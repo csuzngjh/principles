@@ -46,7 +46,6 @@ import { TrajectoryService } from './service/trajectory-service.js';
 import { PDTaskService } from './core/pd-task-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
-import { migrateStaleWorkspaceGuidance } from './core/workspace-guidance-migrator.js';
 import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
 import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
@@ -320,7 +319,10 @@ const plugin = {
           if (!startedWorkspaces.has(workspaceDir)) {
             startedWorkspaces.add(workspaceDir);
             migrateDirectoryStructure(api, workspaceDir);
-            migrateStaleWorkspaceGuidance(api, workspaceDir);
+            // migrateStaleWorkspaceGuidance removed in PRI-776: the PLAN.md-era
+            // guidance migration ran at every startup for months (all existing
+            // workspaces already migrated) and current templates cannot produce
+            // matching text. See PRI-730 audit + git history for the rules.
             ensureWorkspaceTemplates(api, workspaceDir, language);
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
 
