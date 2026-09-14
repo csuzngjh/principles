@@ -63,6 +63,28 @@ jobs:
           path: impact.json
           retention-days: 30
 
+  # PRI-773 telemetry union guard — ADVISORY (report-only, never gates).
+  # Two-way diff between the TelemetryEventType union and real emit sites:
+  # unregistered names are silently dropped today (ERR-060). Until the
+  # catch-up registration lands and this graduates into verify:merge with
+  # --strict, drift is reported in the job log and Step Summary only.
+  telemetry-guard:
+    name: Telemetry Union Guard (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '22'
+
+      - name: Telemetry union <-> emit-site diff (advisory)
+        run: node scripts/check-telemetry-events.cjs
+
   verify-merge:
     name: Verify Merge Gate
     runs-on: ubuntu-latest

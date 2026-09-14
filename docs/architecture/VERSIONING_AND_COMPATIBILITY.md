@@ -485,7 +485,7 @@ activation:
 |------|-----|
 | `state.db` schema | ≥ 12 个月（2 个 minor） |
 | `principle_training_state.json` | ≥ 24 个月 |
-| `audit-log.jsonl` | 永久（合规需要）|
+| `audit-log.jsonl` | 永久（合规需要；**未实现**——无代码写入方）|
 | `.principles/skills/*` 文件 | ≥ 12 个月 |
 | `.principles/implementations/code/*` | ≥ 12 个月 |
 | Telemetry events | ≥ 6 个月（可归档清理）|

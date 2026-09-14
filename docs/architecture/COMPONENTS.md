@@ -71,7 +71,6 @@ PD 系统有 5 类组件：
 | `ContextAssembler` | 🟡 Store | core | `runtime-v2/store/context/` | state.db | assemble(taskId) | output 可序列化 | ✅ |
 | `LedgerStore`（基于 JSON） | 🟡 Store | core | `principle-tree-ledger.ts` | `principle_training_state.json` | mutateLedger 包装 | atomic write only | ✅ |
 | `PainFlagWriter` | 🟡 Store | core | `pain-recorder.ts` | state.db + ledger | recordPainSignal | 幂等键 painId | ✅ |
-| `EvolutionScorecard` | 🟡 Store | plugin | `core/evolution-engine.ts` | `.state/evolution-scorecard.json` | atomic write | 仅增不减 | ✅ |
 | `ApprovalStore` | 🟡 Store | core | `runtime-v2/activation/sqlite-approval-store.ts` / `memory-approval-store.ts` | state.db / memory | CRUD | (artifactId, channel) 确定性 approvalId | ✅ |
 | `RejectionFeedbackStore` | 🟡 Store | core | `runtime-v2/activation/rejection-feedback-store.ts` | state.db | append-only | 不可修改 | ❌ 待建 |
 | `RuntimeStateManager` | 🟡 Store（聚合） | core | `runtime-v2/store/runtime-state-manager.ts` | state.db | task / run / candidate / artifact 统一入口 | LeaseManager 包装 | ✅ |
