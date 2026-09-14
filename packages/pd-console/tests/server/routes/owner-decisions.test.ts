@@ -216,6 +216,58 @@ describe('GET /api/v1/governance/owner-decisions', () => {
     expect((body.data as { total: number }).total).toBe(0);
   });
 
+  it('PRI-787: rollout decision item carries a fixed label as title — the review summary renders once as summary', async () => {
+    const conn = setupDb();
+    const db = conn.getDb();
+    const now = '2026-08-30T00:00:00.000Z';
+    const rolloutTaskId = 'rollout-reviewer-787';
+    const rolloutArtifactId = `pi-art-${rolloutTaskId}-${RUN_ID}`;
+    db.prepare(
+      `INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(rolloutTaskId, 'rollout_reviewer', 'needs_human_review', now, now, 1, 3, createPITaskDiagnosticJson({
+      dependencyTaskIds: [EVAL_ID],
+      channel: 'prompt',
+      timeoutMs: 300_000,
+      inputArtifactRefs: [],
+      outputArtifactRefs: [],
+      runnerDecision: 'needs_revision',
+      humanReviewContext: {
+        reasonCode: 'rollout_revision_budget_exhausted', sourceRunId: RUN_ID,
+        sourceArtifactId: rolloutArtifactId, revisionEpoch: 0, createdAt: now,
+      },
+    } as never));
+    db.prepare(
+      `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(rolloutArtifactId, 'rollout_review', rolloutTaskId, JSON.stringify([ARTIFACT_ID]), 'pending', JSON.stringify({
+      taskId: rolloutTaskId,
+      review: {
+        summary: 'The rollout reviewer assessment text (owner-facing summary).',
+        requiredChanges: [],
+        rolloutRisks: [],
+      },
+      risks: [],
+      generatedAt: now,
+    }), now, now);
+    conn.close();
+
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+    const data = parse(res).data as {
+      items: Array<{ kind: string; taskId: string; title: string; summary: string; allowedActions: string[] }>;
+      total: number;
+    };
+    const item = data.items.find((entry) => entry.taskId === rolloutTaskId);
+    expect(item).toBeDefined();
+    expect(item?.kind).toBe('rollout_review');
+    // title 固定文案；评审原文只由 summary 承载一次
+    expect(item?.title).toBe('Rollout 评审需要你的判断');
+    expect(item?.summary).toBe('The rollout reviewer assessment text (owner-facing summary).');
+    expect(item?.title).not.toBe(item?.summary);
+    expect(item?.allowedActions).toContain('reject_current');
+  });
+
   it('keeps an Owner-required decision visible when its evidence artifact is missing', async () => {
     const conn = setupDb();
     conn.getDb().prepare('DELETE FROM pi_artifacts WHERE artifact_id = ?').run(ARTIFACT_ID);
