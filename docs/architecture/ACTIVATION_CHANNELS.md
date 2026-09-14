@@ -988,6 +988,8 @@ activation:
 
 ### 8.3 审计日志
 
+> **PRI-786 真况**：`audit-log.jsonl` 审计 sink 当前**没有代码实现**（全仓零写入方/读取方）；本节为设计规范。现存治理事实的落盘是 state.db 的 `activation_decisions`/`approvals` 等表与 trajectory.db。
+
 所有 approval / activation / deactivation 必须写入 `.state/audit-log.jsonl`：
 
 ```json

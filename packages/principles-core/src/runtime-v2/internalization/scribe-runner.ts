@@ -27,6 +27,7 @@
  */
 import type { RunHandle } from '../runtime-protocol.js';
 import type { ScribeOutputV1, ScribeValidator } from './scribe-output.js';
+import { normalizeStringEncodedIntentContract } from './scribe-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
@@ -424,6 +425,9 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     });
     if (correctedFields.length > 0) {
       this.emitEvent('lineage_echo_corrected', taskId, { correctedFields });
+    }
+    if (normalizeStringEncodedIntentContract(untrustedOutput)) {
+      this.emitEvent('intent_contract_string_normalized', taskId, {});
     }
   }
 

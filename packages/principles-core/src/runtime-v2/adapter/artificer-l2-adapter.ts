@@ -232,6 +232,9 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       '  - validate_rulecode: statically validate a code string (forbidden patterns + return shape). Call after drafting code.\n' +
       '  - replay_rulecode: sandbox-replay code against a golden trace. Call after validate passes.\n' +
       '  - submit_rulecode: submit your final ArtificerRuleOutput. You MUST call this exactly once with a complete object; the loop stops after you call it.\n' +
+      'CONFLICT RESOLUTION (EP002-R3 live evidence): this tool-loop session SUPERSEDES any "Output ONLY valid JSON as your message" / "pure JSON, no markdown" instruction from the base protocol. ' +
+      'In this session your ArtificerRuleOutput JSON is delivered ONLY as the submit_rulecode tool arguments — never as message text. ' +
+      'Every assistant message MUST contain a tool call; an assistant message without one terminates the loop as a failure.\n' +
       'Do not emit your final answer as free text — call submit_rulecode.';
 
     // Layered system prompt (PRI-633): base layer (prompt-builder role +
@@ -277,6 +280,8 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       tools,
     };
 
+    const MAX_NO_TOOL_CALL_NUDGES = 2;
+    let nudges = 0;
     const loopConfig: AgentLoopConfig = {
       model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl),
       apiKey,
@@ -297,6 +302,35 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
         turnCount += 1;
         return outputCapture.output !== null || turnCount >= maxTurns;
       },
+      // EP002-R3 (live evidence, glm-5.3-flash): the model sometimes ends its
+      // turn with a plain-text draft instead of a tool call, which makes the
+      // agent loop stop without submit_rulecode. The library-native
+      // continuation path is getFollowUpMessages: when the loop would stop,
+      // feed a corrective user message (bounded) so the SAME conversation —
+      // with the spec/tool results intact — continues. Respects maxTurns and
+      // the total budget (rc-7); failure stays loud once nudges are exhausted.
+      getFollowUpMessages: async () => {
+        if (outputCapture.output !== null) return [];
+        if (budgetTimedOut || turnCount >= maxTurns) return [];
+        if (nudges >= MAX_NO_TOOL_CALL_NUDGES) return [];
+        nudges += 1;
+        this.eventEmitter.emitTelemetry({
+          eventType: 'artificer_l2_turn',
+          traceId: taskId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'l2-adapter',
+          agentId: 'artificer-l2',
+          payload: { runId, phase: 'no_tool_call_nudge', nudge: nudges, turn: turnCount },
+        });
+        return [{
+          role: 'user' as const,
+          content:
+            `Your previous message contained NO tool call — in this session that ends the run as a failure. ` +
+            `Respond NOW with a single tool call: validate_rulecode (to check your drafted code) or submit_rulecode ` +
+            `(with the complete ArtificerRuleOutput JSON as the tool arguments). Do not write plain text.`,
+          timestamp: Date.now(),
+        }];
+      },
     };
 
     this.eventEmitter.emitTelemetry({
@@ -310,12 +344,25 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
     let timedOut = false;
     let loopError: string | null = null;
+    // EP002-R3: streamAssistantResponse reports LLM-call failures as a message
+    // with stopReason 'error'/'aborted' and the agent loop then ends WITHOUT
+    // calling shouldStopAfterTurn — previously invisible (turnCount frozen,
+    // no nudge, generic failure reason). Capture it here so the underlying
+    // provider error surfaces loudly (rc-9) instead of a generic message.
+    let lastErrorMessage: string | null = null;
     try {
       await runAgentLoop(
         prompts,
         agentContext,
         loopConfig,
-        async (event: AgentEvent) => { void event; },
+        async (event: AgentEvent) => {
+          if (event.type === 'message_end') {
+            const { message } = event as { message?: { stopReason?: string; errorMessage?: string } };
+            if (message && (message.stopReason === 'error' || message.stopReason === 'aborted')) {
+              lastErrorMessage = `LLM stream ended with stopReason=${message.stopReason}${message.errorMessage ? `: ${message.errorMessage}` : ''}`;
+            }
+          }
+        },
         abortController.signal,
         pdStreamSimple,
       );
@@ -323,6 +370,9 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       const reason = err instanceof Error ? err.message : String(err);
       timedOut = budgetTimedOut;
       loopError = reason;
+    }
+    if (loopError === null && lastErrorMessage !== null) {
+      loopError = lastErrorMessage;
     }
 
     clearTimeout(budgetTimer);
