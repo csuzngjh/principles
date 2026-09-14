@@ -142,13 +142,17 @@ async function main() {
       headSha = spawnSync("git", ["rev-parse", "FETCH_HEAD"], { encoding: "utf8" }).stdout.trim();
       if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error(`cannot resolve head SHA for ${head}`);
 
-      // 3) push to GitHub (same branch name; fast-forward only, no force)
+      // 3) push to GitHub (fast-forward only, no force). PRI-785 second-layer
+      // fix: `git fetch origin <branch>` only updates FETCH_HEAD — no local
+      // branch exists in the pipeline workspace, so pushing `<branch>:<branch>`
+      // died with "src refspec does not match any". Push the resolved SHA
+      // instead; GitHub still rejects non-fast-forwards (guard below).
       const pr1 = spawnSync(
         "git",
         [
           "-c", `credential.helper=!f(){ printf "username=x-access-token\\n"; printf "password=%s\\n" "${GH_TOKEN}"; }; f`,
           "-c", `lfs.https://github.com/${GH_REPO}.git/info/lfs.locksverify=false`,
-          "push", `https://github.com/${GH_REPO}.git`, `${head}:${head}`,
+          "push", `https://github.com/${GH_REPO}.git`, `${headSha}:refs/heads/${head}`,
         ],
         // helper 由 git 经 sh 执行，GH_TOKEN 必须进入子进程环境（凭据经管道传递，不落日志）
         { encoding: "utf8", env: { ...process.env, GH_TOKEN } },
