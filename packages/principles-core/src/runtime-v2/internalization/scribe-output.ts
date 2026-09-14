@@ -176,3 +176,31 @@ export class DefaultScribeValidator implements ScribeValidator {
       : { valid: true, errors: [] };
   }
 }
+
+/**
+ * EP002-R3 (live evidence, glm-5.3-flash structured-output path): the model
+ * sometimes serializes the nested `intentContract` object as a JSON-encoded
+ * STRING. The information content is complete — only the carrier is wrong —
+ * so present-but-string is normalized in place to the parsed object before
+ * validation instead of dead-ending as output_invalid. A string that does not
+ * parse, or parses to a non-object, is left untouched and fails validation
+ * loudly (rc-2/rc-9: normalization never invents data, never silently drops).
+ *
+ * Mutates `untrustedOutput` in place (BasePeerRunner.postFetchTransform
+ * contract) and returns true when a normalization happened.
+ */
+export function normalizeStringEncodedIntentContract(untrustedOutput: unknown): boolean {
+  if (typeof untrustedOutput !== 'object' || untrustedOutput === null || Array.isArray(untrustedOutput)) return false;
+  if (!Object.hasOwn(untrustedOutput, 'intentContract')) return false;
+  const raw: unknown = Reflect.get(untrustedOutput, 'intentContract');
+  if (typeof raw !== 'string') return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false; // unparseable string → validator rejects loudly
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
+  Reflect.set(untrustedOutput, 'intentContract', parsed);
+  return true;
+}
