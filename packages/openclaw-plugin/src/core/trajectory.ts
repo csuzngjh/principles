@@ -629,6 +629,24 @@ export class TrajectoryDatabase {
     });
   }
 
+  /**
+   * PRI-788 G1: Stage2 LLM 确认纠正后的标志位回写。user_turns 的第一个（也是
+   * 唯一）更新 API：以 recordUserTurn 返回的 rowid 精确寻址（rc-7，不重扫）。
+   *
+   * @returns 是否实际更新了行。false = rowid 不存在（轮次已被清理），调用方
+   * 应记 SIGNAL_WRITEBACK_MISS 上浮，不得静默。
+   */
+  markUserTurnCorrection(rowid: number, cue: string | null): boolean {
+    const result = this.withWrite(() =>
+      this.db.prepare(`
+        UPDATE user_turns
+        SET correction_detected = 1, correction_cue = ?
+        WHERE id = ?
+      `).run(cue ?? null, rowid),
+    );
+    return Number(result.changes) > 0;
+  }
+
   recordToolCall(input: TrajectoryToolCallInput): number {
     this.recordSession({ sessionId: input.sessionId, startedAt: input.createdAt });
     const createdAt = input.createdAt ?? nowIso();

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import Database from 'better-sqlite3';
 import { TrajectoryDatabase } from '../../src/core/trajectory.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { TrajectoryRegistry } from '../../src/core/trajectory.js';
@@ -1047,5 +1048,81 @@ describe('PRI-647 workspace reacquisition after trajectory dispose', () => {
     // A real write must succeed on the reacquired connection.
     expect(() => second.recordSession({ sessionId: 's-pri647-reopen' })).not.toThrow();
     second.dispose();
+  });
+});
+
+// ── PRI-788 G1: Stage2 确认回写（user_turns 首个更新 API）────────────────────
+
+describe('TrajectoryDatabase.markUserTurnCorrection (PRI-788 G1)', () => {
+  let workspaceDir: string | null = null;
+
+  afterEach(() => {
+    if (workspaceDir) {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      workspaceDir = null;
+    }
+  });
+
+  function makeDb(): InstanceType<typeof TrajectoryDatabase> {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-g1-writeback-'));
+    return new TrajectoryDatabase({ workspaceDir });
+  }
+
+  // 直接只读打开 trajectory.db 断言列值——TrajectoryDatabase 的查询面不含单行回读
+  function readTurn(ws: string, rowid: number): { correction_detected: number; correction_cue: string | null } {
+    const raw = new Database(path.join(ws, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      return raw.prepare(
+        'SELECT correction_detected, correction_cue FROM user_turns WHERE id = ?',
+      ).get(rowid) as { correction_detected: number; correction_cue: string | null };
+    } finally {
+      raw.close();
+    }
+  }
+
+  it('flips correction_detected to 1 with the LLM cue on the exact rowid', () => {
+    const db = makeDb();
+    const ws = workspaceDir as string;
+    // Stage1 歧义写入:标志位 0 (现状——LLM 确认前)
+    const rowid = db.recordUserTurn({
+      sessionId: 's-g1',
+      turnIndex: 1,
+      rawText: '为什么你总是不先确认再改？',
+      correctionDetected: false,
+      correctionCue: null,
+      referencesAssistantTurnId: null,
+    });
+
+    expect(db.markUserTurnCorrection(rowid, 'llm:用户指出未确认即执行')).toBe(true);
+
+    const row = readTurn(ws, rowid);
+    expect(row.correction_detected).toBe(1);
+    expect(row.correction_cue).toBe('llm:用户指出未确认即执行');
+    db.dispose();
+  });
+
+  it('updates only the addressed row and leaves sibling rows untouched (rc-7 rowid addressing)', () => {
+    const db = makeDb();
+    const ws = workspaceDir as string;
+    const rowA = db.recordUserTurn({
+      sessionId: 's-g1b', turnIndex: 1, rawText: 'msg a', correctionDetected: false,
+      correctionCue: null, referencesAssistantTurnId: null,
+    });
+    const rowB = db.recordUserTurn({
+      sessionId: 's-g1b', turnIndex: 2, rawText: 'msg b', correctionDetected: false,
+      correctionCue: null, referencesAssistantTurnId: null,
+    });
+
+    expect(db.markUserTurnCorrection(rowA, 'llm:cue')).toBe(true);
+
+    expect(readTurn(ws, rowA).correction_detected).toBe(1);
+    expect(readTurn(ws, rowB).correction_detected).toBe(0);
+    db.dispose();
+  });
+
+  it('returns false for a nonexistent rowid (caller surfaces SIGNAL_WRITEBACK_MISS)', () => {
+    const db = makeDb();
+    expect(db.markUserTurnCorrection(999999, 'llm:cue')).toBe(false);
+    db.dispose();
   });
 });
