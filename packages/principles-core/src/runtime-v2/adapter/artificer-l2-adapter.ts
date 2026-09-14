@@ -232,6 +232,9 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       '  - validate_rulecode: statically validate a code string (forbidden patterns + return shape). Call after drafting code.\n' +
       '  - replay_rulecode: sandbox-replay code against a golden trace. Call after validate passes.\n' +
       '  - submit_rulecode: submit your final ArtificerRuleOutput. You MUST call this exactly once with a complete object; the loop stops after you call it.\n' +
+      'CONFLICT RESOLUTION (EP002-R3 live evidence): this tool-loop session SUPERSEDES any "Output ONLY valid JSON as your message" / "pure JSON, no markdown" instruction from the base protocol. ' +
+      'In this session your ArtificerRuleOutput JSON is delivered ONLY as the submit_rulecode tool arguments — never as message text. ' +
+      'Every assistant message MUST contain a tool call; an assistant message without one terminates the loop as a failure.\n' +
       'Do not emit your final answer as free text — call submit_rulecode.';
 
     // Layered system prompt (PRI-633): base layer (prompt-builder role +
