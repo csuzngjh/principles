@@ -19,6 +19,16 @@ export interface IntakeToInternalizationBridgeInput {
    * legacy seeds and legacy readers stay byte-compatible.
    */
   pipelineMode?: PipelineTopologyMode;
+  /**
+   * PRI-720 C6: parsed diagnostician recommendation content (the candidate's
+   * `sourceRecommendationJson`). Optional for backward compatibility — when
+   * absent, rule-candidate routes keep the pre-existing behavior. When
+   * present, a rule recommendation WITHOUT complete mechanical trigger
+   * evidence (triggerPattern + observable action) is demoted to the prompt
+   * channel instead of entering the RuleCode sub-chain (deterministic field
+   * check — never an LLM judgment).
+   */
+  recommendation?: unknown;
   /** Diagnostician task ID that produced this candidate (lineage). */
   sourceTaskId?: string;
   /** Artifact ID of the diagnostician artifact (lineage). */
@@ -28,10 +38,31 @@ export interface IntakeToInternalizationBridgeInput {
 }
 
 export type BridgeDecision =
-  | { decision: 'seeded'; taskId: string; taskKind: 'dreamer'; channel: InternalizationChannel }
+  | {
+    decision: 'seeded';
+    taskId: string;
+    taskKind: 'dreamer';
+    channel: InternalizationChannel;
+    /** PRI-720 C6: present when a rule candidate without mechanical evidence was demoted to prompt. */
+    demotedFromChannel?: InternalizationChannel;
+  }
   | { decision: 'already_exists'; taskId: string }
   | { decision: 'not_internalizable'; reason: string }
   | { decision: 'invalid_candidate'; reason: string };
+
+/**
+ * PRI-720 C6 admission discipline: a rule recommendation may only enter the
+ * code_tool_hook channel when it carries COMPLETE mechanical trigger evidence
+ * — an observable triggerPattern and an observable action declaration.
+ * Deterministic field checks only (rc-1/rc-3); no LLM judgment. Cognitive
+ * behavioral principles without this evidence are prompt-channel material.
+ */
+export function hasRuleMechanicalEvidence(recommendation: unknown): boolean {
+  if (typeof recommendation !== 'object' || recommendation === null) return false;
+  const r = recommendation as Record<string, unknown>;
+  return typeof r.triggerPattern === 'string' && r.triggerPattern.trim() !== ''
+    && typeof r.action === 'string' && r.action.trim() !== '';
+}
 
 export const MVP_ENABLED_CHANNELS: ReadonlySet<InternalizationChannel> = new Set<InternalizationChannel>([
   'prompt',
@@ -88,8 +119,24 @@ export function computeBridgeDecision(
     return { decision: 'not_internalizable', reason: `Channel "${channel}" for route "${input.route}" is MVP-disabled — not internalizable in current stage` };
   }
 
-  const taskId = `dreamer-${input.candidateId}-${channel}`;
-  return { decision: 'seeded', taskId, taskKind: 'dreamer', channel };
+  // PRI-720 C6: rule candidates without complete mechanical trigger evidence
+  // are demoted to the prompt channel (principle semantic path) instead of
+  // being compiled blind into RuleCode.
+  let effectiveChannel = channel;
+  let demotedFromChannel: InternalizationChannel | undefined;
+  if (input.route === 'rule-candidate' && !hasRuleMechanicalEvidence(input.recommendation)) {
+    demotedFromChannel = channel;
+    effectiveChannel = 'prompt';
+  }
+
+  const taskId = `dreamer-${input.candidateId}-${effectiveChannel}`;
+  return {
+    decision: 'seeded',
+    taskId,
+    taskKind: 'dreamer',
+    channel: effectiveChannel,
+    ...(demotedFromChannel !== undefined ? { demotedFromChannel } : {}),
+  };
 }
 
 export interface BridgeTaskSeed {
@@ -98,6 +145,8 @@ export interface BridgeTaskSeed {
   channel: InternalizationChannel;
   /** PRI-720: present only when the seed carries the explicit full-chain override. */
   pipelineMode?: PipelineTopologyMode;
+  /** PRI-720 C6: present when a rule candidate was demoted to prompt (no mechanical evidence). */
+  demotedFromChannel?: InternalizationChannel;
   diagnosticJson: string;
   status: 'pending';
   attemptCount: number;
@@ -156,6 +205,9 @@ export function buildDreamerTaskSeed(
     taskKind: 'dreamer',
     channel: decision.channel,
     ...(input.pipelineMode === 'full_chain' ? { pipelineMode: 'full_chain' as const } : {}),
+    ...(decision.decision === 'seeded' && decision.demotedFromChannel !== undefined
+      ? { demotedFromChannel: decision.demotedFromChannel }
+      : {}),
     diagnosticJson: finalDiagnosticJson,
     status: 'pending',
     attemptCount: 0,
@@ -203,6 +255,15 @@ export function buildDreamerSeedFromCandidate(
     };
   }
 
+  // PRI-720 C6: surface the recommendation content for the deterministic
+  // code-channel admission check. Unparseable JSON = no evidence (demote).
+  let recommendation: unknown;
+  try {
+    recommendation = JSON.parse(candidate.sourceRecommendationJson) as unknown;
+  } catch {
+    recommendation = undefined;
+  }
+
   return buildDreamerTaskSeed({
     candidateId: candidate.candidateId,
     recommendationKind: candidate.recommendationKind ?? 'unknown',
@@ -210,6 +271,7 @@ export function buildDreamerSeedFromCandidate(
     ready,
     sourcePainId,
     pipelineMode,
+    recommendation,
     sourceTaskId: candidate.taskId?.trim() || undefined,
     sourceArtifactId: candidate.artifactId?.trim() || undefined,
     sourceRunId: candidate.sourceRunId?.trim() || undefined,

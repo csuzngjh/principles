@@ -90,6 +90,9 @@ async function seedDreamerTask(
     route: channel === 'code_tool_hook' ? 'rule-candidate' : 'principle-ledger',
     ready: true,
     pipelineMode,
+    // PRI-720 C6: a code_tool_hook seed must carry complete mechanical trigger
+    // evidence, otherwise the bridge demotes it to the prompt channel.
+    ...(channel === 'code_tool_hook' ? { recommendation: { triggerPattern: 'edit .pd/**', action: 'block' } } : {}),
     sourceTaskId,
     sourceArtifactId: sourceTaskId ? `art-${sourceTaskId}` : undefined,
     sourceRunId: sourceTaskId ? `run-${sourceTaskId}` : undefined,

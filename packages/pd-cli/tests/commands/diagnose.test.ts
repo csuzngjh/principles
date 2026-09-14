@@ -197,6 +197,8 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
     defaults: { config: {}, source: 'defaults', warnings: [] },
   }),
   computeFlagsFromLoadResult: vi.fn().mockReturnValue({}),
+  // PRI-720: full-chain override resolution — undefined (standard topology) in tests.
+  resolvePromptFullPipelineSeedMode: vi.fn().mockReturnValue(undefined),
 }));
 
 vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({

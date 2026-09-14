@@ -803,8 +803,14 @@ export class PainSignalBridge {
                   eventType: 'candidate_dreamer_task_seeded',
                   traceId: candidate.candidateId,
                   timestamp: new Date().toISOString(),
-                  // rc-9: the full-chain override must be observable at seed time.
-                  payload: { taskId: seed.taskId, channel: seed.channel, ...(seed.pipelineMode ? { pipelineMode: seed.pipelineMode } : {}) },
+                  // rc-9: the full-chain override and the C6 channel demotion
+                  // must both be observable at seed time.
+                  payload: {
+                    taskId: seed.taskId,
+                    channel: seed.channel,
+                    ...(seed.pipelineMode ? { pipelineMode: seed.pipelineMode } : {}),
+                    ...(seed.demotedFromChannel ? { demotedFromChannel: seed.demotedFromChannel } : {}),
+                  },
                 });
               }
             } else if (seed.decision === 'not_internalizable') {

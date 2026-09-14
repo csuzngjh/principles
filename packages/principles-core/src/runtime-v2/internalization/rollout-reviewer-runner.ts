@@ -6,7 +6,7 @@ import type {
   StartRunInput,
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
-import type { RolloutReviewerOutputV1, RolloutReviewerValidator } from './rollout-reviewer-output.js';
+import type { RolloutReviewerOutputV1, RolloutReviewerValidator, RolloutReviewMode } from './rollout-reviewer-output.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
@@ -21,7 +21,7 @@ import {
 } from './owner-review.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { RolloutReviewerPromptBuilder } from './rollout-reviewer-prompt-builder.js';
-import { reconcileLineageEcho } from './peer-runner-contracts.js';
+import { reconcileLineageEcho, type PITaskRecord } from './peer-runner-contracts.js';
 import { checkRuleActivationContent } from './rule-activation-contract.js';
 import type { OutputLanguage } from '../language-directive.js';
 
@@ -144,12 +144,39 @@ interface SucceedContext {
   readonly output: RolloutReviewerOutputV1;
   readonly task: TaskRecord;
   readonly contextHash: string;
-  /** 被评审的 evaluator artifact (dispatch 目标) — 由 buildContext 解析 */
+  /** 被评审的 evaluator artifact (code_chain dispatch 面) — 由 buildContext 解析 */
   readonly sourceEvaluatorArtifactId?: string;
+  /** PRI-720 principle semantic mode: 被评审的 scribe principle artifact (reviewed=validated=approved identity) */
+  readonly sourceScribeArtifactId?: string;
+  /** PRI-720: 本任务的评审契约模式 (缺省 = code_chain) */
+  readonly reviewMode?: RolloutReviewMode;
   /** 本 lineage 的 activation channel (路由修订目标 + dispatch 用) */
   readonly channel?: string;
 }
 
+/**
+ * PRI-720: resolves the review contract mode for a rollout task.
+ *
+ * - code_tool_hook/skill channels and any explicit `full_chain` override run
+ *   the legacy code-chain review (byte-compatible).
+ * - prompt/defer_archive chains in the STANDARD topology run the principle
+ *   semantic review — recognized structurally by a scribe dependency and the
+ *   ABSENCE of an evaluator dependency (the graph never creates one there).
+ * - A legacy (pre-PRI-720) prompt chain carries an evaluator dep; AC12 forbids
+ *   reinterpreting in-flight chains, so it keeps the code-chain contract.
+ */
+export function resolveRolloutReviewMode(
+  channel?: string,
+  pipelineMode?: string,
+  dependencyTaskKinds?: readonly string[],
+): RolloutReviewMode {
+  if (pipelineMode === 'full_chain') return 'code_chain';
+  if (channel !== 'prompt' && channel !== 'defer_archive') return 'code_chain';
+  const kinds = dependencyTaskKinds ?? [];
+  const hasEvaluatorDep = kinds.includes('evaluator');
+  const hasScribeDep = kinds.includes('scribe');
+  return !hasEvaluatorDep && hasScribeDep ? 'principle_semantic' : 'code_chain';
+}
 interface ValidationErrorContext {
   readonly taskId: string;
   readonly task: TaskRecord;
@@ -250,21 +277,23 @@ export class RolloutReviewerRunner {
       const storeRunId = await this.resolveStoreRunId(taskId);
 
       this.phase = RunnerPhase.BuildingContext;
-      const { contextHash, evaluatorArtifact, sourceEvaluatorArtifactId } = await this.buildContext(taskId);
+      const { contextHash, sourceArtifact, sourceArtifactId, reviewMode } = await this.buildContext(taskId);
 
-      if (!evaluatorArtifact || !sourceEvaluatorArtifactId) {
+      if (!sourceArtifact || !sourceArtifactId) {
         return this.retryOrFail({
           taskId,
           task: leasedTask,
           errorCategory: 'input_invalid',
-          failureReason: sourceEvaluatorArtifactId ? 'Evaluator dependency artifact not found' : 'Evaluator dependency artifact ID not resolved',
+          failureReason: reviewMode === 'principle_semantic'
+            ? 'Scribe dependency artifact not found'
+            : 'Evaluator dependency artifact not found',
         });
       }
 
-      this.emitRolloutReviewerEvent('rollout_reviewer_context_built', taskId, { contextHash });
+      this.emitRolloutReviewerEvent('rollout_reviewer_context_built', taskId, { contextHash, reviewMode });
 
       this.phase = RunnerPhase.Invoking;
-      const runHandle = await this.invokeRuntime({ taskId, contextHash, evaluatorArtifact, sourceEvaluatorArtifactId });
+      const runHandle = await this.invokeRuntime({ taskId, contextHash, sourceArtifact, sourceArtifactId, reviewMode });
 
       this.emitRolloutReviewerEvent('rollout_reviewer_run_started', taskId, {
         runtimeKind: this.resolvedOptions.runtimeKind,
@@ -281,19 +310,19 @@ export class RolloutReviewerRunner {
       const output = await this.fetchAndParseOutput(runHandle.runId);
 
       // Lineage echo reconciliation (PRI-272 / ERR-004 / ERR-008 class):
-      // taskId and sourceEvaluatorArtifactId are runner-owned lineage
-      // metadata whose authoritative sources are the task record and the
-      // artifact store read in buildContext(). LLMs routinely truncate or
+      // taskId and the mode-specific source artifact id are runner-owned
+      // lineage metadata whose authoritative sources are the task record and
+      // the artifact store read in buildContext(). LLMs routinely truncate or
       // alter long IDs when echoing them back, and a mismatch fails
       // validation as output_invalid — a permanent error with no retry —
       // dead-ending the candidate before it can reach the approval queue.
       // Overwrite the echoed lineage with the authoritative values before
       // validation; emit telemetry whenever an echo differed so the
       // correction rate stays observable (rc-9-no-silent-fallback).
-      this.reconcileLineageEcho(taskId, output, sourceEvaluatorArtifactId);
+      this.reconcileLineageEcho(taskId, output, sourceArtifactId, reviewMode);
 
       this.phase = RunnerPhase.Validating;
-      const validationResult = await this.validator.validate(output, taskId, sourceEvaluatorArtifactId ?? undefined);
+      const validationResult = await this.validator.validate(output, taskId, sourceArtifactId, { reviewMode });
       if (!validationResult.valid) {
         return await this.handleValidationError({
           taskId,
@@ -314,7 +343,9 @@ export class RolloutReviewerRunner {
         output,
         task: leasedTask,
         contextHash,
-        sourceEvaluatorArtifactId,
+        ...(reviewMode === 'principle_semantic'
+          ? { reviewMode, sourceScribeArtifactId: sourceArtifactId }
+          : { reviewMode, sourceEvaluatorArtifactId: sourceArtifactId }),
         channel: hydratePITaskRecord(leasedTask)?.channel,
       });
     } catch (error) {
@@ -329,39 +360,58 @@ export class RolloutReviewerRunner {
    * BasePeerRunner, so it calls the shared helper directly and emits its own
    * telemetry (no automatic runnerName prefix).
    *
-   * The prompt asks the model to copy taskId / sourceEvaluatorArtifactId /
-   * sourceTrace.evaluatorArtifactId verbatim, but long artifact IDs are
-   * routinely truncated or altered on echo. Because a mismatch is classified
-   * output_invalid (a permanent error — no retry), a bad echo permanently
-   * blocks the candidate from reaching the approval queue. Lineage is
-   * runner-owned metadata (rc-6): the authoritative values come from the
-   * task record and the artifact store read in buildContext().
+   * The prompt asks the model to copy taskId / the mode-specific source
+   * artifact id / its sourceTrace counterpart verbatim, but long artifact IDs
+   * are routinely truncated or altered on echo. Because a mismatch is
+   * classified output_invalid (a permanent error — no retry), a bad echo
+   * permanently blocks the candidate from reaching the approval queue.
+   * Lineage is runner-owned metadata (rc-6): the authoritative values come
+   * from the task record and the artifact store read in buildContext().
+   * PRI-720: in principle semantic mode the reviewed source is the scribe
+   * artifact, so the reconciled fields are sourceScribeArtifactId /
+   * sourceTrace.scribeArtifactId.
    *
    * Whenever an echo differed (or sourceTrace was missing), a
    * rollout_reviewer_lineage_echo_corrected telemetry event is emitted so
    * the correction rate stays observable (rc-9-no-silent-fallback).
    */
-  private reconcileLineageEcho(taskId: string, output: RolloutReviewerOutputV1, authoritativeEvaluatorArtifactId: string): void {
+  private reconcileLineageEcho(
+    taskId: string,
+    output: RolloutReviewerOutputV1,
+    authoritativeSourceArtifactId: string,
+    reviewMode: RolloutReviewMode,
+  ): void {
+    const principleSemantic = reviewMode === 'principle_semantic';
     const correctedFields = reconcileLineageEcho(output, {
       topFields: [
         { field: 'taskId', authoritativeValue: taskId },
-        { field: 'sourceEvaluatorArtifactId', authoritativeValue: authoritativeEvaluatorArtifactId },
+        principleSemantic
+          ? { field: 'sourceScribeArtifactId', authoritativeValue: authoritativeSourceArtifactId }
+          : { field: 'sourceEvaluatorArtifactId', authoritativeValue: authoritativeSourceArtifactId },
       ],
       trace: {
         traceField: 'sourceTrace',
-        fields: [{ field: 'evaluatorArtifactId', authoritativeValue: authoritativeEvaluatorArtifactId }],
+        fields: [principleSemantic
+          ? { field: 'scribeArtifactId', authoritativeValue: authoritativeSourceArtifactId }
+          : { field: 'evaluatorArtifactId', authoritativeValue: authoritativeSourceArtifactId }],
       },
     });
 
     if (correctedFields.length > 0) {
       this.emitRolloutReviewerEvent('rollout_reviewer_lineage_echo_corrected', taskId, {
         correctedFields,
-        authoritativeSourceEvaluatorArtifactId: authoritativeEvaluatorArtifactId,
+        authoritativeSourceArtifactId,
+        reviewMode,
       });
     }
   }
 
-  private async buildContext(taskId: string): Promise<{ contextHash: string; evaluatorArtifact: string | null; sourceEvaluatorArtifactId: string | null }> {
+  private async buildContext(taskId: string): Promise<{
+    contextHash: string;
+    sourceArtifact: string | null;
+    sourceArtifactId: string | null;
+    reviewMode: RolloutReviewMode;
+  }> {
     const task = await this.stateManager.getTask(taskId);
     if (!task) {
       throw new PDRuntimeError('input_invalid', `Task ${taskId} not found`);
@@ -371,14 +421,28 @@ export class RolloutReviewerRunner {
     const deps = piTask?.dependencyTaskIds ?? [];
 
     if (deps.length === 0) {
-      this.emitRolloutReviewerEvent('rollout_reviewer_no_dependencies', taskId, {});
-      return { contextHash: 'empty', evaluatorArtifact: null, sourceEvaluatorArtifactId: null };
+      const emptyMode = resolveRolloutReviewMode(piTask?.channel, piTask?.pipelineMode);
+      this.emitRolloutReviewerEvent('rollout_reviewer_no_dependencies', taskId, { reviewMode: emptyMode });
+      return { contextHash: 'empty', sourceArtifact: null, sourceArtifactId: null, reviewMode: emptyMode };
     }
 
+    // Fetch dep tasks once; the review mode is structural (PRI-720/AC12):
+    // a scribe dep without an evaluator dep = principle semantic review; an
+    // evaluator dep (legacy or full_chain chain) = code-chain review.
+    const depEntries: { depId: string; task: TaskRecord }[] = [];
     for (const depId of deps) {
       const depTask = await this.stateManager.getTask(depId);
-      if (!depTask) continue;
-      if (depTask.taskKind !== 'evaluator') continue;
+      if (depTask) depEntries.push({ depId, task: depTask });
+    }
+    const reviewMode = resolveRolloutReviewMode(
+      piTask?.channel,
+      piTask?.pipelineMode,
+      depEntries.map((d) => d.task.taskKind),
+    );
+    const wantedDepKind = reviewMode === 'principle_semantic' ? 'scribe' : 'evaluator';
+
+    for (const { depId, task: depTask } of depEntries) {
+      if (depTask.taskKind !== wantedDepKind) continue;
       if (depTask.status !== 'succeeded') {
         this.emitRolloutReviewerEvent('rollout_reviewer_dependency_not_succeeded', taskId, {
           depTaskId: depId,
@@ -391,21 +455,26 @@ export class RolloutReviewerRunner {
       if (artifacts.length > 0) {
         const [firstArtifact] = artifacts;
         if (!firstArtifact) continue;
-        const artifactRef = firstArtifact.artifactId;
-        this.emitRolloutReviewerEvent('rollout_reviewer_evaluator_dep_selected', taskId, {
-          depTaskId: depId,
-          artifactId: firstArtifact.artifactId,
-        });
+        this.emitRolloutReviewerEvent(
+          reviewMode === 'principle_semantic' ? 'rollout_reviewer_scribe_dep_selected' : 'rollout_reviewer_evaluator_dep_selected',
+          taskId,
+          { depTaskId: depId, artifactId: firstArtifact.artifactId },
+        );
         return {
-          contextHash: RolloutReviewerRunner.hashContextRefs([artifactRef]),
-          evaluatorArtifact: firstArtifact.contentJson,
-          sourceEvaluatorArtifactId: firstArtifact.artifactId,
+          contextHash: RolloutReviewerRunner.hashContextRefs([firstArtifact.artifactId]),
+          sourceArtifact: firstArtifact.contentJson,
+          sourceArtifactId: firstArtifact.artifactId,
+          reviewMode,
         };
       }
     }
 
-    this.emitRolloutReviewerEvent('rollout_reviewer_no_evaluator_artifact', taskId, {});
-    return { contextHash: 'empty', evaluatorArtifact: null, sourceEvaluatorArtifactId: null };
+    this.emitRolloutReviewerEvent(
+      reviewMode === 'principle_semantic' ? 'rollout_reviewer_no_scribe_artifact' : 'rollout_reviewer_no_evaluator_artifact',
+      taskId,
+      { reviewMode },
+    );
+    return { contextHash: 'empty', sourceArtifact: null, sourceArtifactId: null, reviewMode };
   }
 
   private static hashContextRefs(refs: readonly string[]): string {
@@ -430,15 +499,16 @@ export class RolloutReviewerRunner {
   private async invokeRuntime(params: {
     taskId: string;
     contextHash: string;
-    evaluatorArtifact: string | null;
-    sourceEvaluatorArtifactId: string;
+    sourceArtifact: string | null;
+    sourceArtifactId: string;
+    reviewMode: RolloutReviewMode;
   }): Promise<RunHandle> {
-    let parsedEvaluatorArtifact: unknown = null;
-    if (params.evaluatorArtifact) {
+    let parsedSourceArtifact: unknown = null;
+    if (params.sourceArtifact) {
       try {
-        parsedEvaluatorArtifact = JSON.parse(params.evaluatorArtifact);
+        parsedSourceArtifact = JSON.parse(params.sourceArtifact);
       } catch {
-        parsedEvaluatorArtifact = params.evaluatorArtifact;
+        parsedSourceArtifact = params.sourceArtifact;
       }
     }
 
@@ -446,8 +516,10 @@ export class RolloutReviewerRunner {
     const { message, systemPrompt } = builder.buildPrompt({
       taskId: params.taskId,
       contextHash: params.contextHash,
-      evaluatorArtifact: parsedEvaluatorArtifact,
-      sourceEvaluatorArtifactId: params.sourceEvaluatorArtifactId,
+      reviewMode: params.reviewMode,
+      ...(params.reviewMode === 'principle_semantic'
+        ? { sourceScribeArtifactId: params.sourceArtifactId, scribeArtifact: parsedSourceArtifact }
+        : { sourceEvaluatorArtifactId: params.sourceArtifactId, evaluatorArtifact: parsedSourceArtifact }),
       // PRI-714: language directive for review fields (undefined = none).
       outputLanguage: this.resolvedOptions.outputLanguage,
     });
@@ -755,6 +827,51 @@ export class RolloutReviewerRunner {
       await this.collectLineageSourceTaskIds(depId, acc, depth + 1);
     }
     return acc;
+  }
+
+  /**
+   * PRI-720 C3: flip the exact reviewed scribe principle artifact to
+   * `validated` on semantic approve. Mirrors the evaluator's approved-path
+   * behavior (evaluator-runner.ts): idempotent updateValidationStatus;
+   * a `false` return is a deterministic store inconsistency surfaced via
+   * structured telemetry (the activation resolver then fails closed to
+   * needs_human_review); a store throw retries (the write is a required
+   * effect of the approve verdict — resume replays it, never a second LLM
+   * verdict).
+   */
+  private async validateReviewedScribeArtifactOrThrow(ctx: SucceedContext): Promise<void> {
+    const principleArtifactId = ctx.sourceScribeArtifactId;
+    if (!principleArtifactId) {
+      // No reviewed scribe artifact on the context — the validator already
+      // required it, so this is an invariant breach; fail loud (retryOrFail
+      // treats input_invalid as permanent and the approval queue stays honest).
+      throw new PDRuntimeError('input_invalid', `principle semantic approve requires sourceScribeArtifactId on task ${ctx.taskId}`);
+    }
+    try {
+      const updated = await this.artifactStore.updateValidationStatus(principleArtifactId, 'validated');
+      if (!updated) {
+        this.emitRolloutReviewerEvent('rollout_principle_validation_update_not_found', ctx.taskId, {
+          runId: ctx.runId,
+          sourceArtifactId: principleArtifactId,
+          reason: 'scribe_principle_artifact_not_found_in_store',
+          nextAction: 'verify_artifact_lineage_and_store_consistency',
+        });
+        return;
+      }
+      this.emitRolloutReviewerEvent('rollout_principle_validated', ctx.taskId, {
+        runId: ctx.runId,
+        sourceArtifactId: principleArtifactId,
+        validatedBy: 'rollout_reviewer_principle_semantic_approve',
+      });
+    } catch (updateErr) {
+      this.emitRolloutReviewerEvent('rollout_principle_validation_update_failed', ctx.taskId, {
+        runId: ctx.runId,
+        sourceArtifactId: principleArtifactId,
+        errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
+        nextAction: 'task_will_retry; repeated validated write is idempotent',
+      });
+      throw updateErr;
+    }
   }
 
   /**
@@ -1110,6 +1227,17 @@ export class RolloutReviewerRunner {
   ): Promise<{ kind: 'completed'; dispatchArtifactId?: string } | { kind: 'human_review' }> {
     const decision = decisionOverride ?? ctx.output.review.decision;
     if (decision === 'approve_rollout') {
+      // ── PRI-720 C3: validated 翻转归属转移 ──
+      // In principle semantic mode the evaluator (the legacy validated writer,
+      // evaluator-runner.ts approved path) does not exist on the chain, so the
+      // semantic review's approve owns flipping the EXACT reviewed scribe
+      // artifact to validated. Idempotent (crash-resume re-applies without
+      // contradiction) and identity-preserving: reviewed = validated = approved
+      // = PromptWriter-consumed artifact. Runs inside applyDecisionEffects so
+      // resume replays it as part of the same governance effects.
+      if (ctx.reviewMode === 'principle_semantic') {
+        await this.validateReviewedScribeArtifactOrThrow(ctx);
+      }
       const { candidateId, rejectionDetail } = await this.resolveActivationCandidate(ctx);
       if (!candidateId) {
         // PRI-634: rejectionDetail 透传给 Owner —— 说明候选为何不合格
@@ -1153,6 +1281,22 @@ export class RolloutReviewerRunner {
       });
       throw err;
     }
+  }
+
+  /**
+   * PRI-720: dep-aware review mode for a hydrated task (resume/owner-override
+   * paths, where buildContext did not run). Structural rule — see
+   * resolveRolloutReviewMode: a scribe dep without an evaluator dep is a
+   * principle semantic chain; anything else keeps the code-chain contract.
+   */
+  private async resolveReviewModeForTask(piTask?: PITaskRecord): Promise<RolloutReviewMode> {
+    if (!piTask) return 'code_chain';
+    const kinds: string[] = [];
+    for (const depId of piTask.dependencyTaskIds) {
+      const dep = await this.stateManager.getTask(depId);
+      if (dep) kinds.push(dep.taskKind);
+    }
+    return resolveRolloutReviewMode(piTask.channel, piTask.pipelineMode, kinds);
   }
 
   /**
@@ -1220,13 +1364,16 @@ export class RolloutReviewerRunner {
     }
 
     const output = await this.recoverIntentOutput(taskId, intent.sourceRunId);
+    const reviewMode = await this.resolveReviewModeForTask(piTask);
     const ctx: SucceedContext = {
       taskId,
       runId: intent.sourceRunId,
       output,
       task: leasedTask,
       contextHash: `resume-${intent.sourceRunId}`,
-      sourceEvaluatorArtifactId: output.sourceEvaluatorArtifactId,
+      ...(reviewMode === 'principle_semantic'
+        ? { reviewMode, sourceScribeArtifactId: output.sourceScribeArtifactId }
+        : { reviewMode, sourceEvaluatorArtifactId: output.sourceEvaluatorArtifactId }),
       channel: piTask.channel,
     };
     const artifactId = `pi-art-${taskId}-${intent.sourceRunId}`;
@@ -1294,14 +1441,18 @@ export class RolloutReviewerRunner {
       );
     }
 
+    const overridePiTask = hydratePITaskRecord(leasedTask);
+    const overrideReviewMode = await this.resolveReviewModeForTask(overridePiTask ?? undefined);
     const ctx: SucceedContext = {
       taskId,
       runId: resolution.sourceRunId,
       output,
       task: leasedTask,
       contextHash: `owner-override-${resolution.resolutionId}`,
-      sourceEvaluatorArtifactId: output.sourceEvaluatorArtifactId,
-      channel: hydratePITaskRecord(leasedTask)?.channel,
+      ...(overrideReviewMode === 'principle_semantic'
+        ? { reviewMode: overrideReviewMode, sourceScribeArtifactId: output.sourceScribeArtifactId }
+        : { reviewMode: overrideReviewMode, sourceEvaluatorArtifactId: output.sourceEvaluatorArtifactId }),
+      channel: overridePiTask?.channel,
     };
     const artifactId = `pi-art-${taskId}-${resolution.sourceRunId}`;
     const resultRef = `rollout-reviewer://${resolution.sourceRunId}`;
