@@ -138,6 +138,11 @@ function resolvePiAiAgentAdapter(
       model: binding.profile.model,
       apiKeyEnv: binding.profile.apiKeyEnv,
       maxRetries: binding.profile.maxRetries,
+      // Forward profile maxTokens: pi-ai only sends max_tokens when the caller
+      // sets it — omitting it lets the provider apply its own (small) default
+      // output cap, truncating long JSON outputs (EP002-R3 scribe intentContract).
+      // Parity with the consumer-cycle adapter (PRI-758 CodeRabbit P2).
+      ...(binding.profile.maxTokens !== undefined ? { maxTokens: binding.profile.maxTokens } : {}),
       timeoutMs: options.timeoutMs ?? binding.profile.timeoutMs,
       baseUrl: binding.profile.baseUrl,
       workspace: options.workspaceDir,
@@ -257,6 +262,9 @@ function resolveRunRuleHostRuntime(
     gateDeps: createSandboxGateDeps(),
     validator: new DefaultArtificerValidator(),
     totalBudgetMs: timeoutMs,
+    // Forward profile maxTokens — parity with the consumer-cycle adapter;
+    // omitting it truncates long artificer JSON at the provider's default cap.
+    ...(artificerProfile.maxTokens !== undefined ? { maxTokens: artificerProfile.maxTokens } : {}),
   });
 
   return {
