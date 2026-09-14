@@ -35,6 +35,7 @@ import {
 } from './prompt-helpers.js';
 import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
 import { createLiveSignalKeywordStore } from '../core/signal-keyword-store.js';
+import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 import type { InjectablePrinciple } from '../core/principle-injection.js';
 
@@ -215,7 +216,19 @@ export function getSignalCollectorHost(wctx: WorkspaceContext, logger?: PluginLo
     // P0-B: 检测词库走 live provider(learned correction cues 无需重启即生效,
     // optimizer 写 correction_keywords.json 后下一次 detectSync 消费)。
     const liveStore = createLiveSignalKeywordStore(wctx, logger);
-    host = new SignalCollectorHost(wctx, { llmClassifier, keywordStoreProvider: () => liveStore.resolve() });
+    host = new SignalCollectorHost(wctx, {
+      llmClassifier,
+      keywordStoreProvider: () => liveStore.resolve(),
+      // PRI-788 G3: LLM 确认 verdict → 关键词 TP/FP 反馈(earned precision 证据源)。
+      // correction_keywords.json 全部为 correction 类词,命中词直接记入 learner。
+      cueFeedbackRecorder: (terms, wasCorrection) => {
+        const learner = CorrectionCueLearner.get(wctx.stateDir);
+        for (const term of terms) {
+          if (wasCorrection) learner.recordTruePositive(term);
+          else learner.recordFalsePositive(term);
+        }
+      },
+    });
     _signalCollectorHosts.set(wctx.workspaceDir, host);
   }
   return host;

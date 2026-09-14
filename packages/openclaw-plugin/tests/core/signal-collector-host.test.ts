@@ -828,3 +828,87 @@ describe('PRI-788 G2: confirmPendingSignal', () => {
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRI-788 G3 — cueFeedbackRecorder（earned precision 证据源）
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('PRI-788 G3: cueFeedbackRecorder TP/FP 反馈', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('LLM confirms STRONG → recorder called with matched terms + true', async () => {
+    const wctx = makeMockWctx();
+    (wctx.trajectory as unknown as Record<string, ReturnType<typeof vi.fn>>).recordUserTurn =
+      vi.fn().mockReturnValue(1);
+    const recorder = vi.fn();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({ is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue' }),
+      cueFeedbackRecorder: recorder,
+    });
+
+    host.detectSync('这个不对', 'sess-g3-tp', 'user');
+    await flushAsync();
+
+    expect(recorder).toHaveBeenCalledWith(['不对'], true);
+  });
+
+  it('LLM says none → recorder called with false; degraded (no verdict) → recorder NOT called', async () => {
+    const wctx = makeMockWctx();
+    (wctx.trajectory as unknown as Record<string, ReturnType<typeof vi.fn>>).recordUserTurn =
+      vi.fn().mockReturnValue(1);
+    const recorder = vi.fn();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({ is_feedback: false, type: 'none', confidence: 1, reason: '普通' }),
+      cueFeedbackRecorder: recorder,
+    });
+
+    host.detectSync('这个不对', 'sess-g3-fp', 'user');
+    await flushAsync();
+    expect(recorder).toHaveBeenCalledWith(['不对'], false);
+
+    // 无 verdict 的降级分支不算 FP（通道死≠词错）
+    const host2 = makeHost(wctx, { keywordStore: testStore, config: testConfig, cueFeedbackRecorder: recorder });
+    host2.detectSync('这个不对', 'sess-g3-degraded', 'user');
+    await flushAsync();
+    expect(recorder).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirmPendingSignal forwards terms feedback: confirmed→true, rejected→false', async () => {
+    const wctx = makeMockWctx();
+    const recorder = vi.fn();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig, cueFeedbackRecorder: recorder });
+    const batchItem = { sessionId: 's', userTurnRowid: 9, occurrenceId: 'occ-9', excerpt: '这个不对', terms: ['不对'] };
+
+    await host.confirmPendingSignal(batchItem, async () => ({
+      is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue',
+    }));
+    expect(recorder).toHaveBeenLastCalledWith(['不对'], true);
+
+    await host.confirmPendingSignal(batchItem, async () => ({
+      is_feedback: false, type: 'none', confidence: 1, reason: 'none',
+    }));
+    expect(recorder).toHaveBeenLastCalledWith(['不对'], false);
+  });
+
+  it('recorder throwing does not block routing (SIGNAL_CUE_FEEDBACK_FAIL)', async () => {
+    const wctx = makeMockWctx();
+    (wctx.trajectory as unknown as Record<string, ReturnType<typeof vi.fn>>).recordUserTurn =
+      vi.fn().mockReturnValue(1);
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({ is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue' }),
+      cueFeedbackRecorder: () => { throw new Error('learner broke'); },
+    });
+
+    host.detectSync('这个不对', 'sess-g3-throw', 'user');
+    await flushAsync();
+
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+    expect(SystemLogger.log).toHaveBeenCalledWith('/tmp/test-ws', 'SIGNAL_CUE_FEEDBACK_FAIL', expect.stringContaining('learner broke'));
+  });
+});

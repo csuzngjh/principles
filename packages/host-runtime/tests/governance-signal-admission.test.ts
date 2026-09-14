@@ -180,6 +180,73 @@ describe('shared correction detector (SPEC §12)', () => {
   });
 });
 
+describe('earned precision (PRI-788 G3)', () => {
+  beforeEach(() => {
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+  });
+
+  function writeLearnerFile(keywords: unknown[]): void {
+    const filePath = path.join(workspaceDir, '.state', 'correction_keywords.json');
+    fs.writeFileSync(filePath, JSON.stringify({ keywords }));
+    // mtime 粒度可能低于写入间隔——强制推进以绕过 mtime 缓存
+    const now = Date.now();
+    fs.utimesSync(filePath, new Date(now), new Date(now));
+  }
+
+  function resolveTerm(term: string) {
+    const store = createSharedCorrectionKeywordStore({ workspaceDir });
+    const resolved = store.resolve();
+    return resolved.terms[term];
+  }
+
+  it('llm-learned term with TP>=3 and zero FP earns high precision; any FP keeps it ambiguous', () => {
+    writeLearnerFile([
+      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+      { term: '又错了', weight: 0.8, source: 'llm', truePositiveCount: 2, falsePositiveCount: 0 },
+      { term: '重来', weight: 0.8, source: 'llm', truePositiveCount: 5, falsePositiveCount: 1 },
+    ]);
+    expect(resolveTerm('先确认再改')?.precision).toBe('high');
+    expect(resolveTerm('又错了')?.precision).toBe('ambiguous');
+    expect(resolveTerm('重来')?.precision).toBe('ambiguous');
+  });
+
+  it('llm term below the TP threshold stays ambiguous; losing evidence demotes a previously earned term', () => {
+    writeLearnerFile([
+      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+    ]);
+    expect(resolveTerm('先确认再改')?.precision).toBe('high');
+
+    writeLearnerFile([
+      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 2 },
+    ]);
+    expect(resolveTerm('先确认再改')?.precision).toBe('ambiguous');
+  });
+
+  it('owner-promoted terms keep the weight-based rule (Owner decision not gated by evidence)', () => {
+    writeLearnerFile([
+      { term: '别自作聪明', weight: 0.9, source: 'user', truePositiveCount: 0, falsePositiveCount: 0 },
+      { term: '字太大了', weight: 0.5, source: 'user' },
+    ]);
+    expect(resolveTerm('别自作聪明')?.precision).toBe('high');
+    expect(resolveTerm('字太大了')?.precision).toBe('ambiguous');
+  });
+
+  it('new owner-approved seed phrases hit the deterministic STRONG path', () => {
+    const detection = evaluateCorrectionSignal({
+      workspaceDir,
+      text: '我说的是先确认再改,谁让你直接动主分支的',
+      sessionId: 's1',
+      detectedAt: NOW.toISOString(),
+      store: buildSharedSeedKeywordStore(),
+    });
+    expect(detection.output.matchedPrecision).toBe('high');
+    expect(detection.output.strength).toBe('STRONG');
+    for (const seed of ['我说的是', '不是让你', '谁让你', '又搞错', '都说了']) {
+      expect(buildSharedSeedKeywordStore().terms[seed]?.precision).toBe('high');
+    }
+  });
+});
+
 describe('correction admission → one canonical pain (SPEC §10/§12)', () => {
   it('admits a real correction once with a deterministic content-derived id', () => {
     const first = admit([correction()]);

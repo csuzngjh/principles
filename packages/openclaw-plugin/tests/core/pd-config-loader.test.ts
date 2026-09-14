@@ -210,6 +210,43 @@ describe('Observer ready', () => {
     }
   });
 
+  it('surfaces profile maxTokens for observer adapters (PRI-788 G3)', () => {
+    const tmp = mkTmpDir();
+    const config = yaml.dump({
+      version: 1,
+      features: { correction_observer: { category: 'quiet', enabled: true } },
+      runtimeProfiles: {
+        'pi-ai.local': { type: 'pi-ai', provider: 'openai', model: 'qwen3.8-27b', apiKeyEnv: 'ANTHROPIC_API_KEY', timeoutMs: 300000, maxTokens: 16000 },
+      },
+      internalAgents: {
+        defaultRuntime: 'pi-ai.local',
+        agents: {
+          diagnostician: { enabled: true },
+          dreamer: { enabled: true },
+          scribe: { enabled: true },
+          artificer: { enabled: true },
+          philosopher: { enabled: false },
+          evaluator: { enabled: false },
+          rolloutReviewer: { enabled: false },
+          correctionObserver: { enabled: true, runtimeProfile: 'pi-ai.local' },
+          empathyObserver: { enabled: false },
+        },
+      },
+    });
+    writeConfig(tmp, config);
+    const originalKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key-1234567890';
+    try {
+      const result = resolveObserverConfig(tmp, 'correction_observer', 'correctionObserver');
+      expect(result.readiness).toBe('not_ready');
+      expect(result.maxTokens).toBe(16000);
+    } finally {
+      if (originalKey !== undefined) process.env.ANTHROPIC_API_KEY = originalKey;
+      else delete process.env.ANTHROPIC_API_KEY;
+      rmTmpDir(tmp);
+    }
+  });
+
   it('returns readiness=needs_setup for OpenClaw profile (not supported for observers)', () => {
     const tmp = mkTmpDir();
     const config = yaml.dump({

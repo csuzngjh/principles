@@ -137,6 +137,13 @@ export interface SignalCollectorHostOptions {
   config?: SignalCollectorConfig;
   /** Stage2 LLM 分类器。null/undefined → 降级纯关键词。 */
   llmClassifier?: SignalLlmClassifier | null;
+  /**
+   * PRI-788 G3: 关键词确认反馈（earned precision 的证据源）。LLM 确认 verdict
+   * 出现时以命中的词回调——wasCorrection=true 记 TP（LLM 确认是纠正），
+   * false 记 FP（命中但不是纠正）。由 prompt.ts 接线到 CorrectionCueLearner；
+   * 未注入时为 no-op（earned 永不升级，行为=G3 之前）。
+   */
+  cueFeedbackRecorder?: (terms: readonly string[], wasCorrection: boolean) => void;
 }
 
 export class SignalCollectorHost {
@@ -144,6 +151,7 @@ export class SignalCollectorHost {
   private readonly storeProvider: () => UnifiedKeywordStore;
   private readonly config: SignalCollectorConfig;
   private readonly llmClassifier: SignalLlmClassifier | null;
+  private readonly cueFeedbackRecorder?: (terms: readonly string[], wasCorrection: boolean) => void;
 
   /** rate limit 状态:sessionId → STRONG 计数桶 */
   private readonly rateLimit = new Map<string, RateLimitBucket>();
@@ -154,6 +162,7 @@ export class SignalCollectorHost {
       ?? (options.keywordStore ? () => options.keywordStore as UnifiedKeywordStore : () => buildDefaultKeywordStore());
     this.config = options.config ?? DEFAULT_SIGNAL_CONFIG;
     this.llmClassifier = options.llmClassifier ?? null;
+    this.cueFeedbackRecorder = options.cueFeedbackRecorder;
   }
 
   /**
@@ -292,6 +301,8 @@ export class SignalCollectorHost {
 
     // 3. 按 strength 分流
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
+      // PRI-788 G3: LLM 确认是纠正 → 命中词记 TP（earned precision 证据）
+      this.emitCueFeedback(pending.output.matchedTerms, true);
       // PRI-788 G1: LLM 确认的纠正回写标志位。Stage1 写入时歧义候选置 0，若不
       // 回写，证据构建器与 correction_samples 闭环永远看不到这条纠正。标志位
       // 陈述"这条消息是纠正"的事实，独立于 pain 事件的 rate limit，故先于
@@ -299,9 +310,26 @@ export class SignalCollectorHost {
       this.writeBackConfirmedCorrection(pending.userTurnRowid, confirmed);
       this.routeStrong(confirmed, pending.sessionId, pending.text, pending.occurrenceId);
     } else if (confirmed.isSignal && confirmed.strength === 'WEAK') {
+      // LLM 判为情绪/挫败而非纠正 → 命中的纠正词记 FP
+      this.emitCueFeedback(pending.output.matchedTerms, false);
       this.routeWeak(confirmed, pending.sessionId);
+    } else {
+      // LLM 判为普通消息 → 命中词记 FP
+      this.emitCueFeedback(pending.output.matchedTerms, false);
     }
-    // none → 仅记录,无副作用
+  }
+
+  /**
+   * PRI-788 G3: 把 LLM 确认 verdict 转成关键词 TP/FP 反馈（earned precision 的
+   * 证据源）。recorder 未注入或抛错均不阻塞路由（rc-9：抛错记结构化日志）。
+   */
+  private emitCueFeedback(terms: readonly string[] | undefined, wasCorrection: boolean): void {
+    if (!terms || terms.length === 0 || !this.cueFeedbackRecorder) return;
+    try {
+      this.cueFeedbackRecorder(terms, wasCorrection);
+    } catch (e) {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CUE_FEEDBACK_FAIL', String(e));
+    }
   }
 
   /**
@@ -344,7 +372,7 @@ export class SignalCollectorHost {
    * attempts++，达上限转 abandoned）。
    */
   async confirmPendingSignal(
-    item: { sessionId: string; userTurnRowid: number; occurrenceId: string; excerpt: string },
+    item: { sessionId: string; userTurnRowid: number; occurrenceId: string; excerpt: string; terms?: readonly string[] },
     classifier: SignalLlmClassifier,
   ): Promise<{ disposition: 'confirmed' | 'rejected' | 'failed'; detail: string }> {
     let llmResult: Awaited<ReturnType<SignalLlmClassifier>> = null;
@@ -356,14 +384,17 @@ export class SignalCollectorHost {
     if (!llmResult) return { disposition: 'failed', detail: 'classifier unavailable' };
     const confirmed = mapLlmResultToOutput(llmResult, item.excerpt, item.sessionId, this.config, new Date().toISOString());
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
+      this.emitCueFeedback(item.terms, true);
       this.writeBackConfirmedCorrection(item.userTurnRowid, confirmed);
       this.routeStrong(confirmed, item.sessionId, item.excerpt, item.occurrenceId);
       return { disposition: 'confirmed', detail: confirmed.llmReason ?? 'confirmed correction' };
     }
     if (confirmed.isSignal && confirmed.strength === 'WEAK') {
+      this.emitCueFeedback(item.terms, false);
       this.routeWeak(confirmed, item.sessionId);
       return { disposition: 'rejected', detail: 'weak/empathy at confirmation' };
     }
+    this.emitCueFeedback(item.terms, false);
     return { disposition: 'rejected', detail: confirmed.llmReason ?? 'classified none' };
   }
 
@@ -547,6 +578,8 @@ export function createSignalLlmClassifierFromConfig(
       model: cfg.model,
       apiKeyEnv: cfg.apiKeyEnv,
       timeoutMs: cfg.timeoutMs ?? 30_000,
+      // PRI-788 G3: profile 的 maxTokens 透传（思考型本地模型小 token 预算会返回空）
+      maxTokens: cfg.maxTokens ?? undefined,
       baseUrl: cfg.baseUrl ?? undefined,
       workspace: wctx.workspaceDir,
     });

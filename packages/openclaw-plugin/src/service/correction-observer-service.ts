@@ -66,6 +66,7 @@ export async function batchConfirmPendingSignals(wctx: WorkspaceContext, logger:
                     userTurnRowid: item.userTurnRowid,
                     occurrenceId: item.occurrenceId,
                     excerpt: item.excerpt,
+                    terms: item.terms,
                 },
                 classifier,
             );
@@ -128,6 +129,8 @@ export function resolveCorrectionObserver(wctx: WorkspaceContext, logger?: Pick<
                 model: observerConfig.model ?? 'anthropic/claude-3-5-sonnet',
                 apiKeyEnv: observerConfig.apiKeyEnv ?? 'ANTHROPIC_API_KEY',
                 timeoutMs: observerConfig.timeoutMs ?? undefined,
+                // PRI-788 G3: profile 的 maxTokens 透传（思考型本地模型小 token 预算会返回空）
+                maxTokens: observerConfig.maxTokens ?? undefined,
                 baseUrl: observerConfig.baseUrl ?? undefined,
                 workspace: wctx.workspaceDir,
             });

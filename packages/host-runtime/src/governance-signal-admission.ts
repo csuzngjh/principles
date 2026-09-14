@@ -97,14 +97,23 @@ type Degradation = { ok: false; reason: string; nextAction: string };
 
 const KEYWORD_STORE_FILE = 'correction_keywords.json';
 
-/** learned 词进入高精度 deterministic path 的权重阈值(仅 seed/owner_promoted; llm_learned 恒 ambiguous) */
+/** seed/owner_promoted 词进入高精度 deterministic path 的权重阈值 */
 export const HIGH_PRECISION_LEARNED_WEIGHT = 0.7;
+
+/** PRI-788 G3: llm 学习词 earned precision 的 TP 门槛（且要求零 FP） */
+export const EARNED_PRECISION_MIN_TP = 3;
 
 /** 高精度纠正短语 overlay(已验证的确定性 STRONG 路径,不属于 learner seed 集) */
 export const HIGH_PRECISION_CORRECTION_OVERLAY: readonly (readonly [string, number])[] = [
   ['这是错的', 0.9],
   ['不要自作主张', 0.9],
   ['不应该这么做', 0.9],
+  // PRI-788 G3(Owner 批准清单):中文高精度纠正句式
+  ['我说的是', 0.9],
+  ['不是让你', 0.85],
+  ['谁让你', 0.85],
+  ['又搞错', 0.8],
+  ['都说了', 0.8],
 ];
 
 /** empathy seed overlay(检测行为不变) */
@@ -116,6 +125,9 @@ interface LearnedKeywordShape {
   term: string;
   weight: number;
   source: string;
+  /** 确认/误报计数（correction-cue-learner 维护）——earned precision 的证据源 */
+  truePositiveCount?: number;
+  falsePositiveCount?: number;
 }
 
 function isValidLearnedKeyword(v: unknown): v is LearnedKeywordShape {
@@ -132,8 +144,22 @@ function mapLearnedSource(source: string): UnifiedKeywordStore['terms'][string][
   return 'seed';
 }
 
-function precisionFor(source: string, weight: number): 'high' | 'ambiguous' {
-  if (source === 'llm') return 'ambiguous';
+/**
+ * PRI-788 G3 earned precision：llm 学习词不再恒为 ambiguous——确认证据达标
+ * （TP ≥ 3 且零 FP）时升 high，出现任一 FP 即降回 ambiguous。安全姿态不变：
+ * LLM 单次建议无法自升 STRONG，必须积累 LLM 确认的正例。owner_promoted 仍按
+ * 权重判定（Owner 显式决策不受证据门槛约束）。
+ */
+function precisionFor(
+  source: string,
+  weight: number,
+  stats?: { truePositiveCount?: number; falsePositiveCount?: number },
+): 'high' | 'ambiguous' {
+  if (source === 'llm') {
+    const tp = stats?.truePositiveCount ?? 0;
+    const fp = stats?.falsePositiveCount ?? 0;
+    return tp >= EARNED_PRECISION_MIN_TP && fp === 0 ? 'high' : 'ambiguous';
+  }
   return weight >= HIGH_PRECISION_LEARNED_WEIGHT ? 'high' : 'ambiguous';
 }
 
@@ -152,7 +178,7 @@ function projectLearnedStore(raw: unknown): { terms: UnifiedKeywordStore['terms'
       term,
       category: 'correction',
       weight,
-      precision: precisionFor(kw.source, weight),
+      precision: precisionFor(kw.source, weight, kw),
       source: mapLearnedSource(kw.source),
     };
     if (kw.source === 'llm') learnedCount += 1;
