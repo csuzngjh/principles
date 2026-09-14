@@ -112,6 +112,25 @@ export interface DoctorOutput {
   legacyFilesDetected: string[];
   /** PRI-404: Next actions for removing legacy files */
   legacyFileNextActions: string[];
+  /** PRI-788 G4: 纠正信号检测健康（.state/signal-health.json，缺失=unknown） */
+  signalHealth: SignalHealthEntry;
+}
+
+export interface SignalHealthEntry {
+  status: DoctorStatus | 'unknown';
+  counts: {
+    stage1Strong: number;
+    stage2Confirmed: number;
+    stage2Queued: number;
+    stage2Dropped: number;
+    pendingCount: number;
+  } | null;
+  lastStage2SuccessAt: string | null;
+  observerLastSuccessAt: string | null;
+  observerConsecutiveFailures: number | null;
+  updatedAt: string | null;
+  reason: string;
+  nextAction: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -395,6 +414,85 @@ function diagnoseInternalAgent(
   };
 }
 
+// ─── Signal detection health (PRI-788 G4) ───────────────────────────────────
+
+const SIGNAL_HEALTH_STALE_MS = 25 * 60 * 60 * 1000;
+/** observer 连续失败超过该次数（≈1 小时无成功轮）→ degraded */
+const OBSERVER_FAILURE_DEGRADED_THRESHOLD = 4;
+
+function isStringRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function numberOr(v: unknown, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
+function stringOrNull(v: unknown): string | null {
+  return typeof v === 'string' ? v : null;
+}
+
+/**
+ * Read + classify `.state/signal-health.json` (written by the OpenClaw plugin).
+ * rc-1/rc-2: file content parsed as unknown; malformed/missing → status
+ * 'unknown' with a next action, never a throw.
+ */
+export function buildSignalHealthEntry(stateDir: string): SignalHealthEntry {
+  const unknownEntry: SignalHealthEntry = {
+    status: 'unknown',
+    counts: null,
+    lastStage2SuccessAt: null,
+    observerLastSuccessAt: null,
+    observerConsecutiveFailures: null,
+    updatedAt: null,
+    reason: 'signal-health.json missing or unreadable (plugin not running, or pre-G4 runtime)',
+    nextAction: 'If correction detection should be active, verify the OpenClaw gateway is running and the signal_collector / correction_observer flags are enabled',
+  };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(path.join(stateDir, 'signal-health.json'), 'utf-8'));
+  } catch {
+    return unknownEntry;
+  }
+  if (!isStringRecord(parsed)) return unknownEntry;
+
+  const failures = numberOr(parsed.observerConsecutiveFailures, 0);
+  const updatedAt = stringOrNull(parsed.updatedAt);
+  const entry: SignalHealthEntry = {
+    status: 'ok',
+    counts: {
+      stage1Strong: numberOr(parsed.stage1Strong, 0),
+      stage2Confirmed: numberOr(parsed.stage2Confirmed, 0),
+      stage2Queued: numberOr(parsed.stage2Queued, 0),
+      stage2Dropped: numberOr(parsed.stage2Dropped, 0),
+      pendingCount: numberOr(parsed.pendingCount, 0),
+    },
+    lastStage2SuccessAt: stringOrNull(parsed.lastStage2SuccessAt),
+    observerLastSuccessAt: stringOrNull(parsed.observerLastSuccessAt),
+    observerConsecutiveFailures: failures,
+    updatedAt,
+    reason: 'Signal detection healthy',
+    nextAction: '',
+  };
+
+  if (failures > OBSERVER_FAILURE_DEGRADED_THRESHOLD) {
+    entry.status = 'degraded';
+    entry.reason = `Correction observer failing ${failures} cycles in a row — keyword learning and batch confirmation are paused`;
+    entry.nextAction = "Check the observer runtime profile (quota/provider), then run 'pd runtime probe --runtime pi-ai' to verify connectivity";
+    return entry;
+  }
+
+  const parsedTime = updatedAt === null ? Number.NaN : Date.parse(updatedAt);
+  if (updatedAt === null || Number.isNaN(parsedTime) || (Date.now() - parsedTime) > SIGNAL_HEALTH_STALE_MS) {
+    entry.status = 'degraded';
+    entry.reason = updatedAt === null
+      ? 'Health file carries no timestamp'
+      : `Signal health not updated for >24h (last: ${updatedAt})`;
+    entry.nextAction = 'Verify the OpenClaw plugin is running and the signal_collector / correction_observer flags are enabled';
+  }
+  return entry;
+}
+
 // ─── Main entry: buildDoctorOutput ───────────────────────────────────────────
 
 export interface BuildDoctorInput {
@@ -559,7 +657,16 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
     }
   }
 
-  // 7) Build output
+  // 7) Signal detection health (PRI-788 G4)
+  const signalHealth = buildSignalHealthEntry(path.join(workspaceDir, '.state'));
+  if (signalHealth.status === 'degraded') {
+    const { reason: shReason, nextAction: shNextAction } = signalHealth;
+    if (status === 'ok') status = 'degraded';
+    if (!reason) reason = shReason;
+    if (shNextAction) nextActions.push(shNextAction);
+  }
+
+  // 8) Build output
   const out: DoctorOutput = {
     status,
     workspaceDir,
@@ -580,6 +687,7 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
     nextActions: nextActions.length > 0 ? nextActions : ['All checks passed — configuration is valid'],
     legacyFilesDetected: loadResult.legacyFilesDetected,
     legacyFileNextActions,
+    signalHealth,
   };
 
   if (reason) out.reason = reason;

@@ -12,6 +12,7 @@ import { SystemLogger } from '../core/system-logger.js';
 import { resolveObserverConfig } from '../core/pd-config-loader.js';
 import { createSignalLlmClassifierFromConfig } from '../core/signal-collector-host.js';
 import { getSignalCollectorHost } from '../hooks/prompt.js';
+import { updateSignalHealth } from '../core/signal-health.js';
 
 export interface CorrectionObserverServiceShape {
     id: string;
@@ -81,6 +82,12 @@ export async function batchConfirmPendingSignals(wctx: WorkspaceContext, logger:
             }
             trajectory.markSignalConfirmationResult(item.id, result.disposition, result.detail);
             resolved++;
+            if (result.disposition === 'confirmed') {
+                updateSignalHealth(wctx.stateDir, (s) => {
+                    s.stage2Confirmed += 1;
+                    s.lastStage2SuccessAt = new Date().toISOString();
+                });
+            }
             SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CONFIRMATION_RESOLVED',
                 `${item.id} -> ${result.disposition} (${result.detail.slice(0, 80)})`);
         } catch (err) {
@@ -146,6 +153,18 @@ export function resolveCorrectionObserver(wctx: WorkspaceContext, logger?: Pick<
     }
 }
 
+/** PRI-788 G4: 周期成功/失败计数（旁路；成功归零连续失败计数）。 */
+function recordObserverCycleOutcome(wctx: WorkspaceContext, ok: boolean): void {
+    updateSignalHealth(wctx.stateDir, (s) => {
+        if (ok) {
+            s.observerLastSuccessAt = new Date().toISOString();
+            s.observerConsecutiveFailures = 0;
+        } else {
+            s.observerConsecutiveFailures += 1;
+        }
+    });
+}
+
 export async function runCorrectionObserverCycle(wctx: WorkspaceContext, logger: PluginLogger): Promise<void> {
     try {
         // PRI-788 G2: 先批量确认持久化的待确认信号——独立于 observer 本身的
@@ -154,11 +173,17 @@ export async function runCorrectionObserverCycle(wctx: WorkspaceContext, logger:
         if (confirmedCount > 0) {
             logger?.info?.(`[PD:CorrectionObserver] batch-confirmed ${confirmedCount} pending signals`);
         }
+        // PRI-788 G4: 刷新队列深度快照
+        updateSignalHealth(wctx.stateDir, (s) => {
+            s.pendingCount = wctx.trajectory?.countPendingSignalConfirmations?.() ?? s.pendingCount;
+        });
 
         const observer = resolveCorrectionObserver(wctx, logger);
         if (!observer) {
             // PRI-307: No noisy "no API key" cycling. Only log at debug level.
             logger?.debug?.(`[PD:CorrectionObserver] Observer not resolved. Skipping cycle.`);
+            // G4: 周期正常完成（observer 未配置不是失败）
+            recordObserverCycleOutcome(wctx, true);
             return;
         }
 
@@ -225,10 +250,14 @@ export async function runCorrectionObserverCycle(wctx: WorkspaceContext, logger:
         if (result.updated) {
             optimizationService.applyResult(result);
         }
+        // PRI-788 G4: 整个周期成功（含 observer 未配置的 no-op 轮）
+        recordObserverCycleOutcome(wctx, true);
     } catch (err) {
         const errMsg = `Correction observer cycle failed: ${String(err)}`;
         logger?.warn?.(`[PD:CorrectionObserver] ${errMsg}`);
         SystemLogger.log(wctx.workspaceDir, 'CORRECTION_OBSERVER_CYCLE_FAILED', errMsg);
+        // PRI-788 G4: 失败计数上浮到健康产物（doctor 呈现 degraded）
+        recordObserverCycleOutcome(wctx, false);
     }
 }
 

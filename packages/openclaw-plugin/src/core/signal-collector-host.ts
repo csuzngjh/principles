@@ -41,6 +41,7 @@ import { trackFriction } from './session-tracker.js';
 import { SystemLogger } from './system-logger.js';
 import { createTraceId } from '../utils/trace-id.js';
 import { resolveObserverConfig } from './pd-config-loader.js';
+import { updateSignalHealth } from './signal-health.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
 import type { WorkspaceContext } from './workspace-context.js';
 import type { TrajectoryUserTurnInput } from './trajectory-types.js';
@@ -215,6 +216,8 @@ export class SignalCollectorHost {
 
     // 5. 高精度短语命中 (high, STRONG) → 直接走 STRONG 分流 (同步)
     if (output.isSignal && output.strength === 'STRONG' && output.matchedPrecision === 'high') {
+      // PRI-788 G4: 健康度计数（旁路，失败不阻塞）
+      updateSignalHealth(this.wctx.stateDir, (s) => { s.stage1Strong += 1; });
       this.routeStrong(output, sessionId, userMessage, this.resolveOccurrenceId(sessionId, userMessage, options));
       return;
     }
@@ -308,6 +311,11 @@ export class SignalCollectorHost {
       // 陈述"这条消息是纠正"的事实，独立于 pain 事件的 rate limit，故先于
       // routeStrong 执行。
       this.writeBackConfirmedCorrection(pending.userTurnRowid, confirmed);
+      // PRI-788 G4: 健康度计数
+      updateSignalHealth(this.wctx.stateDir, (s) => {
+        s.stage2Confirmed += 1;
+        s.lastStage2SuccessAt = new Date().toISOString();
+      });
       this.routeStrong(confirmed, pending.sessionId, pending.text, pending.occurrenceId);
     } else if (confirmed.isSignal && confirmed.strength === 'WEAK') {
       // LLM 判为情绪/挫败而非纠正 → 命中的纠正词记 FP
@@ -341,8 +349,11 @@ export class SignalCollectorHost {
    * 语义覆盖由 G3 的词库扩充/earned 解锁承担。
    */
   private queueUnconfirmedForBatch(pending: PendingSignal, reason: string): void {
-    if (pending.userTurnRowid === undefined) return; // 无行可回写，持久化无意义
-    if (pending.output.matchedPrecision !== 'ambiguous' || pending.output.matchedTerms.length === 0) return;
+    if (pending.userTurnRowid === undefined) { this.countStage2Dropped(); return; } // 无行可回写，持久化无意义
+    if (pending.output.matchedPrecision !== 'ambiguous' || pending.output.matchedTerms.length === 0) {
+      this.countStage2Dropped();
+      return;
+    }
     const suggestedType = pending.output.matchedTerms.some(
       (term) => pending.storeSnapshot.terms[term]?.category === 'correction',
     ) ? 'correction' : 'empathy';
@@ -356,12 +367,19 @@ export class SignalCollectorHost {
         suggestedType,
         createdAt: new Date().toISOString(),
       });
+      updateSignalHealth(this.wctx.stateDir, (s) => { s.stage2Queued += 1; });
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_QUEUED',
         `${reason}; queued for batch confirmation (suggested=${suggestedType})`);
     } catch (e) {
+      this.countStage2Dropped();
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_QUEUE_FAIL',
         `enqueueSignalConfirmation threw: ${String(e)}`);
     }
+  }
+
+  /** PRI-788 G4: 未经确认就消失的候选计数（旁路，失败不阻塞）。 */
+  private countStage2Dropped(): void {
+    updateSignalHealth(this.wctx.stateDir, (s) => { s.stage2Dropped += 1; });
   }
 
   /**
