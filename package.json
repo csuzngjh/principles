@@ -17,6 +17,7 @@
     "check:generated-artifacts": "node scripts/check-generated-artifacts.cjs",
     "check:error-handbook": "node scripts/check-error-handbook.cjs",
     "check:error-handbook:audit": "node scripts/check-error-handbook.cjs --audit",
+    "check:telemetry-events": "node scripts/check-telemetry-events.cjs",
     "error:context": "node scripts/error-context.mjs",
     "error:hotspots": "node scripts/check-error-handbook.cjs --hotspots",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.js all",
