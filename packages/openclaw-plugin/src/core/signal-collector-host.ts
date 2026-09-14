@@ -243,6 +243,8 @@ export class SignalCollectorHost {
         llmResult = await this.llmClassifier(pending.text, this.config.promptTemplate);
       } catch (e) {
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', `LLM classifier threw: ${String(e)}`);
+        // PRI-788 G2: 异常不再静默丢候选——持久化待确认（通道恢复后批量确认）。
+        this.queueUnconfirmedForBatch(pending, 'llm_classifier_threw');
       }
       const llmDetectedAt = new Date().toISOString();
       if (llmResult) {
@@ -250,6 +252,8 @@ export class SignalCollectorHost {
       } else {
         // LLM 返回非法结果 → 当 none 处理 (rc-1),降级不静默
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result, treating as none');
+        // PRI-788 G2: 同上——超时/不可用返回 null 的候选持久化，不丢。
+        this.queueUnconfirmedForBatch(pending, 'llm_result_unavailable');
         confirmed = mapLlmResultToOutput(
           { is_feedback: false, type: 'none', confidence: 1, reason: 'LLM parse failed' },
           pending.text, pending.sessionId, this.config, llmDetectedAt,
@@ -281,6 +285,8 @@ export class SignalCollectorHost {
       }
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_DEGRADED',
         'LLM unavailable, dropping candidate (no STRONG trigger)');
+      // PRI-788 G2: 丢弃改持久化——通道恢复后批量确认，不再"通道死=信号丢"。
+      this.queueUnconfirmedForBatch(pending, 'llm_unavailable');
       return;
     }
 
@@ -290,7 +296,7 @@ export class SignalCollectorHost {
       // 回写，证据构建器与 correction_samples 闭环永远看不到这条纠正。标志位
       // 陈述"这条消息是纠正"的事实，独立于 pain 事件的 rate limit，故先于
       // routeStrong 执行。
-      this.writeBackConfirmedCorrection(pending, confirmed);
+      this.writeBackConfirmedCorrection(pending.userTurnRowid, confirmed);
       this.routeStrong(confirmed, pending.sessionId, pending.text, pending.occurrenceId);
     } else if (confirmed.isSignal && confirmed.strength === 'WEAK') {
       this.routeWeak(confirmed, pending.sessionId);
@@ -299,18 +305,81 @@ export class SignalCollectorHost {
   }
 
   /**
+   * PRI-788 G2: Stage2 不可用时的持久化兜底。LLM 不可用/超时/解析失败的丢弃
+   * 分支改为落库 signal_confirmations（pending），由 CorrectionObserverService
+   * 每周期批量确认——通道恢复后信号可补确认，不再"通道死=信号丢"。
+   *
+   * 只入队"词库命中过的歧义候选"：零命中的普通消息体量与噪声不可控，其纠正
+   * 语义覆盖由 G3 的词库扩充/earned 解锁承担。
+   */
+  private queueUnconfirmedForBatch(pending: PendingSignal, reason: string): void {
+    if (pending.userTurnRowid === undefined) return; // 无行可回写，持久化无意义
+    if (pending.output.matchedPrecision !== 'ambiguous' || pending.output.matchedTerms.length === 0) return;
+    const suggestedType = pending.output.matchedTerms.some(
+      (term) => pending.storeSnapshot.terms[term]?.category === 'correction',
+    ) ? 'correction' : 'empathy';
+    try {
+      this.wctx.trajectory?.enqueueSignalConfirmation?.({
+        sessionId: pending.sessionId,
+        userTurnRowid: pending.userTurnRowid,
+        occurrenceId: pending.occurrenceId,
+        excerpt: pending.text.slice(0, 400),
+        terms: pending.output.matchedTerms,
+        suggestedType,
+        createdAt: new Date().toISOString(),
+      });
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_QUEUED',
+        `${reason}; queued for batch confirmation (suggested=${suggestedType})`);
+    } catch (e) {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_QUEUE_FAIL',
+        `enqueueSignalConfirmation threw: ${String(e)}`);
+    }
+  }
+
+  /**
+   * PRI-788 G2: 批量确认一条持久化的待确认信号（CorrectionObserverService 每
+   * 周期调用）。用调用方提供的 classifier（每 cycle 新鲜解析）重新分类：
+   * correction → 回写标志 + 复用 realtime STRONG 分流（限流/身份派生一致）；
+   * WEAK → trackFriction；none → rejected；classifier 失败 → failed（调用方
+   * attempts++，达上限转 abandoned）。
+   */
+  async confirmPendingSignal(
+    item: { sessionId: string; userTurnRowid: number; occurrenceId: string; excerpt: string },
+    classifier: SignalLlmClassifier,
+  ): Promise<{ disposition: 'confirmed' | 'rejected' | 'failed'; detail: string }> {
+    let llmResult: Awaited<ReturnType<SignalLlmClassifier>> = null;
+    try {
+      llmResult = await classifier(item.excerpt, '');
+    } catch (e) {
+      return { disposition: 'failed', detail: `classifier threw: ${String(e)}` };
+    }
+    if (!llmResult) return { disposition: 'failed', detail: 'classifier unavailable' };
+    const confirmed = mapLlmResultToOutput(llmResult, item.excerpt, item.sessionId, this.config, new Date().toISOString());
+    if (confirmed.isSignal && confirmed.strength === 'STRONG') {
+      this.writeBackConfirmedCorrection(item.userTurnRowid, confirmed);
+      this.routeStrong(confirmed, item.sessionId, item.excerpt, item.occurrenceId);
+      return { disposition: 'confirmed', detail: confirmed.llmReason ?? 'confirmed correction' };
+    }
+    if (confirmed.isSignal && confirmed.strength === 'WEAK') {
+      this.routeWeak(confirmed, item.sessionId);
+      return { disposition: 'rejected', detail: 'weak/empathy at confirmation' };
+    }
+    return { disposition: 'rejected', detail: confirmed.llmReason ?? 'classified none' };
+  }
+
+  /**
    * PRI-788 G1: Stage2 确认为纠正后回写 user_turns.correction_detected（G1）。
    * 以 Stage1 写入返回的 rowid 精确寻址（rc-7）；rowid 缺失/行已不存在均为
    * 可观测降级，不阻塞路由。
    */
-  private writeBackConfirmedCorrection(pending: PendingSignal, confirmed: SignalCollectorOutput): void {
-    if (pending.userTurnRowid === undefined) return;
+  private writeBackConfirmedCorrection(userTurnRowid: number | undefined, confirmed: SignalCollectorOutput): void {
+    if (userTurnRowid === undefined) return;
     const cue = confirmed.llmReason ? `llm:${confirmed.llmReason.slice(0, 120)}` : null;
     try {
-      const updated = this.wctx.trajectory?.markUserTurnCorrection(pending.userTurnRowid, cue);
+      const updated = this.wctx.trajectory?.markUserTurnCorrection(userTurnRowid, cue);
       if (updated === false) {
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_WRITEBACK_MISS',
-          `user_turn rowid ${pending.userTurnRowid} no longer exists; correction flag write-back skipped`);
+          `user_turn rowid ${userTurnRowid} no longer exists; correction flag write-back skipped`);
       }
     } catch (e) {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_WRITEBACK_FAIL',

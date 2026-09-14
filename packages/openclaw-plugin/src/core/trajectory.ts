@@ -12,6 +12,9 @@ import { guardWorkspaceLeak } from '@principles/core/runtime-v2';
 import type {
   CorrectionSampleReviewStatus,
   CorrectionExportMode,
+  SignalConfirmationInput,
+  SignalConfirmationRow,
+  SignalConfirmationStatus,
   TrajectoryDataStats,
   TrajectoryAssistantTurnInput,
   TrajectoryUserTurnInput,
@@ -299,6 +302,21 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
       note TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS signal_confirmations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      user_turn_rowid INTEGER NOT NULL UNIQUE,
+      occurrence_id TEXT NOT NULL,
+      excerpt TEXT NOT NULL,
+      terms_json TEXT NOT NULL,
+      suggested_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','confirmed','rejected','abandoned')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      resolved_at TEXT,
+      resolution TEXT
+    );
     CREATE TABLE IF NOT EXISTS exports_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       export_kind TEXT NOT NULL,
@@ -432,6 +450,7 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
     CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
     CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
     CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
+    CREATE INDEX IF NOT EXISTS idx_signal_confirmations_status ON signal_confirmations(status, attempts);
   `);
 
   return { tables, warnings };
@@ -508,6 +527,33 @@ function redactText(text: string): string {
     .replace(/\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+/g, '<PATH>')
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '<EMAIL>')
     .replace(/\b(sk|rk|pk)_[A-Za-z0-9]+\b/g, '<TOKEN>');
+}
+
+/** signal_confirmations 行 → camelCase 投影（terms_json 校验为 unknown，rc-1/2）。 */
+function rowToSignalConfirmation(row: Record<string, unknown>): SignalConfirmationRow {
+  let terms: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(String(row.terms_json ?? '[]'));
+    if (Array.isArray(parsed)) {
+      terms = parsed.filter((t): t is string => typeof t === 'string');
+    }
+  } catch {
+    terms = [];
+  }
+  return {
+    id: String(row.id),
+    sessionId: String(row.session_id),
+    userTurnRowid: Number(row.user_turn_rowid),
+    occurrenceId: String(row.occurrence_id),
+    excerpt: String(row.excerpt),
+    terms,
+    suggestedType: String(row.suggested_type),
+    status: String(row.status) as SignalConfirmationStatus,
+    attempts: Number(row.attempts ?? 0),
+    createdAt: String(row.created_at),
+    resolvedAt: row.resolved_at === null || row.resolved_at === undefined ? null : String(row.resolved_at),
+    resolution: row.resolution === null || row.resolution === undefined ? null : String(row.resolution),
+  };
 }
 
 export class TrajectoryDatabase {
@@ -1467,6 +1513,88 @@ export class TrajectoryDatabase {
       // Non-fatal: pain event recording should not break the review flow
       console.warn(`[Trajectory] Failed to record correction_rejected pain event: ${String(err)}`);
     }
+  }
+
+  // ── PRI-788 G2: Stage2 待确认信号持久队列（signal_confirmations） ────────────
+
+  /**
+   * 入队一条待确认信号。幂等：UNIQUE(user_turn_rowid) 兜底，重复入队是 no-op
+   * （同一轮消息只会在队列里出现一次）。id 由 (sessionId, rowid) 确定性派生。
+   */
+  enqueueSignalConfirmation(input: SignalConfirmationInput): void {
+    const id = `sq_${crypto.createHash('sha256')
+      .update(`${input.sessionId}:${input.userTurnRowid}`)
+      .digest('hex')
+      .slice(0, 12)}`;
+    this.withWrite(() => {
+      this.db.prepare(`
+        INSERT OR IGNORE INTO signal_confirmations (
+          id, session_id, user_turn_rowid, occurrence_id, excerpt,
+          terms_json, suggested_type, status, attempts, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)
+      `).run(
+        id,
+        input.sessionId,
+        input.userTurnRowid,
+        input.occurrenceId,
+        input.excerpt,
+        JSON.stringify(input.terms),
+        input.suggestedType,
+        input.createdAt,
+      );
+    });
+  }
+
+  /** 按 attempts ASC, created_at ASC 取 pending 队列（最久未确认的优先）。 */
+  listPendingSignalConfirmations(limit: number): SignalConfirmationRow[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM signal_confirmations
+      WHERE status = 'pending'
+      ORDER BY attempts ASC, created_at ASC
+      LIMIT ?
+    `).all(limit) as Record<string, unknown>[];
+    return rows.map(rowToSignalConfirmation);
+  }
+
+  /** 确认失败一次：attempts++（仍 pending，可重试）。返回累加后的 attempts。 */
+  bumpSignalConfirmationAttempt(id: string): number {
+    this.withWrite(() => {
+      this.db.prepare(`
+        UPDATE signal_confirmations SET attempts = attempts + 1
+        WHERE id = ? AND status = 'pending'
+      `).run(id);
+    });
+    const row = this.db.prepare(
+      'SELECT attempts FROM signal_confirmations WHERE id = ?',
+    ).get(id) as { attempts: number } | undefined;
+    return row?.attempts ?? 0;
+  }
+
+  /**
+   * 终态转移（confirmed/rejected/abandoned）。乐观锁守卫：仅当仍为 pending 时
+   * 生效（照 principle_candidates 模式）；返回是否实际转移。
+   */
+  markSignalConfirmationResult(
+    id: string,
+    status: Exclude<SignalConfirmationStatus, 'pending'>,
+    resolution: string,
+  ): boolean {
+    const result = this.withWrite(() =>
+      this.db.prepare(`
+        UPDATE signal_confirmations
+        SET status = ?, resolved_at = ?, resolution = ?
+        WHERE id = ? AND status = 'pending'
+      `).run(status, nowIso(), resolution.slice(0, 500), id),
+    );
+    return Number(result.changes) > 0;
+  }
+
+  /** 经济性：pending 总量（健康度指标 G4 用，O(1) 走索引）。 */
+  countPendingSignalConfirmations(): number {
+    const row = this.db.prepare(
+      "SELECT COUNT(*) AS n FROM signal_confirmations WHERE status = 'pending'",
+    ).get() as { n: number };
+    return row.n;
   }
 
   /**

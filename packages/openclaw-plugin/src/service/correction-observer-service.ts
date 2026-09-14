@@ -10,6 +10,8 @@ import {
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { resolveObserverConfig } from '../core/pd-config-loader.js';
+import { createSignalLlmClassifierFromConfig } from '../core/signal-collector-host.js';
+import { getSignalCollectorHost } from '../hooks/prompt.js';
 
 export interface CorrectionObserverServiceShape {
     id: string;
@@ -25,6 +27,68 @@ const CORRECTION_OBSERVER_INTERVAL_MS = 15 * 60 * 1000;
 const CORRECTION_OBSERVER_INITIAL_DELAY_MS = 10_000;
 const CORRECTION_OBSERVER_MAX_RECENT_SESSIONS = 20;
 const CORRECTION_OBSERVER_MAX_PAYLOAD_SESSIONS = 5;
+
+/** PRI-788 G2: 每周期批量确认的待确认信号条数上限。 */
+const SIGNAL_CONFIRM_BATCH_LIMIT = 20;
+/** PRI-788 G2: 单条候选确认失败次数上限，超过转 abandoned（不再重试）。 */
+const SIGNAL_CONFIRM_MAX_ATTEMPTS = 5;
+
+/**
+ * PRI-788 G2: 批量确认 signal_confirmations 里的 pending 候选。
+ *
+ * 用每周期新鲜解析的 signal classifier 重新分类——检测时 LLM 不可用而入队的
+ * 候选，在通道恢复后由这里补确认：correction → 回写标志位 + 复用 realtime
+ * STRONG 分流（同一限流桶/pain 身份派生）；none → rejected；连续失败达上限
+ * → abandoned。classifier 本身不可用（通道仍死）时整批跳过、不计失败次数。
+ *
+ * @returns 本轮 resolved（confirmed/rejected/abandoned）条数。
+ */
+export async function batchConfirmPendingSignals(wctx: WorkspaceContext, logger: PluginLogger): Promise<number> {
+    const trajectory = wctx.trajectory;
+    if (!trajectory?.listPendingSignalConfirmations) return 0;
+    const pending = trajectory.listPendingSignalConfirmations(SIGNAL_CONFIRM_BATCH_LIMIT);
+    if (pending.length === 0) return 0;
+
+    const classifier = createSignalLlmClassifierFromConfig(wctx, logger);
+    if (!classifier) {
+        logger?.debug?.('[PD:CorrectionObserver] batch confirm skipped: signal classifier unavailable');
+        return 0;
+    }
+    // 共享 realtime host：确认补发 pain 走同一限流桶与身份派生（ADR-0020 §11.4）。
+    const host = getSignalCollectorHost(wctx, logger);
+
+    let resolved = 0;
+    for (const item of pending) {
+        try {
+            const result = await host.confirmPendingSignal(
+                {
+                    sessionId: item.sessionId,
+                    userTurnRowid: item.userTurnRowid,
+                    occurrenceId: item.occurrenceId,
+                    excerpt: item.excerpt,
+                },
+                classifier,
+            );
+            if (result.disposition === 'failed') {
+                const attempts = trajectory.bumpSignalConfirmationAttempt(item.id);
+                if (attempts >= SIGNAL_CONFIRM_MAX_ATTEMPTS) {
+                    trajectory.markSignalConfirmationResult(item.id, 'abandoned', `attempts exhausted (${attempts}): ${result.detail}`);
+                    resolved++;
+                    SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CONFIRMATION_ABANDONED', `${item.id} after ${attempts} attempts`);
+                }
+                continue;
+            }
+            trajectory.markSignalConfirmationResult(item.id, result.disposition, result.detail);
+            resolved++;
+            SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CONFIRMATION_RESOLVED',
+                `${item.id} -> ${result.disposition} (${result.detail.slice(0, 80)})`);
+        } catch (err) {
+            // 单条失败不中断整批；该条仍是 pending，下一周期重试（rc-9）
+            logger?.warn?.(`[PD:CorrectionObserver] confirm failed for ${item.id}: ${String(err)}`);
+        }
+    }
+    return resolved;
+}
 
 /**
  * PRI-307: Resolve CorrectionObserver from .pd/config.yaml.
@@ -81,6 +145,13 @@ export function resolveCorrectionObserver(wctx: WorkspaceContext, logger?: Pick<
 
 export async function runCorrectionObserverCycle(wctx: WorkspaceContext, logger: PluginLogger): Promise<void> {
     try {
+        // PRI-788 G2: 先批量确认持久化的待确认信号——独立于 observer 本身的
+        // 解析结果（observer 未就绪时，信号补确认仍应进行）。
+        const confirmedCount = await batchConfirmPendingSignals(wctx, logger);
+        if (confirmedCount > 0) {
+            logger?.info?.(`[PD:CorrectionObserver] batch-confirmed ${confirmedCount} pending signals`);
+        }
+
         const observer = resolveCorrectionObserver(wctx, logger);
         if (!observer) {
             // PRI-307: No noisy "no API key" cycling. Only log at debug level.

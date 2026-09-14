@@ -276,3 +276,38 @@ export interface RuleHostContextResult {
 }
 
 export type { DailyMetricRow };
+
+// ── PRI-788 G2: Stage2 待确认信号持久队列（signal_confirmations） ────────────
+
+export type SignalConfirmationStatus = 'pending' | 'confirmed' | 'rejected' | 'abandoned';
+
+/** 入队载荷（id 由 store 派生：sha256(sessionId:userTurnRowid) 前 12 位）。 */
+export interface SignalConfirmationInput {
+  readonly sessionId: string;
+  /** Stage1 写入 user_turns 返回的 rowid（G1 回写寻址键；UNIQUE 幂等）。 */
+  readonly userTurnRowid: number;
+  /** 与 realtime 路径一致的 occurrence 身份（ADR-0020 §11.4，批量确认复现同一 canonical pain）。 */
+  readonly occurrenceId: string;
+  readonly excerpt: string;
+  /** Stage1 命中的词列表（JSON 落库）。 */
+  readonly terms: readonly string[];
+  /** Stage1 建议类别：correction | empathy。 */
+  readonly suggestedType: string;
+  readonly createdAt: string;
+}
+
+/** signal_confirmations 行（camelCase 投影）。 */
+export interface SignalConfirmationRow {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly userTurnRowid: number;
+  readonly occurrenceId: string;
+  readonly excerpt: string;
+  readonly terms: readonly string[];
+  readonly suggestedType: string;
+  readonly status: SignalConfirmationStatus;
+  readonly attempts: number;
+  readonly createdAt: string;
+  readonly resolvedAt: string | null;
+  readonly resolution: string | null;
+}
