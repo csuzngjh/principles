@@ -363,7 +363,15 @@ function boundCaseForPrompt(value: GoldenTraceCaseInput): GoldenTraceCaseInput {
   };
 }
 
-function boundPackForPrompt(pack: BehaviorExamplePack): BehaviorExamplePack {
+/**
+ * EP002-R4: the SINGLE bounded projection shared by the prompt AND the v2
+ * echo-contract validation. The model can only copy what it saw, so the
+ * "Owner-labelled example was rewritten" check MUST compare against the same
+ * bounded cases the prompt presented — comparing against the raw pack would
+ * reject every honest echo on real-sized workspaces. Idempotent: an
+ * already-bounded pack passes through unchanged.
+ */
+export function boundPackForPrompt(pack: BehaviorExamplePack): BehaviorExamplePack {
   return {
     ...pack,
     sourceNegativeCase: boundCaseForPrompt(pack.sourceNegativeCase),

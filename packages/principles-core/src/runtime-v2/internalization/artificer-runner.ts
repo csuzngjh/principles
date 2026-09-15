@@ -40,7 +40,7 @@ import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../erro
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
 import { extractIntentContract } from './intent-contract.js';
-import { ArtificerPromptBuilder, type ArtificerDreamerContext, type ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
+import { ArtificerPromptBuilder, boundPackForPrompt, type ArtificerDreamerContext, type ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
 
 // PRI-741: the host semantic projection DTO travels with the runner options,
 // so it is re-exported alongside them (barrel exports it from this module).
@@ -952,7 +952,11 @@ ${context.revisionFeedback}
 
   async validateOutput(output: unknown, taskId: string, context: ArtificerContext): Promise<PeerRunnerValidationResult> {
     const result = await this.validator.validate(output, taskId, context.sourceScribeArtifactId ?? undefined);
-    const modeErrors = validateV2OutputContract(output, this.behaviorExamplePack);
+    // EP002-R4: the echo contract must compare against the SAME bounded
+    // projection the prompt presented (the model can only copy what it
+    // saw); validating against the raw pack would reject every honest
+    // echo on real-sized workspaces.
+    const modeErrors = validateV2OutputContract(output, this.behaviorExamplePack !== undefined ? boundPackForPrompt(this.behaviorExamplePack) : undefined);
 
     // Trust-boundary: validator returns `string | undefined` for errorCategory.
     // Must not `as`-cast; validate at runtime (ERR-001, ERR-005).
