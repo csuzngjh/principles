@@ -98,6 +98,17 @@ describe('native release target matrix', () => {
     // input ref (it is what produces the commit the other jobs pin to).
     expect(metadataWorkflow.match(/github\.event\.inputs\.ref/g) ?? []).toHaveLength(1);
 
+    // The artifact-uploading build legs must NOT persist the checkout token:
+    // they never push, and a token left in .git/config can end up inside
+    // uploaded artifacts (zizmor "artipacked"). assemble-publish is the one
+    // job that DOES push gh-pages, so it keeps the default credential.
+    const buildAssetJob = metadataWorkflow.slice(
+      metadataWorkflow.indexOf('build-asset:'),
+      metadataWorkflow.indexOf('assemble-publish:'),
+    );
+    expect(buildAssetJob).toContain('persist-credentials: false');
+    expect(buildAssetJob).not.toContain('git push');
+
     // The signing-key SECRET lives ONLY in the assemble job — build legs never
     // see it (header comments mention the secret name; only one real usage).
     const secretUsages = metadataWorkflow.match(/secrets\.PD_RELEASE_SIGNING_KEY/g) ?? [];

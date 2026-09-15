@@ -240,10 +240,15 @@ jobs:
       # source_epoch are only truthful for that SHA. Checking out a mutable ref
       # here could build bytes whose published metadata names a different
       # source commit than the one that was verified (rc-6 lineage consistency).
+      # persist-credentials is off because this leg only builds and uploads
+      # artifacts (never pushes): leaving the token in .git/config is what
+      # zizmor's "artipacked" warning flags. assemble-publish keeps credentials
+      # on purpose — it is the job that pushes gh-pages.
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.resolve-inputs.outputs.commit }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
