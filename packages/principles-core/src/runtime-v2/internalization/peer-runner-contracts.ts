@@ -31,6 +31,21 @@ export type InternalizationChannel =
   | 'defer_archive';
 
 /**
+ * Pipeline topology mode of one internalization task chain (PRI-720).
+ *
+ * Topology convention (P1 fix, Owner review 2026-09-15):
+ * - `standard`: channel-aware edges — prompt/defer_archive chains skip the
+ *   RuleCode sub-chain (artificer/evaluator are never created).
+ * - `full_chain`: explicit Owner/operator override — the legacy full linear
+ *   graph regardless of channel (test scenarios, explicit full-pipeline runs).
+ * - Field ABSENT = a pre-PRI-720 record: legacy full-chain topology, never
+ *   reinterpreted mid-flight (AC12). New seeds always write the field
+ *   explicitly at seed time (prompt_full_pipeline flag or seed options);
+ *   successors inherit it unchanged.
+ */
+export type PipelineTopologyMode = 'standard' | 'full_chain';
+
+/**
  * The 6 peer runner kinds in the Internalization Engine.
  * All runners are peers — no main/sub hierarchy.
  *
@@ -133,6 +148,8 @@ export interface PITaskRecord extends TaskRecord {
   parentTaskId?: string;
   dependencyTaskIds: string[];
   channel: InternalizationChannel;
+  /** PRI-720: explicit topology mode; ABSENT = legacy (pre-PRI-720) full-chain record. */
+  pipelineMode?: PipelineTopologyMode;
   correlationId?: string;
   timeoutMs: number;
   inputArtifactRefs: ArtifactRef[];
@@ -236,6 +253,21 @@ export function isInternalizationChannel(value: string): value is Internalizatio
 }
 
 /**
+ * All valid pipeline topology modes (PRI-720).
+ */
+export const PIPELINE_TOPOLOGY_MODES: readonly PipelineTopologyMode[] = [
+  'standard',
+  'full_chain',
+] as const;
+
+/**
+ * Type guard for PipelineTopologyMode.
+ */
+export function isPipelineTopologyMode(value: unknown): value is PipelineTopologyMode {
+  return typeof value === 'string' && PIPELINE_TOPOLOGY_MODES.includes(value as PipelineTopologyMode);
+}
+
+/**
  * Type guard for PIArtifactKind.
  */
 export function isPIArtifactKind(value: string): value is PIArtifactKind {
@@ -272,6 +304,7 @@ export function isValidPITaskRecord(record: TaskRecord): record is PITaskRecord 
 
   const dependencyTaskIds = Reflect.get(record, 'dependencyTaskIds');
   const channel = Reflect.get(record, 'channel');
+  const pipelineMode = Reflect.get(record, 'pipelineMode');
   const timeoutMs = Reflect.get(record, 'timeoutMs');
   const inputArtifactRefs = Reflect.get(record, 'inputArtifactRefs');
   const outputArtifactRefs = Reflect.get(record, 'outputArtifactRefs');
@@ -282,6 +315,9 @@ export function isValidPITaskRecord(record: TaskRecord): record is PITaskRecord 
     Array.isArray(dependencyTaskIds) &&
     typeof channel === 'string' &&
     isInternalizationChannel(channel) &&
+    (!Object.hasOwn(record, 'pipelineMode') ||
+      pipelineMode === undefined ||
+      isPipelineTopologyMode(pipelineMode)) &&
     typeof timeoutMs === 'number' &&
     Array.isArray(inputArtifactRefs) &&
     Array.isArray(outputArtifactRefs) &&

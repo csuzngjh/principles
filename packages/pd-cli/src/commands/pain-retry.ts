@@ -43,7 +43,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
 import type { Command } from 'commander';
-import { loadPdConfig } from '../services/pd-config-loader.js';
+import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { createHash } from 'node:crypto';
 /** Layer 0 content-hash (design §6.1); injected so diag writers can attach predecessorSummary hashes. */
@@ -620,6 +620,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         ledgerAdapter,
         owner: 'pd-cli-pain-retry-dead-letter',
         workspaceDir,
+        // PRI-720: honor the Owner's full-prompt-pipeline switch on replay seeds.
+        fullPipelinePromptSeeds: resolvePromptFullPipelineSeedMode(workspaceDir) === 'full_chain',
       });
 
       let bridgeResult: PainSignalBridgeResult;

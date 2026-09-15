@@ -493,6 +493,12 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('rollout_reviewer_mark_succeeded_failed'),
   Type.Literal('rollout_reviewer_no_dependencies'),
   Type.Literal('rollout_reviewer_no_evaluator_artifact'),
+  // PRI-720: principle semantic review mode events.
+  Type.Literal('rollout_reviewer_no_scribe_artifact'),
+  Type.Literal('rollout_reviewer_scribe_dep_selected'),
+  Type.Literal('rollout_principle_validated'),
+  Type.Literal('rollout_principle_validation_update_failed'),
+  Type.Literal('rollout_principle_validation_update_not_found'),
   Type.Literal('rollout_reviewer_output_invalid'),
   Type.Literal('rollout_reviewer_output_validated'),
   Type.Literal('rollout_reviewer_run_failed'),

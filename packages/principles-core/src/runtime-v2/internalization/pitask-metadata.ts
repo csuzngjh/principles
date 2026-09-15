@@ -29,9 +29,10 @@ import type { TaskRecord } from '../task-status.js';
 import type {
   PITaskRecord,
   InternalizationChannel,
+  PipelineTopologyMode,
   ArtifactRef,
 } from './peer-runner-contracts.js';
-import { isInternalizationChannel, isRunnerKind } from './peer-runner-contracts.js';
+import { isInternalizationChannel, isPipelineTopologyMode, isRunnerKind } from './peer-runner-contracts.js';
 import type { BoundEvidenceManifestV1 } from './owner-decision-review.js';
 
 /** Namespace key used inside diagnosticJson to isolate PI metadata. */
@@ -309,6 +310,13 @@ export function parseLastValidatorErrors(diagnosticJson: string | null | undefin
 export interface PITaskMetadata {
   dependencyTaskIds: string[];
   channel: InternalizationChannel;
+  /**
+   * PRI-720: explicit topology mode. New seeds always write it
+   * ('standard' or 'full_chain') at seed time; ABSENT = a pre-PRI-720 record,
+   * which keeps the legacy full-chain topology (AC12 — no reinterpretation).
+   * Inherited unchanged by successor proposals.
+   */
+  pipelineMode?: PipelineTopologyMode;
   timeoutMs: number;
   inputArtifactRefs: ArtifactRef[];
   outputArtifactRefs: ArtifactRef[];
@@ -466,6 +474,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
     [PI_METADATA_KEY]: {
       dependencyTaskIds: metadata.dependencyTaskIds,
       channel: metadata.channel,
+      pipelineMode: metadata.pipelineMode,
       timeoutMs: metadata.timeoutMs,
       inputArtifactRefs: metadata.inputArtifactRefs,
       outputArtifactRefs: metadata.outputArtifactRefs,
@@ -502,6 +511,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
   return {
     dependencyTaskIds: base.dependencyTaskIds,
     channel: base.channel,
+    pipelineMode: base.pipelineMode,
     timeoutMs: base.timeoutMs,
     inputArtifactRefs: base.inputArtifactRefs,
     outputArtifactRefs: base.outputArtifactRefs,
@@ -746,6 +756,10 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
   }
   if (typeof m.channel !== 'string') return null;
   if (!isInternalizationChannel(m.channel)) return null;
+  // pipelineMode (PRI-720): optional literal union; ABSENT = legacy full-chain record.
+  if (Object.hasOwn(m, 'pipelineMode') && m.pipelineMode !== undefined) {
+    if (!isPipelineTopologyMode(m.pipelineMode)) return null;
+  }
   if (typeof m.timeoutMs !== 'number') return null;
   if (!Number.isFinite(m.timeoutMs) || m.timeoutMs <= 0) return null;
   if (!Array.isArray(m.inputArtifactRefs)) return null;
@@ -898,6 +912,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
+    pipelineMode: isPipelineTopologyMode(m.pipelineMode) ? m.pipelineMode : undefined,
     timeoutMs: m.timeoutMs,
     inputArtifactRefs: m.inputArtifactRefs as ArtifactRef[],
     outputArtifactRefs: m.outputArtifactRefs as ArtifactRef[],
@@ -956,6 +971,7 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     ...task,
     dependencyTaskIds: meta.dependencyTaskIds,
     channel: meta.channel,
+    pipelineMode: meta.pipelineMode,
     timeoutMs: meta.timeoutMs,
     inputArtifactRefs: meta.inputArtifactRefs,
     outputArtifactRefs: meta.outputArtifactRefs,
