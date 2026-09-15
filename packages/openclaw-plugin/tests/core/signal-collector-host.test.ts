@@ -912,3 +912,93 @@ describe('PRI-788 G3: cueFeedbackRecorder TP/FP 反馈', () => {
     expect(SystemLogger.log).toHaveBeenCalledWith('/tmp/test-ws', 'SIGNAL_CUE_FEEDBACK_FAIL', expect.stringContaining('learner broke'));
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRI-687 回归 — 强烈 Owner 纠正不再漏检；纯宣泄不误报
+//
+// Live 原文（2026-09-05，ticket 实例）：当时 correction_detected=0，原因链=
+// 学习词命中但恒 ambiguous + Stage2 确认不回写。修复来源：PRI-788（G1 回写 /
+// G2 持久队列 / G3 earned precision）。以下两条钉住 ticket 的验收证据。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const LIVE_TURN_TEXT = '什么狗屎，这个根本不是我们讨论的第二集的内容，第二集说的是PD内置的10个原则，你说的信任这个狗屁主题是哪里冒出来的';
+
+// live 词库投影：这几个词已被 CorrectionObserver 学入 correction_keywords.json（source=llm→ambiguous）
+const pri687LearnedStore: UnifiedKeywordStore = {
+  version: 2,
+  terms: {
+    '什么狗屎': { term: '什么狗屎', category: 'correction', weight: 0.9, precision: 'ambiguous', source: 'llm_learned' },
+    '根本不是': { term: '根本不是', category: 'correction', weight: 0.8, precision: 'ambiguous', source: 'llm_learned' },
+    '狗屁': { term: '狗屁', category: 'correction', weight: 0.85, precision: 'ambiguous', source: 'llm_learned' },
+    '哪里冒出来的': { term: '哪里冒出来的', category: 'correction', weight: 0.6, precision: 'ambiguous', source: 'llm_learned' },
+  },
+};
+
+describe('PRI-687 回归：强烈 Owner 纠正端到端可检出', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function makeWctxWithRowid(rowid: number | undefined) {
+    const wctx = makeMockWctx();
+    const trajectory = wctx.trajectory as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    trajectory.recordUserTurn = vi.fn().mockReturnValue(rowid);
+    trajectory.markUserTurnCorrection = vi.fn().mockReturnValue(true);
+    trajectory.enqueueSignalConfirmation = vi.fn();
+    return { ...wctx, trajectory };
+  }
+
+  it('live 原文：Stage1 歧义命中学习词，LLM 确认 correction → 回写标志位 + pain 事件（owner_message 证据可生成）', async () => {
+    const wctx = makeWctxWithRowid(14); // ticket 实例：turn 14
+    const recorder = vi.fn();
+    const host = makeHost(wctx, {
+      keywordStore: pri687LearnedStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: true, type: 'correction', confidence: 0.95,
+        reason: '用户否定了 AI 编造的主题并重述了正确内容',
+      }),
+      cueFeedbackRecorder: recorder,
+    });
+
+    host.detectSync(LIVE_TURN_TEXT, '82177127-db59-4d49-b4bd-8fe9301e050e', 'user');
+    await flushAsync();
+
+    // Stage1 确实命中了学习词（ticket 当时的漏检点）
+    expect(recorder).toHaveBeenCalled();
+    const [terms, wasCorrection] = recorder.mock.calls[0];
+    expect(terms.length).toBeGreaterThan(0);
+    expect(terms).toContain('什么狗屎');
+    expect(wasCorrection).toBe(true);
+    // G1 回写：标志位翻转，owner_message 证据通道恢复
+    expect(wctx.trajectory.markUserTurnCorrection).toHaveBeenCalledWith(
+      14, expect.stringContaining('llm:'),
+    );
+    // pain 事件照发
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { data: { source: string } };
+    expect(callArg.data.source).toBe('user_correction');
+  });
+
+  it('负向：纯宣泄脏话（无纠正语义）→ empathy/WEAK，不翻转标志位、不触发 pain', async () => {
+    const wctx = makeWctxWithRowid(15);
+    const recorder = vi.fn();
+    const host = makeHost(wctx, {
+      keywordStore: pri687LearnedStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: true, type: 'empathy', confidence: 0.8,
+        reason: '纯宣泄情绪，未否定具体产出也未重述期望',
+      }),
+      cueFeedbackRecorder: recorder,
+    });
+
+    host.detectSync('什么狗屎，烦死了', 'sess-pri687-neg', 'user');
+    await flushAsync();
+
+    // 脏话 ≠ 纠正：不回写标志位、不发 pain
+    expect(wctx.trajectory.markUserTurnCorrection).not.toHaveBeenCalled();
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+    // 仍累积 GFI 摩擦（WEAK 路由不变），且命中词记 FP（earned 证据的反向积累）
+    expect(trackFriction).toHaveBeenCalled();
+    expect(recorder).toHaveBeenCalledWith(expect.arrayContaining(['什么狗屎']), false);
+  });
+});
