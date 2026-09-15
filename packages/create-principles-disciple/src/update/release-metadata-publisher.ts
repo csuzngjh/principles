@@ -425,6 +425,11 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     const keyB = `${b.platform}/${b.arch}/abi${b.nodeAbi}`;
     return keyA < keyB ? -1 : keyA > keyB ? 1 : 0;
   });
+  // Same platform/arch twice would generate the same artifact target path
+  // (the path carries no ABI), with the later entry silently overwriting the
+  // earlier one in `artifactTargets` while `artifactFiles` keeps both — an
+  // inconsistent publication. Reject before any bytes are emitted (rc-3).
+  const seenPlatformTargets = new Set<string>();
   for (const [index, archive] of sortedArchives.entries()) {
     for (const [field, value] of [['platform', archive.platform], ['arch', archive.arch]] as const) {
       if (typeof value !== 'string' || value.length === 0 || !PLATFORM_ARCH_PATTERN.test(value)) {
@@ -452,6 +457,16 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
         'Build the self-contained release asset first; nothing is published without the artifact bytes.',
       );
     }
+    const platformTarget = `${archive.platform}/${archive.arch}`;
+    if (seenPlatformTargets.has(platformTarget)) {
+      throw new ReleasePublicationError(
+        'invalid_input',
+        `archives[${index}]`,
+        `Duplicate platform asset target: ${platformTarget} — the artifact target path carries no Node ABI, so a second archive for this platform/arch collides with the first.`,
+        'Pass exactly one archive per platform/arch pair; multi-ABI publishing needs ABI-qualified artifact paths (not supported yet).',
+      );
+    }
+    seenPlatformTargets.add(platformTarget);
   }
   const signer = requireSigner(input.signingKeyPem);
 

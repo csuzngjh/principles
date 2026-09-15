@@ -236,9 +236,13 @@ jobs:
       run:
         shell: bash
     steps:
+      # Pin the EXACT commit `resolve-inputs` measured: its version gate and
+      # source_epoch are only truthful for that SHA. Checking out a mutable ref
+      # here could build bytes whose published metadata names a different
+      # source commit than the one that was verified (rc-6 lineage consistency).
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.inputs.ref || 'main' }}
+          ref: ${{ needs.resolve-inputs.outputs.commit }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -307,9 +311,11 @@ jobs:
       CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
       MODE: ${{ github.event.inputs.mode || 'dry-run' }}
     steps:
+      # Same pin as build-asset: publish against the commit whose identity
+      # `resolve-inputs` resolved, never a possibly-moved branch tip (rc-6).
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.inputs.ref || 'main' }}
+          ref: ${{ needs.resolve-inputs.outputs.commit }}
           fetch-depth: 0
 
       - name: Setup Node.js

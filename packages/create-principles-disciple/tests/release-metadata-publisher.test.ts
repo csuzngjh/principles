@@ -267,18 +267,28 @@ describe('release publication contract', () => {
       archives: [{ platform: 'win32', arch: 'x64', nodeAbi: '147', bytes: Buffer.alloc(0) }],
     }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({ archives: [] }))).toThrow(ReleasePublicationError);
+    // The artifact target path is platform/arch-qualified and carries no Node
+    // ABI, so a second archive for one platform/arch would overwrite the first
+    // target. release-identity.ts only rejects the identical triple (its key
+    // includes nodeAbi), so the path collision must fail loud here instead.
     expect(() => buildReleasePublication(publicationInput({
       archives: [
         makeArchive('win32', 'x64', '147', 'pd-release-payload-bytes'),
         makeArchive('win32', 'x64', '147', 'pd-release-payload-bytes'),
       ],
-    }))).toThrow(/duplicate platform asset/);
+    }))).toThrow(/Duplicate platform asset target/);
     expect(() => buildReleasePublication(publicationInput({
       archives: [makeArchive('Win32', 'x64', '147', 'pd-release-payload-bytes')],
     }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({
       archives: [makeArchive('win32', 'x64', 'abi137', 'pd-release-payload-bytes')],
     }))).toThrow(ReleasePublicationError);
+    expect(() => buildReleasePublication(publicationInput({
+      archives: [
+        makeArchive('win32', 'x64', '137', 'pd-release-payload-a'),
+        makeArchive('win32', 'x64', '147', 'pd-release-payload-b'),
+      ],
+    }))).toThrow(/Duplicate platform asset target/);
     expect(() => buildReleasePublication(publicationInput({ signingKeyPem: '' }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({ signingKeyPem: 'not a key' }))).toThrow(ReleasePublicationError);
   });

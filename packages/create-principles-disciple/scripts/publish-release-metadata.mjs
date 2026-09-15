@@ -136,6 +136,14 @@ function readPlatformArchives(values, publisher) {
   return platformDirs.map((dirName) => readOnePlatformArchive(assetsDir, dirName, publisher));
 }
 
+/**
+ * Verify and read ONE platform's staged archive.
+ *
+ * Layers 1+2 (meta shape, archive bytes vs sidecar digest) live here; layer 3
+ * (the tar's own `_release/asset.json` stamp) is delegated to
+ * assertArchiveIdentityMatchesMeta. Returns the GZIP bytes the publisher
+ * signs, because the consumer extracts with `tar xzf`.
+ */
 function readOnePlatformArchive(assetsDir, dirName, publisher) {
   const platformDir = join(assetsDir, dirName);
   const metaPath = join(platformDir, 'asset-meta.json');

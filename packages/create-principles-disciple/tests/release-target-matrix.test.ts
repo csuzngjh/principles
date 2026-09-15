@@ -88,6 +88,16 @@ describe('native release target matrix', () => {
     expect(metadataWorkflow).not.toContain('--archive ');
     expect(metadataWorkflow).not.toContain('--platform linux');
 
+    // Every downstream job builds/publishes the EXACT commit resolve-inputs
+    // measured: its version gate and source_epoch are only truthful for that
+    // SHA, so re-resolving a mutable branch ref here would publish metadata
+    // naming a different source commit than the verified one (rc-6).
+    const pinnedCheckouts = metadataWorkflow.match(/ref: \$\{\{ needs\.resolve-inputs\.outputs\.commit \}\}/g) ?? [];
+    expect(pinnedCheckouts).toHaveLength(2);
+    // The resolving job itself is the ONLY place allowed to read the mutable
+    // input ref (it is what produces the commit the other jobs pin to).
+    expect(metadataWorkflow.match(/github\.event\.inputs\.ref/g) ?? []).toHaveLength(1);
+
     // The signing-key SECRET lives ONLY in the assemble job — build legs never
     // see it (header comments mention the secret name; only one real usage).
     const secretUsages = metadataWorkflow.match(/secrets\.PD_RELEASE_SIGNING_KEY/g) ?? [];
