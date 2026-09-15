@@ -28,6 +28,7 @@
 | **代理长程任务 / 自校验工具** | [`COMPONENTS.md`](./COMPONENTS.md) §3.9（LRAS）+ ADR-0009 |
 | **痛苦信号来源 / 目标对齐** | [`INTERNALIZATION_PIPELINE.md`](./INTERNALIZATION_PIPELINE.md) §2.1.1 + ADR-0010 |
 | **长任务执行 / Agent 交付规范（何时停、产物写哪）** | [`AGENT_DELIVERY_OPERATING_MODEL.md`](./AGENT_DELIVERY_OPERATING_MODEL.md) |
+| **多 AI 工作树治理（worktree 生命周期 / 清理 / 空间回收）** | [`WORKTREE_GOVERNANCE.md`](./WORKTREE_GOVERNANCE.md) + `AGENTS.md` §23A |
 | **OKR / Mission / 任务调度** | [`COMPONENTS.md`](./COMPONENTS.md) §3.10-3.11 + ADR-0010/0011 |
 
 ---
@@ -94,6 +95,7 @@
 | [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) | Active | 配置管理 |
 | [`VERSIONING_AND_COMPATIBILITY.md`](./VERSIONING_AND_COMPATIBILITY.md) | Active | 版本与兼容 |
 | [`PERFORMANCE_BUDGETS.md`](./PERFORMANCE_BUDGETS.md) | Active | 性能预算 |
+| [`WORKTREE_GOVERNANCE.md`](./WORKTREE_GOVERNANCE.md) | Active | 多 AI 工作树治理（`AGENTS.md` §23A 的解释性文档）|
 
 ### 历史与废弃文档
 

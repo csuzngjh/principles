@@ -1,15 +1,20 @@
 #!/bin/sh
 # scripts/post-checkout-worktree.sh
-# Worktree auto-setup hook fragment — appended to .git/hooks/post-checkout
-# after the graphify hook block (if present).
+# Worktree readiness hint — appended to .git/hooks/post-checkout by
+# scripts/install-hooks.mjs.
 #
-# Purpose: automatically run setup-worktree.ps1 when a new worktree is created
-# or a branch is checked out inside a worktree (not the main repo).
+# PRI-796 (SPEC §9) changed this hook's CONTRACT, deliberately:
 #
-# Idempotent: safe to run multiple times; setup-worktree.ps1 itself is idempotent.
-# CI-safe: only runs in interactive terminals (skipped when $CI is set).
+#   before — ran setup-worktree.mjs on every branch switch. That could trigger a
+#            full `npm install` (tens of minutes on this monorepo), turning a
+#            branch switch into a heavy operation. A hook that can stall a
+#            checkout for half an hour gets disabled by the humans who need it.
 #
-# Installed by: scripts/install-hooks.ps1
+#   now    — runs a CHEAP READINESS PROBE only, and prints the bootstrap command
+#            when the worktree is not ready. It never installs, never builds, and
+#            never mutates anything.
+#
+# Idempotent and CI-safe: skipped when $CI is set, and in non-interactive shells.
 # Markers: pd-worktree-hook-start / pd-worktree-hook-end
 
 # post-checkout hook receives 3 args: PREV_HEAD NEW_HEAD BRANCH_SWITCH
@@ -22,7 +27,7 @@ if [ "$BRANCH_SWITCH" != "1" ]; then
     exit 0
 fi
 
-# Detect if we are inside a worktree (not the main repo)
+# Detect if we are inside a worktree (not the main repo).
 # In a worktree, --git-common-dir points to the main repo's .git,
 # which differs from --git-dir (the worktree's private .git).
 common_dir=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
@@ -39,41 +44,28 @@ if [ -z "$repo_root" ]; then
     exit 0
 fi
 
-# Check setup script exists — prefer the cross-platform .mjs version,
-# fall back to the legacy .ps1 wrapper if .mjs is unavailable.
-setup_script_mjs="$repo_root/scripts/setup-worktree.mjs"
-setup_script_ps1="$repo_root/scripts/setup-worktree.ps1"
-if [ ! -f "$setup_script_mjs" ] && [ ! -f "$setup_script_ps1" ]; then
-    exit 0
-fi
-
 # Skip in CI / non-interactive contexts (avoid noise)
 if [ -n "$CI" ] || [ ! -t 1 ]; then
     exit 0
 fi
 
-# Skip during rebase/merge/cherry-pick (same guards as graphify hook)
+# Skip during rebase/merge/cherry-pick (same guards as the graphify hook)
 [ -d "$git_dir/rebase-merge" ] && exit 0
 [ -d "$git_dir/rebase-apply" ] && exit 0
 [ -f "$git_dir/MERGE_HEAD" ] && exit 0
 [ -f "$git_dir/CHERRY_PICK_HEAD" ] && exit 0
 
-# Order: node (cross-platform) → powershell (legacy wrapper on Windows) → pwsh (PowerShell Core)
-# -SkipBuild/--skip-build: hook context, build verification deferred to user
-# -FromHook/--from-hook: skip PATH fix (hook inherits git's environment which has PATH)
-if command -v node >/dev/null 2>&1 && [ -f "$setup_script_mjs" ]; then
-    echo "[pd-worktree] Running setup-worktree.mjs..."
-    node "$setup_script_mjs" --skip-build --from-hook || {
-        echo "[pd-worktree] setup-worktree.mjs failed. Run manually: node scripts/setup-worktree.mjs"
-    }
-elif command -v powershell >/dev/null 2>&1 && [ -f "$setup_script_ps1" ]; then
-    echo "[pd-worktree] Running setup-worktree.ps1..."
-    powershell -NoProfile -File "$setup_script_ps1" -SkipBuild -FromHook || {
-        echo "[pd-worktree] setup-worktree.ps1 failed. Run manually: scripts/setup-worktree.ps1"
-    }
-elif command -v pwsh >/dev/null 2>&1 && [ -f "$setup_script_ps1" ]; then
-    echo "[pd-worktree] Running setup-worktree.ps1 (pwsh)..."
-    pwsh -NoProfile -File "$setup_script_ps1" -SkipBuild -FromHook || {
-        echo "[pd-worktree] setup-worktree.ps1 failed. Run manually: scripts/setup-worktree.ps1"
-    }
+ready_script="$repo_root/scripts/dev/worktree-ready.mjs"
+
+if command -v node >/dev/null 2>&1 && [ -f "$ready_script" ]; then
+    if node "$ready_script" --json >/dev/null 2>&1; then
+        exit 0  # ready — stay silent; this is the common case
+    fi
+    echo "[pd-worktree] This worktree is NOT ready (dependencies/build missing, or packages resolving outside it)."
+    echo "[pd-worktree] Run: npm run dev:worktree:bootstrap"
+    exit 0
 fi
+
+# No probe available (older checkout) — hint only; never install from a hook.
+echo "[pd-worktree] Note: readiness probe unavailable here. Verify with: npm run dev:worktree:ready"
+exit 0
