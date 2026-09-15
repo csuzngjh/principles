@@ -49,12 +49,26 @@ const EXPECTED_CHAIN: PeerRunnerKind[] = [
   'rollout_reviewer',
 ];
 
+/**
+ * PRI-720: the standard prompt-channel chain skips the RuleCode sub-chain —
+ * artificer/evaluator tasks are never created; scribe's canonical successor
+ * is rollout_reviewer (principle semantic mode).
+ */
+const EXPECTED_PROMPT_CHAIN: PeerRunnerKind[] = [
+  'dreamer',
+  'philosopher',
+  'scribe',
+  'rollout_reviewer',
+];
+
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
 /** Options for seeding a dreamer task through the real intake bridge path. */
 interface SeedDreamerOptions {
   candidateId: string;
   channel: InternalizationChannel;
+  /** PRI-720: explicit full-chain topology override. */
+  pipelineMode?: 'full_chain';
   sourceTaskId?: string;
 }
 
@@ -69,12 +83,16 @@ async function seedDreamerTask(
   stateManager: RuntimeStateManager,
   options: SeedDreamerOptions,
 ): Promise<string> {
-  const { candidateId, channel, sourceTaskId } = options;
+  const { candidateId, channel, pipelineMode, sourceTaskId } = options;
   const bridgeInput: IntakeToInternalizationBridgeInput = {
     candidateId,
     recommendationKind: channel === 'code_tool_hook' ? 'rule' : 'principle',
     route: channel === 'code_tool_hook' ? 'rule-candidate' : 'principle-ledger',
     ready: true,
+    pipelineMode,
+    // PRI-720 C6: a code_tool_hook seed must carry complete mechanical trigger
+    // evidence, otherwise the bridge demotes it to the prompt channel.
+    ...(channel === 'code_tool_hook' ? { recommendation: { triggerPattern: 'edit .pd/**', action: 'block' } } : {}),
     sourceTaskId,
     sourceArtifactId: sourceTaskId ? `art-${sourceTaskId}` : undefined,
     sourceRunId: sourceTaskId ? `run-${sourceTaskId}` : undefined,
@@ -129,6 +147,7 @@ async function simulateTaskSuccess(
     await stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson({
       dependencyTaskIds: piTask.dependencyTaskIds,
       channel: piTask.channel,
+      pipelineMode: piTask.pipelineMode,
       timeoutMs: piTask.timeoutMs,
       inputArtifactRefs: piTask.inputArtifactRefs,
       outputArtifactRefs: piTask.outputArtifactRefs,
@@ -141,6 +160,7 @@ async function simulateTaskSuccess(
     await stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson({
       dependencyTaskIds: piTask.dependencyTaskIds,
       channel: piTask.channel,
+      pipelineMode: piTask.pipelineMode,
       timeoutMs: piTask.timeoutMs,
       inputArtifactRefs: piTask.inputArtifactRefs,
       outputArtifactRefs: piTask.outputArtifactRefs,
@@ -183,6 +203,7 @@ async function walkFullChain(
   stateManager: RuntimeStateManager,
   orchestrator: InternalizationOrchestrator,
   dreamerTaskId: string,
+  expectedChain: PeerRunnerKind[] = EXPECTED_CHAIN,
 ): Promise<string[]> {
   let currentTaskId = dreamerTaskId;
   const actualChain: string[] = ['dreamer'];
@@ -193,10 +214,10 @@ async function walkFullChain(
   const dreamerSegments = dreamerTaskId.split('-');
   const channel = dreamerSegments[dreamerSegments.length - 1];
 
-  for (let i = 0; i < EXPECTED_CHAIN.length - 1; i++) {
-    const expectedNextKind = EXPECTED_CHAIN[i + 1];
+  for (let i = 0; i < expectedChain.length - 1; i++) {
+    const expectedNextKind = expectedChain[i + 1];
     if (!expectedNextKind) {
-      throw new Error(`EXPECTED_CHAIN[${i + 1}] is undefined`);
+      throw new Error(`expectedChain[${i + 1}] is undefined`);
     }
 
     await simulateTaskSuccess(stateManager, currentTaskId);
@@ -262,7 +283,7 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
 
   // ── Channel: prompt ──────────────────────────────────────────────────────
 
-  it('prompt channel: full successor chain dreamer→philosopher→scribe→artificer→evaluator→rollout_reviewer', async () => {
+  it('prompt channel (standard): principle chain dreamer→philosopher→scribe→rollout_reviewer — artificer/evaluator never created (PRI-720)', async () => {
     const dreamerTaskId = await seedDreamerTask(stateManager, {
       candidateId: `cand-prompt-${Date.now()}`,
       channel: 'prompt',
@@ -275,9 +296,48 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
     }
     expect(dreamerTask.taskKind).toBe('dreamer');
 
-    const actualChain = await walkFullChain(stateManager, orchestrator, dreamerTaskId);
-    expect(actualChain).toEqual(EXPECTED_CHAIN);
+    const actualChain = await walkFullChain(stateManager, orchestrator, dreamerTaskId, EXPECTED_PROMPT_CHAIN);
+    expect(actualChain).toEqual(EXPECTED_PROMPT_CHAIN);
   });
+
+  // ── Channel: prompt + full_chain override (PRI-720) ──────────────────────
+
+  it('prompt channel + pipelineMode full_chain: legacy full chain dreamer→…→rollout_reviewer (Owner override)', async () => {
+    const candidateId = `cand-prompt-full-${Date.now()}`;
+    const dreamerTaskId = await seedDreamerTask(stateManager, {
+      candidateId,
+      channel: 'prompt',
+      pipelineMode: 'full_chain',
+    });
+
+    const dreamerTask = await stateManager.getTask(dreamerTaskId);
+    if (!dreamerTask) {
+      throw new Error('Dreamer task not found after seeding');
+    }
+    // The override is durable on the seed record...
+    const piDreamer = hydratePITaskRecord(dreamerTask);
+    expect(piDreamer?.pipelineMode).toBe('full_chain');
+
+  // ...inherited by every successor...
+  const actualChain = await walkFullChain(stateManager, orchestrator, dreamerTaskId);
+  expect(actualChain).toEqual(EXPECTED_CHAIN);
+
+  // ...check a mid-chain record (deterministic successor id: <kind>-<candidateId>-<channel>).
+  const scribeTask = await stateManager.getTask(`scribe-${candidateId}-prompt`);
+  if (!scribeTask) {
+    throw new Error('Scribe successor not found');
+  }
+  const piScribe = hydratePITaskRecord(scribeTask);
+  expect(piScribe?.pipelineMode).toBe('full_chain');
+  expect(piScribe?.channel).toBe('prompt');
+  // The RuleCode sub-chain was created and also carries the override.
+  const artificerTask = await stateManager.getTask(`artificer-${candidateId}-prompt`);
+  if (!artificerTask) {
+    throw new Error('Artificer successor not found — full_chain override must create it on the prompt channel');
+  }
+  const piArtificer = hydratePITaskRecord(artificerTask);
+  expect(piArtificer?.pipelineMode).toBe('full_chain');
+});
 
   // ── Channel: code_tool_hook ──────────────────────────────────────────────
 
@@ -374,28 +434,71 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
     }
   });
 
-  // ── Edge validation: validateEdge does not filter by channel ──────────────
+  // ── Edge validation: channel-aware topology (PRI-720) ────────────────────
 
-  it('validateEdge returns true for all peer runner edges regardless of channel', async () => {
-    // This documents that the job graph does NOT filter by channel.
-    // The _channel parameter in validateEdge is unused.
-    // This is a key finding for C2-P2: channel-based runner skipping does NOT
-    // happen at the job graph level.
-    const { validateEdge } = await import('../internalization-job-graph.js');
+  it('validateEdge resolves the edge set from channel + pipelineMode (PRI-720)', async () => {
+    // Channel-aware since PRI-720: topology mode is EXPLICIT on new seeds —
+    // 'standard' takes the principle semantic path on prompt/defer_archive
+    // (scribe→rollout_reviewer), 'full_chain' and ABSENT (pre-PRI-720 legacy
+    // records, AC12) keep the full linear graph on every channel.
+    const { validateEdge, resolveChannelEdges } = await import('../internalization-job-graph.js');
 
-    const edges: [PeerRunnerKind, PeerRunnerKind][] = [
+    // Shared upstream edges exist on every standard channel.
+    for (const channel of ['prompt', 'code_tool_hook', 'defer_archive'] as const) {
+      expect(validateEdge('dreamer', 'philosopher', { channel, pipelineMode: 'standard' })).toBe(true);
+      expect(validateEdge('philosopher', 'scribe', { channel, pipelineMode: 'standard' })).toBe(true);
+    }
+    // evaluator→rollout_reviewer exists only where the evaluator exists.
+    expect(validateEdge('evaluator', 'rollout_reviewer', { channel: 'code_tool_hook', pipelineMode: 'standard' })).toBe(true);
+    expect(validateEdge('evaluator', 'rollout_reviewer', { channel: 'prompt', pipelineMode: 'standard' })).toBe(false);
+
+    // The channel fork (AC11): standard prompt forbids the RuleCode sub-chain,
+    // code_tool_hook requires it.
+    expect(validateEdge('scribe', 'rollout_reviewer', { channel: 'prompt', pipelineMode: 'standard' })).toBe(true);
+    expect(validateEdge('scribe', 'artificer', { channel: 'prompt', pipelineMode: 'standard' })).toBe(false);
+    expect(validateEdge('scribe', 'rollout_reviewer', { channel: 'code_tool_hook', pipelineMode: 'standard' })).toBe(false);
+    expect(validateEdge('scribe', 'artificer', { channel: 'code_tool_hook', pipelineMode: 'standard' })).toBe(true);
+    expect(validateEdge('artificer', 'evaluator', { channel: 'prompt', pipelineMode: 'standard' })).toBe(false);
+    expect(validateEdge('artificer', 'evaluator', { channel: 'code_tool_hook', pipelineMode: 'standard' })).toBe(true);
+
+    // defer_archive is prompt-shaped (AC9).
+    expect(validateEdge('scribe', 'rollout_reviewer', { channel: 'defer_archive', pipelineMode: 'standard' })).toBe(true);
+    expect(validateEdge('scribe', 'artificer', { channel: 'defer_archive', pipelineMode: 'standard' })).toBe(false);
+
+    // The full_chain override restores every legacy edge on any channel.
+    for (const channel of ['prompt', 'defer_archive', 'code_tool_hook'] as const) {
+      expect(validateEdge('scribe', 'artificer', { channel, pipelineMode: 'full_chain' })).toBe(true);
+      expect(validateEdge('artificer', 'evaluator', { channel, pipelineMode: 'full_chain' })).toBe(true);
+    }
+
+    // P1 fix (Owner review): ABSENT pipelineMode = legacy (pre-PRI-720) record
+    // → the FULL graph on every channel, never the new short path (AC12: no
+    // mid-flight reinterpretation of in-flight legacy chains).
+    for (const channel of ['prompt', 'defer_archive', 'code_tool_hook'] as const) {
+      expect(validateEdge('scribe', 'artificer', { channel })).toBe(true);
+      expect(validateEdge('artificer', 'evaluator', { channel })).toBe(true);
+      expect(validateEdge('scribe', 'rollout_reviewer', { channel })).toBe(false);
+    }
+
+    // Backward compatibility: no channel/scope at all → full graph (legacy callers).
+    expect(validateEdge('scribe', 'artificer')).toBe(true);
+    expect(validateEdge('artificer', 'evaluator')).toBe(true);
+
+    // SSOT: the resolved edge tables are exactly the documented topology.
+    expect(resolveChannelEdges('prompt', 'standard')).toEqual([
+      ['dreamer', 'philosopher'],
+      ['philosopher', 'scribe'],
+      ['scribe', 'rollout_reviewer'],
+    ]);
+    expect(resolveChannelEdges('prompt')).toHaveLength(5); // absent mode = legacy
+    expect(resolveChannelEdges('code_tool_hook', 'standard')).toEqual([
       ['dreamer', 'philosopher'],
       ['philosopher', 'scribe'],
       ['scribe', 'artificer'],
       ['artificer', 'evaluator'],
       ['evaluator', 'rollout_reviewer'],
-    ];
-
-    for (const [from, to] of edges) {
-      expect(validateEdge(from, to, 'prompt')).toBe(true);
-      expect(validateEdge(from, to, 'code_tool_hook')).toBe(true);
-      expect(validateEdge(from, to, 'defer_archive')).toBe(true);
-    }
+    ]);
+    expect(resolveChannelEdges()).toHaveLength(5);
   });
 
   // ── Config defaults: document the DEFAULT_AGENT_ENABLED values ────────────

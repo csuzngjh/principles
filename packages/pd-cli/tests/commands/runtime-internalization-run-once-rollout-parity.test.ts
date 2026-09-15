@@ -155,7 +155,7 @@ async function seedWorkspace(workspaceDir: string): Promise<RuntimeStateManager>
     await sm.createTask({
       taskId: id, taskKind: kind, status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({
-        dependencyTaskIds: deps, channel: 'prompt', timeoutMs: 300_000,
+        dependencyTaskIds: deps, channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000,
         inputArtifactRefs: [], outputArtifactRefs: [], correlationId: 'parity',
       }),
     });
@@ -426,7 +426,7 @@ describe('PRI-708 P0-B durable recovery through the run-once entry', () => {
     await sm.createTask({
       taskId: ROLL_ID_SEED, taskKind: 'rollout_reviewer', status: 'pending', attemptCount: 1, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({
-        dependencyTaskIds: [EVAL_ID], channel: 'prompt', timeoutMs: 300_000,
+        dependencyTaskIds: [EVAL_ID], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000,
         inputArtifactRefs: [{ artifactType: 'principle', ref: EVAL_ART }], outputArtifactRefs: [], correlationId: 'parity-recovery',
       }),
     });
@@ -509,7 +509,7 @@ describe('PRI-708 P0-C exhaustion safety through the run-once entry', () => {
     await sm.createTask({
       taskId: ROLL_ID_SEED, taskKind: 'rollout_reviewer', status: 'pending', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({
-        dependencyTaskIds: [EVAL_ID], channel: 'prompt', timeoutMs: 300_000,
+        dependencyTaskIds: [EVAL_ID], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000,
         inputArtifactRefs: [{ artifactType: 'principle', ref: EVAL_ART }], outputArtifactRefs: [], correlationId: 'parity-budget',
         // 预算证据: 两轮修订已 applied
         rolloutRevisionPayload: {

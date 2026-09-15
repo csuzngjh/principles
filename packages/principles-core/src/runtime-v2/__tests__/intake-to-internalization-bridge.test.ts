@@ -151,7 +151,24 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       expect(result.decision).toBe('not_internalizable');
     });
 
-    it('rule-candidate route maps to code_tool_hook channel', () => {
+    it('rule-candidate with complete mechanical evidence maps to code_tool_hook channel', () => {
+      // PRI-720 C6: entering the RuleCode sub-chain requires complete
+      // mechanical trigger evidence (triggerPattern + observable action).
+      const result = computeBridgeDecision({
+        candidateId: 'cand-rule',
+        recommendationKind: 'rule',
+        route: 'rule-candidate',
+        ready: true,
+        recommendation: { triggerPattern: 'edit .pd/**', action: 'block' },
+      });
+      expect(result.decision).toBe('seeded');
+      if (result.decision === 'seeded') {
+        expect(result.channel).toBe('code_tool_hook');
+        expect(result.taskId).toBe('dreamer-cand-rule-code_tool_hook');
+      }
+    });
+
+    it('rule-candidate without mechanical evidence is demoted to prompt (PRI-720 C6)', () => {
       const result = computeBridgeDecision({
         candidateId: 'cand-rule',
         recommendationKind: 'rule',
@@ -160,8 +177,9 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       });
       expect(result.decision).toBe('seeded');
       if (result.decision === 'seeded') {
-        expect(result.channel).toBe('code_tool_hook');
-        expect(result.taskId).toBe('dreamer-cand-rule-code_tool_hook');
+        expect(result.channel).toBe('prompt');
+        expect(result.demotedFromChannel).toBe('code_tool_hook');
+        expect(result.taskId).toBe('dreamer-cand-rule-prompt');
       }
     });
 

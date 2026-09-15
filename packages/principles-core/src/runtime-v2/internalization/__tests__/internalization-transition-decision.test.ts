@@ -101,6 +101,8 @@ function makeMeta(overrides: Partial<PITaskMetadata> = {}): PITaskMetadata {
   return {
     dependencyTaskIds: [],
     channel: 'prompt',
+    // PRI-720: full-chain topology — these tests exercise evaluator/rollout commit gates.
+    pipelineMode: 'full_chain',
     timeoutMs: 60_000,
     inputArtifactRefs: [],
     outputArtifactRefs: [],
@@ -231,7 +233,7 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
     expect(result.reopenedTaskId).toBe('evaluator-cand-4-prompt');
     // evaluator 被单次 task-row mutation 更新: pending + attemptCount 重置 + metadata
     // (P1 评审修复: 单行原子写,消除 metadata/status 两写 crash 窗口)
-    const reopenCall1 = (mockStateManager.updateTask.mock.calls as Array<[string, { status?: string; attemptCount?: number; diagnosticJson?: string }]>).find(
+    const reopenCall1 = (mockStateManager.updateTask.mock.calls as [string, { status?: string; attemptCount?: number; diagnosticJson?: string }][]).find(
       (c) => c[0] === 'evaluator-cand-4-prompt',
     )?.[1];
     expect(reopenCall1?.status).toBe('pending');
@@ -266,7 +268,7 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
 
     expect(result.decision).toBe('successor_reopened');
     expect(result.reopenedTaskId).toBe('rollout_reviewer-cand-5-prompt');
-    const reopenCall2 = (mockStateManager.updateTask.mock.calls as Array<[string, { status?: string; attemptCount?: number; diagnosticJson?: string }]>).find(
+    const reopenCall2 = (mockStateManager.updateTask.mock.calls as [string, { status?: string; attemptCount?: number; diagnosticJson?: string }][]).find(
       (c) => c[0] === 'rollout_reviewer-cand-5-prompt',
     )?.[1];
     expect(reopenCall2?.status).toBe('pending');
@@ -314,7 +316,7 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
     const r1 = await orchestrator.reopenTaskForRevision('evaluator-cand-7-prompt', { reason: 'idempotent-check' });
     expect(r1.ok).toBe(true);
     // 单写契约: metadata + status + attemptCount 一个 UPDATE (P1 评审修复)
-    const call3 = (mockStateManager.updateTask.mock.calls as Array<[string, { status?: string; attemptCount?: number; diagnosticJson?: string }]>).find(
+    const call3 = (mockStateManager.updateTask.mock.calls as [string, { status?: string; attemptCount?: number; diagnosticJson?: string }][]).find(
       (c) => c[0] === 'evaluator-cand-7-prompt',
     )?.[1];
     const parsed = JSON.parse(call3?.diagnosticJson ?? '') as { pi_metadata: { revisionCount?: number } };

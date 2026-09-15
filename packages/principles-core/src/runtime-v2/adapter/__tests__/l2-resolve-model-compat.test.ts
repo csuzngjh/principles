@@ -84,3 +84,74 @@ describe('resolveL2Model — pi-ai compat regression (RUNTIME_CONTRACT @ l2-agen
     expect(() => resolveL2Model('not-a-known-provider', 'm1')).toThrow();
   });
 });
+
+// ── PRI-795 r2 — catalog-first for custom endpoints ──────────────────────────
+
+describe('resolveL2Model — catalog-first borrowing (PRI-795 r2)', () => {
+  it('borrows the catalog entry for a baseUrl-relayed catalog-known model, overriding only transport', () => {
+    // glm-5.3-flash IS in the installed catalog (zai namespace): 1M context,
+    // 131072 output, reasoning:true, zai thinking format, effort-capable.
+    const model = resolveL2Model('zai', 'glm-5.3-flash', 'https://open.bigmodel.cn/api/paas/v4/');
+    expect(model.api).toBe('openai-completions');
+    expect(model.id).toBe('glm-5.3-flash');
+    // Transport overridden to the caller's endpoint + provider name.
+    expect(model.provider).toBe('zai');
+    expect(model.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4/');
+    // Authoritative metadata kept (NOT the hand-built literal's 128000/32000).
+    expect(model.contextWindow).toBe(1_000_000);
+    expect(model.maxTokens).toBe(131_072);
+    expect(model.reasoning).toBe(true);
+    // Compat carries the zai thinking format + effort support so the profile's
+    // reasoning level actually reaches the wire (the EP002-R3 root cause).
+    const compat = model.compat as Record<string, unknown> | undefined;
+    expect(compat?.thinkingFormat).toBe('zai');
+    expect(compat?.supportsReasoningEffort).toBe(true);
+  });
+
+  it('scans ALL catalog namespaces: a non-catalog relay provider name still borrows the model entry', () => {
+    // Review P2-2: a custom relay whose configured provider name is not a
+    // catalog namespace must still resolve authoritative metadata for a
+    // catalog-known model id (the most common relay shape). The model is
+    // found under the 'zai' namespace even though provider='my-relay'.
+    const model = resolveL2Model('my-relay', 'glm-5.3-flash', 'https://relay.example.com/v1');
+    expect(model.api).toBe('openai-completions');
+    expect(model.contextWindow).toBe(1_000_000);
+    expect(model.maxTokens).toBe(131_072);
+    expect(model.reasoning).toBe(true);
+    // Transport overridden to the CALLER's identity (provider name kept for
+    // auth/telemetry, baseUrl pointed at the relay).
+    expect(model.provider).toBe('my-relay');
+    expect(model.baseUrl).toBe('https://relay.example.com/v1');
+    const compat = model.compat as Record<string, unknown> | undefined;
+    expect(compat?.thinkingFormat).toBe('zai');
+    expect(compat?.supportsReasoningEffort).toBe(true);
+  });
+
+  it('cross-catalog relay: a relay provider name + catalog-known deepseek model borrows the deepseek entry', () => {
+    // Review P1-3's second example (B.AI / SenseNova-style relays): the
+    // configured provider name is the relay, the model id belongs to another
+    // vendor's catalog namespace entirely.
+    const model = resolveL2Model('my-relay', 'deepseek-v4-flash', 'https://relay.example.com/v1');
+    expect(model.api).toBe('openai-completions');
+    // The entry must come from the deepseek namespace, NOT the hand-built
+    // literal (128000/32000).
+    expect(model.contextWindow).not.toBe(128_000);
+    expect(model.maxTokens).not.toBe(32_000);
+    expect(model.provider).toBe('my-relay');
+    expect(model.baseUrl).toBe('https://relay.example.com/v1');
+  });
+
+  it('falls back to the hand-built literal for a model absent from every catalog', () => {
+    const model = resolveL2Model('zai', 'no-such-model-anywhere', 'https://open.bigmodel.cn/api/paas/v4/', {
+      reasoning: true,
+      maxTokens: 16_000,
+    });
+    expect(model.api).toBe('openai-completions');
+    expect(model.contextWindow).toBe(128_000);
+    expect(model.maxTokens).toBe(16_000);
+    expect(model.reasoning).toBe(true);
+    const compat = model.compat as Record<string, unknown> | undefined;
+    expect(compat?.thinkingFormat).toBe('deepseek');
+    expect(compat?.supportsReasoningEffort).toBe(false);
+  });
+});

@@ -553,7 +553,7 @@ export function mapBridgeTelemetryToStoreEvent(event: {
 async function constructBridge(
   opts: PainSignalRuntimeFactoryOptions,
   runtimeConfig: RuntimeConfig,
-  pipeline: { diagnosisPersistenceEnabled: boolean },
+  pipeline: { diagnosisPersistenceEnabled: boolean; fullPipelinePromptSeeds: boolean },
 ): Promise<PainSignalBridge> {
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
   await stateManager.initialize();
@@ -653,6 +653,9 @@ async function constructBridge(
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
     workspaceDir: opts.workspaceDir,
     diagnosisPersistenceEnabled: pipeline.diagnosisPersistenceEnabled,
+    // PRI-720: seed-time full-chain override for prompt/defer_archive chains
+    // (prompt_full_pipeline flag; Owner switch via Console / config file).
+    fullPipelinePromptSeeds: pipeline.fullPipelinePromptSeeds,
     // rc-9: the persistence path must degrade observably in production. Only
     // the persistence degradation events are forwarded (see
     // mapBridgeTelemetryToStoreEvent); other bridge events stay dormant as on main.
@@ -730,6 +733,9 @@ async function createDisabledBridge(
     workspaceDir: opts.workspaceDir,
     // No diagnosis runs, so nothing can be persisted by the persistence path.
     diagnosisPersistenceEnabled: false,
+    // No diagnosis runs → no candidates → no seeding; the PRI-720 override is
+    // irrelevant on the disabled bridge.
+    fullPipelinePromptSeeds: false,
     // PRI-638 P1-A: mark this bridge so onPainDetected / executePendingDiagnosis
     // only ENSURE a durable task exists and never reset existing task state.
     capabilityDisabled: { reason: capability.message, nextAction: capability.nextAction },
@@ -786,16 +792,20 @@ export async function createPainSignalBridge(
   // Pain Diagnosis Persistence: resolve the flag before the cache key so a
   // later call with the flag toggled cannot collide with a cached bridge.
   let diagnosisPersistenceEnabled = false;
+  // PRI-720: same cache-key discipline for the full-prompt-pipeline override —
+  // a toggle must never resurrect a bridge cached under the other topology.
+  let fullPipelinePromptSeeds = false;
   if (opts.effectiveConfig) {
     const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
     diagnosisPersistenceEnabled = isFeatureEnabled(featureFlags, 'pain_diagnosis_persistence');
+    fullPipelinePromptSeeds = isFeatureEnabled(featureFlags, 'prompt_full_pipeline');
   }
 
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}`;
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
-  const bridge = await constructBridge(opts, runtimeConfig, { diagnosisPersistenceEnabled });
+  const bridge = await constructBridge(opts, runtimeConfig, { diagnosisPersistenceEnabled, fullPipelinePromptSeeds });
   // PRI-624: a concurrent constructor may have won the cache slot while we
   // were building — the loser self-disposes so its handles never leak.
   const winner = bridgeCache.get(cacheKey);
@@ -820,7 +830,9 @@ export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: s
   bridgeCache.delete(`${workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`);
   for (const mode of ['local', 'gateway', '']) {
     for (const pdp of ['pdp', 'nopdp']) {
-      bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pdp}`);
+      for (const pfp of ['pfp', 'nopfp']) {
+        bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pdp}:${pfp}`);
+      }
     }
   }
 }
