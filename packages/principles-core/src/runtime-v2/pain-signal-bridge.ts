@@ -8,7 +8,7 @@ import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
-import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
 import {
@@ -155,6 +155,14 @@ export interface PainSignalBridgeOptions {
    * false keeps the pre-feature behavior (no writes).
    */
   diagnosisPersistenceEnabled?: boolean;
+  /**
+   * PRI-720: seed NEW prompt/defer_archive chains with the explicit full-chain
+   * topology override (pipelineMode='full_chain') instead of the channel-aware
+   * short path. Resolved by the factory from the `prompt_full_pipeline`
+   * feature flag (Owner switch: Console settings / .pd/config.yaml). Default
+   * false = standard channel-aware topology. Affects only newly seeded chains.
+   */
+  fullPipelinePromptSeeds?: boolean;
   eventEmitter?: {
     emitTelemetry: (event: { eventType: string; traceId: string; timestamp: string; payload: Record<string, unknown> }) => void;
   };
@@ -336,6 +344,7 @@ export class PainSignalBridge {
   private readonly owner: string;
   private readonly autoIntakeEnabled: boolean;
   private readonly diagnosisPersistenceEnabled: boolean;
+  private readonly fullPipelinePromptSeeds: boolean;
   private readonly workspaceDir: string | undefined;
   private readonly eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
   private readonly ownedResources: readonly { close: () => void | Promise<void> }[];
@@ -349,6 +358,7 @@ export class PainSignalBridge {
     this.owner = opts.owner ?? 'pain-signal-bridge';
     this.autoIntakeEnabled = opts.autoIntakeEnabled ?? true;
     this.diagnosisPersistenceEnabled = opts.diagnosisPersistenceEnabled ?? false;
+    this.fullPipelinePromptSeeds = opts.fullPipelinePromptSeeds ?? false;
     this.workspaceDir = opts.workspaceDir;
     this.eventEmitter = opts.eventEmitter;
     this.ownedResources = opts.ownedResources ?? [];
@@ -766,10 +776,23 @@ export class PainSignalBridge {
             // instead of the misleading "not ready — missing required fields".
             const channel = ROUTE_CHANNEL_MAP[route];
             const ready = !!channel;
-            const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: painId });
+            const seed = buildDreamerSeedFromCandidate(candidate, {
+              route,
+              ready,
+              sourcePainId: painId,
+              // PRI-720: explicit full-chain override when the Owner switched
+              // prompt_full_pipeline on. Seed-time application — in-flight
+              // chains keep their seeded topology.
+              pipelineMode: this.fullPipelinePromptSeeds ? 'full_chain' : undefined,
+            });
             // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
             if (!('decision' in seed)) {
-              const existingTask = await this.stateManager.getTask(seed.taskId);
+              // PRI-720 C6: dedup at candidate level — the demotion may have
+              // changed the derived channel suffix vs a pre-existing chain.
+              const existingTask = await findExistingDreamerTask(
+                (id) => this.stateManager.getTask(id),
+                candidate.candidateId,
+              );
               if (!existingTask) {
                 await this.stateManager.createTask({
                   taskId: seed.taskId,
@@ -785,7 +808,14 @@ export class PainSignalBridge {
                   eventType: 'candidate_dreamer_task_seeded',
                   traceId: candidate.candidateId,
                   timestamp: new Date().toISOString(),
-                  payload: { taskId: seed.taskId, channel: seed.channel },
+                  // rc-9: the full-chain override and the C6 channel demotion
+                  // must both be observable at seed time.
+                  payload: {
+                    taskId: seed.taskId,
+                    channel: seed.channel,
+                    ...(seed.pipelineMode ? { pipelineMode: seed.pipelineMode } : {}),
+                    ...(seed.demotedFromChannel ? { demotedFromChannel: seed.demotedFromChannel } : {}),
+                  },
                 });
               }
             } else if (seed.decision === 'not_internalizable') {

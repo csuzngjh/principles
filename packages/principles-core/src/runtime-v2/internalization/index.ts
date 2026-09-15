@@ -359,6 +359,8 @@ export {
   computeBridgeDecision,
   buildDreamerTaskSeed,
   buildDreamerSeedFromCandidate,
+  dreamerTaskIdsForCandidate,
+  findExistingDreamerTask,
   seedIntakeTask,
 } from './intake-to-internalization-bridge.js';
 

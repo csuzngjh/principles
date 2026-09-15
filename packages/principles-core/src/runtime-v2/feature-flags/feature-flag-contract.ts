@@ -206,6 +206,16 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // FULL_CHAIN_CONSUMER_RUNNER_KINDS vs DEFAULT_CONSUMER_RUNNER_KINDS in
   // internalization-consumer-decision.ts.
   { id: 'internalization_full_chain', category: 'core', enabled: true, since: '2026-08-12', description: 'PRI-419 amendment: auto-consumer advances dreamer→…→evaluator→rollout_reviewer (full chain) so artifacts reach validated and the approval queue is populated unattended. The human gate is the approval queue (Console), not the rollout_reviewer CLI trigger. Default ON; flag-off = dreamer-only.' },
+  // PRI-720 (Owner directive 2026-09-15): explicit escape hatch for the
+  // channel-aware job graph. Default OFF = standard channel-aware topology
+  // (prompt/defer_archive chains skip the RuleCode sub-chain). Flag ON forces
+  // NEWLY SEEDED prompt/defer_archive chains to run the full legacy linear
+  // graph (artificer + evaluator + adversarial replay) — for test scenarios
+  // and explicit full-pipeline runs. Applied at seed time per chain (in-flight
+  // chains keep their seeded topology); toggled via Console settings or
+  // `.pd/config.yaml` features section. Distinct from internalization_full_chain,
+  // which gates the auto-consumer's leased runner scope, not chain topology.
+  { id: 'prompt_full_pipeline', category: 'quiet', enabled: false, since: '2026-09-15', description: 'PRI-720: force prompt/defer_archive internalization chains through the full legacy pipeline (artificer + evaluator + replay) instead of the channel-aware short path. Default OFF (channel-aware); flag ON affects only newly seeded chains. Owner-facing switch: Console settings toggle or `.pd/config.yaml` features section.' },
   // PRI-408: Story A approval-completion orchestrator. Replaces the demo direct-writer
   // activation path with a formal ApprovalCompletionService that validates approval state,
   // enforces idempotency, and dispatches via ActivationDispatcher with rolloutDecision='approved'.

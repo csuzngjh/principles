@@ -398,6 +398,10 @@ describe('createNextTaskProposal', () => {
       taskId: 'eval-1',
       taskKind: 'evaluator',
       status: 'succeeded',
+      // PRI-720: the evaluator→rollout_reviewer edge exists on the code chain
+      // (an evaluator is a full-chain entity — the standard prompt graph never
+      // creates one).
+      channel: 'code_tool_hook',
       outputArtifactRefs: [],
     });
     const result = createNextTaskProposal(task, []);

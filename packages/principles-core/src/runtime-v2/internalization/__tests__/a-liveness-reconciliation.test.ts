@@ -41,7 +41,8 @@ afterEach(async () => {
 
 function meta(correlationId: string): string {
   return createPITaskDiagnosticJson({
-    dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+    // PRI-720: full-chain topology — reconciliation drives the evaluator chain.
+    dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000,
     inputArtifactRefs: [], outputArtifactRefs: [], correlationId,
   });
 }
