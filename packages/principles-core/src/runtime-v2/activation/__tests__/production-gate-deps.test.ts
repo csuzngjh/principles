@@ -564,6 +564,36 @@ function evaluate(input, helpers) {
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 
+  it('blocks Function.caller / arguments.callee walks toward host frames (Case 6)', () => {
+    // The constructor chain is not the only classic vm-escape family: walking
+    // .caller across realm frames is the other. The rule CAN reach the
+    // realm-side bridge function via arguments.callee.caller (the bridge is
+    // realm code — that is fine), but walking past it must hit the strict
+    // host frame (throw/null), and NO reachable frame may yield host process
+    // through its constructor chain.
+    const result = evaluateRaw(`
+      var seen = [];
+      var fn = arguments.callee;
+      for (var depth = 0; depth < 5; depth++) {
+        try {
+          fn = fn.caller;
+          if (!fn) { seen.push('null@' + depth); break; }
+          seen.push(typeof fn + '@' + depth);
+          try {
+            var proc = fn.constructor.constructor('return process')();
+            if (proc && proc.version) {
+              return { decision: 'allow', matched: false, reason: 'ESCAPED_VIA_CALLER_' + String(proc.version) };
+            }
+            seen.push('proc-unreachable@' + depth);
+          } catch (ctorError) { seen.push('ctor-throw@' + depth); }
+        } catch (walkError) { seen.push('walk-throw@' + depth); break; }
+      }
+      return { decision: 'allow', matched: false, reason: 'caller-walk:' + seen.join(',') };
+    `, probeInput());
+    expect(result.reason).not.toContain('ESCAPED_VIA_CALLER');
+    expect(result.reason.startsWith('caller-walk:')).toBe(true);
+  });
+
   it('non-JSON-serializable input fails loud instead of crossing the boundary (rc-3)', () => {
     const evaluate = compileHardenedRuleEvaluator(
       'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',

@@ -101,8 +101,27 @@ function isCompiledModuleExports(value: unknown): value is CompiledModuleExports
  * primitive for every in-process RuleCode execution path (production gate
  * deps, pd-cli demo compile, story-a demo): the host side hands the realm
  * ONLY a JSON string primitive and the vm-realm bridge (see normalizeSource)
- * rebuilds the call input + helpers inside the realm, matching the live
- * host-runtime executor's boundary. Host-realm objects never cross.
+ * rebuilds the call input + helpers inside the realm — the same crossing the
+ * live host-runtime executor makes inside its child process.
+ *
+ * Precise boundary contract (what this does and does NOT claim):
+ * - INBOUND: host-realm objects never cross. A rule walking
+ *   `.constructor.constructor` (top-level, nested, or on helpers) lands on
+ *   the REALM's Function, where `process`/`require` do not exist.
+ * - OUTBOUND: the result crosses back as a vm-realm object and is consumed
+ *   only through the canonical validateRuleHostResult (field reads + JSON
+ *   preview) — the host never invokes functions on it.
+ * - TIMEOUT: only compilation is hard-bounded (runInContext timeout). The
+ *   evaluate call is a host-frame invocation with no hard timeout — same as
+ *   before this change and as documented in refiner-sandbox-wrapper.ts,
+ *   whose soft-timeout classification remains the core-side contract; hard
+ *   cancellation stays a plugin/child-process responsibility.
+ * - LOCKSTEP: the helper contract here (five getters over the JSON input)
+ *   mirrors the live plugin executor's EVALUATION_PROCESS_SOURCE in
+ *   openclaw-plugin/src/core/rule-implementation-runtime.ts. The two copies
+ *   are intentionally kept (live path owns process isolation; this file owns
+ *   in-process replay) but MUST stay semantically identical — change both or
+ *   neither.
  *
  * @throws if the code fails to compile or does not define a function evaluate
  */

@@ -86,7 +86,7 @@ export function validateGeneratedCode(code: string): ValidationResult {
   // this host process. callEvaluate crosses the existing child-process
   // boundary with a JSON payload, the same hardened path the live RuleHost uses.
   if (typeof moduleExports.callEvaluate !== 'function') {
-    errors.push('Missing export: evaluate (no sandboxed caller available)');
+    errors.push('Missing export: evaluate (the compiled module exposes no sandboxed callEvaluate bridge)');
     return { valid: false, errors, warnings };
   }
   try {
