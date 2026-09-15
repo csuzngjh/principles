@@ -46,6 +46,12 @@ function makeSigningKeyPem(): string {
 
 const SIGNING_KEY_PEM = makeSigningKeyPem();
 
+function makeArchive(platform: string, arch: string, nodeAbi: string, payload: string): {
+  platform: string; arch: string; nodeAbi: string; bytes: Buffer;
+} {
+  return { platform, arch, nodeAbi, bytes: gzipReleaseArchive(Buffer.from(payload)) };
+}
+
 function publicationInput(overrides: Partial<Parameters<typeof buildReleasePublication>[0]> = {}) {
   return {
     productVersion: '1.223.0',
@@ -56,16 +62,23 @@ function publicationInput(overrides: Partial<Parameters<typeof buildReleasePubli
     expiresAt: EXPIRES,
     minBootstrapVersion: '1.0.0',
     dataSchemaForwardReadableFrom: '1.220.0',
-    archive: {
-      platform: 'win32',
-      arch: 'x64',
-      nodeAbi: '147',
-      bytes: gzipReleaseArchive(Buffer.from('pd-release-payload-bytes')),
-    },
+    archives: [makeArchive('win32', 'x64', '147', 'pd-release-payload-bytes')],
     signingKeyPem: SIGNING_KEY_PEM,
     previous: null,
     ...overrides,
   };
+}
+
+/** PRI-733 three-platform matrix fixture (Node 24 / abi137, synthetic bytes). */
+function matrixInput(overrides: Partial<Parameters<typeof buildReleasePublication>[0]> = {}) {
+  return publicationInput({
+    archives: [
+      makeArchive('darwin', 'arm64', '137', 'pd-release-payload-darwin-arm64'),
+      makeArchive('linux', 'x64', '137', 'pd-release-payload-linux-x64'),
+      makeArchive('win32', 'x64', '137', 'pd-release-payload-win32-x64'),
+    ],
+    ...overrides,
+  });
 }
 
 function fileMap(publication: { files: readonly { path: string; bytes: Buffer }[] }): Map<string, Buffer> {
@@ -145,7 +158,55 @@ describe('release publication contract', () => {
     const artifactBytes = paths.get(`targets/releases/${publication.releaseMetadata.releaseId}/release-asset-win32-x64.tar.gz`)!;
     expect(createHash('sha256').update(artifactBytes).digest('hex')).toBe(metadataPayload.assets[0].archiveSha256);
     expect(artifactBytes.length).toBe(metadataPayload.assets[0].archiveSizeBytes);
-    expect(publication.manifest.artifactSha256).toBe(metadataPayload.assets[0].archiveSha256);
+    expect(publication.manifest.artifacts).toHaveLength(1);
+    expect(publication.manifest.artifacts[0].artifactSha256).toBe(metadataPayload.assets[0].archiveSha256);
+  });
+
+  it('publishes one release covering every matrix platform with sorted assets and targets', () => {
+    const publication = buildReleasePublication(matrixInput());
+    const paths = fileMap(publication);
+    const releaseId = publication.releaseMetadata.releaseId;
+
+    expect([...paths.keys()].sort()).toEqual([
+      'root.json',
+      'snapshot.json',
+      'targets.json',
+      'targets/channels/stable.json',
+      `targets/releases/${releaseId}/metadata.json`,
+      `targets/releases/${releaseId}/release-asset-darwin-arm64.tar.gz`,
+      `targets/releases/${releaseId}/release-asset-linux-x64.tar.gz`,
+      `targets/releases/${releaseId}/release-asset-win32-x64.tar.gz`,
+      'timestamp.json',
+    ].sort());
+
+    const metadataPayload = parseReleaseMetadata(JSON.parse(paths.get(`targets/releases/${releaseId}/metadata.json`)!.toString('utf8')));
+    verifyReleaseMetadataIdentity(metadataPayload);
+    expect(metadataPayload.assets.map((a) => `${a.platform}/${a.arch}/abi${a.nodeAbi}`)).toEqual([
+      'darwin/arm64/abi137',
+      'linux/x64/abi137',
+      'win32/x64/abi137',
+    ]);
+    for (const asset of metadataPayload.assets) {
+      const served = paths.get(`targets/releases/${releaseId}/release-asset-${asset.platform}-${asset.arch}.tar.gz`)!;
+      expect(createHash('sha256').update(served).digest('hex')).toBe(asset.archiveSha256);
+      expect(served.length).toBe(asset.archiveSizeBytes);
+    }
+    expect(publication.manifest.artifacts.map((a) => a.artifactTargetPath).sort()).toEqual([
+      `releases/${releaseId}/release-asset-darwin-arm64.tar.gz`,
+      `releases/${releaseId}/release-asset-linux-x64.tar.gz`,
+      `releases/${releaseId}/release-asset-win32-x64.tar.gz`,
+    ]);
+
+    // Archive input order must not leak into the release identity or file set.
+    const shuffled = buildReleasePublication(matrixInput({
+      archives: [
+        makeArchive('win32', 'x64', '137', 'pd-release-payload-win32-x64'),
+        makeArchive('darwin', 'arm64', '137', 'pd-release-payload-darwin-arm64'),
+        makeArchive('linux', 'x64', '137', 'pd-release-payload-linux-x64'),
+      ],
+    }));
+    expect(shuffled.releaseMetadata.releaseId).toBe(releaseId);
+    expect([...fileMap(shuffled).keys()].sort()).toEqual([...paths.keys()].sort());
   });
 
   it('is byte-deterministic: same inputs and key re-emit identical files', () => {
@@ -203,7 +264,20 @@ describe('release publication contract', () => {
     expect(() => buildReleasePublication(publicationInput({ expiresAt: '2030-01-01' }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({ expiresAt: '2001-01-01T00:00:00Z' }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({
-      archive: { platform: 'win32', arch: 'x64', nodeAbi: '147', bytes: Buffer.alloc(0) },
+      archives: [{ platform: 'win32', arch: 'x64', nodeAbi: '147', bytes: Buffer.alloc(0) }],
+    }))).toThrow(ReleasePublicationError);
+    expect(() => buildReleasePublication(publicationInput({ archives: [] }))).toThrow(ReleasePublicationError);
+    expect(() => buildReleasePublication(publicationInput({
+      archives: [
+        makeArchive('win32', 'x64', '147', 'pd-release-payload-bytes'),
+        makeArchive('win32', 'x64', '147', 'pd-release-payload-bytes'),
+      ],
+    }))).toThrow(/duplicate platform asset/);
+    expect(() => buildReleasePublication(publicationInput({
+      archives: [makeArchive('Win32', 'x64', '147', 'pd-release-payload-bytes')],
+    }))).toThrow(ReleasePublicationError);
+    expect(() => buildReleasePublication(publicationInput({
+      archives: [makeArchive('win32', 'x64', 'abi137', 'pd-release-payload-bytes')],
     }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({ signingKeyPem: '' }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({ signingKeyPem: 'not a key' }))).toThrow(ReleasePublicationError);
@@ -285,7 +359,7 @@ describe('digest and gzip helpers', () => {
 describe('signature verification through the real TUF client', () => {
   it('accepts the emitted chain and rejects tampered metadata and payload bytes', async () => {
     const publication = buildReleasePublication(publicationInput());
-    const artifactTargetPath = publication.manifest.artifactTargetPath;
+    const [artifactTargetPath] = publication.manifest.artifacts.map((a) => a.artifactTargetPath);
     const baseUrl = await serveFiles(fileMap(publication));
 
     const trusted = await resolveTrustedReleaseTarget({
@@ -343,12 +417,12 @@ describe('ReleaseManager integration over a served publication', () => {
     // (selectReleaseAsset + releaseAssetTargetPath use process values), so
     // the publication must declare the runtime platform.
     const publication = buildReleasePublication(publicationInput({
-      archive: {
+      archives: [{
         platform: process.platform,
         arch: process.arch,
         nodeAbi: process.versions.modules,
         bytes: gzipReleaseArchive(Buffer.from('pd-release-payload-bytes')),
-      },
+      }],
     }));
     const files = fileMap(publication);
     const baseUrl = await serveFiles(files);
@@ -411,7 +485,21 @@ describe('ReleaseManager integration over a served publication', () => {
       transactionId: 'txn-publisher-test',
     });
     const downloadedBytes = fs.readFileSync(downloaded.archivePath);
-    expect(createHash('sha256').update(downloadedBytes).digest('hex')).toBe(publication.manifest.artifactSha256);
+    expect(createHash('sha256').update(downloadedBytes).digest('hex')).toBe(publication.manifest.artifacts[0].artifactSha256);
+  });
+
+  it('serves every matrix platform to the matching runtime asset', async () => {
+    // A multi-asset release must let a non-default platform resolve its own
+    // asset: simulate darwin/arm64 selection against the matrix publication
+    // without touching the real host runtime.
+    const publication = buildReleasePublication(matrixInput());
+    const asset = publication.releaseMetadata.assets.find((a) => a.platform === 'darwin' && a.arch === 'arm64');
+    expect(asset?.nodeAbi).toBe('137');
+    const files = fileMap(publication);
+    const targetPath = `releases/${publication.releaseMetadata.releaseId}/release-asset-darwin-arm64.tar.gz`;
+    const served = files.get(`targets/${targetPath}`)!;
+    expect(createHash('sha256').update(served).digest('hex')).toBe(asset?.archiveSha256);
+    expect(served.length).toBe(asset?.archiveSizeBytes);
   });
 });
 

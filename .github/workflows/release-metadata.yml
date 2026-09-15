@@ -1,14 +1,20 @@
-# Release metadata publish pipeline (PRI-727).
+# Release metadata publish pipeline (PRI-727; PRI-733 multi-platform matrix).
 #
 # Produces and publishes the signed release metadata / artifact targets that
 # ReleaseManager already consumes (channels/<channel>.json,
-# releases/<releaseId>/metadata.json, the release-asset tarball, and the TUF
-# root/timestamp/snapshot/targets chain). This is the SUPPLY side of the
-# metadata source contract (PRI-709) — it changes no update entry point:
-# the legacy updater, the console routes and the installer layout are
+# releases/<releaseId>/metadata.json, one release-asset tarball PER PLATFORM,
+# and the TUF root/timestamp/snapshot/targets chain). This is the SUPPLY side
+# of the metadata source contract (PRI-709) — it changes no update entry
+# point: the legacy updater, the console routes and the installer layout are
 # untouched, and the metadata source URL stays operator-configured
 # (PD_RELEASE_METADATA_URL / install.json releaseMetadataUrl). No URL is
 # baked into the product by this workflow.
+#
+# Matrix (PRI-733): three build jobs (linux/x64, win32/x64, darwin/arm64 —
+# Node 24) each natively build their own asset.tar (local-target builds can
+# only target the runner they run on), then ONE assemble job publishes a
+# single release whose metadata assets[] covers all three platforms. The
+# channel pointer advances exactly once per publication.
 #
 # Modes (workflow_dispatch input):
 #   dry-run (default) — build, sign, verify and upload the publication as a
@@ -94,13 +100,20 @@ permissions:
   contents: write
 
 jobs:
-  publish-metadata:
-    name: Release metadata (${{ github.event.inputs.mode || 'dry-run' }})
+  # Shared inputs: version/commit identity, source epoch, plus the monotonic
+  # publication counters. Derived ONCE so the channel pointer advances exactly
+  # once per publication, no matter how many matrix legs build assets.
+  resolve-inputs:
+    name: Resolve publication inputs
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
-      MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      source_epoch: ${{ steps.release.outputs.source_epoch }}
+      publication_sequence: ${{ steps.inputs.outputs.publication_sequence }}
+      channel_version: ${{ steps.inputs.outputs.channel_version }}
+      expires_at: ${{ steps.inputs.outputs.expires_at }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -113,27 +126,6 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
-
-      # Same component build order as the create-principles-disciple path in
-      # publish-npm.yml (dependency-first; the console and the fresh plugin
-      # ship inside the installer payload, so the release asset must be built
-      # from the same tree shape a published installer bundle has).
-      - name: Build release payload components
-        run: |
-          npm run build --workspace=@principles/core
-          npm run build --workspace=@principles/install-layout
-          npm run build --workspace=@principles/host-runtime
-          npm run build:production --workspace=principles-disciple
-          npm run build:types --workspace=principles-disciple
-          npm run build --workspace=@principles/codex-adapter
-          npm run build --workspace=@principles/pd-cli
-          (cd packages/create-principles-disciple && npm run build)
-          npm run build --workspace=@principles/pd-console
 
       - name: Resolve release identity
         id: release
@@ -162,17 +154,13 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "source_epoch=$(git log -1 --format=%ct)" >> "$GITHUB_OUTPUT"
           echo "release identity: version=$VERSION commit=$(git rev-parse --short HEAD)"
-
-      - name: Build release asset
-        run: |
-          # Deterministic archive: fixed mtime from the source commit.
-          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
-          npm run build:release-asset --workspace=create-principles-disciple -- --output "$RUNNER_TEMP/release-asset"
-          ls -la "$RUNNER_TEMP/release-asset"
 
       - name: Fetch previously published metadata state
         id: prev
+        env:
+          CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
         run: |
           mkdir -p "$RUNNER_TEMP/prev-metadata"
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
@@ -220,24 +208,156 @@ jobs:
           echo "channel_version=$PTR" >> "$GITHUB_OUTPUT"
           echo "expires_at=$EXPIRES" >> "$GITHUB_OUTPUT"
           echo "publication inputs: sequence=$SEQ pointer=$PTR expires=$EXPIRES"
+        env:
+          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+
+  # One leg per platform. Each leg builds NATIVELY on its own runner —
+  # assertSupportedLocalReleaseTarget forbids cross-target builds, so the
+  # matrix runner IS the target platform by construction.
+  build-asset:
+    name: Build asset (${{ matrix.platform }}/${{ matrix.arch }})
+    needs: resolve-inputs
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux
+            arch: x64
+            runs_on: ubuntu-latest
+          - platform: win32
+            arch: x64
+            runs_on: windows-latest
+          - platform: darwin
+            arch: arm64
+            runs_on: macos-latest
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
+
+      # Same component build order as the create-principles-disciple path in
+      # publish-npm.yml (dependency-first; the console and the fresh plugin
+      # ship inside the installer payload, so the release asset must be built
+      # from the same tree shape a published installer bundle has).
+      - name: Build release payload components
+        run: |
+          npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/install-layout
+          npm run build --workspace=@principles/host-runtime
+          npm run build:production --workspace=principles-disciple
+          npm run build:types --workspace=principles-disciple
+          npm run build --workspace=@principles/codex-adapter
+          npm run build --workspace=@principles/pd-cli
+          (cd packages/create-principles-disciple && npm run build)
+          npm run build --workspace=@principles/pd-console
+
+      - name: Build release asset
+        run: |
+          # Deterministic archive: fixed mtime from the SHARED source epoch
+          # so the same source always yields the same per-platform bytes.
+          export SOURCE_DATE_EPOCH="${{ needs.resolve-inputs.outputs.source_epoch }}"
+          npm run build:release-asset --workspace=create-principles-disciple -- --output "$RUNNER_TEMP/release-asset"
+          ls -la "$RUNNER_TEMP/release-asset"
+
+      - name: Stage platform asset for assembly
+        run: |
+          STAGE="$RUNNER_TEMP/platform-asset"
+          mkdir -p "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}"
+          cp "$RUNNER_TEMP/release-asset/asset.tar" "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}/asset.tar"
+          cp "$RUNNER_TEMP/release-asset/asset.tar.sha256" "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}/asset.tar.sha256"
+          node -p "JSON.stringify({ platform: '${{ matrix.platform }}', arch: '${{ matrix.arch }}', nodeAbi: process.versions.modules })" > "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}/asset-meta.json"
+          cat "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}/asset-meta.json"
+
+      - name: Upload platform asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-asset-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/platform-asset
+          if-no-files-found: error
+          retention-days: 7
+
+  # Single publication covering every matrix platform. Downloads all legs,
+  # verifies each (bytes vs sidecar, tar stamp vs meta), signs once, and
+  # either uploads the publication (dry-run) or pushes it atomically to
+  # gh-pages (publish). The ONLY job holding the signing key.
+  assemble-publish:
+    name: Assemble + publish (${{ github.event.inputs.mode || 'dry-run' }})
+    needs: [resolve-inputs, build-asset]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
+      MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
+
+      - name: Build publisher
+        run: (cd packages/create-principles-disciple && npm run build)
+
+      - name: Download all platform assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-asset-*
+          path: ${{ runner.temp }}/assets
+          merge-multiple: true
+
+      - name: Fetch previously published metadata state
+        run: |
+          mkdir -p "$RUNNER_TEMP/prev-metadata"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages --depth=1
+            git archive refs/remotes/origin/gh-pages | tar -x -C "$RUNNER_TEMP/prev-metadata"
+          else
+            echo "No gh-pages metadata repository yet — this publication bootstraps it."
+          fi
 
       - name: Sign and emit release metadata
         env:
           PD_RELEASE_SIGNING_KEY: ${{ secrets.PD_RELEASE_SIGNING_KEY }}
         run: |
           ARGS=(
-            --archive "$RUNNER_TEMP/release-asset/asset.tar"
-            --product-version "${{ steps.release.outputs.version }}"
-            --source-commit "${{ steps.release.outputs.commit }}"
+            --assets-dir "$RUNNER_TEMP/assets"
+            --product-version "${{ needs.resolve-inputs.outputs.version }}"
+            --source-commit "${{ needs.resolve-inputs.outputs.commit }}"
             --channel "$CHANNEL"
-            --channel-version "${{ steps.inputs.outputs.channel_version }}"
-            --publication-sequence "${{ steps.inputs.outputs.publication_sequence }}"
-            --expires-at "${{ steps.inputs.outputs.expires_at }}"
+            --channel-version "${{ needs.resolve-inputs.outputs.channel_version }}"
+            --publication-sequence "${{ needs.resolve-inputs.outputs.publication_sequence }}"
+            --expires-at "${{ needs.resolve-inputs.outputs.expires_at }}"
             --min-bootstrap-version 1.0.0
             --data-schema-forward-readable-from 1.220.0
-            --platform linux
-            --arch x64
-            --node-abi "$(node -p "process.versions.modules")"
             --output-dir "$RUNNER_TEMP/metadata-repo"
           )
           if [ -n "$PD_RELEASE_SIGNING_KEY" ]; then
@@ -289,7 +409,7 @@ jobs:
             const payload = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
             console.log(payload.releaseId.slice(0, 12));
           " "$RUNNER_TEMP/metadata-repo/targets/channels/$CHANNEL.json")
-          git commit -m "release-metadata: ${RELEASE_ID} (${{ steps.release.outputs.version }}, $CHANNEL)"
+          git commit -m "release-metadata: ${RELEASE_ID} (${{ needs.resolve-inputs.outputs.version }}, $CHANNEL)"
           # One push updates the whole tree atomically; consumers never see a
           # channel pointer whose artifact is missing.
           git push origin gh-pages
