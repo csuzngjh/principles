@@ -194,7 +194,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_l2_fallback_to_l1'),
   // PRI-424/PRI-439: Artificer L2 agent loop telemetry.
   // - artificer_l2_turn: per tool-execution turn inside the L2 agent loop (PRI-439 Phase 4)
-  // - artificer_l2_complete: when the loop finishes (turnCount, toolsInvoked, succeeded, timedOut)
+  // - artificer_l2_complete: when the loop finishes (turnCount, toolsInvoked, succeeded, abortOwner, budgetMs, elapsedMs, stopReason, tokenUsage)
   // (artificer_l2_attempt pruned in PRI-773: legacy write-test-fix loop event,
   // zero emit sites since PRI-439 replaced the loop.)
   Type.Literal('artificer_l2_turn'),
