@@ -400,3 +400,109 @@ describe('acquireTrajectoryEvidenceFromDb — typed CLI acquisition (PRI-642 Sco
     expect(unreadable.reasonCode).toBe('evidence_read_failed');
   });
 });
+
+// ── PRI-783 review P1: the binding fact gates degrade vs refuse ─────────────
+// 'verified' = the sessions table was queried and DID contain the id;
+// 'unverified' = DB missing / unopenable / id absent / sessions table
+// unreadable. Only verified bindings may degrade to a bound submission.
+
+describe('acquisition binding fact (PRI-783 review P1)', () => {
+  beforeEach(() => {
+    createStateDir();
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('session present with zero evidence → empty_trajectory, binding verified (degrade precondition)', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const db = createTrajectoryDb();
+    db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)')
+      .run('quiet-session', '2026-01-01T09:00:00Z', '2026-01-01T09:00:00Z');
+    insertUserTurn(db, 'quiet-session', 'ordinary message', false, '2026-01-01T09:01:00Z');
+    db.close();
+
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'quiet-session', tmpDir);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('empty_trajectory');
+    expect(result.binding).toBe('verified');
+  });
+
+  it('id absent from sessions table → session_not_found, binding unverified', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const db = createTrajectoryDb();
+    db.close();
+
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'no-such-session', tmpDir);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('session_not_found');
+    expect(result.binding).toBe('unverified');
+  });
+
+  it('missing trajectory.db → trajectory_unavailable, binding unverified', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'some-session', tmpDir);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('trajectory_unavailable');
+    expect(result.binding).toBe('unverified');
+  });
+
+  it('corrupt DB (open fails) → evidence_read_failed, binding unverified', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const dbPath = path.join(stateDir, 'trajectory.db');
+    fs.writeFileSync(dbPath, Buffer.from('this is not a sqlite database at all'));
+
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'some-session', tmpDir);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('evidence_read_failed');
+    expect(result.binding).toBe('unverified');
+  });
+
+  it('session verified but evidence tables unreadable → evidence_read_failed, binding verified', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const db = createTrajectoryDb();
+    db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)')
+      .run('readable-session', '2026-01-01T09:00:00Z', '2026-01-01T09:00:00Z');
+    db.close();
+    // Drop the evidence tables after the session row exists: the sessions
+    // check passed, the evidence read cannot.
+    const raw = new Database(path.join(stateDir, 'trajectory.db'));
+    raw.exec('DROP TABLE user_turns');
+    raw.close();
+
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'readable-session', tmpDir);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('evidence_read_failed');
+    expect(result.binding).toBe('verified');
+  });
+
+  it('sessions table missing entirely → nothing is verified (unverified even when the reason is evidence_read_failed)', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const db = new Database(path.join(stateDir, 'trajectory.db'));
+    db.exec('CREATE TABLE user_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, raw_excerpt TEXT, correction_detected INTEGER NOT NULL DEFAULT 0, correction_cue TEXT, created_at TEXT NOT NULL)');
+    db.close();
+
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'never-seen', tmpDir);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    // assistant_turns/tool_calls tables missing → readFailed → evidence_read_failed
+    expect(result.reasonCode).toBe('evidence_read_failed');
+    expect(result.binding).toBe('unverified');
+  });
+});
