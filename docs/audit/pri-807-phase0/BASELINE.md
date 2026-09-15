@@ -85,3 +85,55 @@
 - 新建治理框架 / scanner 框架 / 第二 SSOT；
 - Worker 直接改 Linear / 自行建 issue；
 - 把 audit snapshot 升级为 runtime SSOT。
+
+
+---
+
+# Final-main Delta Sync（Lead Auditor 于合并前执行，2026-09-15）
+
+## 两个 SHA 的语义必须区分
+
+- **WORKER_BASELINE_SHA** = `cdec05d4bc4252151c7f9f118bdad90f25067594`
+  - A-F 六个 Worker 与 RED_TEAM 全部**实际运行于**该 immutable SHA。
+  - 所有 Worker 报告的原始证据、行号、`BASELINE: SYNCED` 标记继续**只对该 SHA 负责**——它们是历史事实，不是对 final-main 的声明。
+- **FINAL_MAIN_SHA** = `28e1de74c64c2c7fd8cf8a1ccba55ec7b51939ee`（本次同步时 `origin/main` 实际 SHA）
+  - Lead Auditor 在合并前又执行了 `WORKER_BASELINE_SHA..FINAL_MAIN_SHA` 的 targeted delta audit（本节）。
+
+> 本节职责：证明并记录 WORKER_BASELINE → FINAL_MAIN 的变化是否影响 Phase 0 结论。未受影响的 Worker 结论**不重写、不伪造重新执行**。
+
+## Delta 清单（WORKER_BASELINE_SHA..FINAL_MAIN_SHA）
+
+`git log --oneline cdec05d4b..origin/main`：
+
+```
+28e1de74 Merge pull request #1709 from csuzngjh/ai/PRI-797-signal-collector-default-on
+04c00dea Merge branch 'main' into ai/PRI-797-signal-collector-default-on
+fd3b6e98 fix(flags): align signal_collector governance trio per owner review (PRI-797)
+6670d4fc PRI-797: signalCollector defaults on — semantic detection stops failing silently
+```
+
+`git diff --stat cdec05d4b..origin/main`：8 个文件，+196/-22。唯一实质代码提交 = PRI-797（PR #1709，2026-09-15 Owner 指令）。
+
+## 最小 Delta 表
+
+| Commit / PR | Changed seam | Affected report | Worker 时点结论 | Final-main 结论 | Action |
+|---|---|---|---|---|---|
+| PRI-797 / PR #1709（6670d4fc + fd3b6e98） | S5 Signal Ingestion（`signal_collector` flag + `SignalCollectorHost` + installer 默认 config + lifecycle） | TOPOLOGY.md（R-25 / F10 邻近行）、HOST_CAPABILITY_MATRIX.md（矩阵 #1） | `signal_collector` quiet / **默认 OFF**；LLM 深判 gate 默认关闭 | `signal_collector` quiet / **默认 ON**（Owner 2026-09-15 指令）；未配置 profile 时**显性 WARN + needs_setup** 降级为 keyword-only，绝不静默；Owner 可 config override 关闭 | 已修订两文件该行结论为 Final-main 状态 |
+| PRI-797（同上） | S6 Tests / Protection（`feature-flag-contract.test.ts` +2 条、`signal-classifier-needs-setup.test.ts` 新增 119 行、`j12-fresh-install-defaults.test.ts` 改写） | PROTECTION_GAP_MATRIX.md | 未对 signal ingestion 面下过具体保护断言 | 新增 default-on contract、needs_setup WARN、installer 默认三组回归 | 不推翻任何现有 Gap 行；在 PROTECTION_GAP 记录为「PRI-797 新增保护面」（见该文件 Final-main 节） |
+| — | S1 拓扑 / S2 prompt-schema / S3 lineage / S4 writer / S5 RuleCode host parity / R-19 沙箱 / NEW-E1 pins | 上述之外的报告 | 不变 | 不变（delta 未触碰任何相关实现文件） | 无修改 |
+
+## Delta 对发现级结论的影响
+
+- **R-25 的语句修订**：「两个 flag 未入 F10 表」的**事实**（两个 flag 仍不在 F10 表）不变；但 `signal_collector` 的**默认值**已由 `enabled:false` 翻为 `enabled:true`（PRI-797）。TOPOLOGY.md 对应行已同步为 Final-main 事实；**判断词维持 CONFIRMED**（遗漏登记类结论不受默认值翻转影响）。`codex_conversation_ingestion` 仍为 quiet / **默认 OFF**，与 `signal_collector` 是两个独立 flag，不得混写。
+- **HOST_CAPABILITY_MATRIX 矩阵 #1（signal ingestion）**：OpenClaw 侧从「LLM 深判默认 OFF」修订为「默认 ON；未配置端点 → keyword-only 降级 + 可见 WARN/needs_setup」；PARTIAL 判定维持（降级本身是 designed degradation，不构成能力升级为 SUPPORTED）。
+- **R-19 / NEW-E1 / R-01 / R-20**：delta 未修改任何相关实现文件（`production-gate-deps.ts`、`refiner-sandbox-wrapper.ts`、`demo-rule-compiler.ts`、`rule-code-validator.ts`、`rule-implementation-runtime.ts`、`runtime-version.json`）→ **全部保持原裁决（UNCHANGED）**。
+- **SYNTHESIS / RED_TEAM**：各自新增 Final-main Delta 章节，见对应文件。
+
+## 时间语义原则（本同步遵循）
+
+```
+Worker 证据 @ WORKER_BASELINE_SHA: 保留原样（file:line / BASELINE: SYNCED 不动）
+Final-main 变化 @ FINAL_MAIN_SHA : 用 delta 章节 / final 裁决覆盖（显式标记）
+```
+
+本文件上部所有 `CURRENT_MAIN_SHA = cdec05d4…` 表述为 Worker 开工时点事实，保留原义；本节为合并时点对账，两者在时间轴上不冲突。

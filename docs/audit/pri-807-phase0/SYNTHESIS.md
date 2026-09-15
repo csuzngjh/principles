@@ -1,7 +1,7 @@
 # PRI-807 Phase 0 — SYNTHESIS.md（核心价值管道 Reality Audit 综合）
 
 - 阶段：Phase 0「current-main Reality Audit」
-- 基线：cdec05d4bc4252151c7f9f118bdad90f25067594（CURRENT_MAIN_SHA，#1710 合并后的 main；BASELINE: SYNCED）
+- WORKER_BASELINE_SHA（Worker 实际执行基线）：cdec05d4bc4252151c7f9f118bdad90f25067594（#1710 合并 SHA；A-F 与 RED_TEAM 全部在此 immutable 基线上运行，BASELINE: SYNCED）`n- FINAL_MAIN_SHA（合并前对账基线）：28e1de74c64c2c7fd8cf8a1ccba55ec7b51939ee（2026-09-15 同步时 origin/main；WORKER_BASELINE..FINAL_MAIN delta = PRI-797 4 提交，见 §9 Final-main Delta Sync）
 - 输入：BASELINE.md + Worker A–F 六份审计报告 + RED_TEAM.md（本地 Red Team，12 条抽验全部 SUSTAINED）
 - 产出目的：为核心契约接缝（seam）、SSOT、漂移与测试保护缺口提供单一综合视图，作为后续治理文档与机械护栏（check:pipeline-contract 等）的设计输入。
 - 判定合法性声明：所有严重度为各 Worker 定级经 Red Team 抽验后的保留值；NEW-E1 已经独立复现升级为已验证事实。
@@ -139,5 +139,41 @@ Red Team 结论：无一条被攻击结论需降级或删除；无 OVERTURNED。
 
 ---
 
-*综合基线：cdec05d4bc4252151c7f9f118bdad90f25067594（BASELINE: SYNCED）*
+## 9. Final-main Delta Sync（合并前对账，2026-09-15 追加）
+
+### 9.1 对账范围
+
+- **WORKER_BASELINE_SHA** = `cdec05d4bc4252151c7f9f118bdad90f25067594`（A-F + RED_TEAM 实际执行基线，历史证据绑定此 SHA，不改写）
+- **FINAL_MAIN_SHA** = `28e1de74c64c2c7fd8cf8a1ccba55ec7b51939ee`（本次同步 origin/main 实际 SHA）
+- Delta 提交（`git log cdec05d4b..origin/main`）：PRI-797 / PR #1709 共 4 提交（6670d4fc、fd3b6e98、04c00dea、28e1de74），8 文件 +196/-22
+
+### 9.2 对 Phase 0 结论的影响
+
+| Worker 结论 | Final-main 裁决 | 依据 |
+|---|---|---|
+| R-25「两个 flag 未入 F10 表」 | **维持 CONFIRMED**（语句已修订） | 遗漏登记类结论不受默认值翻转影响；`signal_collector` 默认 OFF→ON（PRI-797）已同步至 TOPOLOGY.md |
+| HOST #1「LLM 深判默认 OFF」 | **修订为默认 ON + 显性降级**（PARTIAL 维持） | `feature-flag-contract.ts:195` enabled:true；`signal-collector-host.ts:604-627` 未配置 profile → keyword-only + WARN/needs_setup（每 workspace 一次） |
+| Worker F「signal 面无测试保护」 | **新增保护面** | PRI-797 新增 `feature-flag-contract.test.ts` +2 条 / `signal-classifier-needs-setup.test.ts`(119 行) / `j12-fresh-install-defaults.test.ts` 改写——default-on + needs_setup WARN + installer 默认三组回归；不推翻任何现有 Gap 行，也不夸大为完整保护 |
+| R-19（沙箱信任边界，P1） | **UNCHANGED（still sustained）** | delta 未触碰 production-gate-deps / refiner-sandbox-wrapper / demo-rule-compiler / rule-code-validator / rule-implementation-runtime |
+| NEW-E1（pinned host-runtime@0.1.0 缺守卫，P1） | **UNCHANGED（still sustained）** | delta 未触碰 runtime-version.json，pins 仍为 codexAdapter 0.1.0 / hostRuntime 0.1.0 / core 1.252.0 |
+| S1/S2/S3/S4 其余结论 | **UNCHANGED** | delta 单点落在 signal ingestion 面（S5/S6 局部），未触及任何拓扑/契约/血缘/写者实现 |
+
+### 9.3 最终表述
+
+本 Phase 0 结论现在诚实表述为：
+
+```
+Immutable Worker Audit（@cdec05d4）
++ Targeted Final-main Delta Audit（@28e1de74，PRI-797 单点）
+= Merge-time Current Reality View
+```
+
+- 全部 Worker 分报告与 RED_TEAM 继续对 WORKER_BASELINE_SHA 负责。
+- 受 delta 影响的两处（TOPOLOGY R-25 语句、HOST #1）与新增保护面（PROTECTION）已在各自文件显式标记 Final-main 状态。
+- 两条 P1（R-19 / NEW-E1）与全部其余结论保持成立。
+- 未出现新的 blocker。
+
+---
+
+*综合基线：WORKER_BASELINE_SHA cdec05d4bc4252151c7f9f118bdad90f25067594（Worker 执行基线，BASELINE: SYNCED）+ FINAL_MAIN_SHA 28e1de74c64c2c7fd8cf8a1ccba55ec7b51939ee（合并前对账基线）*
 *本文是 Phase 0 的唯一综合产物；六份分报告与 RED_TEAM.md 为附件。*

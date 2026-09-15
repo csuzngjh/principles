@@ -148,5 +148,36 @@ Red Team 本地复核在权威仓库工作树进行，所有行号锚定同一 S
 
 ---
 
-*审计基准：cdec05d4bc4252151c7f9f118bdad90f25067594（BASELINE: SYNCED）*
-*本文件为唯一新增物；所有行号引用对应上述 SHA。*
+---
+
+# Post-Red-Team Final-main Delta Check（2026-09-15 追加）
+
+> 本 Red Team 是对 **WORKER_BASELINE_SHA**（cdec05d4b）的 Worker 结论的攻击，未在 latest main 上重新执行。以下仅记录 WORKER_BASELINE → FINAL_MAIN（28e1de74，delta = PRI-797 单点）是否改变本报告 §3 的 12 条 SUSTAINED 裁决。
+
+## 逐条核对
+
+| # | 被攻击结论 | Final-main 状态 |
+|---|---|---|
+| 1 | A-NEW-A1（pipelineMode ABSENT ≡ full_chain） | **未受影响**（delta 未触碰 internalization-job-graph / state-machine） |
+| 2 | A-NEW-A4（CHANNEL_EDGES 不在 barrel） | **未受影响** |
+| 3 | A-A4 PARTIAL（非完整拓扑 SSOT） | **未受影响** |
+| 4 | B-NEW-2（空 requiredChanges → metadata 不可读） | **未受影响**（delta 未触碰 pitask-metadata） |
+| 5 | B-NEW-8（router prompt 三份字段清单冲突） | **未受影响** |
+| 6 | B-R-18（evidence 空 → confidence<0.3 无执行面） | **未受影响** |
+| 7 | C-C-11（血缘字段名断链） | **未受影响**（delta 未触碰 scribe/philosopher/artificer） |
+| 8 | D-NEW-D6a（promoteActivation 零生产 caller） | **未受影响** |
+| 9 | E-NEW-E1（pinned host-runtime@0.1.0 缺守卫，P1） | **保持 SUSTAINED**（delta 未触碰 runtime-version.json；pins 仍 0.1.0/0.1.0/1.252.0） |
+| 10 | E-NEW-E2（shared 路径事件缺 activationId） | **未受影响** |
+| 11 | F-NEW-F1（6 个测试文件永不执行） | **未受影响**（signal-collector-host.ts 新增测试落位在 tests/core/，在 openclaw-plugin include 口径内，不属被遗漏 6 文件；N=6 不变） |
+| 12 | F-§3.1（verify:merge 16 步、文档称 9 checks） | **未受影响**（PRI-797 未改 package.json scripts / TESTING.md） |
+
+## 结论
+
+**No previously sustained Red-Team conclusion was invalidated by the final-main delta.**
+
+FINAL_MAIN 上唯一相关变化（signal_collector 默认 ON）不属于本 Red Team 攻击的 12 条结论范围；它影响的是 Worker E 矩阵 #1 与 Worker A R-25 的语句（已在对应文件及 SYNTHESIS §9 处理），不影响上述裁决。
+
+---
+
+*审计基准：cdec05d4bc4252151c7f9f118bdad90f25067594（WORKER_BASELINE_SHA，BASELINE: SYNCED）*
+*FINAL_MAIN_SHA：28e1de74c64c2c7fd8cf8a1ccba55ec7b51939ee；本文件为唯一新增物，所有行号引用对应 WORKER_BASELINE SHA。*

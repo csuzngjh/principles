@@ -670,5 +670,29 @@ R-19（#1710 CONFIRMED 的 P1）：RuleCode 沙箱信任边界——静态禁门
 
 ---
 
-*审计基准：`cdec05d4bc4252151c7f9f118bdad90f25067594`（BASELINE: SYNCED）*
+---
+
+# Final-main Delta Sync（合并前对账，2026-09-15 追加）
+
+## 变化源
+
+`WORKER_BASELINE_SHA`（cdec05d4b）.. `FINAL_MAIN_SHA`（28e1de74）之间的唯一实质提交 = **PRI-797 / PR #1709**（signalCollector 默认启用 + needs_setup 显性提醒），4 提交、8 文件。
+
+## 对 Worker F 结论的影响
+
+Worker F 的 Top-10 / 各 Gap 行**均未按面提及 signal ingestion**（在 WORKER_BASELINE 时点，`signal_collector` 默认 OFF，LLM 深判面默认关闭，故该面未被列入管道瘫痪风险缺口）。因此 PRI-797 的新增测试**不推翻任何现有 Gap 行**。
+
+但值得记录：PRI-797 为该面新增了三组 contract 回归，事实如下（不夸大为"完整保护"）：
+
+| PRI-797 新增/改写测试 | 覆盖面 | 相对 Worker F 时点 |
+|---|---|---|
+| `feature-flag-contract.test.ts` +2 条 | signal_collector 默认 ON + 可 config override 关闭 | 新增（WORKER_BASELINE 时无） |
+| `signal-classifier-needs-setup.test.ts`（新增 119 行） | 未配置 profile → WARN（每 workspace 一次）+ needs_setup + `return null` 降级，含 SystemLogger 断言 | 新增 |
+| `j12-fresh-install-defaults.test.ts` 改写 | installer fresh config 默认 signalCollector enabled:true（配/不配 provider 两种） | 改写（原断言 enabled:false） |
+
+**判定**：这三组测试保护的是 **PRI-797 自己的新行为**（default-on / needs_setup 显性提醒），不是本报告 Top-10 所列缺口（prompt-example↔validator、血缘字段名、Stage C 缓存、升级 E2E、verify:merge 组成等）。**Top-10 其余 9 项结论在 FINAL_MAIN 仍然成立**；唯一"新增保护面"的事实已如实登记，未据此下调任何缺口的严重度。
+
+---
+
+*审计基准：`cdec05d4bc4252151c7f9f118bdad90f25067594`（WORKER_BASELINE_SHA，BASELINE: SYNCED）；FINAL_MAIN_SHA = 28e1de74c64c2c7fd8cf8a1ccba55ec7b51939ee*
 *全部行号与文件路径引用均对应上述 SHA。*

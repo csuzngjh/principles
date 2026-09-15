@@ -362,7 +362,7 @@ current-main 回源：
 #### R-25（P2）入口/gate 全景遗漏 → **CONFIRMED**
 
 - **Codex 会话摄取入口**：`codex-adapter/src/pd-hook.ts:156` 读 `codex_conversation_ingestion`，`:166-167`（turn_complete）与 `:178-179`（其它 kind）调 `runConversationIngestion` → `runGovernanceAdmission`（`ingestion/admission.ts:130`）→ `ensureGovernanceContinuation`（`governance-signal-admission.ts:997`）→ `ensureGovernanceDiagnosticianTask`（`:853`）→ `recordPain({asyncMode: true})`（`:901-905`）。REPORT §2 入口清单（11 行）**确实无此入口**（grep `codex_conversation_ingestion` 在 REPORT 正文仅出现在 R-25 自身的修订行）。判定 CONFIRMED。
-- **两个 flag 未入 F10 表**：`signal_collector`（`feature-flag-contract.ts:195`，quiet/`enabled:false`）实际 gate 的是 Stage2 LLM 分类器 —— `openclaw-plugin/src/core/signal-collector-host.ts:599-601`（`if (!cfg.enabled)` → `return null`）。`codex_conversation_ingestion`（`:427`，quiet/`enabled:false`）gate 整个 Codex 摄取。判定 CONFIRMED。
+- **两个 flag 未入 F10 表**：`signal_collector`（`feature-flag-contract.ts:195`，quiet/`enabled:true` — **Final-main 状态**，PRI-797 2026-09-15 由 OFF 翻为 ON，见 BASELINE.md §Final-main Delta Sync）实际 gate 的是 Stage2 LLM 分类器 —— `openclaw-plugin/src/core/signal-collector-host.ts:599-601`（`if (!cfg.enabled)` → `return null`）。`codex_conversation_ingestion`（`:427`，quiet/`enabled:false`）gate 整个 Codex 摄取。判定 CONFIRMED。
 
 ### 5.2 REPORT §2 关键结论的 current-main 裁决
 
