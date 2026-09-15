@@ -968,8 +968,13 @@ export class InternalizationOrchestrator {
 
     const allCandidates: TaskRecord[] = [];
     try {
-      const pending = await this.stateManager.listTasks({ status: 'pending' });
-      const retryWait = await this.stateManager.listTasks({ status: 'retry_wait' });
+      // PRI-798: oldest-first (updated_at ASC) is the lease-order contract.
+      // Without an explicit orderBy the SQL layer returns insertion order —
+      // an undeclared contract that mis-leases across pains when an older
+      // chain's tasks sit in the queue next to a newer one. Mirrors the
+      // anti-starvation ordering of reconcileSucceededTransitions.
+      const pending = await this.stateManager.listTasks({ status: 'pending', orderBy: 'updated_at_asc' });
+      const retryWait = await this.stateManager.listTasks({ status: 'retry_wait', orderBy: 'updated_at_asc' });
       allCandidates.push(...pending, ...retryWait);
     } catch (error) {
       if (error instanceof PDRuntimeError) throw error;

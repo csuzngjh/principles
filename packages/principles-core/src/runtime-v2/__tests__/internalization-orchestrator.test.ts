@@ -859,4 +859,49 @@ describe('InternalizationOrchestrator', () => {
       expect(parsed.pi_metadata.inputArtifactRefs).toEqual([{ artifactType: 'principle', ref: 'artifact-dreamer-1' }]);
     });
   });
+
+  // ── PRI-798: lease-order contract ──────────────────────────────────────────
+  // findCandidates must request a deterministic oldest-first (updated_at ASC)
+  // order from the store. Without it the SQL layer returns insertion order —
+  // an undeclared contract that mis-leases across pains when an older chain's
+  // tasks sit in the queue next to a newer one.
+
+  describe('wakeOnce — lease ordering (PRI-798)', () => {
+    it('requests updated_at_asc ordering and leases the oldest candidate first', async () => {
+      const older = makeRawTask({
+        taskId: 'scribe-older',
+        taskKind: 'scribe',
+        status: 'pending',
+        updatedAt: '2026-09-13T16:00:00.000Z',
+      });
+      const newer = makeRawTask({
+        taskId: 'scribe-newer',
+        taskKind: 'scribe',
+        status: 'pending',
+        updatedAt: '2026-09-15T10:00:00.000Z',
+      });
+      mockStateManager.listTasks.mockImplementation(async (filter?: { status?: string; orderBy?: string }) => {
+        if (filter?.orderBy !== 'updated_at_asc') return [];
+        return filter.status === 'pending' ? [older, newer] : [];
+      });
+      mockStateManager.getTask.mockResolvedValue(null);
+      mockStateManager.acquireLease.mockImplementation(async ({ taskId }: { taskId: string }) => {
+        const source = taskId === 'scribe-older' ? older : newer;
+        return { ...source, status: 'leased' };
+      });
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce('scribe');
+
+      expect(result.decision).toBe('leased');
+      expect((result as { taskId: string }).taskId).toBe('scribe-older');
+      expect(mockStateManager.listTasks).toHaveBeenCalledWith({ status: 'pending', orderBy: 'updated_at_asc' });
+      expect(mockStateManager.listTasks).toHaveBeenCalledWith({ status: 'retry_wait', orderBy: 'updated_at_asc' });
+      expect(mockStateManager.acquireLease).toHaveBeenCalledTimes(1);
+    });
+  });
 });

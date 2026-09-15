@@ -265,7 +265,9 @@ export function OwnerDecisionCard({
             )}
           </div>
           <div className="mt-2 text-ink-4 text-[11.5px] leading-relaxed">
-            {t("pages.focus.ownerDecision.actionConsequence")}
+            {canAccept
+              ? t("pages.focus.ownerDecision.actionConsequence")
+              : t("pages.focus.ownerDecision.acceptBlockedHardGate")}
           </div>
           <button
             type="button"
