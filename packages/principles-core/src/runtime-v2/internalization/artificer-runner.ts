@@ -33,7 +33,7 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 import type { RunHandle } from '../runtime-protocol.js';
-import type { ArtificerRuleOutput, ArtificerValidator } from './artificer-output.js';
+import type { ArtificerRuleOutput, ArtificerValidator, GoldenTraceCaseInput } from './artificer-output.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
@@ -948,6 +948,41 @@ ${context.revisionFeedback}
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });
+  }
+
+  /**
+   * EP002-R4: restore Owner-labelled goldenTraceCases from the authoritative
+   * (bounded) pack BEFORE validation. The v2 contract requires the artifact to
+   * carry the Owner-labelled evidence verbatim — but demanding that the MODEL
+   * transcribe multi-KB history windows byte-perfectly rejected honest echoes
+   * on real-sized packs (live evidence: 2/2 L2 submissions succeeded, both
+   * rejected as "was rewritten"). Mechanical restoration is strictly STRONGER
+   * against fabrication: the model cannot rewrite what the code overwrites.
+   * The model's own additional cases (different caseIds) pass through
+   * untouched and still face full validation.
+   */
+  protected override async fetchAndParseOutput(runId: string, taskId: string): Promise<unknown> {
+    const output = await super.fetchAndParseOutput(runId, taskId);
+    if (this.behaviorExamplePack === undefined
+      || output === null || typeof output !== 'object' || Array.isArray(output)) {
+      return output;
+    }
+    const record = output as Record<string, unknown>;
+    if (!Array.isArray(record.goldenTraceCases)) return output;
+    const bounded = boundPackForPrompt(this.behaviorExamplePack);
+    const authoritative = new Map<string, GoldenTraceCaseInput>();
+    for (const ownerCase of [bounded.sourceNegativeCase, ...bounded.positiveCounterexamples]) {
+      authoritative.set(ownerCase.caseId, ownerCase);
+    }
+    record.goldenTraceCases = record.goldenTraceCases.map((entry: unknown) => {
+      if (entry !== null && typeof entry === 'object' && !Array.isArray(entry)) {
+        const {caseId} = (entry as Record<string, unknown>);
+        const restored = typeof caseId === 'string' ? authoritative.get(caseId) : undefined;
+        if (restored !== undefined) return restored;
+      }
+      return entry;
+    });
+    return record;
   }
 
   async validateOutput(output: unknown, taskId: string, context: ArtificerContext): Promise<PeerRunnerValidationResult> {
