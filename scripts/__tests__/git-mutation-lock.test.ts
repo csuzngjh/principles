@@ -195,6 +195,9 @@ describe('repo mutation mutex', () => {
     const file = mutationLockPath(commonDir);
     const content = fs.readFileSync(file, 'utf-8');
     const inoBefore = fs.statSync(file).ino;
+    // codeql[js/file-system-race] -- deliberate single-threaded construction:
+    // the rm+recreate IS the scenario under test (a replacement wearing our
+    // bytes); both inode outcomes are asserted explicitly below.
     fs.rmSync(file);
     fs.writeFileSync(file, content, 'utf-8');
     const inoAfter = fs.statSync(file).ino;
