@@ -51,6 +51,33 @@ interface ScribeContext {
   readonly contextHash: string;
   readonly philosopherArtifact: string;
   readonly sourcePhilosopherArtifactId: string;
+  /**
+   * PRI-816 (R-01): authoritative dreamer artifact id extracted from the
+   * philosopher artifact's `sourceDreamerArtifactId`. Optional — absent on
+   * pre-PRI-508 philosopher artifacts, where the scribe keeps emitting no
+   * `sourceTrace.dreamerArtifactId` (backward compatible).
+   */
+  readonly sourceDreamerArtifactId?: string;
+}
+
+/**
+ * PRI-816 (R-01): extract the authoritative dreamer artifact id from the
+ * philosopher artifact content (rc-1: content is untrusted — field-by-field
+ * guard, no `as`). Returns undefined when absent or malformed; the scribe
+ * then simply omits `sourceTrace.dreamerArtifactId` (pre-PRI-508 compatible).
+ */
+function extractSourceDreamerArtifactId(philosopherContentJson: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(philosopherContentJson);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined;
+  if (!Object.hasOwn(parsed, 'sourceDreamerArtifactId')) return undefined;
+  const value = (parsed as Record<string, unknown>).sourceDreamerArtifactId;
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  return value;
 }
 
 /**
@@ -190,6 +217,12 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
           contextHash: BasePeerRunner.hashContextRefs([artifactRef]),
           philosopherArtifact: firstArtifact.contentJson,
           sourcePhilosopherArtifactId: firstArtifact.artifactId,
+          // PRI-816 (R-01): authoritative dreamer lineage, extracted from the
+          // philosopher artifact's own `sourceDreamerArtifactId` (a required
+          // field of philosopher-output-v1). The scribe prompt copies this
+          // into `sourceTrace.dreamerArtifactId` instead of scraping artifact
+          // content with a mismatched field name.
+          sourceDreamerArtifactId: extractSourceDreamerArtifactId(firstArtifact.contentJson),
         };
       }
     }
@@ -223,6 +256,9 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       contextHash: context.contextHash,
       philosopherArtifact: parsedPhilosopherArtifact,
       sourcePhilosopherArtifactId: context.sourcePhilosopherArtifactId,
+      ...(context.sourceDreamerArtifactId !== undefined
+        ? { sourceDreamerArtifactId: context.sourceDreamerArtifactId }
+        : {}),
       outputLanguage: this.resolvedOptions.outputLanguage,
       coreGrounding,
     });
@@ -411,8 +447,17 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     // Shared lineage echo gate (PRI-541): reconciles taskId,
     // sourcePhilosopherArtifactId and sourceTrace.philosopherArtifactId
     // against the authoritative context value before validation — a wrong
-    // echo previously dead-ended as output_invalid. Optional trace fields
-    // (dreamerArtifactId) have no authoritative value and are left alone.
+    // echo previously dead-ended as output_invalid.
+    // PRI-816 (R-01): when the context carries an authoritative
+    // sourceDreamerArtifactId, `sourceTrace.dreamerArtifactId` is now echo-
+    // corrected the same way (a wrong/absent copy used to strand the dreamer
+    // lineage: artificer's resolveDreamerContext silently lost the five
+    // dreamer dimensions). Without an authoritative value the field stays
+    // untouched (pre-PRI-508 flows).
+    const dreamerTraceFields =
+      _context.sourceDreamerArtifactId !== undefined
+        ? [{ field: 'dreamerArtifactId', authoritativeValue: _context.sourceDreamerArtifactId }]
+        : [];
     const correctedFields = reconcileLineageEcho(untrustedOutput, {
       topFields: [
         { field: 'taskId', authoritativeValue: taskId },
@@ -420,7 +465,10 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       ],
       trace: {
         traceField: 'sourceTrace',
-        fields: [{ field: 'philosopherArtifactId', authoritativeValue: _context.sourcePhilosopherArtifactId }],
+        fields: [
+          { field: 'philosopherArtifactId', authoritativeValue: _context.sourcePhilosopherArtifactId },
+          ...dreamerTraceFields,
+        ],
       },
     });
     if (correctedFields.length > 0) {
