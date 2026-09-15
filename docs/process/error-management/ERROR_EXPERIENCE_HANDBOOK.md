@@ -80,6 +80,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-114 | Semantic resolvability used as an existence proof — fallback/generic lookup members pass validators that should only accept authoritative host declarations | PRI-634-F PR #1495 R2 |
 | ERR-122 | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side README/package.json and tutorial-style verifier comments ship to the subject agent's workspace; audit the DEPLOYED FILE LIST as the answer surface, enforced by a deploy-shape assertion + hint scan | PRI-684 PR #1584 |
 | ERR-124 | Test mutates a process-global singleton without try/finally restore — sibling tests run under hijacked state | PRI-723 / PR #1596 review |
+| ERR-131 | Dependency-bump blast radius unverified: path-filtered CI skips package test/typecheck jobs for lockfile/manifest-only PRs, so ESM default-export removal, 0.x pairing dual-installs, and renamed APIs ship green | adhoc 2026-09-14 PRs #1689-#1692 repair |
 
 ---
 
@@ -193,11 +194,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-189
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — `as`-bypass at trust boundaries (JSON parsing, SQLite rows, CLI inputs, LLM/runtime outputs, DOM values, test fixtures).
-  - 2026-08-21 PR #1371 (RuleCode owner live-decision): `openclaw-promotion-checks.ts` narrowed untrusted `hostContract` config with `as unknown as HostLivenessContract` — a known-typed-interface variant (the index-signature-silencer flavor, cf. PR #1104). The cast masked reader-visible fields (`outOfBandControls`, `protectedCapabilities`, `neutralProbes`) that could be missing/malformed, bypassing runtime validation. Fixed by building the typed object explicitly through `isRecord()`/`isNonEmptyString` guards, copying and validating each field, and returning `null` on any shape violation — no cast, extendable to any future field (rc-2-no-as-bypass).
-  - 2026-07-23 PR #1251 (PRI-518, self-review + CodeRabbit): trusting a TS type declaration instead of validating the runtime object — `input.output.recommendations` deref threw native TypeError (rc-1); verbose-validator continue path hit non-iterable recommendations. Fixed with `typeof`/`Array.isArray` guards (rc-3-fail-loud-missing). Lesson: when a new validation check records an error but continues, audit EVERY downstream deref/iteration of the same field.
-  - 2026-07-12 PR #1211: array index access without optional chaining (`result[0].id`) — 38 TS2532/TS18048 errors blocked CI; `better-sqlite3` `.get()` returns `{}` needing typed assertions. Lesson: under `noUncheckedIndexedAccess`, guard every array index access and verify test helpers don't silently fill the field the test intends to leave absent.
-  - 2026-07-03 PR #1170: `RegExpExecArray` indices used as `string` — TS2345 under strict mode; fixed with destructure + `undefined` guard (rc-2-no-as-bypass, rc-3-fail-loud-missing).
-  - 2026-07-01 PR #1149 (PRI-494): `makeHostInput()` test fixture used `as unknown as RuleHostInput['action']` — silently used invalid enum `bashRisk: { level: 'low' }`. Fixed by constructing the real shape directly (rc-2-no-as-bypass).
+  - 2026-08-21 PR #1371 (RuleCode owner live-decision): `openclaw-promotion-checks.ts` narrowed untrusted `hostContract` config with `as unknown as HostLivenessContract` — the cast masked reader-visible fields (`outOfBandControls`, `protectedCapabilities`, `neutralProbes`) that could be missing/malformed. Fixed by building the typed object explicitly through `isRecord()`/`isNonEmptyString` guards, returning `null` on any shape violation (rc-2-no-as-bypass).
+  - 2026-07-23 PR #1251 (PRI-518, self-review + CodeRabbit): trusting a TS type declaration instead of validating the runtime object — `input.output.recommendations` deref threw native TypeError (rc-1). Fixed with `typeof`/`Array.isArray` guards (rc-3-fail-loud-missing). Lesson: when a validation check records an error but continues, audit EVERY downstream deref/iteration of the same field.
+  - 2026-07-12 / 07-03 / 07-01 (compressed; full text → ERROR_ARCHIVE.md): unguarded array index access under `noUncheckedIndexedAccess` (38 TS2532/TS18048 errors); `RegExpExecArray` indices used as `string` under strict mode; `makeHostInput()` fixture cast a silently invalid enum — guard every index access and construct real shapes instead of casting.
   - Earlier 2026-06 recurrences (PR #1098–#1146, compressed): same `as`-bypass across JSON parsing, SQLite rows, DOM events, LLM adapter output, test fixtures — fixed with `isRecord()` guards, `typeof` checks, `Object.hasOwn()`, or removing the cast. See git history for PR#688–#1072 and PR#1098–#1146.
 
 ---
@@ -375,8 +374,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When writing validators for untrusted data, never use `if (hasCorrectType) { validate }` — always use `if (!hasCorrectType) { error } else { validate }`. The "skip on wrong type" pattern is always wrong for required fields.
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
-- **Recurrence**: Yes — validator/test silently passes when data is absent/malformed instead of failing loud. Same class as ERR-001/005/007.
-  - 2026-09-12 PRI-754 / PR #1633 Codex review (protocol-required flavor): the AI-User action protocol treated `finish.success` — the verdict that decides the whole run result — as optional; an absent field silently defaulted to "failed" and produced a misleading report instead of a protocol violation. Fixed by requiring it boolean in the parser (absence → violation → corrective re-ask) + missing-field negative test.
+- **Recurrence**: Yes — validator/test silently passes when data is absent/malformed instead of failing loud.
+  - 2026-09-12 PRI-754 / PR #1633 Codex review (protocol-required flavor): the AI-User action protocol treated `finish.success` — the verdict deciding the whole run result — as optional; an absent field silently defaulted to "failed" instead of a protocol violation. Fixed: parser requires it boolean (absence → violation → corrective re-ask) + missing-field negative test.
   <!-- recurrence-meta
   {
     "date": "2026-09-12",
@@ -388,7 +387,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     "guard": "parser required-field negative test (ai-user llm protocol)"
   }
   -->
-  - 2026-09-12 PRI-749 / PR #1619 review (derivation-source flavor): the UI validator for `GET /api/v1/failed-tasks/:id` was written field-by-field from the payload the client happened to construct — required `TaskRecord.updatedAt` was read as nullable (a lost/malformed field rendered a silently partial record) and `RunRecord.taskId` lineage was not validated at all (a mixed response could display another task's failure reasons under the selected task, rc-6). Fixed by requiring `updatedAt` as an owned string, requiring each run's `taskId` and equality with `task.taskId`, plus mismatch/absence tests. Prevention: derive every field's presence requirement and null acceptance INDEPENDENTLY from the SERVER's authoritative type (typebox schema / store types) — a property NOT wrapped in `Type.Optional` must be present; whether `null` is a legal VALUE comes from the property's own schema (`Type.Null()` members like `TraceTimelineEntrySchema.at` are required-AND-nullable) — and equality-check lineage identifiers (rc-6) with a mismatch test.
+  - 2026-09-12 PRI-749 / PR #1619 review (derivation-source flavor): a UI validator was derived from the client's payload instead of the server's authoritative type — required `TaskRecord.updatedAt` read as nullable, `RunRecord.taskId` lineage unvalidated (rc-6). Fixed: require presence/nullability/equality from the SERVER's schema (`Type.Optional` = required; `Type.Null()` members are required-AND-nullable) + lineage mismatch tests.
   <!-- recurrence-meta
   {
     "date": "2026-09-12",
@@ -400,9 +399,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     "guard": "none"
   }
   -->
-  - 2026-08-13 PRI-523: structural guards accepted blank/relative route fields; added semantic validation + fail-loud tables.
-  - 2026-07-23 PRI-518: `recommendations` had no `minItems` — `[]` committed zero candidates and marked diagnosis SUCCEEDED (Story A root cause). Fixed `minItems: 1`; intentional "no action" must be `{kind:'defer',...}`.
-  - 2026-06-25 PRI-459 (PR#1045): `createRule`/`createImplementation` silently overwrote existing id; 2026-06-23 PR#1026: 4 `as`-bypass violations.
+  - 2026-08-13 / 07-23 / 06-25 (compressed; full text → ERROR_ARCHIVE.md): blank/relative route fields passed structural guards; `recommendations` lacked `minItems:1` so `[]` marked diagnosis SUCCEEDED; `createRule`/`createImplementation` silently overwrote existing ids + 4 `as`-bypass violations.
   - Earlier recurrences (PR#680-#966): same silent-skip pattern across `parseInt` w/o NaN check, `?.trim()||undefined`, `?? 'fallback'` defaulting, `if(output){assert}` (full text → ERROR_ARCHIVE.md).
 **[ERR-011]** | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades
 
@@ -543,8 +540,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For every new validation/security function, the PR must include: (1) a test proving the production path calls the function, (2) a test proving the production path rejects/defends when the function returns invalid. If neither exists, the validator is not actually defending anything. Review trigger: any PR that adds a validation function without modifying the code that handles the untrusted input.
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
-- **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
-  - 2026-09-13 PRI-770 / PR #1645 CodeRabbit review round 1: deleting the evolution_tasks V2 column migration with its zero-call writers ignored a THIRD data state the migration protected — a pre-V2 historical table missing the six nullable columns makes readers' SELECT throw "no such column". Rule: when deleting a migration/backfill/compat layer, enumerate the HISTORICAL STATES it normalized (not just the call graph) and fixture-test the OLDEST supported state — the layer's existence signals data it keeps readable.
+- **Recurrence**: Yes — a component exists with isolated tests but is not wired into the production enforcement path.
+  - 2026-09-13 PRI-770 / PR #1645 CodeRabbit review: deleting the evolution_tasks V2 column migration with its zero-call writers ignored a THIRD data state it protected — a pre-V2 historical table missing the six nullable columns makes readers' SELECT throw "no such column". Rule: enumerate the HISTORICAL STATES a deleted compat layer normalized; fixture-test the oldest state.
   <!-- recurrence-meta
   {
     "date": "2026-09-13",
@@ -556,7 +553,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     "guard": "pre-V2 fixture regression test"
   }
   -->
-  - 2026-09-12 PRI-752 / PR #1621+#1623 review, 7 findings, one root cause (pre-merge): retirement declared complete without enumerating readers of the changed surface — config merge let a stored legacy `category: quiet` override the new `gone` tombstone; a docs "run all tests" loop still invoked a deleted scenario; an architecture tree still inventoried deleted CLI files; a census count drifted; and a read-only CLI whose retention an audit deferred to Owner decision was deleted ahead of it (restored). Rule: a write-side change (registry value, deletion, rename) does not propagate itself — grep ALL read/display sites of the changed field plus every doc/test/inventory reference before claiming "synced/retired"; audit-deferred surfaces stay out of delete scope until the decision lands.
+  - 2026-09-12 PRI-752 / PR #1621+#1623 review, 7 findings, one root cause (pre-merge): retirement declared complete without enumerating READERS of the changed surface (legacy override beat the `gone` tombstone; docs loop invoked a deleted scenario; census drifted; a deferred read-only CLI deleted early). Rule: a write-side change does not propagate itself — grep ALL read/display sites plus doc/test/inventory references before claiming "synced/retired".
   <!-- recurrence-meta
   {
     "date": "2026-09-12",
@@ -568,19 +565,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     "guard": "none"
   }
   -->
-  - 2026-09-09 PR #1574 review: finish metadata added to evidencePack + `output_extraction_failed` but sibling terminal `output_repair_exhausted` kept the old payload — grep ALL emission sites of a mirrored failure payload and assert the full field set on EACH surface.
-  - 2026-09-12 PRI-755 / PR #1638 review, 5 findings, one root cause (pre-merge): a NEW validation+warn mechanism in an existing helper was verified only by direct-helper tests — production registration never passed the logger (rc-9 warns were no-ops), consumer/producer keyed sessions differently, empty rounds fed validation a stale set, warns fired on healthy traffic, untrusted ids unescaped into logs. Rule: a NEW auxiliary mechanism in an existing pipeline is evidence-verified on its OWN integration surfaces — every consumed dep actually passed; write cadence covers empty cycles; producer/consumer identity resolves identically; degradation fires only on degraded events; untrusted values escaped before log interpolation — one wiring-level test each through the production call shape.
-  - 2026-08-31 PRI-631 / PR #1462: optional Evaluator V2 shape bypassed the canonical Artificer validator — route every accepted shape through the hard gate + shape regression.
-  - 2026-08-26 PRI-606: axiom builders tested in isolation, never injected on fresh installs (reducer empty + barrel miss) — registry-direct wiring + regression.
-  - 2026-09-08 PR #1551 R2: fresh-derived disposition not persisted with completion intent; resume re-derived and drifted — persist the disposition before effects; resume replays it.
-  - 2026-08-24 PR #1389: forwarding two NEW telemetry events via a previously-unpassed optional dep woke four dormant emission sites under the wrong channel — grep ALL consumption sites when activating a dormant dep + negative-control test.
-  - 2026-08-20 PR #1358 (three rounds): per-cycle budget gated on a resource constructed after an early return; crash-recovery re-consulted the LLM over the durably persisted `runnerDecision`; retry edge reset the authority — construct budget deps before all early returns; every re-entry path consumes the durably recorded decision as authority; enumerate every decision reset path and merge multi-write Owner mutations into one patch.
-  - 2026-07-04 PRI-510 / PR#1188: optional deps passed at only 2 of N construction sites (repair loop dead at runtime) — centralize dep construction in one helper.
-  - 2026-06-25 PRI-467 / PR#1059: `truncateInjectionToBudget()` `blocks` param omitted `intentBlockContent` — priority strip could not remove INTENT.
-  - 2026-06-19 PRI-408 / PR#972: `activateArtifact()` accepted `rolloutDecision='approved'` without verifying the approval record — require `approvalId` + independent verification.
-
----
-  - 2026-09-08 PRI-705 / PR #1551 review round: `partitionV2OutOfScopeFailures` had direct-call tests (hand-built `requiresContextVersion: undefined`), but the production resolver `resolveRequiresContextVersion` collapsed "key absent on a PARSED artifact" (deterministically v1 — the classifier's entire target population) into the same `null` as "unresolvable", so out-of-scope routing could never fire in production. Three-state resolver + WIRING-level regression through the real `contentJson` shape. Lesson: "absent on valid input" and "input unresolvable" are different states — collapsing them creates dead branches direct-call tests cannot catch; add one resolver→classifier composition test with the production input shape.
+  - 2026-09-12 PRI-755 / 09-09 #1574 / 09-08 PRI-705 + #1551 R2 / 08-31→06-19 (compressed; full text → ERROR_ARCHIVE.md): verify a NEW auxiliary mechanism on its OWN integration surfaces through the production call shape; grep ALL emission sites of a mirrored failure payload; "absent on valid input" ≠ "input unresolvable" (three-state resolvers + composition tests); persist fresh-derived dispositions before effects; route every accepted shape through the canonical validator; wire optional deps/budgets at ALL construction sites.
 
 ---
 
@@ -593,7 +578,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-209 / PR #689
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — tests assert shapes/strings/isolated helper behavior instead of the real production contract, or vacuously pass when data is absent.
-  - 2026-09-12 PRI-749 / PR #1619 review (two-sided-contract flavor): the client test asserted `encodeURIComponent(taskId)` goes on the wire — green against mocked fetch — while the server route compared the still-encoded path segment against raw store ids, so the real round trip 404'd for any id needing encoding. Coverage proved one half of a two-sided contract in isolation. Fixed by decoding server-side (`400 invalid_encoding` on malformed sequences, decode before any store access) with route-level round-trip tests asserting the DECODED id reaches the store. Prevention: for any wire contract the test asserts from the client side, pin the server half in the same PR (route-level test through the real handler, not a fetch mock).
+  - 2026-09-12 PRI-749 / PR #1619 review (two-sided-contract flavor): the client test asserted `encodeURIComponent(taskId)` goes on the wire while the server route compared the still-encoded path segment against raw store ids — the real round trip 404'd for any id needing encoding. Fixed by decoding server-side (`400 invalid_encoding` on malformed) with route-level round-trip tests asserting the DECODED id reaches the store. Prevention: for any wire contract asserted from the client side, pin the server half in the same PR (route-level test through the real handler, not a fetch mock).
   <!-- recurrence-meta
   {
     "date": "2026-09-12",
@@ -605,13 +590,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
     "guard": "none"
   }
   -->
-  - 2026-08-27 PR #1413 review (release-update SPEC, no Linear issue): direct module tests did not prove installer/Console/Companion production wiring, so scope was corrected to foundation/shadow and production-entry BDD remains follow-up. The first post-fix CI run then proved the version fixture also differed from the official install, causing clean install rejection. Fixed with a production-shaped fixture, root-manifest priority, and fail-loud corrupt-manifest behavior. Prevention: every shipped entry point needs a real smoke; helper fixtures are diagnostic only.
-  - 2026-08-14 PRI-523 (PR#1315 review): `CodexHostInstaller.resolvePdHookPath()` was proven only in the dev worktree and module-mocked tests, while the documented end-user npx flow dead-ended (npx cache is not an ancestor of the global npm root). Fixed by probing `npm root -g` as a fallback with injectable-deps tests. Same class: the production consumer path was never the thing under test.
-  - 2026-08-11 PR #1298 (CodeRabbit #3758794691): `mvp-config.test.ts` used `content.indexOf('runHostInstallers')` to extract a boundary and matched the declaration/JSDoc occurrence instead of the intended `return {` block — the extracted block did not contain the asserted guard and the test passed vacuously. Fixed by anchoring on the call pattern `await runHostInstallers(`. Same class as ERR-026 — the test boundary drifted from the real code structure.
-  - 2026-06-25 PRI-467 (PR#1059): mock stubbed `readActivations()` but prod calls `readActivatedPrinciples()` — TypeError catch-and-continue masked it
-  - 2026-06-25 PRI-459 (PR#1045): ledger no-lost-update test was sequential (passes without lock); fails-LOUD lock contract untested
-  - 2026-07-17 PRI-518: the OpenClaw CLI adapter's mocked test asserted a remembered `--message @file` convention, while the checked OpenClaw source accepts multiline payloads through `--message-file <path>` — the real replay sent a literal path and repeatedly received schema-invalid output. Fixed by emitting the source-backed flag and asserting the exact spawned argument contract.
-  - Earlier recurrences (PR#689-#1004): same vacuous-pass pattern across MVP smoke, repair loop, package tests, nav tests, RuleHost fixtures. See git history.
+  - 2026-08-27 / 08-14 / 08-11 (compressed; full text → ERROR_ARCHIVE.md): direct module tests did not prove installer/Console/Companion production wiring — every shipped entry point needs a real smoke, helper fixtures are diagnostic only; `resolvePdHookPath()` proven only in the dev worktree while the npx flow dead-ended — the production consumer path must be the thing under test; an `indexOf`-extracted test boundary matched the declaration and passed vacuously — anchor on the real call pattern.
+  - 2026-06-25 / 07-17 / earlier (compressed; full text → ERROR_ARCHIVE.md): mock stubbed a method prod doesn't call (catch-and-continue masked it); no-lost-update test sequential so the lock contract went untested; a mocked adapter asserted a remembered `--message @file` convention against a source that takes `--message-file <path>`; vacuous-pass pattern across MVP smoke, repair loop, package/nav tests, RuleHost fixtures (PR#689-#1004).
 
 ---
 **[ERR-032]** | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014
@@ -725,8 +705,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 121 |
-| Last updated | 2026-09-13 |
+| Total lessons | 123 |
+| Last updated | 2026-09-15 |
 | Top category | Schema & Type |
 | Recurring errors | 65 |
 
@@ -739,19 +719,11 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Add a tarball content contract test that: (1) reads `package.json files` array, (2) asserts required directories are listed, (3) after `npm pack`, asserts the tarball contains expected files. Run this test in CI, not just locally.
 - **Source**: PRI-247 / PR #721
 - **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-025, ERR-026. 3 most recent full entries below; older recurrences compressed to one lines (full text → ERROR_ARCHIVE.md).
-  - 2026-08-27 PR #1413 review (release-update SPEC): reproducibility workflow exercised only 5 of the declared 15 OS/arch×Node targets and publication could bypass it — the publish job must depend on the full supported-target matrix (a separately green matrix is not a gate).
-  - 2026-08-25 Phase 2b quality review: spawning `npm` via `execFile` on Windows fails (npm.cmd shell shim) — win32 child-process npm invocations must go through `process.env.ComSpec`.
-  - 2026-08-25 Phase 2b SPEC review: clean-machine matrix ran generic `build` while the producer needs `openclaw-plugin/dist/bundle.js` from `build:production` — enumerate the exact producer for every required generated artifact.
-  - 2026-08-25 release-update SPEC review (compressed; full text → ERROR_ARCHIVE.md): producer copied only dist metadata, release test fabricated `node_modules`, `./governance-audit` export undelivered; every zero-install consumer contract lands with the producer + clean consumer smoke in the same change.
-  - 2026-08-22 PRI-561 (compressed; full text → ERROR_ARCHIVE.md): console inline updater missed the host-runtime copy + resolution link; when a package gains a new `@principles/*` dependency, extend EVERY delivery surface (bundle-plugin / installer / updater).
-  - 2026-08-21 PR #1371 (compressed; full text → ERROR_ARCHIVE.md): bundle dependency-rewrite map missed the new `@principles/host-runtime` import → packaged console crashed on clean install; extend the rewrite map for every new `@principles/*` package and cover the import in the packaged-install smoke.
-  - 2026-08-14 PRI-524 (compressed; full text → ERROR_ARCHIVE.md): Codex plugin scripts re-committed the pd `.cmd` shim spawn EINVAL; resolve the real pd-cli JS entry and spawn via `process.execPath`.
-  - 2026-08-13 PRI-523 (compressed; full text → ERROR_ARCHIVE.md): bundled plugin kept an inlined workspace-only dependency; packaging strips and pack-tests it.
-  - 2026-07-03 PRI-505 (compressed; full text → ERROR_ARCHIVE.md): `PLUGIN_REQUIRED` checked `dist/` exists, not `dist/bundle.js`; required-file checks must name the exact file.
-  - 2026-07-01 PR #1146 (compressed; full text → ERROR_ARCHIVE.md): bare npm `pd` shim fails under Windows `shell:false`; resolve the sibling `dist/index.js` and spawn via `process.execPath`.
-  - 2026-06-03 PRI-299 (compressed; full text → ERROR_ARCHIVE.md): pd-cli imported better-sqlite3 without declaring it.
-  - 2026-06-02 PRI-250 (compressed; full text → ERROR_ARCHIVE.md): `js-yaml`/`semver` in devDependencies (stripped by publish); undeclared better-sqlite3 for console bundle; `installBundledCore` never ran npm install.
+- **Recurrence**: Same class as ERR-025, ERR-026. Older recurrences compressed to one lines (full text → ERROR_ARCHIVE.md).
+  - 2026-08-27 / 08-25 ×3 (compressed; full text → ERROR_ARCHIVE.md): the publish job must depend on the FULL supported-target matrix; win32 child-process npm via `process.env.ComSpec`; enumerate the exact producer per required artifact (`bundle.js` needs `build:production`); producer copied only dist metadata / release test fabricated `node_modules` — consumer contracts land with the producer + clean consumer smoke.
+  - 2026-08-22 / 08-21 (compressed; full text → ERROR_ARCHIVE.md): a package gaining a new `@principles/*` dependency must extend EVERY delivery surface (bundle-plugin / installer / updater) AND the bundle dependency-rewrite map, covered by the packaged-install smoke.
+  - 2026-08-14 / 08-13 (compressed; full text → ERROR_ARCHIVE.md): Codex plugin scripts re-committed the pd `.cmd` shim spawn EINVAL (resolve the real pd-cli JS entry, spawn via `process.execPath`); bundled plugin kept an inlined workspace-only dependency (packaging strips and pack-tests it).
+  - 2026-07-03 / 07-01 / 06-03 / 06-02 (compressed; full text → ERROR_ARCHIVE.md): `PLUGIN_REQUIRED` must name the exact file (`dist/bundle.js`, not `dist/`); bare npm `pd` shim fails under Windows `shell:false`; undeclared runtime deps (better-sqlite3; js-yaml/semver as devDeps stripped by publish).
 
 ---
 **[ERR-055]** | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys pass through unredacted
@@ -847,7 +819,32 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Root cause**: Did not check which package manager CI uses before installing dependencies. The repo root has both `package.json` (`packageManager: pnpm@11.1.1`) and `package-lock.json`, but CI workflows exclusively use `npm ci`. pnpm and npm maintain separate lockfiles; updating one does not sync the other.
 - **Fix**: `git checkout pnpm-lock.yaml` (revert the wrong lockfile), then `npm install --ignore-scripts` to regenerate `package-lock.json` with the new deps. Commit 3a7780e.
 - **Prevention**: Before adding/removing dependencies, check CI workflows (`grep -r "npm ci\|pnpm install" .github/workflows/`) to identify the canonical lockfile. Run the install command matching CI's package manager, then commit the lockfile CI reads. EP-06 "package runtime dependencies are declared in the package that imports them" extends to: the lockfile CI consumes must be the one updated.
-- **Recurrence**: 2026-06-16, PRI-419 / PR #953.
+- **Recurrence**: Yes — a lockfile the consuming `npm ci` reads was not the one updated (wrong package manager; or auxiliary/release lockfiles outside the bump author's view).
+  - 2026-09-14 dependabot vite bump repair (PRs #1689/#1690/#1692 campaign, no Linear issue): dependabot bumped vite across 7 package.jsons + the root lockfile but NOT the 8 `packages/create-principles-disciple/release-locks/*/package-lock.json` the self-contained release bundling `npm ci` consumes — `lock file's vite@8.2.2 does not satisfy vite@8.3.0` failed quick-check and both install smokes. Fixed by regenerating all release locks via `generate:release-locks` (must run under Node 22/npm 10 — the record shape every supported major can install) and verifying with `check:release-locks` before push.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-14",
+    "pattern": "EP-06",
+    "invariant": "auxiliary-release-lockfile-not-updated-on-manifest-bump",
+    "severity": "P1",
+    "escaped": "none",
+    "caughtBy": "ci",
+    "guard": "generate:release-locks + check:release-locks on any dependency-bump PR; ERR-130 pre-merge audit for path-filter-skipped suites"
+  }
+  -->
+  - 2026-09-08 dependabot subpackage bumps (4 PRs, recorded 2026-09-15): dependabot updated a subpackage `package.json` without the root `package-lock.json` npm ci reads (`Missing: <pkg>@<ver> from lock file`), and vitest 4↔5 peer interlocks required a whole-repo co-bump.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-08",
+    "pattern": "EP-06",
+    "invariant": "root-lockfile-not-updated-on-subpackage-manifest-bump",
+    "severity": "P1",
+    "escaped": "none",
+    "caughtBy": "ci",
+    "guard": "npm install at repo root after any dependabot manifest bump; whole-repo co-bump for peer-interlocked majors"
+  }
+  -->
+  - 2026-06-16, PRI-419 / PR #953.
 **[ERR-069]** | Adapter `runHandle` hardcodes `status:'succeeded'` absent from `RunHandleSchema` (masked by `as RunHandle`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in `ArtificerL2Adapter`
 
 - **What happened**: Two defects found in a single self-review of `ArtificerL2Adapter` (PRI-424 Phase 4), both in the same file:
@@ -891,12 +888,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-002 (silent cleanup failure — PRI-240 recurrence), ERR-015/ERR-018/ERR-019 (stale state from incomplete cleanup)
 - **Source**: PRI-428 / PR #966 (CodeRabbit review)
 - **Date**: 2026-06-18
-- **Recurrence**: 2026-06-21 PR #994 — timeout cleanup killed only the direct CLI process on Unix, allowing descendant processes and inherited handles to survive. Fixed by launching a detached process group and terminating the whole group on timeout. Also 2026-06-21 PR #989 — short-lived SQLite queues returned without their owning connection; 2026-06-18 PRI-429 / PR #966 — cleanup failures were discarded; 2026-06-18 PR #971 — `AudioContext` instances leaked on unmount. 2026-09-04 PRI-655 / PR #1514 review — a daemon-loop test sent its stop signal only on the happy path, so assertion failures leaked a live background loop, timers and signal listeners into subsequent tests; fixed by moving SIGINT + handler await into try/finally.
-
-  - 2026-07-17 PRI-518 self-review: a new cross-SQLite E2E test called `RuntimeStateManager.close()` in `afterEach` without `await`. Fixed before handoff by making the hook async and awaiting close before removing the temporary workspace.
-  - 2026-08-13 PRI-523: a registration-test timer could mutate real home config. Mocked the writer, authorized the fake config, cleaned timers, and isolated packed-bundle HOME.
-  - 2026-08-28 PRI-612 / PR #1426 review: a pd-cli test registered a process-wide `unhandledRejection` listener and never removed it, leaking debug behavior into later tests in the same worker. Fixed by removing the listener; the focused suite now proves the intended rejection behavior without global instrumentation.
-  - 2026-08-13 PRI-523 C1.3 self-review (corrected classification, consolidated): the OpenClaw host-owned diagnosis continuation must remain best-effort so the PostToolUse hook returns after durable shared SQLite persistence, but the first implementation used bare `void emitPainDetectedEvent(...)` with no lifecycle-owned rejection handling or test drain. The first corrective scheduler still allowed a never-settling continuation to keep the pending set and lifecycle drain open forever. Fixed with an explicit scheduler that attaches immediate resolution/rejection handlers, enforces a finite 30-second timeout, emits bounded reason/nextAction, clears its timer on every terminal path, removes settled or timed-out promises, and exposes a test-only drain. Rejected and never-settling continuation regressions prove observability and bounded cleanup without extending hook latency; the original promise remains rejection-observed even if it settles after the timeout.
+- **Recurrence**: 2026-09-04 PRI-655 / PR #1514 review — a daemon-loop test sent its stop signal only on the happy path, so assertion failures leaked a live background loop, timers and signal listeners into subsequent tests; fixed by moving SIGINT + handler await into try/finally. 2026-07-17 / 08-13 / 08-28 / 06-21 / 06-18 (compressed; full text → ERROR_ARCHIVE.md): `RuntimeStateManager.close()` awaited in an async `afterEach`; a registration-test timer mocked instead of mutating real home config; a process-wide `unhandledRejection` listener registered but never removed; timeout cleanup killed only the direct CLI process (terminate the whole detached process group); short-lived SQLite queues returned without their owning connection; cleanup failures discarded; `AudioContext` instances leaked on unmount.
 
 ---
 **[ERR-073]** | Refactoring characterization tests cover shared logic happy path, not call-site-specific behavior equivalence
@@ -1070,7 +1062,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
-  - 2026-09-12 PRI-754 / PR #1633 Codex review (spawned-process isolation flavor): the ai-user bootstrap spawned the REAL console server with the ambient environment — its production wiring reads the developer's `~/.pd-console` / `~/.openclaw` and exposes update routes that can mutate `~/.pd/runtime`, so a QA run could touch the live installation. Fixed by redirecting the child's `HOME`/`USERPROFILE` into the temp workspace at spawn + whole-pair Owner identity env (never half-real) + an isolation startup smoke.
+  - 2026-09-12 PRI-754 / PR #1633 Codex review (spawned-process isolation flavor): the ai-user bootstrap spawned the REAL console server with the ambient environment — its wiring reads the developer's `~/.pd-console` / `~/.openclaw` and can mutate `~/.pd/runtime`. Fixed: redirect the child's `HOME`/`USERPROFILE` at spawn + whole-pair Owner identity env + isolation startup smoke.
   <!-- recurrence-meta
   {
     "date": "2026-09-12",
@@ -1082,7 +1074,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     "guard": "isolation startup smoke (server healthy under redirected HOME)"
   }
   -->
-  - 2026-09-11 PRI-737 / PR #1613 (baseline inventory removal): removed two retired files from the plugin-core anti-growth allowlist in principles-core's architecture-regression.test.ts but missed the sibling self-consistency guard `expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98)` in the SAME file → CI "Test principles-core" red; local gates passed because verify:merge does not run the owning package's vitest suite. Fixed 98→96 with a dated comment. Prevention: when editing an inventory/allowlist list, grep the same file for derived count assertions (`\.size).toBe(` / `toHaveLength`) and update them in the same commit; run the owning package's tests — the merge gate builds/typechecks but does not run every package's suite.
+  - 2026-09-11 PRI-737 / PR #1613 (baseline inventory removal): removed two files from the plugin-core allowlist but missed the sibling `expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98)` guard in the SAME file → CI red; local gates passed because verify:merge does not run the owning package's vitest suite. Prevention: when editing an inventory/allowlist, grep the same file for derived count assertions and update them in the same commit; run the owning package's tests.
   <!-- recurrence-meta
   {
     "date": "2026-09-11",
@@ -1094,15 +1086,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     "guard": "none"
   }
   -->
-  - 2026-09-04 PRI-672 / PR #1511 (build-scope recurrence): pd-console deep-imported installer `dist` that the root `build` chain never produced — clean CI TS2307, local runs masked by prebuilt dist. Prevention: a new cross-package import of another package's `dist` (runtime or type-level) must add that package to the root build chain in the SAME PR.
-  - 2026-09-03 adhoc runtime-update-guards: update-route tests resolved the REAL canonical install and a fake tarball overwrote it — pin homedir, refuse unself-identifying staged packages, isolation sentinel test.
-  - 2026-08-31 PRI-631 / PR #1462: Console E2E inherited local Owner identity, clean CI had none — explicit Playwright server identity vars.
-  - 2026-08-27 PRI-612 / PR #1426: new barrel export missing from a bare vi.mock factory — importOriginal spread.
-  - 2026-08-26 PRI-595~603 / PR #1419: dependency-first build ordering + HOME/USERPROFILE env pins.
-  - 2026-08-24 PRI-583 / PR #1406: install-layout producer/consumer/delivery paths audited end-to-end (related: ERR-040).
-  - 2026-08-18~21 RuleCode Owner Live Decision reviews ×6: duplicated allowlists, guard classification, optional-note string broke SQLite read contract, env-sensitive error-subclass assertions.
-  - 2026-08-13~15 PRI-523×5 + PRI-526: shared kernel wiring missed host-owned exclusion/enrichment; env fixture refactor missed in-process siblings reading real HOME.
-  - 2026-06-26~07-04 PR #1066/#1137/#1162/#1182/#1183: FK guards, status enum, default profile name, package rename, homedir defaults — each missed same/cross-package validators/tests (full text → ERROR_ARCHIVE.md).
+  - 2026-09-04 / 09-03 / 08-31 / 08-27 / 08-26 / 08-24 / 08-18~21 / 08-13~15 / 06-26~07-04 (merged one-liners): a cross-package import of another package's `dist` must add it to the root build chain in the same PR; pin homedir/identity for update-route and Console E2E tests; bare vi.mock factories need importOriginal spread for new barrel exports; dependency-first build ordering; duplicated allowlists + optional-note strings broke SQLite read contracts; shared-kernel wiring missed host-owned exclusion; FK guards/status enums/default names/package renames each missed same/cross-package validators and tests.
 
 ---
 **[ERR-084]** | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA
@@ -1133,8 +1117,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-025 (test proves isolated helper, not real production defense — same EP-09 group), ERR-077 (characterization tests don't verify parameter parity — same EP-09 group), ERR-009/ERR-010 (production-code sibling: falsy values silently passing validation).
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
-- **Recurrence**: (older inline recurrences compressed; full text → ERROR_ARCHIVE.md) 2026-08-13 PRI-523 C1.1: production-BDD seeded only a Runtime V2 activation then asserted its unique text — could not prove the legacy/Runtime V2 overlap branch; seed both paths, assert per-path unique signals. 2026-07-22 PRI-520 / PR #1249: a fail-loud contract test must assert BOTH the surfaced error text AND the preserved original outcome. 2026-07-15 PRI-516: fixture override destructured but never applied while tests mutated the real mock — remove dead overrides. 2026-07-04 PR #1182: non-unique UPDATE-by-painId + pagination-past-end false-empty — latest-row subquery + total-based emptiness. (2026-06-30/07-01/07-02/07-03 compressions unchanged.)
-  - 2026-09-11 PRI-626 / PR #1608 review: two P1s, one root cause — self-authored verification whose failure paths were never executed (harness `=== undefined` vs `null` sentinel crashed the real needs_revision path; zero-write probe asserted exit-0 only on a fail-open hook). Bite-verify every failure branch the author adds, with a unique structured marker + flag-ON negative control. (Full text → ERROR_ARCHIVE.md.)
+- **Recurrence**: (older inline recurrences → ERROR_ARCHIVE.md) 2026-08-13 PRI-523 C1.1: production-BDD seeded only a Runtime V2 activation then asserted its unique text — seed both paths, assert per-path unique signals. 2026-07-22 PRI-520: fail-loud tests assert the surfaced error AND the preserved outcome. 2026-07-04 PR #1182: non-unique UPDATE-by-painId + pagination false-empty — latest-row subquery + total-based emptiness.
+  - 2026-09-11 PRI-626 / PR #1608 review: self-authored verification never executed its failure paths (harness sentinel crashed the real needs_revision path; zero-write probe asserted exit-0 on a fail-open hook). Bite-verify every failure branch the author adds: unique marker + flag-ON negative control. (Full text → ERROR_ARCHIVE.md.)
   <!-- recurrence-meta
   {
     "date": "2026-09-11",
@@ -1158,7 +1142,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     "guard": "none"
   }
   -->
-  - 2026-08-28 PRI-614: gateway recovery test counted a restart without proving it followed the tar failure; strict call-order assertions + inverted-order negative control. 2026-08-20 PRI-553: governance BDD treated non-empty body text as SPA-ready before the `#/focus` redirect settled; wait for the canonical focus URL. 2026-09-04 PRI-665 (diagnosis-side sibling): "barrel missing 8 exports" misdiagnosis from three text-level symbol checks sharing one blind spot (`export *` chains); real cause was stale physical dependency copies shadowing canonical packages — root-cause claims about module interfaces require a REAL Node import. (Full texts → ERROR_ARCHIVE.md.)
+  - 2026-08-28 / 08-20 / 09-04 (merged one-liners): gateway recovery test counted a restart without proving it followed the tar failure (strict call-order + inverted-order negative control); governance BDD asserted SPA-readiness before the `#/focus` redirect settled; "barrel missing 8 exports" misdiagnosis from text-level symbol checks — root-cause claims about module interfaces require a REAL Node import.
 
 ---
 **[ERR-089]** | Fix addresses primary failure path but leaves sibling failure branches with stale state, wrong command path, or CLI contract violation
@@ -1679,6 +1663,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
+---
 **[ERR-130]** | Outcome classification derived from WHICH control path executed (catch block) instead of post-hoc state resolution — library silent-returns on abort make catch-based assignment dead code
 
 - **What happened**: ArtificerL2Adapter (EP002-R3) classified loop failures via `timedOut = budgetTimedOut` assigned ONLY inside the `catch` around `runAgentLoop`. pi-agent-core's runLoop, however, ends an aborted LLM stream with a silent `return` (no throw), so the catch never executed: every PD-budget abort was recorded as `output_invalid` (permanent) instead of `timeout`, and 16 consecutive live runs were diagnosis-dead — the investigation itself was misled, inferring "budget didn't fire" from a classification that could never have observed the flag.
@@ -1689,4 +1674,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-002 (fail-loud surface), EP-03 (silent degradation)
 - **Source**: PRI-795 / EP002-R3 live evidence (PR #1684 follow-up investigation)
 - **Date**: 2026-09-14
+- **Recurrence**: None
+
+---
+**[ERR-131]** | Dependency-bump blast radius unverified — path-filtered CI skips package test/typecheck jobs for lockfile/manifest-only PRs, so ESM default-export removal, 0.x semver pairing dual-installs, and renamed APIs ship green
+
+- **What happened**: Three parallel dependabot repair PRs (2026-09-14, #1689/#1690/#1692): (1) js-yaml 4→5 is ESM-only with NO default export — `import yaml from 'js-yaml'` in pd-console's `pd-config-store.ts` crashed the installed Console server at startup ("does not provide an export named 'default'") and `(await import('js-yaml')).default` yielded `undefined` in three test files; (2) js-yaml 5 also deleted `DEFAULT_SCHEMA` (load's default narrowed to CORE_SCHEMA — timestamps parse as STRINGS) and renamed `quotingType`→`quoteStyle`; (3) bumping pi-ai to 0.85.1 without its 0.x-locked sibling pi-agent-core (^0.84.1 does not satisfy 0.85.x) produced TWO pi-ai copies whose private-class types are mutually incompatible. All of this was invisible to the PRs' green CI because path-filtered workflows SKIP package test/typecheck jobs when only lockfiles/manifests change — failures surfaced only after code edits brought the jobs back, or at install smoke.
+- **Why it's wrong**: A green path-filtered CI run is NOT evidence that a dependency bump is safe — the jobs that would catch consumer breakage (package unit tests, tsc, install smoke) were skipped, and `verify:merge` does not re-resolve lockfiles or typecheck every workspace. A bumped library's consumer blast radius (import shape, renamed/removed exports, 0.x semver pairing) is a cross-package contract change (§19) that must be audited, not assumed.
+- **Generalized failure mode**: When a PR changes dependency versions (package.json/lockfile), assistants must audit the consumers' import/usage surface and the resolved dependency tree before trusting green CI, otherwise ESM-interop breaks, renamed/removed exports, and dual-install type splits ship as latent failures the filtered pipeline never ran.
+- **Correct approach**: For dependency bumps run, locally, the suites CI would skip: affected packages' `vitest run` + `tsc --noEmit`, plus `npm ls <pkg>` to confirm a single resolved copy (a second nested copy = nominal type split — pair-bump the 0.x-locked sibling instead, e.g. pi-ai ↔ pi-agent-core). Scan consumer usage for the bump's known breaking shapes: default-import patterns (`rg "\.default"` at import sites) and renamed/removed symbols. Regenerate auxiliary lockfiles the repo owns (`release-locks`) — see ERR-068.
+- **How to prevent**: Before pushing a dependency-bump PR, answer in the PR body: which package jobs will CI SKIP for this change, and what local evidence covers them (30-second check). After any major/0.x-minor bump: default-import scan + `npm ls` single-copy check.
+- **Regression guard**: `npm run verify:merge` locally on the bump PR + targeted `vitest run` in each consumer package (pd-cli/pd-console/codex-adapter suites were all red before the port and green after); `npm ls` dedupe check is manual per bump — no mechanized guard yet; escalation decision deferred unless this class recurs.
+- **Related ERRs**: ERR-068 (auxiliary lockfile drift — same campaign), ERR-125 (lint-uncovered surface is someone else's net), ERR-129 (parity claims without verification)
+- **Source**: adhoc 2026-09-14 dependabot repair campaign (PRs #1689/#1690/#1692)
+- **Date**: 2026-09-15
 - **Recurrence**: None
