@@ -35,8 +35,9 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import { gzipSync } from 'node:zlib';
 import {
   Key,
-  MetaFile,
   Metadata,
+  MetadataKind,
+  MetaFile,
   Root,
   Signature,
   Snapshot,
@@ -547,4 +548,48 @@ export function generateEphemeralSigningKeyPem(): string {
     .privateKey
     .export({ type: 'pkcs8', format: 'pem' })
     .toString();
+}
+
+/**
+ * PRI-732 publish-side guard: a REAL publication must be verifiable by the
+ * pinned trust root installs actually carry. Refuses a signing key whose
+ * derived key id is not a root-role key of the pinned trust root — publishing
+ * with any other key would produce metadata NO existing install can verify.
+ * (Dry-run/ephemeral pipelines simply do not call this.)
+ */
+export function verifySigningKeyMatchesPinnedRoot(
+  signingKeyPem: string,
+  pinnedRootJson: string,
+): { keyId: string; pinnedRootKeyIds: readonly string[] } {
+  const signer = requireSigner(signingKeyPem);
+  let pinnedRoot: Root;
+  try {
+    pinnedRoot = (Metadata.fromJSON(MetadataKind.Root, JSON.parse(pinnedRootJson))).signed;
+  } catch {
+    throw new ReleasePublicationError(
+      'signing_key_invalid',
+      'pinnedTrustRoot',
+      'The pinned trust root is not a parseable TUF Root document.',
+      'Repair packages/create-principles-disciple/trust/root.json (re-run the trust root ceremony only as an explicit governance decision).',
+    );
+  }
+  const pinnedRootRole = pinnedRoot.roles.root;
+  if (pinnedRootRole === undefined) {
+    throw new ReleasePublicationError(
+      'signing_key_invalid',
+      'pinnedTrustRoot',
+      'The pinned trust root carries no root role.',
+      'Repair packages/create-principles-disciple/trust/root.json (re-run the trust root ceremony only as an explicit governance decision).',
+    );
+  }
+  const pinnedRootKeyIds = pinnedRootRole.keyIDs;
+  if (!pinnedRootKeyIds.includes(signer.keyId)) {
+    throw new ReleasePublicationError(
+      'signing_key_invalid',
+      'signingKeyPem',
+      `The signing key (${signer.keyId.slice(0, 16)}…) does not match the pinned trust root installs carry (${pinnedRootKeyIds.map((keyId) => keyId.slice(0, 16)).join(', ')}…).`,
+      'Set PD_RELEASE_SIGNING_KEY to the private key matching the pinned trust root (packages/create-principles-disciple/trust/root.json).',
+    );
+  }
+  return { keyId: signer.keyId, pinnedRootKeyIds };
 }

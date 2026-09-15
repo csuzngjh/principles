@@ -16,6 +16,7 @@
     "codex-adapter",
     "install-layout",
     "release-manager",
+    "trust/root.json",
     "README.md",
     "LICENSE"
   ],
