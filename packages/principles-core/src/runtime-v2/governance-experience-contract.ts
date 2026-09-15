@@ -4,6 +4,7 @@ import {
   OwnerGovernanceViewSchema,
   SourceRefSchema,
 } from './governance-projection-contract.js';
+import { GovernanceTimestampSchema } from './governance-timestamp-schema.js';
 
 // Governance Experience Snapshot v1.5.1 contract (PRI-584).
 //
@@ -14,9 +15,11 @@ import {
 // fields the projection already computed.
 
 const NonEmptyStringSchema = Type.String({ minLength: 1 });
-// Reuses the ISO-8601 UTC format registered by governance-projection-contract.js
-// at import time; Value.Check fails loud if the two registrations ever diverge.
-const TimestampSchema = Type.String({ format: 'governance-iso-utc' });
+// PRI-798: shared pattern-based timestamp schema. The previous version reused
+// a FormatRegistry format registered by governance-projection-contract.js at
+// import time — a cross-copy instance split silently unregistered it and
+// failed every check.
+const TimestampSchema = GovernanceTimestampSchema;
 
 export const GovernancePrimaryAttentionSchema = Type.Union([
   Type.Literal('setup_required'),

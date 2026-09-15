@@ -42,6 +42,24 @@ export function OwnerDecisionCard({
   const canReject = item.allowedActions.includes("reject_current");
   const requiresPartialAcknowledgement = item.review?.capability.acceptRequirement.kind === "acknowledge_partial_evidence";
   const evidenceUnavailable = item.evidenceUnavailableReason !== undefined;
+  // PRI-798 P1-2: when accept is unavailable the copy must name the actual
+  // reason — the adversarial hard gate, a missing activation candidate, or
+  // insufficient review evidence are different situations with different next
+  // actions. Discriminate on the structured reason codes, never on !canAccept.
+  const acceptBlockedCopy = (() => {
+    const acceptRequirement = item.review?.capability.acceptRequirement;
+    if (
+      acceptRequirement?.kind === "forbidden" &&
+      (acceptRequirement.reasonCode === "adversarial_hard_gate_failed" ||
+        acceptRequirement.reasonCode === "adversarial_hard_gate_not_passed")
+    ) {
+      return t("pages.focus.ownerDecision.acceptBlockedHardGate");
+    }
+    if (item.reasonCode === "rollout_activation_candidate_unresolved") {
+      return t("pages.focus.ownerDecision.acceptBlockedNoCandidate");
+    }
+    return t("pages.focus.ownerDecision.acceptBlockedGeneric");
+  })();
 
   async function handleAction(action: VerdictAction) {
     if (action === "revise_once" && showInstruction && instruction.trim().length === 0) {
@@ -265,7 +283,9 @@ export function OwnerDecisionCard({
             )}
           </div>
           <div className="mt-2 text-ink-4 text-[11.5px] leading-relaxed">
-            {t("pages.focus.ownerDecision.actionConsequence")}
+            {canAccept
+              ? t("pages.focus.ownerDecision.actionConsequence")
+              : acceptBlockedCopy}
           </div>
           <button
             type="button"
