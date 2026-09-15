@@ -86,14 +86,27 @@ describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction 
   });
 
   it('shared cycle evaluator case 的事件走 workspace-scoped emitter 而非全局 storeEmitter', () => {
-    expect(evaluatorCase()).toContain('eventEmitter: evaluatorEmitter');
+    // PRI-795 review P1: the emitter was renamed evaluatorEmitter →
+    // workspaceEmitter because the ArtificerL2 adapter now shares it.
+    expect(evaluatorCase()).toContain('eventEmitter: workspaceEmitter');
     expect(evaluatorCase()).not.toContain('eventEmitter: storeEmitter');
   });
 
   it('WorkspaceTelemetryEmitter 在 per-wake 装配处构造（workspaceDir 在作用域内）且落盘失败走注入回调', () => {
     const source = readSrc(CYCLE_SRC);
-    expect(source).toContain('const evaluatorEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir,');
+    expect(source).toContain('const workspaceEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir,');
     expect(source).toContain("'WORKSPACE_TELEMETRY_PERSIST_FAILED'");
+  });
+
+  it('PRI-795 review P1: ArtificerL2 adapter 在 shared cycle 内接收 workspace emitter（completion 证据落盘）', () => {
+    const source = readSrc(CYCLE_SRC);
+    // The adapter must be constructed AFTER the emitter and receive it —
+    // without this wiring artificer_l2_complete evidence dies with the process.
+    const emitterPos = source.indexOf('const workspaceEmitter = new WorkspaceTelemetryEmitter');
+    const adapterPos = source.indexOf('new ArtificerL2Adapter');
+    expect(emitterPos).toBeGreaterThan(-1);
+    expect(adapterPos).toBeGreaterThan(emitterPos);
+    expect(source).toContain('eventEmitter: workspaceEmitter');
   });
 });
 

@@ -24,6 +24,15 @@ import type { PainEvidenceEntry } from '@principles/core/runtime-v2';
  * a distinct reasonCode so `pd pain record --session` can fail/degrade
  * explicitly BEFORE any LLM/task/candidate mutation, without placeholder
  * evidence.
+ *
+ * `binding` (PRI-783 review P1) is the small separate-axes fact the ingress
+ * decision keys on: 'verified' = the sessions table was queried and DID
+ * contain the id; 'unverified' = the id could not be validated (DB missing,
+ * DB unopenable, id absent, or sessions table unreadable). Only verified
+ * bindings may degrade to a bound submission — claiming bound for an
+ * unverified id would let the observability writer persist that id into a
+ * freshly created trajectory.db, laundering an unverified fact into future
+ * "evidence" (self-proving loop).
  */
 export type TrajectoryEvidenceAcquisition =
   | { status: 'available'; entries: PainEvidenceEntry[] }
@@ -31,6 +40,7 @@ export type TrajectoryEvidenceAcquisition =
       status: 'unavailable';
       reasonCode: 'trajectory_unavailable' | 'session_not_found' | 'empty_trajectory' | 'evidence_read_failed';
       detail: string;
+      binding: 'verified' | 'unverified';
     };
 
 /** SourceRef markers that carry no real behavior trace (placeholder shapes). */
@@ -211,6 +221,7 @@ export function acquireTrajectoryEvidenceFromDb(
       status: 'unavailable',
       reasonCode: 'session_not_found',
       detail: sessionId ? `sentinel_session_id:${sessionId}` : 'missing_session_id',
+      binding: 'unverified',
     };
   }
 
@@ -220,6 +231,7 @@ export function acquireTrajectoryEvidenceFromDb(
       status: 'unavailable',
       reasonCode: 'trajectory_unavailable',
       detail: 'trajectory_db_missing',
+      binding: 'unverified',
     };
   }
 
@@ -231,6 +243,7 @@ export function acquireTrajectoryEvidenceFromDb(
       status: 'unavailable',
       reasonCode: 'evidence_read_failed',
       detail: `trajectory_db_unreadable: ${err instanceof Error ? err.message : String(err)}`,
+      binding: 'unverified',
     };
   }
 
@@ -238,19 +251,26 @@ export function acquireTrajectoryEvidenceFromDb(
     // Session existence: rows are upserted by every turn/tool-call write, so
     // an absent row means the trajectory never saw this session.
     let sessionExists = false;
+    // PRI-783 review P1: only a query that actually RAN and found the row
+    // counts as binding verification — the legacy fallback (sessions table
+    // missing) leaves the id unverified.
+    let sessionVerified = false;
     try {
       const row = db.prepare('SELECT 1 FROM sessions WHERE session_id = ?').get(sessionId);
       sessionExists = row !== undefined;
+      sessionVerified = sessionExists;
     } catch {
       // sessions table missing → cannot validate existence; fall through and
       // let the evidence rows decide (legacy DBs may lack the table).
       sessionExists = true;
+      sessionVerified = false;
     }
     if (!sessionExists) {
       return {
         status: 'unavailable',
         reasonCode: 'session_not_found',
         detail: 'session_not_present_in_trajectory',
+        binding: 'unverified',
       };
     }
 
@@ -263,12 +283,14 @@ export function acquireTrajectoryEvidenceFromDb(
         status: 'unavailable',
         reasonCode: 'evidence_read_failed',
         detail: 'trajectory_tables_unreadable',
+        binding: sessionVerified ? 'verified' : 'unverified',
       };
     }
     return {
       status: 'unavailable',
       reasonCode: 'empty_trajectory',
       detail: 'session_present_but_no_usable_evidence',
+      binding: sessionVerified ? 'verified' : 'unverified',
     };
   } finally {
     db.close();

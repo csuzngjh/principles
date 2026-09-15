@@ -57,7 +57,8 @@ afterEach(async () => {
 
 function meta(o: Record<string, unknown> = {}): string {
   return createPITaskDiagnosticJson({
-    dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+    // PRI-720: full-chain topology — drift journeys run the evaluator chain.
+    dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000,
     inputArtifactRefs: [], outputArtifactRefs: [], ...o,
   });
 }

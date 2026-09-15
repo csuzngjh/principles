@@ -193,6 +193,7 @@ export function createEvaluatorRepairDeps(
         diagnosticJson: createPITaskDiagnosticJson({
           dependencyTaskIds: [...params.inheritedDependencyTaskIds],
           channel: params.inheritedChannel,
+          pipelineMode: params.inheritedPipelineMode,
           timeoutMs: params.inheritedTimeoutMs,
           inputArtifactRefs: [...params.inheritedInputArtifactRefs],
           outputArtifactRefs: [],

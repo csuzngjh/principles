@@ -673,6 +673,7 @@ export class InternalizationOrchestrator {
     const successorMetadata: PITaskMetadata = {
       dependencyTaskIds: proposal.dependencyTaskIds,
       channel: proposal.channel,
+      pipelineMode: proposal.pipelineMode,
       timeoutMs: 300_000,
       inputArtifactRefs: proposal.inputArtifactRefs,
       outputArtifactRefs: [],
