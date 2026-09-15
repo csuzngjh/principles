@@ -254,4 +254,39 @@ describe('PRI-629 §34 architecture regression guards', () => {
       expect(data.pages.failedTasks.goGovernanceFocus).toBeDefined();
     }
   });
+
+  // P1-2 regression (PRI-798): rollout_activation_candidate_unresolved must
+  // show a distinct copy from hard-gate reasons; any other accept-blocked
+  // reason (e.g. review_evidence_insufficient) must fall back to a truthful
+  // generic copy instead of mislabeling as the hard gate.
+  it('P1-2: acceptBlockedNoCandidate i18n key exists in both locales and differs from acceptBlockedHardGate', () => {
+    for (const locale of ['zh-CN', 'en']) {
+      const raw = fs.readFileSync(path.resolve(__dirname, `../../src/ui/i18n/${locale}.json`), 'utf-8');
+      const data = JSON.parse(raw) as { pages: { focus: { ownerDecision?: Record<string, unknown> } } };
+      const od = data.pages.focus.ownerDecision;
+      expect(od, `${locale}: pages.focus.ownerDecision missing`).toBeDefined();
+      expect(typeof od?.['acceptBlockedNoCandidate'], `${locale}: acceptBlockedNoCandidate missing or not a string`).toBe('string');
+      expect(typeof od?.['acceptBlockedHardGate'], `${locale}: acceptBlockedHardGate missing or not a string`).toBe('string');
+      expect(typeof od?.['acceptBlockedGeneric'], `${locale}: acceptBlockedGeneric missing or not a string`).toBe('string');
+      // The three keys must be distinct — they describe different situations
+      expect(od?.['acceptBlockedNoCandidate']).not.toBe(od?.['acceptBlockedHardGate']);
+      expect(od?.['acceptBlockedGeneric']).not.toBe(od?.['acceptBlockedHardGate']);
+      expect(od?.['acceptBlockedGeneric']).not.toBe(od?.['acceptBlockedNoCandidate']);
+    }
+  });
+
+  it('P1-2: OwnerDecisionCard branches on structured reason codes, not just canAccept', () => {
+    const cardSrc = fs.readFileSync(
+      path.resolve(__dirname, '../../src/ui/pages/focus/OwnerDecisionCard.tsx'), 'utf-8');
+    // Must use the dedicated i18n key for the candidate-unresolved case
+    expect(cardSrc).toContain('acceptBlockedNoCandidate');
+    // Must still retain the hard-gate key, gated on the hard-gate reason codes
+    expect(cardSrc).toContain('acceptBlockedHardGate');
+    expect(cardSrc).toContain("adversarial_hard_gate_failed");
+    expect(cardSrc).toContain("adversarial_hard_gate_not_passed");
+    // Must branch on reasonCode, not just canAccept (quote-style agnostic)
+    expect(cardSrc).toMatch(/item\.reasonCode === ["']rollout_activation_candidate_unresolved["']/);
+    // Unknown/other blocked reasons must fall back to the truthful generic copy
+    expect(cardSrc).toContain('acceptBlockedGeneric');
+  });
 });
