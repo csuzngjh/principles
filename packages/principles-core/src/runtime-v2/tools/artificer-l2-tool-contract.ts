@@ -352,7 +352,7 @@ export function buildArtificerL2Tools(ctx: ArtificerL2ToolContext): AgentTool[] 
     label: 'Submit RuleCode',
     name: 'submit_rulecode',
     description:
-      'Submit your final ArtificerRuleOutput. You MUST call this exactly once with a complete object (taskId, sourceScribeArtifactId, implementationCode, goldenTraceCases, affectedTools, implementationSummary, risks, sourceTrace, generatedAt). The loop stops after you call this. Do not emit the answer as free text — call this tool.',
+      'Submit your final ArtificerRuleOutput. You MUST call this exactly once with a complete object (taskId, sourceScribeArtifactId, implementationCode, goldenTraceCases, affectedTools, implementationSummary, risks, sourceTrace, generatedAt, evidenceRefs, requiresContextVersion). The loop stops after you call this. Do not emit the answer as free text — call this tool.',
     parameters: ArtificerRuleOutputTypebox,
     execute: async (_id, params): Promise<AgentToolResult<undefined>> => {
       try {

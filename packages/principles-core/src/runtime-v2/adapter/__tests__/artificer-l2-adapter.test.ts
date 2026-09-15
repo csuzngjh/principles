@@ -22,6 +22,7 @@ type LoopCfg = {
   beforeToolCall?: (ctx: { toolCall: { name: string } }) => Promise<unknown>;
   maxTokens?: number;
   timeoutMs?: number;
+  reasoning?: string;
 };
 type LoopImpl = ((...args: never[]) => Promise<unknown[]>) | null;
 
@@ -702,5 +703,34 @@ describe('PRI-795 ArtificerL2Adapter — abort ownership & timeout contract', ()
     expect(payload.provider).toBe('test-provider');
     expect(payload.model).toBe('test-model');
     expect(payload.reasoning).toBe('unavailable');
+  });
+
+  it('review P2-4: configured reasoning reaches BOTH the loop stream options and the resolver opts', async () => {
+    const adapter = new ArtificerL2Adapter({
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_API_KEY',
+      baseUrl: 'http://localhost:1234/v1',
+      gateDeps: makeAlwaysPassGateDeps(),
+      validator: new DefaultArtificerValidator(),
+      totalBudgetMs: 60_000,
+      maxTokens: 4096,
+      reasoning: 'low',
+    });
+    hoisted.mockReturn = [];
+    await captureError(adapter);
+    // Stream options: the thinking level the LLM call must carry.
+    expect(hoisted.lastLoopConfig.reasoning).toBe('low');
+    expect(hoisted.lastLoopConfig.maxTokens).toBe(4096);
+    // loop_started telemetry reflects the configured level (not 'unavailable').
+    const startCall = emitTelemetryMock.mock.calls.find(
+      (c: unknown[]) => {
+        const evt = c[0] as { eventType: string; payload: { phase?: string } };
+        return evt.eventType === 'artificer_l2_turn' && evt.payload?.phase === 'loop_started';
+      },
+    );
+    const {payload} = (startCall?.[0] as { payload: Record<string, unknown> });
+    expect(payload.reasoning).toBe('low');
+    expect(payload.requestTimeoutMs).toBe(60_000);
   });
 });

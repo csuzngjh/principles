@@ -286,7 +286,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-009, ERR-024, ERR-033
 - **Source**: PRI-553
 - **Date**: 2026-08-20
-- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): the initial feature-flag design said flag-off restored the existing Console presentation but did not state that every promotion entry point, especially CLI, must re
+- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): flag-off design did not state that every promotion entry point (especially CLI) must refuse promotion — fixed in review. (Full recurrence text archived 2026-09-14 PRI-795 size-gate — see ERROR_ARCHIVE.md ERR-102.)
 
 ---
 **[ERR-103]** | Empty or malformed declared enforcement scope is accepted and can degrade into match-all behavior

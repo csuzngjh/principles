@@ -145,11 +145,38 @@ export function resolveL2Model(
     );
   }
   // PRI-795 r2: catalog-first — same rationale and openai-completions guard
-  // as PiAiRuntimeAdapter.resolveModel. A miss falls through to the literal.
+  // as PiAiRuntimeAdapter.resolveModel. Lookup order matters because several
+  // catalog namespaces carry entries for the SAME model id with semantically
+  // different gateway compat (e.g. 'opencode-go' relaying 'glm-5.3-flash'
+  // without the zai thinking format):
+  //   1. the configured provider's own namespace — highest authority when the
+  //      configured name IS a catalog namespace;
+  //   2. other namespaces, preferring entries that DECLARE a thinkingFormat
+  //      (protocol-complete provider entries over relay/gateway variants);
+  //   3. any openai-completions entry at all.
+  // A total miss falls through to the literal.
   // @ts-expect-error — runtime strings are acceptable against the literal-typed signature
-  const catalogModel = getModel(provider as KnownProvider, modelId);
-  if (catalogModel && catalogModel.api === 'openai-completions') {
-    return { ...catalogModel, provider, baseUrl };
+  const configuredHit = getModel(provider as KnownProvider, modelId);
+  if (configuredHit && configuredHit.api === 'openai-completions') {
+    return { ...configuredHit, provider, baseUrl };
+  }
+  const isProtocolComplete = (m: Model<string>): boolean => {
+    const compat = m.compat as Record<string, unknown> | undefined;
+    return !!compat && compat.thinkingFormat !== undefined;
+  };
+  let anyHit: Model<string> | undefined;
+  for (const catalogProvider of knownProviders) {
+    if (catalogProvider === provider) continue;
+    // @ts-expect-error — runtime strings are acceptable against the literal-typed signature
+    const catalogModel = getModel(catalogProvider as KnownProvider, modelId);
+    if (!catalogModel || catalogModel.api !== 'openai-completions') continue;
+    if (isProtocolComplete(catalogModel)) {
+      return { ...catalogModel, provider, baseUrl };
+    }
+    anyHit ??= catalogModel;
+  }
+  if (anyHit) {
+    return { ...anyHit, provider, baseUrl };
   }
   // Custom model unknown to every catalog — construct a Model object directly
   // (openai-completions API). The literal object doesn't fully satisfy

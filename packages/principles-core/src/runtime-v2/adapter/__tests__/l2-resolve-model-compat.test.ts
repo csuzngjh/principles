@@ -108,6 +108,25 @@ describe('resolveL2Model — catalog-first borrowing (PRI-795 r2)', () => {
     expect(compat?.supportsReasoningEffort).toBe(true);
   });
 
+  it('scans ALL catalog namespaces: a non-catalog relay provider name still borrows the model entry', () => {
+    // Review P2-2: a custom relay whose configured provider name is not a
+    // catalog namespace must still resolve authoritative metadata for a
+    // catalog-known model id (the most common relay shape). The model is
+    // found under the 'zai' namespace even though provider='my-relay'.
+    const model = resolveL2Model('my-relay', 'glm-5.3-flash', 'https://relay.example.com/v1');
+    expect(model.api).toBe('openai-completions');
+    expect(model.contextWindow).toBe(1_000_000);
+    expect(model.maxTokens).toBe(131_072);
+    expect(model.reasoning).toBe(true);
+    // Transport overridden to the CALLER's identity (provider name kept for
+    // auth/telemetry, baseUrl pointed at the relay).
+    expect(model.provider).toBe('my-relay');
+    expect(model.baseUrl).toBe('https://relay.example.com/v1');
+    const compat = model.compat as Record<string, unknown> | undefined;
+    expect(compat?.thinkingFormat).toBe('zai');
+    expect(compat?.supportsReasoningEffort).toBe(true);
+  });
+
   it('falls back to the hand-built literal for a model absent from every catalog', () => {
     const model = resolveL2Model('zai', 'no-such-model-anywhere', 'https://open.bigmodel.cn/api/paas/v4/', {
       reasoning: true,

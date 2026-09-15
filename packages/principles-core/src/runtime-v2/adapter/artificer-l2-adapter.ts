@@ -171,16 +171,12 @@ function summarizeTranscriptUsage(transcript: AgentMessage[]): L2TokenUsage {
     if (!usage || typeof usage !== 'object') continue;
     const input = Reflect.get(usage, 'input');
     const output = Reflect.get(usage, 'output');
-    const total = Reflect.get(usage, 'totalTokens');
     if (typeof input === 'number' && Number.isFinite(input)) {
       inputTokens += input;
       sawUsage = true;
     }
     if (typeof output === 'number' && Number.isFinite(output)) {
       outputTokens += output;
-      sawUsage = true;
-    }
-    if (typeof total === 'number' && Number.isFinite(total)) {
       sawUsage = true;
     }
   }
