@@ -1,6 +1,15 @@
-// PRI-796 (git-12): the repo mutation mutex is a CROSS-PROCESS guarantee, so the
-// load-bearing cases here hold it from a real child process. An in-process test
-// would prove nothing about the failure this exists to prevent.
+// PRI-796 (git-12): the repo mutation mutex is a CROSS-PROCESS guarantee, so
+// the load-bearing cases here hold it from a real child process. An in-process
+// test would prove nothing about the failure this exists to prevent.
+//
+// Round-2 review (the acceptance line for the release protocol): the property
+// is "an old holder's release can NEVER delete a successor's lock". v1 tried
+// to prove that with a check before the unlink; the check and the unlink could
+// always be split by (human recovery + successor acquire). v2 is token-private:
+// release unlinks exactly one path — <arena>/owner-<own token>.json — which no
+// other process can name. The successor test below runs the REAL sequence
+// (A holds → human recovery removes A's record → B really acquires → A's late
+// release) and asserts B's claim survives byte-identical.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,6 +17,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   MUTATION_LOCK_FILENAME,
+  MUTATION_LOCK_SCHEMA,
   acquireMutationLock,
   mutationLockPath,
   readMutationLock,
@@ -55,12 +65,11 @@ function writeHolderHelper(dir: string): string {
   return file;
 }
 
-async function waitForFile(file: string, timeoutMs = 15_000): Promise<void> {
+async function waitForLockVisible(dir: string, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  // PRI-796 review: existence alone leaves a window where the holder created
-  // the file but the JSON is not yet readable — poll the PARSED state instead
-  // so the loser's holder assertions cannot race the write.
-  const dir = path.dirname(file);
+  // Poll the PARSED state, not mere path existence: a holder that created its
+  // record but has not finished writing it must not make the loser's holder
+  // assertions race the write (PRI-728 shape).
   while (Date.now() < deadline) {
     const state = readMutationLock(dir);
     if (state.exists && state.valid) return;
@@ -68,16 +77,35 @@ async function waitForFile(file: string, timeoutMs = 15_000): Promise<void> {
   }
 }
 
+function liveToken(): string | null {
+  const state = readMutationLock(commonDir);
+  return state.exists && state.valid ? state.lock.token : null;
+}
+
+const HEX32_RE = /^[0-9a-f]{32}$/;
+
+/** Write a stray owner-shaped record directly (bypassing acquire). */
+function rawOwnerRecord(token: string, extra: Record<string, unknown> = {}): string {
+  // The token is a fixed fixture basename, whitelisted before it is used as a
+  // file name — no caller input ever reaches the path here.
+  if (!HEX32_RE.test(token)) throw new Error('fixture bug: non-hex32 token');
+  const fileName = 'owner-' + token + '.json';
+  const arena = mutationLockPath(commonDir);
+  fs.mkdirSync(arena, { recursive: true });
+  const file = path.join(arena, fileName);
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ schema: MUTATION_LOCK_SCHEMA, token, operation: 'raw-fixture', pid: 0, ...extra }, null, 2),
+    'utf-8'
+  );
+  return file;
+}
+
 describe('repo mutation mutex', () => {
   it('lets exactly one process hold it, and the loser fails loud with the holder identity', async () => {
     const helper = writeHolderHelper(commonDir);
     const holder = runNode([helper, commonDir, '3000'], { env: { PD_MUTEX_MODULE: MUTEX_MODULE_URL } });
-    await waitForFile(mutationLockPath(commonDir));
-    if (!fs.existsSync(mutationLockPath(commonDir))) {
-      // Surface the child's own error rather than a bare assertion failure.
-      const failed = await holder;
-      throw new Error('the holder child never took the lock.\nstdout: ' + failed.stdout + '\nstderr: ' + failed.stderr);
-    }
+    await waitForLockVisible(commonDir);
 
     const loser = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'other' });
     expect(loser.ok).toBe(false);
@@ -113,43 +141,53 @@ describe('repo mutation mutex', () => {
     expect(tokenOf(after)).toBe(tokenOf(before));
 
     if (first.ok) first.release();
-    expect(fs.existsSync(mutationLockPath(commonDir))).toBe(false);
+    // Release removed OUR record only; the arena is then simply free.
+    expect(readMutationLock(commonDir).exists).toBe(false);
   });
 
-  it('fails closed on an unparsable lock file instead of trusting or replacing it', () => {
-    fs.writeFileSync(mutationLockPath(commonDir), 'not json at all', 'utf-8');
+  it('fails closed on an unparsable owner record instead of trusting or replacing it', () => {
+    const arena = mutationLockPath(commonDir);
+    fs.mkdirSync(arena, { recursive: true });
+    const bogus = path.join(arena, 'owner-ffffffffffffffffffffffffffffffff.json');
+    fs.writeFileSync(bogus, 'not json at all', 'utf-8');
     const result = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'a' });
     expect(result.ok).toBe(false);
     expect(result.holder).toContain('unreadable');
     // And it is still there — we did not "fix" the problem by deleting a
     // possibly-live holder's file.
-    expect(fs.readFileSync(mutationLockPath(commonDir), 'utf-8')).toBe('not json at all');
+    expect(fs.readFileSync(bogus, 'utf-8')).toBe('not json at all');
   });
 
-  it('release is idempotent', () => {
+  it('treats an owner record whose embedded token does not match its file name as unreadable', () => {
+    const file = rawOwnerRecord('a'.repeat(32), { token: 'b'.repeat(32) });
+    const state = readMutationLock(commonDir);
+    expect(state.exists).toBe(true);
+    expect(state.valid).toBe(false);
+    expect(fs.existsSync(file)).toBe(true);
+  });
+
+  it('elects the oldest live claim as holder (create-then-verify election)', () => {
+    const newer = rawOwnerRecord('a'.repeat(32), { operation: 'newer-claim' });
+    const older = rawOwnerRecord('b'.repeat(32), { operation: 'older-claim' });
+    const t = new Date(Date.now() - 60_000);
+    fs.utimesSync(older, t, t);
+    expect(liveToken()).toBe('b'.repeat(32));
+    // The loser of the election would remove only its own record; reading the
+    // mutex must never touch either file.
+    expect(fs.existsSync(newer)).toBe(true);
+    expect(fs.existsSync(older)).toBe(true);
+  });
+
+  it('release is idempotent and frees the arena', () => {
     const lock = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'a' });
     expect(lock.ok).toBe(true);
     if (!lock.ok) throw new Error('unreachable');
     expect(lock.release().released).toBe(true);
     expect(lock.release().released).toBe(false);
-    expect(fs.existsSync(mutationLockPath(commonDir))).toBe(false);
-  });
-
-  it('refuses to delete a lock whose ownership token changed underneath it', () => {
-    const lock = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'a' });
-    expect(lock.ok).toBe(true);
-    if (!lock.ok) throw new Error('unreachable');
-
-    // Simulate a successor having taken over the file (e.g. after a human
-    // cleared the original). The straggler must not unlink it.
-    const file = mutationLockPath(commonDir);
-    const successor = { ...JSON.parse(fs.readFileSync(file, 'utf-8')), token: 'deadbeefdeadbeefdeadbeefdeadbeef' };
-    fs.writeFileSync(file, JSON.stringify(successor, null, 2), 'utf-8');
-
-    const outcome = lock.release();
-    expect(outcome.released).toBe(false);
-    expect(outcome.reason).toMatch(/no longer owned/);
-    expect(fs.existsSync(file)).toBe(true);
+    expect(readMutationLock(commonDir).exists).toBe(false);
+    const again = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'a' });
+    expect(again.ok).toBe(true);
+    if (again.ok) again.release();
   });
 
   it('releases the lock even when the guarded operation throws', async () => {
@@ -158,39 +196,68 @@ describe('repo mutation mutex', () => {
         throw new Error('boom');
       })
     ).rejects.toThrow('boom');
-    expect(fs.existsSync(mutationLockPath(commonDir))).toBe(false);
+    expect(readMutationLock(commonDir).exists).toBe(false);
   });
 
-  it('puts the lock inside the shared git dir, named as documented', () => {
+  it('puts the arena inside the shared git dir, named as documented', () => {
     expect(path.basename(mutationLockPath(commonDir))).toBe(MUTATION_LOCK_FILENAME);
     expect(MUTATION_LOCK_FILENAME).toBe('pd-worktree-mutation.lock');
   });
 
-  // PRI-796 review: the one-writer property a straggler release must never
-  // violate is "cannot delete a SUCCESSOR's lock". A successor always takes
-  // over with a fresh token (here simulated by the human-recovery replace
-  // step); the release guard — token compare first, then the inode pin taken
-  // at our create — must refuse and leave the successor's file untouched.
-  it('release after a successor took over leaves the successor lock intact', () => {
+  // THE ACCEPTANCE SCENARIO (round-2 review): human recovery + a REAL
+  // successor acquire happen while the old holder's release is still pending.
+  // A's release is a private-path unlink; B's claim is a different file that A
+  // structurally cannot name. B must survive byte-identical.
+  it('a straggler release after human recovery + real successor acquire leaves the successor lock intact', () => {
     const a = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'wt' });
     expect(a.ok).toBe(true);
     if (!a.ok) return;
-    const b = acquireMutationLock({ commonDir, operation: 'worktree-remove', target: 'wt2' });
-    expect(b.ok).toBe(false); // mutex held — successor cannot create yet
+    const aFile = a.file;
 
-    // Human-recovery shape: the held file is replaced by another process's
-    // lock record (fresh token) while our release has not run.
-    const file = mutationLockPath(commonDir);
-    const ours = JSON.parse(fs.readFileSync(file, 'utf-8')) as { token: string };
-    const replacement = { ...ours, token: 'successor-token', operation: 'worktree-remove' };
-    fs.writeFileSync(file, JSON.stringify(replacement, null, 2) + '\n', 'utf-8');
+    // Human recovery: remove exactly the dead holder's record (the documented
+    // recovery is to remove only that holder's owner file — no shared-path
+    // dance anywhere in the protocol).
+    fs.rmSync(aFile);
+
+    const b = acquireMutationLock({ commonDir, operation: 'worktree-remove', target: 'wt2' });
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+    const bBefore = fs.readFileSync(b.file, 'utf-8');
 
     const r = a.release();
     expect(r.released).toBe(false);
-    expect(r.reason).toMatch(/no longer owned|replaced/);
-    const after = readMutationLock(commonDir);
-    expect(after.exists).toBe(true);
-    expect(after.valid).toBe(true);
-    if (after.valid) expect(after.lock.token).toBe('successor-token');
+    expect(r.reason).toMatch(/already gone/);
+
+    // B's lock is untouched — same bytes, same token, still the holder.
+    expect(fs.existsSync(b.file)).toBe(true);
+    expect(fs.readFileSync(b.file, 'utf-8')).toBe(bBefore);
+    expect(liveToken()).toBe(b.record.token);
+
+    // And the arena still serialises: C cannot get in while B holds it.
+    const c = acquireMutationLock({ commonDir, operation: 'worktree-prune', target: 'wt3' });
+    expect(c.ok).toBe(false);
+    expect(c.holder).toContain('worktree-remove');
+
+    b.release();
+  });
+
+  // Same invariant through the harsher recovery shape: the whole arena was
+  // removed, the successor recreated it, the straggler holds an old path.
+  it('a straggler release after the entire arena was recreated cannot kill the successor', () => {
+    const a = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'wt' });
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+
+    fs.rmSync(mutationLockPath(commonDir), { recursive: true, force: true });
+
+    const b = acquireMutationLock({ commonDir, operation: 'worktree-remove', target: 'wt2' });
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+
+    const r = a.release();
+    expect(r.released).toBe(false);
+    expect(fs.existsSync(b.file)).toBe(true);
+    expect(liveToken()).toBe(b.record.token);
+    b.release();
   });
 });

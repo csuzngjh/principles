@@ -1,13 +1,20 @@
-// PRI-796 (SPEC §8, §23): readiness probes L1/L2/L3, and the PRIMARY_LEAKAGE hard
-// gate. The leakage case is built with a REAL directory junction pointing out of
-// the worktree — the exact shape a shared `node_modules` produces on Windows —
-// so the probe must catch it through genuine Node resolution, not a heuristic.
+// PRI-796 (SPEC §8, §23): readiness probes L1/L2/L3, and the PRIMARY_LEAKAGE
+// hard gate. The leakage case is built with a REAL directory junction pointing
+// out of the worktree — the exact shape a shared `node_modules` produces on
+// Windows — so the probe must catch it through genuine Node resolution, not a
+// heuristic.
+//
+// Round-2 review (Blocker 3): build freshness is CONTENT IDENTITY — the build
+// stamp (HEAD + package-lock digest + build-authority digest + clean tracked
+// inputs) — never mtimes. These fixtures are therefore REAL git repositories:
+// a stamp over a fake clock is exactly what this change replaces.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { checkReadiness, detectStaleInstall, isInside, listWorkspacePackages } from '../dev/lib/readiness.mjs';
-import { makeJunction, makeTempDir, removeFixture, runDevScript } from './dev-worktree-test-utils';
+import { checkReadiness, isInside, listWorkspacePackages } from '../dev/lib/readiness.mjs';
+import { verifyBuildStamp, writeBuildStamp } from '../dev/lib/build-state.mjs';
+import { commitFile, git, initRepo, makeJunction, makeTempDir, removeFixture, runDevScript } from './dev-worktree-test-utils';
 
 let root: string;
 
@@ -19,58 +26,96 @@ afterEach(() => {
   removeFixture(root);
 });
 
+/**
+ * Every fixture path is derived from a fixed literal under a known root and
+ * bound-checked — the test never accepts caller-controlled segments.
+ */
+function under(dir: string, ...segments: string[]): string {
+  const target = path.resolve(dir, ...segments);
+  const base = path.resolve(dir) + path.sep;
+  if (target !== path.resolve(dir) && !target.startsWith(base)) {
+    throw new Error('fixture bug: path escaped ' + dir);
+  }
+  return target;
+}
+
 function writeJson(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(value, null, 2), 'utf-8');
 }
 
+const COVERED_DIRS = (worktree: string): string[] => [
+  under(worktree, 'packages', 'a'),
+  under(worktree, 'packages', 'b'),
+];
+
 /**
- * A minimal npm workspace shaped like the real monorepo: two packages, each with
- * a declared entry and a subpath export, both produced by the root build script.
+ * A minimal npm workspace shaped like the real monorepo — as a REAL git
+ * repository with the tracked inputs committed, so content-identity checks
+ * (HEAD, dirt, digests) work exactly as in production. dist/ and
+ * node_modules/ stay untracked (gitignored in the real repo, invisible to
+ * `git status -uno` here), which also lets artifacts survive a checkout —
+ * the scenario readiness must then catch via the stamp, not timestamps.
  */
-function buildWorkspace(worktree: string, { leakA = false } = {}): string | null {
-  writeJson(path.join(worktree, 'package.json'), {
+async function buildWorkspace(worktree: string, { leakA = false, stamp = true } = {}): Promise<string | null> {
+  await initRepo(worktree);
+  writeJson(under(worktree, 'package.json'), {
     name: 'fixture-monorepo',
     private: true,
     type: 'module',
     workspaces: ['packages/*'],
     scripts: { build: 'npm run build --workspace=@x/a && npm run build --workspace=@x/b' },
   });
+  fs.writeFileSync(under(worktree, 'package-lock.json'), '{"lockfileVersion":3,"packages":{}}', 'utf-8');
 
   let outsideA: string | null = null;
   if (leakA) {
     // A sibling of the worktree — deliberately OUTSIDE it.
     outsideA = path.join(path.dirname(worktree), path.basename(worktree) + '-outside-a');
-    writeJson(path.join(outsideA, 'package.json'), {
+    writeJson(under(outsideA, 'package.json'), {
       name: '@x/a',
       version: '1.0.0',
       main: './dist/index.js',
       exports: { '.': './dist/index.js', './sub': './dist/sub.js' },
     });
-    fs.mkdirSync(path.join(outsideA, 'dist'), { recursive: true });
-    fs.writeFileSync(path.join(outsideA, 'dist', 'index.js'), 'export const a = 1;\n', 'utf-8');
-    fs.writeFileSync(path.join(outsideA, 'dist', 'sub.js'), 'export const sub = 1;\n', 'utf-8');
+    fs.mkdirSync(under(outsideA, 'dist'), { recursive: true });
+    fs.writeFileSync(under(outsideA, 'dist', 'index.js'), 'export const a = 1;\n', 'utf-8');
+    fs.writeFileSync(under(outsideA, 'dist', 'sub.js'), 'export const sub = 1;\n', 'utf-8');
   }
 
   for (const name of ['a', 'b']) {
-    const pkgDir = path.join(worktree, 'packages', name);
-    writeJson(path.join(pkgDir, 'package.json'), {
+    const pkgDir = under(worktree, 'packages', name);
+    writeJson(under(pkgDir, 'package.json'), {
       name: '@x/' + name,
       version: '1.0.0',
       main: './dist/index.js',
       exports: { '.': './dist/index.js', './sub': './dist/sub.js' },
       scripts: { build: 'echo' },
     });
-    fs.mkdirSync(path.join(pkgDir, 'dist'), { recursive: true });
-    fs.writeFileSync(path.join(pkgDir, 'dist', 'index.js'), 'export const v = 1;\n', 'utf-8');
-    fs.writeFileSync(path.join(pkgDir, 'dist', 'sub.js'), 'export const v = 1;\n', 'utf-8');
+    // A tracked source file — the exact class of input whose change must flip
+    // the tree to NOT_READY even while dist stays on disk.
+    writeJson(under(pkgDir, 'src', 'placeholder.json'), { v: 1 });
+    fs.mkdirSync(under(pkgDir, 'dist'), { recursive: true });
+    fs.writeFileSync(under(pkgDir, 'dist', 'index.js'), 'export const v = 1;\n', 'utf-8');
+    fs.writeFileSync(under(pkgDir, 'dist', 'sub.js'), 'export const v = 1;\n', 'utf-8');
   }
 
-  const scoped = path.join(worktree, 'node_modules', '@x');
+  const scoped = under(worktree, 'node_modules', '@x');
   fs.mkdirSync(scoped, { recursive: true });
-  makeJunction(path.join(scoped, 'a'), leakA && outsideA ? outsideA : path.join(worktree, 'packages', 'a'));
-  makeJunction(path.join(scoped, 'b'), path.join(worktree, 'packages', 'b'));
+  makeJunction(under(scoped, 'a'), leakA && outsideA ? outsideA : under(worktree, 'packages', 'a'));
+  makeJunction(under(scoped, 'b'), under(worktree, 'packages', 'b'));
+
+  await git(worktree, 'add', '-A');
+  await git(worktree, 'commit', '-m', 'fixture workspace');
+  if (stamp) {
+    const written = writeBuildStamp(worktree, { coveredDirs: COVERED_DIRS(worktree) });
+    if (!written.ok) throw new Error('fixture stamp failed: ' + written.error);
+  }
   return outsideA;
+}
+
+function stampVerdict(worktree: string) {
+  return verifyBuildStamp(worktree, { coveredDirs: COVERED_DIRS(worktree) });
 }
 
 describe('isInside', () => {
@@ -82,23 +127,24 @@ describe('isInside', () => {
 });
 
 describe('workspace enumeration', () => {
-  it('reads the packages from the root manifest instead of assuming them', () => {
-    buildWorkspace(root);
+  it('reads the packages from the root manifest instead of assuming them', async () => {
+    await buildWorkspace(root);
     const packages = listWorkspacePackages(root).map((p) => p.name);
     expect(packages).toEqual(['@x/a', '@x/b']);
   });
 
-  it('fails loud on an unsupported workspace glob rather than silently covering nothing', () => {
-    writeJson(path.join(root, 'package.json'), { name: 'fx', workspaces: ['apps/*'] });
+  it('fails loud on an unsupported workspace glob rather than silently covering nothing', async () => {
+    await initRepo(root);
+    writeJson(under(root, 'package.json'), { name: 'fx', workspaces: ['apps/*'] });
     expect(() => listWorkspacePackages(root)).toThrow(/unsupported workspace pattern/);
   });
 });
 
 describe('readiness on a self-contained worktree', () => {
-  it('is READY when dependencies, artifacts and resolutions all stay inside', () => {
-    buildWorkspace(root);
+  it('is READY when dependencies, artifacts, resolutions and the build stamp all hold', async () => {
+    await buildWorkspace(root);
     const report = checkReadiness({ worktreeRoot: root });
-    expect(report.ok).toBe(true);
+    expect(report.ok, JSON.stringify(report.levels.l2)).toBe(true);
     expect(report.leakage).toEqual([]);
     expect(report.levels.l1.ok).toBe(true);
     expect(report.levels.l2.ok).toBe(true);
@@ -107,140 +153,137 @@ describe('readiness on a self-contained worktree', () => {
     expect(report.levels.l3.probes.map((p) => p.specifier)).toContain('@x/a/sub');
   });
 
-  it('is NOT_READY with a bootstrap hint when node_modules is absent', () => {
-    buildWorkspace(root);
-    fs.rmSync(path.join(root, 'node_modules'), { recursive: true, force: true });
+  it('is NOT_READY with a bootstrap hint when node_modules is absent', async () => {
+    await buildWorkspace(root);
+    fs.rmSync(under(root, 'node_modules'), { recursive: true, force: true });
     const report = checkReadiness({ worktreeRoot: root });
     expect(report.ok).toBe(false);
     expect(report.nextAction).toContain('dev:worktree:bootstrap');
   });
 
-  it('is NOT_READY when the build authority produced no artifact', () => {
-    buildWorkspace(root);
-    fs.rmSync(path.join(root, 'packages', 'b', 'dist'), { recursive: true, force: true });
+  it('is NOT_READY when the build authority produced no artifact', async () => {
+    await buildWorkspace(root);
+    fs.rmSync(under(root, 'packages', 'b', 'dist'), { recursive: true, force: true });
     const report = checkReadiness({ worktreeRoot: root });
     expect(report.ok).toBe(false);
     expect(report.levels.l2.ok).toBe(false);
     expect(report.levels.l2.results.find((r) => r.name === '@x/b')?.ok).toBe(false);
   });
 
-  it('scopes L2/L3 to what the root build authority promises', () => {
-    buildWorkspace(root);
+  it('is NOT_READY without a build stamp at all — installed state is unverified', async () => {
+    await buildWorkspace(root, { stamp: false });
+    const report = checkReadiness({ worktreeRoot: root });
+    expect(report.ok).toBe(false);
+    const row = report.levels.l1.checks.find((c) => c.name === 'node_modules matches package-lock.json');
+    expect(row?.ok).toBe(false);
+    expect(row?.detail).toMatch(/no build stamp/);
+  });
+
+  it('scopes L2/L3 to what the root build authority promises', async () => {
+    await buildWorkspace(root);
     // A package that exists but that the root build does not cover must not be
     // required to have an artifact — pd-console/pd-companion build elsewhere.
-    writeJson(path.join(root, 'packages', 'c', 'package.json'), {
+    writeJson(under(root, 'packages', 'c', 'package.json'), {
       name: '@x/c',
       version: '1.0.0',
       main: './dist/index.js',
       scripts: { build: 'echo' },
     });
     const report = checkReadiness({ worktreeRoot: root });
-    expect(report.levels.l2.results.map((r) => r.name)).toEqual(['@x/a', '@x/b']);
+    expect(report.levels.l2.results.map((r) => r.name)).toEqual(['build stamp', '@x/a', '@x/b']);
   });
 });
 
-// PRI-796 review: an artifact that EXISTS but predates the sources is the
-// silent false-verification L2 exists to prevent (checkout/merge refreshes src,
-// old dist survives → old existsSync-only probe said READY).
-describe('L2 build freshness (PRI-796)', () => {
-  function age(file: string, msAgo: number): void {
-    const t = new Date(Date.now() - msAgo);
-    fs.utimesSync(file, t, t);
-  }
+// PRI-796 round-2 (Blocker 3): the owner's freshness matrix. Every case proves
+// the verdict comes from CONTENT IDENTITY: HEAD, the lockfile digest, the
+// build-authority digest, and tracked dirt — never a timestamp comparison.
+describe('build readiness stamp (content identity, not clocks)', () => {
+  it('T1: committed + built + stamped → READY', async () => {
+    await buildWorkspace(root);
+    expect(stampVerdict(root).ok).toBe(true);
+  });
 
-  it('is NOT_READY when a source file is newer than the built artifact', () => {
-    buildWorkspace(root);
-    const pkgDir = path.join(root, 'packages', 'a');
-    fs.mkdirSync(path.join(pkgDir, 'src'), { recursive: true });
-    const src = path.join(pkgDir, 'src', 'index.ts');
-    fs.writeFileSync(src, 'export const v = 2;\n', 'utf-8');
-    // artifact older than src → stale build
-    age(path.join(pkgDir, 'dist', 'index.js'), 60_000);
-    age(src, 1_000);
-
+  it('T2: tracked source modified, dist kept → NOT_READY (dirty inputs, then gitHead)', async () => {
+    await buildWorkspace(root);
+    // Modify a TRACKED source input — new untracked files are not dirt to
+    // `git status -uno`, but a tracked edit is, even uncommitted.
+    fs.writeFileSync(under(root, 'packages', 'a', 'src', 'placeholder.json'), '{"v":2}\n', 'utf-8');
+    const beforeCommit = stampVerdict(root);
+    expect(beforeCommit.ok).toBe(false);
+    expect(beforeCommit.mismatches).toContain('dirty-build-inputs');
+    await git(root, 'add', '-A');
+    await git(root, 'commit', '-m', 'modify src');
+    const afterCommit = stampVerdict(root);
+    expect(afterCommit.ok).toBe(false);
+    expect(afterCommit.mismatches).toContain('git-head');
     const report = checkReadiness({ worktreeRoot: root });
     expect(report.ok).toBe(false);
     expect(report.levels.l2.ok).toBe(false);
-    const hit = report.levels.l2.results.find((r) => r.name === '@x/a');
-    expect(hit?.ok).toBe(false);
-    expect(hit?.detail).toMatch(/STALE/);
   });
 
-  it('is READY once the artifact is emitted after the sources', () => {
-    buildWorkspace(root);
-    const pkgDir = path.join(root, 'packages', 'a');
-    fs.mkdirSync(path.join(pkgDir, 'src'), { recursive: true });
-    const src = path.join(pkgDir, 'src', 'index.ts');
-    fs.writeFileSync(src, 'export const v = 2;\n', 'utf-8');
-    // rebuild ordering: src older, artifact newer
-    age(src, 60_000);
-    for (const f of ['index.js', 'sub.js']) age(path.join(pkgDir, 'dist', f), 1_000);
+  it('T3: checkout of an older commit with the new dist kept on disk → NOT_READY', async () => {
+    await buildWorkspace(root);
+    const firstCommit = (await git(root, 'rev-parse', 'HEAD')).trim();
+    // Build + stamp the SECOND state (HEAD=B, READY): this is "commit B
+    // bootstrap → READY".
+    await commitFile(root, 'packages/a/src/placeholder.json', '{"v":2}\n', 'second commit');
+    expect(writeBuildStamp(root, { coveredDirs: COVERED_DIRS(root) }).ok).toBe(true);
+    expect(stampVerdict(root).ok).toBe(true);
+    // Then check out A with the B-era dist still on disk (dist is untracked,
+    // so checkout never touches it). Only the stamp's HEAD comparison catches
+    // this — mtimes of A-checkout vs B-build prove nothing.
+    await git(root, 'checkout', firstCommit);
+    const verdict = stampVerdict(root);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.mismatches).toContain('git-head');
+  });
 
+  it('T4: package-lock content changes (committed), node_modules kept → NOT_READY', async () => {
+    await buildWorkspace(root);
+    await commitFile(root, 'package-lock.json', '{"lockfileVersion":3,"packages":{"changed":true}}', 'lock bump');
+    const verdict = stampVerdict(root);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.mismatches).toContain('package-lock');
     const report = checkReadiness({ worktreeRoot: root });
-    expect(report.levels.l2.ok).toBe(true);
-    expect(report.levels.l2.results.find((r) => r.name === '@x/a')?.ok).toBe(true);
-  });
-});
-
-describe('stale-install detection (L1)', () => {
-  /** Create a lockfile + install marker with explicit mtimes. */
-  function makeInstall(worktree: string, lockAgeMs: number, markerAgeMs: number): void {
-    const lock = path.join(worktree, 'package-lock.json');
-    const marker = path.join(worktree, 'node_modules', '.package-lock.json');
-    fs.mkdirSync(path.dirname(marker), { recursive: true });
-    fs.writeFileSync(lock, '{"lockfileVersion":3,"packages":{}}', 'utf-8');
-    fs.writeFileSync(marker, '{"lockfileVersion":3,"packages":{}}', 'utf-8');
-    const now = Date.now();
-    fs.utimesSync(lock, new Date(now - lockAgeMs), new Date(now - lockAgeMs));
-    fs.utimesSync(marker, new Date(now - markerAgeMs), new Date(now - markerAgeMs));
-  }
-
-  it('is NOT stale when the install marker is at least as new as the lockfile', () => {
-    makeInstall(root, 60_000, 0);
-    const verdict = detectStaleInstall(root);
-    expect(verdict.stale).toBe(false);
-  });
-
-  it('is NOT stale for the in-sync case where both were written together (0ms apart)', () => {
-    // Observed in practice: a successful `npm install` rewrites BOTH files, so
-    // equality is the normal in-sync signal and must not be read as drift.
-    makeInstall(root, 0, 0);
-    expect(detectStaleInstall(root).stale).toBe(false);
-  });
-
-  it('IS stale when the lockfile was rewritten after the install (a merge/checkout)', () => {
-    makeInstall(root, 0, 600_000);
-    const verdict = detectStaleInstall(root);
-    expect(verdict.stale).toBe(true);
-    expect(verdict.reason).toContain('newer than node_modules/.package-lock.json');
-  });
-
-  it('tolerates sub-second write ordering instead of reporting false drift', () => {
-    makeInstall(root, 0, 1_000);
-    expect(detectStaleInstall(root).stale).toBe(false);
-  });
-
-  it('reports no drift when there is no install marker at all (L1 handles "nothing installed")', () => {
-    fs.writeFileSync(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}', 'utf-8');
-    const verdict = detectStaleInstall(root);
-    expect(verdict.stale).toBe(false);
-    expect(verdict.markerMtime).toBeNull();
-  });
-
-  it('surfaces a stale install through readiness with an actionable next step', () => {
-    buildWorkspace(root);
-    makeInstall(root, 0, 600_000);
-    const report = checkReadiness({ worktreeRoot: root });
-    expect(report.ok).toBe(false);
     expect(report.levels.l1.checks.find((c) => c.name === 'node_modules matches package-lock.json')?.ok).toBe(false);
-    expect(report.nextAction).toContain('STALE');
-    expect(report.nextAction).toContain('npm install');
+    expect(report.nextAction).toMatch(/npm install/);
+  });
+
+  it('T5: re-stamping a freshly built state returns to READY', async () => {
+    await buildWorkspace(root);
+    await commitFile(root, 'package-lock.json', '{"lockfileVersion":3,"packages":{"changed":true}}', 'lock bump');
+    expect(stampVerdict(root).ok).toBe(false);
+    const rewritten = writeBuildStamp(root, { coveredDirs: COVERED_DIRS(root) });
+    expect(rewritten.ok).toBe(true);
+    expect(stampVerdict(root).ok).toBe(true);
+  });
+
+  it('T6: a touched (newer) artifact does not fool the verdict when content mismatches', async () => {
+    await buildWorkspace(root);
+    // Mismatch the content, then push the timestamps the OLD mtime heuristic
+    // consulted into the future. A clock-based check would call this fresh.
+    await commitFile(root, 'package-lock.json', '{"lockfileVersion":3,"packages":{"x":true}}', 'lock bump');
+    const future = new Date(Date.now() + 10 * 60_000);
+    fs.utimesSync(under(root, 'packages', 'a', 'dist', 'index.js'), future, future);
+    fs.utimesSync(under(root, 'packages', 'a', 'src', 'placeholder.json'), future, future);
+    const verdict = stampVerdict(root);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.mismatches).toContain('package-lock');
+  });
+
+  it('refuses to mint a stamp over uncommitted build inputs', async () => {
+    await buildWorkspace(root, { stamp: false });
+    fs.writeFileSync(under(root, 'packages', 'a', 'src', 'loose.ts'), 'export const v = 1;\n', 'utf-8');
+    await git(root, 'add', '-A'); // tracked-dirty: staged modifications count
+    const written = writeBuildStamp(root, { coveredDirs: COVERED_DIRS(root) });
+    expect(written.ok).toBe(false);
+    expect(written.error).toMatch(/dirty/);
   });
 });
 
 describe('PRIMARY_LEAKAGE — the silent false-verification gate', () => {
-  it('FAILS when a workspace package resolves outside the worktree', () => {
-    const outsideA = buildWorkspace(root, { leakA: true });
+  it('FAILS when a workspace package resolves outside the worktree', async () => {
+    const outsideA = await buildWorkspace(root, { leakA: true });
     expect(outsideA).not.toBeNull();
 
     const report = checkReadiness({ worktreeRoot: root });
@@ -261,7 +304,7 @@ describe('PRIMARY_LEAKAGE — the silent false-verification gate', () => {
   });
 
   it('surfaces the leakage through the CLI as NOT_READY with a non-zero exit', async () => {
-    buildWorkspace(root, { leakA: true });
+    await buildWorkspace(root, { leakA: true });
     const result = await runDevScript('worktree-ready.mjs', [root, '--json'], { cwd: root });
     expect(result.code).toBe(1);
     const out = JSON.parse(result.stdout) as { ok: boolean; code: string; leakage: unknown[] };
@@ -269,8 +312,8 @@ describe('PRIMARY_LEAKAGE — the silent false-verification gate', () => {
     expect(out.leakage.length).toBeGreaterThan(0);
   });
 
-  it('reports READY through the CLI when the worktree is self-contained', async () => {
-    buildWorkspace(root);
+  it('reports READY through the CLI when the worktree is self-contained and stamped', async () => {
+    await buildWorkspace(root);
     const result = await runDevScript('worktree-ready.mjs', [root, '--json'], { cwd: root });
     expect(result.code).toBe(0);
     const out = JSON.parse(result.stdout) as { ok: boolean };

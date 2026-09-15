@@ -23,9 +23,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 
 export const LEASE_FILENAME = '.workspace-lease.json';
 export const LEASE_SCHEMA = 'pd-workspace-lease/1';
+
+/**
+ * PRI-796 round-2: every logical ownership takes a fresh CLAIM ID
+ * (randomUUID). Renewal by the same active owner keeps it; a takeover — even
+ * by the same owner after expiry — mints a new one. It exists so release can
+ * be CONDITIONAL (`releaseLease(root, { expectedClaimId })`): an old
+ * holder's late release can no longer delete a newly-created successor
+ * lease. Before this, the only release shape was a blind unlink.
+ */
+export function newClaimId() {
+  return crypto.randomUUID();
+}
 export const DEFAULT_TTL_MS = 4 * 60 * 60 * 1000; // 4h — long enough for one
 // working session, short enough that a crashed holder self-clears quickly.
 
@@ -162,6 +175,9 @@ export function readLease(root, { readRetryDelayFn = () => sleepSync(LEASE_READ_
   if (Date.parse(parsed.expiresAt) <= Date.parse(parsed.createdAt)) {
     return { exists: true, valid: false, error: 'expiresAt must be after createdAt' };
   }
+  if ('claimId' in parsed && (typeof parsed.claimId !== 'string' || parsed.claimId.length === 0)) {
+    return { exists: true, valid: false, error: "field 'claimId' must be a non-empty string" };
+  }
   return { exists: true, valid: true, lease: parsed };
 }
 
@@ -242,11 +258,25 @@ export function acquireLease(root, { owner, branch, ttlMs = DEFAULT_TTL_MS, now 
       };
     }
     const renewed = current.exists === true;
+    // PRI-796 round-2: claim identity. An ACTIVE renewal by the same owner is
+    // the same logical ownership and keeps its claimId; every FRESH
+    // acquisition — first create, or a takeover of an expired lease (even by
+    // the same owner) — mints a new one. Conditional release then cannot
+    // confuse two ownership eras at the same pathname.
+    const sameActiveOwner =
+      current.exists === true &&
+      current.valid === true &&
+      current.lease.owner === owner &&
+      leasePhase(current.lease, now) === 'active';
+    const carried = sameActiveOwner && typeof current.lease.claimId === 'string' && current.lease.claimId.length > 0
+      ? current.lease.claimId
+      : null;
     const lease = {
       schema: LEASE_SCHEMA,
       workspace: root,
       owner,
       branch,
+      claimId: carried ?? newClaimId(),
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + ttlMs).toISOString(),
       // PRI-796: stable writer identity (`writer:task`) plus pid/host as DEBUG
@@ -274,9 +304,32 @@ export function acquireLease(root, { owner, branch, ttlMs = DEFAULT_TTL_MS, now 
   };
 }
 
-/** Release the lease (idempotent — releasing an unleased workspace is ok). */
-export function releaseLease(root) {
+/**
+ * Release the lease (idempotent — releasing an unleased workspace is ok).
+ *
+ * WITH `expectedClaimId`, release is CONDITIONAL: a lease whose claimId has
+ * changed underneath us belongs to a NEW ownership era, and deleting it would
+ * recreate the round-2 bug (an old releaser wiping a successor's lease).
+ * Without it (legacy callers, pre-claimId v1 files, and the human-facing
+ * `dev:lease release` fallback) the unlink stays blind — a human may always
+ * delete the file; this is a cooperative guard, not a permission system.
+ */
+export function releaseLease(root, { expectedClaimId } = {}) {
   const file = leaseFilePath(root);
+  if (expectedClaimId !== undefined && expectedClaimId !== null) {
+    const current = readLease(root);
+    if (!current.exists) return { ok: true, removed: false, alreadyGone: true };
+    if (!current.valid) return { ok: true, removed: false, reason: 'lease-invalid' };
+    if (current.lease.claimId !== expectedClaimId) {
+      return {
+        ok: true,
+        removed: false,
+        reason: 'ownership-changed',
+        currentOwner: current.lease.owner,
+        currentClaimId: current.lease.claimId ?? null,
+      };
+    }
+  }
   let removed = false;
   try {
     fs.unlinkSync(file);

@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { checkReadiness, renderReadiness } from './lib/readiness.mjs';
+import { sameGitPath } from './lib/git.mjs';
 
 function parseArgs(argv) {
   const args = { target: null, skipInstall: false, skipBuild: false, skipPrivateDocs: false, json: false };
@@ -68,12 +69,23 @@ async function main() {
     refuse(args, 'not a PD worktree (no package.json): ' + root);
   }
 
-  // PRI-796 review: package.json + a copied scripts/ tree is satisfiable by any
-  // copied source directory or nested folder — running installs there would
-  // build the wrong tree. Require a real git worktree before anything mutates.
-  const gitCheck = spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf-8' });
-  if (gitCheck.status !== 0 || gitCheck.stdout?.trim() !== 'true') {
-    refuse(args, 'not a git worktree (git rev-parse --is-inside-work-tree failed): ' + root);
+  // PRI-796 round-2 review: `--is-inside-work-tree` is true for ANY nested
+  // subdirectory (`<worktree>/packages/foo` answers "true" and would happily
+  // install there), and package.json + a copied scripts/ tree is satisfiable
+  // by any copied source dir. The only safe precondition is that the target
+  // IS the worktree root: git's own --show-toplevel must name the same real
+  // path (case/slash/junction hazards normalized by sameGitPath).
+  const gitTop = spawnSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf-8' });
+  const topLevel = gitTop.status === 0 ? gitTop.stdout.trim() : '';
+  if (topLevel.length === 0) {
+    refuse(args, 'not inside a git worktree (git rev-parse --show-toplevel failed): ' + root);
+  }
+  if (!sameGitPath(root, topLevel)) {
+    refuse(
+      args,
+      'target is inside a Git worktree but is not the worktree root: ' + root +
+      ' (the worktree root is ' + topLevel + '). Installs must run at the root, not a subdirectory.'
+    );
   }
 
   const setupScript = path.join(root, 'scripts', 'setup-worktree.mjs');

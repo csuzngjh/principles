@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { CODES } from './preflight.mjs';
+import { verifyBuildStamp } from './build-state.mjs';
 
 /**
  * L3 probe set, DERIVED from the manifests rather than hardcoded.
@@ -113,62 +114,12 @@ function readJson(file) {
 }
 
 /**
- * Detect an install that predates the current lockfile.
- *
- * WHY THIS EXISTS (observed, not hypothetical): a fresh worktree was installed,
- * then `git merge origin/main` brought a dependency bump (js-yaml 4 → 5) in
- * `package-lock.json`. `npm run build` still "worked" far enough to fail with
- * `error TS2339: Property 'YAML11_SCHEMA' does not exist on type 'typeof
- * import("js-yaml")'` — a confusing TYPE error for what was really a STALE
- * ENVIRONMENT. `scripts/setup-worktree.mjs` skipped the install because
- * `node_modules/` merely EXISTED, so "bootstrap ran" was mistaken for "the tree
- * is trustworthy".
- *
- * The signal: npm rewrites both `package-lock.json` and
- * `node_modules/.package-lock.json` on a successful install, so a lockfile that
- * is NEWER than the installed marker (by more than the write-ordering margin)
- * can only mean the lock changed without a re-install. That happens on every
- * `git merge` / `git checkout` that touches the lock.
- *
- * Deliberately one-directional: the failure mode we accept is an occasional
- * unnecessary `npm install`; what we must not accept is silently building
- * against a dependency tree that does not match the lockfile.
- *
- * @returns {{stale: boolean, reason: string|null, lockMtime: number|null, markerMtime: number|null}}
+ * PRI-796 round-2: the old `detectStaleInstall` compared package-lock.json
+ * MTIMES with a 2-second margin. That is not dependency identity — a checkout
+ * landing inside the margin passed, and `touch` defeated it outright. The
+ * authority is now the content digest recorded in the build stamp (see
+ * lib/build-state.mjs); timestamps are never consulted for a verdict.
  */
-export const INSTALL_MARKER_MTIME_MARGIN_MS = 2000;
-
-export function detectStaleInstall(worktreeRoot) {
-  const lock = path.join(worktreeRoot, 'package-lock.json');
-  const marker = path.join(worktreeRoot, 'node_modules', '.package-lock.json');
-  const statOrNull = (file) => {
-    try {
-      return fs.statSync(file).mtimeMs;
-    } catch {
-      return null;
-    }
-  };
-  const lockMtime = statOrNull(lock);
-  const markerMtime = statOrNull(marker);
-  if (lockMtime === null) return { stale: false, reason: null, lockMtime, markerMtime };
-  if (markerMtime === null) {
-    // No install marker at all: either nothing is installed (L1's own
-    // "node_modules present" check already fails) or the install predates
-    // npm's marker convention. Not evidence of drift by itself.
-    return { stale: false, reason: null, lockMtime, markerMtime };
-  }
-  if (lockMtime > markerMtime + INSTALL_MARKER_MTIME_MARGIN_MS) {
-    return {
-      stale: true,
-      reason:
-        'package-lock.json is newer than node_modules/.package-lock.json — the lockfile changed after the last install ' +
-        '(a merge or checkout rewrote it). Installed dependency versions may not match the lockfile.',
-      lockMtime,
-      markerMtime,
-    };
-  }
-  return { stale: false, reason: null, lockMtime, markerMtime };
-}
 
 /**
  * Enumerate the workspace packages declared by the root `package.json`.
@@ -279,21 +230,30 @@ export function locateDependencyDir(name, req) {
  * Locates each dependency through Node's resolution paths, then checks
  * containment of the REAL path, so a junction pointing back at the primary is
  * caught even though the file exists.
+ *
+ * The lock-vs-install row is answered by the BUILD STAMP's content digest —
+ * never by mtimes (PRI-796 round 2).
  */
-export function checkL1Dependencies({ worktreeRoot, packages, req = defaultRequire(worktreeRoot) }) {
+export function checkL1Dependencies({ worktreeRoot, packages, req = defaultRequire(worktreeRoot), stamp = null }) {
   const checks = [];
   const leakage = [];
   const nodeModules = path.join(worktreeRoot, 'node_modules');
   checks.push({ name: 'node_modules present', ok: fs.existsSync(nodeModules), detail: nodeModules });
 
-  // A present-but-stale install is the trap that makes `bootstrap ran` look like
-  // `the tree is trustworthy` (see detectStaleInstall).
-  const install = detectStaleInstall(worktreeRoot);
-  checks.push({
-    name: 'node_modules matches package-lock.json',
-    ok: !install.stale,
-    detail: install.stale ? install.reason : 'in sync',
-  });
+  // A present-but-unverifiable install is the trap that makes `bootstrap ran`
+  // look like `the tree is trustworthy`: only a stamp whose recorded
+  // package-lock digest equals the lockfile on disk proves the installed tree
+  // matches it.
+  const s = stamp ?? verifyBuildStamp(worktreeRoot, { coveredDirs: [] });
+  let lockOk = false;
+  let lockDetail;
+  if (!s.stamp) {
+    lockDetail = 'no build stamp — install state unverified: run npm run dev:worktree:bootstrap';
+  } else {
+    lockOk = !s.mismatches.includes('package-lock');
+    lockDetail = lockOk ? 'in sync with the stamped install (content digest)' : 'package-lock.json changed after the stamped install — run npm install';
+  }
+  checks.push({ name: 'node_modules matches package-lock.json', ok: lockOk, detail: lockDetail });
 
   for (const pkg of packages) {
     const located = locateDependencyDir(pkg.name, req);
@@ -318,44 +278,16 @@ export function checkL1Dependencies({ worktreeRoot, packages, req = defaultRequi
 }
 
 /**
- * L2 — did the build authority emit the artifacts it promises, AND are those
- * artifacts newer than the sources they were built from?
- * Scoped to the packages the root build actually covers, so a worktree that has
- * run the supported bootstrap is not failed for an artifact the authority never
- * produced (pd-console and pd-companion build outside the root chain).
+ * L2 — did the build authority emit the artifacts it promises, AND is the
+ * on-disk state the one that stamp recorded? Freshness is answered by the
+ * build stamp — content identity of HEAD, the lockfile and the build
+ * authority plus a clean tracked worktree — NEVER by artifact mtimes
+ * (PRI-796 round 2: a touched timestamp used to be able to fake "fresh").
+ * Scoped to the packages the root build actually covers, so a worktree that
+ * has run the supported bootstrap is not failed for an artifact the authority
+ * never produced (pd-console and pd-companion build outside the root chain).
  */
-
-/**
- * PRI-796 (review): an artifact that EXISTS but predates a later
- * checkout/merge is the silent false-verification L2 exists to prevent —
- * `fs.existsSync` alone passed a tree whose src was new and whose dist was the
- * previous build. Fresh = artifact mtime >= newest source mtime under the
- * package's src/. Bounded walk; unreadable trees fall back to existence-only
- * so filesystem quirks never produce false failures.
- */
-function newestSourceMtime(srcDir, cap = 2000) {
-  let newest = -1;
-  let seen = 0;
-  const stack = [srcDir];
-  while (stack.length > 0 && seen < cap) {
-    const dir = stack.pop();
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    for (const ent of entries) {
-      if (seen >= cap) break;
-      const full = path.join(dir, ent.name);
-      if (ent.isDirectory()) { stack.push(full); continue; }
-      seen++;
-      try {
-        const m = fs.statSync(full).mtimeMs;
-        if (m > newest) newest = m;
-      } catch { /* transient/unreadable file — skip */ }
-    }
-  }
-  return seen >= cap ? null : newest;
-}
-
-export function checkL2Build({ worktreeRoot, packages }) {
+export function checkL2Build({ worktreeRoot, packages, stamp = null }) {
   const covered = coveredByRootBuild(worktreeRoot);
   const byName = new Map(packages.map((p) => [p.name, p]));
   const results = [];
@@ -367,6 +299,9 @@ export function checkL2Build({ worktreeRoot, packages }) {
       reason: 'the root `build` script could not be parsed for --workspace targets',
     };
   }
+  const coveredDirs = covered.names.map((n) => byName.get(n)).filter(Boolean).map((p) => p.dir);
+  const s = stamp ?? verifyBuildStamp(worktreeRoot, { coveredDirs });
+  results.push({ name: 'build stamp', ok: s.ok, detail: s.detail });
   for (const name of covered.names) {
     const pkg = byName.get(name);
     if (!pkg) {
@@ -378,22 +313,8 @@ export function checkL2Build({ worktreeRoot, packages }) {
       results.push({ name, ok: true, detail: 'no declared entry artifact — skipped' });
       continue;
     }
-    let ok = fs.existsSync(entry.file);
-    let detail = entry.spec + ' -> ' + entry.file;
-    if (ok) {
-      const srcDir = path.join(pkg.dir, 'src');
-      if (fs.existsSync(srcDir)) {
-        const newest = newestSourceMtime(srcDir);
-        if (newest !== null) {
-          let artifactMtime = null;
-          try { artifactMtime = fs.statSync(entry.file).mtimeMs; } catch { /* vanished mid-check */ }
-          if (artifactMtime !== null && newest > artifactMtime) {
-            ok = false;
-            detail += ' — STALE: sources are newer than the built artifact; run npm run build';
-          }
-        }
-      }
-    }
+    const ok = fs.existsSync(entry.file);
+    const detail = entry.spec + ' -> ' + entry.file;
     results.push({ name, ok, fresh: ok, detail });
   }
   return { ok: results.every((r) => r.ok), parsedAuthority: true, results, covered: covered.names };
@@ -473,8 +394,14 @@ export function checkReadiness({ worktreeRoot, primaryPath = null, req } = {}) {
   const packages = listWorkspacePackages(root);
   const derived = deriveRuntimeProbes(root, packages);
   const requireFor = req || defaultRequire(root);
-  const l1 = checkL1Dependencies({ worktreeRoot: root, packages, req: requireFor });
-  const l2 = checkL2Build({ worktreeRoot: root, packages });
+  // ONE stamp evaluation feeds L1 (install vs lock digest) and L2 (freshness)
+  // — a single identity authority, never two heuristics that can disagree.
+  const coveredNames = coveredByRootBuild(root).names;
+  const byName = new Map(packages.map((p) => [p.name, p]));
+  const coveredDirs = coveredNames.map((n) => byName.get(n)).filter(Boolean).map((p) => p.dir);
+  const stamp = verifyBuildStamp(root, { coveredDirs });
+  const l1 = checkL1Dependencies({ worktreeRoot: root, packages, req: requireFor, stamp });
+  const l2 = checkL2Build({ worktreeRoot: root, packages, stamp });
   const l3 = checkL3Runtime({ worktreeRoot: root, probes: derived.probes, bins: derived.bins });
 
   const leakage = [...l1.leakage, ...l3.leakage];
@@ -489,14 +416,16 @@ export function checkReadiness({ worktreeRoot, primaryPath = null, req } = {}) {
       'Delete this worktree\'s node_modules and run `npm run dev:worktree:bootstrap` — never share node_modules between worktrees (SPEC D5).';
   } else if (!l1.ok) {
     code = CODES.NOT_READY;
-    const installStale = l1.checks.some((c) => c.name === 'node_modules matches package-lock.json' && !c.ok);
+    const installStale = !stamp.stamp || stamp.mismatches.includes('package-lock');
     nextAction = installStale
-      ? 'Dependencies are installed but STALE relative to package-lock.json: run `npm install` (or npm run dev:worktree:bootstrap). ' +
+      ? 'Dependencies are installed but STALE relative to package-lock.json (content digest, not timestamps): run `npm install` (or npm run dev:worktree:bootstrap). ' +
         'A stale tree fails later as a confusing type/build error instead of here.'
       : 'Dependencies are missing or incomplete: npm run dev:worktree:bootstrap';
   } else if (!l2.ok || !l3.ok) {
     code = CODES.NOT_READY;
-    nextAction = 'Build artifacts are missing or stale: npm run dev:worktree:bootstrap (or npm run build)';
+    nextAction = stamp.mismatches.includes('dirty-build-inputs')
+      ? 'Uncommitted changes touch build inputs — the stamped build does not represent them. Commit (or revert) them, then npm run build.'
+      : 'Build artifacts are missing or stale (stamp mismatch): npm run dev:worktree:bootstrap (or npm run build)';
   }
 
   return { ok, code, worktreeRoot: root, primaryPath, leakage, levels: { l1, l2, l3 }, nextAction };

@@ -10,6 +10,17 @@
 // Releasing does both in reverse, idempotently, so a repeated release or a
 // release after a crash-recovery unlock is a no-op instead of an error.
 //
+// WHY THE WHOLE TRANSITION RUNS UNDER THE REPO MUTATION MUTEX (round-2 review)
+// Both halves must change together. A claim that interleaved with a release —
+// old releaser between `git worktree unlock` and its lease unlink, successor
+// claimant in between — could end in the forbidden half state "git lock = B,
+// lease = none". `withMutationLock` serialises every ownership transition on
+// the repository, so claim and release can never interleave; the transition
+// is only the git lock/unlock plus one lease write (tens of milliseconds),
+// never a build or an install. Lease release additionally passes the lease's
+// own claimId, so even an actor that bypassed the mutex cannot silently delete
+// a successor-era lease (it gets `ownership-changed` instead).
+//
 // WHY THE TASK, NOT THE PID, IS THE IDENTITY (SPEC §10.1 A)
 // A task can be handed from WorkBuddy to Codex between sessions. If ownership
 // were keyed on the process that claimed it, every CLI invocation would look
@@ -19,7 +30,7 @@
 
 import path from 'node:path';
 import os from 'node:os';
-import { getGitContext, listWorktrees, normalizeGitPath } from './git.mjs';
+import { getGitContext, gitCommonDirAbsolute, listWorktrees, normalizeGitPath } from './git.mjs';
 import {
   DEFAULT_TTL_MS,
   acquireLease,
@@ -33,6 +44,7 @@ import {
 } from './workspace-lease.mjs';
 import { lockWorktree, unlockWorktree, writerLockReason } from './worktree-lock.mjs';
 import { taskIdentityFromBranch } from './worktree-root.mjs';
+import { withMutationLock } from './git-mutation-lock.mjs';
 
 export const PRIMARY_OVERRIDE_ENV = 'PD_DEV_WORKTREE_ALLOW_PRIMARY';
 
@@ -47,6 +59,9 @@ export async function resolveSlot({ target = null, cwd = process.cwd() } = {}) {
   return {
     root,
     gitCwd: base,
+    // The repo mutation arena lives in the SHARED git dir — the exact place
+    // the claim/release transition must be serialised against.
+    commonDir: await gitCommonDirAbsolute(base),
     branch: ctx.branch,
     task: taskIdentityFromBranch(ctx.branch),
     isPrimary: ctx.isPrimary,
@@ -56,11 +71,12 @@ export async function resolveSlot({ target = null, cwd = process.cwd() } = {}) {
 /**
  * Claim a slot for `writer`.
  *
- * Ordering matters: the lease is taken FIRST so a concurrent claim fails at the
- * cheap, well-understood layer. If the Git lock then fails, the lease is
- * released again — a half-claim (lease without lock) would tell other PD sessions
- * to back off while giving git no protection at all, which is worse than either
- * outcome alone.
+ * Ordering (lock-before-lease, under the repo mutation mutex): the GIT
+ * worktree lock is taken FIRST — it is the only primitive Git serialises
+ * atomically — and the lease is written only after it succeeds. A failed
+ * lease therefore rolls back OUR fresh lock; a failed lock leaves no lease of
+ * ours behind. Neither interleaves with a straggler release, because the
+ * whole transition runs under `withMutationLock` (see header note).
  *
  * @returns {{ok: true, action: string, owner: string, lease: object, lock: object} |
  *           {ok: false, code: string, error: string, nextAction: string}}
@@ -98,6 +114,28 @@ export async function claimWriter({ slot, writer, ttlMs = DEFAULT_TTL_MS, now = 
   const owner = composeWriterOwner(writer, slot.task);
   const expectedReason = writerLockReason(writer, slot.task);
 
+  try {
+    return await withMutationLock(
+      { commonDir: slot.commonDir, operation: 'writer-claim', target: slot.root },
+      () => claimTransition({ slot, writer, owner, expectedReason, ttlMs, now })
+    );
+  } catch (err) {
+    if (err && err.code === 'GIT_MUTATION_LOCKED') {
+      return {
+        ok: false,
+        code: 'GIT_MUTATION_LOCKED',
+        error: 'another writer transition or git-metadata mutation is running — claim refused:\n' + String(err.message),
+        nextAction:
+          'Retry the claim in a moment: the mutex window is only the git lock + one lease write. ' +
+          'If you confirmed the named holder is gone, a human may remove ONLY that holder\'s owner record.',
+      };
+    }
+    throw err;
+  }
+}
+
+/** The claim itself — only ever run inside claimWriter's withMutationLock span. */
+async function claimTransition({ slot, writer, owner, expectedReason, ttlMs, now }) {
   // PRI-796 (review): the GIT worktree lock is taken FIRST. It is the only
   // primitive here that Git serialises atomically. Previously both claimants
   // could read the same expired lease, both overwrite the lease file, and only
@@ -194,9 +232,33 @@ async function currentLockReason(slot) {
  * destroying that evidence.
  */
 export async function releaseWriter({ slot, cwd = slot?.gitCwd }) {
+  try {
+    return await withMutationLock(
+      { commonDir: slot.commonDir, operation: 'writer-release', target: slot.root },
+      () => releaseTransition({ slot, cwd })
+    );
+  } catch (err) {
+    if (err && err.code === 'GIT_MUTATION_LOCKED') {
+      return {
+        ok: false,
+        code: 'GIT_MUTATION_LOCKED',
+        error: 'another writer transition or git-metadata mutation is running — release refused:\n' + String(err.message),
+        nextAction: 'Retry the release in a moment: the mutex window is only a git unlock + one lease unlink.',
+      };
+    }
+    throw err;
+  }
+}
+
+/** The release itself — only ever run inside releaseWriter's withMutationLock span. */
+async function releaseTransition({ slot, cwd }) {
+  // Read the CURRENT lease inside the transition: the claimId we release
+  // against is the one that exists now, so a successor-era lease (a different
+  // claimId) can never be unlinked by this call, even by a stray actor.
   const lease = readLease(slot.root);
   const phase = lease.exists && lease.valid ? leasePhase(lease.lease) : lease.exists ? 'invalid' : 'none';
   const previousOwner = lease.exists && lease.valid ? lease.lease.owner : null;
+  const expectedClaimId = lease.exists && lease.valid ? lease.lease.claimId : undefined;
 
   const unlock = await unlockWorktree({ cwd: cwd || slot.root, path: slot.root });
   if (!unlock.ok) {
@@ -208,12 +270,13 @@ export async function releaseWriter({ slot, cwd = slot?.gitCwd }) {
     };
   }
 
-  const released = releaseLease(slot.root);
+  const released = releaseLease(slot.root, { expectedClaimId });
   return {
     ok: true,
     owner: previousOwner,
     leaseStateBefore: phase,
     leaseRemoved: released.removed,
+    ...(released.reason ? { leaseRelease: released.reason } : {}),
     gitUnlocked: unlock.unlocked,
     leaseFile: leaseFilePath(slot.root),
   };

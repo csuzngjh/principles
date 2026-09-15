@@ -126,10 +126,25 @@ async function main() {
     return;
   }
 
-  // release
-  const result = releaseLease(root);
+  // release — CONDITIONAL when the lease carries a claimId: releasing never
+  // deletes a lease that has since been re-claimed by a new owner (or an
+  // era we never saw). Malformed/absent leases keep the blind path so the
+  // documented human recovery ("a human may always delete the file") works.
+  const current = readLease(root);
+  const expectedClaimId = current.exists && current.valid && typeof current.lease.claimId === 'string'
+    ? current.lease.claimId
+    : undefined;
+  const result = releaseLease(root, { expectedClaimId });
   if (args.json) printJson(result);
-  else console.log('[workspace-lease] ' + (result.removed ? 'released (' + leaseFilePath(root) + ')' : 'no lease to release'));
+  else if (result.removed) console.log('[workspace-lease] released (' + leaseFilePath(root) + ')');
+  else if (result.reason === 'ownership-changed') {
+    console.error('[workspace-lease] NOT released — the lease was re-claimed by a new owner: ' + result.currentOwner);
+    console.error('  next: the current holder releases it, or a human removes the file deliberately.');
+    process.exit(1);
+  } else if (result.reason === 'lease-invalid') {
+    console.error('[workspace-lease] NOT released — the lease file is malformed; a human may delete it.');
+    process.exit(1);
+  } else console.log('[workspace-lease] no lease to release');
 }
 
 const isMain = process.argv[1] && process.argv[1].endsWith('workspace-lease.mjs');

@@ -27,18 +27,41 @@ import path from 'node:path';
 import os from 'node:os';
 import { execSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-// PRI-796: shared install-freshness signal, so "bootstrap" and "ready" cannot
-// disagree about whether the dependency tree is trustworthy.
-import { detectStaleInstall } from './dev/lib/readiness.mjs';
+// PRI-796 round-2: install/build decisions and the readiness stamp share ONE
+// content-identity authority (build-state.mjs) with `dev:worktree:ready`, so
+// "bootstrap" and "ready" cannot disagree — and neither trusts timestamps.
+import { coveredByRootBuild, listWorkspacePackages } from './dev/lib/readiness.mjs';
+import { verifyBuildStamp, writeBuildStamp } from './dev/lib/build-state.mjs';
 
 const isWin = process.platform === 'win32';
 
-function isInstallStale(repoRoot) {
+/** Package dirs the root build authority compiles — the stamp's dirt scope. */
+function buildInputDirs(repoRoot) {
   try {
-    return detectStaleInstall(repoRoot).stale;
+    const covered = new Set(coveredByRootBuild(repoRoot).names);
+    return listWorkspacePackages(repoRoot).filter((p) => covered.has(p.name)).map((p) => p.dir);
   } catch {
-    return false; // never block an install decision on a probe failure
+    return [];
   }
+}
+
+function stampState(repoRoot) {
+  try {
+    return verifyBuildStamp(repoRoot, { coveredDirs: buildInputDirs(repoRoot) });
+  } catch {
+    // A probe that cannot answer is NEVER evidence of freshness.
+    return { ok: false, mismatches: ['stamp'], stamp: null, detail: 'stamp probe failed' };
+  }
+}
+
+/**
+ * Is the installed tree untrustworthy? Content identity: the stamp records
+ * the digest of the lockfile the last successful install was made against.
+ * No stamp → unverified → install (a no-op when actually in sync).
+ */
+function isInstallStale(stamp) {
+  if (!stamp.stamp) return true;
+  return stamp.mismatches.includes('package-lock');
 }
 
 function parseArgs(argv) {
@@ -215,6 +238,9 @@ function main() {
 
   // ---- Step 4: Dependencies ----
   console.log('\nStep 4: Dependencies (npm install)');
+  // ONE stamp evaluation drives both the install decision (lock digest) and
+  // the build decision (full identity) below.
+  const stamp = stampState(repoRoot);
   if (args.skipInstall) {
     logStep('skip', 'npm install (--skip-install)');
   } else {
@@ -228,14 +254,14 @@ function main() {
         console.log('      node_modules incomplete (missing .package-lock.json or @types/node)');
       }
     }
-    // PRI-796: existence is not freshness. A merge/checkout that rewrites
-    // package-lock.json leaves a present-but-stale tree behind, and skipping the
-    // install then turns a dependency mismatch into a confusing build/type error
-    // much later. Observed: js-yaml 4 → 5 bump surfacing as TS2339 on
-    // YAML11_SCHEMA from `npm run build`, with node_modules untouched.
-    if (!needsInstall && isInstallStale(repoRoot)) {
+    // PRI-796 round-2: existence is not freshness, and neither are mtimes.
+    // The stamp's recorded package-lock DIGEST is the install-freshness
+    // authority: a merge/checkout that rewrote the lock flips it exactly,
+    // regardless of clock ordering. Observed failure class: js-yaml 4 → 5
+    // bump surfacing as TS2339 on YAML11_SCHEMA from `npm run build`.
+    if (!needsInstall && isInstallStale(stamp)) {
       needsInstall = true;
-      console.log('      node_modules is STALE relative to package-lock.json (lockfile changed after the last install)');
+      console.log('      node_modules is STALE relative to package-lock.json (content digest differs from the stamped install)');
     }
     if (needsInstall) {
       const ok = run('npm install' + (args.preferOffline ? ' --prefer-offline' : ''), { cwd: repoRoot, dryRun: args.dryRun });
@@ -255,15 +281,26 @@ function main() {
     logStep('skip', 'npm run build (--skip-build)');
   } else {
     const coreDist = path.join(repoRoot, 'packages', 'principles-core', 'dist');
-    if (!fs.existsSync(coreDist)) {
+    // PRI-796 round-2: "dist exists" is not "dist is current". The stamp is
+    // the authority: rebuild when it is missing or mismatched (HEAD moved,
+    // lock changed, build authority changed, or build inputs are dirty).
+    if (!fs.existsSync(coreDist) || !stamp.ok) {
       const ok = run('npm run build', { cwd: repoRoot, dryRun: args.dryRun });
-      if (ok) logStep('ok', 'npm run build');
-      else {
+      if (!ok) {
         logStep('fail', 'npm run build failed');
         process.exit(1);
       }
+      logStep('ok', 'npm run build');
+      // The stamp is written ONLY after install + build have both succeeded —
+      // never before, never for a partial build, never kept from an older
+      // state just because dist survived.
+      if (!args.dryRun) {
+        const stamped = writeBuildStamp(repoRoot, { coveredDirs: buildInputDirs(repoRoot) });
+        if (stamped.ok) logStep('ok', 'readiness stamp written (' + stamped.file + ')');
+        else logStep('fail', 'build succeeded but readiness cannot be stamped: ' + stamped.error);
+      }
     } else {
-      logStep('skip', 'npm run build (dist already present)');
+      logStep('skip', 'npm run build (readiness stamp current — this exact source state was built)');
     }
   }
 
