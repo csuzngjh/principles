@@ -211,6 +211,7 @@ CONSTRAINTS:
 - NEVER call string methods on paramsSummary itself — paramsSummary.includes(...), paramsSummary.startsWith(...), paramsSummary.match(...) are always bugs and will crash with "is not a function"
 - To inspect a parameter, access its specific key (e.g. paramsSummary.path) and guard its type at runtime (typeof paramsSummary.path === 'string') before using it as a string
 - For path logic prefer input.action.normalizedPath (a normalized string) over reading raw params strings
+- ADVERSARIAL GUARD CONTRACT: when your rule declares requiresContextVersion: 2, action-level safety still dominates the context — if helpers.isRiskPath() is true the decision MUST be block regardless of input.context; writes to well-known sensitive system locations (/etc/**, system configuration outside the governed workspace) must block even when context reports priorReadOfTarget === 'yes' (a context-provided read outside the workspace is untrusted signal, never authorization)
 - implementationCode MUST be deterministic and self-contained: no imports, require, eval, Function, I/O, network, timers, Date.now, or randomness
 - goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block case
 - goldenTraceCases expectedDecision MUST be only "allow" or "block" — do NOT emit "propose_correction", "requireApproval", or "auto_correct" (seed-user MVP only supports allow/block; all other action types are rejected by the schema validator)
