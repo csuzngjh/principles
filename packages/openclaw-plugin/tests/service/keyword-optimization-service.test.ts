@@ -124,6 +124,40 @@ describe('KeywordOptimizationService', () => {
       expect(mockLearner.recordFalsePositive).toHaveBeenCalledTimes(1);
       expect(mockLearner.recordFalsePositive).toHaveBeenCalledWith('learned-term');
     });
+
+    it('PRI-812 safety: recordFalsePositive throwing does not block remaining terms (rc-9)', () => {
+      mockLearner.recordFalsePositive.mockImplementation((term: string) => {
+        if (term === 'bad-term') throw new Error('store flush failed');
+      });
+      const result: CorrectionObserverResult = {
+        updated: false,
+        updates: {},
+        fpTerms: ['bad-term', 'good-term'],
+        fpAnalysisStatus: 'completed',
+        summary: 'one term fails, the batch must continue',
+      } as any;
+      expect(() => service.applyResult(result)).not.toThrow();
+      // 两条都被尝试：失败条目只告警，不中断循环
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledTimes(2);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledWith('good-term');
+    });
+
+    it('safety: a throwing store mutation is logged and skipped, batch continues', () => {
+      mockLearner.remove.mockImplementation(() => {
+        throw new Error('keyword not found');
+      });
+      const result: CorrectionObserverResult = {
+        updated: true,
+        updates: {
+          'ghost-term': { action: 'remove', reasoning: 'stale entry' },
+          'other-term': { action: 'add', weight: 0.5, reasoning: 'new pattern' },
+        },
+        summary: 'first op fails, second still applied',
+      } as any;
+      expect(() => service.applyResult(result)).not.toThrow();
+      expect(mockLearner.remove).toHaveBeenCalledWith('ghost-term');
+      expect(mockLearner.add).toHaveBeenCalledWith({ term: 'other-term', weight: 0.5, source: 'llm' });
+    });
   });
 
   describe('updateWeight() clamp behavior', () => {
