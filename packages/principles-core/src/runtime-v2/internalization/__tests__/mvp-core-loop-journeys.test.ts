@@ -60,6 +60,10 @@ function meta(overrides: Record<string, unknown> = {}): string {
   return createPITaskDiagnosticJson({
     dependencyTaskIds: [],
     channel: 'prompt',
+    // PRI-720: these journeys exercise the FULL chain mechanics (evaluator/
+    // rollout/repair), which is now the explicit full_chain topology on the
+    // prompt channel.
+    pipelineMode: 'full_chain',
     timeoutMs: 300_000,
     inputArtifactRefs: [],
     outputArtifactRefs: [],
@@ -84,9 +88,11 @@ async function succeedWithDecision(taskId: string, runnerDecision?: string): Pro
       await stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson({
         dependencyTaskIds: pi.dependencyTaskIds,
         channel: pi.channel,
+        pipelineMode: pi.pipelineMode,
         timeoutMs: pi.timeoutMs,
         inputArtifactRefs: pi.inputArtifactRefs,
         outputArtifactRefs: pi.outputArtifactRefs,
+        parentTaskId: pi.parentTaskId,
         correlationId: pi.correlationId,
         revisionCount: pi.revisionCount,
         runnerDecision: runnerDecision as never,

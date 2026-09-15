@@ -1828,6 +1828,16 @@
       "disabled": "Onboarding wizard disabled",
       "toggleFailed": "Failed to toggle onboarding feature",
       "loadFailed": "Failed to load onboarding flag state"
+    },
+    "fullPipelineFlag": {
+      "title": "Pipeline Mode (PRI-720)",
+      "label": "Force full pipeline for prompt principles",
+      "description": "Default OFF: prompt/defer principles take the short semantic path (no code generation, no sandbox). ON: newly seeded prompt chains run the complete legacy pipeline including Artificer code generation, Evaluator review and adversarial replay — for test scenarios or when you explicitly want the full pipeline. Does not affect chains already in progress.",
+      "toggleAriaLabel": "Toggle force-full-pipeline mode for prompt internalization",
+      "enabled": "Full pipeline forced for new prompt chains",
+      "disabled": "Prompt chains use the short semantic path",
+      "toggleFailed": "Failed to toggle pipeline mode",
+      "loadFailed": "Failed to load pipeline mode state"
     }
   }
 }

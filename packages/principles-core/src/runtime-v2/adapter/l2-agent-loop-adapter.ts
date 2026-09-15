@@ -108,12 +108,31 @@ export interface L2AgentLoopAdapterConfig {
  * on a streaming agent loop rather than one-shot completeSimple; both now live
  * on the single @earendil-works scope, so the historical "no cross-import"
  * reason for full duplication is gone and a dedupe is planned as PR3 follow-up).
- * Deliberately NOT catalog-first: L2's strict Model<string> return shape and
- * its streaming loop semantics are untested against borrowed catalog entries.
- * Built-in providers use getModel(); custom OpenAI-compatible endpoints
- * construct a Model object directly.
+ *
+ * PRI-795 r2 — catalog-first for custom endpoints, mirroring
+ * PiAiRuntimeAdapter.resolveModel: a custom baseUrl relaying a catalog-known
+ * model keeps the catalog's authoritative metadata (reasoning, contextWindow,
+ * maxTokens, thinkingLevelMap, compat incl. thinkingFormat/supportsReasoningEffort)
+ * with only the transport (provider name + baseUrl) overridden. The previous
+ * hand-built literal hardcoded `reasoning:false`, `contextWindow:128000`,
+ * `maxTokens:32000`, and a compat that could not send `reasoning_effort` —
+ * EP002-R3 live evidence: for glm-5.3-flash (catalog: 1M context / 131072
+ * output / zai thinking / effort-capable) the profile's `reasoning:low` never
+ * reached the wire, so the model thought at default strength and burned the
+ * entire 16000-token response budget before emitting a tool call. The literal
+ * remains only as the fallback for model ids absent from every catalog.
+ * (The original "deliberately NOT catalog-first" caution is superseded by
+ * EP002-R3: the PiAi path has run catalog-borrowed entries in production
+ * since PRI-758, and the L2 loop ran 25 live model calls against this exact
+ * model without shape issues.)
  */
-export function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Model<string> {
+// eslint-disable-next-line @typescript-eslint/max-params -- 4th param is an optional opts bag; keeping (provider, modelId, baseUrl?) positional preserves the existing exported signature and all call sites
+export function resolveL2Model(
+  provider: string,
+  modelId: string,
+  baseUrl?: string,
+  opts?: { reasoning?: boolean; maxTokens?: number },
+): Model<string> {
   const knownProviders = getProviders();
   if ((knownProviders as string[]).includes(provider) && !baseUrl) {
     // @ts-expect-error — getModel requires literal model ID types; runtime strings from config are acceptable
@@ -125,19 +144,54 @@ export function resolveL2Model(provider: string, modelId: string, baseUrl?: stri
       `Provider '${provider}' is not a built-in pi-ai provider and requires a custom baseUrl.`,
     );
   }
-  // Custom provider with baseUrl — construct a Model object directly (openai-completions API).
-  // The literal object doesn't fully satisfy Model<string>'s discriminant union, so narrow via unknown.
+  // PRI-795 r2: catalog-first — same rationale and openai-completions guard
+  // as PiAiRuntimeAdapter.resolveModel. Lookup order matters because several
+  // catalog namespaces carry entries for the SAME model id with semantically
+  // different gateway compat (e.g. 'opencode-go' relaying 'glm-5.3-flash'
+  // without the zai thinking format):
+  //   1. the configured provider's own namespace — highest authority when the
+  //      configured name IS a catalog namespace;
+  //   2. other namespaces, preferring entries that DECLARE a thinkingFormat
+  //      (protocol-complete provider entries over relay/gateway variants);
+  //   3. any openai-completions entry at all.
+  // A total miss falls through to the literal.
+  // @ts-expect-error — runtime strings are acceptable against the literal-typed signature
+  const configuredHit = getModel(provider as KnownProvider, modelId);
+  if (configuredHit && configuredHit.api === 'openai-completions') {
+    return { ...configuredHit, provider, baseUrl };
+  }
+  const isProtocolComplete = (m: Model<string>): boolean => {
+    const compat = m.compat as Record<string, unknown> | undefined;
+    return !!compat && compat.thinkingFormat !== undefined;
+  };
+  let anyHit: Model<string> | undefined;
+  for (const catalogProvider of knownProviders) {
+    if (catalogProvider === provider) continue;
+    // @ts-expect-error — runtime strings are acceptable against the literal-typed signature
+    const catalogModel = getModel(catalogProvider as KnownProvider, modelId);
+    if (!catalogModel || catalogModel.api !== 'openai-completions') continue;
+    if (isProtocolComplete(catalogModel)) {
+      return { ...catalogModel, provider, baseUrl };
+    }
+    anyHit ??= catalogModel;
+  }
+  if (anyHit) {
+    return { ...anyHit, provider, baseUrl };
+  }
+  // Custom model unknown to every catalog — construct a Model object directly
+  // (openai-completions API). The literal object doesn't fully satisfy
+  // Model<string>'s discriminant union, so narrow via unknown.
   const customModel = {
     id: modelId,
     name: modelId,
     api: 'openai-completions' as const,
     provider,
     baseUrl,
-    reasoning: false,
+    reasoning: opts?.reasoning ?? false,
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
-    maxTokens: 32000,
+    maxTokens: opts?.maxTokens ?? 32000,
     compat: {
       supportsStore: false,
       supportsDeveloperRole: false,

@@ -72,4 +72,10 @@ export const ArtificerRuleOutputTypebox = Type.Object({
   generatedAt: Type.String({ minLength: 1 }),
   // PRI-484 — optional v2 context declaration. Only literal `2` is supported.
   requiresContextVersion: Type.Optional(Type.Literal(2)),
+  // PRI-490 — evidence references, required for v2 rules (runtime-validated).
+  // PRI-795 r3: this field MUST exist here — it is the submit tool's parameter
+  // schema, i.e. the model's structural source of truth. Its absence made the
+  // model omit evidenceRefs on EVERY submit (glm-5.3-flash AND glm-5.3, 13
+  // consecutive live rejections, EP002-R3) while the v2 validator demanded it.
+  evidenceRefs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 });

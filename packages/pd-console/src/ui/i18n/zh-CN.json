@@ -1828,6 +1828,16 @@
       "disabled": "引导向导已关闭",
       "toggleFailed": "切换引导功能失败",
       "loadFailed": "加载引导开关状态失败"
+    },
+    "fullPipelineFlag": {
+      "title": "管道模式（PRI-720）",
+      "label": "强制 prompt 原则走完整管道",
+      "description": "默认关：prompt/defer 原则走短语义路径（不生成代码、不跑沙箱）。开启后：新种子的 prompt 链走完整旧管道，包括 Artificer 代码生成、Evaluator 评审与对抗重放——用于测试场景或您明确需要跑完整管道时。不影响已在进行中的链。",
+      "toggleAriaLabel": "切换 prompt 内化强制完整管道模式",
+      "enabled": "新 prompt 链已强制走完整管道",
+      "disabled": "prompt 链使用短语义路径",
+      "toggleFailed": "切换管道模式失败",
+      "loadFailed": "加载管道模式状态失败"
     }
   }
 }

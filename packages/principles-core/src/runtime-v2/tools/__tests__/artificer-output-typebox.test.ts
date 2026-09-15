@@ -42,6 +42,21 @@ function checkTypebox(value: unknown): boolean {
 }
 
 describe('PRI-439 artificer-output-typebox consistency with @sinclair/typebox schema', () => {
+  // PRI-795 r3: behavioural samples alone cannot catch a MISSING optional
+  // field — every sample that omits it validates on both sides. Pin the
+  // top-level property sets to be IDENTICAL so a one-sided field addition
+  // (like the evidenceRefs drift that made every live submit reject with
+  // 'evidenceRefs is required') goes red here.
+  it('declares the SAME top-level property set as the canonical schema', () => {
+    const sinclairKeys = Object.keys(ArtificerRuleOutputSchema.properties).sort();
+    const typeboxKeys = Object.keys(ArtificerRuleOutputTypebox.properties).sort();
+    expect(typeboxKeys).toEqual(sinclairKeys);
+    // Explicit sentinel: the field whose absence caused EP002-R3's
+    // 13-consecutive-rejection loop must be declared in BOTH schemas.
+    expect(typeboxKeys).toContain('evidenceRefs');
+    expect(sinclairKeys).toContain('evidenceRefs');
+  });
+
   it('both schemas accept the valid sample', () => {
     expect(checkSinclair(VALID_OUTPUT)).toBe(true);
     expect(checkTypebox(VALID_OUTPUT)).toBe(true);
@@ -158,7 +173,7 @@ describe('PRI-439 artificer-output-typebox consistency with @sinclair/typebox sc
 
 describe('PRI-439 GoldenTraceCaseInputTypebox standalone', () => {
   it('accepts a valid case', () => {
-    const valid = VALID_OUTPUT.goldenTraceCases[0];
+    const [valid] = VALID_OUTPUT.goldenTraceCases;
     expect(TypeboxValue.Check(GoldenTraceCaseInputTypebox, valid)).toBe(true);
   });
 
