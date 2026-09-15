@@ -192,8 +192,8 @@ export interface RuleHostPipelineStage {
  *   rule artifact exists and is WAITING for owner review. This is NOT owner
  *   approval — it means the candidate is ready for the owner to review.
  * - `text_principle_only`: code-rule capability OFF (artificer or evaluator
- *   disabled). No rule artifact; a text principle artifact is produced for
- *   prompt-channel fallback.
+ *   disabled). No rule artifact; a text principle artifact is produced for the
+ *   prompt channel and enqueued into the existing approval queue (PRI-804).
  * - `generation_rejected`: pipeline failed (no dreamer task, stage failure, or
  *   evaluator rejected the candidate). No rule artifact.
  */
@@ -211,10 +211,10 @@ export interface RuleHostPipelineResult {
   readonly principleArtifactId: string | null;
   /**
    * Approval ID when the candidate was auto-enqueued into the ApprovalQueue.
-   * Present when decision='candidate_ready_for_owner_review' and the pipeline
-   * successfully enqueued the candidate for owner review (P1 #1 fix).
-   * Null when the candidate was not enqueued (text_principle_only, rejected,
-   * or enqueue failed — check degradationReason for details).
+   * Present for decision='candidate_ready_for_owner_review' (rule artifact,
+   * code_tool_hook channel) AND for decision='text_principle_only' (principle
+   * artifact, prompt channel — PRI-804 wiring). Null when the enqueue itself
+   * failed — check degradationReason for the structured reason.
    */
   readonly approvalId: string | null;
   /** Structured reason when decision is not candidate_ready_for_owner_review. */
@@ -386,7 +386,10 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     if (!capabilityEnabled) {
       stages.push({ name: 'adversarial_loop', status: 'skipped', reason: capabilityDisabledReason });
       onProgress('adversarial_loop', 'skipped', capabilityDisabledReason);
-      return await textPrincipleOnlyResult({ painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason, artifactStore });
+      // PRI-804: text principles enter the existing prompt-channel approval
+      // queue (Owner governance, same gate as RuleCode) instead of dead-ending.
+      const approvalStore = new SqliteApprovalQueueStore(stateManager.connection);
+      return await textPrincipleOnlyResult({ painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason, artifactStore, approvalStore, now: new Date().toISOString() });
     }
 
     // ── Stage: adversarial loop (artificer↔evaluator) ──
@@ -849,16 +852,44 @@ interface TextPrincipleOnlyParams {
   readonly scribeTaskId: string;
   readonly disabledReason: string;
   readonly artifactStore: PIArtifactStore;
+  /** PRI-804: approval queue used to enqueue the text principle (prompt channel). */
+  readonly approvalStore: SqliteApprovalQueueStore;
+  readonly now: string;
 }
 
 async function textPrincipleOnlyResult(
   params: TextPrincipleOnlyParams,
 ): Promise<RuleHostPipelineResult> {
-  const { painId, stages, scribeTaskId, disabledReason, artifactStore } = params;
+  const { painId, stages, scribeTaskId, disabledReason, artifactStore, approvalStore, now } = params;
   // Look up the principle artifact produced by the scribe stage.
   try {
     const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
     const principleArt = arts.find((a) => a.artifactKind === 'principle');
+    // PRI-804: a text principle is a prompt-channel intervention and follows the
+    // same Owner governance as RuleCode (Owner decision 2026-09-15): enqueue it
+    // into the EXISTING approval queue so the Owner can approve it in Console.
+    // Deterministic approval id (apr_prompt_<artifactId>) + INSERT OR IGNORE make
+    // replays idempotent. Enqueue failure degrades observably (rc-9), never
+    // throwing away the artifact.
+    let approvalId: string | null = null;
+    let enqueueNote = '';
+    if (principleArt) {
+      try {
+        const record = await approvalStore.enqueue({
+          artifactId: principleArt.artifactId,
+          channel: 'prompt',
+          riskLevel: getChannelRiskLevel('prompt'),
+          summary: `Text principle candidate for pain ${painId}`,
+          triggerReason: `text_principle_only: pain=${painId}, principle=${principleArt.artifactId}; code-rule capability off (${disabledReason})`,
+        }, now);
+        approvalId = record.approvalId;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        enqueueNote = `; approval_enqueue_failed: ${msg}. Manual enqueue required: pd activation dispatch --artifact-id ${principleArt.artifactId} --channel prompt`;
+      }
+    } else {
+      enqueueNote = '; approval_enqueue_skipped: no principle artifact from scribe';
+    }
     return {
       decision: 'text_principle_only',
       painId,
@@ -866,8 +897,8 @@ async function textPrincipleOnlyResult(
       scribeTaskId,
       ruleArtifactId: null,
       principleArtifactId: principleArt?.artifactId ?? null,
-      approvalId: null,
-      degradationReason: `code_rule_capability_off: ${disabledReason}`,
+      approvalId,
+      degradationReason: `code_rule_capability_off: ${disabledReason}${enqueueNote}`,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
