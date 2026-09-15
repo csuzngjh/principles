@@ -166,16 +166,10 @@ export function createDemoSandboxEvaluate(
   // which compiles and runs it directly in the HOST realm — unapproved code
   // with full host capabilities. It now delegates to the shared hardened
   // replay evaluator (vm realm + JSON-string trust-boundary crossing), the
-  // same primitive the production gate uses.
-  const hardenedEvaluate = compileHardenedRuleEvaluator(implementationCode, 'story-a-demo');
-
-  return (input: RuleHostInput, helpers: RuleHostHelpers): RuleHostResult => {
-    const result = hardenedEvaluate(input, helpers);
-    if (typeof result !== 'object' || result === null || Array.isArray(result)) {
-      return { decision: 'allow', matched: false, reason: 'Demo sandbox: evaluate returned non-object' };
-    }
-    return result;
-  };
+  // same primitive the production gate uses, including its canonical
+  // RuleHostResult validation: a malformed result is a structured failure,
+  // never a fabricated allow.
+  return compileHardenedRuleEvaluator(implementationCode, 'story-a-demo');
 }
 
 export function evaluateDemoGoldenTrace(
