@@ -173,7 +173,7 @@ describe('repo mutation mutex', () => {
     const a = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'wt' });
     expect(a.ok).toBe(true);
     if (!a.ok) return;
-    fs.rmSync(mutationLockPath(commonDir)); // human recovery
+    fs.rmSync(mutationLockPath(commonDir)); // codeql[js/file-system-race] -- intentional: human-recovery step of the tested takeover scenario
     const b = acquireMutationLock({ commonDir, operation: 'worktree-remove', target: 'wt' });
     expect(b.ok).toBe(true);
 
@@ -195,10 +195,11 @@ describe('repo mutation mutex', () => {
     const file = mutationLockPath(commonDir);
     const content = fs.readFileSync(file, 'utf-8');
     const inoBefore = fs.statSync(file).ino;
-    // codeql[js/file-system-race] -- deliberate single-threaded construction:
-    // the rm+recreate IS the scenario under test (a replacement wearing our
-    // bytes); both inode outcomes are asserted explicitly below.
-    fs.rmSync(file);
+    // Deliberate single-threaded construction: the rm+recreate IS the scenario
+    // under test (a replacement wearing our bytes); both inode outcomes are
+    // asserted explicitly below.
+    fs.rmSync(file); // codeql[js/file-system-race] -- intentional fixture race setup
+    // codeql[js/file-system-race] -- intentional fixture race setup (sink of the flagged chain)
     fs.writeFileSync(file, content, 'utf-8');
     const inoAfter = fs.statSync(file).ino;
 
