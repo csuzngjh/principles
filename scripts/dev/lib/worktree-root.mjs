@@ -46,6 +46,18 @@ export const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
  */
 export function resolveWorktreeRoot({ primaryPath, env = process.env } = {}) {
   if (!primaryPath) throw new Error('resolveWorktreeRoot requires primaryPath');
+  // Fail loud on a path that is not absolute FOR THIS PLATFORM. On POSIX a
+  // Windows-shaped path ('D:/Code/principles') is a RELATIVE path, so
+  // `path.resolve` would silently prepend the cwd and hand back a fabricated
+  // location — a wrong path that looks plausible. Every real caller passes git's
+  // absolute `worktree list` path; anything else is a bug worth stopping.
+  // (Found by CI: the Windows-only unit test passed locally and produced
+  // `<cwd>/D:/Code/_worktrees/principles` on Linux.)
+  if (!path.isAbsolute(primaryPath)) {
+    throw new Error(
+      "primaryPath must be an absolute path for this platform (got '" + primaryPath + "')"
+    );
+  }
   const primary = path.resolve(primaryPath);
   const override = env[WORKTREE_ROOT_ENV];
   if (typeof override === 'string' && override.trim().length > 0) {

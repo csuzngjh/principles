@@ -13,7 +13,13 @@ import {
   worktreePathFor,
 } from '../dev/lib/worktree-root.mjs';
 
-const PRIMARY = path.join('D:', 'Code', 'principles');
+// PORTABILITY: this test file runs on Windows AND on the Linux CI runner. A
+// literal 'D:/Code/principles' is an ABSOLUTE path on Windows but a RELATIVE one
+// on POSIX, so it must not be used as a fixture here — the platform-appropriate
+// absolute form is built with path.resolve, and the real Windows layout is pinned
+// separately below.
+const PRIMARY = path.resolve(path.sep, 'srv', 'code', 'principles');
+const OTHER_PRIMARY = path.resolve(path.sep, 'elsewhere', 'other', 'principles');
 
 describe('resolveWorktreeRoot (git-10)', () => {
   it('derives the pool from the primary checkout without any hardcoded drive', () => {
@@ -21,17 +27,27 @@ describe('resolveWorktreeRoot (git-10)', () => {
     expect(source).toBe('derived');
     expect(root).toBe(path.join(path.dirname(PRIMARY), POOL_DIRNAME, 'principles'));
     // The derivation must FOLLOW the primary rather than a literal — the repo
-    // lives on a different drive in CI and on other machines. (On Windows a
-    // POSIX-style input still resolves to a drive-relative path, so both sides
-    // go through path.resolve.)
-    const otherPrimary = path.resolve(path.join('some', 'where', 'else', 'principles'));
-    const other = resolveWorktreeRoot({ primaryPath: otherPrimary, env: {} });
-    expect(other.root).toBe(path.join(path.dirname(otherPrimary), POOL_DIRNAME, 'principles'));
+    // lives on a different drive in CI and on other machines.
+    const other = resolveWorktreeRoot({ primaryPath: OTHER_PRIMARY, env: {} });
+    expect(other.root).toBe(path.join(path.dirname(OTHER_PRIMARY), POOL_DIRNAME, 'principles'));
     expect(other.root).not.toBe(root);
   });
 
+  it.runIf(process.platform === 'win32')('derives D:\\Code\\_worktrees\\principles for D:\\Code\\principles', () => {
+    // The Owner's actual layout — pinned only where drive letters exist.
+    const { root } = resolveWorktreeRoot({ primaryPath: path.join('D:', 'Code', 'principles'), env: {} });
+    expect(root).toBe(path.join('D:', 'Code', '_worktrees', 'principles'));
+  });
+
+  it('refuses a path that is not absolute FOR THIS PLATFORM instead of fabricating one', () => {
+    // On POSIX a Windows-shaped path is relative; resolving it would silently
+    // produce '<cwd>/D:/Code/...'. Fail loud instead (found by CI).
+    const notAbsoluteHere = process.platform === 'win32' ? 'relative/dir' : 'D:/Code/principles';
+    expect(() => resolveWorktreeRoot({ primaryPath: notAbsoluteHere, env: {} })).toThrow(/must be an absolute path/);
+  });
+
   it('lets PD_WORKTREE_ROOT override the pool root', () => {
-    const custom = path.join('E:', 'pools', 'pd');
+    const custom = path.resolve(path.sep, 'pools', 'pd');
     const { root, source } = resolveWorktreeRoot({ primaryPath: PRIMARY, env: { [WORKTREE_ROOT_ENV]: custom } });
     expect(source).toBe('env');
     expect(root).toBe(path.resolve(custom));
