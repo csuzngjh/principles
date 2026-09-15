@@ -55,6 +55,8 @@ import {
   // runners already receive (EP-07: canonical resolved value, not raw input).
   resolveOutputLanguage,
   buildArtificerHostSemanticContext,
+  // PRI-804(a): ledger identity lookup for the source_principle_id backfill.
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import type {
   AdversarialLoopResult,
@@ -72,6 +74,7 @@ import type {
   EvaluatorValidator,
 } from '@principles/core/runtime-v2';
 import { createHash } from 'node:crypto';
+import * as path from 'node:path';
 import { loadPdConfig } from './pd-config-loader.js';
 import { createEvaluatorRuntimeContext } from '@principles/host-runtime';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
@@ -389,7 +392,11 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       // PRI-804: text principles enter the existing prompt-channel approval
       // queue (Owner governance, same gate as RuleCode) instead of dead-ending.
       const approvalStore = new SqliteApprovalQueueStore(stateManager.connection);
-      return await textPrincipleOnlyResult({ painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason, artifactStore, approvalStore, now: new Date().toISOString() });
+      return await textPrincipleOnlyResult({
+        painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason,
+        artifactStore, approvalStore, stateManager, dreamerTaskId: dreamerSeedTaskId,
+        workspaceDir: opts.workspaceDir, now: new Date().toISOString(),
+      });
     }
 
     // ── Stage: adversarial loop (artificer↔evaluator) ──
@@ -854,7 +861,51 @@ interface TextPrincipleOnlyParams {
   readonly artifactStore: PIArtifactStore;
   /** PRI-804: approval queue used to enqueue the text principle (prompt channel). */
   readonly approvalStore: SqliteApprovalQueueStore;
+  /** PRI-804(a): ledger identity resolution for the source_principle_id backfill. */
+  readonly stateManager: RuntimeStateManager;
+  readonly dreamerTaskId: string;
+  readonly workspaceDir: string;
   readonly now: string;
+}
+
+/**
+ * PRI-804(a): resolve the LEDGER principle UUID for the chain.
+ *
+ * The ledger principle is the identity the Console groups approvals by and the
+ * one `upgradeLedgerPrinciple` activates after approval. The only durable link
+ * from the internalization chain to the ledger is the candidateId carried in
+ * the dreamer task's diagnosticJson (set by the intake bridge) — the ledger
+ * entry stores it in derivedFromPainIds. Resolving through
+ * PrincipleTreeLedgerAdapter.existsForCandidate reuses the SAME lookup the
+ * intake bridge uses (one authority, no second truth).
+ */
+async function resolveLedgerPrincipleId(
+  stateManager: RuntimeStateManager,
+  dreamerTaskId: string,
+  workspaceDir: string,
+): Promise<string | null> {
+  let candidateId: string | undefined;
+  try {
+    const dreamerTask = await stateManager.getTask(dreamerTaskId);
+    if (typeof dreamerTask?.diagnosticJson === 'string') {
+      const parsed: unknown = JSON.parse(dreamerTask.diagnosticJson);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        && Object.hasOwn(parsed, 'candidateId')) {
+        const stored = Reflect.get(parsed, 'candidateId');
+        if (typeof stored === 'string' && stored.length > 0) candidateId = stored;
+      }
+    }
+  } catch {
+    return null; // malformed dreamer diagnosticJson — skip backfill, observable via note
+  }
+  if (!candidateId) return null;
+  try {
+    const ledger = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+    const entry = ledger.existsForCandidate(candidateId);
+    return entry?.id ?? null;
+  } catch {
+    return null; // ledger unreadable — skip backfill, observable via note
+  }
 }
 
 async function textPrincipleOnlyResult(
@@ -865,6 +916,25 @@ async function textPrincipleOnlyResult(
   try {
     const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
     const principleArt = arts.find((a) => a.artifactKind === 'principle');
+    // PRI-804(a): backfill source_principle_id with the ledger principle UUID so
+    // the approval binds to the ledger principle (Console approval grouping and
+    // the post-approve ledger activation upgrade both resolve identity from
+    // this column first). Failure degrades observably — the enqueue below
+    // still proceeds so the Owner can act, with the gap surfaced in the reason.
+    let identityNote = '';
+    if (principleArt && !principleArt.sourcePrincipleId) {
+      const ledgerPrincipleId = await resolveLedgerPrincipleId(params.stateManager, params.dreamerTaskId, params.workspaceDir);
+      if (ledgerPrincipleId) {
+        try {
+          await artifactStore.upsertArtifact({ ...principleArt, sourcePrincipleId: ledgerPrincipleId, updatedAt: now });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          identityNote = `; source_principle_id_backfill_failed: ${msg}`;
+        }
+      } else {
+        identityNote = '; source_principle_id_backfill_skipped: no ledger principle resolved for the chain candidate';
+      }
+    }
     // PRI-804: a text principle is a prompt-channel intervention and follows the
     // same Owner governance as RuleCode (Owner decision 2026-09-15): enqueue it
     // into the EXISTING approval queue so the Owner can approve it in Console.
@@ -882,7 +952,8 @@ async function textPrincipleOnlyResult(
           summary: `Text principle candidate for pain ${painId}`,
           triggerReason: `text_principle_only: pain=${painId}, principle=${principleArt.artifactId}; code-rule capability off (${disabledReason})`,
         }, now);
-        approvalId = record.approvalId;
+        const { approvalId: enqueuedApprovalId } = record;
+        approvalId = enqueuedApprovalId;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         enqueueNote = `; approval_enqueue_failed: ${msg}. Manual enqueue required: pd activation dispatch --artifact-id ${principleArt.artifactId} --channel prompt`;
@@ -898,7 +969,7 @@ async function textPrincipleOnlyResult(
       ruleArtifactId: null,
       principleArtifactId: principleArt?.artifactId ?? null,
       approvalId,
-      degradationReason: `code_rule_capability_off: ${disabledReason}${enqueueNote}`,
+      degradationReason: `code_rule_capability_off: ${disabledReason}${identityNote}${enqueueNote}`,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
