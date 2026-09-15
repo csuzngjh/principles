@@ -364,7 +364,16 @@ head/base 原始值——零匹配也可见，静默空转不可能再伪装成�
 列表接口分页参数是 `page_size` 而非 `per_page`。
 
 **前置**：`pd-secrets/cnb-github-bridge.yml` 的 `allow_events` 必须包含
-`pull_request.target`（见 §4.4.1）；缺失时 T7 fail-loud，T6 不受影响。
+`pull_request.merged`、`pull_request.target` 与 `api_trigger_deliver`（见 §4.4.1）；
+缺失时对应流水线在 Prepare 即 fail-loud。
+
+> **白名单语义（PRI-785 实证，与官方文档表述有出入）**：只要密钥文件声明了
+> `allow_events`，**所有**引用它的流水线事件都必须在名单内——可信事件
+> （`pull_request.target`/`api_trigger_deliver` 等）并不豁免（官方 file-reference
+> 文档称该约束仅针对不可信事件；实测 `api_trigger_deliver` 未在名单时 Prepare
+> 直接拒绝，build `cnb-kl8-1k2gcqs96` 日志留档）。新增任何引用该密钥文件的
+> 事件类型时，必须同步更新此名单，否则流水线在 Prepare 阶段失败且 GitHub 侧
+> 零痕迹。
 
 #### 4.4.1 Owner 一次性预置（代码无法代劳）
 
@@ -379,6 +388,7 @@ head/base 原始值——零匹配也可见，静默空转不可能再伪装成�
    allow_events:
      - pull_request.merged
      - pull_request.target
+     - api_trigger_deliver
    allow_branches: main
    GITHUB_SYNC_USERNAME: x-access-token
    GITHUB_SYNC_TOKEN: <上一步的 fine-grained PAT>
@@ -402,7 +412,7 @@ head/base 原始值——零匹配也可见，静默空转不可能再伪装成�
 
 完整闭环 = T7/T6 桥（CNB→GitHub）+ 镜像（GitHub→CNB，§2）。
 引导顺序：① 合并本 PR（GitHub main 获得桥配置）→ ② 完成 §4.4.1 预置
-（allow_events 含 `pull_request.target` 与 `pull_request.merged`）→
+（allow_events 含 `pull_request.target`、`pull_request.merged` 与 `api_trigger_deliver`）→
 ③ 按 §2 方案A-2 把 CNB main 同步到 GitHub main 当前 SHA（此后 CNB main 含桥配置）
 → ④ 之后每次 Developer CNB PR 创建，T7 自动投递出 GitHub PR；
 GitHub PR 合并后重做 ③ 对齐。
