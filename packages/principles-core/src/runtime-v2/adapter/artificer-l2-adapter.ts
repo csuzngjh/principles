@@ -54,6 +54,7 @@ import type {
 import type { RefinerRuleHostGateDeps } from '../internalization/refiner-rulehost-gate.js';
 import type { ArtificerValidator } from '../internalization/artificer-output.js';
 import { PDRuntimeError } from '../error-categories.js';
+import type { PDErrorCategory } from '../error-categories.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
@@ -85,6 +86,14 @@ export interface ArtificerL2AdapterConfig {
   readonly totalBudgetMs?: number;
   /** Max output tokens per LLM call (default 8192). */
   readonly maxTokens?: number;
+  /**
+   * PRI-795: optional pi-ai reasoning/thinking level from the runtime profile.
+   * Forwarded into the loop's stream options so always-thinking models (e.g.
+   * zai glm-5.3-flash) get a bounded thinking level instead of their most
+   * expensive default. `false` explicitly disables reasoning. Mirrors the
+   * PiAiRuntimeAdapter config field (profile contract, pd-config-types.ts).
+   */
+  readonly reasoning?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | false;
   /** Optional event emitter; defaults to the shared singleton. */
   readonly eventEmitter?: StoreEventEmitter;
   /**
@@ -99,15 +108,163 @@ interface ArtificerL2RunState {
   readonly runId: string;
   readonly startedAt: string;
   endedAt: string;
-  status: 'succeeded' | 'failed' | 'timed_out';
+  status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled';
   output: StructuredRunOutput | null;
   reason?: string;
+  /** PRI-795: who aborted the run's AbortController, when anyone did. */
+  abortOwner?: L2AbortOwner;
+  /** PRI-795: wall-clock duration of the agent loop in ms. */
+  elapsedMs?: number;
 }
+
+/**
+ * PRI-795 abort-ownership model. The adapter's AbortController has exactly
+ * two internal aborters (budget timer, cancelRun); pi-ai reports
+ * stopReason='aborted' whenever OUR signal is aborted, and pi-agent-core
+ * then ends the loop with a silent return (agent-loop.js: no throw). The
+ * previous code assigned `timedOut = budgetTimedOut` only inside the catch
+ * block — dead code on the silent-return path — so every abort was
+ * misclassified as output_invalid. Ownership is now resolved AFTER the
+ * loop from these flags, never from which control path returned.
+ */
+type L2AbortOwner = 'pd_budget' | 'cancelled' | 'unknown';
+
+/**
+ * PRI-795 fine-grained failure classification. The coarse PDErrorCategory
+ * thrown to the runner stays (timeout / cancelled / execution_failed /
+ * output_invalid — existing union, no schema change); the fine-grained
+ * kind rides in the failure reason + telemetry payload for diagnosis.
+ */
+type L2FailureKind =
+  | 'pd_budget_timeout'
+  | 'provider_timeout'
+  | 'cancelled'
+  | 'stream_aborted'
+  | 'provider_error'
+  | 'no_submit';
 
 const DEFAULT_MAX_TURNS = 12;
 const DEFAULT_TOTAL_BUDGET_MS = 300_000;
 const DEFAULT_MAX_TOKENS = 8192;
 const MAX_RETAINED_RUNS = 100;
+
+// ── PRI-795 runtime evidence helpers ─────────────────────────────────────────
+
+/** Token usage summary; the string form marks "honestly unavailable". */
+type L2TokenUsage =
+  | { status: 'ok'; inputTokens: number; outputTokens: number; totalTokens: number }
+  | { status: 'unavailable' };
+
+/**
+ * Sum pi-ai Usage off the loop transcript's assistant messages. The transcript
+ * is produced by pi-agent-core in-process (not a trust boundary), but the walk
+ * still guards shapes (rc-1/rc-4): any non-finite field disqualifies that
+ * message; zero qualifying messages yields `unavailable` — never fabricated.
+ */
+function summarizeTranscriptUsage(transcript: AgentMessage[]): L2TokenUsage {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let sawUsage = false;
+  for (const msg of transcript) {
+    if (!msg || typeof msg !== 'object' || (msg as { role?: unknown }).role !== 'assistant') continue;
+    const {usage} = (msg as { usage?: unknown });
+    if (!usage || typeof usage !== 'object') continue;
+    const input = Reflect.get(usage, 'input');
+    const output = Reflect.get(usage, 'output');
+    if (typeof input === 'number' && Number.isFinite(input)) {
+      inputTokens += input;
+      sawUsage = true;
+    }
+    if (typeof output === 'number' && Number.isFinite(output)) {
+      outputTokens += output;
+      sawUsage = true;
+    }
+  }
+  return sawUsage ? { status: 'ok', inputTokens, outputTokens, totalTokens: inputTokens + outputTokens } : { status: 'unavailable' };
+}
+
+/** stopReason of the last assistant message in the transcript, guarded. */
+function lastAssistantStopReason(transcript: AgentMessage[]): string | null {
+  for (let i = transcript.length - 1; i >= 0; i -= 1) {
+    const msg = transcript[i];
+    if (!msg || (msg as { role?: unknown }).role !== 'assistant') continue;
+    const {stopReason} = (msg as { stopReason?: unknown });
+    return typeof stopReason === 'string' && stopReason.length > 0 ? stopReason : null;
+  }
+  return null;
+}
+
+/** PRI-795 failure classification inputs. */
+interface L2FailureClassificationInput {
+  abortOwner: L2AbortOwner | undefined;
+  budgetMs: number;
+  elapsedMs: number;
+  turnCount: number;
+  stopReason: string | null;
+  loopError: string | null;
+  tokenUsage: L2TokenUsage;
+}
+
+/**
+ * Map a loop failure to (coarse PDErrorCategory, fine-grained kind, reason,
+ * nextAction). Coarse categories reuse the existing union — 'timeout' and
+ * 'execution_failed' are retriable, 'cancelled' permanent — fixing the old
+ * behavior where every abort/provider error was permanently 'output_invalid'.
+ */
+function classifyL2Failure(input: L2FailureClassificationInput): {
+  category: PDErrorCategory;
+  kind: L2FailureKind;
+  reason: string;
+  nextAction: string;
+} {
+  const evidence = `abortOwner=${input.abortOwner ?? 'none'} budgetMs=${input.budgetMs} elapsedMs=${input.elapsedMs} stopReason=${input.stopReason ?? 'unavailable'} turns=${input.turnCount} tokenUsage=${input.tokenUsage.status === 'ok' ? `${input.tokenUsage.inputTokens}in/${input.tokenUsage.outputTokens}out` : 'unavailable'}`;
+  if (input.abortOwner === 'pd_budget') {
+    return {
+      category: 'timeout',
+      kind: 'pd_budget_timeout',
+      reason: `Artificer L2 total budget (${input.budgetMs}ms) exhausted; failureKind=pd_budget_timeout; ${evidence}`,
+      nextAction: 'increase totalBudgetMs (--timeout-ms or profile timeoutMs) or lower the profile reasoning level; verify the model supports tool use',
+    };
+  }
+  if (input.abortOwner === 'cancelled') {
+    return {
+      category: 'cancelled',
+      kind: 'cancelled',
+      reason: `Artificer L2 run cancelled; failureKind=cancelled; ${evidence}`,
+      nextAction: 're-invoke the pipeline when the run is intended',
+    };
+  }
+  if (input.abortOwner === 'unknown') {
+    // The signal was aborted but neither known aborter fired — an ownership
+    // gap. Scream loudly instead of guessing (rc-9); never output_invalid.
+    return {
+      category: 'execution_failed',
+      kind: 'stream_aborted',
+      reason: `Artificer L2 abort signal aborted with UNKNOWN owner (no first-writer ownership claim recorded)${input.loopError !== null ? `: ${input.loopError}` : ''}; failureKind=stream_aborted; ${evidence}`,
+      nextAction: 'report this run: abort ownership gap — an aborter outside the adapter contract fired the AbortController',
+    };
+  }
+  if (input.loopError !== null) {
+    // Provider-side timeout recognition (bounded match on our own recorded
+    // loopError text, not a trust boundary). With the SDK ceiling now explicit
+    // (= budget), a provider timeout surfacing without an abort is a
+    // provider-side failure; both kinds share the retriable category.
+    const isTimeoutLike = /timed?[ _-]?out|timeout/i.test(input.loopError);
+    return {
+      category: 'execution_failed',
+      kind: isTimeoutLike ? 'provider_timeout' : 'provider_error',
+      reason: `Artificer L2 agent loop threw: ${input.loopError}; failureKind=${isTimeoutLike ? 'provider_timeout' : 'provider_error'}; ${evidence}`,
+      nextAction: 'check provider availability / API key / network; retry when the provider recovers',
+    };
+  }
+  return {
+    category: 'output_invalid',
+    kind: 'no_submit',
+    reason: `Artificer L2 agent loop ended without a submit_rulecode call after ${input.turnCount} turn(s); failureKind=no_submit; ${evidence}`,
+    nextAction: 'inspect artificer L2 telemetry; verify the model calls submit_rulecode with a valid ArtificerRuleOutput',
+  };
+}
+
 
 export class ArtificerL2Adapter implements PDRuntimeAdapter {
   private readonly config: ArtificerL2AdapterConfig;
@@ -116,6 +273,15 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
   private readonly eventEmitter: StoreEventEmitter;
   private readonly runs = new Map<string, ArtificerL2RunState>();
   private readonly abortControllers = new Map<string, AbortController>();
+  /**
+   * PRI-795 (review P1): FIRST-WRITER-WINS abort ownership. Both the budget
+   * timer and cancelRun can abort the same controller, and a cancel may be
+   * followed by a slow stream exit that lets the budget timer fire afterwards
+   * — a fixed budget-first precedence would then record a manual cancel as a
+   * budget timeout. Whoever claims FIRST becomes the authoritative owner;
+   * later aborters never overwrite the claim.
+   */
+  private readonly abortOwners = new Map<string, L2AbortOwner>();
 
   constructor(config: ArtificerL2AdapterConfig) {
     this.config = config;
@@ -195,11 +361,15 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
     const abortController = new AbortController();
     this.abortControllers.set(runId, abortController);
-    // Track whether the budget timer fired (vs. cancelRun calling abort).
-    // Without this flag, cancelRun() is misidentified as a timeout because
-    // both paths set abortController.signal.aborted to true.
-    let budgetTimedOut = false;
-    const budgetTimer = setTimeout(() => { budgetTimedOut = true; abortController.abort(); }, totalBudgetMs);
+    // PRI-795 (review P1): the budget timer claims ownership ONLY if nobody
+    // (i.e. cancelRun) has claimed it already — first writer wins. A cancel
+    // followed by a slow stream exit that lets this timer fire must still be
+    // recorded as 'cancelled', never as a budget timeout.
+    const budgetTimer = setTimeout(() => {
+      if (!this.abortOwners.has(runId)) this.abortOwners.set(runId, 'pd_budget');
+      abortController.abort();
+    }, totalBudgetMs);
+    const startedWallMs = Date.now();
 
     // Build the prompt message. Serialized before the try block so a
     // non-serializable inputPayload fails loud with cleanup (no timer leak).
@@ -211,6 +381,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     } catch (err) {
       clearTimeout(budgetTimer);
       this.abortControllers.delete(runId);
+      this.abortOwners.delete(runId);
       const reason = err instanceof Error ? err.message : String(err);
       runState.status = 'failed';
       runState.reason = `inputPayload not serializable: ${reason}`;
@@ -282,10 +453,37 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
     const MAX_NO_TOOL_CALL_NUDGES = 2;
     let nudges = 0;
+    // PRI-795 timeout contract (three explicit layers, one authority):
+    //   1. Artificer total budget  — totalBudgetMs, armed HERE (t0). The single
+    //      authoritative deadline for the whole loop.
+    //   2. Per-request SDK timeout — `timeoutMs` below. AgentLoopConfig extends
+    //      SimpleStreamOptions, so this flows verbatim to pi-ai's
+    //      requestOptions.timeout (OpenAI SDK `timeout`), replacing the SDK's
+    //      silent 600s default that previously coexisted unobservably with the
+    //      budget. Set equal to the budget: the budget timer is always armed
+    //      earlier (t0 ≤ any request start), so the budget is provably the
+    //      tightest timer on the wire (EP-07) and the SDK ceiling is a pure
+    //      backstop that never wins the race.
+    //   3. Runner poll deadline   — BasePeerRunner.timeoutMs; polls only after
+    //      startRun returns (this adapter blocks through the loop), so it can
+    //      never abort mid-loop.
     const loopConfig: AgentLoopConfig = {
-      model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl),
+      model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl, {
+        // Model-level maxTokens is the thinking-budget clamp ceiling; keep it
+        // coherent with the request-level cap (loopConfig.maxTokens) instead
+        // of the hardcoded literal that previously diverged (8192/32000/16000).
+        reasoning: this.config.reasoning !== undefined && this.config.reasoning !== false,
+        maxTokens,
+      }),
       apiKey,
       maxTokens,
+      // PRI-795: per-request SDK timeout = total budget (see contract above).
+      timeoutMs: totalBudgetMs,
+      // Profile thinking level; `false` means "disable" and is expressed by
+      // omitting the field (model default), mirroring PiAiRuntimeAdapter.
+      ...(this.config.reasoning !== undefined && this.config.reasoning !== false
+        ? { reasoning: this.config.reasoning }
+        : {}),
       convertToLlm: (msgs: AgentMessage[]): Message[] => msgs.map((m): Message => {
         if (m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult') {
           return m as Message;
@@ -311,7 +509,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       // the total budget (rc-7); failure stays loud once nudges are exhausted.
       getFollowUpMessages: async () => {
         if (outputCapture.output !== null) return [];
-        if (budgetTimedOut || turnCount >= maxTurns) return [];
+        if (this.abortOwners.has(runId) || turnCount >= maxTurns) return [];
         if (nudges >= MAX_NO_TOOL_CALL_NUDGES) return [];
         nudges += 1;
         this.eventEmitter.emitTelemetry({
@@ -339,10 +537,19 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       timestamp: new Date().toISOString(),
       sessionId: 'l2-adapter',
       agentId: 'artificer-l2',
-      payload: { runId, phase: 'loop_started', maxTurns, totalBudgetMs, maxTokens },
+      payload: {
+        runId,
+        phase: 'loop_started',
+        maxTurns,
+        totalBudgetMs,
+        maxTokens,
+        requestTimeoutMs: totalBudgetMs,
+        reasoning: this.config.reasoning ?? 'unavailable',
+        provider: this.config.provider,
+        model: this.config.model,
+      },
     });
 
-    let timedOut = false;
     let loopError: string | null = null;
     // EP002-R3: streamAssistantResponse reports LLM-call failures as a message
     // with stopReason 'error'/'aborted' and the agent loop then ends WITHOUT
@@ -350,8 +557,10 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     // no nudge, generic failure reason). Capture it here so the underlying
     // provider error surfaces loudly (rc-9) instead of a generic message.
     let lastErrorMessage: string | null = null;
+    let lastStopReason: string | null = null;
+    let transcript: AgentMessage[] = [];
     try {
-      await runAgentLoop(
+      transcript = await runAgentLoop(
         prompts,
         agentContext,
         loopConfig,
@@ -360,6 +569,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
             const { message } = event as { message?: { stopReason?: string; errorMessage?: string } };
             if (message && (message.stopReason === 'error' || message.stopReason === 'aborted')) {
               lastErrorMessage = `LLM stream ended with stopReason=${message.stopReason}${message.errorMessage ? `: ${message.errorMessage}` : ''}`;
+              lastStopReason = message.stopReason ?? null;
             }
           }
         },
@@ -368,7 +578,6 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       );
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      timedOut = budgetTimedOut;
       loopError = reason;
     }
     if (loopError === null && lastErrorMessage !== null) {
@@ -378,34 +587,58 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     clearTimeout(budgetTimer);
     this.abortControllers.delete(runId);
 
+    // PRI-795 (review P1): resolve abort ownership AFTER the loop from the
+    // first-writer-wins claim map — never from which control path returned
+    // (the loop returns silently on abort; the old `timedOut =
+    // budgetTimedOut` lived only in the catch block and was dead code on that
+    // path, misclassifying budget aborts as output_invalid). The claim was
+    // set by whichever aborter fired FIRST, so a cancel followed by a slow
+    // stream exit stays 'cancelled' even when the budget timer fires late.
+    const claimedOwner = this.abortOwners.get(runId);
+    this.abortOwners.delete(runId);
+    const abortOwner: L2AbortOwner | undefined = claimedOwner
+      ?? (abortController.signal.aborted
+          ? 'unknown'
+          : undefined);
+    const elapsedMs = Date.now() - startedWallMs;
+    const tokenUsage = summarizeTranscriptUsage(transcript);
+    const finalStopReason = lastStopReason ?? lastAssistantStopReason(transcript);
+
     // Extract output from the capture (set by submit_rulecode).
     if (outputCapture.output !== null) {
       runState.status = 'succeeded';
       runState.endedAt = new Date().toISOString();
       runState.output = { runId, payload: outputCapture.output };
-      this.emitComplete({ taskId, runId, turnCount, toolsInvoked, succeeded: true, timedOut: false });
+      this.emitComplete({
+        taskId, runId, turnCount, toolsInvoked, succeeded: true,
+        evidence: { abortOwner: undefined, budgetMs: totalBudgetMs, elapsedMs, stopReason: finalStopReason, tokenUsage },
+      });
       return this.runHandle(runId, startedAt);
     }
 
     // No output captured — fail loud (Runtime Contract Rule 9, ERR-002).
     // PRI-439: no V1/L1 fallback. Missing/invalid/replay-failing RuleCode
     // creates no rule artifact, approval, or activation.
-    const failureReason = loopError !== null
-      ? `Artificer L2 agent loop threw: ${loopError}`
-      : `Artificer L2 agent loop ended without a submit_rulecode call after ${turnCount} turn(s)`;
-    runState.status = timedOut ? 'timed_out' : 'failed';
+    // PRI-795: classify by abort ownership / failure kind, not by control path.
+    const { category, kind, reason, nextAction } = classifyL2Failure({
+      abortOwner,
+      budgetMs: totalBudgetMs,
+      elapsedMs,
+      turnCount,
+      stopReason: finalStopReason,
+      loopError,
+      tokenUsage,
+    });
+    runState.status = kind === 'pd_budget_timeout' ? 'timed_out' : kind === 'cancelled' ? 'cancelled' : 'failed';
     runState.endedAt = new Date().toISOString();
-    runState.reason = failureReason;
-    this.emitComplete({ taskId, runId, turnCount, toolsInvoked, succeeded: false, timedOut });
-    throw new PDRuntimeError(
-      timedOut ? 'timeout' : 'output_invalid',
-      failureReason,
-      {
-        nextAction: timedOut
-          ? 'increase totalBudgetMs or use a faster model; verify the model supports tool use'
-          : 'inspect artificer L2 telemetry; verify the model calls submit_rulecode with a valid ArtificerRuleOutput',
-      },
-    );
+    runState.reason = reason;
+    runState.abortOwner = abortOwner;
+    runState.elapsedMs = elapsedMs;
+    this.emitComplete({
+      taskId, runId, turnCount, toolsInvoked, succeeded: false,
+      evidence: { abortOwner, budgetMs: totalBudgetMs, elapsedMs, stopReason: finalStopReason, tokenUsage, failureKind: kind },
+    });
+    throw new PDRuntimeError(category, reason, { nextAction });
   }
 
   async pollRun(runId: string): Promise<RunStatus> {
@@ -423,15 +656,22 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
   }
 
   async cancelRun(runId: string): Promise<void> {
-    const controller = this.abortControllers.get(runId);
-    if (controller) {
-      controller.abort();
+    // PRI-795 (review P1): claim ownership BEFORE aborting — first writer
+    // wins, so even if the budget timer fires later during a slow stream exit
+    // the run is still recorded as 'cancelled'. Guarded by abortControllers
+    // membership so a late cancel of an already-terminal run neither leaks a
+    // claim entry nor rewrites the recorded terminal state.
+    if (this.abortControllers.has(runId)) {
+      if (!this.abortOwners.has(runId)) this.abortOwners.set(runId, 'cancelled');
+      const controller = this.abortControllers.get(runId);
+      controller?.abort();
     }
     const state = this.runs.get(runId);
-    if (state && state.status !== 'succeeded') {
-      state.status = 'failed';
+    if (state && this.abortControllers.has(runId) && state.status !== 'succeeded') {
+      state.status = 'cancelled';
       state.endedAt = new Date().toISOString();
       state.reason = 'cancelled';
+      state.abortOwner = 'cancelled';
     }
   }
 
@@ -466,7 +706,15 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     turnCount: number;
     toolsInvoked: Record<string, number>;
     succeeded: boolean;
-    timedOut: boolean;
+    /** PRI-795 runtime evidence block (budget/elapsed/abort ownership/usage). */
+    evidence: {
+      abortOwner?: L2AbortOwner;
+      budgetMs: number;
+      elapsedMs: number;
+      stopReason: string | null;
+      tokenUsage: L2TokenUsage;
+      failureKind?: L2FailureKind;
+    };
   }): void {
     this.eventEmitter.emitTelemetry({
       eventType: 'artificer_l2_complete',
@@ -475,11 +723,18 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       sessionId: 'l2-adapter',
       agentId: 'artificer-l2',
       payload: {
+        taskId: opts.taskId,
         runId: opts.runId,
         turnCount: opts.turnCount,
         toolsInvoked: opts.toolsInvoked,
         succeeded: opts.succeeded,
-        timedOut: opts.timedOut,
+        abortOwner: opts.evidence.abortOwner ?? 'none',
+        budgetMs: opts.evidence.budgetMs,
+        elapsedMs: opts.evidence.elapsedMs,
+        stopReason: opts.evidence.stopReason ?? 'unavailable',
+        tokenUsage: opts.evidence.tokenUsage,
+        ...(opts.evidence.failureKind !== undefined ? { failureKind: opts.evidence.failureKind } : {}),
+        model: { provider: this.config.provider, model: this.config.model, maxTokens: this.config.maxTokens ?? DEFAULT_MAX_TOKENS },
         outputPreview: safeStringifyPreview(this.runs.get(opts.runId)?.output?.payload, 300),
       },
     });

@@ -72,7 +72,15 @@ async function seedMaterializedRollout(id: string): Promise<void> {
 }
 
 async function seedOrphanEvaluator(id: string): Promise<void> {
-  await stateManager.createTask({ taskId: id, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(id) });
+  // PRI-720: an evaluator is a full-chain entity — the standard prompt graph
+  // never creates one, so the orphan chain is declared full_chain explicitly.
+  await stateManager.createTask({
+    taskId: id, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
+    diagnosticJson: createPITaskDiagnosticJson({
+      dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 5_000,
+      inputArtifactRefs: [], outputArtifactRefs: [], correlationId: id,
+    }),
+  });
   await stateManager.acquireLease({ taskId: id, owner: 'a2', runtimeKind: 'test-double' });
   await stateManager.markTaskSucceeded(id);
   const pi = hydratePITaskRecord(await stateManager.getTask(id) as TaskRecord);

@@ -20,6 +20,7 @@ import {
   validatePdConfig,
   computeEffectivePdConfig,
   computeFeatureFlagsFromConfig,
+  isFeatureEnabled,
   redactPdConfig,
 } from '@principles/core/runtime-v2';
 import type {
@@ -244,6 +245,19 @@ export function computeFlagsFromLoadResult(result: PdConfigLoadResult): FeatureF
     }
   }
   return flags;
+}
+
+/**
+ * PRI-720: resolve the seed-time full-chain override for prompt/defer_archive
+ * internalization chains from the `prompt_full_pipeline` feature flag
+ * (Owner switch: Console settings toggle or `.pd/config.yaml` features).
+ * Returns undefined (= standard channel-aware topology) when the flag is off
+ * or the config is unreadable — absence is the legacy-compatible default.
+ * Resolve ONCE per command invocation and pass the value to every seed call.
+ */
+export function resolvePromptFullPipelineSeedMode(workspaceDir: string): 'full_chain' | undefined {
+  const flags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
+  return isFeatureEnabled(flags, 'prompt_full_pipeline') ? 'full_chain' : undefined;
 }
 
 // ── Redacted Summary from Config ─────────────────────────────────────────────

@@ -342,7 +342,8 @@ describe('pd runtime init', () => {
         expect(output.config?.status).toBe('initialized');
         const configPath = path.join(tmp, '.pd', 'config.yaml');
         expect(fs.existsSync(configPath)).toBe(true);
-        const yaml = (await import('js-yaml')).default;
+        // js-yaml 5 is ESM-only: no default export — use the namespace.
+        const yaml = await import('js-yaml');
         const raw = fs.readFileSync(configPath, 'utf8');
         const parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
         expect(typeof parsed).toBe('object');
@@ -360,7 +361,8 @@ describe('pd runtime init', () => {
       try {
         buildRuntimeInitOutput(tmp, true);
         const configPath = path.join(tmp, '.pd', 'config.yaml');
-        const yaml = (await import('js-yaml')).default;
+        // js-yaml 5 is ESM-only: no default export — use the namespace.
+        const yaml = await import('js-yaml');
         const { validatePdConfig } = await import('@principles/core/runtime-v2');
         const parsed: unknown = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
         const result = validatePdConfig(parsed);
@@ -373,7 +375,8 @@ describe('pd runtime init', () => {
       try {
         buildRuntimeInitOutput(tmp, true);
         const configPath = path.join(tmp, '.pd', 'config.yaml');
-        const yaml = (await import('js-yaml')).default;
+        // js-yaml 5 is ESM-only: no default export — use the namespace.
+        const yaml = await import('js-yaml');
         const { computeEffectivePdConfig, validatePdConfig } = await import('@principles/core/runtime-v2');
         const parsed: unknown = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
         const parsedFeatures = (parsed as { features?: unknown }).features;

@@ -600,7 +600,7 @@ describe('DefaultRolloutReviewerValidator (vertical slice)', () => {
   it('rejects mismatched sourceEvaluatorArtifactId when expected is provided', async () => {
     const output = makeRolloutReviewerOutput();
     (output as unknown as Record<string, unknown>).sourceEvaluatorArtifactId = 'wrong-artifact-id';
-    const result = await validator.validate(output, ROLLOUT_REVIEWER_TASK_ID, 'pi-art-evaluator-001-run-001');
+    const result = await validator.validate(output, ROLLOUT_REVIEWER_TASK_ID, { expectedSourceArtifactId: 'pi-art-evaluator-001-run-001' });
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('sourceEvaluatorArtifactId mismatch'))).toBe(true);
   });
@@ -608,7 +608,7 @@ describe('DefaultRolloutReviewerValidator (vertical slice)', () => {
   it('rejects mismatched sourceTrace.evaluatorArtifactId when expected is provided', async () => {
     const output = makeRolloutReviewerOutput();
     (output.sourceTrace as unknown as Record<string, unknown>).evaluatorArtifactId = 'wrong-artifact-id';
-    const result = await validator.validate(output, ROLLOUT_REVIEWER_TASK_ID, 'pi-art-evaluator-001-run-001');
+    const result = await validator.validate(output, ROLLOUT_REVIEWER_TASK_ID, { expectedSourceArtifactId: 'pi-art-evaluator-001-run-001' });
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('sourceTrace.evaluatorArtifactId mismatch'))).toBe(true);
   });
@@ -708,7 +708,7 @@ describe('DefaultRolloutReviewerValidator (vertical slice)', () => {
 
   it('accepts valid output with matching expectedSourceEvaluatorArtifactId', async () => {
     const output = makeRolloutReviewerOutput();
-    const result = await validator.validate(output, ROLLOUT_REVIEWER_TASK_ID, 'pi-art-evaluator-001-run-001');
+    const result = await validator.validate(output, ROLLOUT_REVIEWER_TASK_ID, { expectedSourceArtifactId: 'pi-art-evaluator-001-run-001' });
     expect(result.valid).toBe(true);
   });
 
