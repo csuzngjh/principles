@@ -108,7 +108,7 @@ export interface NextTaskProposal {
   dependencyTaskIds: string[];
   inputArtifactRefs: ArtifactRef[];
   channel: InternalizationChannel;
-  /** PRI-720: inherited full-chain override; absent = standard channel-aware topology. */
+  /** PRI-720: inherited topology mode; ABSENT = legacy (pre-PRI-720) full-chain record. */
   pipelineMode?: PipelineTopologyMode;
   correlationId?: string;
 }
@@ -359,7 +359,8 @@ export function createNextTaskProposal(
   const effectiveChannel = channel ?? currentTask.channel;
   // PRI-720: topology mode is a property of the seeded chain — inherited from
   // the task record, never decided per-hop, so a chain cannot switch topology
-  // mid-flight when the workspace flag flips.
+  // mid-flight when the workspace flag flips. ABSENT (legacy record) resolves
+  // to the full legacy graph — no reinterpretation (AC12).
   const effectivePipelineMode = currentTask.pipelineMode;
   const validSuccessors = getAllowedSuccessors(taskKind, effectiveChannel, effectivePipelineMode);
 

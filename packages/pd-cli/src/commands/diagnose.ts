@@ -29,6 +29,7 @@ import {
   status as diagnoseStatus,
   PrincipleTreeLedgerAdapter,
   buildDreamerSeedFromCandidate,
+  findExistingDreamerTask,
   CANDIDATE_KIND_TO_ROUTE,
   ROUTE_CHANNEL_MAP,
   MVP_ENABLED_CHANNELS,
@@ -616,7 +617,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: sourcePainId ?? undefined, pipelineMode: seedPipelineMode });
           // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
           if ('decision' in seed) continue; // not_internalizable or invalid — skip
-          const existingTask = await stateManager.getTask(seed.taskId);
+          // PRI-720 C6: candidate-level dedup (demotion may change the
+          // derived channel suffix vs a pre-existing chain).
+          const existingTask = await findExistingDreamerTask((id) => stateManager.getTask(id), candidate.candidateId);
           if (!existingTask) {
             await stateManager.createTask({
               taskId: seed.taskId,

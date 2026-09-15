@@ -20,6 +20,7 @@ import {
   CandidateIntakeError,
   decideInternalizationRoute,
   buildDreamerSeedFromCandidate,
+  findExistingDreamerTask,
   PrincipleTreeLedgerAdapter,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
@@ -387,7 +388,6 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
     }
 
     const { channel } = seed;
-    const { taskId } = seed;
 
     if (opts.dryRun) {
       const result: CandidateInternalizeResult = {
@@ -409,7 +409,9 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       return;
     }
 
-    const existingTask = await stateManager.getTask(taskId);
+    // PRI-720 C6: candidate-level dedup (demotion may change the derived
+    // channel suffix vs a pre-existing chain).
+    const existingTask = await findExistingDreamerTask((id) => stateManager.getTask(id), opts.candidateId);
     if (existingTask) {
       const result: CandidateInternalizeResult = {
         candidateId: opts.candidateId,
@@ -417,7 +419,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         taskId: existingTask.taskId,
         channel: seed.channel,
         status: 'existing',
-        reason: 'Task already exists for this candidate+channel combination',
+        reason: 'Task already exists for this candidate (any channel variant)',
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -1008,7 +1010,9 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       const { channel } = seed;
       const { taskId } = seed;
 
-      const existingTask = await stateManager.getTask(taskId);
+      // PRI-720 C6: candidate-level dedup (demotion may change the derived
+      // channel suffix vs a pre-existing chain).
+      const existingTask = await findExistingDreamerTask((id) => stateManager.getTask(id), candidateId);
       if (existingTask) {
         if (isConfirm && existingTask.diagnosticJson) {
           try {

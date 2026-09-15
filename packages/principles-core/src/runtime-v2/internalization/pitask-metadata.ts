@@ -311,10 +311,10 @@ export interface PITaskMetadata {
   dependencyTaskIds: string[];
   channel: InternalizationChannel;
   /**
-   * PRI-720: explicit full-chain topology override. Absent = standard
-   * channel-aware topology (legacy records hydrate identically). Set at seed
-   * time only (prompt_full_pipeline flag / explicit seed options) and
-   * inherited unchanged by successor proposals.
+   * PRI-720: explicit topology mode. New seeds always write it
+   * ('standard' or 'full_chain') at seed time; ABSENT = a pre-PRI-720 record,
+   * which keeps the legacy full-chain topology (AC12 — no reinterpretation).
+   * Inherited unchanged by successor proposals.
    */
   pipelineMode?: PipelineTopologyMode;
   timeoutMs: number;
@@ -756,7 +756,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
   }
   if (typeof m.channel !== 'string') return null;
   if (!isInternalizationChannel(m.channel)) return null;
-  // pipelineMode (PRI-720): optional literal union; absent/undefined = standard.
+  // pipelineMode (PRI-720): optional literal union; ABSENT = legacy full-chain record.
   if (Object.hasOwn(m, 'pipelineMode') && m.pipelineMode !== undefined) {
     if (!isPipelineTopologyMode(m.pipelineMode)) return null;
   }

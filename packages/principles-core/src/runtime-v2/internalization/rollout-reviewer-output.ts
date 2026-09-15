@@ -10,7 +10,15 @@ export interface RolloutReviewerReview {
 }
 
 export interface RolloutReviewerSourceTrace {
-  readonly evaluatorArtifactId: string;
+  /**
+   * Code-chain reviews only (PRI-720): the reviewed evaluator artifact.
+   * Optional at the schema/contract level — which trace id is REQUIRED is
+   * enforced per review mode by DefaultRolloutReviewerValidator (code_chain
+   * ⇔ evaluatorArtifactId, principle_semantic ⇔ scribeArtifactId), so the
+   * real LLM output path (tool-call/JSON-mode validation against the
+   * registered `rollout-reviewer-output-v1` schema) accepts both modes.
+   */
+  readonly evaluatorArtifactId?: string;
   readonly artificerArtifactId?: string;
   readonly scribeArtifactId?: string;
   readonly philosopherArtifactId?: string;
@@ -59,7 +67,13 @@ export const RolloutReviewerReviewSchema = Type.Object({
 });
 
 export const RolloutReviewerSourceTraceSchema = Type.Object({
-  evaluatorArtifactId: Type.String({ minLength: 1 }),
+  // PRI-720 P1 fix: optional here — the mode-aware DefaultRolloutReviewerValidator
+  // is the single authority for which trace id is required (evaluatorArtifactId
+  // on code_chain, scribeArtifactId on principle_semantic). A required entry in
+  // this schema made the registered `rollout-reviewer-output-v1` structured
+  // output gate reject every valid principle-semantic LLM output before the
+  // runner validator ever ran.
+  evaluatorArtifactId: Type.Optional(Type.String({ minLength: 1 })),
   artificerArtifactId: Type.Optional(Type.String()),
   scribeArtifactId: Type.Optional(Type.String()),
   philosopherArtifactId: Type.Optional(Type.String()),

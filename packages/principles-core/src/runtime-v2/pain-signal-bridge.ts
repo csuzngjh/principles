@@ -8,7 +8,7 @@ import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
-import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
 import {
@@ -787,7 +787,12 @@ export class PainSignalBridge {
             });
             // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
             if (!('decision' in seed)) {
-              const existingTask = await this.stateManager.getTask(seed.taskId);
+              // PRI-720 C6: dedup at candidate level — the demotion may have
+              // changed the derived channel suffix vs a pre-existing chain.
+              const existingTask = await findExistingDreamerTask(
+                (id) => this.stateManager.getTask(id),
+                candidate.candidateId,
+              );
               if (!existingTask) {
                 await this.stateManager.createTask({
                   taskId: seed.taskId,

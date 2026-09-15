@@ -53,6 +53,15 @@ describe('hasRuleMechanicalEvidence — 确定性字段检查 (rc-1/rc-3)', () =
     expect(hasRuleMechanicalEvidence('not an object')).toBe(false);
     expect(hasRuleMechanicalEvidence(undefined)).toBe(false);
   });
+
+  it('评审不对称加固 (2026-09-15): recommendation 信封与 snake_case 列名回退 → true', () => {
+    // candidate-intake 的 readiness 回退读 trigger_pattern/action 列——
+    // 准入检查必须接受同样的证据形状，否则带证据的 rule 候选会被误降级。
+    expect(hasRuleMechanicalEvidence({ recommendation: { triggerPattern: 'edit .pd/**', action: 'block' } })).toBe(true);
+    expect(hasRuleMechanicalEvidence({ trigger_pattern: 'edit .pd/**', action: 'block' })).toBe(true);
+    expect(hasRuleMechanicalEvidence({ recommendation: { trigger_pattern: 'edit .pd/**', action: 'block' } })).toBe(true);
+    expect(hasRuleMechanicalEvidence({ recommendation: { triggerPattern: 'edit .pd/**' } })).toBe(false);
+  });
 });
 
 describe('computeBridgeDecision — rule 渠道准入 (AC10)', () => {
@@ -77,6 +86,27 @@ describe('computeBridgeDecision — rule 渠道准入 (AC10)', () => {
   it('未提供 recommendation（legacy 调用方）→ 降级 prompt（保守默认）', () => {
     const decision = computeBridgeDecision(bridgeInput());
     expect(decision.decision === 'seeded' && decision.channel === 'prompt').toBe(true);
+  });
+
+  it('入口一致化 (P1-3): ready=false 的证据缺失 rule 候选同样降级 prompt（candidate CLI 入口 = pain bridge 入口）', () => {
+    // candidate CLI 经 decideInternalizationRoute 传 ready=false（缺
+    // trigger/action）；pain bridge / diagnose 传 ready=true（route 映射）。
+    // 降级是唯一准入权威，必须先于 ready 门 —— 两个入口同一结果。
+    const viaCandidateCli = computeBridgeDecision(bridgeInput({ ready: false }));
+    const viaPainBridge = computeBridgeDecision(bridgeInput({ ready: true }));
+    expect(viaCandidateCli.decision === 'seeded' && viaCandidateCli.channel === 'prompt').toBe(true);
+    expect(viaPainBridge.decision === 'seeded' && viaPainBridge.channel === 'prompt').toBe(true);
+    expect(viaCandidateCli.decision === 'seeded' && viaCandidateCli.taskId === (viaPainBridge.decision === 'seeded' ? viaPainBridge.taskId : '')).toBe(true);
+  });
+
+  it('入口一致化边界：非 rule 路由的 ready=false 仍拒绝（语义不变）', () => {
+    const decision = computeBridgeDecision({
+      candidateId: 'cand-c6-p',
+      recommendationKind: 'principle',
+      route: 'principle-ledger',
+      ready: false,
+    });
+    expect(decision.decision).toBe('not_internalizable');
   });
 });
 

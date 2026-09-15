@@ -172,6 +172,9 @@ vi.mock('@principles/core/runtime-v2', () => {
         maxAttempts: 3,
       };
     }),
+    // PRI-720 C6: candidate-level dedup — tests assume a clean store (no
+    // pre-existing dreamer task under any channel suffix).
+    findExistingDreamerTask: vi.fn().mockResolvedValue(null),
     CANDIDATE_KIND_TO_ROUTE: {
       principle: 'principle-candidate',
       rule: 'rule-candidate',

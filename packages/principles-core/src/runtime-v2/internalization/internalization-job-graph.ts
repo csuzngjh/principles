@@ -72,15 +72,20 @@ export const CHANNEL_EDGES: Readonly<
 /**
  * Resolves the effective edge set for a channel + topology mode (PRI-720).
  *
- * - `full_chain` mode always returns the full linear graph (explicit override).
- * - A known channel returns that channel's edge set.
- * - No channel (legacy callers) keeps the full graph for backward compatibility.
+ * Topology mode convention (P1 fix, Owner review 2026-09-15):
+ *   - `pipelineMode: 'standard'` → channel-aware edges (prompt/defer take the
+ *     principle-semantic short path).
+ *   - `pipelineMode: 'full_chain'` or **absent** → the full legacy linear
+ *     graph. Absence means a pre-PRI-720 record whose topology must NOT be
+ *     reinterpreted mid-flight (AC12) — new seeds always write the field
+ *     explicitly, so absence unambiguously identifies legacy chains.
+ *   - No channel (legacy callers) → full graph.
  */
 export function resolveChannelEdges(
   channel?: InternalizationChannel,
   pipelineMode?: PipelineTopologyMode,
 ): readonly (readonly [PeerRunnerKind, PeerRunnerKind])[] {
-  if (pipelineMode === 'full_chain') {
+  if (pipelineMode !== 'standard') {
     return ALLOWED_EDGES;
   }
   if (channel !== undefined && isInternalizationChannel(channel)) {

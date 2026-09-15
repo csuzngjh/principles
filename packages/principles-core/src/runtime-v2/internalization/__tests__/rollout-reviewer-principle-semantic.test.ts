@@ -16,7 +16,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RolloutReviewerRunner, resolveRolloutReviewMode } from '../rollout-reviewer-runner.js';
 import { DefaultRolloutReviewerValidator } from '../rollout-reviewer-output.js';
-import { ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION } from '../rollout-reviewer-prompt-builder.js';
+import { resolveOutputSchema } from '../../adapter/output-schema-registry.js';
+import { Value } from '@sinclair/typebox/value';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import { MemoryTaskStore } from '../../store/task/memory-task-store.js';
 import { createPITaskDiagnosticJson, type PITaskMetadata } from '../pitask-metadata.js';
@@ -125,6 +126,7 @@ function makeHarness(options: {
     cancelRun: vi.fn(),
   };
   const eventEmitter = { emitTelemetry: vi.fn() };
+  const reopenRevisionTarget = vi.fn().mockResolvedValue({ ok: true, reason: 'reopened' });
   const runner = new RolloutReviewerRunner(
     {
       stateManager: stateManager as never,
@@ -133,10 +135,11 @@ function makeHarness(options: {
       artifactStore: options.artifacts,
       validator: new DefaultRolloutReviewerValidator(),
       dispatchActivation,
+      reopenRevisionTarget,
     },
     { owner: 'test', runtimeKind: 'rollout_reviewer' },
   );
-  return { runner, startRun, dispatchActivation, stateManager, artifacts: options.artifacts, eventEmitter };
+  return { runner, startRun, dispatchActivation, reopenRevisionTarget, stateManager, artifacts: options.artifacts, eventEmitter };
 }
 
 // ── 模式判定表 ────────────────────────────────────────────────────────────────
@@ -158,6 +161,72 @@ describe('resolveRolloutReviewMode — 结构判定 (PRI-720/AC12)', () => {
 });
 
 // ── Validator 模式分支 ────────────────────────────────────────────────────────
+
+describe('真实 LLM 输出路径 — 注册表 schema 与 mode validator 契约一致 (P1-1)', () => {
+  // 这是 Owner 评审 P1-1 的回归测试: runner 传给 runtime adapter 的
+  // outputSchemaRef='rollout-reviewer-output-v1' 会先于 mode validator 被
+  // PiAi/OpenClaw 适配器做结构化校验 (tool-call / JSON mode / repair)。该
+  // 注册表 schema 必须接受两种 mode 的合法输出, 否则语义模式的真实 LLM 路径
+  // 全部 output_invalid (fake adapter 的 runner 级测试无法暴露这一层)。
+  const schema = resolveOutputSchema('rollout-reviewer-output-v1');
+
+  it('注册表解析 rollout-reviewer-output-v1', () => {
+    expect(schema).toBeDefined();
+  });
+
+  it('principle_semantic 合法输出 (省略 evaluator 字段) 通过注册表 schema', () => {
+    expect(schema).toBeDefined();
+    if (!schema) throw new Error('schema missing');
+    expect(Value.Check(schema, principleModeOutput('approve_rollout'))).toBe(true);
+  });
+
+  it('code_chain 合法输出 (evaluator 身份) 通过注册表 schema', () => {
+    expect(schema).toBeDefined();
+    if (!schema) throw new Error('schema missing');
+    const codeOutput = {
+      taskId: ROLLOUT_ID,
+      sourceEvaluatorArtifactId: 'pi-art-eval-1',
+      review: { decision: 'approve_rollout', summary: 's', confidence: 0.9, requiredChanges: [], rolloutRisks: [], safetyChecks: [] },
+      sourceTrace: { evaluatorArtifactId: 'pi-art-eval-1' },
+      risks: [],
+      generatedAt: '2026-09-15T00:00:00.000Z',
+    };
+    expect(Value.Check(schema, codeOutput)).toBe(true);
+  });
+
+  it('schema 层仍拒绝结构性缺失 (无任何 source 身份 / 坏 decision)', () => {
+    expect(schema).toBeDefined();
+    if (!schema) throw new Error('schema missing');
+    const noSource = {
+      taskId: ROLLOUT_ID,
+      review: { decision: 'approve_rollout', summary: 's', confidence: 0.9, requiredChanges: [], rolloutRisks: [], safetyChecks: [] },
+      sourceTrace: {},
+      risks: [],
+      generatedAt: '2026-09-15T00:00:00.000Z',
+    };
+    expect(Value.Check(schema, noSource)).toBe(true); // schema 层宽容: source 必填性由 mode validator 持有
+    const badDecision = {
+      ...principleModeOutput('approve_rollout'),
+      review: { ...principleModeOutput('approve_rollout').review, decision: 'maybe' },
+    };
+    expect(Value.Check(schema, badDecision)).toBe(false);
+  });
+
+  it('mode validator 仍是 source 身份的唯一权威 (schema 放开 + validator 收紧)', async () => {
+    const validator = new DefaultRolloutReviewerValidator();
+    // code_chain: 缺 evaluator 身份 → validator 拒 (尽管 schema 层已放开)
+    const codeMissing = {
+      taskId: ROLLOUT_ID,
+      review: { decision: 'approve_rollout', summary: 's', confidence: 0.9, requiredChanges: [], rolloutRisks: [], safetyChecks: [] },
+      sourceTrace: { scribeArtifactId: SCRIBE_ARTIFACT_ID },
+      risks: [],
+      generatedAt: '2026-09-15T00:00:00.000Z',
+    };
+    const result = await validator.validate(codeMissing as never, ROLLOUT_ID, { reviewMode: 'code_chain' });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('\n')).toContain('sourceEvaluatorArtifactId must be non-empty string');
+  });
+});
 
 describe('DefaultRolloutReviewerValidator — 模式分支', () => {
   const validator = new DefaultRolloutReviewerValidator();
@@ -254,9 +323,48 @@ describe('RolloutReviewer principle semantic mode — fresh run', () => {
     expect(h.dispatchActivation).not.toHaveBeenCalled();
   });
 
-  it('needs_revision 的修订路由目标 = scribe（C4，语义考卷约束修订只产出文字修改）', async () => {
-    // 完整 reopen 机制由 orchestrator 级既有测试覆盖;此处钉住语义考卷对
-    // 修订方向的约束: requiredChanges 必须是给 Scribe 的语义修改,而非代码。
-    expect(ROLLOUT_REVIEWER_PRINCIPLE_SEMANTIC_INSTRUCTION).toContain('needs_revision: requiredChanges MUST name concrete semantic fixes for the Scribe');
+  it('needs_revision: reopen 路由直达 scribe（C4 行为证明）', async () => {
+    const artifacts = makeArtifacts();
+    const rolloutTask = task(ROLLOUT_ID, 'rollout_reviewer', { status: 'pending', m: meta({ dependencyTaskIds: [SCRIBE_ID] }) });
+    const scribeSucceeded = task(SCRIBE_ID, 'scribe', { status: 'succeeded', m: meta({ dependencyTaskIds: [] }) });
+    const h = makeHarness({
+      tasks: [rolloutTask, scribeSucceeded],
+      artifacts,
+      output: principleModeOutput('needs_revision'),
+      dispatchDecision: null,
+    });
+
+    const result = await h.runner.run(ROLLOUT_ID);
+    expect(result.status).toBe('succeeded');
+    // 修订目标 = 撰写该原则的 scribe（reviewer→scribe 直接依赖，无需经 artificer）
+    expect(h.reopenRevisionTarget).toHaveBeenCalledTimes(1);
+    expect(h.reopenRevisionTarget.mock.calls[0]?.[0]).toMatchObject({
+      targetTaskId: SCRIBE_ID,
+      targetKind: 'scribe',
+      revisionIteration: 1,
+    });
+    // 不翻转、不 dispatch、不进人工裁决（fail-closed 死路已消除）
+    expect((await artifacts.getArtifactById(SCRIBE_ARTIFACT_ID))?.validationStatus).toBe('pending');
+    expect(h.dispatchActivation).not.toHaveBeenCalled();
+    expect((await h.stateManager.getTask(ROLLOUT_ID))?.status).toBe('succeeded');
+  });
+
+  it('resolveRevisionTarget: code 链（经 evaluator→artificer）路由不变', async () => {
+    // code_chain 形状（rollout→evaluator→artificer→scribe）保持既有路由：
+    // owner-override-resume.test.ts 的 code 渠道修订路由测试继续覆盖该形状。
+    const { resolveRolloutRevisionTarget } = await import('../revision-reopen.js');
+    const store = new Map<string, { taskId: string; taskKind: string; diagnosticJson: string }>([
+      ['rollout-1', { taskId: 'rollout-1', taskKind: 'rollout_reviewer', diagnosticJson: createPITaskDiagnosticJson(meta({ dependencyTaskIds: ['eval-1'] })) }],
+      ['eval-1', { taskId: 'eval-1', taskKind: 'evaluator', diagnosticJson: createPITaskDiagnosticJson(meta({ dependencyTaskIds: ['art-1'] })) }],
+      ['art-1', { taskId: 'art-1', taskKind: 'artificer', diagnosticJson: createPITaskDiagnosticJson(meta({ dependencyTaskIds: [SCRIBE_ID] })) }],
+      [SCRIBE_ID, { taskId: SCRIBE_ID, taskKind: 'scribe', diagnosticJson: createPITaskDiagnosticJson(meta({ dependencyTaskIds: [] })) }],
+    ]);
+    const getTask = async (id: string) => store.get(id) ?? null;
+    // Minimal in-memory records satisfy the resolver (it reads taskKind +
+    // dependencyTaskIds via hydrated metadata only).
+    const code = await resolveRolloutRevisionTarget(getTask as never, 'rollout-1', 'code_tool_hook');
+    expect(code?.kind).toBe('artificer');
+    const promptLegacy = await resolveRolloutRevisionTarget(getTask as never, 'rollout-1', 'prompt');
+    expect(promptLegacy?.kind).toBe('scribe');
   });
 });

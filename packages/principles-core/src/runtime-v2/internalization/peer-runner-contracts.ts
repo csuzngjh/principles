@@ -33,13 +33,15 @@ export type InternalizationChannel =
 /**
  * Pipeline topology mode of one internalization task chain (PRI-720).
  *
- * - `standard` (default, field absent on legacy records): the job graph is
- *   channel-aware — prompt/defer_archive chains skip the RuleCode sub-chain
- *   (artificer/evaluator are never created).
- * - `full_chain`: explicit Owner/operator override — the chain runs the
- *   legacy full linear graph regardless of channel (test scenarios, explicit
- *   full-pipeline runs). Set only at seed time via the `prompt_full_pipeline`
- *   feature flag or explicit seed options; inherited by successor proposals.
+ * Topology convention (P1 fix, Owner review 2026-09-15):
+ * - `standard`: channel-aware edges — prompt/defer_archive chains skip the
+ *   RuleCode sub-chain (artificer/evaluator are never created).
+ * - `full_chain`: explicit Owner/operator override — the legacy full linear
+ *   graph regardless of channel (test scenarios, explicit full-pipeline runs).
+ * - Field ABSENT = a pre-PRI-720 record: legacy full-chain topology, never
+ *   reinterpreted mid-flight (AC12). New seeds always write the field
+ *   explicitly at seed time (prompt_full_pipeline flag or seed options);
+ *   successors inherit it unchanged.
  */
 export type PipelineTopologyMode = 'standard' | 'full_chain';
 
@@ -146,7 +148,7 @@ export interface PITaskRecord extends TaskRecord {
   parentTaskId?: string;
   dependencyTaskIds: string[];
   channel: InternalizationChannel;
-  /** PRI-720: explicit full-chain override; absent = standard channel-aware topology. */
+  /** PRI-720: explicit topology mode; ABSENT = legacy (pre-PRI-720) full-chain record. */
   pipelineMode?: PipelineTopologyMode;
   correlationId?: string;
   timeoutMs: number;

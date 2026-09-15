@@ -1026,7 +1026,8 @@ export class RolloutReviewerRunner {
 
   /**
    * 解析修订目标任务 (只读遍历 dep 链):
-   *   rollout → evaluator → artificer → scribe
+   *   rollout → evaluator → artificer → scribe (code 链);
+   *   rollout → scribe (PRI-720 principle 语义链: scribe 是直接依赖)。
    * code_tool_hook → artificer; 其他 → scribe (走到底)。
    */
   private async resolveRevisionTarget(
@@ -1063,7 +1064,18 @@ export class RolloutReviewerRunner {
         if (artificerTaskId) break;
       }
     }
-    if (!artificerTaskId) return null;
+    if (!artificerTaskId) {
+      // PRI-720 (C4): principle semantic chain — the scribe is a DIRECT dep of
+      // the rollout (the graph never created an artificer/evaluator). Route
+      // the revision straight back to the authoring scribe instead of
+      // dead-ending in needs_human_review.
+      for (const depId of firstHop) {
+        const dep = await this.stateManager.getTask(depId);
+        if (!dep || dep.taskKind !== 'scribe') continue;
+        return { taskId: dep.taskId, kind: 'scribe' };
+      }
+      return null;
+    }
 
     if (channel === 'code_tool_hook') {
       return { taskId: artificerTaskId, kind: 'artificer' };
