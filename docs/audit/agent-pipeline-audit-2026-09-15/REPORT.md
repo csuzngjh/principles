@@ -1,7 +1,8 @@
 # PD 数据管道内置代理全面审计报告
 
 - 日期：2026-09-15
-- 审计对象：`main` @ 70d824c4（PR #1692 合并后；不含 OPEN PR #1698/#1693/#1694/#1703/#1700 的改动）
+- 审计对象：`main` @ 70d824c4（PR #1692 合并后）
+- 修订轮：**2026-09-15 下午**——本报告经 CNB 云端四轮独立核实（见 §8 与同目录 VERIFICATION-A/B/C/D.md）；核实期间 #1698/#1693/#1694/#1703/#1700 已并入 main，受影响条目的时效已在 §8.3 逐项标注
 - 审计方式：只读静态审计（代码事实为准），全部结论带 `文件:行号` 证据；行号对应当日工作树
 - 权威代理清单来源：`packages/principles-core/src/runtime-v2/config/pd-config-types.ts:115-126`（`INTERNAL_AGENT_NAMES`）
 - 说明：本报告描述**仓库 main 代码的实现真相**；已安装运行时（`~/.pd/runtime/`）若版本落后，行为可能与本报告不一致
@@ -17,6 +18,7 @@
 - §5 内化链后半段四代理详情（evaluator/artificer/scribe/rolloutReviewer，提示词全文）
 - §6 观察者 + 治理下游详情（correctionObserver/empathyObserver/signalCollector + approval→activation→shadow→promote→gate）
 - §7 已知在途修复 PR 关联与处理优先级建议
+- §8 核实轮修订（2026-09-15 下午 · CNB 四轮独立核实）
 
 ## 0. 审计范围与方法
 
@@ -86,7 +88,7 @@
 |---|------|--------------|------|
 | R-01 | **scribe→artificer 血缘命名断链**：philosopher 产物字段叫 `sourceDreamerArtifactId`，scribe 提示词却让找 `dreamerArtifactId`；该字段可选且无权威校验，省略时 artificer `resolveDreamerContext` 静默返回 undefined **且不发任何事件**——dreamer 五维上下文对代码化阶段静默消失（违反 rc-9） | philosopher-output.ts:24,42 vs scribe-prompt-builder.ts:78；artificer-runner.ts:271-280；§4 philosopher 卡 1 | ✅命名 ◐静默段 |
 | R-02 | **artificer OUTPUT FORMAT 示例违反 v2 硬契约**：示例不含 `requiresContextVersion`/case 级 `ruleContext`/`evidenceRefs`，而 V2 指令与双层校验定为必须——逐字模仿示例的 LLM **必然**被拒；且「CONTEXT MODE block above」实际拼接在其后（方位自指错误）。代码化阶段每次都可能白烧重试 | artificer-prompt-builder.ts:168-186 vs :245-246,264-269；artificer-output.ts:305-311,388-394；§5 artificer 卡 1/2 | ✅ |
-| R-03 | **artificer 两份「等价」schema 漂移**：LLM 工具面 `ArtificerRuleOutputTypebox` 完全无 `evidenceRefs`（v2 必填）、「等价性保证」注释宣称与 @sinclair 版 field-for-field 一致为假——submit_rulecode 工具参数不向模型暴露必填字段 | artificer-output-typebox.ts:18-19,51-53 vs artificer-output.ts:105,386-390；§5 artificer 卡 3 | ✅ |
+| R-03 | **artificer 两份「等价」schema 漂移**：LLM 工具面 `ArtificerRuleOutputTypebox` 完全无 `evidenceRefs`（v2 必填）、「等价性保证」注释宣称与 @sinclair 版 field-for-field 一致为假——submit_rulecode 工具参数不向模型暴露必填字段 | artificer-output-typebox.ts:18-19,51-53 vs artificer-output.ts:105,386-390；§5 artificer 卡 3；**【时效 §8.3】现 main 已由 #1693-r3（afa95651）修复——typebox 现含 evidenceRefs；本条保留为 70d824c4 基线事实** | ✅ |
 | R-04 | **Stage C 缓存复用旁路全部校验**：历史成功 run 的 outputPayload 仅 `JSON.parse` 即 `as DiagnosticianOutputV1`，可解析但非法的 payload 作为诊断结果直达 admission/落库/seed（违反 rc-1/rc-2；parse 失败分支反而做了 fail-safe） | split-diagnostician-runner.ts:190-206；§3 router 卡 5 | ✅ |
 | R-05 | **empathyObserver 是死角色但 Owner 面还活着**：类无生产实例化（仅测试）、flag 已 retired、检测职责移交 signalCollector，但 Console 控制中心仍渲染其开关+成本确认，agent 绑定配置键仍在——Owner 打开后**零运行时效果**（违背 mvp-q-2-how-observed） | new EmpathyObserver 仅 __tests__/empathy-observer.test.ts:26 等；feature-flag-contract.ts:251；ControlCenterPage.tsx:879-890；§6 F-E1 | ✅ |
 | R-06 | **渐进披露三层「默认关闭+打开也不通」**：三个 flag 全 default OFF；且其中 manifest 层即使打开也因 summary 键碰撞跳过导致 dreamer 7 条聚焦路径恒 absent→恒回退全量注入（1500 token 预算从未生效），其文档注释与实际行为自相矛盾 | feature-flag-contract.ts:325-347；context-manifests.ts:46-69；base-peer-runner.ts:1108-1123；summary-field-reader.ts:10-12,34-51；resolve-injection.ts:101-105；§0.2+§4 dreamer 卡 | ✅ |
@@ -101,9 +103,9 @@
 | R-10 | correctionObserver 的 FP 判定指令依赖 trajectory 的 `userMessage`，但该字段因隐私设计恒为空串——提示词在要求 LLM 用不存在的证据做词库降权判断 | correction-observer.ts:119 vs keyword-optimization-service.ts:121-123；§6 F-E2 | ✅ |
 | R-11 | EP-07 不变量保护清单不含 `abstractedPrinciple`：最终写入 principle_candidates 的是 router 转述版而非 distiller 蒸馏原件，「必须抽象、不许 rule-like」质量门在最后一棒失效 | diag-router-runner.ts:446-519（字段枚举 rootCause/evidence/confidence/intentTension）；§3 router 卡 4 | ✅◐ |
 | R-12 | owner-governed 待审词池 PendingTermStore 无生产写入者、Console 端点全 stub——「LLM 学词→Owner 批准」承诺断在审批池一环，实际是 correctionObserver 直写词库 | signal-collector/types.ts:21-35；signal-keywords-api.ts:38-66,97-107,116-150；§6 F-E3 | · |
-| R-13 | rolloutReviewer `needs_revision` 无 requiredChanges 非空硬约束（evaluator 有），prompt 还明示可为空→盲目修订轮；其自报 confidence 无锚却参与 decideAutoPromotion 免审晋级 | rollout-reviewer-output.ts:102-107,60 vs evaluator-output.ts:470-474；activation-dispatcher.ts:264-267,131-132；§5 rollout 卡 1/3 | · |
+| R-13 | rolloutReviewer `needs_revision` 无 requiredChanges 非空硬约束（evaluator 有），prompt 还明示可为空→盲目修订轮；其自报 confidence 无锚却参与 decideAutoPromotion 免审晋级 | rollout-reviewer-output.ts:102-107,60 vs evaluator-output.ts:470-474；activation-dispatcher.ts:264-267,131-132；§5 rollout 卡 1/3；**【时效 §8.3】#1698（285d1c81）已重写 rolloutReviewer（新增 principle_semantic 模式），本条按现 main 待复审** | · |
 | R-14 | route→ready 判定双实现：纯决策函数（含 missingFields 检查）只被 CLI 手动路径消费，自动路径 `ready=!!channel` 短路——字段不全的候选两路径命运不同；kind→channel 映射表也是两份 | internalization-route.ts:43-48,52-150 vs pain-signal-bridge.ts:761-768；intake-to-internalization-bridge.ts:34-40,66-81；§2 F3 | · |
-| R-15 | diagnostician 持续产出 `implementation` 类候选，但其固定路由到未启用的 skill 通道→必然 not_internalizable（有遥测非静默，属产品边界应 Owner 明示） | intake-to-internalization-bridge.ts:28-47；router-prompt-builder.ts:163-164；§2 F4+§3 router 卡 7 | · |
+| R-15 | diagnostician 持续产出 `implementation` 类候选，但其固定路由到未启用的 skill 通道→必然 not_internalizable（有遥测非静默，属产品边界应 Owner 明示） | intake-to-internalization-bridge.ts:28-47；router-prompt-builder.ts:163-164；§2 F4+§3 router 卡 7；**【时效 §8.3】#1698 通道重构已改动 intake bridge，本条按现 main 待复审** | · |
 | R-16 | dreamer 候选数量口径三处不一（prompt「每根因 1-5」vs validator 总数 1-5 vs 文档注释 2-3），多根因输入可预期触发 output_invalid 重试 | dreamer-prompt-builder.ts:84,97 vs dreamer-output.ts:4,140-142；§4 dreamer 卡 1 | · |
 | R-17 | 诊断超时元数据与实际行为脱节：diagnosticJson 写 perStageTimeoutMs（默认 600s）从不传给 runner，实际死线 BasePeerRunner 默认 300s——按元数据排障会得出错误结论；且「prompt 声明 vs 机器执行」无对齐面 | split-diagnostician-runner.ts:81,290-296；factory:640；base-peer-runner.ts:108-114；§3 横切 4 | · |
 | R-18 | rootcause prompt 承诺「evidence 空则 confidence<0.3」，validator 与 admission gate（阈值 0.5，查数量不查此承诺）均不执行——低证据高置信候选可入列 | rootcause-prompt-builder.ts:252-253 vs admission-gate.ts:25,61-75；§3 rootcause 卡 2 | · |
@@ -339,9 +341,9 @@ flowchart TB
 | `dreamer-output-v1` | candidates[{badDecision,betterDecision,rationale,confidence,riskLevel,strategicPerspective}] | dreamer | philosopher 上下文；pi_artifacts(kind='principle') |
 | `philosopher-output-v1` | thesis, principleCandidate{title,rationale,scope,confidence}, risks | philosopher | scribe 上下文 |
 | `scribe-output-v1` | principleDraft{title,statement,rationale,applicability,antiPatterns,confidence} | scribe | artificer 上下文 |
-| `artificer-rule-output-v2` | RuleCode 工件（ruleCode/submit_rulecode 语义，L2 循环产物） | artificer | evaluator 评估对象；activation 后 RuleHost 执行 |
+| `artificer-rule-output-v2` | RuleCode 工件（schema 实现字段为 `implementationCode`，artificer-output.ts:81；`submit_rulecode` 是 L2 工具名，非 schema 字段——A 轮核实修正） | artificer | evaluator 评估对象；activation 后 RuleHost 执行 |
 | `evaluator-output-v1` | evaluation{decision∈approved/needs_revision/rejected, score, requiredChanges…}, adversarialResult? | evaluator | commitNextTaskProposal verdict 仲裁（transition-decision.ts:91-108）；repair seed |
-| `rollout-reviewer-output-v1` | review{decision∈approve_rollout/needs_revision/reject…}, rolloutDecision | rolloutReviewer | 仲裁（:110-124）；dispatchActivation |
+| `rollout-reviewer-output-v1` | review{decision∈approve_rollout/needs_revision/reject…}（`rolloutDecision` 不在 V1 schema 内，系 Dispatcher 入参 activation-types.ts:38——A 轮核实修正；**#1698 后新增 principle_semantic 模式，以现 main 为准**） | rolloutReviewer | 仲裁（:110-124）；dispatchActivation |
 | `empathy-observer-output-v1` | empathy 观察输出 | **（无生产产出方，见 §5-F1）** | 仅测试 |
 | `correction-observer-output-v1` | updated, updates{add/update/remove,weight,reasoning}, fpTerms, summary | correctionObserver | KeywordOptimizationService.applyResult（correction-observer-service.ts:303-304） |
 | `signal-classification-output-v1` | is_feedback, type∈correction/empathy/none, confidence, reason | signalCollector Stage2 | SignalCollectorHost.detectAsyncAndRoute（signal-collector-host.ts:253-278） |
@@ -1383,10 +1385,10 @@ CONSTRAINTS:
 | intentContract | IntentContractV1\|undefined | extractIntentContract(scribe 工件)（evaluator-runner.ts:867；intent-contract.ts:71-77） | isValidIntentContractV1 逐字段非空校验（intent-contract.ts:54-64） |
 | outputLanguage | OutputLanguage\|undefined | options.outputLanguage（evaluator-runner.ts:331,442） | 仅影响语言指令 |
 
-序列化进 prompt：全部字段构成 `EvaluatorPromptInput` 后经 `serializePromptInput` 整体 JSON 序列化为用户消息（evaluator-prompt-builder.ts:227-241）；序列化器有 50,000 字符硬上限，超限抛 RangeError（prompt-serializer.ts:12,57-59）——超长 prompt 在 runner 侧表现为执行失败重试。修复轮的 requirement id（req-1..N）由 `deriveRequirementLedger` 跨轮稳定（evaluator-prompt-builder.ts:85-116）。
+序列化进 prompt：全部字段构成 `EvaluatorPromptInput` 后经 `serializePromptInput` 整体 JSON 序列化为用户消息（evaluator-prompt-builder.ts:227-241）；序列化器有 50,000 字符硬上限，超限抛 RangeError（prompt-serializer.ts:1,49-51）——超长 prompt 在 runner 侧表现为执行失败重试。修复轮的 requirement id（req-1..N）由 `deriveRequirementLedger` 跨轮稳定（evaluator-prompt-builder.ts:85-116）。
 
 ### 系统提示词全文
-来源：`EVALUATOR_PROTOCOL_INSTRUCTION`，packages/principles-core/src/runtime-v2/internalization/evaluator-prompt-builder.ts:147-217。运行时在尾部追加语言指令（⟨注入: languageDirective⟩，:226,245）。以下为逐字引用（源码中两处 `\`intentContract\`` 转义反引号按运行时实际字符串呈现）：
+来源：`EVALUATOR_PROTOCOL_INSTRUCTION`，packages/principles-core/src/runtime-v2/internalization/evaluator-prompt-builder.ts:147-217。运行时在尾部追加语言指令（⟨注入: languageDirective⟩，:226,245）。以下为逐字引用（源码中一处 `\`intentContract\``（:182）转义反引号按运行时实际字符串呈现）：
 
 ```text
 You are an Evaluator agent in a principle internalization pipeline. Your role is to critically review the Artificer's implementation plan and produce a structured evaluation with a decision, score, and actionable feedback.
@@ -1485,7 +1487,7 @@ CONSTRAINTS:
 | risks | string[] | 是 | :222, :539-543 |
 | generatedAt | string | 是（base 层强制覆写为当前时间，base-peer-runner.ts:306-309） | :223, :552-554 |
 | codeReview（V2 可选） | {intentConsistency{aligned,explanation}, scopePrecision{verdict,explanation}, traceCoverage{sufficient,gaps,explanation}} | 可选，存在则逐字段 fail-loud | :56-70, :242-294, :559-561 |
-| adversarialCases（V2 可选） | AdversarialCase[]（caseId/attackType/toolName/params/expectedDecision∈allow\|block\|propose_correction/rationale[/ruleContext]） | 可选，存在则逐元素校验 | :14-29, :296-341, :562-564 |
+| adversarialCases（V2 可选） | AdversarialCase[]（caseId/attackType/toolName/params/expectedDecision∈allow\|block\|propose_correction/rationale[/ruleContext]） | 可选，存在则校验字段存在/类型与可选 ruleContext 结构——**不校验数量（prompt 要 3-5）与 attackType×expectedDecision 组合语义**（C 轮核实修正） | :14-29, :296-341, :562-564 |
 | adversarialResult（V2 可选） | {passed, failedCases[{caseId,attackType,expectedDecision[,actualDecision][,errorType][,message],rationale}], failure?{layer,reasonCode}} | LLM 可携带但成功路径**先剥离**（evaluator-runner.ts:941-944），只允许 executeDeterministicReplay 回写 | :31-82, :343-389, :565-567 |
 | painCoverage / compressionFidelity（Layer 2 可选） | 见 :146-172 | 不被 DefaultEvaluatorValidator 校验（仅 isEvaluatorOutputV2 白名单 :396-411） | :146-172 |
 
@@ -1842,7 +1844,7 @@ ScribeOutputV1（scribe-output.ts）：
 1. **prompt 必填 vs schema 可选的 intentContract 口径差**：prompt 宣布 "intentContract is REQUIRED"（scribe-prompt-builder.ts:101），类型层刻意 Optional 以兼容历史产物（scribe-output.ts:37-45,69-72）——新输出缺 intentContract **能通过校验**，下游全链（artificer/evaluator/rule 转发）静默退回无契约模式（各端仅事件可观测）。「推断」这是向后兼容的有意取舍，但意味着 PRI-703 契约无机器强制入口。
 2. **title ≤100 chars 为 prompt-only 约束**：validator 只查非空（scribe-output.ts:124），超长标题放行并可能被 extractPrincipleIdFromArtifact 当 principleId 兜底引用（evaluator-runner.ts:2819-2825）。
 3. **intentContract 与 principleDraft 的一致性只存在于 prompt**：prompt 要求二者"SAME intent at different precision"（scribe-prompt-builder.ts:103），validator 只查五个非空字符串（intent-contract.ts:54-64）——契约与原则文本矛盾（"corrupted anchor" 的最危险形态）无机器防线。「推断」evaluator 以契约为优先正确性定义（evaluator-prompt-builder.ts:182-183）时，一个坏契约将系统性带偏 code review 与 adversarial scoping。
-4. **用户消息无长度上限**：scribe 与 rolloutReviewer 用裸 `JSON.stringify`（scribe-prompt-builder.ts:151；rollout-reviewer-prompt-builder.ts:91），evaluator/artificer 用 50k 封顶的 serializePromptInput（prompt-serializer.ts:12,57-59）——同一管线两种溢出行为（一个抛错可重试，一个无界发给她主模型）。
+4. **用户消息无长度上限**：scribe 与 rolloutReviewer 用裸 `JSON.stringify`（scribe-prompt-builder.ts:151；rollout-reviewer-prompt-builder.ts:91），evaluator/artificer 用 50k 封顶的 serializePromptInput（prompt-serializer.ts:1,49-51）——同一管线两种溢出行为（一个抛错可重试，一个无界发给她主模型）。
 5. Scribe vs Artificer 职责重叠：无（见 artificer 卡第 9 条）；真正的灰色地带是 intentContract.validationExpectation 与 evaluator Part A 维度的关系——前者是 scribe 预写的"验收标准"，后者是 evaluator 自有三维，两者并存且无冲突消解规则（prompt 仅说契约存在时以契约为准）。「推断」
 
 ---
@@ -1968,7 +1970,7 @@ RolloutReviewerOutputV1（rollout-reviewer-output.ts）：
 
 - **角色一句话**：修正关键词优化器——周期性用 LLM 复查修正关键词词库（ADD/UPDATE/REMOVE）并做假阳性（FP）轨迹分析，把结果写回词库供 Stage1 检测消费。
 - **运行入口**：`packages/principles-core/src/runtime-v2/observer/correction-observer.ts:56`（`CorrectionObserver` 类），`run()` 在 correction-observer.ts:133-228。
-- **触发方式**：OpenClaw 插件服务 `CorrectionObserverService`（`packages/openclaw-plugin/src/service/correction-observer-service.ts:320-406`）以 `setTimeout` 周期调度：启动延迟 10s、间隔 15 分钟（correction-observer-service.ts:50-51）；带单消费者边界 + epoch 防旧周期复活（correction-observer-service.ts:23-47, 369-384）。启用前提：`.pd/config.yaml` 中 `correctionObserver` agent 绑定 enabled 且 runtimeProfile 就绪（correction-observer-service.ts:153-198, 337-355；默认关闭 `packages/principles-core/src/runtime-v2/config/pd-config-defaults.ts:70`）。core 的 `AgentScheduler`（observer/agent-scheduler.ts:21-55）只是类型安全 dispatch 器，不做调度——"periodic" 模式字段（agent-scheduler.ts:11）由插件 setTimeout 实现（推断：scheduler 本身无任何时间逻辑）。
+- **触发方式**：OpenClaw 插件服务 `CorrectionObserverService`（`packages/openclaw-plugin/src/service/correction-observer-service.ts:320-406`）以 `setTimeout` 周期调度：启动延迟 10s、间隔 15 分钟（correction-observer-service.ts:50-51）；带单消费者边界 + epoch 防旧周期复活（correction-observer-service.ts:23-47, 369-384）。启用前提：`.pd/config.yaml` 中 `correctionObserver` agent 绑定 enabled 且 runtimeProfile 就绪（correction-observer-service.ts:153-198, 337-355；默认关闭 `packages/principles-core/src/runtime-v2/config/pd-config-defaults.ts:69`（D 轮核实修正：:70 是 empathyObserver））。core 的 `AgentScheduler`（observer/agent-scheduler.ts:21-55）只是类型安全 dispatch 器，不做调度——"periodic" 模式字段（agent-scheduler.ts:11）由插件 setTimeout 实现（推断：scheduler 本身无任何时间逻辑）。
 
 **输入**（`CorrectionObserverPayloadSchema`，correction-observer.ts:6-26）：
 
@@ -2032,7 +2034,7 @@ Note: fpTerms is optional — only include if you identified clear false positiv
 | fpAnalysisStatus | `'completed'\|'skipped'`（可选） | :221-225 枚举校验 |
 | summary | string | :186 类型校验 |
 
-- **持久化位置**：输出本身不落库；效果经 `KeywordOptimizationService.applyResult`（keyword-optimization-service.ts:31-99）写入 `<stateDir>/correction_keywords.json`（`CorrectionCueLearner`，correction-cue-learner.ts:26；原子写 temp+rename，:19 注释）。`source` 记为 `'llm'`（keyword-optimization-service.ts:56）。
+- **持久化位置**：输出本身不落库；效果经 `KeywordOptimizationService.applyResult`（keyword-optimization-service.ts:31-99）写入 `<stateDir>/correction_keywords.json`（`CorrectionCueLearner`，correction-cue-learner.ts:26；原子写 temp+rename（注释 :9、实现 :75——D 轮核实修正））。`source` 记为 `'llm'`（keyword-optimization-service.ts:56）。
 
 **失败/降级路径**：
 - LLM run 失败/超时：poll 循环抛错（correction-observer.ts:158-172），周期 catch 后记 `CORRECTION_OBSERVER_CYCLE_FAILED` 日志并累加 `signal-health.observerConsecutiveFailures`（correction-observer-service.ts:308-317, 200-210）；周期本身不中断下一轮。
@@ -2045,7 +2047,7 @@ Note: fpTerms is optional — only include if you identified clear false positiv
 - `fpTerms` + `fpAnalysisStatus==='completed'` → `learner.recordFalsePositive`（keyword-optimization-service.ts:81-98；权重 ×0.8 注释 :93）。
 - llm 学习词精度由 `precisionFor` 决定：TP≥3 且 FP=0 才升 high（earned precision），否则恒 ambiguous（governance-signal-admission.ts:104, 161-172）——LLM 单次建议无法自升 STRONG 路径。
 - 旁路产物：每周期批量确认 `signal_confirmations` pending 候选（`batchConfirmPendingSignals`，correction-observer-service.ts:72-143）→ `SignalCollectorHost.confirmPendingSignal`（signal-collector-host.ts:411-436）→ confirmed/rejected/abandoned（attempts≥5，correction-observer-service.ts:57-58, 98-105）。
-- 无人消费的字段：输出的 `updates[].falsePositiveRate`（schema :35 允许，应用侧 applyResult 不读取）；`updates[].reasoning`（仅日志，applyResult 不落库）。
+- 无人消费的字段：输出的 `updates[].falsePositiveRate`（schema :35 允许，应用侧 applyResult 不读取）；`updates[].reasoning`（schema 校验处仅 typeof 检查，**既不落库也不进任何日志**——D 轮核实修正）。
 
 **断裂/不一致嫌疑**：
 1. **FP 分析结构性失明（P2）**：提示词要求"term 出现在 trajectory 但 user message 并非真挫折 → 判 FP"（correction-observer.ts:119），但 `buildTrajectoryHistory` 因隐私永远填 `userMessage: ''`（keyword-optimization-service.ts:120-124 注释明言 rawText 不可得）——LLM 只看到 term + 空消息，FP 判定的证据基础不存在；`fpAnalysisStatus='completed'` 在结构上是空洞的。
@@ -2152,7 +2154,7 @@ system（`packages/principles-core/src/runtime-v2/signal-collector/llm-stage.ts:
 
 - **输入**：`ActivationDispatcher.enqueueForApproval`（`packages/principles-core/src/runtime-v2/activation/activation-dispatcher.ts:276-338`）。入队条件：rolloutDecision='require_approval' **或** 非低风险 channel（:265；低风险 = prompt/defer_archive，activation-types.ts:8）；例外：skill channel + confidence≥0.95 自动豁免人工审批（`decideAutoPromotion`，approval-queue.ts:17-22；阈值 activation-types.ts:15-17——注释明言这是有意的 ：263-264）。入队前跑 writer.canActivate 预检（:288-292）。
 - **动作**：Console `POST /api/v1/approvals/:id/approve|reject|edit`（`pd-console/src/server/routes/approvals.ts:122-287`，decidedBy 固定 'operator'，:146/205/260）。approve（`ApprovalsConsoleModel.approve`，`pd-console/src/server/models/ApprovalsConsoleModel.ts:144-216`）：① 原子置 approved（`SqliteApprovalQueueStore.approve`，UPDATE..RETURNING，sqlite-approval-store.ts:226-240）→ ② `ApprovalCompletionService.completeApproval`（approval-completion-service.ts:63-192）以 `rolloutDecision='approved'` 派发激活 → ③ 激活失败则 resetToPending 回滚供重试（ApprovalsConsoleModel.ts:170-184；resetToPending sqlite-approval-store.ts:258-265）→ ④ 成功后升级 ledger 原则 candidate→active（非致命，:211-213, 230-265）。
-- **输出/状态转移**：pending → approved / rejected / cancelled；edit 仅 pending 可改 artifact（sqlite-approval-store.ts:267-282，previous_artifact_id 原子派生）。approvals 表行结构映射 sqlite-approval-store.ts:51-88。
+- **输出/状态转移**：pending → approved / rejected（类型含 `cancelled` 但**无生产写入者**——D 轮核实修正）；edit 仅 pending 可改 artifact（sqlite-approval-store.ts:267-282，previous_artifact_id 原子派生）。approvals 表行结构映射 sqlite-approval-store.ts:51-88。
 - **持久化**：SQLite `approvals` 表（DDL sqlite-connection.ts:395）；approvalId 确定性 = `apr_<channel>_<artifactId>`（sqlite-approval-store.ts:138-140），INSERT OR IGNORE（:156-174），写入前应用层 FK 校验 pi_artifacts 存在（:149-154）。
 - **Owner 可见性**：Console approvals 页（GET 列表带 MVP 通道过滤，approvals.ts:62-91）；CLI `pd runtime activation dispatch`（`pd-cli/src/commands/runtime-activation.ts:316`）。
 - **失败路径**：`story_a_approval_completion` flag 关闭时审批照记、激活跳过并显式 warning（ApprovalsConsoleModel.ts:190-197, 351-362；flag 定义 feature-flag-contract.ts:214）；code_tool_hook 审批在 host 声明不可解析时拒绝在 dispatch 之前（:393-401）；already_decided 409（approvals.ts:161, 212）。
@@ -2246,18 +2248,24 @@ Codex 路径：`admitGovernanceSignals`（governance-signal-admission.ts:776）�
 
 # §7 已知在途修复 PR 关联与处理优先级建议
 
-## 7.1 在途 OPEN PR 与本报告发现的交叉（基于 70d824c4，未含这些 PR）
+## 7.1 在途修复 PR 状态（2026-09-15 下午修订）
 
-| PR | 内容 | 与登记表交叉 | 注意 |
-|----|------|--------------|------|
-| #1698（PRI-720 Channel-aware DAG，Owner 已 REQUEST CHANGES 3 P1） | 原则/规则通道分离重构 | R-15（implementation→skill 必然不可内化）、R-14（route 双实现）大概率被其重构改写 | 合入前先以本报告 §2 F3/F4 现状为基线评审其覆盖面 |
-| #1693（PRI-795 Artificer L2 abort 归因+超时契约） | artificer L2 循环超时/abort 归属 | R-17（超时元数据脱节属 diag 侧，不同文件但同类模式）、§5 artificer L2 卡 | 合并后需复查 §0.1 三层拼接在 L2 路径的双 merge 调用（pi-ai 588 vs l2 351/353） |
-| #1694（PRI-783 pain record 空证据降级） | pain 入口 admission 行为 | §2 入口表行 1-4（pain-ingress 语义） | 合并后 pain 入口拒绝面变宽，R-18 类低证据候选可能增多 |
-| #1703（PRI-798 治理批准链路：租约排序/决策卡文案） | approvals/governance Console 面 | §6 治理环节卡（approvals 读写面当时核实无断裂） | 合并后 R-22（OR IGNORE 遮蔽）值得确认是否受其时序改动影响 |
+初稿基于 70d824c4 将下列 5 个 PR 记为「OPEN 在途」；**A 轮核实（GitHub 匿名 API）确认五者已于当日上午全部合并**，本表为修订后事实：
 
+| PR | 主题 | 合并时刻（UTC+8） | 对本报告的影响 |
+|----|------|-------------------|----------------|
+| #1698 | PRI-720 Channel-aware DAG | 09:13 | 重写 rollout-reviewer 三文件 + intake bridge/orchestrator/state-machine——§5 rollout 卡、R-13、R-15 按现 main 失效待复审（§8.3） |
+| #1693 | PRI-795 Artificer L2 abort/超时契约（含 r3 补 evidenceRefs） | 09:25 | **R-03 双 schema 漂移已修复**（afa95651）；artificer L2 注释/常量同步（§5 artificer 卡 8 失效） |
+| #1694 | PRI-783 pain 空证据降级 | 09:42 | §2 入口表 pain-ingress 语义更新（degrade 收下替代硬拒；binding verified/unverified 分流） |
+| #1700 | ERR-130/068 手册登记 | 11:29 | 无正文影响 |
+| #1703 | PRI-798 治理批准链路（租约排序/决策卡文案） | 11:40 | §6 治理环节卡部分行号漂移；shadow→live 无旁路结论经 D 轮重验仍成立 |
+
+**A 轮关键推论（✅审计长认可）**：本报告的分支基线（origin/main@191ae1af）已含上述合并，但报告正文按 70d824c4 描述——即「报告所在树 ≠ 报告所述树」。这正是 §8.3 时效表存在的理由：在现 main 上复现 §5/§6 部分行号会看到代码已变，属预期漂移而非报告造假（报告头已声明基线）。#1707（本报告初版+模型钉定）已由 Owner 合并。
+
+> 初稿本节对 #1698/#1693 覆盖面与本报告发现的交叉分析，仍然适用于其**合并前评审语境**（如「合入前以现状为基线评审覆盖面」），但对应改动已实际落 main，读者应以 §8.3 与 VERIFICATION-A 的 R-A41..45 为准。
 ## 7.2 建议处理优先级（供 Owner 挑选，均为建议非自动实施）
 
-1. **一次「artificer 提示词↔契约对齐」工单**：R-02 + R-03 + P3-17（示例补齐 v2 字段、双 schema 合一、禁模式清单进 prompt）。理由：代码化阶段是修复环最贵环节（历史 EP002 实证单轮 165 分钟级），确定性失败先消除。
+1. **一次「artificer 提示词↔契约对齐」工单**：R-02 + P3-17（示例补齐 v2 字段、禁模式清单进 prompt；R-03 双 schema 合一已随 #1693-r3 并入 main 消解，见 §8.3）。理由：代码化阶段是修复环最贵环节（历史 EP002 实证单轮 165 分钟级），确定性失败先消除。
 2. **一次「血缘命名单一权威」工单**：R-01（sourceDreamerArtifactId/dreamerArtifactId 统一 + artificer resolveDreamerContext 静默段补事件，对齐 rc-9）+ P3-9/P3-10。
 3. **两枚「旁路校验」补丁**：R-04（Stage C 缓存补 schema 校验）、R-08（factory 补传 effectiveConfig，一行级）。
 4. **一项退役裁决**：R-05 + R-06 + R-12——empathyObserver Console 开关、渐进披露三层、PendingTermStore：要么修复到可用，要么统一墓碑化（含 Console 面）。这是 Owner 决策，不是工程默认。
@@ -2266,3 +2274,74 @@ Codex 路径：`admitGovernanceSignals`（governance-signal-admission.ts:776）�
 7. P3 清单不单独开工单，按 AGENTS.md §14 错误经验手册规程择机登记根因条目。
 
 > 本审计为只读静态审计。未做的事：live 运行时取证（`~/.pd/` 状态库核对实际行为与默认 flag 组合）、LLM 实测提示词遵循度、#1698/#1693 合入后的重新基线。若需要，可作为后续工单。
+
+---
+
+# §8 核实轮修订（2026-09-15 下午 · CNB 四轮独立核实）
+
+## 8.1 核实方式与总判定
+
+四路 CNB 云端代理（PD Developer，npc:go 钉定 `model=deepseek-v4.1-flash`，Owner 指令）对报告**逐项回源核实**，管辖互不重叠、基线纪律统一（`git show 70d824c4:` 不切分支）：
+
+| 轮次 | 管辖 | CNB Issue / PR | 核实文档 | CONFIRMED | REFUTED | DRIFT | NEW |
+|------|------|----------------|----------|-----------|---------|-------|-----|
+| A | §0/§1/§2/§7（登记表/全景/入口/状态机/PR 表） | #28 / PR #34 | VERIFICATION-A.md（309 行） | 108 | 5（全部为 §7 在途 PR 时效） | 2 | 5 |
+| B | §3 诊断三阶段 + §4 dreamer/philosopher | #29 / PR #32 | VERIFICATION-B.md（529 行） | 60 | **0** | 3 | 6 |
+| C | §5 四代理 + L2 | #30 / PR #33 | VERIFICATION-C.md（465 行） | 47 | 2（表述精度级） | 3 | 10（P1×1） |
+| D | §6 观察者+治理五环节+排除清单 | #31 / PR #35 | VERIFICATION-D.md（426 行） | 155 | 3 | 2 | 13 |
+| **合计** | 全文 | — | 1729 行 | **370** | **10** | **10** | **34** |
+
+**结论校准**：报告的 P1/P2 事实骨架全部经四轮独立回源成立——10 条 REFUTED 中 5 条是「OPEN PR 已合并」的时效问题、5 条是表述精度/行号问题，**无一推翻任何断裂结论**。13 段提示词逐字引用（B 11 块 + C 8 段 + D 三卡全文）经逐字符/归一化 diff 全部一致。B 轮超出静态阅读：**实际安装 typebox 运行生产代码** `DefaultSchemaPromptAdapter`，把报告标注【推断】的「示例由 schema 机械合成」升级为实证（并修正归因：`Value.Cast` 只救回 literal-union 字段，普通 string 字段违规照抄仍会被 validator 拒——见 8.4 定级修正）。
+
+## 8.2 已应用进正文的修订清单（本次修订轮）
+
+| 位置 | 修订 | 来源 |
+|------|------|------|
+| 报告头/目录 | 声明修订轮与 §8 索引 | — |
+| §1.3 R-03/R-13/R-15 | 加「时效」标注（修复/待复审） | A-NEW-3、C 基线说明 |
+| §2.4 注册表 artificer-rule-output-v2 概要 | `submit_rulecode` 非 schema 字段，实现字段为 `implementationCode`（artificer-output.ts:81） | A-S7 |
+| §2.4 注册表 rollout-reviewer-output-v1 概要 | `rolloutDecision` 系 Dispatcher 入参（activation-types.ts:38）非 V1 字段 + #1698 时效 | A-S9 |
+| §5 evaluator 卡 | 「两处转义反引号」→ 一处（:182）；adversarialCases「逐元素校验」→ 不校验数量与组合语义 | C-R1/R2 |
+| §4/§5 evaluator+scribe 卡 | `prompt-serializer.ts:12,57-59` → `:1,49-51`（:57-59 不存在） | C-DRIFT |
+| §6 correctionObserver 卡 | 原子写注释 :19→:9/实现 :75；reasoning「仅日志」→「不落库也不进日志」；默认关闭行 :70→:69 | D-R-a/b、DRIFT |
+| §6 approval 环节 | `cancelled` 无生产写入者标注 | D-R-c |
+| §7.1 | 五 PR 全部改为「已合并」+时刻+影响表 + 基线树≠所述树推论 | A-R-A41..45 |
+| §7.2 第 1 项 | R-03 已被 #1693-r3 消解，剩余 R-02+禁模式教学 | A-NEW-3 |
+
+未修订项说明：正文各行号仍按 `70d824c4` 基线保留（修订原则=**不悄悄重锚**，漂移集中记录于 §8.3 与各 VERIFICATION 漂移表）；§6 第四部分嫌疑表行号 1..9 与执行摘要/登记表中的 F-E1..F-E9 一一对应（行 9=排除清单），D 轮将「F-E8」判 UNVERIFIABLE 即因该编号映射未显式化——本行说明即修正。
+
+## 8.3 基线时效表（70d824c4 → main@d77433fd，51 commits，审计长亲验）
+
+| 条目 | 现 main 状态 | 亲验证据 |
+|------|--------------|----------|
+| R-03 双 schema 漂移 | **已修复**（#1693-r3 afa95651） | rg：现 `tools/artificer-output-typebox.ts` 含 evidenceRefs（2 命中） |
+| §5 rolloutReviewer 卡全部、R-13、R-15 | **失效待复审**（#1698 285d1c81 重写三文件，新增 principle_semantic 模式） | rg：principle_semantic 命中 output:8/runner:12 |
+| §5 artificer 卡 8（maxTurns 注释 8 vs 12） | 失效（#1693 改动 l2 adapter） | diff --name-only 亲验 |
+| R-01/R-02/R-04/R-08/R-10/R-11/R-16/R-18 | **仍成立**（源文件不在 51-commits 差异内） | diff --name-only 亲验 |
+| R-05 empathy 死开关 | 仍成立 | rg：ControlCenterPage 现仍引用 empathyObserver（4 命中） |
+| R-06 三层披露 default-OFF | 仍成立（行号漂移至 :340/:351/:357） | 亲读现 feature-flag-contract.ts 三行 enabled:false |
+| R-07 桥预算清零语义 | 仍成立（行号漂移至 :427/:454/:504） | rg 亲验 `attemptCount: 0` |
+| §2/§6 引用 pain-signal-bridge/orchestrator/state-machine/peer-runner-contracts/evaluator-runner 的行号 | 结论成立但行号有漂移 | 以 VERIFICATION-A/D 漂移表为准 |
+
+## 8.4 核实轮新增发现（并入登记表，编号续接；详情见对应 VERIFICATION 文件）
+
+| # | 严重度 | 发现 | 来源 |
+|---|--------|------|------|
+| R-19 | **P1** | **RuleCode 沙箱信任边界**：静态禁门可被字符串/模板拼接绕过（`\bconstructor\b` 词边界天然漏 `'con'+'structor'`/`` `con${''}structor` ``），且 core 侧两条 vm 预处理路径（evaluator 确定性对抗重放 gateDeps、refiner sandbox wrapper）把宿主 realm 的 input/helpers 直接注入 vm——`input.constructor.constructor` 可取宿主 `process`/fs/env。生产 live gate 走子进程不受影响（其注释早已记录同模式），受影响面为评估/激活预检路径。**✅审计长亲验**（rule-code-validator.ts:27-65 + masking、activation/production-gate-deps.ts:86-124、refiner-sandbox-wrapper.ts:153-171）；C 轮含本地复现回显 | C NEW-1 |
+| R-20 | P2 | Console「停用」按钮路径 `POST /activations/:id/disable` 不要求 Owner 身份、不写 activation_decisions、不检查 control state——与 emergency-deactivate 授权不对称 | D NEW-5 |
+| R-21 | P2 | correctionObserver 结构性失明三连：hitCount 恒 0（REMOVE 判据恒真）、`CorrectionCueLearner.match()` 无调用者（UPDATE weight 不影响检测评分）、llm 词升 high 后不可逆（Stage1 短路+FP 路径失明） | D NEW-1/2/3 |
+| R-22 | P2 | Codex 侧无 `rulehost_evaluated` 事件通道 → shadow 证据恒不可得、promote 在该宿主**结构性不可达** | D NEW-7 |
+| R-23 | P2 | `tasks.attempt_count` 与 `runs.attempt_number` 在 revision 窗口双源不一致（rc-7 面） | C NEW-2 |
+| R-24 | P2 | 第二个语义过载持久化键：`pi_artifacts.source_task_id`+唯一索引=覆盖语义 | C NEW-3 |
+| R-25 | P2 | 管道入口/gate 全景各有遗漏：Codex 会话摄取（codex_conversation_ingestion）未入入口清单；`signal_collector`/`codex_conversation_ingestion` 两 flag 未入 F10 表 | A NEW-1/2 |
+| R-26 | P2 | 「第二条 live 写者 / skill 通道无 writer」两项事实 | D NEW-6 |
+
+**定级修正建议（B-NEW-6，审计长接受归因修正、维持 P2）**：§3 rootcause/distiller「示例违反规则」的机制归因应为「`Value.Cast` 兜底使示例通过自身 Check，但普通 string 字段（rootCause 前缀、grounded IDs）Cast 不回填——语义违规示例照抄后仍被 validator 拒」；横切 1 措辞已相应精化（技术层示例合法≠语义层示例可模仿）。
+
+P3 级 NEW 共 17 项（languageDirective subject 错配、philosopher 双重编码回退、OCRA 路径不剥 lineage、rollout validator 错误归因、intentContract `Type.Unknown()`、三 flag 组合死角、owner-review 最后工件口径、双 gate 护栏不对等、`as never`、`TermSource` 镜像缺 `llm_learned`、empathy 第三处遗留面等）+ B/C/D 各漂移表——不在此复述，见 VERIFICATION-{A..D}.md §5/§4/§3。
+
+## 8.5 交付面与后续动作
+
+- **CNB 核实 PR #32/#33/#34/#35**：base 为已合并的报告分支，四份 VERIFICATION 文件已随本修订 PR 进入 GitHub 主线（内容逐字取自 CNB 分支，未改编）；CNB 侧建议 **close 而非 merge**，避免交付桥重复投递。
+- **§7.2 优先级修订**：新增最高优先一项——**R-19 沙箱面安全工单**（静态门改 AST/归一化检查 + core 两路径改 JSON 边界传参，对照 `rule-implementation-runtime.ts` 既有防护）；原第 5 项（家族一集中修复）因 B 轮实证而修复面更清晰；rolloutReviewer 相关结论需按现 main 重审（可再次委派 CNB）。
+- **本审计的后续取证缺口不变**：live 运行时核对、LLM 实测提示词遵循度仍未做。
