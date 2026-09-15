@@ -278,9 +278,23 @@ export class RuleHostWriter implements ChannelWriter {
       const declaredTools = Array.isArray(parsed.affectedTools)
         ? parsed.affectedTools.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
         : [];
+      // EP002-R4: host-liveness probes (caseId `host-liveness:*`) are
+      // host-control-plane SYNTHETIC cases injected by the promotion checker
+      // (openclaw-promotion-checks) — their tool names (bash,
+      // owner_review_access) are control surfaces, not business tools, and
+      // are deliberately absent from the workspace host-tool declaration.
+      // Feeding them through host-dispatch validation made every promotion
+      // permanently blocked (live-chain evidence: neutral_probe_or_live_
+      // composition_failed with all other checks green). Exclude them from
+      // the reliability scope; the sandbox replay below still executes them
+      // (expected allow) so the liveness signal itself is preserved.
+      const livenessPrefix = 'host-liveness:';
+      const reliabilityCaseToolNames = goldenTrace.cases
+        .filter((c) => !(typeof c.caseId === 'string' && c.caseId.startsWith(livenessPrefix)))
+        .map((c) => c.toolName);
       const reliability = validateRuleReliability({
         affectedTools: declaredTools,
-        goldenTraceCaseToolNames: goldenTrace.cases.map((c) => c.toolName),
+        goldenTraceCaseToolNames: reliabilityCaseToolNames,
         toolSemantics: this.toolSemantics,
       });
       if (!reliability.valid && reliability.failure) {
