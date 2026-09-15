@@ -21,6 +21,8 @@ type LoopCfg = {
   shouldStopAfterTurn?: () => boolean;
   beforeToolCall?: (ctx: { toolCall: { name: string } }) => Promise<unknown>;
   maxTokens?: number;
+  timeoutMs?: number;
+  reasoning?: string;
 };
 type LoopImpl = ((...args: never[]) => Promise<unknown[]>) | null;
 
@@ -75,6 +77,7 @@ vi.mock('../../store/event-emitter.js', () => ({
 
 import { storeEmitter } from '../../store/event-emitter.js';
 import { ArtificerL2Adapter } from '../artificer-l2-adapter.js';
+import { PDRuntimeError } from '../../error-categories.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
 import type { RefinerRuleHostGateDeps } from '../../internalization/refiner-rulehost-gate.js';
 import type { RefinerSandboxResult } from '../../internalization/refiner-sandbox-wrapper.js';
@@ -519,5 +522,244 @@ describe('PRI-633 — layered systemPrompt placement', () => {
     const first = captured?.messages[0];
     expect(first?.role).toBe('user');
     expect(first?.content).toBe('initial prompt');
+  });
+});
+
+// ── PRI-795 — abort ownership & timeout contract ─────────────────────────────
+
+describe('PRI-795 ArtificerL2Adapter — abort ownership & timeout contract', () => {
+  /** Start-run promise → thrown PDRuntimeError (null when it resolves). */
+  async function captureError(adapter: ArtificerL2Adapter): Promise<PDRuntimeError | null> {
+    try {
+      await adapter.startRun(makeStartRun());
+      return null;
+    } catch (err) {
+      expect(err).toBeInstanceOf(PDRuntimeError);
+      return err as PDRuntimeError;
+    }
+  }
+
+  function completePayload(): Record<string, unknown> | undefined {
+    const call = emitTelemetryMock.mock.calls.find(
+      (c: unknown[]) => (c[0] as { eventType: string }).eventType === 'artificer_l2_complete',
+    );
+    return call ? (call[0] as { payload: Record<string, unknown> }).payload : undefined;
+  }
+
+  it('Case 1: PD budget timeout → category timeout, failureKind=pd_budget_timeout, abortOwner=pd_budget (NOT output_invalid)', async () => {
+    const adapter = makeAdapter({ totalBudgetMs: 60 });
+    // Mirror the REAL failure path (EP002-R3 live evidence): the budget timer
+    // aborts OUR signal → pi-ai marks stopReason=aborted → the agent loop
+    // returns SILENTLY (no throw). The old code misclassified this as
+    // output_invalid because `timedOut = budgetTimedOut` lived only in the
+    // catch block, which never ran.
+    // eslint-disable-next-line @typescript-eslint/max-params -- mirrors the 5-param runAgentLoop signature
+    hoisted.impl = async (_p: unknown, _c: unknown, _cfg: unknown, emit: (e: unknown) => Promise<void>, signal?: AbortSignal) => {
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) { resolve(); return; }
+        signal?.addEventListener('abort', () => resolve(), { once: true });
+        setTimeout(resolve, 5_000); // safety valve
+      });
+      await emit({ type: 'message_end', message: { stopReason: 'aborted', errorMessage: 'Request was aborted' } });
+      return [];
+    };
+
+    const err = await captureError(adapter);
+    if (!err) throw new Error('expected startRun to reject');
+    expect(err.category).toBe('timeout');
+    expect(err.message).toContain('failureKind=pd_budget_timeout');
+    expect(err.message).toContain('abortOwner=pd_budget');
+    expect(err.message).toContain('stopReason=aborted');
+
+    const payload = completePayload();
+    expect(payload?.abortOwner).toBe('pd_budget');
+    expect(payload?.failureKind).toBe('pd_budget_timeout');
+    expect(typeof payload?.budgetMs).toBe('number');
+    expect(typeof payload?.elapsedMs).toBe('number');
+    expect((payload?.elapsedMs as number) >= 60).toBe(true);
+  });
+
+  it('Case 2: provider timeout (stopReason=error, timeout-like message) → execution_failed, failureKind=provider_timeout', async () => {
+    const adapter = makeAdapter();
+    // eslint-disable-next-line @typescript-eslint/max-params -- mirrors the 5-param runAgentLoop signature
+    hoisted.impl = async (_p: unknown, _c: unknown, _cfg: unknown, emit: (e: unknown) => Promise<void>) => {
+      await emit({ type: 'message_end', message: { stopReason: 'error', errorMessage: 'Request timed out' } });
+      return [];
+    };
+
+    const err = await captureError(adapter);
+    if (!err) throw new Error('expected startRun to reject');
+    expect(err.category).toBe('execution_failed');
+    expect(err.message).toContain('failureKind=provider_timeout');
+    expect(completePayload()?.failureKind).toBe('provider_timeout');
+  });
+
+  it('provider error without timeout wording → failureKind=provider_error', async () => {
+    const adapter = makeAdapter();
+    // eslint-disable-next-line @typescript-eslint/max-params -- mirrors the 5-param runAgentLoop signature
+    hoisted.impl = async (_p: unknown, _c: unknown, _cfg: unknown, emit: (e: unknown) => Promise<void>) => {
+      await emit({ type: 'message_end', message: { stopReason: 'error', errorMessage: 'boom from provider' } });
+      return [];
+    };
+
+    const err = await captureError(adapter);
+    if (!err) throw new Error('expected startRun to reject');
+    expect(err.category).toBe('execution_failed');
+    expect(err.message).toContain('failureKind=provider_error');
+  });
+
+  it('Case 3: manual cancelRun → category cancelled, failureKind=cancelled, abortOwner=cancelled', async () => {
+    const adapter = makeAdapter({ totalBudgetMs: 30_000 });
+    // cancelRun is invoked while the loop is in flight (state registered at
+    // startRun entry, before the loop starts) — mirrors BasePeerRunner's
+    // cancel path timing.
+    hoisted.impl = async () => {
+      const [runId] = [...(adapter as unknown as { runs: Map<string, unknown> }).runs.keys()];
+      if (!runId) throw new Error('run not registered before loop start');
+      await adapter.cancelRun(runId);
+      return []; // silent return, like the real aborted path
+    };
+
+    const err = await captureError(adapter);
+    if (!err) throw new Error('expected startRun to reject');
+    expect(err.category).toBe('cancelled');
+    expect(err.message).toContain('failureKind=cancelled');
+    expect(err.message).toContain('abortOwner=cancelled');
+
+    const payload = completePayload();
+    expect(payload?.abortOwner).toBe('cancelled');
+    expect(payload?.failureKind).toBe('cancelled');
+  });
+
+  it('review P1: cancel FIRST + slow stream exit + budget firing late → still cancelled (first-writer-wins)', async () => {
+    // The exact review scenario: cancelRun aborts the signal at t≈0, the
+    // stream exits slowly (mock lingers 150ms), and the budget timer fires at
+    // t=60ms while the loop is still draining. A fixed budget-first
+    // precedence recorded this as pd_budget_timeout; ownership must stay
+    // with the FIRST aborter (the manual cancel).
+    const adapter = makeAdapter({ totalBudgetMs: 60 });
+    // eslint-disable-next-line @typescript-eslint/max-params -- mirrors the 5-param runAgentLoop signature
+    hoisted.impl = async (_p: unknown, _c: unknown, _cfg: unknown, emit: (e: unknown) => Promise<void>) => {
+      const [runId] = [...(adapter as unknown as { runs: Map<string, unknown> }).runs.keys()];
+      if (!runId) throw new Error('run not registered before loop start');
+      await adapter.cancelRun(runId);
+      // Slow exit: keep the loop "draining" well past the budget deadline.
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+      await emit({ type: 'message_end', message: { stopReason: 'aborted', errorMessage: 'Request was aborted' } });
+      return []; // silent return, like the real aborted path
+    };
+
+    const err = await captureError(adapter);
+    if (!err) throw new Error('expected startRun to reject');
+    expect(err.category).toBe('cancelled');
+    expect(err.message).toContain('failureKind=cancelled');
+    expect(err.message).not.toContain('pd_budget_timeout');
+
+    const payload = completePayload();
+    expect(payload?.abortOwner).toBe('cancelled');
+    expect(payload?.failureKind).toBe('cancelled');
+  });
+
+  it('abort by neither budget nor cancel → failureKind=stream_aborted with UNKNOWN owner, never output_invalid', async () => {
+    const adapter = makeAdapter({ totalBudgetMs: 30_000 });
+    hoisted.impl = async () => {
+      // Abort the controller WITHOUT setting either ownership flag —
+      // simulates an aborter outside the adapter contract.
+      const [controller] = [...(adapter as unknown as { abortControllers: Map<string, AbortController> }).abortControllers.values()];
+      controller?.abort();
+      return []; // silent return, like the real aborted path
+    };
+
+    const err = await captureError(adapter);
+    if (!err) throw new Error('expected startRun to reject');
+    expect(err.category).toBe('execution_failed');
+    expect(err.message).toContain('failureKind=stream_aborted');
+    expect(err.message).toContain('UNKNOWN owner');
+  });
+
+  it('Case 4: normal completion → success with evidence payload (abortOwner=none, token usage from transcript)', async () => {
+    const adapter = makeAdapter();
+    hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
+      const submit = context.tools?.find((t) => t.name === 'submit_rulecode');
+      if (submit) {
+        await submit.execute('call-1', makeRuleOutput());
+      }
+      // Transcript carrying pi-ai usage on the final assistant message.
+      return [
+        { role: 'assistant', content: [], usage: { input: 100, output: 50, totalTokens: 150 }, stopReason: 'toolUse' },
+      ];
+    };
+
+    const handle = await adapter.startRun(makeStartRun());
+    const output = await adapter.fetchOutput(handle.runId);
+    expect(output?.payload).toEqual(makeRuleOutput());
+
+    const payload = completePayload();
+    expect(payload?.succeeded).toBe(true);
+    expect(payload?.abortOwner).toBe('none');
+    expect(payload?.stopReason).toBe('toolUse');
+    expect(payload?.tokenUsage).toEqual({ status: 'ok', inputTokens: 100, outputTokens: 50, totalTokens: 150 });
+    expect(typeof payload?.elapsedMs).toBe('number');
+    expect(payload?.model).toMatchObject({ provider: 'test-provider', model: 'test-model' });
+  });
+
+  it('marks token usage unavailable when the transcript carries none — never fabricated', async () => {
+    const adapter = makeAdapter();
+    hoisted.impl = async () => [];
+    await captureError(adapter);
+    expect(completePayload()?.tokenUsage).toEqual({ status: 'unavailable' });
+  });
+
+  it('timeout contract: loopConfig.timeoutMs equals the total budget (explicit SDK ceiling, no silent 600s default)', async () => {
+    const adapter = makeAdapter({ totalBudgetMs: 120_000 });
+    hoisted.mockReturn = [];
+    await captureError(adapter);
+    expect(hoisted.lastLoopConfig.timeoutMs).toBe(120_000);
+  });
+
+  it('loop_started telemetry carries the model config + requestTimeoutMs for diagnosis', async () => {
+    const adapter = makeAdapter();
+    hoisted.mockReturn = [];
+    await captureError(adapter);
+    const startCall = emitTelemetryMock.mock.calls.find(
+      (c: unknown[]) => {
+        const evt = c[0] as { eventType: string; payload: { phase?: string } };
+        return evt.eventType === 'artificer_l2_turn' && evt.payload?.phase === 'loop_started';
+      },
+    );
+    const {payload} = (startCall?.[0] as { payload: Record<string, unknown> });
+    expect(payload.requestTimeoutMs).toBe(60_000);
+    expect(payload.provider).toBe('test-provider');
+    expect(payload.model).toBe('test-model');
+    expect(payload.reasoning).toBe('unavailable');
+  });
+
+  it('review P2-4: configured reasoning reaches BOTH the loop stream options and the resolver opts', async () => {
+    const adapter = new ArtificerL2Adapter({
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_API_KEY',
+      baseUrl: 'http://localhost:1234/v1',
+      gateDeps: makeAlwaysPassGateDeps(),
+      validator: new DefaultArtificerValidator(),
+      totalBudgetMs: 60_000,
+      maxTokens: 4096,
+      reasoning: 'low',
+    });
+    hoisted.mockReturn = [];
+    await captureError(adapter);
+    // Stream options: the thinking level the LLM call must carry.
+    expect(hoisted.lastLoopConfig.reasoning).toBe('low');
+    expect(hoisted.lastLoopConfig.maxTokens).toBe(4096);
+    // loop_started telemetry reflects the configured level (not 'unavailable').
+    const startCall = emitTelemetryMock.mock.calls.find(
+      (c: unknown[]) => {
+        const evt = c[0] as { eventType: string; payload: { phase?: string } };
+        return evt.eventType === 'artificer_l2_turn' && evt.payload?.phase === 'loop_started';
+      },
+    );
+    const {payload} = (startCall?.[0] as { payload: Record<string, unknown> });
+    expect(payload.reasoning).toBe('low');
+    expect(payload.requestTimeoutMs).toBe(60_000);
   });
 });

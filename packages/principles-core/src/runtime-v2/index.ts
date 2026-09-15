@@ -426,9 +426,10 @@ export { isOwnerExplicitManual, shouldShortCircuitEmptyEvidence } from './eviden
 export { PainChainReadModel } from './pain-chain-read-model.js';
 export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions } from './pain-chain-read-model.js';
 
-// Workspace guidance migration (PRI-286) — remove stale PLAN.md gate guidance from installed workspaces
-export { migrateWorkspaceGuidance, containsStalePlanMdGuidance, STALE_PLAN_MD_PATTERNS } from './workspace-guidance-migration.js';
-export type { MigrationResult as WorkspaceGuidanceMigrationResult } from './workspace-guidance-migration.js';
+// Workspace guidance migration (PRI-286) removed in PRI-776: the PLAN.md-era
+// rules ran at every startup for months (all existing workspaces already
+// migrated) and current templates cannot produce matching text. The rules
+// remain in git history.
 
 // Ledger file utilities — PRI-443 Phase 5: removed from runtime-v2 barrel.
 // I/O functions (loadLedger, saveLedger, getLedgerFilePathPublic, updatePrinciple)
@@ -1230,6 +1231,8 @@ export {
   computeBridgeDecision,
   buildDreamerTaskSeed,
   buildDreamerSeedFromCandidate,
+  dreamerTaskIdsForCandidate,
+  findExistingDreamerTask,
   seedIntakeTask,
 } from './internalization/intake-to-internalization-bridge.js';
 

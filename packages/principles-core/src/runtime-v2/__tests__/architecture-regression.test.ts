@@ -363,7 +363,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
 
   // ── Runtime V2 ──────────────────────────────────────────────────────────
   'runtime-v2-prompt-activation-reader.ts',
-  'workspace-guidance-migrator.ts',
   // PRI-307: Plugin I/O boundary — reads .pd/config.yaml, delegates validation to core
   'pd-config-loader.ts',
   // PRI-346: Pure function for checking conversation access config (extracted for circular import avoidance)
@@ -431,7 +430,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (98 files)', async () => {
+  it('known baseline count is self-consistent (96 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -484,7 +483,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-788 G4: Added signal-health.ts (96 → 97) — plugin I/O boundary for
     // <workspace>/.state/signal-health.json (atomic write + mkdir + SYSTEM log),
     // consumed by `pd config doctor` for detection-chain health visibility.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
+    // PRI-776: Removed workspace-guidance-migrator.ts (97 → 96) — PLAN.md-era
+    // guidance migration retired (ran at every startup for months; current
+    // templates cannot produce matching text).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
   });
 });
 

@@ -80,7 +80,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-114 | Semantic resolvability used as an existence proof — fallback/generic lookup members pass validators that should only accept authoritative host declarations | PRI-634-F PR #1495 R2 |
 | ERR-122 | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side README/package.json and tutorial-style verifier comments ship to the subject agent's workspace; audit the DEPLOYED FILE LIST as the answer surface, enforced by a deploy-shape assertion + hint scan | PRI-684 PR #1584 |
 | ERR-124 | Test mutates a process-global singleton without try/finally restore — sibling tests run under hijacked state | PRI-723 / PR #1596 review |
-| ERR-130 | Dependency-bump blast radius unverified: path-filtered CI skips package test/typecheck jobs for lockfile/manifest-only PRs, so ESM default-export removal, 0.x pairing dual-installs, and renamed APIs ship green | adhoc 2026-09-14 PRs #1689-#1692 repair |
+| ERR-131 | Dependency-bump blast radius unverified: path-filtered CI skips package test/typecheck jobs for lockfile/manifest-only PRs, so ESM default-export removal, 0.x pairing dual-installs, and renamed APIs ship green | adhoc 2026-09-14 PRs #1689-#1692 repair |
 
 ---
 
@@ -103,7 +103,6 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | [archived] ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded (moved to ERROR_ARCHIVE.md) | PR #808/#809/#810 |
 | ERR-063 | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored | PR #844 |
 | [archived] ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit (moved to ERROR_ARCHIVE.md) | PRI-337 / PR #852 |
-| ERR-065 | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013) | PRI-394 / PR #926 |
 | ERR-067 | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI | PRI-405 |
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
 | ERR-076 | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken | PRI-437 / PR #986 |
@@ -181,6 +180,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-126 | New utility call site added via the nearest neighbor's import instead of surveying for the utility's existing owner — a duplicate capability grows and the owner's documented guardrails silently don't apply | PRI-749 / PR #1619 review |
 | ERR-127 | Deletion/audit PRs assert completeness claims ("zero consumers", "condition met", "only these files") from truncated sweeps (head -N), non-normative readings of governance lifecycle docs, and never-executed DoD commands — capture the FULL sweep output in the PR, treat registry/census lifecycle semantics as binding before choosing the deletion shape, and execute every DoD command once before opening the PR | PRI-751 / PR #1622-#1628 review |
 | ERR-129 | Extending a host/cross-package receipt chain asserts parity with the existing counterpart without verifying it — consumer field precedence (pain.ts `toolUseId`-first) and downstream writer/table (`assistant_turns` written only by the OpenClaw plugin) | PRI-750 / PR #1663 review |
+| ERR-130 | Outcome classification derived from WHICH control path executed (catch block) instead of post-hoc state resolution — a wrapped library that silent-returns failure paths makes catch-based assignment dead code, so every such failure inherits the default misclassification | PRI-795 / EP002-R3 live evidence |
 
 ---
 
@@ -285,7 +285,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-009, ERR-024, ERR-033
 - **Source**: PRI-553
 - **Date**: 2026-08-20
-- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): the initial feature-flag design said flag-off restored the existing Console presentation but did not state that every promotion entry point, especially CLI, must refuse promotion. That left room for the stricter Owner decision authority to disappear while the legacy unchecked mutation remained available. The same review also found that local no-auth Console had been allowed to write `reject-after-shadow`, incorrectly granting governance authority to a break-glass operator. Fixed before implementation by making feature-off refuse promotion across Console and CLI, requiring both paths to use one application service, and restricting unauthenticated authority to inspect/deactivate/global-pause only. Regression requirement: disabled, unavailable, validated-deny, and authenticated-allow must be exercised at every promotion entry point; no-auth tests must prove governance writes are refused. 2026-08-25 PR #1409 (PRI-586): READ-side sibling — `featureFlags?.enabled === true` gating made the still-loading state indistinguishable from flag-off, so FocusPage fired the legacy `/governance/queue` request before flipping to experience mode (wasted call + legacy-panel flash). Fixed by gating the data load on flags-resolved; loading ≠ disabled extends the same three-state rule to read paths.
+- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): flag-off design did not state that every promotion entry point (especially CLI) must refuse promotion — fixed in review. (Full recurrence text archived 2026-09-14 PRI-795 size-gate — see ERROR_ARCHIVE.md ERR-102.)
 
 ---
 **[ERR-103]** | Empty or malformed declared enforcement scope is accepted and can degrade into match-all behavior
@@ -669,17 +669,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-065]** | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013)
-
-- **What happened**: In the malformed consumed candidate row test for `mainline-snapshot-assembler`, raw SQL INSERT into `principle_candidates` was written with guessed column names: `INSERT INTO principle_candidates (candidate_id, task_id, status, created_at) VALUES ('', ?, 'consumed', ?)`. This hit `SqliteError` three times: first `no column named updated_at`, then `NOT NULL constraint failed: artifact_id`, then `NOT NULL constraint failed: title`.
-- **Why it's wrong**: The SQLite schema was treated as "known" without reading it. This is the same trust-boundary violation as ERR-001 (using `as` on untrusted JSON instead of runtime validation), ERR-005 (bypassing type contract on salvaged arrays), and ERR-013 (using `in` on untrusted objects). A database schema is an external data source — guessing column names is no different from using `as Record<string, unknown>` on parsed JSON.
-- **Correct approach**: Before writing raw SQL INSERT statements, read the actual CREATE TABLE schema from `sqlite-connection.ts` to confirm all column names, types, and NOT NULL constraints.
-- **How to prevent**: When writing raw SQL against a database not authored by the same code: (1) grep the CREATE TABLE statement to verify column names and constraints; (2) include all NOT NULL columns; (3) prefer typed mapper functions over ad-hoc INSERT strings.
-- **Recurrence of**: ERR-001, ERR-005, ERR-013
-- **Source**: PRI-394 / PR #926
-- **Date**: 2026-06-14
-
----
 **[ERR-072]** | React component duplicates hook state as local state — desync causes silent feature failure
 
 - **What happened**: `NotificationProvider` maintained its own `audioUnlocked` state in `useState` while also consuming `audioUnlocked` from `useNotificationSound()` hook. The Provider's `handleInteraction` callback called `unlockAudio()` (which sets the hook's internal state) AND `setState({ audioUnlocked: true })` (setting the Provider's local copy). Since `unlockAudio()` is async (calls `ctx.resume()`), the Provider could mark audio as unlocked before the hook's internal state updated, causing `playSound()` to still return early due to its own `audioUnlocked` being `false`.
@@ -716,7 +705,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 122 |
+| Total lessons | 123 |
 | Last updated | 2026-09-15 |
 | Top category | Schema & Type |
 | Recurring errors | 65 |
@@ -1674,7 +1663,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-**[ERR-130]** | Dependency-bump blast radius unverified — path-filtered CI skips package test/typecheck jobs for lockfile/manifest-only PRs, so ESM default-export removal, 0.x semver pairing dual-installs, and renamed APIs ship green
+---
+**[ERR-130]** | Outcome classification derived from WHICH control path executed (catch block) instead of post-hoc state resolution — library silent-returns on abort make catch-based assignment dead code
+
+- **What happened**: ArtificerL2Adapter (EP002-R3) classified loop failures via `timedOut = budgetTimedOut` assigned ONLY inside the `catch` around `runAgentLoop`. pi-agent-core's runLoop, however, ends an aborted LLM stream with a silent `return` (no throw), so the catch never executed: every PD-budget abort was recorded as `output_invalid` (permanent) instead of `timeout`, and 16 consecutive live runs were diagnosis-dead — the investigation itself was misled, inferring "budget didn't fire" from a classification that could never have observed the flag.
+- **Why it's wrong**: Deriving outcome state from which control path completed assumes the wrapped library signals every failure by throwing. Libraries that terminate failure paths with sentinel returns (stopReason messages, null results, silent stops) route around the catch entirely; the assignment inside it is untestable-by-accident dead code, and the misclassification is systematic, not random — the same wrong category every time, which looks like a real signal.
+- **Generalized failure mode**: When wrapping a library whose failure paths include non-throwing terminations, post-loop state must be resolved from explicitly recorded flags (who aborted, who cancelled, what stopReason was seen) AFTER the await returns — never from catch-vs-return control flow. The same applies to any `catch`-scoped state that silent/sentinel paths bypass.
+- **How to prevent**: For every `try { await lib(...) } catch` that assigns outcome state, enumerate the library's non-throwing failure terminations (read the library source, don't assume) and ensure classification reads recorded flags after the call regardless of path. A test must exercise the silent-return path explicitly (mock returning normally after an abort) — a catch-path-only test cannot catch this.
+- **Regression guard**: `packages/principles-core/src/runtime-v2/adapter/__tests__/artificer-l2-adapter.test.ts` PRI-795 block — Case 1 (budget abort → silent return → `timeout`/`failureKind=pd_budget_timeout`), Case 3 (cancel), Case 3b (unknown aborter), plus the provider-error cases.
+- **Related ERRs**: ERR-002 (fail-loud surface), EP-03 (silent degradation)
+- **Source**: PRI-795 / EP002-R3 live evidence (PR #1684 follow-up investigation)
+- **Date**: 2026-09-14
+- **Recurrence**: None
+
+---
+**[ERR-131]** | Dependency-bump blast radius unverified — path-filtered CI skips package test/typecheck jobs for lockfile/manifest-only PRs, so ESM default-export removal, 0.x semver pairing dual-installs, and renamed APIs ship green
 
 - **What happened**: Three parallel dependabot repair PRs (2026-09-14, #1689/#1690/#1692): (1) js-yaml 4→5 is ESM-only with NO default export — `import yaml from 'js-yaml'` in pd-console's `pd-config-store.ts` crashed the installed Console server at startup ("does not provide an export named 'default'") and `(await import('js-yaml')).default` yielded `undefined` in three test files; (2) js-yaml 5 also deleted `DEFAULT_SCHEMA` (load's default narrowed to CORE_SCHEMA — timestamps parse as STRINGS) and renamed `quotingType`→`quoteStyle`; (3) bumping pi-ai to 0.85.1 without its 0.x-locked sibling pi-agent-core (^0.84.1 does not satisfy 0.85.x) produced TWO pi-ai copies whose private-class types are mutually incompatible. All of this was invisible to the PRs' green CI because path-filtered workflows SKIP package test/typecheck jobs when only lockfiles/manifests change — failures surfaced only after code edits brought the jobs back, or at install smoke.
 - **Why it's wrong**: A green path-filtered CI run is NOT evidence that a dependency bump is safe — the jobs that would catch consumer breakage (package unit tests, tsc, install smoke) were skipped, and `verify:merge` does not re-resolve lockfiles or typecheck every workspace. A bumped library's consumer blast radius (import shape, renamed/removed exports, 0.x semver pairing) is a cross-package contract change (§19) that must be audited, not assumed.
