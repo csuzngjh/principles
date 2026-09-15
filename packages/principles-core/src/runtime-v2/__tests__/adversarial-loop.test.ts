@@ -315,6 +315,13 @@ describe('runAdversarialLoop (PRI-428)', () => {
     // assembly is skipped → no rule artifact → rejected.
     try { fs.rmSync(h.tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
     h = await makeHarness({ gateDeps: makeFailingGateDeps() });
+    // EP002-R4: approved + failed adversarial replay is now needs_revision
+    // (PRI-758 semantics) — the loop feeds the failed cases into a second
+    // round instead of rejecting with 'evaluator_approved_without_rule_
+    // artifact'. Queue TWO artificer rounds so the loop exhausts its rounds
+    // against the persistently failing gate; the contract under test — never
+    // report approved without a durable rule artifact — is unchanged.
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator((taskId, artificerArtifactId) => ({
       taskId,
@@ -335,7 +342,7 @@ describe('runAdversarialLoop (PRI-428)', () => {
 
     expect(result.decision).toBe('rejected');
     expect(result.ruleArtifactId).toBeNull();
-    expect(result.degradationReason).toContain('rule_artifact');
+    expect(result.degradationReason).toBeTruthy();
   });
 
   it('enforces the two-round hard cap when callers request more rounds', async () => {
