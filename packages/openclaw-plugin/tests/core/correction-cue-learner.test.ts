@@ -233,112 +233,16 @@ describe('CORR-05: 200-term limit', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CORR-11: Equivalence to detectCorrectionCue
+// CORR-11: Detection semantics
 // ═══════════════════════════════════════════════════════════════════════════════
+//
+// PRI-812: CorrectionCueLearner.match() removed (ghost second detector, zero
+// production callers). Canonical detection is the shared keyword store →
+// collectSync path; its behavior is covered by the @principles/core
+// signal-collector tests, the host-runtime governance-signal-admission tests,
+// and the plugin's signal-collector-host / signal-keyword-store tests.
 
-describe('CORR-11: Equivalence to detectCorrectionCue', () => {
-  beforeEach(() => {
-    vi.mocked(fs.existsSync).mockReturnValue(false);
-  });
-
-  /**
-   * Reference implementation using find() — first match wins (same as detectCorrectionCue).
-   */
-  function detectCorrectionCueLegacy(text: string): string | null {
-    const normalized = text.trim().toLowerCase().replace(/[.,!?;:，。！？；：]/g, '');
-    const cues = CORRECTION_SEED_KEYWORDS.map((k) => k.term);
-    return cues.find((cue) => normalized.includes(cue)) ?? null;
-  }
-
-  /**
-   * Tests using first-match semantics: find() returns the FIRST keyword in the
-   * array whose term appears in the normalized text, not the longest match.
-   *
-   * Order of CORRECTION_SEED_KEYWORDS array (first 8 Chinese):
-   *   '不是这个', '不对', '错了', '搞错了', '理解错了', '你理解错了', '重新来', '再试一次'
-   *
-   * So "我搞错了" → "错了" is found first (index 2) before "搞错了" (index 3).
-   * "你理解错了" → "错了" is found first (index 2) before "理解错了" (index 4) and "你理解错了" (index 5).
-   */
-  it.each([
-    // Chinese cases — note: first match wins
-    ['不是这个', '不是这个'],       // exact match
-    ['你不对啊', '不对'],          // first match is '不对' (index 1)
-    ['错了！', '错了'],            // exact match (index 2)
-    ['我搞错了', '错了'],          // '错了' appears first in array (index 2 < index 3)
-    ['你理解错了', '错了'],         // '错了' appears first in array (index 2 < index 4)
-    ['重新来一遍', '重新来'],       // exact match
-    ['再试一次行不行', '再试一次'],  // exact match
-    // English cases
-    ['you are wrong', 'you are wrong'],  // exact match
-    ['wrong file', 'wrong file'],        // exact match
-    ['not this one', 'not this'],        // exact match
-    ['redo it', 'redo'],                 // exact match (index 11)
-    ['try again', 'try again'],           // exact match (index 12)
-    ['do it again', 'again'],             // 'again' is index 13
-    ['please redo', 'redo'],              // 'redo' found first (index 11 < index 14)
-    ['please try again', 'try again'],    // 'try again' found first (index 12 < index 15)
-  ])('should match "%s" → "%s"', (text, expected) => {
-    vi.mocked(fs.existsSync).mockReturnValue(false);
-    const dir = tempDir();
-    const learner = new CorrectionCueLearner(dir);
-    const result = learner.match(text);
-    expect(result.matched).toBe(true);
-    expect(result.matchedTerms).toContain(expected);
-    expect(result.score).toBeGreaterThan(0);
-  });
-
-  it('should produce same result as legacy detectCorrectionCue for varied inputs', () => {
-    vi.mocked(fs.existsSync).mockReturnValue(false);
-    const dir = tempDir();
-    const learner = new CorrectionCueLearner(dir);
-
-    const cases = [
-      '这个可以，没问题',
-      '不对，应该是这样',
-      '你再试试这个方法',
-      'nothing wrong here',
-      'please be careful',
-      'can you try again?',
-      'I think you are wrong about this',
-    ];
-
-    for (const text of cases) {
-      const legacyResult = detectCorrectionCueLegacy(text);
-      const learnerResult = learner.match(text);
-
-      if (legacyResult !== null) {
-        expect(learnerResult.matched).toBe(true);
-        expect(learnerResult.matchedTerms).toContain(legacyResult);
-        expect(learnerResult.score).toBeGreaterThan(0);
-      } else {
-        expect(learnerResult.matched).toBe(false);
-        expect(learnerResult.matchedTerms).toEqual([]);
-      }
-    }
-  });
-
-  it('should match regardless of surrounding punctuation', () => {
-    vi.mocked(fs.existsSync).mockReturnValue(false);
-    const dir = tempDir();
-    const learner = new CorrectionCueLearner(dir);
-
-    const variations = ['不对', '不对!', '不对?', '。不对', '不对。', '  不对  ', '不对啊'];
-    for (const text of variations) {
-      const result = learner.match(text);
-      expect(result.matched).toBe(true);
-      expect(result.matchedTerms).toContain('不对');
-    }
-  });
-
-  it('should return positive score when matched, 0 when not matched', () => {
-    vi.mocked(fs.existsSync).mockReturnValue(false);
-    const dir = tempDir();
-    const learner = new CorrectionCueLearner(dir);
-    expect(learner.match('不是这个').score).toBeGreaterThan(0);
-    expect(learner.match('这个可以').score).toBe(0);
-  });
-
+describe('CORR-11: Store limits contract', () => {
   it('should export MAX_CORRECTION_KEYWORDS = 200', () => {
     expect(MAX_CORRECTION_KEYWORDS).toBe(200);
   });

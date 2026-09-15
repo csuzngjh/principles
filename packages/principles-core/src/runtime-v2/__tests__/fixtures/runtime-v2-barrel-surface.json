@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1716,
+  "count": 1714,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "AGENT_IDS",
@@ -178,8 +178,6 @@
     "CorrectionKeywordSchema",
     "CorrectionKeywordStore",
     "CorrectionKeywordStoreSchema",
-    "CorrectionMatchResult",
-    "CorrectionMatchResultSchema",
     "CorrectionObserver",
     "CorrectionObserverDeps",
     "CorrectionObserverOptions",

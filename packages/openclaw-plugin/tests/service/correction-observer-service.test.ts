@@ -6,7 +6,7 @@ import * as yaml from 'js-yaml';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
 const mockLearner = {
-  getStore: vi.fn(() => ({ keywords: [{ term: 'wrong', weight: 0.5, hitCount: 3, truePositiveCount: 1, falsePositiveCount: 2 }] })),
+  getStore: vi.fn(() => ({ keywords: [{ term: 'wrong', weight: 0.5, truePositiveCount: 1, falsePositiveCount: 2 }] })),
 };
 
 const mockDb = {
@@ -191,6 +191,48 @@ describe('CorrectionObserverService — Independent Service (PRI-293)', () => {
       expect(mockOptimizationService.applyResult).toHaveBeenCalledWith(expect.objectContaining({
         updated: true,
         summary: 'Keyword store optimized',
+      }));
+    } finally {
+      CorrectionObserverService.stop?.({} as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('PRI-812: delivers FP-only verdicts (updated=false) to the optimization service', async () => {
+    // PRI-812 C: observer 只报误报、不建议增删改时（updated=false + fpTerms），
+    // 该裁决必须到达 applyResult——它是 earned-high 词项唯一的自动降级证据。
+    // 旧实现 `if (result.updated)` 会把它静默吞掉。
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-obs-fponly-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    mockDispatch.mockImplementationOnce(async () => ({
+      updated: false,
+      fpTerms: ['wrong'],
+      fpAnalysisStatus: 'completed',
+      summary: 'wrong keeps firing on factual messages, no store mutations',
+    }));
+
+    try {
+      CorrectionObserverService.start({
+        workspaceDir,
+        stateDir,
+        logger,
+        config: { get: () => undefined },
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+
+      expect(mockDispatch).toHaveBeenCalled();
+      expect(mockOptimizationService.applyResult).toHaveBeenCalledWith(expect.objectContaining({
+        updated: false,
+        fpTerms: ['wrong'],
+        fpAnalysisStatus: 'completed',
       }));
     } finally {
       CorrectionObserverService.stop?.({} as any);

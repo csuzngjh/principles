@@ -32,52 +32,56 @@ export class KeywordOptimizationService {
     const learner = CorrectionCueLearner.get(this.stateDir);
 
     const updates = result.updates ?? {};
-    if (!result.updated || Object.keys(updates).length === 0) {
-      this.logger?.info?.('[KeywordOptimizationService] No updates to apply');
-      return;
-    }
-
-    for (const [term, update] of Object.entries(updates)) {
-      try {
-        switch (update.action) {
-          case 'add': {
-            const normalizedTerm = term.trim().toLowerCase();
-            // Check for existing normalized term to avoid duplicates
-            const existing = learner.getStore().keywords.find(
-              k => k.term.toLowerCase() === normalizedTerm
-            );
-            if (existing) {
-              this.logger?.info?.(`[KeywordOptimizationService] ADD skipped: "${term}" already exists as "${existing.term}"`);
+    if (result.updated && Object.keys(updates).length > 0) {
+      for (const [term, update] of Object.entries(updates)) {
+        try {
+          switch (update.action) {
+            case 'add': {
+              const normalizedTerm = term.trim().toLowerCase();
+              // Check for existing normalized term to avoid duplicates
+              const existing = learner.getStore().keywords.find(
+                k => k.term.toLowerCase() === normalizedTerm
+              );
+              if (existing) {
+                this.logger?.info?.(`[KeywordOptimizationService] ADD skipped: "${term}" already exists as "${existing.term}"`);
+                break;
+              }
+              const weight = update.weight !== undefined
+                ? Math.max(0.1, Math.min(0.9, update.weight))
+                : 0.5;
+              learner.add({ term: normalizedTerm, weight, source: 'llm' });
+              this.logger?.info?.(`[KeywordOptimizationService] ADD term="${normalizedTerm}" weight=${weight}`);
               break;
             }
-            const weight = update.weight !== undefined
-              ? Math.max(0.1, Math.min(0.9, update.weight))
-              : 0.5;
-            learner.add({ term: normalizedTerm, weight, source: 'llm' });
-            this.logger?.info?.(`[KeywordOptimizationService] ADD term="${normalizedTerm}" weight=${weight}`);
-            break;
-          }
-          case 'update': {
-            if (update.weight !== undefined) {
-              learner.updateWeight(term, update.weight);
-              this.logger?.info?.(`[KeywordOptimizationService] UPDATE term="${term}" weight=${update.weight}`);
+            case 'update': {
+              if (update.weight !== undefined) {
+                learner.updateWeight(term, update.weight);
+                this.logger?.info?.(`[KeywordOptimizationService] UPDATE term="${term}" weight=${update.weight}`);
+              }
+              break;
             }
-            break;
+            case 'remove': {
+              learner.remove(term);
+              this.logger?.info?.(`[KeywordOptimizationService] REMOVE term="${term}"`);
+              break;
+            }
           }
-          case 'remove': {
-            learner.remove(term);
-            this.logger?.info?.(`[KeywordOptimizationService] REMOVE term="${term}"`);
-            break;
-          }
+        } catch (opErr) {
+          // Log and skip individual operation failures — don't fail the whole batch
+          this.logger?.warn?.(`[KeywordOptimizationService] ${update.action.toUpperCase()} failed for term="${term}": ${String(opErr)}`);
         }
-      } catch (opErr) {
-        // Log and skip individual operation failures — don't fail the whole batch
-        this.logger?.warn?.(`[KeywordOptimizationService] ${update.action.toUpperCase()} failed for term="${term}": ${String(opErr)}`);
       }
+    } else {
+      this.logger?.info?.('[KeywordOptimizationService] No store mutations to apply');
     }
 
     // H-1: Record confirmed false positives — terms where correctionDetected fired
     // but trajectory analysis shows user wasn't actually expressing frustration.
+    // PRI-812: recorded INDEPENDENTLY of `updated`/`updates` — the observer
+    // contract allows an FP-only verdict (updated=false, fpTerms=[...]), and
+    // that verdict is the counter-evidence the earned-high demotion loop
+    // consumes (high → FP=1 → precisionFor → ambiguous). Gating it behind
+    // store mutations silently discarded the only demotion signal.
     if (result.fpAnalysisStatus === 'completed' && result.fpTerms && result.fpTerms.length > 0) {
       // Normalize: trim, lowercase, dedupe, sanity cap
       const MAX_FP_TERMS = 20;

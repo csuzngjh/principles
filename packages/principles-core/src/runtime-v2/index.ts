@@ -1652,13 +1652,11 @@ export {
   CORRECTION_SEED_KEYWORDS,
   CorrectionKeywordSchema,
   CorrectionKeywordStoreSchema,
-  CorrectionMatchResultSchema,
 } from './correction/correction-types.js';
 
 export type {
   CorrectionKeyword,
   CorrectionKeywordStore,
-  CorrectionMatchResult,
 } from './correction/correction-types.js';
 
 // ── Queue, Hygiene, Runtime Summary, Event Types (migrated from openclaw-plugin) ──

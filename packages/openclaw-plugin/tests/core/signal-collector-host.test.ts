@@ -216,6 +216,40 @@ describe('SignalCollectorHost.detectSync', () => {
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
     expect(wctx.trajectory.recordUserTurn).not.toHaveBeenCalled();
   });
+
+  it('PRI-812 C characterization: earned-high learned term → deterministic STRONG fast path, Stage2 skipped, no realtime cue feedback', async () => {
+    // 复现 PRI-807 R-21#3 的真实形态：llm 学习词经 earned precision（TP≥3 且
+    // FP=0）升 high 后，realtime 命中走确定性 STRONG 快速路径——不经 Stage2、
+    // 不产生 TP/FP 反馈。本测试固化该快速路径契约（§5 禁止为降级而每次重跑
+    // Stage2），反证只能来自异步 CorrectionObserver → applyResult 链（该链的
+    // FP-only 裁决投递由 keyword-optimization-service / correction-observer-
+    // service 测试与 earned-high-demotion-roundtrip 测试覆盖）。
+    const wctx = makeMockWctx();
+    const llmClassifier = vi.fn();
+    const cueFeedbackRecorder = vi.fn();
+    // 与 createSharedCorrectionKeywordStore 对 llm+TP≥3+FP=0 的投影一致
+    const earnedHighStore: UnifiedKeywordStore = {
+      version: 2,
+      terms: {
+        '先确认再改': { term: '先确认再改', category: 'correction', weight: 0.5, precision: 'high', source: 'llm_learned' },
+      },
+    };
+    const host = makeHost(wctx, { keywordStore: earnedHighStore, config: testConfig, llmClassifier, cueFeedbackRecorder });
+
+    host.detectSync('请你先确认再改，刚才的方案不对', 'sess-earned-high', 'user', { turnIndex: 3 });
+    await flushAsync();
+
+    // 确定性快速路径：不重跑 Stage2 LLM
+    expect(llmClassifier).not.toHaveBeenCalled();
+    // realtime 路径不产生关键词 TP/FP 反馈（升 high 后 realtime 零反馈是现状）
+    expect(cueFeedbackRecorder).not.toHaveBeenCalled();
+    // 但 STRONG 分流与证据写入照常：pain 事件 + user_turns 标记 + 命中词留痕
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalledWith(expect.objectContaining({
+      correctionDetected: true,
+      correctionCue: '先确认再改',
+    }));
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

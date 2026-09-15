@@ -16,7 +16,7 @@ import * as path from 'path';
 import type {
   CorrectionKeyword,
   CorrectionKeywordStore,
-  CorrectionMatchResult} from './correction-types.js';
+} from './correction-types.js';
 import {
   CORRECTION_SEED_KEYWORDS,
   MAX_CORRECTION_KEYWORDS,
@@ -94,55 +94,11 @@ export class CorrectionCueLearner {
     this.store = loadCorrectionKeywordStore(stateDir);
   }
 
-  match(text: string): CorrectionMatchResult {
-    const normalized = text
-      .trim()
-      .toLowerCase()
-      .replace(/[.,!?;:，。！？；：]/g, '');
-
-    const matchedTerms: string[] = [];
-    let totalScore = 0;
-
-    for (const keyword of this.store.keywords) {
-      if (normalized.includes(keyword.term.toLowerCase())) {
-        const tp = keyword.truePositiveCount ?? 0;
-        const fp = keyword.falsePositiveCount ?? 0;
-        const accuracy = (tp + fp) > 0 ? tp / (tp + fp) : 1;
-        const score = keyword.weight * accuracy;
-
-        totalScore += score;
-        matchedTerms.push(keyword.term);
-      }
-    }
-
-    const cappedScore = Math.min(1, totalScore);
-    const isMatched = matchedTerms.length > 0;
-
-    const termConfidence = Math.min(1, matchedTerms.length / 3);
-    const scoreConfidence = Math.min(1, cappedScore / 0.8);
-    const confidence = Math.max(termConfidence, scoreConfidence);
-
-    return {
-      matched: isMatched,
-      matchedTerms: matchedTerms.slice(0, 5),
-      score: cappedScore,
-      confidence,
-    };
-  }
-
-  recordHits(terms: string[]): void {
-    for (const term of terms) {
-      const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
-      if (keywordIndex < 0) continue;
-      const keyword = this.store.keywords[keywordIndex];
-      if (!keyword) continue;
-      this.store.keywords[keywordIndex] = {
-        ...keyword,
-        hitCount: (keyword.hitCount ?? 0) + 1,
-        lastHitAt: new Date().toISOString(),
-      };
-    }
-  }
+  // PRI-812: CorrectionCueLearner.match() 与 recordHits() 已删除。
+  // match() 是 canonical detector（createSharedCorrectionKeywordStore →
+  // collectSync）之外的幽灵第二检测算法，生产调用者为 0；recordHits() 同样
+  // 无生产调用者，其维护的 hitCount 在观测面结构性恒 0。检测权威与 TP/FP
+  // 反馈（recordTruePositive / recordFalsePositive）保持不变。
 
   recordTruePositive(term: string): void {
     const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
