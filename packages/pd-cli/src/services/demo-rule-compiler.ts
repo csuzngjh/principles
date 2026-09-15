@@ -35,6 +35,6 @@ export function compileDemoRule(code: string, sourceLabel: string): ReplayEvalua
         })`,
       );
     }
-    return result as RuleHostResult;
+    return result;
   };
 }
