@@ -17,7 +17,7 @@
  *   --help             Show help message
  */
 
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, realpathSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -907,24 +907,42 @@ function injectLocalWorkspacePackages() {
 
     console.log('  📦 Injecting local workspace packages (@principles/core)...');
 
-    // Remove the target FIRST, because cp -rL on Windows copies the source
-    // directory INTO the existing target, creating a nested core/core/ that
-    // leaves the original npm-version package.json untouched. We must start
-    // with a clean slate so the local version is authoritative.
-    if (existsSync(targetModules)) {
-        rmSync(targetModules, { recursive: true, force: true });
-    }
+    // PRI-801: resolve through reparse points. On the live layout
+    // node_modules/@principles/core is a directory JUNCTION into the plugin's
+    // own core/ payload. rmSync/copyDir THROUGH a junction mutates the real
+    // target unpredictably (partial deletes behind locked files, content
+    // landing in the wrong tree — this is how the live pd CLI ended up with a
+    // core/ missing its package.json/dist). Operate on the real directory
+    // behind the link and leave the junction itself intact.
+    let writeTarget = targetModules;
+    try {
+        if (lstatSync(targetModules).isSymbolicLink()) {
+            writeTarget = realpathSync(targetModules);
+        }
+    } catch { /* target absent — fresh directory below */ }
 
-    mkdirSync(dirname(targetModules), { recursive: true });
+    if (existsSync(writeTarget)) {
+        try {
+            rmSync(writeTarget, { recursive: true, force: true });
+        } catch (rmErr) {
+            console.error(`  ❌ Failed to clear ${writeTarget} before injection: ${rmErr.message}`);
+            console.error('     A running gateway may hold files in the installed tree — stop it (or use the Companion update flow) and retry.');
+            process.exit(1);
+        }
+    }
+    mkdirSync(writeTarget, { recursive: true });
+
     // Use copyDir (Node-based, no cp -rL semantics trap) for reliable
     // cross-platform overwrite. cpSync creates symlinks on Windows for
     // symlinked dirs — copyDir dereferences by reading file contents.
     try {
-        copyDir(monorepoModules, targetModules);
+        copyDir(monorepoModules, writeTarget);
         console.log('    ✅ @principles/core local build injected');
     } catch (copyErr) {
-        console.warn('  ⚠️ Failed to inject @principles/core from monorepo: ' + copyErr.message);
-        console.warn('  ⚠️ npm version remains in place — pd-cli may fail if exports differ');
+        console.error('  ❌ Failed to inject @principles/core from monorepo: ' + copyErr.message);
+        // Fail loud: leaving the npm version in place is what produced a
+        // half-updated tree that only exploded at the pd shim smoke gate.
+        process.exit(1);
     }
 }
 
