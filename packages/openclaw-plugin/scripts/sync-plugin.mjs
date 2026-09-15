@@ -1036,13 +1036,21 @@ function verifyInjectedWorkspaceDeps() {
     const specs = [...missing].map(([name, range]) => `${name}@${range}`);
     console.log(`  ⚠️  ${missing.size} transitive dependenc${missing.size === 1 ? 'y' : 'ies'} missing from the installed tree, installing...`);
     try {
-        execSync(`npm install ${specs.join(' ')} --no-audit --no-fund --prefer-offline`, {
+        // --legacy-peer-deps: the installed tree carries devDependencies from
+        // the copied plugin package.json whose peer ranges (e.g. typescript)
+        // can conflict with newly added transitive deps; full-tree peer
+        // resolution (ERESOLVE) would otherwise abort this install and leave
+        // the transitive gap in place until the pd shim smoke gate (PRI-801).
+        execSync(`npm install ${specs.join(' ')} --no-audit --no-fund --prefer-offline --legacy-peer-deps`, {
             cwd: INSTALL_DIR,
             stdio: 'pipe'
         });
         console.log('  ✅ Transitive dependencies installed');
     } catch (error) {
         console.warn(`  ⚠️  Failed to install transitive dependencies: ${error.message}`);
+        // Fail loud at the gate instead of silently continuing to a smoke
+        // failure that cannot self-heal (PRI-801).
+        process.exit(1);
     }
 }
 
