@@ -37,6 +37,10 @@ function parseArgs(argv) {
     skipPrivateDocs: false,
     fromHook: false,
     dryRun: false,
+    // PRI-796 §7.1: prefer the npm download cache. The lockfile still fixes
+    // resolution and integrity, so this only changes where bytes come from —
+    // never the resulting dependency graph.
+    preferOffline: false,
   };
   for (const arg of argv.slice(2)) {
     switch (arg) {
@@ -44,9 +48,10 @@ function parseArgs(argv) {
       case '--skip-build': args.skipBuild = true; break;
       case '--skip-private-docs': args.skipPrivateDocs = true; break;
       case '--from-hook': args.fromHook = true; break;
+      case '--prefer-offline': args.preferOffline = true; break;
       case '--dry-run': case '--whatif': case '--WhatIf': args.dryRun = true; break;
       case '-h': case '--help':
-        console.log('Usage: node scripts/setup-worktree.mjs [--skip-install] [--skip-build] [--skip-private-docs] [--from-hook] [--dry-run]');
+        console.log('Usage: node scripts/setup-worktree.mjs [--skip-install] [--skip-build] [--skip-private-docs] [--from-hook] [--prefer-offline] [--dry-run]');
         process.exit(0);
         break;
       default:
@@ -213,7 +218,7 @@ function main() {
       }
     }
     if (needsInstall) {
-      const ok = run('npm install', { cwd: repoRoot, dryRun: args.dryRun });
+      const ok = run('npm install' + (args.preferOffline ? ' --prefer-offline' : ''), { cwd: repoRoot, dryRun: args.dryRun });
       if (ok) logStep('ok', 'npm install');
       else {
         logStep('fail', 'npm install failed');

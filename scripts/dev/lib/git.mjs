@@ -32,23 +32,50 @@ export async function runGit(args, { cwd, allowFailure = false } = {}) {
 }
 
 /**
+ * Expand a path using the nearest EXISTING ancestor.
+ *
+ * `fs.realpathSync.native` only expands 8.3 short names (`ADMINI~1`) for paths
+ * that exist. Comparing a path that does not exist yet — a worktree about to be
+ * created, a pool root before the first task, `os.tmpdir()` against a git-reported
+ * path — therefore silently compares a short name against a long one and reports
+ * a difference that is not real. This is the ERR-090 recurrence class: normalize
+ * BOTH sides, and make the normalization work for paths that do not exist yet.
+ */
+function expandExistingAncestor(target) {
+  try {
+    return fs.realpathSync.native(target);
+  } catch {
+    // Fall through: walk up to the closest ancestor that does exist.
+  }
+  const parts = [];
+  let current = target;
+  for (;;) {
+    const parent = path.dirname(current);
+    if (parent === current) return target; // reached the volume root
+    parts.unshift(path.basename(current));
+    current = parent;
+    try {
+      return path.join(fs.realpathSync.native(current), ...parts);
+    } catch {
+      // Keep walking up.
+    }
+  }
+}
+
+/**
  * Normalize a git-reported path for comparison. Both sides of any path
  * comparison must go through this. Windows hazards handled here:
  *   - mixed '/' vs '\' separators across git subcommands;
  *   - 8.3 short names (mkdtemp/TEMP dirs report 'ADMINI~1', git reports
- *     'Administrator') — realpathSync.native expands to final paths;
+ *     'Administrator') — realpathSync.native expands to final paths, and the
+ *     nearest-existing-ancestor walk covers paths that do not exist yet;
  *   - drive-letter and path case.
  * (ERR-090 recurrence class: normalize BOTH sides before comparing.)
  */
 export function normalizeGitPath(p, cwd) {
   const base = cwd || process.cwd();
   const absolute = path.isAbsolute(p) ? p : path.resolve(base, p);
-  let resolved = path.resolve(absolute);
-  try {
-    resolved = fs.realpathSync.native(resolved);
-  } catch {
-    // Path does not exist (yet) — the resolved form is the best comparable.
-  }
+  const resolved = expandExistingAncestor(path.resolve(absolute));
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
@@ -61,6 +88,10 @@ export function sameGitPath(a, b, cwd) {
  * Parse `git worktree list --porcelain` output into records.
  * The FIRST non-bare record is the primary worktree (git guarantees the
  * main working tree is listed first).
+ *
+ * PRI-796: `locked` / `prunable` are captured as well — the Git-native lock is
+ * the second half of writer ownership (git-9 lease + `git worktree lock`), and
+ * cleanup must refuse a locked worktree instead of silently unlocking it.
  */
 export function parseWorktreeList(output) {
   const worktrees = [];
@@ -77,6 +108,13 @@ export function parseWorktreeList(output) {
       worktrees[worktrees.length - 1].bare = true;
     } else if (line === 'detached') {
       worktrees[worktrees.length - 1].detached = true;
+    } else if (line === 'locked') {
+      worktrees[worktrees.length - 1].locked = true;
+    } else if (line.startsWith('locked ')) {
+      worktrees[worktrees.length - 1].locked = true;
+      worktrees[worktrees.length - 1].lockReason = line.slice('locked '.length).trim();
+    } else if (line.startsWith('prunable')) {
+      worktrees[worktrees.length - 1].prunable = true;
     }
   }
   return worktrees;
@@ -153,6 +191,30 @@ export async function findPrimaryWorktree(cwd) {
  * branch ('HEAD' when detached), and whether this checkout is the primary
  * worktree (git dir == common dir).
  */
+/**
+ * Absolute path of the SHARED git directory (the common dir).
+ *
+ * `git rev-parse --git-common-dir` answers with a cwd-RELATIVE path when run
+ * from a subdirectory (`../.git`), so it must never be used as a filesystem
+ * path directly — that is the bug class that makes a lock file land somewhere
+ * surprising. `--path-format=absolute` (git >= 2.31) answers absolutely; the
+ * fallback resolves against the worktree toplevel for older clients.
+ *
+ * PRI-796: the repo mutation mutex lives here, so this must be exact.
+ */
+export async function gitCommonDirAbsolute(cwd) {
+  const base = path.resolve(cwd || process.cwd());
+  const absolute = await runGit(['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+    cwd: base,
+    allowFailure: true,
+  });
+  if (absolute !== null && absolute.trim().length > 0) return absolute.trim();
+  const relative = (await runGit(['rev-parse', '--git-common-dir'], { cwd: base })).trim();
+  if (path.isAbsolute(relative)) return relative;
+  const toplevel = (await runGit(['rev-parse', '--show-toplevel'], { cwd: base })).trim();
+  return path.resolve(toplevel, relative);
+}
+
 export async function getGitContext(cwd) {
   const base = path.resolve(cwd || process.cwd());
   const gitDir = (await runGit(['rev-parse', '--absolute-git-dir'], { cwd: base })).trim();

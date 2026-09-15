@@ -182,7 +182,10 @@ describe('conflictCodes (pure)', () => {
 const SKIP_GH = { PD_WORKSPACE_SKIP_GH: '1' };
 
 async function makeTask(primary: string, slug: string): Promise<{ wt: string; branch: string }> {
-  const r = await runDevScript('create-task-worktree.mjs', ['PRI-800', slug, '--json'], { cwd: primary });
+  // PRI-796: --skip-bootstrap, because this suite exercises the lifecycle
+  // classifier, not the (multi-minute) bootstrap → ready path, which has its own
+  // coverage. Without it create reports CREATED_NOT_READY and exits non-zero.
+  const r = await runDevScript('create-task-worktree.mjs', ['PRI-800', slug, '--skip-bootstrap', '--json'], { cwd: primary });
   expect(r.code).toBe(0);
   const out = JSON.parse(r.stdout) as { worktree: string; branch: string };
   await commitFile(out.worktree, slug + '.txt', 'x\n', 'task commit ' + slug);

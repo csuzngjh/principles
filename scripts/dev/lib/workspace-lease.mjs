@@ -50,6 +50,46 @@ export function leasePhase(lease, now = Date.now()) {
   return Date.parse(lease.expiresAt) > now ? 'active' : 'expired';
 }
 
+// ---------------------------------------------------------------------------
+// Writer identity (PRI-796, SPEC D4 / §10.1)
+// ---------------------------------------------------------------------------
+//
+// The worktree's identity is `Task -> Branch -> Worktree`; the WRITER is a
+// property of the current owner, not of the slot. Handing a task from WorkBuddy
+// to Codex must not change the directory, the branch, or anything git sees — it
+// changes one label.
+//
+// Before PRI-796 the default owner embedded the pid, which made every CLI
+// invocation a distinct owner and forced callers to pass a bespoke string to
+// renew. The pid stays available as debug metadata, but ownership is the stable
+// `writer:task` pair below, which renews across processes by construction.
+//
+// Labels are a closed set: a free-form writer name would let two agents disagree
+// about who "owns" a slot while both believe they are compliant. `other` is the
+// deliberate escape hatch for a tool not in the list.
+
+export const WRITER_LABELS = Object.freeze(['workbuddy', 'codex', 'zcode', 'trae', 'human', 'other']);
+
+export function isValidWriter(label) {
+  return typeof label === 'string' && WRITER_LABELS.includes(label);
+}
+
+/** Stable owner string: `<writer>:<task>`. */
+export function composeWriterOwner(writer, task) {
+  return String(writer) + ':' + String(task);
+}
+
+/** Inverse of composeWriterOwner; null when the owner is not a writer claim. */
+export function parseWriterOwner(owner) {
+  if (typeof owner !== 'string') return null;
+  const at = owner.indexOf(':');
+  if (at <= 0 || at === owner.length - 1) return null;
+  const writer = owner.slice(0, at);
+  const task = owner.slice(at + 1);
+  if (!WRITER_LABELS.includes(writer)) return null;
+  return { writer, task };
+}
+
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -171,7 +211,7 @@ function createLeaseAtomically(root, lease) {
  * existing ACTIVE lease has the same owner (renewal by the holding session).
  * Fails loudly when an ACTIVE lease is held by a different owner.
  */
-export function acquireLease(root, { owner, branch, ttlMs = DEFAULT_TTL_MS, now = Date.now(), readRetryDelayFn }) {
+export function acquireLease(root, { owner, branch, ttlMs = DEFAULT_TTL_MS, now = Date.now(), readRetryDelayFn, writer } = {}) {
   // Racing first-acquires are serialized by the exclusive create below: the
   // loser of the create re-reads and re-evaluates against the winner's lease
   // (readLease's bounded retry rides out the winner's non-atomic write window).
@@ -209,6 +249,11 @@ export function acquireLease(root, { owner, branch, ttlMs = DEFAULT_TTL_MS, now 
       branch,
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + ttlMs).toISOString(),
+      // PRI-796: stable writer identity (`writer:task`) plus pid/host as DEBUG
+      // metadata only. Nested so it cannot be confused with the validated
+      // top-level fields, and omitted entirely for legacy `dev:lease` callers so
+      // nothing about the original contract changes.
+      ...(writer ? { writer } : {}),
     };
     if (!renewed) {
       const lostCreate = createLeaseAtomically(root, lease);
