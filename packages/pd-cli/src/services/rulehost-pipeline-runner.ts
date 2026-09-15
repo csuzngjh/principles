@@ -935,6 +935,22 @@ async function textPrincipleOnlyResult(
         identityNote = '; source_principle_id_backfill_skipped: no ledger principle resolved for the chain candidate';
       }
     }
+    // PRI-804: on the rule path the EVALUATOR marks the scribe principle
+    // artifact 'validated' after adversarial approval (evaluator-runner). On the
+    // text path that stage never runs, so nothing ever flips the status and
+    // PromptWriter.canActivate refuses the activation with
+    // artifact_validation_status_pending. The scribe task's success already
+    // implies its output passed DefaultScribeValidator (peer-runner contract:
+    // output_invalid tasks never succeed), so the terminal marks the artifact
+    // validated through the same store API the evaluator uses — no new writer.
+    if (principleArt && principleArt.validationStatus !== 'validated') {
+      try {
+        await artifactStore.updateValidationStatus(principleArt.artifactId, 'validated');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        identityNote += `; validation_status_mark_failed: ${msg}`;
+      }
+    }
     // PRI-804: a text principle is a prompt-channel intervention and follows the
     // same Owner governance as RuleCode (Owner decision 2026-09-15): enqueue it
     // into the EXISTING approval queue so the Owner can approve it in Console.
