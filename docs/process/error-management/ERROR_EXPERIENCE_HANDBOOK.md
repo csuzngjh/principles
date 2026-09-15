@@ -103,7 +103,6 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | [archived] ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded (moved to ERROR_ARCHIVE.md) | PR #808/#809/#810 |
 | ERR-063 | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored | PR #844 |
 | [archived] ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit (moved to ERROR_ARCHIVE.md) | PRI-337 / PR #852 |
-| ERR-065 | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013) | PRI-394 / PR #926 |
 | ERR-067 | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI | PRI-405 |
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
 | ERR-076 | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken | PRI-437 / PR #986 |
@@ -181,6 +180,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-126 | New utility call site added via the nearest neighbor's import instead of surveying for the utility's existing owner — a duplicate capability grows and the owner's documented guardrails silently don't apply | PRI-749 / PR #1619 review |
 | ERR-127 | Deletion/audit PRs assert completeness claims ("zero consumers", "condition met", "only these files") from truncated sweeps (head -N), non-normative readings of governance lifecycle docs, and never-executed DoD commands — capture the FULL sweep output in the PR, treat registry/census lifecycle semantics as binding before choosing the deletion shape, and execute every DoD command once before opening the PR | PRI-751 / PR #1622-#1628 review |
 | ERR-129 | Extending a host/cross-package receipt chain asserts parity with the existing counterpart without verifying it — consumer field precedence (pain.ts `toolUseId`-first) and downstream writer/table (`assistant_turns` written only by the OpenClaw plugin) | PRI-750 / PR #1663 review |
+| ERR-130 | Outcome classification derived from WHICH control path executed (catch block) instead of post-hoc state resolution — a wrapped library that silent-returns failure paths makes catch-based assignment dead code, so every such failure inherits the default misclassification | PRI-795 / EP002-R3 live evidence |
 
 ---
 
@@ -285,7 +285,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-009, ERR-024, ERR-033
 - **Source**: PRI-553
 - **Date**: 2026-08-20
-- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): the initial feature-flag design said flag-off restored the existing Console presentation but did not state that every promotion entry point, especially CLI, must refuse promotion. That left room for the stricter Owner decision authority to disappear while the legacy unchecked mutation remained available. The same review also found that local no-auth Console had been allowed to write `reject-after-shadow`, incorrectly granting governance authority to a break-glass operator. Fixed before implementation by making feature-off refuse promotion across Console and CLI, requiring both paths to use one application service, and restricting unauthenticated authority to inspect/deactivate/global-pause only. Regression requirement: disabled, unavailable, validated-deny, and authenticated-allow must be exercised at every promotion entry point; no-auth tests must prove governance writes are refused. 2026-08-25 PR #1409 (PRI-586): READ-side sibling — `featureFlags?.enabled === true` gating made the still-loading state indistinguishable from flag-off, so FocusPage fired the legacy `/governance/queue` request before flipping to experience mode (wasted call + legacy-panel flash). Fixed by gating the data load on flags-resolved; loading ≠ disabled extends the same three-state rule to read paths.
+- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): flag-off design did not state that every promotion entry point (especially CLI) must refuse promotion — fixed in review. (Full recurrence text archived 2026-09-14 PRI-795 size-gate — see ERROR_ARCHIVE.md ERR-102.)
 
 ---
 **[ERR-103]** | Empty or malformed declared enforcement scope is accepted and can degrade into match-all behavior
@@ -669,17 +669,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-065]** | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013)
-
-- **What happened**: In the malformed consumed candidate row test for `mainline-snapshot-assembler`, raw SQL INSERT into `principle_candidates` was written with guessed column names: `INSERT INTO principle_candidates (candidate_id, task_id, status, created_at) VALUES ('', ?, 'consumed', ?)`. This hit `SqliteError` three times: first `no column named updated_at`, then `NOT NULL constraint failed: artifact_id`, then `NOT NULL constraint failed: title`.
-- **Why it's wrong**: The SQLite schema was treated as "known" without reading it. This is the same trust-boundary violation as ERR-001 (using `as` on untrusted JSON instead of runtime validation), ERR-005 (bypassing type contract on salvaged arrays), and ERR-013 (using `in` on untrusted objects). A database schema is an external data source — guessing column names is no different from using `as Record<string, unknown>` on parsed JSON.
-- **Correct approach**: Before writing raw SQL INSERT statements, read the actual CREATE TABLE schema from `sqlite-connection.ts` to confirm all column names, types, and NOT NULL constraints.
-- **How to prevent**: When writing raw SQL against a database not authored by the same code: (1) grep the CREATE TABLE statement to verify column names and constraints; (2) include all NOT NULL columns; (3) prefer typed mapper functions over ad-hoc INSERT strings.
-- **Recurrence of**: ERR-001, ERR-005, ERR-013
-- **Source**: PRI-394 / PR #926
-- **Date**: 2026-06-14
-
----
 **[ERR-072]** | React component duplicates hook state as local state — desync causes silent feature failure
 
 - **What happened**: `NotificationProvider` maintained its own `audioUnlocked` state in `useState` while also consuming `audioUnlocked` from `useNotificationSound()` hook. The Provider's `handleInteraction` callback called `unlockAudio()` (which sets the hook's internal state) AND `setState({ audioUnlocked: true })` (setting the Provider's local copy). Since `unlockAudio()` is async (calls `ctx.resume()`), the Provider could mark audio as unlocked before the hook's internal state updated, causing `playSound()` to still return early due to its own `audioUnlocked` being `false`.

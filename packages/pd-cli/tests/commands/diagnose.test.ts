@@ -172,6 +172,9 @@ vi.mock('@principles/core/runtime-v2', () => {
         maxAttempts: 3,
       };
     }),
+    // PRI-720 C6: candidate-level dedup — tests assume a clean store (no
+    // pre-existing dreamer task under any channel suffix).
+    findExistingDreamerTask: vi.fn().mockResolvedValue(null),
     CANDIDATE_KIND_TO_ROUTE: {
       principle: 'principle-candidate',
       rule: 'rule-candidate',
@@ -197,6 +200,8 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
     defaults: { config: {}, source: 'defaults', warnings: [] },
   }),
   computeFlagsFromLoadResult: vi.fn().mockReturnValue({}),
+  // PRI-720: full-chain override resolution — undefined (standard topology) in tests.
+  resolvePromptFullPipelineSeedMode: vi.fn().mockReturnValue(undefined),
 }));
 
 vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({

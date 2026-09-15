@@ -44,7 +44,8 @@ const EVAL_ARTIFACT = 'pi-art-eval-j11';
 
 function meta(o = {}) {
   return createPITaskDiagnosticJson({
-    dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+    // PRI-720: full-chain topology — Journey 11 restart-safety runs the evaluator chain.
+    dependencyTaskIds: [], channel: 'prompt', pipelineMode: 'full_chain', timeoutMs: 300_000,
     inputArtifactRefs: [], outputArtifactRefs: [], ...o,
   });
 }

@@ -16,13 +16,16 @@ import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime
  * （ERR-092）。正确粒度是 **workspace-scoped**：本 emitter 在 consumer
  * cycle 的 per-wake 装配处构造，只经手本 workspace runner 发出的事件。
  *
- * 持久化策略：**allowlist**，只落盘 4 类 critical events（与 telemetry-event
+ * 持久化策略：**allowlist**，只落盘 critical events（与 telemetry-event
  * schema 枚举同源），不做全量 telemetry 无差别写盘（日志量 + 隐私审计面
  * 无谓扩大）：
  *   - evaluator_adversarial_replay_skipped
  *   - evaluator_adversarial_replay
  *   - evaluator_rule_assembled
  *   - evaluator_rule_assembly_failed
+ *   - artificer_l2_complete（PRI-795 review P1：Artificer L2 的 completion
+ *     证据 — abortOwner/budgetMs/elapsedMs/stopReason/tokenUsage — 必须
+ *     crash 前落盘，否则 EP002-R3 的「失败后什么都查不到」重演）
  *
  * 落点 `<workspaceDir>/.pd/telemetry/critical-events.jsonl`（JSONL，一行一
  * 事件，含完整 TelemetryEvent）。同步 append：事件量小（allowlist 限流），
@@ -35,6 +38,7 @@ const CRITICAL_EVENT_ALLOWLIST: ReadonlySet<string> = new Set([
   'evaluator_adversarial_replay',
   'evaluator_rule_assembled',
   'evaluator_rule_assembly_failed',
+  'artificer_l2_complete',
 ]);
 
 export type WorkspaceTelemetryPersistFailureSink = (detailJson: string) => void;

@@ -123,7 +123,8 @@ export interface RolloutRevisionTarget {
 
 /**
  * 解析 rollout needs_revision 的修订目标 (只读遍历 dep 链):
- *   rollout → evaluator → artificer → scribe
+ *   rollout → evaluator → artificer → scribe (code 链);
+ *   rollout → scribe (PRI-720 principle 语义链: scribe 是直接依赖)。
  * code_tool_hook → artificer (规则实现); 其他 channel → scribe (走到底)。
  * 与 RolloutReviewerRunner 的路由规则保持同一实现 (单一来源)。
  */
@@ -162,7 +163,18 @@ export async function resolveRolloutRevisionTarget(
       if (artificerTaskId) break;
     }
   }
-  if (!artificerTaskId) return null;
+  if (!artificerTaskId) {
+    // PRI-720 (C4): principle semantic chain — the scribe is a DIRECT dep of
+    // the rollout (the graph never created an artificer/evaluator). Route the
+    // revision straight back to the authoring scribe (Owner revise_once
+    // included) instead of dead-ending in needs_human_review.
+    for (const depId of firstHop) {
+      const dep = await getTask(depId);
+      if (!dep || dep.taskKind !== 'scribe') continue;
+      return { taskId: dep.taskId, kind: 'scribe' };
+    }
+    return null;
+  }
 
   if (channel === 'code_tool_hook') {
     return { taskId: artificerTaskId, kind: 'artificer' };

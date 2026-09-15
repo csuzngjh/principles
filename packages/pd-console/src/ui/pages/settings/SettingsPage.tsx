@@ -159,6 +159,11 @@ export function SettingsPage() {
   // null = loading/unknown (button disabled); true/false = persisted state.
   const [onboardingFlagEnabled, setOnboardingFlagEnabled] = useState<boolean | null>(null);
 
+  // PRI-720: prompt_full_pipeline feature flag toggle state (Owner switch for
+  // forcing prompt/defer_archive chains through the full legacy pipeline).
+  // null = loading/unknown (button disabled); true/false = persisted state.
+  const [fullPipelineFlagEnabled, setFullPipelineFlagEnabled] = useState<boolean | null>(null);
+
   // Inline confirm for remove (J.1 pattern)
   const [confirmRemove, setConfirmRemove] = useState<ConfirmState | null>(null);
 
@@ -233,6 +238,26 @@ export function SettingsPage() {
   }, [t]);
 
   useEffect(() => { void loadOnboardingFlag(); }, [loadOnboardingFlag]);
+
+  // PRI-720: load prompt_full_pipeline flag state from config summary.
+  // Same contract as the onboarding toggle (rc-9: failures keep the toggle
+  // disabled and surface a toast — no silent fallback).
+  const loadFullPipelineFlag = useCallback(async () => {
+    setFullPipelineFlagEnabled(null);
+    const result = await fetchConfigSummary();
+    if (!result.success || !result.data) {
+      toast.error(t("components.fullPipelineFlag.loadFailed"));
+      return;
+    }
+    const flag = result.data.features.find((f) => f.id === "prompt_full_pipeline");
+    if (!flag) {
+      toast.error(t("components.fullPipelineFlag.loadFailed"));
+      return;
+    }
+    setFullPipelineFlagEnabled(flag.enabled);
+  }, [t]);
+
+  useEffect(() => { void loadFullPipelineFlag(); }, [loadFullPipelineFlag]);
 
   // ── ADR-0022 (PRI-578): owner identity handlers ─────────────────────────
 
@@ -450,6 +475,29 @@ export function SettingsPage() {
       ),
     );
   }, [onboardingFlagEnabled, t]);
+
+  // ── PRI-720 full-pipeline flag toggle handler ───────────────────────────
+  // Calls the validated PATCH /api/v1/config/features/prompt_full_pipeline
+  // wrapper (patchFeatureFlag). Response is runtime-validated by
+  // validateFeatureFlagUpdate (rc-1/rc-3) before state is updated.
+  const handleToggleFullPipelineFlag = useCallback(async () => {
+    if (fullPipelineFlagEnabled === null) return;
+    const newEnabled = !fullPipelineFlagEnabled;
+    const result = await patchFeatureFlag("prompt_full_pipeline", newEnabled);
+    if (!result.success || !result.data) {
+      // rc-9: surface reason via toast instead of silent rollback
+      toast.error(t("components.fullPipelineFlag.toggleFailed"));
+      return;
+    }
+    setFullPipelineFlagEnabled(result.data.enabled);
+    toast.success(
+      t(
+        newEnabled
+          ? "components.fullPipelineFlag.enabled"
+          : "components.fullPipelineFlag.disabled",
+      ),
+    );
+  }, [fullPipelineFlagEnabled, t]);
 
   // ── Onboarding reset handler ───────────────────────────────────────────
   // Mirror App.tsx currentWorkspaceId derivation (App.tsx default="default",
@@ -960,6 +1008,49 @@ export function SettingsPage() {
                 className={cn(
                   "inline-block h-4 w-4 transform rounded-full bg-paper transition-transform",
                   onboardingFlagEnabled ? "translate-x-6" : "translate-x-1",
+                )}
+              />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Section: PRI-720 full-prompt-pipeline feature flag toggle */}
+      <section className="mb-8" aria-labelledby="section-full-pipeline-flag">
+        <SectionTitle id="section-full-pipeline-flag">
+          {t("components.fullPipelineFlag.title")}
+        </SectionTitle>
+
+        <div className="bg-panel border border-line rounded-[6px] p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <label
+                htmlFor="full-pipeline-flag-toggle"
+                className="block text-sm font-medium text-ink"
+              >
+                {t("components.fullPipelineFlag.label")}
+              </label>
+              <p className="text-ink-3 text-[13px] leading-relaxed mt-1">
+                {t("components.fullPipelineFlag.description")}
+              </p>
+            </div>
+            <button
+              id="full-pipeline-flag-toggle"
+              type="button"
+              role="switch"
+              aria-checked={fullPipelineFlagEnabled ?? false}
+              aria-label={t("components.fullPipelineFlag.toggleAriaLabel")}
+              onClick={handleToggleFullPipelineFlag}
+              disabled={fullPipelineFlagEnabled === null}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed",
+                fullPipelineFlagEnabled ? "bg-gov" : "bg-line",
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block h-4 w-4 transform rounded-full bg-paper transition-transform",
+                  fullPipelineFlagEnabled ? "translate-x-6" : "translate-x-1",
                 )}
               />
             </button>

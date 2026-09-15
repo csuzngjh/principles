@@ -137,6 +137,14 @@ describe('PRI-439 read_rulecode_spec tool', () => {
     expect(text).toContain('export');
     expect(text).toContain('MATCHED=FALSE RULE');
     expect(text).toContain('GOLDEN TRACE CASES');
+    // PRI-795 r2: the spec must teach the v2 validator contract, not the v1
+    // leftover — the model submitted propose_correction expectations because
+    // this text used to advertise them, and submit validation rejected every
+    // attempt (EP002-R3 live evidence).
+    expect(text).toContain('propose_correction" is FORBIDDEN in v2 seed rules');
+    expect(text).not.toContain('is "block" or "propose_correction"');
+    expect(text).toContain('ruleContext (REQUIRED on every case');
+    expect(text).toContain('unavailable posture');
   });
 
   it('emits telemetry on success', async () => {
