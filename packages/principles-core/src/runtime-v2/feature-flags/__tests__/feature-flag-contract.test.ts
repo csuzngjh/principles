@@ -262,6 +262,12 @@ describe('computeEffectiveFlags', () => {
       // to the default governance path (ADR 2026-06-28 amendment) — see
       // QUIET_FLAG_LIFECYCLE GRADUATE row; rollback = config override.
       if (flag.id === 'rulecode_context_v2') continue;
+      // PRI-797 graduation (Owner directive 2026-09-15): signalCollector
+      // defaults on — an unconfigured runtime profile degrades to keyword-only
+      // with a visible WARN + `pd config doctor` needs_setup instead of a
+      // silent semantic-detection gap — see QUIET_FLAG_LIFECYCLE GRADUATE
+      // row; rollback = config override.
+      if (flag.id === 'signal_collector') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -302,6 +308,30 @@ describe('computeEffectiveFlags', () => {
       '/test/.pd/feature-flags.yaml',
     );
     expect(result.flags.artificer_output_retry?.enabled).toBe(false);
+  });
+
+  // PRI-797 (Owner directive 2026-09-15): signal_collector graduates to
+  // default-on while staying quiet. The flag gates only the LLM deep-judgment
+  // path (ambiguous terms / missed keywords) — keyword detection runs
+  // regardless; an unconfigured runtime profile must degrade to keyword-only
+  // with a visible WARN + `pd config doctor` needs_setup instead of failing
+  // silently. Category stays quiet: rollback is an explicit config override,
+  // not a core-flag promotion.
+  it('PRI-797: signal_collector graduates to default-on while staying quiet (rollback = config override)', () => {
+    const result = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    const flag = result.flags.signal_collector;
+    expect(flag, 'flag must stay registered').toBeDefined();
+    expect(flag?.enabled, 'graduated flag should default on').toBe(true);
+    expect(flag?.category, 'stays quiet — rollback path is a config override').toBe('quiet');
+  });
+
+  it('PRI-797: signal_collector remains disableable via explicit config override', () => {
+    const result = computeEffectiveFlags(
+      { signal_collector: { enabled: false, since: '2026-09-15' } },
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/feature-flags.yaml',
+    );
+    expect(result.flags.signal_collector?.enabled).toBe(false);
   });
 
   it('enables every approved MVP-Core flag after the RuleCode rollout gate', () => {
