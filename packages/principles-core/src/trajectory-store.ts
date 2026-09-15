@@ -6,7 +6,11 @@
  *
  * Reads the canonical workspace trajectory database
  * (`{workspaceDir}/.state/trajectory.db`) written by openclaw-plugin
- * TrajectoryDatabase — see trajectory-db.ts for the shared path contract.
+ * TrajectoryDatabase — the path pin below (`resolveTrajectoryDbPath`) is the
+ * shared path contract: core must not import from openclaw-plugin, so the
+ * relative path is pinned here, and the plugin-to-core round-trip test
+ * (openclaw-plugin tests/core/trajectory-store-round-trip.test.ts) fails if
+ * either side moves the file.
  *
  * @example
  * import { listCorrectionSamples, reviewCorrectionSample } from '@principles/core/trajectory-store';
@@ -15,29 +19,22 @@
 import Database from 'better-sqlite3';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import type {
+  CorrectionSampleReviewStatus,
+  CorrectionExportMode,
+  CorrectionSampleRecord,
+} from './trajectory-types.js';
 
 // ---------------------------------------------------------------------------
-// Types (copied from trajectory-types.ts — do NOT import from openclaw-plugin)
+// Types (single-homed in src/trajectory-types.ts since PRI-774; re-exported
+// here to preserve the historical @principles/core/trajectory-store surface)
 // ---------------------------------------------------------------------------
 
-export type CorrectionSampleReviewStatus = 'pending' | 'approved' | 'rejected';
-
-export type CorrectionExportMode = 'raw' | 'redacted';
-
-export interface CorrectionSampleRecord {
-  sampleId: string;
-  sessionId: string;
-  badAssistantTurnId: number;
-  userCorrectionTurnId: number;
-  recoveryToolSpanJson: string;
-  diffExcerpt: string;
-  principleIdsJson: string;
-  qualityScore: number;
-  reviewStatus: CorrectionSampleReviewStatus;
-  exportMode: CorrectionExportMode;
-  createdAt: string;
-  updatedAt: string;
-}
+export type {
+  CorrectionSampleReviewStatus,
+  CorrectionExportMode,
+  CorrectionSampleRecord,
+} from './trajectory-types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

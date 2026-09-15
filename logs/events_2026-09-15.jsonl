@@ -1,0 +1,1 @@
+{"ts":"2026-09-15T15:45:13.821Z","date":"2026-09-15","type":"pain_signal","category":"detected","sessionId":"cli","workspaceDir":"C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\pd-observability-Hc9ma3","data":{"eventId":"empty_state_test","score":60,"source":"manual","reason":"empty state test","severity":"moderate","origin":"user_manual"}}
