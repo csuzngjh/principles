@@ -21,15 +21,16 @@ import * as yaml from 'js-yaml';
 import { generateConfigYamlContent } from '../src/mvp-config.js';
 
 describe('Journey 12 — fresh install 默认面 (Outcome B)', () => {
-  it('默认安装 (无 provider): semantic 检测不可用 + 确定性路径工作 + 修复后 flag 生效', () => {
+  it('默认安装 (无 provider): signalCollector 默认启用（未配端点则 WARN 降级）+ 确定性路径工作 + 修复后 flag 生效', () => {
     // ── 层 1: installer 生成的 config (fresh install 的确切产物) ──
     const yamlContent = generateConfigYamlContent(); // 无 runtimeProfile = 默认用户
     const parsed = yaml.load(yamlContent) as Record<string, unknown>;
 
-    // Outcome B 证据 1: signalCollector agent 默认禁用
+    // PRI-797: signalCollector agent 默认启用——语义确认链不再依赖手工开闸；
+    // 未配置 API 端点时降级为关键词-only 并以 WARN + doctor needs_setup 显性提醒。
     const agents = (parsed.internalAgents as { agents: Record<string, { enabled: boolean; runtimeProfile: string }> }).agents;
-    expect(agents.signalCollector.enabled).toBe(false);
-    // Outcome B 证据 2: 默认 profile 是 pi-ai 型且 provider 为空 → 无 semantic runtime
+    expect(agents.signalCollector.enabled).toBe(true);
+    // 默认 profile 是 pi-ai 型且 provider 为空 → 该状态下 classifier needs_setup（WARN 可见）
     const profiles = parsed.runtimeProfiles as Record<string, { type: string; provider?: string }>;
     expect(profiles['pd.default'].type).toBe('pi-ai');
     expect(profiles['pd.default'].provider ?? '').toBe('');
@@ -40,8 +41,9 @@ describe('Journey 12 — fresh install 默认面 (Outcome B)', () => {
     expect(features['evaluator_artificer_repair_loop']).toBeUndefined();
     expect(features['internalization_auto_consumer']).toBeUndefined();
     expect(features['internalization_full_chain']).toBeUndefined();
-    // signal LLM 检测面默认关闭 (Outcome B — 确定性路径仍由 keyword Stage1 常开承担):
-    // signal_collector 未列出 → registry 默认 false;correction_observer 显式 false
+    // PRI-797: signal_collector registry 默认已翻为 ON——fresh config 不物化该
+    // 条目，registry 默认由 effective resolver 提供（同 correction_observer 的
+    // sparse-bootstrap 模式）。
     expect(features['signal_collector']).toBeUndefined();
     // PRI-645: fresh config 携带零 feature 条目 — correction_observer 同样
     // 不再物化,registry 默认 false 由 effective resolver 提供 (core 侧
@@ -50,11 +52,11 @@ describe('Journey 12 — fresh install 默认面 (Outcome B)', () => {
     expect(features).toEqual({});
   });
 
-  it('带 provider 的安装: signalCollector 仍需用户显式启用 (不自动宣称 semantic 可用)', () => {
+  it('带 provider 的安装: signalCollector 默认启用——配好端点即语义确认自动生效', () => {
     const yamlContent = generateConfigYamlContent({ provider: 'openai', model: 'gpt-4o', apiKeyEnv: 'OPENAI_API_KEY' });
     const parsed = yaml.load(yamlContent) as Record<string, unknown>;
     const agents = (parsed.internalAgents as { agents: Record<string, { enabled: boolean }> }).agents;
-    // 即使配了 LLM provider, signalCollector 也不自动开 — 语义检测是显式 opt-in
-    expect(agents.signalCollector.enabled).toBe(false);
+    // PRI-797: 默认启用——provider 就绪时语义确认链开箱即用，无需手工开闸
+    expect(agents.signalCollector.enabled).toBe(true);
   });
 });

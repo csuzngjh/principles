@@ -46,11 +46,11 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     retirementCriteria: 'No dogfood activation for 6 months (ADR-0014 §2.5) or owner abandons LLM optimization path',
   },
   signal_collector: {
-    decision: 'KEEP_QUIET',
+    decision: 'GRADUATE',
     consumers: ['openclaw-plugin/src/core/signal-collect*'],
-    evidence: 'LLM deep-judgment path for ambiguous correction/empathy terms; keyword path runs regardless (since 2026-06-30)',
-    decided: '2026-08-27',
-    graduationCriteria: 'Dogfood evidence that LLM deep judgment catches missed signals without false positives',
+    evidence: 'Graduated default-on 2026-09-15 (PRI-797, Owner directive): keyword-only detection was failing silently on unconfigured runtime profiles — semantic detection now defaults on, and an unconfigured profile degrades to keyword-only with a visible WARN + `pd config doctor` needs_setup instead of a silent gap. Rollback = explicit config override (features.signal_collector.enabled=false). Keyword path runs regardless (since 2026-06-30).',
+    decided: '2026-09-15',
+    graduationCriteria: 'MET 2026-09-15 (PRI-797 Owner directive): silent semantic-detection failure eliminated; unconfigured-profile gap surfaced as WARN + needs_setup',
     retirementCriteria: 'No dogfood activation for 6 months or signal merge design replaced',
   },
   internalization_auto_consumer: {
