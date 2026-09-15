@@ -68,7 +68,7 @@ function ownerFilePath(commonDir, token) {
 
 /**
  * Read every owner record in the arena.
- * @returns {{present: boolean, live: Array<{token: string, file: string, meta: object, order: number, by: 'mtime'|'entry'}>, malformed: string[]}}
+ * @returns {{present: boolean, live: Array<{token: string, file: string, meta: object, order: number}>, malformed: string[]}}
  */
 function scanClaims(commonDir) {
   const arena = mutationLockPath(commonDir);
@@ -100,15 +100,13 @@ function scanClaims(commonDir) {
       continue;
     }
     let order = 0;
-    let by = 'entry';
     try {
       order = fs.statSync(file).mtimeMs;
-      by = 'mtime';
     } catch {
       malformed.push(name); // vanished or unreadable mid-scan — fail closed
       continue;
     }
-    live.push({ token: meta.token, file, meta, order, by });
+    live.push({ token: meta.token, file, meta, order });
   }
   // Filesystem creation order is the election key; the token is a stable
   // tiebreak when two claims share a mtime tick (coarse FAT-style volumes).
