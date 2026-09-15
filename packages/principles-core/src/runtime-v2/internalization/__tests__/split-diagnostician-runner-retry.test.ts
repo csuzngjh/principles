@@ -610,4 +610,131 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
     // Stage C was cached — routerRunner.run should NOT be invoked
     expect(routerRunner.run).not.toHaveBeenCalled();
   });
+
+  // ── PRI-818 (R-04): parseable ≠ valid — cache must pass Stage C's own ──
+  // semantic validation before it may skip the router stage. Previously a
+  // payload that survived JSON.parse but failed DefaultDiagnosticianValidator
+  // reached admission/persistence as a diagnosis via a raw `as` cast.
+  describe('PRI-818: Stage C cache must pass semantic validation', () => {
+    it('re-runs Stage C when cached payload is parseable but semantically invalid', async () => {
+      const tasks: Record<string, TaskRecord> = {
+        [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+        [STAGE_C_TASK_ID]: makeTask(STAGE_C_TASK_ID, {
+          taskKind: 'diag_router',
+          status: 'succeeded',
+          attemptCount: 1,
+        }),
+      };
+      const stateManager = makeMockStateManager(tasks);
+      // Valid JSON, but confidence 5 violates the [0, 1] closed interval —
+      // exactly the class of payload the old raw cast let through.
+      stateManager.getRunsByTask = vi.fn().mockResolvedValue([
+        {
+          runId: 'run-sc-invalid',
+          executionStatus: 'succeeded',
+          outputPayload: JSON.stringify({
+            valid: true,
+            diagnosisId: 'bad-001',
+            summary: 'Semantically invalid cached diagnosis',
+            rootCause: 'confidence out of range',
+            violatedPrinciples: [],
+            evidence: [{ sourceRef: 'src', note: 'note' }],
+            recommendations: [{ kind: 'defer', description: 'd' }],
+            confidence: 5,
+          }),
+        },
+      ]);
+
+      const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+      routerRunner.run.mockResolvedValue({
+        status: 'succeeded',
+        taskId: STAGE_C_TASK_ID,
+        attemptCount: 1,
+        contextHash: 'ctx-rerun-invalid',
+        output: {
+          valid: true,
+          diagnosisId: 'rerun-diag',
+          summary: 'Rerun after invalid cache',
+          rootCause: 'Rerun root cause',
+          violatedPrinciples: [],
+          evidence: [{ sourceRef: 'rerun', note: 'note' }],
+          recommendations: [{ kind: 'defer', description: 'rerun defer' }],
+          confidence: 0.7,
+        },
+      });
+
+      const runner = new SplitDiagnosticianRunner({
+        rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+        distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+        routerRunner: routerRunner as never,
+        stateManager: stateManager as never,
+        committer: makeMockCommitter(),
+        perStageTimeoutMs: 30_000,
+      });
+
+      const result = await runner.run(PARENT_TASK_ID);
+
+      expect(result.status).toBe('succeeded');
+      // Cache was rejected by validation — Stage C must have been re-run, and
+      // the parent result must carry the RERUN output, not the cached one.
+      expect(routerRunner.run).toHaveBeenCalledWith(STAGE_C_TASK_ID);
+      if (result.status === 'succeeded') {
+        expect((result.output as DiagnosticianOutputV1).diagnosisId).toBe('rerun-diag');
+      }
+    });
+
+    it('re-runs Stage C when the cached succeeded run has no outputPayload at all', async () => {
+      // Previously a succeeded run with a null/undefined payload produced
+      // `output: undefined as DiagnosticianOutputV1` — a succeeded diagnosis
+      // with no content flowing to the bridge.
+      const tasks: Record<string, TaskRecord> = {
+        [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+        [STAGE_C_TASK_ID]: makeTask(STAGE_C_TASK_ID, {
+          taskKind: 'diag_router',
+          status: 'succeeded',
+          attemptCount: 1,
+        }),
+      };
+      const stateManager = makeMockStateManager(tasks);
+      stateManager.getRunsByTask = vi.fn().mockResolvedValue([
+        {
+          runId: 'run-sc-empty',
+          executionStatus: 'succeeded',
+          outputPayload: undefined,
+        },
+      ]);
+
+      const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+      routerRunner.run.mockResolvedValue({
+        status: 'succeeded',
+        taskId: STAGE_C_TASK_ID,
+        attemptCount: 1,
+        contextHash: 'ctx-rerun-empty',
+        output: {
+          valid: true,
+          diagnosisId: 'rerun-empty-diag',
+          summary: 'Rerun after empty cache',
+          rootCause: 'Rerun root cause',
+          violatedPrinciples: [],
+          evidence: [{ sourceRef: 'rerun', note: 'note' }],
+          recommendations: [{ kind: 'defer', description: 'rerun defer' }],
+          confidence: 0.7,
+        },
+      });
+
+      const runner = new SplitDiagnosticianRunner({
+        rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+        distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+        routerRunner: routerRunner as never,
+        stateManager: stateManager as never,
+        committer: makeMockCommitter(),
+        perStageTimeoutMs: 30_000,
+      });
+
+      const result = await runner.run(PARENT_TASK_ID);
+
+      expect(result.status).toBe('succeeded');
+      expect(routerRunner.run).toHaveBeenCalledWith(STAGE_C_TASK_ID);
+    });
+  });
 });
