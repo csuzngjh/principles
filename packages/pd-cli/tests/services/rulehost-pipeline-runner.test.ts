@@ -19,7 +19,8 @@ import * as fs from 'node:fs';
 import { runRuleHostPipeline } from '../../src/services/rulehost-pipeline-runner.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
-import { RuntimeStateManager, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
+import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore } from '@principles/core/runtime-v2';
+import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
 type StageFactory = (taskId: string, priorArtifactId?: string) => unknown;
@@ -248,11 +249,12 @@ async function seedDreamerWithId(
   taskId: string,
   painId: string,
   channel: 'prompt' | 'code_tool_hook' | 'defer_archive' = 'code_tool_hook',
+  candidateId?: string,
 ): Promise<void> {
   const baseMetadata = JSON.parse(createPITaskDiagnosticJson({
     dependencyTaskIds: [], channel, timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [],
   })) as Record<string, unknown>;
-  const diagnosticJson = JSON.stringify({ ...baseMetadata, sourcePainId: painId });
+  const diagnosticJson = JSON.stringify({ ...baseMetadata, sourcePainId: painId, ...(candidateId ? { candidateId } : {}) });
   await sm.createTask({ taskId, taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson });
 }
 
@@ -270,12 +272,18 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
   });
 
   // ── Test 1: Capability ON + approved → candidate_ready_for_owner_review ──
-  it('capability ON + evaluator approved → candidate_ready_for_owner_review', async () => {
+  it('capability ON + evaluator approved → candidate_ready_for_owner_review; scribe identity backfilled on the rule path too (EP002-R4 follow-up #2)', async () => {
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
     await sm.initialize();
-    await seedDreamerWithId(sm, 'dreamer-seeded-001', 'pain-test-001');
+    await seedDreamerWithId(sm, 'dreamer-seeded-001', 'pain-test-001', 'code_tool_hook', 'cand-001');
     await sm.close();
+    addPrincipleToLedger(path.join(tmpDir, '.state'), {
+      id: 'ledger-principle-001', version: 1, text: 'test ledger principle', triggerPattern: '', action: '',
+      status: 'candidate', evaluability: 'weak_heuristic', priority: 'P1', scope: 'general',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0, derivedFromPainIds: ['cand-001'],
+      ruleIds: [], conflictsWithPrincipleIds: [], createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',
+    });
 
     const adapter = makeAdapter();
     const capability: CodeRuleCapability = { enabled: true, artificerAdapter: adapter };
@@ -292,6 +300,23 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(result.ruleArtifactId).not.toBeNull();
     // P1 #1 fix: candidate should be auto-enqueued into the ApprovalQueue
     expect(result.approvalId).not.toBeNull();
+
+    // EP002-R4 follow-up #2: the scribe artifact carries the LEDGER UUID (not
+    // a title) so the evaluator propagates it into the rule artifact and the
+    // Console groups the approval by an id the detail page can resolve.
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const scribeArt = await verify.piArtifactStore.getArtifactById(
+        (await verify.piArtifactStore.listBySourceTaskId(result.stages.find((s) => s.name === 'scribe')!.taskId!))
+          .find((a) => a.artifactKind === 'principle')!.artifactId,
+      );
+      expect(scribeArt?.sourcePrincipleId).toBe('ledger-principle-001');
+      const ruleArt = await verify.piArtifactStore.getArtifactById(result.ruleArtifactId!);
+      expect(ruleArt?.sourcePrincipleId).toBe('ledger-principle-001');
+    } finally {
+      await verify.close();
+    }
   }, 60_000);
 
   it('adversarial feedback loop drives a second artificer round before creating a candidate', async () => {
@@ -355,12 +380,20 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
   }, 60_000);
 
   // ── Test 2: Capability OFF (explicitly disabled) → text_principle_only ──
-  it('capability OFF (explicitly disabled) → text_principle_only', async () => {
+  it('capability OFF (explicitly disabled) → text_principle_only + prompt approval enqueue + identity backfill (PRI-804)', async () => {
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
     await sm.initialize();
-    await seedDreamerWithId(sm, 'dreamer-seeded-002', 'pain-test-001');
+    await seedDreamerWithId(sm, 'dreamer-seeded-002', 'pain-test-001', 'code_tool_hook', 'cand-002');
     await sm.close();
+    // PRI-804(a): seed the ledger with the principle this chain's candidate maps
+    // to, mirroring what the intake bridge creates in production workspaces.
+    addPrincipleToLedger(path.join(tmpDir, '.state'), {
+      id: 'ledger-principle-002', version: 1, text: 'test ledger principle', triggerPattern: '', action: '',
+      status: 'candidate', evaluability: 'weak_heuristic', priority: 'P1', scope: 'general',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0, derivedFromPainIds: ['cand-002'],
+      ruleIds: [], conflictsWithPrincipleIds: [], createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',
+    });
 
     const adapter = makeAdapter();
     const capability: CodeRuleCapability = { enabled: false, disabledReason: 'artificer agent disabled in config' };
@@ -380,6 +413,29 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     // Adversarial loop stage should be skipped (not present or skipped status).
     const advStage = result.stages.find((s) => s.name === 'adversarial_loop');
     expect(advStage?.status).toBe('skipped');
+
+    // PRI-804: the text principle must NOT dead-end — it is enqueued into the
+    // EXISTING approval queue on the prompt channel for Owner Console review.
+    expect(result.approvalId).not.toBeNull();
+    expect(result.approvalId).toBe(`apr_prompt_${result.principleArtifactId}`);
+
+    // Verify the persisted approval row, the PRI-804(a) identity backfill, and
+    // the terminal validation marking (real store, real SQLite, real ledger).
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const approvalStore = new SqliteApprovalQueueStore(verify.connection);
+      const record = await approvalStore.getById(result.approvalId!);
+      expect(record).not.toBeNull();
+      expect(record!.status).toBe('pending');
+      expect(record!.channel).toBe('prompt');
+      expect(record!.artifactId).toBe(result.principleArtifactId);
+      const artifact = await verify.piArtifactStore.getArtifactById(result.principleArtifactId!);
+      expect(artifact?.sourcePrincipleId).toBe('ledger-principle-002');
+      expect(artifact?.validationStatus).toBe('validated');
+    } finally {
+      await verify.close();
+    }
   }, 60_000);
 
   // ── Test 3: Capability ON + evaluator rejected → generation_rejected ──

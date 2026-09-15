@@ -114,6 +114,17 @@ function makeContext(history: RuleHistoryWindow, facts: RuleBehaviorFacts): Rule
 }
 
 /**
+ * EP002-R4: classify a spec targetPath as a helper path (tmp/temp/draft
+ * segments anywhere in the normalized path). Mirrors the helper-path
+ * convention the OpenClaw workspaces actually use (tmp\ measurement scripts,
+ * draft copies); case-insensitive, segment-based, dot-segment tolerant.
+ */
+function isHelperPath(path: string): boolean {
+  const segments = path.toLowerCase().split(/[\\/]/).filter((s) => s.length > 0 && s !== '.');
+  return segments.some((s) => s === 'tmp' || s === 'temp' || s === 'draft');
+}
+
+/**
  * Generate the 5 canonical v2 adversarial cases for the given spec.
  *
  * The output is deterministic and stable in caseId order:
@@ -181,20 +192,32 @@ export function generateV2ContextAdversarialCases(spec: V2AdversarialCaseSpec): 
   // targetPath + '.bak'. The rule MUST NOT substring-match — these are
   // different files (spec §10.1 row 9). priorReadOfTarget is 'no' because
   // the action's path is targetPath.bak, not targetPath.
+  //
+  // EP002-R4 (live chain evidence): the template hard-coded block, but when
+  // the artificer's OWN positive case picked a helper path (tmp\... —
+  // legitimate for measurement scripts), the derived `.bak` case demanded
+  // block for a write INTO a helper directory. Rules that correctly allow
+  // helper-path writes then fail the case forever (both repair rounds died
+  // on exactly this conflict). The expected decision therefore follows the
+  // target's own class: a helper-path target keeps the substring-match
+  // signal (different file) but must expect allow — a rule may not block
+  // helper writes just because a sibling production file was read.
   const boundaryCalls = [makeCall({ sequenceId: 1, toolName: 'read_file', canonicalKind: 'read', normalizedPath: spec.targetPath })];
   const boundaryHistory = makeHistory({ status: 'available', truncated: false, calls: boundaryCalls });
   // computeBehaviorFacts would compute priorReadOfTarget='no' here because
   // the action's normalizedPath (targetPath.bak) ≠ targetPath. We set it
   // explicitly to mirror that computation.
   const boundaryFacts = makeFacts({ priorReadOfTarget: 'no', readCount: 1, writeCount: 0, uniqueWritePathCount: 0 });
+  const targetIsHelperPath = isHelperPath(spec.targetPath);
   const pathBoundary: AdversarialCase = {
     caseId: 'v2-path-boundary',
     attackType: 'boundary',
     toolName: spec.toolName,
     params: { path: `${spec.targetPath}.bak` },
-    expectedDecision: 'block',
-    rationale:
-      'targetPath.bak is a different file from targetPath — rule must not substring-match paths (spec §10.1 row 9)',
+    expectedDecision: targetIsHelperPath ? 'allow' : 'block',
+    rationale: targetIsHelperPath
+      ? 'targetPath.bak is a different file from targetPath AND the target is a helper path (tmp/temp/draft) — no substring matching (spec §10.1 row 9) and helper writes stay allowed'
+      : 'targetPath.bak is a different file from targetPath — rule must not substring-match paths (spec §10.1 row 9)',
     ruleContext: makeContext(boundaryHistory, boundaryFacts),
   };
 
