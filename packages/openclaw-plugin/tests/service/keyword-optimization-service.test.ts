@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CorrectionObserverResult } from '@principles/core/runtime-v2';
 
 // Shared mock objects so tests can mutate them after vi.mock runs
-const mockLearner = { add: vi.fn(), updateWeight: vi.fn(), remove: vi.fn(), getStore: vi.fn(() => ({ keywords: [] })) };
+const mockLearner = { add: vi.fn(), updateWeight: vi.fn(), remove: vi.fn(), recordFalsePositive: vi.fn(), recordTruePositive: vi.fn(), getStore: vi.fn(() => ({ keywords: [] })) };
 const mockDb = { listUserTurnsForSession: vi.fn(() => []), listRecentSessions: vi.fn(() => []) };
 
 // Mock the CorrectionCueLearner dependency
@@ -69,6 +69,60 @@ describe('KeywordOptimizationService', () => {
       const result: CorrectionObserverResult = { updated: true, updates: undefined as any, summary: '' };
       service.applyResult(result);
       expect(mockLearner.add).not.toHaveBeenCalled();
+    });
+
+    // ── PRI-812 C: FP 记录独立于 store mutations（earned-high 降级闭环的入口）──
+    // observer 的输出契约允许 "updated=false 但 fpTerms 非空"（只报误报、不建议
+    // 增删改）。这正是 earned high 词项唯一的自动反证来源——若被 updated 门吞掉，
+    // learned cue 升 high 后永远无法降级。
+    it('PRI-812: records FP from an FP-only verdict (updated=false, no updates)', () => {
+      const result: CorrectionObserverResult = {
+        updated: false,
+        updates: {},
+        fpTerms: ['learned-term'],
+        fpAnalysisStatus: 'completed',
+        summary: 'no store mutations, but learned-term keeps firing on non-corrections',
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledWith('learned-term');
+    });
+
+    it('PRI-812: records FP alongside store mutations (updated=true)', () => {
+      const result: CorrectionObserverResult = {
+        updated: true,
+        updates: { 'another-term': { action: 'update', weight: 0.3, reasoning: 'lower weight' } },
+        fpTerms: ['learned-term'],
+        fpAnalysisStatus: 'completed',
+        summary: 'mixed verdict',
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.updateWeight).toHaveBeenCalledWith('another-term', 0.3);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledWith('learned-term');
+    });
+
+    it('PRI-812: fpAnalysisStatus=skipped never records FPs (no verdict, no fabricated evidence)', () => {
+      const result: CorrectionObserverResult = {
+        updated: false,
+        updates: {},
+        fpTerms: ['learned-term'],
+        fpAnalysisStatus: 'skipped',
+        summary: 'trajectory empty, no analysis performed',
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.recordFalsePositive).not.toHaveBeenCalled();
+    });
+
+    it('PRI-812: normalizes fpTerms (trim/lowercase/dedupe) before recording', () => {
+      const result: CorrectionObserverResult = {
+        updated: false,
+        updates: {},
+        fpTerms: ['  Learned-Term ', 'learned-term', ''],
+        fpAnalysisStatus: 'completed',
+        summary: 'duplicated fp entries',
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledTimes(1);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledWith('learned-term');
     });
   });
 

@@ -265,12 +265,13 @@ export async function runCorrectionObserverCycle(
 
         const learner = CorrectionCueLearner.get(wctx.stateDir);
         const keywords = learner.getStore().keywords;
+        // PRI-812: hitCount 不再投影——recordHits 已删除（死写者），该字段在
+        // payload 里结构性恒 0，只会喂养 prompt 里失真的 REMOVE 判据。
         const keywordStoreSummary = {
             totalKeywords: keywords.length,
             terms: keywords.map(k => ({
                 term: k.term,
                 weight: k.weight,
-                hitCount: k.hitCount ?? 0,
                 truePositiveCount: k.truePositiveCount ?? 0,
                 falsePositiveCount: k.falsePositiveCount ?? 0,
             })),
@@ -300,9 +301,10 @@ export async function runCorrectionObserverCycle(
 
         // dispatch 期间可能被 stop/重启 ⇒ 不再写 keyword store / 健康度。
         if (isStale?.()) return;
-        if (result.updated) {
-            optimizationService.applyResult(result);
-        }
+        // PRI-812: 无条件投递——FP-only 裁决（updated=false 但 fpTerms 非空）
+        // 是 earned-high 降级闭环的唯一自动反证来源，applyResult 内部把
+        // store mutations 与 FP 记录分开处理，空结果只记 info 不产生变更。
+        optimizationService.applyResult(result);
         // PRI-788 G4: 整个周期成功（含 observer 未配置的 no-op 轮）
         recordObserverCycleOutcome(wctx, true);
     } catch (err) {

@@ -20,13 +20,18 @@ export interface CorrectionKeyword {
   source: 'seed' | 'llm' | 'user';
   /** ISO 8601 timestamp of when this keyword was added */
   addedAt: string;
-  /** Total times this keyword has matched (default: 0) */
+  /**
+   * Legacy field — tolerated on read for existing correction_keywords.json
+   * files, never written at runtime (its only writer, recordHits, was removed
+   * in PRI-812: zero production callers, structurally always 0). Not an
+   * authoritative signal for any decision.
+   */
   hitCount?: number;
   /** Confirmed correct matches (default: 0) */
   truePositiveCount?: number;
   /** Confirmed incorrect matches (default: 0) */
   falsePositiveCount?: number;
-  /** Last time this keyword matched (ISO timestamp) */
+  /** Last time this keyword was recorded as a false positive (ISO timestamp) */
   lastHitAt?: string;
 }
 
@@ -37,21 +42,6 @@ export interface CorrectionKeywordStore {
   version: number;
   /** Last time keyword optimization was performed (ISO timestamp) */
   lastOptimizedAt: string;
-}
-
-// =========================================================================
-// Match Result
-// =========================================================================
-
-export interface CorrectionMatchResult {
-  /** Whether any keyword matched */
-  matched: boolean;
-  /** Matched terms (empty array when no match; may be truncated to first N items) */
-  matchedTerms: string[];
-  /** Weighted score (0-1) based on keyword weight and accuracy */
-  score: number;
-  /** Confidence in the match result (0-1) */
-  confidence: number;
 }
 
 // =========================================================================
@@ -113,10 +103,7 @@ export const CorrectionKeywordStoreSchema = Type.Object({
 });
 export type CorrectionKeywordStoreTB = Static<typeof CorrectionKeywordStoreSchema>;
 
-export const CorrectionMatchResultSchema = Type.Object({
-  matched: Type.Boolean(),
-  matchedTerms: Type.Array(Type.String()),
-  score: Type.Number({ minimum: 0, maximum: 1 }),
-  confidence: Type.Number({ minimum: 0, maximum: 1 }),
-});
-export type CorrectionMatchResultTB = Static<typeof CorrectionMatchResultSchema>;
+// PRI-812: CorrectionMatchResult / CorrectionMatchResultSchema removed — its
+// only producer was CorrectionCueLearner.match(), a ghost second detector with
+// zero production callers. Canonical detection is the shared keyword store →
+// collectSync path.
