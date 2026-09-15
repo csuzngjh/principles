@@ -976,6 +976,19 @@ export class InternalizationOrchestrator {
       const pending = await this.stateManager.listTasks({ status: 'pending', orderBy: 'updated_at_asc' });
       const retryWait = await this.stateManager.listTasks({ status: 'retry_wait', orderBy: 'updated_at_asc' });
       allCandidates.push(...pending, ...retryWait);
+      // P1-1 (PRI-798): merge the two separately-ordered buckets into a single
+      // globally oldest-first sequence.  Each bucket is ASC-sorted within
+      // itself, but concatenating them leaves cross-bucket ordering undefined.
+      // Sort here so that a retry_wait task updated at T1 is always considered
+      // before a pending task updated at T2 > T1.  taskId breaks ties for
+      // deterministic test behaviour.
+      allCandidates.sort((a, b) =>
+        a.updatedAt < b.updatedAt ? -1
+        : a.updatedAt > b.updatedAt ? 1
+        : a.taskId < b.taskId ? -1
+        : a.taskId > b.taskId ? 1
+        : 0
+      );
     } catch (error) {
       if (error instanceof PDRuntimeError) throw error;
       throw new PDRuntimeError('runtime_unavailable', 'findCandidates failed', { cause: error });

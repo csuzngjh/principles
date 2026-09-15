@@ -903,5 +903,54 @@ describe('InternalizationOrchestrator', () => {
       expect(mockStateManager.listTasks).toHaveBeenCalledWith({ status: 'retry_wait', orderBy: 'updated_at_asc' });
       expect(mockStateManager.acquireLease).toHaveBeenCalledTimes(1);
     });
+
+    // P1-1 regression (PRI-798): cross-status global sort — retry_wait task
+    // updated at T1 must be leased before a pending task updated at T2 > T1.
+    // Pre-fix: allCandidates = [...pending, ...retryWait] placed ALL pending
+    // tasks before retry_wait regardless of timestamps, so an older retry_wait
+    // could be starved by a newer pending task.
+    it('P1-1: older retry_wait task is leased before newer pending task (cross-status global sort)', async () => {
+      const olderRetryWait = makeRawTask({
+        taskId: 'scribe-retry-older',
+        taskKind: 'scribe',
+        status: 'retry_wait',
+        updatedAt: '2026-09-13T09:00:00.000Z',   // older
+      });
+      const newerPending = makeRawTask({
+        taskId: 'scribe-pending-newer',
+        taskKind: 'scribe',
+        status: 'pending',
+        updatedAt: '2026-09-15T10:00:00.000Z',   // newer
+      });
+      mockStateManager.listTasks.mockImplementation(async (filter?: { status?: string; orderBy?: string }) => {
+        if (filter?.status === 'pending') return [newerPending];
+        if (filter?.status === 'retry_wait') return [olderRetryWait];
+        return [];
+      });
+      mockStateManager.getTask.mockResolvedValue(null);
+      mockStateManager.acquireLease.mockImplementation(async ({ taskId }: { taskId: string }) => {
+        const source = taskId === 'scribe-retry-older' ? olderRetryWait : newerPending;
+        return { ...source, status: 'leased' };
+      });
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce('scribe');
+
+      expect(result.decision).toBe('leased');
+      // The retry_wait task is older, so it must be leased first despite being
+      // in the second bucket when concatenated naively.
+      expect((result as { taskId: string }).taskId).toBe('scribe-retry-older');
+      expect(mockStateManager.acquireLease).toHaveBeenCalledTimes(1);
+      expect(mockStateManager.acquireLease).toHaveBeenCalledWith({
+        taskId: 'scribe-retry-older',
+        owner: 'test-owner',
+        runtimeKind: 'dreamer',
+      });
+    });
   });
 });
+

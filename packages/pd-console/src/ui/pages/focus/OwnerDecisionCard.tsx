@@ -267,7 +267,9 @@ export function OwnerDecisionCard({
           <div className="mt-2 text-ink-4 text-[11.5px] leading-relaxed">
             {canAccept
               ? t("pages.focus.ownerDecision.actionConsequence")
-              : t("pages.focus.ownerDecision.acceptBlockedHardGate")}
+              : item.reasonCode === 'rollout_activation_candidate_unresolved'
+                ? t("pages.focus.ownerDecision.acceptBlockedNoCandidate")
+                : t("pages.focus.ownerDecision.acceptBlockedHardGate")}
           </div>
           <button
             type="button"

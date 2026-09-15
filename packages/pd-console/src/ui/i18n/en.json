@@ -305,6 +305,7 @@
         "instructionRequired": "Fill in the revision guidance, or collapse the input and submit directly.",
         "actionConsequence": "Accept = continue with the current version (the machine verdict is preserved permanently); Revise once = authorize one extra revision round (automatic budget unchanged); Reject = terminate this evolution.",
         "acceptBlockedHardGate": "\"Accept\" is unavailable: this item contains a code-rule implementation and opens only after the adversarial sandbox hard gate passes.",
+        "acceptBlockedNoCandidate": "\"Accept\" is unavailable: no activation candidate exists for this principle — revise or reject to continue.",
         "advanced": "Advanced diagnostics",
         "resolved": "Resolution recorded.",
         "staleError": "The facts of this item changed (a new evaluation may exist). Your decision was NOT applied — refresh and decide again.",
