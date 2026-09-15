@@ -82,7 +82,7 @@ pd-cli quality-scorecard（pain_events 6 列 / evolution_tasks 历史行 / princ
 
 - `applyTrajectorySchemaBase(db, opts)` — 应用 Canonical Base（Profile A）；`opts.views` 控制是否附建 runtime-init views（Profile B 用）。
 - `TRAJECTORY_SCHEMA_VERSION` — 常量（数值保持现值 1；不改任何版本语义）。
-- `TRAJECTORY_TABLES` — 由正本派生的表清单（消灭三份硬编码清单中的两份来源）。
+- `TRAJECTORY_TABLES` — 由正本派生的表清单。消费方：两条建表路径的清单声明、`pd runtime init` 的 dry-run trajectory tables 报告（runtime-init.ts skipped 分支）及其测试期望（runtime-init-empty-workspace 的 EXPECTED_TRAJECTORY_TABLES）——**全部硬编码 trajectory 清单由此消灭**（state.db 清单不在本单范围）。
 - Profile 类型/常量（Profile B/C 的 views 清单声明）。
 
 **不选**"把正本塞进 pain-signal-observability.ts"：该模块运行时依赖 fs/path/better-sqlite3 与 bridge/sanitizer，会让插件建表路径耦合 I/O 模块；独立纯文件是更小的接口面。
@@ -138,10 +138,10 @@ pd-cli quality-scorecard（pain_events 6 列 / evolution_tasks 历史行 / princ
 
 **PRI-774 只收敛 DDL authority，不重新设计 trajectory schema-version governance。**
 
-- Canonical module 定义 `TRAJECTORY_SCHEMA_VERSION`（数值 = 现值 1），**不改变任何现有运行时版本语义**。
+- Canonical module 定义并导出 `TRAJECTORY_SCHEMA_VERSION`（数值 = 现值 1），供两个既有 version owner 采用；导出该常量**不改变任何现有运行时版本语义**。
 - `TrajectoryDatabase.initSchema`：继续拥有 read current version → migrateSchema() → write/update current version（现状不变；`migrateSchema` 的版本参数现状忽略也维持现状）。
 - `initTrajectorySchema`：继续 apply schema → write/update current version（现状不变）。
-- core pain-record ensure 路径：本轮**只允许**一种 fail-loud——schema_version 表**结构明显不合法 / 损坏**（无法读取版本）时报错；**不得**因版本不等于 current 而拒绝、降级、迁移或覆盖 future version。版本缺失（空表）= 采用并写入 current（与 A 路径语义一致）。
+- **core pain-record ensure 路径：本轮不获得任何 version row 读写权**——继续只应用 Canonical Base schema，不读写 schema_version row，不新增 mismatch policy。future / old / corrupt version 的治理全部**另立工单**（Gate Review v2 P1-A 裁定：若未来要让 core 路径写版本，必须作为 intentional behavior change 单独评审，并删除本 SPEC 的"零语义变化"承诺、补对应兼容测试）。
 - Future/old version 的完整迁移兼容策略：如需要，**另立工单**，PRI-774 不承担。
 
 ---
@@ -156,7 +156,7 @@ writer consolidation；reader consolidation；database merge；sink removal；`m
 
 - **Step 1 — Reality Check**：基于最新 main diff 两份 DDL、清点 tables/indexes/views、确认 historical migration 与 package exports；若 main 已漂移：先更新本 SPEC implementation notes，**不改变 Owner 已拍板方向**。
 - **Step 2 — Extract Canonical Base**：建 `trajectory-schema.ts`，只提取 tables/columns/indexes/既有 ALTER/backfill 行为；不得加入新 schema。
-- **Step 3 — Rewire Existing Entry Points**：plugin `applyTrajectorySchema` 与 core `ensureTrajectorySchema` 改调 canonical module；保留既有 view 行为、连接生命周期、WAL/pragmas、schema version owner。
+- **Step 3 — Rewire Existing Entry Points**：plugin `applyTrajectorySchema` 与 core `ensureTrajectorySchema` 改调 canonical module；保留既有 view 行为、连接生命周期、WAL/pragmas、schema version owner；**`pd runtime init` 的 dry-run trajectory tables 清单改消费 `TRAJECTORY_TABLES`（或同一 canonical helper），对应测试期望同源自派生**（关闭 Failure Window #1 的 pd-cli 清单分支；state.db 清单不在本单范围）。
 - **Step 4 — Types Convergence**：建 `@principles/core/trajectory-types` subpath + plugin shim；删 core 手抄 type definitions；保持 public API compatibility（含兼容回归测试）。
 - **Step 5 — Mechanical Guards**：fresh base parity / historical migration parity（Fixture B）/ populated DB no-data-change（Fixture C）/ view profile tests / public exports snapshot。
 - **Step 6 — Full Regression**：至少 principles-core、openclaw-plugin、pd-cli、trajectory round-trip、runtime init、pain record、correction samples、quality scorecard、evolution historical reader、verify:merge。
@@ -165,7 +165,7 @@ writer consolidation；reader consolidation；database merge；sink removal；`m
 
 ## 8. 实施完成标准（实施 PR 的 Done 条件）
 
-**Schema**：canonical base schema 只有一个 authority；plugin/core 不再存在重复 DDL 文本；tables list 从 canonical definition 派生；deliberate views 差异有 profile contract。
+**Schema**：canonical base schema 只有一个 authority；plugin/core 不再存在重复 DDL 文本；tables list 从 canonical definition 派生；deliberate views 差异有 profile contract；**`pd runtime init` dry-run 的 trajectory tables 输出与测试期望同源自 `TRAJECTORY_TABLES`**。
 
 **Compatibility**：existing DB 无业务数据变化；fresh DB schema 不变化；historical evolution DB 仍可读；public import paths（`trajectory-store`/`evolution-store`/root barrel 既有符号）不破坏。
 
