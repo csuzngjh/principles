@@ -39,6 +39,8 @@ import {
 } from '@principles/core/runtime-v2';
 import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import type { BehaviorExamplePack } from '@principles/core/runtime-v2';
+import { storeEmitter } from '@principles/core/runtime-v2';
+import { WorkspaceTelemetryEmitter } from '@principles/host-runtime';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { resolveRuleHostReadiness } from '../services/rulehost-readiness.js';
 import type { RuleHostReadinessResult } from '../services/rulehost-readiness.js';
@@ -254,6 +256,16 @@ function resolveRunRuleHostRuntime(
   agentRuntimeProfiles.artificer = artificerBinding.profileId;
   agentRuntimeProfiles.evaluator = evaluator.profileId;
 
+  // PRI-795 review P1: the CLI process is one-shot — without a durable sink
+  // the artificer_l2_complete evidence (abortOwner/budget/elapsed/stopReason/
+  // tokenUsage) dies with the process, repeating the EP002-R3
+  // "nothing recoverable after a failure" investigation gap. Reuse the
+  // host-runtime workspace-scoped emitter so completions land in
+  // <workspaceDir>/.pd/telemetry/critical-events.jsonl.
+  const artificerEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {
+    console.error(`[run-rulehost] workspace telemetry persist failed: ${detail}`);
+  });
+
   const artificerAdapter = new ArtificerL2Adapter({
     provider: artificerProfile.provider,
     model: artificerProfile.model,
@@ -273,6 +285,7 @@ function resolveRunRuleHostRuntime(
     // bounded thinking level on the L2 loop too — parity with the
     // PiAiRuntimeAdapter wiring (it was previously L2-dropped).
     ...(artificerProfile.reasoning !== undefined ? { reasoning: artificerProfile.reasoning } : {}),
+    eventEmitter: artificerEmitter,
   });
 
   return {

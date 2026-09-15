@@ -240,7 +240,7 @@ function classifyL2Failure(input: L2FailureClassificationInput): {
     return {
       category: 'execution_failed',
       kind: 'stream_aborted',
-      reason: `Artificer L2 abort signal aborted with UNKNOWN owner (budgetTimedOut=false, cancelRequested=false)${input.loopError !== null ? `: ${input.loopError}` : ''}; failureKind=stream_aborted; ${evidence}`,
+      reason: `Artificer L2 abort signal aborted with UNKNOWN owner (no first-writer ownership claim recorded)${input.loopError !== null ? `: ${input.loopError}` : ''}; failureKind=stream_aborted; ${evidence}`,
       nextAction: 'report this run: abort ownership gap — an aborter outside the adapter contract fired the AbortController',
     };
   }
@@ -273,8 +273,15 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
   private readonly eventEmitter: StoreEventEmitter;
   private readonly runs = new Map<string, ArtificerL2RunState>();
   private readonly abortControllers = new Map<string, AbortController>();
-  /** PRI-795: runIds whose cancelRun() was invoked (abort ownership flag). */
-  private readonly cancelledRuns = new Set<string>();
+  /**
+   * PRI-795 (review P1): FIRST-WRITER-WINS abort ownership. Both the budget
+   * timer and cancelRun can abort the same controller, and a cancel may be
+   * followed by a slow stream exit that lets the budget timer fire afterwards
+   * — a fixed budget-first precedence would then record a manual cancel as a
+   * budget timeout. Whoever claims FIRST becomes the authoritative owner;
+   * later aborters never overwrite the claim.
+   */
+  private readonly abortOwners = new Map<string, L2AbortOwner>();
 
   constructor(config: ArtificerL2AdapterConfig) {
     this.config = config;
@@ -354,11 +361,14 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
     const abortController = new AbortController();
     this.abortControllers.set(runId, abortController);
-    // Track whether the budget timer fired (vs. cancelRun calling abort).
-    // Without this flag, cancelRun() is misidentified as a timeout because
-    // both paths set abortController.signal.aborted to true.
-    let budgetTimedOut = false;
-    const budgetTimer = setTimeout(() => { budgetTimedOut = true; abortController.abort(); }, totalBudgetMs);
+    // PRI-795 (review P1): the budget timer claims ownership ONLY if nobody
+    // (i.e. cancelRun) has claimed it already — first writer wins. A cancel
+    // followed by a slow stream exit that lets this timer fire must still be
+    // recorded as 'cancelled', never as a budget timeout.
+    const budgetTimer = setTimeout(() => {
+      if (!this.abortOwners.has(runId)) this.abortOwners.set(runId, 'pd_budget');
+      abortController.abort();
+    }, totalBudgetMs);
     const startedWallMs = Date.now();
 
     // Build the prompt message. Serialized before the try block so a
@@ -371,6 +381,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     } catch (err) {
       clearTimeout(budgetTimer);
       this.abortControllers.delete(runId);
+      this.abortOwners.delete(runId);
       const reason = err instanceof Error ? err.message : String(err);
       runState.status = 'failed';
       runState.reason = `inputPayload not serializable: ${reason}`;
@@ -498,7 +509,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       // the total budget (rc-7); failure stays loud once nudges are exhausted.
       getFollowUpMessages: async () => {
         if (outputCapture.output !== null) return [];
-        if (budgetTimedOut || turnCount >= maxTurns) return [];
+        if (this.abortOwners.has(runId) || turnCount >= maxTurns) return [];
         if (nudges >= MAX_NO_TOOL_CALL_NUDGES) return [];
         nudges += 1;
         this.eventEmitter.emitTelemetry({
@@ -576,19 +587,19 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     clearTimeout(budgetTimer);
     this.abortControllers.delete(runId);
 
-    // PRI-795: resolve abort ownership AFTER the loop, from the flags — never
-    // from which control path returned (the loop returns silently on abort;
-    // the old `timedOut = budgetTimedOut` lived only in the catch block and
-    // was dead code on that path, misclassifying budget aborts as
-    // output_invalid). Deterministic precedence: budget > cancel > unknown.
-    const cancelRequested = this.cancelledRuns.delete(runId);
-    const abortOwner: L2AbortOwner | undefined = budgetTimedOut
-      ? 'pd_budget'
-      : cancelRequested
-        ? 'cancelled'
-        : abortController.signal.aborted
+    // PRI-795 (review P1): resolve abort ownership AFTER the loop from the
+    // first-writer-wins claim map — never from which control path returned
+    // (the loop returns silently on abort; the old `timedOut =
+    // budgetTimedOut` lived only in the catch block and was dead code on that
+    // path, misclassifying budget aborts as output_invalid). The claim was
+    // set by whichever aborter fired FIRST, so a cancel followed by a slow
+    // stream exit stays 'cancelled' even when the budget timer fires late.
+    const claimedOwner = this.abortOwners.get(runId);
+    this.abortOwners.delete(runId);
+    const abortOwner: L2AbortOwner | undefined = claimedOwner
+      ?? (abortController.signal.aborted
           ? 'unknown'
-          : undefined;
+          : undefined);
     const elapsedMs = Date.now() - startedWallMs;
     const tokenUsage = summarizeTranscriptUsage(transcript);
     const finalStopReason = lastStopReason ?? lastAssistantStopReason(transcript);
@@ -645,12 +656,13 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
   }
 
   async cancelRun(runId: string): Promise<void> {
-    // PRI-795: flag BEFORE aborting so the in-flight startRun resolves
-    // ownership as 'cancelled' after the loop returns silently. Guarded by
-    // abortControllers membership so a late cancel of an already-terminal run
-    // neither leaks a Set entry nor rewrites the recorded terminal state.
+    // PRI-795 (review P1): claim ownership BEFORE aborting — first writer
+    // wins, so even if the budget timer fires later during a slow stream exit
+    // the run is still recorded as 'cancelled'. Guarded by abortControllers
+    // membership so a late cancel of an already-terminal run neither leaks a
+    // claim entry nor rewrites the recorded terminal state.
     if (this.abortControllers.has(runId)) {
-      this.cancelledRuns.add(runId);
+      if (!this.abortOwners.has(runId)) this.abortOwners.set(runId, 'cancelled');
       const controller = this.abortControllers.get(runId);
       controller?.abort();
     }

@@ -631,6 +631,35 @@ describe('PRI-795 ArtificerL2Adapter — abort ownership & timeout contract', ()
     expect(payload?.failureKind).toBe('cancelled');
   });
 
+  it('review P1: cancel FIRST + slow stream exit + budget firing late → still cancelled (first-writer-wins)', async () => {
+    // The exact review scenario: cancelRun aborts the signal at t≈0, the
+    // stream exits slowly (mock lingers 150ms), and the budget timer fires at
+    // t=60ms while the loop is still draining. A fixed budget-first
+    // precedence recorded this as pd_budget_timeout; ownership must stay
+    // with the FIRST aborter (the manual cancel).
+    const adapter = makeAdapter({ totalBudgetMs: 60 });
+    // eslint-disable-next-line @typescript-eslint/max-params -- mirrors the 5-param runAgentLoop signature
+    hoisted.impl = async (_p: unknown, _c: unknown, _cfg: unknown, emit: (e: unknown) => Promise<void>) => {
+      const [runId] = [...(adapter as unknown as { runs: Map<string, unknown> }).runs.keys()];
+      if (!runId) throw new Error('run not registered before loop start');
+      await adapter.cancelRun(runId);
+      // Slow exit: keep the loop "draining" well past the budget deadline.
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+      await emit({ type: 'message_end', message: { stopReason: 'aborted', errorMessage: 'Request was aborted' } });
+      return []; // silent return, like the real aborted path
+    };
+
+    const err = await captureError(adapter);
+    if (!err) throw new Error('expected startRun to reject');
+    expect(err.category).toBe('cancelled');
+    expect(err.message).toContain('failureKind=cancelled');
+    expect(err.message).not.toContain('pd_budget_timeout');
+
+    const payload = completePayload();
+    expect(payload?.abortOwner).toBe('cancelled');
+    expect(payload?.failureKind).toBe('cancelled');
+  });
+
   it('abort by neither budget nor cancel → failureKind=stream_aborted with UNKNOWN owner, never output_invalid', async () => {
     const adapter = makeAdapter({ totalBudgetMs: 30_000 });
     hoisted.impl = async () => {

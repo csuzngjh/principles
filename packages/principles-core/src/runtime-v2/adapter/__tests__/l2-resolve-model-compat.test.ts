@@ -127,6 +127,20 @@ describe('resolveL2Model — catalog-first borrowing (PRI-795 r2)', () => {
     expect(compat?.supportsReasoningEffort).toBe(true);
   });
 
+  it('cross-catalog relay: a relay provider name + catalog-known deepseek model borrows the deepseek entry', () => {
+    // Review P1-3's second example (B.AI / SenseNova-style relays): the
+    // configured provider name is the relay, the model id belongs to another
+    // vendor's catalog namespace entirely.
+    const model = resolveL2Model('my-relay', 'deepseek-v4-flash', 'https://relay.example.com/v1');
+    expect(model.api).toBe('openai-completions');
+    // The entry must come from the deepseek namespace, NOT the hand-built
+    // literal (128000/32000).
+    expect(model.contextWindow).not.toBe(128_000);
+    expect(model.maxTokens).not.toBe(32_000);
+    expect(model.provider).toBe('my-relay');
+    expect(model.baseUrl).toBe('https://relay.example.com/v1');
+  });
+
   it('falls back to the hand-built literal for a model absent from every catalog', () => {
     const model = resolveL2Model('zai', 'no-such-model-anywhere', 'https://open.bigmodel.cn/api/paas/v4/', {
       reasoning: true,

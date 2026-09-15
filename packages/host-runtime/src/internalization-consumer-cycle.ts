@@ -443,6 +443,20 @@ export async function runInternalizationConsumerCycle(
     // the kind-specific profile, not the shared gate resolution.
     const taskRuntimeKind = taskRuntimeConfig.runtimeKind;
 
+    // PRI-634 A3: workspace-scoped telemetry sink. Constructed here (per-wake,
+    // workspaceDir in scope) so events from THIS workspace's runners are
+    // attributable to THIS workspace — a global subscriber on the storeEmitter
+    // singleton cannot (multi-workspace isolation, see
+    // workspace-telemetry-emitter.ts). Persist failures degrade through the
+    // host's structured event port, never break the runner.
+    // PRI-795 review P1: shared by the EvaluatorRunner AND the ArtificerL2
+    // adapter so `artificer_l2_complete` evidence (abortOwner/budget/elapsed/
+    // stopReason/tokenUsage) persists durably instead of vanishing with the
+    // process (the EP002-R3 "nothing recoverable after a failure" class).
+    const workspaceEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {
+      emitEvent('WORKSPACE_TELEMETRY_PERSIST_FAILED', detail);
+    });
+
     let adapter: PDRuntimeAdapter;
     if (taskRuntimeKind === 'pi-ai') {
       // PRI-419: when l2_dreamer flag is on AND this is a dreamer task, route
@@ -480,6 +494,9 @@ export async function runInternalizationConsumerCycle(
           // branch below already receives it; the L2 loop was silently dropping
           // it, leaving always-thinking models at their most expensive default.
           ...(taskRuntimeConfig.reasoning !== undefined ? { reasoning: taskRuntimeConfig.reasoning } : {}),
+          // PRI-795 review P1: the completion evidence must land in the
+          // workspace's durable telemetry sink, not the in-process singleton.
+          eventEmitter: workspaceEmitter,
         });
       } else if (l2Flag.enabled && wakeResult.taskKind === 'dreamer') {
         const stateDir = `${workspaceDir}/.state`;
@@ -568,9 +585,8 @@ export async function runInternalizationConsumerCycle(
     // subscriber on the storeEmitter singleton cannot (multi-workspace
     // isolation, see workspace-telemetry-emitter.ts). Persist failures
     // degrade through the host's structured event port, never break the runner.
-    const evaluatorEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {
-      emitEvent('WORKSPACE_TELEMETRY_PERSIST_FAILED', detail);
-    });
+    // (PRI-795 review P1: the emitter itself is constructed above, before the
+    // adapter dispatch, so the ArtificerL2 adapter can share it.)
 
     // Dispatch by leased task kind. Only kinds listed in
     // FULL_CHAIN_CONSUMER_RUNNER_KINDS can be leased here; anything else
@@ -618,7 +634,7 @@ export async function runInternalizationConsumerCycle(
         // 必须存在 (第二个 options 参数, 绝不放第一个 deps 参数)。
         runner = new EvaluatorRunner(
           {
-            stateManager, runtimeAdapter: adapter, eventEmitter: evaluatorEmitter,
+            stateManager, runtimeAdapter: adapter, eventEmitter: workspaceEmitter,
             artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
             ...createEvaluatorRepairDeps(workspaceDir, stateManager, logger),
           },
