@@ -68,7 +68,10 @@ const DEFAULT_AGENT_ENABLED: Record<InternalAgentName, boolean> = {
   rolloutReviewer: false,
   correctionObserver: false,
   empathyObserver: false,
-  signalCollector: false,
+  // PRI-797 (Owner 2026-09-15): 默认启用——语义确认链（Stage2/批量确认/TP 记录）
+  // 不再依赖手工开闸；profile 未配置 API 端点时降级为关键词-only 并以 WARN +
+  // `pd config doctor` needs_setup 显性呈现，绝不静默。
+  signalCollector: true,
 };
 
 export function getDefaultInternalAgents(): InternalAgentsConfig {
