@@ -224,6 +224,39 @@ describe('repo mutation mutex', () => {
     }
   });
 
+  // Round-3 P1 (Owner review): post-election must fail CLOSED. A malformed
+  // peer alongside our own live claim must NOT let us win — the peer can
+  // still complete with an OLDER creation order, and then two processes
+  // would each consider themselves the holder of the mutex. Verified
+  // deterministically through the injection seam, not child-process timing.
+  it('post-election steps back while a malformed peer exists, removing only its own record', () => {
+    const arenaDir = mutationLockPath(commonDir);
+    const peer = path.resolve(arenaDir, 'owner-cccccccccccccccccccccccccccccccc.json');
+    let injected = false;
+    const result = acquireMutationLock({
+      commonDir,
+      operation: 'worktree-add',
+      target: 'a',
+      afterOwnCreate: () => {
+        // A concurrent claimant that became visible mid-verify and died
+        // half-writing its JSON — older mtime: had it parsed, IT would win.
+        fs.writeFileSync(peer, '{"schema": "pd-worktr', 'utf-8');
+        const old = new Date(Date.now() - 60_000);
+        fs.utimesSync(peer, old, old);
+        injected = true;
+      },
+    });
+    expect(injected).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.holder).toContain('unreadable');
+    // We never delete foreign records — only our own file left the arena.
+    expect(fs.existsSync(peer)).toBe(true);
+    expect(fs.readdirSync(arenaDir)).toEqual(['owner-cccccccccccccccccccccccccccccccc.json']);
+    // And the board stays fail-closed for readers too.
+    expect(readMutationLock(commonDir)).toMatchObject({ exists: true, valid: false });
+    fs.rmSync(peer);
+  });
+
   it('release is idempotent and frees the arena', () => {
     const lock = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'a' });
     expect(lock.ok).toBe(true);

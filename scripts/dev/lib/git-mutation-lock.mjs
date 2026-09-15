@@ -29,14 +29,16 @@
 //     * the lock is an ARENA directory; every claim is its own file named
 //       after the holder's random token:  <arena>/owner-<token>.json
 //     * mutual exclusion is a create-then-verify ELECTION: each claimant
-//       creates its own owner file, then re-reads the arena and accepts the
-//       oldest live claim (filesystem creation order) as the holder; younger
-//       claims remove ONLY their own file and step back.
-//       Two winners are impossible: both proceed only if each verify scan
-//       missed the other's create. With X_w/X_v (create-visible / verify) and
-//       Y_w/Y_v, each verify follows its own create, so the miss-pairing means
-//       X_w < X_v < Y_w < Y_v < X_w — a cycle. One of the two therefore sees
-//       the other's older claim and yields.
+//       creates its own owner file, then re-reads the arena. It wins ONLY on
+//       a fully readable board — zero malformed peers AND being the oldest
+//       live claim (filesystem creation order). A half-written peer may
+//       complete later with a PREDATING creation order, so "I see myself as
+//       winner while a malformed record exists" must never enter the
+//       critical section; the claimant steps back and removes only its own
+//       file (round-3 P1: fail closed, matching readMutationLock's rule that
+//       malformed + live blocks). On a fully readable board two winners are
+//       still impossible: both proceed only if each verify missed the other's
+//       create — X_w < X_v < Y_w < Y_v < X_w is a cycle.
 //     * release() deletes exactly one path: <arena>/owner-<own token>.json.
 //       No other process can name or recreate that path, so an old holder's
 //       late release is STRUCTURALLY incapable of deleting a successor's lock —
@@ -197,6 +199,11 @@ export function acquireMutationLock({
   target,
   now = Date.now(),
   readRetryDelayFn = () => sleepSync(SCAN_RETRY_DELAY_MS),
+  // Deterministic test seam (round-3 P1): invoked after our own record is
+  // visible and before our post-election verify — exactly the window in which
+  // a concurrent claim can appear half-written. Production callers never
+  // pass it; same injectable style as readRetryDelayFn.
+  afterOwnCreate = null,
 } = {}) {
   const arena = mutationLockPath(commonDir);
   try {
@@ -272,26 +279,36 @@ export function acquireMutationLock({
     };
   }
 
-  // Create-then-verify election. After our record is visible, the arena's
-  // oldest live claim is the holder: if that is not us, a concurrent
-  // claimant's record predates ours and we remove ONLY our own file.
+  // Create-then-verify election, with the round-3 P1 tightening: the win
+  // requires a FULLY READABLE board. Any malformed peer — even alongside our
+  // own live claim — means we cannot prove the ordering (a half-written
+  // record may complete later with a mtime PREDATING ours), so we step back
+  // and remove only our own file. The bounded retry in scanClaimsStable has
+  // already given transient records their chance.
+  if (typeof afterOwnCreate === 'function') afterOwnCreate({ commonDir, ownerFile });
   const post = scanClaimsStable(commonDir, readRetryDelayFn);
   const winner = post.live.length > 0 ? post.live[0] : null;
-  const lostToMalformed = winner === null && post.malformed.length > 0;
-  if (lostToMalformed || (winner && winner.token !== token)) {
+  const won = post.malformed.length === 0 && winner !== null && winner.token === token;
+  if (!won) {
     try { fs.unlinkSync(ownerFile); } catch { /* our own record; ENOENT is fine */ }
-    const state = winner
-      ? { exists: true, valid: true, lock: winner.meta }
+    // Report honestly: under the fail-closed rule we may step back even while
+    // WE are the oldest live claim — blinded by an unreadable peer. Only name
+    // ANOTHER live claim as holder; otherwise the board is unverifiable.
+    const other = winner && winner.token !== token ? winner : null;
+    const state = other
+      ? { exists: true, valid: true, lock: other.meta }
       : { exists: true, valid: false, error: 'unreadable owner record(s): ' + post.malformed.join(', ') };
     return {
       ok: false,
       code: 'GIT_MUTATION_LOCKED',
-      error: (winner ? 'shared Git metadata is already locked by another process:\n' : 'the mutation arena holds an unreadable record:\n')
+      error: (other ? 'shared Git metadata is already locked by another process:\n' : 'the mutation arena holds an unreadable record — exclusive ownership cannot be proven:\n')
         + describeHolder(state),
       holder: describeHolder(state),
-      nextAction: winner
+      nextAction: other && post.malformed.length === 0
         ? recoveryHint(commonDir, post)
-        : 'A HUMAN should inspect/remove the unreadable record(s) under ' + arena + ', then retry.',
+        : (post.malformed.length > 0
+          ? 'A HUMAN should inspect/remove the unreadable record(s) under ' + arena + ', then retry.'
+          : recoveryHint(commonDir, post)),
     };
   }
 
