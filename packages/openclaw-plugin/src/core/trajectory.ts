@@ -1342,7 +1342,8 @@ export class TrajectoryDatabase {
 
   /**
    * List user turns for a session.
-   * Returns sanitized/reduced fields for nocturnal use — NO raw text.
+   * Returns bounded fields — `rawExcerpt` is the stored ≤200-char excerpt
+   * (persisted per user_turn), not the full raw text.
    */
   listUserTurnsForSession(sessionId: string): {
     id: number;
