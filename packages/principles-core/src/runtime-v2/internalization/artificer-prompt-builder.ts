@@ -1,6 +1,7 @@
 import { serializePromptInput } from './prompt-serializer.js';
 import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
+import type { GoldenTraceCaseInput } from './artificer-output.js';
 import type { LastValidatorErrors } from './pitask-metadata.js';
 import type { IntentContractV1 } from './intent-contract.js';
 import type { ToolSemanticMappingV1, ToolSemanticRegistry } from './tool-semantic-registry.js';
@@ -301,6 +302,55 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  */
 export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v6';
 
+// ── EP002-R4: bounded pack projection at the prompt boundary ─────────────────
+//
+// The persisted BehaviorExamplePack keeps full-fidelity raw tool-call payloads
+// (entire file contents, edit diffs). Real workspaces produce real-sized
+// calls, and a single example routinely exceeds the whole 50k prompt budget
+// (live workspace: pack 115,198 chars vs cap 50,000), making v2 generation
+// structurally unreachable there. Bound each example's payload HERE, at the
+// LLM trust boundary (rc-8), never in the pack itself: the model sees bounded
+// previews with an explicit truncation marker, the persisted evidence stays
+// complete, and validateBehaviorExamplePack still runs on the original pack.
+
+const MAX_PROMPT_PARAM_STRING_CHARS = 2_500;
+const PROMPT_PARAM_TRUNCATION_MARKER = '…[truncated-for-prompt]';
+
+function boundPromptParamString(value: string): string {
+  return value.length <= MAX_PROMPT_PARAM_STRING_CHARS
+    ? value
+    : value.slice(0, MAX_PROMPT_PARAM_STRING_CHARS) + PROMPT_PARAM_TRUNCATION_MARKER;
+}
+
+function boundPromptParams(params: Record<string, unknown>): Record<string, unknown> {
+  const bounded: Record<string, unknown> = {};
+  for (const key of Object.keys(params)) {
+    const value: unknown = params[key];
+    bounded[key] = typeof value === 'string'
+      ? boundPromptParamString(value)
+      : value;
+  }
+  return bounded;
+}
+
+function boundCaseForPrompt(value: GoldenTraceCaseInput): GoldenTraceCaseInput {
+  return {
+    ...value,
+    params: boundPromptParams(value.params),
+    ...(value.expectedProposedParams !== undefined
+      ? { expectedProposedParams: boundPromptParams(value.expectedProposedParams) }
+      : {}),
+  };
+}
+
+function boundPackForPrompt(pack: BehaviorExamplePack): BehaviorExamplePack {
+  return {
+    ...pack,
+    sourceNegativeCase: boundCaseForPrompt(pack.sourceNegativeCase),
+    positiveCounterexamples: pack.positiveCounterexamples.map(boundCaseForPrompt),
+  };
+}
+
 /**
  * PRI-741: render the host semantic projection as a prompt block. Mirrors the
  * evaluator's TOOL CATALOG AUTHORITY pattern: the list is authoritative for
@@ -363,7 +413,10 @@ export class ArtificerPromptBuilder {
       // (empty string when outputLanguage is undefined).
       + buildLanguageDirective(input.outputLanguage, 'implementation');
     const promptInput: ArtificerPromptInput = {
-      behaviorExamplePack: input.behaviorExamplePack,
+      // EP002-R4: bounded projection — the pack's raw payloads can exceed the
+      // 50k prompt cap on real workspaces; the LLM gets bounded previews while
+      // the persisted pack (and everything downstream of it) keeps full fidelity.
+      behaviorExamplePack: boundPackForPrompt(input.behaviorExamplePack),
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourceScribeArtifactId: input.sourceScribeArtifactId,

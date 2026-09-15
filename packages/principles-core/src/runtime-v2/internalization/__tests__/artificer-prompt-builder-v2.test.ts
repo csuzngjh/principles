@@ -53,6 +53,38 @@ describe('ArtificerPromptBuilder V2 contract', () => {
     expect(result.systemPrompt).toMatch(/must.*requiresContextVersion.*2/i);
   });
 
+  // EP002-R4: real workspaces produce real-sized tool-call payloads — a single
+  // example (full file content / edit diff) can exceed the whole 50k prompt
+  // budget (live workspace measured: pack 115,198 chars). The builder must
+  // bound the pack's payload strings at the prompt boundary while leaving the
+  // CALLER's pack object untouched (persisted evidence keeps full fidelity).
+  it('bounds oversized behavior-example payloads at the prompt boundary (EP002-R4)', () => {
+    const hugePayload = 'x'.repeat(45_000);
+    const hugePack = {
+      sourceNegativeCase: { caseId: 'negative-big', kind: 'negative' as const, toolName: 'write_file', params: { path: 'prod/hud.js', content: hugePayload }, expectedDecision: 'block' as const, ruleContext },
+      ownerDesiredOutcome: 'Anchor baselines before production writes.',
+      positiveCounterexamples: [
+        { caseId: 'positive-big', kind: 'positive' as const, toolName: 'write_file', params: { path: 'work/copy.js', content: hugePayload }, expectedDecision: 'allow' as const, ruleContext },
+        { caseId: 'positive-big-2', kind: 'positive' as const, toolName: 'write_file', params: { path: 'work/copy2.js', content: hugePayload }, expectedDecision: 'allow' as const, ruleContext },
+      ],
+      evidenceRefs: ['pain:1'], redactionNotes: [],
+    };
+
+    const result = new ArtificerPromptBuilder().buildPrompt({
+      taskId: 'task-big-pack', contextHash: 'hash-big', sourceScribeArtifactId: 'scribe-big', scribeArtifact: {},
+      behaviorExamplePack: hugePack,
+    });
+
+    // The serialized prompt fits the 50k budget instead of throwing RangeError.
+    expect(result.message.length).toBeLessThanOrEqual(50_000);
+    // Truncation is explicit, not silent (rc-9): the marker appears per bounded field.
+    expect(result.message).toContain('truncated-for-prompt');
+    // The prompt projection is bounded, not the caller's pack (persisted full fidelity).
+    const boundedNeg = result.promptInput.behaviorExamplePack?.sourceNegativeCase;
+    expect(typeof boundedNeg?.params.content === 'string' && boundedNeg.params.content.length).toBeLessThanOrEqual(2_600);
+    expect(hugePack.sourceNegativeCase.params.content.length).toBe(45_000);
+  });
+
   // PRI-490: v2 prompt must mention allow/block-only constraint and evidenceRefs copy
   it('V2 prompt instruction mentions allow/block-only and evidenceRefs copy requirement (PRI-490)', () => {
     const result = new ArtificerPromptBuilder().buildPrompt({
