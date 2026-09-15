@@ -7,6 +7,7 @@ import type { PIArtifactRecord } from './internalization/pi-artifact.js';
 import type { RuleHostInput, RuleHostResult } from './internalization/rule-host-contracts.js';
 import type { RuleHostHelpers } from './internalization/rule-host-helpers.js';
 import { evaluateInRefinerSandbox } from './internalization/refiner-sandbox-wrapper.js';
+import { compileHardenedRuleEvaluator } from './activation/production-gate-deps.js';
 import type { RefinerSandboxResult } from './internalization/refiner-sandbox-wrapper.js';
 
 export type MvpChannel = 'prompt' | 'code_tool_hook' | 'defer_archive';
@@ -161,16 +162,19 @@ export function computeDemoStatus(
 export function createDemoSandboxEvaluate(
   implementationCode: string,
 ): (input: RuleHostInput, helpers: RuleHostHelpers) => RuleHostResult {
-  const wrappedCode = `${implementationCode}; return evaluate(input, helpers);`;
-  const rawEvaluate = new Function('input', 'helpers', wrappedCode) as
-    (input: RuleHostInput, helpers: RuleHostHelpers) => unknown;
+  // PRI-809: the demo previously evaluated rule code with `new Function`,
+  // which compiles and runs it directly in the HOST realm — unapproved code
+  // with full host capabilities. It now delegates to the shared hardened
+  // replay evaluator (vm realm + JSON-string trust-boundary crossing), the
+  // same primitive the production gate uses.
+  const hardenedEvaluate = compileHardenedRuleEvaluator(implementationCode, 'story-a-demo');
 
   return (input: RuleHostInput, helpers: RuleHostHelpers): RuleHostResult => {
-    const result = rawEvaluate(input, helpers);
+    const result = hardenedEvaluate(input, helpers);
     if (typeof result !== 'object' || result === null || Array.isArray(result)) {
       return { decision: 'allow', matched: false, reason: 'Demo sandbox: evaluate returned non-object' };
     }
-    return result as RuleHostResult;
+    return result;
   };
 }
 

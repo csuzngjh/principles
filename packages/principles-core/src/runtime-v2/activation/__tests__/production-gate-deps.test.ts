@@ -13,8 +13,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createProductionGateDeps } from '../production-gate-deps.js';
-import { createGoldenTraceFixture } from '../../golden-trace.js';
+import { compileHardenedRuleEvaluator, createProductionGateDeps } from '../production-gate-deps.js';
+import { createGoldenTraceFixture, createSyntheticRuleHostInput } from '../../golden-trace.js';
+import type { RuleHostInput } from '../../internalization/rule-host-contracts.js';
+import type { RuleHostHelpers } from '../../internalization/rule-host-helpers.js';
 
 describe('createProductionGateDeps', () => {
   it('returns a valid RefinerRuleHostGateDeps with evaluateInSandbox function', () => {
@@ -415,5 +417,161 @@ function evaluate(input, helpers) {
       // crash, structured failure).
       expect(result.success).toBe(false);
     });
+  });
+});
+
+// ── PRI-809: pre-activation sandbox trust boundary ──────────────────────────
+// Unapproved RuleCode must never reach host capabilities during replay.
+// These probes call the hardened primitive DIRECTLY (no forbidden-pattern
+// scanner in front) to prove runtime isolation is the trust boundary — the
+// static scanner is only defense-in-depth (PRI-679 stays an upgrade option).
+
+describe('PRI-809 sandbox trust boundary (hardened replay evaluator)', () => {
+  const HOST_PROCESS_PREFIX = 'ESCAPED_PROCESS_';
+
+  function evaluateRaw(ruleBody: string, input: RuleHostInput): { decision: string; matched: boolean; reason: string } {
+    const evaluate = compileHardenedRuleEvaluator(
+      `function evaluate(input, helpers) {\n${ruleBody}\n}`,
+      'pri-809-probe',
+    );
+    return evaluate(input, {} as RuleHostHelpers);
+  }
+
+  function probeInput(): RuleHostInput {
+    return createSyntheticRuleHostInput(
+      { toolName: 'edit', params: { filePath: '/src/index.ts' } },
+      {},
+      {},
+    );
+  }
+
+  it('blocks the top-level input.constructor.constructor escape (Case 1)', () => {
+    const result = evaluateRaw(`
+      try {
+        var hostFunction = input.constructor.constructor;
+        var proc = hostFunction('return process')();
+        return { decision: 'allow', matched: false, reason: '${HOST_PROCESS_PREFIX}' + String(proc && proc.version) };
+      } catch (error) {
+        return { decision: 'allow', matched: false, reason: 'escape_blocked:' + String(error && error.message).slice(0, 80) };
+      }
+    `, probeInput());
+    expect(result.decision).toBe('allow');
+    expect(result.reason).not.toContain(HOST_PROCESS_PREFIX);
+    expect(result.reason).toContain('escape_blocked');
+  });
+
+  it('blocks nested-object constructor chains (input.action.paramsSummary.constructor.constructor) (Case 2)', () => {
+    const result = evaluateRaw(`
+      try {
+        var hostFunction = input.action.paramsSummary.constructor.constructor;
+        var proc = hostFunction('return process')();
+        return { decision: 'allow', matched: false, reason: '${HOST_PROCESS_PREFIX}' + String(proc && proc.version) };
+      } catch (error) {
+        return { decision: 'allow', matched: false, reason: 'escape_blocked_nested:' + String(error && error.message).slice(0, 80) };
+      }
+    `, probeInput());
+    expect(result.reason).not.toContain(HOST_PROCESS_PREFIX);
+  });
+
+  it('blocks helper escapes (helpers.constructor.constructor and helpers.getToolName.constructor.constructor) (Case 3)', () => {
+    const result = evaluateRaw(`
+      var vectors = [helpers, helpers.getToolName];
+      for (var i = 0; i < vectors.length; i++) {
+        try {
+          var hostFunction = vectors[i].constructor.constructor;
+          var proc = hostFunction('return process')();
+          return { decision: 'allow', matched: false, reason: '${HOST_PROCESS_PREFIX}' + String(proc && proc.version) };
+        } catch (error) { /* try next vector */ }
+      }
+      return { decision: 'allow', matched: false, reason: 'helper_escape_blocked_all_vectors' };
+    `, probeInput());
+    expect(result.reason).toBe('helper_escape_blocked_all_vectors');
+  });
+
+  it('string-concatenation bypasses the scanner but still cannot escape (Case 4)', () => {
+    // The forbidden-pattern scanner matches literal patterns; dynamic
+    // property access built from concatenated strings evades it. Runtime
+    // isolation must hold anyway — the scanner is NOT the trust boundary.
+    const result = evaluateRaw(`
+      try {
+        var ctor = input['con' + 'structor'];
+        var hostFunction = ctor['con' + 'structor'];
+        var proc = hostFunction('return process')();
+        return { decision: 'allow', matched: false, reason: '${HOST_PROCESS_PREFIX}' + String(proc && proc.version) };
+      } catch (error) {
+        return { decision: 'allow', matched: false, reason: 'concat_bypass_still_sandboxed:' + String(error && error.message).slice(0, 80) };
+      }
+    `, probeInput());
+    expect(result.reason).not.toContain(HOST_PROCESS_PREFIX);
+  });
+
+  it('the concat-bypass rule sails through the forbidden-pattern scanner (proving isolation, not the scanner, is the boundary)', () => {
+    const deps = createProductionGateDeps();
+    const concatRule = `
+function evaluate(input, helpers) {
+  try {
+    var hostFunction = input['con' + 'structor']['con' + 'structor'];
+    hostFunction('return process')();
+  } catch (error) { /* unreachable either way */ }
+  return { decision: 'allow', matched: false, reason: 'safe path' };
+}
+`;
+    const goldenTrace = createGoldenTraceFixture({
+      toolName: 'edit',
+      negativeParams: { filePath: '/etc/passwd' },
+      positiveParams: { filePath: '/src/index.ts' },
+      expectedDecision: 'allow',
+    });
+    const result = deps.evaluateInSandbox(concatRule, goldenTrace);
+    // The scanner misses the dynamic access entirely, and the replay is
+    // judged on behavior — no host escape happened (it could not).
+    expect(result.forbiddenPatternViolations).toHaveLength(0);
+    expect(result.success).toBe(true);
+  });
+
+  it('legal allow rule with helpers still works (Case 5a)', () => {
+    const result = evaluateRaw(`
+      if (helpers.getToolName() === 'edit' && helpers.isRiskPath() === false) {
+        return { decision: 'allow', matched: false, reason: 'helpers:' + helpers.getToolName() + ':' + String(helpers.getEstimatedLineChanges()) + ':' + helpers.getBashRisk() + ':' + String(helpers.getEpTier()) };
+      }
+      return { decision: 'allow', matched: false, reason: 'helpers unexpected' };
+    `, probeInput());
+    expect(result.reason).toBe('helpers:edit:0:unknown:0');
+  });
+
+  it('legal block rule reading input context still works (Case 5b)', () => {
+    const result = evaluateRaw(`
+      var p = input.action.paramsSummary;
+      if (p && p.filePath === '/src/index.ts') {
+        return { decision: 'block', matched: true, reason: 'index guarded' };
+      }
+      return { decision: 'allow', matched: false, reason: 'safe path' };
+    `, probeInput());
+    expect(result.decision).toBe('block');
+    expect(result.matched).toBe(true);
+    expect(result.reason).toBe('index guarded');
+  });
+
+  it('replay is deterministic: same rule + same input produce identical verdicts', () => {
+    const rule = `
+function evaluate(input, helpers) {
+  return { decision: 'allow', matched: false, reason: 'det:' + input.action.toolName + ':' + String(input.workspace.isRiskPath) };
+}
+`;
+    const evaluate = compileHardenedRuleEvaluator(rule, 'pri-809-determinism');
+    const a = evaluate(probeInput(), {} as RuleHostHelpers);
+    const b = evaluate(probeInput(), {} as RuleHostHelpers);
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+
+  it('non-JSON-serializable input fails loud instead of crossing the boundary (rc-3)', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
+      'pri-809-rc3',
+    );
+    const circular: Record<string, unknown> = { toolName: 'edit' };
+    circular.self = circular;
+    const poison = { derived: circular } as unknown as RuleHostInput;
+    expect(() => evaluate(poison, {} as RuleHostHelpers)).toThrow(/not JSON-serializable/);
   });
 });

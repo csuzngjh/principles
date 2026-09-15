@@ -1440,6 +1440,7 @@ export {
   trimToBudget,
   renderPrinciplesToDirectives,
   createProductionGateDeps,
+  compileHardenedRuleEvaluator,
   ApprovalCompletionService,
   buildPromotionEvidenceSnapshot,
   computeArtifactDigest,
