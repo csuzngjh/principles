@@ -1,3 +1,1 @@
-# PRI-785 smoke
-
-交付桥端到端实测产物分支，验证后两端删除。
+PRI-785 smoke-2 final verification line.
