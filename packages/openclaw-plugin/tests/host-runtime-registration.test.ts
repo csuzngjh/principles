@@ -75,7 +75,7 @@ vi.mock('../src/core/pd-config-loader.js', async (importOriginal) => {
   };
 });
 vi.mock('../src/core/migration.js', () => ({ migrateDirectoryStructure: vi.fn() }));
-vi.mock('../src/core/workspace-guidance-migrator.js', () => ({ migrateStaleWorkspaceGuidance: vi.fn() }));
+// workspace-guidance-migrator mock removed (PRI-776): the module was deleted.
 vi.mock('../src/core/init.js', () => ({ ensureWorkspaceTemplates: vi.fn() }));
 vi.mock('../src/core/system-logger.js', () => ({ SystemLogger: { log: vi.fn() } }));
 vi.mock('../src/core/workspace-context.js', () => ({
