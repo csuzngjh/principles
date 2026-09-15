@@ -27,8 +27,19 @@ import path from 'node:path';
 import os from 'node:os';
 import { execSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+// PRI-796: shared install-freshness signal, so "bootstrap" and "ready" cannot
+// disagree about whether the dependency tree is trustworthy.
+import { detectStaleInstall } from './dev/lib/readiness.mjs';
 
 const isWin = process.platform === 'win32';
+
+function isInstallStale(repoRoot) {
+  try {
+    return detectStaleInstall(repoRoot).stale;
+  } catch {
+    return false; // never block an install decision on a probe failure
+  }
+}
 
 function parseArgs(argv) {
   const args = {
@@ -217,6 +228,15 @@ function main() {
         console.log('      node_modules incomplete (missing .package-lock.json or @types/node)');
       }
     }
+    // PRI-796: existence is not freshness. A merge/checkout that rewrites
+    // package-lock.json leaves a present-but-stale tree behind, and skipping the
+    // install then turns a dependency mismatch into a confusing build/type error
+    // much later. Observed: js-yaml 4 → 5 bump surfacing as TS2339 on
+    // YAML11_SCHEMA from `npm run build`, with node_modules untouched.
+    if (!needsInstall && isInstallStale(repoRoot)) {
+      needsInstall = true;
+      console.log('      node_modules is STALE relative to package-lock.json (lockfile changed after the last install)');
+    }
     if (needsInstall) {
       const ok = run('npm install' + (args.preferOffline ? ' --prefer-offline' : ''), { cwd: repoRoot, dryRun: args.dryRun });
       if (ok) logStep('ok', 'npm install');
@@ -225,7 +245,7 @@ function main() {
         process.exit(1);
       }
     } else {
-      logStep('skip', 'npm install (node_modules already present)');
+      logStep('skip', 'npm install (node_modules already present and in sync)');
     }
   }
 

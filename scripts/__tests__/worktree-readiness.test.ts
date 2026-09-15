@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { checkReadiness, isInside, listWorkspacePackages } from '../dev/lib/readiness.mjs';
+import { checkReadiness, detectStaleInstall, isInside, listWorkspacePackages } from '../dev/lib/readiness.mjs';
 import { makeJunction, makeTempDir, removeFixture, runDevScript } from './dev-worktree-test-utils';
 
 let root: string;
@@ -136,6 +136,62 @@ describe('readiness on a self-contained worktree', () => {
     });
     const report = checkReadiness({ worktreeRoot: root });
     expect(report.levels.l2.results.map((r) => r.name)).toEqual(['@x/a', '@x/b']);
+  });
+});
+
+describe('stale-install detection (L1)', () => {
+  /** Create a lockfile + install marker with explicit mtimes. */
+  function makeInstall(worktree: string, lockAgeMs: number, markerAgeMs: number): void {
+    const lock = path.join(worktree, 'package-lock.json');
+    const marker = path.join(worktree, 'node_modules', '.package-lock.json');
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(lock, '{"lockfileVersion":3,"packages":{}}', 'utf-8');
+    fs.writeFileSync(marker, '{"lockfileVersion":3,"packages":{}}', 'utf-8');
+    const now = Date.now();
+    fs.utimesSync(lock, new Date(now - lockAgeMs), new Date(now - lockAgeMs));
+    fs.utimesSync(marker, new Date(now - markerAgeMs), new Date(now - markerAgeMs));
+  }
+
+  it('is NOT stale when the install marker is at least as new as the lockfile', () => {
+    makeInstall(root, 60_000, 0);
+    const verdict = detectStaleInstall(root);
+    expect(verdict.stale).toBe(false);
+  });
+
+  it('is NOT stale for the in-sync case where both were written together (0ms apart)', () => {
+    // Observed in practice: a successful `npm install` rewrites BOTH files, so
+    // equality is the normal in-sync signal and must not be read as drift.
+    makeInstall(root, 0, 0);
+    expect(detectStaleInstall(root).stale).toBe(false);
+  });
+
+  it('IS stale when the lockfile was rewritten after the install (a merge/checkout)', () => {
+    makeInstall(root, 0, 600_000);
+    const verdict = detectStaleInstall(root);
+    expect(verdict.stale).toBe(true);
+    expect(verdict.reason).toContain('newer than node_modules/.package-lock.json');
+  });
+
+  it('tolerates sub-second write ordering instead of reporting false drift', () => {
+    makeInstall(root, 0, 1_000);
+    expect(detectStaleInstall(root).stale).toBe(false);
+  });
+
+  it('reports no drift when there is no install marker at all (L1 handles "nothing installed")', () => {
+    fs.writeFileSync(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}', 'utf-8');
+    const verdict = detectStaleInstall(root);
+    expect(verdict.stale).toBe(false);
+    expect(verdict.markerMtime).toBeNull();
+  });
+
+  it('surfaces a stale install through readiness with an actionable next step', () => {
+    buildWorkspace(root);
+    makeInstall(root, 0, 600_000);
+    const report = checkReadiness({ worktreeRoot: root });
+    expect(report.ok).toBe(false);
+    expect(report.levels.l1.checks.find((c) => c.name === 'node_modules matches package-lock.json')?.ok).toBe(false);
+    expect(report.nextAction).toContain('STALE');
+    expect(report.nextAction).toContain('npm install');
   });
 });
 

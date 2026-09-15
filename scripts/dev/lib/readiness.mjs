@@ -113,6 +113,64 @@ function readJson(file) {
 }
 
 /**
+ * Detect an install that predates the current lockfile.
+ *
+ * WHY THIS EXISTS (observed, not hypothetical): a fresh worktree was installed,
+ * then `git merge origin/main` brought a dependency bump (js-yaml 4 → 5) in
+ * `package-lock.json`. `npm run build` still "worked" far enough to fail with
+ * `error TS2339: Property 'YAML11_SCHEMA' does not exist on type 'typeof
+ * import("js-yaml")'` — a confusing TYPE error for what was really a STALE
+ * ENVIRONMENT. `scripts/setup-worktree.mjs` skipped the install because
+ * `node_modules/` merely EXISTED, so "bootstrap ran" was mistaken for "the tree
+ * is trustworthy".
+ *
+ * The signal: npm rewrites both `package-lock.json` and
+ * `node_modules/.package-lock.json` on a successful install, so a lockfile that
+ * is NEWER than the installed marker (by more than the write-ordering margin)
+ * can only mean the lock changed without a re-install. That happens on every
+ * `git merge` / `git checkout` that touches the lock.
+ *
+ * Deliberately one-directional: the failure mode we accept is an occasional
+ * unnecessary `npm install`; what we must not accept is silently building
+ * against a dependency tree that does not match the lockfile.
+ *
+ * @returns {{stale: boolean, reason: string|null, lockMtime: number|null, markerMtime: number|null}}
+ */
+export const INSTALL_MARKER_MTIME_MARGIN_MS = 2000;
+
+export function detectStaleInstall(worktreeRoot) {
+  const lock = path.join(worktreeRoot, 'package-lock.json');
+  const marker = path.join(worktreeRoot, 'node_modules', '.package-lock.json');
+  const statOrNull = (file) => {
+    try {
+      return fs.statSync(file).mtimeMs;
+    } catch {
+      return null;
+    }
+  };
+  const lockMtime = statOrNull(lock);
+  const markerMtime = statOrNull(marker);
+  if (lockMtime === null) return { stale: false, reason: null, lockMtime, markerMtime };
+  if (markerMtime === null) {
+    // No install marker at all: either nothing is installed (L1's own
+    // "node_modules present" check already fails) or the install predates
+    // npm's marker convention. Not evidence of drift by itself.
+    return { stale: false, reason: null, lockMtime, markerMtime };
+  }
+  if (lockMtime > markerMtime + INSTALL_MARKER_MTIME_MARGIN_MS) {
+    return {
+      stale: true,
+      reason:
+        'package-lock.json is newer than node_modules/.package-lock.json — the lockfile changed after the last install ' +
+        '(a merge or checkout rewrote it). Installed dependency versions may not match the lockfile.',
+      lockMtime,
+      markerMtime,
+    };
+  }
+  return { stale: false, reason: null, lockMtime, markerMtime };
+}
+
+/**
  * Enumerate the workspace packages declared by the root `package.json`.
  * Only `packages/*` is supported in this repository; the glob is read rather
  * than assumed so a future layout change surfaces here instead of silently
@@ -227,6 +285,15 @@ export function checkL1Dependencies({ worktreeRoot, packages, req = defaultRequi
   const leakage = [];
   const nodeModules = path.join(worktreeRoot, 'node_modules');
   checks.push({ name: 'node_modules present', ok: fs.existsSync(nodeModules), detail: nodeModules });
+
+  // A present-but-stale install is the trap that makes `bootstrap ran` look like
+  // `the tree is trustworthy` (see detectStaleInstall).
+  const install = detectStaleInstall(worktreeRoot);
+  checks.push({
+    name: 'node_modules matches package-lock.json',
+    ok: !install.stale,
+    detail: install.stale ? install.reason : 'in sync',
+  });
 
   for (const pkg of packages) {
     const located = locateDependencyDir(pkg.name, req);
@@ -378,7 +445,11 @@ export function checkReadiness({ worktreeRoot, primaryPath = null, req } = {}) {
       'Delete this worktree\'s node_modules and run `npm run dev:worktree:bootstrap` — never share node_modules between worktrees (SPEC D5).';
   } else if (!l1.ok) {
     code = CODES.NOT_READY;
-    nextAction = 'Dependencies are missing or incomplete: npm run dev:worktree:bootstrap';
+    const installStale = l1.checks.some((c) => c.name === 'node_modules matches package-lock.json' && !c.ok);
+    nextAction = installStale
+      ? 'Dependencies are installed but STALE relative to package-lock.json: run `npm install` (or npm run dev:worktree:bootstrap). ' +
+        'A stale tree fails later as a confusing type/build error instead of here.'
+      : 'Dependencies are missing or incomplete: npm run dev:worktree:bootstrap';
   } else if (!l2.ok || !l3.ok) {
     code = CODES.NOT_READY;
     nextAction = 'Build artifacts are missing or stale: npm run dev:worktree:bootstrap (or npm run build)';
