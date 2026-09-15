@@ -315,6 +315,12 @@ export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v6'
 
 const MAX_PROMPT_PARAM_STRING_CHARS = 2_500;
 const PROMPT_PARAM_TRUNCATION_MARKER = '…[truncated-for-prompt]';
+// Live-workspace measurement: one case's ruleContext.history carried 100 raw
+// calls (45,380 chars) — the aggregate, not any single string, blows the 50k
+// prompt budget. The prompt projection keeps only the window immediately
+// preceding the labeled call; the persisted pack keeps the full history and
+// the runtime gate reconstructs its own context at evaluation time.
+const MAX_PROMPT_HISTORY_CALLS = 12;
 
 function boundPromptParamString(value: string): string {
   return value.length <= MAX_PROMPT_PARAM_STRING_CHARS
@@ -334,12 +340,26 @@ function boundPromptParams(params: Record<string, unknown>): Record<string, unkn
 }
 
 function boundCaseForPrompt(value: GoldenTraceCaseInput): GoldenTraceCaseInput {
+  const boundedContext = value.ruleContext !== undefined
+    ? {
+        ...value.ruleContext,
+        history: {
+          ...value.ruleContext.history,
+          truncated: value.ruleContext.history.truncated
+            || value.ruleContext.history.calls.length > MAX_PROMPT_HISTORY_CALLS,
+          calls: value.ruleContext.history.calls
+            .slice(-MAX_PROMPT_HISTORY_CALLS)
+            .map((call) => ({ ...call, paramsSummary: boundPromptParams(call.paramsSummary) })),
+        },
+      }
+    : undefined;
   return {
     ...value,
     params: boundPromptParams(value.params),
     ...(value.expectedProposedParams !== undefined
       ? { expectedProposedParams: boundPromptParams(value.expectedProposedParams) }
       : {}),
+    ...(boundedContext !== undefined ? { ruleContext: boundedContext } : {}),
   };
 }
 
