@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { checkReadiness, isInside, listWorkspacePackages } from '../dev/lib/readiness.mjs';
-import { verifyBuildStamp, writeBuildStamp } from '../dev/lib/build-state.mjs';
+import { verifyBuildStamp, writeBuildStamp, installAttestedWithSkip } from '../dev/lib/build-state.mjs';
 import { commitFile, git, initRepo, makeJunction, makeTempDir, removeFixture, runDevScript } from './dev-worktree-test-utils';
 
 let root: string;
@@ -59,6 +59,10 @@ const COVERED_DIRS = (worktree: string): string[] => [
  */
 async function buildWorkspace(worktree: string, { leakA = false, stamp = true } = {}): Promise<string | null> {
   await initRepo(worktree);
+  // node_modules and dist are gitignored exactly like the real repo: dist is
+  // the build OUTPUT (it survives a checkout untouched) and is NOT dirt —
+  // dirt counts tracked + untracked-but-not-ignored files (round-3 rule).
+  fs.writeFileSync(under(worktree, '.gitignore'), 'node_modules/\npackages/*/dist/\n', 'utf-8');
   writeJson(under(worktree, 'package.json'), {
     name: 'fixture-monorepo',
     private: true,
@@ -271,13 +275,50 @@ describe('build readiness stamp (content identity, not clocks)', () => {
     expect(verdict.mismatches).toContain('package-lock');
   });
 
-  it('refuses to mint a stamp over uncommitted build inputs', async () => {
+  it('refuses to mint a stamp over untracked build inputs (round-3: dirt includes untracked)', async () => {
     await buildWorkspace(root, { stamp: false });
+    // A brand-new, not-ignored source file: the recorded build never saw it.
     fs.writeFileSync(under(root, 'packages', 'a', 'src', 'loose.ts'), 'export const v = 1;\n', 'utf-8');
-    await git(root, 'add', '-A'); // tracked-dirty: staged modifications count
     const written = writeBuildStamp(root, { coveredDirs: COVERED_DIRS(root) });
     expect(written.ok).toBe(false);
     expect(written.error).toMatch(/dirty/);
+  });
+
+  it('an untracked source addition under covered inputs flips a READY tree to NOT_READY', async () => {
+    await buildWorkspace(root);
+    expect(stampVerdict(root).ok).toBe(true);
+    fs.writeFileSync(under(root, 'packages', 'b', 'src', 'addition.ts'), 'export const x = 1;\n', 'utf-8');
+    const verdict = stampVerdict(root);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.mismatches).toContain('dirty-build-inputs');
+    // gitignored build output must NOT count as dirt (dist is untracked on purpose).
+    fs.writeFileSync(under(root, 'packages', 'b', 'dist', 'extra.js'), 'x\n', 'utf-8');
+    fs.rmSync(under(root, 'packages', 'b', 'src', 'addition.ts'));
+    expect(stampVerdict(root).ok).toBe(true);
+  });
+});
+
+// setup-worktree must never mint a stamp claiming an install nobody observed.
+// The predicate is the exported rule (build-state.mjs is the stamp authority);
+// the CLI consults it before accepting --skip-install.
+describe('install attestation with --skip-install (round-3)', () => {
+  const stampedResult = { stamp: { packageLockDigest: 'abc' }, mismatches: [] as string[] };
+  const driftedResult = { stamp: { packageLockDigest: 'abc' }, mismatches: ['package-lock'] as string[] };
+
+  it('attests only when the marker exists AND a prior stamp proves the current lock', () => {
+    expect(installAttestedWithSkip({ markerPresent: true, stampResult: stampedResult })).toBe(true);
+  });
+
+  it('refuses: no install marker at all', () => {
+    expect(installAttestedWithSkip({ markerPresent: false, stampResult: stampedResult })).toBe(false);
+  });
+
+  it('refuses: no prior stamp — nothing proves what was installed', () => {
+    expect(installAttestedWithSkip({ markerPresent: true, stampResult: { stamp: null, mismatches: ['stamp'] } })).toBe(false);
+  });
+
+  it('refuses: lockfile drifted since the stamped install', () => {
+    expect(installAttestedWithSkip({ markerPresent: true, stampResult: driftedResult })).toBe(false);
   });
 });
 

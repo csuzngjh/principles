@@ -108,9 +108,13 @@ function scanClaims(commonDir) {
     }
     live.push({ token: meta.token, file, meta, order });
   }
-  // Filesystem creation order is the election key; the token is a stable
-  // tiebreak when two claims share a mtime tick (coarse FAT-style volumes).
-  live.sort((a, b) => (a.order - b.order) || (a.token < b.token ? -1 : a.token < b.token ? 1 : 0));
+  // Filesystem creation order is the election key; the token is a STRICT
+  // total-order tiebreak when two claims share a mtime tick (coarse
+  // FAT-style volumes or same-clock writes). A comparator that returned 0 for
+  // unequal tokens would let readdir order decide the winner — and two
+  // processes may legitimately see different readdir orders. Round-3 review:
+  // the tiebreak MUST be a total order.
+  live.sort((a, b) => (a.order - b.order) || (a.token === b.token ? 0 : a.token < b.token ? -1 : 1));
   return { present: true, live, malformed };
 }
 

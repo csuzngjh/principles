@@ -117,6 +117,33 @@ describe('removeResidueTree', () => {
     expect(fs.existsSync(residue)).toBe(false);
   });
 
+  // Round-3 review: the WALK had the same relative-target bug the pre-flight
+  // scan was fixed for — it probed the raw readlink value against the process
+  // cwd, so a relative link to a real external file reported
+  // targetExistedBefore=false (and would keep brokenTargets blind there).
+  it('reports a RELATIVE link target correctly when detaching (walk resolver)', () => {
+    const residue = path.join(root, 'residue-walk');
+    const precious = path.join(root, 'precious-outside.txt');
+    fs.writeFileSync(precious, 'outside\n', 'utf-8');
+    fs.mkdirSync(path.join(residue, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(residue, 'a.txt'), 'a\n', 'utf-8');
+    const link = path.join(residue, 'sub', 'rel-link');
+    const relTarget = path.relative(path.join(residue, 'sub'), precious);
+    try {
+      fs.symlinkSync(relTarget, link);
+    } catch {
+      return; // file symlinks need extra privilege on some Windows setups; CI (Linux) carries this
+    }
+    const result = removeResidueTree(residue);
+    expect(result.ok, result.error).toBe(true);
+    const hit = result.detachedLinks.find((l) => l.path === link);
+    expect(hit, 'the link was not detached at all').toBeDefined();
+    expect(hit?.targetExistedBefore).toBe(true); // the pre-fix bug: cwd-relative probe said false
+    expect(hit?.targetStillExists).toBe(true);
+    expect(result.brokenTargets).toEqual([]);
+    expect(fs.existsSync(precious)).toBe(true); // the external file survived
+  });
+
   it('JUNCTION SAFETY: detaches a nested link and leaves its target intact', () => {
     const residue = path.join(root, 'residue');
     const precious = path.join(root, 'precious');

@@ -178,6 +178,52 @@ describe('repo mutation mutex', () => {
     expect(fs.existsSync(older)).toBe(true);
   });
 
+  // Round-3 review: when two claims share one mtime tick, the winner must be
+  // decided by a STRICT TOTAL ORDER on the token — never by readdir order,
+  // which two processes may legitimately see differently.
+  it('equal-mtime claims elect the same winner in either creation order', () => {
+    const tokHi = 'f'.repeat(32); // lexicographically LATER
+    const tokLo = '1'.repeat(32); // lexicographically EARLIER
+    const tick = new Date(Date.now() - 30_000);
+
+    const arenaA = makeTempDir('pd-election-a-');
+    const arenaB = makeTempDir('pd-election-b-');
+    try {
+      const rec = (arena: string, token: string) => {
+        // Fixed fixture tokens, whitelist-checked before use as file names,
+        // every derived path bound-checked to its arena root.
+        if (!HEX32_RE.test(token)) throw new Error('fixture bug: non-hex32 token');
+        const dir = path.resolve(arena, MUTATION_LOCK_FILENAME);
+        const arenaBase = path.resolve(arena) + path.sep;
+        if (!dir.startsWith(arenaBase)) throw new Error('fixture bug: arena escaped');
+        fs.mkdirSync(dir, { recursive: true });
+        const fileName = 'owner-' + token + '.json';
+        const file = path.resolve(dir, fileName);
+        if (!file.startsWith(dir + path.sep)) throw new Error('fixture bug: record escaped arena');
+        fs.writeFileSync(file, JSON.stringify({ schema: MUTATION_LOCK_SCHEMA, token, operation: 'tie', pid: 0 }, null, 2), 'utf-8');
+        fs.utimesSync(file, tick, tick);
+        return file;
+      };
+      // Creation order differs between the two arenas; the readdir order may
+      // follow it. The winner must not.
+      rec(arenaA, tokHi);
+      rec(arenaA, tokLo);
+      rec(arenaB, tokLo);
+      rec(arenaB, tokHi);
+      const stateA = readMutationLock(arenaA);
+      const stateB = readMutationLock(arenaB);
+      expect(stateA.exists && stateA.valid).toBe(true);
+      expect(stateB.exists && stateB.valid).toBe(true);
+      if (stateA.valid && stateB.valid) {
+        expect(stateA.lock.token).toBe(stateB.lock.token);
+        expect(stateA.lock.token).toBe(tokLo); // the earlier token wins, deterministically
+      }
+    } finally {
+      removeFixture(arenaA);
+      removeFixture(arenaB);
+    }
+  });
+
   it('release is idempotent and frees the arena', () => {
     const lock = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'a' });
     expect(lock.ok).toBe(true);

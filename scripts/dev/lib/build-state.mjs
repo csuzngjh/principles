@@ -29,11 +29,13 @@
 // Any mismatch → NOT_READY ("run npm run build" / "run npm install").
 // A hand-touched artifact cannot fool it: mtime is not consulted at all.
 //
-// KNOWN LIMIT (deliberate, documented): untracked NEW source files are not
-// dirt (git status -uno), so a brand-new untracked input does not invalidate
-// the stamp. It also cannot have been compiled by the recorded build; the next
-// real change or `git add` forces a rebuild. Build outputs (dist/) are
-// gitignored and therefore invisible to the dirt check by design.
+// KNOWN SCOPE (round-3 review): dirt covers TRACKED *and* UNTRACKED (but not
+// gitignored) files under the build inputs — `git status --porcelain` without
+// -uno. An untracked-but-not-ignored file is a real addition the recorded
+// build never saw, so it flips readiness. Gitignored trees (node_modules/,
+// dist/, coverage/) are invisible here by design — dist is the build OUTPUT,
+// and node_modules freshness is proven by the lock digest, not by dirt.
+// The next real `git add` (or the file's effect on the build) re-covers it.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -85,13 +87,15 @@ export function computeBuildIdentity(root, { coveredDirs = [] } = {}) {
 }
 
 /**
- * Tracked modifications under the covered build inputs + the root manifests.
- * Empty string = clean; null = git could not answer (treated as NOT clean —
- * fail closed, a broken probe must never mint a READY).
+ * Tracked AND untracked (non-ignored) modifications under the covered build
+ * inputs + the root manifest. Empty string = clean; null = git could not
+ * answer (treated as NOT clean — fail closed, a broken probe must never mint
+ * a READY). Round-3: -uno was dropped, so a brand-new untracked source file
+ * — bytes the stamped build provably never compiled — invalidates the stamp.
  */
 function dirtyBuildInputs(root, coveredDirs) {
   const pathspecs = ['package.json', ...coveredDirs.map((d) => path.relative(root, d).replaceAll('\\', '/'))];
-  const r = spawnSync('git', ['-C', root, 'status', '--porcelain', '-uno', '--', ...pathspecs], { encoding: 'utf-8' });
+  const r = spawnSync('git', ['-C', root, 'status', '--porcelain', '--', ...pathspecs], { encoding: 'utf-8' });
   if (r.status !== 0) return null;
   return r.stdout.replace(/\r?\n$/, '');
 }
@@ -205,4 +209,21 @@ export function verifyBuildStamp(root, { coveredDirs = [] } = {}) {
 
 function short(sha) {
   return typeof sha === 'string' ? sha.slice(0, 9) : String(sha);
+}
+
+/**
+ * Round-3 review: a stamp also claims "the dependency tree matches THIS
+ * lockfile", and only an actually-verified `npm install` earns that claim.
+ * When `--skip-install` is used, the skip is attested ONLY if the existing
+ * chain of evidence still holds: npm's install marker is present AND a prior
+ * stamp recorded the EXACT current lock digest (a drifted or missing lock
+ * means dependencies changed without anyone verifying). Anything else must
+ * refuse to mint the stamp — a build that merely "passed" against a stale
+ * node_modules is exactly the js-yaml TS2339 failure class this module
+ * exists to prevent from re-appearing under a new name.
+ */
+export function installAttestedWithSkip({ markerPresent, stampResult }) {
+  if (!markerPresent) return false;
+  if (!stampResult || !stampResult.stamp) return false;
+  return !stampResult.mismatches.includes('package-lock');
 }

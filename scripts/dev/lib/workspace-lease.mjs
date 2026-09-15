@@ -178,6 +178,23 @@ export function readLease(root, { readRetryDelayFn = () => sleepSync(LEASE_READ_
   if ('claimId' in parsed && (typeof parsed.claimId !== 'string' || parsed.claimId.length === 0)) {
     return { exists: true, valid: false, error: "field 'claimId' must be a non-empty string" };
   }
+  // Round-3 review: the writer block is a closed-set claim, so it validates
+  // as one. A `writer.label` outside WRITER_LABELS is either tampering or a
+  // second owner namespace sneaking in through a hand-written file — exactly
+  // what the closed set exists to prevent. Malformed writer data makes the
+  // whole lease invalid (fail closed); it must not merely be ignored.
+  if ('writer' in parsed) {
+    const w = parsed.writer;
+    if (typeof w !== 'object' || w === null || Array.isArray(w)) {
+      return { exists: true, valid: false, error: "field 'writer' must be an object" };
+    }
+    if (typeof w.label !== 'string' || !WRITER_LABELS.includes(w.label)) {
+      return { exists: true, valid: false, error: "field 'writer.label' must be one of: " + WRITER_LABELS.join(', ') };
+    }
+    if (typeof w.task !== 'string' || w.task.length === 0) {
+      return { exists: true, valid: false, error: "field 'writer.task' must be a non-empty string" };
+    }
+  }
   return { exists: true, valid: true, lease: parsed };
 }
 

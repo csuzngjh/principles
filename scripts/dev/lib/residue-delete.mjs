@@ -30,6 +30,19 @@ export const DEFAULT_PROGRESS_INTERVAL_MS = 10_000;
 export const DEFAULT_PROGRESS_EVERY_FILES = 5_000;
 
 /**
+ * Resolve a link's raw readlink target the way the OS does: a relative target
+ * is anchored at the LINK'S OWN directory, never at the process cwd. One
+ * resolver for both the pre-flight scan and the deletion walk (round-3
+ * review: fixing only one of the two call sites left the walk mis-reporting
+ * existence — and mis-classifying brokenTargets — for every relative link).
+ * @returns {string|null} absolute candidate, or null when there is no target.
+ */
+export function resolveLinkTarget(linkPath, target) {
+  if (typeof target !== 'string' || target.length === 0) return null;
+  return path.isAbsolute(target) ? target : path.resolve(path.dirname(linkPath), target);
+}
+
+/**
  * Pre-flight: enumerate the tree without following reparse points.
  * Returns the counts (for progress) and every link found (for the safety
  * report), so the operator sees what will be detached BEFORE anything is.
@@ -56,19 +69,16 @@ export function scanReparsePoints(root) {
       // which would traverse into the target.
       if (entry.isSymbolicLink()) {
       // PRI-796 review: readlink returns RELATIVE targets verbatim — resolving
-      // them against the process cwd reports existence wrongly. Node resolves a
-      // link's target against the link's own directory; do the same.
+      // them against the process cwd reports existence wrongly. The shared
+      // resolveLinkTarget anchors them at the link's own directory.
       let target = null;
-      let resolvedTarget = null;
       try {
         target = fs.readlinkSync(full);
-        resolvedTarget = target === null ? null
-          : (path.isAbsolute(target) ? target : path.resolve(path.dirname(full), target));
       } catch {
         target = null;
-        resolvedTarget = null;
       }
-      links.push({ path: full, target, targetExists: resolvedTarget ? fs.existsSync(resolvedTarget) : false });
+      const resolvedTarget = resolveLinkTarget(full, target);
+      links.push({ path: full, target, targetExists: resolvedTarget !== null && fs.existsSync(resolvedTarget) });
       continue;
       }
       if (entry.isDirectory()) {
@@ -173,10 +183,15 @@ export function removeResidueTree(root, opts = {}) {
         } catch {
           target = null;
         }
-        const existedBefore = target ? fs.existsSync(target) : null;
+        // Round-3 review: the existence probe must go through the SAME
+        // link-directory resolver as the pre-flight scan — a relative target
+        // checked against the process cwd wrongly reported "did not exist",
+        // silently downgrading the very anomaly detection this walk performs.
+        const resolvedTarget = resolveLinkTarget(full, target);
+        const existedBefore = resolvedTarget !== null ? fs.existsSync(resolvedTarget) : null;
         fs.unlinkSync(full);
         removedLinks += 1;
-        const stillThere = target ? fs.existsSync(target) : null;
+        const stillThere = resolvedTarget !== null ? fs.existsSync(resolvedTarget) : null;
         detachedLinks.push({ path: full, target, targetExistedBefore: existedBefore, targetStillExists: stillThere });
         if (target && existedBefore === true && stillThere === false) {
           // The link was followed, or the external target was destroyed
