@@ -955,9 +955,39 @@ function installTargetDependencies() {
 }
 
 /**
- * Verify injected workspace packages have their transitive dependencies installed.
- * npm install --omit=dev in the target doesn't resolve deps of manually-copied packages,
- * so transitive deps like @earendil-works/pi-agent-core may be missing after production install.
+ * Resolve a package the way Node does: walk up from the requiring package's
+ * directory checking <ancestor>/node_modules/<dep> until INSTALL_DIR.
+ * Returns the resolved directory or null when the dep is not installed
+ * anywhere on the resolution path.
+ */
+function resolveInstalledDepDir(depName, fromDir) {
+    let dir = fromDir;
+    for (;;) {
+        const candidate = join(dir, 'node_modules', depName);
+        if (existsSync(candidate)) return candidate;
+        if (dir === INSTALL_DIR) return null;
+        const parent = dirname(dir);
+        if (parent === dir) return null;
+        dir = parent;
+    }
+}
+
+/**
+ * Verify injected workspace packages have their transitive dependencies
+ * installed (PRI-801).
+ *
+ * npm install --omit=dev in the target doesn't resolve deps of manually-copied
+ * packages. The previous check only looked at @principles/core's DIRECT deps
+ * (and only at INSTALL_DIR top level), so a SECOND-level addition slipped
+ * through: @earendil-works/pi-agent-core@0.85 added @earendil-works/chord,
+ * the pd shim smoke gate then failed on ERR_MODULE_NOT_FOUND deep inside the
+ * copied tree and left the installed tree half-updated.
+ *
+ * Now the check walks the transitive closure of the injected package subtree,
+ * resolving each dependency the way Node does (upward node_modules walk from
+ * the requiring package), and installs anything missing at INSTALL_DIR top
+ * level with the version range declared by its requirer — Node's upward
+ * resolution then finds it from every nested copy.
  */
 function verifyInjectedWorkspaceDeps() {
     const corePkgDir = join(INSTALL_DIR, 'node_modules', '@principles', 'core');
@@ -974,19 +1004,39 @@ function verifyInjectedWorkspaceDeps() {
         process.exit(1);
     }
 
-    const deps = corePkg.dependencies || {};
-    const missing = [];
-    for (const [dep, version] of Object.entries(deps)) {
-        if (!existsSync(join(INSTALL_DIR, 'node_modules', dep))) {
-            missing.push(`${dep}@${version}`);
+    // Bounded BFS over the injected subtree's package manifests.
+    const missing = new Map(); // depName -> version range (first requirer wins)
+    const visited = new Set();
+    const queue = [corePkgDir];
+    const MAX_PACKAGES = 200; // runaway guard for the closure walk
+    let walked = 0;
+    while (queue.length > 0 && walked < MAX_PACKAGES) {
+        const pkgDir = queue.shift();
+        if (visited.has(pkgDir)) continue;
+        visited.add(pkgDir);
+        walked++;
+        const pkgJsonPath = join(pkgDir, 'package.json');
+        if (!existsSync(pkgJsonPath)) continue;
+        let pkg;
+        try {
+            pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+        } catch { continue; }
+        for (const [dep, range] of Object.entries(pkg.dependencies || {})) {
+            const depDir = resolveInstalledDepDir(dep, pkgDir);
+            if (!depDir) {
+                if (!missing.has(dep)) missing.set(dep, range);
+                continue;
+            }
+            queue.push(depDir);
         }
     }
 
-    if (missing.length === 0) return;
+    if (missing.size === 0) return;
 
-    console.log(`  ⚠️  ${missing.length} transitive dependenc${missing.length === 1 ? 'y' : 'ies'} of @principles/core missing, installing...`);
+    const specs = [...missing].map(([name, range]) => `${name}@${range}`);
+    console.log(`  ⚠️  ${missing.size} transitive dependenc${missing.size === 1 ? 'y' : 'ies'} missing from the installed tree, installing...`);
     try {
-        execSync(`npm install ${missing.join(' ')} --no-audit --no-fund --prefer-offline`, {
+        execSync(`npm install ${specs.join(' ')} --no-audit --no-fund --prefer-offline`, {
             cwd: INSTALL_DIR,
             stdio: 'pipe'
         });
