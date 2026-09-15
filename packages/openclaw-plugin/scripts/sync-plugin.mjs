@@ -20,6 +20,7 @@
 import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, realpathSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, dirname } from 'path';
+import { scanMissingTransitiveDeps, MAX_TRAVERSAL_PACKAGES } from './lib/transitive-deps.mjs';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 
@@ -893,56 +894,68 @@ function copyDir(src, dest) {
 
 /**
  * Inject local workspace packages (monorepo) into node_modules after npm install.
- * @principles/core from the local monorepo is authoritative because the
- * npm-published package line lacks exports required by the current pd-cli.
+ * @principles/core and @principles/host-runtime from the local monorepo are
+ * authoritative: the npm-published lines lack the exports/content the current
+ * pd-cli and plugin runtime import (PRI-801 — pd-cli/dist/commands/health.js
+ * imports @principles/host-runtime, which nothing else in the installed layout
+ * linked, so the local install produced a tree that failed the pd shim smoke).
  */
 function injectLocalWorkspacePackages() {
-    const monorepoModules = join(SOURCE_DIR, '..', '..', 'node_modules', '@principles', 'core');
-    const targetModules = join(INSTALL_DIR, 'node_modules', '@principles', 'core');
+    const monorepoRoot = join(SOURCE_DIR, '..', '..', 'node_modules', '@principles');
+    // Each package is independent; list = the @principles library packages the
+    // installed tree must serve (pd-cli → core/host-runtime/codex-adapter;
+    // host-runtime → install-layout). pd-cli/pd-console/pd-companion/website
+    // are installed by their own steps, not as node_modules libs. Missing
+    // entries surface at the pd shim smoke gate (PRI-801: codex-adapter is the
+    // same "锁清单漏 adapter" class PRI-711 fixed for the release locks).
+    for (const pkgName of ['core', 'host-runtime', 'install-layout', 'codex-adapter']) {
+        const monorepoModules = join(monorepoRoot, pkgName);
+        const targetModules = join(INSTALL_DIR, 'node_modules', '@principles', pkgName);
 
-    if (!existsSync(monorepoModules)) {
-        // Not in monorepo context (e.g., npm pack / CI tarball) — skip
-        return;
-    }
-
-    console.log('  📦 Injecting local workspace packages (@principles/core)...');
-
-    // PRI-801: resolve through reparse points. On the live layout
-    // node_modules/@principles/core is a directory JUNCTION into the plugin's
-    // own core/ payload. rmSync/copyDir THROUGH a junction mutates the real
-    // target unpredictably (partial deletes behind locked files, content
-    // landing in the wrong tree — this is how the live pd CLI ended up with a
-    // core/ missing its package.json/dist). Operate on the real directory
-    // behind the link and leave the junction itself intact.
-    let writeTarget = targetModules;
-    try {
-        if (lstatSync(targetModules).isSymbolicLink()) {
-            writeTarget = realpathSync(targetModules);
+        if (!existsSync(monorepoModules)) {
+            // Not in monorepo context (e.g., npm pack / CI tarball) — skip
+            continue;
         }
-    } catch { /* target absent — fresh directory below */ }
 
-    if (existsSync(writeTarget)) {
+        console.log(`  📦 Injecting local workspace packages (@principles/${pkgName})...`);
+
+        // PRI-801: resolve through reparse points. On the live layout
+        // node_modules/@principles/core is a directory JUNCTION into the
+        // plugin's own core/ payload. rmSync/copyDir THROUGH a junction
+        // mutates the real target unpredictably (partial deletes behind locked
+        // files, content landing in the wrong tree — this is how the live pd
+        // CLI ended up with a core/ missing its package.json/dist). Operate on
+        // the real directory behind the link and leave the junction intact.
+        let writeTarget = targetModules;
         try {
-            rmSync(writeTarget, { recursive: true, force: true });
-        } catch (rmErr) {
-            console.error(`  ❌ Failed to clear ${writeTarget} before injection: ${rmErr.message}`);
-            console.error('     A running gateway may hold files in the installed tree — stop it (or use the Companion update flow) and retry.');
+            if (lstatSync(targetModules).isSymbolicLink()) {
+                writeTarget = realpathSync(targetModules);
+            }
+        } catch { /* target absent — fresh directory below */ }
+
+        if (existsSync(writeTarget)) {
+            try {
+                rmSync(writeTarget, { recursive: true, force: true });
+            } catch (rmErr) {
+                console.error(`  ❌ Failed to clear ${writeTarget} before injection: ${rmErr.message}`);
+                console.error('     A running gateway may hold files in the installed tree — stop it (or use the Companion update flow) and retry.');
+                process.exit(1);
+            }
+        }
+        mkdirSync(writeTarget, { recursive: true });
+
+        // Use copyDir (Node-based, no cp -rL semantics trap) for reliable
+        // cross-platform overwrite. cpSync creates symlinks on Windows for
+        // symlinked dirs — copyDir dereferences by reading file contents.
+        try {
+            copyDir(monorepoModules, writeTarget);
+            console.log(`    ✅ @principles/${pkgName} local build injected`);
+        } catch (copyErr) {
+            console.error(`  ❌ Failed to inject @principles/${pkgName} from monorepo: ${copyErr.message}`);
+            // Fail loud: leaving the npm version in place is what produced a
+            // half-updated tree that only exploded at the pd shim smoke gate.
             process.exit(1);
         }
-    }
-    mkdirSync(writeTarget, { recursive: true });
-
-    // Use copyDir (Node-based, no cp -rL semantics trap) for reliable
-    // cross-platform overwrite. cpSync creates symlinks on Windows for
-    // symlinked dirs — copyDir dereferences by reading file contents.
-    try {
-        copyDir(monorepoModules, writeTarget);
-        console.log('    ✅ @principles/core local build injected');
-    } catch (copyErr) {
-        console.error('  ❌ Failed to inject @principles/core from monorepo: ' + copyErr.message);
-        // Fail loud: leaving the npm version in place is what produced a
-        // half-updated tree that only exploded at the pd shim smoke gate.
-        process.exit(1);
     }
 }
 
@@ -973,86 +986,36 @@ function installTargetDependencies() {
 }
 
 /**
- * Resolve a package the way Node does: walk up from the requiring package's
- * directory checking <ancestor>/node_modules/<dep> until INSTALL_DIR.
- * Returns the resolved directory or null when the dep is not installed
- * anywhere on the resolution path.
- */
-function resolveInstalledDepDir(depName, fromDir) {
-    let dir = fromDir;
-    for (;;) {
-        const candidate = join(dir, 'node_modules', depName);
-        if (existsSync(candidate)) return candidate;
-        if (dir === INSTALL_DIR) return null;
-        const parent = dirname(dir);
-        if (parent === dir) return null;
-        dir = parent;
-    }
-}
-
-/**
  * Verify injected workspace packages have their transitive dependencies
- * installed (PRI-801).
+ * installed (PRI-801). The closure semantics live in
+ * scripts/lib/transitive-deps.mjs (committed regression tests cover the
+ * missing-dep collection, traversal-cap and malformed-manifest paths).
  *
- * npm install --omit=dev in the target doesn't resolve deps of manually-copied
- * packages. The previous check only looked at @principles/core's DIRECT deps
- * (and only at INSTALL_DIR top level), so a SECOND-level addition slipped
- * through: @earendil-works/pi-agent-core@0.85 added @earendil-works/chord,
- * the pd shim smoke gate then failed on ERR_MODULE_NOT_FOUND deep inside the
- * copied tree and left the installed tree half-updated.
- *
- * Now the check walks the transitive closure of the injected package subtree,
- * resolving each dependency the way Node does (upward node_modules walk from
- * the requiring package), and installs anything missing at INSTALL_DIR top
- * level with the version range declared by its requirer — Node's upward
- * resolution then finds it from every nested copy.
+ * Fail-loud contract: traversal-cap exhaustion or an unparseable manifest
+ * aborts the install — silently passing an incompletely verified tree is
+ * exactly the half-updated-live failure this verifier exists to prevent.
  */
 function verifyInjectedWorkspaceDeps() {
     const corePkgDir = join(INSTALL_DIR, 'node_modules', '@principles', 'core');
     if (!existsSync(corePkgDir)) return;
 
-    const corePkgPath = join(corePkgDir, 'package.json');
-    if (!existsSync(corePkgPath)) return;
+    const scan = scanMissingTransitiveDeps({ entryPkgDir: corePkgDir, installDir: INSTALL_DIR });
 
-    let corePkg;
-    try {
-        corePkg = JSON.parse(readFileSync(corePkgPath, 'utf-8'));
-    } catch (error) {
-        console.error(`  ❌ Failed to parse @principles/core/package.json: ${error.message}`);
+    if (scan.malformed.length > 0) {
+        console.error(`  ❌ ${scan.malformed.length} package manifest(s) in the installed tree are unparseable — refusing to pass verification on an unscannable subtree (PRI-801):`);
+        for (const dir of scan.malformed) console.error(`     ${dir}`);
+        process.exit(1);
+    }
+    if (scan.incomplete) {
+        console.error(`  ❌ Transitive scan hit the ${MAX_TRAVERSAL_PACKAGES}-package traversal cap with packages left unvisited — refusing to pass an incompletely verified tree (PRI-801).`);
+        console.error('     Raise the cap deliberately (scripts/lib/transitive-deps.mjs) if the tree genuinely outgrew it.');
         process.exit(1);
     }
 
-    // Bounded BFS over the injected subtree's package manifests.
-    const missing = new Map(); // depName -> version range (first requirer wins)
-    const visited = new Set();
-    const queue = [corePkgDir];
-    const MAX_PACKAGES = 200; // runaway guard for the closure walk
-    let walked = 0;
-    while (queue.length > 0 && walked < MAX_PACKAGES) {
-        const pkgDir = queue.shift();
-        if (visited.has(pkgDir)) continue;
-        visited.add(pkgDir);
-        walked++;
-        const pkgJsonPath = join(pkgDir, 'package.json');
-        if (!existsSync(pkgJsonPath)) continue;
-        let pkg;
-        try {
-            pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
-        } catch { continue; }
-        for (const [dep, range] of Object.entries(pkg.dependencies || {})) {
-            const depDir = resolveInstalledDepDir(dep, pkgDir);
-            if (!depDir) {
-                if (!missing.has(dep)) missing.set(dep, range);
-                continue;
-            }
-            queue.push(depDir);
-        }
-    }
+    if (scan.missing.size === 0) return;
 
-    if (missing.size === 0) return;
-
-    const specs = [...missing].map(([name, range]) => `${name}@${range}`);
-    console.log(`  ⚠️  ${missing.size} transitive dependenc${missing.size === 1 ? 'y' : 'ies'} missing from the installed tree, installing...`);
+    const specs = [...scan.missing].map(([name, range]) => `${name}@${range}`);
+    console.log(`  ⚠️  ${scan.missing.size} transitive dependenc${scan.missing.size === 1 ? 'y' : 'ies'} missing from the installed tree, installing...`);
     try {
         // --legacy-peer-deps: the installed tree carries devDependencies from
         // the copied plugin package.json whose peer ranges (e.g. typescript)
