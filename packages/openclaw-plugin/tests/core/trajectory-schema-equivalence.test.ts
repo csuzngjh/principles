@@ -3,9 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import Database from 'better-sqlite3';
-
-import { TrajectoryDatabase, TrajectoryRegistry } from '../../src/core/trajectory.js';
 import { TRAJECTORY_TABLES } from '@principles/core/runtime-v2';
+import { TrajectoryRegistry } from '../../src/core/trajectory.js';
 
 const tempDirs: string[] = [];
 
