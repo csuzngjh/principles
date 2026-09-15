@@ -10,7 +10,15 @@ export interface RolloutReviewerReview {
 }
 
 export interface RolloutReviewerSourceTrace {
-  readonly evaluatorArtifactId: string;
+  /**
+   * Code-chain reviews only (PRI-720): the reviewed evaluator artifact.
+   * Optional at the schema/contract level — which trace id is REQUIRED is
+   * enforced per review mode by DefaultRolloutReviewerValidator (code_chain
+   * ⇔ evaluatorArtifactId, principle_semantic ⇔ scribeArtifactId), so the
+   * real LLM output path (tool-call/JSON-mode validation against the
+   * registered `rollout-reviewer-output-v1` schema) accepts both modes.
+   */
+  readonly evaluatorArtifactId?: string;
   readonly artificerArtifactId?: string;
   readonly scribeArtifactId?: string;
   readonly philosopherArtifactId?: string;
@@ -19,11 +27,28 @@ export interface RolloutReviewerSourceTrace {
 
 export interface RolloutReviewerOutputV1 {
   readonly taskId: string;
-  readonly sourceEvaluatorArtifactId: string;
+  /** Code-chain reviews: the reviewed evaluator artifact (validator-enforced). */
+  readonly sourceEvaluatorArtifactId?: string;
+  /**
+   * PRI-720 principle semantic mode: the reviewed source is the SCRIBE
+   * principle artifact. Required (and validated against the runner-owned
+   * authority) when the review runs in principle semantic mode; absent on
+   * code-chain reviews.
+   */
+  readonly sourceScribeArtifactId?: string;
   readonly review: RolloutReviewerReview;
   readonly sourceTrace: RolloutReviewerSourceTrace;
   readonly risks: readonly string[];
   readonly generatedAt: string;
+}
+
+/** PRI-720: which contract the rollout review runs under. */
+export type RolloutReviewMode = 'principle_semantic' | 'code_chain';
+
+/** Reads one field off an untrusted record without `as` casts (rc-1/rc-2). */
+function readTraceField(source: unknown, field: string): unknown {
+  if (typeof source !== 'object' || source === null) return undefined;
+  return Reflect.get(source, field);
 }
 
 export const ROLLOUT_REVIEWER_DECISIONS = ['approve_rollout', 'needs_revision', 'reject'] as const;
@@ -42,7 +67,13 @@ export const RolloutReviewerReviewSchema = Type.Object({
 });
 
 export const RolloutReviewerSourceTraceSchema = Type.Object({
-  evaluatorArtifactId: Type.String({ minLength: 1 }),
+  // PRI-720 P1 fix: optional here — the mode-aware DefaultRolloutReviewerValidator
+  // is the single authority for which trace id is required (evaluatorArtifactId
+  // on code_chain, scribeArtifactId on principle_semantic). A required entry in
+  // this schema made the registered `rollout-reviewer-output-v1` structured
+  // output gate reject every valid principle-semantic LLM output before the
+  // runner validator ever ran.
+  evaluatorArtifactId: Type.Optional(Type.String({ minLength: 1 })),
   artificerArtifactId: Type.Optional(Type.String()),
   scribeArtifactId: Type.Optional(Type.String()),
   philosopherArtifactId: Type.Optional(Type.String()),
@@ -51,7 +82,12 @@ export const RolloutReviewerSourceTraceSchema = Type.Object({
 
 export const RolloutReviewerOutputV1Schema = Type.Object({
   taskId: Type.String({ minLength: 1 }),
-  sourceEvaluatorArtifactId: Type.String({ minLength: 1 }),
+  // PRI-720: per-mode presence is enforced by DefaultRolloutReviewerValidator
+  // (code_chain requires sourceEvaluatorArtifactId, principle_semantic requires
+  // sourceScribeArtifactId) — the schema keeps both optional so one output
+  // contract serves both review modes.
+  sourceEvaluatorArtifactId: Type.Optional(Type.String({ minLength: 1 })),
+  sourceScribeArtifactId: Type.Optional(Type.String({ minLength: 1 })),
   review: RolloutReviewerReviewSchema,
   sourceTrace: RolloutReviewerSourceTraceSchema,
   risks: Type.Array(Type.String()),
@@ -66,13 +102,28 @@ export interface RolloutReviewerValidationResult {
   readonly errorCategory?: string;
 }
 
+export interface RolloutReviewerValidatorOptions {
+  /** Runner-owned source artifact id the output must echo exactly (rc-6). */
+  expectedSourceArtifactId?: string;
+  /** PRI-720: review contract mode; defaults to the legacy code_chain. */
+  reviewMode?: RolloutReviewMode;
+}
+
 export interface RolloutReviewerValidator {
-  validate(output: RolloutReviewerOutputV1, taskId: string, expectedSourceEvaluatorArtifactId?: string): Promise<RolloutReviewerValidationResult>;
+  validate(
+    output: RolloutReviewerOutputV1,
+    taskId: string,
+    options?: RolloutReviewerValidatorOptions,
+  ): Promise<RolloutReviewerValidationResult>;
 }
 
 export class DefaultRolloutReviewerValidator implements RolloutReviewerValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async validate(output: RolloutReviewerOutputV1, taskId: string, expectedSourceEvaluatorArtifactId?: string): Promise<RolloutReviewerValidationResult> {
+  async validate(
+    output: RolloutReviewerOutputV1,
+    taskId: string,
+    options?: RolloutReviewerValidatorOptions,
+  ): Promise<RolloutReviewerValidationResult> {
     const errors: string[] = [];
 
     if (typeof output !== 'object' || output === null) {
@@ -83,10 +134,22 @@ export class DefaultRolloutReviewerValidator implements RolloutReviewerValidator
       errors.push(`taskId mismatch: expected ${taskId}, got ${String(output.taskId)}`);
     }
 
-    if (typeof output.sourceEvaluatorArtifactId !== 'string' || output.sourceEvaluatorArtifactId.trim() === '') {
-      errors.push('sourceEvaluatorArtifactId must be non-empty string');
-    } else if (expectedSourceEvaluatorArtifactId && output.sourceEvaluatorArtifactId !== expectedSourceEvaluatorArtifactId) {
-      errors.push(`sourceEvaluatorArtifactId mismatch: expected ${expectedSourceEvaluatorArtifactId}, got ${output.sourceEvaluatorArtifactId}`);
+    const expectedSourceArtifactId = options?.expectedSourceArtifactId;
+    const reviewMode = options?.reviewMode ?? 'code_chain';
+
+    // PRI-720: the lineage field under review depends on the review mode —
+    // code_chain reviews the evaluator artifact; principle_semantic reviews
+    // the exact SCRIBE principle artifact (reviewed = validated = approved =
+    // activated identity).
+    const sourceField = reviewMode === 'principle_semantic' ? 'sourceScribeArtifactId' : 'sourceEvaluatorArtifactId';
+    const traceField = reviewMode === 'principle_semantic' ? 'scribeArtifactId' : 'evaluatorArtifactId';
+    const sourceValue = reviewMode === 'principle_semantic' ? output.sourceScribeArtifactId : output.sourceEvaluatorArtifactId;
+    const traceValue = readTraceField(output.sourceTrace, traceField);
+
+    if (typeof sourceValue !== 'string' || sourceValue.trim() === '') {
+      errors.push(`${sourceField} must be non-empty string (${reviewMode} review)`);
+    } else if (expectedSourceArtifactId && sourceValue !== expectedSourceArtifactId) {
+      errors.push(`${sourceField} mismatch: expected ${expectedSourceArtifactId}, got ${sourceValue}`);
     }
 
     if (typeof output.review !== 'object' || output.review === null) {
@@ -111,10 +174,21 @@ export class DefaultRolloutReviewerValidator implements RolloutReviewerValidator
       errors.push('sourceTrace must be an object');
     } else {
       const st = output.sourceTrace as unknown as Record<string, unknown>;
-      if (typeof st.evaluatorArtifactId !== 'string' || (st.evaluatorArtifactId).trim() === '') {
-        errors.push('sourceTrace.evaluatorArtifactId must be non-empty string');
-      } else if (expectedSourceEvaluatorArtifactId && st.evaluatorArtifactId !== expectedSourceEvaluatorArtifactId) {
-        errors.push(`sourceTrace.evaluatorArtifactId mismatch: expected ${expectedSourceEvaluatorArtifactId}, got ${st.evaluatorArtifactId}`);
+      if (reviewMode === 'code_chain') {
+        if (typeof st.evaluatorArtifactId !== 'string' || (st.evaluatorArtifactId).trim() === '') {
+          errors.push('sourceTrace.evaluatorArtifactId must be non-empty string');
+        } else if (expectedSourceArtifactId && st.evaluatorArtifactId !== expectedSourceArtifactId) {
+          errors.push(`sourceTrace.evaluatorArtifactId mismatch: expected ${expectedSourceArtifactId}, got ${st.evaluatorArtifactId}`);
+        }
+      } else {
+        if (typeof st.scribeArtifactId !== 'string' || (st.scribeArtifactId).trim() === '') {
+          errors.push('sourceTrace.scribeArtifactId must be non-empty string (principle semantic review)');
+        } else if (expectedSourceArtifactId && st.scribeArtifactId !== expectedSourceArtifactId) {
+          errors.push(`sourceTrace.scribeArtifactId mismatch: expected ${expectedSourceArtifactId}, got ${st.scribeArtifactId}`);
+        }
+        if (st.evaluatorArtifactId !== undefined && typeof st.evaluatorArtifactId !== 'string') {
+          errors.push('sourceTrace.evaluatorArtifactId must be string if present');
+        }
       }
       if (st.artificerArtifactId !== undefined && typeof st.artificerArtifactId !== 'string') {
         errors.push('sourceTrace.artificerArtifactId must be string if present');
@@ -136,11 +210,12 @@ export class DefaultRolloutReviewerValidator implements RolloutReviewerValidator
       errors.push('risks must be an array of strings');
     }
 
-    if (typeof output.sourceEvaluatorArtifactId === 'string' && output.sourceEvaluatorArtifactId.trim() !== ''
-      && typeof output.sourceTrace === 'object' && output.sourceTrace !== null
-      && typeof (output.sourceTrace as unknown as Record<string, unknown>).evaluatorArtifactId === 'string'
-      && output.sourceEvaluatorArtifactId !== (output.sourceTrace as unknown as Record<string, unknown>).evaluatorArtifactId) {
-      errors.push('sourceEvaluatorArtifactId and sourceTrace.evaluatorArtifactId must match');
+    if (typeof sourceValue === 'string' && sourceValue.trim() !== '' && traceValue !== undefined) {
+      if (typeof traceValue !== 'string' || traceValue.trim() === '') {
+        errors.push(`sourceTrace.${traceField} must be non-empty string when present`);
+      } else if (sourceValue !== traceValue) {
+        errors.push(`${sourceField} and sourceTrace.${traceField} must match`);
+      }
     }
 
     if (typeof output.generatedAt !== 'string' || output.generatedAt.trim() === '') {

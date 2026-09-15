@@ -49,7 +49,7 @@ import {
 } from './owner-review.js';
 import { EvaluatorPromptBuilder, deriveRequirementLedger, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
 import type { ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
-import { reconcileLineageEcho, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
+import { reconcileLineageEcho, type InternalizationChannel, type PipelineTopologyMode, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -369,6 +369,8 @@ export interface SeedArtificerRepairParams {
   readonly inheritedDependencyTaskIds: readonly string[];
   /** Channel inherited from the original artificer task. */
   readonly inheritedChannel: InternalizationChannel;
+  /** PRI-720: topology mode inherited from the original artificer task (full_chain override). */
+  readonly inheritedPipelineMode?: PipelineTopologyMode;
   /** Timeout inherited from the original artificer task. */
   readonly inheritedTimeoutMs: number;
   /** Input artifact refs inherited from the original artificer task. */
@@ -2360,6 +2362,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // point to the artificer, not the scribe).
     let inheritedDeps: string[] = [];
     let inheritedChannel: InternalizationChannel = 'prompt';
+    let inheritedPipelineMode: PipelineTopologyMode | undefined;
     let inheritedTimeoutMs = 300_000;
     let inheritedInputArtifactRefs: ArtifactRef[] = [];
     for (const depId of evaluatorDeps) {
@@ -2370,6 +2373,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       if (!piArtificer) continue;
       inheritedDeps = piArtificer.dependencyTaskIds;
       inheritedChannel = piArtificer.channel;
+      inheritedPipelineMode = piArtificer.pipelineMode;
       inheritedTimeoutMs = piArtificer.timeoutMs;
       inheritedInputArtifactRefs = piArtificer.inputArtifactRefs;
       break;
@@ -2394,6 +2398,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         repairPayload,
         inheritedDependencyTaskIds: inheritedDeps,
         inheritedChannel,
+        inheritedPipelineMode,
         inheritedTimeoutMs,
         inheritedInputArtifactRefs,
       });

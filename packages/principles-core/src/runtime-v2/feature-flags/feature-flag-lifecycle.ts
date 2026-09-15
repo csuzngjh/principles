@@ -205,6 +205,14 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Layer 0+1+2 validated together as the progressive-disclosure design (§6, §8)',
     retirementCriteria: 'Progressive disclosure design descoped',
   },
+  prompt_full_pipeline: {
+    decision: 'KEEP_QUIET',
+    consumers: ['principles-core intake-to-internalization-bridge seeding (pipelineMode)', 'host-runtime governance-signal-admission', 'openclaw-plugin hooks/pain', 'pd-console settings toggle (PATCH /api/v1/config/features)'],
+    evidence: 'PRI-720 Owner directive 2026-09-15: channel-aware DAG is the default topology (prompt/defer skip the RuleCode sub-chain); this flag is the Owner-required escape hatch forcing newly seeded prompt chains through the full legacy pipeline for test scenarios and explicit full-pipeline runs. Default-off keeps standard topology; per-chain seed-time application means toggling never reinterprets in-flight chains.',
+    decided: '2026-09-15',
+    graduationCriteria: 'Not a graduation candidate — it is a permanent Owner control surface (like a rollback lever), not an unfinished feature; stays quiet by design',
+    retirementCriteria: 'Only if the full-pipeline path is retired entirely (Owner decision); otherwise permanent',
+  },
   context_manifest_budget: {
     decision: 'KEEP_QUIET',
     consumers: ['principles-core internaliz* context builders', 'principles-core/src/runtime-v2/runner/ba*'],

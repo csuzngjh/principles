@@ -194,7 +194,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_l2_fallback_to_l1'),
   // PRI-424/PRI-439: Artificer L2 agent loop telemetry.
   // - artificer_l2_turn: per tool-execution turn inside the L2 agent loop (PRI-439 Phase 4)
-  // - artificer_l2_complete: when the loop finishes (turnCount, toolsInvoked, succeeded, timedOut)
+  // - artificer_l2_complete: when the loop finishes (turnCount, toolsInvoked, succeeded, abortOwner, budgetMs, elapsedMs, stopReason, tokenUsage)
   // (artificer_l2_attempt pruned in PRI-773: legacy write-test-fix loop event,
   // zero emit sites since PRI-439 replaced the loop.)
   Type.Literal('artificer_l2_turn'),
@@ -493,6 +493,12 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('rollout_reviewer_mark_succeeded_failed'),
   Type.Literal('rollout_reviewer_no_dependencies'),
   Type.Literal('rollout_reviewer_no_evaluator_artifact'),
+  // PRI-720: principle semantic review mode events.
+  Type.Literal('rollout_reviewer_no_scribe_artifact'),
+  Type.Literal('rollout_reviewer_scribe_dep_selected'),
+  Type.Literal('rollout_principle_validated'),
+  Type.Literal('rollout_principle_validation_update_failed'),
+  Type.Literal('rollout_principle_validation_update_not_found'),
   Type.Literal('rollout_reviewer_output_invalid'),
   Type.Literal('rollout_reviewer_output_validated'),
   Type.Literal('rollout_reviewer_run_failed'),

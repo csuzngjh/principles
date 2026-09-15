@@ -344,14 +344,24 @@ Validation / PR，Validation 引用检查原文输出。
 
 ### 4.4 CNB → GitHub 交付桥（T6/T7，PRI-778）
 
-**Owner 只在 GitHub 评审合并一次**——CNB 侧无需任何手工动作。两条自动通路：
+**Owner 只在 GitHub 评审合并一次**——CNB 侧无需任何手工动作。自动通路与手动兜底：
 
 | 触发 | 事件 | 行为 | 场景 |
 |---|---|---|---|
 | **T7 自动投递**（主路径） | `pull_request.target`（PR 创建/重开/源分支 push；配置取自目标分支 main，可信） | 枚举开放的 `ai/cnb-dev/* → main` PR，把 head 分支推到 GitHub（同名，仅快进）并创建/复用 GitHub PR，成功后关闭 CNB PR | Developer 产出即自动送达 |
+| **T7b 手动/远程投递**（兜底，PRI-785） | `api_trigger_deliver`（OpenAPI `POST /{repo}/-/build/start`，body `{"event":"api_trigger_deliver","branch":"main"}`，令牌需 `repo-cnb-trigger:rw`） | 与 T7 同一份流水线定义（YAML 锚点复用），幂等 | T7 事件未触发、或需立即补投积压 |
 | T6 合并桥（兜底） | `pull_request.merged` | 把 CNB main 合并提交推到 `sync/cnb-delivery/<short>` 并建 GitHub PR | 若有人在 CNB 侧直接合并 |
 
 **T7 幂等性**：可重复触发——已推送分支仅快进更新；同 head 的 GitHub PR 已存在则跳过创建（新提交自动出现在既有 PR 上）。**T7 失败不影响 T6**（两条流水线独立）。
+
+**可观测性（PRI-785）**：每次投递运行都会（1）在日志枚举当次全部开放 CNB PR 的
+head/base 原始值——零匹配也可见，静默空转不可能再伪装成健康；（2）把投递 JSON
+摘要写 `cnb-deliver-report.json` 并挂为构建附件（ttl 30 天）。核对历史用 CNB API
+`GET /{repo}/-/build/logs?event=pull_request.target`（scope `repo-cnb-history:r`）。
+
+**投递脚本的两个历史坑（PRI-785 实证）**：CNB PR API 的 `head.ref`/`base.ref`
+返回**全前缀** `refs/heads/...`，过滤前必须归一化（脚本内 `normRef`）；
+列表接口分页参数是 `page_size` 而非 `per_page`。
 
 **前置**：`pd-secrets/cnb-github-bridge.yml` 的 `allow_events` 必须包含
 `pull_request.target`（见 §4.4.1）；缺失时 T7 fail-loud，T6 不受影响。

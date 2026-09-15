@@ -146,7 +146,10 @@ export class WorkflowFunnelLoader {
 
     try {
       const content = fs.readFileSync(this.configPath, 'utf-8');
-      const config = yaml.load(content, { schema: yaml.DEFAULT_SCHEMA }) as WorkflowFunnelConfig;
+      // js-yaml 5 renamed the v4 DEFAULT_SCHEMA to YAML11_SCHEMA and made the
+      // load() default the narrower CORE_SCHEMA; pin the YAML 1.1 schema to
+      // keep v4 parse semantics (timestamps, merge keys).
+      const config = yaml.load(content, { schema: yaml.YAML11_SCHEMA }) as WorkflowFunnelConfig;
 
       if (!config || typeof config.version !== 'string' || !Array.isArray(config.funnels)) {
         const msg = 'workflows.yaml validation failed: missing version or funnels array. Preserving last valid config.';

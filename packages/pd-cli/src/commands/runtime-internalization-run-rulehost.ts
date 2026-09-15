@@ -39,6 +39,8 @@ import {
 } from '@principles/core/runtime-v2';
 import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import type { BehaviorExamplePack } from '@principles/core/runtime-v2';
+import { storeEmitter } from '@principles/core/runtime-v2';
+import { WorkspaceTelemetryEmitter } from '@principles/host-runtime';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { resolveRuleHostReadiness } from '../services/rulehost-readiness.js';
 import type { RuleHostReadinessResult } from '../services/rulehost-readiness.js';
@@ -254,6 +256,16 @@ function resolveRunRuleHostRuntime(
   agentRuntimeProfiles.artificer = artificerBinding.profileId;
   agentRuntimeProfiles.evaluator = evaluator.profileId;
 
+  // PRI-795 review P1: the CLI process is one-shot — without a durable sink
+  // the artificer_l2_complete evidence (abortOwner/budget/elapsed/stopReason/
+  // tokenUsage) dies with the process, repeating the EP002-R3
+  // "nothing recoverable after a failure" investigation gap. Reuse the
+  // host-runtime workspace-scoped emitter so completions land in
+  // <workspaceDir>/.pd/telemetry/critical-events.jsonl.
+  const artificerEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {
+    console.error(`[run-rulehost] workspace telemetry persist failed: ${detail}`);
+  });
+
   const artificerAdapter = new ArtificerL2Adapter({
     provider: artificerProfile.provider,
     model: artificerProfile.model,
@@ -261,10 +273,19 @@ function resolveRunRuleHostRuntime(
     baseUrl: artificerProfile.baseUrl,
     gateDeps: createSandboxGateDeps(),
     validator: new DefaultArtificerValidator(),
-    totalBudgetMs: timeoutMs,
+    // PRI-795: fall back to the profile's timeoutMs when --timeout-ms is not
+    // given — parity with resolvePiAiAgentAdapter above. Previously the raw
+    // CLI option (possibly undefined) was passed, silently dropping the L2
+    // loop onto the adapter's 300s default regardless of the profile.
+    totalBudgetMs: timeoutMs ?? artificerProfile.timeoutMs,
     // Forward profile maxTokens — parity with the consumer-cycle adapter;
     // omitting it truncates long artificer JSON at the provider's default cap.
     ...(artificerProfile.maxTokens !== undefined ? { maxTokens: artificerProfile.maxTokens } : {}),
+    // PRI-795: forward profile reasoning so always-thinking models get a
+    // bounded thinking level on the L2 loop too — parity with the
+    // PiAiRuntimeAdapter wiring (it was previously L2-dropped).
+    ...(artificerProfile.reasoning !== undefined ? { reasoning: artificerProfile.reasoning } : {}),
+    eventEmitter: artificerEmitter,
   });
 
   return {
