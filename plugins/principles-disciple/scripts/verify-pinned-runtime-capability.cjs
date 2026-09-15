@@ -16,9 +16,9 @@
  *   S4 retired contract    RuleCode referencing removed symbols → skipped, never executed
  *   S5 control released    enforcement resumes (deny)
  *
- * Usage:
- *   node verify-pinned-runtime-capability.cjs --runtime-dir <dir> [--workspace <dir>] [--json]
- *   node verify-pinned-runtime-capability.cjs --install [--json]   (temp dir; npm-installs the pins from runtime-version.json)
+ * Usage (stdout is ALWAYS machine-readable JSON):
+ *   node verify-pinned-runtime-capability.cjs --runtime-dir <dir> [--workspace <dir>]
+ *   node verify-pinned-runtime-capability.cjs --install   (temp dir; npm-installs the pins from runtime-version.json)
  *
  * Exit 0 = all scenarios PASS. Any FAIL exits 1 with structured JSON
  * (identity evidence + per-scenario results), so release gates and CI can
@@ -52,10 +52,13 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--install') args.install = true;
-    else if (a === '--json') args.json = true;
     else if (a === '--runtime-dir') args.runtimeDir = argv[++i];
     else if (a === '--workspace') args.workspace = argv[++i];
     else if (a === '--help' || a === '-h') args.help = true;
+    else {
+      // PRI-810 review: unknown args are rejected, not silently ignored.
+      throw new ProbeFailure('probe_unknown_argument:' + a, 'supported flags: --runtime-dir <dir> | --workspace <dir> | --install | --help');
+    }
   }
   return args;
 }
@@ -151,10 +154,16 @@ async function verifyPinnedRuntimeCapability(options = {}) {
   for (const table of ['pi_artifacts', 'activations', 'activation_control_states', 'global_rulecode_pauses']) {
     const row = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
     if (!row) {
-      fail('canonical_control_table_missing:' + table, 'the installed core predates the Owner-control schema (PRI-810 floor: host-runtime>=0.1.1, core with activation control states) — re-pin to a compliant version');
+      fail('canonical_control_table_missing:' + table, 'the installed core predates the Owner-control schema — re-pin to a version at or above the Owner-control floor (see runtime-pin-guard.test.ts; PRI-810)');
     }
   }
 
+  // Fixture note (PRI-810 spec §18): control states are written via direct
+  // SQL ONLY because this probe layer IS the canonical-store fixture layer —
+  // the schema comes from the installed core's own bootstrap. The production
+  // WRITER (SqliteActivationSafetyStore authorized-decision path) is
+  // deliberately not exercised here: this probe verifies the GATE's honoring
+  // of control states, not the store's writing of them.
   const now = () => new Date().toISOString();
   function activate(contentCode) {
     const contentJson = JSON.stringify({ implementationCode: contentCode, ruleId: 'R_PIN_PROBE', principleId: 'P_PIN_PROBE' });
@@ -216,19 +225,19 @@ async function verifyPinnedRuntimeCapability(options = {}) {
       name: 'S2 Owner global pause is honored',
       setup: () => { activate(RULE_BLOCK); setPause('paused'); },
       expect: (s) => s.decision === 'allow' && s.warnings.some((w) => w.startsWith('global_rulecode_pause_active')),
-      nextAction: 'the pinned host-runtime ignores global_rulecode_pauses — re-pin to host-runtime >= 0.1.1 (PRI-810)',
+      nextAction: 'the pinned host-runtime ignores global_rulecode_pauses — re-pin to a host-runtime version at or above the Owner-control floor (see runtime-pin-guard.test.ts; PRI-810)',
     },
     {
       name: 'S3 safety isolation is honored',
       setup: () => { activate(RULE_BLOCK); setEnforcement('safety_isolated'); },
       expect: (s) => s.decision === 'allow' && s.warnings.some((w) => w.startsWith('activation_safety_isolated')),
-      nextAction: 'the pinned host-runtime ignores activation_control_states — re-pin to host-runtime >= 0.1.1 (PRI-810)',
+      nextAction: 'the pinned host-runtime ignores activation_control_states — re-pin to a host-runtime version at or above the Owner-control floor (see runtime-pin-guard.test.ts; PRI-810)',
     },
     {
       name: 'S4 retired-contract RuleCode is skipped',
       setup: () => activate(RULE_RETIRED),
       expect: (s) => s.decision === 'allow' && s.warnings.some((w) => w.startsWith('legacy_rule_contract_dependency')),
-      nextAction: 'the pinned host-runtime executes retired-contract RuleCode — re-pin to host-runtime >= 0.1.1 (PRI-810)',
+      nextAction: 'the pinned host-runtime executes retired-contract RuleCode — re-pin to a host-runtime version at or above the Owner-control floor (see runtime-pin-guard.test.ts; PRI-810)',
     },
     {
       name: 'S5 enforcement resumes after control release',
@@ -266,22 +275,38 @@ async function verifyPinnedRuntimeCapability(options = {}) {
   return payload;
 }
 
-module.exports = { verifyPinnedRuntimeCapability, ProbeFailure };
+module.exports = { verifyPinnedRuntimeCapability };
 
 if (require.main === module) {
-  const args = parseArgs(process.argv);
-  if (args.help) {
-    process.stdout.write('see file header for usage\n');
-    process.exit(0);
-  }
-  verifyPinnedRuntimeCapability(args).then((payload) => {
-    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
-    process.exit(payload.ok ? 0 : 1);
-  }).catch((error) => {
-    const payload = error instanceof ProbeFailure
-      ? error.payload
-      : { ok: false, reason: 'probe_unexpected_error:' + String(error && error.stack ? error.stack.split('\n')[0] : error).slice(0, 200), nextAction: 'inspect the probe output and the installed runtime' };
-    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
-    process.exit(1);
-  });
+  // PRI-810 review: set process.exitCode instead of calling process.exit()
+  // so piped stdout is always fully flushed before the process ends.
+  // (async IIFE: top-level `return` is not parseable by rolldown/vite here.)
+  void (async () => {
+    let args;
+    try {
+      args = parseArgs(process.argv);
+    } catch (error) {
+      const payload = error instanceof ProbeFailure
+        ? error.payload
+        : { ok: false, reason: 'probe_argument_error', nextAction: 'pass --help for usage' };
+      process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+      process.exitCode = 1;
+      return;
+    }
+    if (args.help) {
+      process.stdout.write('see file header for usage\n');
+      return;
+    }
+    try {
+      const payload = await verifyPinnedRuntimeCapability(args);
+      process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+      process.exitCode = payload.ok ? 0 : 1;
+    } catch (error) {
+      const payload = error instanceof ProbeFailure
+        ? error.payload
+        : { ok: false, reason: 'probe_unexpected_error:' + String(error && error.stack ? error.stack.split('\n')[0] : error).slice(0, 200), nextAction: 'inspect the probe output and the installed runtime' };
+      process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+      process.exitCode = 1;
+    }
+  })();
 }

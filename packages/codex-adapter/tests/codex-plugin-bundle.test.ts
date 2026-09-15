@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import Database from 'better-sqlite3';
 
 /**
@@ -475,11 +475,12 @@ describe('first-run $pd-setup (real user flow)', () => {
     // Owner emergency-control capability contract (global pause / safety
     // isolation / retired-contract backstop). Runs IN-PROCESS against the real
     // installed bytes $pd-setup just produced — a pin that regresses to a
-    // guard-less version fails HERE.
-    const { verifyPinnedRuntimeCapability } = (await import(path.join(cachePlugin, 'scripts', 'verify-pinned-runtime-capability.cjs'))) as {
+    // guard-less version fails HERE. pathToFileURL (not a bare path) keeps the
+    // dynamic import valid on Windows drive-letter paths.
+    const probeModule = (await import(pathToFileURL(path.join(cachePlugin, 'scripts', 'verify-pinned-runtime-capability.cjs')).href)) as {
       verifyPinnedRuntimeCapability: (options: { runtimeDir: string }) => Promise<{ ok: boolean; scenarioResults: { name: string; pass: boolean; outcome: unknown }[] }>;
     };
-    const probeReport = await verifyPinnedRuntimeCapability({ runtimeDir: path.join(report.pluginData, 'runtime') });
+    const probeReport = await probeModule.verifyPinnedRuntimeCapability({ runtimeDir: path.join(report.pluginData, 'runtime') });
     expect(probeReport.ok, JSON.stringify(probeReport.scenarioResults)).toBe(true);
     expect(probeReport.scenarioResults.every((s) => s.pass)).toBe(true);
   }, 420_000);
