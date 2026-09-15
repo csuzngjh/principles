@@ -543,7 +543,7 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
   // would silently overwrite and mis-attribute failures. Approved binding
   // path fails loud (R3 terminal-state guard); needs_revision keeps its
   // verdict, records the conflict observably, and stays evidence fail-closed.
-  it('PR-A: duplicate real caseId (LLM case collides with v2-unavailable) → conflict telemetry, no sandbox run', async () => {
+  it('PR-A: duplicate real caseId (LLM case collides with v2-unavailable) → deterministic disambiguation, sandbox runs (EP002-R4)', async () => {
     const store = await seedLineage(codeBearingArtificerContent());
     const calls = { count: 0 };
     const llmCollidedCases = [{
@@ -568,18 +568,11 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
 
     const result = await runner.run(EVAL_ID);
 
-    // sandbox never ran — the conflict is detected pre-sandbox
-    expect(calls.count).toBe(0);
-    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_case_id_conflict' && e.payload.caseId === 'v2-unavailable')).toBe(true);
-    // needs_revision diagnostic path: verdict stands, task completes
+    // EP002-R4: a duplicate id no longer degrades the WHOLE replay — the
+    // Artificer-supplied collision is disambiguated deterministically
+    // (owner: prefix) and the sandbox runs on the full merged set.
+    expect(calls.count).toBe(1);
     expect(result.status).toBe('succeeded');
-    // fail-closed provenance: no diagnosticReplay evidence was produced
-    const artifacts = await store.listBySourceTaskId(EVAL_ID);
-    const principle = artifacts.find((a) => a.artifactKind === 'principle');
-    expect(principle).toBeDefined();
-    if (!principle) return;
-    const parsed = JSON.parse(principle.contentJson) as { adversarialResult?: unknown };
-    expect(Object.hasOwn(parsed, 'adversarialResult')).toBe(false);
   });
 
   // ── PRI-634 PR-A (review P1 2026-09-02): reserved __*__ namespace guard ──
