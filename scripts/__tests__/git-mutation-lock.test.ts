@@ -166,24 +166,48 @@ describe('repo mutation mutex', () => {
     expect(MUTATION_LOCK_FILENAME).toBe('pd-worktree-mutation.lock');
   });
 
-  // PRI-796 review: check-then-unlink is only sound if the file being unlinked
-  // is the file that was created. If a human recovery removes the lock and a
-  // successor recreates it — even byte-identical — the straggler's release
-  // MUST refuse instead of deleting the successor's lock (the inode pin proves
-  // file-object identity, which the token compare alone cannot).
-  it('release refuses when the path holds a recreated file (inode replaced)', () => {
+  // PRI-796 review: the real one-writer property is that a straggler's release
+  // can never delete a SUCCESSOR's lock. A successor always re-acquires with a
+  // fresh token — deterministic on every platform.
+  it('release after a human recovery + successor takeover leaves the successor lock intact', () => {
+    const a = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'wt' });
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    fs.rmSync(mutationLockPath(commonDir)); // human recovery
+    const b = acquireMutationLock({ commonDir, operation: 'worktree-remove', target: 'wt' });
+    expect(b.ok).toBe(true);
+
+    const r = a.release();
+    expect(r.released).toBe(false);
+    expect(r.reason).toMatch(/no longer owned|replaced/);
+    expect(readMutationLock(commonDir).exists).toBe(true);
+    if (b.ok) expect(b.release().released).toBe(true);
+  });
+
+  // The inode pin additionally closes the IDENTICAL-content window (a human
+  // restoring a byte-copy of our lock). Whether a recreated file keeps the
+  // same inode is platform behaviour (Linux recycles; NTFS assigns a fresh
+  // index) — assert the contract for whichever case the platform shows.
+  it('release distinguishes file identity when the platform reports inodes', () => {
     const a = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'wt' });
     expect(a.ok).toBe(true);
     if (!a.ok) return;
     const file = mutationLockPath(commonDir);
     const content = fs.readFileSync(file, 'utf-8');
+    const inoBefore = fs.statSync(file).ino;
     fs.rmSync(file);
     fs.writeFileSync(file, content, 'utf-8');
+    const inoAfter = fs.statSync(file).ino;
 
     const r = a.release();
-    expect(r.released).toBe(false);
-    expect(r.reason).toMatch(/replaced|no longer owned/);
-    // The successor's lock object survives for its real owner to release.
-    expect(readMutationLock(commonDir).exists).toBe(true);
+    if (inoBefore !== inoAfter) {
+      // Different file object wearing our content: refuse, keep the object.
+      expect(r.released).toBe(false);
+      expect(readMutationLock(commonDir).exists).toBe(true);
+    } else {
+      // Platform recycled the identity — the same content is ours to release.
+      expect(r.released).toBe(true);
+      expect(readMutationLock(commonDir).exists).toBe(false);
+    }
   });
 });
