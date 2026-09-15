@@ -8,7 +8,7 @@ import { withLock } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { SampleNotFoundError } from '../config/index.js';
-import { guardWorkspaceLeak } from '@principles/core/runtime-v2';
+import { applyTrajectorySchemaBase, guardWorkspaceLeak, TRAJECTORY_SCHEMA_VERSION, TRAJECTORY_TABLES } from '@principles/core/runtime-v2';
 import type {
   CorrectionSampleReviewStatus,
   CorrectionExportMode,
@@ -82,7 +82,6 @@ export type {
 const DEFAULT_INLINE_THRESHOLD = 16 * 1024;
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 const DEFAULT_ORPHAN_BLOB_GRACE_DAYS = 7;
-const SCHEMA_VERSION = 1;
 
 /**
  * Type guard: narrows a raw better-sqlite3 row to a typed pain_event row
@@ -159,303 +158,21 @@ function isDuplicateColumnError(err: unknown): boolean {
 }
 
 /**
- * Apply the full trajectory.db schema (tables + indexes + views + migrations) to an open
- * Database handle. Used by TrajectoryDatabase.initSchema() and exported via
- * initTrajectorySchema() for external callers (e.g. `pd runtime init`).
+ * Apply the trajectory.db schema to an open Database handle (PRI-774).
  *
- * DDL is the single source of truth for trajectory.db schema. pain-signal-observability.ts
- * in principles-core also duplicates a subset of this DDL (acknowledged duplication); when
- * updating this function, audit ensureTrajectorySchema() in core for parallel updates.
+ * Delegates to the canonical schema module (`applyTrajectorySchemaBase`,
+ * Profile B: base + the three runtime-init views). Profile C extras
+ * (v_daily_metrics) are applied by migrateSchema() in
+ * TrajectoryDatabase.initSchema. schema_version row writes stay with
+ * initSchema/initTrajectorySchema (SPEC §5 contract).
  *
- * Idempotent: all CREATE statements use IF NOT EXISTS; ALTER columns use try/catch on
- * "duplicate column name" to skip existing columns.
+ * Idempotent: all CREATE statements use IF NOT EXISTS; column migrations
+ * swallow duplicate-column errors.
  */
 function applyTrajectorySchema(db: Database.Database): { tables: string[]; warnings: string[] } {
-  const warnings: string[] = [];
-  const tables = [
-    'schema_version', 'ingest_checkpoint', 'sessions', 'assistant_turns',
-    'user_turns', 'tool_calls', 'pain_events', 'gate_blocks', 'trust_changes',
-    'principle_events', 'task_outcomes', 'correction_samples', 'sample_reviews',
-    // PRI-790 G2: Stage2 待确认信号的持久队列。
-    'signal_confirmations',
-    'exports_audit',
-  ];
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS ingest_checkpoint (
-      source_key TEXT PRIMARY KEY,
-      imported_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS sessions (
-      session_id TEXT PRIMARY KEY,
-      started_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS assistant_turns (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      provider TEXT NOT NULL,
-      model TEXT NOT NULL,
-      raw_text TEXT,
-      sanitized_text TEXT NOT NULL,
-      usage_json TEXT NOT NULL,
-      empathy_signal_json TEXT NOT NULL,
-      blob_ref TEXT,
-      raw_excerpt TEXT,
-      stop_reason TEXT,
-      thinking_blocks_count INTEGER,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS user_turns (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
-      turn_index INTEGER NOT NULL,
-      raw_text TEXT,
-      blob_ref TEXT,
-      raw_excerpt TEXT,
-      correction_detected INTEGER NOT NULL DEFAULT 0,
-      correction_cue TEXT,
-      references_assistant_turn_id INTEGER,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS tool_calls (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
-      tool_name TEXT NOT NULL,
-      outcome TEXT NOT NULL,
-      duration_ms INTEGER,
-      exit_code INTEGER,
-      error_type TEXT,
-      error_message TEXT,
-      gfi_before REAL,
-      gfi_after REAL,
-      params_json TEXT NOT NULL,
-      result_preview TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS pain_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
-      source TEXT NOT NULL,
-      score REAL NOT NULL,
-      reason TEXT,
-      severity TEXT,
-      origin TEXT,
-      confidence REAL,
-      text TEXT,
-      canonical_pain_id TEXT,
-      runtime_task_id TEXT,
-      host_kind TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS gate_blocks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT,
-      tool_name TEXT NOT NULL,
-      file_path TEXT,
-      reason TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS trust_changes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT,
-      previous_score REAL NOT NULL,
-      new_score REAL NOT NULL,
-      delta REAL NOT NULL,
-      reason TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS principle_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      principle_id TEXT,
-      event_type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS task_outcomes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
-      task_id TEXT,
-      outcome TEXT NOT NULL,
-      summary TEXT,
-      principle_ids_json TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS correction_samples (
-      sample_id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      bad_assistant_turn_id INTEGER NOT NULL,
-      user_correction_turn_id INTEGER NOT NULL,
-      recovery_tool_span_json TEXT NOT NULL,
-      diff_excerpt TEXT NOT NULL,
-      principle_ids_json TEXT NOT NULL,
-      quality_score REAL NOT NULL,
-      review_status TEXT NOT NULL,
-      export_mode TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS sample_reviews (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sample_id TEXT NOT NULL,
-      review_status TEXT NOT NULL,
-      note TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS signal_confirmations (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      user_turn_rowid INTEGER NOT NULL UNIQUE,
-      occurrence_id TEXT NOT NULL,
-      excerpt TEXT NOT NULL,
-      terms_json TEXT NOT NULL,
-      suggested_type TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending','confirmed','rejected','abandoned')),
-      attempts INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      resolved_at TEXT,
-      resolution TEXT
-    );
-    CREATE TABLE IF NOT EXISTS exports_audit (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      export_kind TEXT NOT NULL,
-      mode TEXT NOT NULL,
-      approved_only INTEGER NOT NULL,
-      file_path TEXT NOT NULL,
-      row_count INTEGER NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    -- evolution_tasks / evolution_events tables are no longer created (PRI-770):
-    -- the evolution worker that enqueued them was retired in PRI-737 and the
-    -- write path had zero production callers. Existing workspaces keep their
-    -- historical tables; read models (quality-scorecard, "pd evolution tasks")
-    -- still serve them and tolerate missing tables on fresh workspaces.
-  `);
-
-  // Migration: Add text column to pain_events if it doesn't exist (MEM-01)
-  // SQLite doesn't support IF NOT EXISTS for ADD COLUMN, so we use try/catch
-  try {
-    db.exec(`ALTER TABLE pain_events ADD COLUMN text TEXT`);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!message.includes('duplicate column name') && !message.includes('no column named')) {
-      // Re-throw unexpected errors — silently swallowing migration failures is dangerous
-      throw err;
-    }
-  }
-
-  // PRI-406: Add canonical_pain_id and runtime_task_id columns to pain_events
-  for (const col of [
-    { name: 'canonical_pain_id', type: 'TEXT' },
-    { name: 'runtime_task_id', type: 'TEXT' },
-    // PRI-640: host attribution — observability metadata only, orthogonal to
-    // `origin` (evidence semantics) and excluded from canonical pain identity.
-    // Keep in sync with ensureTrajectorySchema() in principles-core.
-    { name: 'host_kind', type: 'TEXT' },
-  ]) {
-    try {
-      db.exec(`ALTER TABLE pain_events ADD COLUMN ${col.name} ${col.type}`);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!message.includes('duplicate column name') && !message.includes('no column named')) {
-        throw err;
-      }
-    }
-  }
-
-  // Trajectory enhancement: add stop_reason, thinking_blocks_count, result_preview
-  const trajectoryEnhancementColumns = [
-    { table: 'assistant_turns', name: 'stop_reason', type: 'TEXT' },
-    { table: 'assistant_turns', name: 'thinking_blocks_count', type: 'INTEGER' },
-    { table: 'tool_calls', name: 'result_preview', type: 'TEXT' },
-  ];
-  for (const col of trajectoryEnhancementColumns) {
-    try {
-      db.exec(`ALTER TABLE ${col.table} ADD COLUMN ${col.name} ${col.type}`);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!message.includes('duplicate column name') && !message.includes('no column named')) {
-        throw err;
-      }
-    }
-  }
-
-  // PRI-406: Partial unique index on canonical_pain_id (non-null only) for dedup
-  db.exec(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_pain_events_canonical_pain_id
-    ON pain_events(canonical_pain_id)
-    WHERE canonical_pain_id IS NOT NULL
-  `);
-
-  // V2 evolution_tasks column migration removed (PRI-770): new workspaces no
-  // longer create the table; historical tables already carry the columns.
-  // CodeRabbit review round 1: historical tables created BEFORE the V2 schema
-  // may lack the six nullable V2 columns, so backfill them when the table
-  // exists — otherwise the readers' SELECT fails with "no such column".
-  if (tableExists(db, 'evolution_tasks')) {
-    try {
-      db.exec('ALTER TABLE evolution_tasks ADD COLUMN task_kind TEXT');
-    } catch (err: unknown) {
-      if (!isDuplicateColumnError(err)) throw err;
-    }
-    try {
-      db.exec('ALTER TABLE evolution_tasks ADD COLUMN priority TEXT');
-    } catch (err: unknown) {
-      if (!isDuplicateColumnError(err)) throw err;
-    }
-    try {
-      db.exec('ALTER TABLE evolution_tasks ADD COLUMN retry_count INTEGER');
-    } catch (err: unknown) {
-      if (!isDuplicateColumnError(err)) throw err;
-    }
-    try {
-      db.exec('ALTER TABLE evolution_tasks ADD COLUMN max_retries INTEGER');
-    } catch (err: unknown) {
-      if (!isDuplicateColumnError(err)) throw err;
-    }
-    try {
-      db.exec('ALTER TABLE evolution_tasks ADD COLUMN last_error TEXT');
-    } catch (err: unknown) {
-      if (!isDuplicateColumnError(err)) throw err;
-    }
-    try {
-      db.exec('ALTER TABLE evolution_tasks ADD COLUMN result_ref TEXT');
-    } catch (err: unknown) {
-      if (!isDuplicateColumnError(err)) throw err;
-    }
-  }
-
-  db.exec(`
-    CREATE VIEW IF NOT EXISTS v_error_clusters AS
-    SELECT tool_name, COALESCE(error_type, 'unknown') AS error_type, COUNT(*) AS occurrences
-    FROM tool_calls
-    WHERE outcome = 'failure'
-    GROUP BY tool_name, COALESCE(error_type, 'unknown')
-    ORDER BY occurrences DESC;
-    CREATE VIEW IF NOT EXISTS v_principle_effectiveness AS
-    SELECT event_type, COUNT(*) AS total
-    FROM principle_events
-    GROUP BY event_type
-    ORDER BY total DESC;
-    CREATE VIEW IF NOT EXISTS v_sample_queue AS
-    SELECT review_status, COUNT(*) AS total
-    FROM correction_samples
-    GROUP BY review_status;
-    CREATE INDEX IF NOT EXISTS idx_assistant_turns_session_id ON assistant_turns(session_id);
-    CREATE INDEX IF NOT EXISTS idx_assistant_turns_created_at ON assistant_turns(created_at);
-    CREATE INDEX IF NOT EXISTS idx_assistant_turns_provider_model ON assistant_turns(provider, model);
-    CREATE INDEX IF NOT EXISTS idx_user_turns_session_id ON user_turns(session_id);
-    CREATE INDEX IF NOT EXISTS idx_tool_calls_session_id ON tool_calls(session_id);
-    CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
-    CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
-    CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
-    CREATE INDEX IF NOT EXISTS idx_signal_confirmations_status ON signal_confirmations(status, attempts);
-  `);
-
-  return { tables, warnings };
+  // `tables` mirrors the canonical creation order for runtime-init reporting.
+  const result = applyTrajectorySchemaBase(db, { views: true });
+  return { tables: result.tables, warnings: result.warnings };
 }
 
 /**
@@ -493,9 +210,9 @@ export function initTrajectorySchema(workspaceDir: string): { tables: string[]; 
     // Record schema version (same logic as TrajectoryDatabase.initSchema)
     const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
     if (!row) {
-      db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
-    } else if (row.version !== SCHEMA_VERSION) {
-      db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
+      db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(TRAJECTORY_SCHEMA_VERSION);
+    } else if (row.version !== TRAJECTORY_SCHEMA_VERSION) {
+      db.prepare('UPDATE schema_version SET version = ?').run(TRAJECTORY_SCHEMA_VERSION);
     }
     return result;
   } finally {
@@ -1715,9 +1432,9 @@ export class TrajectoryDatabase {
     const row = this.db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
     this.migrateSchema(row?.version);
     if (!row) {
-      this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
-    } else if (row.version !== SCHEMA_VERSION) {
-      this.db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
+      this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(TRAJECTORY_SCHEMA_VERSION);
+    } else if (row.version !== TRAJECTORY_SCHEMA_VERSION) {
+      this.db.prepare('UPDATE schema_version SET version = ?').run(TRAJECTORY_SCHEMA_VERSION);
     }
   }
 

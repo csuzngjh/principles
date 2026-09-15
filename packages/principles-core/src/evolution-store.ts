@@ -23,11 +23,17 @@ export { TrajectoryDbUnavailableError } from './trajectory-store.js';
 // Historical value unions for the evolution_tasks table (PRI-770: the writer
 // TrajectoryDatabase.recordEvolutionTask was retired with the evolution
 // worker; these types now describe rows in historical workspaces only).
-export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval' | 'keyword_optimization';
-export type TaskPriority = 'high' | 'medium' | 'low';
+// PRI-774: single-homed in src/trajectory-types.ts.
+import type {
+  TaskKind,
+  TaskPriority,
+} from './trajectory-types.js';
+
+export type { TaskKind, TaskPriority };
 
 // ---------------------------------------------------------------------------
-// Types (copied from trajectory-types.ts — do NOT import from openclaw-plugin)
+// Types (single-homed in src/trajectory-types.ts since PRI-774; re-exported
+// here to preserve the historical @principles/core/evolution-store surface)
 // ---------------------------------------------------------------------------
 
 export interface EvolutionTaskRecord {
