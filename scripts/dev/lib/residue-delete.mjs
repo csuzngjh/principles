@@ -55,14 +55,21 @@ export function scanReparsePoints(root) {
       // Dirent for a reparse point reports isSymbolicLink(); never call stat,
       // which would traverse into the target.
       if (entry.isSymbolicLink()) {
-        let target = null;
-        try {
-          target = fs.readlinkSync(full);
-        } catch {
-          target = null;
-        }
-        links.push({ path: full, target, targetExists: target ? fs.existsSync(target) : false });
-        continue;
+      // PRI-796 review: readlink returns RELATIVE targets verbatim — resolving
+      // them against the process cwd reports existence wrongly. Node resolves a
+      // link's target against the link's own directory; do the same.
+      let target = null;
+      let resolvedTarget = null;
+      try {
+        target = fs.readlinkSync(full);
+        resolvedTarget = target === null ? null
+          : (path.isAbsolute(target) ? target : path.resolve(path.dirname(full), target));
+      } catch {
+        target = null;
+        resolvedTarget = null;
+      }
+      links.push({ path: full, target, targetExists: resolvedTarget ? fs.existsSync(resolvedTarget) : false });
+      continue;
       }
       if (entry.isDirectory()) {
         dirs += 1;

@@ -86,6 +86,24 @@ describe('scanReparsePoints', () => {
     // The target's own files must NOT be counted as part of the residue.
     expect(scan.files).toBe(4); // .git, a.txt, sub/b.txt, sub/deeper/c.txt
   });
+
+  // PRI-796 review: readlink returns relative targets verbatim; existence must
+  // be decided against the LINK's directory, not the process cwd.
+  it('resolves a RELATIVE symlink target against the link directory', () => {
+    const residue = path.join(root, 'residue-rel');
+    fs.mkdirSync(path.join(residue, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(residue, 'precious.txt'), 'p\n', 'utf-8');
+    const link = path.join(residue, 'sub', 'rel-link');
+    try {
+      fs.symlinkSync(path.join('..', 'precious.txt'), link);
+    } catch {
+      return; // file symlinks need extra privilege here; the junction case above carries the safety contract
+    }
+    const scan = scanReparsePoints(residue);
+    const hit = scan.links.find((l) => l.path === link);
+    expect(hit).toBeDefined();
+    expect(hit?.targetExists).toBe(true);
+  });
 });
 
 describe('removeResidueTree', () => {

@@ -211,8 +211,10 @@ export async function gitCommonDirAbsolute(cwd) {
   if (absolute !== null && absolute.trim().length > 0) return absolute.trim();
   const relative = (await runGit(['rev-parse', '--git-common-dir'], { cwd: base })).trim();
   if (path.isAbsolute(relative)) return relative;
-  const toplevel = (await runGit(['rev-parse', '--show-toplevel'], { cwd: base })).trim();
-  return path.resolve(toplevel, relative);
+  // PRI-796 review: git documents this answer as relative to the process CWD,
+  // not to the toplevel — resolving against toplevel mislocates the common dir
+  // when a tool runs from a worktree subdirectory on an older git.
+  return path.resolve(base, relative);
 }
 
 export async function getGitContext(cwd) {

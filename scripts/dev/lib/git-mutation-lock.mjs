@@ -23,8 +23,10 @@
 //     holder blocks mutations until a HUMAN removes the file. Leaving the disk
 //     unmutated is strictly better than guessing that a holder is gone;
 //   * a lock file that cannot be parsed still blocks (fail closed);
-//   * release only unlinks a lock this process still owns (token compare), so a
-//     slow holder cannot delete a successor's lock.
+//   * release only unlinks a lock this process still owns — token compare AND
+//     (where the platform exposes file identity) an inode pin taken at create
+//     time — so a slow holder can neither delete a successor's lock nor a
+//     replacement written after a human recovery removed its own (PRI-796).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -134,6 +136,27 @@ export function acquireMutationLock({ commonDir, operation, target, env = proces
     };
   }
 
+  // PRI-796 (review): pin the identity of the file WE created. A token compare
+  // alone leaves a check-then-unlink window: a human recovery may remove the
+  // stale lock and a successor may create a NEW lock at the same path before a
+  // slow holder unlinks — blind unlink would then delete the successor's lock
+  // and two Git metadata mutations could run concurrently. Recording the inode
+  // (file index on NTFS) at creation lets release prove it is deleting the
+  // exact file object it created, not merely a same-named path.
+  let ownIno = null;
+  let pinFd = null;
+  try {
+    pinFd = fs.openSync(file, 'r');
+    ownIno = fs.fstatSync(pinFd).ino;
+  } catch {
+    ownIno = null; // inode pinning unavailable on this platform/fs — release
+                  // falls back to the token-only guard and reports honestly
+  } finally {
+    if (pinFd !== null) {
+      try { fs.closeSync(pinFd); } catch { /* best effort */ }
+    }
+  }
+
   let released = false;
   const release = () => {
     if (released) return { released: false, reason: 'already released' };
@@ -142,6 +165,25 @@ export function acquireMutationLock({ commonDir, operation, target, env = proces
     if (!current.exists) return { released: false, reason: 'lock already gone' };
     if (!current.valid || current.lock.token !== token) {
       return { released: false, reason: 'lock is no longer owned by this process — left in place' };
+    }
+    if (ownIno !== null) {
+      // Same-content file recreated at the path after a human removal would
+      // carry a new inode — prove file-object identity before unlinking.
+      let probeFd = null;
+      let nowIno = null;
+      try {
+        probeFd = fs.openSync(file, 'r');
+        nowIno = fs.fstatSync(probeFd).ino;
+      } catch {
+        return { released: false, reason: 'lock already gone' };
+      } finally {
+        if (probeFd !== null) {
+          try { fs.closeSync(probeFd); } catch { /* best effort */ }
+        }
+      }
+      if (nowIno !== ownIno) {
+        return { released: false, reason: 'lock file was replaced by another owner since acquire — left in place' };
+      }
     }
     try {
       fs.unlinkSync(file);

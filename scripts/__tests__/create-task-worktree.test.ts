@@ -132,11 +132,15 @@ describe('create-task-worktree', () => {
   }, 60_000);
 
   it('gives adhoc tasks a dated identity with a random suffix so same-day agents cannot collide', async () => {
+    // PRI-796 review: the CHILD stamps the UTC date; a run crossing UTC midnight
+    // would reject the child's (correct) earlier stamp if "today" were computed
+    // only afterwards. Accept either boundary.
+    const todayBefore = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const a = await runDevScript('create-task-worktree.mjs', ['adhoc', 'spike', '--skip-bootstrap', '--json'], { cwd: primary });
+    const todayAfter = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     expect(a.code).toBe(0);
     const out = JSON.parse(a.stdout) as { branch: string; worktree: string };
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    expect(out.branch).toMatch(new RegExp('^ai/adhoc-' + today + '-spike-[0-9a-f]{6}$'));
+    expect(out.branch).toMatch(new RegExp('^ai/adhoc-(' + todayBefore + '|' + todayAfter + ')-spike-[0-9a-f]{6}$'));
     // Branch and directory stay the same identity.
     expect(path.basename(out.worktree)).toBe(out.branch.replace(/^ai\//, ''));
   }, 60_000);

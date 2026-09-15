@@ -19,13 +19,17 @@ function parseArgs(argv) {
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg === '--writer') {
-      args.writer = rest[++i];
-      if (!args.writer) {
+      const value = rest[++i];
+      // PRI-796 review: `--writer --json` must be a usage error (exit 2), not
+      // silently consuming the next flag as the label.
+      if (!value || value.startsWith('--')) {
         console.error('--writer requires a label (' + WRITER_LABELS.join('|') + ')');
         process.exit(2);
       }
+      args.writer = value;
     } else if (arg === '--ttl-hours') {
-      const value = Number(rest[++i]);
+      const rawValue = rest[++i];
+      const value = rawValue && !rawValue.startsWith('--') ? Number(rawValue) : Number.NaN;
       if (!Number.isFinite(value) || value <= 0) {
         console.error('--ttl-hours requires a positive number');
         process.exit(2);

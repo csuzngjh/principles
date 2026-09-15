@@ -318,11 +318,43 @@ export function checkL1Dependencies({ worktreeRoot, packages, req = defaultRequi
 }
 
 /**
- * L2 — did the build authority emit the artifacts it promises?
+ * L2 — did the build authority emit the artifacts it promises, AND are those
+ * artifacts newer than the sources they were built from?
  * Scoped to the packages the root build actually covers, so a worktree that has
  * run the supported bootstrap is not failed for an artifact the authority never
  * produced (pd-console and pd-companion build outside the root chain).
  */
+
+/**
+ * PRI-796 (review): an artifact that EXISTS but predates a later
+ * checkout/merge is the silent false-verification L2 exists to prevent —
+ * `fs.existsSync` alone passed a tree whose src was new and whose dist was the
+ * previous build. Fresh = artifact mtime >= newest source mtime under the
+ * package's src/. Bounded walk; unreadable trees fall back to existence-only
+ * so filesystem quirks never produce false failures.
+ */
+function newestSourceMtime(srcDir, cap = 2000) {
+  let newest = -1;
+  let seen = 0;
+  const stack = [srcDir];
+  while (stack.length > 0 && seen < cap) {
+    const dir = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const ent of entries) {
+      if (seen >= cap) break;
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) { stack.push(full); continue; }
+      seen++;
+      try {
+        const m = fs.statSync(full).mtimeMs;
+        if (m > newest) newest = m;
+      } catch { /* transient/unreadable file — skip */ }
+    }
+  }
+  return seen >= cap ? null : newest;
+}
+
 export function checkL2Build({ worktreeRoot, packages }) {
   const covered = coveredByRootBuild(worktreeRoot);
   const byName = new Map(packages.map((p) => [p.name, p]));
@@ -346,11 +378,23 @@ export function checkL2Build({ worktreeRoot, packages }) {
       results.push({ name, ok: true, detail: 'no declared entry artifact — skipped' });
       continue;
     }
-    results.push({
-      name,
-      ok: fs.existsSync(entry.file),
-      detail: entry.spec + ' -> ' + entry.file,
-    });
+    let ok = fs.existsSync(entry.file);
+    let detail = entry.spec + ' -> ' + entry.file;
+    if (ok) {
+      const srcDir = path.join(pkg.dir, 'src');
+      if (fs.existsSync(srcDir)) {
+        const newest = newestSourceMtime(srcDir);
+        if (newest !== null) {
+          let artifactMtime = null;
+          try { artifactMtime = fs.statSync(entry.file).mtimeMs; } catch { /* vanished mid-check */ }
+          if (artifactMtime !== null && newest > artifactMtime) {
+            ok = false;
+            detail += ' — STALE: sources are newer than the built artifact; run npm run build';
+          }
+        }
+      }
+    }
+    results.push({ name, ok, fresh: ok, detail });
   }
   return { ok: results.every((r) => r.ok), parsedAuthority: true, results, covered: covered.names };
 }

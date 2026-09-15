@@ -68,6 +68,14 @@ async function main() {
     refuse(args, 'not a PD worktree (no package.json): ' + root);
   }
 
+  // PRI-796 review: package.json + a copied scripts/ tree is satisfiable by any
+  // copied source directory or nested folder — running installs there would
+  // build the wrong tree. Require a real git worktree before anything mutates.
+  const gitCheck = spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf-8' });
+  if (gitCheck.status !== 0 || gitCheck.stdout?.trim() !== 'true') {
+    refuse(args, 'not a git worktree (git rev-parse --is-inside-work-tree failed): ' + root);
+  }
+
   const setupScript = path.join(root, 'scripts', 'setup-worktree.mjs');
   if (!fs.existsSync(setupScript)) {
     refuse(args, 'setup-worktree.mjs missing in the target worktree: ' + setupScript);
@@ -82,7 +90,16 @@ async function main() {
   if (!args.skipInstall) setupArgs.push('--prefer-offline');
 
   if (args.json) console.error('[bootstrap-worktree] running ' + path.basename(setupScript) + ' in ' + root);
-  const setup = spawnSync(process.execPath, setupArgs, { cwd: root, stdio: args.json ? 'pipe' : 'inherit', encoding: 'utf-8' });
+  // PRI-796 review: never buffer the full npm/build log. In --json mode the
+  // payload carries only the exit code + readiness verdict, so the child's
+  // human log goes to /dev/null instead of a synchronous pipe that can fill
+  // spawnSync's buffer and truncate the run; interactive mode inherits the
+  // terminal so operators still see every line live.
+  const setup = spawnSync(process.execPath, setupArgs, {
+    cwd: root,
+    stdio: args.json ? ['inherit', 'ignore', 'ignore'] : 'inherit',
+    encoding: 'utf-8',
+  });
   const setupOk = setup.status === 0;
 
   // Readiness is the verdict; the setup exit code alone is not evidence that

@@ -61,7 +61,17 @@ export function resolveWorktreeRoot({ primaryPath, env = process.env } = {}) {
   const primary = path.resolve(primaryPath);
   const override = env[WORKTREE_ROOT_ENV];
   if (typeof override === 'string' && override.trim().length > 0) {
-    return { root: path.resolve(override.trim()), source: 'env', primaryPath: primary };
+    // PRI-796 review: same trap as primaryPath — a relative pool root resolves
+    // against the CURRENT process directory, so one config value yields a
+    // different pool from the primary checkout, a task worktree or a subdir.
+    // The pool root must be an explicit absolute path.
+    const trimmed = override.trim();
+    if (!path.isAbsolute(trimmed)) {
+      throw new Error(
+        WORKTREE_ROOT_ENV + ' must be an absolute path for this platform (got ' + JSON.stringify(trimmed) + ')'
+      );
+    }
+    return { root: path.resolve(trimmed), source: 'env', primaryPath: primary };
   }
   return {
     root: path.join(path.dirname(primary), POOL_DIRNAME, path.basename(primary)),

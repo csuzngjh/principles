@@ -174,8 +174,12 @@ async function main() {
 
   const residueRows = state.residue.map((entry) => {
     const measured = args.size ? measureTree(entry.path) : null;
+    // PRI-796 review: taskIdentityFromBranch returns null for a non-ai/ branch
+    // (e.g. a manually recovered name) — never surface `null` as the task cell;
+    // fall back to the recovered branch itself, then the residue directory.
+    const identity = entry.recoveredBranch ? taskIdentityFromBranch(entry.recoveredBranch) : null;
     return {
-      task: entry.recoveredBranch ? taskIdentityFromBranch(entry.recoveredBranch) : path.basename(entry.path),
+      task: identity || entry.recoveredBranch || path.basename(entry.path),
       kind: 'residue',
       writer: entry.leaseOwner ? parseWriterOwner(entry.leaseOwner)?.writer || entry.leaseOwner : '-',
       state: 'UNKNOWN',

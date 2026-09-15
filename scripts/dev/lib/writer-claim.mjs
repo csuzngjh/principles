@@ -96,6 +96,48 @@ export async function claimWriter({ slot, writer, ttlMs = DEFAULT_TTL_MS, now = 
   }
 
   const owner = composeWriterOwner(writer, slot.task);
+  const expectedReason = writerLockReason(writer, slot.task);
+
+  // PRI-796 (review): the GIT worktree lock is taken FIRST. It is the only
+  // primitive here that Git serialises atomically. Previously both claimants
+  // could read the same expired lease, both overwrite the lease file, and only
+  // then discover at the lock step that one lost — the loser's rollback then
+  // deleted the WINNER's lease unconditionally (git lock held, lease gone).
+  // With lock-before-lease exactly one claimant ever reaches the lease write,
+  // and a failed lock leaves no lease of ours to roll back.
+  const lock = await lockWorktree({ cwd: slot.gitCwd, path: slot.root, reason: expectedReason });
+  let reasserted = false;
+  if (!lock.ok) {
+    const existing = await currentLockReason(slot);
+    // `git worktree lock` refuses an already-locked worktree (see
+    // worktree-lock.mjs). For the SAME writer that is a renewal, not a
+    // conflict — the re-assert is an idempotent no-op because the lock already
+    // names exactly this writer/task.
+    if (!(lock.alreadyLocked && existing === expectedReason)) {
+      if (lock.alreadyLocked) {
+        return {
+          ok: false,
+          code: 'CHECK_FAILED',
+          error:
+            'the worktree carries a FOREIGN git lock, so no lease was written:\n' +
+            '    existing: ' + (existing || '(no reason recorded)') + '\n' +
+            '    wanted:   ' + expectedReason,
+          nextAction:
+            'Another writer (or a previous session) holds this slot. Inspect it with `npm run dev:workspace:snapshot`; ' +
+            'if its writer is gone, release deliberately: npm run dev:worktree:release -- "' + slot.root + '". ' +
+            'This tool never unlocks a foreign claim.',
+        };
+      }
+      return {
+        ok: false,
+        code: 'CHECK_FAILED',
+        error: '`git worktree lock` failed, so no lease was written:\n' + lock.error,
+        nextAction: 'Resolve the git error above and retry. Run `git worktree list` to check for a conflicting lock.',
+      };
+    }
+    reasserted = true;
+  }
+
   const lease = acquireLease(slot.root, {
     owner,
     branch: slot.branch,
@@ -111,52 +153,23 @@ export async function claimWriter({ slot, writer, ttlMs = DEFAULT_TTL_MS, now = 
     },
   });
   if (!lease.ok) {
+    // We hold the git lock but the lease refuses — an ACTIVE foreign lease
+    // under a free git lock (a half-migrated tree). Undo OUR lock so no
+    // orphan claim remains; a REASSERTED lock predates this call and is ours,
+    // so it stays.
+    if (!reasserted) {
+      try { await unlockWorktree({ cwd: slot.gitCwd, path: slot.root }); } catch { /* best effort — the conflict result below is the point */ }
+    }
     return { ok: false, code: 'CHECK_FAILED', error: lease.error, nextAction: lease.nextAction, conflict: lease.conflict };
   }
 
-  const expectedReason = writerLockReason(writer, slot.task);
-  const lock = await lockWorktree({ cwd: slot.gitCwd, path: slot.root, reason: expectedReason });
-
-  if (!lock.ok) {
-    // `git worktree lock` refuses an already-locked worktree (see worktree-lock.mjs).
-    // For the SAME writer that is a renewal, not a conflict — the re-assert is an
-    // idempotent no-op because the lock already names exactly this writer/task.
-    // For anyone else it is a real conflict, and the lease rollback below keeps
-    // the slot from ending up half-claimed.
-    const existing = await currentLockReason(slot);
-    if (lock.alreadyLocked && existing === expectedReason) {
-      return {
-        ok: true,
-        action: lease.action,
-        owner,
-        lease: lease.lease,
-        lock: { locked: true, reason: expectedReason, reasserted: true },
-      };
-    }
-    releaseLease(slot.root);
-    if (lock.alreadyLocked) {
-      return {
-        ok: false,
-        code: 'CHECK_FAILED',
-        error:
-          'the write lease was taken but the worktree carries a FOREIGN git lock, so the claim was rolled back:\n' +
-          '    existing: ' + (existing || '(no reason recorded)') + '\n' +
-          '    wanted:   ' + expectedReason,
-        nextAction:
-          'Another writer (or a previous session) holds this slot. Inspect it with `npm run dev:workspace:snapshot`; ' +
-          'if its writer is gone, release deliberately: npm run dev:worktree:release -- "' + slot.root + '". ' +
-          'This tool never unlocks a foreign claim.',
-      };
-    }
-    return {
-      ok: false,
-      code: 'CHECK_FAILED',
-      error: 'the write lease was taken but `git worktree lock` failed, so the claim was rolled back:\n' + lock.error,
-      nextAction: 'Resolve the git error above and retry. Run `git worktree list` to check for a conflicting lock.',
-    };
-  }
-
-  return { ok: true, action: lease.action, owner, lease: lease.lease, lock: { locked: true, reason: expectedReason } };
+  return {
+    ok: true,
+    action: reasserted ? 'renewed' : lease.action,
+    owner,
+    lease: lease.lease,
+    lock: { locked: true, reason: expectedReason, ...(reasserted ? { reasserted: true } : {}) },
+  };
 }
 
 /** Live lock reason for the slot, or null when it is not locked. */

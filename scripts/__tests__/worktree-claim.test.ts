@@ -223,4 +223,39 @@ describe('STALE_LOCK classification (SPEC §10.3)', () => {
     expect(classifyLockAgainstLease({ locked: true, leasePhase: 'active', leaseOwner: 'a', path: 'X' }).state).toBe('locked');
     expect(classifyLockAgainstLease({ locked: false, leasePhase: 'none', path: 'X' }).state).toBe('none');
   });
+
+  // PRI-796 review (claimWriter race): when two claimants both observed the
+  // same expired lease, the loser of the git lock used to delete the winner's
+  // lease during its rollback — leaving "git lock held, no lease", the exact
+  // one-writer-per-worktree violation. The lock-before-lease order makes that
+  // state unreachable; this test pins the surviving property.
+  it('a losing claim on an expired-lease slot never touches the winning lease', async () => {
+    const created = await makeSlot('claim-race');
+    const wt = created.worktree;
+    // An expired lease left behind by a departed third writer.
+    fs.writeFileSync(
+      path.join(wt, '.workspace-lease.json'),
+      JSON.stringify({
+        schema: 'pd-workspace-lease/1',
+        workspace: wt,
+        owner: 'trae:PRI-901-claim-race',
+        branch: created.branch,
+        createdAt: '2020-01-01T00:00:00.000Z',
+        expiresAt: '2020-01-02T00:00:00.000Z',
+      }, null, 2),
+      'utf-8',
+    );
+
+    const first = await runDevScript('worktree-claim.mjs', [wt, '--writer', 'workbuddy', '--json'], { cwd: primary });
+    expect(first.code).toBe(0);
+    expect(leaseOf(wt).owner).toBe('workbuddy:PRI-901-claim-race');
+
+    const second = await runDevScript('worktree-claim.mjs', [wt, '--writer', 'codex', '--json'], { cwd: primary });
+    expect(second.code).not.toBe(0);
+    // The loser conflicts on the FOREIGN lock/lease and rolls nothing back:
+    // the winner's lease must still name the winner.
+    expect(leaseOf(wt).owner).toBe('workbuddy:PRI-901-claim-race');
+    const entry = await worktreeEntry(primary, wt);
+    expect(entry.locked).toBe(true);
+  }, 120_000);
 });

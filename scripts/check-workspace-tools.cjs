@@ -181,22 +181,165 @@ for (const file of devFiles) {
 // G. Every shared-Git-metadata mutation is serialised (SPEC §4 / git-12).
 //    A tool that runs `git worktree add|move|remove|prune` (or deletes a branch)
 //    without the mutex is the exact concurrency bug this change exists to fix.
+//    PRI-796 review: containment is proven PER CALL-SITE, not per file — a
+//    file holding one wrapped call and one bare call must still fail. Structural
+//    scanning runs on a same-length view with string/comment bodies blanked
+//    (template ${…} expressions kept), so parens inside literals can never
+//    fool the withMutationLock span matching; mutation patterns themselves are
+//    matched against the ORIGINAL text at the same offsets.
 // ---------------------------------------------------------------------------
-const MUTATING = [
-  /'worktree',\s*'add'/u,
-  /'worktree',\s*'move'/u,
-  /'worktree',\s*'remove'/u,
-  /'worktree',\s*'prune'/u,
-  /'branch',\s*'-D'/u,
-];
+const MUTATING_RE = /['"]worktree['"]\s*,\s*['"](?:add|move|remove|prune)['"]|['"]branch['"]\s*,\s*['"]-D['"]/g;
+
+/** Same-length mask with non-code characters replaced by spaces. */
+function blankNonCode(src) {
+  const out = src.split('');
+  const n = src.length;
+  let i = 0;
+  const blankRange = (from, to) => { for (let k = from; k < to; k++) out[k] = ' '; };
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === '/' && d === '/') {
+      let j = i + 2;
+      while (j < n && src[j] !== '\n') j++;
+      blankRange(i, j);
+      i = j;
+      continue;
+    }
+    if (c === '/' && d === '*') {
+      let j = i + 2;
+      while (j < n && !(src[j] === '*' && src[j + 1] === '/')) j++;
+      blankRange(i, Math.min(j + 2, n));
+      i = j + 2;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < n && src[j] !== c) {
+        if (src[j] === '\\') j++;
+        if (src[j] === '\n') break; // unterminated string: stop at line end
+        j++;
+      }
+      blankRange(i + 1, Math.min(j, n)); // keep the quote characters themselves
+      i = j + 1;
+      continue;
+    }
+    if (c === '`') {
+      // template literal: blank text, keep ${ … } expressions as code
+      let j = i + 1;
+      let k = j;
+      const parts = [];
+      let litStart = j;
+      while (k < n) {
+        if (src[k] === '\\') { k += 2; continue; }
+        if (src[k] === '`') break;
+        if (src[k] === '$' && src[k + 1] === '{') { parts.push(['lit', litStart, k]); k += 2; let depth = 1; const ex = k; while (k < n && depth > 0) { if (src[k] === '{') depth++; else if (src[k] === '}') depth--; k++; } parts.push(['expr', ex, k - 1]); litStart = k; continue; }
+        k++;
+      }
+      parts.push(['lit', litStart, Math.min(k, n)]);
+      for (const [kind, from, to] of parts) if (kind === 'lit') blankRange(from, to);
+      i = Math.min(k + 1, n);
+      continue;
+    }
+    i++;
+  }
+  return out.join('');
+}
+
+/** [start, endExclusive] spans of every `withMutationLock( … )` call (balanced parens on the masked view). */
+function mutationLockSpans(masked) {
+  const spans = [];
+  const needle = 'withMutationLock(';
+  let from = 0;
+  for (;;) {
+    const idx = masked.indexOf(needle, from);
+    if (idx === -1) break;
+    let depth = 0;
+    let i = idx + needle.length - 1; // the '(' itself
+    for (; i < masked.length; i++) {
+      if (masked[i] === '(') depth++;
+      else if (masked[i] === ')') { depth--; if (depth === 0) break; }
+    }
+    if (depth === 0) spans.push([idx, i + 1]);
+    from = idx + needle.length;
+  }
+  return spans;
+}
+
+/**
+ * Hoisted mutation helpers. A mutation may live in a named function that its
+ * CALLERS invoke inside withMutationLock (textually outside the call span).
+ * Such helpers are legal only when explicitly marked `MUTATION-GUARDED-HELPER`
+ * above the declaration AND every call site of the name sits inside a
+ * withMutationLock span — the gate enforces both halves of that contract
+ * (PRI-796 review: per call-site containment).
+ */
+const GUARD_MARKER = 'MUTATION-GUARDED-HELPER';
+
+function guardedHelpers(text, masked) {
+  const helpers = [];
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(GUARD_MARKER, from);
+    if (at === -1) break;
+    from = at + GUARD_MARKER.length;
+    const decl = /function\s+([A-Za-z_$][\w$]*)\s*\(/.exec(text.slice(at));
+    if (!decl) continue;
+    const name = decl[1];
+    const parenIdx = at + decl.index + decl[0].length - 1; // the '(' of the declaration
+    let depth = 0;
+    let i = parenIdx;
+    for (; i < masked.length; i++) {
+      if (masked[i] === '(') depth++;
+      else if (masked[i] === ')') { depth--; if (depth === 0) break; }
+    }
+    let braceIdx = masked.indexOf('{', i + 1);
+    if (braceIdx === -1) continue;
+    depth = 0;
+    let end = -1;
+    for (let k = braceIdx; k < masked.length; k++) {
+      if (masked[k] === '{') depth++;
+      else if (masked[k] === '}') { depth--; if (depth === 0) { end = k + 1; break; } }
+    }
+    if (end !== -1) helpers.push({ name, span: [braceIdx, end] });
+  }
+  return helpers;
+}
+
 for (const file of devFiles) {
   const text = fs.readFileSync(file, 'utf8');
-  if (!MUTATING.some((re) => re.test(text))) continue;
-  if (!text.includes('withMutationLock')) {
+  const matches = [...text.matchAll(MUTATING_RE)];
+  if (matches.length === 0) continue;
+  const masked = blankNonCode(text);
+  const spans = mutationLockSpans(masked);
+  const helpers = guardedHelpers(text, masked);
+  const rel = path.relative(ROOT, file);
+  const lineOf = (at) => text.slice(0, at).split('\n').length;
+  for (const m of matches) {
+    const at = m.index;
+    if (spans.some(([s, e]) => at >= s && at < e)) continue;
+    if (helpers.some((h) => at >= h.span[0] && at < h.span[1])) continue;
     fail(
       'git-mutation-mutex',
-      `${path.relative(ROOT, file)} runs a shared-Git-metadata mutation without withMutationLock()`
+      `${rel}:${lineOf(at)} runs a shared-Git-metadata mutation (${JSON.stringify(m[0])}) outside any withMutationLock() call — per-file presence is not containment; hoisted helpers need a ${GUARD_MARKER} declaration`
     );
+  }
+  // Contract half two: every call of a guarded helper must be locked.
+  for (const h of helpers) {
+    const callRe = new RegExp('\\b' + h.name + '\\s*\\(', 'g');
+    for (const c of text.matchAll(callRe)) {
+      if (c.index === text.indexOf(h.name)) { /* declaration token — name occurrence in regex above includes it; filtered by span check anyway */ }
+      // skip the declaration itself
+      const before = text.slice(Math.max(0, c.index - 20), c.index);
+      if (/function\s*$/.test(before)) continue;
+      const at = c.index;
+      if (!spans.some(([s, e]) => at >= s && at < e)) {
+        fail(
+          'git-mutation-mutex',
+          `${rel}:${lineOf(at)} calls ${GUARD_MARKER} helper ${h.name}() outside a withMutationLock() span`
+        );
+      }
+    }
   }
 }
 

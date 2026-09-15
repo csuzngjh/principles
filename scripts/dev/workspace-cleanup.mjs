@@ -36,7 +36,6 @@
 //   node scripts/dev/workspace-cleanup.mjs --residue <path> --ack-unknown [--apply] [--json]
 //   npm run dev:workspace:cleanup
 
-import path from 'node:path';
 import { assessWorktreePruneSafety, gitCommonDirAbsolute, listWorktrees, normalizeGitPath, runGit } from './lib/git.mjs';
 import {
   GRACE_DAYS_DEFAULT,
@@ -95,7 +94,12 @@ function describeAction(action) {
   return lines;
 }
 
-/** One `git worktree remove`, with the single sanctioned --force retry. */
+/**
+ * One `git worktree remove`, with the single sanctioned --force retry.
+ * MUTATION-GUARDED-HELPER: this hoisted mutation helper is legal only because
+ * every call site runs inside a withMutationLock span (check-workspace-tools
+ * enforces that contract per call site, PRI-796).
+ */
 async function removeWorktree(cwd, worktreePath, notes) {
   let removeError = '';
   try {

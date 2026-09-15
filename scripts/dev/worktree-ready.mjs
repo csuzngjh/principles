@@ -51,7 +51,12 @@ async function main() {
   try {
     root = await resolveTargetRoot(args.target);
   } catch (err) {
-    console.error('[worktree-ready] FAIL: not inside a git worktree: ' + String((err && err.message) || err));
+    // PRI-796 review: --json consumers must always receive parseable JSON —
+    // the later ENVIRONMENT_INVALID branch already honours that; do the same
+    // here instead of emitting bare text on stderr in JSON mode.
+    const message = '[worktree-ready] not inside a git worktree: ' + String((err && err.message) || err);
+    if (args.json) console.log(JSON.stringify({ ok: false, code: 'ENVIRONMENT_INVALID', error: message }, null, 2));
+    else console.error(message);
     process.exit(2);
   }
 

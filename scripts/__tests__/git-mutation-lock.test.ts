@@ -57,7 +57,13 @@ function writeHolderHelper(dir: string): string {
 
 async function waitForFile(file: string, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (!fs.existsSync(file) && Date.now() < deadline) {
+  // PRI-796 review: existence alone leaves a window where the holder created
+  // the file but the JSON is not yet readable — poll the PARSED state instead
+  // so the loser's holder assertions cannot race the write.
+  const dir = path.dirname(file);
+  while (Date.now() < deadline) {
+    const state = readMutationLock(dir);
+    if (state.exists && state.valid) return;
     await new Promise((r) => setTimeout(r, 20));
   }
 }
@@ -158,5 +164,26 @@ describe('repo mutation mutex', () => {
   it('puts the lock inside the shared git dir, named as documented', () => {
     expect(path.basename(mutationLockPath(commonDir))).toBe(MUTATION_LOCK_FILENAME);
     expect(MUTATION_LOCK_FILENAME).toBe('pd-worktree-mutation.lock');
+  });
+
+  // PRI-796 review: check-then-unlink is only sound if the file being unlinked
+  // is the file that was created. If a human recovery removes the lock and a
+  // successor recreates it — even byte-identical — the straggler's release
+  // MUST refuse instead of deleting the successor's lock (the inode pin proves
+  // file-object identity, which the token compare alone cannot).
+  it('release refuses when the path holds a recreated file (inode replaced)', () => {
+    const a = acquireMutationLock({ commonDir, operation: 'worktree-add', target: 'wt' });
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    const file = mutationLockPath(commonDir);
+    const content = fs.readFileSync(file, 'utf-8');
+    fs.rmSync(file);
+    fs.writeFileSync(file, content, 'utf-8');
+
+    const r = a.release();
+    expect(r.released).toBe(false);
+    expect(r.reason).toMatch(/replaced|no longer owned/);
+    // The successor's lock object survives for its real owner to release.
+    expect(readMutationLock(commonDir).exists).toBe(true);
   });
 });

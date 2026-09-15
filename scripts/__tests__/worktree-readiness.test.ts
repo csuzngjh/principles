@@ -139,6 +139,49 @@ describe('readiness on a self-contained worktree', () => {
   });
 });
 
+// PRI-796 review: an artifact that EXISTS but predates the sources is the
+// silent false-verification L2 exists to prevent (checkout/merge refreshes src,
+// old dist survives → old existsSync-only probe said READY).
+describe('L2 build freshness (PRI-796)', () => {
+  function age(file: string, msAgo: number): void {
+    const t = new Date(Date.now() - msAgo);
+    fs.utimesSync(file, t, t);
+  }
+
+  it('is NOT_READY when a source file is newer than the built artifact', () => {
+    buildWorkspace(root);
+    const pkgDir = path.join(root, 'packages', 'a');
+    fs.mkdirSync(path.join(pkgDir, 'src'), { recursive: true });
+    const src = path.join(pkgDir, 'src', 'index.ts');
+    fs.writeFileSync(src, 'export const v = 2;\n', 'utf-8');
+    // artifact older than src → stale build
+    age(path.join(pkgDir, 'dist', 'index.js'), 60_000);
+    age(src, 1_000);
+
+    const report = checkReadiness({ worktreeRoot: root });
+    expect(report.ok).toBe(false);
+    expect(report.levels.l2.ok).toBe(false);
+    const hit = report.levels.l2.results.find((r) => r.name === '@x/a');
+    expect(hit?.ok).toBe(false);
+    expect(hit?.detail).toMatch(/STALE/);
+  });
+
+  it('is READY once the artifact is emitted after the sources', () => {
+    buildWorkspace(root);
+    const pkgDir = path.join(root, 'packages', 'a');
+    fs.mkdirSync(path.join(pkgDir, 'src'), { recursive: true });
+    const src = path.join(pkgDir, 'src', 'index.ts');
+    fs.writeFileSync(src, 'export const v = 2;\n', 'utf-8');
+    // rebuild ordering: src older, artifact newer
+    age(src, 60_000);
+    for (const f of ['index.js', 'sub.js']) age(path.join(pkgDir, 'dist', f), 1_000);
+
+    const report = checkReadiness({ worktreeRoot: root });
+    expect(report.levels.l2.ok).toBe(true);
+    expect(report.levels.l2.results.find((r) => r.name === '@x/a')?.ok).toBe(true);
+  });
+});
+
 describe('stale-install detection (L1)', () => {
   /** Create a lockfile + install marker with explicit mtimes. */
   function makeInstall(worktree: string, lockAgeMs: number, markerAgeMs: number): void {

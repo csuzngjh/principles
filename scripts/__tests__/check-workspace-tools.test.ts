@@ -126,6 +126,35 @@ describe('workspace tools gate', () => {
     expect(result.stderr).toContain('git-mutation-mutex');
   }, 60_000);
 
+  // PRI-796 review: the old per-file check passed a file that wrapped one
+  // mutation and ran another bare. Per-call-site containment must fail it.
+  it('fails on the per-file blind spot: one wrapped and one bare mutation in the same file', async () => {
+    const target = path.join(fixture, 'scripts', 'dev', 'workspace-cleanup.mjs');
+    fs.writeFileSync(
+      target,
+      fs.readFileSync(target, 'utf-8')
+        + "\nfunction gateFixtureBareRemove(p) { runGit(['worktree', 'remove', p], { cwd }); }\n",
+      'utf-8',
+    );
+    const result = await runGate(fixture);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('git-mutation-mutex');
+    expect(result.stderr).toContain('per-file presence is not containment');
+  }, 60_000);
+
+  it('fails when a MUTATION-GUARDED-HELPER is called outside a withMutationLock span', async () => {
+    const target = path.join(fixture, 'scripts', 'dev', 'workspace-cleanup.mjs');
+    fs.writeFileSync(
+      target,
+      fs.readFileSync(target, 'utf-8') + "\nawait removeWorktree('/somewhere', '/wt', []);\n",
+      'utf-8',
+    );
+    const result = await runGate(fixture);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('git-mutation-mutex');
+    expect(result.stderr).toContain('MUTATION-GUARDED-HELPER');
+  }, 60_000);
+
   it('fails when a background service is introduced', async () => {
     const target = path.join(fixture, 'scripts', 'dev', 'worktree-snapshot.mjs');
     fs.writeFileSync(target, fs.readFileSync(target, 'utf-8') + '\nsetInterval(() => {}, 1000);\n', 'utf-8');

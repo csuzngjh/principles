@@ -57,6 +57,15 @@ describe('resolveWorktreeRoot (git-10)', () => {
     const { source } = resolveWorktreeRoot({ primaryPath: PRIMARY, env: { [WORKTREE_ROOT_ENV]: '   ' } });
     expect(source).toBe('derived');
   });
+
+  it('refuses a relative PD_WORKTREE_ROOT instead of resolving it against the process cwd', () => {
+    // PRI-796 review: a relative pool root would resolve differently from the
+    // primary checkout, a task worktree or a subdirectory — one config value
+    // must name exactly one pool. Same platform-shape trap as primaryPath.
+    const notAbsoluteHere = process.platform === 'win32' ? 'pools\\pd' : 'D:/pools/pd';
+    expect(() => resolveWorktreeRoot({ primaryPath: PRIMARY, env: { [WORKTREE_ROOT_ENV]: notAbsoluteHere } }))
+      .toThrow(/must be an absolute path/);
+  });
 });
 
 describe('resolveTaskIdentity (git-11)', () => {

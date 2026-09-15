@@ -26,11 +26,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { gitCommonDirAbsolute, listWorktrees, normalizeGitPath, runGit, sameGitPath } from './lib/git.mjs';
+import { gitCommonDirAbsolute, listWorktrees, runGit, sameGitPath } from './lib/git.mjs';
 import { collectPrIndex, readLeaseState } from './lib/workspace-lifecycle.mjs';
 import { resolveWorktreeRoot, taskIdentityFromBranch } from './lib/worktree-root.mjs';
 import { withMutationLock } from './lib/git-mutation-lock.mjs';
-import { CODES } from './lib/preflight.mjs';
 
 function parseArgs(argv) {
   const args = { apply: false, json: false, skipGh: false };
@@ -196,6 +195,9 @@ async function main() {
   const payload = { ok: true, mode: 'apply', moved, refused, skipped, poolRoot, notes };
   if (args.json) {
     console.log(JSON.stringify(payload, null, 2));
+    // PRI-796 review: --json must exit non-zero on refusals exactly like the
+    // text path below — callers branch on the exit code.
+    if (refused.length > 0) process.exit(1);
     return;
   }
   const lines = ['[workspace-migrate] moved ' + moved.length + ', refused ' + refused.length + ', skipped ' + skipped.length];
