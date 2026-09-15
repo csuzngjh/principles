@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ApprovalStatus, InternalizationChannel } from '@principles/core/runtime-v2';
 import { MVP_CHANNELS } from '@principles/core/runtime-v2';
-import { ApprovalsConsoleModel, type ApproveWithActivationResult } from '../models/ApprovalsConsoleModel.js';
+import { ApprovalsConsoleModel, type ApproveWithActivationResult, type ReopenApprovalResult } from '../models/ApprovalsConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
 import { parseQuery, readBody } from '../utils/request.js';
 
@@ -221,6 +221,43 @@ export async function handleApprovalsRoute(
       } else {
         sendError(res, 500, 'reject_error', message);
       }
+    }
+    return;
+  }
+
+  // POST /api/v1/approvals/:id/reopen — reset a terminal approval back to
+  // pending so the Owner can decide again (EP002-R4 follow-up: the clean
+  // re-activation path for a deliberately deactivated intervention — reopen,
+  // then a fresh Console approve re-dispatches through the verified chain).
+  const reopenSegments = subPath.split('/').filter((segment) => segment.length > 0);
+  if (req.method === 'POST' && reopenSegments.length === 2 && reopenSegments[1] === 'reopen') {
+    const [rawId] = reopenSegments;
+    if (!rawId) {
+      sendError(res, 400, 'invalid_id', 'Approval ID is missing');
+      return;
+    }
+    let approvalId: string;
+    try {
+      approvalId = decodeURIComponent(rawId);
+    } catch {
+      sendError(res, 400, 'invalid_id', 'Approval ID contains invalid URI encoding');
+      return;
+    }
+    try {
+      const result: ReopenApprovalResult = await model.reopenApproval(approvalId);
+      if (!result.ok) {
+        if (result.error === 'not_found') {
+          sendNotFound(res, 'Approval ' + approvalId + ' not found');
+        } else if (result.error === 'unsupported_channel') {
+          sendError(res, 403, 'unsupported_channel', 'Cannot reopen: only MVP proven channels (' + MVP_CHANNEL_LIST + ') are operable.');
+        } else {
+          sendError(res, 409, 'not_reopenable', 'Approval cannot be reopened from status: ' + (result.status ?? 'unknown'));
+        }
+        return;
+      }
+      sendSuccess(res, { ...result.record, alreadyPending: result.alreadyPending });
+    } catch (err: unknown) {
+      sendError(res, 500, 'reopen_error', getErrorMessage(err));
     }
     return;
   }

@@ -272,12 +272,18 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
   });
 
   // ── Test 1: Capability ON + approved → candidate_ready_for_owner_review ──
-  it('capability ON + evaluator approved → candidate_ready_for_owner_review', async () => {
+  it('capability ON + evaluator approved → candidate_ready_for_owner_review; scribe identity backfilled on the rule path too (EP002-R4 follow-up #2)', async () => {
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
     await sm.initialize();
-    await seedDreamerWithId(sm, 'dreamer-seeded-001', 'pain-test-001');
+    await seedDreamerWithId(sm, 'dreamer-seeded-001', 'pain-test-001', 'code_tool_hook', 'cand-001');
     await sm.close();
+    addPrincipleToLedger(path.join(tmpDir, '.state'), {
+      id: 'ledger-principle-001', version: 1, text: 'test ledger principle', triggerPattern: '', action: '',
+      status: 'candidate', evaluability: 'weak_heuristic', priority: 'P1', scope: 'general',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0, derivedFromPainIds: ['cand-001'],
+      ruleIds: [], conflictsWithPrincipleIds: [], createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',
+    });
 
     const adapter = makeAdapter();
     const capability: CodeRuleCapability = { enabled: true, artificerAdapter: adapter };
@@ -294,6 +300,23 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(result.ruleArtifactId).not.toBeNull();
     // P1 #1 fix: candidate should be auto-enqueued into the ApprovalQueue
     expect(result.approvalId).not.toBeNull();
+
+    // EP002-R4 follow-up #2: the scribe artifact carries the LEDGER UUID (not
+    // a title) so the evaluator propagates it into the rule artifact and the
+    // Console groups the approval by an id the detail page can resolve.
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const scribeArt = await verify.piArtifactStore.getArtifactById(
+        (await verify.piArtifactStore.listBySourceTaskId(result.stages.find((s) => s.name === 'scribe')!.taskId!))
+          .find((a) => a.artifactKind === 'principle')!.artifactId,
+      );
+      expect(scribeArt?.sourcePrincipleId).toBe('ledger-principle-001');
+      const ruleArt = await verify.piArtifactStore.getArtifactById(result.ruleArtifactId!);
+      expect(ruleArt?.sourcePrincipleId).toBe('ledger-principle-001');
+    } finally {
+      await verify.close();
+    }
   }, 60_000);
 
   it('adversarial feedback loop drives a second artificer round before creating a candidate', async () => {

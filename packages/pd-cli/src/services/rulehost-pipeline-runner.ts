@@ -381,6 +381,22 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     }
     onProgress('scribe', 'succeeded');
 
+    // EP002-R4 follow-up #2: backfill the LEDGER principle UUID on the scribe
+    // artifact for BOTH paths (rule + text). Downstream identity resolution
+    // (extractPrincipleId's column-first order) then binds the rule artifact,
+    // the approval grouping, and the post-approve ledger upgrade to the
+    // ledger UUID instead of falling back to principleDraft.title — the
+    // title namespace is what left rule-channel approvals stranded as
+    // title-keyed groups the Console detail page cannot reach.
+    const identityNote = await backfillScribeIdentity({
+      stateManager, artifactStore, scribeTaskId, dreamerTaskId: dreamerSeedTaskId,
+      workspaceDir: opts.workspaceDir, now: new Date().toISOString(),
+    });
+    if (identityNote !== '') {
+      const scribeStage = stages.find((s) => s.name === 'scribe');
+      if (scribeStage) (scribeStage as { reason?: string }).reason = identityNote.replace(/^; /, '');
+    }
+
     // ── Atomic capability branching ──
     // Per user correction (2026-06-18): ArtificerL2 + Evaluator are atomic.
     // When OFF (or not provided), skip the adversarial loop entirely and
@@ -394,8 +410,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       const approvalStore = new SqliteApprovalQueueStore(stateManager.connection);
       return await textPrincipleOnlyResult({
         painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason,
-        artifactStore, approvalStore, stateManager, dreamerTaskId: dreamerSeedTaskId,
-        workspaceDir: opts.workspaceDir, now: new Date().toISOString(),
+        artifactStore, approvalStore, now: new Date().toISOString(),
       });
     }
 
@@ -861,10 +876,6 @@ interface TextPrincipleOnlyParams {
   readonly artifactStore: PIArtifactStore;
   /** PRI-804: approval queue used to enqueue the text principle (prompt channel). */
   readonly approvalStore: SqliteApprovalQueueStore;
-  /** PRI-804(a): ledger identity resolution for the source_principle_id backfill. */
-  readonly stateManager: RuntimeStateManager;
-  readonly dreamerTaskId: string;
-  readonly workspaceDir: string;
   readonly now: string;
 }
 
@@ -908,6 +919,47 @@ async function resolveLedgerPrincipleId(
   }
 }
 
+interface BackfillIdentityParams {
+  readonly stateManager: RuntimeStateManager;
+  readonly artifactStore: PIArtifactStore;
+  readonly scribeTaskId: string;
+  readonly dreamerTaskId: string;
+  readonly workspaceDir: string;
+  readonly now: string;
+}
+
+/**
+ * EP002-R4 follow-up #2: backfill the scribe principle artifact's
+ * source_principle_id with the LEDGER principle UUID (shared by the rule and
+ * text paths — runs right after the scribe stage succeeds). Every downstream
+ * identity resolution reads this column FIRST (extractPrincipleId /
+ * EvaluatorRunner.extractPrincipleIdFromArtifact), so this single write is
+ * what binds approvals, Console grouping, ledger upgrades, and rule
+ * artifacts to the ledger UUID instead of the title namespace.
+ *
+ * Returns a non-empty observable note (rc-9) when the backfill was skipped
+ * or failed; '' on success. Never throws — identity enrichment must not
+ * break the generation chain.
+ */
+async function backfillScribeIdentity(params: BackfillIdentityParams): Promise<string> {
+  const { stateManager, artifactStore, scribeTaskId, dreamerTaskId, workspaceDir, now } = params;
+  try {
+    const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
+    const principleArt = arts.find((a) => a.artifactKind === 'principle');
+    if (!principleArt) return '';
+    if (principleArt.sourcePrincipleId) return ''; // already bound (rerun) — idempotent
+    const ledgerPrincipleId = await resolveLedgerPrincipleId(stateManager, dreamerTaskId, workspaceDir);
+    if (!ledgerPrincipleId) {
+      return '; source_principle_id_backfill_skipped: no ledger principle resolved for the chain candidate';
+    }
+    await artifactStore.upsertArtifact({ ...principleArt, sourcePrincipleId: ledgerPrincipleId, updatedAt: now });
+    return '';
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `; source_principle_id_backfill_failed: ${msg}`;
+  }
+}
+
 async function textPrincipleOnlyResult(
   params: TextPrincipleOnlyParams,
 ): Promise<RuleHostPipelineResult> {
@@ -916,39 +968,19 @@ async function textPrincipleOnlyResult(
   try {
     const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
     const principleArt = arts.find((a) => a.artifactKind === 'principle');
-    // PRI-804(a): backfill source_principle_id with the ledger principle UUID so
-    // the approval binds to the ledger principle (Console approval grouping and
-    // the post-approve ledger activation upgrade both resolve identity from
-    // this column first). Failure degrades observably — the enqueue below
-    // still proceeds so the Owner can act, with the gap surfaced in the reason.
+    // Identity backfill already ran on the shared post-scribe step
+    // (backfillScribeIdentity) for BOTH paths; nothing to do here.
+    // On the text path the evaluator never runs, so nothing else flips the
+    // validation status — mark it validated here (same store API the
+    // evaluator uses; scribe task success already implies its validator
+    // passed — peer-runner contract: output_invalid tasks never succeed).
     let identityNote = '';
-    if (principleArt && !principleArt.sourcePrincipleId) {
-      const ledgerPrincipleId = await resolveLedgerPrincipleId(params.stateManager, params.dreamerTaskId, params.workspaceDir);
-      if (ledgerPrincipleId) {
-        try {
-          await artifactStore.upsertArtifact({ ...principleArt, sourcePrincipleId: ledgerPrincipleId, updatedAt: now });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          identityNote = `; source_principle_id_backfill_failed: ${msg}`;
-        }
-      } else {
-        identityNote = '; source_principle_id_backfill_skipped: no ledger principle resolved for the chain candidate';
-      }
-    }
-    // PRI-804: on the rule path the EVALUATOR marks the scribe principle
-    // artifact 'validated' after adversarial approval (evaluator-runner). On the
-    // text path that stage never runs, so nothing ever flips the status and
-    // PromptWriter.canActivate refuses the activation with
-    // artifact_validation_status_pending. The scribe task's success already
-    // implies its output passed DefaultScribeValidator (peer-runner contract:
-    // output_invalid tasks never succeed), so the terminal marks the artifact
-    // validated through the same store API the evaluator uses — no new writer.
     if (principleArt && principleArt.validationStatus !== 'validated') {
       try {
         await artifactStore.updateValidationStatus(principleArt.artifactId, 'validated');
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        identityNote += `; validation_status_mark_failed: ${msg}`;
+        identityNote = `; validation_status_mark_failed: ${msg}`;
       }
     }
     // PRI-804: a text principle is a prompt-channel intervention and follows the
