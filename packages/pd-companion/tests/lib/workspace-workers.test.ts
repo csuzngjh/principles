@@ -181,4 +181,36 @@ describe('WorkspaceWorkerRegistry (matrix A)', () => {
     for (const entry of scheduled) entry.callback();
     expect(spawnWorker).toHaveBeenCalledTimes(2);
   });
+
+  // ── PRI-715: Owner-visible projection inputs ─────────────────────────────
+
+  it('degraded projection reports only the degraded workspace; healthy ones stay out (C/E)', () => {
+    const ctx = makeRegistry();
+    ctx.registry.sync(['D:/Code/ws-a']);
+    for (let crash = 0; crash < 4; crash += 1) {
+      ctx.spawned[ctx.spawned.length - 1]?.emitExit(1);
+      ctx.flush();
+    }
+    expect(ctx.registry.degradedWorkspaces()).toEqual([canonicalWorkspacePath('D:/Code/ws-a')]);
+    // B joins the manifest later and keeps running — the Owner-facing query
+    // must report A only.
+    ctx.registry.sync(['D:/Code/ws-a', 'D:/Code/ws-b']);
+    ctx.flush();
+    expect(ctx.registry.degradedWorkspaces()).toEqual([canonicalWorkspacePath('D:/Code/ws-a')]);
+    expect(ctx.spawnCalls).toHaveLength(5); // A stays degraded, B spawned once
+  });
+
+  it('removing a degraded workspace clears it from the Owner-visible projection (no ghost, F)', () => {
+    const ctx = makeRegistry();
+    ctx.registry.sync(['D:/Code/ws-a']);
+    for (let crash = 0; crash < 4; crash += 1) {
+      ctx.spawned[ctx.spawned.length - 1]?.emitExit(1);
+      ctx.flush();
+    }
+    expect(ctx.registry.degradedWorkspaces()).toHaveLength(1);
+    // Owner removes the workspace from the manifest → the entry (and its
+    // degraded flag) leaves the map, so no phantom warning survives.
+    ctx.registry.sync([]);
+    expect(ctx.registry.degradedWorkspaces()).toEqual([]);
+  });
 });

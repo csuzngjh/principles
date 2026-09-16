@@ -117,4 +117,17 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
     expect(source).toContain('WORKSPACE_WORKER_SYNC_INTERVAL_MS');
     expect(source).toContain('WORKSPACE_WORKER_CYCLE_INTERVAL_MS');
   });
+
+  it('PRI-715: 永久 degraded 接入 Owner 可见表面——托盘投影 + 一次性通知（纯读，无副作用）', () => {
+    const source = src();
+    // 托盘菜单/tooltip 每次重建时纯读 registry 的 degraded 查询。
+    expect(source).toContain('buildDegradedWorkspacesTrayView(workspaceWorkers?.degradedWorkspaces() ?? [])');
+    // 降级迁移事件触发一次性系统通知，并重建托盘让投影立即生效。
+    expect(source).toContain("event === 'workspace_worker_degraded'");
+    expect(source).toContain('notifyWorkspaceDegraded(workspace)');
+    expect(source).toContain('describeWorkspaceWorkerDegraded(');
+    // 通知路径自身可观察（rc-9）：不支持时留日志，成功时留 notified 事件。
+    expect(source).toContain("'notified_workspace_degraded'");
+    expect(source).toContain('notification_unsupported');
+  });
 });
