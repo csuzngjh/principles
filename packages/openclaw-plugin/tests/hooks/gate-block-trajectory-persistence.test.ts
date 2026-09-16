@@ -187,6 +187,10 @@ describe('PRI-569 gate-block trajectory persistence', () => {
             { toolName: 'Write', filePath, matched: true, decision: 'block', ruleId: 'R_SHADOW_813', activationId: 'act-shadow-813', activationMode: 'shadow' },
             // malformed entry must be skipped observably, never persisted (rc-9)
             { toolName: 'Write', matched: 'yes', decision: 'block' },
+            // CR-6: a schema-valid shadow observation WITHOUT activationId is
+            // dead evidence (the shadow summary keys on the exact id) —
+            // rejected at this boundary, observably.
+            { toolName: 'Write', filePath, matched: true, decision: 'block', ruleId: 'R_SHADOW_NOID_813', activationMode: 'shadow' },
           ],
         },
       },

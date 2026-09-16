@@ -71,6 +71,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isRuleHostEvaluationEntry(value: unknown): boolean {
   // rc-1/rc-2/rc-4: metadata crosses the HostEventResult contract as unknown —
   // validate every entry's shape before it becomes a persisted event.
+  // A shadow observation without activationId is dead evidence (the shadow
+  // summary keys on the exact id), so it is rejected here (CodeRabbit CR-6).
   return isRecord(value)
     && typeof value.toolName === 'string'
     && typeof value.filePath === 'string'
@@ -78,7 +80,8 @@ function isRuleHostEvaluationEntry(value: unknown): boolean {
     && typeof value.decision === 'string' && RULEHOST_EVALUATED_DECISIONS.has(value.decision)
     && (value.ruleId === undefined || typeof value.ruleId === 'string')
     && (value.activationId === undefined || typeof value.activationId === 'string')
-    && (value.activationMode === undefined || value.activationMode === 'shadow' || value.activationMode === 'live');
+    && (value.activationMode === undefined || value.activationMode === 'shadow' || value.activationMode === 'live')
+    && (value.activationMode !== 'shadow' || typeof value.activationId === 'string');
 }
 
 /**
@@ -103,13 +106,21 @@ function recordRuleHostEvaluations(stateDir: string, sessionId: string | undefin
     for (const [key, value] of Object.entries(entry)) {
       redacted[key] = typeof value === 'string' ? redactTelemetryString(value) : value;
     }
-    appendEventLogLine(stateDir, {
-      ts: new Date().toISOString(),
-      type: 'rulehost_evaluated',
-      category: 'evaluated',
-      sessionId,
-      data: redacted,
-    });
+    // CodeRabbit CR-1: evidence persistence is telemetry — an fs failure here
+    // must never propagate into processHookInvocation's fail-open catch,
+    // which would drop an already-computed deny from stdout and let the tool
+    // call proceed. Degrade observably instead (rc-9).
+    try {
+      appendEventLogLine(stateDir, {
+        ts: new Date().toISOString(),
+        type: 'rulehost_evaluated',
+        category: 'evaluated',
+        sessionId,
+        data: redacted,
+      });
+    } catch (error: unknown) {
+      if (diagnostics.length === 0) diagnostics.push(diagnostic(`rulehost_evaluation_persist_failed:${errorMessage(error)}`, 'Inspect workspace .state/logs writability; the evaluation event was not persisted, the tool decision is unaffected.'));
+    }
   }
   return diagnostics;
 }

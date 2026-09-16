@@ -290,6 +290,21 @@ describe('worker cycle — SPEC §13 flag ladder (matrix B)', () => {
     expect(result.reason).toBe('workspace_missing');
   });
 
+  it('PRI-813 (CodeRabbit CR-2): declaration persist failure degrades and SKIPS the downstream cycle (no Codex activation can be created without codex.json)', async () => {
+    // Pre-fix negative control: the old code warned and still ran the
+    // downstream internalization cycle, which could create RuleCode
+    // activations on a workspace whose promotion would then fall back to the
+    // OpenClaw liveness contract (false capability PASS).
+    const ws = makeWorkspace({ ingestion: true, consumer: true });
+    // Block the declarations directory with a regular file so
+    // saveHostToolDeclaration cannot create codex.json.
+    fs.writeFileSync(path.join(ws.root, '.pd', 'host-tool-semantics'), 'not a directory');
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    expect(result.mode).toBe('degraded');
+    expect(result.reason).toContain('host_tool_declaration_persist_failed');
+    expect(result.report?.downstream).toBeNull();
+  });
+
   it('codex_conversation_ingestion=false → ZERO transcript I/O while reconcile + diagnostician still run', async () => {
     const ws = makeWorkspace({ ingestion: true });
     await seedAdmittedPendingTask(ws);

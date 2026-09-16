@@ -276,7 +276,7 @@ function gateEvent(workspaceDir: string, filePath: string) {
 /** PRI-813: seed one activation with an explicit live/shadow action. */
 async function seedRuleActivation(
   workspaceDir: string,
-  options: { suffix: string; action: 'code_tool_hook_live_activate' | 'code_tool_hook_shadow_activate'; implementationCode: string; requiresContextVersion?: 2; ruleId?: string },
+  options: { suffix: string; action: 'code_tool_hook_live_activate' | 'code_tool_hook_shadow_activate'; implementationCode: string; requiresContextVersion?: 2; ruleId?: string; targetRef?: string },
 ): Promise<void> {
   const connection = new SqliteConnection(workspaceDir);
   try {
@@ -291,7 +291,7 @@ async function seedRuleActivation(
     }), now, now);
     await new SqliteActivationStateStore(connection).recordActivation({
       activationId: `act-shared-gate${options.suffix}`, idempotencyKey: `shared-gate${options.suffix}::${options.action}`, artifactId: `art-shared-gate${options.suffix}`,
-      channel: 'code_tool_hook', action: options.action, targetRef: `impl://${ruleId}`,
+      channel: 'code_tool_hook', action: options.action, targetRef: options.targetRef ?? `impl://${ruleId}`,
       activatedAt: now, deactivatedAt: null,
     });
   } finally {
@@ -525,8 +525,44 @@ describe('shared production RuleHost gate kernel', () => {
       decision: 'block',
       toolName: 'write_file',
     })]);
-    // The live aggregate row is still emitted (zero live rules armed).
-    expect(evaluations.filter(entry => entry.activationMode === 'live')).toEqual([expect.objectContaining({ matched: false, decision: 'allow' })]);
+    // The live aggregate row is still emitted — PRI-567 semantics: an EMPTY
+    // live set records 'no_rules_armed', never a live 'allow' (CR-5).
+    expect(evaluations.filter(entry => entry.activationMode === 'live')).toEqual([expect.objectContaining({ matched: false, decision: 'no_rules_armed' })]);
+  });
+
+  it('PRI-813 (CR-3): an unhealthy shadow rule never suppresses live enforcement — live deny survives a shadow timeout', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedRuleActivation(workspaceDir, { suffix: '-live-cr3', action: 'code_tool_hook_live_activate', implementationCode: SHARED_GATE_CODE, ruleId: 'R_CR3_LIVE_523' });
+    await seedRuleActivation(workspaceDir, { suffix: '-shadow-hang', action: 'code_tool_hook_shadow_activate', implementationCode: 'while (true) {}', ruleId: 'R_CR3_SHADOW_523' });
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+
+    // Pre-isolation negative control: with a shared batch the shadow rule's
+    // timeout made the whole gate fail open; the live deny must survive it.
+    const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
+    expect(result.decision).toBe('deny');
+    expect(result.reason).toBe(SHARED_GATE_REASON);
+    expect(result.warnings?.join('\n')).toMatch(/rule_batch_timeout.*live enforcement is unaffected/);
+    expect(readEvaluations(result.metadata).filter(entry => entry.activationMode === 'shadow')).toEqual([]);
+  });
+
+  it('PRI-813 (CR-4): attributes the live deny to the exact winning activation when two live rules share one ruleId', async () => {
+    const workspaceDir = tempWorkspace();
+    const neverMatches = `function evaluate() { return { decision: 'allow', matched: false, reason: 'neutral' }; }`;
+    // Same content.ruleId on two distinct activations/target_refs: the first
+    // never matches, the second denies. The persisted live evaluation must
+    // carry the DENYING activation's id — the old ruleId reverse-lookup
+    // returned the first candidate and mis-attributed the evidence.
+    await seedRuleActivation(workspaceDir, { suffix: '-dup-a', action: 'code_tool_hook_live_activate', implementationCode: neverMatches, ruleId: 'R_SHARED_RULEID_523', targetRef: 'impl://R_SHARED_RULEID_523-a' });
+    await seedRuleActivation(workspaceDir, { suffix: '-dup-b', action: 'code_tool_hook_live_activate', implementationCode: SHARED_GATE_CODE, ruleId: 'R_SHARED_RULEID_523', targetRef: 'impl://R_SHARED_RULEID_523-b' });
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+
+    const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
+    expect(result.decision).toBe('deny');
+    expect(readEvaluations(result.metadata).find(entry => entry.activationMode === 'live')).toEqual(expect.objectContaining({
+      activationId: 'act-shared-gate-dup-b',
+      ruleId: 'R_SHARED_RULEID_523',
+      decision: 'block',
+    }));
   });
 
   it('PRI-813: keeps a v2 shadow rule suspended when no context provider is wired (Codex posture)', async () => {

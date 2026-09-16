@@ -29,8 +29,12 @@ import { observeRuleCodeSafety } from '../core/rulecode-safety-circuit.js';
 // PRI-813: metadata.evaluations entries cross the HostEventResult contract as
 // unknown — validate each against the CANONICAL event schema (rc-1/rc-2) so a
 // malformed gate payload can never become a persisted evidence row.
+// CodeRabbit CR-6: a shadow observation without activationId is dead evidence
+// (the shadow summary keys on the exact id), so it is rejected at this
+// boundary even though the canonical schema keeps the field optional.
 function isSharedRuleEvaluationEntry(value: unknown): value is RuleHostEvaluatedEventData {
-  return Value.Check(RuleHostEvaluatedEventDataSchema, value);
+  return Value.Check(RuleHostEvaluatedEventDataSchema, value)
+    && (value.activationMode !== 'shadow' || typeof value.activationId === 'string');
 }
 
 export function handleBeforeToolCall(
