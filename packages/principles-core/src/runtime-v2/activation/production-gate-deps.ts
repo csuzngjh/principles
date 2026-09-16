@@ -50,6 +50,15 @@ function isValidRuleHostResult(value: unknown): value is RuleHostResult {
 /**
  * Normalize rule source code: strip ES module export keywords so the code
  * can be evaluated in a vm context (which doesn't support ESM exports).
+ *
+ * PRI-809 trust boundary: the module's `evaluate` export is bridged through
+ * a JSON-string wrapper, so the host-side call site can only ever hand the
+ * realm a primitive JSON string. The call input and the helpers are rebuilt
+ * INSIDE the vm realm from the context's own intrinsics — mirroring the live
+ * host-runtime executor. Handing host-realm objects to the vm-realm evaluate
+ * function would let unapproved rule code walk `input.constructor.constructor`
+ * back to the host Function constructor and reach host process/require.
+ * Untrusted input crosses as DATA (a string), never as code or objects.
  */
 function normalizeSource(sourceCode: string): string {
   const withoutExports = sourceCode
@@ -59,7 +68,17 @@ function normalizeSource(sourceCode: string): string {
   return `${withoutExports}
 globalThis.__pdRuleModule = {
   meta: typeof meta === 'undefined' ? undefined : meta,
-  evaluate: typeof evaluate === 'undefined' ? undefined : evaluate,
+  evaluate: typeof evaluate === 'undefined' ? undefined : function (__pdJsonBridge) {
+    var __pdCallInput = JSON.parse(__pdJsonBridge);
+    var __pdCallHelpers = Object.freeze({
+      isRiskPath: function () { return __pdCallInput.workspace.isRiskPath; },
+      getToolName: function () { return __pdCallInput.action.toolName; },
+      getEstimatedLineChanges: function () { return __pdCallInput.derived.estimatedLineChanges; },
+      getBashRisk: function () { return __pdCallInput.derived.bashRisk; },
+      getEpTier: function () { return __pdCallInput.evolution.epTier; }
+    });
+    return evaluate(__pdCallInput, __pdCallHelpers);
+  },
 };`;
 }
 
@@ -77,13 +96,36 @@ function isCompiledModuleExports(value: unknown): value is CompiledModuleExports
 }
 
 /**
- * Compile rule implementation code in a node:vm sandbox and return a typed
- * evaluate function. Mirrors the compilation logic used by the production
- * openclaw-plugin RuleHost (rule-implementation-runtime.ts).
+ * PRI-809: compile rule implementation code in a node:vm sandbox and return
+ * a hardened evaluate function for pre-activation replay. This is the shared
+ * primitive for every in-process RuleCode execution path (production gate
+ * deps, pd-cli demo compile, story-a demo): the host side hands the realm
+ * ONLY a JSON string primitive and the vm-realm bridge (see normalizeSource)
+ * rebuilds the call input + helpers inside the realm — the same crossing the
+ * live host-runtime executor makes inside its child process.
+ *
+ * Precise boundary contract (what this does and does NOT claim):
+ * - INBOUND: host-realm objects never cross. A rule walking
+ *   `.constructor.constructor` (top-level, nested, or on helpers) lands on
+ *   the REALM's Function, where `process`/`require` do not exist.
+ * - OUTBOUND: the result crosses back as a vm-realm object and is consumed
+ *   only through the canonical validateRuleHostResult (field reads + JSON
+ *   preview) — the host never invokes functions on it.
+ * - TIMEOUT: only compilation is hard-bounded (runInContext timeout). The
+ *   evaluate call is a host-frame invocation with no hard timeout — same as
+ *   before this change and as documented in refiner-sandbox-wrapper.ts,
+ *   whose soft-timeout classification remains the core-side contract; hard
+ *   cancellation stays a plugin/child-process responsibility.
+ * - LOCKSTEP: the helper contract here (five getters over the JSON input)
+ *   mirrors the live plugin executor's EVALUATION_PROCESS_SOURCE in
+ *   openclaw-plugin/src/core/rule-implementation-runtime.ts. The two copies
+ *   are intentionally kept (live path owns process isolation; this file owns
+ *   in-process replay) but MUST stay semantically identical — change both or
+ *   neither.
  *
  * @throws if the code fails to compile or does not define a function evaluate
  */
-function compileRuleCode(code: string, sourceLabel: string): ReplayEvaluateFn {
+export function compileHardenedRuleEvaluator(code: string, sourceLabel: string): ReplayEvaluateFn {
   if (typeof code !== 'string' || code.trim().length === 0) {
     throw new Error(`[${sourceLabel}] rule code is empty or not a string`);
   }
@@ -108,8 +150,21 @@ function compileRuleCode(code: string, sourceLabel: string): ReplayEvaluateFn {
     );
   }
 
-  return (input: RuleHostInput, helpers: RuleHostHelpers): RuleHostResult => {
-    const result = Reflect.apply(evaluateFn, undefined, [input, helpers]) as unknown;
+  return (input: RuleHostInput, _helpers: RuleHostHelpers): RuleHostResult => {
+    // Trust-boundary crossing: serialize host-built input to a JSON string
+    // primitive. The vm-realm bridge parses it with the realm's own
+    // intrinsics — a rule walking `.constructor.constructor` lands on the
+    // realm's Function (where `process` does not exist), never on the host.
+    let inputJson: string;
+    try {
+      inputJson = JSON.stringify(input);
+    } catch (err: unknown) {
+      throw new Error(
+        `[${sourceLabel}] replay input is not JSON-serializable (trust-boundary crossing requires plain data): ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+    const result: unknown = (evaluateFn as (json: string) => unknown)(inputJson);
     // PRI-634 PR-A (Slice A): canonical RuleHostResult authority. The failure
     // message carries the canonical validator's specific errors so the
     // write-test-fix loop receives actionable evidence (P-03).
@@ -211,7 +266,7 @@ export function createProductionGateDeps(options: ProductionGateDepsOptions = {}
 
       let evaluateCode: ReplayEvaluateFn;
       try {
-        evaluateCode = compileRuleCode(code, 'production-gate-deps');
+        evaluateCode = compileHardenedRuleEvaluator(code, 'production-gate-deps');
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         return {
