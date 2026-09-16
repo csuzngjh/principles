@@ -30,6 +30,10 @@ export function makeTrustMaterial(): TestTrustMaterial {
   };
 }
 
+export function publicKeyPemOf(material: TestTrustMaterial): string {
+  return createPublicKey(material.privateKey).export({ type: 'spki', format: 'pem' }).toString();
+}
+
 /** Build a self-signed TUF Root with the same shape the publisher/keygen emit. */
 export function buildSignedRoot(material: TestTrustMaterial, expires: string): Buffer {
   const root = new Root({ version: 1, specVersion: '1.0.31', expires, consistentSnapshot: false });

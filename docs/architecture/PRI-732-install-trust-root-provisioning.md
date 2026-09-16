@@ -77,11 +77,14 @@ per-release roots carry shorter expiries (verified against tuf-js 3.1.0).
 ## 5. Publish-side guard
 
 `verifySigningKeyMatchesPinnedRoot` (release-metadata-publisher.ts) refuses a
-real (non-dry-run) publication whose signing key is not a root-role key of the
-committed pinned root — publishing with any other key would produce metadata
-no existing install can verify. The guard runs in
-`scripts/publish-release-metadata.mjs` publish mode; dry-run/ephemeral output
-is explicitly untrusted and skips it.
+real (non-dry-run) publication whose signing key is not authorized for **all
+four roles** (`root`, `timestamp`, `snapshot`, `targets`) of the committed
+pinned root at **threshold 1**. The current publisher signs every role with the
+single key and emits one signature per role, so a key that can merely sign root
+would still produce timestamp/snapshot/targets metadata no existing install can
+verify — the guard enforces the full threshold-1 publishing contract, not just
+the root role. The guard runs in `scripts/publish-release-metadata.mjs` publish
+mode; dry-run/ephemeral output is explicitly untrusted and skips it.
 
 ## 6. Key ceremony runbook (Owner)
 

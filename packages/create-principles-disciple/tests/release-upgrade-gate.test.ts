@@ -301,7 +301,7 @@ beforeAll(async () => {
     // gate therefore publishes with the floor the current install base has.
     minBootstrapVersion: '0.0.0',
     dataSchemaForwardReadableFrom: '1.0.0',
-    archive: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules, bytes: gzipReleaseArchive(archiveBytes) },
+    archives: [{ platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules, bytes: gzipReleaseArchive(archiveBytes) }],
     signingKeyPem: candidateTrust.privateKeyPem,
     previous: null,
   });
@@ -436,7 +436,7 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
         expiresAt: FAR_EXPIRY,
         minBootstrapVersion: '0.0.0',
         dataSchemaForwardReadableFrom: '1.0.0',
-        archive: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules, bytes: gzipReleaseArchive(fs.readFileSync(path.resolve(publicationDir, 'asset.tar'))) },
+        archives: [{ platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules, bytes: gzipReleaseArchive(fs.readFileSync(path.resolve(publicationDir, 'asset.tar'))) }],
         signingKeyPem: candidateTrust.privateKeyPem,
         previous: {
           channelPayload: JSON.parse(
@@ -445,8 +445,12 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
           tufVersions: { root: 1, timestamp: 1, snapshot: 1, targets: 1 },
         },
       });
+      // Single-archive fixture: assert the singular shape, then corrupt the
+      // one artifact target this publication carries.
+      expect(publicationBad.manifest.artifacts).toHaveLength(1);
+      const corruptedTargetPath = publicationBad.manifest.artifacts[0].artifactTargetPath;
       const corruptedServed = publicationBad.files.map((file) => {
-        if (file.path === `targets/${publicationBad.manifest.artifactTargetPath}`) {
+        if (file.path === `targets/${corruptedTargetPath}`) {
           const bytes = Buffer.from(file.bytes);
           bytes[bytes.length - 1] ^= 0xff;
           return { path: file.path, bytes };

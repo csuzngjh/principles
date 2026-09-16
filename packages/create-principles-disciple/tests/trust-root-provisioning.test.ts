@@ -31,7 +31,7 @@ import { buildReleasePublication, verifySigningKeyMatchesPinnedRoot } from '../s
 import { ReleaseManager } from '../src/update/release-manager.js';
 import { ensurePdHomeLayout, resolvePdHomePaths, writeInstallConfig } from '../src/update/install-layout.js';
 import { writeActiveRecord } from '../src/update/transaction-journal.js';
-import { buildSignedRoot, FAR_EXPIRY, makeTrustMaterial, type TestTrustMaterial } from './helpers/trust-material.js';
+import { buildSignedRoot, FAR_EXPIRY, makeTrustMaterial, publicKeyPemOf } from './helpers/trust-material.js';
 
 const PUBLICATION_EXPIRY = '2030-01-01T00:00:00Z';
 
@@ -278,7 +278,7 @@ describe('provisioned anchor × real ReleaseManager verification (PRI-732 end-to
       expiresAt: PUBLICATION_EXPIRY,
       minBootstrapVersion: '1.0.0',
       dataSchemaForwardReadableFrom: '1.0.0',
-      archive: { platform: process.platform, arch: process.arch, nodeAbi: '127', bytes: Buffer.from('pri732-fake-archive') },
+      archives: [{ platform: process.platform, arch: process.arch, nodeAbi: '127', bytes: Buffer.from('pri732-fake-archive') }],
       signingKeyPem: material.privateKeyPem,
       previous: null,
     });
@@ -306,7 +306,7 @@ describe('provisioned anchor × real ReleaseManager verification (PRI-732 end-to
       expiresAt: PUBLICATION_EXPIRY,
       minBootstrapVersion: '1.0.0',
       dataSchemaForwardReadableFrom: '1.0.0',
-      archive: { platform: process.platform, arch: process.arch, nodeAbi: '127', bytes: Buffer.from('pri732-fake-archive') },
+      archives: [{ platform: process.platform, arch: process.arch, nodeAbi: '127', bytes: Buffer.from('pri732-fake-archive') }],
       signingKeyPem: publisherMaterial.privateKeyPem,
       previous: null,
     });
@@ -322,7 +322,33 @@ describe('provisioned anchor × real ReleaseManager verification (PRI-732 end-to
 });
 
 describe('publish-side guard: signing key must match the pinned trust root (PRI-732)', () => {
-  it('accepts the signing key whose id is a root-role key of the pinned root', () => {
+  // Wire-format JSON mutation helper: buildSignedRoot emits the real pipeline
+  // shape (all four roles → one key, threshold 1). Role-level overrides let the
+  // tests express single-role deauthorisation without a second root builder.
+  type RoleMutation = { keyIds?: string[]; threshold?: number; remove?: boolean };
+  function mutatePinnedRootRole(pinnedRootJson: string, role: string, mutation: RoleMutation, extraKeys: Array<[string, string]> = []): string {
+    const doc = JSON.parse(pinnedRootJson) as {
+      signed: {
+        keys: Record<string, unknown>;
+        roles: Record<string, { keyids?: string[]; keyIDs?: string[]; threshold: number } | undefined>;
+      };
+    };
+    for (const [keyId, publicKeyPem] of extraKeys) {
+      doc.signed.keys[keyId] = { keytype: 'ed25519', scheme: 'ed25519', keyval: { public: publicKeyPem } };
+    }
+    if (mutation.remove) {
+      delete doc.signed.roles[role];
+      return JSON.stringify(doc);
+    }
+    const entry = doc.signed.roles[role];
+    if (entry === undefined) throw new Error(`fixture bug: root has no ${role} role`);
+    const keyIdsKey = entry.keyids !== undefined ? 'keyids' : 'keyIDs';
+    if (mutation.keyIds !== undefined) entry[keyIdsKey] = mutation.keyIds;
+    if (mutation.threshold !== undefined) entry.threshold = mutation.threshold;
+    return JSON.stringify(doc);
+  }
+
+  it('accepts the signing key authorized for all four roles of the pinned root (threshold-1 publishing contract)', () => {
     const material = makeTrustMaterial();
     const pinnedRoot = buildSignedRoot(material, FAR_EXPIRY).toString('utf8');
     const match = verifySigningKeyMatchesPinnedRoot(material.privateKeyPem, pinnedRoot);
@@ -335,7 +361,42 @@ describe('publish-side guard: signing key must match the pinned trust root (PRI-
     const otherMaterial = makeTrustMaterial();
     const pinnedRoot = buildSignedRoot(pinnedMaterial, FAR_EXPIRY).toString('utf8');
     expect(() => verifySigningKeyMatchesPinnedRoot(otherMaterial.privateKeyPem, pinnedRoot))
-      .toThrowError(/does not match the pinned trust root/i);
+      .toThrowError(/not authorized for the pinned trust root root role/i);
+  });
+
+  it('refuses when a non-root role (targets) is authorized for a different key — signing root is not signing targets', () => {
+    const material = makeTrustMaterial();
+    const otherMaterial = makeTrustMaterial();
+    const pinnedRoot = mutatePinnedRootRole(
+      buildSignedRoot(material, FAR_EXPIRY).toString('utf8'),
+      'targets',
+      { keyIds: [otherMaterial.keyId] },
+      [[otherMaterial.keyId, publicKeyPemOf(otherMaterial)]],
+    );
+    expect(() => verifySigningKeyMatchesPinnedRoot(material.privateKeyPem, pinnedRoot))
+      .toThrowError(/not authorized for the pinned trust root targets role/i);
+  });
+
+  it('refuses when a role threshold exceeds 1 — the publisher emits a single signature per role', () => {
+    const material = makeTrustMaterial();
+    const pinnedRoot = mutatePinnedRootRole(
+      buildSignedRoot(material, FAR_EXPIRY).toString('utf8'),
+      'snapshot',
+      { threshold: 2 },
+    );
+    expect(() => verifySigningKeyMatchesPinnedRoot(material.privateKeyPem, pinnedRoot))
+      .toThrowError(/threshold 2.*threshold-1 publishing contract/i);
+  });
+
+  it('refuses when a required role is missing from the pinned root', () => {
+    const material = makeTrustMaterial();
+    const pinnedRoot = mutatePinnedRootRole(
+      buildSignedRoot(material, FAR_EXPIRY).toString('utf8'),
+      'timestamp',
+      { remove: true },
+    );
+    expect(() => verifySigningKeyMatchesPinnedRoot(material.privateKeyPem, pinnedRoot))
+      .toThrowError(/carries no timestamp role/i);
   });
 
   it('refuses an unparseable pinned root document', () => {
