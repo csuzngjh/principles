@@ -147,6 +147,33 @@ describe('records tree loading and referential integrity', () => {
     }
   });
 
+  it('fails loud on duplicate pattern display ids and lineage mismatches (rc-6)', () => {
+    const root = tmpRoot();
+    try {
+      writePatternRecord(root, patternMeta, 'body');
+      writePatternRecord(
+        root,
+        { ...patternMeta, recordId: 'P-20260916T000000Z-aaaaaa', displayId: 'ERR-068' },
+        'other body',
+      );
+      writeOccurrenceRecord(root, occurrenceMeta, 'narrative');
+      const loaded = loadRecords(root);
+      expect(loaded.errors.join('\n')).toContain('duplicate pattern display id: ERR-068');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+
+    const root2 = tmpRoot();
+    try {
+      writePatternRecord(root2, patternMeta, 'body');
+      writeOccurrenceRecord(root2, { ...occurrenceMeta, displayId: 'ERR-999' }, 'narrative');
+      const loaded = loadRecords(root2);
+      expect(loaded.errors.join('\n')).toContain('does not match pattern P-ERR-068 displayId ERR-068');
+    } finally {
+      rmSync(root2, { recursive: true, force: true });
+    }
+  });
+
   it('refuses duplicate occurrence ids on write', () => {
     const root = tmpRoot();
     try {
@@ -163,13 +190,23 @@ describe('records tree loading and referential integrity', () => {
     try {
       writePatternRecord(root, patternMeta, '**Recurrence**: Yes — note');
       writeOccurrenceRecord(root, occurrenceMeta, 'narrative');
-      const before = readFileSync(path.join(root, 'docs', 'process', 'error-management', 'records', 'patterns', 'P-ERR-068.md'), 'utf8');
       archivePattern(root, 'P-ERR-068');
       const after = readFileSync(path.join(root, 'docs', 'process', 'error-management', 'records', 'patterns', 'P-ERR-068.md'), 'utf8');
       expect(JSON.parse(after.match(new RegExp(`${MARKER}\\n([\\s\\S]*?)\\n-->`))![1]).status).toBe('archived');
       expect(after.includes('**Recurrence**: Yes — note')).toBe(true);
       expect(existsSync(path.join(root, 'docs', 'process', 'error-management', 'records', 'occurrences', 'P-ERR-068', 'OCC-2026-09-14-err-068-r1.md'))).toBe(true);
-      void before;
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to overwrite an existing pattern record', () => {
+    const root = tmpRoot();
+    try {
+      writePatternRecord(root, patternMeta, 'body');
+      expect(() => writePatternRecord(root, { ...patternMeta, status: 'archived' }, 'body')).toThrow(
+        /refusing to overwrite/,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -235,6 +272,31 @@ describe('concurrency acceptance (SPEC §24, real git merge shape)', () => {
   function occurrenceText(id: string): string {
     return serializeRecord({ ...occurrenceMeta, occurrenceId: id }, `narrative for ${id}`);
   }
+
+  it('Test A — two occurrences of DIFFERENT existing patterns from two branches merge clean', () => {
+    const root = initRepo();
+    try {
+      const base = path.join(root, 'docs/process/error-management/records/patterns');
+      commitRecord(
+        root,
+        path.join(base, 'P-ERR-130.md'),
+        serializeRecord({ ...patternMeta, recordId: 'P-ERR-130', displayId: 'ERR-130' }, 'other pattern'),
+      );
+      const occBase = path.join(root, 'docs/process/error-management/records/occurrences');
+      git(root, 'checkout', '-b', 'agent-a');
+      commitRecord(root, path.join(occBase, 'P-ERR-068', 'OCC-2026-09-15-err-068-r90.md'), occurrenceText('OCC-2026-09-15-err-068-r90'));
+      git(root, 'checkout', 'main');
+      git(root, 'checkout', '-b', 'agent-b');
+      commitRecord(root, path.join(occBase, 'P-ERR-130', 'OCC-2026-09-15-err-130-r90.md'), occurrenceText('OCC-2026-09-15-err-130-r90').replace('P-ERR-068', 'P-ERR-130').replace('ERR-068', 'ERR-130'));
+      git(root, 'merge', 'agent-a', '--no-edit'); // must not throw
+      const loaded = loadRecords(root);
+      expect(loaded.errors).toEqual([]);
+      expect(loaded.occurrences.length).toBe(2);
+      expect(loaded.patterns.size).toBe(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   it('Test B — two occurrences of the SAME pattern from two branches merge clean', () => {
     const root = initRepo();
@@ -315,6 +377,10 @@ describe('legacy parsing and projection parity (fixture)', () => {
     expect(entry.parsedBody.shape).toBe('standard');
     expect(entry.parsedBody.bullets.length).toBe(2);
     expect(entry.parsedBody.bullets[0].text.startsWith('2026-09-14 PR #1689')).toBe(true);
+    // the meta block must NOT be swallowed into the bullet's narrative text —
+    // that duplicated it into the occurrence body AND the projection
+    expect(entry.parsedBody.bullets[0].text.includes('recurrence-meta')).toBe(false);
+    expect(entry.parsedBody.bullets[0].text.includes('-->')).toBe(false);
     expect(entry.parsedBody.metas.length).toBe(1);
     expect(entry.parsedBody.metas[0].meta.guard).toBe('check:release-locks');
     expect(entry.parsedBody.trailer).toEqual([
@@ -390,6 +456,9 @@ describe('legacy parsing and projection parity (fixture)', () => {
     const report: string[] = [];
     verifyParity(projected, legacyEntry, 'fixture', report, new Set());
     expect(report).toEqual([]);
+    // the recurrence-meta block appears exactly ONCE (re-emitted from
+    // structured fields), never twice via an embedded copy
+    expect(projected.split('recurrence-meta').length - 1).toBe(1);
     expect(projected).toContain('- **Recurrence**: Yes — lockfile the consuming npm ci reads was not updated.');
     expect(projected).toContain('  - 2026-09-14 PR #1689: dependabot missed release-locks.');
     expect(projected).toContain('  - Earlier recurrences (PR#702-#810): see git history.');

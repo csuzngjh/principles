@@ -36,6 +36,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+// Shared error-experience metadata helpers: the caught-by enum and the strict
+// calendar-date validator have ONE implementation (error-handbook-meta.cjs,
+// the v2 parser this module extends), not a third mirror copy.
+const { isValidCalendarDate, VALID_CAUGHT_BY } = require('./error-handbook-meta.cjs');
 
 const MARKER = 'pd-error-record';
 const RECORDS_RELATIVE_DIR = path.join('docs', 'process', 'error-management', 'records');
@@ -45,7 +49,6 @@ const SCHEMA_VERSION = 1;
 
 const VALID_STATUS = new Set(['active', 'archived']);
 const VALID_RECORD_TYPES = new Set(['pattern', 'occurrence']);
-const VALID_CAUGHT_BY = new Set(['self-review', 'pr-review', 'ci', 'runtime', 'owner']);
 const VALID_SEVERITY = new Set(['P0', 'P1', 'P2', 'P3']);
 /** Category headings are stable prose in the handbook; classified on migration. */
 const VALID_CATEGORIES = new Set([
@@ -57,11 +60,10 @@ const VALID_CATEGORIES = new Set([
   'Process & Workflow',
 ]);
 
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DISPLAY_ID_PATTERN = /^ERR-\d{3,4}$/;
 const RECORD_ID_PATTERN = /^P-(ERR-\d{3,4}|\d{8}T\d{6}Z-[0-9a-z]{6})$/;
 // Two occurrence-id shapes:
-//   runtime   OCC-<compactUTC>-<rand4>          e.g. OCC-20260916T143000Z-a3k9
+//   runtime   OCC-<compactUTC>-<rand6>          e.g. OCC-20260916T143000Z-a3k9
 //   migration OCC-<date>-err-NNN-r<index>       deterministic, re-runnable
 const OCCURRENCE_ID_RE = /^OCC-(\d{8}T\d{6}Z-[0-9a-z]{6}|\d{4}-\d{2}(?:-\d{2})?-err-\d{3,4}-r\d+)$/;
 const EP_ID_PATTERN = /^EP-\d{2}$/;
@@ -81,22 +83,10 @@ function pad2(n) {
 }
 
 /**
- * Strict YYYY-MM-DD calendar validation. Date.parse silently rolls impossible
- * dates over (2026-02-30 → 2026-03-02); parse components and require the UTC
- * round-trip to reproduce them exactly. Mirrors error-handbook-meta.cjs.
- */
-function isValidCalendarDate(value) {
-  if (typeof value !== 'string' || !DATE_PATTERN.test(value)) return false;
-  const [year, month, day] = value.split('-').map((p) => Number.parseInt(p, 10));
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() + 1 === month && date.getUTCDate() === day;
-}
-
-/**
  * Month-precision dates are legitimate observed facts — several legacy
  * recurrence bullets say "2026-06" without a day. Store exactly what the
- * source states; `YYYY-MM` passes when the month is real.
+ * source states; `YYYY-MM` passes when the month is real. Calendar-day
+ * validation is reused from error-handbook-meta.cjs.
  */
 function isValidObservedAt(value) {
   if (isValidCalendarDate(value)) return true;
@@ -174,7 +164,7 @@ function validatePatternMeta(meta, label) {
     problems.push("recordType must be 'pattern'");
   }
   if (!has('recordId') || !isNonEmptyString(meta.recordId) || !RECORD_ID_PATTERN.test(meta.recordId)) {
-    problems.push('recordId must match P-(ERR-NNN|timestamp-rand4)');
+    problems.push('recordId must match P-(ERR-NNN|timestamp-rand6)');
   }
   if (!has('displayId') || !isNonEmptyString(meta.displayId) || !DISPLAY_ID_PATTERN.test(meta.displayId)) {
     problems.push('displayId must match ERR-NNN');
@@ -226,7 +216,7 @@ function validateOccurrenceMeta(meta, label) {
     problems.push('occurrenceId must match OCC-<date|compactUTC-rand4>');
   }
   if (!has('patternRecordId') || !isNonEmptyString(meta.patternRecordId) || !RECORD_ID_PATTERN.test(meta.patternRecordId)) {
-    problems.push('patternRecordId must match P-(ERR-NNN|timestamp-rand4)');
+    problems.push('patternRecordId must match P-(ERR-NNN|timestamp-rand6)');
   }
   if (!has('displayId') || !isNonEmptyString(meta.displayId) || !DISPLAY_ID_PATTERN.test(meta.displayId)) {
     problems.push('displayId must match ERR-NNN');
@@ -317,27 +307,36 @@ function loadRecords(repoRoot) {
   }
 
   const seenOccurrenceIds = new Set();
-  const seenDisplayIds = new Set();
   for (const occ of occurrences) {
     if (seenOccurrenceIds.has(occ.meta.occurrenceId)) {
       errors.push(`duplicate occurrence id: ${occ.meta.occurrenceId}`);
     }
     seenOccurrenceIds.add(occ.meta.occurrenceId);
-    if (!patterns.has(occ.meta.patternRecordId)) {
+    const pattern = patterns.get(occ.meta.patternRecordId);
+    if (!pattern) {
       errors.push(`occurrence ${occ.meta.occurrenceId} references unknown pattern ${occ.meta.patternRecordId}`);
+    } else if (pattern.meta.displayId !== occ.meta.displayId) {
+      // rc-6 lineage consistency: an occurrence's display id must agree with
+      // the pattern it references, or lineage queries silently split.
+      errors.push(
+        `occurrence ${occ.meta.occurrenceId} displayId ${occ.meta.displayId} does not match pattern ${occ.meta.patternRecordId} displayId ${pattern.meta.displayId}`,
+      );
     }
   }
+  const seenDisplayIds = new Set();
   for (const [recordId, pattern] of patterns) {
     if (seenDisplayIds.has(pattern.meta.displayId)) {
       errors.push(`duplicate pattern display id: ${pattern.meta.displayId}`);
     }
     seenDisplayIds.add(pattern.meta.displayId);
-    if (pattern.meta.ep !== null && pattern.meta.ep !== undefined && !EP_ID_PATTERN.test(pattern.meta.ep ?? '')) {
-      errors.push(`pattern ${recordId} has invalid ep reference`);
-    }
   }
 
   return { patterns, occurrences, errors };
+}
+
+/** Normalize an observed date for time comparison (month → first of month). */
+function observedAtTimeKey(observedAt) {
+  return observedAt.length === 7 ? `${observedAt}-01` : observedAt;
 }
 
 /** Derived per-pattern recurrence facts — never hand-maintained (SPEC §11). */
@@ -352,9 +351,13 @@ function aggregatePatternStats(patterns, occurrences, now = new Date(), recentDa
     if (!entry) continue;
     entry.occurrenceCount += 1;
     if (Object.hasOwn(occ.meta, 'guard')) entry.structuredCount += 1;
-    const t = Date.parse(`${occ.meta.observedAt}T00:00:00Z`);
+    // Month-precision dates ("2026-06") parse at month precision via the
+    // first-of-month key; raw strings are kept for display, compared via the
+    // key so YYYY-MM cannot lexicographically lose to YYYY-MM-DD.
+    const timeKey = observedAtTimeKey(occ.meta.observedAt);
+    const t = Date.parse(`${timeKey}T00:00:00Z`);
     if (!Number.isNaN(t)) {
-      if (entry.lastSeen === null || occ.meta.observedAt > entry.lastSeen) entry.lastSeen = occ.meta.observedAt;
+      if (entry.lastSeen === null || timeKey > observedAtTimeKey(entry.lastSeen)) entry.lastSeen = occ.meta.observedAt;
       if (t >= cutoff) entry.recentCount += 1;
     }
   }
@@ -386,6 +389,12 @@ function writePatternRecord(repoRoot, meta, body) {
   const validated = validatePatternMeta(meta, `pattern ${meta.recordId ?? '<unparsed>'}`);
   if (validated.error) throw new Error(validated.error);
   const filePath = recordFilePath(repoRoot, meta);
+  if (fs.existsSync(filePath)) {
+    // Same fail-loud contract as occurrences: last-writer-wins over a
+    // pattern record (including an accidental archived→active flip) is a
+    // silent identity takeover, not a write.
+    throw new Error(`pattern already exists: ${meta.recordId} (refusing to overwrite; archive it or pick a new id)`);
+  }
   writeRecordAtomic(filePath, serializeRecord(meta, body));
   return filePath;
 }
@@ -437,9 +446,32 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** A typo'd flag must fail loud, not be silently ignored (rc-9 sibling). */
+function rejectUnknownFlags(argv, known) {
+  const knownSet = new Set(known);
+  for (const arg of argv) {
+    if (arg.startsWith('--') && !knownSet.has(arg)) {
+      throw new Error(`unknown flag for ${argv[0]}: ${arg} (known: ${[...knownSet].join(' ')})`);
+    }
+  }
+}
+
+const CLI_FLAGS = {
+  validate: [],
+  'create-pattern': ['--record-id', '--display', '--title', '--category', '--ep', '--date', '--source', '--body-file', '--body'],
+  'add-occurrence': ['--pattern', '--occurrence-id', '--date', '--source', '--invariant', '--severity', '--escaped', '--caughtBy', '--guard', '--body-file', '--body'],
+  archive: ['--pattern'],
+};
+
 function runCli(argv) {
   const command = argv[0];
   try {
+    if (!CLI_FLAGS[command]) {
+      throw new Error(
+        `unknown command: ${command ?? '<none>'} (usage: error-records <validate|create-pattern|add-occurrence|archive> [...])`,
+      );
+    }
+    rejectUnknownFlags(argv.slice(1), CLI_FLAGS[command]);
     if (command === 'validate') {
       const { patterns, occurrences, errors } = loadRecords(process.cwd());
       if (errors.length > 0) {
@@ -507,9 +539,7 @@ function runCli(argv) {
       console.log(`[error:record] pattern archived (lifecycle flip only, narrative untouched): ${written}`);
       return;
     }
-    throw new Error(
-      `unknown command: ${command ?? '<none>'} (usage: error-records <validate|create-pattern|add-occurrence|archive> [...])`,
-    );
+    throw new Error('unreachable: command dispatch is total');
   } catch (err) {
     console.error(`[error:record] FAILED: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);

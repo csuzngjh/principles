@@ -237,5 +237,6 @@ module.exports = {
   parseRecurrenceMeta,
   aggregateHotspots,
   extractHtmlComments,
+  isValidCalendarDate,
   VALID_CAUGHT_BY,
 };

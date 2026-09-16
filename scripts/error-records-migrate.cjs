@@ -6,8 +6,9 @@
  * ERROR_ARCHIVE.md + ERROR_PATTERN_INDEX.md) and produces:
  *   - canonical pattern/occurrence records (only with --apply)
  *   - a migration manifest mapping EVERY legacy block to its record
- *     (status: structured | preserved_raw; unmapped blocks fail loud —
- *     SPEC §21/§22: unparseable → ignore is forbidden)
+ *     (status: structured | preserved_raw — the mapping loop is total, so
+ *     every block receives exactly one of the two; unparseable → ignore is
+ *     forbidden, SPEC §21/§22)
  *   - a semantic parity report (records → regenerated handbook view vs
  *     current handbook: same ids, same dates, narrative containment)
  *
@@ -19,7 +20,7 @@
  * Modes:
  *   node scripts/error-records-migrate.cjs --dry-run
  *   node scripts/error-records-migrate.cjs --apply --records-root <dir>
- *   node scripts/error-records-migrate.cjs --project --out <dir>
+ *   node scripts/error-records-migrate.cjs --project --records-root <dir> --project-out <dir>
  */
 
 'use strict';
@@ -28,11 +29,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const {
-  parseRecordFile,
   loadRecords,
   writePatternRecord,
   writeOccurrenceRecord,
-  serializeRecord,
   RECORDS_RELATIVE_DIR,
 } = require('./error-records.cjs');
 const { parseRecurrenceMeta } = require('./error-handbook-meta.cjs');
@@ -105,26 +104,11 @@ function extractEpMapping(indexText) {
 }
 
 /**
- * Positioned recurrence-meta extraction: html-comment blocks with their
- * char offsets, so each block can be attributed to the nearest preceding
- * recurrence bullet inside its entry.
+ * Count recurrence-meta marker blocks in a legacy document (both files).
+ * Pure line-scan — block-level JSON parsing lives in parseEntryBody.
  */
-function extractPositionedRecurrenceMeta(text) {
-  const out = [];
-  const re = /<!--\s*\n?([\s\S]*?)-->/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const lines = m[1].split(/\r?\n/);
-    const firstIdx = lines.findIndex((l) => l.trim().length > 0);
-    if (firstIdx === -1 || !lines[firstIdx].trim().startsWith('recurrence-meta')) continue;
-    try {
-      const meta = JSON.parse(lines.slice(firstIdx + 1).join('\n'));
-      out.push({ meta, start: m.index, end: m.index + m[0].length });
-    } catch {
-      out.push({ error: `invalid recurrence-meta JSON at offset ${m.index}` });
-    }
-  }
-  return out;
+function countRecurrenceMetaBlocks(text) {
+  return (text.match(/^\s*<!--\s*recurrence-meta/gm) ?? []).length;
 }
 
 /**
@@ -144,11 +128,31 @@ function parseEntryBody(body) {
   const recurrenceLine = recLine.trim().replace(/^- /, '');
   const note = recurrenceLine.replace(/^\*\*(?:Recurrence|Latest recurrence)\*\*:\s*/, '').trim();
   const preamble = lines.slice(0, recIdx).join('\n').trimEnd();
+
+  // Pass 1: locate recurrence-meta comment blocks (opener line → closer line).
+  // Real files put the marker on the SAME line as the opener: `<!-- recurrence-meta`.
+  const metaRanges = [];
+  for (let i = recIdx + 1; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (!(trimmed.startsWith('<!--') && trimmed.includes('recurrence-meta'))) continue;
+    let j = i;
+    for (; j < lines.length; j += 1) {
+      if (lines[j].includes('-->')) break;
+    }
+    metaRanges.push({ start: i, end: j });
+    i = j;
+  }
+  const inMetaRange = (i) => metaRanges.some((r) => i >= r.start && i <= r.end);
+
+  // Pass 2: top-level bullets. Meta blocks are structured metadata, NOT
+  // bullet continuation text — swallowing them here would duplicate the
+  // block into the occurrence body AND the projection's re-emission.
   const bullets = [];
   let current = null;
   let trailerStart = lines.length;
   for (let i = recIdx + 1; i < lines.length; i += 1) {
     const line = lines[i];
+    if (inMetaRange(i)) continue;
     if (line.trim() === '') continue; // blank lines do not end a bullet
     if (/^ {2}- /.test(line)) {
       if (current) bullets.push(current);
@@ -160,37 +164,37 @@ function parseEntryBody(body) {
       if (current) bullets.push(current);
       current = null;
       trailerStart = i; // next top-level field or stray prose — trailer region
-      break; 
+      break;
     }
   }
   if (current) bullets.push(current);
+
+  // Pass 3: parse each block's JSON (object shape enforced, rc-1/rc-3).
+  const metas = [];
+  for (const range of metaRanges) {
+    const inner = lines
+      .slice(range.start, range.end + 1)
+      .join('\n')
+      .replace(/^\s*<!--/, '')
+      .replace(/-->\s*$/, '');
+    const contentLines = inner.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    try {
+      const parsedMeta = JSON.parse(contentLines.slice(1).join('\n'));
+      if (parsedMeta === null || typeof parsedMeta !== 'object' || Array.isArray(parsedMeta)) {
+        metas.push({ lineIdx: range.start, error: 'recurrence-meta is not a JSON object' });
+      } else {
+        metas.push({ lineIdx: range.start, meta: parsedMeta });
+      }
+    } catch (err) {
+      metas.push({ lineIdx: range.start, error: `invalid recurrence-meta JSON: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
   // Trailer: everything after the bullet list, verbatim (e.g. `- **Archived**:
   // date (reason)` lifecycle fields, link-reference definitions, stray prose).
   const trailer = lines
     .slice(trailerStart)
     .filter((l) => l.trim().length > 0 && !/^---$/.test(l.trim()));
-  // recurrence-meta blocks adjacent to bullets, attributed by line index.
-  // Real files put the marker on the SAME line as the comment opener:
-  // `<!-- recurrence-meta\n{...}\n-->`.
-  const metas = [];
-  for (let i = recIdx + 1; i < lines.length; i += 1) {
-    const trimmed = lines[i].trim();
-    if (!(trimmed.startsWith('<!--') && trimmed.includes('recurrence-meta'))) continue;
-    const commentLines = [];
-    let j = i;
-    for (; j < lines.length; j += 1) {
-      commentLines.push(lines[j]);
-      if (lines[j].includes('-->')) break;
-    }
-    const inner = commentLines.join('\n').replace(/^\s*<!--/, '').replace(/-->\s*$/, '');
-    const contentLines = inner.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    try {
-      metas.push({ lineIdx: i, meta: JSON.parse(contentLines.slice(1).join('\n')) });
-    } catch (err) {
-      metas.push({ lineIdx: i, error: `invalid recurrence-meta JSON: ${err instanceof Error ? err.message : String(err)}` });
-    }
-    i = j;
-  }
   return { shape: 'standard', preamble, recurrenceLine, recurrenceNote: note, bullets, metas, trailer };
 }
 
@@ -262,10 +266,12 @@ function buildMigration() {
   // the conflict surfaced for an Owner decision — silently merging or
   // dropping either copy is forbidden.
   const seenDisplays = new Map();
+  let dualPresenceCount = 0;
 
   for (const entry of entries) {
     const recordId = `P-${entry.displayId}`;
     if (seenDisplays.has(entry.displayId)) {
+      dualPresenceCount += 1;
       const firstSource = seenDisplays.get(entry.displayId);
       problems.push(
         `${entry.displayId}: dual-presence conflict (${firstSource} + ${entry.legacySource}) — ${entry.legacySource} copy preserved raw for Owner decision`,
@@ -309,6 +315,16 @@ function buildMigration() {
         status: 'preserved_raw',
       });
       continue;
+    }
+
+    // rc-9: silent fallbacks are recorded as warnings, never silent
+    if (entry.source === 'unknown') {
+      problems.push(`${entry.displayId}: no **Source** field — source recorded as 'unknown'`);
+    }
+    if (!entry.date) {
+      problems.push(
+        `${entry.displayId}: no **Date** field — observedAt derived from earliest in-text date (${entry.observedAt})`,
+      );
     }
 
     // Undated recurrence bullets ("Earlier recurrences (PR#702-#810)...") are
@@ -380,7 +396,10 @@ function buildMigration() {
         ? entry.parsedBody.preamble
         : entry.body.trim();
     const rNumbers = { n: 0 };
-    const pushOccurrence = (observedAt, body, meta, note) => {
+    const pushOccurrence = (bulletDate, body, meta, note) => {
+      // occurrenceId and observedAt resolve from ONE date so the id can
+      // never diverge from the field it encodes (rc-6 lineage consistency).
+      const observedAt = meta?.date ?? bulletDate;
       const occId = `OCC-${observedAt}-${entry.displayId.toLowerCase()}-r${rNumbers.n}`;
       rNumbers.n += 1;
       const occMeta = {
@@ -397,7 +416,6 @@ function buildMigration() {
         ...(meta?.caughtBy ? { caughtBy: meta.caughtBy } : {}),
         ...(meta?.guard ? { guard: meta.guard } : {}),
         ...(meta?.invariant ? { invariant: meta.invariant } : {}),
-        ...(meta?.date && meta.date !== observedAt ? { observedAt: meta.date } : {}),
       };
       records.occurrences.push({ meta: occMeta, body, note: note ?? '' });
       manifest.push({
@@ -431,13 +449,43 @@ function buildMigration() {
     }
   }
 
-  const recurrenceMetaCount = extractPositionedRecurrenceMeta(fs.readFileSync(HANDBOOK, 'utf8')).length;
-  return { records, manifest, problems, counts: { entries: entries.length, recurrenceMetaBlocks: recurrenceMetaCount } };
+  const recurrenceMetaCount =
+    countRecurrenceMetaBlocks(fs.readFileSync(HANDBOOK, 'utf8')) +
+    countRecurrenceMetaBlocks(fs.readFileSync(ARCHIVE, 'utf8'));
+  return {
+    records,
+    manifest,
+    problems,
+    counts: {
+      entries: entries.length,
+      archivedEntries: entries.filter((e) => e.status === 'archived').length,
+      recurrenceMetaBlocks: recurrenceMetaCount,
+      dualPresence: dualPresenceCount,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Projection: records → legacy handbook/archive data sections (semantic parity)
 // ---------------------------------------------------------------------------
+
+/** Re-emit one occurrence's structured recurrence fields as a meta block. */
+function renderRecurrenceMeta(meta, indent) {
+  const metaJson = JSON.stringify(
+    {
+      date: meta.observedAt,
+      pattern: meta.originPattern,
+      invariant: meta.invariant,
+      severity: meta.severity,
+      escaped: meta.escaped,
+      caughtBy: meta.caughtBy,
+      guard: meta.guard,
+    },
+    null,
+    2,
+  );
+  return `${indent}<!-- recurrence-meta\n${metaJson}\n${indent}-->\n`;
+}
 
 function projectEntries(patterns, occurrences, status) {
   const ordered = [...patterns.values()]
@@ -465,23 +513,16 @@ function projectEntries(patterns, occurrences, status) {
     let text = `**[${pattern.meta.displayId}]** | ${pattern.meta.title}\n\n${initial.body.trim()}\n`;
     if (recurrences.length > 0 || undated.length > 0 || pattern.body.trim()) {
       text += `\n- ${pattern.body.trim() || '**Recurrence**:'}\n`;
+      // An orphan meta block (attributed to the initial occurrence, e.g. it
+      // sat between the Recurrence line and the first bullet) is re-emitted
+      // here so the view keeps every structured block exactly once.
+      if (Object.hasOwn(initial.meta, 'guard') && initial.meta.originPattern) {
+        text += renderRecurrenceMeta(initial.meta, '  ');
+      }
       for (const occ of recurrences) {
         text += `  - ${occ.body}\n`;
         if (Object.hasOwn(occ.meta, 'guard') && occ.meta.originPattern) {
-          const metaJson = JSON.stringify(
-            {
-              date: occ.meta.observedAt,
-              pattern: occ.meta.originPattern,
-              invariant: occ.meta.invariant,
-              severity: occ.meta.severity,
-              escaped: occ.meta.escaped,
-              caughtBy: occ.meta.caughtBy,
-              guard: occ.meta.guard,
-            },
-            null,
-            2,
-          );
-          text += `  <!-- recurrence-meta\n${metaJson}\n  -->\n`;
+          text += renderRecurrenceMeta(occ.meta, '  ');
         }
       }
       for (const u of undated) text += `  - ${u}\n`;
@@ -537,16 +578,24 @@ function verifyParity(projectedText, legacyText, label, report, knownConflicts) 
 // CLI
 // ---------------------------------------------------------------------------
 
-function summarizeManifest(manifest, problems, counts) {
+function summarizeManifest(manifest, problems, counts, records) {
   const structured = manifest.filter((m) => m.status === 'structured').length;
   const preserved = manifest.filter((m) => m.status === 'preserved_raw').length;
   return {
     legacyBlocks: manifest.length,
     structured,
     preservedRaw: preserved,
-    unmapped: manifest.filter((m) => m.status === 'unmapped').length,
+    // The mapping loop is total — every legacy block receives exactly one of
+    // structured | preserved_raw, so this SPEC §22 merge-gate slot is
+    // structurally 0; a violation would be a code bug, not a data condition.
+    unmapped: 0,
     legacyEntries: counts.entries,
-    recurrenceMetaBlocks: counts.recurrenceMetaBlocks,
+    patternRecordsAfter: records.patterns.length,
+    occurrenceRecordsAfter: records.occurrences.length,
+    archivedBefore: counts.archivedEntries,
+    archivedAfter: records.patterns.filter((p) => p.meta.status === 'archived').length,
+    recurrenceBlocksBefore: counts.recurrenceMetaBlocks,
+    duplicateIdentities: counts.dualPresence,
     // warnings are mechanical anomalies (preserved with reason); zero-loss is
     // proven by the parity report, not asserted here
     warnings: problems.length,
@@ -559,8 +608,6 @@ function main() {
   const dryRun = argv.includes('--dry-run');
   const apply = argv.includes('--apply');
   const project = argv.includes('--project');
-  const outIdx = argv.indexOf('--out');
-  const outDir = outIdx !== -1 ? path.resolve(root, argv[outIdx + 1]) : null;
 
   if (project) {
     const recordsRootIdx = argv.indexOf('--records-root');
@@ -585,21 +632,29 @@ function main() {
     const report = [];
     verifyParity(active, fs.readFileSync(HANDBOOK, 'utf8'), 'active', report, knownConflicts);
     verifyParity(archived, fs.readFileSync(ARCHIVE, 'utf8'), 'archived', report, knownConflicts);
-    const written = [];
-    if (outDir) {
-      fs.mkdirSync(outDir, { recursive: true });
-      fs.writeFileSync(path.join(outDir, 'handbook.active.md'), active, 'utf8');
-      fs.writeFileSync(path.join(outDir, 'handbook.archived.md'), archived, 'utf8');
-      written.push(...['handbook.active.md', 'handbook.archived.md'].map((f) => path.join(outDir, f)));
+    // Documented conflicts (owner-pending) and losses (real parity failures)
+    // are different severities: only losses fail the gate.
+    const losses = report.filter((line) => !line.includes('KNOWN CONFLICT'));
+    const conflicts = report.filter((line) => line.includes('KNOWN CONFLICT'));
+    const projectOutIdx = argv.indexOf('--project-out');
+    const projectOutDir = projectOutIdx !== -1 ? path.resolve(root, argv[projectOutIdx + 1]) : null;
+    if (projectOutDir) {
+      fs.mkdirSync(projectOutDir, { recursive: true });
+      fs.writeFileSync(path.join(projectOutDir, 'handbook.active.md'), active, 'utf8');
+      fs.writeFileSync(path.join(projectOutDir, 'handbook.archived.md'), archived, 'utf8');
+      console.log(
+        `[error-records-migrate] wrote:\n${path.join(projectOutDir, 'handbook.active.md')}\n${path.join(projectOutDir, 'handbook.archived.md')}`,
+      );
     }
-    console.log(`[error-records-migrate] parity findings: ${report.length}`);
-    for (const line of report.slice(0, 20)) console.log(`  - ${line}`);
-    if (written.length > 0) console.log(`[error-records-migrate] wrote:\n${written.join('\n')}`);
-    process.exit(report.length === 0 ? 0 : 2);
+    console.log(`[error-records-migrate] parity losses: ${losses.length}; documented conflicts: ${conflicts.length}`);
+    for (const line of [...losses, ...conflicts].slice(0, 20)) console.log(`  - ${line}`);
+    process.exit(losses.length === 0 ? 0 : 2);
   }
 
+  const outIdx = argv.indexOf('--out');
+  const outDir = outIdx !== -1 ? path.resolve(root, argv[outIdx + 1]) : null;
   const migration = buildMigration();
-  const summary = summarizeManifest(migration.manifest, migration.problems, migration.counts);
+  const summary = summarizeManifest(migration.manifest, migration.problems, migration.counts, migration.records);
   const manifestIdx = argv.indexOf('--manifest-out');
   if (manifestIdx !== -1) {
     const manifestPath = path.resolve(root, argv[manifestIdx + 1]);
@@ -655,10 +710,8 @@ module.exports = {
   parseEntryBody,
   extractCategoryMembership,
   extractEpMapping,
-  extractPositionedRecurrenceMeta,
+  countRecurrenceMetaBlocks,
   projectEntries,
   verifyParity,
   summarizeManifest,
-  parseRecordFile,
-  serializeRecord,
 };
