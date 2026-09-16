@@ -62,8 +62,9 @@ interface ScribeContext {
 
 /**
  * PRI-816 (R-01): extract the authoritative dreamer artifact id from the
- * philosopher artifact content (rc-1: content is untrusted — field-by-field
- * guard, no `as`). Returns undefined when absent or malformed; the scribe
+ * philosopher artifact content (rc-1: content is untrusted). Access uses
+ * `Reflect.get` + a runtime type guard — no `as` cast, per the rc-2 contract
+ * this PR claims. Returns undefined when absent or malformed; the scribe
  * then simply omits `sourceTrace.dreamerArtifactId` (pre-PRI-508 compatible).
  */
 function extractSourceDreamerArtifactId(philosopherContentJson: string): string | undefined {
@@ -73,9 +74,9 @@ function extractSourceDreamerArtifactId(philosopherContentJson: string): string 
   } catch {
     return undefined;
   }
-  if (typeof parsed !== 'object' || parsed === null) return undefined;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
   if (!Object.hasOwn(parsed, 'sourceDreamerArtifactId')) return undefined;
-  const value = (parsed as Record<string, unknown>).sourceDreamerArtifactId;
+  const value = Reflect.get(parsed, 'sourceDreamerArtifactId');
   if (typeof value !== 'string' || value.trim() === '') return undefined;
   return value;
 }
