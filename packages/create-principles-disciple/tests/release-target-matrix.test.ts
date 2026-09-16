@@ -64,6 +64,65 @@ describe('native release target matrix', () => {
     }
   });
 
+  it('publishes one multi-platform release from a native matrix with a single assemble', () => {
+    const metadataWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'release-metadata.yml'), 'utf8');
+
+    // Three native legs (PRI-733 MVP): linux/x64, win32/x64, darwin/arm64 on
+    // Node 24. Each leg builds on its own runner because local-target builds
+    // can only target the runner they run on.
+    for (const [platform, runner] of [
+      ['platform: linux', 'ubuntu-latest'],
+      ['platform: win32', 'windows-latest'],
+      ['platform: darwin', 'macos-latest'],
+    ] as const) {
+      expect(metadataWorkflow).toContain(platform);
+      expect(metadataWorkflow).toContain(runner);
+    }
+    expect(metadataWorkflow).toContain('arch: arm64');
+
+    // Exactly one assemble job consumes all legs; the channel pointer is
+    // derived once in resolve-inputs (no per-leg sequence advancement).
+    expect(metadataWorkflow).toContain('assemble-publish:');
+    expect(metadataWorkflow).toContain('needs: [resolve-inputs, build-asset]');
+    expect(metadataWorkflow).toContain('--assets-dir');
+    expect(metadataWorkflow).not.toContain('--archive ');
+    expect(metadataWorkflow).not.toContain('--platform linux');
+
+    // Every downstream job builds/publishes the EXACT commit resolve-inputs
+    // measured: its version gate and source_epoch are only truthful for that
+    // SHA, so re-resolving a mutable branch ref here would publish metadata
+    // naming a different source commit than the verified one (rc-6).
+    const pinnedCheckouts = metadataWorkflow.match(/ref: \$\{\{ needs\.resolve-inputs\.outputs\.commit \}\}/g) ?? [];
+    expect(pinnedCheckouts).toHaveLength(2);
+    // The resolving job itself is the ONLY place allowed to read the mutable
+    // input ref (it is what produces the commit the other jobs pin to).
+    expect(metadataWorkflow.match(/github\.event\.inputs\.ref/g) ?? []).toHaveLength(1);
+
+    // The artifact-uploading build legs must NOT persist the checkout token:
+    // they never push, and a token left in .git/config can end up inside
+    // uploaded artifacts (zizmor "artipacked"). assemble-publish is the one
+    // job that DOES push gh-pages, so it keeps the default credential.
+    const buildAssetJob = metadataWorkflow.slice(
+      metadataWorkflow.indexOf('build-asset:'),
+      metadataWorkflow.indexOf('assemble-publish:'),
+    );
+    expect(buildAssetJob).toContain('persist-credentials: false');
+    expect(buildAssetJob).not.toContain('git push');
+
+    // The signing-key SECRET lives ONLY in the assemble job — build legs never
+    // see it (header comments mention the secret name; only one real usage).
+    const secretUsages = metadataWorkflow.match(/secrets\.PD_RELEASE_SIGNING_KEY/g) ?? [];
+    expect(secretUsages.length).toBe(1);
+    expect(metadataWorkflow.indexOf('assemble-publish:')).toBeLessThan(metadataWorkflow.indexOf('secrets.PD_RELEASE_SIGNING_KEY'));
+
+    // Single-channel concurrency: one publication owns the sequence at a time.
+    expect(metadataWorkflow).toContain("group: release-metadata-${{ github.event.inputs.channel || 'stable' }}");
+
+    // Manual workflow only: PR merge CI must not pay for the matrix.
+    expect(metadataWorkflow).toContain('workflow_dispatch:');
+    expect(metadataWorkflow).not.toContain('pull_request:');
+  });
+
   it('keeps the PR quick-check bounded and materializes each release lock once', () => {
     const quickWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'release-reproducibility.yml'), 'utf8');
     const builderScript = fs.readFileSync(path.join(repoRoot, 'packages', 'create-principles-disciple', 'scripts', 'bundle-plugin.mjs'), 'utf8');
