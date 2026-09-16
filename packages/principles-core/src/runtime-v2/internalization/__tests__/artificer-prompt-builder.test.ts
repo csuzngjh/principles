@@ -86,8 +86,11 @@ describe('ArtificerPromptBuilder', () => {
     // output-contract rejection feedback; PRI-741 — bumped v4 → v5 for the
     // canonicalKind-first matching contract + HOST SEMANTIC CONTEXT block;
     // PRI-780 — bumped v5 → v6: the v1 context-mode branch is deleted, v2 is
-    // the only generation contract.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v6');
+    // the only generation contract; PRI-817 — bumped v6 → v7: the OUTPUT
+    // FORMAT example now carries the three v2 obligations with a
+    // validator-legal ruleContext object literal, and the CONTEXT MODE
+    // position reference is corrected (below).
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v7');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -249,8 +252,8 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
     expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → … → v6 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v6');
+  it('declares the contract version bump history v1 → … → v7 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v7');
   });
 
   it('still references input.action', () => {
