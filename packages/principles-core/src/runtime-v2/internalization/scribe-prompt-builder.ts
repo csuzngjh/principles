@@ -7,6 +7,13 @@ export interface ScribePromptBuilderInput {
   taskId: string;
   contextHash: string;
   sourcePhilosopherArtifactId: string;
+  /**
+   * PRI-816 (R-01): authoritative dreamer artifact id, extracted by the
+   * runner from the philosopher artifact's `sourceDreamerArtifactId`. When
+   * present the scribe copies it into `sourceTrace.dreamerArtifactId`;
+   * when absent the field stays optional (pre-PRI-508 flows).
+   */
+  sourceDreamerArtifactId?: string;
   philosopherArtifact: unknown;
   /** Owner's preferred language for principle generation (PRI-336). */
   outputLanguage?: OutputLanguage;
@@ -18,6 +25,7 @@ export interface ScribePromptInput {
   taskId: string;
   contextHash: string;
   sourcePhilosopherArtifactId: string;
+  sourceDreamerArtifactId?: string;
   philosopherArtifact: unknown;
   promptContractVersion: string;
 }
@@ -75,7 +83,7 @@ ${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
     "validationExpectation": "<what an evaluator should observe to accept a rule as faithful to this intent>"
   },
   "sourceTrace": {
-    "dreamerArtifactId": "<from philosopher artifact if available, or omit>",
+    "dreamerArtifactId": "<copy exactly from input.sourceDreamerArtifactId; omit when input does not carry one>",
     "philosopherArtifactId": "<copy exactly from input.sourcePhilosopherArtifactId>"
   },
   "risks": ["<risk 1>", "<risk 2>"],
@@ -103,7 +111,7 @@ CONSTRAINTS:
 - intentContract.ownerIntent / targetBehavior / forbiddenBehavior MUST stay consistent with principleDraft.statement and antiPatterns — they express the SAME intent at different precision, never a different one
 - sourcePhilosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId (non-empty string)
 - sourceTrace.philosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId
-- sourceTrace.dreamerArtifactId is optional — include only if available from philosopher artifact
+- sourceTrace.dreamerArtifactId: when input.sourceDreamerArtifactId is provided, it MUST be copied exactly from input.sourceDreamerArtifactId (non-empty string); omit the field only when the input does not carry one. Never scrape artifact content for ids — use the input field
 - risks MUST be an array of strings (can be empty if no risks identified)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 - If the CORE AXIOMS section is provided, ensure the principle draft does not duplicate or contradict any existing core axiom. If overlap exists, note it in risks
@@ -144,6 +152,9 @@ export class ScribePromptBuilder {
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourcePhilosopherArtifactId: input.sourcePhilosopherArtifactId,
+      ...(input.sourceDreamerArtifactId !== undefined
+        ? { sourceDreamerArtifactId: input.sourceDreamerArtifactId }
+        : {}),
       philosopherArtifact: input.philosopherArtifact,
       promptContractVersion: SCRIBE_PROMPT_CONTRACT_VERSION,
     };
