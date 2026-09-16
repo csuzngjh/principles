@@ -126,6 +126,9 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
     expect(source).toContain("event === 'workspace_worker_degraded'");
     expect(source).toContain('notifyWorkspaceDegraded(workspace)');
     expect(source).toContain('describeWorkspaceWorkerDegraded(');
+    // 评审 P1（§7F）：manifest 移除（含 degraded workspace）必须立即重建托盘，
+    // 否则已移除 workspace 的警告区段会残留到下一次无关重建。
+    expect(source).toContain("event === 'workspace_worker_stopped'");
     // 通知路径自身可观察（rc-9）：不支持时留日志，成功时留 notified 事件。
     expect(source).toContain("'notified_workspace_degraded'");
     expect(source).toContain('notification_unsupported');

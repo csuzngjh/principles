@@ -326,6 +326,12 @@ function startWorkspaceWorkerSupervision(): void {
         }
         notifyWorkspaceDegraded(workspace);
         rebuildTrayMenu();
+      } else if (event === 'workspace_worker_stopped') {
+        // Manifest removal of a (possibly degraded) workspace must retire its
+        // tray section immediately — nothing else rebuilds the tray on removal
+        // (review P1, PRI-715 §7F). The rebuild re-reads the registry, so the
+        // ghost display dies with the entry.
+        rebuildTrayMenu();
       }
     },
   });

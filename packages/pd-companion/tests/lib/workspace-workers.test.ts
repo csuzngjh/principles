@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { WorkspaceWorkerRegistry, canonicalWorkspacePath, type WorkerChild } from '../../src/lib/workspace-workers.js';
+import { buildDegradedWorkspacesTrayView } from '../../src/lib/degraded.js';
 
 interface FakeChild extends WorkerChild {
   killed: boolean;
@@ -46,6 +47,14 @@ function makeRegistry() {
     },
   });
   return { registry, spawned, spawnCalls, scheduled, events, flush: () => { for (const entry of scheduled.splice(0)) if (!entry.cleared) entry.callback(); } };
+}
+
+/** Crash the current child through the whole restart ladder until degraded. */
+function crashToDegraded(ctx: ReturnType<typeof makeRegistry>): void {
+  for (let crash = 0; crash < 4; crash += 1) {
+    ctx.spawned[ctx.spawned.length - 1]?.emitExit(1);
+    ctx.flush();
+  }
 }
 
 describe('canonicalWorkspacePath', () => {
@@ -125,10 +134,7 @@ describe('WorkspaceWorkerRegistry (matrix A)', () => {
   it('periodic sync() after restart exhaustion does NOT reset the budget (review P1 regression)', () => {
     const ctx = makeRegistry();
     ctx.registry.sync(['D:/Code/ws-a']);
-    for (let crash = 0; crash < 4; crash += 1) {
-      ctx.spawned[ctx.spawned.length - 1]?.emitExit(1);
-      ctx.flush();
-    }
+    crashToDegraded(ctx);
     expect(ctx.spawnCalls).toHaveLength(4);
     expect(ctx.registry.degradedWorkspaces()).toHaveLength(1);
     // The Companion's 60s periodic reconciliation must not silently restart
@@ -187,10 +193,7 @@ describe('WorkspaceWorkerRegistry (matrix A)', () => {
   it('degraded projection reports only the degraded workspace; healthy ones stay out (C/E)', () => {
     const ctx = makeRegistry();
     ctx.registry.sync(['D:/Code/ws-a']);
-    for (let crash = 0; crash < 4; crash += 1) {
-      ctx.spawned[ctx.spawned.length - 1]?.emitExit(1);
-      ctx.flush();
-    }
+    crashToDegraded(ctx);
     expect(ctx.registry.degradedWorkspaces()).toEqual([canonicalWorkspacePath('D:/Code/ws-a')]);
     // B joins the manifest later and keeps running — the Owner-facing query
     // must report A only.
@@ -203,14 +206,31 @@ describe('WorkspaceWorkerRegistry (matrix A)', () => {
   it('removing a degraded workspace clears it from the Owner-visible projection (no ghost, F)', () => {
     const ctx = makeRegistry();
     ctx.registry.sync(['D:/Code/ws-a']);
-    for (let crash = 0; crash < 4; crash += 1) {
-      ctx.spawned[ctx.spawned.length - 1]?.emitExit(1);
-      ctx.flush();
-    }
+    crashToDegraded(ctx);
     expect(ctx.registry.degradedWorkspaces()).toHaveLength(1);
     // Owner removes the workspace from the manifest → the entry (and its
     // degraded flag) leaves the map, so no phantom warning survives.
     ctx.registry.sync([]);
     expect(ctx.registry.degradedWorkspaces()).toEqual([]);
+  });
+
+  it('PRI-715 B/F: real registry degraded output feeds the Owner projection end-to-end', () => {
+    const ctx = makeRegistry();
+    ctx.registry.sync(['D:/Code/ws-a']);
+    crashToDegraded(ctx);
+    const canonical = canonicalWorkspacePath('D:/Code/ws-a');
+    // The projection consumes the registry's actual public query, not
+    // synthetic strings — identity, reason and nextAction must survive the hop.
+    const view = buildDegradedWorkspacesTrayView(ctx.registry.degradedWorkspaces());
+    expect(view.statusSuffix).toContain('1 个工作区');
+    const joined = view.menuLabels.join('\n');
+    expect(joined).toContain(canonical);
+    expect(joined).toContain('重启次数已耗尽');
+    expect(joined).toContain('重启 PD Companion');
+    // F: official manifest removal empties the projection input, so the
+    // rebuilt tray section dies with the entry (main.ts rebuilds on
+    // workspace_worker_stopped).
+    ctx.registry.sync([]);
+    expect(buildDegradedWorkspacesTrayView(ctx.registry.degradedWorkspaces()).menuLabels).toEqual([]);
   });
 });
