@@ -22,7 +22,7 @@
  */
 
 import { createHash, createPublicKey, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Key, Metadata, Root, Signature } from '@tufjs/models';
@@ -62,8 +62,22 @@ if (!isAbsolute(privateKeyOutput)) {
 if (privateKeyOutputPath === REPO_ROOT || privateKeyOutputPath.startsWith(REPO_ROOT + sep)) {
   throw new Error(`Refusing to write the private signing key inside the repository (${privateKeyOutputPath}). Point --private-key-output at a location outside ${REPO_ROOT}.`);
 }
-if (existsSync(TRUST_ROOT_PATH) && !process.argv.includes('--force')) {
-  throw new Error(`A pinned trust root already exists (${TRUST_ROOT_PATH}). Re-running the ceremony REPLACES the trust anchor every install already pinned — rotation requires an explicit governance decision. Pass --force only for that decision.`);
+// Atomic ceremony creation: the non-force write uses the exclusive-create
+// flag (`wx`) so the trust root can NEVER be silently overwritten by a race
+// between an existence check and the write (the old check-then-write TOCTOU).
+// If a root already exists (or appears between invocations), `wx` raises
+// EEXIST — mapped back to the same governance error below. `--force` keeps the
+// explicit, conscious rotation semantics with plain `w`.
+const forceRotation = process.argv.includes('--force');
+function writePinnedRoot(bytes) {
+  try {
+    writeFileSync(TRUST_ROOT_PATH, bytes, { encoding: 'utf8', flag: forceRotation ? 'w' : 'wx' });
+  } catch (error) {
+    if (!forceRotation && error?.code === 'EEXIST') {
+      throw new Error(`A pinned trust root already exists (${TRUST_ROOT_PATH}). Re-running the ceremony REPLACES the trust anchor every install already pinned — rotation requires an explicit governance decision. Pass --force only for that decision.`);
+    }
+    throw error;
+  }
 }
 
 const { privateKey } = generateKeyPairSync('ed25519');
@@ -82,7 +96,7 @@ metadata.sign(
 const rootBytes = `${JSON.stringify(metadata.toJSON(), null, 2)}\n`;
 
 mkdirSync(dirname(TRUST_ROOT_PATH), { recursive: true });
-writeFileSync(TRUST_ROOT_PATH, rootBytes, 'utf8');
+writePinnedRoot(rootBytes);
 
 mkdirSync(dirname(privateKeyOutputPath), { recursive: true });
 writeFileSync(privateKeyOutputPath, privateKey.export({ type: 'pkcs8', format: 'pem' }), 'utf8');
