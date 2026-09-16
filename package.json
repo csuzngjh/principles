@@ -22,6 +22,7 @@
     "error:hotspots": "node scripts/check-error-handbook.cjs --hotspots",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.js all",
     "check:runtime-contract": "node scripts/check-runtime-contract.js",
+    "check:runtime-pin": "node plugins/principles-disciple/scripts/verify-pinned-runtime-capability.cjs --install",
     "check:docs-structure": "node scripts/check-docs-structure.cjs",
     "check:security-baseline": "node scripts/check-security-baseline.js",
     "check:workspace-tools": "node scripts/check-workspace-tools.cjs",

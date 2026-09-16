@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import Database from 'better-sqlite3';
 
 /**
@@ -441,7 +441,7 @@ describe('pd-cli discovery Windows fallback (pd-locate)', () => {
 });
 
 describe('first-run $pd-setup (real user flow)', () => {
-  it('creates the plugin data dir Codex never creates, and npm-installs the pinned runtime', () => {
+  it('creates the plugin data dir Codex never creates, and npm-installs the pinned runtime', async () => {
     // Codex 0.147 SETS PLUGIN_DATA for hooks but does NOT create the dir —
     // $pd-setup must own first-run creation (derive marketplace from the
     // installed cache path) or every fresh install dead-ends.
@@ -464,9 +464,26 @@ describe('first-run $pd-setup (real user flow)', () => {
     // The data dir was derived + created under the fake home, not the real one.
     expect(report.pluginData.startsWith(fakeHome)).toBe(true);
     expect(fs.existsSync(path.join(report.pluginData, 'runtime', 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js'))).toBe(true);
-    expect(report.runtime.codexAdapter).toBe('0.1.0');
-    expect(report.runtime.hostRuntime).toBe('0.1.0');
-  }, 300_000);
+    // PRI-810: assert against the pin SOURCE OF TRUTH, not a hardcoded copy —
+    // the previous hardcoded '0.1.0' expectations locked the drift in place.
+    const pins = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8')) as { codexAdapter: string; hostRuntime: string; core: string };
+    expect(report.runtime.codexAdapter).toBe(pins.codexAdapter);
+    expect(report.runtime.hostRuntime).toBe(pins.hostRuntime);
+    expect(report.runtime.core).toBe(pins.core);
+
+    // PRI-810 regression guard: the freshly installed runtime must satisfy the
+    // Owner emergency-control capability contract (global pause / safety
+    // isolation / retired-contract backstop). Runs IN-PROCESS against the real
+    // installed bytes $pd-setup just produced — a pin that regresses to a
+    // guard-less version fails HERE. pathToFileURL (not a bare path) keeps the
+    // dynamic import valid on Windows drive-letter paths.
+    const probeModule = (await import(pathToFileURL(path.join(cachePlugin, 'scripts', 'verify-pinned-runtime-capability.cjs')).href)) as {
+      verifyPinnedRuntimeCapability: (options: { runtimeDir: string }) => Promise<{ ok: boolean; scenarioResults: { name: string; pass: boolean; outcome: unknown }[] }>;
+    };
+    const probeReport = await probeModule.verifyPinnedRuntimeCapability({ runtimeDir: path.join(report.pluginData, 'runtime') });
+    expect(probeReport.ok, JSON.stringify(probeReport.scenarioResults)).toBe(true);
+    expect(probeReport.scenarioResults.every((s) => s.pass)).toBe(true);
+  }, 420_000);
 });
 
 describe('pd-disable.cjs kill switch', () => {

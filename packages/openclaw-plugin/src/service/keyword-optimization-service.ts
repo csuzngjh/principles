@@ -117,10 +117,13 @@ export class KeywordOptimizationService {
               sessionId,
               timestamp: turn.createdAt ?? new Date().toISOString(),
               term: turn.correctionCue ?? 'unknown',
-              // Note: rawText is not available from listUserTurnsForSession (privacy: no raw text stored).
-              // userMessage left empty — trajectory section is used for FPR trend analysis,
-              // not for understanding user intent (correctionCue term is sufficient).
-              userMessage: '',
+              // PRI-823: carry the bounded raw excerpt (≤200 chars, persisted
+              // per user_turn) so the observer can judge each hit event on its
+              // own message text instead of guessing from the term alone. Same
+              // data category recentMessages already delivers — no new storage
+              // or privacy surface. buildPrompt still caps rendering at 80
+              // chars/entry.
+              userMessage: turn.rawExcerpt ?? '',
             });
           }
           if (history.length >= 50) break; // Cap at 50 events
