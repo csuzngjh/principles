@@ -52,18 +52,29 @@ the consumer extracts with `tar xzf` — the publisher wraps deterministically
 
 ## 4. CI pipeline (`release-metadata.yml`, workflow_dispatch)
 
-1. Build the payload components (same order as the installer path in
-   `publish-npm.yml`), then `build:release-asset` with
-   `SOURCE_DATE_EPOCH` from the source commit (deterministic archive).
-2. Read the previously published state from `gh-pages` and derive
-   `publicationSequence`/pointer version (previous + 1) and expiry
-   (dispatch input; `auto` = now + 90d with a loud warning that
-   reproducible re-publication needs an explicit value).
-3. `publish-release-metadata.mjs` verifies the archive against its digest
-   sidecar, signs, and emits the file set. Dry-run uploads the publication
-   as a workflow artifact and publishes nothing; without the
-   `PD_RELEASE_SIGNING_KEY` secret it signs with an ephemeral key labeled
-   UNTRUSTED (pipeline smoke only).
+Three jobs, one publication (PRI-733 multi-platform matrix):
+
+1. `resolve-inputs` (ubuntu): resolve the product version/commit identity
+   (fail-closed version guard), read the previously published state from
+   `gh-pages`, and derive `publicationSequence`/pointer version (previous + 1)
+   and expiry (dispatch input; `auto` = now + 90d with a loud warning that
+   reproducible re-publication needs an explicit value). Derived ONCE so the
+   channel pointer advances exactly once per publication.
+2. `build-asset` (matrix: linux/x64 on ubuntu-latest, win32/x64 on
+   windows-latest, darwin/arm64 on macos-latest — Node 24): build the payload
+   components (same order as the installer path in `publish-npm.yml`), then
+   `build:release-asset` with the SHARED `SOURCE_DATE_EPOCH` from
+   resolve-inputs (same source + same epoch + same triple → same bytes).
+   Each leg uploads `asset.tar` + `asset.tar.sha256` + `asset-meta.json`
+   (`{platform, arch, nodeAbi}` written from the runner's own runtime).
+3. `assemble-publish` (ubuntu): download all legs, then
+   `publish-release-metadata.mjs --assets-dir` verifies each archive against
+   its digest sidecar AND cross-checks the tar's stamped `_release/asset.json`
+   against the leg's claimed triple, signs ONCE, and emits the file set.
+   Dry-run uploads the publication as a workflow artifact and publishes
+   nothing; without the `PD_RELEASE_SIGNING_KEY` secret (held ONLY by this
+   job) it signs with an ephemeral key labeled UNTRUSTED (pipeline smoke
+   only).
 4. Publish mode pushes the tree to `gh-pages` as ONE atomic git commit —
    consumers never observe a channel pointer whose artifact is missing.
    Published releases are preserved (append-and-advance); pruning stale
@@ -72,6 +83,12 @@ the consumer extracts with `tar xzf` — the publisher wraps deterministically
 The metadata base URL stays operator-configured
 (`PD_RELEASE_METADATA_URL` / `install.json releaseMetadataUrl`). This
 pipeline bakes no URL into the product (contract I-1 of the read-side doc).
+
+Same-source determinism note: per-platform `asset.tar` bytes are EXPECTED to
+differ across platforms (each tar stamps its own `_release/asset.json`
+platform/arch/abi). Determinism means: same (source, epoch, triple) yields
+the same bytes, and the same multi-archive inputs re-emit identical
+publication bytes (archive order normalized by platform/arch/abi sort).
 
 ## 5. Trust material
 
@@ -103,7 +120,11 @@ pipeline bakes no URL into the product (contract I-1 of the read-side doc).
 
 - Install-side provisioning of `~/.pd/trust/root.json` (the pinned trust
   anchor) — separate production precondition, tracked on Linear.
-- Multi-platform release assets (the publisher accepts one asset per
-  publication; cross-platform build matrices are release-infra work).
+- Multi-platform release assets: DONE by PRI-733 (one publication covers
+  linux/x64, win32/x64, darwin/arm64 on Node 24; `archives[]` input,
+  per-platform bytes-vs-sidecar verification plus tar-stamp cross-check).
+  Follow-ups: darwin/x64 + linux/arm64 legs, Node 22/26 ABI legs (requires
+  artifact path naming that includes the ABI — `release-asset-<platform>-<arch>`
+  collides across ABIs — plus the consumer `releaseAssetTargetPath` change).
 - Key rotation, offline root ceremony, publishing approval UI.
 - Stale-release pruning in the metadata repository.

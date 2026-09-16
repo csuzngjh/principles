@@ -282,8 +282,12 @@ describe('Story A\' pure helpers', () => {
       expect(result.matched).toBe(true);
     });
 
-    it('returns allow for non-object result', () => {
-      const fn = createDemoSandboxEvaluate('return "other";');
+    it('rejects non-object results via canonical validation (PRI-809: no fabricated demo allow)', () => {
+      // PRI-809: the demo sandbox delegates to the hardened replay evaluator,
+      // whose canonical RuleHostResult validation makes a malformed result a
+      // structured failure. The old new-Function evaluator fabricated a
+      // default-allow decision for non-object results — that masked failures.
+      const fn = createDemoSandboxEvaluate('function evaluate(input, helpers) { return "other"; }');
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: {} },
         workspace: { isRiskPath: false },
@@ -291,9 +295,7 @@ describe('Story A\' pure helpers', () => {
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
       } as RuleHostInput;
-      const result = fn(input, {} as RuleHostHelpers);
-      expect(result.decision).toBe('allow');
-      expect(result.matched).toBe(false);
+      expect(() => fn(input, {} as RuleHostHelpers)).toThrow(/invalid RuleHostResult/);
     });
   });
 
