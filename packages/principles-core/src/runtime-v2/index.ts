@@ -1561,6 +1561,18 @@ export type {
   BuildGoldenTraceFromArtificerInput,
   BuildGoldenTraceResult,
 } from './golden-trace.js';
+// ── Trajectory Schema (PRI-774 canonical DDL owner) ───────────────────────
+
+export {
+  applyTrajectorySchemaBase,
+  TRAJECTORY_SCHEMA_VERSION,
+  TRAJECTORY_TABLES,
+} from './trajectory-schema.js';
+
+export type {
+  TrajectorySchemaApplyOptions,
+  TrajectorySchemaApplyResult,
+} from './trajectory-schema.js';
 // ── GoldenTrace Replay Validator (PRI-115) ────────────────────────────────
 
 export {

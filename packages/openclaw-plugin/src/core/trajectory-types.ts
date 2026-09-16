@@ -1,313 +1,42 @@
 /**
- * Trajectory database type definitions.
- * 
- * PURPOSE: Track task outcomes, trust changes, and evolution progress over time.
- * USAGE: Insights, trends, and Phase 3 supporting evidence (where explicitly allowed).
- * NOT FOR: Control decisions, Phase 3 eligibility, or real-time operations.
+ * Trajectory domain type surface for the plugin.
+ *
+ * SINGLE HOME since PRI-774: all trajectory types live in
+ * `@principles/core/trajectory-types` (principles-core/src/trajectory-types.ts).
+ * This file is a compatibility re-export shim for existing plugin importers —
+ * do NOT add new type definitions here.
  */
 
-export type CorrectionSampleReviewStatus = 'pending' | 'approved' | 'rejected';
-export type CorrectionExportMode = 'raw' | 'redacted';
-
-export interface TrajectoryDataStats {
-  dbPath: string;
-  dbSizeBytes: number;
-  assistantTurns: number;
-  userTurns: number;
-  toolCalls: number;
-  painEvents: number;
-  pendingSamples: number;
-  approvedSamples: number;
-  blobBytes: number;
-  lastIngestAt: string | null;
-}
-
-export interface TrajectoryAssistantTurnInput {
-  sessionId: string;
-  runId: string;
-  provider: string;
-  model: string;
-  rawText: string;
-  sanitizedText: string;
-  usageJson: unknown;
-  empathySignalJson: unknown;
-  stopReason?: string | null;
-  thinkingBlocksCount?: number | null;
-  createdAt?: string;
-}
-
-export interface TrajectoryUserTurnInput {
-  sessionId: string;
-  turnIndex: number;
-  rawText: string;
-  correctionDetected: boolean;
-  correctionCue?: string | null;
-  referencesAssistantTurnId?: number | null;
-  createdAt?: string;
-}
-
-export interface TrajectoryToolCallInput {
-  sessionId: string;
-  toolName: string;
-  outcome: 'success' | 'failure' | 'blocked';
-  durationMs?: number | null;
-  exitCode?: number | null;
-  errorType?: string | null;
-  errorMessage?: string | null;
-  gfiBefore?: number | null;
-  gfiAfter?: number | null;
-  paramsJson?: unknown;
-  resultPreview?: string | null;
-  createdAt?: string;
-}
-
-export interface TrajectoryPainEventInput {
-  sessionId: string;
-  source: string;
-  score: number;
-  reason?: string | null;
-  severity?: string | null;
-  origin?: string | null;
-  confidence?: number | null;
-  text?: string;
-  createdAt?: string;
-  /** PRI-406: Canonical pain identity (e.g. manual_<ts>_<hash> or pain_<ts>_<hash>). */
-  canonicalPainId?: string;
-  /** PRI-406: Runtime V2 diagnostician task ID linked to this pain event. */
-  runtimeTaskId?: string;
-  /** PRI-640: Host attribution ('openclaw' | 'codex'); omit for manual/legacy (persists NULL = unknown). */
-  hostKind?: 'openclaw' | 'codex';
-}
-
-export interface TrajectoryGateBlockInput {
-  sessionId?: string | null;
-  toolName: string;
-  filePath?: string | null;
-  reason: string;
-  createdAt?: string;
-}
-
-type DailyMetricRow = {
-  day: string;
-  tool_calls: number;
-  failures: number;
-  user_corrections: number;
-};
-
-export interface TrajectoryTrustChangeInput {
-  sessionId?: string | null;
-  previousScore: number;
-  newScore: number;
-  delta: number;
-  reason: string;
-  createdAt?: string;
-}
-
-export interface TrajectoryPrincipleEventInput {
-  principleId?: string | null;
-  eventType: string;
-  payload: unknown;
-  createdAt?: string;
-}
-
-export interface TrajectoryTaskOutcomeInput {
-  sessionId: string;
-  taskId?: string | null;
-  outcome: string;
-  summary?: string | null;
-  principleIdsJson?: unknown;
-  createdAt?: string;
-}
-
-export interface TrajectorySessionInput {
-  sessionId: string;
-  startedAt?: string;
-}
-
-// V2: Task kind and priority types for queue schema
-export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval' | 'keyword_optimization';
-export type TaskPriority = 'high' | 'medium' | 'low';
-
-// V2: EvolutionTaskInput with all V2 fields
-interface EvolutionTaskInputBase {
-  taskId: string;
-  traceId: string;
-  source: string;
-  reason?: string | null;
-  score?: number;
-  status?: string;
-  enqueuedAt?: string | null;
-  startedAt?: string | null;
-  completedAt?: string | null;
-  resolution?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface EvolutionTaskInputV2 extends EvolutionTaskInputBase {
-  taskKind?: TaskKind;
-  priority?: TaskPriority;
-  retryCount?: number;
-  maxRetries?: number;
-  lastError?: string | null;
-  resultRef?: string | null;
-}
-
-export type EvolutionTaskInput = EvolutionTaskInputV2;
-
-export interface EvolutionEventInput {
-  traceId: string;
-  taskId?: string | null;
-  stage: string;
-  level?: string;
-  message: string;
-  summary?: string | null;
-  metadata?: unknown;
-  createdAt?: string;
-}
-
-export interface EvolutionTaskRecord {
-  id: number;
-  taskId: string;
-  traceId: string;
-  source: string;
-  reason: string | null;
-  score: number;
-  status: string;
-  enqueuedAt: string | null;
-  startedAt: string | null;
-  completedAt: string | null;
-  resolution: string | null;
-  createdAt: string;
-  updatedAt: string;
-  taskKind: TaskKind | null;
-  priority: TaskPriority | null;
-  retryCount: number | null;
-  maxRetries: number | null;
-  lastError: string | null;
-  resultRef: string | null;
-}
-
-export interface EvolutionEventRecord {
-  id: number;
-  traceId: string;
-  taskId: string | null;
-  stage: string;
-  level: string;
-  message: string;
-  summary: string | null;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-}
-
-export interface EvolutionTaskFilters {
-  status?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface AssistantTurnRecord {
-  id: number;
-  sessionId: string;
-  runId: string;
-  provider: string;
-  model: string;
-  rawText: string;
-  sanitizedText: string;
-  blobRef: string | null;
-  stopReason: string | null;
-  thinkingBlocksCount: number | null;
-  createdAt: string;
-}
-
-export interface CorrectionSampleRecord {
-  sampleId: string;
-  sessionId: string;
-  badAssistantTurnId: number;
-  userCorrectionTurnId: number;
-  recoveryToolSpanJson: string;
-  diffExcerpt: string;
-  principleIdsJson: string;
-  qualityScore: number;
-  reviewStatus: CorrectionSampleReviewStatus;
-  exportMode: CorrectionExportMode;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface TrajectoryExportResult {
-  filePath: string;
-  count: number;
-  mode?: CorrectionExportMode;
-}
-
-export interface TrajectoryDatabaseOptions {
-  workspaceDir: string;
-  blobInlineThresholdBytes?: number;
-  busyTimeoutMs?: number;
-  orphanBlobGraceDays?: number;
-}
-
-/**
- * Raw row from tool_calls for RuleContext v2 history assembly.
- * Fields are raw strings from SQLite — the assembler validates them as unknown.
- */
-export interface RuleHostContextRow {
-  readonly id: number;
-  readonly toolName: string;
-  readonly outcome: string;
-  readonly paramsJson: string;
-}
-
-/** A single tool call selected by an Owner as labelled RuleHost evidence. */
-export interface RuleHostEvidenceRow extends RuleHostContextRow {
-  readonly sessionId: string;
-}
-
-/**
- * Result of getRuleHostContextRows: FIFO-ordered rows + truncated flag.
- * truncated=true when more than `limit` rows existed (limit+1 read trick).
- */
-export interface RuleHostContextResult {
-  readonly rows: readonly RuleHostContextRow[];
-  readonly truncated: boolean;
-}
-
-export type { DailyMetricRow };
-
-// ── PRI-788 G2: Stage2 待确认信号持久队列（signal_confirmations） ────────────
-
-export type SignalConfirmationStatus = 'pending' | 'confirmed' | 'rejected' | 'abandoned';
-
-/** 入队载荷（id 由 store 派生：sha256(sessionId:userTurnRowid) 前 12 位）。 */
-export interface SignalConfirmationInput {
-  readonly sessionId: string;
-  /** Stage1 写入 user_turns 返回的 rowid（G1 回写寻址键；UNIQUE 幂等）。 */
-  readonly userTurnRowid: number;
-  /** 与 realtime 路径一致的 occurrence 身份（ADR-0020 §11.4，批量确认复现同一 canonical pain）。 */
-  readonly occurrenceId: string;
-  readonly excerpt: string;
-  /** Stage1 命中的词列表（JSON 落库）。 */
-  readonly terms: readonly string[];
-  /** Stage1 建议类别：correction | empathy。 */
-  readonly suggestedType: string;
-  readonly createdAt: string;
-}
-
-/** signal_confirmations 行（camelCase 投影）。 */
-export interface SignalConfirmationRow {
-  readonly id: string;
-  readonly sessionId: string;
-  readonly userTurnRowid: number;
-  readonly occurrenceId: string;
-  readonly excerpt: string;
-  readonly terms: readonly string[];
-  readonly suggestedType: string;
-  readonly status: SignalConfirmationStatus;
-  readonly attempts: number;
-  readonly createdAt: string;
-  readonly resolvedAt: string | null;
-  readonly resolution: string | null;
-}
+export type {
+  AssistantTurnRecord,
+  CorrectionExportMode,
+  CorrectionSampleRecord,
+  CorrectionSampleReviewStatus,
+  DailyMetricRow,
+  EvolutionEventInput,
+  EvolutionEventRecord,
+  EvolutionTaskFilters,
+  EvolutionTaskInput,
+  EvolutionTaskInputV2,
+  EvolutionTaskRecord,
+  RuleHostContextResult,
+  RuleHostContextRow,
+  RuleHostEvidenceRow,
+  SignalConfirmationInput,
+  SignalConfirmationRow,
+  SignalConfirmationStatus,
+  TrajectoryAssistantTurnInput,
+  TrajectoryDataStats,
+  TrajectoryDatabaseOptions,
+  TrajectoryExportResult,
+  TrajectoryGateBlockInput,
+  TrajectoryPainEventInput,
+  TrajectoryPrincipleEventInput,
+  TrajectorySessionInput,
+  TrajectoryTaskOutcomeInput,
+  TrajectoryToolCallInput,
+  TrajectoryTrustChangeInput,
+  TrajectoryUserTurnInput,
+  TaskKind,
+  TaskPriority,
+} from '@principles/core/trajectory-types';
