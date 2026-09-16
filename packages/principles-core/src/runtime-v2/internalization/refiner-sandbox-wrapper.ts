@@ -137,6 +137,20 @@ function resolveTimeoutMs(timeoutMs: number): number {
   return timeoutMs;
 }
 
+
+/**
+ * EP002-R4: mirror the production gate's dynamic risk classification for the
+ * synthetic replay inputs. Well-known sensitive system prefixes only — this
+ * is a replay-input parity fix, not a new policy surface. Segment-based
+ * posix check; Windows drive forms are out of scope for these fixtures.
+ */
+function isSensitiveSystemPath(params: Record<string, unknown>): boolean {
+  const raw = params.path ?? params.file_path;
+  if (typeof raw !== 'string' || raw.length === 0) return false;
+  const normalized = raw.toLowerCase();
+  return normalized === '/etc' || normalized.startsWith('/etc/');
+}
+
 interface ReplayInputContext {
   timeoutMs: number;
   projectDir?: string;
@@ -152,7 +166,18 @@ function evaluateCaseWithTimeout(
   const hasOptions = projectDir !== undefined || toolSemantics !== undefined;
   const input = createSyntheticRuleHostInput(
     { toolName: traceCase.toolName, params: traceCase.params },
-    traceCase.ruleContext !== undefined ? { context: traceCase.ruleContext } : {},
+    {
+      ...(traceCase.ruleContext !== undefined ? { context: traceCase.ruleContext } : {}),
+      // EP002-R4: the production OpenClaw gate computes workspace.isRiskPath
+      // dynamically for sensitive system locations, but the synthetic replay
+      // input hard-coded it to false — a rule correctly consulting
+      // helpers.isRiskPath()/input.workspace.isRiskPath could NEVER satisfy
+      // the v2-combination expectation (block on a risk path with
+      // priorRead=yes), no matter how the prompt taught the dominance rule
+      // (live-chain evidence: 6 repair rounds died on exactly this). Mirror
+      // the production computation for well-known sensitive system prefixes.
+      workspace: { isRiskPath: isSensitiveSystemPath(traceCase.params) },
+    },
     hasOptions
       ? { ...(projectDir !== undefined ? { projectDir } : {}), ...(toolSemantics !== undefined ? { toolSemantics } : {}) }
       : {},

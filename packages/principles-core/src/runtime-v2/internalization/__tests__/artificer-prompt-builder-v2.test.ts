@@ -53,6 +53,58 @@ describe('ArtificerPromptBuilder V2 contract', () => {
     expect(result.systemPrompt).toMatch(/must.*requiresContextVersion.*2/i);
   });
 
+  // EP002-R4: real workspaces produce real-sized tool-call payloads — a single
+  // example (full file content / edit diff) can exceed the whole 50k prompt
+  // budget (live workspace measured: pack 115,198 chars, of which ONE case's
+  // ruleContext.history carried 100 raw calls = 45,380 chars). The builder must
+  // bound BOTH per-field payload strings AND the history window at the prompt
+  // boundary while leaving the CALLER's pack object untouched (persisted
+  // evidence keeps full fidelity).
+  it('bounds oversized behavior-example payloads at the prompt boundary (EP002-R4)', () => {
+    const hugePayload = 'x'.repeat(45_000);
+    const manyCalls = Array.from({ length: 100 }, (_, i) => ({
+      sequenceId: i + 1,
+      toolName: 'write_file',
+      canonicalKind: 'write' as const,
+      normalizedPath: `prod/file-${i}.js`,
+      paramsSummary: { content: 'y'.repeat(600) },
+      outcome: 'success' as const,
+    }));
+    const hugePack = {
+      sourceNegativeCase: {
+        caseId: 'negative-big', kind: 'negative' as const, toolName: 'write_file',
+        params: { path: 'prod/hud.js', content: hugePayload },
+        expectedDecision: 'block' as const,
+        ruleContext: { version: 2 as const, history: { status: 'available' as const, truncated: false, calls: manyCalls }, facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null } },
+      },
+      ownerDesiredOutcome: 'Anchor baselines before production writes.',
+      positiveCounterexamples: [
+        { caseId: 'positive-big', kind: 'positive' as const, toolName: 'write_file', params: { path: 'work/copy.js', content: hugePayload }, expectedDecision: 'allow' as const, ruleContext: { version: 2 as const, history: { status: 'available' as const, truncated: false, calls: manyCalls }, facts: { priorReadOfTarget: 'unknown' as const, readCount: 1, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null } } },
+        { caseId: 'positive-big-2', kind: 'positive' as const, toolName: 'write_file', params: { path: 'work/copy2.js', content: hugePayload }, expectedDecision: 'allow' as const, ruleContext: { version: 2 as const, history: { status: 'available' as const, truncated: false, calls: manyCalls }, facts: { priorReadOfTarget: 'unknown' as const, readCount: 1, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null } } },
+      ],
+      evidenceRefs: ['pain:1'], redactionNotes: [],
+    };
+
+    const result = new ArtificerPromptBuilder().buildPrompt({
+      taskId: 'task-big-pack', contextHash: 'hash-big', sourceScribeArtifactId: 'scribe-big', scribeArtifact: {},
+      behaviorExamplePack: hugePack,
+    });
+
+    // The serialized prompt fits the 50k budget instead of throwing RangeError.
+    expect(result.message.length).toBeLessThanOrEqual(50_000);
+    // Truncation is explicit, not silent (rc-9): field strings carry the marker…
+    expect(result.message).toContain('truncated-for-prompt');
+    // …and the history window is capped with its own truncation flag set.
+    const boundedNeg = result.promptInput.behaviorExamplePack?.sourceNegativeCase;
+    expect(boundedNeg?.ruleContext?.history.calls.length).toBeLessThanOrEqual(12);
+    expect(boundedNeg?.ruleContext?.history.truncated).toBe(true);
+    // The prompt projection is bounded, not the caller's pack (persisted full fidelity).
+    expect(typeof boundedNeg?.params.content === 'string' && boundedNeg.params.content.length).toBeLessThanOrEqual(2_600);
+    expect(hugePack.sourceNegativeCase.params.content.length).toBe(45_000);
+    expect(hugePack.sourceNegativeCase.ruleContext.history.calls.length).toBe(100);
+    expect(hugePack.sourceNegativeCase.ruleContext.history.truncated).toBe(false);
+  });
+
   // PRI-490: v2 prompt must mention allow/block-only constraint and evidenceRefs copy
   it('V2 prompt instruction mentions allow/block-only and evidenceRefs copy requirement (PRI-490)', () => {
     const result = new ArtificerPromptBuilder().buildPrompt({

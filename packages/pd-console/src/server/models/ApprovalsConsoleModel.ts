@@ -69,10 +69,16 @@ type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelR
 
 export type ApproveWithActivationResult =
   | { ok: true; record: ApprovalRecord; activation?: ActivationDecision; warning?: string }
-  | { ok: false; error: 'already_decided'; status: ApprovalStatus }
+  | { ok: false, error: 'already_decided'; status: ApprovalStatus }
   | { ok: false; error: 'not_found' }
   | { ok: false; error: 'unsupported_channel'; channel: string }
   | { ok: false; error: 'activation_failed'; reason: string; approvalRolledBack: boolean };
+
+export type ReopenApprovalResult =
+  | { ok: true; record: ApprovalRecord; alreadyPending: boolean }
+  | { ok: false; error: 'not_found' }
+  | { ok: false; error: 'unsupported_channel'; channel: string }
+  | { ok: false; error: 'not_reopenable'; status: ApprovalStatus };
 
 function stateDbExists(workspaceDir: string): boolean {
   return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
@@ -476,6 +482,49 @@ export class ApprovalsConsoleModel {
     const { queue, connection } = this.createWriteContext();
     try {
       return await queue.reject(approvalId, decidedBy, reason);
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
+    }
+  }
+
+  /**
+   * EP002-R4 follow-up: reopen a terminal approval so the Owner can decide
+   * again in the Console. The concrete gap: an APPROVED activation was
+   * deliberately deactivated (J4 revocation) and the Owner wants the
+   * intervention back — but `approve` only acts on pending rows and dispatch
+   * only re-enqueues (a no-op on the existing approved row), leaving the
+   * standing approval unreachable from every production surface.
+   *
+   * The store's `resetToPending` (approved → pending, decision fields
+   * cleared) is the existing single-writer mechanism — this method just
+   * exposes it. INV-04 (authorization is temporal) is preserved: reopening
+   * does NOT re-activate anything; the Owner must make a fresh Console
+   * approve decision, which re-dispatches through the full verified chain.
+   */
+  async reopenApproval(approvalId: string): Promise<ReopenApprovalResult> {
+    if (!stateDbExists(this.workspaceDir)) {
+      return { ok: false, error: 'not_found' };
+    }
+    const existing = await this.readSafeGetById(approvalId);
+    if (!existing) return { ok: false, error: 'not_found' };
+    if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
+      return { ok: false, error: 'unsupported_channel', channel: existing.channel };
+    }
+    if (existing.status === 'pending') {
+      // Already actionable — nothing to reopen. Not an error from the
+      // Owner's point of view: the approval is ready for a fresh decision.
+      return { ok: true, record: existing, alreadyPending: true };
+    }
+    const { queue, connection } = this.createWriteContext();
+    try {
+      const result = await queue.resetToPending(approvalId);
+      if (!result.ok) {
+        if (result.error === 'not_found') return { ok: false, error: 'not_found' };
+        return { ok: false, error: 'not_reopenable', status: existing.status };
+      }
+      const reopened = await this.readSafeGetById(approvalId);
+      if (!reopened) return { ok: false, error: 'not_found' };
+      return { ok: true, record: reopened, alreadyPending: false };
     } finally {
       try { connection.close(); } catch { /* best-effort */ }
     }

@@ -1,13 +1,11 @@
 import type {
   CorrectionKeyword,
   CorrectionKeywordStore,
-  CorrectionMatchResult,
 } from '@principles/core/runtime-v2';
 
 export type {
   CorrectionKeyword,
   CorrectionKeywordStore,
-  CorrectionMatchResult,
 };
 
 export {

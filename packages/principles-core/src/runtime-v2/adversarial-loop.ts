@@ -149,11 +149,25 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
     }
 
     const evaluatorOutput = evaluatorResult.output;
-    const { decision } = evaluatorOutput.evaluation;
+    const reviewDecision = evaluatorOutput.evaluation.decision;
     lastPrincipleArtifactId = evaluatorResult.artifactId ?? await resolvePrincipleArtifactId(input, evaluatorTaskId);
     if (isEvaluatorOutputV2(evaluatorOutput) && evaluatorOutput.adversarialResult) {
       lastAdversarialResult = evaluatorOutput.adversarialResult;
     }
+
+    // EP002-R4: align with PRI-758's dual semantics. The evaluator preserves
+    // the RAW review verdict ('approved') on its artifact while the transition
+    // layer routes approved+replay-failed into repair (needs_revision). This
+    // loop previously read only the raw verdict and rejected with the
+    // misleading 'evaluator_approved_without_rule_artifact' — burning the
+    // remaining round instead of feeding the failed cases back. Approved with
+    // a failed/not-passed adversarial replay IS needs_revision for this loop.
+    const replayFailed = isEvaluatorOutputV2(evaluatorOutput)
+      && evaluatorOutput.adversarialResult !== undefined
+      && evaluatorOutput.adversarialResult.passed !== true;
+    const decision = reviewDecision === 'approved' && replayFailed
+      ? 'needs_revision'
+      : reviewDecision;
 
     if (decision === 'approved') {
       // Rule artifact written by EvaluatorRunner.succeedTask (PRI-427) when

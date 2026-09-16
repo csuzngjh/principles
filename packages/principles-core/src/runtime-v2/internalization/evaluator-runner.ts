@@ -2620,7 +2620,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // PRI-741: host-name parity case — the rule must reach the same decision
     // under the REAL host tool name as under the author's vocabulary.
     const hostAliasCase = this.generateHostAliasCase(goldenTraceCases, taskId, runId);
-    const mergedAdversarialCases: readonly AdversarialCase[] = [
+    const mergedAdversarialCases: AdversarialCase[] = [
       ...v2Cases,
       ...(hostAliasCase !== null ? [hostAliasCase] : []),
       ...llmCases,
@@ -2644,6 +2644,25 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         nextAction: 'verify_artificer_affectedTools_or_positive_case_path_derivable',
       });
       return { updatedOutput: null, skipReason: 'no_adversarial_cases_after_merge' };
+    }
+
+    // EP002-R4: deduplicate case IDs BEFORE conversion. The prompt forbids
+    // the v2-* namespace for Artificer-supplied cases, but the merge can
+    // still collide (live evidence: the model echoed 'v2-unavailable' as its
+    // own case id despite the warning) — and a duplicate id degraded the
+    // WHOLE replay to case_id_conflict, refusing an otherwise-clean
+    // approval. Disambiguate Artificer/LLM-supplied duplicates
+    // deterministically (owner: prefix) instead of burning the round; the
+    // sandbox only needs unique ids for evidence attribution, and the
+    // prefix keeps the provenance visible in the replay report.
+    const seenCaseIds = new Set<string>();
+    for (let caseIndex = 0; caseIndex < mergedAdversarialCases.length; caseIndex += 1) {
+      const adversarialCase = mergedAdversarialCases[caseIndex];
+      if (adversarialCase !== undefined && seenCaseIds.has(adversarialCase.caseId)) {
+        mergedAdversarialCases[caseIndex] = { ...adversarialCase, caseId: `owner:${adversarialCase.caseId}` };
+      }
+      const current = mergedAdversarialCases[caseIndex];
+      if (current !== undefined) seenCaseIds.add(current.caseId);
     }
 
     // (5) Convert the merged adversarial cases to an all-negative GoldenTrace.
