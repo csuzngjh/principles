@@ -183,7 +183,12 @@ export class SplitDiagnosticianRunner {
     let resultC: PeerRunnerResult<DiagnosticianOutputV1>;
     if (stageCTask && stageCTask.status === 'succeeded') {
       const runs = await this.stateManager.getRunsByTask(stageCTaskId);
-      const succeededRun = runs.find((r) => r.executionStatus === 'succeeded');
+      // PRI-818 (R1 review 818-2): getRunsByTask returns runs in started_at
+      // ASC order. A superseded older succeeded run (e.g. one written before
+      // cache validation existed and rejected below) must never shadow a
+      // newer valid one — pick the LATEST succeeded run.
+      const succeededRuns = runs.filter((r) => r.executionStatus === 'succeeded');
+      const [succeededRun] = succeededRuns.slice(-1);
       const outputPayload = succeededRun?.outputPayload;
       // EP-01 / rc-1: JSON.parse of persisted DB content is a trust boundary —
       // outputPayload may be corrupt/malformed (e.g. partial write, DB
@@ -233,6 +238,15 @@ export class SplitDiagnosticianRunner {
           output: parsedOutput as DiagnosticianOutputV1,
         };
       } else {
+        // PRI-818 (R1 review 818-1): the Stage C task is `succeeded`, but
+        // BasePeerRunner.acquireLease only accepts pending/retry_wait — a
+        // plain rerun would throw lease_conflict and dead-end the parent
+        // with no recovery path. Reset the sub-task to pending first (same
+        // raw-reset precedent as PainSignalBridge.onPainDetected; the
+        // canTransitionTo guard does not model cache invalidation, and the
+        // recovery sweep uses the same bypass). attemptCount is deliberately
+        // preserved — the rerun consumes no fresh retry budget.
+        await this.stateManager.updateTask(stageCTaskId, { status: 'pending', lastError: null, resultRef: null });
         resultC = await this.runStageWithRetry({
           taskId: stageCTaskId,
           runFn: (id) => this.routerRunner.run(id),
