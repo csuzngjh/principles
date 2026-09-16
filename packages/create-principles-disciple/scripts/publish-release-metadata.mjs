@@ -1,17 +1,25 @@
 #!/usr/bin/env node
 /**
- * Release metadata publisher CLI (PRI-727).
+ * Release metadata publisher CLI (PRI-727; PRI-733 multi-platform matrix).
  *
- * Thin wiring only: argv → input verification (archive bytes vs digest
- * sidecar) → src/update/release-metadata-publisher (all identity, signing
- * and monotonicity decisions) → files on disk or a dry-run report.
+ * Thin wiring only: argv → input verification (per-platform archive bytes vs
+ * digest sidecar, plus an asset.json cross-check that the tar really contains
+ * what the sidecar directory claims) → src/update/release-metadata-publisher
+ * (all identity, signing and monotonicity decisions) → files on disk or a
+ * dry-run report.
  *
- * Consumes the outputs of `build-self-contained-release.mjs`:
- *   <output>/asset.tar       deterministic release archive (uncompressed tar)
- *   <output>/asset.tar.sha256  its sha256 sidecar
+ * Consumes the outputs of `build-self-contained-release.mjs` as assembled by
+ * the CI matrix (one subdirectory per platform):
+ *   <assets-dir>/<platform>-<arch>/asset.tar           deterministic archive
+ *   <assets-dir>/<platform>-<arch>/asset.tar.sha256    its sha256 sidecar
+ *   <assets-dir>/<platform>-<arch>/asset-meta.json     {platform, arch, nodeAbi}
  * and publishes the GZIP'd artifact as the TUF target
  * `releases/<releaseId>/release-asset-<platform>-<arch>.tar.gz` — the exact
  * byte shape the ReleaseManager downloads and `tar xzf`s (apply-payload.ts).
+ *
+ * Matrix编排（runner 选择、fan-in、排序）全部在 release-metadata.yml；
+ * 这里只接收"一个 release 的 N 个 archive 输入"，publisher 保持纯函数、
+ * 单 release 输入 → 确定性输出（PRI-733 边界 3 合规）。
  *
  * Contract: stdout carries exactly one JSON publication manifest (machine
  * readable); all progress and errors go to stderr. Non-zero exit on any
@@ -19,19 +27,19 @@
  *
  * Usage:
  *   node scripts/publish-release-metadata.mjs \
- *     --archive <asset.tar> [--digest <asset.tar.sha256>] \
+ *     --assets-dir <dir> \
  *     --product-version 1.223.0 --source-commit <40-hex> \
  *     --channel stable --channel-version 5 --publication-sequence 10 \
  *     --expires-at 2026-12-01T00:00:00Z \
  *     --min-bootstrap-version 1.0.0 --data-schema-forward-readable-from 1.220.0 \
- *     --platform linux --arch x64 --node-abi 137 \
  *     --output-dir <dir> [--previous-dir <published-repo>] \
  *     [--signing-key-env PD_RELEASE_SIGNING_KEY] [--ephemeral-key] [--dry-run]
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 const BOOLEAN_FLAGS = new Set(['dry-run', 'ephemeral-key']);
 
@@ -95,38 +103,140 @@ function readTufVersions(previousDir) {
   };
 }
 
-async function main() {
-  const { values, flags } = readArguments(process.argv.slice(2));
-  const dryRun = flags.has('dry-run');
+/**
+ * Read and verify every platform archive under --assets-dir.
+ *
+ * Directory contract (written by the CI matrix assemble job):
+ *   <assets-dir>/<platform>-<arch>/asset.tar
+ *   <assets-dir>/<platform>-<arch>/asset.tar.sha256
+ *   <assets-dir>/<platform>-<arch>/asset-meta.json  {platform, arch, nodeAbi}
+ *
+ * Three verification layers per platform (all untrusted input, rc-1/rc-2):
+ *  1. asset-meta.json parses to a well-formed triple;
+ *  2. asset.tar bytes match the .sha256 sidecar (guards build output);
+ *  3. the tar really contains _release/asset.json with the SAME triple
+ *     (guards matrix mis-assembly: a linux tar labeled as win32 must fail
+ *     loud instead of publishing lying metadata).
+ */
+function readPlatformArchives(values, publisher) {
+  const assetsDir = resolve(requireValue(values, 'assets-dir'));
+  let entries;
+  try {
+    entries = readdirSync(assetsDir, { withFileTypes: true });
+  } catch (error) {
+    throw new Error(`Release assets directory does not exist or is not readable: ${assetsDir} (${error instanceof Error ? error.message : String(error)})`);
+  }
+  const platformDirs = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  if (platformDirs.length === 0) {
+    throw new Error(`Release assets directory contains no platform subdirectories: ${assetsDir}. Next action: run the CI matrix build jobs first.`);
+  }
+  return platformDirs.map((dirName) => readOnePlatformArchive(assetsDir, dirName, publisher));
+}
 
-  const archivePath = resolve(requireValue(values, 'archive'));
-  // Read first, classify the error — no existsSync/statSync pre-check (the
-  // file could be swapped between check and read).
+/**
+ * Verify and read ONE platform's staged archive.
+ *
+ * Layers 1+2 (meta shape, archive bytes vs sidecar digest) live here; layer 3
+ * (the tar's own `_release/asset.json` stamp) is delegated to
+ * assertArchiveIdentityMatchesMeta. Returns the GZIP bytes the publisher
+ * signs, because the consumer extracts with `tar xzf`.
+ */
+function readOnePlatformArchive(assetsDir, dirName, publisher) {
+  const platformDir = join(assetsDir, dirName);
+  const metaPath = join(platformDir, 'asset-meta.json');
+  let metaText;
+  try {
+    metaText = readFileSync(metaPath, 'utf8');
+  } catch (error) {
+    throw new Error(`Release asset metadata is missing or unreadable: ${metaPath} (${error instanceof Error ? error.message : String(error)})`);
+  }
+  let meta;
+  try {
+    meta = JSON.parse(metaText);
+  } catch (error) {
+    throw new Error(`Release asset metadata is not valid JSON at ${metaPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) {
+    throw new Error(`Release asset metadata must be a JSON object at ${metaPath}`);
+  }
+  const { platform, arch, nodeAbi } = meta;
+  for (const [field, value] of [['platform', platform], ['arch', arch]]) {
+    if (typeof value !== 'string' || value.length === 0 || !/^[a-z0-9-]+$/.test(value)) {
+      throw new Error(`Release asset metadata field "${field}" must be a non-empty lowercase identifier at ${metaPath}, got: ${JSON.stringify(value)}`);
+    }
+  }
+  if (typeof nodeAbi !== 'string' || !/^\d+$/.test(nodeAbi)) {
+    throw new Error(`Release asset metadata field "nodeAbi" must be a numeric Node ABI string at ${metaPath}, got: ${JSON.stringify(nodeAbi)}`);
+  }
+
+  const archivePath = join(platformDir, 'asset.tar');
   let archiveBytes;
   try {
     archiveBytes = readFileSync(archivePath);
   } catch (error) {
     throw new Error(`Release archive does not exist or is not readable: ${archivePath} (${error instanceof Error ? error.message : String(error)})`);
   }
-  const digestPath = resolve(values.get('digest') ?? `${archivePath}.sha256`);
+  const digestPath = join(platformDir, 'asset.tar.sha256');
   let digestText;
   try {
     digestText = readFileSync(digestPath, 'utf8');
   } catch (error) {
     throw new Error(`Release archive digest sidecar does not exist or is not readable: ${digestPath} (${error instanceof Error ? error.message : String(error)})`);
   }
-  const publisher = await import('../dist/update/release-metadata-publisher.js');
   const declaredDigest = publisher.parseSha256DigestFile(digestText);
   const actualDigest = createHash('sha256').update(archiveBytes).digest('hex');
   if (actualDigest !== declaredDigest) {
     throw new Error(
-      `The release archive does not match its digest sidecar (declared ${declaredDigest}, actual ${actualDigest}). Refusing to publish unverified bytes.`,
+      `The release archive does not match its digest sidecar in ${dirName} (declared ${declaredDigest}, actual ${actualDigest}). Refusing to publish unverified bytes.`,
     );
   }
+
+  assertArchiveIdentityMatchesMeta(archivePath, dirName, { platform, arch, nodeAbi });
+
   // The consumer extracts with `tar xzf` (apply-payload.ts), so the published
   // target bytes are the deterministic gzip of the verified archive; the
   // sidecar digest guards the build output BEFORE that wrapping.
-  const publishedBytes = publisher.gzipReleaseArchive(archiveBytes);
+  return { platform, arch, nodeAbi, bytes: publisher.gzipReleaseArchive(archiveBytes) };
+}
+
+/** Extract `_release/asset.json` from the tar without unpacking it, via argv array. */
+function assertArchiveIdentityMatchesMeta(archivePath, dirName, meta) {
+  let stampedText;
+  try {
+    stampedText = execFileSync('tar', ['-xOf', archivePath, '_release/asset.json'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+    });
+  } catch (error) {
+    throw new Error(
+      `The release archive in ${dirName} does not contain a stamped _release/asset.json (${error instanceof Error ? error.message : String(error)}). Next action: rebuild the asset with build-self-contained-release.mjs.`,
+    );
+  }
+  let stamped;
+  try {
+    stamped = JSON.parse(stampedText);
+  } catch (error) {
+    throw new Error(`The stamped _release/asset.json in ${dirName} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  for (const field of ['platform', 'arch', 'nodeAbi']) {
+    if (stamped?.[field] !== meta[field]) {
+      throw new Error(
+        `The release archive in ${dirName} is stamped for ${String(stamped?.platform)}/${String(stamped?.arch)}/abi${String(stamped?.nodeAbi)} but its directory claims ${meta.platform}/${meta.arch}/abi${meta.nodeAbi}. Refusing to publish mis-assembled bytes.`,
+      );
+    }
+  }
+}
+
+async function main() {
+  const { values, flags } = readArguments(process.argv.slice(2));
+  const dryRun = flags.has('dry-run');
+
+  const publisher = await import('../dist/update/release-metadata-publisher.js');
+  const archives = readPlatformArchives(values, publisher);
 
   const signingKeyEnv = values.get('signing-key-env') ?? 'PD_RELEASE_SIGNING_KEY';
   let signingKeyPem = process.env[signingKeyEnv] ?? '';
@@ -173,12 +283,7 @@ async function main() {
     expiresAt: requireValue(values, 'expires-at'),
     minBootstrapVersion: requireValue(values, 'min-bootstrap-version'),
     dataSchemaForwardReadableFrom: requireValue(values, 'data-schema-forward-readable-from'),
-    archive: {
-      platform: values.get('platform') ?? process.platform,
-      arch: values.get('arch') ?? process.arch,
-      nodeAbi: values.get('node-abi') ?? process.versions.modules,
-      bytes: publishedBytes,
-    },
+    archives,
     signingKeyPem,
     previous: previous ?? null,
   });

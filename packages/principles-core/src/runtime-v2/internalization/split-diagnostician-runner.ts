@@ -35,6 +35,7 @@ import type { PeerRunnerResult, PeerRunnerResultStatus } from '../runner/peer-ru
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
 import type { DiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
 import type { RetryPolicy } from '../store/lifecycle/retry-policy.js';
+import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { createPITaskDiagnosticJson } from './pitask-metadata.js';
 
@@ -72,6 +73,12 @@ export class SplitDiagnosticianRunner {
   private readonly stateManager: RuntimeStateManager;
   private readonly perStageTimeoutMs: number;
   private readonly retryPolicy: RetryPolicy;
+  /**
+   * PRI-818 (R-04): same authority the live Stage C path uses for semantic
+   * validation (diag-router-runner.ts). A cached succeeded run must pass the
+   * identical gate before it is allowed to skip the router stage.
+   */
+  private readonly cacheOutputValidator: DefaultDiagnosticianValidator;
 
   constructor(deps: SplitDiagnosticianRunnerDeps) {
     this.rootCauseRunner = deps.rootCauseRunner;
@@ -80,6 +87,7 @@ export class SplitDiagnosticianRunner {
     this.stateManager = deps.stateManager;
     this.perStageTimeoutMs = deps.perStageTimeoutMs ?? 600_000;
     this.retryPolicy = deps.retryPolicy ?? deps.stateManager.getRetryPolicy();
+    this.cacheOutputValidator = new DefaultDiagnosticianValidator();
   }
 
   /**
@@ -194,7 +202,27 @@ export class SplitDiagnosticianRunner {
           cacheUsable = false;
         }
       } else {
+        // No persisted payload at all — an undefined output would flow to the
+        // bridge as a succeeded diagnosis. Treat as unusable (PRI-818).
         parsedOutput = undefined;
+        cacheUsable = false;
+      }
+      // PRI-818 (R-04, rc-2): parseable ≠ valid. A payload that survives
+      // JSON.parse but fails Stage C's own semantic validation would
+      // previously bypass the router validator entirely (raw `as` cast) and
+      // reach admission/persistence as a diagnosis. Re-run the identical
+      // DefaultDiagnosticianValidator the live Stage C path uses (single
+      // authority); the `as` only satisfies the validator's declared parameter
+      // type — its first step re-guards the value at runtime, so no untrusted
+      // data escapes validation (same pattern as diag-router-runner post-gate).
+      if (cacheUsable) {
+        const cacheValidation = await this.cacheOutputValidator.validate(
+          parsedOutput as DiagnosticianOutputV1,
+          stageCTaskId,
+        );
+        if (!cacheValidation.valid) {
+          cacheUsable = false;
+        }
       }
       if (cacheUsable) {
         resultC = {
