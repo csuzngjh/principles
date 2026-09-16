@@ -35,8 +35,9 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import { gzipSync } from 'node:zlib';
 import {
   Key,
-  MetaFile,
   Metadata,
+  MetadataKind,
+  MetaFile,
   Root,
   Signature,
   Snapshot,
@@ -621,4 +622,82 @@ export function generateEphemeralSigningKeyPem(): string {
     .privateKey
     .export({ type: 'pkcs8', format: 'pem' })
     .toString();
+}
+
+/**
+ * PRI-732 publish-side guard: a REAL publication must be verifiable by the
+ * pinned trust root installs actually carry. The current publisher signs
+ * root, timestamp, snapshot AND targets with the single signing key and emits
+ * one signature per role, so the key must be authorized for ALL FOUR roles
+ * under the current threshold-1 publishing contract — a key that can merely
+ * sign root would produce timestamp/snapshot/targets metadata no existing
+ * install can verify.
+ * (Dry-run/ephemeral pipelines simply do not call this.)
+ */
+export function verifySigningKeyMatchesPinnedRoot(
+  signingKeyPem: string,
+  pinnedRootJson: string,
+): { keyId: string; pinnedRootKeyIds: readonly string[] } {
+  const signer = requireSigner(signingKeyPem);
+  const requiredRoles = ['root', 'timestamp', 'snapshot', 'targets'] as const;
+  const missingRoleError = (roleName: string): ReleasePublicationError =>
+    new ReleasePublicationError(
+      'signing_key_invalid',
+      'pinnedTrustRoot',
+      `The pinned trust root carries no ${roleName} role — the publisher cannot produce ${roleName} metadata any pinned install can verify.`,
+      'Repair packages/create-principles-disciple/trust/root.json (re-run the trust root ceremony only as an explicit governance decision).',
+    );
+  // @tufjs/metadata refuses to deserialize a root that lacks any required
+  // top-level role, which would mask the precise diagnosis behind a generic
+  // parse refusal. Pre-scan the raw document so a missing role is reported
+  // as itself; everything else still goes through the full parse below.
+  const rawSignedRoles = (() => {
+    try {
+      const {signed} = (JSON.parse(pinnedRootJson) as { signed?: unknown });
+      if (signed === null || typeof signed !== 'object' || !Object.hasOwn(signed, 'roles')) return undefined;
+      const {roles} = (signed as { roles?: unknown });
+      return roles !== null && typeof roles === 'object' ? (roles as Record<string, unknown>) : undefined;
+    } catch {
+      return undefined; // malformed JSON — the canonical parse error surfaces below
+    }
+  })();
+  if (rawSignedRoles !== undefined) {
+    for (const roleName of requiredRoles) {
+      if (!Object.hasOwn(rawSignedRoles, roleName)) throw missingRoleError(roleName);
+    }
+  }
+  let pinnedRoot: Root;
+  try {
+    pinnedRoot = (Metadata.fromJSON(MetadataKind.Root, JSON.parse(pinnedRootJson))).signed;
+  } catch {
+    throw new ReleasePublicationError(
+      'signing_key_invalid',
+      'pinnedTrustRoot',
+      'The pinned trust root is not a parseable TUF Root document.',
+      'Repair packages/create-principles-disciple/trust/root.json (re-run the trust root ceremony only as an explicit governance decision).',
+    );
+  }
+  for (const roleName of requiredRoles) {
+    const role = pinnedRoot.roles[roleName];
+    if (role === undefined) throw missingRoleError(roleName);
+    if (role.threshold !== 1) {
+      throw new ReleasePublicationError(
+        'signing_key_invalid',
+        'pinnedTrustRoot',
+        `The pinned trust root ${roleName} role has threshold ${role.threshold}; the current publisher emits a single signature per role and can only satisfy the threshold-1 publishing contract.`,
+        'Repair packages/create-principles-disciple/trust/root.json (re-run the trust root ceremony only as an explicit governance decision).',
+      );
+    }
+    if (!role.keyIDs.includes(signer.keyId)) {
+      throw new ReleasePublicationError(
+        'signing_key_invalid',
+        'signingKeyPem',
+        `The signing key (${signer.keyId.slice(0, 16)}…) is not authorized for the pinned trust root ${roleName} role (authorized: ${role.keyIDs.map((keyId) => keyId.slice(0, 16)).join(', ')}…). The single publisher key must be authorized for root, timestamp, snapshot and targets alike.`,
+        'Set PD_RELEASE_SIGNING_KEY to the private key matching the pinned trust root (packages/create-principles-disciple/trust/root.json).',
+      );
+    }
+  }
+  const rootRole = pinnedRoot.roles.root;
+  if (rootRole === undefined) throw missingRoleError('root'); // rc-3: fail loud (defensive; the loop above already enforces this for every required role)
+  return { keyId: signer.keyId, pinnedRootKeyIds: rootRole.keyIDs };
 }

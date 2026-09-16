@@ -52,6 +52,7 @@ import {
   resolvePdHomePaths,
 } from './update/install-layout.js';
 import { RELEASE_METADATA_URL_ENV, normalizeReleaseMetadataUrl } from './update/release-metadata-source.js';
+import { provisionBootstrapTrustRoot, TrustRootValidationError } from './update/trust-root-provisioning.js';
 import {
   appendJournalTransition,
   readActiveRecord,
@@ -2264,6 +2265,13 @@ function probeAutolaunchHealth(port: number, timeoutMs = 1500): Promise<boolean>
  * EP-06: reuses pd-cli's handleConsoleOpen via the CLI entry — no new launcher.
  */
 async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: string; fallbackAction?: string }> {
+  // Test/smoke seam (mirrors PD_SKIP_GLOBAL_SHIM): isolated installs (release
+  // smoke, upgrade gate) must not spawn a detached console that holds the
+  // installed files open or pops a browser.
+  if (process.env.PD_SKIP_CONSOLE_AUTOLAUNCH === '1' || process.env.PD_SKIP_CONSOLE_AUTOLAUNCH === 'true') {
+    logger.info('Skipping console auto-launch (PD_SKIP_CONSOLE_AUTOLAUNCH set).');
+    return {};
+  }
   const pdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
   if (!existsSync(pdCliEntry)) {
     return { fallbackAction: `pd console open --workspace "${workspaceDir}" --no-auth (auto-launch skipped: pd CLI entry not found)` };
@@ -3152,6 +3160,27 @@ export async function install(
     // PRI-709 P0-1: persist the metadata source after the manifest write, so
     // the durable tier cannot be clobbered by the same install.
     persistReleaseMetadataSource();
+    // PRI-732: provision the pinned TUF trust anchor in the SAME transaction
+    // position as the metadata source — the official installer transaction is
+    // the only production writer of the trust root. An invalid pinned root
+    // fails the install loudly (the transaction below rolls back to the
+    // previous runtime); a differing existing anchor is kept and reported
+    // (rotation is separate governance work, never a silent overwrite).
+    try {
+      const trustOutcome = provisionBootstrapTrustRoot({ pdHome: getPdDir(), payloadRoot: pluginDir });
+      if (trustOutcome.outcome === 'provisioned') {
+        logger.info(`Pinned release trust root installed (key ${trustOutcome.keyIds.join(', ')}), expires ${trustOutcome.expires}.`);
+      } else if (trustOutcome.outcome === 'retained-existing') {
+        logger.warn(`${trustOutcome.note} Anchor kept at ${trustOutcome.trustRootPath}; payload carried ${trustOutcome.sourcePath}.`);
+      }
+      // already-pinned (idempotent) and skipped-no-source (pre-PRI-732
+      // payloads stay unconfigured) are expected quiet states.
+    } catch (error) {
+      if (error instanceof TrustRootValidationError) {
+        throw new Error(`Release trust root provisioning refused the install (${error.reason}): ${error.message} ${error.nextAction}`, { cause: error });
+      }
+      throw error;
+    }
     // ADR-0024 D-2: host installers completed and the install manifest is
     // written — the new installation is fully activated (backups not yet
     // discarded, so a crash here still recovers via the backup).

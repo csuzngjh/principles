@@ -352,9 +352,26 @@ for (const item of CREATE_PRINCIPLES_DISCIPLE_REQUIRED) {
   const src = join(RELEASE_MANAGER_SRC, item);
   if (!existsSync(src)) {
     console.error(`❌ Required release-manager item not found: ${src}`);
-    console.error(`   Run: npm run build --workspace=create-principles-disciple`);
+    console.error('   Run: npm run build --workspace=create-principles-disciple');
     process.exit(1);
   }
+}
+
+// PRI-732: the pinned TUF trust root ships at the payload root. The npm
+// package ships it from the committed location itself (see package.json
+// "files"); the self-contained asset copies it below. Required, not optional:
+// a payload without the anchor cannot bootstrap ReleaseManager trust.
+const TRUST_ROOT_SRC = join(THIS_PACKAGE_ROOT, 'trust', 'root.json');
+const TRUST_ROOT_DEST = join(OUTPUT_ROOT, 'trust', 'root.json');
+if (!existsSync(TRUST_ROOT_SRC)) {
+  console.error(`❌ Pinned trust root not found: ${TRUST_ROOT_SRC}`);
+  console.error('   Run: node scripts/generate-trust-root.mjs --private-key-output <path-outside-repo>');
+  process.exit(1);
+}
+if (BUILD_SELF_CONTAINED_ASSET) {
+  mkdirSync(dirname(TRUST_ROOT_DEST), { recursive: true });
+  copyFileSync(TRUST_ROOT_SRC, TRUST_ROOT_DEST);
+  console.log(`   Trust Root: ${TRUST_ROOT_DEST}`);
 }
 
 if (existsSync(RELEASE_MANAGER_DEST)) {

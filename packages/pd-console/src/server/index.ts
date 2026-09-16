@@ -218,7 +218,12 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
 const REQUEST_TIMEOUT_MS = 10000;
 const UPDATE_APPLY_TIMEOUT_MS = 120000;
 // Full update downloads a tarball + copies files — allow 3 min for slow networks.
-const UPDATE_APPLY_FULL_TIMEOUT_MS = 180000;
+// PD_UPDATE_APPLY_FULL_TIMEOUT_MS (ms) overrides it for slow-disk machines:
+// a real RM apply can legitimately exceed 3 minutes there, and a 504 while
+// the update SUCCEEDS server-side is the worst possible signal (observed in
+// the PRI-671 upgrade gate on Windows/AV-slow disks). Same knob pattern as
+// the installer's PD_INSTALL_TIMEOUT_MS.
+const UPDATE_APPLY_FULL_TIMEOUT_MS = parseInt(process.env.PD_UPDATE_APPLY_FULL_TIMEOUT_MS || '180000', 10);
 
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 

@@ -21,6 +21,7 @@ import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, realpathSync, r
 import { createHash } from 'crypto';
 import { join, dirname } from 'path';
 import { scanMissingTransitiveDeps, MAX_TRAVERSAL_PACKAGES } from './lib/transitive-deps.mjs';
+import { ensurePdCliPluginResolution } from './lib/pd-cli-resolution.mjs';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 
@@ -791,6 +792,13 @@ function syncPdCli() {
     mkdirSync(INSTALLED_PD_CLI_DIR, { recursive: true });
     cpSync(distDir, join(INSTALLED_PD_CLI_DIR, 'dist'), { recursive: true });
     copyFileSync(join(PD_CLI_SOURCE_DIR, 'package.json'), join(INSTALLED_PD_CLI_DIR, 'package.json'));
+
+    // PRI-808: pd-cli statically imports `principles-disciple/<subpath>` (the
+    // plugin package's own name). The release installer resolves this with a
+    // node_modules link inside the deployed pd-cli; mirror that here so the
+    // local dev layout resolves the SAME way instead of dying at the pd shim
+    // smoke gate with ERR_MODULE_NOT_FOUND.
+    ensurePdCliPluginResolution(INSTALLED_PD_CLI_DIR, INSTALL_DIR);
 
     mkdirSync(INSTALLED_BIN_DIR, { recursive: true });
     const installedEntry = join(INSTALLED_PD_CLI_DIR, 'dist', 'index.js');

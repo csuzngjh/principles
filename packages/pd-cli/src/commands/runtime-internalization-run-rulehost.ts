@@ -524,12 +524,14 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         return;
       }
       if (opts.confirm) {
-        // Lazy import: avoids loading `principles-disciple` at module init time.
-        // `pd --version` (and the create-principles-disciple smoke test) loads
-        // this file statically via index.ts. If we used a static import, the
-        // module would fail with MODULE_NOT_FOUND in bundled environments where
-        // `principles-disciple` is not resolvable from pd-cli's node_modules.
-        // The import only executes when `--confirm` is actually used.
+        // Lazy import: avoids loading `principles-disciple` at module init
+        // time. `pd --version` (and the create-principles-disciple smoke
+        // test) loads this file statically via index.ts; a static import
+        // would pull the plugin package into every pd startup even when
+        // `--confirm` is never used. Both install layouts resolve the
+        // package via a `pd-cli/node_modules/principles-disciple` link
+        // (release: installer.ts syncPdCli; local dev: sync-plugin.mjs,
+        // PRI-808).
         const { BehaviorExamplePackAssembler, RuleHostEvidenceRegistry } = await import('principles-disciple/rulehost-evidence');
         try {
           const assembler = new BehaviorExamplePackAssembler({ workspaceDir, stateDir: path.join(workspaceDir, '.state') });

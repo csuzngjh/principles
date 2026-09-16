@@ -69,3 +69,15 @@ jobs:
         run: npm test --workspace=create-principles-disciple -- --run tests/release-asset-smoke.test.ts
         env:
           PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
+      # PRI-671: the N-1 → candidate N REAL upgrade gate. Installs an N-1
+      # derived from the candidate asset, drives the installed Console's
+      # /api/update/apply-full against a locally served signed publication
+      # (pre-publish validation — nothing touches the npm registry), and
+      # verifies the upgraded runtime plus the corrupted-artifact failure
+      # path. Cost-bounded: two of the 15 matrix entries (the incident
+      # platform windows-2025 + one linux).
+      - name: N-1 to N real upgrade gate (Console /apply-full)
+        if: (matrix.runner == 'windows-2025' || matrix.runner == 'ubuntu-24.04') && matrix.node == '22.22.2'
+        run: npm test --workspace=create-principles-disciple -- --run tests/release-upgrade-gate.test.ts
+        env:
+          PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two

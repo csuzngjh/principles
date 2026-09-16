@@ -40,6 +40,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const BOOLEAN_FLAGS = new Set(['dry-run', 'ephemeral-key']);
 
@@ -248,6 +249,23 @@ async function main() {
     throw new Error(
       `No signing key: set the ${signingKeyEnv} environment variable (ed25519 private key PEM), or pass --ephemeral-key for an untrusted dry-run.`,
     );
+  }
+
+  // PRI-732: a REAL publication must be verifiable by the pinned trust root
+  // installs carry — refuse to publish bytes no install can verify. Dry-run /
+  // ephemeral output is explicitly untrusted and skips this gate.
+  if (!dryRun) {
+    const pinnedRootPath = resolve(dirname(fileURLToPath(new URL(import.meta.url))), '..', 'trust', 'root.json');
+    let pinnedRootJson;
+    try {
+      pinnedRootJson = readFileSync(pinnedRootPath, 'utf8');
+    } catch (error) {
+      throw new Error(
+        `Pinned trust root is missing or unreadable (${pinnedRootPath}) — publish mode requires it (PRI-732): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const match = publisher.verifySigningKeyMatchesPinnedRoot(signingKeyPem, pinnedRootJson);
+    process.stderr.write(`Signing key matches the pinned trust root (${match.keyId.slice(0, 16)}…).\n`);
   }
 
   const previousDir = values.has('previous-dir') ? resolve(values.get('previous-dir')) : undefined;

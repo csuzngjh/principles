@@ -16,6 +16,7 @@
     "codex-adapter",
     "install-layout",
     "release-manager",
+    "trust/root.json",
     "README.md",
     "LICENSE"
   ],
@@ -29,7 +30,7 @@
     "prepack": "npm run build && npm run bundle",
     "prepublishOnly": "npm run build && npm run bundle",
     "test": "vitest run",
-    "test:fast": "vitest run --exclude tests/smoke-packaged-install.test.ts --exclude tests/release-asset-smoke.test.ts",
+    "test:fast": "vitest run --exclude tests/smoke-packaged-install.test.ts --exclude tests/release-asset-smoke.test.ts --exclude tests/release-upgrade-gate.test.ts",
     "test:smoke:packaged": "vitest run tests/smoke-packaged-install.test.ts",
     "test:smoke:release-asset": "vitest run tests/release-asset-smoke.test.ts"
   },
