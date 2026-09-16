@@ -9,8 +9,8 @@ describe('CorrectionObserver', () => {
     keywordStoreSummary: {
       totalKeywords: 2,
       terms: [
-        { term: 'wrong', weight: 0.5, hitCount: 10, truePositiveCount: 8, falsePositiveCount: 2 },
-        { term: 'error', weight: 0.6, hitCount: 5, truePositiveCount: 4, falsePositiveCount: 1 },
+        { term: 'wrong', weight: 0.5, truePositiveCount: 8, falsePositiveCount: 2 },
+        { term: 'error', weight: 0.6, truePositiveCount: 4, falsePositiveCount: 1 },
       ],
     },
     recentMessages: ['help me', 'something is wrong here'],

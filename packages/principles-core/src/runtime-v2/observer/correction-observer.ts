@@ -11,7 +11,6 @@ export const CorrectionObserverPayloadSchema = Type.Object({
     terms: Type.Array(Type.Object({
       term: Type.String(),
       weight: Type.Number(),
-      hitCount: Type.Number(),
       truePositiveCount: Type.Number(),
       falsePositiveCount: Type.Number(),
     })),
@@ -79,8 +78,12 @@ export class CorrectionObserver {
     const { keywordStoreSummary, recentMessages, trajectoryHistory } = payload;
     const MAX_TRAJECTORY_MESSAGE_LENGTH = 80;
 
+    // PRI-812: hitCount removed from the payload — its only writer
+    // (CorrectionCueLearner.recordHits) had zero production callers, so this
+    // field was structurally always 0 and made the REMOVE rule fire on false
+    // premises. TP/FP are the real, Stage2-confirmed counters.
     const termsList = keywordStoreSummary.terms
-      .map(t => `  - term="${t.term}", weight=${t.weight}, hits=${t.hitCount}, TP=${t.truePositiveCount}, FP=${t.falsePositiveCount}`)
+      .map(t => `  - term="${t.term}", weight=${t.weight}, TP=${t.truePositiveCount}, FP=${t.falsePositiveCount}`)
       .join('\n');
 
     const messages = recentMessages.length > 0
@@ -115,7 +118,7 @@ export class CorrectionObserver {
       '  - Terms must be literal substrings as they appear in messages (matching is exact substring, lowercased).',
       '- UPDATE: If a term\'s weight should change based on TP/FP ratio',
       '  - truePositiveCount = the term\'s match was LLM-confirmed as a real correction; falsePositiveCount = matched but not a correction.',
-      '- REMOVE: If a term has 0 hits after many uses AND high false positive rate (>0.3)',
+      '- REMOVE: If a term\'s false positive rate (FP / (TP + FP)) exceeds 0.3 with few or no true positives',
       '- FALSE POSITIVE: If a term appears in trajectory but the user message doesn\'t actually express frustration (e.g., user said "wrong" but in a factual context, not emotional)',
       '- fpAnalysisStatus: set to "completed" if you performed trajectory analysis (even if no FPs found), or "skipped" if trajectory was empty/unavailable',
       '- Keep reasoning concise (max 100 chars)',

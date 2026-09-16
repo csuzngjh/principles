@@ -154,8 +154,6 @@ vi.mock('../../src/core/empathy-types.js', () => ({
 vi.mock('../../src/core/correction-cue-learner.js', () => ({
   CorrectionCueLearner: {
     get: vi.fn().mockReturnValue({
-      match: vi.fn().mockReturnValue({ matched: null, matchedTerms: [], confidence: 0 }),
-      recordHits: vi.fn(),
       recordTruePositive: vi.fn(),
       flush: vi.fn(),
     }),
