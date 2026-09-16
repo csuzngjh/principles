@@ -181,8 +181,8 @@ OUTPUT FORMAT (pure JSON, no markdown):
   "risks": ["<risk 1>", "<risk 2>"],
   "implementationCode": "function evaluate(input, helpers) { if (input.action.canonicalKind === 'write' && typeof input.action.normalizedPath === 'string' && input.action.normalizedPath.startsWith('/system/')) { return { decision: 'block', matched: true, reason: 'write to system path' }; } return { decision: 'allow', matched: false, reason: 'no risk pattern' }; }",
   "goldenTraceCases": [
-    {"caseId":"negative-1","kind":"negative","toolName":"write","params":{"path":"/system/file"},"expectedDecision":"block","ruleContext":"<the case's ruleContext object, copied exactly from the behaviorExamplePack>"},
-    {"caseId":"positive-1","kind":"positive","toolName":"write","params":{"path":"/workspace/file"},"expectedDecision":"allow","ruleContext":"<the case's ruleContext object, copied exactly from the behaviorExamplePack>"}
+    {"caseId":"negative-1","kind":"negative","toolName":"write","params":{"path":"/system/file"},"expectedDecision":"block","ruleContext":{"version":2,"history":{"status":"available","truncated":false,"calls":[]},"facts":{"priorReadOfTarget":"unknown","readCount":0,"writeCount":0,"uniqueWritePathCount":0,"sameActionBlockCount":null}}},
+    {"caseId":"positive-1","kind":"positive","toolName":"write","params":{"path":"/workspace/file"},"expectedDecision":"allow","ruleContext":{"version":2,"history":{"status":"available","truncated":false,"calls":[]},"facts":{"priorReadOfTarget":"unknown","readCount":0,"writeCount":0,"uniqueWritePathCount":0,"sameActionBlockCount":null}}}
   ],
   "affectedTools": ["write"],
   "generatedAt": "<ISO-8601 timestamp>"
@@ -304,7 +304,16 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * the CONTEXT MODE block documents the runtime context capabilities
  * (history/facts, default-on assembly, host unavailable declarations).
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v6';
+/**
+ * PRI-817: bumped v6 → v7. The OUTPUT FORMAT example previously omitted the
+ * three v2-mandatory obligations (requiresContextVersion, evidenceRefs,
+ * case-level ruleContext) and misreferenced the CONTEXT MODE block as
+ * "above" — an LLM imitating the example verbatim was guaranteed rejected.
+ * The example now carries all three obligations with a validator-legal
+ * ruleContext object literal, the position reference is corrected, and a
+ * NOTE line marks them as REQUIRED.
+ */
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v7';
 
 // ── EP002-R4: bounded pack projection at the prompt boundary ─────────────────
 //
