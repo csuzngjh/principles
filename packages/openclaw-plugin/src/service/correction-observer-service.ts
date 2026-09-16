@@ -50,7 +50,11 @@ const startedWorkspaces = new Set<string>();
 const CORRECTION_OBSERVER_INTERVAL_MS = 15 * 60 * 1000;
 const CORRECTION_OBSERVER_INITIAL_DELAY_MS = 10_000;
 const CORRECTION_OBSERVER_MAX_RECENT_SESSIONS = 20;
-const CORRECTION_OBSERVER_MAX_PAYLOAD_SESSIONS = 5;
+// PRI-823: aligned with buildTrajectoryHistory's 10-session window — the FP
+// counter-evidence surface (recentMessages excerpts) must cover the same
+// sessions the correction-hit history (trajectoryHistory) reports on,
+// otherwise hits outside the text window are unjudgeable for the observer.
+const CORRECTION_OBSERVER_MAX_PAYLOAD_SESSIONS = 10;
 
 /** PRI-788 G2: 每周期批量确认的待确认信号条数上限。 */
 const SIGNAL_CONFIRM_BATCH_LIMIT = 20;

@@ -32,8 +32,32 @@ function getUnionSchemas(schema: Record<string, unknown>, key: 'anyOf' | 'oneOf'
   return arr.filter((s): s is Record<string, unknown> => isRecord(s));
 }
 
-function generateValueForSchema(schema: Record<string, unknown>, depth = 0): unknown {
+/**
+ * PRI-817 (audit R-02 family / family-1): the generic synthesizer produces
+ * placeholder values ("example") that are technically schema-valid but
+ * violate SEMANTIC validator rules (root-cause category prefix, core-axiom
+ * registry ids). An LLM that imitates the example is then rejected by the
+ * very validator the same prompt advertises. These field-level overrides
+ * give the synthesizer one authoritative table of semantic example values;
+ * new semantic rules must be added here (and to the validator) together.
+ */
+const SEMANTIC_FIELD_EXAMPLES: Record<string, unknown> = {
+  // diag-rootcause validator requires `<Category>: <text>` where the prefix
+  // matches the rootCauseCategory enum value; the generic synthesizer picks
+  // the first enum member ('People'), so the example prefix must agree.
+  rootCause: 'People: Example root cause',
+  // diag-distiller validator requires ids from the T-01..T-10 core registry.
+  groundedOnCorePrincipleIds: ['T-01'],
+};
+
+function generateValueForSchema(schema: Record<string, unknown>, depth = 0, fieldName?: string): unknown {
   if (depth > MAX_SCHEMA_PROMPT_DEPTH) return null;
+
+  // Semantic overrides win over generic placeholders (checked by field name
+  // before the type dispatch so string/array-of-string fields both resolve).
+  if (fieldName !== undefined && Object.hasOwn(SEMANTIC_FIELD_EXAMPLES, fieldName)) {
+    return SEMANTIC_FIELD_EXAMPLES[fieldName];
+  }
 
   if (schema.type === 'boolean') return true;
   if (schema.type === 'number') {
@@ -74,7 +98,9 @@ function generateValueForSchema(schema: Record<string, unknown>, depth = 0): unk
   if (schema.type === 'array') {
     const items = getArrayItems(schema);
     if (!items) return [];
-    return [generateValueForSchema(items, depth + 1)];
+    // PRI-817: carry the field name so semantic overrides apply to arrays of
+    // strings too (e.g. groundedOnCorePrincipleIds → registry ids).
+    return [generateValueForSchema(items, depth + 1, fieldName)];
   }
 
   if (schema.type === 'object') {
@@ -86,7 +112,7 @@ function generateValueForSchema(schema: Record<string, unknown>, depth = 0): unk
     for (const [key, propSchema] of Object.entries(props)) {
       if (!isRecord(propSchema)) continue;
       if (!required.has(key)) continue;
-      result[key] = generateValueForSchema(propSchema, depth + 1);
+      result[key] = generateValueForSchema(propSchema, depth + 1, key);
     }
     return result;
   }

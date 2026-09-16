@@ -18,6 +18,10 @@
       "types": "./dist/trajectory-store.d.ts",
       "default": "./dist/trajectory-store.js"
     },
+    "./trajectory-types": {
+      "types": "./dist/trajectory-types.d.ts",
+      "default": "./dist/trajectory-types.js"
+    },
     "./prompt-builder": {
       "types": "./dist/prompt-builder/index.d.ts",
       "default": "./dist/prompt-builder/index.js"

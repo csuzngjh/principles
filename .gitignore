@@ -39,6 +39,7 @@ packages/*/dist/
 packages/*/coverage/
 packages/*/screenshots/
 packages/*/logs/
+logs/
 packages/*/*.tgz
 node_modules/
 dist/

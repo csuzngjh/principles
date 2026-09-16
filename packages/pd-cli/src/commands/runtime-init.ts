@@ -25,6 +25,7 @@ import * as yaml from 'js-yaml';
 import { SqliteConnection, SchemaConformanceReadModel } from '@principles/core/runtime-v2';
 import { getDefaultPdConfig, validatePdConfig } from '@principles/core/runtime-v2';
 import { initTrajectorySchema } from 'principles-disciple';
+import { TRAJECTORY_TABLES } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { emitResult, emitFlagConflict, emitError } from '../services/cli-output.js';
 
@@ -251,12 +252,9 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
     databases.push({
       name: DB_NAMES.trajectory,
       path: path.join(resolvedWorkspace, '.state', 'trajectory.db'),
-      tables: ['schema_version', 'ingest_checkpoint', 'sessions', 'assistant_turns',
-        'user_turns', 'tool_calls', 'pain_events', 'gate_blocks', 'trust_changes',
-        'principle_events', 'task_outcomes', 'correction_samples', 'sample_reviews',
-        // PRI-790 G2: Stage2 待确认信号的持久队列。
-        'signal_confirmations',
-        'exports_audit'],
+      // PRI-774: derived from TRAJECTORY_TABLES — same canonical source as
+      // the real init, so the dry-run report can never drift.
+      tables: [...TRAJECTORY_TABLES],
       status: 'skipped',
       warnings: [],
     });

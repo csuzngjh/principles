@@ -240,6 +240,55 @@ describe('CorrectionObserverService — Independent Service (PRI-293)', () => {
     }
   });
 
+  it('PRI-823: recentMessages window covers 10 sessions, aligned with trajectoryHistory', async () => {
+    // FP 反证证据面（recentMessages 摘录）必须与命中历史（trajectoryHistory，
+    // buildTrajectoryHistory 内 slice(0,10)）同宽——超出文本窗口的命中事件
+    // 对观察员不可判定。锁定 MAX_PAYLOAD_SESSIONS=10 的对齐关系。
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-obs-window-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    const sessions = Array.from({ length: 12 }, (_, i) => ({ sessionId: `session-${i + 1}` }));
+    mockDb.listRecentSessions = vi.fn(() => sessions);
+    mockDb.listUserTurnsForSession = vi.fn((sessionId: string) => [
+      { rawExcerpt: `excerpt-of-${sessionId}`, correctionDetected: true, correctionCue: 'wrong' },
+    ]);
+
+    try {
+      CorrectionObserverService.start({
+        workspaceDir,
+        stateDir,
+        logger,
+        config: { get: () => undefined },
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+
+      expect(mockDispatch).toHaveBeenCalledWith('correction-observer', expect.objectContaining({
+        workspaceDir,
+      }));
+      const payload = mockDispatch.mock.calls.find((c) => c[0] === 'correction-observer')?.[1] as {
+        recentMessages: string[];
+      };
+      // 覆盖最近 10 个会话（session-1..10），不含 11/12
+      for (let i = 1; i <= 10; i++) {
+        expect(payload.recentMessages).toContain(`excerpt-of-session-${i}`);
+      }
+      expect(payload.recentMessages).not.toContain('excerpt-of-session-11');
+      expect(payload.recentMessages).not.toContain('excerpt-of-session-12');
+    } finally {
+      CorrectionObserverService.stop?.({} as any);
+      mockDb.listRecentSessions = vi.fn(() => [{ sessionId: 'session-1' }]);
+      mockDb.listUserTurnsForSession = vi.fn(() => [{ rawExcerpt: 'User said wrong input', correctionDetected: true, correctionCue: 'wrong' }]);
+      safeRmDir(workspaceDir);
+    }
+  });
+
   it('stops cleanly and cancels pending timer', () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-obs-stop-'));
     const stateDir = path.join(workspaceDir, '.state');

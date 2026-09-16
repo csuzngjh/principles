@@ -191,6 +191,21 @@ describe('KeywordOptimizationService', () => {
       expect(history[1].term).toBe('error');
     });
 
+    it('PRI-823: carries the bounded raw excerpt on each hit event (FP counter-evidence)', async () => {
+      mockDb.listUserTurnsForSession = vi.fn(() => [
+        { id: 1, turnIndex: 0, rawExcerpt: 'User said wrong input', correctionDetected: true, correctionCue: 'wrong', createdAt: '2024-01-01T00:01:00Z' },
+        { id: 2, turnIndex: 1, rawExcerpt: '', correctionDetected: true, correctionCue: 'error', createdAt: '2024-01-01T00:02:00Z' },
+      ] as any);
+
+      const history = await service.buildTrajectoryHistory(['session-1']);
+
+      expect(history).toHaveLength(2);
+      // 每个命中事件自带摘录文本——观察员可逐事件判定误报，而非只看 term
+      expect(history[0].userMessage).toBe('User said wrong input');
+      // 摘录缺失时回退为空串（不产生 undefined，schema 要求 string）
+      expect(history[1].userMessage).toBe('');
+    });
+
     it('caps at 50 events', async () => {
       const manyTurns = Array.from({ length: 60 }, (_, i) => ({
         id: i,
