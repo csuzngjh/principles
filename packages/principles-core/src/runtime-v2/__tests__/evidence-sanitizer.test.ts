@@ -25,6 +25,7 @@ import {
   sanitizeToolParams,
   convergePath,
   MAX_EVIDENCE_VALUE_CHARS,
+  MAX_COMMAND_PREVIEW_CHARS,
 } from '../evidence-sanitizer.js';
 
 // ── convergePath ─────────────────────────────────────────────────────────────
@@ -555,5 +556,113 @@ describe('ReDoS timing regressions', () => {
     expect(sanitizeString('ıX<empathy>a')).toBe('ıXa');
     // Mixed-case tags still strip (the /i flag's only job).
     expect(sanitizeString('<EMPATHY/>x<EmPaThY a="b">y')).toBe('xy');
+  });
+});
+
+// ── PRI-825: command evidence head+tail bound ────────────────────────────────
+
+describe('PRI-825 command evidence bound (sanitizeToolParams)', () => {
+  // Realistic long-command padding: contains separators/spaces so it mirrors
+  // real shell one-liners (contiguous 40+ base64-class runs would be collapsed
+  // by token redaction before the bound is applied, which is correct behavior
+  // but useless as padding).
+  function realisticPadding(unit: string, count: number): string {
+    return Array.from({ length: count }, (_, i) => `${unit}${i}`).join(' && ');
+  }
+
+  function buildLongBaselineCommand(): string {
+    // Realistic long one-liner in the shape the EP002-R4 lab Agent produced:
+    // baseline-anchor semantics live at the TAIL (output file + writeFileSync
+    // target), far beyond the generic 200-char evidence bound.
+    const filler = realisticPadding('scan --module sim/module-', 100);
+    return [
+      'node -e "',
+      "const fs=require('fs'),crypto=require('crypto');",
+      "const p='sim-fixture/assemble-final.txt';",
+      "const c=fs.readFileSync(p,'utf8');",
+      "const h=crypto.createHash('sha256').update(c).digest('hex');",
+      `const steps='${filler}';`,
+      "fs.writeFileSync('sim-fixture/assemble-final.baseline.json',JSON.stringify({path:p,hash:h},null,2));",
+      "console.log('baseline persisted',h)",
+      '"',
+    ].join('');
+  }
+
+  it('T825-1: >1KB baseline command keeps tail anchor evidence after sanitization', () => {
+    const command = buildLongBaselineCommand();
+    expect(command.length).toBeGreaterThan(1000);
+
+    const sanitized = sanitizeToolParams({ command }, '/workspace/repo');
+    const stored = sanitized.command;
+    expect(typeof stored).toBe('string');
+
+    // Anchors survive at BOTH semantic positions.
+    expect(stored).toContain("crypto.createHash('sha256')");
+    expect(stored).toContain('assemble-final.baseline.json');
+    // Explicit machine-visible truncation fact — never a silent cut.
+    expect(stored).toContain('___TRUNCATED___');
+    expect((stored as string).length).toBeLessThanOrEqual(MAX_COMMAND_PREVIEW_CHARS + 20);
+  });
+
+  it('T825-2: modern anchor forms survive (node crypto / Get-FileHash / certutil / baseline.sha256)', () => {
+    const padding = realisticPadding('echo step-', 220);
+    const commands = [
+      `node -e "require('fs').writeFileSync('out.txt', require('crypto').createHash('sha256').update('x').digest('hex'))" ${padding}`,
+      `powershell -Command "Get-FileHash sim-fixture\\assemble-final.txt -Algorithm SHA256 | Out-File assemble-final.baseline.sha256" ${padding}`,
+      `certutil -hashfile sim-fixture/assemble-final.txt SHA256 > assemble-final.baseline.sha256 && ${padding}`,
+    ];
+    for (const command of commands) {
+      expect(command.length).toBeGreaterThan(MAX_COMMAND_PREVIEW_CHARS);
+      const sanitized = sanitizeToolParams({ command });
+      expect(sanitized.command).toContain('___TRUNCATED___');
+      expect(sanitized.command).toMatch(/createHash|Get-FileHash|certutil/);
+    }
+  });
+
+  it('T825-3: secret inside a long command stays redacted after the command bound', () => {
+    const secret = 'sk-proj-abcdefghij0123456789ABCDEF';
+    const command = `curl -H "Authorization: Bearer ${secret}" https://api.example.com/v1/run ${realisticPadding('fetch chunk-', 200)} && node -e "require('fs').writeFileSync('assemble-final.baseline.sha256','x')"`;
+    const sanitized = sanitizeToolParams({ command });
+    const stored = sanitized.command as string;
+    expect(stored).not.toContain(secret);
+    expect(stored).toContain('___REDACTED___');
+    expect(stored).toContain('assemble-final.baseline.sha256');
+  });
+
+  it('T825-4: a 100KB command is bounded, never persisted verbatim', () => {
+    const command = `node -e "console.log('${'lorem ipsum dolor '.repeat(8000)}')"`;
+    const sanitized = sanitizeToolParams({ command });
+    const stored = sanitized.command as string;
+    expect(command.length).toBeGreaterThan(100 * 1024);
+    expect(stored.length).toBeLessThanOrEqual(MAX_COMMAND_PREVIEW_CHARS + 20);
+    expect(stored).toContain('___TRUNCATED___');
+  });
+
+  it('T825-5: write-face params keep the generic 200-char head bound', () => {
+    const sanitized = sanitizeToolParams({
+      path: 'sim-fixture/assemble-final.txt',
+      content: 'lorem ipsum dolor sit amet '.repeat(400),
+      new_string: 'consectetur adipiscing elit sed '.repeat(400),
+    });
+    expect((sanitized.content as string).length).toBeLessThanOrEqual(MAX_EVIDENCE_VALUE_CHARS + '___TRUNCATED___'.length);
+    expect((sanitized.new_string as string).length).toBeLessThanOrEqual(MAX_EVIDENCE_VALUE_CHARS + '___TRUNCATED___'.length);
+    expect(sanitized.content).toContain('___TRUNCATED___');
+  });
+
+  it('short commands remain verbatim sanitized — no marker, no shape change', () => {
+    const command = 'node sim-fixture/check.js';
+    const sanitized = sanitizeToolParams({ command });
+    expect(sanitized.command).toBe(command);
+  });
+
+  it('string args field gets the command bound too; non-string args keep generic bounds', () => {
+    const longArgs = realisticPadding('--baseline chunk-', 120);
+    expect(longArgs.length).toBeGreaterThan(MAX_COMMAND_PREVIEW_CHARS);
+    const sanitizedStringArgs = sanitizeToolParams({ args: longArgs });
+    expect(sanitizedStringArgs.args).toContain('___TRUNCATED___');
+    expect((sanitizedStringArgs.args as string).length).toBeLessThanOrEqual(MAX_COMMAND_PREVIEW_CHARS + 20);
+
+    const arrayArgs = sanitizeToolParams({ args: ['--flag', 'value'] });
+    expect(Array.isArray(JSON.parse(JSON.stringify(arrayArgs.args)))).toBe(true);
   });
 });
