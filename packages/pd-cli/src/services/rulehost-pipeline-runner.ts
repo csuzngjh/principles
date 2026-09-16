@@ -54,6 +54,8 @@ import {
   // runners already receive (EP-07: canonical resolved value, not raw input).
   resolveOutputLanguage,
   buildArtificerHostSemanticContext,
+  // PRI-804(a): ledger identity lookup for the source_principle_id backfill.
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import type {
   AdversarialLoopResult,
@@ -71,6 +73,7 @@ import type {
   EvaluatorValidator,
 } from '@principles/core/runtime-v2';
 import { createHash } from 'node:crypto';
+import * as path from 'node:path';
 import { loadPdConfig } from './pd-config-loader.js';
 import { createEvaluatorRuntimeContext } from '@principles/host-runtime';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
@@ -191,8 +194,8 @@ export interface RuleHostPipelineStage {
  *   rule artifact exists and is WAITING for owner review. This is NOT owner
  *   approval — it means the candidate is ready for the owner to review.
  * - `text_principle_only`: code-rule capability OFF (artificer or evaluator
- *   disabled). No rule artifact; a text principle artifact is produced for
- *   prompt-channel fallback.
+ *   disabled). No rule artifact; a text principle artifact is produced for the
+ *   prompt channel and enqueued into the existing approval queue (PRI-804).
  * - `generation_rejected`: pipeline failed (no dreamer task, stage failure, or
  *   evaluator rejected the candidate). No rule artifact.
  */
@@ -210,10 +213,10 @@ export interface RuleHostPipelineResult {
   readonly principleArtifactId: string | null;
   /**
    * Approval ID when the candidate was auto-enqueued into the ApprovalQueue.
-   * Present when decision='candidate_ready_for_owner_review' and the pipeline
-   * successfully enqueued the candidate for owner review (P1 #1 fix).
-   * Null when the candidate was not enqueued (text_principle_only, rejected,
-   * or enqueue failed — check degradationReason for details).
+   * Present for decision='candidate_ready_for_owner_review' (rule artifact,
+   * code_tool_hook channel) AND for decision='text_principle_only' (principle
+   * artifact, prompt channel — PRI-804 wiring). Null when the enqueue itself
+   * failed — check degradationReason for the structured reason.
    */
   readonly approvalId: string | null;
   /** Structured reason when decision is not candidate_ready_for_owner_review. */
@@ -375,6 +378,22 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     }
     onProgress('scribe', 'succeeded');
 
+    // EP002-R4 follow-up #2: backfill the LEDGER principle UUID on the scribe
+    // artifact for BOTH paths (rule + text). Downstream identity resolution
+    // (extractPrincipleId's column-first order) then binds the rule artifact,
+    // the approval grouping, and the post-approve ledger upgrade to the
+    // ledger UUID instead of falling back to principleDraft.title — the
+    // title namespace is what left rule-channel approvals stranded as
+    // title-keyed groups the Console detail page cannot reach.
+    const identityNote = await backfillScribeIdentity({
+      stateManager, artifactStore, scribeTaskId, dreamerTaskId: dreamerSeedTaskId,
+      workspaceDir: opts.workspaceDir, now: new Date().toISOString(),
+    });
+    if (identityNote !== '') {
+      const scribeStage = stages.find((s) => s.name === 'scribe');
+      if (scribeStage) (scribeStage as { reason?: string }).reason = identityNote.replace(/^; /, '');
+    }
+
     // ── Atomic capability branching ──
     // Per user correction (2026-06-18): ArtificerL2 + Evaluator are atomic.
     // When OFF (or not provided), skip the adversarial loop entirely and
@@ -383,7 +402,13 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     if (!capabilityEnabled) {
       stages.push({ name: 'adversarial_loop', status: 'skipped', reason: capabilityDisabledReason });
       onProgress('adversarial_loop', 'skipped', capabilityDisabledReason);
-      return await textPrincipleOnlyResult({ painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason, artifactStore });
+      // PRI-804: text principles enter the existing prompt-channel approval
+      // queue (Owner governance, same gate as RuleCode) instead of dead-ending.
+      const approvalStore = new SqliteApprovalQueueStore(stateManager.connection);
+      return await textPrincipleOnlyResult({
+        painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason,
+        artifactStore, approvalStore, now: new Date().toISOString(),
+      });
     }
 
     // ── Stage: adversarial loop (artificer↔evaluator) ──
@@ -846,16 +871,141 @@ interface TextPrincipleOnlyParams {
   readonly scribeTaskId: string;
   readonly disabledReason: string;
   readonly artifactStore: PIArtifactStore;
+  /** PRI-804: approval queue used to enqueue the text principle (prompt channel). */
+  readonly approvalStore: SqliteApprovalQueueStore;
+  readonly now: string;
+}
+
+/**
+ * PRI-804(a): resolve the LEDGER principle UUID for the chain.
+ *
+ * The ledger principle is the identity the Console groups approvals by and the
+ * one `upgradeLedgerPrinciple` activates after approval. The only durable link
+ * from the internalization chain to the ledger is the candidateId carried in
+ * the dreamer task's diagnosticJson (set by the intake bridge) — the ledger
+ * entry stores it in derivedFromPainIds. Resolving through
+ * PrincipleTreeLedgerAdapter.existsForCandidate reuses the SAME lookup the
+ * intake bridge uses (one authority, no second truth).
+ */
+async function resolveLedgerPrincipleId(
+  stateManager: RuntimeStateManager,
+  dreamerTaskId: string,
+  workspaceDir: string,
+): Promise<string | null> {
+  let candidateId: string | undefined;
+  try {
+    const dreamerTask = await stateManager.getTask(dreamerTaskId);
+    if (typeof dreamerTask?.diagnosticJson === 'string') {
+      const parsed: unknown = JSON.parse(dreamerTask.diagnosticJson);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        && Object.hasOwn(parsed, 'candidateId')) {
+        const stored = Reflect.get(parsed, 'candidateId');
+        if (typeof stored === 'string' && stored.length > 0) candidateId = stored;
+      }
+    }
+  } catch {
+    return null; // malformed dreamer diagnosticJson — skip backfill, observable via note
+  }
+  if (!candidateId) return null;
+  try {
+    const ledger = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+    const entry = ledger.existsForCandidate(candidateId);
+    return entry?.id ?? null;
+  } catch {
+    return null; // ledger unreadable — skip backfill, observable via note
+  }
+}
+
+interface BackfillIdentityParams {
+  readonly stateManager: RuntimeStateManager;
+  readonly artifactStore: PIArtifactStore;
+  readonly scribeTaskId: string;
+  readonly dreamerTaskId: string;
+  readonly workspaceDir: string;
+  readonly now: string;
+}
+
+/**
+ * EP002-R4 follow-up #2: backfill the scribe principle artifact's
+ * source_principle_id with the LEDGER principle UUID (shared by the rule and
+ * text paths — runs right after the scribe stage succeeds). Every downstream
+ * identity resolution reads this column FIRST (extractPrincipleId /
+ * EvaluatorRunner.extractPrincipleIdFromArtifact), so this single write is
+ * what binds approvals, Console grouping, ledger upgrades, and rule
+ * artifacts to the ledger UUID instead of the title namespace.
+ *
+ * Returns a non-empty observable note (rc-9) when the backfill was skipped
+ * or failed; '' on success. Never throws — identity enrichment must not
+ * break the generation chain.
+ */
+async function backfillScribeIdentity(params: BackfillIdentityParams): Promise<string> {
+  const { stateManager, artifactStore, scribeTaskId, dreamerTaskId, workspaceDir, now } = params;
+  try {
+    const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
+    const principleArt = arts.find((a) => a.artifactKind === 'principle');
+    if (!principleArt) return '';
+    if (principleArt.sourcePrincipleId) return ''; // already bound (rerun) — idempotent
+    const ledgerPrincipleId = await resolveLedgerPrincipleId(stateManager, dreamerTaskId, workspaceDir);
+    if (!ledgerPrincipleId) {
+      return '; source_principle_id_backfill_skipped: no ledger principle resolved for the chain candidate';
+    }
+    await artifactStore.upsertArtifact({ ...principleArt, sourcePrincipleId: ledgerPrincipleId, updatedAt: now });
+    return '';
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `; source_principle_id_backfill_failed: ${msg}`;
+  }
 }
 
 async function textPrincipleOnlyResult(
   params: TextPrincipleOnlyParams,
 ): Promise<RuleHostPipelineResult> {
-  const { painId, stages, scribeTaskId, disabledReason, artifactStore } = params;
+  const { painId, stages, scribeTaskId, disabledReason, artifactStore, approvalStore, now } = params;
   // Look up the principle artifact produced by the scribe stage.
   try {
     const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
     const principleArt = arts.find((a) => a.artifactKind === 'principle');
+    // Identity backfill already ran on the shared post-scribe step
+    // (backfillScribeIdentity) for BOTH paths; nothing to do here.
+    // On the text path the evaluator never runs, so nothing else flips the
+    // validation status — mark it validated here (same store API the
+    // evaluator uses; scribe task success already implies its validator
+    // passed — peer-runner contract: output_invalid tasks never succeed).
+    let identityNote = '';
+    if (principleArt && principleArt.validationStatus !== 'validated') {
+      try {
+        await artifactStore.updateValidationStatus(principleArt.artifactId, 'validated');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        identityNote = `; validation_status_mark_failed: ${msg}`;
+      }
+    }
+    // PRI-804: a text principle is a prompt-channel intervention and follows the
+    // same Owner governance as RuleCode (Owner decision 2026-09-15): enqueue it
+    // into the EXISTING approval queue so the Owner can approve it in Console.
+    // Deterministic approval id (apr_prompt_<artifactId>) + INSERT OR IGNORE make
+    // replays idempotent. Enqueue failure degrades observably (rc-9), never
+    // throwing away the artifact.
+    let approvalId: string | null = null;
+    let enqueueNote = '';
+    if (principleArt) {
+      try {
+        const record = await approvalStore.enqueue({
+          artifactId: principleArt.artifactId,
+          channel: 'prompt',
+          riskLevel: getChannelRiskLevel('prompt'),
+          summary: `Text principle candidate for pain ${painId}`,
+          triggerReason: `text_principle_only: pain=${painId}, principle=${principleArt.artifactId}; code-rule capability off (${disabledReason})`,
+        }, now);
+        const { approvalId: enqueuedApprovalId } = record;
+        approvalId = enqueuedApprovalId;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        enqueueNote = `; approval_enqueue_failed: ${msg}. Manual enqueue required: pd activation dispatch --artifact-id ${principleArt.artifactId} --channel prompt`;
+      }
+    } else {
+      enqueueNote = '; approval_enqueue_skipped: no principle artifact from scribe';
+    }
     return {
       decision: 'text_principle_only',
       painId,
@@ -863,8 +1013,8 @@ async function textPrincipleOnlyResult(
       scribeTaskId,
       ruleArtifactId: null,
       principleArtifactId: principleArt?.artifactId ?? null,
-      approvalId: null,
-      degradationReason: `code_rule_capability_off: ${disabledReason}`,
+      approvalId,
+      degradationReason: `code_rule_capability_off: ${disabledReason}${identityNote}${enqueueNote}`,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

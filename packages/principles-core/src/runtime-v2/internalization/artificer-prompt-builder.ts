@@ -1,6 +1,7 @@
 import { serializePromptInput } from './prompt-serializer.js';
 import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
+import type { GoldenTraceCaseInput } from './artificer-output.js';
 import type { LastValidatorErrors } from './pitask-metadata.js';
 import type { IntentContractV1 } from './intent-contract.js';
 import type { ToolSemanticMappingV1, ToolSemanticRegistry } from './tool-semantic-registry.js';
@@ -213,6 +214,7 @@ CONSTRAINTS:
 - NEVER call string methods on paramsSummary itself — paramsSummary.includes(...), paramsSummary.startsWith(...), paramsSummary.match(...) are always bugs and will crash with "is not a function"
 - To inspect a parameter, access its specific key (e.g. paramsSummary.path) and guard its type at runtime (typeof paramsSummary.path === 'string') before using it as a string
 - For path logic prefer input.action.normalizedPath (a normalized string) over reading raw params strings
+- ADVERSARIAL GUARD CONTRACT: when your rule declares requiresContextVersion: 2, action-level safety still dominates the context — if helpers.isRiskPath() is true the decision MUST be block regardless of input.context; writes to well-known sensitive system locations (/etc/**, system configuration outside the governed workspace) must block even when context reports priorReadOfTarget === 'yes' (a context-provided read outside the workspace is untrusted signal, never authorization)
 - implementationCode MUST be deterministic and self-contained: no imports, require, eval, Function, I/O, network, timers, Date.now, or randomness
 - goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block case
 - goldenTraceCases expectedDecision MUST be only "allow" or "block" — do NOT emit "propose_correction", "requireApproval", or "auto_correct" (seed-user MVP only supports allow/block; all other action types are rejected by the schema validator)
@@ -304,6 +306,83 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  */
 export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v6';
 
+// ── EP002-R4: bounded pack projection at the prompt boundary ─────────────────
+//
+// The persisted BehaviorExamplePack keeps full-fidelity raw tool-call payloads
+// (entire file contents, edit diffs). Real workspaces produce real-sized
+// calls, and a single example routinely exceeds the whole 50k prompt budget
+// (live workspace: pack 115,198 chars vs cap 50,000), making v2 generation
+// structurally unreachable there. Bound each example's payload HERE, at the
+// LLM trust boundary (rc-8), never in the pack itself: the model sees bounded
+// previews with an explicit truncation marker, the persisted evidence stays
+// complete, and validateBehaviorExamplePack still runs on the original pack.
+
+const MAX_PROMPT_PARAM_STRING_CHARS = 2_500;
+const PROMPT_PARAM_TRUNCATION_MARKER = '…[truncated-for-prompt]';
+// Live-workspace measurement: one case's ruleContext.history carried 100 raw
+// calls (45,380 chars) — the aggregate, not any single string, blows the 50k
+// prompt budget. The prompt projection keeps only the window immediately
+// preceding the labeled call; the persisted pack keeps the full history and
+// the runtime gate reconstructs its own context at evaluation time.
+const MAX_PROMPT_HISTORY_CALLS = 12;
+
+function boundPromptParamString(value: string): string {
+  return value.length <= MAX_PROMPT_PARAM_STRING_CHARS
+    ? value
+    : value.slice(0, MAX_PROMPT_PARAM_STRING_CHARS) + PROMPT_PARAM_TRUNCATION_MARKER;
+}
+
+function boundPromptParams(params: Record<string, unknown>): Record<string, unknown> {
+  const bounded: Record<string, unknown> = {};
+  for (const key of Object.keys(params)) {
+    const value: unknown = params[key];
+    bounded[key] = typeof value === 'string'
+      ? boundPromptParamString(value)
+      : value;
+  }
+  return bounded;
+}
+
+function boundCaseForPrompt(value: GoldenTraceCaseInput): GoldenTraceCaseInput {
+  const boundedContext = value.ruleContext !== undefined
+    ? {
+        ...value.ruleContext,
+        history: {
+          ...value.ruleContext.history,
+          truncated: value.ruleContext.history.truncated
+            || value.ruleContext.history.calls.length > MAX_PROMPT_HISTORY_CALLS,
+          calls: value.ruleContext.history.calls
+            .slice(-MAX_PROMPT_HISTORY_CALLS)
+            .map((call) => ({ ...call, paramsSummary: boundPromptParams(call.paramsSummary) })),
+        },
+      }
+    : undefined;
+  return {
+    ...value,
+    params: boundPromptParams(value.params),
+    ...(value.expectedProposedParams !== undefined
+      ? { expectedProposedParams: boundPromptParams(value.expectedProposedParams) }
+      : {}),
+    ...(boundedContext !== undefined ? { ruleContext: boundedContext } : {}),
+  };
+}
+
+/**
+ * EP002-R4: the SINGLE bounded projection shared by the prompt AND the v2
+ * echo-contract validation. The model can only copy what it saw, so the
+ * "Owner-labelled example was rewritten" check MUST compare against the same
+ * bounded cases the prompt presented — comparing against the raw pack would
+ * reject every honest echo on real-sized workspaces. Idempotent: an
+ * already-bounded pack passes through unchanged.
+ */
+export function boundPackForPrompt(pack: BehaviorExamplePack): BehaviorExamplePack {
+  return {
+    ...pack,
+    sourceNegativeCase: boundCaseForPrompt(pack.sourceNegativeCase),
+    positiveCounterexamples: pack.positiveCounterexamples.map(boundCaseForPrompt),
+  };
+}
+
 /**
  * PRI-741: render the host semantic projection as a prompt block. Mirrors the
  * evaluator's TOOL CATALOG AUTHORITY pattern: the list is authoritative for
@@ -366,7 +445,10 @@ export class ArtificerPromptBuilder {
       // (empty string when outputLanguage is undefined).
       + buildLanguageDirective(input.outputLanguage, 'implementation');
     const promptInput: ArtificerPromptInput = {
-      behaviorExamplePack: input.behaviorExamplePack,
+      // EP002-R4: bounded projection — the pack's raw payloads can exceed the
+      // 50k prompt cap on real workspaces; the LLM gets bounded previews while
+      // the persisted pack (and everything downstream of it) keeps full fidelity.
+      behaviorExamplePack: boundPackForPrompt(input.behaviorExamplePack),
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourceScribeArtifactId: input.sourceScribeArtifactId,

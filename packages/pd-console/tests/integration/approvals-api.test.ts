@@ -1388,3 +1388,133 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
   });
 });
+
+// ── EP002-R4 follow-up #1: POST /api/v1/approvals/:id/reopen ────────────────
+
+describe('Approvals API — reopen a terminal approval (EP002-R4)', () => {
+  let server: http.Server;
+  let baseUrl: string;
+  let tmpDir: string;
+  let sqliteConn: SqliteConnection;
+
+  async function fetchJson(urlPath: string, options?: RequestInit): Promise<{ status: number; body: unknown }> {
+    const res = await fetch(`${baseUrl}${urlPath}`, options);
+    const body = await res.json();
+    return { status: res.status, body };
+  }
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  function seedArtifact(artifactId: string): void {
+    const store = new SqlitePIArtifactStore(sqliteConn);
+    const now = new Date().toISOString();
+    void store.upsertArtifact({
+      artifactId,
+      artifactKind: 'principle',
+      sourceTaskId: `task-${artifactId}`,
+      sourcePrincipleId: null,
+      sourceRuleId: undefined,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ principleId: artifactId, text: 'reopen test principle' }),
+      createdAt: now,
+      updatedAt: now,
+    }).catch(() => { /* sync upsert */ });
+  }
+
+  function seedApprovalRow(approvalId: string, artifactId: string, status: string): void {
+    const db = sqliteConn.getDb();
+    const now = new Date().toISOString();
+    db.prepare(
+      'INSERT OR IGNORE INTO approvals' +
+      ' (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, summary, trigger_reason)' +
+      ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(approvalId, artifactId, 'prompt', 'low', status, 0.8, now, `reopen seed ${approvalId}`, 'test');
+  }
+
+  beforeAll(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-approval-reopen-'));
+    const stateDir = path.join(tmpDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    sqliteConn = new SqliteConnection({ workspaceDir: tmpDir });
+
+    seedArtifact('reopen-art-approved');
+    seedArtifact('reopen-art-pending');
+    seedArtifact('reopen-art-rejected');
+    seedApprovalRow('apr_reopen_approved', 'reopen-art-approved', 'approved');
+    seedApprovalRow('apr_reopen_pending', 'reopen-art-pending', 'pending');
+    seedApprovalRow('apr_reopen_rejected', 'reopen-art-rejected', 'rejected');
+
+    function asyncHandler(fn: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>) {
+      return (req: http.IncomingMessage, res: http.ServerResponse) => {
+        fn(req, res).catch((err: unknown) => {
+          if (!res.headersSent) {
+            sendJson(res, 500, { success: false, error: err instanceof Error ? err.message : 'Internal error' });
+          }
+        });
+      };
+    }
+    server = http.createServer((req, res) => {
+      const urlPath = req.url?.split('?')[0] ?? '/';
+      if (!urlPath.startsWith('/api/v1/approvals')) {
+        sendNotFound(res, 'Not found');
+        return;
+      }
+      const subPath = urlPath.slice('/api/v1/approvals'.length);
+      asyncHandler(() => handleApprovalsRoute(req, res, tmpDir, subPath))(req, res);
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => {
+        const addr = server.address();
+        if (addr && typeof addr === 'object') baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  }, 30000);
+
+  afterAll(async () => {
+    disposeApprovalsModels();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    try { sqliteConn.close(); } catch { /* ignore */ }
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('approved → reopen → pending; a fresh Console approve then re-dispatches (full re-activation semantics)', async () => {
+    const first = await fetchJson('/api/v1/approvals/apr_reopen_approved/reopen', { method: 'POST' });
+    expect(first.status).toBe(200);
+    if (!isRecord(first.body) || !isRecord(first.body.data)) throw new Error('bad body');
+    expect(first.body.data.status).toBe('pending');
+    expect(first.body.data.alreadyPending).toBe(false);
+
+    // The fresh decision must be a REAL dispatch path: approve with a body —
+    // the artifact is validated + prompt channel, so approve → dispatch runs.
+    const second = await fetchJson('/api/v1/approvals/apr_reopen_approved/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'fresh decision after reopen' }),
+    });
+    expect(second.status).toBe(200);
+  });
+
+  it('pending → reopen is a 200 no-op with alreadyPending=true (idempotent, not an error)', async () => {
+    const { status, body } = await fetchJson('/api/v1/approvals/apr_reopen_pending/reopen', { method: 'POST' });
+    expect(status).toBe(200);
+    if (!isRecord(body) || !isRecord(body.data)) throw new Error('bad body');
+    expect(body.data.alreadyPending).toBe(true);
+    expect(body.data.status).toBe('pending');
+  });
+
+  it('rejected → reopen → 409 not_reopenable (store only reopens approved rows)', async () => {
+    const { status, body } = await fetchJson('/api/v1/approvals/apr_reopen_rejected/reopen', { method: 'POST' });
+    expect(status).toBe(409);
+    if (!isRecord(body)) throw new Error('bad body');
+    expect(body.error).toBe('not_reopenable');
+  });
+
+  it('unknown id → reopen → 404', async () => {
+    const { status } = await fetchJson('/api/v1/approvals/apr_reopen_missing/reopen', { method: 'POST' });
+    expect(status).toBe(404);
+  });
+});
