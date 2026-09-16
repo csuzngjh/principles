@@ -1,63 +1,30 @@
 /**
- * Demo Rule Compiler — Minimal bridge for Story A demo runner
+ * Demo Rule Compiler — Minimal bridge for Story A demo runner and the
+ * rulehost pipeline behavior checks.
  *
  * PURPOSE: Compile rule implementation code strings into typed evaluate
- * functions for use in `evaluateInRefinerSandbox`. This allows the demo
- * to perform REAL canActivate validation instead of always returning success.
+ * functions for use in `evaluateInRefinerSandbox`.
  *
- * ARCHITECTURE: This intentionally duplicates the compilation logic from
- * `openclaw-plugin/src/core/rule-implementation-runtime.ts` because pd-cli
- * cannot depend on the bundled openclaw-plugin package. The compilation
- * logic is identical: normalize exports → vm compile → extract evaluate.
- *
- * NOT for production use — the openclaw-plugin's RuleHost uses its own
- * `loadRuleImplementationModule` for production code_tool_hook evaluation.
+ * ARCHITECTURE (PRI-809): compilation delegates to the canonical hardened
+ * replay evaluator in @principles/core — the vm realm with the JSON-string
+ * trust-boundary crossing (input + helpers rebuilt inside the realm), the
+ * same primitive the production gate uses. The previous local vm duplicate
+ * handed host-realm objects to the vm-realm evaluate function, which let
+ * unapproved rule code escape via `input.constructor.constructor`.
  */
 
-import * as vm from 'node:vm';
 import type { RuleHostInput, RuleHostResult } from '@principles/core/runtime-v2';
 import type { RuleHostHelpers } from '@principles/core/runtime-v2';
 import type { ReplayEvaluateFn } from '@principles/core/runtime-v2';
-import { safeStringifyPreview, validateRuleHostResult } from '@principles/core/runtime-v2';
-
-function normalizeSource(sourceCode: string): string {
-  const withoutExports = sourceCode
-    .replace(/export\s+const\s+meta\s*=/, 'const meta =')
-    .replace(/export\s+function\s+evaluate\s*\(/, 'function evaluate(');
-
-  return `${withoutExports}
-globalThis.__pdRuleModule = {
-  meta: typeof meta === 'undefined' ? undefined : meta,
-  evaluate: typeof evaluate === 'undefined' ? undefined : evaluate,
-};`;
-}
-
-function isRuleEvaluator(value: unknown): value is (input: RuleHostInput, helpers: RuleHostHelpers) => unknown {
-  return typeof value === 'function';
-}
+import { compileHardenedRuleEvaluator, safeStringifyPreview, validateRuleHostResult } from '@principles/core/runtime-v2';
 
 /**
  * Compile rule implementation code and return a typed evaluate function.
- * Mirrors `createReplayEvaluateFromCode` in openclaw-plugin.
  *
  * @throws if the code fails to compile or does not define a function evaluate
  */
 export function compileDemoRule(code: string, sourceLabel: string): ReplayEvaluateFn {
-  const context = vm.createContext(Object.create(null));
-  const script = new vm.Script(normalizeSource(code), {
-    filename: sourceLabel,
-  });
-
-  script.runInContext(context, { timeout: 1000, displayErrors: true });
-
-  const moduleExports = (context as { __pdRuleModule?: { meta?: unknown; evaluate?: unknown } }).__pdRuleModule;
-  delete (context as { __pdRuleModule?: unknown }).__pdRuleModule;
-
-  if (!moduleExports || !isRuleEvaluator(moduleExports.evaluate)) {
-    throw new Error(`[compileDemoRule] ${sourceLabel}: compiled module has no evaluate function`);
-  }
-
-  const evaluateFn = moduleExports.evaluate;
+  const evaluateFn = compileHardenedRuleEvaluator(code, sourceLabel);
   return (input: RuleHostInput, helpers: RuleHostHelpers): RuleHostResult => {
     const result = evaluateFn(input, helpers);
     const validation = validateRuleHostResult(result);
@@ -68,6 +35,6 @@ export function compileDemoRule(code: string, sourceLabel: string): ReplayEvalua
         })`,
       );
     }
-    return result as RuleHostResult;
+    return result;
   };
 }

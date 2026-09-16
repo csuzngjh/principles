@@ -268,15 +268,23 @@ async function resolveDreamerContext(params: {
     emitEvent('dreamer_context_skipped', taskId, { reason: 'scribe_contentJson_unparseable' });
     return undefined;
   }
-  if (!isRecord(scribeParsed)) return undefined;
-
-  // rc-5: use Object.hasOwn, not `in`.
+  // PRI-816 (R-01, rc-9): not-a-record was previously a silent return — the
+  // dreamer five-dimension context vanished with no observable trace.
+  if (!isRecord(scribeParsed)) {
+    emitEvent('dreamer_context_skipped', taskId, { reason: 'scribe_content_not_record' });
+    return undefined;
+  }
   if (!Object.hasOwn(scribeParsed, 'sourceTrace') || !isRecord(scribeParsed.sourceTrace)) {
-    // scribe has no sourceTrace.dreamerArtifactId — pre-PRI-508 flow, backward compatible.
+    // scribe has no sourceTrace — pre-PRI-508 flow, backward compatible.
+    // PRI-816: now observable (rc-9) instead of a silent return.
+    emitEvent('dreamer_context_skipped', taskId, { reason: 'sourceTrace_missing' });
     return undefined;
   }
   const { sourceTrace } = scribeParsed;
   if (!Object.hasOwn(sourceTrace, 'dreamerArtifactId') || sourceTrace.dreamerArtifactId === undefined) {
+    // PRI-816: with the scribe now receiving an authoritative
+    // sourceDreamerArtifactId, absence here is unusual — make it observable.
+    emitEvent('dreamer_context_skipped', taskId, { reason: 'dreamerArtifactId_missing' });
     return undefined;
   }
   const { dreamerArtifactId } = sourceTrace;

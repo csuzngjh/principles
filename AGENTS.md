@@ -1206,7 +1206,9 @@ npm run dev:worktree -- PRI-123 some-task
 ```
 
 which bases the new worktree + `ai/<task>-<slug>` branch on the latest
-`origin/main` (never a possibly-stale local `main`).
+`origin/main` (never a possibly-stale local `main`), places it in the shared
+pool (`git-10`), and then bootstraps and verifies it (`git-13`) unless
+`--skip-bootstrap` is passed.
 
 ## `git-2-one-writer-per-worktree`
 
@@ -1290,6 +1292,136 @@ boundary. Semantics:
 This is a cooperative signal between well-meaning sessions, NOT a permission
 system: a human may always delete the file. It does not run in CI, does not
 use file ACLs, and does not track file-level permissions.
+
+## `git-10-centralized-worktree-pool`
+
+Task worktrees live in ONE pool derived from the primary checkout, never as
+ad-hoc siblings:
+
+```
+primary            D:\Code\principles
+pool root          D:\Code\_worktrees\principles
+task worktree      D:\Code\_worktrees\principles\PRI-790-signal-confirmations
+```
+
+The default is *derived* (`<parent(primary)>/_worktrees/<basename(primary)>`) —
+tooling must never hardcode a drive or a workstation path. `PD_WORKTREE_ROOT`
+overrides the pool root for advanced setups; it is configuration, not state.
+`check:workspace-tools` fails on a hardcoded absolute path under `scripts/dev/`.
+
+Directory names do not repeat the repository name or the branch namespace: the
+pool path already encodes the repository.
+
+## `git-11-task-branch-worktree-identity`
+
+One task has ONE stable identity, and it maps 1:1 onto directory and branch:
+
+```
+PRI-790  ->  ai/PRI-790-signal-confirmations  ->  <pool>/PRI-790-signal-confirmations
+```
+
+Adhoc tasks use `adhoc-YYYYMMDD-<slug>-<rand6>` so two agents cannot collide on
+the same day. An IDE session id must NEVER participate in identity — the point
+of the mapping is that a task can be handed from one AI to another (or to a
+human) without the directory, branch, or git state changing. Only the current
+writer changes, and writers are a closed set:
+
+```
+workbuddy | codex | zcode | trae | human | other
+```
+
+Claim and release both halves of writer ownership:
+
+```bash
+npm run dev:worktree:claim -- --writer workbuddy
+npm run dev:worktree:release
+```
+
+The claim takes the git-9 lease (owner = `<writer>:<task>`, stable across CLI
+processes — pid and host are debug metadata only) AND `git worktree lock`, so
+stock git commands also refuse to move/prune/remove the slot. A lock whose lease
+has expired is reported as `STALE_LOCK` and is never unlocked automatically.
+
+## `git-12-repo-mutation-mutex`
+
+All worktrees share one set of Git metadata (`.git`, `.git/worktrees/`, `refs/`,
+`packed-refs`). `git worktree add|move|remove|repair|prune` and branch deletion
+are read-modify-write sequences over that shared state, and the per-worktree
+lease (git-9) cannot serialise them because it is scoped to one checkout.
+
+Such mutations therefore run under a short-lived cross-process critical section
+at `<git-common-dir>/pd-worktree-mutation.lock` (created with `O_EXCL`). It is
+NOT a registry, ownership database, or persistent state.
+
+* an existing lock is never overwritten and never auto-deleted — a crashed
+  holder blocks mutations until a human removes the file;
+* never hold it across `npm install`, a build, or a test run;
+* the acquire error prints the holder's operation, pid, host and age.
+
+## `git-13-worktree-readiness`
+
+A worktree is either READY or it is not, and "bootstrap ran" is not evidence.
+Readiness is checked at three levels, and every resolved path must stay INSIDE
+the worktree:
+
+* **L1 dependencies** — the worktree's own workspace packages resolve inside it;
+* **L2 build** — the packages the root `npm run build` authority covers have
+  emitted the artifacts their manifests promise;
+* **L3 runtime** — real specifiers (`@principles/core`, `@principles/core/runtime-v2`,
+  `principles-disciple`, the `pd` CLI bin) resolve inside the worktree.
+
+A package resolving to the primary checkout is `PRIMARY_LEAKAGE` and a hard
+failure: the worktree would be testing the control plane's `dist` while looking
+like it tests its own code. This is why each worktree installs its **own**
+`node_modules` and why a full `node_modules` junction to the primary is
+forbidden. Sharing the npm *download* cache is fine.
+
+```bash
+npm run dev:worktree -- PRI-790 signal-confirmations   # create + bootstrap + verify
+npm run dev:worktree:bootstrap                        # one command to READY
+npm run dev:worktree:ready [-- --json]                 # read-only verdict
+```
+
+The post-checkout hook runs only the cheap readiness probe and prints the
+bootstrap command; it never installs. A branch switch must not become a
+minute-scale operation.
+
+## `git-14-unknown-residue-never-auto-deleted`
+
+Owner-facing vocabulary (SPEC §12). The classifier's long-standing status tokens
+are unchanged and authoritative; these are their Owner-facing names:
+
+| Owner-facing | Internal status |
+| --- | --- |
+| `ACTIVE` | `ACTIVE` |
+| `PENDING` | `CLEANUP_PENDING` |
+| `CLEANUP_READY` | `CLEANUP_READY` |
+| `UNKNOWN` | `ORPHAN`, and every residue row |
+
+Do not introduce a third name for any of these states.
+
+Nothing is deleted unless it can be PROVEN safe — merged, clean, status
+readable, no active lease, no Git lock, not the primary. That is why a residue
+shell (a directory whose worktree admin metadata is gone) is NEVER part of the
+automatic sweep: git cannot read its index, so its dirtiness is unprovable, and
+`git worktree repair` cannot recover a fully deleted admin entry.
+
+The only residue deletion path is explicit and doubly gated:
+
+```bash
+npm run dev:workspace:cleanup -- --residue "<path>" --ack-unknown --apply
+```
+
+The path must be one this tool's own scan classified as residue, `--ack-unknown`
+must be present, and deletion is junction-safe: reparse points are identified
+with `lstat`, detached with `unlink` and never traversed, and each link's
+external target is re-verified afterwards. Leaving an unprovable directory on
+disk costs space; deleting unknown work is unrecoverable.
+
+```bash
+npm run dev:workspace:snapshot [-- --size]   # what is here, who owns it, what may be deleted
+npm run dev:workspace:migrate                # dry-run; --apply moves safe registered worktrees
+```
 
 ---
 

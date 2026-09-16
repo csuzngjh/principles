@@ -360,10 +360,14 @@ export class RuleHostWriter implements ChannelWriter {
     // activation first. Shadow activations are observation-only — the
     // runtime RuleHost (rule-host.ts) records would-block/would-allow into
     // `shadowDecisions` but never blocks or modifies the tool call. The
-    // only shadow -> live transition is `pd activation promote
-    // --activation-id ... --confirm`, which atomically rewrites the action
-    // to `code_tool_hook_live_activate` inside a BEGIN IMMEDIATE
-    // transaction (SqliteActivationStateStore.promoteActivation).
+    // production shadow -> live transition is the sanctioned promotion path
+    // (SqliteActivationSafetyStore.commitPromotion, driven by `pd activation
+    // promote --activation-id ... --confirm` or the Console equivalent),
+    // which swaps the persisted action to live under the safety store's
+    // guarded transaction. Note: SqliteActivationStateStore.promoteActivation
+    // also rewrites the action in a BEGIN IMMEDIATE transaction, but it has
+    // no production callers (tests only) — do not wire new code to it
+    // (PRI-818 comment correction; audited 2026-09-15).
     //
     // Returning `code_tool_hook_live_activate` here was the seed-MVP
     // release blocker: a newly approved rule would immediately block

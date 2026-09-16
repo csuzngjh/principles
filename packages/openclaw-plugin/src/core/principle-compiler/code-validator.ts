@@ -11,7 +11,7 @@
  */
 
 import { nodeVm } from '../../utils/node-vm-polyfill.js';
-import { loadRuleImplementationModule } from '../rule-implementation-runtime.js';
+import { loadRuleImplementationModule, type RuleImplementationModuleExports } from '../rule-implementation-runtime.js';
 import { checkForbiddenPatterns, type ValidationResult } from '@principles/core/runtime-v2';
 
 const MOCK_INPUT = {
@@ -57,7 +57,7 @@ export function validateGeneratedCode(code: string): ValidationResult {
   }
 
   // --- Check 3: Sandbox load + export check ---
-  let moduleExports: { meta?: unknown; evaluate?: unknown };
+  let moduleExports: RuleImplementationModuleExports;
   try {
     moduleExports = loadRuleImplementationModule(code, 'code-validator-candidate.js');
   } catch (err) {
@@ -81,8 +81,16 @@ export function validateGeneratedCode(code: string): ValidationResult {
   // evaluate() throwing on mock input is acceptable — the function exists and has the
   // right signature, it just can't handle our generic mock data.
   // Track as a non-blocking warning so operators know the rule may be fragile.
+  // PRI-809: the raw vm-realm evaluate must not be called with the host-realm
+  // MOCK_INPUT — a rule could walk `input.constructor.constructor` back into
+  // this host process. callEvaluate crosses the existing child-process
+  // boundary with a JSON payload, the same hardened path the live RuleHost uses.
+  if (typeof moduleExports.callEvaluate !== 'function') {
+    errors.push('Missing export: evaluate (the compiled module exposes no sandboxed callEvaluate bridge)');
+    return { valid: false, errors, warnings };
+  }
   try {
-    const result = (moduleExports.evaluate as (input: unknown) => unknown)(MOCK_INPUT);
+    const result = moduleExports.callEvaluate(MOCK_INPUT, {});
     if (!result || typeof result !== 'object') {
       errors.push('evaluate must return an object');
     } else if (typeof (result as Record<string, unknown>).matched !== 'boolean') {

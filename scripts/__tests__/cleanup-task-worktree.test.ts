@@ -1,6 +1,15 @@
 // Real-git integration tests for scripts/dev/cleanup-task-worktree.mjs —
 // the safe-removal path (AGENTS.md §23A git-8-cleanup-after-merge, git-4
 // no-unknown-work-destruction).
+//
+// PRI-796 added three refusals to this tool (git lock, active lease, open PR).
+// Those are covered here; the completion-proof taxonomy itself is unchanged and
+// stays covered by the cases below.
+//
+// `--skip-gh` is passed throughout so the suite does not depend on the local
+// gh installation or on network latency: these cases are about git-level
+// semantics, and the GitHub `PR MERGED` evidence path is covered by the
+// workspace-lifecycle classifier tests.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,7 +39,7 @@ afterAll(() => {
 
 /** Create a task worktree with one commit on its branch. */
 async function makeTask(slug: string): Promise<{ wt: string; branch: string }> {
-  const r = await runDevScript('create-task-worktree.mjs', ['PRI-800', slug, '--json'], { cwd: primary });
+  const r = await runDevScript('create-task-worktree.mjs', ['PRI-800', slug, '--skip-bootstrap', '--json'], { cwd: primary });
   expect(r.code).toBe(0);
   const out = JSON.parse(r.stdout) as { worktree: string; branch: string };
   await commitFile(out.worktree, slug + '.txt', 'x\n', 'task commit');
@@ -52,7 +61,7 @@ describe('cleanup-task-worktree', () => {
     await mergeIntoMain(branch);
     await git(primary, 'switch', '-c', 'work/back-from-' + 'merged');
 
-    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--json'], { cwd: primary });
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--skip-gh', '--json'], { cwd: primary });
     expect(r.code).toBe(0);
     const out = JSON.parse(r.stdout) as { ok: boolean; removedWorktree: string; deletedBranch: string };
     expect(out.ok).toBe(true);
@@ -71,7 +80,7 @@ describe('cleanup-task-worktree', () => {
     await mergeIntoMain(branch);
     await git(primary, 'switch', '-c', 'work/back-from-keep');
 
-    const r = await runDevScript('cleanup-task-worktree.mjs', [wt, '--json'], { cwd: primary });
+    const r = await runDevScript('cleanup-task-worktree.mjs', [wt, '--skip-gh', '--json'], { cwd: primary });
     expect(r.code).toBe(0);
     expect(fs.existsSync(wt)).toBe(false);
     const branchSha = await git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch);
@@ -84,7 +93,7 @@ describe('cleanup-task-worktree', () => {
     await git(primary, 'switch', '-c', 'work/back-from-dirty');
     fs.writeFileSync(path.join(wt, 'precious-wip.txt'), 'do not delete me\n', 'utf-8');
 
-    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--json'], { cwd: primary });
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--skip-gh', '--json'], { cwd: primary });
     expect(r.code).toBe(1);
     const out = JSON.parse(r.stdout) as { error: string; nextAction: string };
     expect(out.error).toContain('uncommitted');
@@ -96,7 +105,7 @@ describe('cleanup-task-worktree', () => {
   it('REFUSES --delete-branch when the branch is not merged into origin/main', async () => {
     const { wt, branch } = await makeTask('unmerged');
 
-    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--json'], { cwd: primary });
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--skip-gh', '--json'], { cwd: primary });
     expect(r.code).toBe(1);
     const out = JSON.parse(r.stdout) as { error: string; nextAction: string };
     expect(out.error).toContain('NOT an ancestor');
@@ -113,7 +122,7 @@ describe('cleanup-task-worktree', () => {
     // active working directory.
     const { wt, branch } = await makeTask('unmerged-clean');
 
-    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--json'], { cwd: primary });
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--skip-gh', '--json'], { cwd: primary });
     expect(r.code).toBe(1);
     const out = JSON.parse(r.stdout) as { error: string; nextAction: string };
     expect(out.error).toContain('NOT an ancestor');
@@ -128,12 +137,60 @@ describe('cleanup-task-worktree', () => {
   }, 120_000);
 
   it('REFUSES to remove the primary checkout', async () => {
-    const r = await runDevScript('cleanup-task-worktree.mjs', [primary, '--json'], { cwd: primary });
+    const r = await runDevScript('cleanup-task-worktree.mjs', [primary, '--skip-gh', '--json'], { cwd: primary });
     expect(r.code).toBe(1);
     const out = JSON.parse(r.stdout) as { error: string };
     expect(out.error).toContain('PRIMARY');
     expect(fs.existsSync(primary)).toBe(true);
   }, 60_000);
+
+  it('REFUSES a Git-locked worktree and never unlocks it (SPEC §14.3)', async () => {
+    const { wt, branch } = await makeTask('locked');
+    await mergeIntoMain(branch);
+    await git(primary, 'switch', '-c', 'work/back-from-locked');
+    await git(primary, 'worktree', 'lock', '--reason', 'writer=zcode task=PRI-800-locked', wt);
+
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--skip-gh', '--json'], { cwd: primary });
+    expect(r.code).toBe(1);
+    const out = JSON.parse(r.stdout) as { error: string; nextAction: string };
+    expect(out.error).toContain('Git worktree lock');
+    expect(out.nextAction).toContain('never unlocks');
+
+    // The lock is still there, and so is the worktree.
+    const porcelain = await git(primary, 'worktree', 'list', '--porcelain');
+    expect(porcelain).toContain('locked');
+    expect(fs.existsSync(wt)).toBe(true);
+  }, 120_000);
+
+  it('REFUSES a worktree held by an ACTIVE write lease — same behaviour as the batch sweep (SPEC §14.2)', async () => {
+    const { wt, branch } = await makeTask('leased');
+    await mergeIntoMain(branch);
+    await git(primary, 'switch', '-c', 'work/back-from-leased');
+    fs.writeFileSync(
+      path.join(wt, '.workspace-lease.json'),
+      JSON.stringify(
+        {
+          schema: 'pd-workspace-lease/1',
+          workspace: wt,
+          owner: 'zcode:' + branch,
+          branch,
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--skip-gh', '--json'], { cwd: primary });
+    expect(r.code).toBe(1);
+    const out = JSON.parse(r.stdout) as { error: string; nextAction: string };
+    expect(out.error).toContain('ACTIVE write lease');
+    expect(out.error).toContain('zcode:' + branch);
+    expect(out.nextAction).toContain('dev:worktree:release');
+    expect(fs.existsSync(wt)).toBe(true);
+  }, 120_000);
 
   it('SKIPS the global prune while a sibling worktree is unreadable, and still cleans the target (PRI-712)', async () => {
     // Target: clean + merged → removable as usual.
@@ -151,7 +208,7 @@ describe('cleanup-task-worktree', () => {
     fs.rmSync(siblingGitFile);
 
     try {
-      const r = await runDevScript('cleanup-task-worktree.mjs', [target.branch, '--delete-branch', '--json'], { cwd: primary });
+      const r = await runDevScript('cleanup-task-worktree.mjs', [target.branch, '--delete-branch', '--skip-gh', '--json'], { cwd: primary });
       expect(r.code).toBe(0);
       const out = JSON.parse(r.stdout) as { ok: boolean; pruned: boolean; notes: string[] };
       expect(out.ok).toBe(true);
@@ -180,13 +237,13 @@ describe('cleanup-task-worktree', () => {
     const status = await git(wt, 'status', '--porcelain');
     expect(status.trim()).toBe('');
 
-    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--json'], { cwd: primary });
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--skip-gh', '--json'], { cwd: primary });
     expect(r.code).toBe(0);
     expect(fs.existsSync(wt)).toBe(false);
   }, 120_000);
 
   it('fails clearly for an unknown target', async () => {
-    const r = await runDevScript('cleanup-task-worktree.mjs', ['ai/nope-never-existed', '--json'], { cwd: primary });
+    const r = await runDevScript('cleanup-task-worktree.mjs', ['ai/nope-never-existed', '--skip-gh', '--json'], { cwd: primary });
     expect(r.code).toBe(1);
     const out = JSON.parse(r.stdout) as { error: string };
     expect(out.error).toContain('No worktree or branch matches');

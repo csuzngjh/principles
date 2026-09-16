@@ -169,6 +169,7 @@ OWNER INTENT CONTRACT (when \`intentContract\` is present — PRI-703):
 OUTPUT FORMAT (pure JSON, no markdown):
 {
   "taskId": "<from input>",
+  "requiresContextVersion": 2,
   "sourceScribeArtifactId": "<copy exactly from input.sourceScribeArtifactId>",
   "implementationSummary": "<concise summary of what the code does and the implementation approach>",
   "sourceTrace": {
@@ -176,15 +177,17 @@ OUTPUT FORMAT (pure JSON, no markdown):
     "philosopherArtifactId": "<from scribe artifact if available, or omit>",
     "dreamerArtifactId": "<from scribe artifact if available, or omit>"
   },
+  "evidenceRefs": ["<copy exactly from the behaviorExamplePack evidenceRefs; every ref, in order>"],
   "risks": ["<risk 1>", "<risk 2>"],
   "implementationCode": "function evaluate(input, helpers) { if (input.action.canonicalKind === 'write' && typeof input.action.normalizedPath === 'string' && input.action.normalizedPath.startsWith('/system/')) { return { decision: 'block', matched: true, reason: 'write to system path' }; } return { decision: 'allow', matched: false, reason: 'no risk pattern' }; }",
   "goldenTraceCases": [
-    {"caseId":"negative-1","kind":"negative","toolName":"write","params":{"path":"/system/file"},"expectedDecision":"block"},
-    {"caseId":"positive-1","kind":"positive","toolName":"write","params":{"path":"/workspace/file"},"expectedDecision":"allow"}
+    {"caseId":"negative-1","kind":"negative","toolName":"write","params":{"path":"/system/file"},"expectedDecision":"block","ruleContext":"<the case's ruleContext object, copied exactly from the behaviorExamplePack>"},
+    {"caseId":"positive-1","kind":"positive","toolName":"write","params":{"path":"/workspace/file"},"expectedDecision":"allow","ruleContext":"<the case's ruleContext object, copied exactly from the behaviorExamplePack>"}
   ],
   "affectedTools": ["write"],
   "generatedAt": "<ISO-8601 timestamp>"
 }
+NOTE: the example above IS the full v2 contract — requiresContextVersion, evidenceRefs, and case-level ruleContext are REQUIRED fields (see the CONTEXT MODE block below), not optional extras.
 
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
@@ -244,7 +247,7 @@ REPAIR FEEDBACK (PRI-509, when \`repairFeedback\` is present):
 ADVERSARIAL CASE VOCABULARY NOTE (apply whenever replay evidence or repair feedback mentions case ids):
 - Case ids such as "v2-unavailable", "v2-truncated", "v2-alias" (and any "v2-*" prefixed id) are INTERNAL EVALUATOR CASE NUMBERING — they describe which adversarial fixture was run, NOT a request to use context-version-2 features.
 - NEVER respond to a case id by declaring \`requiresContextVersion\`, adding case-level \`ruleContext\`, or changing \`expectedDecision\` to satisfy the case NAME. Case names are labels, not instructions.
-- Your output must ALWAYS satisfy the CONTEXT MODE block above (the v2 contract) regardless of which case ids appear in the feedback text.
+- Your output must ALWAYS satisfy the CONTEXT MODE block below (the v2 contract, appended after these constraints) regardless of which case ids appear in the feedback text.
 - The ONLY legal decisions are "allow" and "block"; the ONLY legal field set is the one in OUTPUT FORMAT above plus the v2 CONTEXT MODE obligations (requiresContextVersion: 2, case-level ruleContext, evidenceRefs). Any other field is a contract violation and WILL be rejected.
 
 PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
