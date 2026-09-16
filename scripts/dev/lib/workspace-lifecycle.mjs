@@ -24,6 +24,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { listWorktrees, runGit, sameGitPath } from './git.mjs';
 import { leasePhase, readLease } from './workspace-lease.mjs';
+import { resolveWorktreeRoot } from './worktree-root.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -216,31 +217,64 @@ export async function collectPrIndex(cwd) {
 }
 
 /**
- * Scan the sibling directories of the primary checkout for deregistered
- * worktree shells: a `.git` FILE whose gitdir admin target no longer exists
- * (the ERR-098 / metadata-incident residue class). Report-only — v1 never
- * deletes these.
+ * Scan for deregistered worktree shells: a `.git` FILE whose gitdir admin target
+ * no longer exists (the ERR-098 / metadata-incident residue class).
+ *
+ * PRI-796 additions, both driven by the real incident on the Owner's machine
+ * (Reality Audit §2.4 — `git worktree repair` CANNOT recover a fully deleted
+ * admin entry, so this class is terminal and must be reported accurately):
+ *
+ *   * the shared worktree POOL is scanned as well as the legacy sibling
+ *     location, because residue can appear in either once the pool exists;
+ *   * the PD lease file is read for each shell. It is frequently the ONLY
+ *     surviving record of which task branch the directory belonged to — the
+ *     admin metadata held HEAD/branch/index, and the lease is owner-authored
+ *     evidence that a `git worktree repair` cannot reconstruct.
+ *
+ * Still report-only: nothing here deletes, moves, or repairs.
+ *
+ * @param {string} primaryPath
+ * @param {{poolRoot?: string|null, now?: number}} [opts]
  */
-export function scanResidue(primaryPath) {
-  const parent = path.dirname(primaryPath);
+export function scanResidue(primaryPath, { poolRoot = null, now = Date.now() } = {}) {
   const base = path.basename(primaryPath);
-  const found = [];
-  let entries;
+  const candidates = [];
+
+  // Legacy location: siblings of the primary named `<repo>-*`.
+  const parent = path.dirname(primaryPath);
   try {
-    entries = fs.readdirSync(parent, { withFileTypes: true });
+    for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith(base + '-')) continue;
+      candidates.push(path.join(parent, entry.name));
+    }
   } catch {
-    return found;
+    /* parent unreadable — nothing to report from here */
   }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith(base + '-')) continue;
-    const dir = path.join(parent, entry.name);
+
+  // Pool location: every directory directly inside `<parent>/_worktrees/<repo>`.
+  if (poolRoot) {
+    try {
+      for (const entry of fs.readdirSync(poolRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        candidates.push(path.join(poolRoot, entry.name));
+      }
+    } catch {
+      /* pool does not exist yet — that is the normal fresh state */
+    }
+  }
+
+  const found = [];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'package.json')) === false && !fs.existsSync(path.join(dir, '.git'))) {
+      continue; // not a checkout of any kind
+    }
     const gitFile = path.join(dir, '.git');
     let raw;
     try {
       // Read directly with no stat pre-check (CodeQL file-system-race): a
-      // worktree shell has a .git FILE (readable), while a plain repo
-      // checkout has a .git DIRECTORY (readFileSync throws EISDIR) and a
-      // plain dir has none (ENOENT) — both land in the catch below.
+      // worktree shell has a .git FILE (readable), while a plain repo checkout
+      // has a .git DIRECTORY (readFileSync throws EISDIR) and a plain dir has
+      // none (ENOENT) — both land in the catch below.
       raw = fs.readFileSync(gitFile, 'utf-8');
     } catch {
       continue; // no readable .git file → not a worktree shell — out of scope
@@ -248,11 +282,102 @@ export function scanResidue(primaryPath) {
     const match = /^\s*gitdir:\s*(.+)\s*$/m.exec(raw);
     if (!match) continue;
     const target = match[1].trim();
-    if (!fs.existsSync(target)) {
-      found.push({ path: dir, gitdirTarget: target, reason: 'worktree admin entry missing' });
-    }
+    if (fs.existsSync(target)) continue; // admin metadata intact — a registered worktree
+
+    const lease = readLeaseState(dir, now);
+    found.push({
+      path: dir,
+      gitdirTarget: target,
+      reason: 'worktree admin entry missing',
+      // Recovered evidence — NOT authoritative identity; git's branch is, and for
+      // this class there is no git view left at all.
+      leasePhase: lease.phase,
+      leaseOwner: lease.owner,
+      recoveredBranch: readLeaseBranch(dir),
+    });
   }
   return found;
+}
+
+/** Branch recorded in a surviving lease file, or null. Never throws. */
+function readLeaseBranch(root) {
+  try {
+    const result = readLease(root);
+    return result.exists && result.valid ? result.lease.branch : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Residue taxonomy (SPEC §15). Two classes, and the distinction is deliberately
+ * NARROW:
+ *
+ *   RESIDUE_KNOWN — the task identity is recoverable from owner-authored
+ *     evidence (the lease file) and no writer is active. The directory can be
+ *     discussed by task name instead of by path.
+ *   UNKNOWN       — nothing can be established.
+ *
+ * Both are report-only, and BOTH require an explicit `--ack-unknown` to delete.
+ * That is not an oversight: SPEC §12 makes "status readable" part of provable
+ * safety, and for every residue shell the index is gone, so DIRTINESS IS
+ * UNPROVABLE. A weaker delete gate for RESIDUE_KNOWN would claim a proof we do
+ * not have.
+ *
+ * @returns {{status: 'UNKNOWN', residueClass: 'RESIDUE_KNOWN'|'UNKNOWN', evidence: string[], reasons: string[]}}
+ */
+export function classifyResidue(entry) {
+  const evidence = [];
+  const reasons = [];
+  const branch = entry.recoveredBranch || null;
+
+  evidence.push('worktree admin metadata is missing — git cannot read this directory');
+  if (entry.gitdirTarget) evidence.push('dead gitdir: ' + entry.gitdirTarget);
+  if (branch) evidence.push('task branch recovered from the lease file: ' + branch);
+
+  if (entry.leasePhase === 'active') {
+    reasons.push('an ACTIVE lease is held' + (entry.leaseOwner ? ' by ' + entry.leaseOwner : ''));
+  } else if (entry.leasePhase === 'expired') {
+    evidence.push('lease expired' + (entry.leaseOwner ? ' (last writer ' + entry.leaseOwner + ')' : ''));
+  } else if (entry.leasePhase === 'invalid') {
+    reasons.push('lease file unreadable — inspect manually');
+  }
+
+  if (entry.branchExists === false) reasons.push('task branch no longer exists in the repository');
+  if (entry.completion === 'pr-merged') evidence.push('PR #' + entry.pr.number + ' MERGED');
+  else if (entry.completion === 'ancestry') evidence.push('task branch is an ancestor of origin/main');
+  else reasons.push('completion cannot be proven');
+
+  // Dirtiness is unprovable without the index — always say so, out loud.
+  reasons.push('working-tree dirtiness is UNPROVABLE (the worktree index is gone)');
+
+  const known =
+    Boolean(branch) &&
+    entry.leasePhase !== 'active' &&
+    entry.leasePhase !== 'invalid' &&
+    (entry.completion === 'pr-merged' || entry.completion === 'ancestry');
+
+  return { status: 'UNKNOWN', residueClass: known ? 'RESIDUE_KNOWN' : 'UNKNOWN', evidence, reasons };
+}
+
+/**
+ * Owner-facing state projection (SPEC §12).
+ *
+ * The classifier keeps its long-standing tokens (they are asserted by tests and
+ * referenced by the architecture docs); this maps them onto the four words the
+ * Owner froze, in ONE place. It is a read-model projection over a single source
+ * of truth (P4 explicitly permits derived read models) — not a second state
+ * machine, and no caller may branch on the projected value.
+ */
+export function toOwnerState(status) {
+  switch (status) {
+    case 'CLEANUP_PENDING':
+      return 'PENDING';
+    case 'ORPHAN':
+      return 'UNKNOWN';
+    default:
+      return status;
+  }
 }
 
 function shortBranch(ref) {
@@ -325,6 +450,9 @@ export async function collectWorkspaceState(opts = {}) {
       ancestry: facts.ancestry,
       remoteExists: facts.remoteExists,
       tipDate: facts.tipDate,
+      // PRI-796: the Git-native lock is the second half of writer ownership.
+      locked: Boolean(wt.locked),
+      lockReason: wt.lockReason || null,
       ...leaseFacts(wt.path, now),
     });
   }
@@ -361,12 +489,32 @@ export async function collectWorkspaceState(opts = {}) {
     }
   }
 
-  const residue = opts.includeResidue === false ? [] : scanResidue(primary.path);
+  // Residue shells: report-only, and the ONE class where the lease file is the
+  // surviving evidence of the task identity (Reality Audit §2.4 — git cannot
+  // recover a fully deleted admin entry, so there is nothing to repair).
+  const { root: poolRoot } = resolveWorktreeRoot({ primaryPath: primary.path, env: process.env });
+  let residue = [];
+  if (opts.includeResidue !== false) {
+    residue = scanResidue(primary.path, { poolRoot, now });
+    for (const entry of residue) {
+      const branch = entry.recoveredBranch;
+      if (!branch) continue;
+      const facts = await branchFacts(cwd, branch);
+      entry.branchExists = facts.branchExists;
+      entry.ancestry = facts.ancestry;
+      entry.tipDate = facts.tipDate;
+      const pr = gh.open.get(branch) || gh.merged.get(branch) || null;
+      if (pr) entry.pr = pr;
+      entry.completion = pr && pr.state === 'MERGED' ? 'pr-merged' : facts.ancestry ? 'ancestry' : null;
+    }
+    for (const entry of residue) Object.assign(entry, classifyResidue(entry));
+  }
 
   return {
     cwd,
     now,
     primaryPath: primary.path,
+    poolRoot,
     primaryRecord: records.find((r) => r.kind === 'worktree' && r.isPrimary) || null,
     records,
     residue,

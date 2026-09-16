@@ -89,7 +89,7 @@ export type { RuleHostWriterConfig } from './writers/rule-host-writer.js';
 // Story A (PRI-408): Production gate deps factory — canonical vm-based rule
 // compilation for RuleHostWriter gateDeps. Available to all packages that
 // depend on @principles/core (pd-cli, pd-console, plugin).
-export { createProductionGateDeps } from './production-gate-deps.js';
+export { createProductionGateDeps, compileHardenedRuleEvaluator } from './production-gate-deps.js';
 
 // Story A (PRI-408): Formal approval-completion production service.
 // Replaces demo "approve → direct writer" with structured, idempotent path.

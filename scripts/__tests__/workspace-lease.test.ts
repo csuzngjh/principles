@@ -204,6 +204,41 @@ describe('workspace-lease CLI', () => {
     expect(r.code).toBe(0);
     expect(jsonOut(r.stdout)).toMatchObject({ ok: true, lease: { state: 'active', owner: 'agent-a/PRI-1' } });
   }, 60_000);
+
+  // Round-3 review: the writer block is a CLOSED-set claim (SPEC D4). A
+  // hand-written or tampered lease claiming a label outside WRITER_LABELS is
+  // a second owner namespace sneaking in — the lease must fail closed at
+  // every real boundary (status reports invalid, acquire refuses).
+  it('a writer label outside the closed set makes the lease invalid (status + acquire fail closed)', async () => {
+    const { wt } = await makeTaskWorktree('writer-label', 'work/writer-label');
+    fs.writeFileSync(
+      leaseFile(wt),
+      JSON.stringify(
+        {
+          schema: 'pd-workspace-lease/1',
+          workspace: wt,
+          owner: 'codex:work/writer-label',
+          branch: 'work/writer-label',
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+          writer: { label: 'some-ide', task: 'work/writer-label' },
+        },
+        null,
+        2,
+      ) + '\n',
+      'utf-8',
+    );
+
+    const status = await runDevScript('workspace-lease.mjs', ['status', '--json'], { cwd: wt });
+    expect(status.code).toBe(0);
+    const st = jsonOut(status.stdout) as { lease: { state: string; error?: string } };
+    expect(st.lease.state).toBe('invalid');
+    expect(st.lease.error).toContain('writer.label');
+
+    const acquire = await runDevScript('workspace-lease.mjs', ['acquire', '--owner', 'zcode:PRI-9', '--json'], { cwd: wt });
+    expect(acquire.code).toBe(1);
+    expect((jsonOut(acquire.stdout) as { error: string }).error).toContain('writer.label');
+  }, 60_000);
 });
 
 describe('worktree guard lease rules (check-dev-worktree.mjs)', () => {

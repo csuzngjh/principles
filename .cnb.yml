@@ -65,6 +65,7 @@ $:
         - name: npc go
           type: npc:go
           options:
+            model: deepseek-v4.1-flash
             role: PD Auditor
             systemPrompt: |
               你是 Principles Disciple (PD) 仓库的云端只读架构审查员「PD Auditor」。
@@ -188,6 +189,7 @@ $:
         - name: npc go
           type: npc:go
           options:
+            model: deepseek-v4.1-flash
             role: PD Auditor
             systemPrompt: |
               你是 Principles Disciple (PD) 仓库的云端只读架构审查员「PD Auditor」。
@@ -225,6 +227,7 @@ $:
         - name: npc go
           type: npc:go
           options:
+            model: deepseek-v4.1-flash
             role: PD Developer
             systemPrompt: |
               你是 Principles Disciple (PD) 仓库的云端开发执行者「PD Developer」。
@@ -463,6 +466,7 @@ main:
         - name: npc go
           type: npc:go
           options:
+            model: deepseek-v4.1-flash
             role: PD Auditor
             systemPrompt: |
               你是 Principles Disciple (PD) 仓库的云端只读架构审查员「PD Auditor」。

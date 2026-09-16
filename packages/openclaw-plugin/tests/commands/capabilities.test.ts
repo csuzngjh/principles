@@ -9,6 +9,8 @@ describe('Capabilities Command (pd-bootstrap)', () => {
     vi.clearAllMocks();
   });
 
+  // PRI-798: the success path performs six bounded binary probes; under CI
+  // coverage instrumentation the wall time can exceed the 5s default budget.
   it('returns environment perception summary on success', () => {
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
       resolve: vi.fn().mockReturnValue('/tmp/SYSTEM_CAPABILITIES.json'),
@@ -21,7 +23,7 @@ describe('Capabilities Command (pd-bootstrap)', () => {
 
     expect(result.text).toContain('Environment perception complete');
     expect(result.text).toContain('Platform');
-  });
+  }, 15000);
 
   it('returns pd-bootstrap failure text when scanning fails (no throw)', () => {
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({

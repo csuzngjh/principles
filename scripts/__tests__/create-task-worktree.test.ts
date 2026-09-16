@@ -1,5 +1,11 @@
 // Real-git integration tests for scripts/dev/create-task-worktree.mjs.
 // Fixtures use a local bare "origin" so the fetch/base logic runs for real.
+//
+// PRI-796 updated the PATH contract (git-10) and the adhoc identity (git-11):
+// worktrees now land in the derived pool, and adhoc tasks carry a random suffix.
+// Cases that only care about creation pass --skip-bootstrap, because the
+// bootstrap → ready path has its own dedicated coverage and would otherwise run
+// a multi-minute npm install inside every one of these tests.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,6 +14,7 @@ import { normalizeGitPath } from '../dev/lib/git.mjs';
 import {
   commitFile,
   git,
+  poolRootFor,
   removeFixture,
   runDevScript,
   setupOriginFixture,
@@ -30,13 +37,32 @@ afterAll(() => {
 });
 
 describe('create-task-worktree', () => {
-  it('creates a task worktree + ai/ branch based on the latest origin/main', async () => {
-    const r = await runDevScript('create-task-worktree.mjs', ['PRI-999', 'fix-thing', '--json'], { cwd: primary });
+  it('creates a task worktree + ai/ branch based on the latest origin/main, inside the pool', async () => {
+    const r = await runDevScript('create-task-worktree.mjs', ['PRI-999', 'fix-thing', '--skip-bootstrap', '--json'], {
+      cwd: primary,
+    });
     expect(r.code).toBe(0);
-    const out = JSON.parse(r.stdout) as { ok: boolean; worktree: string; branch: string; base: string };
+    const out = JSON.parse(r.stdout) as {
+      ok: boolean;
+      state: string;
+      worktree: string;
+      branch: string;
+      base: string;
+      pool: { root: string };
+    };
     expect(out.ok).toBe(true);
+    expect(out.state).toBe('CREATED');
     expect(out.branch).toBe('ai/PRI-999-fix-thing');
-    expect(normalizeGitPath(out.worktree)).toBe(
+
+    // git-10: the pool is DERIVED from the primary, and the directory name does
+    // not repeat the repo or branch namespace. (Both sides go through
+    // normalizeGitPath: os.tmpdir() can hand back an 8.3 short name while the
+    // tool reports the expanded one — the ERR-090 class.)
+    const pool = poolRootFor(primary);
+    expect(normalizeGitPath(out.pool.root)).toBe(normalizeGitPath(pool));
+    expect(normalizeGitPath(out.worktree)).toBe(normalizeGitPath(path.join(pool, 'PRI-999-fix-thing')));
+    // The legacy sibling layout must no longer be produced.
+    expect(normalizeGitPath(out.worktree)).not.toBe(
       normalizeGitPath(path.join(path.dirname(primary), path.basename(primary) + '-PRI-999-fix-thing'))
     );
 
@@ -52,35 +78,75 @@ describe('create-task-worktree', () => {
     expect(headInWorktree).toBe(mainSha);
   }, 120_000);
 
+  it('honours PD_WORKTREE_ROOT as an override for the pool', async () => {
+    const custom = path.join(root, 'custom-pool');
+    const r = await runDevScript('create-task-worktree.mjs', ['PRI-960', 'custom-pool', '--skip-bootstrap', '--json'], {
+      cwd: primary,
+      env: { PD_WORKTREE_ROOT: custom },
+    });
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout) as { worktree: string; pool: { root: string; source: string } };
+    expect(out.pool.source).toBe('env');
+    expect(normalizeGitPath(out.pool.root)).toBe(normalizeGitPath(custom));
+    expect(normalizeGitPath(out.worktree)).toBe(normalizeGitPath(path.join(custom, 'PRI-960-custom-pool')));
+    expect(fs.existsSync(out.worktree)).toBe(true);
+  }, 120_000);
+
   it('refuses a duplicate branch name (branch collision)', async () => {
-    const r = await runDevScript('create-task-worktree.mjs', ['PRI-999', 'fix-thing', '--json'], { cwd: primary });
+    const r = await runDevScript('create-task-worktree.mjs', ['PRI-999', 'fix-thing', '--skip-bootstrap', '--json'], {
+      cwd: primary,
+    });
     expect(r.code).toBe(1);
     const out = JSON.parse(r.stdout) as { ok: boolean; error: string };
     expect(out.ok).toBe(false);
     expect(out.error).toContain('already exists');
   }, 60_000);
 
-  it('refuses when the target worktree path already exists', async () => {
-    const collision = path.join(path.dirname(primary), path.basename(primary) + '-PRI-998-path-clash');
+  it('classifies an existing plain directory instead of collapsing to "already exists"', async () => {
+    // SPEC §6.1 D: the operator must get a real diagnosis. The directory is
+    // created where the tool would put the worktree — inside the pool.
+    const collision = path.join(poolRootFor(primary), 'PRI-998-path-clash');
     fs.mkdirSync(collision, { recursive: true });
-    const r = await runDevScript('create-task-worktree.mjs', ['PRI-998', 'path-clash', '--json'], { cwd: primary });
+    fs.writeFileSync(path.join(collision, 'something-of-mine.txt'), 'not yours\n', 'utf-8');
+
+    const r = await runDevScript('create-task-worktree.mjs', ['PRI-998', 'path-clash', '--skip-bootstrap', '--json'], { cwd: primary });
     expect(r.code).toBe(1);
-    const out = JSON.parse(r.stdout) as { ok: boolean; error: string };
-    expect(out.error).toContain('already exists');
+    const out = JSON.parse(r.stdout) as { ok: boolean; error: string; nextAction: string };
+    expect(out.error).toContain('plain-directory');
     // The pre-existing directory is untouched.
-    expect(fs.existsSync(collision)).toBe(true);
+    expect(fs.readFileSync(path.join(collision, 'something-of-mine.txt'), 'utf-8')).toBe('not yours\n');
   }, 60_000);
 
-  it('maps the adhoc task id to a dated branch prefix', async () => {
-    const r = await runDevScript('create-task-worktree.mjs', ['adhoc', 'spike', '--json'], { cwd: primary });
-    expect(r.code).toBe(0);
-    const out = JSON.parse(r.stdout) as { branch: string };
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    expect(out.branch).toBe('ai/adhoc-' + today + '-spike');
+  it('classifies a residue shell and points at the ack workflow', async () => {
+    const residue = path.join(poolRootFor(primary), 'PRI-997-residue-clash');
+    fs.mkdirSync(residue, { recursive: true });
+    fs.writeFileSync(path.join(residue, '.git'), 'gitdir: ' + path.join(primary, '.git', 'worktrees', 'gone') + '\n', 'utf-8');
+
+    const r = await runDevScript('create-task-worktree.mjs', ['PRI-997', 'residue-clash', '--skip-bootstrap', '--json'], { cwd: primary });
+    expect(r.code).toBe(1);
+    const out = JSON.parse(r.stdout) as { error: string; nextAction: string };
+    expect(out.error).toContain('residue');
+    expect(out.nextAction).toContain('--ack-unknown');
+    // Nothing was deleted.
+    expect(fs.existsSync(residue)).toBe(true);
+  }, 60_000);
+
+  it('gives adhoc tasks a dated identity with a random suffix so same-day agents cannot collide', async () => {
+    // PRI-796 review: the CHILD stamps the UTC date; a run crossing UTC midnight
+    // would reject the child's (correct) earlier stamp if "today" were computed
+    // only afterwards. Accept either boundary.
+    const todayBefore = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const a = await runDevScript('create-task-worktree.mjs', ['adhoc', 'spike', '--skip-bootstrap', '--json'], { cwd: primary });
+    const todayAfter = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    expect(a.code).toBe(0);
+    const out = JSON.parse(a.stdout) as { branch: string; worktree: string };
+    expect(out.branch).toMatch(new RegExp('^ai/adhoc-(' + todayBefore + '|' + todayAfter + ')-spike-[0-9a-f]{6}$'));
+    // Branch and directory stay the same identity.
+    expect(path.basename(out.worktree)).toBe(out.branch.replace(/^ai\//, ''));
   }, 60_000);
 
   it('rejects invalid slugs (must be lowercase dir-safe)', async () => {
-    const r = await runDevScript('create-task-worktree.mjs', ['PRI-997', 'Bad_Slug', '--json'], { cwd: primary });
+    const r = await runDevScript('create-task-worktree.mjs', ['PRI-996', 'Bad_Slug', '--skip-bootstrap', '--json'], { cwd: primary });
     expect(r.code).toBe(1);
     const out = JSON.parse(r.stdout) as { ok: boolean; error: string };
     expect(out.error).toContain('Invalid slug');
@@ -89,7 +155,7 @@ describe('create-task-worktree', () => {
   it('fails loudly when the base ref cannot be resolved', async () => {
     const r = await runDevScript(
       'create-task-worktree.mjs',
-      ['PRI-996', 'missing-base', '--base', 'origin/nope', '--offline', '--json'],
+      ['PRI-995', 'missing-base', '--base', 'origin/nope', '--offline', '--skip-bootstrap', '--json'],
       { cwd: primary }
     );
     expect(r.code).toBe(1);
@@ -104,22 +170,25 @@ describe('create-task-worktree', () => {
     // it afterwards or every later test in this fixture loses its origin.
     await git(brokenRemote, 'remote', 'remove', 'origin');
 
-    const r = await runDevScript('create-task-worktree.mjs', ['PRI-995', 'no-fetch', '--json'], { cwd: brokenRemote });
+    const r = await runDevScript('create-task-worktree.mjs', ['PRI-994', 'no-fetch', '--skip-bootstrap', '--json'], { cwd: brokenRemote });
     expect(r.code).toBe(1);
-    const out = JSON.parse(r.stdout) as { error: string; nextAction: string };
+    const out = JSON.parse(r.stdout) as { error: string; nextAction: string; code: string };
     expect(out.error).toContain('fetch');
     expect(out.nextAction).toContain('--offline');
+    // A network/credential failure is an ENVIRONMENT problem, not a check
+    // failure — the taxonomy exists so this is not mistaken for a bad change.
+    expect(out.code).toBe('ENVIRONMENT_INVALID');
 
     await git(brokenRemote, 'remote', 'add', 'origin', origin);
   }, 60_000);
 
   it('creates a second concurrent task without disturbing the first (isolation)', async () => {
-    const r = await runDevScript('create-task-worktree.mjs', ['PRI-994', 'second', '--json'], { cwd: primary });
+    const r = await runDevScript('create-task-worktree.mjs', ['PRI-993', 'second', '--skip-bootstrap', '--json'], { cwd: primary });
     expect(r.code).toBe(0);
     const out = JSON.parse(r.stdout) as { worktree: string };
 
     // First task's worktree is untouched and still registered.
-    const first = path.join(path.dirname(primary), path.basename(primary) + '-PRI-999-fix-thing');
+    const first = path.join(poolRootFor(primary), 'PRI-999-fix-thing');
     expect(fs.existsSync(first)).toBe(true);
     await commitFile(first, 'task-a.txt', 'a\n', 'task A commit');
     const branchA = (await git(first, 'rev-parse', '--abbrev-ref', 'HEAD')).trim();

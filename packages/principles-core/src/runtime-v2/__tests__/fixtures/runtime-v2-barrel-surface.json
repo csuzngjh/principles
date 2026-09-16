@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1721,
+ "count": 1722,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -1403,6 +1403,7 @@
   "collectOpenClawPromotionChecks",
   "collectOwnerDecisionFacts",
   "collectSync",
+  "compileHardenedRuleEvaluator",
   "computeArtifactContentHash",
   "computeArtifactDigest",
   "computeBehaviorFacts",

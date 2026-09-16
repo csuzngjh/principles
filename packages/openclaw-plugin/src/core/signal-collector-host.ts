@@ -577,13 +577,24 @@ export class SignalCollectorHost {
  * 从 .pd/config.yaml 的 signalCollector runtimeProfile 构造 SignalLlmClassifier。
  * 完成配置单轨化(spec §3.3 决策3):统一走 .pd/config.yaml,移除 empathy 的 workflows.yaml 双轨。
  *
- * 返回 null 的情况(走纯关键词降级,rc-9 不静默):
- * - feature flag signal_collector 关闭
- * - runtimeProfile 未配置 / apiKeyEnv 缺失
- * - profile 是 openclaw 类型(observer 不支持)
+ * 返回 null 的情况(走纯关键词降级):
+ * - feature flag signal_collector 关闭（Owner 刻意关闭 → debug 级，不算告警）
+ * - runtimeProfile 未配置 / apiKeyEnv 缺失 / profile 是 openclaw 类型
+ *   → PRI-797: **WARN 级显性提醒**（每 workspace 一次，rc-9 不静默）——
+ *     语义确认链（歧义词纠正判定/批量确认/TP 记录）此刻全部停摆，
+ *     Owner 必须可感知，而不是翻 7 天滚动日志才能发现。
  *
  * 这是 Task 11 的最后一块:让本地 LLM(LMStudio)真正参与检测。
  */
+
+/** 每个 workspace 只告警一次（进程生命周期内），避免每次构建 host 都刷屏。 */
+const signalClassifierWarnedWorkspaces = new Set<string>();
+
+/** 测试专用：清空告警去重状态。 */
+export function _resetSignalClassifierWarnState(): void {
+  signalClassifierWarnedWorkspaces.clear();
+}
+
 export function createSignalLlmClassifierFromConfig(
   wctx: WorkspaceContext,
   logger?: Pick<PluginLogger, 'info' | 'warn' | 'error' | 'debug'>,
@@ -601,8 +612,15 @@ export function createSignalLlmClassifierFromConfig(
       return null;
     }
     if (cfg.readiness !== 'not_ready' && cfg.readiness !== 'ready') {
-      // needs_setup / disabled / config_malformed → 降级
-      logger?.debug?.(`[PD:Signal] LLM classifier not ready (${cfg.readiness}): ${cfg.reason}. ${cfg.nextAction}`);
+      // PRI-797: needs_setup / config_malformed = 配置不完整，语义确认链停摆——
+      // 这是 Owner 必须看见的状态（ERR-101 静默失败家族），升 WARN 并去重。
+      const message = `[PD:Signal] 语义纠正检测降级为关键词-only (${cfg.readiness}): ${cfg.reason}. ${cfg.nextAction}`;
+      const warnKey = `${wctx.workspaceDir}:${cfg.readiness}`;
+      if (!signalClassifierWarnedWorkspaces.has(warnKey)) {
+        signalClassifierWarnedWorkspaces.add(warnKey);
+        logger?.warn?.(message);
+        SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CLASSIFIER_NEEDS_SETUP', message);
+      }
       return null;
     }
     if (!cfg.provider || !cfg.model || !cfg.apiKeyEnv) {
