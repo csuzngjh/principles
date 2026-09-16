@@ -98,6 +98,15 @@ function fakeInstallResult(workspaceDir: string, overrides: Partial<InstallResul
   } as unknown as InstallResult;
 }
 
+/** Continue the SAME transaction the way the real installer does: staged → … → confirmed. */
+function confirmThroughInstaller(journal: InstallerJournal | undefined): void {
+  const handle = journal as InstallerJournal;
+  journalInstallerTransition(handle, handle.lastState, 'staged', 'test: runtime components installed');
+  journalInstallerTransition(handle, handle.lastState, 'probed', 'test: console verified');
+  journalInstallerTransition(handle, handle.lastState, 'activated', 'test: host installers completed');
+  journalInstallerTransition(handle, handle.lastState, 'confirmed', 'test: backup cleaned up');
+}
+
 describe('ReleaseManager.apply — orchestration through installer + journal (PRI-698 Phase 1)', () => {
   it('happy path: one journal file, signed identity, full chain planned → … → confirmed', async () => {
     const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
@@ -157,11 +166,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     // authority on that outcome — this layer must not re-derive it).
     const notice = 'Gateway 未自动重启，请手动启动：openclaw gateway start (openclaw gateway start failed: spawn ENOENT)';
     installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
-      const handle = journal as InstallerJournal;
-      journalInstallerTransition(handle, handle.lastState, 'staged', 'test: runtime components installed');
-      journalInstallerTransition(handle, handle.lastState, 'probed', 'test: console verified');
-      journalInstallerTransition(handle, handle.lastState, 'activated', 'test: host installers completed');
-      journalInstallerTransition(handle, handle.lastState, 'confirmed', 'test: backup cleaned up');
+      confirmThroughInstaller(journal);
       return fakeInstallResult(options.workspaceDir, { gatewayNotice: notice });
     });
 
@@ -181,11 +186,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
 
     installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
-      const handle = journal as InstallerJournal;
-      journalInstallerTransition(handle, handle.lastState, 'staged', 'test: runtime components installed');
-      journalInstallerTransition(handle, handle.lastState, 'probed', 'test: console verified');
-      journalInstallerTransition(handle, handle.lastState, 'activated', 'test: host installers completed');
-      journalInstallerTransition(handle, handle.lastState, 'confirmed', 'test: backup cleaned up');
+      confirmThroughInstaller(journal);
       return fakeInstallResult(options.workspaceDir);
     });
 

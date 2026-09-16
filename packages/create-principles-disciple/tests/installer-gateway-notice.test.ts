@@ -27,7 +27,7 @@ import * as os from 'os';
 import { EventEmitter } from 'events';
 import { install } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
-import { setLanguage } from '../src/i18n.js';
+import { setLanguage, t } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
 import { appendJournalTransition } from '../src/update/transaction-journal.js';
 
@@ -48,7 +48,9 @@ vi.mock('child_process', async (importOriginal) => {
       };
       child.stdout = new EventEmitter();
       child.stderr = new EventEmitter();
-      child.pid = process.pid;
+      // Review round: a real pid would let any stray process.kill(pid) path
+      // terminate the test runner itself — keep the fake clearly fake.
+      child.pid = 424242;
       child.kill = () => true;
       child.unref = () => child;
       return child;
@@ -228,7 +230,10 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     // never a failure, never a rollback trigger.
     expect(result.success).toBe(true);
     expect(result.gatewayNotice).toBeDefined();
-    expect(result.gatewayNotice).toContain('openclaw gateway start');
+    // Review round: anchor on the i18n copy itself, not a substring the
+    // injected error happens to share — dropping the reusable copy source
+    // must fail this test, and the manual recovery action must lead.
+    expect(result.gatewayNotice!.startsWith(t('gateway_restart_failed'))).toBe(true);
     expect(result.gatewayNotice).toContain('spawn openclaw ENOENT');
     expect(restartOpenClawGateway).toHaveBeenCalledTimes(1);
   });

@@ -3399,16 +3399,13 @@ export async function install(
         if (!quiet) logger.success(t('gateway_restarted'));
       } else {
         logger.error(`${t('gateway_restart_failed')} ${restartRes.error ?? ''}`);
-        // PRI-726: the restart failure must reach the Owner, not only this
-        // log (rc-9). The pending result object is still mutable here —
-        // finally runs before the caller sees the return value — so the
-        // degraded-success notice rides the SAME object out of install().
-        // ReleaseManager.apply propagates it verbatim as ApplyOutcome.
-        // gatewayNotice → the Console `gatewayNotice` contract (PRI-723
-        // legacy parity). A FAILED install is never wrapped in a
-        // success-shaped notice: it keeps its own error/nextAction (failure
-        // isolation — the payload did not commit, so "degraded success"
-        // would be a lie).
+        // PRI-726 (rc-9): the failure must reach the Owner, not only this log.
+        // The pending result is still mutable here — finally runs before the
+        // caller sees the return value — so the degraded-success notice rides
+        // the SAME object out; ReleaseManager/Console propagate it verbatim
+        // as `gatewayNotice`. A FAILED install is never wrapped in a
+        // success-shaped notice: the payload did not commit, so "degraded
+        // success" would be a lie (failure isolation).
         if (pendingResult?.success) {
           pendingResult.gatewayNotice = restartRes.error
             ? `${t('gateway_restart_failed')} (${restartRes.error})`
