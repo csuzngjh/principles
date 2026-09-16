@@ -20,6 +20,8 @@
     "check:telemetry-events": "node scripts/check-telemetry-events.cjs",
     "error:context": "node scripts/error-context.mjs",
     "error:hotspots": "node scripts/check-error-handbook.cjs --hotspots",
+    "error:record": "node scripts/error-records.cjs",
+    "error:migrate": "node scripts/error-records-migrate.cjs",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.js all",
     "check:runtime-contract": "node scripts/check-runtime-contract.js",
     "check:runtime-pin": "node plugins/principles-disciple/scripts/verify-pinned-runtime-capability.cjs --install",
