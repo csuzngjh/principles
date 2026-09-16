@@ -59,6 +59,7 @@ const ROOT_ROLES = ['root', 'timestamp', 'snapshot', 'targets'] as const;
 export type TrustRootValidationReason =
   | 'trust_root_not_json'
   | 'trust_root_envelope_invalid'
+  | 'trust_root_path_escape'
   | 'trust_root_role_missing'
   | 'trust_root_role_threshold_invalid'
   | 'trust_root_key_missing'
@@ -275,7 +276,7 @@ export function provisionBootstrapTrustRoot(options: ProvisionTrustRootOptions):
   const canonicalTrustRootPath = path.join(pdHomeRoot, 'trust', TRUST_ROOT_FILENAME);
   if (trustRootPath !== canonicalTrustRootPath || !trustRootPath.startsWith(pdHomeRoot + path.sep)) {
     throw new TrustRootValidationError(
-      'trust_root_not_json',
+      'trust_root_path_escape',
       `The trust root path escapes the PD home (${pdHomeRoot}): ${trustRootPath}`,
       'Do not install this package. The PD home layout is corrupt; re-run the official installer.',
     );
@@ -287,7 +288,7 @@ export function provisionBootstrapTrustRoot(options: ProvisionTrustRootOptions):
   // (a fixed relative segment makes this invariant explicit).
   if (!payloadTrustRootPath.startsWith(payloadRoot + path.sep)) {
     throw new TrustRootValidationError(
-      'trust_root_not_json',
+      'trust_root_path_escape',
       `The payload trust root path escapes the payload root: ${payloadTrustRootPath}`,
       'Do not install this package. The payload layout is corrupt; re-build the installer payload.',
     );
@@ -318,7 +319,7 @@ export function provisionBootstrapTrustRoot(options: ProvisionTrustRootOptions):
   const stagingPath = path.join(paths.trustDir, stagingName);
   if (!stagingPath.startsWith(pdHomeRoot + path.sep)) {
     throw new TrustRootValidationError(
-      'trust_root_not_json',
+      'trust_root_path_escape',
       `The trust root staging path escapes the PD home (${pdHomeRoot}): ${stagingPath}`,
       'Do not install this package. The PD home layout is corrupt; re-run the official installer.',
     );

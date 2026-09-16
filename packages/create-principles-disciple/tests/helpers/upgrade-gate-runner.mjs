@@ -155,7 +155,7 @@ try {
   } else if (mode === 'console') {
     await runConsole();
   } else {
-    throw new Error(`PD_GATE_MODE must be "install", "pd-version" or "console", got: ${JSON.stringify(mode)}`);
+    throw new Error(`PD_GATE_MODE must be "install", "pd-version", "restamp" or "console", got: ${JSON.stringify(mode)}`);
   }
 } catch (error) {
   process.stderr.write(`upgrade-gate-runner: ${error instanceof Error ? error.message : String(error)}\n`);

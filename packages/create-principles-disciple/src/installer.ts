@@ -114,7 +114,20 @@ export function ensureConversationAccess(config: Record<string, unknown>): Recor
   return result;
 }
 
-const INSTALL_TIMEOUT_MS = parseInt(process.env.PD_INSTALL_TIMEOUT_MS || '300000', 10);
+// rc-3: a malformed PD_INSTALL_TIMEOUT_MS must fall back LOUD to the default —
+// a NaN timeout would make every execNpm fail instantly (same NaN-timeout
+// class as the console's PD_UPDATE_APPLY_FULL_TIMEOUT_MS, review 2026-09-17).
+function resolveInstallTimeoutMs(): number {
+  const raw = process.env.PD_INSTALL_TIMEOUT_MS;
+  if (raw === undefined || raw.trim().length === 0) return 300000;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    logger.warn(`PD_INSTALL_TIMEOUT_MS=${JSON.stringify(raw)} is not a positive number — using the 300000ms default.`);
+    return 300000;
+  }
+  return parsed;
+}
+const INSTALL_TIMEOUT_MS = resolveInstallTimeoutMs();
 
 // 超时常量
 const PD_CLI_VERIFICATION_TIMEOUT_MS = 30_000;

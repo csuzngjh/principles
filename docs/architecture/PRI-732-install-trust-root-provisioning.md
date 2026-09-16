@@ -74,6 +74,14 @@ byte-identical**: tuf-js verifies the chain against the pinned root's keys, so
 a long-lived pinned root (same key, version 1) verifies publications whose
 per-release roots carry shorter expiries (verified against tuf-js 3.1.0).
 
+**Rollback boundary (documented behavior, review 2026-09-17):** the anchor
+provisioning runs inside the install transaction's rollback window, but
+`restoreBackup` restores only the runtime/extension trees — a freshly pinned
+`trust/root.json` SURVIVES a rolled-back install. This is deliberate under the
+keep-anchor semantics above (keeping an anchor is not rotation; the next
+install hits the idempotent `already-pinned` path), but it means the anchor
+write is positionally transaction-aligned, not literally transactional.
+
 ## 5. Publish-side guard
 
 `verifySigningKeyMatchesPinnedRoot` (release-metadata-publisher.ts) refuses a
