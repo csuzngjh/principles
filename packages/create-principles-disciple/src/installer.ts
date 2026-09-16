@@ -2265,6 +2265,13 @@ function probeAutolaunchHealth(port: number, timeoutMs = 1500): Promise<boolean>
  * EP-06: reuses pd-cli's handleConsoleOpen via the CLI entry — no new launcher.
  */
 async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: string; fallbackAction?: string }> {
+  // Test/smoke seam (mirrors PD_SKIP_GLOBAL_SHIM): isolated installs (release
+  // smoke, upgrade gate) must not spawn a detached console that holds the
+  // installed files open or pops a browser.
+  if (process.env.PD_SKIP_CONSOLE_AUTOLAUNCH === '1' || process.env.PD_SKIP_CONSOLE_AUTOLAUNCH === 'true') {
+    logger.info('Skipping console auto-launch (PD_SKIP_CONSOLE_AUTOLAUNCH set).');
+    return {};
+  }
   const pdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
   if (!existsSync(pdCliEntry)) {
     return { fallbackAction: `pd console open --workspace "${workspaceDir}" --no-auth (auto-launch skipped: pd CLI entry not found)` };
