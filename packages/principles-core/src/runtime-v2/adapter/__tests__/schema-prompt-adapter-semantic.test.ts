@@ -20,6 +20,7 @@ import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
 import { DiagRootCauseOutputV1Schema } from '../../diagnostician/diag-rootcause-output.js';
 import { DiagDistillerOutputV1Schema } from '../../diagnostician/diag-distiller-output.js';
 import { ARTIFICER_PROTOCOL_INSTRUCTION } from '../../internalization/artificer-prompt-builder.js';
+import { validateRuleContextV2 } from '../../internalization/rule-context-v2.js';
 
 const adapter = new DefaultSchemaPromptAdapter();
 
@@ -95,10 +96,25 @@ describe('PRI-817: artificer OUTPUT FORMAT example carries the v2 obligations', 
     expect(instruction).toContain('"evidenceRefs":');
   });
 
-  it('every goldenTraceCases example entry declares case-level ruleContext', () => {
-    const casesBlock = instruction.slice(instruction.indexOf('"goldenTraceCases"'), instruction.indexOf('"affectedTools"'));
-    expect(casesBlock).toContain('"ruleContext"');
-    expect(casesBlock.match(/"ruleContext"/g)?.length).toBeGreaterThanOrEqual(2);
+  it('OUTPUT FORMAT block is parseable JSON and every example ruleContext passes validateRuleContextV2', () => {
+    // PRI-817 review (817-1): the hand-written example itself must be
+    // contract-legal — a placeholder string for an object field would be
+    // family-1 relapse in the new fields. Parse the whole block and run each
+    // example ruleContext through the production validator.
+    const start = instruction.indexOf('{', instruction.indexOf('OUTPUT FORMAT'));
+    const end = instruction.indexOf('\nNOTE:', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const parsed = JSON.parse(instruction.slice(start, end)) as {
+      goldenTraceCases: { ruleContext?: unknown }[];
+    };
+    expect(Array.isArray(parsed.goldenTraceCases)).toBe(true);
+    expect(parsed.goldenTraceCases.length).toBeGreaterThanOrEqual(2);
+    for (const tc of parsed.goldenTraceCases) {
+      expect(tc.ruleContext, 'case-level ruleContext must be present in the example').toBeDefined();
+      const result = validateRuleContextV2(tc.ruleContext);
+      expect(result.valid, `example ruleContext must be validator-legal — errors: ${result.errors.join('; ')}`).toBe(true);
+    }
   });
 
   it('CONTEXT MODE is referenced by its true position (below, not above)', () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CorrectionObserverResult } from '@principles/core/runtime-v2';
 
 // Shared mock objects so tests can mutate them after vi.mock runs
-const mockLearner = { add: vi.fn(), updateWeight: vi.fn(), remove: vi.fn(), getStore: vi.fn(() => ({ keywords: [] })) };
+const mockLearner = { add: vi.fn(), updateWeight: vi.fn(), remove: vi.fn(), recordFalsePositive: vi.fn(), recordTruePositive: vi.fn(), getStore: vi.fn(() => ({ keywords: [] })) };
 const mockDb = { listUserTurnsForSession: vi.fn(() => []), listRecentSessions: vi.fn(() => []) };
 
 // Mock the CorrectionCueLearner dependency
@@ -69,6 +69,94 @@ describe('KeywordOptimizationService', () => {
       const result: CorrectionObserverResult = { updated: true, updates: undefined as any, summary: '' };
       service.applyResult(result);
       expect(mockLearner.add).not.toHaveBeenCalled();
+    });
+
+    // ── PRI-812 C: FP 记录独立于 store mutations（earned-high 降级闭环的入口）──
+    // observer 的输出契约允许 "updated=false 但 fpTerms 非空"（只报误报、不建议
+    // 增删改）。这正是 earned high 词项唯一的自动反证来源——若被 updated 门吞掉，
+    // learned cue 升 high 后永远无法降级。
+    it('PRI-812: records FP from an FP-only verdict (updated=false, no updates)', () => {
+      const result: CorrectionObserverResult = {
+        updated: false,
+        updates: {},
+        fpTerms: ['learned-term'],
+        fpAnalysisStatus: 'completed',
+        summary: 'no store mutations, but learned-term keeps firing on non-corrections',
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledWith('learned-term');
+    });
+
+    it('PRI-812: records FP alongside store mutations (updated=true)', () => {
+      const result: CorrectionObserverResult = {
+        updated: true,
+        updates: { 'another-term': { action: 'update', weight: 0.3, reasoning: 'lower weight' } },
+        fpTerms: ['learned-term'],
+        fpAnalysisStatus: 'completed',
+        summary: 'mixed verdict',
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.updateWeight).toHaveBeenCalledWith('another-term', 0.3);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledWith('learned-term');
+    });
+
+    it('PRI-812: fpAnalysisStatus=skipped never records FPs (no verdict, no fabricated evidence)', () => {
+      const result: CorrectionObserverResult = {
+        updated: false,
+        updates: {},
+        fpTerms: ['learned-term'],
+        fpAnalysisStatus: 'skipped',
+        summary: 'trajectory empty, no analysis performed',
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.recordFalsePositive).not.toHaveBeenCalled();
+    });
+
+    it('PRI-812: normalizes fpTerms (trim/lowercase/dedupe) before recording', () => {
+      const result: CorrectionObserverResult = {
+        updated: false,
+        updates: {},
+        fpTerms: ['  Learned-Term ', 'learned-term', ''],
+        fpAnalysisStatus: 'completed',
+        summary: 'duplicated fp entries',
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledTimes(1);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledWith('learned-term');
+    });
+
+    it('PRI-812 safety: recordFalsePositive throwing does not block remaining terms (rc-9)', () => {
+      mockLearner.recordFalsePositive.mockImplementation((term: string) => {
+        if (term === 'bad-term') throw new Error('store flush failed');
+      });
+      const result: CorrectionObserverResult = {
+        updated: false,
+        updates: {},
+        fpTerms: ['bad-term', 'good-term'],
+        fpAnalysisStatus: 'completed',
+        summary: 'one term fails, the batch must continue',
+      } as any;
+      expect(() => service.applyResult(result)).not.toThrow();
+      // 两条都被尝试：失败条目只告警，不中断循环
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledTimes(2);
+      expect(mockLearner.recordFalsePositive).toHaveBeenCalledWith('good-term');
+    });
+
+    it('safety: a throwing store mutation is logged and skipped, batch continues', () => {
+      mockLearner.remove.mockImplementation(() => {
+        throw new Error('keyword not found');
+      });
+      const result: CorrectionObserverResult = {
+        updated: true,
+        updates: {
+          'ghost-term': { action: 'remove', reasoning: 'stale entry' },
+          'other-term': { action: 'add', weight: 0.5, reasoning: 'new pattern' },
+        },
+        summary: 'first op fails, second still applied',
+      } as any;
+      expect(() => service.applyResult(result)).not.toThrow();
+      expect(mockLearner.remove).toHaveBeenCalledWith('ghost-term');
+      expect(mockLearner.add).toHaveBeenCalledWith({ term: 'other-term', weight: 0.5, source: 'llm' });
     });
   });
 

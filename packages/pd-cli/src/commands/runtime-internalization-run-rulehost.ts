@@ -314,6 +314,9 @@ function formatTextOutput(result: RuleHostPipelineResult): string {
   lines.push('');
   lines.push(`ruleArtifactId: ${result.ruleArtifactId ?? '(none)'}`);
   lines.push(`principleArtifactId: ${result.principleArtifactId ?? '(none)'}`);
+  if (result.approvalId) {
+    lines.push(`approvalId: ${result.approvalId}`);
+  }
   if (result.degradationReason) {
     lines.push(`degradationReason: ${result.degradationReason}`);
   }
@@ -322,7 +325,11 @@ function formatTextOutput(result: RuleHostPipelineResult): string {
     lines.push('Next: the rule artifact is validated and WAITING for owner review. This is NOT owner approval.');
   } else if (result.decision === 'text_principle_only') {
     lines.push('');
-    lines.push('Next: code-rule capability is OFF. Principle artifact remains for prompt-channel fallback.');
+    if (result.approvalId) {
+      lines.push(`Next: code-rule capability is OFF. Text principle enqueued for Owner review in the approval queue (${result.approvalId}). Approve it in the Console.`);
+    } else {
+      lines.push('Next: code-rule capability is OFF and the text principle could NOT be enqueued. Check degradationReason.');
+    }
   } else {
     lines.push('');
     lines.push('Next: generation rejected. Check degradationReason. Principle artifact may still exist for prompt-channel fallback.');
@@ -642,7 +649,9 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
           status: result.decision,
           ...result,
           nextAction: result.decision === 'text_principle_only'
-            ? 'code-rule capability OFF; principle artifact available for prompt-channel fallback.'
+            ? (result.approvalId
+              ? `code-rule capability OFF; text principle enqueued for Owner review (${result.approvalId}). Approve it in the Console.`
+              : 'code-rule capability OFF and approval enqueue failed; check degradationReason for the manual enqueue command.')
             : 'Check degradationReason; principle artifact may still exist for prompt-channel fallback.',
         };
     process.stdout.write(JSON.stringify(output) + '\n');
