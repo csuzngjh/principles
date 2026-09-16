@@ -38,18 +38,54 @@ export async function runDevScript(
   args: string[],
   opts: { cwd?: string; env?: Record<string, string> } = {}
 ): Promise<RunResult> {
-  const env = { ...process.env, ...(opts.env ?? {}) };
+  return runNode([path.join(DEV_SCRIPTS_DIR, scriptName), ...args], opts);
+}
+
+/**
+ * Run an arbitrary node entry point (a fixture helper, a repo script) as a real
+ * child process. PRI-796 tests need this for concurrency cases: the repo
+ * mutation mutex is a CROSS-PROCESS guarantee, so holding it in-process would
+ * test nothing.
+ */
+export async function runNode(
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string | undefined> } = {}
+): Promise<RunResult> {
+  const env = { ...process.env, ...(opts.env ?? {}) } as Record<string, string>;
+  // Drop keys explicitly set to undefined so a test can hide them.
+  for (const [key, value] of Object.entries(opts.env ?? {})) {
+    if (value === undefined) delete env[key];
+  }
   try {
-    const { stdout, stderr } = await execFileAsync(
-      process.execPath,
-      [path.join(DEV_SCRIPTS_DIR, scriptName), ...args],
-      { cwd: opts.cwd, encoding: 'utf-8', env, maxBuffer: 16 * 1024 * 1024 }
-    );
+    const { stdout, stderr } = await execFileAsync(process.execPath, args, {
+      cwd: opts.cwd,
+      encoding: 'utf-8',
+      env,
+      maxBuffer: 16 * 1024 * 1024,
+    });
     return { code: 0, stdout, stderr };
   } catch (err) {
     const e = err as { code?: number; stdout?: string; stderr?: string; message?: string };
     return { code: typeof e.code === 'number' ? e.code : 1, stdout: e.stdout ?? '', stderr: e.stderr ?? e.message ?? '' };
   }
+}
+
+/**
+ * Create a directory junction (Windows) / symlink (POSIX) at `link` -> `target`.
+ *
+ * The junction case is the one that matters here: a worktree whose
+ * `node_modules/@principles/*` points back at the primary is the silent
+ * false-verification hazard (`PRIMARY_LEAKAGE`), and the residue deleter must
+ * detach such a link instead of following it.
+ */
+export function makeJunction(link: string, target: string): void {
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
+/** The pool root the tools derive for a given primary checkout. */
+export function poolRootFor(primary: string): string {
+  return path.join(path.dirname(primary), '_worktrees', path.basename(primary));
 }
 
 export function makeTempDir(prefix: string): string {
@@ -129,15 +165,50 @@ export function removeFixture(root: string): void {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-export async function worktreeList(dir: string): Promise<Array<{ path: string; branch?: string }>> {
+export async function worktreeList(
+  dir: string
+): Promise<Array<{ path: string; branch?: string; locked?: boolean; lockReason?: string }>> {
   const out = await git(dir, 'worktree', 'list', '--porcelain');
-  const list: Array<{ path: string; branch?: string }> = [];
+  const list: Array<{ path: string; branch?: string; locked?: boolean; lockReason?: string }> = [];
   for (const line of out.split(/\r?\n/)) {
     if (line.startsWith('worktree ')) {
       list.push({ path: line.slice('worktree '.length).trim() });
-    } else if (line.startsWith('branch ') && list.length > 0) {
+    } else if (list.length === 0) {
+      continue;
+    } else if (line.startsWith('branch ')) {
       list[list.length - 1].branch = line.slice('branch '.length).trim();
+    } else if (line === 'locked') {
+      list[list.length - 1].locked = true;
+    } else if (line.startsWith('locked ')) {
+      list[list.length - 1].locked = true;
+      list[list.length - 1].lockReason = line.slice('locked '.length).trim();
     }
   }
   return list;
+}
+
+/**
+ * The live entry for one worktree, matched through git's own path normalization.
+ *
+ * Matching on the raw string is a trap: the CLI reports a native path
+ * (`D:\...\slot`) while `git worktree list --porcelain` reports a forward-slash
+ * path (`D:/.../slot`), so `indexOf` silently misses and a substring assertion
+ * over the whole list then "passes" against some OTHER worktree's lock.
+ */
+export async function worktreeEntry(
+  dir: string,
+  worktreePath: string
+): Promise<{ path: string; branch?: string; locked?: boolean; lockReason?: string } | undefined> {
+  const list = await worktreeList(dir);
+  const normalize = (p: string): string => {
+    let resolved = path.resolve(p);
+    try {
+      resolved = fs.realpathSync.native(resolved);
+    } catch {
+      /* keep lexical */
+    }
+    return (process.platform === 'win32' ? resolved.toLowerCase() : resolved).replaceAll('\\', '/');
+  };
+  const wanted = normalize(worktreePath);
+  return list.find((w) => normalize(w.path) === wanted);
 }

@@ -123,7 +123,12 @@ export interface ReleasePublicationInput {
   readonly expiresAt: string;
   readonly minBootstrapVersion: string;
   readonly dataSchemaForwardReadableFrom: string;
-  readonly archive: PublicationArchive;
+  /**
+   * The release-asset archives published as artifact targets (PRI-733: one
+   * entry per platform built by the CI matrix; the assemble job passes all
+   * of them so one release covers every platform in a single publication).
+   */
+  readonly archives: readonly PublicationArchive[];
   /** PEM-encoded ed25519 PRIVATE key signing the whole repository. */
   readonly signingKeyPem: string;
   readonly previous?: PreviousPublication | null;
@@ -135,17 +140,22 @@ export interface PublicationFile {
   readonly bytes: Buffer;
 }
 
+export interface ReleasePublicationManifestArtifact {
+  readonly platform: string;
+  readonly arch: string;
+  readonly nodeAbi: string;
+  readonly artifactSha256: string;
+  readonly artifactSizeBytes: number;
+  readonly artifactTargetPath: string;
+}
+
 export interface ReleasePublicationManifest {
   readonly releaseId: string;
   readonly productVersion: string;
   readonly channel: ReleaseChannelName;
-  readonly platform: string;
-  readonly arch: string;
-  readonly nodeAbi: string;
+  /** One entry per published platform archive, sorted by platform/arch/abi. */
+  readonly artifacts: readonly ReleasePublicationManifestArtifact[];
   readonly sourceCommit: string;
-  readonly artifactSha256: string;
-  readonly artifactSizeBytes: number;
-  readonly artifactTargetPath: string;
   readonly keyId: string;
   readonly signingScheme: 'ed25519';
   readonly publicationSequence: number;
@@ -402,35 +412,89 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
   requirePositiveInteger(input.channelVersion, 'channelVersion');
   requirePositiveInteger(input.publicationSequence, 'publicationSequence');
   requireExpiresAt(input.expiresAt);
-  if (!Buffer.isBuffer(input.archive.bytes) || input.archive.bytes.length === 0) {
+  if (!Array.isArray(input.archives) || input.archives.length === 0) {
     throw new ReleasePublicationError(
       'invalid_input',
-      'archive.bytes',
-      'The release archive is empty or missing.',
+      'archives',
+      'The release publication must declare at least one platform archive.',
       'Build the self-contained release asset first; nothing is published without the artifact bytes.',
     );
   }
+  const PLATFORM_ARCH_PATTERN = /^[a-z0-9-]+$/;
+  const sortedArchives = [...input.archives].sort((a, b) => {
+    const keyA = `${a.platform}/${a.arch}/abi${a.nodeAbi}`;
+    const keyB = `${b.platform}/${b.arch}/abi${b.nodeAbi}`;
+    return keyA < keyB ? -1 : keyA > keyB ? 1 : 0;
+  });
+  // Same platform/arch twice would generate the same artifact target path
+  // (the path carries no ABI), with the later entry silently overwriting the
+  // earlier one in `artifactTargets` while `artifactFiles` keeps both — an
+  // inconsistent publication. Reject before any bytes are emitted (rc-3).
+  const seenPlatformTargets = new Set<string>();
+  for (const [index, archive] of sortedArchives.entries()) {
+    for (const [field, value] of [['platform', archive.platform], ['arch', archive.arch]] as const) {
+      if (typeof value !== 'string' || value.length === 0 || !PLATFORM_ARCH_PATTERN.test(value)) {
+        throw new ReleasePublicationError(
+          'invalid_input',
+          `archives[${index}].${field}`,
+          `archives[${index}].${field} must be a non-empty lowercase identifier, got: ${JSON.stringify(value)}`,
+          'Pass the platform/arch triple the CI matrix job built the archive for.',
+        );
+      }
+    }
+    if (typeof archive.nodeAbi !== 'string' || !/^\d+$/.test(archive.nodeAbi)) {
+      throw new ReleasePublicationError(
+        'invalid_input',
+        `archives[${index}].nodeAbi`,
+        `archives[${index}].nodeAbi must be a numeric Node ABI string (e.g. "137"), got: ${JSON.stringify(archive.nodeAbi)}`,
+        'Pass the Node ABI the archive was built against.',
+      );
+    }
+    if (!Buffer.isBuffer(archive.bytes) || archive.bytes.length === 0) {
+      throw new ReleasePublicationError(
+        'invalid_input',
+        `archives[${index}].bytes`,
+        'The release archive is empty or missing.',
+        'Build the self-contained release asset first; nothing is published without the artifact bytes.',
+      );
+    }
+    const platformTarget = `${archive.platform}/${archive.arch}`;
+    if (seenPlatformTargets.has(platformTarget)) {
+      throw new ReleasePublicationError(
+        'invalid_input',
+        `archives[${index}]`,
+        `Duplicate platform asset target: ${platformTarget} — the artifact target path carries no Node ABI, so a second archive for this platform/arch collides with the first.`,
+        'Pass exactly one archive per platform/arch pair; multi-ABI publishing needs ABI-qualified artifact paths (not supported yet).',
+      );
+    }
+    seenPlatformTargets.add(platformTarget);
+  }
   const signer = requireSigner(input.signingKeyPem);
 
-  const artifactBytes = input.archive.bytes;
-  const artifactSha256 = sha256Hex(artifactBytes);
   // Artifact bytes are finalized FIRST: the release metadata binds their
-  // digest, the channel binds the metadata digest. By construction the
+  // digests, the channel binds the metadata digest. By construction the
   // emitted channel pointer can never reference an artifact that is not part
   // of the same publication.
+  const artifacts = sortedArchives.map((archive) => ({
+    platform: archive.platform,
+    arch: archive.arch,
+    nodeAbi: archive.nodeAbi,
+    bytes: archive.bytes,
+    sha256: sha256Hex(archive.bytes),
+  }));
   const releaseMetadata = buildReleaseMetadata({
     productVersion: input.productVersion,
     sourceCommit: input.sourceCommit,
     minBootstrapVersion: input.minBootstrapVersion,
     publicationSequence: input.publicationSequence,
     expiresAt: input.expiresAt,
-    assets: [{
-      platform: input.archive.platform,
-      arch: input.archive.arch,
-      nodeAbi: input.archive.nodeAbi,
-      archiveSha256: artifactSha256,
-      archiveSizeBytes: artifactBytes.length,
-    }],
+    assets: artifacts.map((artifact) => ({
+      platform: artifact.platform,
+      arch: artifact.arch,
+      nodeAbi: artifact.nodeAbi,
+      archiveSha256: artifact.sha256,
+      archiveSizeBytes: artifact.bytes.length,
+    })),
     dataSchemaForwardReadableFrom: input.dataSchemaForwardReadableFrom,
   });
 
@@ -452,9 +516,31 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
 
   const channelTargetPath = `channels/${input.channel}.json`;
   const metadataTargetPath = `releases/${releaseMetadata.releaseId}/metadata.json`;
-  const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${input.archive.platform}-${input.archive.arch}.tar.gz`;
   const channelPayloadBytes = deterministicJsonBytes(channelPayload);
   const releaseMetadataBytes = deterministicJsonBytes(releaseMetadata);
+
+  const artifactTargets: Record<string, TargetFile> = {};
+  const artifactFiles: PublicationFile[] = [];
+  const manifestArtifacts = artifacts.map((artifact) => {
+    const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${artifact.platform}-${artifact.arch}.tar.gz`;
+    artifactTargets[artifactTargetPath] = new TargetFile({
+      path: artifactTargetPath,
+      length: artifact.bytes.length,
+      hashes: { sha256: artifact.sha256 },
+      unrecognizedFields: {
+        custom: { releaseId: releaseMetadata.releaseId, channel: input.channel, platform: artifact.platform },
+      },
+    });
+    artifactFiles.push({ path: `targets/${artifactTargetPath}`, bytes: artifact.bytes });
+    return {
+      platform: artifact.platform,
+      arch: artifact.arch,
+      nodeAbi: artifact.nodeAbi,
+      artifactSha256: artifact.sha256,
+      artifactSizeBytes: artifact.bytes.length,
+      artifactTargetPath,
+    };
+  });
 
   const targets = new Targets({
     version: versions.targets,
@@ -477,14 +563,7 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
           custom: { releaseId: releaseMetadata.releaseId, channel: input.channel, platform: 'metadata' },
         },
       }),
-      [artifactTargetPath]: new TargetFile({
-        path: artifactTargetPath,
-        length: artifactBytes.length,
-        hashes: { sha256: artifactSha256 },
-        unrecognizedFields: {
-          custom: { releaseId: releaseMetadata.releaseId, channel: input.channel, platform: input.archive.platform },
-        },
-      }),
+      ...artifactTargets,
     },
   });
   const root = new Root({
@@ -518,20 +597,15 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     { path: 'targets.json', bytes: signedTufMetadata(targets, signer) },
     { path: `targets/${channelTargetPath}`, bytes: channelPayloadBytes },
     { path: `targets/${metadataTargetPath}`, bytes: releaseMetadataBytes },
-    { path: `targets/${artifactTargetPath}`, bytes: artifactBytes },
+    ...artifactFiles,
   ];
 
   const manifest: ReleasePublicationManifest = {
     releaseId: releaseMetadata.releaseId,
     productVersion: releaseMetadata.productVersion,
     channel: input.channel,
-    platform: input.archive.platform,
-    arch: input.archive.arch,
-    nodeAbi: input.archive.nodeAbi,
+    artifacts: manifestArtifacts,
     sourceCommit: input.sourceCommit,
-    artifactSha256,
-    artifactSizeBytes: artifactBytes.length,
-    artifactTargetPath,
     keyId: signer.keyId,
     signingScheme: 'ed25519',
     publicationSequence: input.publicationSequence,

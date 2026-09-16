@@ -2,6 +2,12 @@
 
 > Phase 0 artifact. Written before any implementation code, per the task
 > directive. Evidence gathered 2026-09-06 from `origin/main` @ `bed8aedb8`.
+>
+> **Historical.** This is the point-in-time analysis that produced the v1
+> classifier. The living reference for the current design (shared pool, writer
+> claims, readiness, residue handling, mutation mutex) is
+> [WORKTREE_GOVERNANCE.md](./WORKTREE_GOVERNANCE.md), with the normative rules in
+> `AGENTS.md` §23A `git-1` … `git-14`.
 
 ## 1. Problem
 
