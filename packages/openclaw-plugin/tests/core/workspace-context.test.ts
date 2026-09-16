@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { EventLogService } from '../../src/core/event-log.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as principleTreeLedger from '../../src/core/principle-tree-ledger.js';
@@ -42,6 +43,7 @@ describe('WorkspaceContext', () => {
 
     afterEach(() => {
         vi.resetAllMocks();
+        EventLogService.disposeAll();
     });
 
     it('should bind the canonical workspace stateDir even when the host ctx carries a different stateDir (PRI-824 T824-1)', () => {
@@ -107,6 +109,50 @@ describe('WorkspaceContext', () => {
         expect(mockRuleHostCalls).toEqual([
             { stateDir: path.join(workspaceDir, '.state'), logger: {}, options: { workspaceDir } },
         ]);
+    });
+
+    it('should report a diverging host stateDir exactly once via the structured PRI-824 warning (rc-9)', () => {
+        const warn = vi.fn();
+        const wctx = WorkspaceContext.fromHookContext({
+            workspaceDir,
+            stateDir: path.resolve('/host/home'),
+            logger: { warn },
+        });
+
+        expect(wctx.stateDir).toBe(path.join(workspaceDir, '.state'));
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0]?.[0])).toContain('PRI-824');
+    });
+
+    it('should not warn when the host stateDir already is the canonical path', () => {
+        const warn = vi.fn();
+        const canonical = path.join(workspaceDir, '.state');
+        const wctx = WorkspaceContext.fromHookContext({
+            workspaceDir,
+            stateDir: canonical,
+            logger: { warn },
+        });
+
+        expect(wctx.stateDir).toBe(canonical);
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('should ignore non-string or blank host stateDir values without warning', () => {
+        const warn = vi.fn();
+        WorkspaceContext.fromHookContext({ workspaceDir, stateDir: '   ', logger: { warn } });
+        WorkspaceContext.clearCache();
+        WorkspaceContext.fromHookContext({ workspaceDir, stateDir: 42, logger: { warn } });
+
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('should canonicalize through fromHookContextExplicit as well (PRI-824)', () => {
+        const wctx = WorkspaceContext.fromHookContextExplicit({
+            workspaceDir,
+            logger: { warn: vi.fn() },
+        });
+
+        expect(wctx.stateDir).toBe(path.join(workspaceDir, '.state'));
     });
 
     it('should lazy load ConfigService', () => {

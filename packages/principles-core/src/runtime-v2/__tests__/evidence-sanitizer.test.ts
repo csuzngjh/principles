@@ -665,4 +665,24 @@ describe('PRI-825 command evidence bound (sanitizeToolParams)', () => {
     const arrayArgs = sanitizeToolParams({ args: ['--flag', 'value'] });
     expect(Array.isArray(JSON.parse(JSON.stringify(arrayArgs.args)))).toBe(true);
   });
+
+  it('PRI-825 boundary: a command of exactly MAX_COMMAND_PREVIEW_CHARS stays verbatim, +1 char triggers head+tail', () => {
+    // 'ab cd ab cd …' words: no token-pattern runs, no absolute paths — the
+    // sanitized form equals the raw input, so lengths are exact.
+    const words = (n: number): string => Array.from({ length: n }, (_, i) => (i % 2 === 0 ? 'ab' : 'cd')).join(' ');
+    const atLimit = words(667); // 667*3 - 1 = 2000
+
+    expect(atLimit.length).toBe(MAX_COMMAND_PREVIEW_CHARS);
+    const storedAtLimit = sanitizeToolParams({ command: atLimit }).command;
+    expect(storedAtLimit).toBe(atLimit);
+    expect(storedAtLimit).not.toContain('___TRUNCATED___');
+
+    const overLimit = `${atLimit} x`; // 2002 chars
+    const storedOver = sanitizeToolParams({ command: overLimit }).command as string;
+    // head 65% (1300) + marker (15) + tail 30% (600) = 1915
+    expect(storedOver.length).toBe(1300 + '___TRUNCATED___'.length + 600);
+    expect(storedOver.startsWith(overLimit.slice(0, 1300))).toBe(true);
+    expect(storedOver.endsWith(overLimit.slice(-600))).toBe(true);
+    expect(storedOver).toContain('___TRUNCATED___');
+  });
 });

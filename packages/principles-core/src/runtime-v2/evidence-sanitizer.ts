@@ -344,7 +344,9 @@ export function sanitizeValue(
  * Execute-command-like param fields. Both OpenClaw (`command`) and the
  * generic bash extraction contract (`command || args`, see
  * extractFilePathFromParams) treat these as the durable shell-command face
- * that RuleCode anchor semantics scan.
+ * that RuleCode anchor semantics scan. Only STRING values get the command
+ * bound; array `args` (no producing host today) and non-string values keep
+ * the generic sanitizeValue bounds.
  */
 const COMMAND_PARAM_KEYS = ['command', 'args'] as const;
 
