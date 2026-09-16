@@ -69,4 +69,30 @@ describe('ScribePromptBuilder (PRI-109)', () => {
     const { message } = builder.buildPrompt(defaultInput);
     expect(() => JSON.parse(message)).not.toThrow();
   });
+
+  // ── PRI-816 (R-01): authoritative sourceDreamerArtifactId in prompt input ──
+
+  it('promptInput carries sourceDreamerArtifactId when provided (PRI-816)', () => {
+    const { promptInput, message } = builder.buildPrompt({
+      ...defaultInput,
+      sourceDreamerArtifactId: 'pi-art-dreamer-001',
+    });
+    expect(promptInput.sourceDreamerArtifactId).toBe('pi-art-dreamer-001');
+    const parsed = JSON.parse(message) as { sourceDreamerArtifactId?: string };
+    expect(parsed.sourceDreamerArtifactId).toBe('pi-art-dreamer-001');
+  });
+
+  it('promptInput omits sourceDreamerArtifactId when not provided (pre-PRI-508 compat)', () => {
+    const { promptInput, message } = builder.buildPrompt(defaultInput);
+    expect(Object.hasOwn(promptInput, 'sourceDreamerArtifactId')).toBe(false);
+    const parsed = JSON.parse(message) as { sourceDreamerArtifactId?: string };
+    expect(Object.hasOwn(parsed, 'sourceDreamerArtifactId')).toBe(false);
+  });
+
+  it('instruction tells scribe to copy sourceTrace.dreamerArtifactId from input (PRI-816)', () => {
+    const instruction = buildScribeProtocolInstruction();
+    expect(instruction).toContain('MUST be copied exactly from input.sourceDreamerArtifactId');
+    // The old "scrape from philosopher artifact" instruction must be gone.
+    expect(instruction).not.toContain('from philosopher artifact if available');
+  });
 });
