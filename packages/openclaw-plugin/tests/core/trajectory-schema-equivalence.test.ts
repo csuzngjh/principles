@@ -33,15 +33,6 @@ function tableNames(dbPath: string): string[] {
   }
 }
 
-function columnNames(dbPath: string, table: string): string[] {
-  const db = new Database(dbPath, { readonly: true });
-  try {
-    return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name);
-  } finally {
-    db.close();
-  }
-}
-
 describe('PRI-774: plugin trajectory schema parity with the canonical module', () => {
   it('Profile C runtime DB contains exactly the canonical base tables plus runtime-only views extras', () => {
     const workspaceDir = makeWorkspace();
