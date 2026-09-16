@@ -628,7 +628,10 @@ async function constructBridge(
   );
   const routerRunner = new DiagRouterRunner(
     { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer },
-    { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage },
+    // PRI-818 (R-08): effectiveConfig must reach Stage C like it does for
+    // Stage A/B — without it, isDegradationEnabled() is always false and the
+    // ADR-0019 rate-limit fast-fail degradation path can never fire here.
+    { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
   );
 
   const runner: DiagnosticianRunnerLike = new SplitDiagnosticianRunner({

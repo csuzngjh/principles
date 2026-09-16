@@ -17,10 +17,9 @@
  *   - The artificer↔evaluator stage delegates to `runAdversarialLoop` (PRI-428),
  *     which never throws and degrades to { decision: 'rejected' } with a reason.
  *   - gateDeps (the sandbox adapter) is built from `compileDemoRule` +
- *     `evaluateInRefinerSandbox`. Per the Explore finding, `compileDemoRule` is
- *     byte-equivalent to openclaw-plugin's `loadRuleImplementationModule`; the
- *     duplication is a package-boundary necessity (pd-cli cannot import
- *     openclaw-plugin), not a capability gap.
+ *     `evaluateInRefinerSandbox`. `compileDemoRule` delegates to the canonical
+ *     hardened replay evaluator in @principles/core (PRI-809), so pre-activation
+ *     replay crosses the same vm trust boundary as the production gate.
  *
  * @see docs/plans/rulehost-mvp-activation.md
  * @see runAdversarialLoop in @principles/core/runtime-v2
@@ -226,11 +225,9 @@ export interface RuleHostPipelineResult {
 /**
  * Build the sandbox gate deps for adversarial replay.
  *
- * `compileDemoRule` is byte-equivalent to openclaw-plugin's
- * `loadRuleImplementationModule` (same vm.createContext, same normalize, same
- * evaluate-shape check). pd-cli cannot import openclaw-plugin (package
- * boundary), so this duplicate is intentional and capability-identical, not a
- * stripped demo. See demo-rule-compiler.ts header comment.
+ * `compileDemoRule` delegates to the canonical hardened replay evaluator in
+ * @principles/core (PRI-809) — capability-identical across packages without a
+ * duplicate vm implementation. See demo-rule-compiler.ts header comment.
  */
 export function createSandboxGateDeps(): RefinerRuleHostGateDeps {
   return {
