@@ -697,5 +697,7 @@ export function verifySigningKeyMatchesPinnedRoot(
       );
     }
   }
-  return { keyId: signer.keyId, pinnedRootKeyIds: pinnedRoot.roles.root.keyIDs };
+  const rootRole = pinnedRoot.roles.root;
+  if (rootRole === undefined) throw missingRoleError('root'); // rc-3: fail loud (defensive; the loop above already enforces this for every required role)
+  return { keyId: signer.keyId, pinnedRootKeyIds: rootRole.keyIDs };
 }
