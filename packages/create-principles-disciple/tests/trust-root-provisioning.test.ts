@@ -15,13 +15,12 @@
  * 4. The committed production anchor (trust/root.json) satisfies the same
  *    contract.
  */
-import { createHash, createPublicKey, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Key, Metadata, Root, Signature } from '@tufjs/models';
+import { Root } from '@tufjs/models';
 import {
   TRUST_ROOT_FILENAME,
   TrustRootValidationError,
@@ -32,8 +31,8 @@ import { buildReleasePublication, verifySigningKeyMatchesPinnedRoot } from '../s
 import { ReleaseManager } from '../src/update/release-manager.js';
 import { ensurePdHomeLayout, resolvePdHomePaths, writeInstallConfig } from '../src/update/install-layout.js';
 import { writeActiveRecord } from '../src/update/transaction-journal.js';
+import { buildSignedRoot, FAR_EXPIRY, makeTrustMaterial, type TestTrustMaterial } from './helpers/trust-material.js';
 
-const FAR_EXPIRY = '2036-01-01T00:00:00Z';
 const PUBLICATION_EXPIRY = '2030-01-01T00:00:00Z';
 
 const tempDirs: string[] = [];
@@ -54,38 +53,6 @@ afterEach(() => {
     if (directory) fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 });
-
-interface TestTrustMaterial {
-  keyId: string;
-  privateKey: ReturnType<typeof generateKeyPairSync>['privateKey'];
-  privateKeyPem: string;
-  key: Key;
-}
-
-function makeTrustMaterial(): TestTrustMaterial {
-  const { privateKey } = generateKeyPairSync('ed25519');
-  const publicKeyPem = createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }).toString();
-  const keyId = createHash('sha256').update(publicKeyPem).digest('hex');
-  const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-  return {
-    keyId,
-    privateKey,
-    privateKeyPem,
-    key: new Key({ keyID: keyId, keyType: 'ed25519', scheme: 'ed25519', keyVal: { public: publicKeyPem } }),
-  };
-}
-
-/** Build a self-signed TUF Root with the same shape the publisher/keygen emit. */
-function buildSignedRoot(material: TestTrustMaterial, expires: string): Buffer {
-  const root = new Root({ version: 1, specVersion: '1.0.31', expires, consistentSnapshot: false });
-  for (const role of ['root', 'timestamp', 'snapshot', 'targets']) root.addKey(material.key, role);
-  const metadata = new Metadata(root);
-  metadata.sign(
-    (data) => new Signature({ keyID: material.keyId, sig: cryptoSign(null, data, material.privateKey).toString('hex') }),
-    false,
-  );
-  return Buffer.from(JSON.stringify(metadata.toJSON()), 'utf8');
-}
 
 /** Unsigned envelope (for refusal cases where an earlier check must fire first). */
 function buildUnsignedRootJson(material: TestTrustMaterial, expires: string): string {
