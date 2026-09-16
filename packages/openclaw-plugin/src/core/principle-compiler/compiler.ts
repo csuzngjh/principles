@@ -19,9 +19,19 @@ import { registerCompiledRule } from './ledger-registrar.js';
 import { createImplementationAssetDir } from '../code-implementation-storage.js';
 import type { TrajectoryDatabase } from '../trajectory.js';
 import type { CompileResult } from '@principles/core/runtime-v2';
-import { loadRuleImplementationModule } from '../rule-implementation-runtime.js';
+import { loadRuleImplementationModule, type RuleImplementationModuleExports } from '../rule-implementation-runtime.js';
 import { createGoldenTraceFixture, type GoldenTraceCase } from '@principles/core/runtime-v2';
-import { replayGoldenTrace, type ReplayEvaluateFn } from '@principles/core/runtime-v2';
+import {
+  replayGoldenTrace,
+  validateRuleHostResult,
+  type ReplayEvaluateFn,
+  type RuleHostResult,
+} from '@principles/core/runtime-v2';
+
+/** rc-2: type predicate over the canonical RuleHostResult validator (no `as`). */
+function isRuleHostResultValue(value: unknown): value is RuleHostResult {
+  return validateRuleHostResult(value).valid;
+}
 
 // Re-export CompileResult from core
 export type { CompileResult } from '@principles/core/runtime-v2';
@@ -211,7 +221,7 @@ export class PrincipleCompiler {
     // Step 4.5: Replay validation against GoldenTrace (PRI-115)
     const replayCases = this.buildGoldenTraceCases(patterns, context);
     if (replayCases.length > 0) {
-      let moduleExports: { evaluate?: unknown };
+      let moduleExports: RuleImplementationModuleExports;
       try {
         moduleExports = loadRuleImplementationModule(code, `replay-${principleId}.js`);
       } catch (err) {
@@ -224,12 +234,25 @@ export class PrincipleCompiler {
         };
       }
 
-      if (typeof moduleExports.evaluate !== 'function') {
+      if (typeof moduleExports.evaluate !== 'function' || typeof moduleExports.callEvaluate !== 'function') {
         return { success: false, principleId, reason: 'replay: no evaluate export', degraded: true };
       }
 
       try {
-        const evaluateFn = moduleExports.evaluate as ReplayEvaluateFn;
+        // PRI-809: replay through the child-process boundary (callEvaluate)
+        // instead of calling the raw vm-realm evaluate with host-realm
+        // synthetic inputs — same hardened crossing the live RuleHost uses.
+        const callEvaluate = moduleExports.callEvaluate;
+        const evaluateFn: ReplayEvaluateFn = (input: unknown, helpers: unknown) => {
+          const result: unknown = callEvaluate(input, helpers);
+          // The child returns JSON — validate the canonical contract before
+          // the replay consumes it (rc-2: no `as` bypass on untrusted data).
+          if (!isRuleHostResultValue(result)) {
+            const { errors } = validateRuleHostResult(result);
+            throw new Error(`replay: RuleCode returned invalid RuleHostResult — ${errors.join('; ')}`);
+          }
+          return result;
+        };
         const replayResult = replayGoldenTrace(evaluateFn, replayCases);
         if (!replayResult.passed) {
           return {
