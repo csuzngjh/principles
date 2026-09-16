@@ -20,6 +20,7 @@ import * as os from 'os';
 import { ActivationsConsoleModel } from '../../src/server/models/ActivationsConsoleModel.js';
 import { updateFeatureFlag } from '../../src/server/config/pd-config-store.js';
 import { SqliteConnection } from '@principles/core/runtime-v2';
+import { saveHostToolDeclaration } from '@principles/host-runtime';
 import type { GovernanceAuditWriter } from 'principles-disciple/governance-audit';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
@@ -435,6 +436,43 @@ describe('ActivationsConsoleModel — Owner review', () => {
     expect(review.artifact.digest).toMatch(/^sha256:/);
     expect(review.readiness.evidenceSnapshot.shadowSummary).toEqual({ observed: null, matched: null, wouldBlock: null, wouldAllow: null, requireApproval: null, autoCorrect: null, errors: null, neutralControl: null, firstObservedAt: null, lastObservedAt: null });
     expect(review.readiness.status).not.toBe('ready');
+  });
+
+  it('PRI-813 (Test F): a Codex-declared workspace no longer inherits the OpenClaw capability claim — readiness and runtimeCapability report the truth', async () => {
+    // Before PRI-813 this exact fixture reported runtime_compatibility /
+    // runtime_shadow_evidence as PASSED (the OpenClaw contract was passed
+    // unconditionally), and only the sample-count gate ever refused.
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    const now = '2026-09-16T06:00:00.000Z';
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-codex-813', 'diagnosis', 'pending', ?, ?)").run(now, now);
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-codex-813', 'rule', 'task-codex-813', 'rule-codex-813', '["parent-1"]', 'validated', ?, ?, ?)`)
+      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+    db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('act-codex-813', 'idem-codex-813', 'artifact-codex-813', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-codex-813', ?, NULL)`).run(now);
+    db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-codex-813', 'eligible', 1, ?)`).run(now);
+    conn.close();
+    expect(saveHostToolDeclaration(workspaceDir, {
+      version: 1,
+      hostKind: 'codex',
+      mappings: [{ rawToolName: 'Bash', canonicalKind: 'execute' }],
+      declaredAt: now,
+    }).ok).toBe(true);
+
+    const review = await model.getOwnerReview('act-codex-813');
+
+    expect(review.readiness.status).not.toBe('ready');
+    // The overall result short-circuits to 'unavailable' while shadow
+    // telemetry is absent; the check-level capability truth rides in the
+    // evidence snapshot's safety gate results.
+    const failedIds = review.readiness.evidenceSnapshot.safetyGateResults
+      .filter(check => check.status === 'failed')
+      .map(check => check.checkId);
+    expect(failedIds).toContain('runtime_compatibility');
+    expect(failedIds).toContain('runtime_shadow_evidence');
+    expect(failedIds).toContain('emergency_controls');
+    expect(review.runtimeCapability).toEqual({ hostRuntimeVersion: 'promotion_host_unsupported', shadowEvidence: false });
   });
 });
 

@@ -62,6 +62,58 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, MAX_DIAGNOSTIC) : 'unknown_error';
 }
 
+const RULEHOST_EVALUATED_DECISIONS = new Set(['allow', 'block', 'requireApproval', 'auto_correct', 'no_rules_armed', 'evaluation_failed']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRuleHostEvaluationEntry(value: unknown): boolean {
+  // rc-1/rc-2/rc-4: metadata crosses the HostEventResult contract as unknown —
+  // validate every entry's shape before it becomes a persisted event.
+  return isRecord(value)
+    && typeof value.toolName === 'string'
+    && typeof value.filePath === 'string'
+    && typeof value.matched === 'boolean'
+    && typeof value.decision === 'string' && RULEHOST_EVALUATED_DECISIONS.has(value.decision)
+    && (value.ruleId === undefined || typeof value.ruleId === 'string')
+    && (value.activationId === undefined || typeof value.activationId === 'string')
+    && (value.activationMode === undefined || value.activationMode === 'shadow' || value.activationMode === 'live');
+}
+
+/**
+ * PRI-813: persist the shared gate's per-activation evaluation facts
+ * (metadata.evaluations — shadow observations plus the live aggregate) as
+ * canonical `rulehost_evaluated` events through the same core JSONL writer
+ * and the same telemetry-redaction policy the Codex emitter already uses.
+ * This is the Codex side of the shadow-evidence reconnection: exact
+ * activationId per event, `activationMode: 'shadow'` rows feed the existing
+ * rulecode-shadow-summary and promotion evidence unchanged.
+ */
+function recordRuleHostEvaluations(stateDir: string, sessionId: string | undefined, evaluations: unknown): string[] {
+  if (!Array.isArray(evaluations)) return [];
+  const diagnostics: string[] = [];
+  for (const entry of evaluations) {
+    if (!isRuleHostEvaluationEntry(entry)) {
+      // rc-9: a skipped evidence row must be observable, never silent.
+      if (diagnostics.length === 0) diagnostics.push(diagnostic('rulehost_evaluation_entry_invalid', 'Inspect host-runtime gate metadata contract; the evaluation event was not persisted.'));
+      continue;
+    }
+    const redacted: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(entry)) {
+      redacted[key] = typeof value === 'string' ? redactTelemetryString(value) : value;
+    }
+    appendEventLogLine(stateDir, {
+      ts: new Date().toISOString(),
+      type: 'rulehost_evaluated',
+      category: 'evaluated',
+      sessionId,
+      data: redacted,
+    });
+  }
+  return diagnostics;
+}
+
 /**
  * PRI-780 Codex capability declaration (structured UNSUPPORTED — suspension
  * semantics, revised after Codex review round 2 P1): the Codex host has no
@@ -191,7 +243,17 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       // v2 rules stay SUSPENDED on Codex (never loaded context-blind). See
       // annotateContextWarnings for the structured unsupported declaration.
     }).dispatch(event);
-    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
+    // PRI-813: the shared gate's evaluation facts leave through metadata —
+    // persist them here (telemetry persistence is host-side business; the
+    // gate itself never writes). Codex previously recorded NO
+    // rulehost_evaluated rows, so shadow evidence never reached the
+    // promotion pipeline.
+    const evaluationDiagnostics = recordRuleHostEvaluations(
+      path.join(resolution.workspaceDir, '.state'),
+      event.context.sessionId,
+      result.metadata?.evaluations,
+    );
+    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...ingestionDiagnostics];
     return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;

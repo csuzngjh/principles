@@ -12,6 +12,7 @@ import {
   validateRuleHostResult,
   type LoadedImplementation,
   type RuleContextV2,
+  type RuleHostEvaluatedEventData,
   type RuleHostInput,
   type RuleHostMeta,
   type RuleHostResult,
@@ -193,7 +194,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     }
 
     const connection = new SqliteConnection({ workspaceDir: event.context.workspaceDir, readonly: true, bootstrapIfMissing: false });
-    const candidates: { implId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string }[] = [];
+    const candidates: { implId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string; activationMode: 'live' | 'shadow' }[] = [];
     try {
       const globalPause: unknown = connection.getDb().prepare(`
         SELECT pause_id FROM global_rulecode_pauses WHERE status = 'paused' LIMIT 1
@@ -257,7 +258,17 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             continue;
           }
           const [row] = group;
-          if (!row || row.action !== 'code_tool_hook_live_activate') continue;
+          if (!row) continue;
+          // PRI-813: shadow activations are no longer skipped here — they run
+          // through the SAME budget/content/context validation and
+          // evaluateBatch pipeline as live rows, but their results are
+          // collected as observations only and never join mergeDecisions
+          // (shadow observes, never enforces). The v2 gate below stays ahead
+          // of any evaluation, so Codex v2 shadow remains suspended.
+          const activationMode: 'live' | 'shadow' | null = row.action === 'code_tool_hook_live_activate'
+            ? 'live'
+            : row.action === 'code_tool_hook_shadow_activate' ? 'shadow' : null;
+          if (activationMode === null) continue;
           const activationId = row.activation_id;
           const artifactId = row.artifact_id;
           const expectedContentBytes = row.content_bytes;
@@ -322,7 +333,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               continue;
             }
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
-            candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode });
+            candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode, activationMode });
           } catch (error: unknown) {
             addWarning(warnings, `implementation_unhealthy: ${error instanceof Error ? error.message : String(error)}`, 'fix the RuleCode and reactivate the rule');
           }
@@ -355,6 +366,12 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_batch_timeout: ${timedOutChild.error ?? 'unknown child timeout'}`, 'fix or deactivate the unhealthy RuleCode and retry')], metadata: { evaluatedLiveRules: 0 } };
       }
       const implementations: LoadedImplementation[] = [];
+      // PRI-813: one canonical evaluation fact per shadow activation —
+      // observations only. Shadow results never join mergeDecisions, never
+      // block/modify/require approval: they record what a live rule WOULD
+      // have decided (ACTIVATION_CHANNELS §3.4), mirroring the legacy
+      // RuleHost report's shadowDecisions.
+      const shadowEvaluations: RuleHostEvaluatedEventData[] = [];
       for (let index = 0; index < candidates.length; index += 1) {
         const candidate = candidates[index];
         const batchResult = batch.results[index];
@@ -374,19 +391,53 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         const validatedResult = batchResult.result.matched
           ? { ...batchResult.result, ruleId: candidate.ruleId, principleId: candidate.principleId }
           : batchResult.result;
+        if (candidate.activationMode === 'shadow') {
+          shadowEvaluations.push({
+            toolName: input.toolName,
+            filePath: action.normalizedPath,
+            matched: validatedResult.matched,
+            decision: validatedResult.decision,
+            ruleId: candidate.ruleId,
+            activationId: candidate.implId,
+            activationMode: 'shadow',
+          });
+          continue;
+        }
         implementations.push({ ...candidate, evaluate: () => validatedResult });
       }
       const result = mergeDecisions(implementations, hostInput, {
         warn(message) { addWarning(warnings, message, 'inspect the unhealthy activation and RuleCode output'); },
       });
+      // PRI-813: per-activation evaluation facts for host-side telemetry
+      // writers. HostEventResult.metadata is the designed channel for
+      // host-neutral evaluation facts; each entry maps losslessly onto the
+      // canonical RuleHostEvaluatedEventData contract. The live aggregate
+      // entry preserves exactly what the OpenClaw shared writer already
+      // records (now with the winning activation's exact id — same ruleId
+      // reverse lookup the legacy RuleHost report uses, ISSUE-023).
+      const liveActivationId = result?.ruleId !== undefined
+        ? candidates.find(candidate => candidate.activationMode === 'live' && candidate.ruleId === result.ruleId)?.implId
+        : undefined;
+      const evaluations: RuleHostEvaluatedEventData[] = [
+        {
+          toolName: input.toolName,
+          filePath: action.normalizedPath,
+          matched: result?.matched ?? false,
+          decision: result?.decision ?? 'allow',
+          ...(result?.ruleId !== undefined ? { ruleId: result.ruleId } : {}),
+          ...(liveActivationId !== undefined ? { activationId: liveActivationId } : {}),
+          activationMode: 'live',
+        },
+        ...shadowEvaluations,
+      ];
       if (result?.decision === 'block') {
         if (result.reason.trim().length === 0) {
           addWarning(warnings, 'deny_reason_missing', 'fix the RuleCode to return a non-empty block reason');
-          return { decision: 'allow', source: event.source, warnings, metadata: { evaluatedLiveRules: implementations.length } };
+          return { decision: 'allow', source: event.source, warnings, metadata: { evaluatedLiveRules: implementations.length, evaluations } };
         }
-        return { decision: 'deny', reason: result.reason, source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleId: result.ruleId, principleId: result.principleId } };
+        return { decision: 'deny', reason: result.reason, source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleId: result.ruleId, principleId: result.principleId, evaluations } };
       }
-      return { decision: 'allow', source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleDecision: result?.decision ?? 'allow' } };
+      return { decision: 'allow', source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleDecision: result?.decision ?? 'allow', evaluations } };
     } catch (error: unknown) {
       addWarning(warnings, `activation_read_failed: ${error instanceof Error ? error.message : String(error)}`, 'inspect state.db schema and integrity');
       return { decision: 'allow', source: event.source, warnings, metadata: { evaluatedLiveRules: 0 } };

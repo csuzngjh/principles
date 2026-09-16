@@ -34,7 +34,7 @@ import type {
   ApprovalCompletionResult,
 } from '@principles/core/runtime-v2';
 import type { PIArtifactRecord, ActivationStatusRecord, PromotionEvidenceSnapshot } from '@principles/core/runtime-v2';
-import { OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
+import { resolvePromotionHostLiveness } from '@principles/host-runtime';
 import { authorizeGovernanceAction, writeGovernanceAction } from 'principles-disciple/governance-audit';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
@@ -539,6 +539,12 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
     // so unresolvable provenance degrades to legacy rather than refusing).
     const readinessToolSemantics = resolveWorkspaceToolSemantics(workspaceDir);
     const workspaceToolSemantics = readinessToolSemantics.ok ? readinessToolSemantics.registry : undefined;
+    // PRI-813: the promotion host contract comes from the workspace's REAL
+    // host declarations. A Codex (or multi-host) workspace resolves fail
+    // closed with a null contract — the promotion checks then report
+    // runtime_compatibility / runtime_shadow_evidence as NOT passed instead
+    // of silently inheriting the OpenClaw capability claim.
+    const promotionHost = resolvePromotionHostLiveness(workspaceDir);
     // ADR-0022 (PRI-578): single resolver — env > ~/.pd/owner.json > none
     const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
     const { ownerId, credentialId } = identity;
@@ -595,7 +601,7 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
               ownerIdentityConfigured: actor.principal.kind === 'configured_owner'
                 && actor.authentication.method === 'cli_owner_credential',
               safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls'),
-              hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+              hostContract: promotionHost.ok ? promotionHost.hostContract : null,
               existingLiveArtifacts: liveArtifacts,
               validateProductionArtifact: value => writer.canActivate(value),
             });
@@ -608,7 +614,7 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
               artifact,
               expectedArtifactDigest: request.expectedArtifactDigest,
               ownerIdentity: actor,
-              hostRuntimeVersion: 'openclaw-legacy@1',
+              hostRuntimeVersion: promotionHost.ok ? promotionHost.hostRuntimeVersion : promotionHost.reason,
               shadowSummary: readShadowSummaryForActivation(workspaceDir, activationId),
             });
           },

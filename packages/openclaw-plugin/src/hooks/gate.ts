@@ -11,8 +11,9 @@
 
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { persistGateBlock, recordGateBlockAndReturn } from './gate-block-helper.js';
-import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
-import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
+import type { RuleHostInput, RuleContextV2, RuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
+import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, RuleHostEvaluatedEventDataSchema } from '@principles/core/runtime-v2';
+import { Value } from '@sinclair/typebox/value';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
@@ -24,6 +25,13 @@ import { recordPrincipleApplication } from '../core/principle-application-ledger
 import { buildProductionRuleContext } from '../core/rule-context-assembler.js';
 import type { HostEventResult } from '@principles/core/host';
 import { observeRuleCodeSafety } from '../core/rulecode-safety-circuit.js';
+
+// PRI-813: metadata.evaluations entries cross the HostEventResult contract as
+// unknown — validate each against the CANONICAL event schema (rc-1/rc-2) so a
+// malformed gate payload can never become a persisted evidence row.
+function isSharedRuleEvaluationEntry(value: unknown): value is RuleHostEvaluatedEventData {
+  return Value.Check(RuleHostEvaluatedEventDataSchema, value);
+}
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
@@ -581,11 +589,45 @@ export function handleSharedRuleHostResult(
   }
   try {
     const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-    eventLog.recordRuleHostEvaluated({
-      toolName: event.toolName, filePath: action.normalizedPath,
-      matched: result.decision === 'deny', decision: result.decision === 'deny' ? 'block' : 'allow',
-      ruleId, activationMode: 'live',
-    });
+    const evaluations = metadata?.['evaluations'];
+    if (Array.isArray(evaluations)) {
+      // PRI-813: per-activation evaluation facts from the shared gate — one
+      // canonical rulehost_evaluated row per shadow activation (exact
+      // activationId) plus the live aggregate row, which now also carries its
+      // winning activationId (the same audit gap ISSUE-023 closed for legacy).
+      // The entry shape is validated field-by-field: metadata crosses the
+      // HostEventResult contract as unknown (rc-1/rc-2).
+      let wroteEvaluationRow = false;
+      for (const evaluation of evaluations) {
+        if (!isSharedRuleEvaluationEntry(evaluation)) {
+          logger.warn?.(`[PD_GATE:RULE_HOST] shared gate produced an invalid evaluation entry; the row was not persisted (rc-9)`);
+          continue;
+        }
+        eventLog.recordRuleHostEvaluated({
+          toolName: evaluation.toolName,
+          filePath: evaluation.filePath,
+          matched: evaluation.matched,
+          decision: evaluation.decision,
+          ...(evaluation.ruleId !== undefined ? { ruleId: evaluation.ruleId } : {}),
+          ...(evaluation.activationId !== undefined ? { activationId: evaluation.activationId } : {}),
+          ...(evaluation.activationMode !== undefined ? { activationMode: evaluation.activationMode } : {}),
+        });
+        wroteEvaluationRow = true;
+      }
+      if (!wroteEvaluationRow) {
+        eventLog.recordRuleHostEvaluated({
+          toolName: event.toolName, filePath: action.normalizedPath,
+          matched: result.decision === 'deny', decision: result.decision === 'deny' ? 'block' : 'allow',
+          ruleId, activationMode: 'live',
+        });
+      }
+    } else {
+      eventLog.recordRuleHostEvaluated({
+        toolName: event.toolName, filePath: action.normalizedPath,
+        matched: result.decision === 'deny', decision: result.decision === 'deny' ? 'block' : 'allow',
+        ruleId, activationMode: 'live',
+      });
+    }
     if (result.decision === 'deny') {
       eventLog.recordRuleEnforced({ ruleId: ruleId ?? 'unknown', principleId: principleId ?? 'unknown', enforcement: 'block', toolName: event.toolName, filePath: action.normalizedPath });
       eventLog.recordRuleHostBlocked({ toolName: event.toolName, filePath: action.normalizedPath, reason: denyReason, ruleId });

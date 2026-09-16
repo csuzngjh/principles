@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection, summarizeRuleCodeShadowEvents } from '@principles/core/runtime-v2';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../principles-core/tests/bdd/support/repo-root.js';
 
@@ -24,7 +24,7 @@ function invoke(payload: unknown) {
   return spawnSync(process.execPath, [hookEntry], { input: JSON.stringify(payload), encoding: 'utf8' });
 }
 function base(root: string) { return { session_id: 'codex-session-523', turn_id: 'codex-turn-523', transcript_path: null, cwd: root, model: 'gpt-5.6', permission_mode: 'default' }; }
-async function artifact(root: string, input: { id: string; kind: 'principle' | 'rule'; principleId: string; ruleId?: string; content: object; channel: 'prompt' | 'code_tool_hook'; action: 'prompt_activate' | 'code_tool_hook_live_activate'; target: string }) {
+async function artifact(root: string, input: { id: string; kind: 'principle' | 'rule'; principleId: string; ruleId?: string; content: object; channel: 'prompt' | 'code_tool_hook'; action: 'prompt_activate' | 'code_tool_hook_live_activate' | 'code_tool_hook_shadow_activate'; target: string }) {
   const connection = new SqliteConnection(root);
   try {
     const now = new Date().toISOString();
@@ -120,6 +120,78 @@ describe('PRI-780 Codex runtime context capability declaration (v2 rules)', () =
     const suspended = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'ctxdecl-always-780.txt'), content: 'x' }, tool_use_id: 'call-suspended' });
     expect(JSON.parse(suspended.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
     expect(suspended.stderr).toContain('rule_context_v2_unavailable');
+  });
+});
+
+describe('PRI-813 shared shadow evidence reconnection', () => {
+  const SHADOW_RULE_CODE_813 = (ruleId: string, marker: string) => `function evaluate(input) { if (input.action.normalizedPath.indexOf('${marker}') >= 0) return { decision: 'block', matched: true, reason: 'CODEX_SHADOW_WOULD_BLOCK_813' }; return { decision: 'allow', matched: false, reason: 'safe' }; } var meta={name:'codex-shadow-813',version:'1',ruleId:'${ruleId}',coversCondition:'all'};`;
+
+  function readRuleHostEvaluated(root: string): { ts: string; type: string; category: string; sessionId: string | undefined; data: Record<string, unknown> }[] {
+    const logsDir = path.join(root, '.state', 'logs');
+    if (!fs.existsSync(logsDir)) return [];
+    const rows: { ts: string; type: string; category: string; sessionId: string | undefined; data: Record<string, unknown> }[] = [];
+    for (const file of fs.readdirSync(logsDir).filter(name => name.startsWith('events_') && name.endsWith('.jsonl'))) {
+      for (const line of fs.readFileSync(path.join(logsDir, file), 'utf8').split(/\r?\n/)) {
+        if (line.trim().length === 0) continue;
+        const parsed = JSON.parse(line) as { type?: string };
+        if (parsed.type === 'rulehost_evaluated') rows.push(parsed as { ts: string; type: string; category: string; sessionId: string | undefined; data: Record<string, unknown> });
+      }
+    }
+    return rows;
+  }
+
+  it('records canonical shadow rulehost_evaluated evidence with the exact activationId while the host action stays allowed', async () => {
+    const root = workspace();
+    await artifact(root, { id: 'art-shadow-813', kind: 'rule', principleId: 'P_CODEX_SHADOW_813', ruleId: 'R_CODEX_SHADOW_813', content: { principleId: 'P_CODEX_SHADOW_813', ruleId: 'R_CODEX_SHADOW_813', implementationCode: SHADOW_RULE_CODE_813('R_CODEX_SHADOW_813', 'shadow-blocked-813') }, channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', target: 'impl://R_CODEX_SHADOW_813' });
+    // The RuleCode returns block/matched for this path; shadow semantics mean
+    // the evidence row MUST say block while the actual host outcome is allow.
+    const result = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'shadow-blocked-813.txt'), content: 'x' }, tool_use_id: 'call-shadow-813' });
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    const rows = readRuleHostEvaluated(root);
+    expect(rows.some(row => row.data['activationMode'] === 'shadow'
+      && row.data['activationId'] === 'act-art-shadow-813'
+      && row.data['ruleId'] === 'R_CODEX_SHADOW_813'
+      && row.data['matched'] === true
+      && row.data['decision'] === 'block'
+      && row.data['toolName'] === 'write_file'
+      && row.category === 'evaluated'
+      && row.sessionId === 'codex-session-523')).toBe(true);
+  });
+
+  it('records the live evaluation row with its exact activationId on a live deny', async () => {
+    const root = workspace();
+    await artifact(root, { id: 'art-live-813', kind: 'rule', principleId: 'P_CODEX_LIVE_813', ruleId: 'R_CODEX_LIVE_813', content: { principleId: 'P_CODEX_LIVE_813', ruleId: 'R_CODEX_LIVE_813', implementationCode: SHADOW_RULE_CODE_813('R_CODEX_LIVE_813', 'live-blocked-813') }, channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_CODEX_LIVE_813' });
+    const result = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'live-blocked-813.txt'), content: 'x' }, tool_use_id: 'call-live-813' });
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'CODEX_SHADOW_WOULD_BLOCK_813' } });
+    const rows = readRuleHostEvaluated(root);
+    expect(rows.some(row => row.data['activationMode'] === 'live'
+      && row.data['activationId'] === 'act-art-live-813'
+      && row.data['matched'] === true
+      && row.data['decision'] === 'block')).toBe(true);
+  });
+
+  it('keeps a v2 shadow rule suspended: zero shadow evidence, structured warning (Codex v2 boundary extends to shadow)', async () => {
+    const root = workspace();
+    await artifact(root, { id: 'art-v2shadow-813', kind: 'rule', principleId: 'P_CODEX_V2SHADOW_813', ruleId: 'R_CODEX_V2SHADOW_813', content: { principleId: 'P_CODEX_V2SHADOW_813', ruleId: 'R_CODEX_V2SHADOW_813', requiresContextVersion: 2, implementationCode: SHADOW_RULE_CODE_813('R_CODEX_V2SHADOW_813', 'v2shadow-813') }, channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', target: 'impl://R_CODEX_V2SHADOW_813' });
+    const result = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'v2shadow-813.txt'), content: 'x' }, tool_use_id: 'call-v2shadow-813' });
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    expect(result.stderr).toContain('rule_context_v2_unavailable');
+    expect(result.stderr).toContain('codex_runtime_context_unsupported');
+    expect(readRuleHostEvaluated(root).filter(row => row.data['activationMode'] === 'shadow')).toEqual([]);
+  });
+
+  it('isolates two shadow activations into two exact-identity evidence rows the shadow summary can aggregate separately', async () => {
+    const root = workspace();
+    await artifact(root, { id: 'art-shadow-a-813', kind: 'rule', principleId: 'P_CODEX_SHADOW_A_813', ruleId: 'R_CODEX_SHADOW_A_813', content: { principleId: 'P_CODEX_SHADOW_A_813', ruleId: 'R_CODEX_SHADOW_A_813', implementationCode: SHADOW_RULE_CODE_813('R_CODEX_SHADOW_A_813', 'shadow-iso-813') }, channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', target: 'impl://R_CODEX_SHADOW_A_813' });
+    await artifact(root, { id: 'art-shadow-b-813', kind: 'rule', principleId: 'P_CODEX_SHADOW_B_813', ruleId: 'R_CODEX_SHADOW_B_813', content: { principleId: 'P_CODEX_SHADOW_B_813', ruleId: 'R_CODEX_SHADOW_B_813', implementationCode: SHADOW_RULE_CODE_813('R_CODEX_SHADOW_B_813', 'shadow-iso-813') }, channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', target: 'impl://R_CODEX_SHADOW_B_813' });
+    const result = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'shadow-iso-813.txt'), content: 'x' }, tool_use_id: 'call-iso-813' });
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    const rows = readRuleHostEvaluated(root).filter(row => row.data['activationMode'] === 'shadow');
+    expect(rows.map(row => row.data['activationId']).sort()).toEqual(['act-art-shadow-a-813', 'act-art-shadow-b-813']);
+    // The existing promotion-evidence aggregator keys on the exact
+    // activationId: evidence for A must not count B.
+    expect(summarizeRuleCodeShadowEvents(rows, 'act-art-shadow-a-813')).toEqual(expect.objectContaining({ observed: 1, matched: 1, wouldBlock: 1 }));
+    expect(summarizeRuleCodeShadowEvents(rows, 'act-art-shadow-b-813')).toEqual(expect.objectContaining({ observed: 1, matched: 1, wouldBlock: 1 }));
   });
 });
 

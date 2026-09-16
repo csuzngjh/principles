@@ -1,0 +1,104 @@
+/**
+ * PRI-813 — promotion host-liveness resolution.
+ *
+ * Before PRI-813 the promotion call sites passed OPENCLAW_HOST_LIVENESS_CONTRACT
+ * unconditionally, so a Codex workspace reported runtime_compatibility /
+ * runtime_shadow_evidence as PASSED — a false capability claim that hid the
+ * "promotion on this host is unsupported" truth behind a sample-count failure.
+ * The resolver routes the ONE existing contract authority by the workspace's
+ * real host declarations and fails closed everywhere else.
+ */
+
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { saveHostToolDeclaration } from '../src/host-tool-declaration.js';
+import {
+  OPENCLAW_HOST_LIVENESS_CONTRACT,
+  resolvePromotionHostLiveness,
+} from '../src/host-liveness-contract.js';
+
+let ws: string;
+
+beforeEach(() => {
+  ws = mkdtempSync(path.join(tmpdir(), 'pd-liveness-813-'));
+});
+
+afterEach(() => {
+  rmSync(ws, { recursive: true, force: true });
+});
+
+const OPENCLAW = {
+  version: 1 as const,
+  hostKind: 'openclaw',
+  mappings: [{ rawToolName: 'shell', canonicalKind: 'execute' as const }],
+  declaredAt: '2026-09-16T00:00:00.000Z',
+};
+
+const CODEX = {
+  version: 1 as const,
+  hostKind: 'codex',
+  mappings: [{ rawToolName: 'Bash', canonicalKind: 'execute' as const }],
+  declaredAt: '2026-09-16T00:00:00.000Z',
+};
+
+describe('resolvePromotionHostLiveness (PRI-813 fail-closed capability routing)', () => {
+  it('keeps the historical OpenClaw contract when no host has declared anything yet', () => {
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toEqual({
+      ok: true,
+      hostKind: 'openclaw',
+      hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+      hostRuntimeVersion: 'openclaw-legacy@1',
+    });
+  });
+
+  it('resolves the OpenClaw contract for an OpenClaw-declared workspace', () => {
+    expect(saveHostToolDeclaration(ws, OPENCLAW).ok).toBe(true);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved.ok).toBe(true);
+    expect(resolved).toEqual({
+      ok: true,
+      hostKind: 'openclaw',
+      hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+      hostRuntimeVersion: 'openclaw-legacy@1',
+    });
+  });
+
+  it('fails closed for a Codex-only workspace — no contract inheritance, no false PASS (Test F)', () => {
+    expect(saveHostToolDeclaration(ws, CODEX).ok).toBe(true);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: 'promotion_host_unsupported',
+      hostKinds: ['codex'],
+      hostContract: null,
+      hostRuntimeVersion: null,
+    });
+  });
+
+  it('fails closed with an ambiguity reason when multiple hosts are declared — never defaults to OpenClaw (Test H)', () => {
+    expect(saveHostToolDeclaration(ws, OPENCLAW).ok).toBe(true);
+    expect(saveHostToolDeclaration(ws, CODEX).ok).toBe(true);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: 'multi_host_promotion_ambiguous',
+      hostKinds: ['codex', 'openclaw'],
+      hostContract: null,
+    });
+  });
+
+  it('fails closed observably when the host declarations cannot be read', () => {
+    const declarationsDir = path.join(ws, '.pd', 'host-tool-semantics');
+    mkdirSync(declarationsDir, { recursive: true });
+    writeFileSync(path.join(declarationsDir, 'codex.json'), '{ not json', 'utf8');
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: 'host_declarations_unreadable',
+      hostContract: null,
+    });
+  });
+});
