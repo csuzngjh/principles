@@ -221,11 +221,21 @@ export class SplitDiagnosticianRunner {
       // type — its first step re-guards the value at runtime, so no untrusted
       // data escapes validation (same pattern as diag-router-runner post-gate).
       if (cacheUsable) {
-        const cacheValidation = await this.cacheOutputValidator.validate(
-          parsedOutput as DiagnosticianOutputV1,
-          stageCTaskId,
-        );
-        if (!cacheValidation.valid) {
+        try {
+          const cacheValidation = await this.cacheOutputValidator.validate(
+            parsedOutput as DiagnosticianOutputV1,
+            stageCTaskId,
+          );
+          if (!cacheValidation.valid) {
+            cacheUsable = false;
+          }
+        } catch {
+          // PRI-821 (R4 review F-1): the validator's semantic checks assume
+          // string fields (e.g. `summary.trim()`); a truthy non-string field
+          // can throw TypeError here — unlike the live path, this call is
+          // NOT wrapped by BasePeerRunner's catch, so the error would escape
+          // run() and strand the parent leased. Fail safe: treat the cache
+          // as unusable and take the reset+rerun path below.
           cacheUsable = false;
         }
       }

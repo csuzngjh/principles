@@ -10,6 +10,7 @@
  */
 
 import { app, BrowserWindow, Menu, Notification, Tray, nativeImage, safeStorage, ipcMain } from 'electron';
+import type { MenuItemConstructorOptions } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -31,7 +32,7 @@ import {
 } from '../lib/launch-result.js';
 import { buildConsoleTokenStatus, isSameConsoleOrigin, type ConsoleTokenStatus } from '../lib/console-origin.js';
 import { ConsoleSupervisor } from '../lib/supervisor.js';
-import { buildDegradedPageHtml, describeDegraded } from '../lib/degraded.js';
+import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, describeDegraded, describeWorkspaceWorkerDegraded } from '../lib/degraded.js';
 import {
   defaultCompanionState,
   markApprovalsNotified,
@@ -311,7 +312,28 @@ function spawnWorkspaceWorker(canonicalWorkspaceDir: string): WorkerChild {
 function startWorkspaceWorkerSupervision(): void {
   workspaceWorkers = new WorkspaceWorkerRegistry({
     spawnWorker: spawnWorkspaceWorker,
-    log: (event, fields) => log(event, fields ?? {}),
+    // The degraded fact already exists in the registry (PRI-624); PRI-715 only
+    // connects it to the Owner-visible surfaces — one-shot notification on the
+    // degradation transition plus the persistent tray section (rebuilt below).
+    log: (event, fields) => {
+      log(event, fields ?? {});
+      if (event === 'workspace_worker_degraded') {
+        // rc-1/rc-2: log fields are untrusted runtime values — guard before use.
+        const workspace = fields?.workspace;
+        if (typeof workspace !== 'string' || workspace.length === 0) {
+          log('workspace_worker_degraded_notify_skipped', { reason: 'workspace_field_invalid' });
+          return;
+        }
+        notifyWorkspaceDegraded(workspace);
+        rebuildTrayMenu();
+      } else if (event === 'workspace_worker_stopped') {
+        // Manifest removal of a (possibly degraded) workspace must retire its
+        // tray section immediately — nothing else rebuilds the tray on removal
+        // (review P1, PRI-715 §7F). The rebuild re-reads the registry, so the
+        // ghost display dies with the entry.
+        rebuildTrayMenu();
+      }
+    },
   });
   workspaceWorkers.sync(manifestCodexWorkspaces());
   workspaceWorkerTimer = setInterval(() => {
@@ -319,6 +341,23 @@ function startWorkspaceWorkerSupervision(): void {
     workspaceWorkers?.sync(manifestCodexWorkspaces());
   }, WORKSPACE_WORKER_SYNC_INTERVAL_MS);
   workspaceWorkerTimer.unref();
+}
+
+/** Owner-facing surface for a permanently degraded workspace worker (PRI-715). */
+function notifyWorkspaceDegraded(canonicalWorkspace: string): void {
+  if (!Notification.isSupported()) {
+    log('notification_unsupported', { event: 'workspace_worker_degraded', workspace: canonicalWorkspace });
+    return;
+  }
+  const info = describeWorkspaceWorkerDegraded(canonicalWorkspace);
+  const notification = new Notification({
+    title: info.title,
+    body: info.body,
+    icon: nativeImage.createFromPath(iconPath()),
+  });
+  notification.on('click', () => showWindow());
+  notification.show();
+  log('notified_workspace_degraded', { workspace: canonicalWorkspace });
 }
 
 function stopWorkspaceWorkerSupervision(): void {
@@ -784,32 +823,42 @@ async function updateCheckTick(): Promise<void> {
 function rebuildTrayMenu(): void {
   if (tray === undefined) return;
   const s = supervisor.getState();
-  const statusLabel =
+  // Pure read of the existing degraded state (PRI-715) — querying must never
+  // reset degradation, restart a worker or touch the manifest.
+  const degradedView = buildDegradedWorkspacesTrayView(workspaceWorkers?.degradedWorkspaces() ?? []);
+  const supervisorLabel =
     s.kind === 'running'
       ? s.mode === 'managed' ? `控制台运行中（端口 ${s.port}）` : `控制台已连接·外部实例（端口 ${s.port}）`
       : s.kind === 'starting' || s.kind === 'restarting'
         ? '控制台启动中…'
         : '控制台未运行';
+  const statusLabel = supervisorLabel + degradedView.statusSuffix;
   tray.setToolTip(`PD Companion — ${statusLabel}`);
   const autoStart = app.getLoginItemSettings().openAtLogin;
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: '打开控制台', click: () => showWindow() },
-      { label: '重启控制台服务', enabled: supervisor.canRestart(), click: () => restartFromTray() },
-      { type: 'separator' },
-      {
-        label: '开机自启',
-        type: 'checkbox',
-        checked: autoStart,
-        click: (menuItem) => {
-          app.setLoginItemSettings({ openAtLogin: menuItem.checked });
-          log('autostart_toggled', { enabled: menuItem.checked });
-        },
+  const degradedSection: MenuItemConstructorOptions[] = degradedView.menuLabels.length > 0
+    ? [
+        { type: 'separator' },
+        ...degradedView.menuLabels.map((label) => ({ label, enabled: false })),
+      ]
+    : [];
+  const template: MenuItemConstructorOptions[] = [
+    { label: '打开控制台', click: () => showWindow() },
+    { label: '重启控制台服务', enabled: supervisor.canRestart(), click: () => restartFromTray() },
+    ...degradedSection,
+    { type: 'separator' },
+    {
+      label: '开机自启',
+      type: 'checkbox',
+      checked: autoStart,
+      click: (menuItem) => {
+        app.setLoginItemSettings({ openAtLogin: menuItem.checked });
+        log('autostart_toggled', { enabled: menuItem.checked });
       },
-      { type: 'separator' },
-      { label: '退出', click: () => app.quit() },
-    ]),
-  );
+    },
+    { type: 'separator' },
+    { label: '退出', click: () => app.quit() },
+  ];
+  tray.setContextMenu(Menu.buildFromTemplate(template));
 }
 
 function createTray(): void {
