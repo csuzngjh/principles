@@ -17,6 +17,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'node:os';
+import { getPdRuntimeDir, getPluginExtDir } from '../src/mvp-config.js';
 import { install } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
 import { setLanguage } from '../src/i18n.js';
@@ -29,7 +31,7 @@ vi.mock('child_process', () => ({
   execSync: vi.fn(() => ''),
 }));
 vi.mock('../src/utils/env.js', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
+  const actual = await importOriginal<typeof import('../src/utils/env.js')>();
   return {
     ...actual,
     checkOpenClawGateway: vi.fn(),
@@ -62,14 +64,26 @@ const PLUGIN_MANIFEST = JSON.stringify({
 
 describe('install() release-manager dependency install + authority import smoke (PR #1525 review)', () => {
   let savedLegacyNpmInstall: string | undefined;
+  let savedHome: string | undefined;
+  let savedUserProfile: string | undefined;
+  let tempHome = '';
+  let realFs: typeof fs;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    realFs = await vi.importActual<typeof fs>('fs');
     vi.clearAllMocks();
     vi.mocked(appendJournalTransition).mockImplementation(() => undefined);
     savedLegacyNpmInstall = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     // Force the npm-distributed shape: registry resolution is the subject.
     process.env.PD_ALLOW_LEGACY_NPM_INSTALL = '1';
     setLanguage('en');
+    // PRI-822：复用既有 smoke 的真实临时目录模式；不扩大 fs mock。
+    // getHomeDir 优先 HOME，os.homedir 在 Windows 使用 USERPROFILE，故同时隔离。
+    savedHome = process.env.HOME;
+    savedUserProfile = process.env.USERPROFILE;
+    tempHome = realFs.realpathSync.native(realFs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri822-smoke-home-')));
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
     vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
     vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
     vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: true });
@@ -90,26 +104,89 @@ describe('install() release-manager dependency install + authority import smoke 
     vi.mocked(fs.readdirSync).mockReturnValue([]);
   });
 
+  function seedPreviousInstall(): void {
+    const originalDirs = [getPdRuntimeDir(), getPluginExtDir()];
+    for (const originalDir of originalDirs) {
+      realFs.mkdirSync(originalDir, { recursive: true });
+      realFs.writeFileSync(path.join(originalDir, 'previous-install.txt'), originalDir);
+    }
+    vi.mocked(fs.renameSync).mockImplementation((source, destination) => {
+      if (!originalDirs.includes(String(source)) && !originalDirs.includes(String(destination))) return;
+      realFs.mkdirSync(path.dirname(String(destination)), { recursive: true });
+      realFs.renameSync(source, destination);
+    });
+    vi.mocked(fs.rmSync).mockImplementation((target, options) => {
+      if (originalDirs.includes(String(target))) realFs.rmSync(target, options);
+    });
+  }
+
+  function expectPreviousInstallRestored(): void {
+    const renames = vi.mocked(fs.renameSync).mock.calls;
+    for (const originalDir of [getPdRuntimeDir(), getPluginExtDir()]) {
+      const backupCalls = renames.filter(([source]) => source === originalDir);
+      expect(backupCalls).toHaveLength(1);
+      const backupCall = backupCalls[0]!;
+      expect(backupCall[1]).not.toBe(originalDir);
+      expect(renames).toContainEqual([backupCall[1], originalDir]);
+      const restoreIndex = renames.findIndex(([source, destination]) =>
+        source === backupCall[1] && destination === originalDir);
+      expect(restoreIndex).toBeGreaterThan(renames.indexOf(backupCall));
+    }
+  }
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.mocked(fs.existsSync).mockReset();
     vi.mocked(fs.readFileSync).mockReset();
     vi.mocked(fs.readdirSync).mockReset();
+    vi.mocked(fs.renameSync).mockReset();
+    vi.mocked(fs.rmSync).mockReset();
     if (savedLegacyNpmInstall === undefined) delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
+    if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+    if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
     setLanguage('zh');
+    if (tempHome !== '') {
+      realFs.rmSync(tempHome, { recursive: true, force: true });
+      tempHome = '';
+    }
   });
 
-  it('runs npm install in the installed release-manager dir and fails loudly when the authority graph cannot load', async () => {
-    // The authority path exists per the fs mock, but the REAL file is absent
-    // in the test environment — the import must fail and the installer must
-    // report it with a structured, actionable message (rc-9), never silently
-    // continue.
-    const result = await install(baseInstallOptions, '/asset', { quiet: true });
+  it.each(['HOME + USERPROFILE', 'USERPROFILE fallback'])('authority 缺失时通过真实导入失败并回滚（%s）', async (homeMode) => {
+    // 空的真实临时目录决定导入失败，不再借用机器上恰好缺失的文件。
+    if (homeMode === 'USERPROFILE fallback') delete process.env.HOME;
+    const runtimeDir = path.join(tempHome, '.pd', 'runtime');
+    const authorityPath = path.join(runtimeDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js');
+    expect(getPdRuntimeDir()).toBe(runtimeDir);
+    expect(realFs.existsSync(authorityPath)).toBe(false);
+    seedPreviousInstall();
+    const result = await install(
+      { ...baseInstallOptions, workspaceDir: path.join(tempHome, 'workspace') },
+      path.join(tempHome, 'asset'),
+      { quiet: true },
+    );
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/ReleaseManager authority module failed to load/);
     expect(result.error).toMatch(/Re-run the installer to repair/);
+    expect(result.error).toContain('Previous install has been restored');
+    expectPreviousInstallRestored();
+    for (const originalDir of [runtimeDir, getPluginExtDir()]) {
+      expect(realFs.readFileSync(path.join(originalDir, 'previous-install.txt'), 'utf8')).toBe(originalDir);
+    }
+    expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(authorityPath);
+    const authorityProbes = vi.mocked(fs.existsSync).mock.calls
+      .map(([value]) => String(value))
+      .filter((value) => value.endsWith('release-manager-authority.js'));
+    expect([...new Set(authorityProbes)]).toEqual([
+      path.join(tempHome, 'asset', 'release-manager', 'dist', 'update', 'release-manager-authority.js'),
+      authorityPath,
+    ]);
+    expect(vi.mocked(fs.renameSync).mock.calls.length).toBeGreaterThan(0);
+    for (const [source, destination] of vi.mocked(fs.renameSync).mock.calls) {
+      expect(path.relative(tempHome, String(source))).not.toMatch(/^(\.\.|[A-Za-z]:)/);
+      expect(path.relative(tempHome, String(destination))).not.toMatch(/^(\.\.|[A-Za-z]:)/);
+    }
 
     // Registry resolution ran for the release-manager component directory —
     // the exact gap the review found (payload ships no node_modules).
@@ -123,5 +200,29 @@ describe('install() release-manager dependency install + authority import smoke 
         && /[\\/]release-manager$/.test(opts.cwd.replace(/[\\/]+$/, ''));
     });
     expect(releaseManagerNpmCall, 'expected npm install to run with cwd=<runtime>/release-manager').toBeDefined();
+    expect(releaseManagerNpmCall?.[2]).toEqual(expect.objectContaining({
+      cwd: path.join(runtimeDir, 'release-manager'),
+    }));
+  });
+
+  it('临时 HOME 中 authority 的真实依赖缺失时报告加载失败并回滚', async () => {
+    const componentDir = path.join(tempHome, '.pd', 'runtime', 'release-manager');
+    const authorityPath = path.join(componentDir, 'dist', 'update', 'release-manager-authority.js');
+    realFs.mkdirSync(path.dirname(authorityPath), { recursive: true });
+    realFs.writeFileSync(path.join(componentDir, 'package.json'), JSON.stringify({ type: 'module' }));
+    realFs.writeFileSync(authorityPath, "import './fixture-missing-dependency.js';\n");
+
+    const result = await install(
+      { ...baseInstallOptions, workspaceDir: path.join(tempHome, 'workspace') },
+      path.join(tempHome, 'asset'),
+      { quiet: true },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/ReleaseManager authority module failed to load/);
+    expect(result.error).toContain('fixture-missing-dependency.js');
+    expect(result.error).toContain('Previous install has been restored');
+    expectPreviousInstallRestored();
+    expect(fs.existsSync).toHaveBeenCalledWith(authorityPath);
   });
 });

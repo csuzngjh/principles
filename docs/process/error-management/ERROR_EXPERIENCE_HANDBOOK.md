@@ -1117,6 +1117,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-025 (test proves isolated helper, not real production defense — same EP-09 group), ERR-077 (characterization tests don't verify parameter parity — same EP-09 group), ERR-009/ERR-010 (production-code sibling: falsy values silently passing validation).
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
+- **Recurrence (2026-09-17, PRI-822 / PR #1744)**: 恢复提示与任意 rename 也可由未恢复路径产生；增加双目录反向调用顺序及真实旧内容标记断言。抑制实际恢复时两例因标记缺失失败，撤销注入后 3/3 通过。
+  <!-- recurrence-meta
+  {"date":"2026-09-17","pattern":"EP-09","invariant":"rollback-test-must-prove-restoration-not-backup","severity":"P2","escaped":"pr-handoff","caughtBy":"pr-review","guard":"release-manager-install-smoke reverse rename + restored marker; negative control verified"}
+  -->
 - **Recurrence**: (older inline recurrences → ERROR_ARCHIVE.md) 2026-08-13 PRI-523 C1.1: production-BDD seeded only a Runtime V2 activation then asserted its unique text — seed both paths, assert per-path unique signals. 2026-07-22 PRI-520: fail-loud tests assert the surfaced error AND the preserved outcome. 2026-07-04 PR #1182: non-unique UPDATE-by-painId + pagination false-empty — latest-row subquery + total-based emptiness.
   - 2026-09-11 PRI-626 / PR #1608 review: self-authored verification never executed its failure paths (harness sentinel crashed the real needs_revision path; zero-write probe asserted exit-0 on a fail-open hook). Bite-verify every failure branch the author adds: unique marker + flag-ON negative control. (Full text → ERROR_ARCHIVE.md.)
   <!-- recurrence-meta
