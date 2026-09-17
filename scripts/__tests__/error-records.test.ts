@@ -29,7 +29,6 @@ import {
   isValidObservedAt,
 } from '../error-records.cjs';
 import {
-  parseEntryBody,
   parseLegacyEntry,
   projectEntries,
   verifyParity,
@@ -83,6 +82,17 @@ describe('record serialization', () => {
     const parsed = parseRecordFile(text);
     expect(parsed.error).toBeUndefined();
     expect(parsed.meta.guard).toBe('run x --> y --> z');
+  });
+
+  it('escapes comment-open and alternate close sequences so serialized records stay intact', () => {
+    const meta = { ...occurrenceMeta, guard: 'a <!-- b --!> c --> d' };
+    const text = serializeRecord(meta, 'body');
+    // the only `<!--` is the opener; no early `-->`/`--!>` may appear
+    expect(text.indexOf('<!--', 1)).toBe(-1);
+    expect(text.slice(0, -10).includes('-->')).toBe(false);
+    const parsed = parseRecordFile(text);
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.meta.guard).toBe('a <!-- b --!> c --> d');
   });
 
   it('rejects files without a marker block', () => {
@@ -214,7 +224,7 @@ describe('records tree loading and referential integrity', () => {
 });
 
 describe('aggregation and id generation', () => {
-  it('derives per-pattern recurrence stats from occurrences', () => {
+  it('derives per-pattern recurrence stats from occurrences (month precision counts at first of month)', () => {
     const patterns = new Map([[patternMeta.recordId, { meta: patternMeta, body: '', file: 'x' }]]);
     const now = new Date('2026-09-16T00:00:00Z');
     const stats = aggregatePatternStats(
@@ -223,12 +233,16 @@ describe('aggregation and id generation', () => {
         { meta: occurrenceMeta, body: '', file: 'a' },
         { meta: { ...occurrenceMeta, occurrenceId: 'OCC-2026-09-15-err-068-r2', observedAt: '2026-09-15' }, body: '', file: 'b' },
         { meta: { ...occurrenceMeta, occurrenceId: 'OCC-2026-01-01-err-068-r3', observedAt: '2026-01-01' }, body: '', file: 'c' },
+        // Month-precision dates are valid observedAt values; they must enter
+        // the 90-day window and lastSeen at first-of-month, not drop out as
+        // invalid dates (review round regression).
+        { meta: { ...occurrenceMeta, occurrenceId: 'OCC-2026-09-err-068-r4', observedAt: '2026-09' }, body: '', file: 'd' },
       ],
       now,
     );
     const s = stats.get('P-ERR-068')!;
-    expect(s.occurrenceCount).toBe(3);
-    expect(s.recentCount).toBe(2);
+    expect(s.occurrenceCount).toBe(4);
+    expect(s.recentCount).toBe(3);
     expect(s.lastSeen).toBe('2026-09-15');
   });
 

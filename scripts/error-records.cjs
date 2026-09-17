@@ -48,7 +48,6 @@ const OCCURRENCES_DIR = 'occurrences';
 const SCHEMA_VERSION = 1;
 
 const VALID_STATUS = new Set(['active', 'archived']);
-const VALID_RECORD_TYPES = new Set(['pattern', 'occurrence']);
 const VALID_SEVERITY = new Set(['P0', 'P1', 'P2', 'P3']);
 /** Category headings are stable prose in the handbook; classified on migration. */
 const VALID_CATEGORIES = new Set([
@@ -71,10 +70,23 @@ const EP_ID_PATTERN = /^EP-\d{2}$/;
 /** Crockford-ish base32 (no confusing 0/O/1/I) for random suffixes. */
 const ID_ALPHABET = '23456789abcdefghjkmnpqrstvwxyz';
 
+/**
+ * Rejection sampling over randomBytes: values >= 240 (the largest multiple
+ * of the 30-char alphabet within one byte) are discarded, so every
+ * character has exactly equal probability — no modulo bias (CodeQL:
+ * biased random numbers from a cryptographically secure source).
+ */
 function randomSuffix(length) {
-  const bytes = crypto.randomBytes(length);
+  const limit = 256 - (256 % ID_ALPHABET.length);
   let out = '';
-  for (let i = 0; i < length; i += 1) out += ID_ALPHABET[bytes[i] % ID_ALPHABET.length];
+  while (out.length < length) {
+    const bytes = crypto.randomBytes(length * 2);
+    for (const byte of bytes) {
+      if (byte >= limit) continue;
+      out += ID_ALPHABET[byte % ID_ALPHABET.length];
+      if (out.length === length) break;
+    }
+  }
   return out;
 }
 
@@ -110,16 +122,29 @@ function generateOccurrenceId(now = new Date()) {
 }
 
 /**
+ * Make a JSON text safe to embed inside an HTML comment. HTML comments have
+ * TWO end markers — `-->` and `--!>` — and one open marker `<!--`; after
+ * this transform none of them can occur in the literal text:
+ *   `-->` → `\u002d\u002d>`  (cannot terminate the comment early)
+ *   `!`   → `\u0021`         (kills `--!>`; also covers stray `!` harmlessly)
+ *   `<`   → `\u003c`         (kills `<!--`)
+ * All three are standard JSON unicode escapes — JSON.parse restores the
+ * original string losslessly.
+ */
+function escapeHtmlCommentJson(text) {
+  return String(text)
+    .replace(/-->/g, '\\u002d\\u002d>')
+    .replace(/!/g, '\\u0021')
+    .replace(/</g, '\\u003c');
+}
+
+/**
  * Serialize one record file: marker JSON block + markdown body.
  * Deterministic — key order is the object's own insertion order and the
  * writer always serializes from a freshly constructed meta object.
- * `-->` inside string values would terminate the HTML comment early and
- * truncate the JSON, so it is escaped as `\u002d\u002d>` (JSON.parse
- * restores it losslessly).
  */
 function serializeRecord(meta, body) {
-  const json = JSON.stringify(meta, null, 2).replace(/-->/g, '\\u002d\\u002d>');
-  return `<!-- ${MARKER}\n${json}\n-->\n\n${body.trimEnd()}\n`;
+  return `<!-- ${MARKER}\n${escapeHtmlCommentJson(JSON.stringify(meta, null, 2))}\n-->\n\n${body.trimEnd()}\n`;
 }
 
 /**
@@ -129,7 +154,7 @@ function serializeRecord(meta, body) {
  */
 function parseRecordFile(text) {
   if (typeof text !== 'string' || text.length === 0) return { error: 'empty record file' };
-  const match = text.match(/^<!--\s*\n?([\s\S]*?)-->/);
+  const match = text.match(/^<!--\s*\n?([\s\S]*?)(?:--!?)>/);
   if (!match) return { error: 'no HTML-comment block found' };
   const lines = match[1].split(/\r?\n/);
   const firstIdx = lines.findIndex((l) => l.trim().length > 0);
@@ -324,7 +349,7 @@ function loadRecords(repoRoot) {
     }
   }
   const seenDisplayIds = new Set();
-  for (const [recordId, pattern] of patterns) {
+  for (const pattern of patterns.values()) {
     if (seenDisplayIds.has(pattern.meta.displayId)) {
       errors.push(`duplicate pattern display id: ${pattern.meta.displayId}`);
     }
@@ -365,10 +390,50 @@ function aggregatePatternStats(patterns, occurrences, now = new Date(), recentDa
 }
 
 /**
- * Atomic write: temp file in the target directory + rename. Never leaves a
- * partial record visible to a concurrent reader/validator.
+ * Atomic NO-CLOBBER record creation. 'wx' = O_CREAT|O_EXCL: the filesystem
+ * itself guarantees an existing recordId/occurrenceId is never replaced —
+ * two concurrent writers (or an explicit duplicate --record-id) can only
+ * get EEXIST, closing the check-then-rename TOCTOU window. A crash
+ * mid-write leaves a truncated file that loadRecords rejects loudly
+ * (repair = delete the partial record and retry); tmp+rename atomicity
+ * cannot provide no-clobber and was rejected deliberately.
  */
-function writeRecordAtomic(filePath, content) {
+function createRecordFile(filePath, content) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'wx');
+    fs.writeFileSync(fd, content, 'utf8');
+    fs.closeSync(fd);
+    fd = undefined;
+  } catch (err) {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* already closed */
+      }
+      try {
+        fs.unlinkSync(filePath);
+      } catch {
+        /* nothing was created */
+      }
+    }
+    if (err instanceof Error && err.code === 'EEXIST') {
+      throw new Error(`record already exists: ${path.basename(filePath, '.md')} (refusing to overwrite)`);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Replace a record we have just read (archive lifecycle flip only). This is
+ * a read-modify-write of a KNOWN-EXISTING file, not a create: concurrent
+ * flips of the same pattern are a semantic conflict that Git surfaces by
+ * design (SPEC §3.3) — no-clobber creation semantics do not apply here.
+ */
+function replaceRecordFile(filePath, content) {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.tmp`);
@@ -384,18 +449,12 @@ function recordFilePath(repoRoot, meta) {
   return path.join(recordsDir, OCCURRENCES_DIR, meta.patternRecordId, `${meta.occurrenceId}.md`);
 }
 
-/** Validate-then-write for one record. Returns written path or throws. */
+/** Validate-then-create for one record. Returns written path or throws. */
 function writePatternRecord(repoRoot, meta, body) {
   const validated = validatePatternMeta(meta, `pattern ${meta.recordId ?? '<unparsed>'}`);
   if (validated.error) throw new Error(validated.error);
   const filePath = recordFilePath(repoRoot, meta);
-  if (fs.existsSync(filePath)) {
-    // Same fail-loud contract as occurrences: last-writer-wins over a
-    // pattern record (including an accidental archived→active flip) is a
-    // silent identity takeover, not a write.
-    throw new Error(`pattern already exists: ${meta.recordId} (refusing to overwrite; archive it or pick a new id)`);
-  }
-  writeRecordAtomic(filePath, serializeRecord(meta, body));
+  createRecordFile(filePath, serializeRecord(meta, body));
   return filePath;
 }
 
@@ -403,10 +462,7 @@ function writeOccurrenceRecord(repoRoot, meta, body) {
   const validated = validateOccurrenceMeta(meta, `occurrence ${meta.occurrenceId ?? '<unparsed>'}`);
   if (validated.error) throw new Error(validated.error);
   const filePath = recordFilePath(repoRoot, meta);
-  if (fs.existsSync(filePath)) {
-    throw new Error(`occurrence already exists: ${meta.occurrenceId} (refusing to overwrite)`);
-  }
-  writeRecordAtomic(filePath, serializeRecord(meta, body));
+  createRecordFile(filePath, serializeRecord(meta, body));
   return filePath;
 }
 
@@ -418,7 +474,7 @@ function archivePattern(repoRoot, recordId) {
   if (!pattern) throw new Error(`unknown pattern record: ${recordId}`);
   if (pattern.meta.status === 'archived') return pattern.file;
   const nextMeta = { ...pattern.meta, status: 'archived' };
-  writeRecordAtomic(pattern.file, serializeRecord(nextMeta, pattern.body));
+  replaceRecordFile(pattern.file, serializeRecord(nextMeta, pattern.body));
   return pattern.file;
 }
 
@@ -560,11 +616,13 @@ module.exports = {
   generateOccurrenceId,
   serializeRecord,
   parseRecordFile,
+  escapeHtmlCommentJson,
   validatePatternMeta,
   validateOccurrenceMeta,
   loadRecords,
   aggregatePatternStats,
-  writeRecordAtomic,
+  createRecordFile,
+  replaceRecordFile,
   writePatternRecord,
   writeOccurrenceRecord,
   archivePattern,

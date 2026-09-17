@@ -32,9 +32,9 @@ const {
   loadRecords,
   writePatternRecord,
   writeOccurrenceRecord,
+  escapeHtmlCommentJson,
   RECORDS_RELATIVE_DIR,
 } = require('./error-records.cjs');
-const { parseRecurrenceMeta } = require('./error-handbook-meta.cjs');
 
 const root = process.cwd();
 const docsDir = path.join(root, 'docs', 'process', 'error-management');
@@ -137,7 +137,7 @@ function parseEntryBody(body) {
     if (!(trimmed.startsWith('<!--') && trimmed.includes('recurrence-meta'))) continue;
     let j = i;
     for (; j < lines.length; j += 1) {
-      if (lines[j].includes('-->')) break;
+      if (/--!?>/.test(lines[j])) break;
     }
     metaRanges.push({ start: i, end: j });
     i = j;
@@ -176,7 +176,7 @@ function parseEntryBody(body) {
       .slice(range.start, range.end + 1)
       .join('\n')
       .replace(/^\s*<!--/, '')
-      .replace(/-->\s*$/, '');
+      .replace(/--!?>\s*$/, '');
     const contentLines = inner.split(/\r?\n/).filter((l) => l.trim().length > 0);
     try {
       const parsedMeta = JSON.parse(contentLines.slice(1).join('\n'));
@@ -484,7 +484,7 @@ function renderRecurrenceMeta(meta, indent) {
     null,
     2,
   );
-  return `${indent}<!-- recurrence-meta\n${metaJson}\n${indent}-->\n`;
+  return `${indent}<!-- recurrence-meta\n${escapeHtmlCommentJson(metaJson)}\n${indent}-->\n`;
 }
 
 function projectEntries(patterns, occurrences, status) {
@@ -561,11 +561,11 @@ function verifyParity(projectedText, legacyText, label, report, knownConflicts) 
     const id = entry.match(ENTRY_HEADER)[1];
     const projected = projectedEntries.get(id);
     if (!projected) continue;
-    const normLegacy = entry.replace(/<!--[\s\S]*?-->/g, '').split('\n').map((l) => l.trim()).filter((l) => l.length > 3);
-    const normProj = projected.replace(/<!--[\s\S]*?-->/g, '');
+    const normLegacy = entry.replace(/<!--[\s\S]*?--!?>/g, '').split('\n').map((l) => l.trim()).filter((l) => l.length > 3);
+    const normProj = projected.replace(/<!--[\s\S]*?--!?>/g, '');
     for (const line of normLegacy) {
       if (/^(\*\*Date\*\*|\*\*Recurrence\*\*|- \*\*Recurrence\*\*)/.test(line)) continue;
-      if (line.startsWith('<!--') || line.startsWith('-->')) continue;
+      if (line.startsWith('<!--') || /^--!?>/.test(line)) continue;
       if (!normProj.includes(line)) {
         report.push(`${label} ${id}: narrative line lost: ${line.slice(0, 80)}`);
         break;
@@ -691,7 +691,7 @@ function main() {
     const file = path.join(dir, `${raw.displayId}-${hashText(raw.text)}.md`);
     fs.writeFileSync(
       file,
-      `<!-- preserved-legacy source=${raw.legacySource} reason="${raw.reason}" -->\n\n${raw.text}\n`,
+      `<!-- preserved-legacy\n${escapeHtmlCommentJson(JSON.stringify({ displayId: raw.displayId, legacySource: raw.legacySource, reason: raw.reason }, null, 2))}\n-->\n\n${raw.text}\n`,
       'utf8',
     );
   }
