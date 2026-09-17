@@ -189,6 +189,8 @@ export async function createShadowFixture(overrides: {
   };
   const channelPayloadBytes = Buffer.from(`${JSON.stringify(channelPayload, null, 2)}\n`);
 
+  const releaseTargetPath = `releases/${releaseMetadata.releaseId}/metadata.json`;
+  const releaseMetadataBytes = Buffer.from(JSON.stringify(releaseMetadata));
   const channelTargetPath = 'channels/stable.json';
   // PRI-698 Phase 1: the signed artifact target (Phase 1 path convention,
   // same computation as the acquisition module).
@@ -198,6 +200,12 @@ export async function createShadowFixture(overrides: {
     specVersion: '1.0.31',
     expires: expiresFar,
     targets: {
+      [releaseTargetPath]: new TargetFile({
+        path: releaseTargetPath,
+        length: releaseMetadataBytes.length,
+        hashes: { sha256: createHash('sha256').update(releaseMetadataBytes).digest('hex') },
+        unrecognizedFields: { custom: { releaseId: releaseMetadata.releaseId, channel: 'stable', platform: 'metadata' } },
+      }),
       [channelTargetPath]: new TargetFile({
         path: channelTargetPath,
         length: channelPayloadBytes.length,
@@ -234,6 +242,7 @@ export async function createShadowFixture(overrides: {
     }), signer)],
     ['targets.json', signedMetadata(targets, signer)],
     [`targets/${channelTargetPath}`, channelPayloadBytes],
+    [`targets/${releaseTargetPath}`, releaseMetadataBytes],
     ...(artifactBytes !== null ? [[`targets/${artifactTargetPath}`, artifactBytes] as const] : []),
   ]);
   fs.writeFileSync(path.join(paths.trustDir, 'root.json'), served.get('root.json') as Buffer);

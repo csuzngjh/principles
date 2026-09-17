@@ -81,6 +81,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-122 | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side README/package.json and tutorial-style verifier comments ship to the subject agent's workspace; audit the DEPLOYED FILE LIST as the answer surface, enforced by a deploy-shape assertion + hint scan | PRI-684 PR #1584 |
 | ERR-124 | Test mutates a process-global singleton without try/finally restore — sibling tests run under hijacked state | PRI-723 / PR #1596 review |
 | ERR-131 | Dependency-bump blast radius unverified: path-filtered CI skips package test/typecheck jobs for lockfile/manifest-only PRs, so ESM default-export removal, 0.x pairing dual-installs, and renamed APIs ship green | adhoc 2026-09-14 PRs #1689-#1692 repair |
+| ERR-132 | Test client for a long-blocking endpoint uses global fetch — undici's default 300s headers timeout aborts a response that legitimately waits for the whole server-side transaction, misreporting a healthy slow path as a failure; use a `node:http` client with an explicit budget | PRI-738 upgrade gate 2026-09-17 |
 
 ---
 
@@ -1692,4 +1693,16 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-068 (auxiliary lockfile drift — same campaign), ERR-125 (lint-uncovered surface is someone else's net), ERR-129 (parity claims without verification)
 - **Source**: adhoc 2026-09-14 dependabot repair campaign (PRs #1689/#1690/#1692)
 - **Date**: 2026-09-15
+- **Recurrence**: None
+
+**[ERR-132]** | Test client for a long-blocking endpoint uses global fetch — undici's default 300s headers timeout aborts the response while the server-side transaction is still legitimately running
+
+- **What happened**: PRI-738's real upgrade gate drove the installed Console's `POST /api/update/apply-full` with global `fetch`. The endpoint blocks on the whole installer transaction (download + deploy + gateway restart); on a loaded machine it exceeded undici's default 300s `headersTimeout`, so the test failed with `HeadersTimeoutError (UND_ERR_HEADERS_TIMEOUT)` in two consecutive runs while the update itself was healthy. The cascade made the follow-on corruption-injection test read the pre-upgrade active record.
+- **Why it's wrong**: The client-side timeout ceiling was an implicit library default, not a decision — a healthy slow path (multi-minute transaction) is indistinguishable from a hung server, and the failure pointed at the wrong layer (product) instead of the harness.
+- **Correct approach**: For endpoints that legitimately block for the duration of a long server-side transaction, drive them from tests with a `node:http` request (no undici headers timeout) and set the budget explicitly (here: the test's own 900s limit). Server-side `requestTimeout`/`headersTimeout` knobs do NOT help — they govern receiving the request, not sending the response.
+- **How to prevent**: When a test POST/GET can outlive ~5 minutes, name the transport budget in the test file. Browsers (Console UI) have no such cap; only Node test clients hit this.
+- **Regression guard**: `release-upgrade-gate.test.ts` `postApplyFull()` uses `node:http`; the gate re-runs the real transaction end-to-end.
+- **Related ERRs**: ERR-101 (port/test-server selection), ERR-124 (test-global hygiene)
+- **Source**: PRI-738 final retirement PR #1750
+- **Date**: 2026-09-17
 - **Recurrence**: None

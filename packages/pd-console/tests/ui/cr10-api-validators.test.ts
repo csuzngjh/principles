@@ -624,10 +624,9 @@ describe('validateUpdateStatus', () => {
     expect(validateUpdateStatus({ ...validStatus, hasUpdate: 'yes' })).toBeNull();
   });
 
-  it('accepts optional changelog field', () => {
-    const result = validateUpdateStatus({ ...validStatus, changelog: '## What\'s new\n- Bug fix' });
-    expect(result).not.toBeNull();
-    expect(result!.changelog).toBe('## What\'s new\n- Bug fix');
+  it('preserves a failed canonical check reason and next action', () => {
+    const result = validateUpdateStatus({ ...validStatus, hasUpdate: false, latestVersion: '', error: 'Trust unavailable', reason: 'metadata_refresh_failed', nextAction: 'Repair trust metadata.' });
+    expect(result).toMatchObject({ hasUpdate: false, error: 'Trust unavailable', reason: 'metadata_refresh_failed', nextAction: 'Repair trust metadata.' });
   });
 });
 

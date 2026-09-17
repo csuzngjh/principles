@@ -11,7 +11,6 @@ import {
 } from '../src/update/bootstrap-protocol.js';
 import { ensurePdHomeLayout, resolvePdHomePaths } from '../src/update/install-layout.js';
 import { readTransactionJournal, writeActiveRecord } from '../src/update/transaction-journal.js';
-import type { LegacyUpdaterDecision } from '../src/update/release-manager.js';
 import { createShadowFixture, disposeShadowFixtures, trackTempDir } from './helpers/shadow-release-fixture.js';
 
 afterEach(async () => {
@@ -102,65 +101,32 @@ describe('ReleaseManager shadow mode', () => {
     }
   });
 
-  it('checks a verified channel and compares decisions with the legacy updater', async () => {
+  it('checks signed release metadata from a cold cache without a registry oracle', async () => {
     const fixture = await createShadowFixture();
-    const agreeLegacy: LegacyUpdaterDecision = {
-      source: 'legacy-updater',
-      latestVersion: '1.223.0',
-      updateAvailable: true,
-    };
-    const manager = new ReleaseManager({
-      pdHome: fixture.pdHome,
-      metadataBaseUrl: fixture.repository.baseUrl,
-      legacyCheck: async () => agreeLegacy,
-    });
+    const metadataPath = path.join(fixture.pdHome, 'releases', fixture.releaseId, 'metadata.json');
+    fs.unlinkSync(metadataPath);
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
     const check = await manager.check('stable');
     expect(check.candidate).toMatchObject({ productVersion: '1.223.0', publicationSequence: 9 });
     expect(check.decision).toEqual({ allowed: true, direction: 'update' });
-    expect(check.shadowComparison.agrees).toBe(true);
-    expect(check.shadowComparison.note).toBeNull();
+    expect(fs.existsSync(metadataPath)).toBe(true);
   });
 
-  it('records a structured disagreement note when the legacy updater decides differently', async () => {
-    const fixture = await createShadowFixture();
-    const disagreeLegacy: LegacyUpdaterDecision = {
-      source: 'legacy-updater',
-      latestVersion: '1.222.0',
-      updateAvailable: false,
-    };
-    const manager = new ReleaseManager({
-      pdHome: fixture.pdHome,
-      metadataBaseUrl: fixture.repository.baseUrl,
-      legacyCheck: async () => disagreeLegacy,
+  it('does not offer a same-version bundled installation as a new update', async () => {
+    const fixture = await createShadowFixture({ productVersion: '1.222.0' });
+    const paths = resolvePdHomePaths(fixture.pdHome);
+    writeActiveRecord(paths.activeRecordPath, {
+      generation: 1, releaseId: 'bundled-1.222.0', releaseMetadataDigest: 'a'.repeat(64),
+      previousReleaseId: null, transactionId: 'bundled-fixture', productVersion: '1.222.0',
     });
-    const check = await manager.check('stable');
-    expect(check.shadowComparison.agrees).toBe(false);
-    expect(check.shadowComparison.note).toMatch(/decision mismatch/);
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    expect((await manager.check('stable')).decision.allowed).toBe(false);
   });
 
-  it('survives a failing legacy comparison without failing the new check', async () => {
-    const fixture = await createShadowFixture();
-    const manager = new ReleaseManager({
-      pdHome: fixture.pdHome,
-      metadataBaseUrl: fixture.repository.baseUrl,
-      legacyCheck: async () => {
-        throw new Error('registry unreachable');
-      },
-    });
-    const check = await manager.check('stable');
-    expect(check.decision.allowed).toBe(true);
-    expect(check.shadowComparison.agrees).toBeNull();
-    expect(check.shadowComparison.note).toMatch(/legacy updater failed/);
-  });
-
-  it('rollback still refuses in shadow mode; apply refuses legacy-overlay and journals terminal failed when acquisition fails', async () => {
+  it('apply refuses legacy-overlay and journals terminal failed when acquisition fails', async () => {
     const fixture = await createShadowFixture({
       candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
     });
-    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl , openclawHome: path.join(os.tmpdir(), 'pd-test-no-openclaw-')});
-    // PRI-698 Phase 2 (not this task): rollback keeps refusing.
-    await expect(manager.rollback()).rejects.toMatchObject({ reason: 'shadow_mode_read_only' });
-
     // PRI-698 Phase 1: apply() refuses non-dual-slot layouts BEFORE any write.
     const overlayHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-shadow-overlay-'));
     trackTempDir(overlayHome);
@@ -260,7 +226,6 @@ describe('bootstrap protocol', () => {
       expect(apply.nextAction.length).toBeGreaterThan(10);
     }
 
-    const rollback = await handleBootstrapRequest({ op: 'rollback' }, manager);
-    expect(rollback).toMatchObject({ ok: false, reason: 'shadow_mode_read_only' });
+    expect(() => parseBootstrapRequest('{"op":"rollback"}')).toThrow(/Unknown bootstrap op/);
   });
 });
