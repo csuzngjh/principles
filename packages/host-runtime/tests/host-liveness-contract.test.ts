@@ -13,6 +13,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { saveHostToolDeclaration } from '../src/host-tool-declaration.js';
 import {
   OPENCLAW_HOST_LIVENESS_CONTRACT,
@@ -42,6 +43,16 @@ const CODEX = {
   mappings: [{ rawToolName: 'Bash', canonicalKind: 'execute' as const }],
   declaredAt: '2026-09-16T00:00:00.000Z',
 };
+
+/** Seed durable host-behavior provenance: pain_events.host_kind rows (trajectory.db). */
+function seedProvenance(kinds: readonly string[]): void {
+  mkdirSync(path.join(ws, '.state'), { recursive: true });
+  const db = new Database(path.join(ws, '.state', 'trajectory.db'));
+  db.exec('CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, host_kind TEXT)');
+  const insert = db.prepare('INSERT INTO pain_events (host_kind) VALUES (?)');
+  for (const kind of kinds) insert.run(kind);
+  db.close();
+}
 
 describe('resolvePromotionHostLiveness (PRI-813 fail-closed capability routing)', () => {
   it('keeps the historical OpenClaw contract when no host has declared anything yet — distinguishable via empty hostKinds (review S3)', () => {
@@ -100,6 +111,56 @@ describe('resolvePromotionHostLiveness (PRI-813 fail-closed capability routing)'
     expect(resolved).toMatchObject({
       ok: false,
       reason: 'host_declarations_unreadable',
+      hostContract: null,
+    });
+  });
+
+  it('round-4 (Owner): a Codex workspace whose codex.json was DELETED fails closed — trajectory evidence forbids the OpenClaw fallback', () => {
+    // The exact reviewed attack sequence: Codex ran here (durable pain_events
+    // host_kind='codex' rows), then the declaration is lost. The resolver
+    // must NOT treat "missing" as legacy-OpenClaw.
+    seedProvenance(['codex']);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: 'host_declaration_missing_for_configured_host',
+      hostKinds: ['codex'],
+      hostContract: null,
+      hostRuntimeVersion: null,
+    });
+  });
+
+  it('round-4 (Owner): an openclaw.json that survives while codex evidence exists still fails closed (partial-declaration variant)', () => {
+    seedProvenance(['codex']);
+    expect(saveHostToolDeclaration(ws, OPENCLAW).ok).toBe(true);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: 'host_declaration_missing_for_configured_host',
+      hostKinds: ['codex', 'openclaw'],
+      hostContract: null,
+    });
+  });
+
+  it('round-4: openclaw-only behavioral evidence keeps the legacy OpenClaw default (no over-correction)', () => {
+    seedProvenance(['openclaw']);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toEqual({
+      ok: true,
+      hostKind: 'openclaw',
+      hostKinds: [],
+      hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+      hostRuntimeVersion: 'openclaw-legacy@1',
+    });
+  });
+
+  it('round-4: an unreadable trajectory database fails closed instead of guessing', () => {
+    mkdirSync(path.join(ws, '.state'), { recursive: true });
+    writeFileSync(path.join(ws, '.state', 'trajectory.db'), 'this is not sqlite', 'utf8');
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: 'workspace_provenance_unreadable',
       hostContract: null,
     });
   });
