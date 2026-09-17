@@ -125,7 +125,14 @@ ${languageDirective}`;
  * repair. Wire shape is additive; the hand-rolled validator enforces the five
  * non-empty fields when the key is present.
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v2';
+/**
+ * PRI-816: bumped v2 → v3. The OUTPUT FORMAT sourceTrace.dreamerArtifactId
+ * instruction changed semantics — from "scrape the philosopher artifact for
+ * an id (field name mismatched)" to "copy input.sourceDreamerArtifactId
+ * exactly" — the prompt input gained `sourceDreamerArtifactId`, and the
+ * CONSTRAINTS text tightened accordingly (audit R-01 lineage fix).
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v3';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;

@@ -698,6 +698,75 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       }
     });
 
+    it('re-runs Stage C when the validator itself throws on a malformed field type (R4 F-1)', async () => {
+      // The validator's semantic checks assume string fields; a truthy
+      // non-string summary makes `summary.trim()` throw TypeError inside
+      // validate(). Unlike the live path, the cache-side call is not wrapped
+      // by BasePeerRunner's catch — without the try/catch the error escapes
+      // run() and strands the parent leased.
+      const tasks: Record<string, TaskRecord> = {
+        [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+        [STAGE_C_TASK_ID]: makeTask(STAGE_C_TASK_ID, {
+          taskKind: 'diag_router',
+          status: 'succeeded',
+          attemptCount: 1,
+        }),
+      };
+      const stateManager = makeMockStateManager(tasks);
+      stateManager.getRunsByTask = vi.fn().mockResolvedValue([
+        {
+          runId: 'run-sc-throws',
+          executionStatus: 'succeeded',
+          outputPayload: JSON.stringify({
+            valid: true,
+            diagnosisId: 'throws-001',
+            summary: { malicious: 'object instead of string' },
+            rootCause: 'r',
+            violatedPrinciples: [],
+            evidence: [],
+            recommendations: [{ kind: 'defer', description: 'd' }],
+            confidence: 0.8,
+          }),
+        },
+      ]);
+
+      const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+      routerRunner.run.mockResolvedValue({
+        status: 'succeeded',
+        taskId: STAGE_C_TASK_ID,
+        attemptCount: 1,
+        contextHash: 'ctx-rerun-throws',
+        output: {
+          valid: true,
+          diagnosisId: 'rerun-after-throw',
+          summary: 'Rerun after validator throw',
+          rootCause: 'Rerun root cause',
+          violatedPrinciples: [],
+          evidence: [{ sourceRef: 'rerun', note: 'note' }],
+          recommendations: [{ kind: 'defer', description: 'rerun defer' }],
+          confidence: 0.7,
+        },
+      });
+
+      const runner = new SplitDiagnosticianRunner({
+        rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+        distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+        routerRunner: routerRunner as never,
+        stateManager: stateManager as never,
+        committer: makeMockCommitter(),
+        perStageTimeoutMs: 30_000,
+      });
+
+      const result = await runner.run(PARENT_TASK_ID);
+
+      expect(result.status).toBe('succeeded');
+      expect(stateManager.updateTask).toHaveBeenCalledWith(
+        STAGE_C_TASK_ID,
+        expect.objectContaining({ status: 'pending' }),
+      );
+      expect(routerRunner.run).toHaveBeenCalledWith(STAGE_C_TASK_ID);
+    });
+
     it('prefers the LATEST succeeded run when an older invalid cache exists (convergence)', async () => {
       // R1 review 818-2: runs arrive started_at ASC — an older superseded
       // succeeded run (written before cache validation) must never shadow a
