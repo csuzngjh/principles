@@ -160,16 +160,30 @@ This creates `docs/quality-reports/YYYY-MM.md` with:
 
 ### Verify Merge Gate
 
-`npm run verify:merge` runs 9 checks before allowing merge:
+`npm run verify:merge` runs the following checks before allowing merge
+(17 steps — the historical "9 checks" description had drifted; resynced when
+`check:pipeline-contract` was added, PRI-828):
 1. `check:generated-artifacts` — Generated artifacts consistency
 2. `check:error-handbook` — Error handbook integrity
-3. `check:repo-hygiene` — Repository hygiene (no temp files, DB files)
-4. `check:runtime-contract` — Runtime Contract incremental scan
-5. `lint` — ESLint
-6. `build` — Build core + plugin
-7. `build:pd-cli` — Build CLI
-8. `typecheck:openclaw-plugin` — TypeScript check
-9. `typecheck:pd-console` — TypeScript check
+3. `check:telemetry-events --strict` — Telemetry event catalog drift
+4. `check:repo-hygiene` — Repository hygiene (no temp files, DB files)
+5. `check:runtime-contract` — Runtime Contract incremental scan
+6. `check:docs-structure` — Docs structure
+7. `check:security-baseline` — Security baseline
+8. `check:workspace-tools` — Workspace tooling guards
+9. `release-target-matrix.test.ts` (create-principles-disciple) — the one legacy named test file
+10. `build @principles/core` — Core build
+11. `test:website` — Website package tests
+12. `lint` — ESLint
+13. `build` — Full workspace build
+14. `check:pipeline-contract` — **Pipeline Safety Net v1.2 (PRI-828)**: focused
+    deterministic vitest journeys (formation → governance → runtime boundary →
+    precise revocation) across principles-core + openclaw-plugin. This is the
+    only step that runs package vitest suites inside the merge gate; a red
+    journey fails the gate. See `docs/audit/pri-807-safety-net/`.
+15. `build:pd-cli` — Build CLI
+16. `typecheck:openclaw-plugin` — TypeScript check
+17. `typecheck:pd-console` + `typecheck:pd-companion` — TypeScript checks
 
 ### Git Hooks (lefthook)
 

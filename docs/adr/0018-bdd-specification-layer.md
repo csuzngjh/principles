@@ -25,7 +25,7 @@ PD 项目当前测试体系存在三类痛点(详见 [BDD spec §1](../superpowe
 
 3. **`@cucumber/gherkin` 与 `@cucumber/messages` 作为 root devDependencies**,不进任何子包的 dependencies。BDD 测试直接导入这两个包,因此必须直接声明,不能依赖其他包的传递依赖或 npm hoist;同时不会污染 `@principles/core` 的发布依赖。
 
-4. **BDD 不进 `verify:merge` 合并门禁**。`verify:merge` 只跑 9 个静态门(check:generated-artifacts / check:error-handbook / check:repo-hygiene / check:runtime-contract / check:docs-structure / lint / build / build pd-cli / typecheck:openclaw-plugin / typecheck:pd-console)。BDD 场景随 CI per-package test job 跑;要让 BDD 成为合并门禁,需显式修改 CI required checks(Phase 2 评估)。
+4. **BDD 不进 `verify:merge` 合并门禁**。`verify:merge` 跑静态门 + lint/build/typecheck + (2026-09-17 起, PRI-828) `check:pipeline-contract` 的 Safety Net vitest 旅程;BDD `.feature` 场景仍随 CI per-package test job 跑,不在此门内。要让 BDD 成为合并门禁,需显式修改 CI required checks(Phase 2 评估)。
 
 5. **禁用必须显式**:`@disabled(reason,owner,date)` 标签 + skip 报告(runner 输出 `SKIP: 场景名 [SKIP: reason; owner=...; date=...]`)。**禁止**通过删除 `.feature` 文件让测试绿——删除文件会让 `readFileSync` fail loud(ENOENT),不允许静默通过。
 
