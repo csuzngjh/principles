@@ -55,7 +55,7 @@ for (const f of fs.readdirSync(runsDir).filter((x) => x.endsWith('.json'))) {
     const res = await chat([
       { role: 'system', content: SYSTEM },
       { role: 'user', content: JSON.stringify({ SCENARIOS: sc.scenarios, DRAFTS: drafts }) },
-    ]);
+    ], { maxTokens: 4000, thinking: 'disabled' });
     const parsed = extractJson(res.content);
     const valid = parsed && Array.isArray(parsed.drafts) && parsed.drafts.length === drafts.length;
     let classification = 'JUDGE_INVALID';
@@ -82,7 +82,7 @@ for (const f of fs.readdirSync(runsDir).filter((x) => x.endsWith('.json'))) {
         : (drift > 0 || judgeDrift > 0) ? 'MATERIAL_DRIFT' : 'STABLE';
       out.groups[key] = { key, classification, stances, driftFindings: parsed.driftFindings ?? [], contradictionFindings: parsed.contradictionFindings ?? [] };
     } else {
-      out.groups[key] = { key, classification, raw: (res.content || '').slice(0, 400) };
+      out.groups[key] = { key, classification: 'JUDGE_INVALID', raw: (res.content || '').slice(0, 400), usage: res.usage };
     }
     fs.writeFileSync(OUT, JSON.stringify(out, null, 1));
     console.log(`[ok] ${key} -> ${classification}`);

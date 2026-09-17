@@ -1,0 +1,699 @@
+{
+ "group": "G-manual_1788610740431_xo5",
+ "class": "DEV",
+ "pain_id": "manual_1788610740431_xo571ixc",
+ "frozen_at": "2026-09-17T15:32:16.692Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788610740431_xo5",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788610740431_xo5-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "12:00 心跳合并时直接将会话记录快照（09:05 已废弃的主题信任版）当作事实源，未核验源文件的 mtime 与内容哈希",
+       "betterDecision": "在任何跨会话合并/同步操作执行前，强制对比源文件的 mtime 与内容哈希和快照元数据；不一致时以源文件为准重新同步并发出告警，阻止陈旧快照进入合并",
+       "rationale": "真实事实源是源文件本身而非转述快照；以可观察的 mtime+内容哈希作为强制检查门，可在合并前拦截陈旧状态",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_source_of_truth",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "19:08 播报时仍引用 12:00 合并进来的陈旧会话记录，未在内容外发给用户前重新读取源文件比对当前状态",
+       "betterDecision": "在播报/发布等面向用户的动作执行前，即时重读权威源文件并与待引用版本做差异比对，不一致则刷新内容或中止播报并升级为需人工确认",
+       "rationale": "行动的效果必须与源核验；在状态消费点做最后一刻新鲜度检查，可防止陈旧状态外泄给用户造成二次纠正",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "check_freshness_at_consumption",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "第一次用户纠正后未将教训固化为可执行检查规则，导致 19:08 同类陈旧引用错误再次发生，用户被迫二次纠正",
+       "betterDecision": "首次纠正后立即把教训转化为显式守则：为(心跳|merge|同步|sync|合并).*(快照|会话记录|snapshot)触发模式配置强制源文件核验门，并记录该纠正事件作为规则来源以便追溯",
+       "rationale": "纠正与摩擦是反馈；只有把反馈固化为守则与自动检查门，才能阻断同类错误的重复发生",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "institutionalize_corrections",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "同步机制设计上默认会话记录快照具有权威性，未在数据模型中区分'转述快照'与'事实源'，也未为快照附带可校验的版本元数据",
+       "betterDecision": "重新设计状态模型：明确源文件为唯一事实源，每个快照必须携带来源指纹（mtime+内容哈希），使任何消费方都能廉价检测快照是否过期",
+       "rationale": "在模型层建立单一事实源与可验证指纹，使陈旧状态在设计上可被检测，而非依赖人工记得去核对；改动较大故风险中等",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "single_source_of_truth_modeling",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "跨会话状态传递依赖瞬时会话上下文与转述记录，关键版本判定信息（当前生效集为10原则总纲集、旧版已废弃）未持久化到会话之外的持久状态中",
+       "betterDecision": "将关键中间结论与状态标记（当前权威版本及其指纹、废弃清单）持久化到会话外的持久存储，并要求心跳合并与播报消费该持久状态而非会话记忆",
+       "rationale": "跨会话连续性依赖持久化的关键状态；把权威版本标记持久化，可避免各会话凭瞬时记忆推断事实源而产生分歧",
+       "confidence": 0.7,
+       "riskLevel": "medium",
+       "strategicPerspective": "persist_authoritative_state",
+       "sourcePrincipleId": "T-10"
+      }
+     ],
+     "contextRefs": [
+      "artifact://7fabeb07-402c-4407-8278-740778b1d115"
+     ],
+     "generatedAt": "2026-09-04T12:20:30.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788610740431_xo5-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"12:00 心跳合并时直接将会话记录快照（09:05 已废弃的主题信任版）当作事实源，未核验源文件的 mtime 与内容哈希\",\"betterDecision\":\"在任何跨会话合并/同步操作执行前，强制对比源文件的 mtime 与内容哈希和快照元数据；不一致时以源文件为准重新同步并发出告警，阻止陈旧快照进入合并\",\"rationale\":\"真实事实源是源文件本身而非转述快照；以可观察的 mtime+内容哈希作为强制检查门，可在合并前拦截陈旧状态\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_source_of_truth\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"19:08 播报时仍引用 12:00 合并进来的陈旧会话记录，未在内容外发给用户前重新读取源文件比对当前状态\",\"betterDecision\":\"在播报/发布等面向用户的动作执行前，即时重读权威源文件并与待引用版本做差异比对，不一致则刷新内容或中止播报并升级为需人工确认\",\"rationale\":\"行动的效果必须与源核验；在状态消费点做最后一刻新鲜度检查，可防止陈旧状态外泄给用户造成二次纠正\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"check_freshness_at_consumption\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"第一次用户纠正后未将教训固化为可执行检查规则，导致 19:08 同类陈旧引用错误再次发生，用户被迫二次纠正\",\"betterDecision\":\"首次纠正后立即把教训转化为显式守则：为(心跳|merge|同步|sync|合并).*(快照|会话记录|snapshot)触发模式配置强制源文件核验门，并记录该纠正事件作为规则来源以便追溯\",\"rationale\":\"纠正与摩擦是反馈；只有把反馈固化为守则与自动检查门，才能阻断同类错误的重复发生\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"institutionalize_corrections\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":3,\"badDecision\":\"同步机制设计上默认会话记录快照具有权威性，未在数据模型中区分'转述快照'与'事实源'，也未为快照附带可校验的版本元数据\",\"betterDecision\":\"重新设计状态模型：明确源文件为唯一事实源，每个快照必须携带来源指纹（mtime+内容哈希），使任何消费方都能廉价检测快照是否过期\",\"rationale\":\"在模型层建立单一事实源与可验证指纹，使陈旧状态在设计上可被检测，而非依赖人工记得去核对；改动较大故风险中等\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"single_source_of_truth_modeling\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":4,\"badDecision\":\"跨会话状态传递依赖瞬时会话上下文与转述记录，关键版本判定信息（当前生效集为10原则总纲集、旧版已废弃）未持久化到会话之外的持久状态中\",\"betterDecision\":\"将关键中间结论与状态标记（当前权威版本及其指纹、废弃清单）持久化到会话外的持久存储，并要求心跳合并与播报消费该持久状态而非会话记忆\",\"rationale\":\"跨会话连续性依赖持久化的关键状态；把权威版本标记持久化，可避免各会话凭瞬时记忆推断事实源而产生分歧\",\"confidence\":0.7,\"riskLevel\":\"medium\",\"strategicPerspective\":\"persist_authoritative_state\",\"sourcePrincipleId\":\"T-10\"}],\"contextRefs\":[\"artifact://7fabeb07-402c-4407-8278-740778b1d115\"],\"generatedAt\":\"2026-09-04T12:20:30.000Z\"}",
+    "usage": {
+     "input": 1734,
+     "output": 3813,
+     "total": 5547
+    },
+    "latencyMs": 49369,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e8451191ef697363"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788610740431_xo5-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r1-run1",
+     "thesis": "Authority does not transfer through copying: a snapshot, cache, or transcription is only a claim about the source at a past moment, not the fact itself. Derived state is safe to use only when it carries verifiable provenance (a source fingerprint) and is re-checked against the authoritative source at every propagation point (merge/sync) and every consumption point (user-facing output); on divergence, the source wins and the mismatch must be surfaced. Staleness must be detectable by design rather than prevented by vigilance, and every correction must harden into an automatic gate so the same class of error cannot recur.",
+     "principleCandidate": {
+      "title": "Derived state is a claim, not a fact: verify source fingerprints at merge and consumption points",
+      "rationale": "The root cause of the failure chain was not one bad read but the absence of any mechanism distinguishing 'transcribed snapshot' from 'source of truth': the 12:00 merge trusted a stale snapshot, the 19:08 broadcast consumed the already-merged staleness, and the first correction was never codified, so the error repeated. Requiring every derived snapshot to carry a verifiable fingerprint (mtime + content hash of its source) and enforcing freshness gates at both propagation and consumption makes staleness cheap to detect by design, aligns all sessions on a single authoritative source, and converts corrections into durable guardrails instead of one-time fixes.",
+      "scope": "Applies whenever state is copied, cached, transcribed, synchronized, or merged across sessions, components, or time, and whenever derived representations feed decisions or user-facing output — especially cross-session continuity, heartbeat/scheduled sync jobs, and announcements built on cached records. Less critical for ephemeral reads of a live source that are never propagated.",
+      "confidence": 0.78
+     },
+     "risks": [
+      "Adjacent to existing axioms: this principle extends T-03 (evidence before inference), T-07 (verify after acting), and T-10 (persist key state); it does not contradict them, but the axiom set should avoid accumulating redundant overlapping guidance.",
+      "Verification overhead: mandatory fingerprint checks at every merge and consumption point add latency and cost; for low-stakes, high-frequency reads the gate may need proportionality or batching.",
+      "Fingerprint equality is not semantic correctness: a snapshot may match the source's mtime+hash yet encode a faulty transformation; freshness gates detect staleness, not derivation bugs.",
+      "Misidentified source of truth: if the designated authoritative source is wrong (e.g., pointing at a deprecated file), all freshness gates will systematically validate against a non-authoritative source.",
+      "Abort-on-mismatch behavior: automatically blocking user-facing actions on divergence can reduce availability; a human-confirmation fallback may be preferable to a hard stop.",
+      "Model-level redesign (attaching fingerprints to every snapshot) carries migration cost and may be over-engineering for small, single-session systems."
+     ],
+     "generatedAt": "2026-09-04T12:21:15.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788610740431_xo5-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r1-run1\",\"thesis\":\"Authority does not transfer through copying: a snapshot, cache, or transcription is only a claim about the source at a past moment, not the fact itself. Derived state is safe to use only when it carries verifiable provenance (a source fingerprint) and is re-checked against the authoritative source at every propagation point (merge/sync) and every consumption point (user-facing output); on divergence, the source wins and the mismatch must be surfaced. Staleness must be detectable by design rather than prevented by vigilance, and every correction must harden into an automatic gate so the same class of error cannot recur.\",\"principleCandidate\":{\"title\":\"Derived state is a claim, not a fact: verify source fingerprints at merge and consumption points\",\"rationale\":\"The root cause of the failure chain was not one bad read but the absence of any mechanism distinguishing 'transcribed snapshot' from 'source of truth': the 12:00 merge trusted a stale snapshot, the 19:08 broadcast consumed the already-merged staleness, and the first correction was never codified, so the error repeated. Requiring every derived snapshot to carry a verifiable fingerprint (mtime + content hash of its source) and enforcing freshness gates at both propagation and consumption makes staleness cheap to detect by design, aligns all sessions on a single authoritative source, and converts corrections into durable guardrails instead of one-time fixes.\",\"scope\":\"Applies whenever state is copied, cached, transcribed, synchronized, or merged across sessions, components, or time, and whenever derived representations feed decisions or user-facing output — especially cross-session continuity, heartbeat/scheduled sync jobs, and announcements built on cached records. Less critical for ephemeral reads of a live source that are never propagated.\",\"confidence\":0.78},\"risks\":[\"Adjacent to existing axioms: this principle extends T-03 (evidence before inference), T-07 (verify after acting), and T-10 (persist key state); it does not contradict them, but the axiom set should avoid accumulating redundant overlapping guidance.\",\"Verification overhead: mandatory fingerprint checks at every merge and consumption point add latency and cost; for low-stakes, high-frequency reads the gate may need proportionality or batching.\",\"Fingerprint equality is not semantic correctness: a snapshot may match the source's mtime+hash yet encode a faulty transformation; freshness gates detect staleness, not derivation bugs.\",\"Misidentified source of truth: if the designated authoritative source is wrong (e.g., pointing at a deprecated file), all freshness gates will systematically validate against a non-authoritative source.\",\"Abort-on-mismatch behavior: automatically blocking user-facing actions on divergence can reduce availability; a human-confirmation fallback may be preferable to a hard stop.\",\"Model-level redesign (attaching fingerprints to every snapshot) carries migration cost and may be over-engineering for small, single-session systems.\"],\"generatedAt\":\"2026-09-04T12:21:15.000Z\"}",
+    "usage": {
+     "input": 1710,
+     "output": 3371,
+     "total": 5081
+    },
+    "latencyMs": 46810,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "585505eef3c3a548"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788610740431_xo5-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r1-run1",
+     "principleDraft": {
+      "title": "Derived state is a claim, not a fact: re-verify source provenance at merge and use",
+      "statement": "Whenever state is copied, cached, transcribed, or synchronized, treat the derived copy as a claim about its source at a past moment, never as the fact itself: (1) attach verifiable provenance to the derived copy — the identity of the authoritative source plus a content fingerprint (e.g., content hash and/or modification timestamp) captured at copy time; (2) before propagating the copy (merge/sync) and before consuming it for decisions or user-facing output, re-read the source's current fingerprint and compare it against the copy's recorded provenance; (3) on divergence, resolve in favor of the authoritative source, refresh the derived copy, and explicitly surface the mismatch; (4) after any staleness correction, codify the freshness check as an automatic gate at that propagation or consumption point so the same class of error cannot silently recur. Ephemeral reads of a live source that are never propagated or persisted are exempt.",
+      "rationale": "The diagnosed failure chain — a 12:00 merge that trusted a stale snapshot, a 19:08 broadcast that consumed the already-merged staleness, and a correction that was never codified so the error repeated — shows the root cause was not one bad read but the absence of any mechanism distinguishing a transcribed snapshot from the source of truth. Making staleness mechanically detectable by design (fingerprint comparison at defined checkpoints) closes every link in that chain: propagation gates stop stale copies from being merged, consumption gates stop them from reaching users, source-wins resolution realigns state on divergence, and gate codification converts one-time fixes into durable prevention instead of relying on operator vigilance.",
+      "applicability": [
+       "Cross-session continuity: loading persisted memory/session state into a new session and merging it with current state",
+       "Scheduled or heartbeat-driven sync/merge jobs that copy authoritative records into shared or derived stores",
+       "User-facing output and decisions built on cached, transcribed, or summarized representations of an authoritative source",
+       "Pipelines where a snapshot is transcribed, transformed, or summarized before downstream use",
+       "Scope boundary: ephemeral reads of a live source that are never propagated or persisted are out of scope"
+      ],
+      "antiPatterns": [
+       "Merging or syncing a snapshot/cache into shared state without comparing its recorded source fingerprint against the current authoritative source",
+       "Broadcasting or acting on derived records (announcements, reports, decisions) without re-checking them against their source at the point of consumption",
+       "Propagating derived state that carries no provenance (no source identity or content fingerprint), leaving staleness undetectable",
+       "On divergence, silently keeping or propagating the derived copy instead of the authoritative source without surfacing the mismatch",
+       "Fixing a staleness incident as a one-time manual correction without codifying an automatic freshness gate, allowing the same error class to recur",
+       "Relying on vigilance ('remember to check freshness') instead of a mechanical, by-design staleness check"
+      ],
+      "confidence": 0.78
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent the agent from merging or broadcasting stale copies of authoritative records as if they were current — e.g., announcing user-facing status from a cached snapshot without re-verifying it against the live source.",
+      "targetBehavior": "In any tool trajectory involving cached or transcribed state, a reviewer can see the agent record or read a source fingerprint (source identity plus hash/timestamp) alongside the derived copy, re-compare it against the authoritative source immediately before each merge/sync and before each user-facing use, refresh from the source and report the mismatch on divergence, and add a recurring automatic check (not a one-time manual fix) after correcting a staleness incident.",
+      "forbiddenBehavior": "Consuming or propagating derived state (snapshots, caches, transcriptions) as authoritative without any freshness verification at the propagation or consumption point, and leaving staleness corrections as uncodified manual fixes so the same stale-data error repeats.",
+      "evidenceSource": "The diagnosed failure chain: the 12:00 merge trusted a stale snapshot as authoritative, the 19:08 broadcast consumed the already-merged staleness into user-facing output, and the first correction was never codified, so the error repeated.",
+      "validationExpectation": "An evaluator should accept a rule only if it mandates a mechanical fingerprint comparison (source identity plus content hash/timestamp) at both merge/sync and user-facing consumption points, source-wins resolution with the mismatch surfaced, and codification of corrections as automatic gates; rules that merely urge 'keep data current' or 'double-check caches' without an observable check are not faithful."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r1-run1"
+     },
+     "risks": [
+      "Overlaps with core axioms T-03 (use observable evidence before claiming results) and T-07 (verify after acting), and is adjacent to T-10 (persist important state): rule generation must scope rules to the derived-state/staleness specialization so they extend rather than duplicate or weaken those axioms.",
+      "Mandatory fingerprint checks at every merge and consumption point add latency and cost; applied without proportionality this over-burdens low-stakes, high-frequency reads (batching or proportional gating may be needed).",
+      "A matching fingerprint proves freshness, not derivation correctness — a faithfully copied but semantically faulty transformation still passes the gate.",
+      "If the designated authoritative source is itself wrong or deprecated, all freshness gates will systematically validate against a non-authoritative source.",
+      "Hard abort-on-mismatch before user-facing actions can reduce availability; a surfaced-mismatch-plus-confirmation fallback may be preferable to a silent hard stop.",
+      "Requiring provenance metadata on every snapshot is a model-level redesign with migration cost and may over-engineer small, single-session systems."
+     ],
+     "generatedAt": "2026-09-04T12:22:30.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788610740431_xo5-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r1-run1\",\"principleDraft\":{\"title\":\"Derived state is a claim, not a fact: re-verify source provenance at merge and use\",\"statement\":\"Whenever state is copied, cached, transcribed, or synchronized, treat the derived copy as a claim about its source at a past moment, never as the fact itself: (1) attach verifiable provenance to the derived copy — the identity of the authoritative source plus a content fingerprint (e.g., content hash and/or modification timestamp) captured at copy time; (2) before propagating the copy (merge/sync) and before consuming it for decisions or user-facing output, re-read the source's current fingerprint and compare it against the copy's recorded provenance; (3) on divergence, resolve in favor of the authoritative source, refresh the derived copy, and explicitly surface the mismatch; (4) after any staleness correction, codify the freshness check as an automatic gate at that propagation or consumption point so the same class of error cannot silently recur. Ephemeral reads of a live source that are never propagated or persisted are exempt.\",\"rationale\":\"The diagnosed failure chain — a 12:00 merge that trusted a stale snapshot, a 19:08 broadcast that consumed the already-merged staleness, and a correction that was never codified so the error repeated — shows the root cause was not one bad read but the absence of any mechanism distinguishing a transcribed snapshot from the source of truth. Making staleness mechanically detectable by design (fingerprint comparison at defined checkpoints) closes every link in that chain: propagation gates stop stale copies from being merged, consumption gates stop them from reaching users, source-wins resolution realigns state on divergence, and gate codification converts one-time fixes into durable prevention instead of relying on operator vigilance.\",\"applicability\":[\"Cross-session continuity: loading persisted memory/session state into a new session and merging it with current state\",\"Scheduled or heartbeat-driven sync/merge jobs that copy authoritative records into shared or derived stores\",\"User-facing output and decisions built on cached, transcribed, or summarized representations of an authoritative source\",\"Pipelines where a snapshot is transcribed, transformed, or summarized before downstream use\",\"Scope boundary: ephemeral reads of a live source that are never propagated or persisted are out of scope\"],\"antiPatterns\":[\"Merging or syncing a snapshot/cache into shared state without comparing its recorded source fingerprint against the current authoritative source\",\"Broadcasting or acting on derived records (announcements, reports, decisions) without re-checking them against their source at the point of consumption\",\"Propagating derived state that carries no provenance (no source identity or content fingerprint), leaving staleness undetectable\",\"On divergence, silently keeping or propagating the derived copy instead of the authoritative source without surfacing the mismatch\",\"Fixing a staleness incident as a one-time manual correction without codifying an automatic freshness gate, allowing the same error class to recur\",\"Relying on vigilance ('remember to check freshness') instead of a mechanical, by-design staleness check\"],\"confidence\":0.78},\"intentContract\":{\"ownerIntent\":\"Prevent the agent from merging or broadcasting stale copies of authoritative records as if they were current — e.g., announcing user-facing status from a cached snapshot without re-verifying it against the live source.\",\"targetBehavior\":\"In any tool trajectory involving cached or transcribed state, a reviewer can see the agent record or read a source fingerprint (source identity plus hash/timestamp) alongside the derived copy, re-compare it against the authoritative source immediately before each merge/sync and before each user-facing use, refresh from the source and report the mismatch on divergence, and add a recurring automatic check (not a one-time manual fix) after correcting a staleness incident.\",\"forbiddenBehavior\":\"Consuming or propagating derived state (snapshots, caches, transcriptions) as authoritative without any freshness verification at the propagation or consumption point, and leaving staleness corrections as uncodified manual fixes so the same stale-data error repeats.\",\"evidenceSource\":\"The diagnosed failure chain: the 12:00 merge trusted a stale snapshot as authoritative, the 19:08 broadcast consumed the already-merged staleness into user-facing output, and the first correction was never codified, so the error repeated.\",\"validationExpectation\":\"An evaluator should accept a rule only if it mandates a mechanical fingerprint comparison (source identity plus content hash/timestamp) at both merge/sync and user-facing consumption points, source-wins resolution with the mismatch surfaced, and codification of corrections as automatic gates; rules that merely urge 'keep data current' or 'double-check caches' without an observable check are not faithful.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r1-run1\"},\"risks\":[\"Overlaps with core axioms T-03 (use observable evidence before claiming results) and T-07 (verify after acting), and is adjacent to T-10 (persist important state): rule generation must scope rules to the derived-state/staleness specialization so they extend rather than duplicate or weaken those axioms.\",\"Mandatory fingerprint checks at every merge and consumption point add latency and cost; applied without proportionality this over-burdens low-stakes, high-frequency reads (batching or proportional gating may be needed).\",\"A matching fingerprint proves freshness, not derivation correctness — a faithfully copied but semantically faulty transformation still passes the gate.\",\"If the designated authoritative source is itself wrong or deprecated, all freshness gates will systematically validate against a non-authoritative source.\",\"Hard abort-on-mismatch before user-facing actions can reduce availability; a surfaced-mismatch-plus-confirmation fallback may be preferable to a silent hard stop.\",\"Requiring provenance metadata on every snapshot is a model-level redesign with migration cost and may over-engineer small, single-session systems.\"],\"generatedAt\":\"2026-09-04T12:22:30.000Z\"}",
+    "usage": {
+     "input": 2072,
+     "output": 4582,
+     "total": 6654
+    },
+    "latencyMs": 64398,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "9c4085568b7afe9f"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788610740431_xo5-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r1-run1",
+     "principleDraft": {
+      "title": "Derived state is a claim, not a fact: verify source fingerprints at merge and consumption points",
+      "statement": "Whenever state is copied, cached, transcribed, or synchronized across sessions or time, and whenever derived state feeds user-facing output, treat the snapshot as a claim about the source, never as the fact itself. Every derived snapshot must carry verifiable provenance: a fingerprint of its authoritative source (mtime + content hash). At every propagation point (merge/sync/heartbeat) and every consumption point (broadcast/announcement/publish), re-verify the snapshot's fingerprint against the live authoritative source; on divergence the source wins: re-sync from the source, surface the mismatch, and do not propagate or publish the stale state. Every staleness correction must be codified into an automatic verification gate so the same class of error cannot recur.",
+      "rationale": "The root cause was not one bad read but the absence of any mechanism distinguishing 'transcribed snapshot' from 'source of truth': the 12:00 heartbeat merge trusted the stale snapshot (the deprecated 09-05 version) without checking source mtime/content, the 19:08 broadcast then consumed the already-merged staleness, and the first correction was never codified, so the error recurred and forced a second user correction. Fingerprint provenance plus mandatory freshness gates at both propagation and consumption points makes staleness cheaply detectable by design rather than prevented by vigilance, aligns all sessions on a single authoritative source, and converts one-time fixes into durable guardrails.",
+      "applicability": [
+       "Cross-session state synchronization: heartbeat merges, scheduled sync jobs, and any merge of session records or snapshots",
+       "User-facing output derived from cached or transcribed state: announcements, broadcasts, reports",
+       "Any copy, cache, or transcription of state that is later reused across time, sessions, or components",
+       "Boundary: ephemeral reads of a live source that are never propagated or republished do not require the gate"
+      ],
+      "antiPatterns": [
+       "Merging or syncing a session-record snapshot into shared state without comparing the authoritative source file's mtime and content hash against the snapshot's recorded fingerprint (the 12:00 heartbeat merge failure)",
+       "Broadcasting or publishing user-facing content from a cached or merged snapshot without a last-moment freshness check against the authoritative source (the 19:08 broadcast failure)",
+       "Treating a copy, cache, or transcription as authoritative because it was recently produced or previously trusted — assuming authority transfers through copying",
+       "Resolving a staleness error with a one-time manual correction while leaving no automatic verification gate, so the identical error recurs and forces the user to correct it again"
+      ],
+      "confidence": 0.7
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent the same stale-snapshot citation from recurring across sessions: any state being merged or broadcast must be verified against the authoritative source file (mtime + content hash), not trusted from transcribed session-record snapshots, so a deprecated version is never re-cited and never demands a second manual correction.",
+      "targetBehavior": "In the tool trajectory, before executing a cross-session merge/sync/heartbeat or a user-facing broadcast, the agent performs an observable comparison of the authoritative source file's mtime and content hash against the snapshot's recorded fingerprint; on divergence it re-syncs from the source, surfaces the mismatch, and holds the stale content back (or escalates) instead of propagating or publishing it.",
+      "forbiddenBehavior": "Proceeding with a merge/sync or user-facing publication on the basis of a session-record snapshot's presumed currency, without any observable check against the authoritative source, and closing a staleness incident with a one-off manual fix instead of codifying a verification gate — the failure family that produced the 12:00 merge and 19:08 broadcast errors.",
+      "evidenceSource": "Diagnosis manual_1788610740431_xo571ixc (owner-submitted CLI pain, confidence 0.35, no behavioral raw evidence beyond the reasonSummary): the 09-05 08:24 '主题信任版' was deprecated and rewritten into the 10-principle 总纲集, but the 12:00 heartbeat merge skipped source mtime/content verification and the 19:08 broadcast re-cited the stale merged session record, forcing a second user correction; T-03/T-07/T-08 violations recorded.",
+      "validationExpectation": "An evaluator should accept a rule only if, at merge/sync and broadcast moments, it demands an observable fingerprint comparison (mtime + content hash vs snapshot metadata) with a source-wins re-sync and surfaced mismatch on divergence; a rule that merely says 'avoid stale data', that permits proceeding on an unchecked snapshot, or that is later changed to trust snapshot recency over the source check is unfaithful to this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r1-run1"
+     },
+     "risks": [
+      "Adjacent to core axioms T-03 (evidence over inference), T-07 (verify after acting), T-08 (institutionalize corrections), and T-10 (persist key state): this principle specializes rather than contradicts them, but the axiom set risks accumulating overlapping guidance.",
+      "The source diagnosis has low confidence (0.35): evidence is limited to the owner-submitted reasonSummary with no behavioral raw evidence, so the concrete incident details are owner-reported rather than observed.",
+      "Mandatory fingerprint checks at every merge and consumption point add latency and cost; low-stakes, high-frequency reads may need proportionality or batching.",
+      "Fingerprint equality is not semantic correctness: a snapshot can match the source's mtime+hash yet encode a faulty transformation — the gate detects staleness, not derivation bugs.",
+      "If the designated authoritative source is itself wrong (e.g., a deprecated file), all freshness gates systematically validate against a non-authoritative source.",
+      "Hard abort on mismatch can reduce availability (an escalation-to-human fallback may beat a hard stop), and attaching fingerprints to every snapshot carries migration cost that may over-engineer small single-session systems."
+     ],
+     "generatedAt": "2026-09-04T12:23:05.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788610740431_xo5-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r1-run1\",\"principleDraft\":{\"title\":\"Derived state is a claim, not a fact: verify source fingerprints at merge and consumption points\",\"statement\":\"Whenever state is copied, cached, transcribed, or synchronized across sessions or time, and whenever derived state feeds user-facing output, treat the snapshot as a claim about the source, never as the fact itself. Every derived snapshot must carry verifiable provenance: a fingerprint of its authoritative source (mtime + content hash). At every propagation point (merge/sync/heartbeat) and every consumption point (broadcast/announcement/publish), re-verify the snapshot's fingerprint against the live authoritative source; on divergence the source wins: re-sync from the source, surface the mismatch, and do not propagate or publish the stale state. Every staleness correction must be codified into an automatic verification gate so the same class of error cannot recur.\",\"rationale\":\"The root cause was not one bad read but the absence of any mechanism distinguishing 'transcribed snapshot' from 'source of truth': the 12:00 heartbeat merge trusted the stale snapshot (the deprecated 09-05 version) without checking source mtime/content, the 19:08 broadcast then consumed the already-merged staleness, and the first correction was never codified, so the error recurred and forced a second user correction. Fingerprint provenance plus mandatory freshness gates at both propagation and consumption points makes staleness cheaply detectable by design rather than prevented by vigilance, aligns all sessions on a single authoritative source, and converts one-time fixes into durable guardrails.\",\"applicability\":[\"Cross-session state synchronization: heartbeat merges, scheduled sync jobs, and any merge of session records or snapshots\",\"User-facing output derived from cached or transcribed state: announcements, broadcasts, reports\",\"Any copy, cache, or transcription of state that is later reused across time, sessions, or components\",\"Boundary: ephemeral reads of a live source that are never propagated or republished do not require the gate\"],\"antiPatterns\":[\"Merging or syncing a session-record snapshot into shared state without comparing the authoritative source file's mtime and content hash against the snapshot's recorded fingerprint (the 12:00 heartbeat merge failure)\",\"Broadcasting or publishing user-facing content from a cached or merged snapshot without a last-moment freshness check against the authoritative source (the 19:08 broadcast failure)\",\"Treating a copy, cache, or transcription as authoritative because it was recently produced or previously trusted — assuming authority transfers through copying\",\"Resolving a staleness error with a one-time manual correction while leaving no automatic verification gate, so the identical error recurs and forces the user to correct it again\"],\"confidence\":0.7},\"intentContract\":{\"ownerIntent\":\"The Owner wants to prevent the same stale-snapshot citation from recurring across sessions: any state being merged or broadcast must be verified against the authoritative source file (mtime + content hash), not trusted from transcribed session-record snapshots, so a deprecated version is never re-cited and never demands a second manual correction.\",\"targetBehavior\":\"In the tool trajectory, before executing a cross-session merge/sync/heartbeat or a user-facing broadcast, the agent performs an observable comparison of the authoritative source file's mtime and content hash against the snapshot's recorded fingerprint; on divergence it re-syncs from the source, surfaces the mismatch, and holds the stale content back (or escalates) instead of propagating or publishing it.\",\"forbiddenBehavior\":\"Proceeding with a merge/sync or user-facing publication on the basis of a session-record snapshot's presumed currency, without any observable check against the authoritative source, and closing a staleness incident with a one-off manual fix instead of codifying a verification gate — the failure family that produced the 12:00 merge and 19:08 broadcast errors.\",\"evidenceSource\":\"Diagnosis manual_1788610740431_xo571ixc (owner-submitted CLI pain, confidence 0.35, no behavioral raw evidence beyond the reasonSummary): the 09-05 08:24 '主题信任版' was deprecated and rewritten into the 10-principle 总纲集, but the 12:00 heartbeat merge skipped source mtime/content verification and the 19:08 broadcast re-cited the stale merged session record, forcing a second user correction; T-03/T-07/T-08 violations recorded.\",\"validationExpectation\":\"An evaluator should accept a rule only if, at merge/sync and broadcast moments, it demands an observable fingerprint comparison (mtime + content hash vs snapshot metadata) with a source-wins re-sync and surfaced mismatch on divergence; a rule that merely says 'avoid stale data', that permits proceeding on an unchecked snapshot, or that is later changed to trust snapshot recency over the source check is unfaithful to this intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r1-run1\"},\"risks\":[\"Adjacent to core axioms T-03 (evidence over inference), T-07 (verify after acting), T-08 (institutionalize corrections), and T-10 (persist key state): this principle specializes rather than contradicts them, but the axiom set risks accumulating overlapping guidance.\",\"The source diagnosis has low confidence (0.35): evidence is limited to the owner-submitted reasonSummary with no behavioral raw evidence, so the concrete incident details are owner-reported rather than observed.\",\"Mandatory fingerprint checks at every merge and consumption point add latency and cost; low-stakes, high-frequency reads may need proportionality or batching.\",\"Fingerprint equality is not semantic correctness: a snapshot can match the source's mtime+hash yet encode a faulty transformation — the gate detects staleness, not derivation bugs.\",\"If the designated authoritative source is itself wrong (e.g., a deprecated file), all freshness gates systematically validate against a non-authoritative source.\",\"Hard abort on mismatch can reduce availability (an escalation-to-human fallback may beat a hard stop), and attaching fingerprints to every snapshot carries migration cost that may over-engineer small single-session systems.\"],\"generatedAt\":\"2026-09-04T12:23:05.000Z\"}",
+    "usage": {
+     "input": 4065,
+     "output": 6479,
+     "total": 10544
+    },
+    "latencyMs": 87680,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "99c86437c7c4dda8"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788610740431_xo5",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788610740431_xo5-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "12:00 心跳合并时直接信任会话记录快照作为事实源，未核对源文件的 mtime 与内容哈希",
+       "betterDecision": "在执行跨会话合并前，先读取源文件并比对 mtime 与内容哈希；若与快照不一致，以源文件为准重新同步并向用户/系统告警",
+       "rationale": "以真实事实源（源文件）为唯一基准可以在源头阻止陈旧状态进入合并结果，而不是等错误外溢后再纠正（T-03）",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "source_of_truth_verification",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "19:08 播报直接引用陈旧会话记录中的主题信息，未在对外输出前与源文件做最终一致性校验",
+       "betterDecision": "在播报等对外输出前，对引用的关键状态（主题、版本）执行一次源文件实时核对；输出与源不一致时阻断输出并以源文件内容替换",
+       "rationale": "在对外输出前增加核验门可以把错误拦截在系统内部，避免用户二次纠正（T-07）",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_emit",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "09-05 08:24 废弃并重写主题版本后，未将『旧版本已废弃、以 10 原则总纲集为准』的状态变更持久化到会话外的可靠记录",
+       "betterDecision": "废弃/重写关键状态时，立即在持久层写入版本变更记录（标记旧版本废弃并指向新版本），所有会话读取该状态时必须优先检查废弃标记",
+       "rationale": "重要中间结论与状态变更必须持久化到会话之外，不能依赖易失的会话记忆或转述快照传递（T-10）",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "persistent_state_change_log",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "同一陈旧引用错误在 12:00 与 19:08 重复出现并导致用户二次纠正，系统未把第一次纠正转化为防重复机制",
+       "betterDecision": "建立纠错反馈闭环：用户纠正后记录错误模式与触发路径，为心跳合并与播报路径添加针对该模式的检查规则，同类错误再现时自动告警并阻断",
+       "rationale": "把用户纠正当作改进机制的一次性输入而非孤立事件，才能杜绝同类错误重复发生（T-08）",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "feedback_loop_closure",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "同步机制设计将多个会话记录快照默认视为可等价合并的事实源，未明确定义唯一权威源与冲突裁决规则",
+       "betterDecision": "设计跨会话同步机制时明确源文件为唯一权威事实源、会话快照仅为缓存；将『禁止引用陈旧快照』转化为合并/读取路径上的显式检查门与禁止转换",
+       "rationale": "把『以源文件为准』的硬约束在执行前显式转化为检查门与禁止转换，防止设计层面默认信任转述快照（T-05）",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "explicit_guardrail_design",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "contextRefs": [
+      "artifact://7fabeb07-402c-4407-8278-740778b1d115"
+     ],
+     "generatedAt": "2026-09-05T19:45:00Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788610740431_xo5-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"12:00 心跳合并时直接信任会话记录快照作为事实源，未核对源文件的 mtime 与内容哈希\",\"betterDecision\":\"在执行跨会话合并前，先读取源文件并比对 mtime 与内容哈希；若与快照不一致，以源文件为准重新同步并向用户/系统告警\",\"rationale\":\"以真实事实源（源文件）为唯一基准可以在源头阻止陈旧状态进入合并结果，而不是等错误外溢后再纠正（T-03）\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"source_of_truth_verification\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"19:08 播报直接引用陈旧会话记录中的主题信息，未在对外输出前与源文件做最终一致性校验\",\"betterDecision\":\"在播报等对外输出前，对引用的关键状态（主题、版本）执行一次源文件实时核对；输出与源不一致时阻断输出并以源文件内容替换\",\"rationale\":\"在对外输出前增加核验门可以把错误拦截在系统内部，避免用户二次纠正（T-07）\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_emit\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"09-05 08:24 废弃并重写主题版本后，未将『旧版本已废弃、以 10 原则总纲集为准』的状态变更持久化到会话外的可靠记录\",\"betterDecision\":\"废弃/重写关键状态时，立即在持久层写入版本变更记录（标记旧版本废弃并指向新版本），所有会话读取该状态时必须优先检查废弃标记\",\"rationale\":\"重要中间结论与状态变更必须持久化到会话之外，不能依赖易失的会话记忆或转述快照传递（T-10）\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"persistent_state_change_log\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":3,\"badDecision\":\"同一陈旧引用错误在 12:00 与 19:08 重复出现并导致用户二次纠正，系统未把第一次纠正转化为防重复机制\",\"betterDecision\":\"建立纠错反馈闭环：用户纠正后记录错误模式与触发路径，为心跳合并与播报路径添加针对该模式的检查规则，同类错误再现时自动告警并阻断\",\"rationale\":\"把用户纠正当作改进机制的一次性输入而非孤立事件，才能杜绝同类错误重复发生（T-08）\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"feedback_loop_closure\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":4,\"badDecision\":\"同步机制设计将多个会话记录快照默认视为可等价合并的事实源，未明确定义唯一权威源与冲突裁决规则\",\"betterDecision\":\"设计跨会话同步机制时明确源文件为唯一权威事实源、会话快照仅为缓存；将『禁止引用陈旧快照』转化为合并/读取路径上的显式检查门与禁止转换\",\"rationale\":\"把『以源文件为准』的硬约束在执行前显式转化为检查门与禁止转换，防止设计层面默认信任转述快照（T-05）\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"explicit_guardrail_design\",\"sourcePrincipleId\":\"T-05\"}],\"contextRefs\":[\"artifact://7fabeb07-402c-4407-8278-740778b1d115\"],\"generatedAt\":\"2026-09-05T19:45:00Z\"}",
+    "usage": {
+     "input": 1734,
+     "output": 3698,
+     "total": 5432
+    },
+    "latencyMs": 44640,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "7b44ddaf15bdc856"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788610740431_xo5-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r2-run1",
+     "thesis": "Stale state propagates when transcribed or cached representations (session snapshots, summaries, replicas) are treated as facts rather than as provisional caches. Trust must be anchored in a single authoritative source: state changes are persisted durably outside volatile sessions, and any consequential use—merging across sessions or emitting to users—must pass an explicit consistency check against that source, with past user corrections compiled into gates that block recurrence.",
+     "principleCandidate": {
+      "title": "Anchor trust in the authoritative source: re-verify cached state at consequential boundaries",
+      "rationale": "The recurring failure was systemic, not incidental: the synchronization design defaulted to treating session snapshots as equivalent fact sources, so stale references survived the merge and re-emerged in user-facing output, forcing repeated user correction. Designating the source file as the sole authority, adding pre-merge and pre-emit consistency checks (mtime/content hash), persisting deprecation and version changes outside sessions, and converting the first correction into a blocking rule stops stale state at the boundary rather than after user-visible errors.",
+      "scope": "Applies whenever a system acts on cached, mirrored, transcribed, or summarized state that has a distinguishable authoritative source—especially cross-session merges, state synchronization designs, and user-facing outputs. Not applicable when no authoritative source exists or when verification cost demonstrably exceeds the downside of staleness.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Partial overlap with existing core axioms T-03 (use observable evidence before claiming results) and T-07 (verify outcome after acting); this principle specializes them into pre-use cache verification at action boundaries rather than introducing wholly new behavior",
+      "Unbounded verification on every read could add latency and load; checks should be confined to consequential boundaries such as merge and emit",
+      "If the designated authoritative source is wrong or multiple legitimate writers exist, rigid single-source authority may discard valid divergent updates; conflict-resolution rules must be defined alongside the authority designation",
+      "Persisting version/deprecation markers adds write overhead and can itself go stale, blocking valid reads if markers are not maintained"
+     ],
+     "generatedAt": "2026-09-05T19:52:00Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788610740431_xo5-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r2-run1\",\"thesis\":\"Stale state propagates when transcribed or cached representations (session snapshots, summaries, replicas) are treated as facts rather than as provisional caches. Trust must be anchored in a single authoritative source: state changes are persisted durably outside volatile sessions, and any consequential use—merging across sessions or emitting to users—must pass an explicit consistency check against that source, with past user corrections compiled into gates that block recurrence.\",\"principleCandidate\":{\"title\":\"Anchor trust in the authoritative source: re-verify cached state at consequential boundaries\",\"rationale\":\"The recurring failure was systemic, not incidental: the synchronization design defaulted to treating session snapshots as equivalent fact sources, so stale references survived the merge and re-emerged in user-facing output, forcing repeated user correction. Designating the source file as the sole authority, adding pre-merge and pre-emit consistency checks (mtime/content hash), persisting deprecation and version changes outside sessions, and converting the first correction into a blocking rule stops stale state at the boundary rather than after user-visible errors.\",\"scope\":\"Applies whenever a system acts on cached, mirrored, transcribed, or summarized state that has a distinguishable authoritative source—especially cross-session merges, state synchronization designs, and user-facing outputs. Not applicable when no authoritative source exists or when verification cost demonstrably exceeds the downside of staleness.\",\"confidence\":0.8},\"risks\":[\"Partial overlap with existing core axioms T-03 (use observable evidence before claiming results) and T-07 (verify outcome after acting); this principle specializes them into pre-use cache verification at action boundaries rather than introducing wholly new behavior\",\"Unbounded verification on every read could add latency and load; checks should be confined to consequential boundaries such as merge and emit\",\"If the designated authoritative source is wrong or multiple legitimate writers exist, rigid single-source authority may discard valid divergent updates; conflict-resolution rules must be defined alongside the authority designation\",\"Persisting version/deprecation markers adds write overhead and can itself go stale, blocking valid reads if markers are not maintained\"],\"generatedAt\":\"2026-09-05T19:52:00Z\"}",
+    "usage": {
+     "input": 1644,
+     "output": 2013,
+     "total": 3657
+    },
+    "latencyMs": 29846,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "05b78c1818e4874f"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788610740431_xo5-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r2-run1",
+     "principleDraft": {
+      "title": "Anchor trust in the authoritative source: re-verify cached state at consequential boundaries",
+      "statement": "When acting on cached, mirrored, or transcribed state (session snapshots, summaries, replicas) that has a distinguishable authoritative source, treat the cache as provisional and the authoritative source (e.g., the source file) as the sole fact baseline: designate the authority explicitly, persist consequential state changes such as deprecations and version rewrites outside volatile sessions, and pass every consequential use—cross-session merge/sync and user-facing emission—through an explicit consistency check against the authoritative source (e.g., mtime and content hash), resyncing from the source and alerting on mismatch; compile prior user corrections into blocking gates so the same stale reference cannot recur.",
+      "rationale": "The diagnosed root cause was a synchronization design that defaulted to treating session-record snapshots as equivalent fact sources, with no mandatory gate comparing them to the source file. Consequently, a state change persisted at 09:05-08:24 (deprecation of the old topic version, rewritten as the 10-principle master set) was ignored: the 12:00 heartbeat merge trusted the snapshot without checking source mtime/content, and the 19:08 broadcast still cited the stale record, forcing a second user correction. Anchoring authority in a single source, verifying at merge and emit boundaries, persisting deprecation outside sessions, and converting the first correction into a blocking gate intercepts stale state at the boundary instead of after user-visible errors.",
+      "applicability": [
+       "Cross-session state synchronization and merge operations (e.g., heartbeat merges) that consume session snapshots or transcribed records",
+       "User-facing emission of state-derived content (broadcasts, reports, summaries) where a stale reference would reach the owner",
+       "Any cached, mirrored, or summarized representation of state that has a distinguishable authoritative source such as a source file or canonical record",
+       "Deprecation or version-rewrite events for key state whose invalidation must survive beyond a single volatile session"
+      ],
+      "antiPatterns": [
+       "Treating session snapshots, summaries, or transcribed records as equivalent fact sources without comparison against the authoritative source",
+       "Executing a cross-session merge or sync without first verifying the cache against the source (mtime/content hash), letting stale references enter the merged state",
+       "Emitting user-facing output that cites key state (topic, version, deprecation status) without a final consistency check against the authoritative source",
+       "Recording deprecations or version rewrites only in volatile session memory or transcripts, so later sessions read superseded state",
+       "Treating a user correction as an isolated fix without compiling the error pattern into a blocking gate on the merge/emit paths"
+      ],
+      "confidence": 0.75
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants deprecated or superseded state to never resurface through cross-session merges or user-facing broadcasts, so the same stale-reference correction never has to be made twice.",
+      "targetBehavior": "Before any cross-session merge/sync or user-facing emission that uses cached state, the agent performs an observable read of the authoritative source (e.g., source file mtime and content hash), compares it with the cached representation, resyncs from the source and alerts on mismatch, persists deprecations and version rewrites outside volatile sessions, and installs a blocking check for error patterns the user has already corrected.",
+      "forbiddenBehavior": "Executing merges or emitting output that treats session snapshots or transcribed records as fact sources without checking the authoritative source, and allowing a stale-reference error the user already corrected to recur because no gate was installed.",
+      "evidenceSource": "Diagnosis manual_1788610740431_xo571ixc: the 09-05 08:24 deprecation/rewrite of the old topic version (superseded by the 10-principle master set) was not honored—the 12:00 heartbeat merge trusted the session-record snapshot without checking the source file's mtime/content, and the 19:08 broadcast still cited the stale record, forcing a second user correction (T-03/T-07/T-08 violations).",
+      "validationExpectation": "An evaluator should accept a rule only if it (a) triggers verification against the authoritative source's observable signals (mtime, content hash) BEFORE merge/emit actions, (b) blocks or resyncs from the source on mismatch rather than proceeding, (c) requires deprecations/version changes to be persisted outside volatile sessions, and (d) converts a user correction into a recurrence-blocking gate; a rule that verifies only after user-visible failure, or vaguely advises keeping state fresh, contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r2-run1"
+     },
+     "risks": [
+      "Partial overlap with core axioms T-03, T-05, T-07, T-08, and T-10: this principle specializes them into pre-use cache verification at consequential merge/emit boundaries rather than introducing wholly new behavior; downstream rule generation must not duplicate existing axiom rules.",
+      "Verifying on every read could add latency and load; checks must stay confined to consequential boundaries (cross-session merge, user-facing emit) as scoped by the philosopher.",
+      "If the designated authoritative source is wrong or multiple legitimate writers exist, rigid single-source authority may discard valid divergent updates; conflict-resolution rules must be defined alongside the authority designation.",
+      "Persisted deprecation/version markers add write overhead and can themselves go stale, blocking valid reads if not maintained.",
+      "The evidence base is thin (diagnosis confidence 0.35): a manual CLI pain submission with no behavioral raw evidence beyond the owner's reasonSummary, so the cited event details cannot be independently verified."
+     ],
+     "generatedAt": "2026-09-05T19:57:30Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788610740431_xo5-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r2-run1\",\"principleDraft\":{\"title\":\"Anchor trust in the authoritative source: re-verify cached state at consequential boundaries\",\"statement\":\"When acting on cached, mirrored, or transcribed state (session snapshots, summaries, replicas) that has a distinguishable authoritative source, treat the cache as provisional and the authoritative source (e.g., the source file) as the sole fact baseline: designate the authority explicitly, persist consequential state changes such as deprecations and version rewrites outside volatile sessions, and pass every consequential use—cross-session merge/sync and user-facing emission—through an explicit consistency check against the authoritative source (e.g., mtime and content hash), resyncing from the source and alerting on mismatch; compile prior user corrections into blocking gates so the same stale reference cannot recur.\",\"rationale\":\"The diagnosed root cause was a synchronization design that defaulted to treating session-record snapshots as equivalent fact sources, with no mandatory gate comparing them to the source file. Consequently, a state change persisted at 09:05-08:24 (deprecation of the old topic version, rewritten as the 10-principle master set) was ignored: the 12:00 heartbeat merge trusted the snapshot without checking source mtime/content, and the 19:08 broadcast still cited the stale record, forcing a second user correction. Anchoring authority in a single source, verifying at merge and emit boundaries, persisting deprecation outside sessions, and converting the first correction into a blocking gate intercepts stale state at the boundary instead of after user-visible errors.\",\"applicability\":[\"Cross-session state synchronization and merge operations (e.g., heartbeat merges) that consume session snapshots or transcribed records\",\"User-facing emission of state-derived content (broadcasts, reports, summaries) where a stale reference would reach the owner\",\"Any cached, mirrored, or summarized representation of state that has a distinguishable authoritative source such as a source file or canonical record\",\"Deprecation or version-rewrite events for key state whose invalidation must survive beyond a single volatile session\"],\"antiPatterns\":[\"Treating session snapshots, summaries, or transcribed records as equivalent fact sources without comparison against the authoritative source\",\"Executing a cross-session merge or sync without first verifying the cache against the source (mtime/content hash), letting stale references enter the merged state\",\"Emitting user-facing output that cites key state (topic, version, deprecation status) without a final consistency check against the authoritative source\",\"Recording deprecations or version rewrites only in volatile session memory or transcripts, so later sessions read superseded state\",\"Treating a user correction as an isolated fix without compiling the error pattern into a blocking gate on the merge/emit paths\"],\"confidence\":0.75},\"intentContract\":{\"ownerIntent\":\"The Owner wants deprecated or superseded state to never resurface through cross-session merges or user-facing broadcasts, so the same stale-reference correction never has to be made twice.\",\"targetBehavior\":\"Before any cross-session merge/sync or user-facing emission that uses cached state, the agent performs an observable read of the authoritative source (e.g., source file mtime and content hash), compares it with the cached representation, resyncs from the source and alerts on mismatch, persists deprecations and version rewrites outside volatile sessions, and installs a blocking check for error patterns the user has already corrected.\",\"forbiddenBehavior\":\"Executing merges or emitting output that treats session snapshots or transcribed records as fact sources without checking the authoritative source, and allowing a stale-reference error the user already corrected to recur because no gate was installed.\",\"evidenceSource\":\"Diagnosis manual_1788610740431_xo571ixc: the 09-05 08:24 deprecation/rewrite of the old topic version (superseded by the 10-principle master set) was not honored—the 12:00 heartbeat merge trusted the session-record snapshot without checking the source file's mtime/content, and the 19:08 broadcast still cited the stale record, forcing a second user correction (T-03/T-07/T-08 violations).\",\"validationExpectation\":\"An evaluator should accept a rule only if it (a) triggers verification against the authoritative source's observable signals (mtime, content hash) BEFORE merge/emit actions, (b) blocks or resyncs from the source on mismatch rather than proceeding, (c) requires deprecations/version changes to be persisted outside volatile sessions, and (d) converts a user correction into a recurrence-blocking gate; a rule that verifies only after user-visible failure, or vaguely advises keeping state fresh, contradicts this intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r2-run1\"},\"risks\":[\"Partial overlap with core axioms T-03, T-05, T-07, T-08, and T-10: this principle specializes them into pre-use cache verification at consequential merge/emit boundaries rather than introducing wholly new behavior; downstream rule generation must not duplicate existing axiom rules.\",\"Verifying on every read could add latency and load; checks must stay confined to consequential boundaries (cross-session merge, user-facing emit) as scoped by the philosopher.\",\"If the designated authoritative source is wrong or multiple legitimate writers exist, rigid single-source authority may discard valid divergent updates; conflict-resolution rules must be defined alongside the authority designation.\",\"Persisted deprecation/version markers add write overhead and can themselves go stale, blocking valid reads if not maintained.\",\"The evidence base is thin (diagnosis confidence 0.35): a manual CLI pain submission with no behavioral raw evidence beyond the owner's reasonSummary, so the cited event details cannot be independently verified.\"],\"generatedAt\":\"2026-09-05T19:57:30Z\"}",
+    "usage": {
+     "input": 3832,
+     "output": 5368,
+     "total": 9200
+    },
+    "latencyMs": 70776,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "b817a525dbed6201"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788610740431_xo5-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r2-run1",
+     "principleDraft": {
+      "title": "Re-verify cached state against the authoritative source at consequential boundaries",
+      "statement": "Whenever cached, mirrored, transcribed, or summarized representations of state coexist with a distinguishable authoritative source, any consequential use of those representations — merging, synchronizing, or emitting user-facing output — must first pass an explicit consistency check against that authoritative source (e.g., content hash, version, or mtime comparison). State changes must be persisted durably outside volatile sessions, and the first user correction of a stale-state failure must be compiled into a blocking gate that prevents recurrence.",
+      "rationale": "The diagnosed failure was systemic, not incidental: the synchronization design treated session snapshots as equivalent fact sources, so stale references survived the merge and re-emerged in user-facing output, forcing the user to correct the same staleness repeatedly. Designating a single authoritative source, verifying cached representations against it at the moment of consequential use (pre-merge, pre-emit), persisting state changes outside volatile sessions, and turning the first correction into a blocking rule stops stale state at the boundary instead of after user-visible errors.",
+      "applicability": [
+       "Cross-session state merges and synchronization designs where session snapshots, replicas, or summaries coexist with a primary source",
+       "User-facing output derived from cached, mirrored, or transcribed state (responses, documentation, generated artifacts)",
+       "Any read of a cached representation at a consequential boundary (merge, sync, emit) where an authoritative source is distinguishable",
+       "Recurring corrections of the same stale reference, where a prior user correction should become a standing gate",
+       "Not applicable when no authoritative source exists or when verification cost demonstrably exceeds the downside of staleness"
+      ],
+      "antiPatterns": [
+       "Treating session snapshots, summaries, or replicas as equivalent fact sources during merges without checking them against the authoritative source",
+       "Emitting user-facing content from cached state without a pre-emit consistency check (hash, version, or mtime) against the authoritative source",
+       "Persisting critical state changes only inside volatile session context that disappears on session close",
+       "Re-accepting a representation the user has already corrected once, without a blocking gate that prevents the same stale reference from recurring",
+       "Applying unbounded verification on every read instead of confining checks to consequential boundaries"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to stop letting stale, previously-corrected references propagate into merged state and user-facing output by treating session snapshots and other caches as authoritative facts.",
+      "targetBehavior": "Before any merge, synchronization, or user-facing emit that consumes cached or transcribed state, the agent performs an explicit consistency check against the designated authoritative source (content hash, version, or mtime), blocks the action on mismatch, persists state changes durably outside the volatile session, and installs a blocking gate after the first user correction of a stale reference.",
+      "forbiddenBehavior": "Merging or emitting state derived from session snapshots, replicas, or summaries without verifying them against the authoritative source, thereby letting stale or already-corrected references survive the merge and re-emerge in user-visible output that the user must correct again.",
+      "evidenceSource": "The diagnosed pain: a state synchronization design that defaulted to treating session snapshots as equivalent fact sources, so stale references survived a cross-session merge, re-emerged in user-facing output, and forced repeated user correction of the same stale state.",
+      "validationExpectation": "An evaluator should require that any rule derived from this principle mandates a pre-merge/pre-emit consistency check against the authoritative source at consequential boundaries, durable persistence of state changes outside volatile sessions, and conversion of first-time corrections into blocking gates; a rule that permits acting on unverified cached state at those boundaries contradicts this intent and must be flagged rather than accepted."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r2-run1"
+     },
+     "risks": [
+      "Partial overlap with core axioms T-03 (use observable evidence before claiming results) and T-07 (verify outcome after acting): this principle specializes them into pre-use cache verification at action boundaries, and downstream rule generation must avoid emitting a generic duplicate of those axioms",
+      "Unbounded verification on every read could add latency and load; checks must be confined to consequential boundaries such as merge and emit, or the principle may be over-applied",
+      "If the designated authoritative source is wrong or multiple legitimate writers exist, rigid single-source authority may discard valid divergent updates; conflict-resolution rules must be defined alongside the authority designation",
+      "Persisted deprecation and version markers add write overhead and can themselves go stale, potentially blocking valid reads if markers are not maintained",
+      "Ambiguity in what counts as a 'consequential boundary' could cause inconsistent enforcement; the boundary set (merge, sync, user-facing emit) must be made explicit in derived rules"
+     ],
+     "generatedAt": "2026-09-05T19:56:30Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788610740431_xo5-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Re-verify cached state against the authoritative source at consequential boundaries\",\n    \"statement\": \"Whenever cached, mirrored, transcribed, or summarized representations of state coexist with a distinguishable authoritative source, any consequential use of those representations — merging, synchronizing, or emitting user-facing output — must first pass an explicit consistency check against that authoritative source (e.g., content hash, version, or mtime comparison). State changes must be persisted durably outside volatile sessions, and the first user correction of a stale-state failure must be compiled into a blocking gate that prevents recurrence.\",\n    \"rationale\": \"The diagnosed failure was systemic, not incidental: the synchronization design treated session snapshots as equivalent fact sources, so stale references survived the merge and re-emerged in user-facing output, forcing the user to correct the same staleness repeatedly. Designating a single authoritative source, verifying cached representations against it at the moment of consequential use (pre-merge, pre-emit), persisting state changes outside volatile sessions, and turning the first correction into a blocking rule stops stale state at the boundary instead of after user-visible errors.\",\n    \"applicability\": [\n      \"Cross-session state merges and synchronization designs where session snapshots, replicas, or summaries coexist with a primary source\",\n      \"User-facing output derived from cached, mirrored, or transcribed state (responses, documentation, generated artifacts)\",\n      \"Any read of a cached representation at a consequential boundary (merge, sync, emit) where an authoritative source is distinguishable\",\n      \"Recurring corrections of the same stale reference, where a prior user correction should become a standing gate\",\n      \"Not applicable when no authoritative source exists or when verification cost demonstrably exceeds the downside of staleness\"\n    ],\n    \"antiPatterns\": [\n      \"Treating session snapshots, summaries, or replicas as equivalent fact sources during merges without checking them against the authoritative source\",\n      \"Emitting user-facing content from cached state without a pre-emit consistency check (hash, version, or mtime) against the authoritative source\",\n      \"Persisting critical state changes only inside volatile session context that disappears on session close\",\n      \"Re-accepting a representation the user has already corrected once, without a blocking gate that prevents the same stale reference from recurring\",\n      \"Applying unbounded verification on every read instead of confining checks to consequential boundaries\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants the agent to stop letting stale, previously-corrected references propagate into merged state and user-facing output by treating session snapshots and other caches as authoritative facts.\",\n    \"targetBehavior\": \"Before any merge, synchronization, or user-facing emit that consumes cached or transcribed state, the agent performs an explicit consistency check against the designated authoritative source (content hash, version, or mtime), blocks the action on mismatch, persists state changes durably outside the volatile session, and installs a blocking gate after the first user correction of a stale reference.\",\n    \"forbiddenBehavior\": \"Merging or emitting state derived from session snapshots, replicas, or summaries without verifying them against the authoritative source, thereby letting stale or already-corrected references survive the merge and re-emerge in user-visible output that the user must correct again.\",\n    \"evidenceSource\": \"The diagnosed pain: a state synchronization design that defaulted to treating session snapshots as equivalent fact sources, so stale references survived a cross-session merge, re-emerged in user-facing output, and forced repeated user correction of the same stale state.\",\n    \"validationExpectation\": \"An evaluator should require that any rule derived from this principle mandates a pre-merge/pre-emit consistency check against the authoritative source at consequential boundaries, durable persistence of state changes outside volatile sessions, and conversion of first-time corrections into blocking gates; a rule that permits acting on unverified cached state at those boundaries contradicts this intent and must be flagged rather than accepted.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r2-run1\"\n  },\n  \"risks\": [\n    \"Partial overlap with core axioms T-03 (use observable evidence before claiming results) and T-07 (verify outcome after acting): this principle specializes them into pre-use cache verification at action boundaries, and downstream rule generation must avoid emitting a generic duplicate of those axioms\",\n    \"Unbounded verification on every read could add latency and load; checks must be confined to consequential boundaries such as merge and emit, or the principle may be over-applied\",\n    \"If the designated authoritative source is wrong or multiple legitimate writers exist, rigid single-source authority may discard valid divergent updates; conflict-resolution rules must be defined alongside the authority designation\",\n    \"Persisted deprecation and version markers add write overhead and can themselves go stale, potentially blocking valid reads if markers are not maintained\",\n    \"Ambiguity in what counts as a 'consequential boundary' could cause inconsistent enforcement; the boundary set (merge, sync, user-facing emit) must be made explicit in derived rules\"\n  ],\n  \"generatedAt\": \"2026-09-05T19:56:30Z\"\n}",
+    "usage": {
+     "input": 1903,
+     "output": 2850,
+     "total": 4753
+    },
+    "latencyMs": 33555,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "dd63f2b7877d8c3f"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788610740431_xo5",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788610740431_xo5-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "12:00 心跳合并时默认信任会话记录快照（09-05 08:24 的信任版主题），未核验源文件 mtime 与内容哈希即执行合并",
+       "betterDecision": "在跨会话合并执行前强制读取源文件的 mtime 与内容哈希，若与快照不一致则以源文件为准重新同步并向 owner 告警",
+       "rationale": "以可观察的真实源状态（源文件内容与 mtime）为证据基准，从入口处阻止已废弃快照被当作事实传播",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "source_of_truth_verification",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "心跳合并完成后即认为同步成功，未将合并结果与源文件实际内容比对，导致 19:08 播报仍引用陈旧主题",
+       "betterDecision": "在合并后与播报前增加核验步骤：重读源文件（或其内容哈希）并与即将播报的载荷比对，不一致则阻断播报并触发刷新与告警",
+       "rationale": "执行不等于成功，行动后必须与预期结果比对，才能在暴露给用户前捕获陈旧状态的传播",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_after_action",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "用户第一次纠正陈旧引用后未把纠正当作反馈固化到同步机制，同一错误在 19:08 重复出现并引发第二次纠正",
+       "betterDecision": "将首次纠正记录为反馈事件，立即失效并刷新所有派生自受影响源文件的会话快照，并增加\"任何早于源文件 mtime 的快照禁止被引用\"的防护规则",
+       "rationale": "把用户纠正当作反馈闭环处理，才能打断重复犯错循环，而非让同一陈旧引用错误再次发生",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "feedback_loop_closure",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "同步设计允许心跳合并与播报直接消费会话记录快照，未将\"源文件为唯一事实源\"翻译为显式检查门与禁止转移规则",
+       "betterDecision": "将硬约束编码为显式防护：凡 mtime 早于源文件或内容哈希不匹配的快照，一律视为禁止输入，阻断其进入合并与播报等下游转移",
+       "rationale": "把硬约束转化为明确的检查门与禁止转移，可在结构上杜绝陈旧状态消费，而非依赖会话内的自觉核验",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_encoding",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "跨会话状态仅存于易失的会话记录快照中，未持久化权威状态及其版本指纹，导致各会话无从检测快照是否陈旧",
+       "betterDecision": "将权威的主题/总纲状态连同版本指纹（mtime + 内容哈希）持久化到会话外存储，并要求每次合并与播报前先对其校验",
+       "rationale": "重要中间结论与状态须持久化在易失上下文之外，跨会话连续性才有可核验的锚点，陈旧性才可被检测",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "durable_state_persistence",
+       "sourcePrincipleId": "T-10"
+      }
+     ],
+     "contextRefs": [
+      "artifact://7fabeb07-402c-4407-8278-740778b1d115"
+     ],
+     "generatedAt": "2026-09-05T12:20:30.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788610740431_xo5-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"12:00 心跳合并时默认信任会话记录快照（09-05 08:24 的信任版主题），未核验源文件 mtime 与内容哈希即执行合并\",\"betterDecision\":\"在跨会话合并执行前强制读取源文件的 mtime 与内容哈希，若与快照不一致则以源文件为准重新同步并向 owner 告警\",\"rationale\":\"以可观察的真实源状态（源文件内容与 mtime）为证据基准，从入口处阻止已废弃快照被当作事实传播\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"source_of_truth_verification\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"心跳合并完成后即认为同步成功，未将合并结果与源文件实际内容比对，导致 19:08 播报仍引用陈旧主题\",\"betterDecision\":\"在合并后与播报前增加核验步骤：重读源文件（或其内容哈希）并与即将播报的载荷比对，不一致则阻断播报并触发刷新与告警\",\"rationale\":\"执行不等于成功，行动后必须与预期结果比对，才能在暴露给用户前捕获陈旧状态的传播\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_after_action\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"用户第一次纠正陈旧引用后未把纠正当作反馈固化到同步机制，同一错误在 19:08 重复出现并引发第二次纠正\",\"betterDecision\":\"将首次纠正记录为反馈事件，立即失效并刷新所有派生自受影响源文件的会话快照，并增加\\\"任何早于源文件 mtime 的快照禁止被引用\\\"的防护规则\",\"rationale\":\"把用户纠正当作反馈闭环处理，才能打断重复犯错循环，而非让同一陈旧引用错误再次发生\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"feedback_loop_closure\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":3,\"badDecision\":\"同步设计允许心跳合并与播报直接消费会话记录快照，未将\\\"源文件为唯一事实源\\\"翻译为显式检查门与禁止转移规则\",\"betterDecision\":\"将硬约束编码为显式防护：凡 mtime 早于源文件或内容哈希不匹配的快照，一律视为禁止输入，阻断其进入合并与播报等下游转移\",\"rationale\":\"把硬约束转化为明确的检查门与禁止转移，可在结构上杜绝陈旧状态消费，而非依赖会话内的自觉核验\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_encoding\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"跨会话状态仅存于易失的会话记录快照中，未持久化权威状态及其版本指纹，导致各会话无从检测快照是否陈旧\",\"betterDecision\":\"将权威的主题/总纲状态连同版本指纹（mtime + 内容哈希）持久化到会话外存储，并要求每次合并与播报前先对其校验\",\"rationale\":\"重要中间结论与状态须持久化在易失上下文之外，跨会话连续性才有可核验的锚点，陈旧性才可被检测\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"durable_state_persistence\",\"sourcePrincipleId\":\"T-10\"}],\"contextRefs\":[\"artifact://7fabeb07-402c-4407-8278-740778b1d115\"],\"generatedAt\":\"2026-09-05T12:20:30.000Z\"}",
+    "usage": {
+     "input": 1734,
+     "output": 3433,
+     "total": 5167
+    },
+    "latencyMs": 44526,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e97438bdd95f9e36"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788610740431_xo5-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r3-run1",
+     "thesis": "A snapshot of state is testimony, not truth. Any derived representation—session snapshot, cache, summary—is only a hypothesis about its authoritative source, and its authority must be re-established by verifiable fingerprints (mtime, content hash) at every consequential boundary. Because remembering having read something is not evidence of it being current, staleness must be detectable via persisted version fingerprints and structurally forbidden from entering downstream transitions, with user corrections treated as feedback that invalidates and refreshes all affected derived state.",
+     "principleCandidate": {
+      "title": "Revalidate derived state against source fingerprints before consequential use",
+      "rationale": "The root cause is not one bad merge but the absence of staleness detection: volatile snapshots lacked version fingerprints anchored to the source of truth, so downstream consumers could not distinguish fresh from stale and stale state propagated to the user twice. Requiring fingerprint revalidation (mtime + content hash) at each consumption boundary—merge, broadcast, decision—and encoding fingerprint mismatch as a forbidden input makes staleness structurally impossible to consume, rather than relying on in-session vigilance. Persisting the fingerprint outside volatile context also gives corrections a concrete target to invalidate and refresh.",
+      "scope": "Applies whenever state derived from an authoritative source (files, databases, external systems) crosses a boundary—session, process, or time—and is then used for consequential actions such as merging, broadcasting, or deciding. Especially relevant to long-running or multi-session workflows where volatile context can outlive the freshness of what it cached.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Partial overlap with existing core axioms: this principle is a composite of T-03 (observable evidence), T-05 (guardrail encoding), T-07 (verify after action), and T-10 (durable state); if promoted, it should be framed as the derived-state-specific synthesis of these, not a duplicate axiom.",
+      "Fingerprint revalidation on every consumption boundary adds latency and I/O cost; over-applying it in low-stakes, high-frequency paths may degrade performance without proportional benefit.",
+      "Unstable source metadata (e.g., mtime updates without content change) can cause false staleness, triggering unnecessary refreshes or blocked outputs; fingerprints should rely on content hashes to mitigate.",
+      "Blocking downstream actions on mismatch needs a defined fallback path (refresh-then-proceed, or degrade with alert); otherwise time-sensitive outputs like heartbeats may silently stall.",
+      "Assuming the source file is always authoritative can be wrong when newer user intent lives in the session; rigidly deferring to the source could overwrite legitimate fresher edits."
+     ],
+     "generatedAt": "2026-09-05T12:21:00.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788610740431_xo5-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r3-run1\",\"thesis\":\"A snapshot of state is testimony, not truth. Any derived representation—session snapshot, cache, summary—is only a hypothesis about its authoritative source, and its authority must be re-established by verifiable fingerprints (mtime, content hash) at every consequential boundary. Because remembering having read something is not evidence of it being current, staleness must be detectable via persisted version fingerprints and structurally forbidden from entering downstream transitions, with user corrections treated as feedback that invalidates and refreshes all affected derived state.\",\"principleCandidate\":{\"title\":\"Revalidate derived state against source fingerprints before consequential use\",\"rationale\":\"The root cause is not one bad merge but the absence of staleness detection: volatile snapshots lacked version fingerprints anchored to the source of truth, so downstream consumers could not distinguish fresh from stale and stale state propagated to the user twice. Requiring fingerprint revalidation (mtime + content hash) at each consumption boundary—merge, broadcast, decision—and encoding fingerprint mismatch as a forbidden input makes staleness structurally impossible to consume, rather than relying on in-session vigilance. Persisting the fingerprint outside volatile context also gives corrections a concrete target to invalidate and refresh.\",\"scope\":\"Applies whenever state derived from an authoritative source (files, databases, external systems) crosses a boundary—session, process, or time—and is then used for consequential actions such as merging, broadcasting, or deciding. Especially relevant to long-running or multi-session workflows where volatile context can outlive the freshness of what it cached.\",\"confidence\":0.8},\"risks\":[\"Partial overlap with existing core axioms: this principle is a composite of T-03 (observable evidence), T-05 (guardrail encoding), T-07 (verify after action), and T-10 (durable state); if promoted, it should be framed as the derived-state-specific synthesis of these, not a duplicate axiom.\",\"Fingerprint revalidation on every consumption boundary adds latency and I/O cost; over-applying it in low-stakes, high-frequency paths may degrade performance without proportional benefit.\",\"Unstable source metadata (e.g., mtime updates without content change) can cause false staleness, triggering unnecessary refreshes or blocked outputs; fingerprints should rely on content hashes to mitigate.\",\"Blocking downstream actions on mismatch needs a defined fallback path (refresh-then-proceed, or degrade with alert); otherwise time-sensitive outputs like heartbeats may silently stall.\",\"Assuming the source file is always authoritative can be wrong when newer user intent lives in the session; rigidly deferring to the source could overwrite legitimate fresher edits.\"],\"generatedAt\":\"2026-09-05T12:21:00.000Z\"}",
+    "usage": {
+     "input": 1649,
+     "output": 2140,
+     "total": 3789
+    },
+    "latencyMs": 33039,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "cc6e4ecbf359e43f"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788610740431_xo5-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r3-run1",
+     "principleDraft": {
+      "title": "Revalidate derived state against source fingerprints before consequential use",
+      "statement": "Whenever state derived from an authoritative source (session snapshot, cache, summary) is about to cross a consequential boundary—merge, broadcast to the user, or state-mutating decision—the agent must revalidate it against a persisted version fingerprint (content hash, with mtime only as a fast-path hint) of that source: proceed only on fingerprint match; on mismatch or missing fingerprint, refresh from the source or halt via a defined fallback before acting. Fingerprints must be persisted outside volatile session context, and user corrections must be treated as invalidation events that mark all affected derived state for refresh.",
+      "rationale": "The root cause was not a single bad merge but the absence of staleness detection: volatile snapshots carried no version fingerprints anchored to the source of truth, so downstream consumers could not distinguish fresh from stale, stale state propagated to the user twice, and corrections had nothing concrete to invalidate. Fingerprint revalidation at each consumption boundary encodes mismatch as a forbidden input, making staleness structurally impossible to consume rather than dependent on in-session vigilance; persisting the fingerprint outside volatile context provides the durable invalidation target that corrections require.",
+      "applicability": [
+       "State derived from an authoritative source (files, databases, external systems) that crosses a session, process, or time boundary before later use",
+       "Long-running or multi-session workflows where in-context caches or summaries can outlive the freshness of what they captured",
+       "Consequential boundaries specifically: merging session-derived data with source-of-truth data, broadcasting outputs to the user, and making state-mutating decisions",
+       "Handling user corrections that contradict previously captured derived state"
+      ],
+      "antiPatterns": [
+       "Trusting an in-session cache, snapshot, or summary as current simply because it was read earlier in the session",
+       "Merging or broadcasting derived state without comparing the source's current fingerprint against the fingerprint persisted at capture time",
+       "Keeping freshness or version information only in volatile context that is lost when the session ends",
+       "Letting stale-derived state pass downstream with a warning instead of a hard stop or forced refresh",
+       "Relying on mtime alone as the staleness signal where content hashes are available",
+       "Ignoring a user correction that contradicts cached derived state instead of invalidating and refreshing it"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent stale cached or session-derived state from being merged into or broadcast as current when the authoritative source has changed, and wants user corrections to reliably invalidate and refresh all affected derived state.",
+      "targetBehavior": "In the tool trajectory, the agent computes and compares the source's current fingerprint (content hash, mtime as hint) against the fingerprint persisted at capture time before every merge, broadcast, or state-mutating decision, and on mismatch visibly refreshes from the source or halts via a defined fallback instead of using the stale copy.",
+      "forbiddenBehavior": "Consuming or propagating derived state across a consequential boundary without revalidating it against the source's current fingerprint, allowing stale snapshots to silently reach merges, user-facing broadcasts, or decisions.",
+      "evidenceSource": "The diagnosed pain: a stale session snapshot was merged with source-of-truth data and stale state was broadcast to the user a second time, because volatile snapshots carried no version fingerprints anchored to the source of truth, making staleness undetectable and leaving corrections without an invalidation target.",
+      "validationExpectation": "An evaluator should accept a rule only if it demands an observable fingerprint comparison against a persisted record at each consequential boundary, hard-stops or refreshes on mismatch via a defined fallback, and treats user corrections as invalidation events; a change that permits warning-only propagation of stale state or drops the persisted-fingerprint requirement contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r3-run1"
+     },
+     "risks": [
+      "Partial overlap with core axioms T-03, T-05, T-07, and T-10: this principle is a derived-state-specific synthesis of evidence-checking, guardrail encoding, post-action verification, and durable state, and should be framed as such rather than promoted as a duplicate axiom.",
+      "Revalidating fingerprints at every consumption boundary adds latency and I/O cost; over-applying it in low-stakes, high-frequency paths may degrade performance without proportional benefit.",
+      "Unstable source metadata (mtime changing without content change) can cause false staleness and unnecessary refreshes or blocked outputs; fingerprints should be content-hash-first to mitigate.",
+      "Blocking downstream actions on mismatch requires a defined fallback path (refresh-then-proceed or degrade-with-alert); otherwise time-sensitive outputs may silently stall.",
+      "Assuming the source file is always authoritative can be wrong when fresher legitimate user intent lives in the session; rigid deferral to the source could overwrite newer edits, creating tension with T-02."
+     ],
+     "generatedAt": "2026-09-05T12:24:30.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788610740431_xo5-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Revalidate derived state against source fingerprints before consequential use\",\n    \"statement\": \"Whenever state derived from an authoritative source (session snapshot, cache, summary) is about to cross a consequential boundary—merge, broadcast to the user, or state-mutating decision—the agent must revalidate it against a persisted version fingerprint (content hash, with mtime only as a fast-path hint) of that source: proceed only on fingerprint match; on mismatch or missing fingerprint, refresh from the source or halt via a defined fallback before acting. Fingerprints must be persisted outside volatile session context, and user corrections must be treated as invalidation events that mark all affected derived state for refresh.\",\n    \"rationale\": \"The root cause was not a single bad merge but the absence of staleness detection: volatile snapshots carried no version fingerprints anchored to the source of truth, so downstream consumers could not distinguish fresh from stale, stale state propagated to the user twice, and corrections had nothing concrete to invalidate. Fingerprint revalidation at each consumption boundary encodes mismatch as a forbidden input, making staleness structurally impossible to consume rather than dependent on in-session vigilance; persisting the fingerprint outside volatile context provides the durable invalidation target that corrections require.\",\n    \"applicability\": [\n      \"State derived from an authoritative source (files, databases, external systems) that crosses a session, process, or time boundary before later use\",\n      \"Long-running or multi-session workflows where in-context caches or summaries can outlive the freshness of what they captured\",\n      \"Consequential boundaries specifically: merging session-derived data with source-of-truth data, broadcasting outputs to the user, and making state-mutating decisions\",\n      \"Handling user corrections that contradict previously captured derived state\"\n    ],\n    \"antiPatterns\": [\n      \"Trusting an in-session cache, snapshot, or summary as current simply because it was read earlier in the session\",\n      \"Merging or broadcasting derived state without comparing the source's current fingerprint against the fingerprint persisted at capture time\",\n      \"Keeping freshness or version information only in volatile context that is lost when the session ends\",\n      \"Letting stale-derived state pass downstream with a warning instead of a hard stop or forced refresh\",\n      \"Relying on mtime alone as the staleness signal where content hashes are available\",\n      \"Ignoring a user correction that contradicts cached derived state instead of invalidating and refreshing it\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants to prevent stale cached or session-derived state from being merged into or broadcast as current when the authoritative source has changed, and wants user corrections to reliably invalidate and refresh all affected derived state.\",\n    \"targetBehavior\": \"In the tool trajectory, the agent computes and compares the source's current fingerprint (content hash, mtime as hint) against the fingerprint persisted at capture time before every merge, broadcast, or state-mutating decision, and on mismatch visibly refreshes from the source or halts via a defined fallback instead of using the stale copy.\",\n    \"forbiddenBehavior\": \"Consuming or propagating derived state across a consequential boundary without revalidating it against the source's current fingerprint, allowing stale snapshots to silently reach merges, user-facing broadcasts, or decisions.\",\n    \"evidenceSource\": \"The diagnosed pain: a stale session snapshot was merged with source-of-truth data and stale state was broadcast to the user a second time, because volatile snapshots carried no version fingerprints anchored to the source of truth, making staleness undetectable and leaving corrections without an invalidation target.\",\n    \"validationExpectation\": \"An evaluator should accept a rule only if it demands an observable fingerprint comparison against a persisted record at each consequential boundary, hard-stops or refreshes on mismatch via a defined fallback, and treats user corrections as invalidation events; a change that permits warning-only propagation of stale state or drops the persisted-fingerprint requirement contradicts this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r3-run1\"\n  },\n  \"risks\": [\n    \"Partial overlap with core axioms T-03, T-05, T-07, and T-10: this principle is a derived-state-specific synthesis of evidence-checking, guardrail encoding, post-action verification, and durable state, and should be framed as such rather than promoted as a duplicate axiom.\",\n    \"Revalidating fingerprints at every consumption boundary adds latency and I/O cost; over-applying it in low-stakes, high-frequency paths may degrade performance without proportional benefit.\",\n    \"Unstable source metadata (mtime changing without content change) can cause false staleness and unnecessary refreshes or blocked outputs; fingerprints should be content-hash-first to mitigate.\",\n    \"Blocking downstream actions on mismatch requires a defined fallback path (refresh-then-proceed or degrade-with-alert); otherwise time-sensitive outputs may silently stall.\",\n    \"Assuming the source file is always authoritative can be wrong when fresher legitimate user intent lives in the session; rigid deferral to the source could overwrite newer edits, creating tension with T-02.\"\n  ],\n  \"generatedAt\": \"2026-09-05T12:24:30.000Z\"\n}",
+    "usage": {
+     "input": 2011,
+     "output": 4057,
+     "total": 6068
+    },
+    "latencyMs": 44771,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "41c8732f83ad9af0"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788610740431_xo5-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r3-run1",
+     "principleDraft": {
+      "title": "Revalidate derived state against source-file fingerprints before consequential use",
+      "statement": "State derived from an authoritative source (session snapshot, cache, summary) must never enter a consequential transition — merge, sync, heartbeat, broadcast, user-facing decision — without first re-establishing its currency against that source via persisted version fingerprints (content hash as the primary signal, mtime as supporting signal). On mismatch or missing fingerprints the derived state is stale: it must be refreshed from the source, or the action blocked with an alert, never consumed as-is. A user correction that exposes staleness must invalidate and refresh every derived artifact anchored to the affected source so the same stale reference cannot recur.",
+      "rationale": "The diagnosed root cause is not one bad merge but the absence of staleness detection: cross-session sync treated session-record snapshots as the default source of truth, so a deprecated 09-05 08:24 snapshot flowed unchecked into the 12:00 heartbeat merge and the 19:08 broadcast, forcing the user to correct the same error twice. Anchoring snapshots to verifiable source fingerprints and rechecking them at each consumption boundary turns freshness into observable evidence rather than an assumption, encodes fingerprint mismatch as a forbidden input (a structural guardrail instead of in-session vigilance), and gives user corrections a concrete target to invalidate, closing the repeat-error loop.",
+      "applicability": [
+       "Cross-session or cross-process state synchronization where a snapshot of source state (file, database, external system) crosses a session or time boundary and is later consumed.",
+       "Consequential consumption boundaries: heartbeat merges, syncs, broadcasts/announcements, and decisions whose output reaches the user.",
+       "Long-running or multi-session workflows where volatile session context can outlive the freshness of what it cached.",
+       "Pipelines where derived representations (caches, transcripts, summaries) stand in for an authoritative source of truth."
+      ],
+      "antiPatterns": [
+       "Treating a session record, transcript, or cached snapshot as the source of truth by default and consuming it without comparing it to the authoritative source.",
+       "Executing a heartbeat merge or broadcast on a snapshot whose mtime/content hash was never checked against the source file.",
+       "Declaring a merge/sync successful without comparing the propagated payload against the actual source content.",
+       "Re-consuming an affected snapshot after a user correction without invalidating and re-deriving it from the corrected source.",
+       "Storing version fingerprints only in volatile in-session memory where a later session cannot use them to detect staleness."
+      ],
+      "confidence": 0.72
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants cross-session sync operations (heartbeat merges, broadcasts) to verify carried-over state against the authoritative source file (mtime + content hash) before use, so a deprecated snapshot is never propagated and the user never has to correct the same stale reference twice.",
+      "targetBehavior": "Before each merge/sync/broadcast, the agent reads the authoritative source's fingerprints (content hash, mtime), compares them to the fingerprints captured with the snapshot being consumed, and on mismatch refreshes from the source and alerts rather than proceeding; after a user correction, it invalidates and re-derives all snapshots anchored to the affected source.",
+      "forbiddenBehavior": "Consuming a derived snapshot (session record, cache, summary) as fact in a merge or broadcast without verifying it against the source file's mtime/content hash, propagating deprecated state and repeating the same stale-reference error after a user correction.",
+      "evidenceSource": "Diagnosis diagnosis_manual_1788610740431_xo571ixc (pain manual_1788610740431_xo571ixc): the 09-05 08:24 trust-version theme was deprecated and rewritten into a 10-principle episode, yet the 12:00 heartbeat merge used it without checking source mtime/content and the 19:08 broadcast again cited the stale session record, causing two user corrections; evidence is limited to the owner-submitted reasonSummary and its diagnosis run, with no behavioral-level raw logs.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it mandates an observable pre-consumption fingerprint comparison against the authoritative source at merge/sync/broadcast boundaries, treats fingerprint mismatch or absence as a forbidden input with a defined refresh-or-block-and-alert fallback, and requires user corrections to invalidate affected derived state; rules that merely advise being careful about staleness without a checkable comparison should be rejected."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r3-run1"
+     },
+     "risks": [
+      "Partial overlap with core axioms: this is a derived-state-specific synthesis of T-03 (observable evidence), T-05 (guardrail encoding), T-07 (verify after action), T-08 (corrections as feedback), and T-10 (durable state); if promoted it must be framed as such, not as a duplicate axiom.",
+      "Revalidating fingerprints at every consumption boundary adds latency and I/O cost; over-applying it in low-stakes, high-frequency paths may degrade performance without proportional benefit.",
+      "Unstable source metadata (mtime changing without content change) can cause false staleness and unnecessary refreshes; content hash should be the primary signal to mitigate.",
+      "Blocking downstream actions on mismatch requires a defined fallback path (refresh-then-proceed, or degrade with alert); otherwise time-sensitive outputs like heartbeats may silently stall.",
+      "Assuming the source file is always authoritative can be wrong when newer user intent lives only in the session; rigid deferral to the source could overwrite legitimate fresher edits.",
+      "The underlying diagnosis rests solely on the owner-submitted pain description with no behavioral raw evidence, so the specific boundary triggers (heartbeat merge, broadcast) are drawn from that account and may not generalize beyond it."
+     ],
+     "generatedAt": "2026-09-05T12:23:00.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788610740431_xo5-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r3-run1\",\"principleDraft\":{\"title\":\"Revalidate derived state against source-file fingerprints before consequential use\",\"statement\":\"State derived from an authoritative source (session snapshot, cache, summary) must never enter a consequential transition — merge, sync, heartbeat, broadcast, user-facing decision — without first re-establishing its currency against that source via persisted version fingerprints (content hash as the primary signal, mtime as supporting signal). On mismatch or missing fingerprints the derived state is stale: it must be refreshed from the source, or the action blocked with an alert, never consumed as-is. A user correction that exposes staleness must invalidate and refresh every derived artifact anchored to the affected source so the same stale reference cannot recur.\",\"rationale\":\"The diagnosed root cause is not one bad merge but the absence of staleness detection: cross-session sync treated session-record snapshots as the default source of truth, so a deprecated 09-05 08:24 snapshot flowed unchecked into the 12:00 heartbeat merge and the 19:08 broadcast, forcing the user to correct the same error twice. Anchoring snapshots to verifiable source fingerprints and rechecking them at each consumption boundary turns freshness into observable evidence rather than an assumption, encodes fingerprint mismatch as a forbidden input (a structural guardrail instead of in-session vigilance), and gives user corrections a concrete target to invalidate, closing the repeat-error loop.\",\"applicability\":[\"Cross-session or cross-process state synchronization where a snapshot of source state (file, database, external system) crosses a session or time boundary and is later consumed.\",\"Consequential consumption boundaries: heartbeat merges, syncs, broadcasts/announcements, and decisions whose output reaches the user.\",\"Long-running or multi-session workflows where volatile session context can outlive the freshness of what it cached.\",\"Pipelines where derived representations (caches, transcripts, summaries) stand in for an authoritative source of truth.\"],\"antiPatterns\":[\"Treating a session record, transcript, or cached snapshot as the source of truth by default and consuming it without comparing it to the authoritative source.\",\"Executing a heartbeat merge or broadcast on a snapshot whose mtime/content hash was never checked against the source file.\",\"Declaring a merge/sync successful without comparing the propagated payload against the actual source content.\",\"Re-consuming an affected snapshot after a user correction without invalidating and re-deriving it from the corrected source.\",\"Storing version fingerprints only in volatile in-session memory where a later session cannot use them to detect staleness.\"],\"confidence\":0.72},\"intentContract\":{\"ownerIntent\":\"The Owner wants cross-session sync operations (heartbeat merges, broadcasts) to verify carried-over state against the authoritative source file (mtime + content hash) before use, so a deprecated snapshot is never propagated and the user never has to correct the same stale reference twice.\",\"targetBehavior\":\"Before each merge/sync/broadcast, the agent reads the authoritative source's fingerprints (content hash, mtime), compares them to the fingerprints captured with the snapshot being consumed, and on mismatch refreshes from the source and alerts rather than proceeding; after a user correction, it invalidates and re-derives all snapshots anchored to the affected source.\",\"forbiddenBehavior\":\"Consuming a derived snapshot (session record, cache, summary) as fact in a merge or broadcast without verifying it against the source file's mtime/content hash, propagating deprecated state and repeating the same stale-reference error after a user correction.\",\"evidenceSource\":\"Diagnosis diagnosis_manual_1788610740431_xo571ixc (pain manual_1788610740431_xo571ixc): the 09-05 08:24 trust-version theme was deprecated and rewritten into a 10-principle episode, yet the 12:00 heartbeat merge used it without checking source mtime/content and the 19:08 broadcast again cited the stale session record, causing two user corrections; evidence is limited to the owner-submitted reasonSummary and its diagnosis run, with no behavioral-level raw logs.\",\"validationExpectation\":\"An evaluator should accept a rule as faithful only if it mandates an observable pre-consumption fingerprint comparison against the authoritative source at merge/sync/broadcast boundaries, treats fingerprint mismatch or absence as a forbidden input with a defined refresh-or-block-and-alert fallback, and requires user corrections to invalidate affected derived state; rules that merely advise being careful about staleness without a checkable comparison should be rejected.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788610740431_xo5-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788610740431_xo5-r3-run1\"},\"risks\":[\"Partial overlap with core axioms: this is a derived-state-specific synthesis of T-03 (observable evidence), T-05 (guardrail encoding), T-07 (verify after action), T-08 (corrections as feedback), and T-10 (durable state); if promoted it must be framed as such, not as a duplicate axiom.\",\"Revalidating fingerprints at every consumption boundary adds latency and I/O cost; over-applying it in low-stakes, high-frequency paths may degrade performance without proportional benefit.\",\"Unstable source metadata (mtime changing without content change) can cause false staleness and unnecessary refreshes; content hash should be the primary signal to mitigate.\",\"Blocking downstream actions on mismatch requires a defined fallback path (refresh-then-proceed, or degrade with alert); otherwise time-sensitive outputs like heartbeats may silently stall.\",\"Assuming the source file is always authoritative can be wrong when newer user intent lives only in the session; rigid deferral to the source could overwrite legitimate fresher edits.\",\"The underlying diagnosis rests solely on the owner-submitted pain description with no behavioral raw evidence, so the specific boundary triggers (heartbeat merge, broadcast) are drawn from that account and may not generalize beyond it.\"],\"generatedAt\":\"2026-09-05T12:23:00.000Z\"}",
+    "usage": {
+     "input": 3943,
+     "output": 5977,
+     "total": 9920
+    },
+    "latencyMs": 72760,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "d2ed84c29b510ff5"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

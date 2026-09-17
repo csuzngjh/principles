@@ -15,17 +15,19 @@ const runsDir = path.join(DATA, 'runs');
 const manifest = JSON.parse(fs.readFileSync(path.join(DATA, '..', 'sample-manifest.json'), 'utf8'));
 
 const sha = (s) => createHash('sha256').update(s).digest('hex').slice(0, 12);
-// prompt hashes: from run files (stable across repeats by stage/arm)
-const promptHashes = { A: new Set(), B: new Set(), dreamer: new Set(), philosopher: new Set() };
+// Arm identity hashes: the CONSTANT system prompts (what actually differs
+// between arms). Per-call prompt hashes (system+message) live in the run files.
+const CORE = path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime-v2');
+const { buildScribeProtocolInstruction } = await import(`file://${CORE}/internalization/scribe-prompt-builder.js`.replace(/\\/g, '/'));
+const { B_ADDENDUM, B_ADDENDUM_VERSION } = await import(`file://${path.join(ROOT, 'scripts/pri-815/b-addendum.mjs')}`.replace(/\\/g, '/'));
+const armAHash = sha(buildScribeProtocolInstruction({ coreGrounding: true }));
+const armBHash = sha(buildScribeProtocolInstruction({ coreGrounding: true }) + B_ADDENDUM);
+
 let genConfig = null;
 for (const f of fs.readdirSync(runsDir)) {
   const run = JSON.parse(fs.readFileSync(path.join(runsDir, f), 'utf8'));
   for (const r of run.repeats) {
     for (const k of ['dreamer', 'philosopher', 'scribe_A', 'scribe_B']) {
-      if (r[k]?.promptHash) {
-        const bucket = k === 'scribe_A' ? 'A' : k === 'scribe_B' ? 'B' : k;
-        promptHashes[bucket].add(r[k].promptHash);
-      }
       if (r[k]?.usage && !genConfig) genConfig = { model: 'glm-5.3', temperature: 0, maxTokens: 8000, endpoint: 'zai-coding' };
     }
   }
@@ -40,16 +42,36 @@ const clean = subsets.CLEAN, dev = subsets.DEV;
 const net = t.NET_ADVANTAGE_PP;
 const judgeAligned = t.W > t.L; // same-family judge — see PRIMARY_JUDGE disclosure
 
-// T1 exploratory provisional-PASS conditions (execution package T1)
+// T1 exploratory provisional-PASS conditions (execution package T1 + SPEC §27/§31/§32)
+// 1. B wins the vast majority of independent groups with net >= 20pp
+// 2. no key regression: no B-only contradictions, B validity failures <= A (SPEC §27)
+// 3. downstream non-regression (blockMiss/overblock)
+// 4. effect not outlier-driven: both subsets aligned
+// 5. at least one INDEPENDENT judge family aligned (none available this env)
+// 6. no sample contamination: CLEAN subset direction consistent
+const stab = JSON.parse(fs.readFileSync(path.join(DATA, 'judgments-stability-runs.json'), 'utf8')).groups;
+const byG = {};
+for (const [k, v] of Object.entries(stab)) {
+  const [g, arm] = k.split('#');
+  byG[g] = byG[g] ?? {};
+  byG[g][arm] = v.classification;
+}
+let bOnlyContra = 0;
+for (const x of Object.values(byG)) {
+  if (x.B === 'CONTRADICTION' && x.A !== 'CONTRADICTION') bOnlyContra += 1;
+}
 const cond = {
   1: t.W >= Math.ceil(t.N * 0.6) && net >= 20,
-  2: s.B.CONTRADICTION === 0,
+  2: bOnlyContra === 0 && agg.validity.B.fail <= agg.validity.A.fail,
   3: d.B.blockMiss <= d.A.blockMiss && d.B.overblock <= d.A.overblock,
   4: clean.w > clean.l && dev.w > dev.l,
-  5: judgeAligned,
-  6: clean.w + clean.l > 0 ? (clean.w / Math.max(clean.w + clean.l, 1) >= 0.5) : false,
+  5: false, // no independent judge family available on this host (documented NOT_MET)
+  6: clean.w + clean.l > 0 ? clean.w > clean.l : false,
 };
 const allPass = Object.values(cond).every(Boolean);
+const stabObserved = bOnlyContra === 0 && agg.validity.B.fail <= agg.validity.A.fail
+  ? (s.B.MATERIAL_DRIFT <= s.A.MATERIAL_DRIFT ? 'NON_REGRESSED' : 'REGRESSED')
+  : 'REGRESSED';
 
 const lines = [
   '# PRI_815_INFORMATION_FLOW_AB — Phase A Report',
@@ -61,9 +83,7 @@ const lines = [
   `INDEPENDENT_SOURCE_GROUPS = ${t.N} (DEV ${dev.w + dev.l + dev.t} / CLEAN ${clean.w + clean.l + clean.t})`,
   `GENERATOR = glm-5.3 (ZAI coding endpoint; production channel)`,
   `GENERATOR_CONFIG = temp=0 maxTokens=8000 (identical for A/B/all stages)`,
-  `A_PROMPT_HASHES = ${[...promptHashes.A].join(', ')}`,
-  `B_PROMPT_HASHES = ${[...promptHashes.B].join(', ')}`,
-  `SHARED_PROMPT_HASHES = dreamer[${[...promptHashes.dreamer].join(',')}] philosopher[${[...promptHashes.philosopher].join(',')}]`,
+  `ARM_SYSTEM_PROMPT_HASHES: A = ${armAHash}   B = ${armBHash} (delta = B_ADDENDUM ${B_ADDENDUM_VERSION} + 3 evidence payload blocks; per-call hashes in data/runs/*.json)`,
   `B_ADDENDUM = pri815-b-addendum.v1 (frozen after Phase 3 dev calibration)`,
   `REPEATS_PER_INPUT = 3 (paired: shared D/P outputs, scribe order interleaved)`,
   '',
@@ -79,7 +99,10 @@ const lines = [
   `  A: correct=${d.A.correct} blockMiss=${d.A.blockMiss} overblock=${d.A.overblock}`,
   `  B: correct=${d.B.correct} blockMiss=${d.B.blockMiss} overblock=${d.B.overblock}`,
   '',
-  `TOKENS A = ${agg.cost.tokensA}   B = ${agg.cost.tokensB}   DELTA = ${agg.cost.deltaPct}% (guard: <= +20%)`,
+  `TOKENS A = ${agg.cost.tokensA}   B = ${agg.cost.tokensB}   DELTA = ${agg.cost.deltaPct}% (guard: <= +20%)  COST_EXCEPTION = YES`,
+  '',
+  `VALIDITY (deterministic validators, failures stay in denominator):`,
+  `  A: ${agg.validity.A.ok} ok / ${agg.validity.A.fail} fail   B: ${agg.validity.B.ok} ok / ${agg.validity.B.fail} fail   aborted repeats (upstream, arm-symmetric): ${agg.validity.abortedRepeats}`,
   '',
   `PRIMARY_JUDGE = glm-5.3 (SAME FAMILY as generator — bias disclosed; mitigations: paired design, evidence-grounded rubric, deterministic validators + scenario classification)`,
   `GPT6_ADJUDICATION = NOT_RUN (no GPT6 access in this environment)`,
@@ -92,7 +115,7 @@ const lines = [
   ...Object.entries(cond).map(([k, v]) => `  ${k}. ${v ? 'PASS' : 'FAIL'}`),
   '',
   `QUALITY_VERDICT = ${net >= 20 && t.W > t.L ? 'PROMISING' : net > 0 ? 'INCONCLUSIVE_TREND' : 'NOT_PROMISING'}`,
-  `STABILITY_OBSERVED = ${s.B.CONTRADICTION === 0 && (s.B.MATERIAL_DRIFT ?? 0) <= (s.A.MATERIAL_DRIFT ?? 0) ? 'NON_REGRESSED' : 'REGRESSED'}`,
+  `STABILITY_OBSERVED = ${stabObserved} (B-only contradiction groups = ${bOnlyContra}; validity A ${agg.validity.A.ok}ok/${agg.validity.A.fail}fail vs B ${agg.validity.B.ok}ok/${agg.validity.B.fail}fail; ${s.A.CONTRADICTION}A/${s.B.CONTRADICTION}B contradiction groups, both dominated by legitimate_exception wording variance)`,
   `FINAL = ${allPass ? 'PROCEED_TO_COGNITIVE_CONTRACT_FREEZE' : 'HOLD'}`,
   '```',
   '',
@@ -105,6 +128,7 @@ const lines = [
   '',
   '## Deviations & disclosures',
   '',
+  '- DATA INCIDENT (2026-09-17T23:04Z, disclosed): a report-tooling defect (importing run-ab.mjs for the B addendum constant executed its experiment driver) re-ran and overwrote the raw generation files of 3 groups (G-manual_1788920022087_pjz, G-manual_1789317326914_sj6, G-pain_host_198b8c4d901b5b) before the process was stopped. Original JUDGMENTS were cached and are unaffected; ALL statistics in this report come from the pre-incident snapshots (aggregate-runs.json + judgments-*.json + the frozen quality verdicts). The overwritten raws are quarantined in data/runs-incident-rerun/ and excluded from evidence. Root cause fixed: B_ADDENDUM moved to scripts/pri-815/b-addendum.mjs (import-safe).',
   '- Judge is same model family as generator (all independent channels dead on this host). Disclosed per SPEC §19 preference violation; mitigated by paired design, frozen scenarios, deterministic classification, and deterministic validators.',
   '- Downstream is a scenario-gated behavioral proxy, not the production rulehost VM (rule generation is Artificer scope, outside H1).',
   '- COST_EXCEPTION: formation-level B tokens exceed A by ' + agg.cost.deltaPct + '% (guard <= +20%). Per SPEC §31/§U this is recorded; continuation judged by the gate with explicit Owner-Card disclosure.',

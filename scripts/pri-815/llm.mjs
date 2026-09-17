@@ -29,9 +29,11 @@ export function extractJson(text) {
   return null;
 }
 
-export async function chat(messages, { maxAttempts = 3, signal } = {}) {
+export async function chat(messages, { maxAttempts = 3, signal, maxTokens, thinking } = {}) {
   const key = process.env.ZAI_API_KEY;
   if (!key) throw new Error('ZAI_API_KEY is not set');
+  const tokenBudget = maxTokens ?? MAX_TOKENS;
+  const extra = thinking === 'disabled' ? { thinking: { type: 'disabled' } } : {};
   let lastError = null;
   let started = Date.now();
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -43,7 +45,7 @@ export async function chat(messages, { maxAttempts = 3, signal } = {}) {
       const res = await fetch(ENDPOINT, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, messages, temperature: TEMPERATURE, max_tokens: MAX_TOKENS }),
+        body: JSON.stringify({ model: MODEL, messages, temperature: TEMPERATURE, max_tokens: tokenBudget, ...extra }),
         signal: controller.signal,
       });
       clearTimeout(timer);

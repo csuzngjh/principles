@@ -1,0 +1,701 @@
+{
+ "group": "G-manual_1788424714466_wmn",
+ "class": "DEV",
+ "pain_id": "manual_1788424714466_wmn09nli",
+ "frozen_at": "2026-09-17T15:18:19.027Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788424714466_wmn",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788424714466_wmn-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Designed Gate B graduation verification to depend entirely on manual human checking, with no automated gate or rule-based validation tooling in place",
+       "betterDecision": "Implement Gate B as an executable automated gate: encode each verification step as a rule-based check that produces structured pass/fail output, and require the gate to run and pass before graduation is declared",
+       "rationale": "Rule-based automated checks remove reliance on human judgment, eliminate manual omission risk, and yield reproducible evidence for every verification run, which the current manual design cannot provide",
+       "confidence": 0.72,
+       "riskLevel": "medium",
+       "strategicPerspective": "automation_first",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "Accepted manual verification completion as proof of success without reconciling results against the intended outcome via observable evidence",
+       "betterDecision": "After every Gate B verification action, capture a structured result log and compare observed output against expected outcomes; mark success only when evidence matches intent, not when the manual step is merely finished",
+       "rationale": "Execution is not success until verified; result logs make each verification auditable and re-checkable instead of trusting human assertion that the check was done",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_after_act",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "Left Gate B verification constraints as implicit procedural knowledge instead of executable guardrails, so manual omissions could pass undetected and pain could only surface after the fact via CLI reports",
+       "betterDecision": "Translate verification constraints into explicit guardrails: automated checks, forbidden transitions (e.g., structurally block the graduation state change when any check fails), and interception before execution rather than after",
+       "rationale": "Hard constraints encoded as executable guardrails structurally prevent manual omissions instead of relying on human vigilance to catch them downstream",
+       "confidence": 0.7,
+       "riskLevel": "low",
+       "strategicPerspective": "guardrail_encoding",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "Allowed verification pain reporting through a CLI path with no authenticated host session trace, leaving the evidence chain incomplete and the failure mechanism unconfirmable",
+       "betterDecision": "Route pain and verification reporting through authenticated host sessions that attach provenance, session context, and full trace to each report, and persist verification state outside transient context",
+       "rationale": "Without host-session provenance, evidence cannot be authenticated or traced, degrading diagnosis quality and preventing confirmation of the actual failure mode",
+       "confidence": 0.6,
+       "riskLevel": "medium",
+       "strategicPerspective": "evidence_provenance",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "Treated 'manual pain at Gate B' as a settled diagnosis despite only a single owner_reported:cli placeholder evidence with no session context and multiple plausible but unconfirmed failure mechanisms",
+       "betterDecision": "Before redesigning the verification flow, gather observable evidence (verification logs, session traces, tool outputs) to disambiguate whether the pain stems from missing automation, missing check scripts, or redundant manual steps",
+       "rationale": "With evidence this thin, building a fix on an unconfirmed mechanism risks solving the wrong problem; observable evidence must precede causal claims and consequential redesign",
+       "confidence": 0.55,
+       "riskLevel": "medium",
+       "strategicPerspective": "evidence_before_inference",
+       "sourcePrincipleId": "T-03"
+      }
+     ],
+     "contextRefs": [
+      "artifact://27c2cac9-5a2c-47d5-a891-b61d64d3204f"
+     ],
+     "generatedAt": "2026-09-02T08:45:12.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788424714466_wmn-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Designed Gate B graduation verification to depend entirely on manual human checking, with no automated gate or rule-based validation tooling in place\",\"betterDecision\":\"Implement Gate B as an executable automated gate: encode each verification step as a rule-based check that produces structured pass/fail output, and require the gate to run and pass before graduation is declared\",\"rationale\":\"Rule-based automated checks remove reliance on human judgment, eliminate manual omission risk, and yield reproducible evidence for every verification run, which the current manual design cannot provide\",\"confidence\":0.72,\"riskLevel\":\"medium\",\"strategicPerspective\":\"automation_first\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"Accepted manual verification completion as proof of success without reconciling results against the intended outcome via observable evidence\",\"betterDecision\":\"After every Gate B verification action, capture a structured result log and compare observed output against expected outcomes; mark success only when evidence matches intent, not when the manual step is merely finished\",\"rationale\":\"Execution is not success until verified; result logs make each verification auditable and re-checkable instead of trusting human assertion that the check was done\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_after_act\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"Left Gate B verification constraints as implicit procedural knowledge instead of executable guardrails, so manual omissions could pass undetected and pain could only surface after the fact via CLI reports\",\"betterDecision\":\"Translate verification constraints into explicit guardrails: automated checks, forbidden transitions (e.g., structurally block the graduation state change when any check fails), and interception before execution rather than after\",\"rationale\":\"Hard constraints encoded as executable guardrails structurally prevent manual omissions instead of relying on human vigilance to catch them downstream\",\"confidence\":0.7,\"riskLevel\":\"low\",\"strategicPerspective\":\"guardrail_encoding\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":3,\"badDecision\":\"Allowed verification pain reporting through a CLI path with no authenticated host session trace, leaving the evidence chain incomplete and the failure mechanism unconfirmable\",\"betterDecision\":\"Route pain and verification reporting through authenticated host sessions that attach provenance, session context, and full trace to each report, and persist verification state outside transient context\",\"rationale\":\"Without host-session provenance, evidence cannot be authenticated or traced, degrading diagnosis quality and preventing confirmation of the actual failure mode\",\"confidence\":0.6,\"riskLevel\":\"medium\",\"strategicPerspective\":\"evidence_provenance\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":4,\"badDecision\":\"Treated 'manual pain at Gate B' as a settled diagnosis despite only a single owner_reported:cli placeholder evidence with no session context and multiple plausible but unconfirmed failure mechanisms\",\"betterDecision\":\"Before redesigning the verification flow, gather observable evidence (verification logs, session traces, tool outputs) to disambiguate whether the pain stems from missing automation, missing check scripts, or redundant manual steps\",\"rationale\":\"With evidence this thin, building a fix on an unconfirmed mechanism risks solving the wrong problem; observable evidence must precede causal claims and consequential redesign\",\"confidence\":0.55,\"riskLevel\":\"medium\",\"strategicPerspective\":\"evidence_before_inference\",\"sourcePrincipleId\":\"T-03\"}],\"contextRefs\":[\"artifact://27c2cac9-5a2c-47d5-a891-b61d64d3204f\"],\"generatedAt\":\"2026-09-02T08:45:12.000Z\"}",
+    "usage": {
+     "input": 1883,
+     "output": 3474,
+     "total": 5357
+    },
+    "latencyMs": 44272,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "10c6d2aafbca3f57"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788424714466_wmn-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r1-run1",
+     "thesis": "Critical go/no-go checks must not rest on human vigilance. When a consequential decision depends on verification, the check itself should be made structural: encoded as an executable gate that produces auditable pass/fail evidence and blocks the transition on failure, so correctness follows from the system's design rather than from a person remembering to look — and the gate should be built only after observable evidence confirms which failure mechanism actually needs guarding.",
+     "principleCandidate": {
+      "title": "Encode critical verification as executable, evidence-producing gates, not manual checks",
+      "rationale": "The root cause across all Dreamer candidates is that manual verification lets omissions pass silently: completion by a human is treated as success, no structured evidence is produced, and pain surfaces only downstream. Encoding each verification step as a rule-based check with structured pass/fail output, a blocking transition on failure, and persisted provenance removes reliance on human attention, makes every run reproducible and auditable, and converts the hard constraint into a structural property of the system rather than a procedural hope.",
+      "scope": "Applies whenever a consequential transition (graduation, release, promotion, approval, deployment) is gated by verification that currently relies on manual human checking, implicit procedural knowledge, or assertion-based completion. Especially relevant when omission carries meaningful downside, when evidence of the check must be auditable after the fact, and when the check can be expressed as deterministic rules. Not applicable where verification genuinely requires human judgment that cannot be formalized.",
+      "confidence": 0.72
+     },
+     "risks": [
+      "Partially duplicates and synthesizes existing core axioms T-05 (guardrail encoding) and T-07 (verify after act); adding it to the axiom set risks redundancy unless it is treated as an operational refinement rather than a new axiom.",
+      "Premature automation risk: as the Dreamer's own evidence_before_inference candidate notes, encoding checks before observable evidence confirms the actual failure mechanism can formalize and entrench the wrong problem.",
+      "Automated gates can drift from actual intent over time; a passing gate may be wrongly treated as proof of correctness while the checks themselves become stale, brittle, or cargo-culted, inverting into false confidence.",
+      "Hard-blocking transitions on any single failed check without severity calibration can halt legitimate progress on low-signal or non-critical failures, creating new friction and workarounds that undermine the gate.",
+      "Full provenance and structured logging for every check add persistence and maintenance overhead that may be disproportionate for low-stakes verifications."
+     ],
+     "generatedAt": "2026-09-02T08:52:00.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788424714466_wmn-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r1-run1\",\"thesis\":\"Critical go/no-go checks must not rest on human vigilance. When a consequential decision depends on verification, the check itself should be made structural: encoded as an executable gate that produces auditable pass/fail evidence and blocks the transition on failure, so correctness follows from the system's design rather than from a person remembering to look — and the gate should be built only after observable evidence confirms which failure mechanism actually needs guarding.\",\"principleCandidate\":{\"title\":\"Encode critical verification as executable, evidence-producing gates, not manual checks\",\"rationale\":\"The root cause across all Dreamer candidates is that manual verification lets omissions pass silently: completion by a human is treated as success, no structured evidence is produced, and pain surfaces only downstream. Encoding each verification step as a rule-based check with structured pass/fail output, a blocking transition on failure, and persisted provenance removes reliance on human attention, makes every run reproducible and auditable, and converts the hard constraint into a structural property of the system rather than a procedural hope.\",\"scope\":\"Applies whenever a consequential transition (graduation, release, promotion, approval, deployment) is gated by verification that currently relies on manual human checking, implicit procedural knowledge, or assertion-based completion. Especially relevant when omission carries meaningful downside, when evidence of the check must be auditable after the fact, and when the check can be expressed as deterministic rules. Not applicable where verification genuinely requires human judgment that cannot be formalized.\",\"confidence\":0.72},\"risks\":[\"Partially duplicates and synthesizes existing core axioms T-05 (guardrail encoding) and T-07 (verify after act); adding it to the axiom set risks redundancy unless it is treated as an operational refinement rather than a new axiom.\",\"Premature automation risk: as the Dreamer's own evidence_before_inference candidate notes, encoding checks before observable evidence confirms the actual failure mechanism can formalize and entrench the wrong problem.\",\"Automated gates can drift from actual intent over time; a passing gate may be wrongly treated as proof of correctness while the checks themselves become stale, brittle, or cargo-culted, inverting into false confidence.\",\"Hard-blocking transitions on any single failed check without severity calibration can halt legitimate progress on low-signal or non-critical failures, creating new friction and workarounds that undermine the gate.\",\"Full provenance and structured logging for every check add persistence and maintenance overhead that may be disproportionate for low-stakes verifications.\"],\"generatedAt\":\"2026-09-02T08:52:00.000Z\"}",
+    "usage": {
+     "input": 1588,
+     "output": 1586,
+     "total": 3174
+    },
+    "latencyMs": 26748,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "370c30bb4e66ce9e"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788424714466_wmn-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r1-run1",
+     "principleDraft": {
+      "title": "Encode critical verification as executable, evidence-producing gates",
+      "statement": "Whenever a consequential transition (release, deployment, promotion, graduation, approval) is gated on verification, encode the verification as an executable gate that emits structured pass/fail evidence with persisted provenance and blocks the transition on failure; never accept manual inspection, sign-off, or assertion of completion as the gate. Encode such a gate only after observable evidence (logs, prior failures, state) confirms which failure mechanism the check must guard.",
+      "rationale": "Manual verification lets omissions pass silently: a human's completion is treated as success, no structured evidence is produced, and pain surfaces only downstream. Encoding each check as a rule-based gate with structured pass/fail output, a blocking transition on failure, and persisted provenance removes reliance on human attention, makes every run reproducible and auditable, and converts the hard constraint into a structural property of the system rather than a procedural hope. Grounding the gate in prior observable evidence of the actual failure mechanism prevents premature automation of the wrong check.",
+      "applicability": [
+       "Consequential transitions gated by verification: release, deployment, promotion, graduation, approval",
+       "Verification that currently relies on manual human checking, implicit procedural knowledge, or assertion-based completion",
+       "Circumstances where a missed check carries meaningful downstream downside or the check must be auditable after the fact",
+       "Checks that can be expressed as deterministic, rule-based conditions"
+      ],
+      "antiPatterns": [
+       "Relying on a human 'sign-off' or 'looks good' as the sole control on a consequential transition",
+       "Treating an assertion of completion (e.g., 'done, I checked it') as verification evidence",
+       "Manual checklists that leave no structured, persisted pass/fail record or provenance",
+       "Allowing a consequential transition to proceed when a required check failed or was skipped",
+       "Encoding gates speculatively before observable evidence confirms which failure mechanism they must guard",
+       "Treating a passing gate as permanent proof of correctness without revisiting whether its checks still match intent"
+      ],
+      "confidence": 0.74
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants consequential go/no-go transitions decided by executable checks that emit auditable pass/fail evidence and block on failure, so that correctness never depends on a human remembering to verify.",
+      "targetBehavior": "Before executing a consequential transition, the agent runs an executable gate covering the required checks, records structured pass/fail output with persisted provenance, and aborts the transition when any check fails; a new gate is only encoded after observable evidence identifies the failure mechanism it guards.",
+      "forbiddenBehavior": "Proceeding on a consequential transition based on manual inspection, verbal or written assertion of completion, or unrecorded human sign-off — any go/no-go decision that rests on human vigilance instead of a blocking, evidence-producing check.",
+      "evidenceSource": "The consolidated Dreamer/Philosopher diagnosis that manual verification lets omissions pass silently: human completion is treated as success, no structured evidence is produced, and pain surfaces only downstream.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it mandates (1) executable checks producing structured pass/fail output, (2) a blocking transition on failure, (3) persisted provenance of each gate run, and (4) observable evidence of the failure mechanism before a gate is encoded; any proposed change that removes blocking, evidence output, or the evidence-before-encoding requirement contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-05 (translate hard constraints into explicit guardrails and forbidden transitions) and T-07 (observe results after acting); this principle should be treated as an operational refinement of those axioms, not a new axiom, to avoid redundancy.",
+      "The evidence-before-encoding requirement overlaps T-03 (use observable evidence before inferring); premature automation can formalize and entrench the wrong failure mechanism.",
+      "Automated gates can drift from actual intent over time; a passing gate may be treated as proof of correctness while its checks become stale, brittle, or cargo-culted, inverting into false confidence.",
+      "Hard-blocking transitions on any single failed check without severity calibration can halt legitimate progress on low-signal or non-critical failures, creating workarounds that undermine the gate.",
+      "Persisted provenance and structured logging for every check add persistence and maintenance overhead that may be disproportionate for low-stakes verifications.",
+      "Some verifications genuinely require human judgment that cannot be formalized; forcing executable gates in those cases yields box-ticking compliance rather than real verification."
+     ],
+     "generatedAt": "2026-09-02T08:58:30.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788424714466_wmn-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r1-run1\",\"principleDraft\":{\"title\":\"Encode critical verification as executable, evidence-producing gates\",\"statement\":\"Whenever a consequential transition (release, deployment, promotion, graduation, approval) is gated on verification, encode the verification as an executable gate that emits structured pass/fail evidence with persisted provenance and blocks the transition on failure; never accept manual inspection, sign-off, or assertion of completion as the gate. Encode such a gate only after observable evidence (logs, prior failures, state) confirms which failure mechanism the check must guard.\",\"rationale\":\"Manual verification lets omissions pass silently: a human's completion is treated as success, no structured evidence is produced, and pain surfaces only downstream. Encoding each check as a rule-based gate with structured pass/fail output, a blocking transition on failure, and persisted provenance removes reliance on human attention, makes every run reproducible and auditable, and converts the hard constraint into a structural property of the system rather than a procedural hope. Grounding the gate in prior observable evidence of the actual failure mechanism prevents premature automation of the wrong check.\",\"applicability\":[\"Consequential transitions gated by verification: release, deployment, promotion, graduation, approval\",\"Verification that currently relies on manual human checking, implicit procedural knowledge, or assertion-based completion\",\"Circumstances where a missed check carries meaningful downstream downside or the check must be auditable after the fact\",\"Checks that can be expressed as deterministic, rule-based conditions\"],\"antiPatterns\":[\"Relying on a human 'sign-off' or 'looks good' as the sole control on a consequential transition\",\"Treating an assertion of completion (e.g., 'done, I checked it') as verification evidence\",\"Manual checklists that leave no structured, persisted pass/fail record or provenance\",\"Allowing a consequential transition to proceed when a required check failed or was skipped\",\"Encoding gates speculatively before observable evidence confirms which failure mechanism they must guard\",\"Treating a passing gate as permanent proof of correctness without revisiting whether its checks still match intent\"],\"confidence\":0.74},\"intentContract\":{\"ownerIntent\":\"The Owner wants consequential go/no-go transitions decided by executable checks that emit auditable pass/fail evidence and block on failure, so that correctness never depends on a human remembering to verify.\",\"targetBehavior\":\"Before executing a consequential transition, the agent runs an executable gate covering the required checks, records structured pass/fail output with persisted provenance, and aborts the transition when any check fails; a new gate is only encoded after observable evidence identifies the failure mechanism it guards.\",\"forbiddenBehavior\":\"Proceeding on a consequential transition based on manual inspection, verbal or written assertion of completion, or unrecorded human sign-off — any go/no-go decision that rests on human vigilance instead of a blocking, evidence-producing check.\",\"evidenceSource\":\"The consolidated Dreamer/Philosopher diagnosis that manual verification lets omissions pass silently: human completion is treated as success, no structured evidence is produced, and pain surfaces only downstream.\",\"validationExpectation\":\"An evaluator should accept a rule as faithful only if it mandates (1) executable checks producing structured pass/fail output, (2) a blocking transition on failure, (3) persisted provenance of each gate run, and (4) observable evidence of the failure mechanism before a gate is encoded; any proposed change that removes blocking, evidence output, or the evidence-before-encoding requirement contradicts this intent and must be flagged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r1-run1\"},\"risks\":[\"Substantial overlap with core axioms T-05 (translate hard constraints into explicit guardrails and forbidden transitions) and T-07 (observe results after acting); this principle should be treated as an operational refinement of those axioms, not a new axiom, to avoid redundancy.\",\"The evidence-before-encoding requirement overlaps T-03 (use observable evidence before inferring); premature automation can formalize and entrench the wrong failure mechanism.\",\"Automated gates can drift from actual intent over time; a passing gate may be treated as proof of correctness while its checks become stale, brittle, or cargo-culted, inverting into false confidence.\",\"Hard-blocking transitions on any single failed check without severity calibration can halt legitimate progress on low-signal or non-critical failures, creating workarounds that undermine the gate.\",\"Persisted provenance and structured logging for every check add persistence and maintenance overhead that may be disproportionate for low-stakes verifications.\",\"Some verifications genuinely require human judgment that cannot be formalized; forcing executable gates in those cases yields box-ticking compliance rather than real verification.\"],\"generatedAt\":\"2026-09-02T08:58:30.000Z\"}",
+    "usage": {
+     "input": 1985,
+     "output": 3907,
+     "total": 5892
+    },
+    "latencyMs": 47712,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6142f714b4cb1405"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788424714466_wmn-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r1-run1",
+     "principleDraft": {
+      "title": "Encode go/no-go verification as executable, evidence-producing gates that block on failure",
+      "statement": "Before a consequential transition (graduation, release, promotion, approval, deployment) may pass, every verification step gating it must be encoded as an executable, rule-based check that (a) is grounded in observable evidence of the actual failure mechanism rather than an assumed one, (b) emits a structured, persisted pass/fail record on every run, and (c) structurally blocks the transition on failure. The transition may be declared successful only when the gate's recorded evidence matches the intended outcome — never when a manual check is merely reported as completed.",
+      "rationale": "The diagnosed root cause is that PRI-650-A Gate B graduation verification was designed to rely on manual human checking with no automated gate or rule-based validation, so omissions pass silently, human completion is treated as success, no structured evidence is produced, and pain surfaces only downstream via CLI reports without host trace. Encoding the check as an executable gate makes correctness a structural property of the system instead of a product of human vigilance: every run becomes reproducible and auditable, failures intercept the transition before it executes, and reconciliation against the intended outcome replaces assertion-based completion. Requiring observable evidence of the failure mechanism before building the gate guards against formalizing the wrong problem, which matters because the diagnosis explicitly flags thin evidence (a single owner_reported:cli entry with no session context and an unconfirmed failure mode).",
+      "applicability": [
+       "Consequential transitions gated by verification that currently depends on manual human checking, implicit procedural knowledge, or assertion-based completion (e.g., PRI-650-A Gate B graduation, release, promotion, approval, deployment)",
+       "Verification steps whose omission carries meaningful downside and must be intercepted before the transition executes, and whose checks can be expressed as deterministic rules with auditable results",
+       "Out of scope: verifications that irreducibly require human judgment that cannot be formalized, and low-stakes checks where gate and logging overhead is disproportionate"
+      ],
+      "antiPatterns": [
+       "Gating a consequential transition on manual human checking with no executable, rule-based check in place",
+       "Accepting a human assertion that a verification was performed (or merely completed) as proof of verification success",
+       "Letting the transition proceed when a gate check fails, deferring detection to downstream pain reports",
+       "Running verification without producing or persisting a structured pass/fail record, leaving the run unauditable",
+       "Building an automated gate from an assumed failure mechanism without observable evidence (logs, traces, tool outputs) confirming which check is actually needed"
+      ],
+      "confidence": 0.7
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants consequential go/no-go verifications such as PRI-650-A Gate B graduation to pass only on executable, rule-based checks with auditable pass/fail evidence — never on a person having manually performed (or reported performing) the check.",
+      "targetBehavior": "When designing or operating a gated verification, the agent first gathers observable evidence of the actual failure mechanism, then encodes each check as an executable rule that emits and persists a structured pass/fail record, structurally blocks the gated transition on failure, and declares success only when the recorded evidence matches the intended outcome.",
+      "forbiddenBehavior": "A consequential transition passing because a manual verification step was reported as completed — with no executable check, no structured pass/fail record, and no structural blocking — or a gate being built on an assumed, evidence-unconfirmed failure mechanism.",
+      "evidenceSource": "diagnosis_manual_1788424714466_wmn09nli: Gate B graduation verification designed as manual checking with no automated gate or rule-based validation (violated T-03/T-05/T-07); the only behavioral evidence was a single owner_reported:cli pain report with owner_reported_no_host_trace and 'No session context available'; ambiguity notes state the concrete failure mechanism (missing automation vs. missing check scripts vs. redundant manual steps) remains unconfirmed.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it requires, for every consequential gated transition: (1) an executable check with structured pass/fail output, (2) a persisted run record, (3) structural blocking of the transition on failure, (4) success declared on evidence matching intent rather than manual completion, and (5) observable confirmation of the failure mechanism before the gate is built. Any change that allows manual-completion-based passage, removes the blocking behavior, or drops the evidence-first precondition contradicts this intent and must be flagged rather than implemented."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r1-run1"
+     },
+     "risks": [
+      "Overlaps with core axioms T-05 (translate hard constraints into executable guardrails and forbidden transitions) and T-07 (observe results and compare with intended outcome); this draft must be treated as an operational refinement combining them for gated transitions, not as a new independent axiom.",
+      "Premature automation: the source evidence is thin (a single owner_reported:cli report with no host trace and an unconfirmed failure mechanism), so encoding gates before confirming the actual mechanism can formalize and entrench the wrong problem.",
+      "Gate drift and false confidence: passing gates may be treated as proof of correctness while the checks themselves become stale, brittle, or cargo-culted, inverting the principle into an illusion of verification.",
+      "Uncalibrated hard-blocking on any single failed check can halt legitimate progress on low-signal or non-critical failures, breeding bypass workarounds that undermine the gate.",
+      "Persisting structured records and provenance for every check adds maintenance overhead disproportionate for low-stakes verifications; applicability must stay limited to consequential transitions.",
+      "This principle does not repair the upstream reporting-path gap (pain reported via CLI with no authenticated host session provenance), which limits the quality of evidence available to satisfy the gate-building precondition."
+     ],
+     "generatedAt": "2026-09-02T09:05:12.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788424714466_wmn-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Encode go/no-go verification as executable, evidence-producing gates that block on failure\",\n    \"statement\": \"Before a consequential transition (graduation, release, promotion, approval, deployment) may pass, every verification step gating it must be encoded as an executable, rule-based check that (a) is grounded in observable evidence of the actual failure mechanism rather than an assumed one, (b) emits a structured, persisted pass/fail record on every run, and (c) structurally blocks the transition on failure. The transition may be declared successful only when the gate's recorded evidence matches the intended outcome — never when a manual check is merely reported as completed.\",\n    \"rationale\": \"The diagnosed root cause is that PRI-650-A Gate B graduation verification was designed to rely on manual human checking with no automated gate or rule-based validation, so omissions pass silently, human completion is treated as success, no structured evidence is produced, and pain surfaces only downstream via CLI reports without host trace. Encoding the check as an executable gate makes correctness a structural property of the system instead of a product of human vigilance: every run becomes reproducible and auditable, failures intercept the transition before it executes, and reconciliation against the intended outcome replaces assertion-based completion. Requiring observable evidence of the failure mechanism before building the gate guards against formalizing the wrong problem, which matters because the diagnosis explicitly flags thin evidence (a single owner_reported:cli entry with no session context and an unconfirmed failure mode).\",\n    \"applicability\": [\n      \"Consequential transitions gated by verification that currently depends on manual human checking, implicit procedural knowledge, or assertion-based completion (e.g., PRI-650-A Gate B graduation, release, promotion, approval, deployment)\",\n      \"Verification steps whose omission carries meaningful downside and must be intercepted before the transition executes, and whose checks can be expressed as deterministic rules with auditable results\",\n      \"Out of scope: verifications that irreducibly require human judgment that cannot be formalized, and low-stakes checks where gate and logging overhead is disproportionate\"\n    ],\n    \"antiPatterns\": [\n      \"Gating a consequential transition on manual human checking with no executable, rule-based check in place\",\n      \"Accepting a human assertion that a verification was performed (or merely completed) as proof of verification success\",\n      \"Letting the transition proceed when a gate check fails, deferring detection to downstream pain reports\",\n      \"Running verification without producing or persisting a structured pass/fail record, leaving the run unauditable\",\n      \"Building an automated gate from an assumed failure mechanism without observable evidence (logs, traces, tool outputs) confirming which check is actually needed\"\n    ],\n    \"confidence\": 0.7\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants consequential go/no-go verifications such as PRI-650-A Gate B graduation to pass only on executable, rule-based checks with auditable pass/fail evidence — never on a person having manually performed (or reported performing) the check.\",\n    \"targetBehavior\": \"When designing or operating a gated verification, the agent first gathers observable evidence of the actual failure mechanism, then encodes each check as an executable rule that emits and persists a structured pass/fail record, structurally blocks the gated transition on failure, and declares success only when the recorded evidence matches the intended outcome.\",\n    \"forbiddenBehavior\": \"A consequential transition passing because a manual verification step was reported as completed — with no executable check, no structured pass/fail record, and no structural blocking — or a gate being built on an assumed, evidence-unconfirmed failure mechanism.\",\n    \"evidenceSource\": \"diagnosis_manual_1788424714466_wmn09nli: Gate B graduation verification designed as manual checking with no automated gate or rule-based validation (violated T-03/T-05/T-07); the only behavioral evidence was a single owner_reported:cli pain report with owner_reported_no_host_trace and 'No session context available'; ambiguity notes state the concrete failure mechanism (missing automation vs. missing check scripts vs. redundant manual steps) remains unconfirmed.\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if it requires, for every consequential gated transition: (1) an executable check with structured pass/fail output, (2) a persisted run record, (3) structural blocking of the transition on failure, (4) success declared on evidence matching intent rather than manual completion, and (5) observable confirmation of the failure mechanism before the gate is built. Any change that allows manual-completion-based passage, removes the blocking behavior, or drops the evidence-first precondition contradicts this intent and must be flagged rather than implemented.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r1-run1\"\n  },\n  \"risks\": [\n    \"Overlaps with core axioms T-05 (translate hard constraints into executable guardrails and forbidden transitions) and T-07 (observe results and compare with intended outcome); this draft must be treated as an operational refinement combining them for gated transitions, not as a new independent axiom.\",\n    \"Premature automation: the source evidence is thin (a single owner_reported:cli report with no host trace and an unconfirmed failure mechanism), so encoding gates before confirming the actual mechanism can formalize and entrench the wrong problem.\",\n    \"Gate drift and false confidence: passing gates may be treated as proof of correctness while the checks themselves become stale, brittle, or cargo-culted, inverting the principle into an illusion of verification.\",\n    \"Uncalibrated hard-blocking on any single failed check can halt legitimate progress on low-signal or non-critical failures, breeding bypass workarounds that undermine the gate.\",\n    \"Persisting structured records and provenance for every check adds maintenance overhead disproportionate for low-stakes verifications; applicability must stay limited to consequential transitions.\",\n    \"This principle does not repair the upstream reporting-path gap (pain reported via CLI with no authenticated host session provenance), which limits the quality of evidence available to satisfy the gate-building precondition.\"\n  ],\n  \"generatedAt\": \"2026-09-02T09:05:12.000Z\"\n}",
+    "usage": {
+     "input": 4005,
+     "output": 6097,
+     "total": 10102
+    },
+    "latencyMs": 73052,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "a56faf6e2dba6d58"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788424714466_wmn",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788424714466_wmn-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Gate B 毕业验证被设计为完全依赖人工手动核对的流程，没有可执行的自动化门禁或规则化校验脚本",
+       "betterDecision": "将 Gate B 毕业标准转化为可执行的自动化门禁检查（CI 规则/校验脚本），人工核对仅作为自动化检查通过后的补充复核",
+       "rationale": "可自动化的规则化检查消除了人工遗漏风险，并产出结构化结果日志，使验证通过具备可观察、可复核对账依据",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "guardrail_automation",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "完成人工验证即视为验证成功，未将实际验证结果与预期毕业标准进行对账比较",
+       "betterDecision": "每次验证执行后，将实际输出与预期的毕业判定标准逐项比对，并持久化结构化的通过/失败结果日志供审计",
+       "rationale": "执行不等于成功；只有以可观察证据对账复核结果，验证结论才可信",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_based_verification",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "pain/事件仅能通过 CLI 上报，无认证宿主会话溯源，导致证据链不完整、诊断置信度受限（仅 0.55）",
+       "betterDecision": "将事件上报接入宿主会话上下文（认证溯源），使每次 pain 携带完整 provenance 和 fullTrace，便于根因定位",
+       "rationale": "带溯源的可观察证据是诊断与改进的基础；无会话溯源使失败机制无法确认，只能停留在模糊诊断",
+       "confidence": 0.7,
+       "riskLevel": "medium",
+       "strategicPerspective": "observability_by_default",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "毕业验证约束仅以隐式的流程知识/文档形式存在，未被建模为可执行的护栏或禁止转移规则，人工遗漏无结构性拦截",
+       "betterDecision": "把毕业硬约束显式翻译为自动化检查与禁止转移规则：未满足判定标准时门禁自动阻断毕业/合并动作",
+       "rationale": "硬约束必须落地为可执行护栏才能消除人工遗漏风险；仅靠文档约定无法结构性拦截违规通过",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "constraints_as_code",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "面对反复出现且状态为 severe 的人工验证痛点，仍持续沿用旧有人工流程，未将摩擦作为反馈信号重新设计流程",
+       "betterDecision": "将本次 severe manual pain 视为系统性设计缺陷的反馈：把 Gate B 验证分解为可独立验证的自动化子步骤，并优先消除人工环节后持续观察改进效果",
+       "rationale": "重复出现的摩擦说明流程设计存在缺陷；应以反馈驱动改进并分解复杂验证以降低风险，而非重复同样的手动操作",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "feedback_driven_process_redesign",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "sourcePainId": "pain-pri650a-gateb-manual",
+     "contextRefs": [
+      "artifact://27c2cac9-5a2c-47d5-a891-b61d64d3204f"
+     ],
+     "generatedAt": "2026-09-03T08:45:12.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788424714466_wmn-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Gate B 毕业验证被设计为完全依赖人工手动核对的流程，没有可执行的自动化门禁或规则化校验脚本\",\"betterDecision\":\"将 Gate B 毕业标准转化为可执行的自动化门禁检查（CI 规则/校验脚本），人工核对仅作为自动化检查通过后的补充复核\",\"rationale\":\"可自动化的规则化检查消除了人工遗漏风险，并产出结构化结果日志，使验证通过具备可观察、可复核对账依据\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"guardrail_automation\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":1,\"badDecision\":\"完成人工验证即视为验证成功，未将实际验证结果与预期毕业标准进行对账比较\",\"betterDecision\":\"每次验证执行后，将实际输出与预期的毕业判定标准逐项比对，并持久化结构化的通过/失败结果日志供审计\",\"rationale\":\"执行不等于成功；只有以可观察证据对账复核结果，验证结论才可信\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_based_verification\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"pain/事件仅能通过 CLI 上报，无认证宿主会话溯源，导致证据链不完整、诊断置信度受限（仅 0.55）\",\"betterDecision\":\"将事件上报接入宿主会话上下文（认证溯源），使每次 pain 携带完整 provenance 和 fullTrace，便于根因定位\",\"rationale\":\"带溯源的可观察证据是诊断与改进的基础；无会话溯源使失败机制无法确认，只能停留在模糊诊断\",\"confidence\":0.7,\"riskLevel\":\"medium\",\"strategicPerspective\":\"observability_by_default\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":3,\"badDecision\":\"毕业验证约束仅以隐式的流程知识/文档形式存在，未被建模为可执行的护栏或禁止转移规则，人工遗漏无结构性拦截\",\"betterDecision\":\"把毕业硬约束显式翻译为自动化检查与禁止转移规则：未满足判定标准时门禁自动阻断毕业/合并动作\",\"rationale\":\"硬约束必须落地为可执行护栏才能消除人工遗漏风险；仅靠文档约定无法结构性拦截违规通过\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"constraints_as_code\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"面对反复出现且状态为 severe 的人工验证痛点，仍持续沿用旧有人工流程，未将摩擦作为反馈信号重新设计流程\",\"betterDecision\":\"将本次 severe manual pain 视为系统性设计缺陷的反馈：把 Gate B 验证分解为可独立验证的自动化子步骤，并优先消除人工环节后持续观察改进效果\",\"rationale\":\"重复出现的摩擦说明流程设计存在缺陷；应以反馈驱动改进并分解复杂验证以降低风险，而非重复同样的手动操作\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"feedback_driven_process_redesign\",\"sourcePrincipleId\":\"T-08\"}],\"sourcePainId\":\"pain-pri650a-gateb-manual\",\"contextRefs\":[\"artifact://27c2cac9-5a2c-47d5-a891-b61d64d3204f\"],\"generatedAt\":\"2026-09-03T08:45:12.000Z\"}",
+    "usage": {
+     "input": 1883,
+     "output": 2301,
+     "total": 4184
+    },
+    "latencyMs": 31599,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3526a2d69507fcd3"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788424714466_wmn-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r2-run1",
+     "thesis": "Critical validations that depend on human diligence rather than structural enforcement are inherently fragile. The Dreamer's candidates converge on one insight: hard constraints (e.g., graduation criteria) become trustworthy only when translated into executable, self-enforcing automated gates that emit persistent, structured pass/fail evidence; execution by itself is not verification until actual results are reconciled against expected criteria; and recurring severe manual friction is not an operational nuisance to be endured but a design-defect signal demanding structural redesign rather than repeated human effort.",
+     "principleCandidate": {
+      "title": "Convert recurring manual verification of hard constraints into automated, self-enforcing, evidence-emitting gates",
+      "rationale": "The root cause was that graduation criteria existed only as implicit process knowledge executed via manual checking, so human omission had no structural barrier and produced no auditable result record. Automated gate checks eliminate the omission risk, persisted structured results make every verification observable and re-checkable, and the recurrence of severe manual pain itself becomes the trigger for this structural migration rather than a cue to repeat the manual effort.",
+      "scope": "Applies wherever a hard constraint, gate, or acceptance criterion is verified primarily through manual human checking, especially when the same manual friction recurs across sessions (release gates, merge/graduation checks, compliance validations, recurring manual sign-offs). Less applicable to one-off validations or genuinely judgment-based evaluations.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Overlaps significantly with core axiom T-05 (constraints as explicit guardrails and forbidden transitions) and T-08 (friction as feedback); its only distinct contribution is linking pain recurrence to guardrail automation, so it may duplicate rather than extend existing axioms",
+      "Premature automation can fossilize an incompletely understood constraint, violating T-01: automating a rule before sufficiently modeling the system can enshrine wrong criteria and structurally block legitimate work",
+      "Automated gates may reject valid edge cases requiring human judgment; an unauditable human-override path can reintroduce the original omission risk the automation was meant to remove",
+      "For low-frequency checks, building automation may violate T-06 (simplest intervention) — automation cost must be justified by recurrence and severity of the manual pain",
+      "Automated gate outputs can create false confidence if not themselves verified against ground truth (T-07); a broken check that always passes is worse than manual verification"
+     ],
+     "generatedAt": "2026-09-03T08:48:00.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788424714466_wmn-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r2-run1\",\"thesis\":\"Critical validations that depend on human diligence rather than structural enforcement are inherently fragile. The Dreamer's candidates converge on one insight: hard constraints (e.g., graduation criteria) become trustworthy only when translated into executable, self-enforcing automated gates that emit persistent, structured pass/fail evidence; execution by itself is not verification until actual results are reconciled against expected criteria; and recurring severe manual friction is not an operational nuisance to be endured but a design-defect signal demanding structural redesign rather than repeated human effort.\",\"principleCandidate\":{\"title\":\"Convert recurring manual verification of hard constraints into automated, self-enforcing, evidence-emitting gates\",\"rationale\":\"The root cause was that graduation criteria existed only as implicit process knowledge executed via manual checking, so human omission had no structural barrier and produced no auditable result record. Automated gate checks eliminate the omission risk, persisted structured results make every verification observable and re-checkable, and the recurrence of severe manual pain itself becomes the trigger for this structural migration rather than a cue to repeat the manual effort.\",\"scope\":\"Applies wherever a hard constraint, gate, or acceptance criterion is verified primarily through manual human checking, especially when the same manual friction recurs across sessions (release gates, merge/graduation checks, compliance validations, recurring manual sign-offs). Less applicable to one-off validations or genuinely judgment-based evaluations.\",\"confidence\":0.8},\"risks\":[\"Overlaps significantly with core axiom T-05 (constraints as explicit guardrails and forbidden transitions) and T-08 (friction as feedback); its only distinct contribution is linking pain recurrence to guardrail automation, so it may duplicate rather than extend existing axioms\",\"Premature automation can fossilize an incompletely understood constraint, violating T-01: automating a rule before sufficiently modeling the system can enshrine wrong criteria and structurally block legitimate work\",\"Automated gates may reject valid edge cases requiring human judgment; an unauditable human-override path can reintroduce the original omission risk the automation was meant to remove\",\"For low-frequency checks, building automation may violate T-06 (simplest intervention) — automation cost must be justified by recurrence and severity of the manual pain\",\"Automated gate outputs can create false confidence if not themselves verified against ground truth (T-07); a broken check that always passes is worse than manual verification\"],\"generatedAt\":\"2026-09-03T08:48:00.000Z\"}",
+    "usage": {
+     "input": 1578,
+     "output": 1841,
+     "total": 3419
+    },
+    "latencyMs": 29801,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "acd1ba159ed9bd1a"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788424714466_wmn-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1",
+     "principleDraft": {
+      "title": "Automate recurring manual verification of hard constraints as blocking, evidence-emitting gates",
+      "statement": "Whenever a hard constraint or acceptance criterion (graduation, release, merge, compliance, sign-off gates) is verified primarily by manual human checking — especially when the same severe manual friction recurs — convert that verification into an executable, self-enforcing automated gate: encode each criterion as an explicit check, block the gated transition until the check passes, and emit a persistent structured pass/fail record that is reconciled against the expected criteria. Manual review may remain only as a supplementary check after the automated gate passes, never as the sole barrier; recurrence of severe manual pain on the same gate is the trigger for this structural migration, not a cue to repeat the manual effort.",
+      "rationale": "The diagnosed root cause was that graduation criteria existed only as implicit process knowledge executed via manual checking: human omission had no structural barrier and produced no auditable result record, and completion of manual verification was never reconciled against the expected criteria. Encoding criteria as executable blocking checks removes the omission risk; persisting structured pass/fail results makes every verification observable, re-checkable, and reconcilable (execution is not success until results are compared with intent); and treating recurring severe manual friction as a design-defect signal for structural migration stops the system from repeatedly paying the same manual cost for the same flaw.",
+      "applicability": [
+       "Hard-constraint gates and acceptance criteria currently verified by manual human checking (e.g., PRI-650-A Gate B graduation verification, release gates, merge checks, compliance validations, recurring manual sign-offs)",
+       "Situations where the same manual verification friction recurs across sessions with severe impact",
+       "Constraints that are objectively expressible as checkable criteria (objective pass/fail standards)",
+       "Out of scope: one-off validations and genuinely judgment-based evaluations that cannot be encoded as executable checks"
+      ],
+      "antiPatterns": [
+       "Passing a hard-constraint gate on manual inspection alone, with no executable check and no persisted pass/fail record",
+       "Treating completion of a manual verification as success without reconciling actual results item-by-item against the expected criteria",
+       "Leaving hard constraints as implicit process knowledge or documentation with nothing that structurally blocks the gated transition when criteria are unmet",
+       "Responding to recurring severe manual verification pain by repeating the same manual effort instead of automating the check",
+       "Automation without evidence: a gate that emits no persistent structured result, or whose always-pass behavior is never verified against ground truth"
+      ],
+      "confidence": 0.7
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants graduation-style hard-constraint verifications (like PRI-650-A Gate B) to stop passing on manual human diligence alone and instead be enforced by automated, blocking checks that produce persistent, auditable pass/fail evidence.",
+      "targetBehavior": "When the agent encounters a hard-constraint gate verified manually (especially with recurring severe friction), it builds or requires an executable automated check that evaluates each criterion, blocks the gated action on failure, and writes a structured pass/fail log reconciled against the expected criteria; any manual review happens only after the gate passes.",
+      "forbiddenBehavior": "Allowing a hard-constraint gate to be passed solely by human diligence — manual execution with no automated barrier, no structural blocking when criteria are unmet, and no persisted structured result for reconciliation — and repeating that manual effort each time the pain recurs.",
+      "evidenceSource": "Diagnosis diagnosis_manual_1788424714466_wmn09nli (rootCause: Gate B graduation verification designed as a manual process lacking automated gate and rule-based checks; violatedPrinciples T-05, T-07, T-03) and pain manual_1788424714466_wmn09nli reported via owner_reported:cli as PRI-650-A Gate B graduation verification (manual pain), status severe, no host session trace.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it (a) triggers on manually-verified hard-constraint gates such as Gate B graduation checks, (b) mandates an executable blocking check plus persisted structured pass/fail results reconciled against expected criteria, and (c) stays bounded — it must not extend to one-off or judgment-only evaluations, nor drop the blocking or evidence-persistence requirement; a change that contradicts any of these is flagged rather than implemented."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1"
+     },
+     "risks": [
+      "Overlaps with core axiom T-05 (constraints as explicit guardrails and forbidden transitions) and T-08 (friction as feedback); the distinct contribution is only the linkage of recurring severe manual pain to guardrail automation with persisted evidence, so downstream rule generation may duplicate rather than extend existing axioms",
+      "Premature automation can fossilize an incompletely understood constraint (conflict with T-01): the diagnosis could not confirm Gate B's exact failure mechanism, and encoding criteria too early could enshrine wrong checks that structurally block legitimate work",
+      "Thin evidence base: a single owner_reported:cli pain with no host session trace and diagnosis confidence 0.55 — the principle may over-generalize from one severe pain report",
+      "Automated gates may reject valid edge cases requiring human judgment; an unauditable human-override path reintroduces the original omission risk the automation was meant to remove",
+      "For low-frequency checks, building automation may violate T-06 (simplest intervention) — automation cost must be justified by recurrence and severity of the manual pain",
+      "A broken gate that always passes creates false confidence worse than manual verification (conflict with T-07): the gate's own outputs must be verified against ground truth"
+     ],
+     "generatedAt": "2026-09-03T09:05:12.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788424714466_wmn-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Automate recurring manual verification of hard constraints as blocking, evidence-emitting gates\",\n    \"statement\": \"Whenever a hard constraint or acceptance criterion (graduation, release, merge, compliance, sign-off gates) is verified primarily by manual human checking — especially when the same severe manual friction recurs — convert that verification into an executable, self-enforcing automated gate: encode each criterion as an explicit check, block the gated transition until the check passes, and emit a persistent structured pass/fail record that is reconciled against the expected criteria. Manual review may remain only as a supplementary check after the automated gate passes, never as the sole barrier; recurrence of severe manual pain on the same gate is the trigger for this structural migration, not a cue to repeat the manual effort.\",\n    \"rationale\": \"The diagnosed root cause was that graduation criteria existed only as implicit process knowledge executed via manual checking: human omission had no structural barrier and produced no auditable result record, and completion of manual verification was never reconciled against the expected criteria. Encoding criteria as executable blocking checks removes the omission risk; persisting structured pass/fail results makes every verification observable, re-checkable, and reconcilable (execution is not success until results are compared with intent); and treating recurring severe manual friction as a design-defect signal for structural migration stops the system from repeatedly paying the same manual cost for the same flaw.\",\n    \"applicability\": [\n      \"Hard-constraint gates and acceptance criteria currently verified by manual human checking (e.g., PRI-650-A Gate B graduation verification, release gates, merge checks, compliance validations, recurring manual sign-offs)\",\n      \"Situations where the same manual verification friction recurs across sessions with severe impact\",\n      \"Constraints that are objectively expressible as checkable criteria (objective pass/fail standards)\",\n      \"Out of scope: one-off validations and genuinely judgment-based evaluations that cannot be encoded as executable checks\"\n    ],\n    \"antiPatterns\": [\n      \"Passing a hard-constraint gate on manual inspection alone, with no executable check and no persisted pass/fail record\",\n      \"Treating completion of a manual verification as success without reconciling actual results item-by-item against the expected criteria\",\n      \"Leaving hard constraints as implicit process knowledge or documentation with nothing that structurally blocks the gated transition when criteria are unmet\",\n      \"Responding to recurring severe manual verification pain by repeating the same manual effort instead of automating the check\",\n      \"Automation without evidence: a gate that emits no persistent structured result, or whose always-pass behavior is never verified against ground truth\"\n    ],\n    \"confidence\": 0.7\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants graduation-style hard-constraint verifications (like PRI-650-A Gate B) to stop passing on manual human diligence alone and instead be enforced by automated, blocking checks that produce persistent, auditable pass/fail evidence.\",\n    \"targetBehavior\": \"When the agent encounters a hard-constraint gate verified manually (especially with recurring severe friction), it builds or requires an executable automated check that evaluates each criterion, blocks the gated action on failure, and writes a structured pass/fail log reconciled against the expected criteria; any manual review happens only after the gate passes.\",\n    \"forbiddenBehavior\": \"Allowing a hard-constraint gate to be passed solely by human diligence — manual execution with no automated barrier, no structural blocking when criteria are unmet, and no persisted structured result for reconciliation — and repeating that manual effort each time the pain recurs.\",\n    \"evidenceSource\": \"Diagnosis diagnosis_manual_1788424714466_wmn09nli (rootCause: Gate B graduation verification designed as a manual process lacking automated gate and rule-based checks; violatedPrinciples T-05, T-07, T-03) and pain manual_1788424714466_wmn09nli reported via owner_reported:cli as PRI-650-A Gate B graduation verification (manual pain), status severe, no host session trace.\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if it (a) triggers on manually-verified hard-constraint gates such as Gate B graduation checks, (b) mandates an executable blocking check plus persisted structured pass/fail results reconciled against expected criteria, and (c) stays bounded — it must not extend to one-off or judgment-only evaluations, nor drop the blocking or evidence-persistence requirement; a change that contradicts any of these is flagged rather than implemented.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1\"\n  },\n  \"risks\": [\n    \"Overlaps with core axiom T-05 (constraints as explicit guardrails and forbidden transitions) and T-08 (friction as feedback); the distinct contribution is only the linkage of recurring severe manual pain to guardrail automation with persisted evidence, so downstream rule generation may duplicate rather than extend existing axioms\",\n    \"Premature automation can fossilize an incompletely understood constraint (conflict with T-01): the diagnosis could not confirm Gate B's exact failure mechanism, and encoding criteria too early could enshrine wrong checks that structurally block legitimate work\",\n    \"Thin evidence base: a single owner_reported:cli pain with no host session trace and diagnosis confidence 0.55 — the principle may over-generalize from one severe pain report\",\n    \"Automated gates may reject valid edge cases requiring human judgment; an unauditable human-override path reintroduces the original omission risk the automation was meant to remove\",\n    \"For low-frequency checks, building automation may violate T-06 (simplest intervention) — automation cost must be justified by recurrence and severity of the manual pain\",\n    \"A broken gate that always passes creates false confidence worse than manual verification (conflict with T-07): the gate's own outputs must be verified against ground truth\"\n  ],\n  \"generatedAt\": \"2026-09-03T09:05:12.000Z\"\n}",
+    "usage": {
+     "input": 3952,
+     "output": 6207,
+     "total": 10159
+    },
+    "latencyMs": 81425,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "7e4e2f26678a5d24"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788424714466_wmn-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1",
+     "principleDraft": {
+      "title": "Convert Recurring Manual Verification of Hard Constraints into Automated Evidence-Emitting Gates",
+      "statement": "Whenever a hard constraint (gate, acceptance criterion, or compliance check) is verified primarily through recurring manual human checking, it must be migrated into an automated, self-enforcing gate that executes the check mechanically and persists a structured pass/fail result; the constraint may be declared satisfied only by reconciling that persisted evidence against the expected criteria — never by assuming a manual step was diligently performed.",
+      "rationale": "The diagnosed root cause was that hard constraints existed as implicit process knowledge executed via manual checking, so human omission had no structural barrier and left no auditable result record. Automating the check removes dependence on human diligence, and persisting structured pass/fail evidence makes every verification observable, re-checkable, and reconcilable against intended criteria. Recurrence of severe manual friction is treated as the design-defect signal that triggers this structural migration, rather than as an operational cost to be repeatedly paid.",
+      "applicability": [
+       "Release gates, merge checks, and graduation/deployment criteria currently verified by manual human checking",
+       "Recurring compliance or security validations executed against a fixed, codable rubric or schedule",
+       "Recurring manual sign-offs where the checker follows a mechanical rubric rather than exercised judgment",
+       "Any hard constraint whose dominant failure mode is 'the human forgot or skipped the check'"
+      ],
+      "antiPatterns": [
+       "Re-executing the same manual checklist across sessions while treating the friction as normal operational cost",
+       "Declaring a hard constraint satisfied based on the assumption that a manual step was performed, with no persisted pass/fail record",
+       "Gates whose results exist only in transient console output with no persistent, structured, re-checkable record",
+       "Silent human overrides of a failed gate without an audited override record",
+       "Automating a constraint before its criteria are sufficiently modeled, enshroring wrong criteria in a structurally enforcing gate"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants hard constraints like graduation criteria enforced by automated, self-enforcing gates that persist structured pass/fail evidence, instead of depending on a human remembering to run a manual check.",
+      "targetBehavior": "On the second or later occurrence of manually verifying the same hard constraint, the agent implements an automated gate that executes the check and writes a structured pass/fail result to a persistent artifact, then cites that record — reconciled against the expected criteria — as the verification evidence.",
+      "forbiddenBehavior": "Repeatedly performing the same manual verification of a hard constraint across sessions and marking the constraint satisfied without any persisted, machine-checkable pass/fail record.",
+      "evidenceSource": "Diagnosis that graduation criteria existed only as implicit process knowledge checked manually, so human omission had no structural barrier and produced no auditable result record (philosopher artifact pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1, distilling the Dreamer's recurring-manual-friction insight).",
+      "validationExpectation": "An evaluator should accept a rule only if it (a) triggers on recurrence of a mechanical manual check of a hard constraint, (b) requires an automated gate that persists a structured pass/fail record, and (c) requires reconciling that record against expected criteria before declaring satisfaction; rules that mandate automating one-off or judgment-based checks, or that merely restate T-05/T-08 without the recurrence-trigger or evidence-emission delta, should be rejected as duplicative or unfaithful."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axiom T-05 (constraints as explicit guardrails) and T-08 (friction as feedback); the distinct delta is only the recurrence trigger plus the persistent structured-evidence requirement, so downstream rule generation must scope rules to that delta to avoid duplicating existing axioms",
+      "Premature automation can fossilize an incompletely understood constraint (conflicts with T-01): automating before sufficiently modeling the criteria can enshrine wrong checks that structurally block legitimate work",
+      "Automated gates may reject valid edge cases requiring human judgment; an unauditable or silent human-override path reintroduces the very omission risk the automation was meant to remove",
+      "For low-frequency checks, building automation violates T-06 (simplest intervention); migration must be justified by demonstrated recurrence and severity of the manual pain",
+      "A faulty gate that always passes creates false confidence worse than manual checking (T-07); the gate's own correctness must be verified against ground truth at least once after construction",
+      "If 'structured' and 'persistent' are left loosely defined, agents may satisfy the letter (a transient log line) while missing the spirit (re-checkable evidence)"
+     ],
+     "generatedAt": "2026-09-03T08:53:00.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788424714466_wmn-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1\",\"principleDraft\":{\"title\":\"Convert Recurring Manual Verification of Hard Constraints into Automated Evidence-Emitting Gates\",\"statement\":\"Whenever a hard constraint (gate, acceptance criterion, or compliance check) is verified primarily through recurring manual human checking, it must be migrated into an automated, self-enforcing gate that executes the check mechanically and persists a structured pass/fail result; the constraint may be declared satisfied only by reconciling that persisted evidence against the expected criteria — never by assuming a manual step was diligently performed.\",\"rationale\":\"The diagnosed root cause was that hard constraints existed as implicit process knowledge executed via manual checking, so human omission had no structural barrier and left no auditable result record. Automating the check removes dependence on human diligence, and persisting structured pass/fail evidence makes every verification observable, re-checkable, and reconcilable against intended criteria. Recurrence of severe manual friction is treated as the design-defect signal that triggers this structural migration, rather than as an operational cost to be repeatedly paid.\",\"applicability\":[\"Release gates, merge checks, and graduation/deployment criteria currently verified by manual human checking\",\"Recurring compliance or security validations executed against a fixed, codable rubric or schedule\",\"Recurring manual sign-offs where the checker follows a mechanical rubric rather than exercised judgment\",\"Any hard constraint whose dominant failure mode is 'the human forgot or skipped the check'\"],\"antiPatterns\":[\"Re-executing the same manual checklist across sessions while treating the friction as normal operational cost\",\"Declaring a hard constraint satisfied based on the assumption that a manual step was performed, with no persisted pass/fail record\",\"Gates whose results exist only in transient console output with no persistent, structured, re-checkable record\",\"Silent human overrides of a failed gate without an audited override record\",\"Automating a constraint before its criteria are sufficiently modeled, enshroring wrong criteria in a structurally enforcing gate\"],\"confidence\":0.8},\"intentContract\":{\"ownerIntent\":\"The Owner wants hard constraints like graduation criteria enforced by automated, self-enforcing gates that persist structured pass/fail evidence, instead of depending on a human remembering to run a manual check.\",\"targetBehavior\":\"On the second or later occurrence of manually verifying the same hard constraint, the agent implements an automated gate that executes the check and writes a structured pass/fail result to a persistent artifact, then cites that record — reconciled against the expected criteria — as the verification evidence.\",\"forbiddenBehavior\":\"Repeatedly performing the same manual verification of a hard constraint across sessions and marking the constraint satisfied without any persisted, machine-checkable pass/fail record.\",\"evidenceSource\":\"Diagnosis that graduation criteria existed only as implicit process knowledge checked manually, so human omission had no structural barrier and produced no auditable result record (philosopher artifact pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1, distilling the Dreamer's recurring-manual-friction insight).\",\"validationExpectation\":\"An evaluator should accept a rule only if it (a) triggers on recurrence of a mechanical manual check of a hard constraint, (b) requires an automated gate that persists a structured pass/fail record, and (c) requires reconciling that record against expected criteria before declaring satisfaction; rules that mandate automating one-off or judgment-based checks, or that merely restate T-05/T-08 without the recurrence-trigger or evidence-emission delta, should be rejected as duplicative or unfaithful.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r2-run1\"},\"risks\":[\"Substantial overlap with core axiom T-05 (constraints as explicit guardrails) and T-08 (friction as feedback); the distinct delta is only the recurrence trigger plus the persistent structured-evidence requirement, so downstream rule generation must scope rules to that delta to avoid duplicating existing axioms\",\"Premature automation can fossilize an incompletely understood constraint (conflicts with T-01): automating before sufficiently modeling the criteria can enshrine wrong checks that structurally block legitimate work\",\"Automated gates may reject valid edge cases requiring human judgment; an unauditable or silent human-override path reintroduces the very omission risk the automation was meant to remove\",\"For low-frequency checks, building automation violates T-06 (simplest intervention); migration must be justified by demonstrated recurrence and severity of the manual pain\",\"A faulty gate that always passes creates false confidence worse than manual checking (T-07); the gate's own correctness must be verified against ground truth at least once after construction\",\"If 'structured' and 'persistent' are left loosely defined, agents may satisfy the letter (a transient log line) while missing the spirit (re-checkable evidence)\"],\"generatedAt\":\"2026-09-03T08:53:00.000Z\"}",
+    "usage": {
+     "input": 1958,
+     "output": 4250,
+     "total": 6208
+    },
+    "latencyMs": 50660,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3c046bc101c4909d"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788424714466_wmn",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788424714466_wmn-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Designed Gate B graduation verification to depend on manual human review instead of executable automated checks",
+       "betterDecision": "Model each Gate B graduation criterion as an automated rule-based check (scripted gate) that runs programmatically and blocks graduation on failure",
+       "rationale": "Automated rule-based gates remove reliance on human judgment, eliminate manual omission risk, and produce consistent repeatable verification results",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "automation_first",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "Treated completion of manual verification as verification success without reconciling actual results against expected outcomes",
+       "betterDecision": "After each gate run, compare logged check results against expected graduation criteria and require observable evidence of match before declaring Gate B passed",
+       "rationale": "Execution is not success until verified; explicit reconciliation of actual vs intended outcomes converts a manual claim into evidence-backed completion",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_after_action",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "Encoded Gate B hard constraints only as implicit manual procedures, leaving no structural interception when steps are skipped",
+       "betterDecision": "Translate Gate B constraints into explicit guardrails and forbidden transitions (e.g., graduation state cannot advance unless all automated checks pass)",
+       "rationale": "Executable guardrails structurally prevent constraint violations instead of relying on humans to remember every step",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrails_by_design",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "Accepted pain reports and verification outcomes through a CLI path with no authenticated host session trace, breaking the evidence chain",
+       "betterDecision": "Route pain reporting and verification evidence through an authenticated host session context that preserves provenance and full trace for diagnosis",
+       "rationale": "Observable evidence with clear provenance is required to infer causes and audit results; untraced CLI reports leave the evidence chain incomplete and amplify diagnostic friction",
+       "confidence": 0.7,
+       "riskLevel": "medium",
+       "strategicPerspective": "evidence_provenance",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "Kept Gate B verification checklists and results in transient manual context, so outcomes could not be re-audited after the fact",
+       "betterDecision": "Persist structured verification checklists and per-check results as durable state with logs outside transient context",
+       "rationale": "Persisted verification state enables later reconciliation and audit of gate decisions, preserving continuity across sessions and actors",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "state_persistence",
+       "sourcePrincipleId": "T-10"
+      }
+     ],
+     "contextRefs": [
+      "artifact://27c2cac9-5a2c-47d5-a891-b61d64d3204f"
+     ],
+     "generatedAt": "2026-09-02T08:40:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788424714466_wmn-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Designed Gate B graduation verification to depend on manual human review instead of executable automated checks\",\"betterDecision\":\"Model each Gate B graduation criterion as an automated rule-based check (scripted gate) that runs programmatically and blocks graduation on failure\",\"rationale\":\"Automated rule-based gates remove reliance on human judgment, eliminate manual omission risk, and produce consistent repeatable verification results\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"automation_first\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":1,\"badDecision\":\"Treated completion of manual verification as verification success without reconciling actual results against expected outcomes\",\"betterDecision\":\"After each gate run, compare logged check results against expected graduation criteria and require observable evidence of match before declaring Gate B passed\",\"rationale\":\"Execution is not success until verified; explicit reconciliation of actual vs intended outcomes converts a manual claim into evidence-backed completion\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_after_action\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"Encoded Gate B hard constraints only as implicit manual procedures, leaving no structural interception when steps are skipped\",\"betterDecision\":\"Translate Gate B constraints into explicit guardrails and forbidden transitions (e.g., graduation state cannot advance unless all automated checks pass)\",\"rationale\":\"Executable guardrails structurally prevent constraint violations instead of relying on humans to remember every step\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrails_by_design\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":3,\"badDecision\":\"Accepted pain reports and verification outcomes through a CLI path with no authenticated host session trace, breaking the evidence chain\",\"betterDecision\":\"Route pain reporting and verification evidence through an authenticated host session context that preserves provenance and full trace for diagnosis\",\"rationale\":\"Observable evidence with clear provenance is required to infer causes and audit results; untraced CLI reports leave the evidence chain incomplete and amplify diagnostic friction\",\"confidence\":0.7,\"riskLevel\":\"medium\",\"strategicPerspective\":\"evidence_provenance\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":4,\"badDecision\":\"Kept Gate B verification checklists and results in transient manual context, so outcomes could not be re-audited after the fact\",\"betterDecision\":\"Persist structured verification checklists and per-check results as durable state with logs outside transient context\",\"rationale\":\"Persisted verification state enables later reconciliation and audit of gate decisions, preserving continuity across sessions and actors\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"state_persistence\",\"sourcePrincipleId\":\"T-10\"}],\"contextRefs\":[\"artifact://27c2cac9-5a2c-47d5-a891-b61d64d3204f\"],\"generatedAt\":\"2026-09-02T08:40:00.000Z\"}",
+    "usage": {
+     "input": 1883,
+     "output": 3211,
+     "total": 5094
+    },
+    "latencyMs": 37908,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "99e91cd3378c8def"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788424714466_wmn-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r3-run1",
+     "thesis": "A manual verification is only a claim of completion; it becomes a fact when an executable check produces durable, provenance-traced evidence that reconciles against the intended criteria. All five of the Dreamer's alternatives converge on one insight: consequential state transitions must be governed by automated, evidence-producing gates—structural guardrails rather than remembered procedures, reconciled results rather than assumed success, persisted records rather than transient context—so that passing is demonstrated rather than attested.",
+     "principleCandidate": {
+      "title": "Gate consequential transitions on executable, persisted, provenance-tracked verification",
+      "rationale": "Manual review fails in characteristic ways: steps get omitted, judgment drifts, claims go unreconciled, and results evaporate with transient context. Encoding each verification criterion as an automated check, wiring it into a structural guardrail that blocks the transition on failure, reconciling logged results against expected outcomes, and persisting the evidence with clear provenance removes all four failure modes at once. The root cause was not a lack of diligence but a verification mechanism whose authority rested on human attestation instead of executable evidence.",
+      "scope": "Applies whenever a hard state transition (graduation, promotion, release, sign-off, deployment) is conditioned on satisfying a set of verification criteria—especially in pipelines, gates, and multi-actor workflows where manual checklists, implicit procedures, or transient session context are the default. Less applicable to genuinely subjective judgments (taste, trust, nuanced interpretation) that cannot be honestly reduced to rules.",
+      "confidence": 0.78
+     },
+     "risks": [
+      "This principle is a composite of existing core axioms T-05 (explicit guardrails), T-07 (verify after action), T-03 (observable evidence), and T-10 (persist state); it risks redundancy with them and should be evaluated as a bundled application of those axioms rather than a genuinely new behavioral rule",
+      "Over-automation risk: criteria that require nuanced human judgment may be forced into brittle rules or silently dropped, enshrining an incomplete model of 'done'—prematurely automating a poorly understood gate violates the spirit of T-01",
+      "Rigid executable gates can block legitimate edge cases needing human discretion, creating false negatives that stall progress with no escape hatch",
+      "Requiring authenticated-session provenance and durable records adds friction to lightweight or emergency operations, which may incentivize bypassing the gate entirely",
+      "Automated checks verify only what is codified; a passing gate can create false confidence that the transition is sound when the criteria themselves were wrong or incomplete"
+     ],
+     "generatedAt": "2026-09-02T08:41:15.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"philosopher-pri815-G-manual_1788424714466_wmn-r3\",\n  \"sourceDreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r3-run1\",\n  \"thesis\": \"A manual verification is only a claim of completion; it becomes a fact when an executable check produces durable, provenance-traced evidence that reconciles against the intended criteria. All five of the Dreamer's alternatives converge on one insight: consequential state transitions must be governed by automated, evidence-producing gates—structural guardrails rather than remembered procedures, reconciled results rather than assumed success, persisted records rather than transient context—so that passing is demonstrated rather than attested.\",\n  \"principleCandidate\": {\n    \"title\": \"Gate consequential transitions on executable, persisted, provenance-tracked verification\",\n    \"rationale\": \"Manual review fails in characteristic ways: steps get omitted, judgment drifts, claims go unreconciled, and results evaporate with transient context. Encoding each verification criterion as an automated check, wiring it into a structural guardrail that blocks the transition on failure, reconciling logged results against expected outcomes, and persisting the evidence with clear provenance removes all four failure modes at once. The root cause was not a lack of diligence but a verification mechanism whose authority rested on human attestation instead of executable evidence.\",\n    \"scope\": \"Applies whenever a hard state transition (graduation, promotion, release, sign-off, deployment) is conditioned on satisfying a set of verification criteria—especially in pipelines, gates, and multi-actor workflows where manual checklists, implicit procedures, or transient session context are the default. Less applicable to genuinely subjective judgments (taste, trust, nuanced interpretation) that cannot be honestly reduced to rules.\",\n    \"confidence\": 0.78\n  },\n  \"risks\": [\n    \"This principle is a composite of existing core axioms T-05 (explicit guardrails), T-07 (verify after action), T-03 (observable evidence), and T-10 (persist state); it risks redundancy with them and should be evaluated as a bundled application of those axioms rather than a genuinely new behavioral rule\",\n    \"Over-automation risk: criteria that require nuanced human judgment may be forced into brittle rules or silently dropped, enshrining an incomplete model of 'done'—prematurely automating a poorly understood gate violates the spirit of T-01\",\n    \"Rigid executable gates can block legitimate edge cases needing human discretion, creating false negatives that stall progress with no escape hatch\",\n    \"Requiring authenticated-session provenance and durable records adds friction to lightweight or emergency operations, which may incentivize bypassing the gate entirely\",\n    \"Automated checks verify only what is codified; a passing gate can create false confidence that the transition is sound when the criteria themselves were wrong or incomplete\"\n  ],\n  \"generatedAt\": \"2026-09-02T08:41:15.000Z\"\n}",
+    "usage": {
+     "input": 1446,
+     "output": 1862,
+     "total": 3308
+    },
+    "latencyMs": 27720,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "ab900e1708e0f373"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788424714466_wmn-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r3-run1",
+     "principleDraft": {
+      "title": "Gate consequential transitions on executable, persisted, provenance-tracked verification",
+      "statement": "Whenever a consequential state transition (release, promotion, sign-off, deployment, graduation, merge approval) is conditioned on verification criteria, encode each criterion as an executable check wired into a structural gate that blocks the transition on failure; then reconcile the logged results against the expected outcomes and persist the evidence with provenance (what ran, when, under whose authority) in durable storage outside transient context. Manual attestation alone must never authorize such a transition. Criteria that are genuinely subjective must be explicitly marked as recorded human-judgment items, not silently skipped or forced into brittle rules.",
+      "rationale": "The diagnosed root cause was not a lack of diligence but a verification mechanism whose authority rested on human attestation rather than executable evidence. Manual gates fail in four characteristic ways: steps get omitted, reviewer judgment drifts, completion claims are never reconciled against the actual criteria, and results evaporate with transient context. Encoding criteria as executable checks removes omission and drift; the structural guardrail makes passage impossible without execution (per T-05); reconciling logged results against expectations converts assumed success into demonstrated success (per T-03 and T-07); and persisting evidence with provenance makes the record auditable after the verifying context is gone (per T-10).",
+      "applicability": [
+       "Hard state transitions conditioned on verification criteria: releases, deployments, promotions, sign-offs, merge approvals, graduations",
+       "Pipelines, CI/CD gates, and multi-actor workflows where manual checklists, remembered procedures, or transient session context are the current default",
+       "Any workflow where completion is currently demonstrated by human attestation ('I checked it') rather than machine-reconciled evidence",
+       "Audit or compliance contexts where evidence of what was verified, by what, and when must outlive the session that verified it"
+      ],
+      "antiPatterns": [
+       "Authorizing a consequential transition on manual attestation, memory, or a checked checklist item with no executable check behind it",
+       "Treating a check as passed simply because it ran, without reconciling its logged output against the declared criteria",
+       "Leaving verification results only in transient context (chat history, terminal scrollback, reviewer memory) with no durable record or provenance",
+       "Keeping verification criteria as an implicit or remembered procedure rather than codified, executable checks under structural guardrail",
+       "Silently dropping criteria that resist automation instead of explicitly marking them as recorded human-judgment items",
+       "Bypassing the gate for expedience or emergencies without recording the bypass, its justification, and who authorized it"
+      ],
+      "confidence": 0.78
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants consequential state transitions (releases, promotions, sign-offs, deployments) to be authorized only by machine-executed checks whose reconciled results and provenance are durably recorded — never by an unverifiable manual claim that the criteria were met.",
+      "targetBehavior": "Before performing or approving a gated transition, the agent encodes the declared criteria as executable checks, runs them, blocks the transition on any failure, reconciles the logged results against the expected outcomes, and writes the evidence with provenance to durable storage — all visible in its tool trajectory.",
+      "forbiddenBehavior": "Passing a consequential transition on manual attestation, remembered procedure, or unlogged assumptions, leaving no durable provenance-traced record of what was actually checked — the 'trust me, it is done' failure family.",
+      "evidenceSource": "The dreamer/philosopher diagnosis of a manual verification gate whose authority rested on human attestation: steps omitted, reviewer judgment drift, completion claims never reconciled against criteria, and results lost with transient context.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if, for a gated transition, it demands an observable executable check whose logged results are reconciled against the declared criteria and persisted with provenance; any rule that permits attestation-only passage, or lets verification results live only in transient context, must be rejected or flagged rather than repaired into acceptance."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r3-run1"
+     },
+     "risks": [
+      "Redundancy overlap: this principle is a composite bundle of core axioms T-03 (observable evidence), T-05 (explicit guardrails), T-07 (verified execution), and T-10 (persisted state); downstream rule generation should treat it as a coordinated application pattern to gated transitions, not a new primitive axiom",
+      "Over-automation: criteria requiring nuanced human judgment may be forced into brittle rules or silently dropped, enshrining an incomplete model of 'done'; the spirit of T-01 (build a sufficient model before consequential changes) applies before codifying a gate",
+      "Rigid executable gates can produce false negatives that block legitimate edge cases requiring human discretion, stalling progress with no escape hatch",
+      "Provenance and persistence requirements add friction to lightweight or emergency operations, which may incentivize bypassing the gate entirely",
+      "Automated checks verify only what is codified; a passing gate can create false confidence that the transition is sound when the criteria themselves were wrong or incomplete",
+      "Boundary ambiguity: classifying which transitions count as 'consequential' is itself a judgment; misclassification risks over-gating routine actions or under-gating risky ones"
+     ],
+     "generatedAt": "2026-09-02T08:46:38.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788424714466_wmn-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Gate consequential transitions on executable, persisted, provenance-tracked verification\",\n    \"statement\": \"Whenever a consequential state transition (release, promotion, sign-off, deployment, graduation, merge approval) is conditioned on verification criteria, encode each criterion as an executable check wired into a structural gate that blocks the transition on failure; then reconcile the logged results against the expected outcomes and persist the evidence with provenance (what ran, when, under whose authority) in durable storage outside transient context. Manual attestation alone must never authorize such a transition. Criteria that are genuinely subjective must be explicitly marked as recorded human-judgment items, not silently skipped or forced into brittle rules.\",\n    \"rationale\": \"The diagnosed root cause was not a lack of diligence but a verification mechanism whose authority rested on human attestation rather than executable evidence. Manual gates fail in four characteristic ways: steps get omitted, reviewer judgment drifts, completion claims are never reconciled against the actual criteria, and results evaporate with transient context. Encoding criteria as executable checks removes omission and drift; the structural guardrail makes passage impossible without execution (per T-05); reconciling logged results against expectations converts assumed success into demonstrated success (per T-03 and T-07); and persisting evidence with provenance makes the record auditable after the verifying context is gone (per T-10).\",\n    \"applicability\": [\n      \"Hard state transitions conditioned on verification criteria: releases, deployments, promotions, sign-offs, merge approvals, graduations\",\n      \"Pipelines, CI/CD gates, and multi-actor workflows where manual checklists, remembered procedures, or transient session context are the current default\",\n      \"Any workflow where completion is currently demonstrated by human attestation ('I checked it') rather than machine-reconciled evidence\",\n      \"Audit or compliance contexts where evidence of what was verified, by what, and when must outlive the session that verified it\"\n    ],\n    \"antiPatterns\": [\n      \"Authorizing a consequential transition on manual attestation, memory, or a checked checklist item with no executable check behind it\",\n      \"Treating a check as passed simply because it ran, without reconciling its logged output against the declared criteria\",\n      \"Leaving verification results only in transient context (chat history, terminal scrollback, reviewer memory) with no durable record or provenance\",\n      \"Keeping verification criteria as an implicit or remembered procedure rather than codified, executable checks under structural guardrail\",\n      \"Silently dropping criteria that resist automation instead of explicitly marking them as recorded human-judgment items\",\n      \"Bypassing the gate for expedience or emergencies without recording the bypass, its justification, and who authorized it\"\n    ],\n    \"confidence\": 0.78\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants consequential state transitions (releases, promotions, sign-offs, deployments) to be authorized only by machine-executed checks whose reconciled results and provenance are durably recorded — never by an unverifiable manual claim that the criteria were met.\",\n    \"targetBehavior\": \"Before performing or approving a gated transition, the agent encodes the declared criteria as executable checks, runs them, blocks the transition on any failure, reconciles the logged results against the expected outcomes, and writes the evidence with provenance to durable storage — all visible in its tool trajectory.\",\n    \"forbiddenBehavior\": \"Passing a consequential transition on manual attestation, remembered procedure, or unlogged assumptions, leaving no durable provenance-traced record of what was actually checked — the 'trust me, it is done' failure family.\",\n    \"evidenceSource\": \"The dreamer/philosopher diagnosis of a manual verification gate whose authority rested on human attestation: steps omitted, reviewer judgment drift, completion claims never reconciled against criteria, and results lost with transient context.\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if, for a gated transition, it demands an observable executable check whose logged results are reconciled against the declared criteria and persisted with provenance; any rule that permits attestation-only passage, or lets verification results live only in transient context, must be rejected or flagged rather than repaired into acceptance.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r3-run1\"\n  },\n  \"risks\": [\n    \"Redundancy overlap: this principle is a composite bundle of core axioms T-03 (observable evidence), T-05 (explicit guardrails), T-07 (verified execution), and T-10 (persisted state); downstream rule generation should treat it as a coordinated application pattern to gated transitions, not a new primitive axiom\",\n    \"Over-automation: criteria requiring nuanced human judgment may be forced into brittle rules or silently dropped, enshrining an incomplete model of 'done'; the spirit of T-01 (build a sufficient model before consequential changes) applies before codifying a gate\",\n    \"Rigid executable gates can produce false negatives that block legitimate edge cases requiring human discretion, stalling progress with no escape hatch\",\n    \"Provenance and persistence requirements add friction to lightweight or emergency operations, which may incentivize bypassing the gate entirely\",\n    \"Automated checks verify only what is codified; a passing gate can create false confidence that the transition is sound when the criteria themselves were wrong or incomplete\",\n    \"Boundary ambiguity: classifying which transitions count as 'consequential' is itself a judgment; misclassification risks over-gating routine actions or under-gating risky ones\"\n  ],\n  \"generatedAt\": \"2026-09-02T08:46:38.000Z\"\n}",
+    "usage": {
+     "input": 1998,
+     "output": 4950,
+     "total": 6948
+    },
+    "latencyMs": 58120,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "f42bd458e691d6b0"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788424714466_wmn-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r3-run1",
+     "principleDraft": {
+      "title": "Gate consequential transitions on executable, reconciled, persisted verification evidence",
+      "statement": "Before any consequential state transition (graduation, promotion, release, deployment, sign-off) conditioned on verification criteria, the criteria must be encoded as executable automated checks wired into a structural gate that blocks the transition on failure; the gate's logged results must be reconciled against the expected criteria and persisted as durable, provenance-traced evidence. Manual human attestation alone must never satisfy such a gate: execution is not success until reconciled evidence demonstrates it.",
+      "rationale": "The root cause at PRI-650-A Gate B was a verification mechanism whose authority rested on human attestation instead of executable evidence: manual review omits steps, drifts in judgment, leaves claims unreconciled, and loses results with transient session context, while the untraced CLI reporting path (owner_reported_no_host_trace) breaks the evidence chain. Encoding criteria as automated checks, wiring them into blocking guardrails, reconciling logged results against expected outcomes, and persisting the evidence with provenance removes all of these failure modes at once, so that passing a gate is demonstrated rather than attested.",
+      "applicability": [
+       "Hard state transitions gated on verification criteria: graduation, promotion, release, deployment, sign-off",
+       "Pipelines and multi-actor workflows where manual checklists, implicit remembered procedures, or transient session context are the default verification mechanism",
+       "Evidence paths for verification outcomes and pain reports, which must preserve provenance (e.g., authenticated host session trace) instead of untraced CLI submissions",
+       "Excluded: genuinely subjective judgments (taste, trust, nuanced interpretation) that cannot be honestly reduced to executable rules"
+      ],
+      "antiPatterns": [
+       "Passing a gate on a manual completion claim or human attestation without executable check results",
+       "Encoding verification criteria only as implicit manual procedures with no structural interception when steps are skipped",
+       "Declaring verification success without reconciling logged check results against the expected criteria",
+       "Keeping verification checklists and results only in transient session context so outcomes cannot be re-audited after the fact",
+       "Accepting verification outcomes or pain reports through paths that carry no authenticated provenance or host trace"
+      ],
+      "confidence": 0.75
+     },
+     "intentContract": {
+      "ownerIntent": "Ensure gate-style transitions such as PRI-650-A Gate B graduation never pass on manual human attestation alone; they must pass via automated checks whose reconciled, provenance-traced results are persisted.",
+      "targetBehavior": "For any gated transition, the agent encodes the verification criteria as executable checks wired into a gate that blocks the transition on failure, runs them, compares the logged results against the expected criteria before declaring the gate passed, persists those results as durable state outside transient context, and records provenance for reported outcomes.",
+      "forbiddenBehavior": "Advancing a gated state transition based on a manual completion claim or checklist without executable checks, without reconciling results against expected criteria, without persisted evidence, or through reporting paths lacking provenance.",
+      "evidenceSource": "diagnosis_manual_1788424714466_wmn09nli: PRI-650-A Gate B graduation verification reported as a severe manual pain via owner_reported:cli with 'No session context available' and provenance owner_reported_no_host_trace; violatedPrinciples T-03, T-05, T-07 identified by the diagnostician.",
+      "validationExpectation": "An evaluator should demand that a gate decision is backed by automated check output reconciled against the expected criteria and persisted with provenance; any rule that permits manual attestation to pass a gate, or that drops the reconciliation or persistence requirement, contradicts this intent and must be flagged rather than accepted."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r3-run1"
+     },
+     "risks": [
+      "Composite redundancy: this principle bundles existing core axioms T-03, T-05, T-07 and T-10 rather than adding a genuinely new behavioral rule; downstream rule generation should treat it as an application profile of those axioms to avoid duplicate rules",
+      "Over-automation: criteria requiring nuanced human judgment may be forced into brittle rules or silently dropped, enshrining an incomplete model of 'done' — prematurely automating a poorly understood gate violates the spirit of T-01",
+      "Rigid executable gates can false-negative legitimate edge cases that need human discretion, stalling progress with no escape hatch",
+      "Provenance and persistence requirements add friction to lightweight or emergency operations, which may incentivize bypassing the gate entirely",
+      "Automated checks verify only what is codified; a passing gate can create false confidence that the transition is sound when the criteria themselves are wrong or incomplete",
+      "Thin evidence base: the diagnosis rests on a single owner_reported:cli placeholder with no host trace and an unconfirmed Gate B failure mechanism (per the diagnosis ambiguityNotes), so the principle may over-generalize one manual pain into a broad rule"
+     ],
+     "generatedAt": "2026-09-02T08:44:32.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788424714466_wmn-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Gate consequential transitions on executable, reconciled, persisted verification evidence\",\n    \"statement\": \"Before any consequential state transition (graduation, promotion, release, deployment, sign-off) conditioned on verification criteria, the criteria must be encoded as executable automated checks wired into a structural gate that blocks the transition on failure; the gate's logged results must be reconciled against the expected criteria and persisted as durable, provenance-traced evidence. Manual human attestation alone must never satisfy such a gate: execution is not success until reconciled evidence demonstrates it.\",\n    \"rationale\": \"The root cause at PRI-650-A Gate B was a verification mechanism whose authority rested on human attestation instead of executable evidence: manual review omits steps, drifts in judgment, leaves claims unreconciled, and loses results with transient session context, while the untraced CLI reporting path (owner_reported_no_host_trace) breaks the evidence chain. Encoding criteria as automated checks, wiring them into blocking guardrails, reconciling logged results against expected outcomes, and persisting the evidence with provenance removes all of these failure modes at once, so that passing a gate is demonstrated rather than attested.\",\n    \"applicability\": [\n      \"Hard state transitions gated on verification criteria: graduation, promotion, release, deployment, sign-off\",\n      \"Pipelines and multi-actor workflows where manual checklists, implicit remembered procedures, or transient session context are the default verification mechanism\",\n      \"Evidence paths for verification outcomes and pain reports, which must preserve provenance (e.g., authenticated host session trace) instead of untraced CLI submissions\",\n      \"Excluded: genuinely subjective judgments (taste, trust, nuanced interpretation) that cannot be honestly reduced to executable rules\"\n    ],\n    \"antiPatterns\": [\n      \"Passing a gate on a manual completion claim or human attestation without executable check results\",\n      \"Encoding verification criteria only as implicit manual procedures with no structural interception when steps are skipped\",\n      \"Declaring verification success without reconciling logged check results against the expected criteria\",\n      \"Keeping verification checklists and results only in transient session context so outcomes cannot be re-audited after the fact\",\n      \"Accepting verification outcomes or pain reports through paths that carry no authenticated provenance or host trace\"\n    ],\n    \"confidence\": 0.75\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Ensure gate-style transitions such as PRI-650-A Gate B graduation never pass on manual human attestation alone; they must pass via automated checks whose reconciled, provenance-traced results are persisted.\",\n    \"targetBehavior\": \"For any gated transition, the agent encodes the verification criteria as executable checks wired into a gate that blocks the transition on failure, runs them, compares the logged results against the expected criteria before declaring the gate passed, persists those results as durable state outside transient context, and records provenance for reported outcomes.\",\n    \"forbiddenBehavior\": \"Advancing a gated state transition based on a manual completion claim or checklist without executable checks, without reconciling results against expected criteria, without persisted evidence, or through reporting paths lacking provenance.\",\n    \"evidenceSource\": \"diagnosis_manual_1788424714466_wmn09nli: PRI-650-A Gate B graduation verification reported as a severe manual pain via owner_reported:cli with 'No session context available' and provenance owner_reported_no_host_trace; violatedPrinciples T-03, T-05, T-07 identified by the diagnostician.\",\n    \"validationExpectation\": \"An evaluator should demand that a gate decision is backed by automated check output reconciled against the expected criteria and persisted with provenance; any rule that permits manual attestation to pass a gate, or that drops the reconciliation or persistence requirement, contradicts this intent and must be flagged rather than accepted.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788424714466_wmn-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788424714466_wmn-r3-run1\"\n  },\n  \"risks\": [\n    \"Composite redundancy: this principle bundles existing core axioms T-03, T-05, T-07 and T-10 rather than adding a genuinely new behavioral rule; downstream rule generation should treat it as an application profile of those axioms to avoid duplicate rules\",\n    \"Over-automation: criteria requiring nuanced human judgment may be forced into brittle rules or silently dropped, enshrining an incomplete model of 'done' — prematurely automating a poorly understood gate violates the spirit of T-01\",\n    \"Rigid executable gates can false-negative legitimate edge cases that need human discretion, stalling progress with no escape hatch\",\n    \"Provenance and persistence requirements add friction to lightweight or emergency operations, which may incentivize bypassing the gate entirely\",\n    \"Automated checks verify only what is codified; a passing gate can create false confidence that the transition is sound when the criteria themselves are wrong or incomplete\",\n    \"Thin evidence base: the diagnosis rests on a single owner_reported:cli placeholder with no host trace and an unconfirmed Gate B failure mechanism (per the diagnosis ambiguityNotes), so the principle may over-generalize one manual pain into a broad rule\"\n  ],\n  \"generatedAt\": \"2026-09-02T08:44:32.000Z\"\n}",
+    "usage": {
+     "input": 3876,
+     "output": 3782,
+     "total": 7658
+    },
+    "latencyMs": 42709,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "7c31d5e5ba8c74cc"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}
