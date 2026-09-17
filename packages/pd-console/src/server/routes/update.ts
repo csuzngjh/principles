@@ -2198,6 +2198,11 @@ async function runReleaseManagerApplyFullDispatch(
         newVersion: outcome.productVersion,
         requiresRestart: true,
         nextAction: 'Restart PD Console to run the updated build.',
+        // PRI-726: legacy parity — a degraded success (the installer committed
+        // the update but the gateway restart failed) surfaces the SAME
+        // `gatewayNotice` field the PRI-723 legacy mutation path merges in;
+        // a healthy restart leaves it absent. No second field name.
+        ...(outcome.gatewayNotice ? { gatewayNotice: outcome.gatewayNotice } : {}),
       });
     } else {
       // Legacy parity: the legacy updater records a `refusal` event when the

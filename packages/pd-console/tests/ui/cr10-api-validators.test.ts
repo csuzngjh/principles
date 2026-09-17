@@ -43,7 +43,41 @@ import {
   validateApprovalsGrouped,
   validateEvidenceChain,
   validateOutputLanguage,
+  validateApplyUpdateResult,
 } from '../../src/ui/utils/validators.js';
+
+// ── validateApplyUpdateResult (PRI-726: gatewayNotice passthrough) ────────────
+
+describe('validateApplyUpdateResult', () => {
+  it('preserves gatewayNotice on a degraded success', () => {
+    const result = validateApplyUpdateResult({
+      success: true,
+      message: 'Updated to 1.223.0.',
+      newVersion: '1.223.0',
+      requiresRestart: true,
+      gatewayNotice: 'Gateway 未自动重启，请手动启动：openclaw gateway start',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.success).toBe(true);
+    expect(result!.gatewayNotice).toBe('Gateway 未自动重启，请手动启动：openclaw gateway start');
+  });
+
+  it('omits gatewayNotice when absent (healthy restart)', () => {
+    const result = validateApplyUpdateResult({ success: true, message: 'Updated to 1.223.0.' });
+    expect(result).not.toBeNull();
+    expect(result!.gatewayNotice).toBeUndefined();
+  });
+
+  it('drops a non-string gatewayNotice instead of passing it through', () => {
+    const result = validateApplyUpdateResult({
+      success: true,
+      message: 'Updated.',
+      gatewayNotice: 42,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.gatewayNotice).toBeUndefined();
+  });
+});
 
 // ── validateErrorResponse ─────────────────────────────────────────────────────
 
