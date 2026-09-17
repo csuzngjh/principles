@@ -1401,19 +1401,35 @@ function globalShimPath(globalBin: string, basename: string): string {
 
 // A legacy path mentioned in a comment is not proof of ownership. Only
 // complete known forwarding scripts may be migrated when their target is gone.
+// The substitutions below REPLICATE the historical writers' exact byte output
+// (format parity, not output escaping): none of the writers escape backslashes
+// in Windows paths, so detection must not add escaping either — split/join is
+// used instead of String.replace to keep that intent explicit.
+function duplicateDoubleQuotes(value: string): string {
+  return value.split('"').join('""');
+}
+
+function doubleBackticksThenBacktickQuotes(value: string): string {
+  return value.split('`').join('``').split('"').join('`"');
+}
+
+function backslashQuote(value: string): string {
+  return value.split('"').join('\\"');
+}
+
 function isLegacyPdShim(content: string): boolean {
   const scripts: string[] = [];
   const bin = path.join(getPluginExtDir(), 'bin');
-  const cmd = path.join(bin, 'pd.cmd').replace(/"/g, '""');
-  const ps = path.join(bin, 'pd.ps1').replace(/`/g, '``').replace(/"/g, '`"');
+  const cmd = duplicateDoubleQuotes(path.join(bin, 'pd.cmd'));
+  const ps = doubleBackticksThenBacktickQuotes(path.join(bin, 'pd.ps1'));
   scripts.push(`@echo off\ncall "${cmd}" %*`);
   scripts.push(`$shim = "${ps}"\n& $shim @args\nexit $LASTEXITCODE`);
-  scripts.push(`#!/usr/bin/env sh\nexec "${path.join(bin, 'pd').replace(/"/g, '\\"')}" "$@"`);
+  scripts.push(`#!/usr/bin/env sh\nexec "${backslashQuote(path.join(bin, 'pd'))}" "$@"`);
   for (const root of [getPdRuntimeDir(), getPluginExtDir()]) {
     const entry = path.join(root, 'pd-cli', 'dist', 'index.js');
-    scripts.push(`@echo off\nnode "${entry.replace(/"/g, '""')}" %*`);
-    scripts.push(`$ErrorActionPreference = "Stop"\n$entry = "${entry.replace(/`/g, '``').replace(/"/g, '`"')}"\n& node $entry @args\nexit $LASTEXITCODE`);
-    scripts.push(`#!/usr/bin/env sh\nexec node "${entry.replace(/"/g, '\\"')}" "$@"`);
+    scripts.push(`@echo off\nnode "${duplicateDoubleQuotes(entry)}" %*`);
+    scripts.push(`$ErrorActionPreference = "Stop"\n$entry = "${doubleBackticksThenBacktickQuotes(entry)}"\n& node $entry @args\nexit $LASTEXITCODE`);
+    scripts.push(`#!/usr/bin/env sh\nexec node "${backslashQuote(entry)}" "$@"`);
   }
   return scripts.includes(content.replace(/\r\n/g, '\n').trim());
 }
