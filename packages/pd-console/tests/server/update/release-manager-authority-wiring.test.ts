@@ -25,7 +25,7 @@ describe('sole ReleaseManager production update handler', () => {
       kinds: { check: { ready: true, reasons: [] }, 'apply-full': { ready: true, reasons: [] } },
       manager: { check: mocks.check, apply: mocks.apply },
     });
-    mocks.check.mockResolvedValue({ candidate: { productVersion: '1.3.0' }, decision: { allowed: true, direction: 'upgrade' } });
+    mocks.check.mockResolvedValue({ candidate: { productVersion: '1.3.0' }, decision: { allowed: true, direction: 'update' } });
     mocks.apply.mockResolvedValue({ kind: 'applied', productVersion: '1.3.0', transactionId: 'tx-1', gatewayNotice: 'Restart gateway manually.' });
     server = createServer((req, res) => { void handleUpdateRoute(req, res, home, req.url ?? ''); });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
