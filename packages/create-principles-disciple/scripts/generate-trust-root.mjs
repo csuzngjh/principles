@@ -22,7 +22,7 @@
  */
 
 import { createHash, createPublicKey, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Key, Metadata, Root, Signature } from '@tufjs/models';
@@ -63,18 +63,40 @@ if (privateKeyOutputPath === REPO_ROOT || privateKeyOutputPath.startsWith(REPO_R
   throw new Error(`Refusing to write the private signing key inside the repository (${privateKeyOutputPath}). Point --private-key-output at a location outside ${REPO_ROOT}.`);
 }
 // Atomic ceremony creation: the non-force write uses the exclusive-create
-// flag (`wx`) so the trust root can NEVER be silently overwritten by a race
-// between an existence check and the write (the old check-then-write TOCTOU).
-// If a root already exists (or appears between invocations), `wx` raises
-// EEXIST — mapped back to the same governance error below. `--force` keeps the
-// explicit, conscious rotation semantics with plain `w`.
+// flag (`wx`) so neither the trust root nor the private key can EVER be
+// silently overwritten by a race between an existence check and the write
+// (the old check-then-write TOCTOU). `wx` raises EEXIST, mapped back to the
+// governance errors below. `--force` keeps the explicit, conscious rotation
+// semantics with plain `w`.
 const forceRotation = process.argv.includes('--force');
+// Pre-flight refusal BEFORE any write (zero side effects on the common
+// re-run path — including not leaving stray private key material). The `wx`
+// flags below remain as the race backstops.
+if (!forceRotation && existsSync(TRUST_ROOT_PATH)) {
+  throw new Error(`A pinned trust root already exists (${TRUST_ROOT_PATH}). Re-running the ceremony REPLACES the trust anchor every install already pinned — rotation requires an explicit governance decision. Pass --force only for that decision.`);
+}
+if (!forceRotation && existsSync(privateKeyOutputPath)) {
+  throw new Error(`A private signing key already exists at ${privateKeyOutputPath}. Overwriting it can destroy the key behind the currently pinned trust root. Move it aside (or store it in the PD_RELEASE_SIGNING_KEY secret and delete it) and re-run, or pass --force only as an explicit governance decision.`);
+}
 function writePinnedRoot(bytes) {
   try {
     writeFileSync(TRUST_ROOT_PATH, bytes, { encoding: 'utf8', flag: forceRotation ? 'w' : 'wx' });
   } catch (error) {
     if (!forceRotation && error?.code === 'EEXIST') {
       throw new Error(`A pinned trust root already exists (${TRUST_ROOT_PATH}). Re-running the ceremony REPLACES the trust anchor every install already pinned — rotation requires an explicit governance decision. Pass --force only for that decision.`);
+    }
+    throw error;
+  }
+}
+// Same exclusive-create discipline for the private key (review 2026-09-17):
+// silently overwriting it could destroy the key behind the CURRENTLY pinned
+// trust root.
+function writePrivateKey(pem) {
+  try {
+    writeFileSync(privateKeyOutputPath, pem, { encoding: 'utf8', flag: forceRotation ? 'w' : 'wx' });
+  } catch (error) {
+    if (!forceRotation && error?.code === 'EEXIST') {
+      throw new Error(`A private signing key already exists at ${privateKeyOutputPath}. Overwriting it can destroy the key behind the currently pinned trust root. Move it aside (or store it in the PD_RELEASE_SIGNING_KEY secret and delete it) and re-run, or pass --force only as an explicit governance decision.`);
     }
     throw error;
   }
@@ -95,11 +117,15 @@ metadata.sign(
 );
 const rootBytes = `${JSON.stringify(metadata.toJSON(), null, 2)}\n`;
 
+// Private key FIRST, then the root: with the pre-flight above the common
+// refusal path already returned, so these writes only fail on a race — and
+// in that race the committed trust anchor (what installs consume) is only
+// ever touched when the key write has succeeded.
+mkdirSync(dirname(privateKeyOutputPath), { recursive: true });
+writePrivateKey(privateKey.export({ type: 'pkcs8', format: 'pem' }));
+
 mkdirSync(dirname(TRUST_ROOT_PATH), { recursive: true });
 writePinnedRoot(rootBytes);
-
-mkdirSync(dirname(privateKeyOutputPath), { recursive: true });
-writeFileSync(privateKeyOutputPath, privateKey.export({ type: 'pkcs8', format: 'pem' }), 'utf8');
 
 console.log(`Pinned trust root written: ${TRUST_ROOT_PATH}`);
 console.log(`  keyId:  ${keyId}`);

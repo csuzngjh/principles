@@ -3,6 +3,7 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { resolveApplyFullTimeoutMs } from './update-timeout.js';
 import {
   loadPdConfig,
   computeFlagsFromLoadResult,
@@ -223,7 +224,7 @@ const UPDATE_APPLY_TIMEOUT_MS = 120000;
 // the update SUCCEEDS server-side is the worst possible signal (observed in
 // the PRI-671 upgrade gate on Windows/AV-slow disks). Same knob pattern as
 // the installer's PD_INSTALL_TIMEOUT_MS.
-const UPDATE_APPLY_FULL_TIMEOUT_MS = parseInt(process.env.PD_UPDATE_APPLY_FULL_TIMEOUT_MS || '180000', 10);
+const UPDATE_APPLY_FULL_TIMEOUT_MS = resolveApplyFullTimeoutMs();
 
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 
