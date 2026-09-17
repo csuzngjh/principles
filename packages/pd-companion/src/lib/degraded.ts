@@ -51,6 +51,50 @@ export function describeDegraded(
   return { title: base.title, description, nextAction };
 }
 
+// ─── Workspace worker degradation (PRI-715) ──────────────────────────────────
+// When the restart ladder is exhausted the workspace pipeline stays stopped
+// until the Owner acts — there is NO automatic recovery (Owner decision), so
+// the copy must name the workspace, the reason and the real recovery path.
+
+const WORKER_DEGRADED_REASON = 'worker 反复崩溃，自动重启次数已耗尽';
+const WORKER_DEGRADED_NEXT_ACTION = '重启 PD Companion（托盘菜单「退出」后重新打开）即可恢复该工作区的管道';
+
+/** Last path segment as display name; falls back to the full path for roots. */
+function workspaceDisplayName(canonicalWorkspace: string): string {
+  const normalized = canonicalWorkspace.replaceAll('\\', '/');
+  const base = normalized.slice(normalized.lastIndexOf('/') + 1);
+  return base.length > 0 ? base : canonicalWorkspace;
+}
+
+/** One-shot notification copy for a workspace that just became degraded. */
+export function describeWorkspaceWorkerDegraded(canonicalWorkspace: string): { title: string; body: string } {
+  return {
+    title: `PD 工作区管道已停止：${workspaceDisplayName(canonicalWorkspace)}`,
+    body: `${WORKER_DEGRADED_REASON}，该工作区的管道已暂停。${WORKER_DEGRADED_NEXT_ACTION}。`,
+  };
+}
+
+export interface DegradedWorkspacesTrayView {
+  /** Appended to the tray status line; '' when nothing is degraded. */
+  statusSuffix: string;
+  /** Disabled informational menu items: header, one per workspace, recovery. */
+  menuLabels: string[];
+}
+
+/** Persistent tray projection of the currently degraded workspaces (pure read). */
+export function buildDegradedWorkspacesTrayView(canonicalWorkspaces: readonly string[]): DegradedWorkspacesTrayView {
+  if (canonicalWorkspaces.length === 0) return { statusSuffix: '', menuLabels: [] };
+  const count = `${canonicalWorkspaces.length}`;
+  return {
+    statusSuffix: `；⚠ ${count} 个工作区管道已停止`,
+    menuLabels: [
+      `⚠ ${count} 个工作区管道已停止（${WORKER_DEGRADED_REASON}）`,
+      ...canonicalWorkspaces.map((canonical) => `・${workspaceDisplayName(canonical)}（${canonical}）`),
+      `恢复方式：${WORKER_DEGRADED_NEXT_ACTION}`,
+    ],
+  };
+}
+
 /** Escape untrusted text for embedding in the degraded data: URL page. */
 export function escapeHtml(text: string): string {
   return text
