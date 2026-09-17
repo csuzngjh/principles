@@ -48,7 +48,6 @@ import {
   ReleaseManager,
   ReleaseManagerError,
   type InstallStatus,
-  type LegacyUpdaterDecision,
 } from './release-manager.js';
 import { InstallLayoutError, readInstallConfig, resolvePdHomePaths, type InstallConfig } from './install-layout.js';
 import { resolveReleaseMetadataSource, type ReleaseMetadataSource } from './release-metadata-source.js';
@@ -91,8 +90,6 @@ export interface ReleaseManagerAuthorityOptions {
   readonly metadataBaseUrl: string | undefined;
   readonly openclawHome?: string;
   readonly now?: () => Date;
-  /** Legacy-updater decision source for the shadow comparison (console-computed). */
-  readonly legacyCheck?: (currentVersion: string) => Promise<LegacyUpdaterDecision | null>;
 }
 
 export interface ReleaseManagerAuthority {
