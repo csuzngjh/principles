@@ -375,6 +375,33 @@ describe('concurrency acceptance (SPEC §24, real git merge shape)', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('Test D — archive (status flip) and a new occurrence of the same pattern merge clean, both survive', () => {
+    const root = initRepo();
+    try {
+      const patternFile = path.join(root, 'docs/process/error-management/records/patterns/P-ERR-068.md');
+      const occDir = path.join(root, 'docs/process/error-management/records/occurrences/P-ERR-068');
+      // agent A performs the archive lifecycle flip on the pattern file
+      git(root, 'checkout', '-b', 'agent-a');
+      writeFileSync(patternFile, serializeRecord({ ...patternMeta, status: 'archived' }, 'body'));
+      git(root, 'add', '.');
+      git(root, 'commit', '-m', 'archive ERR-068');
+      // agent B (branched from the same base) records a fresh occurrence
+      git(root, 'checkout', 'main');
+      git(root, 'checkout', '-b', 'agent-b');
+      commitRecord(root, path.join(occDir, 'OCC-2026-09-17-err-068-r90.md'), occurrenceText('OCC-2026-09-17-err-068-r90'));
+      // the merge is mechanically determinable: different files, no conflict,
+      // and the merged tree still passes whole-tree validation
+      git(root, 'merge', 'agent-a', '--no-edit'); // must not throw
+      const loaded = loadRecords(root);
+      expect(loaded.errors).toEqual([]);
+      expect(loaded.patterns.get('P-ERR-068')?.meta.status).toBe('archived');
+      expect(loaded.occurrences.length).toBe(1);
+      expect(loaded.occurrences[0].meta.occurrenceId).toBe('OCC-2026-09-17-err-068-r90');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('legacy parsing and projection parity (fixture)', () => {
