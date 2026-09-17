@@ -168,6 +168,95 @@ describe('PRI-569 gate-block trajectory persistence', () => {
     expect(types).toContain('gate_block');
   });
 
+  it('PRI-813: shared metadata.evaluations become per-activation rulehost_evaluated rows (shadow + live, exact activationId)', () => {
+    const dir = makeWorkspace();
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir });
+    const logger = makeLogger();
+    const filePath = path.join(dir, 'b.txt');
+
+    handleSharedRuleHostResult(
+      { toolName: 'Write', params: { file_path: filePath } },
+      { workspaceDir: dir, logger },
+      {
+        decision: 'allow', source: 'test',
+        metadata: {
+          evaluatedLiveRules: 0,
+          ruleDecision: 'allow',
+          evaluations: [
+            { toolName: 'Write', filePath, matched: false, decision: 'allow', activationMode: 'live' },
+            { toolName: 'Write', filePath, matched: true, decision: 'block', ruleId: 'R_SHADOW_813', activationId: 'act-shadow-813', activationMode: 'shadow' },
+            // malformed entry must be skipped observably, never persisted (rc-9)
+            { toolName: 'Write', matched: 'yes', decision: 'block' },
+            // CR-6: a schema-valid shadow observation WITHOUT activationId is
+            // dead evidence (the shadow summary keys on the exact id) —
+            // rejected at this boundary, observably.
+            { toolName: 'Write', filePath, matched: true, decision: 'block', ruleId: 'R_SHADOW_NOID_813', activationMode: 'shadow' },
+          ],
+        },
+      },
+    );
+
+    flushEventLog(wctx);
+    const evaluated = readJsonlEvents(dir).filter(e => e['type'] === 'rulehost_evaluated');
+    expect(evaluated).toHaveLength(2);
+    const data = evaluated.map(e => e['data'] as Record<string, unknown>);
+    expect(data.some(d => d['activationMode'] === 'shadow' && d['activationId'] === 'act-shadow-813' && d['ruleId'] === 'R_SHADOW_813' && d['matched'] === true && d['decision'] === 'block')).toBe(true);
+    expect(data.some(d => d['activationMode'] === 'live' && d['matched'] === false && d['decision'] === 'allow')).toBe(true);
+    expect(logger.lines.some(line => line.includes('invalid evaluation entry'))).toBe(true);
+  });
+
+  it.each(['', '   '])('rejects shadow activationId %j without losing a live deny', (activationId) => {
+    const dir = makeWorkspace();
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir });
+    const logger = makeLogger();
+    const filePath = path.join(dir, 'blank-shadow.txt');
+    handleSharedRuleHostResult(
+      { toolName: 'Write', params: { file_path: filePath } },
+      { workspaceDir: dir, logger },
+      {
+        decision: 'deny', reason: 'live-deny-with-invalid-shadow', source: 'test',
+        metadata: {
+          evaluatedLiveRules: 1,
+          evaluations: [
+            { toolName: 'Write', filePath, matched: true, decision: 'block', activationId: 'live-valid', activationMode: 'live' },
+            { toolName: 'Write', filePath, matched: true, decision: 'block', activationId, activationMode: 'shadow' },
+          ],
+        },
+      },
+    );
+    expect(readGateBlocks(dir)).toEqual([expect.objectContaining({ reason: 'live-deny-with-invalid-shadow' })]);
+    flushEventLog(wctx);
+    const evaluated = readJsonlEvents(dir).filter(e => e['type'] === 'rulehost_evaluated');
+    expect(evaluated).toHaveLength(1);
+    expect(evaluated[0]?.['data']).toMatchObject({ activationId: 'live-valid', activationMode: 'live', decision: 'block' });
+    expect(logger.lines.some(line => line.includes('invalid evaluation entry'))).toBe(true);
+  });
+
+  it('PRI-813 (review S2): an evaluations array with only invalid entries persists NOTHING — no fabricated aggregate row', () => {
+    const dir = makeWorkspace();
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir });
+    const logger = makeLogger();
+
+    handleSharedRuleHostResult(
+      { toolName: 'Write', params: { file_path: path.join(dir, 'c.txt') } },
+      { workspaceDir: dir, logger },
+      {
+        decision: 'allow', source: 'test',
+        metadata: {
+          evaluatedLiveRules: 1,
+          ruleDecision: 'allow',
+          evaluations: [{ toolName: 'Write', matched: 'nope', decision: 'block' }],
+        },
+      },
+    );
+
+    flushEventLog(wctx);
+    // rc-9: a contract-violating evaluations payload must not masquerade as
+    // ordinary evidence — zero rows plus the observable warn is the record.
+    expect(readJsonlEvents(dir).filter(e => e['type'] === 'rulehost_evaluated')).toHaveLength(0);
+    expect(logger.lines.some(line => line.includes('no valid entry'))).toBe(true);
+  });
+
   it('T11: unresolved-path deny still counts — null file_path in trajectory, placeholder in EventLog', () => {
     const dir = makeWorkspace();
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir });

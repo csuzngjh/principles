@@ -93,7 +93,10 @@ describe('principle-lifecycle-service', () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-lifecycle-service-'));
     workspaceDir = path.join(tempDir, 'workspace');
-    stateDir = path.join(tempDir, 'state');
+    // PRI-824: WorkspaceContext binds the workspace canonical state dir
+    // (<workspaceDir>/.state); seed the ledger there so the context-surfaced
+    // lifecycle service observes it.
+    stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(workspaceDir, { recursive: true });
     fs.mkdirSync(stateDir, { recursive: true });
   });
@@ -164,7 +167,9 @@ describe('principle-lifecycle-service', () => {
 
   it('surfaces the lifecycle service from WorkspaceContext without breaking existing consumers', () => {
     seedWorkspace();
-    const context = createTestContext({ workspaceDir, stateDir });
+    // PRI-824: the context derives its own canonical stateDir; the override
+    // parameter is no longer honored and must not be needed here.
+    const context = createTestContext({ workspaceDir });
 
     expect(context.principleLifecycle).toBeInstanceOf(PrincipleLifecycleService);
     expect(context.principleLifecycle.listAssessments()).toHaveLength(1);

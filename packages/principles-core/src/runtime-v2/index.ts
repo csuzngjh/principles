@@ -1725,6 +1725,9 @@ export type {
 
 export {
   createEmptyDailyStats,
+  // PRI-813: canonical rulehost_evaluated payload guard — host-side writers
+  // validate through this schema authority instead of hand-rolled copies.
+  isRuleHostEvaluatedEventData,
 } from './types/event-types.js';
 
 export type {

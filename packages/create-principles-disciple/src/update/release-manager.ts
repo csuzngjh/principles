@@ -142,6 +142,12 @@ export type ApplyOutcome =
     readonly productVersion: string;
     readonly transactionId: string;
     readonly journalPath: string;
+    /** PRI-726: degraded-success notice propagated VERBATIM from the
+     * installer's InstallResult — the payload committed but the OpenClaw
+     * gateway restart failed. Undefined on a healthy restart; the Console
+     * merges it into the same `gatewayNotice` HTTP field the PRI-723 legacy
+     * path uses. Never regenerated or parsed from logs here. */
+    readonly gatewayNotice?: string;
   }
   | {
     readonly kind: 'no_update';
@@ -469,6 +475,10 @@ export class ReleaseManager {
         productVersion: releaseMetadata.productVersion,
         transactionId,
         journalPath,
+        // PRI-726: pure field propagation — the installer is the only
+        // authority on the gateway restart outcome (rc-9); this layer must
+        // not re-derive, parse, or drop it.
+        gatewayNotice: installResult.gatewayNotice,
       };
     } catch (error) {
       ensureTerminalFailed(

@@ -2,6 +2,7 @@
  * Event types for structured logging and daily statistics.
  */
 import { Type, type Static } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 
 // ============== Event Types ==============
 
@@ -497,6 +498,18 @@ export const RuleHostEvaluatedEventDataSchema = Type.Object({
   ])),
 });
 export type RuleHostEvaluatedEventDataStatic = Static<typeof RuleHostEvaluatedEventDataSchema>;
+
+/**
+ * PRI-813: type guard over the canonical rulehost_evaluated payload for
+ * host-side telemetry writers (rc-1/rc-2: the payload crosses
+ * HostEventResult.metadata as unknown). P4 — both adapters validate through
+ * THIS schema authority; a hand-rolled field copy in an adapter drifts
+ * silently when the contract evolves. Whether a shadow entry additionally
+ * requires activationId is caller policy, not part of the canonical schema.
+ */
+export function isRuleHostEvaluatedEventData(value: unknown): value is RuleHostEvaluatedEventData {
+  return Value.Check(RuleHostEvaluatedEventDataSchema, value);
+}
 
 /**
  * rulehost_blocked — Tool call was blocked by RuleHost.
