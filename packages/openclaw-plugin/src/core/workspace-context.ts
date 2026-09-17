@@ -36,10 +36,28 @@ interface PrincipleTreeLedgerAccessor {
  * Separator/case-insensitive path comparison for the PRI-824 divergence
  * warning only. Authority decisions never depend on it — the canonical
  * workspace-derived stateDir is always used regardless of comparison result.
+ *
+ * Regex-free by constraint: separator-run collapse and trailing-strip
+ * regexes are js/polynomial-redos flagged by CodeQL even when provably
+ * linear (same constraint as stripTrailingSeparators in the core evidence
+ * sanitizer). Collapsing runs first guarantees at most one trailing
+ * separator, so the final strip is a single bounded slice.
  */
 function isSamePath(a: string, b: string): boolean {
     const normalize = (value: string): string => {
-        const unified = value.replace(/[\\/]+/g, '/').replace(/[\\/]+$/, '');
+        let unified = '';
+        let inSeparatorRun = false;
+        for (let i = 0; i < value.length; i++) {
+            const ch = value[i];
+            if (ch === '/' || ch === '\\') {
+                if (!inSeparatorRun) unified += '/';
+                inSeparatorRun = true;
+            } else {
+                unified += ch;
+                inSeparatorRun = false;
+            }
+        }
+        if (unified.endsWith('/')) unified = unified.slice(0, -1);
         return process.platform === 'win32' ? unified.toLowerCase() : unified;
     };
     return normalize(a) === normalize(b);

@@ -137,6 +137,21 @@ describe('WorkspaceContext', () => {
         expect(warn).not.toHaveBeenCalled();
     });
 
+    it('should treat separator variants of the canonical path as the same (no spurious warning)', () => {
+        const warn = vi.fn();
+        const canonical = path.join(workspaceDir, '.state');
+        const wctx = WorkspaceContext.fromHookContext({
+            workspaceDir,
+            stateDir: canonical.endsWith('\\') || canonical.endsWith('/')
+                ? canonical
+                : `${canonical}\\`,
+            logger: { warn },
+        });
+
+        expect(wctx.stateDir).toBe(canonical);
+        expect(warn).not.toHaveBeenCalled();
+    });
+
     it('should ignore non-string or blank host stateDir values without warning', () => {
         const warn = vi.fn();
         WorkspaceContext.fromHookContext({ workspaceDir, stateDir: '   ', logger: { warn } });
