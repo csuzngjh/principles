@@ -33,6 +33,7 @@ const {
   writePatternRecord,
   writeOccurrenceRecord,
   escapeHtmlCommentJson,
+  stripHtmlComments,
   RECORDS_RELATIVE_DIR,
 } = require('./error-records.cjs');
 
@@ -137,7 +138,7 @@ function parseEntryBody(body) {
     if (!(trimmed.startsWith('<!--') && trimmed.includes('recurrence-meta'))) continue;
     let j = i;
     for (; j < lines.length; j += 1) {
-      if (/--!?>/.test(lines[j])) break;
+      if (lines[j].includes('-->') || lines[j].includes('--!>')) break;
     }
     metaRanges.push({ start: i, end: j });
     i = j;
@@ -561,8 +562,8 @@ function verifyParity(projectedText, legacyText, label, report, knownConflicts) 
     const id = entry.match(ENTRY_HEADER)[1];
     const projected = projectedEntries.get(id);
     if (!projected) continue;
-    const normLegacy = entry.replace(/<!--[\s\S]*?--!?>/g, '').split('\n').map((l) => l.trim()).filter((l) => l.length > 3);
-    const normProj = projected.replace(/<!--[\s\S]*?--!?>/g, '');
+    const normLegacy = stripHtmlComments(entry).split('\n').map((l) => l.trim()).filter((l) => l.length > 3);
+    const normProj = stripHtmlComments(projected);
     for (const line of normLegacy) {
       if (/^(\*\*Date\*\*|\*\*Recurrence\*\*|- \*\*Recurrence\*\*)/.test(line)) continue;
       if (line.startsWith('<!--') || /^--!?>/.test(line)) continue;

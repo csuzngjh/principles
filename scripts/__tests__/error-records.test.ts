@@ -17,6 +17,7 @@ import {
   MARKER,
   serializeRecord,
   parseRecordFile,
+  stripHtmlComments,
   validatePatternMeta,
   validateOccurrenceMeta,
   loadRecords,
@@ -93,6 +94,23 @@ describe('record serialization', () => {
     const parsed = parseRecordFile(text);
     expect(parsed.error).toBeUndefined();
     expect(parsed.meta.guard).toBe('a <!-- b --!> c --> d');
+  });
+
+  it.each(['-->', '--!>'])('accepts the %s metadata terminator', (close) => {
+    expect(parseRecordFile(`<!-- pd-error-record\n{}\n${close}\nbody`)).toEqual({
+      meta: {}, body: 'body',
+    });
+  });
+
+  it('strips mixed comment terminators without losing surrounding text', () => {
+    expect(stripHtmlComments('normal text\n<!-- comment A -->\nmiddle\n<!-- comment B --!>\ntail'))
+      .toBe('normal text\n\nmiddle\n\ntail');
+    expect(stripHtmlComments('a<!-- b --!>c<!-- d -->e')).toBe('ace');
+  });
+
+  it('fails loud on unterminated comments', () => {
+    expect(() => stripHtmlComments('unterminated <!-- comment')).toThrow('unterminated HTML comment');
+    expect(parseRecordFile('<!-- pd-error-record\n{}').error).toBe('unterminated metadata comment');
   });
 
   it('rejects files without a marker block', () => {

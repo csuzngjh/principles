@@ -26,9 +26,13 @@
  *
  * Runtime contracts: parsed file content is untrusted (rc-1); validators
  * reject instead of coercing (rc-2/rc-3); every element of metadata arrays is
- * checked (rc-4); Object.hasOwn for key membership (rc-5); writes are atomic
- * tmp+rename; nothing here makes semantic judgments for the Owner (no auto
- * dedupe, no auto archive, no LLM rewrite — SPEC §16).
+ * checked (rc-4); Object.hasOwn for key membership (rc-5).
+ * Record creation uses filesystem-level no-clobber via open(..., 'wx').
+ * Archive lifecycle replacement uses tmp+rename on a known-existing record.
+ * Creation is not crash-atomic: a crash can leave a partial file; loadRecords
+ * fails loud, and recovery requires removing the partial file before retrying.
+ * Nothing here makes semantic judgments for the Owner (no auto dedupe,
+ * no auto archive, no LLM rewrite — SPEC §16).
  */
 
 'use strict';
@@ -71,10 +75,8 @@ const EP_ID_PATTERN = /^EP-\d{2}$/;
 const ID_ALPHABET = '23456789abcdefghjkmnpqrstvwxyz';
 
 /**
- * Rejection sampling over randomBytes: values >= 240 (the largest multiple
- * of the 30-char alphabet within one byte) are discarded, so every
- * character has exactly equal probability — no modulo bias (CodeQL:
- * biased random numbers from a cryptographically secure source).
+ * Reject byte values outside the largest complete multiple of the alphabet
+ * length within 256, so every character has equal probability.
  */
 function randomSuffix(length) {
   const limit = 256 - (256 % ID_ALPHABET.length);
@@ -133,9 +135,52 @@ function generateOccurrenceId(now = new Date()) {
  */
 function escapeHtmlCommentJson(text) {
   return String(text)
-    .replace(/-->/g, '\\u002d\\u002d>')
-    .replace(/!/g, '\\u0021')
-    .replace(/</g, '\\u003c');
+    .split('-->')
+    .join('\\u002d\\u002d>')
+    .split('!')
+    .join('\\u0021')
+    .split('<')
+    .join('\\u003c');
+}
+
+/**
+ * Find the earliest supported comment terminator in one forward scan.
+ * Stop at the first match so repeated comments never rescan a suffix.
+ *
+ * @returns {{index: number, length: number} | null}
+ */
+function findHtmlCommentEnd(text, fromIndex) {
+  for (let index = fromIndex; index < text.length - 2; index += 1) {
+    if (text[index] !== '-' || text[index + 1] !== '-') continue;
+    if (text[index + 2] === '>') return { index, length: 3 };
+    if (text[index + 2] === '!' && text[index + 3] === '>') return { index, length: 4 };
+  }
+  return null;
+}
+
+/**
+ * Linear HTML-comment stripper for parity normalization: keeps the text
+ * before each `<!--`, skips to the earliest `-->`/`--!>`, repeats. An
+ * unterminated `<!--` throws — silently swallowing the remainder would
+ * hide malformed records from the parity gate (fail-loud by design).
+ */
+function stripHtmlComments(text) {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf('<!--', i);
+    if (open === -1) {
+      out += text.slice(i);
+      break;
+    }
+    out += text.slice(i, open);
+    const end = findHtmlCommentEnd(text, open + 4);
+    if (end === null) {
+      throw new Error(`unterminated HTML comment at offset ${open}`);
+    }
+    i = end.index + end.length;
+  }
+  return out;
 }
 
 /**
@@ -151,12 +196,15 @@ function serializeRecord(meta, body) {
  * Parse one record file. Returns { meta, body } or { error }.
  * The marker protocol mirrors parseMarkerComment in error-handbook-meta.cjs:
  * first non-empty line of the comment must start with the marker.
+ * Comment end detection is the shared linear scanner (both `-->` and
+ * `--!>` are legal end markers) — no filtering regex.
  */
 function parseRecordFile(text) {
   if (typeof text !== 'string' || text.length === 0) return { error: 'empty record file' };
-  const match = text.match(/^<!--\s*\n?([\s\S]*?)(?:--!?)>/);
-  if (!match) return { error: 'no HTML-comment block found' };
-  const lines = match[1].split(/\r?\n/);
+  if (!text.startsWith('<!--')) return { error: 'no HTML-comment block found' };
+  const end = findHtmlCommentEnd(text, 4);
+  if (end === null) return { error: 'unterminated metadata comment' };
+  const lines = text.slice(4, end.index).split(/\r?\n/);
   const firstIdx = lines.findIndex((l) => l.trim().length > 0);
   if (firstIdx === -1) return { error: 'empty metadata block' };
   if (!lines[firstIdx].trim().startsWith(MARKER)) {
@@ -171,7 +219,7 @@ function parseRecordFile(text) {
   if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) {
     return { error: 'metadata is not a JSON object' };
   }
-  const body = text.slice(match[0].length).replace(/^\s*\n/, '');
+  const body = text.slice(end.index + end.length).replace(/^\s*\n/, '');
   return { meta, body };
 }
 
@@ -617,6 +665,8 @@ module.exports = {
   serializeRecord,
   parseRecordFile,
   escapeHtmlCommentJson,
+  findHtmlCommentEnd,
+  stripHtmlComments,
   validatePatternMeta,
   validateOccurrenceMeta,
   loadRecords,
