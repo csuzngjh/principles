@@ -22,7 +22,7 @@ const TEST_TASK: PDTaskSpec = {
 };
 
 describe('PDTaskStore', () => {
-  const tmpDir = path.join(os.tmpdir(), `pd-task-store-test-${Date.now()}-${Math.random()}`);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-task-store-test-'));
   const stateDir = path.join(tmpDir, '.state');
 
   beforeEach(() => {

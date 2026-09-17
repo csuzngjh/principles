@@ -12,7 +12,7 @@
  *   DiagnosticianOutputV1Schema validation failure → output_invalid
  */
 import { Value } from '@sinclair/typebox/value';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCliProcess, type CliOutput } from '../utils/cli-process-runner.js';
@@ -87,24 +87,58 @@ interface RunState {
 
 interface MessageFileRef {
   filePath: string;
+  /**
+   * Unique temp root created by writeMessageFile when no workspaceDir is
+   * configured. Removed recursively on cleanup (js/insecure-temporary-file
+   * remediation, PRI-827).
+   */
+  cleanupDir?: string;
 }
 
+/**
+ * Persist an inter-process message payload so the runtime CLI can read it via
+ * --message-file. When no workspaceDir is configured, the payload is written
+ * inside a fresh mkdtemp root owned solely by this call; on any write failure
+ * that root is removed here so failed writes cannot leak temp dirs
+ * (PRI-827 / js/insecure-temporary-file). Workspace-owned directories are
+ * never removed: they are shared, not exclusive to this call.
+ */
 async function writeMessageFile(message: string, workspaceDir?: string): Promise<MessageFileRef> {
   // Keep the payload in the PD workspace so cleanup and workspace ownership remain explicit.
   const baseDir = workspaceDir
     ? join(workspaceDir, '.pd', 'tmp')
-    : tmpdir();
-  await mkdir(baseDir, { recursive: true });
-  const filePath = join(baseDir, `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.json`);
-  await writeFile(filePath, message, 'utf8');
+    : await mkdtemp(join(tmpdir(), 'pd-msg-'));
+  const cleanupDir = workspaceDir ? undefined : baseDir;
+  try {
+    await mkdir(baseDir, { recursive: true });
+    const filePath = join(baseDir, `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.json`);
+    await writeFile(filePath, message, 'utf8');
 
-  return { filePath };
+    return { filePath, cleanupDir };
+  } catch (error) {
+    if (cleanupDir !== undefined) {
+      try {
+        await rm(cleanupDir, { recursive: true, force: true });
+      } catch {
+        // Best effort: preserve the original error even if cleanup also fails.
+      }
+    }
+    throw error;
+  }
 }
 
+/**
+ * Remove a message file created by writeMessageFile, including its unique temp
+ * root when one was created. Best effort on both success and failure paths.
+ */
 async function cleanupMessageFile(ref: MessageFileRef | undefined): Promise<void> {
   if (!ref) return;
   try {
-    await rm(ref.filePath, { force: true });
+    if (ref.cleanupDir !== undefined) {
+      await rm(ref.cleanupDir, { recursive: true, force: true });
+    } else {
+      await rm(ref.filePath, { force: true });
+    }
   } catch {
     // File may already be gone; ignore cleanup errors
   }
