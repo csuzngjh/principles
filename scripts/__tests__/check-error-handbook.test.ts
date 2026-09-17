@@ -147,4 +147,60 @@ describe('check:error-handbook — records authority gate', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('requires structured recurrence fields on runtime-recorded occurrences', () => {
+    const root = setupRepo();
+    try {
+      writeOccurrenceRecord(
+        root,
+        {
+          schemaVersion: 1,
+          recordType: 'occurrence',
+          occurrenceId: 'OCC-20260917T120000Z-abc234',
+          patternRecordId: 'P-ERR-068',
+          displayId: 'ERR-068',
+          observedAt: '2026-09-17',
+          source: 'PR #1700',
+        },
+        'recurrence without structured facts',
+      );
+      const findings = collectFindings(root);
+      expect(
+        findings.errors.some(
+          (e) => e.includes('OCC-20260917T120000Z-abc234') && e.includes('missing structured recurrence fields'),
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a runtime-recorded occurrence that carries all structured fields', () => {
+    const root = setupRepo();
+    try {
+      writeOccurrenceRecord(
+        root,
+        {
+          schemaVersion: 1,
+          recordType: 'occurrence',
+          occurrenceId: 'OCC-20260917T120000Z-abc234',
+          patternRecordId: 'P-ERR-068',
+          displayId: 'ERR-068',
+          observedAt: '2026-09-17',
+          source: 'PR #1700',
+          originPattern: 'EP-06',
+          invariant: 'auxiliary-release-lockfile-not-updated',
+          severity: 'P1',
+          escaped: 'none',
+          caughtBy: 'pr-review',
+          guard: 'check:release-locks',
+        },
+        'recurrence with structured facts',
+      );
+      const findings = collectFindings(root);
+      expect(findings.errors).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

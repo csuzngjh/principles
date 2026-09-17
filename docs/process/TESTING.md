@@ -153,7 +153,7 @@ npm run quality:report
 ```
 
 This creates `docs/quality-reports/YYYY-MM.md` with:
-1. **Error Experience Handbook stats** — ERR total, recurring count, recurrence rate
+1. **ERR structured records stats** — ERR total, recurring count, recurrence rate（数据源=`records/` 权威树）
 2. **Test coverage** — Test file count per package
 3. **Code coverage** — Lines/functions/branches/statements per package
 4. **Module coupling** — Graph nodes, edges, god nodes from `graphify-out/graph.json`

@@ -24,7 +24,7 @@
  *   - Graceful degradation with reasons (Rule 9)
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, openSync, fstatSync, closeSync } from 'node:fs';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -46,25 +46,43 @@ const ROOT = resolve(__dirname, '..');
  */
 function getGraphifyDir(rootDir) {
   const gitPath = join(rootDir, '.git');
-  if (existsSync(gitPath)) {
+  // Classify and read through ONE opened handle: a statSync→readFileSync pair
+  // left a window where .git could be swapped between check and use
+  // (CodeQL js/file-system-race). Directory open fails on Windows, so the
+  // failure branch still needs one statSync to tell directory from missing —
+  // safe because nothing further is read from the path afterwards.
+  let fd;
+  try {
+    fd = openSync(gitPath, 'r');
+  } catch {
+    let stats = null;
     try {
-      const stats = statSync(gitPath);
-      if (stats.isDirectory()) {
-        return join(gitPath, 'graphify');
-      } else if (stats.isFile()) {
-        const content = readFileSync(gitPath, 'utf8').trim();
-        const match = /^gitdir:\s*(.+)$/.exec(content);
-        if (match) {
-          let gitDir = match[1].trim();
-          if (!isAbsolute(gitDir)) {
-            gitDir = resolve(rootDir, gitDir);
-          }
-          return join(gitDir, 'graphify');
-        }
-      }
+      stats = statSync(gitPath);
     } catch {
-      // ignore and fallback
+      // .git not found
     }
+    if (stats !== null && stats.isDirectory()) return join(gitPath, 'graphify');
+    return join(rootDir, '.git-fallback-graphify');
+  }
+  try {
+    const stats = fstatSync(fd);
+    if (stats.isDirectory()) {
+      // POSIX permits opening directories; the cache lives under it
+      return join(gitPath, 'graphify');
+    }
+    const content = readFileSync(fd, 'utf8').trim();
+    const match = /^gitdir:\s*(.+)$/.exec(content);
+    if (match) {
+      let gitDir = match[1].trim();
+      if (!isAbsolute(gitDir)) {
+        gitDir = resolve(rootDir, gitDir);
+      }
+      return join(gitDir, 'graphify');
+    }
+  } catch {
+    // ignore and fallback
+  } finally {
+    closeSync(fd);
   }
   return join(rootDir, '.git-fallback-graphify');
 }
@@ -219,7 +237,6 @@ export function readCoverage(coveragePath) {
     let totalStatements = 0, coveredStatements = 0;
     let totalFunctions = 0, coveredFunctions = 0;
     let totalBranches = 0, coveredBranches = 0;
-    let totalLines = 0, coveredLines = 0;
     for (const key of Object.keys(data)) {
       const fileData = data[key];
       if (typeof fileData !== 'object' || fileData === null) continue;

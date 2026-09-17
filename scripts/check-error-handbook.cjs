@@ -29,8 +29,10 @@
  * `parseRecurrenceMeta` is intentionally no longer used here: recurrence-meta
  * HTML comments are a legacy-handbook convention. Structured recurrence facts
  * live as occurrence metadata fields now. The parser itself stays in
- * error-handbook-meta.cjs because error-context and its parity tests still
- * consume it.
+ * error-handbook-meta.cjs as the CJS parity reference for the ESM mirror in
+ * error-context.mjs (error-context.test.ts imports BOTH and asserts they
+ * agree, so the mirror cannot silently drift); it has no other production
+ * consumer since this cutover.
  */
 
 'use strict';
@@ -45,6 +47,39 @@ const INDEX_RELATIVE_PATH = path.join('docs', 'process', 'error-management', 'ER
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8');
 }
+
+/**
+ * ERR tokens in ERROR_PATTERN_INDEX.md use two presentations: `ERR-NNN` for
+ * active patterns and `archived-NNN` for archived ones. Bare 3-4 digit
+ * numbers (PRI-828, PR #1234, dates) are NOT ERR tokens and must be ignored.
+ * @returns {{ referenced: Set<string>, activeTokens: Set<string> }}
+ */
+function extractIndexErrIds(index) {
+  const referenced = new Set();
+  const activeTokens = new Set();
+  for (const m of index.matchAll(/\b(?:archived-)?(?:ERR-)?(\d{3,4})\b/g)) {
+    if (m[0].startsWith('archived-')) {
+      referenced.add(`ERR-${m[1]}`);
+    } else if (m[0].startsWith('ERR-')) {
+      referenced.add(`ERR-${m[1]}`);
+      activeTokens.add(`ERR-${m[1]}`);
+    }
+  }
+  return { referenced, activeTokens };
+}
+
+/**
+ * observedAt may be month-precision (YYYY-MM, a legitimate legacy fact);
+ * normalize to first-of-month before Date.parse so it cannot lose to a
+ * day-precision date in comparisons.
+ */
+function observedAtToMs(observedAt) {
+  return Date.parse(`${observedAt}${observedAt.length === 7 ? '-01' : ''}T00:00:00Z`);
+}
+
+/** Id shape produced by `error:record add-occurrence` (vs migration ids). */
+const RUNTIME_OCCURRENCE_ID = /^OCC-\d{8}T\d{6}Z-[0-9a-z]{6}$/;
+const STRUCTURED_RECURRENCE_FIELDS = ['originPattern', 'invariant', 'severity', 'escaped', 'caughtBy', 'guard'];
 
 /**
  * Collect every gate finding for the records authority.
@@ -78,24 +113,31 @@ function collectFindings(repoRoot, options = {}) {
     if (occ.meta.originPattern && !routingIds.has(occ.meta.originPattern)) {
       errors.push(`occurrence ${occ.meta.occurrenceId} references unknown routing pattern ${occ.meta.originPattern}`);
     }
+    // Occurrences recorded at runtime (via `error:record add-occurrence`) are
+    // recurrences and must carry the structured recurrence facts — the
+    // post-cutover successor of the v2 "recurrence-meta mandatory" rule that
+    // was prose-only before. Migration-shaped ids are grandfathered history.
+    if (RUNTIME_OCCURRENCE_ID.test(occ.meta.occurrenceId)) {
+      const missing = STRUCTURED_RECURRENCE_FIELDS.filter((k) => !Object.hasOwn(occ.meta, k));
+      if (missing.length > 0) {
+        errors.push(
+          `occurrence ${occ.meta.occurrenceId} (recorded at runtime) is missing structured recurrence fields: ${missing.join(', ')}`,
+        );
+      }
+    }
   }
 
   // INDEX ↔ records display-id integrity (both directions, active only —
   // archived patterns may legitimately be absent from the index cards).
-  const referencedInIndex = new Set(
-    [...index.matchAll(/\b(?:archived-)?(ERR-)?(\d{3,4})\b/g)]
-      .filter((m) => m[1] === 'ERR-' || m[0].startsWith('archived-'))
-      .map((m) => `ERR-${m[2]}`),
-  );
-  for (const displayId of referencedInIndex) {
+  const indexIds = extractIndexErrIds(index);
+  for (const displayId of indexIds.referenced) {
     if (![...patterns.values()].some((p) => p.meta.displayId === displayId)) {
       errors.push(`${displayId} is referenced in ERROR_PATTERN_INDEX.md but has no pattern record`);
     }
   }
-  const indexedDisplayIds = new Set([...index.matchAll(/\bERR-\d{3,4}\b/g)].map((m) => m[0]));
   for (const pattern of patterns.values()) {
     if (pattern.meta.status !== 'active') continue;
-    if (!indexedDisplayIds.has(pattern.meta.displayId)) {
+    if (!indexIds.activeTokens.has(pattern.meta.displayId)) {
       errors.push(`${pattern.meta.displayId} is an active pattern record but is not mapped in ERROR_PATTERN_INDEX.md`);
     }
   }
@@ -104,7 +146,6 @@ function collectFindings(repoRoot, options = {}) {
   const activeCount = [...patterns.values()].filter((p) => p.meta.status === 'active').length;
   const archivedCount = patterns.size - activeCount;
   const structuredCount = occurrences.filter((o) => Object.hasOwn(o.meta, 'guard')).length;
-  const patternStats = stats;
 
   return {
     errors,
@@ -116,13 +157,13 @@ function collectFindings(repoRoot, options = {}) {
       occurrences: occurrences.length,
       structuredCount,
       routingCards: routing.patterns.length,
-      recentPatterns: [...patternStats.values()].filter((s) => s.recentCount > 0).length,
+      recentPatterns: [...stats.values()].filter((s) => s.recentCount > 0).length,
     },
     // exposed for --hotspots / --audit without re-reading the tree
     patterns,
     occurrences,
     routing,
-    patternStats,
+    patternStats: stats,
   };
 }
 
@@ -137,7 +178,8 @@ function main() {
   const root = process.cwd();
   const auditMode = process.argv.includes('--audit');
   const hotspotMode = process.argv.includes('--hotspots');
-  const findings = collectFindings(root);
+  const now = new Date();
+  const findings = collectFindings(root, { now });
 
   if (hotspotMode) {
     // Recurrence escalation report over structured occurrences (same
@@ -155,7 +197,7 @@ function main() {
         caughtBy: o.meta.caughtBy,
         guard: o.meta.guard,
       }));
-    const { hotspots, decisionRequired } = aggregateHotspots(recurrences, findings.routing.patterns, new Date());
+    const { hotspots, decisionRequired } = aggregateHotspots(recurrences, findings.routing.patterns, now);
     if (hotspots.length === 0) {
       console.log('[check:error-handbook] No structured recurrence records yet.');
       console.log('[check:error-handbook] Record recurrences via `npm run error:record add-occurrence --invariant ... --severity ... --escaped ... --caughtBy ... --guard ...`.');
@@ -194,9 +236,9 @@ function main() {
         stale.push({ id: pattern.meta.displayId, recordId: pattern.meta.recordId, lastSeen: null, daysSince: null });
         continue;
       }
-      const t = Date.parse(`${entry.lastSeen}${entry.lastSeen.length === 7 ? '-01' : ''}T00:00:00Z`);
+      const t = observedAtToMs(entry.lastSeen);
       if (!Number.isNaN(t)) {
-        const daysSince = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
+        const daysSince = Math.floor((now.getTime() - t) / (1000 * 60 * 60 * 24));
         if (daysSince > STALE_DAYS) {
           stale.push({ id: pattern.meta.displayId, recordId: pattern.meta.recordId, lastSeen: entry.lastSeen, daysSince });
         }
