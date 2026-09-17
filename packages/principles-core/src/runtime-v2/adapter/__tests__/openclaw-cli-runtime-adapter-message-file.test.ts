@@ -127,6 +127,10 @@ describe('OpenClawCliRuntimeAdapter healthCheck message-file lifecycle', () => {
       expect(filePath).not.toContain(path.join('.pd', 'tmp'));
       // It should still match the msg-*.json naming convention.
       expect(path.basename(filePath)).toMatch(/^msg-.*\.json$/);
+
+      // PRI-827: the unique pd-msg-* temp root is created via mkdtemp and fully
+      // removed by cleanup together with the message file (not just the file).
+      expect(fs.existsSync(path.dirname(filePath))).toBe(false);
     });
   });
 
@@ -159,7 +163,7 @@ describe('OpenClawCliRuntimeAdapter healthCheck message-file lifecycle', () => {
       stubFirstTwoProbes();
       // Capture the file path before the probe runs so we can check cleanup
       // after the early-return on timeout.
-      let createdFilePath = '';
+      let createdFilePath: string;
       mockRunCliProcess.mockResolvedValueOnce(
         makeCliOutput({ timedOut: true, exitCode: null }),
       );

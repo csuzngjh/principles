@@ -7,11 +7,11 @@
  */
 import { describe, it, expect, afterAll } from 'vitest';
 import { parseErrStats, generateReport, readCoverage, readGraphStats } from '../quality-report.mjs';
-import { writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const TMP = join(tmpdir(), `quality-report-test-${Date.now()}`);
+const TMP = mkdtempSync(join(tmpdir(), 'quality-report-test-'));
 
 describe('parseErrStats', () => {
   it('should count ERR entries and recurrence fields', () => {
