@@ -75,6 +75,7 @@ afterEach(() => {
 
 // ─── Helper: create temp workspace with .pd/config.yaml ────────────────────
 
+/** Create a scratch workspace with .pd/config.yaml under a unique temp root. */
 function createTempWorkspace(configYaml: string): string {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-probe-test-'));
   const pdDir = path.join(tmpDir, '.pd');
