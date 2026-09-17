@@ -18,7 +18,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'node:os';
-import { getPdRuntimeDir } from '../src/mvp-config.js';
+import { getPdRuntimeDir, getPluginExtDir } from '../src/mvp-config.js';
 import { install } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
 import { setLanguage } from '../src/i18n.js';
@@ -104,11 +104,43 @@ describe('install() release-manager dependency install + authority import smoke 
     vi.mocked(fs.readdirSync).mockReturnValue([]);
   });
 
+  function seedPreviousInstall(): void {
+    const originalDirs = [getPdRuntimeDir(), getPluginExtDir()];
+    for (const originalDir of originalDirs) {
+      realFs.mkdirSync(originalDir, { recursive: true });
+      realFs.writeFileSync(path.join(originalDir, 'previous-install.txt'), originalDir);
+    }
+    vi.mocked(fs.renameSync).mockImplementation((source, destination) => {
+      if (!originalDirs.includes(String(source)) && !originalDirs.includes(String(destination))) return;
+      realFs.mkdirSync(path.dirname(String(destination)), { recursive: true });
+      realFs.renameSync(source, destination);
+    });
+    vi.mocked(fs.rmSync).mockImplementation((target, options) => {
+      if (originalDirs.includes(String(target))) realFs.rmSync(target, options);
+    });
+  }
+
+  function expectPreviousInstallRestored(): void {
+    const renames = vi.mocked(fs.renameSync).mock.calls;
+    for (const originalDir of [getPdRuntimeDir(), getPluginExtDir()]) {
+      const backupCalls = renames.filter(([source]) => source === originalDir);
+      expect(backupCalls).toHaveLength(1);
+      const backupCall = backupCalls[0]!;
+      expect(backupCall[1]).not.toBe(originalDir);
+      expect(renames).toContainEqual([backupCall[1], originalDir]);
+      const restoreIndex = renames.findIndex(([source, destination]) =>
+        source === backupCall[1] && destination === originalDir);
+      expect(restoreIndex).toBeGreaterThan(renames.indexOf(backupCall));
+    }
+  }
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.mocked(fs.existsSync).mockReset();
     vi.mocked(fs.readFileSync).mockReset();
     vi.mocked(fs.readdirSync).mockReset();
+    vi.mocked(fs.renameSync).mockReset();
+    vi.mocked(fs.rmSync).mockReset();
     if (savedLegacyNpmInstall === undefined) delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
     if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
@@ -127,6 +159,7 @@ describe('install() release-manager dependency install + authority import smoke 
     const authorityPath = path.join(runtimeDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js');
     expect(getPdRuntimeDir()).toBe(runtimeDir);
     expect(realFs.existsSync(authorityPath)).toBe(false);
+    seedPreviousInstall();
     const result = await install(
       { ...baseInstallOptions, workspaceDir: path.join(tempHome, 'workspace') },
       path.join(tempHome, 'asset'),
@@ -137,6 +170,10 @@ describe('install() release-manager dependency install + authority import smoke 
     expect(result.error).toMatch(/ReleaseManager authority module failed to load/);
     expect(result.error).toMatch(/Re-run the installer to repair/);
     expect(result.error).toContain('Previous install has been restored');
+    expectPreviousInstallRestored();
+    for (const originalDir of [runtimeDir, getPluginExtDir()]) {
+      expect(realFs.readFileSync(path.join(originalDir, 'previous-install.txt'), 'utf8')).toBe(originalDir);
+    }
     expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(authorityPath);
     const authorityProbes = vi.mocked(fs.existsSync).mock.calls
       .map(([value]) => String(value))
@@ -185,6 +222,7 @@ describe('install() release-manager dependency install + authority import smoke 
     expect(result.error).toMatch(/ReleaseManager authority module failed to load/);
     expect(result.error).toContain('fixture-missing-dependency.js');
     expect(result.error).toContain('Previous install has been restored');
+    expectPreviousInstallRestored();
     expect(fs.existsSync).toHaveBeenCalledWith(authorityPath);
   });
 });
