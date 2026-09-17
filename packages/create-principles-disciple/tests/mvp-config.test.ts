@@ -939,7 +939,10 @@ describe('Install timeout is configurable (P2-1 fix)', () => {
   it('default timeout is 300 seconds (5 minutes)', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    expect(content).toContain("'300000'");
+    // The default lives in resolveInstallTimeoutMs()'s fallback returns since
+    // the review-2026-09-17 hardening moved the inline parseInt there (the
+    // malformed-env value now falls back loud instead of becoming NaN).
+    expect(content).toContain('300000');
   });
 
   it('timeout reads from PD_INSTALL_TIMEOUT_MS env var', () => {
