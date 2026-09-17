@@ -277,6 +277,18 @@ export function UpdatePage() {
               </span>
             </div>
 
+            {/* PR-C: identity divergence — the plugin-directory copy disagrees
+                with the signed active release. Surfaced, never hidden: the
+                active release stays authoritative, the Owner sees why. */}
+            {statusData?.identityDivergence && (
+              <div className="border border-amber/35 rounded-[4px] px-3 py-2 text-[12px] leading-relaxed text-ink-2">
+                {t("pages.update.identityDivergence", {
+                  active: statusData.identityDivergence.activeVersion,
+                  plugin: statusData.identityDivergence.pluginVersion,
+                })}
+              </div>
+            )}
+
             {/* Latest version */}
             <div className="flex items-center justify-between">
               <span className="text-ink-3 text-[13px]">{t("pages.update.latestVersion")}</span>

@@ -1756,20 +1756,70 @@ async function doInlineFullUpdate(workspaceDir: string, gatewayFlow: GatewayCoor
  * needs no further change.
  */
 /**
+ * PR-C: the installed active release identity, read by the ReleaseManager
+ * (`manager.inspect()` — one read inside `createReleaseManagerAuthority`,
+ * reused here; never a second identity file). When provided, the governed
+ * check reports THIS as the Owner-visible current version: the signed active
+ * release is authoritative, while the plugin directory may hold an
+ * independently synced copy. `undefined` = legacy computation, byte-identical
+ * to the pre-PR-C wire contract.
+ */
+interface ActiveReleaseIdentity {
+  readonly productVersion: string;
+  readonly releaseId: string;
+  readonly generation: number;
+}
+
+/**
+ * Additive check diagnostics (rc-9): where the reported currentVersion came
+ * from, and — when both reads exist — whether the plugin directory copy
+ * disagrees with the active release. Independently versioned components are
+ * not corruption; the divergence is surfaced, never silently resolved.
+ * sourceCommit is deliberately absent until the PR-B identity contract lands.
+ */
+interface VersionIdentityDiagnostics {
+  readonly versionSource: 'active-release' | 'plugin-package';
+  readonly identityDivergence: {
+    readonly activeVersion: string;
+    readonly pluginVersion: string;
+    readonly releaseId: string;
+    readonly generation: number;
+  } | null;
+}
+
+/**
  * Compute the legacy update-check response body (PRI-659 handler body, split
  * out in PRI-672 so the ReleaseManager-governed check can serve the exact
- * same wire contract). Behavior is unchanged: degraded ERR-002 shape when the
- * current version cannot be determined, network checks otherwise.
+ * same wire contract). Degraded ERR-002 shape when the current version cannot
+ * be determined, network checks otherwise. PR-C: with `activeIdentity` the
+ * check compares the deliverable against the ACTIVE product version and
+ * appends {@link VersionIdentityDiagnostics}; without it the body is the
+ * legacy bytes (compatibility-fallback parity).
  */
-async function computeLegacyUpdateCheck(pluginDir: string): Promise<{
+async function computeLegacyUpdateCheck(
+  pluginDir: string,
+  activeIdentity?: ActiveReleaseIdentity,
+): Promise<{
   currentVersion: string | undefined;
   body: Record<string, unknown>;
 }> {
   // ERR-002 / Runtime Contract Rule 9: 当无法确定当前版本时（如插件未安装），
   // 返回 degraded 状态 + reason，而非 500。前端 validateUpdateStatus 要求
   // currentVersion/latestVersion 为 string，hasUpdate 为 boolean。
-  const currentVersion = readCurrentVersion(pluginDir);
+  const pluginVersion = readCurrentVersion(pluginDir);
   const codexInstalled = detectCodexInstall();
+  const identityDiagnostics: VersionIdentityDiagnostics | null = activeIdentity === undefined ? null : {
+    versionSource: 'active-release' as const,
+    identityDivergence: pluginVersion !== undefined && pluginVersion !== activeIdentity.productVersion
+      ? {
+          activeVersion: activeIdentity.productVersion,
+          pluginVersion,
+          releaseId: activeIdentity.releaseId,
+          generation: activeIdentity.generation,
+        }
+      : null,
+  };
+  const currentVersion = activeIdentity !== undefined ? activeIdentity.productVersion : pluginVersion;
   if (!currentVersion) {
     return {
       currentVersion: undefined,
@@ -1779,11 +1829,19 @@ async function computeLegacyUpdateCheck(pluginDir: string): Promise<{
         latestVersion: '',
         codexInstalled,
         error: 'Could not determine current version (plugin not installed)',
+        ...(identityDiagnostics !== null ? { ...identityDiagnostics } : {}),
       },
     };
   }
   const result = await doCheckForUpdates(currentVersion);
-  return { currentVersion, body: { ...result, codexInstalled } };
+  return {
+    currentVersion,
+    body: {
+      ...result,
+      codexInstalled,
+      ...(identityDiagnostics !== null ? { ...identityDiagnostics } : {}),
+    },
+  };
 }
 
 function legacyCheckMutation(
@@ -2052,8 +2110,14 @@ async function runReleaseManagerCheckDispatch(
   // One legacy computation feeds BOTH the shadow comparison (via legacyCheck)
   // and the response body — a governed check never doubles network cost.
   let legacyOnce: (() => Promise<Awaited<ReturnType<typeof computeLegacyUpdateCheck>>>) | null = null;
+  // PR-C: the active release record read by manager.inspect() (inside
+  // createReleaseManagerAuthority — one read, reused) is the authoritative
+  // current version for a governed check. Absent (legacy-overlay layout, no
+  // active record) ⇒ the plugin-package fallback body, explicitly unannotated
+  // as active-sourced. Assigned after the authority is constructed below.
+  let activeIdentityForBody: ActiveReleaseIdentity | undefined = undefined;
   const legacyComputed = (): Promise<Awaited<ReturnType<typeof computeLegacyUpdateCheck>>> => {
-    legacyOnce ??= () => computeLegacyUpdateCheck(pluginDir);
+    legacyOnce ??= () => computeLegacyUpdateCheck(pluginDir, activeIdentityForBody);
     return legacyOnce();
   };
   let decisionSource: ((currentVersion: string) => Promise<LegacyUpdaterDecision | null>) | null = null;
@@ -2075,6 +2139,20 @@ async function runReleaseManagerCheckDispatch(
       updateAvailable: raw.hasUpdate === true,
     };
   };
+  // PR-C (continued): derive the active identity from the SAME installStatus
+  // snapshot the readiness gate below uses — no second inspect, no second
+  // identity read.
+  const statusForBody = authority.installStatus;
+  activeIdentityForBody = statusForBody !== null
+    && typeof statusForBody.productVersion === 'string' && statusForBody.productVersion.length > 0
+    && typeof statusForBody.releaseId === 'string' && statusForBody.releaseId.length > 0
+    && typeof statusForBody.generation === 'number'
+    ? {
+        productVersion: statusForBody.productVersion,
+        releaseId: statusForBody.releaseId,
+        generation: statusForBody.generation,
+      }
+    : undefined;
   if (authority.installStatus === null || !authority.kinds.check.ready) {
     // Readiness flipped between registration sync and dispatch — explicit
     // fallback, never a half-governed check.
@@ -2092,6 +2170,11 @@ async function runReleaseManagerCheckDispatch(
     const agrees = comparison.agrees === null ? 'unknown' : String(comparison.agrees);
     console.log(`[release-manager] governed update check served (channel=${check.channel}, agrees=${agrees}${comparison.note ? `, note: ${comparison.note}` : ''})`);
   } catch (error) {
+    // PR-C: a refused governed check falls back to the FULL legacy body (no
+    // active-identity substitution) — the fallback annotation and the bytes
+    // must tell the same story, never a half-governed check (EP-03).
+    activeIdentityForBody = undefined;
+    legacyOnce = null;
     const mapped = mod.mapReleaseManagerErrorToFallback(error);
     console.log(`[release-manager] governed update check refused (${mapped.reason}) — explicit fallback to ${LEGACY_MUTATION_AUTHORITY}`);
     res.setHeader('X-PD-Mutation-Authority', `${LEGACY_MUTATION_AUTHORITY} (preferred: ${RELEASE_MANAGER_AUTHORITY} unavailable: ${mapped.reason})`);

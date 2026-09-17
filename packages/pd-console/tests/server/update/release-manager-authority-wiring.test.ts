@@ -224,6 +224,7 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     if (savedOpenclawHome === undefined) delete process.env.OPENCLAW_HOME;
     else process.env.OPENCLAW_HOME = savedOpenclawHome;
     if (savedMetadataUrl === undefined) delete process.env.PD_RELEASE_METADATA_URL;
@@ -269,6 +270,24 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
         '  release_manager_shadow: { category: quiet, enabled: true }\n  release_manager_write_authority: { category: quiet, enabled: true }',
       ),
     );
+  }
+
+  /**
+   * PR-C: a governed check with an active identity runs the deliverable
+   * comparison against the ACTIVE version, so the registry/github reads must
+   * be stubbed to keep these tests hermetic.
+   */
+  function stubRegistryFetch(latestPlugin: string, deliverable: string): void {
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith('https://registry.npmjs.org/principles-disciple')) {
+        return { ok: true, json: async () => ({ version: latestPlugin }) };
+      }
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return { ok: true, json: async () => ({ version: latestPlugin, pd: { bundledPluginVersion: deliverable } }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
   }
 
   it('default install (no config): shadow defaults ON, authority not ready without a metadata source → explicit fallback', async () => {
@@ -333,16 +352,24 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     );
   });
 
-  it('flag on, check ready: ReleaseManager serves under its own header while the body stays the legacy contract', async () => {
+  it('flag on, check ready: ReleaseManager serves under its own header and currentVersion reports the active release identity', async () => {
     enableFlag();
     authorityMock.readiness = { ready: true, reasons: [] };
+    stubRegistryFetch('1.223.0', '1.223.0');
     const req = createMockRequest('GET');
     const res = createMockResponse();
     await routes.handleUpdateRoute(req, res, tmpDir, '/check');
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res._body)).toEqual({ success: true, data: DEGRADED_LEGACY_BODY });
     expect(res._headers['x-pd-mutation-authority']).toBe('release-manager');
     expect(res._headers['x-pd-mutation-fallback-reason']).toBeUndefined();
+    // PR-C: the governed body sources currentVersion from the active release
+    // record (mock installStatus: 1.222.0), NOT from the plugin directory.
+    // No plugin copy exists here, so there is nothing to diverge from.
+    const body = (JSON.parse(res._body) as { data: Record<string, unknown> }).data;
+    expect(body.currentVersion).toBe('1.222.0');
+    expect(body.versionSource).toBe('active-release');
+    expect(body.identityDivergence).toBeNull();
+    expect(body.hasUpdate).toBe(true);
     // Mutation kinds stay on the legacy fallback even when check is ready.
     const applyRes = createMockResponse();
     await routes.handleUpdateRoute(createMockRequest('POST'), applyRes, tmpDir, '/apply');
@@ -350,6 +377,33 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     expect(applyRes._headers['x-pd-mutation-fallback-reason']).toBe(
       'release_manager_unavailable:plugin_diff_not_supported',
     );
+  });
+
+  it('flag on, check ready: a diverging plugin-directory copy is surfaced, never silently substituted', async () => {
+    enableFlag();
+    authorityMock.readiness = { ready: true, reasons: [] };
+    stubRegistryFetch('1.223.0', '1.223.0');
+    // The plugin directory holds an independently synced copy whose version
+    // disagrees with the signed active release. Independently versioned
+    // components are not corruption — but the Owner must SEE the divergence.
+    fs.writeFileSync(
+      path.join(tmpDir, 'extensions', 'principles-disciple', 'package.json'),
+      JSON.stringify({ name: 'principles-disciple', version: '1.999.0' }),
+    );
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(createMockRequest('GET'), res, tmpDir, '/check');
+    expect(res.statusCode).toBe(200);
+    expect(res._headers['x-pd-mutation-authority']).toBe('release-manager');
+    const body = (JSON.parse(res._body) as { data: Record<string, unknown> }).data;
+    // The active release stays authoritative for hasUpdate/currentVersion.
+    expect(body.currentVersion).toBe('1.222.0');
+    expect(body.versionSource).toBe('active-release');
+    expect(body.identityDivergence).toEqual({
+      activeVersion: '1.222.0',
+      pluginVersion: '1.999.0',
+      releaseId: 'r'.repeat(64),
+      generation: 2,
+    });
   });
 
   it('ReleaseManager refusal: explicit fallback re-annotation, legacy body served, no partial state', async () => {
@@ -792,7 +846,7 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     return fs.readdirSync(dir).filter((name) => name.startsWith('console-'));
   }
 
-  it('lifecycle/check — the Companion-visible wire contract is byte-identical under RM governance and under the compatibility fallback', async () => {
+  it('lifecycle/check — the Companion-visible subset stays parseable under RM governance and the fallback; governed currentVersion reports the active release', async () => {
     // The exact subset the Desktop Companion reads
     // (pd-companion/src/lib/poller.ts → parseUpdateCheckResponse):
     // `{data:{hasUpdate:boolean, latestVersion?:string}}`.
@@ -818,15 +872,23 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     expect(fallbackRes._headers['x-pd-mutation-authority']).toContain(LEGACY_MUTATION_AUTHORITY);
     expect(companionShape(JSON.parse(fallbackRes._body))).toEqual({ hasUpdate: false, latestVersion: '' });
 
-    // (b) RM-served governed check: same bytes on the wire.
+    // (b) RM-served governed check: the Companion subset still parses. PR-C
+    // contract change (Owner-visible): the governed body reports the ACTIVE
+    // release identity as currentVersion (with additive identity diagnostics),
+    // so the bodies are no longer byte-identical — the active identity is the
+    // authoritative current version, and any divergence from the plugin
+    // directory copy is surfaced instead of hidden.
     enableFlag();
     authorityMock.readiness = { ready: true, reasons: [] };
+    stubRegistryFetch('1.223.0', '1.223.0');
     const governedRes = createMockResponse();
     await routes.handleUpdateRoute(createMockRequest('GET'), governedRes, tmpDir, '/check');
     expect(governedRes.statusCode).toBe(200);
     expect(governedRes._headers['x-pd-mutation-authority']).toBe(RELEASE_MANAGER_AUTHORITY);
-    expect(governedRes._body).toBe(fallbackRes._body);
-    expect(companionShape(JSON.parse(governedRes._body))).toEqual({ hasUpdate: false, latestVersion: '' });
+    const governedBody = (JSON.parse(governedRes._body) as { data: Record<string, unknown> }).data;
+    expect(governedBody.currentVersion).toBe('1.222.0');
+    expect(governedBody.versionSource).toBe('active-release');
+    expect(companionShape(JSON.parse(governedRes._body))).toEqual({ hasUpdate: true, latestVersion: '1.223.0' });
   });
 
   it('lifecycle/apply-full — ReleaseManager performs the mutation, owns the journal, and the console opens no second transaction', async () => {

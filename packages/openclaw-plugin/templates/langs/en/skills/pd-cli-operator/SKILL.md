@@ -20,7 +20,14 @@ pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --s
   trajectory evidence, candidates likely gated (`needs_evidence`) by the
   admission threshold — the CLI output warns about this.
 - `--session <id>` is validated up front; a missing session fails with
-  `session_not_found` before anything is written.
+  `session_not_found` before anything is written. When the binding is
+  verified but the trajectory evidence is empty or unreadable, the record
+  degrades honestly to bound + evidence-unavailable and the admission gate
+  decides — no evidence is fabricated.
+- A successful command returning a `painId` is only a record receipt; whether
+  the diagnosis produced candidates and whether they were admitted is decided
+  by `candidateIds` / `admissionResults` / `ledgerEntryIds` in the JSON
+  output. Activation is a separate stage that follows Owner approval.
 
 Success requires:
 - `status` is `succeeded`

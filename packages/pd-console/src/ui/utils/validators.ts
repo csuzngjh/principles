@@ -1388,6 +1388,15 @@ export interface UpdateStatusData {
   pluginLatestVersion?: string;
   /** True when a newer plugin is published but the installer has not been republished to bundle it. */
   syncPending?: boolean;
+  /** PR-C: present on governed checks — the reported currentVersion comes from the active release identity. */
+  versionSource?: 'active-release' | 'plugin-package';
+  /** PR-C: the plugin-directory copy disagrees with the signed active release. Surfaced, never silently resolved. */
+  identityDivergence?: {
+    activeVersion: string;
+    pluginVersion: string;
+    releaseId: string;
+    generation: number;
+  };
 }
 
 export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
@@ -1414,6 +1423,25 @@ export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
   }
   if (Object.hasOwn(v, 'syncPending') && typeof v.syncPending === 'boolean') {
     result.syncPending = v.syncPending;
+  }
+  if (Object.hasOwn(v, 'versionSource') && (v.versionSource === 'active-release' || v.versionSource === 'plugin-package')) {
+    result.versionSource = v.versionSource;
+  }
+  if (Object.hasOwn(v, 'identityDivergence') && isObject(v.identityDivergence)) {
+    const divergence: Record<string, unknown> = v.identityDivergence;
+    if (
+      Object.hasOwn(divergence, 'activeVersion') && isString(divergence.activeVersion)
+      && Object.hasOwn(divergence, 'pluginVersion') && isString(divergence.pluginVersion)
+      && Object.hasOwn(divergence, 'releaseId') && isString(divergence.releaseId)
+      && Object.hasOwn(divergence, 'generation') && typeof divergence.generation === 'number'
+    ) {
+      result.identityDivergence = {
+        activeVersion: divergence.activeVersion,
+        pluginVersion: divergence.pluginVersion,
+        releaseId: divergence.releaseId,
+        generation: divergence.generation,
+      };
+    }
   }
   return result;
 }
