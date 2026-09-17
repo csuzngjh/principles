@@ -3,6 +3,7 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { resolveApplyFullTimeoutMs } from './update-timeout.js';
 import {
   loadPdConfig,
   computeFlagsFromLoadResult,
@@ -217,28 +218,12 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
 
 const REQUEST_TIMEOUT_MS = 10000;
 const UPDATE_APPLY_TIMEOUT_MS = 120000;
-const UPDATE_APPLY_FULL_DEFAULT_TIMEOUT_MS = 180000;
 // Full update downloads a tarball + copies files — allow 3 min for slow networks.
 // PD_UPDATE_APPLY_FULL_TIMEOUT_MS (ms) overrides it for slow-disk machines:
 // a real RM apply can legitimately exceed 3 minutes there, and a 504 while
 // the update SUCCEEDS server-side is the worst possible signal (observed in
 // the PRI-671 upgrade gate on Windows/AV-slow disks). Same knob pattern as
 // the installer's PD_INSTALL_TIMEOUT_MS.
-//
-// rc-3: a malformed value must fall back LOUD to the default — parseInt would
-// yield NaN and setTimeout(NaN) fires immediately, instantly 504ing every
-// apply-full while looking like a timeout "configuration" (review finding
-// 2026-09-17).
-function resolveApplyFullTimeoutMs(): number {
-  const raw = process.env.PD_UPDATE_APPLY_FULL_TIMEOUT_MS;
-  if (raw === undefined || raw.trim().length === 0) return UPDATE_APPLY_FULL_DEFAULT_TIMEOUT_MS;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    console.error(`[pd-console] PD_UPDATE_APPLY_FULL_TIMEOUT_MS=${JSON.stringify(raw)} is not a positive number — using the ${UPDATE_APPLY_FULL_DEFAULT_TIMEOUT_MS}ms default.`);
-    return UPDATE_APPLY_FULL_DEFAULT_TIMEOUT_MS;
-  }
-  return parsed;
-}
 const UPDATE_APPLY_FULL_TIMEOUT_MS = resolveApplyFullTimeoutMs();
 
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
