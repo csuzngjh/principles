@@ -106,6 +106,7 @@ async function runStage({ systemPrompt, message, validator, taskId, stage }) {
 async function runGroupRepeat(g, repeat) {
   const taskIdBase = `pri815-${g.source_group_id}-r${repeat}`;
   const contextHash = hashContextRefs(g.contextRefs);
+  const log = (m) => console.log(`[${g.source_group_id} r${repeat}] ${m} ${new Date().toISOString().slice(11, 19)}`);
 
   // Dreamer — production builder, full diagnosis as predecessorOutput
   const dBuilder = new DreamerPromptBuilder({ coreGrounding: true });
@@ -117,6 +118,7 @@ async function runGroupRepeat(g, repeat) {
     coreGrounding: true,
   });
   const dreamer = await runStage({ ...dPrompt, validator: new DefaultDreamerValidator(), taskId: `dreamer-${taskIdBase}`, stage: 'dreamer' });
+  log(`dreamer ok=${dreamer.ok} ms=${dreamer.latencyMs}`);
   if (!dreamer.ok) return { group: g.source_group_id, repeat, aborted: 'dreamer_invalid', dreamer };
 
   // Philosopher — production builder, dreamer artifact as input
@@ -130,6 +132,7 @@ async function runGroupRepeat(g, repeat) {
     coreGrounding: true,
   });
   const philosopher = await runStage({ ...pPrompt, validator: new DefaultPhilosopherValidator(), taskId: `philosopher-${taskIdBase}`, stage: 'philosopher' });
+  log(`philosopher ok=${philosopher.ok} ms=${philosopher.latencyMs}`);
   if (!philosopher.ok) return { group: g.source_group_id, repeat, aborted: 'philosopher_invalid', dreamer, philosopher };
 
   const philosopherArtifactId = `pi-art-philosopher-${taskIdBase}-run1`;
@@ -171,7 +174,9 @@ async function runGroupRepeat(g, repeat) {
   const [first, second] = repeat % 2 === 1 ? ['A', 'B'] : ['B', 'A'];
   const out = { group: g.source_group_id, repeat, dreamer, philosopher };
   out[`scribe_${first}`] = await mk(first);
+  log(`scribe_${first} ok=${out[`scribe_${first}`].ok} ms=${out[`scribe_${first}`].latencyMs}`);
   out[`scribe_${second}`] = await mk(second);
+  log(`scribe_${second} ok=${out[`scribe_${second}`].ok} ms=${out[`scribe_${second}`].latencyMs}`);
   return out;
 }
 

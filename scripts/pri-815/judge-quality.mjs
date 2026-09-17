@@ -54,8 +54,8 @@ const frozen = JSON.parse(fs.readFileSync(path.join(DATA, 'frozen-inputs.json'),
 const diagByGroup = new Map(frozen.map((g) => [g.source_group_id, g.diagnosis]));
 const judgments = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : { pairs: {} };
 
-for (const f of fs.readdirSync(path.join(DATA, runsDir)).filter((x) => x.endsWith('.json'))) {
-  const run = JSON.parse(fs.readFileSync(path.join(DATA, runsDir, f), 'utf8'));
+for (const f of fs.readdirSync(runsDir).filter((x) => x.endsWith('.json'))) {
+  const run = JSON.parse(fs.readFileSync(path.join(runsDir, f), 'utf8'));
   const diag = diagByGroup.get(run.group);
   if (!diag) continue;
   for (const r of run.repeats) {
@@ -63,7 +63,11 @@ for (const f of fs.readdirSync(path.join(DATA, runsDir)).filter((x) => x.endsWit
     if (judgments.pairs[key]) continue;
     const a = r.scribe_A, b = r.scribe_B;
     if (!a?.parsed || !b?.parsed) {
-      judgments.pairs[key] = { key, skipped: 'invalid_output_stays_in_denominator', aValid: !!a?.parsed, bValid: !!b?.parsed };
+      // SPEC §30: generation failures stay in the denominator — a pair where
+      // exactly one arm produced a valid output is won by the valid arm; both
+      // invalid = BOTH_BAD. Never dropped.
+      const verdict = a?.parsed ? 'A' : b?.parsed ? 'B' : 'BOTH_BAD';
+      judgments.pairs[key] = { key, skipped: 'generation_failure', aValid: !!a?.parsed, bValid: !!b?.parsed, verdict, reasons: 'asymmetric or dual generation failure (SPEC §30)' };
       continue;
     }
     const bIsX = seededBool(key);
