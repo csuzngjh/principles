@@ -47,6 +47,8 @@ const authorityMock = vi.hoisted(() => ({
   /** PRI-729: proves the console never reaches for a rollback it cannot serve. */
   rollbackCalls: 0,
   checkRejection: null as (Error & { reason?: string; nextAction?: string }) | null,
+  /** PRI-833 review: make the mock's check run the shadow legacyCheck BEFORE throwing. */
+  checkInvokeLegacyBeforeReject: false,
   createThrows: false,
   createCalls: 0,
   /** Readiness reported at DISPATCH time (inside the governed check handler). */
@@ -75,6 +77,10 @@ vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', (
       return {
         manager: {
           check: async () => {
+            if (authorityMock.checkInvokeLegacyBeforeReject) {
+              const opts = options as { legacyCheck?: (currentVersion: string) => Promise<unknown> };
+              await opts?.legacyCheck?.('1.222.0');
+            }
             if (authorityMock.checkRejection !== null) throw authorityMock.checkRejection;
             return {
               channel: 'stable',
@@ -218,6 +224,7 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     authorityMock.rollbackCalls = 0;
     authorityMock.createCalls = 0;
     authorityMock.checkRejection = null;
+    authorityMock.checkInvokeLegacyBeforeReject = false;
     authorityMock.createThrows = false;
     authorityMock.dispatchReadiness = null;
     authorityMock.dispatchInstallStatus = 'dual-slot';
@@ -416,6 +423,30 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     const req = createMockRequest('GET');
     const res = createMockResponse();
     await routes.handleUpdateRoute(req, res, tmpDir, '/check');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res._body)).toEqual({ success: true, data: DEGRADED_LEGACY_BODY });
+    expect(res._headers['x-pd-mutation-authority']).toContain(LEGACY_MUTATION_AUTHORITY);
+    expect(res._headers['x-pd-mutation-fallback-reason']).toBe(
+      'release_manager_unavailable:metadata_refresh_failed',
+    );
+  });
+
+  it('ReleaseManager refusal AFTER the shadow legacy computation: fallback recomputes the FULL plugin-copy legacy body (byte honesty over cost)', async () => {
+    enableFlag();
+    authorityMock.readiness = { ready: true, reasons: [] };
+    // The shadow comparison ran the shared legacy computation (annotated with
+    // the active identity: currentVersion=1.222.0, hasUpdate=true) BEFORE the
+    // refusal. The fallback must NOT serve those bytes with the annotation
+    // stripped — that would leave currentVersion active-sourced without its
+    // annotation (half-governed, EP-03). It recomputes the plugin-copy body
+    // instead: here that is DEGRADED_LEGACY_BODY (no plugin copy installed).
+    authorityMock.checkInvokeLegacyBeforeReject = true;
+    authorityMock.checkRejection = Object.assign(new Error('metadata refresh failed'), {
+      reason: 'metadata_refresh_failed',
+      nextAction: 'retry the update check',
+    });
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(createMockRequest('GET'), res, tmpDir, '/check');
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res._body)).toEqual({ success: true, data: DEGRADED_LEGACY_BODY });
     expect(res._headers['x-pd-mutation-authority']).toContain(LEGACY_MUTATION_AUTHORITY);

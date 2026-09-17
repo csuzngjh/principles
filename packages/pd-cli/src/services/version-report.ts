@@ -197,18 +197,38 @@ export function buildVersionReport(homeDir: string = os.homedir()): VersionRepor
 
   // The live canonical runtime is the primary component-version source; the
   // release cache stays as the fallback for layouts without a runtime
-  // directory. Component versions are read, never judged: independently
-  // versioned components are not corruption, and health remains bound to the
-  // active-identity verification above (a runtime full of readable package
-  // versions alone never makes the report healthy).
+  // directory (and per component when the runtime copy is absent). Component
+  // versions are read, never judged: independently versioned components are
+  // not corruption, and health remains bound to the active-identity
+  // verification above (a runtime full of readable package versions alone
+  // never makes the report healthy). A malformed component manifest degrades
+  // to an omitted component — this command exists to diagnose broken
+  // installs, so one corrupt manifest must not kill the whole report.
   const runtimeDir = path.join(pdHome, 'runtime');
   const componentsBaseDir = fs.existsSync(runtimeDir) ? runtimeDir : releaseDir;
   const componentsSource: VersionReport['componentsSource'] = componentsBaseDir === runtimeDir
     ? 'runtime'
     : 'release-cached';
+  const readComponentManifest = (component: string): Record<string, unknown> | null => {
+    try {
+      return readJsonIfPresent(path.join(componentsBaseDir, component, 'package.json'));
+    } catch {
+      return null; // malformed live manifest: omit the component, keep the report
+    }
+  };
   const components: Record<string, string> = {};
   for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'codex-adapter', 'release-manager']) {
-    const manifest = readJsonIfPresent(path.join(componentsBaseDir, component, 'package.json'));
+    let manifest = readComponentManifest(component);
+    if (manifest === null && componentsBaseDir === runtimeDir) {
+      // Per-component fallback: a partially populated runtime dir (partial
+      // sync) must not silently drop components that the release cache can
+      // still report.
+      try {
+        manifest = readJsonIfPresent(path.join(releaseDir, component, 'package.json'));
+      } catch {
+        manifest = null;
+      }
+    }
     const version = manifest?.version;
     if (typeof version === 'string') {
       components[component] = version;

@@ -2108,8 +2108,11 @@ async function runReleaseManagerCheckDispatch(
   if (req.method !== 'GET') { sendMethodNotAllowed(res); return; }
   const pluginDir = resolvePluginDir(ctx.workspaceDir);
   // One legacy computation feeds BOTH the shadow comparison (via legacyCheck)
-  // and the response body — a governed check never doubles network cost.
-  let legacyOnce: (() => Promise<Awaited<ReturnType<typeof computeLegacyUpdateCheck>>>) | null = null;
+  // and the response body on the SERVED path — the memoized PROMISE (not a
+  // re-invoking thunk) guarantees the shadow comparison and the body share one
+  // computation. A refused check deliberately recomputes un-annotated (see the
+  // catch below): byte honesty over network cost on the failure path.
+  let legacyOnce: Promise<Awaited<ReturnType<typeof computeLegacyUpdateCheck>>> | null = null;
   // PR-C: the active release record read by manager.inspect() (inside
   // createReleaseManagerAuthority — one read, reused) is the authoritative
   // current version for a governed check. Absent (legacy-overlay layout, no
@@ -2117,8 +2120,11 @@ async function runReleaseManagerCheckDispatch(
   // as active-sourced. Assigned after the authority is constructed below.
   let activeIdentityForBody: ActiveReleaseIdentity | undefined = undefined;
   const legacyComputed = (): Promise<Awaited<ReturnType<typeof computeLegacyUpdateCheck>>> => {
-    legacyOnce ??= () => computeLegacyUpdateCheck(pluginDir, activeIdentityForBody);
-    return legacyOnce();
+    legacyOnce ??= computeLegacyUpdateCheck(pluginDir, activeIdentityForBody).catch((error: unknown) => {
+      legacyOnce = null;
+      throw error;
+    });
+    return legacyOnce;
   };
   let decisionSource: ((currentVersion: string) => Promise<LegacyUpdaterDecision | null>) | null = null;
   const authority: ReleaseManagerAuthorityHandle = mod.createReleaseManagerAuthority({
@@ -2146,7 +2152,7 @@ async function runReleaseManagerCheckDispatch(
   activeIdentityForBody = statusForBody !== null
     && typeof statusForBody.productVersion === 'string' && statusForBody.productVersion.length > 0
     && typeof statusForBody.releaseId === 'string' && statusForBody.releaseId.length > 0
-    && typeof statusForBody.generation === 'number'
+    && typeof statusForBody.generation === 'number' && Number.isSafeInteger(statusForBody.generation)
     ? {
         productVersion: statusForBody.productVersion,
         releaseId: statusForBody.releaseId,
@@ -2174,6 +2180,12 @@ async function runReleaseManagerCheckDispatch(
     // active-identity substitution) — the fallback annotation and the bytes
     // must tell the same story, never a half-governed check (EP-03).
     activeIdentityForBody = undefined;
+    // Discard the (identity-annotated) cached computation: the fallback bytes
+    // must be the FULL plugin-copy legacy body, and stripping the two additive
+    // fields from an annotated body would leave currentVersion active-sourced
+    // without its annotation — the half-governed state EP-03 forbids. The
+    // recompute is the price of byte honesty on this (rare) failure path; the
+    // shared-computation promise above covers the SERVED path.
     legacyOnce = null;
     const mapped = mod.mapReleaseManagerErrorToFallback(error);
     console.log(`[release-manager] governed update check refused (${mapped.reason}) — explicit fallback to ${LEGACY_MUTATION_AUTHORITY}`);
