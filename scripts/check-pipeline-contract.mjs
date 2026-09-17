@@ -9,12 +9,9 @@
 // a scanner framework, an AST checker, or a second source of truth. The only
 // durable artifact is the manifest below + the summary it prints.
 //
-// C0 (test discoverability): each group is executed via vitest path filters
-// against the package's own vitest config. In `vitest run` mode a filter that
-// matches no collected file exits non-zero ("No test files found"), so a
-// Safety Net test that stops being collected — or a file renamed out from
-// under the manifest — cannot silently pass. File existence is additionally
-// pre-checked for a clearer nextAction.
+// C0 checks every selected file against Vitest's execution report. A group
+// can exit zero even when one filter no longer matches its package config.
+// Reports are temporary runner output, not a second test registry.
 //
 // Determinism: no network, no API keys, no real LLM, no real host process.
 // The selected tests use scripted adapters and temp SQLite workspaces only.
@@ -23,7 +20,8 @@
 // tests import `@principles/core/runtime-v2` from dist). verify:merge runs this
 // after the full workspace build, so the prerequisite holds on the merge path.
 
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -168,9 +166,16 @@ function lastSummaryLines(output, maxLines = 6) {
   return lines.slice(-maxLines).join('\n');
 }
 
-function parseTestFileLine(output) {
-  const m = stripAnsi(output).match(/Test Files\s+([^\n]+)/);
-  return m ? m[1].trim() : null;
+function unexecutedFiles(report, cwd, filters) {
+  const suites = report !== null && typeof report === 'object' && Array.isArray(report.testResults)
+    ? report.testResults : [];
+  return filters.filter((file) => !suites.some((suite) =>
+    suite !== null && typeof suite === 'object' && typeof suite.name === 'string'
+    && path.resolve(suite.name) === path.resolve(cwd, file)
+    && Array.isArray(suite.assertionResults) && suite.assertionResults.length > 0
+    && suite.assertionResults.some((assertion) => assertion !== null && typeof assertion === 'object'
+      && (assertion.status === 'passed' || assertion.status === 'failed')),
+  ));
 }
 
 const results = [];
@@ -181,33 +186,41 @@ for (const group of GROUPS) {
   const missing = group.filters.filter((f) => !fs.existsSync(path.join(cwd, f)));
   if (missing.length > 0) {
     failed = true;
-    results.push({ group, status: 'FAIL', detail: `missing file(s): ${missing.join(', ')}` });
+    results.push({ group, status: 'FAIL', executionVerified: false, detail: `missing file(s): ${missing.join(', ')}` });
     continue;
   }
   process.stdout.write(`[check:pipeline-contract] ${group.id} — running ${group.filters.length} test file(s)...\n`);
   const startedAt = Date.now();
+  const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pipeline-contract-'));
   try {
-    const output = execFileSync(
+    const reportFile = path.join(reportDir, 'vitest.json');
+    const child = spawnSync(
       process.execPath,
-      [vitestEntry, 'run', ...group.filters],
+      [vitestEntry, 'run', ...group.filters, '--reporter=default', '--reporter=json', `--outputFile.json=${reportFile}`],
       { cwd, timeout: group.timeoutMs, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 },
     );
+    const output = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
+    let report;
+    let reportError = '';
+    try {
+      report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+    } catch (error) {
+      reportError = `execution report unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    const unexecuted = unexecutedFiles(report, cwd, group.filters);
+    const executionVerified = !reportError && unexecuted.length === 0;
+    const status = child.status === 0 && !child.error && executionVerified ? 'PASS' : 'FAIL';
+    failed ||= status === 'FAIL';
     const durationS = ((Date.now() - startedAt) / 1000).toFixed(1);
-    results.push({ group, status: 'PASS', detail: parseTestFileLine(output) ?? '', durationS });
-    process.stdout.write(`[check:pipeline-contract] ${group.id} — PASS (${durationS}s)\n`);
-  } catch (err) {
-    failed = true;
-    const durationS = ((Date.now() - startedAt) / 1000).toFixed(1);
-    const output = typeof err.stdout === 'string' ? err.stdout : '';
-    const killed = Boolean(err.killed) || /timed out/.test(String(err.message ?? ''));
     results.push({
-      group,
-      status: 'FAIL',
-      durationS,
-      detail: killed ? 'vitest invocation timed out' : lastSummaryLines(output),
+      group, status, executionVerified, durationS,
+      detail: [reportError, unexecuted.length ? `not collected/executed: ${unexecuted.join(', ')}` : '',
+        child.error?.message ?? '', lastSummaryLines(output)].filter(Boolean).join('\n'),
       output: stripAnsi(output).split(/\r?\n/).slice(-60).join('\n'),
     });
-    process.stdout.write(`[check:pipeline-contract] ${group.id} — FAIL (${durationS}s)\n`);
+    process.stdout.write(`[check:pipeline-contract] ${group.id} — ${status} (${durationS}s)\n`);
+  } finally {
+    fs.rmSync(reportDir, { recursive: true, force: true });
   }
 }
 
@@ -235,7 +248,7 @@ process.stdout.write('\nPD Pipeline Safety Net v1.2\n\n');
 // or a manifest file that no longer exists / is no longer collected). Red
 // groups surface through the I-rows below.
 const discoveryBroken =
-  results.length !== GROUPS.length || results.some((r) => r.detail?.startsWith('missing file(s)'));
+  results.length !== GROUPS.length || results.some((r) => !r.executionVerified);
 process.stdout.write(`${row('C0 Test execution', discoveryBroken ? 'FAIL' : 'PASS')}\n`);
 for (const [tag, label] of Object.entries(INVARIANT_LABELS)) {
   process.stdout.write(`${row(`I${tag.slice(1)} ${label}`, invariantVerdict(tag))}\n`);

@@ -38,6 +38,19 @@
   - `deactivating rule A leaves rule B effective on the same live instance (J4 precision, PRI-828)`（本轮新增的 A/B 精确性用例）
 - 还原：✅
 
+## 2026-09-17 复评补验：C5 正式 writer 与 C0 执行语义
+
+本节修正原验收局限：旧 C5 测试复制了 upsert SQL，且撤销后检查了错误的 append 输出面；旧 C0 仅检查文件存在，未证明每个文件实际执行。此前相关 PASS 不能替代本次补验。
+
+- C5 的 A/B 写入均调用公开的 `SqlitePIArtifactStore.upsertArtifact`。A 有真实 approval 行，先证明 owner directive 注入；B replacement 后通过 store reader 验证 A 消失、槽中只剩 B、旧 activation 仍绑定 A。真实 prompt hook 的 prepend/append 均不得包含 B，directive 不存在，日志必须同时包含 `artifact_not_found` 和 A 的 ID。
+- 一次性注入：仅将生产 writer 的 conflict 分支改为保留旧 artifact ID（仍更新内容），然后重建 core，确保 plugin 消费的 dist 包含 mutation。正式 `check:pipeline-contract` 退出 **1**，C5 报 `expected { …(10) } to be null`；**C0 PASS，I3/J1 FAIL**。这证明测试依赖真实 writer，而非自抄 SQL；普通断言失败不等于未执行。
+- C0 全部未收集：临时把 plugin 的 include 改为不存在的目录，文件仍在磁盘；正式命令退出 **1，C0 FAIL**。
+- C0 部分未收集：只 exclude formation 组的 `pain-id-chain-e2e.test.ts`，另一个文件正常执行；正式命令仍退出 **1，C0 FAIL**。逐文件 JSON report 校验防止组内部分漏跑假绿；缺失/非法 report 同样 fail closed。报告仅存临时目录，执行结束删除，不建立长期结果库。
+- 配置和生产 writer 均在 finally 中逐字恢复；core 恢复构建退出 **0**。之后 `npm run check:pipeline-contract` 与 `npm run verify:merge` 均退出 **0**；prompt 文件 **37/37 PASS**。
+- 本轮生产代码净改动 **0**，没有修改 Artifact Store 架构，也没有自动失效 activation 的新机制。
+
+复评问题分类：EP-09（替代性测试/错误观察面）与 EP-03（未执行被误报成功）。本轮防护为真实 writer 负向对照及真实 Vitest 全量/部分漏收集对照，不扩建扫描器。
+
 ## 汇总
 
 ```text

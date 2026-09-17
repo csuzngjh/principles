@@ -3,7 +3,7 @@ import * as principleInjection from '../../src/core/principle-injection.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord } from '@principles/core/runtime-v2';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../../src/core/runtime-v2-prompt-activation-reader.js';
 
@@ -1046,40 +1046,47 @@ describe('Runtime V2 authority derivation + artifact recycling (Safety Net v1.2,
     const taskSlot = `task_${principleId}`;
     const newText = 'UNIQUE_RUNTIME_V2_RECYCLED_CONTENT_5w8q1';
 
-    // 1) Artifact A exists, activation exists, injection works
-    insertValidatedPrincipleArtifact({ artifactId: artifactIdOld, principleId });
+    const artifactStore = new SqlitePIArtifactStore(sqliteConn);
+    const now = new Date().toISOString();
+    await artifactStore.upsertArtifact({
+      artifactId: artifactIdOld,
+      artifactKind: 'principle',
+      sourceTaskId: taskSlot,
+      sourcePrincipleId: principleId,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ principleId, text: TEST_PRINCIPLE_TEXT }),
+      createdAt: now,
+      updatedAt: now,
+    });
     await insertPromptActivation({ artifactId: artifactIdOld, principleId });
+    insertApproval({ artifactId: artifactIdOld });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const before = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
     expect(before?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
 
-    // 2) Production retry-round semantics: upsert on the same
-    //    (source_task_id, artifact_kind) slot recycles the artifact_id and
-    //    replaces the content (sqlite-pi-artifact-store upsertArtifact).
-    const now = new Date().toISOString();
-    const recycled = sqliteConn.getDb().prepare(`
-      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
-      VALUES (?, 'principle', ?, ?, NULL, '[]', 'validated', ?, ?, ?)
-      ON CONFLICT(source_task_id, artifact_kind) DO UPDATE SET
-        artifact_id = excluded.artifact_id,
-        content_json = excluded.content_json,
-        updated_at = excluded.updated_at
-    `).run(
-      artifactIdNew,
-      taskSlot,
-      principleId,
-      JSON.stringify({ principleId, text: newText }),
-      now,
-      now,
-    );
-    // Prove the recycle actually happened (exactly one row, new id) —
-    // otherwise the assertions below would be vacuous.
-    expect(recycled.changes).toBe(1);
-    const slotRow = sqliteConn.getDb().prepare(`
-      SELECT artifact_id FROM pi_artifacts WHERE source_task_id = ? AND artifact_kind = 'principle'
-    `).get(taskSlot) as { artifact_id: string } | undefined;
-    expect(slotRow?.artifact_id).toBe(artifactIdNew);
+    expect(before?.prependSystemContext).toContain(`<directive id="${principleId}" source="runtime_v2_activation" authority="owner">`);
+
+    await artifactStore.upsertArtifact({
+      artifactId: artifactIdNew,
+      artifactKind: 'principle',
+      sourceTaskId: taskSlot,
+      sourcePrincipleId: principleId,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ principleId, text: newText }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(await artifactStore.getArtifactById(artifactIdOld)).toBeNull();
+    expect(await artifactStore.listBySourceTaskId(taskSlot)).toEqual([
+      expect.objectContaining({ artifactId: artifactIdNew, contentJson: JSON.stringify({ principleId, text: newText }) }),
+    ]);
+    const activationStore = new SqliteActivationStateStore(sqliteConn);
+    expect(await activationStore.listAllActivations()).toEqual([
+      expect.objectContaining({ artifactId: artifactIdOld, deactivatedAt: null }),
+    ]);
 
     // 3) The old activation now dangles: the replaced content must NOT be
     //    injected under the old activation's authorization, and the old text
@@ -1099,13 +1106,16 @@ describe('Runtime V2 authority derivation + artifact recycling (Safety Net v1.2,
 
     const after = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
     expect(after).toBeDefined();
+    expect(after?.prependSystemContext).not.toContain(newText);
+    expect(after?.prependSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
+    expect(after?.prependSystemContext).not.toContain(`<directive id="${principleId}"`);
     expect(after?.appendSystemContext).not.toContain(newText);
     expect(after?.appendSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
     const infoCalls = infoSpy.mock.calls.map((c: unknown[]) => String(c[0]));
     const warnCalls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-    const hasDanglingWarning =
-      infoCalls.some((c) => c.includes('artifact_not_found') || c.includes('artifact_query_unexpected') || c.includes('activation')) ||
-      warnCalls.some((c) => c.includes('artifact_not_found') || c.includes('artifact_query_unexpected') || c.includes('activation'));
+    const hasDanglingWarning = [...infoCalls, ...warnCalls].some(
+      (message) => message.includes('artifact_not_found') && message.includes(artifactIdOld),
+    );
     expect(hasDanglingWarning).toBe(true);
   });
 });

@@ -16,7 +16,7 @@
 | `scripts/acceptance-gate-rulehost.mjs:1144` 的 `execFileSync(process.execPath, [root/vitest.mjs, 'run', file], { cwd: package })` | **REUSE** | 直接复用该跨包调用 vitest 的模式实现薄命令 |
 | 审计 NEW-F1（6 个永不执行测试文件） | **DO_NOT_BUILD（本轮）** | 均不在本 Safety Net 选择集内；属已知独立缺口，登记为 follow-up，不顺手改 include 口径 |
 
-**机械发现性证明**：薄命令以显式路径 filter 驱动各包 vitest；vitest run 模式下 filter 未命中任何收集文件时以非零退出（"No test files found"）——文件不存在或不在 include 口径内都会红，无法静默通过。
+**机械发现性证明（复评修正）**：薄命令以显式 filter 驱动各包 Vitest，并读取本次 runner 的临时 JSON report，逐文件检查实际执行的 assertion。文件存在并不等于执行；全组未收集、组内部分未收集、report 缺失/非法均为 C0 FAIL。普通 assertion failure 可为 C0 PASS，但对应 invariant/Journey FAIL。全量/部分漏收集与真实 writer 断言失败均经正式命令注入验证，见 FAULT_INJECTION.md 复评补验。
 
 ### INV-01 — 正式输入 → production formation → 可治理 Principle
 
