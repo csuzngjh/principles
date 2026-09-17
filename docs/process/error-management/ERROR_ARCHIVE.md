@@ -1,5 +1,12 @@
 # Error Experience Archive
 
+> **⛔ FROZEN LEGACY SNAPSHOT (2026-09-17, PRI-799 Phase C authority cutover).**
+> Archiving is now a record lifecycle transition: `npm run error:record archive
+> --pattern P-ERR-NNN`. Archived pattern records live in
+> `docs/process/error-management/records/patterns/` with `status: archived`.
+> Do NOT move or edit Markdown entries by hand anymore. Everything below is
+> preserved verbatim as history and is no longer followed.
+
 > Archived ERR entries whose last recurrence is > 90 days old. These entries are no longer active but retained for historical reference and pattern analysis.
 
 ## Purpose

@@ -1,0 +1,2955 @@
+{
+  "summary": {
+    "legacyBlocks": 366,
+    "structured": 365,
+    "preservedRaw": 1,
+    "unmapped": 0,
+    "legacyEntries": 132,
+    "patternRecordsAfter": 131,
+    "occurrenceRecordsAfter": 221,
+    "archivedBefore": 41,
+    "archivedAfter": 40,
+    "recurrenceBlocksBefore": 18,
+    "duplicateIdentities": 1,
+    "warnings": 7,
+    "problems": [
+      "ERR-002: no **Source** field — source recorded as 'unknown'",
+      "ERR-002: no **Date** field — observedAt derived from earliest in-text date (2026-06-19)",
+      "ERR-068: no **Source** field — source recorded as 'unknown'",
+      "ERR-068: no **Date** field — observedAt derived from earliest in-text date (2026-06-16)",
+      "ERR-069: no **Source** field — source recorded as 'unknown'",
+      "ERR-069: no **Date** field — observedAt derived from earliest in-text date (2026-06-21)",
+      "ERR-083: dual-presence conflict (HANDBOOK + ARCHIVE) — ARCHIVE copy preserved raw for Owner decision"
+    ]
+  },
+  "manifest": [
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-001",
+      "block": "entry-header",
+      "sourceHash": "428e6a1f86bd",
+      "target": "P-ERR-001",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-001",
+      "block": "initial",
+      "sourceHash": "67c57264febe",
+      "target": "OCC-2026-05-19-err-001-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-001",
+      "block": "recurrence",
+      "sourceHash": "2c8bbcc02297",
+      "target": "OCC-2026-08-21-err-001-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-001",
+      "block": "recurrence",
+      "sourceHash": "ebab6b5e175e",
+      "target": "OCC-2026-07-23-err-001-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-001",
+      "block": "recurrence",
+      "sourceHash": "8d83aca174ec",
+      "target": "OCC-2026-07-12-err-001-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-001",
+      "block": "recurrence",
+      "sourceHash": "ebbb155d57f2",
+      "target": "OCC-2026-06-err-001-r4",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-002",
+      "block": "entry-header",
+      "sourceHash": "e81b466819c2",
+      "target": "P-ERR-002",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-002",
+      "block": "initial",
+      "sourceHash": "bfff00af1933",
+      "target": "OCC-2026-06-19-err-002-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-029",
+      "block": "entry-header",
+      "sourceHash": "502f9336c1f0",
+      "target": "P-ERR-029",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-029",
+      "block": "initial",
+      "sourceHash": "d89d311aa2e7",
+      "target": "OCC-2026-05-24-err-029-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-029",
+      "block": "recurrence",
+      "sourceHash": "466508ea9aff",
+      "target": "OCC-2026-06-19-err-029-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-030",
+      "block": "entry-header",
+      "sourceHash": "e1813d77b6ce",
+      "target": "P-ERR-030",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-030",
+      "block": "initial",
+      "sourceHash": "b13c42302e07",
+      "target": "OCC-2026-05-24-err-030-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-030",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "2589589cbbbc",
+      "target": "P-ERR-030",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-030",
+      "block": "recurrence",
+      "sourceHash": "c119d675a515",
+      "target": "OCC-2026-07-03-err-030-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-030",
+      "block": "recurrence",
+      "sourceHash": "0ad6f0d95aae",
+      "target": "OCC-2026-09-05-err-030-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-100",
+      "block": "entry-header",
+      "sourceHash": "b6d2662fd4bd",
+      "target": "P-ERR-100",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-100",
+      "block": "initial",
+      "sourceHash": "20f57f2be803",
+      "target": "OCC-2026-08-20-err-100-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-101",
+      "block": "entry-header",
+      "sourceHash": "7008dbd7b14b",
+      "target": "P-ERR-101",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-101",
+      "block": "initial",
+      "sourceHash": "970b1ca40c1e",
+      "target": "OCC-2026-08-20-err-101-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-102",
+      "block": "entry-header",
+      "sourceHash": "92f4b3b822d3",
+      "target": "P-ERR-102",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-102",
+      "block": "initial",
+      "sourceHash": "1b5c8efda3a5",
+      "target": "OCC-2026-08-20-err-102-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-103",
+      "block": "entry-header",
+      "sourceHash": "e935d88e254e",
+      "target": "P-ERR-103",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-103",
+      "block": "initial",
+      "sourceHash": "71b926f901f5",
+      "target": "OCC-2026-08-21-err-103-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-104",
+      "block": "entry-header",
+      "sourceHash": "bbed70f8a848",
+      "target": "P-ERR-104",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-104",
+      "block": "initial",
+      "sourceHash": "2238c843eafc",
+      "target": "OCC-2026-08-21-err-104-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-004",
+      "block": "entry-header",
+      "sourceHash": "f5f5b44f201c",
+      "target": "P-ERR-004",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-004",
+      "block": "initial",
+      "sourceHash": "f1869978c55b",
+      "target": "OCC-2026-05-19-err-004-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-004",
+      "block": "recurrence",
+      "sourceHash": "e2064b7ed72b",
+      "target": "OCC-2026-08-20-err-004-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-004",
+      "block": "recurrence",
+      "sourceHash": "2df48e25b8b0",
+      "target": "OCC-2026-08-20-err-004-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-004",
+      "block": "recurrence",
+      "sourceHash": "01bcc3c81686",
+      "target": "OCC-2026-08-13-err-004-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-004",
+      "block": "recurrence",
+      "sourceHash": "d62529afab50",
+      "target": "OCC-2026-06-20-err-004-r4",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-004",
+      "block": "recurrence",
+      "sourceHash": "9b3fbc3e3a1c",
+      "target": "OCC-2026-06-19-err-004-r5",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-004",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "fb554e7c26cb",
+      "target": "P-ERR-004",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-005",
+      "block": "entry-header",
+      "sourceHash": "6be86e3d1f81",
+      "target": "P-ERR-005",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-005",
+      "block": "initial",
+      "sourceHash": "f03e88a798e7",
+      "target": "OCC-2026-05-19-err-005-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-008",
+      "block": "entry-header",
+      "sourceHash": "6f6f9f5de5cf",
+      "target": "P-ERR-008",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-008",
+      "block": "initial",
+      "sourceHash": "e393f741c889",
+      "target": "OCC-2026-05-19-err-008-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-008",
+      "block": "recurrence",
+      "sourceHash": "5ee484db45f7",
+      "target": "OCC-2026-08-16-err-008-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-008",
+      "block": "recurrence",
+      "sourceHash": "8c36cb248ebe",
+      "target": "OCC-2026-05-29-err-008-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-008",
+      "block": "recurrence",
+      "sourceHash": "6afc7a3dac7a",
+      "target": "OCC-2026-05-23-err-008-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-008",
+      "block": "recurrence",
+      "sourceHash": "517a36c0fe34",
+      "target": "OCC-2026-05-23-err-008-r4",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-008",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "ac1b89eaf982",
+      "target": "P-ERR-008",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-009",
+      "block": "entry-header",
+      "sourceHash": "8cbecfbc0ed2",
+      "target": "P-ERR-009",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-009",
+      "block": "initial",
+      "sourceHash": "2ba355e956cd",
+      "target": "OCC-2026-05-19-err-009-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-009",
+      "block": "recurrence",
+      "sourceHash": "742168d49ce3",
+      "target": "OCC-2026-09-12-err-009-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-009",
+      "block": "recurrence",
+      "sourceHash": "7738d7de0ad3",
+      "target": "OCC-2026-09-12-err-009-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-009",
+      "block": "recurrence",
+      "sourceHash": "7469b22d02f8",
+      "target": "OCC-2026-08-13-err-009-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-009",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "96d308e63f4b",
+      "target": "P-ERR-009",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-011",
+      "block": "entry-header",
+      "sourceHash": "91393070e37d",
+      "target": "P-ERR-011",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-011",
+      "block": "initial",
+      "sourceHash": "3bc3983a341c",
+      "target": "OCC-2026-05-21-err-011-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-012",
+      "block": "entry-header",
+      "sourceHash": "d4ccbe18845b",
+      "target": "P-ERR-012",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-012",
+      "block": "initial",
+      "sourceHash": "f117876376dc",
+      "target": "OCC-2026-05-21-err-012-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-012",
+      "block": "recurrence",
+      "sourceHash": "8ba10b30557b",
+      "target": "OCC-2026-06-23-err-012-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-012",
+      "block": "recurrence",
+      "sourceHash": "aff05eca4874",
+      "target": "OCC-2026-06-23-err-012-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-012",
+      "block": "recurrence",
+      "sourceHash": "d5099508827a",
+      "target": "OCC-2026-09-04-err-012-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-012",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "adda79fc3cfc",
+      "target": "P-ERR-012",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-013",
+      "block": "entry-header",
+      "sourceHash": "3c00b1fa86f6",
+      "target": "P-ERR-013",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-013",
+      "block": "initial",
+      "sourceHash": "5baecf563786",
+      "target": "OCC-2026-05-21-err-013-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-013",
+      "block": "recurrence",
+      "sourceHash": "396097c07974",
+      "target": "OCC-2026-08-28-err-013-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-013",
+      "block": "recurrence",
+      "sourceHash": "2a371a4cf4f2",
+      "target": "OCC-2026-08-13-err-013-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-013",
+      "block": "recurrence",
+      "sourceHash": "1d890e9aff0e",
+      "target": "OCC-2026-06-28-err-013-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-013",
+      "block": "recurrence",
+      "sourceHash": "9966209639eb",
+      "target": "OCC-2026-06-14-err-013-r4",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-013",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "a4a020d6c471",
+      "target": "P-ERR-013",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-014",
+      "block": "entry-header",
+      "sourceHash": "2bbfe0e8e0d9",
+      "target": "P-ERR-014",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-014",
+      "block": "initial",
+      "sourceHash": "197dcf08a04f",
+      "target": "OCC-2026-05-21-err-014-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-014",
+      "block": "recurrence",
+      "sourceHash": "2b89b6961aa8",
+      "target": "OCC-2026-08-16-err-014-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-014",
+      "block": "recurrence",
+      "sourceHash": "8ff0683f8f4d",
+      "target": "OCC-2026-06-18-err-014-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-017",
+      "block": "entry-header",
+      "sourceHash": "2d5fb0a03d8e",
+      "target": "P-ERR-017",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-017",
+      "block": "initial",
+      "sourceHash": "91e75725b0a4",
+      "target": "OCC-2026-05-21-err-017-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-018",
+      "block": "entry-header",
+      "sourceHash": "d00bf8fdea5e",
+      "target": "P-ERR-018",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-018",
+      "block": "initial",
+      "sourceHash": "88ca656f834a",
+      "target": "OCC-2026-05-21-err-018-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-021",
+      "block": "entry-header",
+      "sourceHash": "07d082b9c415",
+      "target": "P-ERR-021",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-021",
+      "block": "initial",
+      "sourceHash": "f975c8b9768b",
+      "target": "OCC-2026-05-22-err-021-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-021",
+      "block": "recurrence",
+      "sourceHash": "e26d2d12e65a",
+      "target": "OCC-2026-06-29-err-021-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-021",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "c82054181607",
+      "target": "P-ERR-021",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-021",
+      "block": "recurrence",
+      "sourceHash": "13be8fc48080",
+      "target": "OCC-2026-08-13-err-021-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-022",
+      "block": "entry-header",
+      "sourceHash": "aee46042e3ea",
+      "target": "P-ERR-022",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-022",
+      "block": "initial",
+      "sourceHash": "e296d10fd9ec",
+      "target": "OCC-2026-05-22-err-022-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-022",
+      "block": "recurrence",
+      "sourceHash": "b197bab113f6",
+      "target": "OCC-2026-06-19-err-022-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-022",
+      "block": "recurrence",
+      "sourceHash": "e35d78f779ba",
+      "target": "OCC-2026-06-14-err-022-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-022",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "5b0636f9d618",
+      "target": "P-ERR-022",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-023",
+      "block": "entry-header",
+      "sourceHash": "b1ab5c42ff16",
+      "target": "P-ERR-023",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-023",
+      "block": "initial",
+      "sourceHash": "e606f60e3a4d",
+      "target": "OCC-2026-05-23-err-023-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-023",
+      "block": "recurrence",
+      "sourceHash": "b7d74f569f27",
+      "target": "OCC-2026-08-21-err-023-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-023",
+      "block": "recurrence",
+      "sourceHash": "1736e9abcd50",
+      "target": "OCC-2026-09-10-err-023-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-024",
+      "block": "entry-header",
+      "sourceHash": "2acc16442169",
+      "target": "P-ERR-024",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-024",
+      "block": "initial",
+      "sourceHash": "2d55b3f76ce7",
+      "target": "OCC-2026-05-23-err-024-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-024",
+      "block": "recurrence",
+      "sourceHash": "1cb1259c67f5",
+      "target": "OCC-2026-09-13-err-024-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-024",
+      "block": "recurrence",
+      "sourceHash": "9168164ad854",
+      "target": "OCC-2026-09-12-err-024-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-024",
+      "block": "recurrence",
+      "sourceHash": "b5673db3c7cf",
+      "target": "OCC-2026-09-12-err-024-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-025",
+      "block": "entry-header",
+      "sourceHash": "29f7e771b453",
+      "target": "P-ERR-025",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-025",
+      "block": "initial",
+      "sourceHash": "11cdf32bd201",
+      "target": "OCC-2026-05-23-err-025-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-025",
+      "block": "recurrence",
+      "sourceHash": "fd449c51dd47",
+      "target": "OCC-2026-09-12-err-025-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-025",
+      "block": "recurrence",
+      "sourceHash": "084e332594ee",
+      "target": "OCC-2026-08-27-err-025-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-025",
+      "block": "recurrence",
+      "sourceHash": "7b8ab6675d1f",
+      "target": "OCC-2026-06-25-err-025-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-032",
+      "block": "entry-header",
+      "sourceHash": "fe830e172f85",
+      "target": "P-ERR-032",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-032",
+      "block": "initial",
+      "sourceHash": "0c6d70103303",
+      "target": "OCC-2026-05-24-err-032-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-032",
+      "block": "recurrence",
+      "sourceHash": "b7a2030cb276",
+      "target": "OCC-2026-08-20-err-032-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-032",
+      "block": "recurrence",
+      "sourceHash": "8ed420c17b65",
+      "target": "OCC-2026-08-20-err-032-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-034",
+      "block": "entry-header",
+      "sourceHash": "b0b1ca1ab4c5",
+      "target": "P-ERR-034",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-034",
+      "block": "initial",
+      "sourceHash": "c9ec8095aaf7",
+      "target": "OCC-2026-05-24-err-034-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-034",
+      "block": "recurrence",
+      "sourceHash": "5699a0b47dc9",
+      "target": "OCC-2026-07-15-err-034-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-034",
+      "block": "recurrence",
+      "sourceHash": "ed132d94ac73",
+      "target": "OCC-2026-06-18-err-034-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-034",
+      "block": "recurrence",
+      "sourceHash": "335f4129cb53",
+      "target": "OCC-2026-06-08-err-034-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-034",
+      "block": "recurrence",
+      "sourceHash": "9a9ecd1cdb41",
+      "target": "OCC-2026-05-24-err-034-r4",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-035",
+      "block": "entry-header",
+      "sourceHash": "fa779221da7c",
+      "target": "P-ERR-035",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-035",
+      "block": "initial",
+      "sourceHash": "8f9dd7c56e5d",
+      "target": "OCC-2026-05-24-err-035-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-035",
+      "block": "recurrence",
+      "sourceHash": "c953bd027383",
+      "target": "OCC-2026-06-23-err-035-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-035",
+      "block": "recurrence",
+      "sourceHash": "80ed91b8ec5a",
+      "target": "OCC-2026-05-24-err-035-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-035",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "695133d6c5af",
+      "target": "P-ERR-035",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-045",
+      "block": "entry-header",
+      "sourceHash": "4042149994be",
+      "target": "P-ERR-045",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-045",
+      "block": "initial",
+      "sourceHash": "049b4c2e1f5b",
+      "target": "OCC-2026-05-26-err-045-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-045",
+      "block": "recurrence",
+      "sourceHash": "7ff62a1a55b2",
+      "target": "OCC-2026-08-21-err-045-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-048",
+      "block": "entry-header",
+      "sourceHash": "46cd74ca8142",
+      "target": "P-ERR-048",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-048",
+      "block": "initial",
+      "sourceHash": "ee70f9e502cc",
+      "target": "OCC-2026-05-27-err-048-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-048",
+      "block": "recurrence",
+      "sourceHash": "2d0cb3120fd8",
+      "target": "OCC-2026-06-19-err-048-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-048",
+      "block": "recurrence",
+      "sourceHash": "d004e45c0704",
+      "target": "OCC-2026-07-17-err-048-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-048",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "03277a422ca9",
+      "target": "P-ERR-048",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-048",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "5b0636f9d618",
+      "target": "P-ERR-048",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-072",
+      "block": "entry-header",
+      "sourceHash": "da4119bf61e1",
+      "target": "P-ERR-072",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-072",
+      "block": "initial",
+      "sourceHash": "c2aebbb05b09",
+      "target": "OCC-2026-06-18-err-072-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-127",
+      "block": "entry-header",
+      "sourceHash": "fc8001d96e5f",
+      "target": "P-ERR-127",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-127",
+      "block": "initial",
+      "sourceHash": "6f6ae1be02de",
+      "target": "OCC-2026-09-12-err-127-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-040",
+      "block": "entry-header",
+      "sourceHash": "45a584d67f27",
+      "target": "P-ERR-040",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-040",
+      "block": "initial",
+      "sourceHash": "771f76ff6b91",
+      "target": "OCC-2026-05-26-err-040-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-040",
+      "block": "recurrence",
+      "sourceHash": "9b34e834e211",
+      "target": "OCC-2026-08-27-err-040-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-040",
+      "block": "recurrence",
+      "sourceHash": "375b6fde795e",
+      "target": "OCC-2026-08-22-err-040-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-040",
+      "block": "recurrence",
+      "sourceHash": "3636c9f2693e",
+      "target": "OCC-2026-08-14-err-040-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-040",
+      "block": "recurrence",
+      "sourceHash": "6cc7ca9c172e",
+      "target": "OCC-2026-07-03-err-040-r4",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-055",
+      "block": "entry-header",
+      "sourceHash": "c48eef85217c",
+      "target": "P-ERR-055",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-055",
+      "block": "initial",
+      "sourceHash": "cef7b470d0bd",
+      "target": "OCC-2026-06-01-err-055-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-052",
+      "block": "entry-header",
+      "sourceHash": "01eb76e47256",
+      "target": "P-ERR-052",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-052",
+      "block": "initial",
+      "sourceHash": "b268ce68a233",
+      "target": "OCC-2026-06-03-err-052-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-063",
+      "block": "entry-header",
+      "sourceHash": "bb411514af50",
+      "target": "P-ERR-063",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-063",
+      "block": "initial",
+      "sourceHash": "4ed187bc73d7",
+      "target": "OCC-2026-09-12-err-063-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-063",
+      "block": "recurrence",
+      "sourceHash": "8f22ff7c215a",
+      "target": "OCC-2026-08-25-err-063-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-066",
+      "block": "entry-header",
+      "sourceHash": "4599480fc6dc",
+      "target": "P-ERR-066",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-066",
+      "block": "initial",
+      "sourceHash": "82d9b937c812",
+      "target": "OCC-2026-06-15-err-066-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-066",
+      "block": "recurrence",
+      "sourceHash": "2d7ad3c547cf",
+      "target": "OCC-2026-09-12-err-066-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-067",
+      "block": "entry-header",
+      "sourceHash": "ccdd2fb1ba24",
+      "target": "P-ERR-067",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-067",
+      "block": "initial",
+      "sourceHash": "4bcf0734de79",
+      "target": "OCC-2026-06-16-err-067-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-068",
+      "block": "entry-header",
+      "sourceHash": "cd2ef3b45c0e",
+      "target": "P-ERR-068",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-068",
+      "block": "initial",
+      "sourceHash": "bcb371e8f3b5",
+      "target": "OCC-2026-06-16-err-068-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-068",
+      "block": "recurrence",
+      "sourceHash": "de82e155af81",
+      "target": "OCC-2026-09-14-err-068-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-068",
+      "block": "recurrence",
+      "sourceHash": "b538213b06ae",
+      "target": "OCC-2026-09-08-err-068-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-068",
+      "block": "recurrence",
+      "sourceHash": "67b2a3b0b78d",
+      "target": "OCC-2026-06-16-err-068-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-069",
+      "block": "entry-header",
+      "sourceHash": "310719b8dcf7",
+      "target": "P-ERR-069",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-069",
+      "block": "initial",
+      "sourceHash": "cc4009b9a175",
+      "target": "OCC-2026-06-21-err-069-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-070",
+      "block": "entry-header",
+      "sourceHash": "9b04ae77c51d",
+      "target": "P-ERR-070",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-070",
+      "block": "initial",
+      "sourceHash": "8d85de0df205",
+      "target": "OCC-2026-06-18-err-070-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-071",
+      "block": "entry-header",
+      "sourceHash": "88d4a3557709",
+      "target": "P-ERR-071",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-071",
+      "block": "initial",
+      "sourceHash": "d712c23c4d4b",
+      "target": "OCC-2026-06-18-err-071-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-073",
+      "block": "entry-header",
+      "sourceHash": "b8f0d0731212",
+      "target": "P-ERR-073",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-073",
+      "block": "initial",
+      "sourceHash": "94fcd5b2b9d7",
+      "target": "OCC-2026-06-19-err-073-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-074",
+      "block": "entry-header",
+      "sourceHash": "d68296ac39be",
+      "target": "P-ERR-074",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-074",
+      "block": "initial",
+      "sourceHash": "19bf7507f557",
+      "target": "OCC-2026-06-19-err-074-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-075",
+      "block": "entry-header",
+      "sourceHash": "a5c5b26ca8b2",
+      "target": "P-ERR-075",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-075",
+      "block": "initial",
+      "sourceHash": "5bb95646ab2e",
+      "target": "OCC-2026-06-20-err-075-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-075",
+      "block": "recurrence",
+      "sourceHash": "5a29974c4bc3",
+      "target": "OCC-2026-07-01-err-075-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-075",
+      "block": "recurrence",
+      "sourceHash": "25cacf5d8f2c",
+      "target": "OCC-2026-08-20-err-075-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-075",
+      "block": "recurrence",
+      "sourceHash": "d9e8aaada633",
+      "target": "OCC-2026-08-20-err-075-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-075",
+      "block": "recurrence",
+      "sourceHash": "e9d40800e704",
+      "target": "OCC-2026-08-21-err-075-r4",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-075",
+      "block": "recurrence",
+      "sourceHash": "8eddcf7440a7",
+      "target": "OCC-2026-08-22-err-075-r5",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-076",
+      "block": "entry-header",
+      "sourceHash": "64a3a4102626",
+      "target": "P-ERR-076",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-076",
+      "block": "initial",
+      "sourceHash": "46793be87adf",
+      "target": "OCC-2026-06-20-err-076-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-077",
+      "block": "entry-header",
+      "sourceHash": "a518810e3a3f",
+      "target": "P-ERR-077",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-077",
+      "block": "initial",
+      "sourceHash": "fc28bf187300",
+      "target": "OCC-2026-06-24-err-077-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-078",
+      "block": "entry-header",
+      "sourceHash": "5a3cd7dbceb5",
+      "target": "P-ERR-078",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-078",
+      "block": "initial",
+      "sourceHash": "2e91547cbeca",
+      "target": "OCC-2026-06-24-err-078-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-079",
+      "block": "entry-header",
+      "sourceHash": "fb69a17790a7",
+      "target": "P-ERR-079",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-079",
+      "block": "initial",
+      "sourceHash": "763c767f6c69",
+      "target": "OCC-2026-06-25-err-079-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-079",
+      "block": "recurrence",
+      "sourceHash": "e8b5e7cd9001",
+      "target": "OCC-2026-08-13-err-079-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-079",
+      "block": "recurrence",
+      "sourceHash": "77f32ca16632",
+      "target": "OCC-2026-08-13-err-079-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-079",
+      "block": "recurrence",
+      "sourceHash": "bf40cc0482bf",
+      "target": "OCC-2026-08-26-err-079-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-080",
+      "block": "entry-header",
+      "sourceHash": "e1b217d99843",
+      "target": "P-ERR-080",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-080",
+      "block": "initial",
+      "sourceHash": "b178909e5eb1",
+      "target": "OCC-2026-09-12-err-080-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-081",
+      "block": "entry-header",
+      "sourceHash": "2b620e41d724",
+      "target": "P-ERR-081",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-081",
+      "block": "initial",
+      "sourceHash": "f606bca25ddd",
+      "target": "OCC-2026-06-25-err-081-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-081",
+      "block": "recurrence",
+      "sourceHash": "032a5e1446f3",
+      "target": "OCC-2026-08-31-err-081-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-081",
+      "block": "recurrence",
+      "sourceHash": "18b13c131e83",
+      "target": "OCC-2026-09-11-err-081-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-082",
+      "block": "entry-header",
+      "sourceHash": "9075aacace58",
+      "target": "P-ERR-082",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-082",
+      "block": "initial",
+      "sourceHash": "5dec5fa4546c",
+      "target": "OCC-2026-06-26-err-082-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-083",
+      "block": "entry-header",
+      "sourceHash": "e7d7fe9ae64f",
+      "target": "P-ERR-083",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-083",
+      "block": "initial",
+      "sourceHash": "1f80b0889361",
+      "target": "OCC-2026-06-26-err-083-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-083",
+      "block": "recurrence",
+      "sourceHash": "b12fd2e17b70",
+      "target": "OCC-2026-09-12-err-083-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-083",
+      "block": "recurrence",
+      "sourceHash": "537546599b27",
+      "target": "OCC-2026-09-11-err-083-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-083",
+      "block": "recurrence",
+      "sourceHash": "deb1baa8d4bd",
+      "target": "OCC-2026-09-04-err-083-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-084",
+      "block": "entry-header",
+      "sourceHash": "1607dedd685d",
+      "target": "P-ERR-084",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-084",
+      "block": "initial",
+      "sourceHash": "2ee8f264d072",
+      "target": "OCC-2026-06-26-err-084-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-084",
+      "block": "recurrence",
+      "sourceHash": "9f0042452327",
+      "target": "OCC-2026-08-14-err-084-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-088",
+      "block": "entry-header",
+      "sourceHash": "e4be131db073",
+      "target": "P-ERR-088",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-088",
+      "block": "initial",
+      "sourceHash": "0f6920029728",
+      "target": "OCC-2026-06-29-err-088-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-088",
+      "block": "recurrence",
+      "sourceHash": "4f0d38bd8ef7",
+      "target": "OCC-2026-09-11-err-088-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-088",
+      "block": "recurrence",
+      "sourceHash": "c66e4ca14538",
+      "target": "OCC-2026-09-01-err-088-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-088",
+      "block": "recurrence",
+      "sourceHash": "d12e5ce8e873",
+      "target": "OCC-2026-08-28-err-088-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-089",
+      "block": "entry-header",
+      "sourceHash": "ef95ec04f07f",
+      "target": "P-ERR-089",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-089",
+      "block": "initial",
+      "sourceHash": "b91dcd922e85",
+      "target": "OCC-2026-06-29-err-089-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-089",
+      "block": "recurrence",
+      "sourceHash": "188e2c889144",
+      "target": "OCC-2026-08-26-err-089-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-089",
+      "block": "recurrence",
+      "sourceHash": "b81e7f0ca365",
+      "target": "OCC-2026-08-21-err-089-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-089",
+      "block": "recurrence",
+      "sourceHash": "8df501c5ef1c",
+      "target": "OCC-2026-08-21-err-089-r3",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-090",
+      "block": "entry-header",
+      "sourceHash": "83d72a4985e8",
+      "target": "P-ERR-090",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-090",
+      "block": "initial",
+      "sourceHash": "2f956c44efcb",
+      "target": "OCC-2026-07-02-err-090-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-090",
+      "block": "recurrence",
+      "sourceHash": "8e693ce5c585",
+      "target": "OCC-2026-08-25-err-090-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-090",
+      "block": "recurrence",
+      "sourceHash": "dfe51f992bb4",
+      "target": "OCC-2026-08-28-err-090-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-091",
+      "block": "entry-header",
+      "sourceHash": "9485234d8948",
+      "target": "P-ERR-091",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-091",
+      "block": "initial",
+      "sourceHash": "63282cc35f15",
+      "target": "OCC-2026-07-02-err-091-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-092",
+      "block": "entry-header",
+      "sourceHash": "8b61ca632837",
+      "target": "P-ERR-092",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-092",
+      "block": "initial",
+      "sourceHash": "46fda56e2060",
+      "target": "OCC-2026-07-03-err-092-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-092",
+      "block": "recurrence",
+      "sourceHash": "bc6a25ed059b",
+      "target": "OCC-2026-08-16-err-092-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-093",
+      "block": "entry-header",
+      "sourceHash": "08a5e7eb5fea",
+      "target": "P-ERR-093",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-093",
+      "block": "initial",
+      "sourceHash": "4e680509e876",
+      "target": "OCC-2026-07-15-err-093-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-094",
+      "block": "entry-header",
+      "sourceHash": "aa3f3b61df8c",
+      "target": "P-ERR-094",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-094",
+      "block": "initial",
+      "sourceHash": "9e8d323f3828",
+      "target": "OCC-2026-07-16-err-094-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-095",
+      "block": "entry-header",
+      "sourceHash": "272fd92bcdc5",
+      "target": "P-ERR-095",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-095",
+      "block": "initial",
+      "sourceHash": "7a73476a16d7",
+      "target": "OCC-2026-08-02-err-095-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-096",
+      "block": "entry-header",
+      "sourceHash": "d513e70e353f",
+      "target": "P-ERR-096",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-096",
+      "block": "initial",
+      "sourceHash": "3c56d5e4b0b8",
+      "target": "OCC-2026-08-12-err-096-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-097",
+      "block": "entry-header",
+      "sourceHash": "26e116a82508",
+      "target": "P-ERR-097",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-097",
+      "block": "initial",
+      "sourceHash": "c24eb0142212",
+      "target": "OCC-2026-08-16-err-097-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-098",
+      "block": "entry-header",
+      "sourceHash": "2432297281aa",
+      "target": "P-ERR-098",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-098",
+      "block": "initial",
+      "sourceHash": "25bb2836879a",
+      "target": "OCC-2026-08-16-err-098-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-098",
+      "block": "recurrence",
+      "sourceHash": "ff7ffff24c7b",
+      "target": "OCC-2026-08-19-err-098-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-099",
+      "block": "entry-header",
+      "sourceHash": "21b4bdf19fa5",
+      "target": "P-ERR-099",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-099",
+      "block": "initial",
+      "sourceHash": "250da27be6eb",
+      "target": "OCC-2026-08-17-err-099-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-099",
+      "block": "recurrence",
+      "sourceHash": "0817827db9c6",
+      "target": "OCC-2026-08-28-err-099-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-099",
+      "block": "recurrence",
+      "sourceHash": "993eb15b0c9a",
+      "target": "OCC-2026-09-10-err-099-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-105",
+      "block": "entry-header",
+      "sourceHash": "873a9c2f32ce",
+      "target": "P-ERR-105",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-105",
+      "block": "initial",
+      "sourceHash": "ead5b19b99e3",
+      "target": "OCC-2026-08-22-err-105-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-106",
+      "block": "entry-header",
+      "sourceHash": "9143e153405e",
+      "target": "P-ERR-106",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-106",
+      "block": "initial",
+      "sourceHash": "6166fecac9cc",
+      "target": "OCC-2026-08-22-err-106-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-107",
+      "block": "entry-header",
+      "sourceHash": "c680263017bc",
+      "target": "P-ERR-107",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-107",
+      "block": "initial",
+      "sourceHash": "1ace1b65a17b",
+      "target": "OCC-2026-08-24-err-107-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-108",
+      "block": "entry-header",
+      "sourceHash": "e027c0e76afd",
+      "target": "P-ERR-108",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-108",
+      "block": "initial",
+      "sourceHash": "81e0468ae118",
+      "target": "OCC-2026-08-25-err-108-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-109",
+      "block": "entry-header",
+      "sourceHash": "ff7d05053926",
+      "target": "P-ERR-109",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-109",
+      "block": "initial",
+      "sourceHash": "835add18a806",
+      "target": "OCC-2026-08-26-err-109-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-110",
+      "block": "entry-header",
+      "sourceHash": "b5adbd971c4f",
+      "target": "P-ERR-110",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-110",
+      "block": "initial",
+      "sourceHash": "de7d393b0927",
+      "target": "OCC-2026-08-28-err-110-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-111",
+      "block": "entry-header",
+      "sourceHash": "ceaf69fd8e2c",
+      "target": "P-ERR-111",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-111",
+      "block": "initial",
+      "sourceHash": "33e5e780a6ad",
+      "target": "OCC-2026-08-28-err-111-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-112",
+      "block": "entry-header",
+      "sourceHash": "54237c5dbd65",
+      "target": "P-ERR-112",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-112",
+      "block": "initial",
+      "sourceHash": "aefd3ac1eb0e",
+      "target": "OCC-2026-09-02-err-112-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-113",
+      "block": "entry-header",
+      "sourceHash": "5c8939990bc6",
+      "target": "P-ERR-113",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-113",
+      "block": "initial",
+      "sourceHash": "99ea228f04f1",
+      "target": "OCC-2026-09-03-err-113-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-114",
+      "block": "entry-header",
+      "sourceHash": "7da6360da677",
+      "target": "P-ERR-114",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-114",
+      "block": "initial",
+      "sourceHash": "ce79d5d43614",
+      "target": "OCC-2026-09-04-err-114-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-115",
+      "block": "entry-header",
+      "sourceHash": "0853b3d8a9fb",
+      "target": "P-ERR-115",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-115",
+      "block": "initial",
+      "sourceHash": "1b418515df5b",
+      "target": "OCC-2026-09-04-err-115-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-116",
+      "block": "entry-header",
+      "sourceHash": "a364ed27db38",
+      "target": "P-ERR-116",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-116",
+      "block": "initial",
+      "sourceHash": "d21902adadac",
+      "target": "OCC-2026-09-04-err-116-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-117",
+      "block": "entry-header",
+      "sourceHash": "bfc0f13655b6",
+      "target": "P-ERR-117",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-117",
+      "block": "initial",
+      "sourceHash": "24aee8bbaba5",
+      "target": "OCC-2026-09-05-err-117-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-118",
+      "block": "entry-header",
+      "sourceHash": "2b5f10284a53",
+      "target": "P-ERR-118",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-118",
+      "block": "initial",
+      "sourceHash": "5cab04545992",
+      "target": "OCC-2026-09-05-err-118-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-119",
+      "block": "entry-header",
+      "sourceHash": "40a5fba7a3a6",
+      "target": "P-ERR-119",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-119",
+      "block": "initial",
+      "sourceHash": "a85ecdfcdbeb",
+      "target": "OCC-2026-09-06-err-119-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-120",
+      "block": "entry-header",
+      "sourceHash": "1206ed685dec",
+      "target": "P-ERR-120",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-120",
+      "block": "initial",
+      "sourceHash": "6c73af613f46",
+      "target": "OCC-2026-09-06-err-120-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-121",
+      "block": "entry-header",
+      "sourceHash": "2bca60b8fd96",
+      "target": "P-ERR-121",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-121",
+      "block": "initial",
+      "sourceHash": "aa5fd45738aa",
+      "target": "OCC-2026-09-06-err-121-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-122",
+      "block": "entry-header",
+      "sourceHash": "7361bb7d995f",
+      "target": "P-ERR-122",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-122",
+      "block": "initial",
+      "sourceHash": "1ff7b7f6a5ab",
+      "target": "OCC-2026-09-10-err-122-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-123",
+      "block": "entry-header",
+      "sourceHash": "93ccc1a07a9f",
+      "target": "P-ERR-123",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-123",
+      "block": "initial",
+      "sourceHash": "464b940731e2",
+      "target": "OCC-2026-09-10-err-123-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-124",
+      "block": "entry-header",
+      "sourceHash": "aa441ff8f994",
+      "target": "P-ERR-124",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-124",
+      "block": "initial",
+      "sourceHash": "46baaff1721d",
+      "target": "OCC-2026-09-10-err-124-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-125",
+      "block": "entry-header",
+      "sourceHash": "3fca699da60a",
+      "target": "P-ERR-125",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-125",
+      "block": "initial",
+      "sourceHash": "18f651412516",
+      "target": "OCC-2026-09-11-err-125-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-126",
+      "block": "entry-header",
+      "sourceHash": "23bd472410e4",
+      "target": "P-ERR-126",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-126",
+      "block": "initial",
+      "sourceHash": "09f858b9ef3b",
+      "target": "OCC-2026-09-12-err-126-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-128",
+      "block": "entry-header",
+      "sourceHash": "5cbf9cdc6ab8",
+      "target": "P-ERR-128",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-128",
+      "block": "initial",
+      "sourceHash": "4f5a4a4b0f2e",
+      "target": "OCC-2026-09-12-err-128-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-129",
+      "block": "entry-header",
+      "sourceHash": "54b11378c37c",
+      "target": "P-ERR-129",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-129",
+      "block": "initial",
+      "sourceHash": "abe281b055ba",
+      "target": "OCC-2026-09-13-err-129-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-130",
+      "block": "entry-header",
+      "sourceHash": "c00d6e4a92cd",
+      "target": "P-ERR-130",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-130",
+      "block": "initial",
+      "sourceHash": "f81810189289",
+      "target": "OCC-2026-09-14-err-130-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-131",
+      "block": "entry-header",
+      "sourceHash": "f40ddfdcd4ff",
+      "target": "P-ERR-131",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-131",
+      "block": "initial",
+      "sourceHash": "22954b364e29",
+      "target": "OCC-2026-09-15-err-131-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-019",
+      "block": "entry-header",
+      "sourceHash": "18a1e7999e76",
+      "target": "P-ERR-019",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-019",
+      "block": "initial",
+      "sourceHash": "430ab5ed52b9",
+      "target": "OCC-2026-05-21-err-019-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-016",
+      "block": "entry-header",
+      "sourceHash": "07fdeb320989",
+      "target": "P-ERR-016",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-016",
+      "block": "initial",
+      "sourceHash": "206cb50deb9d",
+      "target": "OCC-2026-05-21-err-016-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-007",
+      "block": "entry-header",
+      "sourceHash": "36b246aef82c",
+      "target": "P-ERR-007",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-007",
+      "block": "initial",
+      "sourceHash": "9dc102e1c20e",
+      "target": "OCC-2026-05-19-err-007-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-006",
+      "block": "entry-header",
+      "sourceHash": "4b0a18500d8d",
+      "target": "P-ERR-006",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-006",
+      "block": "initial",
+      "sourceHash": "c23e88e254b9",
+      "target": "OCC-2026-05-19-err-006-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-003",
+      "block": "entry-header",
+      "sourceHash": "f86cb2132494",
+      "target": "P-ERR-003",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-003",
+      "block": "initial",
+      "sourceHash": "b4d8cf93e012",
+      "target": "OCC-2026-05-19-err-003-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-026",
+      "block": "entry-header",
+      "sourceHash": "4c5d88414a9f",
+      "target": "P-ERR-026",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-026",
+      "block": "initial",
+      "sourceHash": "ffee5db8cae7",
+      "target": "OCC-2026-05-23-err-026-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-027",
+      "block": "entry-header",
+      "sourceHash": "e06ec0deb006",
+      "target": "P-ERR-027",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-027",
+      "block": "initial",
+      "sourceHash": "ea58928cdf0a",
+      "target": "OCC-2026-05-24-err-027-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-085",
+      "block": "entry-header",
+      "sourceHash": "e2fb8bc9ebd3",
+      "target": "P-ERR-085",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-085",
+      "block": "initial",
+      "sourceHash": "e7695736e1c0",
+      "target": "OCC-2026-06-27-err-085-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-086",
+      "block": "entry-header",
+      "sourceHash": "4fc647931338",
+      "target": "P-ERR-086",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-086",
+      "block": "initial",
+      "sourceHash": "78dbab5a9cb4",
+      "target": "OCC-2026-06-27-err-086-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-087",
+      "block": "entry-header",
+      "sourceHash": "794f03ee5a1e",
+      "target": "P-ERR-087",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-087",
+      "block": "initial",
+      "sourceHash": "6016be131f77",
+      "target": "OCC-2026-06-29-err-087-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-028",
+      "block": "entry-header",
+      "sourceHash": "279881016173",
+      "target": "P-ERR-028",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-028",
+      "block": "initial",
+      "sourceHash": "fa57b53ceb1b",
+      "target": "OCC-2026-05-24-err-028-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-031",
+      "block": "entry-header",
+      "sourceHash": "26c838df33e5",
+      "target": "P-ERR-031",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-031",
+      "block": "initial",
+      "sourceHash": "4c4f5c8c6ce0",
+      "target": "OCC-2026-05-24-err-031-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-044",
+      "block": "entry-header",
+      "sourceHash": "42916f88fd88",
+      "target": "P-ERR-044",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-044",
+      "block": "initial",
+      "sourceHash": "4021f897a0be",
+      "target": "OCC-2026-05-26-err-044-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-046",
+      "block": "entry-header",
+      "sourceHash": "d5a00a51580c",
+      "target": "P-ERR-046",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-046",
+      "block": "initial",
+      "sourceHash": "442c2736eac8",
+      "target": "OCC-2026-05-26-err-046-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-047",
+      "block": "entry-header",
+      "sourceHash": "3a4f010a36bd",
+      "target": "P-ERR-047",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-047",
+      "block": "initial",
+      "sourceHash": "b759ad59b45c",
+      "target": "OCC-2026-05-26-err-047-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-010",
+      "block": "entry-header",
+      "sourceHash": "92657ee5b895",
+      "target": "P-ERR-010",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-010",
+      "block": "initial",
+      "sourceHash": "a073e22cd4d2",
+      "target": "OCC-2026-05-20-err-010-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-015",
+      "block": "entry-header",
+      "sourceHash": "7148d4c78e41",
+      "target": "P-ERR-015",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-015",
+      "block": "initial",
+      "sourceHash": "3b1a5c650139",
+      "target": "OCC-2026-05-21-err-015-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-020",
+      "block": "entry-header",
+      "sourceHash": "1606b7ee3f04",
+      "target": "P-ERR-020",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-020",
+      "block": "initial",
+      "sourceHash": "2e0499942a9b",
+      "target": "OCC-2026-05-22-err-020-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-033",
+      "block": "entry-header",
+      "sourceHash": "b3dcc7bd9c2c",
+      "target": "P-ERR-033",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-033",
+      "block": "initial",
+      "sourceHash": "836c1aa3c7c9",
+      "target": "OCC-2026-05-24-err-033-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-036",
+      "block": "entry-header",
+      "sourceHash": "5202e16d364d",
+      "target": "P-ERR-036",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-036",
+      "block": "initial",
+      "sourceHash": "0564df1796ae",
+      "target": "OCC-2026-05-24-err-036-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-043",
+      "block": "entry-header",
+      "sourceHash": "1ef9f01173d0",
+      "target": "P-ERR-043",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-043",
+      "block": "initial",
+      "sourceHash": "6cd1c5c43e00",
+      "target": "OCC-2026-05-26-err-043-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-037",
+      "block": "entry-header",
+      "sourceHash": "383482bf7fd7",
+      "target": "P-ERR-037",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-037",
+      "block": "initial",
+      "sourceHash": "b5e7e5c2528f",
+      "target": "OCC-2026-05-25-err-037-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-038",
+      "block": "entry-header",
+      "sourceHash": "dd62dff2724d",
+      "target": "P-ERR-038",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-038",
+      "block": "initial",
+      "sourceHash": "abf20dffeefa",
+      "target": "OCC-2026-05-25-err-038-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-039",
+      "block": "entry-header",
+      "sourceHash": "42ce94b4d2bd",
+      "target": "P-ERR-039",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-039",
+      "block": "initial",
+      "sourceHash": "b8769eeb887f",
+      "target": "OCC-2026-05-25-err-039-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-041",
+      "block": "entry-header",
+      "sourceHash": "f0bf52a7516e",
+      "target": "P-ERR-041",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-041",
+      "block": "initial",
+      "sourceHash": "64e02eb1d4ff",
+      "target": "OCC-2026-05-26-err-041-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-042",
+      "block": "entry-header",
+      "sourceHash": "7e9ab059da3a",
+      "target": "P-ERR-042",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-042",
+      "block": "initial",
+      "sourceHash": "419532dbdf81",
+      "target": "OCC-2026-05-26-err-042-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-056",
+      "block": "entry-header",
+      "sourceHash": "ec1fe329cd35",
+      "target": "P-ERR-056",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-056",
+      "block": "initial",
+      "sourceHash": "a1e105e8496c",
+      "target": "OCC-2026-06-01-err-056-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-056",
+      "block": "recurrence",
+      "sourceHash": "d55c18bb4a89",
+      "target": "OCC-2026-06-06-err-056-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-056",
+      "block": "recurrence",
+      "sourceHash": "1fc66504edfe",
+      "target": "OCC-2026-06-06-err-056-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-056",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "67c4ec6656a3",
+      "target": "P-ERR-056",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-057",
+      "block": "entry-header",
+      "sourceHash": "bfbb375250fa",
+      "target": "P-ERR-057",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-057",
+      "block": "initial",
+      "sourceHash": "0d7dc2b17d38",
+      "target": "OCC-2026-06-01-err-057-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-049",
+      "block": "entry-header",
+      "sourceHash": "f98d8ea25e1f",
+      "target": "P-ERR-049",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-049",
+      "block": "initial",
+      "sourceHash": "056b883674d5",
+      "target": "OCC-2026-06-02-err-049-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-050",
+      "block": "entry-header",
+      "sourceHash": "e9d823b5e822",
+      "target": "P-ERR-050",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-050",
+      "block": "initial",
+      "sourceHash": "eecc0151b7a8",
+      "target": "OCC-2026-06-02-err-050-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-051",
+      "block": "entry-header",
+      "sourceHash": "36ec98c92386",
+      "target": "P-ERR-051",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-051",
+      "block": "initial",
+      "sourceHash": "12c5dfc6250f",
+      "target": "OCC-2026-06-03-err-051-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-053",
+      "block": "entry-header",
+      "sourceHash": "28fc505f7afb",
+      "target": "P-ERR-053",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-053",
+      "block": "initial",
+      "sourceHash": "c32acd0c20c5",
+      "target": "OCC-2026-06-03-err-053-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-054",
+      "block": "entry-header",
+      "sourceHash": "e217409293ba",
+      "target": "P-ERR-054",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-054",
+      "block": "initial",
+      "sourceHash": "b7932774e560",
+      "target": "OCC-2026-06-03-err-054-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-054",
+      "block": "recurrence",
+      "sourceHash": "9b8c498caaae",
+      "target": "OCC-2026-06-03-err-054-r1",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-054",
+      "block": "recurrence",
+      "sourceHash": "b4927a9fce49",
+      "target": "OCC-2026-06-03-err-054-r2",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-054",
+      "block": "recurrence-bullet-undated",
+      "sourceHash": "ee05310733e8",
+      "target": "P-ERR-054",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-062",
+      "block": "entry-header",
+      "sourceHash": "430b05e8313e",
+      "target": "P-ERR-062",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-062",
+      "block": "initial",
+      "sourceHash": "fd0f8c544209",
+      "target": "OCC-2026-06-05-err-062-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-061",
+      "block": "entry-header",
+      "sourceHash": "10128e68808b",
+      "target": "P-ERR-061",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-061",
+      "block": "initial",
+      "sourceHash": "2e44aaa63828",
+      "target": "OCC-2026-06-05-err-061-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-058",
+      "block": "entry-header",
+      "sourceHash": "175882b25765",
+      "target": "P-ERR-058",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-058",
+      "block": "initial",
+      "sourceHash": "4e6e3fe9c8c2",
+      "target": "OCC-2026-06-03-err-058-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-059",
+      "block": "entry-header",
+      "sourceHash": "0d1a0727a11d",
+      "target": "P-ERR-059",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-059",
+      "block": "initial",
+      "sourceHash": "abf94e27939b",
+      "target": "OCC-2026-06-03-err-059-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-060",
+      "block": "entry-header",
+      "sourceHash": "bd894cb99cc3",
+      "target": "P-ERR-060",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-060",
+      "block": "initial",
+      "sourceHash": "1b063591c786",
+      "target": "OCC-2026-06-03-err-060-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-064",
+      "block": "entry-header",
+      "sourceHash": "26008cc7693e",
+      "target": "P-ERR-064",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-064",
+      "block": "initial",
+      "sourceHash": "18f64311e79a",
+      "target": "OCC-2026-06-08-err-064-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-083",
+      "block": "entry",
+      "sourceHash": "831219587dbc",
+      "target": null,
+      "status": "preserved_raw"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-065",
+      "block": "entry-header",
+      "sourceHash": "f3de0e00cf8c",
+      "target": "P-ERR-065",
+      "status": "structured"
+    },
+    {
+      "legacySource": "ARCHIVE",
+      "displayId": "ERR-065",
+      "block": "initial",
+      "sourceHash": "61e3a98a0008",
+      "target": "OCC-2026-06-14-err-065-r0",
+      "status": "structured"
+    }
+  ]
+}

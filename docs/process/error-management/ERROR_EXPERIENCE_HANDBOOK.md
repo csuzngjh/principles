@@ -1,5 +1,14 @@
 # Error Experience Handbook
 
+> **⛔ FROZEN LEGACY SNAPSHOT (2026-09-17, PRI-799 Phase C authority cutover).**
+> The ERR authority is now the structured records tree
+> `docs/process/error-management/records/` (see its `README.md`). Do NOT edit
+> this file — new ERRs, recurrences and archives are recorded only via
+> `npm run error:record` (see the `record-error` skill). Everything below,
+> including the recording instructions, is preserved verbatim as history and is
+> no longer followed. A current human-readable view can be generated from the
+> records with `npm run error:migrate -- --project --project-out <dir>`.
+
 > **INCIDENT LOG.** For ordinary coding tasks, start with `docs/process/error-management/ERROR_PATTERN_INDEX.md` and then read the detailed entries it references. Read this full file when recording a new error, auditing error history, or when the compact index does not cover the task.
 
 ---
