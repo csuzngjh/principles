@@ -1,48 +1,4 @@
-/**
- * ReleaseManager mutation authority surface (PRI-672 — the "PRI-661" adoption task).
- *
- * This module is the narrow seam between the Console's MutationController
- * (PRI-659 migration boundary) and the ReleaseManager deep module. It exposes:
- *
- *   - `createReleaseManagerAuthority()` — constructs the ReleaseManager for a
- *     pdHome and reports per-mutation-kind readiness with stable, structured
- *     reason codes (ADR-0024 §2.4: refusal over silent degradation);
- *   - `mapReleaseManagerErrorToFallback()` — maps ReleaseManager refusals onto
- *     the explicit-fallback reason vocabulary the console surfaces in the
- *     `X-PD-Mutation-Fallback-Reason` response header.
- *
- * Boundary (ADR-0024 §2.1): the authority module DECIDES; it never deploys.
- * Artifact deployment stays with the installer; the transaction journal stays
- * the single source of truth for runtime mutations. Readiness probing performs
- * zero filesystem writes. The governed shadow check (kind `check`) refreshes
- * only ReleaseManager-owned verified-metadata caches under `~/.pd/trust` and
- * `~/.pd/channels` — never `~/.pd/runtime`, never the extension directory.
- *
- * Journal readiness semantics: `journal_not_supported` gates MUTATION kinds as
- * a hard precondition (ADR-0024 D-2 — an unjournaled runtime mutation must be
- * refused, never degraded to). It is reported for `check` only as a
- * conservative coupling — on a dual-slot install, a corrupt active.json is
- * recovered FROM the journal, so a check that cannot trust journal-recoverable
- * state must not claim readiness. Relaxing it for `check` alone is a Phase 4
- * decision that must stay explicit (see the analysis doc §4.3); it can never
- * be relaxed for apply/apply-full/rollback.
- *
- * `apply` and `rollback` stay structurally not-ready until their own work
- * lands; until then these kinds explicitly fall back to the legacy console
- * updater — TEMPORARY migration debt per ADR-0024 D-1, not a supported
- * long-term state. The two gaps are independent (PRI-729 audit §4):
- * `rollback` waits on the Phase 2 same-version restore (`ROLLBACK_AVAILABLE`),
- * while `apply` is the plugin-diff mechanism, which the ReleaseManager does not
- * implement at all — no signed whole-payload release can express it.
- *
- * PRI-698 Phase 1: `apply-full` (full-runtime update) is served by the real
- * ReleaseManager.apply() orchestration (installer + journal) and reports the
- * same base readiness as `check`. The CONSOLE additionally gates the routing
- * behind the `release_manager_write_authority` flag (default ON since the
- * 2026-09-07 graduation) — flag-off dispatches fall back explicitly with
- * `release_manager_write_disabled`.
- */
-
+/** ReleaseManager readiness and failure mapping for the Console. No alternate updater exists. */
 import * as fs from 'node:fs';
 import {
   ReleaseManager,
@@ -52,37 +8,20 @@ import {
 import { InstallLayoutError, readInstallConfig, resolvePdHomePaths, type InstallConfig } from './install-layout.js';
 import { resolveReleaseMetadataSource, type ReleaseMetadataSource } from './release-metadata-source.js';
 
-/** Mutation kinds the console MutationController routes (PRI-659 contract). */
-export const RELEASE_MANAGER_AUTHORITY_KINDS = ['check', 'apply', 'apply-full', 'rollback'] as const;
+/** The two Console update operations. */
+export const RELEASE_MANAGER_AUTHORITY_KINDS = ['check', 'apply-full'] as const;
 export type ReleaseManagerAuthorityKind = (typeof RELEASE_MANAGER_AUTHORITY_KINDS)[number];
-
-/** Why a capability is structurally absent from the ReleaseManager (not a mere precondition). */
-export type ReleaseManagerStructuralGap = 'rollback_not_available' | 'plugin_diff_not_supported';
 
 export type ReleaseManagerAuthorityReason =
   | 'metadata_source_unconfigured'
   | 'bootstrap_not_installed'
   | 'install_state_corrupt'
-  | 'journal_not_supported'
-  | ReleaseManagerStructuralGap;
+  | 'journal_not_supported';
 
 export interface ReleaseManagerAuthorityReadiness {
   readonly ready: boolean;
   readonly reasons: readonly ReleaseManagerAuthorityReason[];
 }
-
-/**
- * Structural gate for the kinds whose write path does not exist yet:
- * `rollback` arrives with the Phase 2 restore migration. `apply-full` left
- * this gate in PRI-698 Phase 1.
- *
- * `apply` (plugin diff) is NOT gated here: it is not a ReleaseManager
- * mechanism at all (see the `apply` kind below), so its reason is a separate
- * structural gap — a plugin-diff update needs a "current deployment → target
- * deployment" comparison that signed whole-payload releases cannot express.
- * Conflating the two made the fallback reason inaccurate (PRI-729 audit §4 B3).
- */
-const ROLLBACK_AVAILABLE = false;
 
 export interface ReleaseManagerAuthorityOptions {
   readonly pdHome: string;
@@ -101,7 +40,7 @@ export interface ReleaseManagerAuthority {
    * PRI-709 P0-1: how the metadata base URL was resolved. `metadataBaseUrl` is
    * `undefined` for `invalid` / `unconfigured` — the same condition that
    * produces the `metadata_source_unconfigured` readiness reason, so an
-   * unconfigured install still falls back exactly as before.
+   * unconfigured install is refused observably.
    */
   readonly metadataSource: ReleaseMetadataSource;
 }
@@ -156,7 +95,6 @@ export function createReleaseManagerAuthority(
     metadataBaseUrl: metadataSource.metadataBaseUrl ?? '',
     ...(options.openclawHome !== undefined ? { openclawHome: options.openclawHome } : {}),
     ...(options.now !== undefined ? { now: options.now } : {}),
-    ...(options.legacyCheck !== undefined ? { legacyCheck: options.legacyCheck } : {}),
   });
 
   let installStatus: InstallStatus | null = null;
@@ -184,43 +122,20 @@ export function createReleaseManagerAuthority(
       ready: baseReady,
       reasons: baseReasons,
     },
-    apply: {
-      ready: false,
-      // Structural, and independent of rollback: the plugin-diff mechanism is
-      // not a ReleaseManager mechanism, so this kind stays not-ready even once
-      // rollback lands (PRI-729 audit §4 B3).
-      reasons: [...baseReasons, 'plugin_diff_not_supported'] as const,
-    },
-    // PRI-698 Phase 1: the full-runtime write path exists (ReleaseManager.apply
-    // → installer → journal). Console routing is additionally flag-gated
-    // (`release_manager_write_authority`, registry default ON since the
-    // 2026-09-07 graduation — only an explicit `enabled: false` disables it).
     'apply-full': {
       ready: baseReady,
       reasons: baseReasons,
-    },
-    rollback: {
-      ready: false,
-      reasons: ROLLBACK_AVAILABLE ? baseReasons : ([...baseReasons, 'rollback_not_available'] as const),
     },
   } satisfies Readonly<Record<ReleaseManagerAuthorityKind, ReleaseManagerAuthorityReadiness>>;
 
   return { manager, installStatus, kinds, metadataSource };
 }
 
-/**
- * Map a ReleaseManager refusal onto the console's explicit-fallback reason
- * vocabulary (rc-9: degradation must be observable with a stable reason).
- * `transactionOpened` passes through the PRI-698 default-on safety net
- * semantics: false ⇒ the refusal happened before any side effect, so the
- * console may fall back to the legacy updater with an explicit reason; true
- * ⇒ runtime-side effects may exist and the refusal must surface as a
- * failure, never as a fallback.
- */
-export function mapReleaseManagerErrorToFallback(error: unknown): {
+/** Preserve explicit failure details; never dispatch another writer. */
+export function mapReleaseManagerError(error: unknown): {
   reason: string;
   message: string;
-  nextAction: string | null;
+  nextAction: string;
   transactionOpened: boolean;
 } {
   if (error instanceof ReleaseManagerError) {
@@ -232,9 +147,9 @@ export function mapReleaseManagerErrorToFallback(error: unknown): {
     };
   }
   return {
-    reason: 'release_manager_check_failed',
+    reason: 'release_manager_failed',
     message: error instanceof Error ? error.message : String(error),
-    nextAction: null,
+    nextAction: 'Resolve the reported cause, or run the official installer to repair PD, then retry.',
     transactionOpened: false,
   };
 }

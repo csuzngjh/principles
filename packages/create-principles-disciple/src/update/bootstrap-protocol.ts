@@ -14,13 +14,12 @@ import { isReleaseChannelName } from './product-identity.js';
 import type { ReleaseManager} from './release-manager.js';
 import { ReleaseManagerError } from './release-manager.js';
 
-export type BootstrapRequestOp = 'inspect' | 'check' | 'apply' | 'rollback';
+export type BootstrapRequestOp = 'inspect' | 'check' | 'apply';
 
 export type BootstrapRequest =
   | { readonly op: 'inspect' }
   | { readonly op: 'check'; readonly channel: ReleaseChannelName }
-  | { readonly op: 'apply'; readonly releaseId: string }
-  | { readonly op: 'rollback' };
+  | { readonly op: 'apply'; readonly releaseId: string };
 
 export interface BootstrapOkResponse {
   readonly ok: true;
@@ -74,7 +73,7 @@ export function parseBootstrapRequest(raw: string): BootstrapRequest {
     throw new BootstrapProtocolError('protocol_missing_op', 'The bootstrap request is missing the required "op" field.');
   }
   const {op} = record;
-  const knownOps: readonly BootstrapRequestOp[] = ['inspect', 'check', 'apply', 'rollback'];
+  const knownOps: readonly BootstrapRequestOp[] = ['inspect', 'check', 'apply'];
   if (typeof op !== 'string' || !knownOps.includes(op as BootstrapRequestOp)) {
     throw new BootstrapProtocolError('protocol_unknown_op', `Unknown bootstrap op: ${JSON.stringify(op)}. Supported: ${knownOps.join(', ')}.`);
   }
@@ -105,7 +104,7 @@ export function parseBootstrapRequest(raw: string): BootstrapRequest {
     }
     return { op, releaseId: record.releaseId };
   }
-  return op === 'rollback' ? { op: 'rollback' } : { op: 'inspect' };
+  return { op: 'inspect' };
 }
 
 /** Serializes exactly one JSON object for stdout (no banners, no extra text). */
@@ -143,9 +142,6 @@ export async function handleBootstrapRequest(
           message: 'The bootstrap protocol does not carry the deployment context ReleaseManager.apply() requires.',
           nextAction: 'Trigger updates through the Console update surface, which supplies the deployment context.',
         };
-      case 'rollback':
-        await manager.rollback();
-        return { ok: true, result: { rolledBack: true } };
     }
   } catch (error) {
     if (error instanceof ReleaseManagerError) {
