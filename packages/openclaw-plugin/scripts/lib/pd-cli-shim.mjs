@@ -27,8 +27,11 @@ function isWindows(platform) {
     return platform === 'win32';
 }
 
+// Format parity with the historical writers, NOT output escaping: none of the
+// shim writers escape backslashes in Windows paths, so these substitutions
+// reproduce their exact byte output (split/join keeps that intent explicit).
 function quoteCmdPath(filePath) {
-    return filePath.replace(/"/g, '""');
+    return filePath.split('"').join('""');
 }
 
 /**
@@ -59,7 +62,7 @@ export function createLocalPdShims({ installedEntry, installedBinDir, platform =
         ].join('\r\n');
         const psShim = [
             '$ErrorActionPreference = "Stop"',
-            `$entry = "${installedEntry.replace(/`/g, '``').replace(/"/g, '`"')}"`,
+            `$entry = "${installedEntry.split('`').join('``').split('"').join('`"')}"`,
             '& node $entry @args',
             'exit $LASTEXITCODE',
             '',
@@ -73,7 +76,7 @@ export function createLocalPdShims({ installedEntry, installedBinDir, platform =
 
     const shShim = [
         '#!/usr/bin/env sh',
-        `exec node "${installedEntry.replace(/"/g, '\\"')}" "$@"`,
+        `exec node "${installedEntry.split('"').join('\\"')}" "$@"`,
         '',
     ].join('\n');
     const shPath = join(installedBinDir, 'pd');

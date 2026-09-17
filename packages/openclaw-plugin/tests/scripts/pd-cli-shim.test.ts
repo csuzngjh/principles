@@ -19,7 +19,7 @@
  * mocked via the injectable execImpl.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync as readRepoFile } from 'node:fs';
@@ -149,7 +149,7 @@ describe('reportGlobalPdEntry — global bin is read-only, recovery is actionabl
     });
 
     it('resolves the global bin through the mocked npm prefix (win32: prefix as-is) without writing', () => {
-        const { lines, log } = captureLog();
+        const { log } = captureLog();
         const execImpl = (cmd: string) => {
             expect(cmd).toBe('npm prefix -g');
             return `${join(root, 'npm-global')}\n`;
