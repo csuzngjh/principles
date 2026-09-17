@@ -130,7 +130,7 @@ describe('parseTriggerDecisions', () => {
 // ── Integration: Real Log File Fixture ─────────────────────────────────────
 
 describe('real SYSTEM log fixture', () => {
-  const tmpDir = path.join(os.tmpdir(), `pd-test-evidence-${Date.now()}`);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-test-evidence-'));
   const logDir = path.join(tmpDir, 'memory', 'logs');
 
   beforeEach(() => {

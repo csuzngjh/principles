@@ -73,11 +73,11 @@ function teardownTempDirs(): void {
  * Generate RuleCode that blocks /etc/passwd with a unique reason marker.
  * The marker lets tests assert WHICH version of the rule executed.
  */
-function makeBlockCode(reason: string, ruleId: string = RULE_ID): string {
+function makeBlockCode(reason: string, ruleId: string = RULE_ID, targetPath: string = '/etc/passwd'): string {
   return `
 function evaluate(input, helpers) {
   var p = input.action.normalizedPath || '';
-  if (p === '/etc/passwd') {
+  if (p === '${targetPath}') {
     return { decision: 'block', matched: true, reason: '${reason}' };
   }
   return { decision: 'allow', matched: false, reason: 'not matched' };
@@ -184,12 +184,12 @@ function updateArtifactContent(artifactId: string, newCode: string, ruleId: stri
  * `as unknown as` would hide field renames (e.g., rawParams → paramsSummary)
  * and enum drift (e.g., bashRisk 'low' → 'safe'|'normal'|'dangerous'|'unknown').
  */
-function makeHostInput(): RuleHostInput {
+function makeHostInput(normalizedPath: string = '/etc/passwd'): RuleHostInput {
   return {
     action: {
       toolName: 'write_file',
-      normalizedPath: '/etc/passwd',
-      paramsSummary: { file_path: '/etc/passwd', content: 'x' },
+      normalizedPath,
+      paramsSummary: { file_path: normalizedPath, content: 'x' },
     },
     workspace: { isRiskPath: false },
     session: { sessionId: 'cache-inval-session', currentGfi: 0 },
@@ -341,6 +341,52 @@ describe('PRI-494 — RuleHost cache invalidation matrix', () => {
     expect(r2.liveDecision).toBeUndefined();
     expect(r2.shadowDecisions).toHaveLength(1);
     expect(r2.shadowDecisions[0]?.decision).toBe('block');
+
+    host.dispose();
+  });
+
+  it('deactivating rule A leaves rule B effective on the same live instance (J4 precision, PRI-828)', async () => {
+    // Two independent live rules with distinct target paths and block markers:
+    // rule A blocks /etc/passwd (MARKER_AB_A), rule B blocks /etc/shadow
+    // (MARKER_AB_B). Deactivating A must remove only A's effect; B must keep
+    // blocking on the SAME RuleHost instance (no restart, no global sweep).
+    const RULE_A = 'R_J4_PRECISION_A';
+    const RULE_B = 'R_J4_PRECISION_B';
+    const ART_A = 'art-j4-precision-a';
+    const ART_B = 'art-j4-precision-b';
+    const ACT_A = 'act_code_j4_precision_a';
+    const ACT_B = 'act_code_j4_precision_b';
+    const MARKER_A = 'J4_PRECISION_BLOCK_MARKER_A';
+    const MARKER_B = 'J4_PRECISION_BLOCK_MARKER_B';
+
+    insertRuleArtifact(ART_A, RULE_A, makeBlockCode(MARKER_A, RULE_A, '/etc/passwd'));
+    insertRuleArtifact(ART_B, RULE_B, makeBlockCode(MARKER_B, RULE_B, '/etc/shadow'));
+    await insertActivation(ACT_A, ART_A, RULE_A, 'code_tool_hook_live_activate');
+    await insertActivation(ACT_B, ART_B, RULE_B, 'code_tool_hook_live_activate');
+
+    const logger = makeLogger();
+    const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
+    const inputA = makeHostInput('/etc/passwd');
+    const inputB = makeHostInput('/etc/shadow');
+
+    // Both rules armed and effective before revocation
+    const rA1 = host.evaluateDetailed(inputA);
+    expect(rA1.liveDecision?.decision).toBe('block');
+    expect(rA1.liveDecision?.reason).toBe(MARKER_A);
+    const rB1 = host.evaluateDetailed(inputB);
+    expect(rB1.liveDecision?.decision).toBe('block');
+    expect(rB1.liveDecision?.reason).toBe(MARKER_B);
+
+    // Revoke A only
+    await deactivateActivation(ACT_A);
+
+    // Same live instance: A's effect disappears, B's effect survives
+    const rA2 = host.evaluateDetailed(inputA);
+    expect(rA2.liveDecision).toBeUndefined();
+    expect(rA2.shadowDecisions).toHaveLength(0);
+    const rB2 = host.evaluateDetailed(inputB);
+    expect(rB2.liveDecision?.decision).toBe('block');
+    expect(rB2.liveDecision?.reason).toBe(MARKER_B);
 
     host.dispose();
   });

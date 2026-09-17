@@ -3,7 +3,7 @@ import * as principleInjection from '../../src/core/principle-injection.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord } from '@principles/core/runtime-v2';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../../src/core/runtime-v2-prompt-activation-reader.js';
 
@@ -968,5 +968,154 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     expect(result).toBeDefined();
+  });
+});
+
+describe('Runtime V2 authority derivation + artifact recycling (Safety Net v1.2, PRI-828)', () => {
+  function insertApproval(overrides: {
+    artifactId: string;
+    channel?: string;
+    decidedBy?: string;
+    status?: string;
+  }) {
+    const {
+      artifactId,
+      channel = 'prompt',
+      decidedBy = 'owner-safety-net-test',
+      status = 'approved',
+    } = overrides;
+    const db = sqliteConn.getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, decided_at, decided_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      `apr_${channel}_${artifactId}`,
+      artifactId,
+      channel,
+      'high',
+      status,
+      0.9,
+      now,
+      status === 'approved' ? now : null,
+      status === 'approved' ? decidedBy : null,
+    );
+  }
+
+  it('approved approvals row renders authority="owner" at the prompt boundary', async () => {
+    const artifactId = 'art-v2-auth-owner-301';
+    const principleId = 'princ-v2-auth-owner-301';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+    insertApproval({ artifactId, decidedBy: 'owner-safety-net-test' });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    // The directive TAG carries the derived authority; the boilerplate
+    // explanation line mentions both values, so assert the tag form
+    // (`authority="...">` only appears on directive tags).
+    expect(result?.prependSystemContext).toContain(`<directive id="${principleId}" source="runtime_v2_activation" authority="owner">`);
+    expect(result?.prependSystemContext).not.toContain('authority="system_policy">');
+  });
+
+  it('low-risk auto-activation without an approvals row renders authority="system_policy" and never claims owner (I3)', async () => {
+    const artifactId = 'art-v2-auth-syspolicy-302';
+    const principleId = 'princ-v2-auth-syspolicy-302';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+    // deliberately NO approvals row — prompt channel low-risk auto-activation
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    // Directive tag must carry system_policy and must NEVER carry owner —
+    // a low-risk auto-activation must not be represented as Owner-approved.
+    expect(result?.prependSystemContext).toContain(`<directive id="${principleId}" source="runtime_v2_activation" authority="system_policy">`);
+    expect(result?.prependSystemContext).not.toContain('authority="owner">');
+  });
+
+  it('artifact slot recycled by production upsert leaves old activation dangling — new content is NOT injected under old authorization (C5)', async () => {
+    const artifactIdOld = 'art-v2-recycle-303-old';
+    const artifactIdNew = 'art-v2-recycle-303-new';
+    const principleId = 'princ-v2-recycle-303';
+    const taskSlot = `task_${principleId}`;
+    const newText = 'UNIQUE_RUNTIME_V2_RECYCLED_CONTENT_5w8q1';
+
+    const artifactStore = new SqlitePIArtifactStore(sqliteConn);
+    const now = new Date().toISOString();
+    await artifactStore.upsertArtifact({
+      artifactId: artifactIdOld,
+      artifactKind: 'principle',
+      sourceTaskId: taskSlot,
+      sourcePrincipleId: principleId,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ principleId, text: TEST_PRINCIPLE_TEXT }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await insertPromptActivation({ artifactId: artifactIdOld, principleId });
+    insertApproval({ artifactId: artifactIdOld });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const before = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    expect(before?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+
+    expect(before?.prependSystemContext).toContain(`<directive id="${principleId}" source="runtime_v2_activation" authority="owner">`);
+
+    await artifactStore.upsertArtifact({
+      artifactId: artifactIdNew,
+      artifactKind: 'principle',
+      sourceTaskId: taskSlot,
+      sourcePrincipleId: principleId,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ principleId, text: newText }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(await artifactStore.getArtifactById(artifactIdOld)).toBeNull();
+    expect(await artifactStore.listBySourceTaskId(taskSlot)).toEqual([
+      expect.objectContaining({ artifactId: artifactIdNew, contentJson: JSON.stringify({ principleId, text: newText }) }),
+    ]);
+    const activationStore = new SqliteActivationStateStore(sqliteConn);
+    expect(await activationStore.listAllActivations()).toEqual([
+      expect.objectContaining({ artifactId: artifactIdOld, deactivatedAt: null }),
+    ]);
+
+    // 3) The old activation now dangles: the replaced content must NOT be
+    //    injected under the old activation's authorization, and the old text
+    //    must be gone too. Fail-safe skip + observable warning, no crash.
+    const infoSpy = vi.fn();
+    const warnSpy = vi.fn();
+    const ctx = {
+      workspaceDir: tempWorkspaceDir,
+      trigger: 'user',
+      sessionId: 'test-session-v2',
+      api: {
+        logger: { info: infoSpy, warn: warnSpy, error: vi.fn() },
+        runtime: {},
+        config: {},
+      },
+    } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
+
+    const after = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
+    expect(after).toBeDefined();
+    expect(after?.prependSystemContext).not.toContain(newText);
+    expect(after?.prependSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
+    expect(after?.prependSystemContext).not.toContain(`<directive id="${principleId}"`);
+    expect(after?.appendSystemContext).not.toContain(newText);
+    expect(after?.appendSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
+    const infoCalls = infoSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    const warnCalls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    const hasDanglingWarning = [...infoCalls, ...warnCalls].some(
+      (message) => message.includes('artifact_not_found') && message.includes(artifactIdOld),
+    );
+    expect(hasDanglingWarning).toBe(true);
   });
 });

@@ -127,6 +127,10 @@ describe('OpenClawCliRuntimeAdapter healthCheck message-file lifecycle', () => {
       expect(filePath).not.toContain(path.join('.pd', 'tmp'));
       // It should still match the msg-*.json naming convention.
       expect(path.basename(filePath)).toMatch(/^msg-.*\.json$/);
+
+      // PRI-827: the unique pd-msg-* temp root is created via mkdtemp and fully
+      // removed by cleanup together with the message file (not just the file).
+      expect(fs.existsSync(path.dirname(filePath))).toBe(false);
     });
   });
 
@@ -159,7 +163,7 @@ describe('OpenClawCliRuntimeAdapter healthCheck message-file lifecycle', () => {
       stubFirstTwoProbes();
       // Capture the file path before the probe runs so we can check cleanup
       // after the early-return on timeout.
-      let createdFilePath = '';
+      let createdFilePath: string;
       mockRunCliProcess.mockResolvedValueOnce(
         makeCliOutput({ timedOut: true, exitCode: null }),
       );
@@ -175,6 +179,29 @@ describe('OpenClawCliRuntimeAdapter healthCheck message-file lifecycle', () => {
 
       // Even on timeout, the finally block must clean up.
       expect(fs.existsSync(createdFilePath)).toBe(false);
+    });
+
+    it('PRI-827: surfaces a message-write failure without removing shared workspace paths', async () => {
+      // Pre-create <workspace>/.pd as a FILE so writeMessageFile's recursive
+      // mkdir of <workspace>/.pd/tmp fails deterministically (no node-builtin
+      // mocks; the workspace dir is shared, not owned by the message writer,
+      // so it must be left intact on failure).
+      const blockedWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-msgfile-block-'));
+      const pdFile = path.join(blockedWorkspace, '.pd');
+      fs.writeFileSync(pdFile, 'not a dir', 'utf8');
+
+      const result = await new OpenClawCliRuntimeAdapter({
+        runtimeMode: 'local',
+        agentId: 'diag',
+        workspaceDir: blockedWorkspace,
+      }).healthCheck();
+
+      // The write failure surfaces as unhealthy, not a crash.
+      expect(result.healthy).toBe(false);
+      // The pre-existing .pd file must be untouched (never removed).
+      expect(fs.readFileSync(pdFile, 'utf8')).toBe('not a dir');
+
+      fs.rmSync(blockedWorkspace, { recursive: true, force: true });
     });
 
     it('deletes the message file after a probe with non-zero exit code', async () => {
