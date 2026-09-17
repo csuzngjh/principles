@@ -266,6 +266,18 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   });
   if (!declared.ok) {
     logger.warn?.(`[PD:CodexWorker] Failed to persist Codex tool declaration: ${declared.reason} — host-neutral consumers will not find it (rc-9)`);
+    // CodeRabbit CR-2 (PRI-813): creating activations while the Codex
+    // declaration is absent would let promotion fall back to the OpenClaw
+    // liveness contract (host_tool_declaration_missing → OpenClaw default)
+    // and falsely pass host-liveness checks for a Codex activation. Degrade
+    // this cycle instead; the next cycle retries the declaration first.
+    return {
+      ...base,
+      mode: 'degraded',
+      reason: `host_tool_declaration_persist_failed:${declared.reason}`,
+      nextAction: 'Repair Codex host declaration persistence (.pd/host-tool-semantics/codex.json) before running the downstream internalization cycle; the worker retries automatically on the next cycle.',
+      report: { catchUp, reconcile, diagnostician, downstream: null },
+    };
   }
   const downstream = await runInternalizationConsumerCycle(workspaceDir, {
     owner: WORKER_OWNER,

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import { appendEventLogLine, redactTelemetryString } from '@principles/core/runtime-v2';
+import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
@@ -15,6 +15,16 @@ import { runGovernanceAdmission } from './ingestion/admission.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface PdHookResult { stdout: unknown; exitCode: number; stderr: string[] }
+
+function redactStringFields(data: object): Record<string, unknown> {
+  // rc-8: telemetry is redacted string-field by string field (same policy as
+  // the OpenClaw EventLog redactEventData) — shared by every emitter here.
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    redacted[key] = typeof value === 'string' ? redactTelemetryString(value) : value;
+  }
+  return redacted;
+}
 
 /**
  * PRI-750: event emitter for the Codex subprocess model. Writes the same
@@ -34,18 +44,12 @@ function codexEventEmitter(stateDir: string): HostEventEmitter {
       });
     },
     recordToolCall(sessionId, data) {
-      // rc-8: tool events are telemetry — redact every string field before
-      // persisting (same policy as the OpenClaw EventLog redactEventData).
-      const redacted: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(data)) {
-        redacted[key] = typeof value === 'string' ? redactTelemetryString(value) : value;
-      }
       appendEventLogLine(stateDir, {
         ts: new Date().toISOString(),
         type: 'tool_call',
         category: data.error || (data.exitCode !== undefined && data.exitCode !== 0) ? 'failure' : 'success',
         sessionId,
-        data: redacted,
+        data: redactStringFields(data),
       });
     },
   };
@@ -60,6 +64,65 @@ function diagnostic(reason: string, nextAction: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, MAX_DIAGNOSTIC) : 'unknown_error';
+}
+
+/**
+ * PRI-813: admissible evaluation entry = the CANONICAL core schema guard
+ * (rc-1/rc-2, P4: no hand-rolled field copy that could drift from the
+ * contract) plus one caller policy: a shadow observation without a non-blank
+ * activationId is dead evidence — the shadow summary keys on the exact id —
+ * so it is rejected here (CodeRabbit CR-6).
+ */
+function isAdmissibleRuleHostEvaluationEntry(value: unknown): value is RuleHostEvaluatedEventData {
+  return isRuleHostEvaluatedEventData(value)
+    && (value.activationMode !== 'shadow' || (typeof value.activationId === 'string' && value.activationId.trim().length > 0));
+}
+
+/**
+ * PRI-813: persist the shared gate's per-activation evaluation facts
+ * (metadata.evaluations — shadow observations plus the live aggregate) as
+ * canonical `rulehost_evaluated` events through the same core JSONL writer
+ * and the same telemetry-redaction policy the Codex emitter already uses.
+ * This is the Codex side of the shadow-evidence reconnection: exact
+ * activationId per event, `activationMode: 'shadow'` rows feed the existing
+ * rulecode-shadow-summary and promotion evidence unchanged.
+ */
+function recordRuleHostEvaluations(stateDir: string, sessionId: string | undefined, evaluations: unknown): string[] {
+  if (!Array.isArray(evaluations)) return [];
+  // One bounded diagnostic per failure CLASS — an early entry-invalid must
+  // not swallow a later persist-failure (review S4).
+  const diagnostics: string[] = [];
+  let sawInvalidEntry = false;
+  let sawPersistFailure = false;
+  for (const entry of evaluations) {
+    if (!isAdmissibleRuleHostEvaluationEntry(entry)) {
+      // rc-9: a skipped evidence row must be observable, never silent.
+      if (!sawInvalidEntry) {
+        sawInvalidEntry = true;
+        diagnostics.push(diagnostic('rulehost_evaluation_entry_invalid', 'Inspect host-runtime gate metadata contract; the evaluation event was not persisted.'));
+      }
+      continue;
+    }
+    // CodeRabbit CR-1: evidence persistence is telemetry — an fs failure here
+    // must never propagate into processHookInvocation's fail-open catch,
+    // which would drop an already-computed deny from stdout and let the tool
+    // call proceed. Degrade observably instead (rc-9).
+    try {
+      appendEventLogLine(stateDir, {
+        ts: new Date().toISOString(),
+        type: 'rulehost_evaluated',
+        category: 'evaluated',
+        sessionId,
+        data: redactStringFields(entry),
+      });
+    } catch (error: unknown) {
+      if (!sawPersistFailure) {
+        sawPersistFailure = true;
+        diagnostics.push(diagnostic(`rulehost_evaluation_persist_failed:${errorMessage(error)}`, 'Inspect workspace .state/logs writability; the evaluation event was not persisted, the tool decision is unaffected.'));
+      }
+    }
+  }
+  return diagnostics;
 }
 
 /**
@@ -191,7 +254,17 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       // v2 rules stay SUSPENDED on Codex (never loaded context-blind). See
       // annotateContextWarnings for the structured unsupported declaration.
     }).dispatch(event);
-    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
+    // PRI-813: the shared gate's evaluation facts leave through metadata —
+    // persist them here (telemetry persistence is host-side business; the
+    // gate itself never writes). Codex previously recorded NO
+    // rulehost_evaluated rows, so shadow evidence never reached the
+    // promotion pipeline.
+    const evaluationDiagnostics = recordRuleHostEvaluations(
+      path.join(resolution.workspaceDir, '.state'),
+      event.context.sessionId,
+      result.metadata?.evaluations,
+    );
+    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...ingestionDiagnostics];
     return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;
