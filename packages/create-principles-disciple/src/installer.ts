@@ -46,6 +46,7 @@ import {
   verifyReleaseAssetManifestAsync,
   verifyReleaseAssetTarget,
 } from './update/release-asset-manifest.js';
+import { parseEmbeddedProductIdentity, ProductIdentityError } from './update/product-identity.js';
 import {
   mergeIntoInstallJson,
   readInstallJsonRecord,
@@ -299,6 +300,8 @@ export function commitInstallerActiveRecord(journal: InstallerJournal): ActiveRe
       previousReleaseId: previous?.releaseId ?? null,
       transactionId: journal.transactionId,
       productVersion: journal.productVersion,
+      // Embedded provenance only — absent (not faked) for legacy payloads.
+      ...(journal.sourceCommit !== null ? { sourceCommit: journal.sourceCommit } : {}),
     });
     return {
       written: true,
@@ -2613,6 +2616,14 @@ export interface InstallerJournal {
   readonly journalPath: string;
   readonly releaseId: string;
   readonly productVersion: string;
+  /**
+   * Embedded product identity (SPEC §12): the payload's stamped source commit.
+   * Null = the payload carries no embedded identity (legacy shape) — provenance
+   * is then visibly unavailable in journal/active.json, never faked.
+   */
+  readonly sourceCommit: string | null;
+  /** Provenance of `productVersion`: 'embedded' | 'package_manifest' | 'unavailable'. */
+  readonly productVersionSource: InstallerProductVersionSource;
   readonly releaseMetadataDigest: string;
   /** PRI-664 review: provenance of releaseMetadataDigest ('manifest' | 'package_manifest' | 'fallback' | 'signed_channel'). */
   readonly releaseMetadataDigestSource: ReleaseMetadataDigestSource;
@@ -2643,27 +2654,41 @@ function readPackageVersion(pkgPath: string): string | null {
 }
 
 /**
- * Identity of the payload being installed. Prefers the self-contained asset
- * manifest (covers the whole payload); falls back to the bundled pd-cli
- * package manifest. Both are REAL digests — the journal never stores a
- * placeholder where a verifiable value is available (same discipline as
- * legacy-migration.ts). The last-resort fallback hashes the literal reason
+ * Identity of the payload being installed. Prefers the EMBEDDED product
+ * identity stamp (`_release/product-identity.json`, written by the asset
+ * build BEFORE the artifact bytes were hashed — SPEC §12); falls back to the
+ * bundled plugin package manifest. Both are REAL facts — the journal never
+ * stores a placeholder where a verifiable value is available (same discipline
+ * as legacy-migration.ts). The last-resort fallback hashes the literal reason
  * string only to satisfy the journal's 64-hex format requirement; it is not
  * part of any release-metadata identity chain.
  *
- * PRI-709 P0-2 (PRI-698 audit F-1): `productVersion` is the PRODUCT version —
- * the plugin package manifest. It previously read `pd-cli/package.json`, but
- * the two packages version independently (on the Owner machine: plugin
- * 1.230.2 vs pd-cli 1.147.5), so every confirmed journal recorded a version
- * that no runtime state could ever match. That is why active.json could not
- * serve as the deployment identity source.
+ * PRI-709 P0-2 (PRI-698 audit F-1): without an embedded stamp `productVersion`
+ * is the PRODUCT version — the plugin package manifest. It previously read
+ * `pd-cli/package.json`, but the two packages version independently (on the
+ * Owner machine: plugin 1.230.2 vs pd-cli 1.147.5), so every confirmed journal
+ * recorded a version that no runtime state could ever match. That is why
+ * active.json could not serve as the deployment identity source.
+ *
+ * Embedded-stamp contract (fail-closed, rc-2/rc-3): a PRESENT but malformed
+ * stamp throws BEFORE any install mutation (the caller journals `planned`
+ * before the first filesystem mutation, so a throw here leaves the runtime
+ * untouched). A MISSING stamp is the legacy shape: provenance stays visibly
+ * unavailable via `productVersionSource: 'package_manifest' | 'unavailable'`
+ * and a null `sourceCommit` — never silently faked.
  */
-function resolveInstallerPayloadIdentity(pluginDir: string): { productVersion: string; releaseMetadataDigest: string; releaseMetadataDigestSource: ReleaseMetadataDigestSource } {
-  const productVersion = readPackageVersion(path.join(pluginDir, 'package.json'))
-    ?? readPackageVersion(path.join(pluginDir, 'pd-cli', 'package.json'))
-    ?? 'unknown';
+export type InstallerProductVersionSource = 'embedded' | 'package_manifest' | 'signed_channel' | 'unavailable';
+
+function resolveInstallerPayloadIdentity(pluginDir: string): {
+  productVersion: string;
+  sourceCommit: string | null;
+  productVersionSource: InstallerProductVersionSource;
+  releaseMetadataDigest: string;
+  releaseMetadataDigestSource: ReleaseMetadataDigestSource;
+} {
   const pdCliPkgPath = path.join(pluginDir, 'pd-cli', 'package.json');
   const assetManifestPath = path.join(pluginDir, '_release', 'manifest.json');
+  const embeddedIdentityPath = path.join(pluginDir, '_release', 'product-identity.json');
   let releaseMetadataDigest: string;
   let releaseMetadataDigestSource: ReleaseMetadataDigestSource;
   if (existsSync(assetManifestPath)) {
@@ -2676,16 +2701,47 @@ function resolveInstallerPayloadIdentity(pluginDir: string): { productVersion: s
     releaseMetadataDigest = createHash('sha256').update('installer-payload-missing-identity').digest('hex');
     releaseMetadataDigestSource = 'fallback';
   }
-  return { productVersion, releaseMetadataDigest, releaseMetadataDigestSource };
+  if (existsSync(embeddedIdentityPath)) {
+    // Present stamp: strict validation, no fallback. A malformed identity must
+    // stop the install before it mutates anything rather than journal a guess.
+    let embeddedValue: unknown;
+    try {
+      embeddedValue = JSON.parse(readFileSync(embeddedIdentityPath, 'utf8')) as unknown;
+    } catch (error) {
+      throw new ProductIdentityError(
+        'productIdentity',
+        `The release payload's embedded product identity is not valid JSON (${embeddedIdentityPath}): `
+        + `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const embedded = parseEmbeddedProductIdentity(embeddedValue);
+    return {
+      productVersion: embedded.productVersion,
+      sourceCommit: embedded.sourceCommit,
+      productVersionSource: 'embedded',
+      releaseMetadataDigest,
+      releaseMetadataDigestSource,
+    };
+  }
+  const productVersion = readPackageVersion(path.join(pluginDir, 'package.json'))
+    ?? readPackageVersion(pdCliPkgPath)
+    ?? 'unknown';
+  return {
+    productVersion,
+    sourceCommit: null,
+    productVersionSource: productVersion === 'unknown' ? 'unavailable' : 'package_manifest',
+    releaseMetadataDigest,
+    releaseMetadataDigestSource,
+  };
 }
 
 /** Opens one installer transaction: `~/.pd/transactions/<transactionId>.jsonl`. */
 export function beginInstallerJournal(pluginDir: string): InstallerJournal {
-  const { productVersion, releaseMetadataDigest, releaseMetadataDigestSource } = resolveInstallerPayloadIdentity(pluginDir);
+  const { productVersion, sourceCommit, productVersionSource, releaseMetadataDigest, releaseMetadataDigestSource } = resolveInstallerPayloadIdentity(pluginDir);
   const transactionId = `install-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const journalPath = path.join(getPdDir(), 'transactions', `${transactionId}.jsonl`);
   const releaseId = `bundled-${productVersion}-${releaseMetadataDigest.slice(0, 12)}`;
-  return { transactionId, journalPath, releaseId, productVersion, releaseMetadataDigest, releaseMetadataDigestSource, generation: 1, degraded: false, lastState: null };
+  return { transactionId, journalPath, releaseId, productVersion, sourceCommit, productVersionSource, releaseMetadataDigest, releaseMetadataDigestSource, generation: 1, degraded: false, lastState: null };
 }
 
 /**
@@ -2707,6 +2763,10 @@ export function journalInstallerTransition(
     transactionId: journal.transactionId,
     releaseId: journal.releaseId,
     productVersion: journal.productVersion,
+    // Embedded provenance only: legacy payloads without a stamp journal no
+    // sourceCommit at all (the field's absence IS the visible unavailable
+    // marker), so a strict reader never mistakes a fallback for a fact.
+    ...(journal.sourceCommit !== null ? { sourceCommit: journal.sourceCommit } : {}),
     releaseMetadataDigest: journal.releaseMetadataDigest,
     releaseMetadataDigestSource: journal.releaseMetadataDigestSource,
     // PRI-698 Phase 1: standalone installs keep generation 1; an externally

@@ -46,8 +46,23 @@ function publishDirectoryAtomically(source, destination) {
 
 const output = readOption('--output');
 if (!output) {
-  throw new Error('Usage: build-self-contained-release --output <directory> [--platform <platform>] [--arch <arch>] [--node-abi <abi>]');
+  throw new Error('Usage: build-self-contained-release --output <directory> [--platform <platform>] [--arch <arch>] [--node-abi <abi>] [--product-version x.y.z --source-commit <40-hex>]');
 }
+
+// Embedded product identity passthrough (SPEC §12): both facts must be given
+// together; build-release-asset validates the values and stamps them into
+// _release/product-identity.json BEFORE the archive bytes are hashed. Omitting
+// both keeps the legacy unstamped shape (local/dev builds); release CI always
+// passes them so the published artifact carries its own identity.
+const productVersionOption = readOption('--product-version');
+const sourceCommitOption = readOption('--source-commit');
+if ((productVersionOption === undefined) !== (sourceCommitOption === undefined)) {
+  throw new Error('--product-version and --source-commit must be provided together');
+}
+const productIdentityArgs = productVersionOption === undefined ? [] : [
+  '--product-version', productVersionOption,
+  '--source-commit', sourceCommitOption,
+];
 
 const targetPlatform = readOption('--platform', process.platform);
 const targetArch = readOption('--arch', process.arch);
@@ -90,6 +105,7 @@ try {
     '--platform', targetPlatform,
     '--arch', targetArch,
     '--node-abi', targetNodeAbi,
+    ...productIdentityArgs,
     '--archive', stagingArchive,
     '--digest-output', stagingDigest,
   ], { stdio: 'inherit' });

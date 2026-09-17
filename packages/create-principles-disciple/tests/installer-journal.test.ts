@@ -96,6 +96,9 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       // No existing install manifest → resolveInstallManifestHosts treats
       // current as undefined (fresh install) instead of re-reading it.
       if (s.endsWith('install.json')) return false;
+      // The fixture payload carries no embedded product identity stamp —
+      // pretending it exists would trip the fail-closed identity parser.
+      if (s.endsWith(path.join('_release', 'product-identity.json'))) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
@@ -157,6 +160,8 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       const s = String(value);
       if (s.endsWith('install.json')) return false;
       if (s.endsWith(path.join('.pd', 'state.db'))) return false;
+      // No embedded product identity stamp in this fixture (fail-closed parser).
+      if (s.endsWith(path.join('_release', 'product-identity.json'))) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {

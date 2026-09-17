@@ -214,6 +214,41 @@ runs:
           echo "Bumped: $NPM_VERSION -> $NEW_VERSION"
         fi
 
+    - name: Stamp npm payload product identity
+      # SPEC §12 product-identity unification: the npm-distributed installer
+      # payload carries its OWN identity (_release/product-identity.json,
+      # read by the installer's resolveInstallerPayloadIdentity). The version
+      # is the one this action just computed for the installer package; the
+      # source commit is the exact checkout HEAD this run publishes from.
+      # The SOURCE tree's package.json version is demoted to a COMPONENT
+      # diagnostic from this point on — it may drift from the product version
+      # and is never the installer's identity authority again (the embedded
+      # stamp wins; its absence stays a visible legacy fallback).
+      if: ${{ inputs.pkg_dir == 'create-principles-disciple' }}
+      shell: bash
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        SOURCE_COMMIT="${{ github.sha }}"
+        node -e '
+          const { writeFileSync, mkdirSync } = require("node:fs");
+          const { join } = require("node:path");
+          const [version, sourceCommit] = process.argv.slice(1);
+          // Same strict shape the installer re-validates at install time
+          // (parseEmbeddedProductIdentity) — a malformed stamp must fail the
+          // release here, never ship.
+          if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
+            throw new Error(`Refusing to stamp: version is not a strict x.y.z product version: ${JSON.stringify(version)}`);
+          }
+          if (!/^[a-f0-9]{40}$/.test(sourceCommit)) {
+            throw new Error(`Refusing to stamp: source commit is not a 40-char git sha: ${JSON.stringify(sourceCommit)}`);
+          }
+          const releaseDir = join("packages", "create-principles-disciple", "_release");
+          mkdirSync(releaseDir, { recursive: true });
+          const identity = { schemaVersion: 1, productVersion: version, sourceCommit };
+          writeFileSync(join(releaseDir, "product-identity.json"), `${JSON.stringify(identity, null, 2)}\n`);
+          console.log(`Stamped npm payload product identity: version=${version} commit=${sourceCommit.slice(0, 12)}`);
+        ' "$VERSION" "$SOURCE_COMMIT"
+
     - name: Sync version to all files
       if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
       shell: bash

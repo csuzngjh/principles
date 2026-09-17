@@ -393,6 +393,10 @@ export class ReleaseManager {
       journalPath,
       releaseId: releaseMetadata.releaseId,
       productVersion: releaseMetadata.productVersion,
+      // The signed release metadata is the ReleaseManager's identity authority;
+      // its validated sourceCommit becomes the journal/active provenance.
+      sourceCommit: releaseMetadata.sourceCommit,
+      productVersionSource: 'signed_channel',
       releaseMetadataDigest: releaseMetadata.metadataDigest,
       releaseMetadataDigestSource: 'signed_channel',
       generation: (status.generation ?? 0) + 1,

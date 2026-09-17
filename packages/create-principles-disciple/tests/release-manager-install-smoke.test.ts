@@ -93,6 +93,9 @@ describe('install() release-manager dependency install + authority import smoke 
       const s = String(value);
       if (s.endsWith('install.json')) return false;
       if (s.endsWith(path.join('.pd', 'state.db'))) return false;
+      // The fixture payload carries no embedded product identity stamp —
+      // pretending it exists would trip the fail-closed identity parser.
+      if (s.endsWith(path.join('_release', 'product-identity.json'))) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
