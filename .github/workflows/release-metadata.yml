@@ -72,10 +72,15 @@ on:
           - dry-run
           - publish
       product_version:
-        description: 'Product version to publish ("auto" = latest published create-principles-disciple; must match the ref''s package.json version — mismatch aborts before any metadata is generated)'
+        description: 'Product version to publish ("auto" = latest published create-principles-disciple). Identity = this resolved version + HEAD commit (format-validated, verified against each asset''s embedded stamp at assembly). An EXPLICIT version must match the ref''s create-principles-disciple/package.json unless allow_version_drift is set.'
         required: false
         default: 'auto'
         type: string
+      allow_version_drift:
+        description: 'Explicit product_version that disagrees with the ref''s package.json is refused unless this is true (deliberate re-publication escape hatch).'
+        required: false
+        default: false
+        type: boolean
       expires_at:
         description: 'Metadata expiry, RFC3339 UTC ("auto" = now + 90 days; pass explicitly when re-publishing a release)'
         required: false
@@ -129,8 +134,11 @@ jobs:
 
       - name: Resolve release identity
         id: release
+        env:
+          PRODUCT_VERSION_INPUT: ${{ github.event.inputs.product_version }}
+          ALLOW_VERSION_DRIFT: ${{ github.event.inputs.allow_version_drift }}
         run: |
-          VERSION="${{ github.event.inputs.product_version }}"
+          VERSION="$PRODUCT_VERSION_INPUT"
           if [ "$VERSION" = "auto" ] || [ -z "$VERSION" ]; then
             VERSION=$(npm view create-principles-disciple version 2>/dev/null || echo "")
           fi
@@ -139,6 +147,20 @@ jobs:
             exit 1
           fi
           COMMIT=$(git rev-parse HEAD)
+          # PRI-832 review re-anchor: an EXPLICIT product_version is refused
+          # when it disagrees with the ref's create-principles-disciple
+          # package.json unless allow_version_drift is set. "auto" is already
+          # registry-anchored (npm view), so no comparison is needed. This
+          # restores the fail-closed guard the format-only validation retired,
+          # without resurrecting the stale-source-label problem: the anchored
+          # file is the REF's manifest, never a cross-run authority.
+          if [ "$PRODUCT_VERSION_INPUT" != "auto" ] && [ -n "$PRODUCT_VERSION_INPUT" ] && [ "$ALLOW_VERSION_DRIFT" != "true" ]; then
+            REF_VERSION=$(node -p "require('./packages/create-principles-disciple/package.json').version")
+            if [ "$VERSION" != "$REF_VERSION" ]; then
+              echo "::error::Explicit product_version ($VERSION) disagrees with the ref's create-principles-disciple/package.json ($REF_VERSION). Pass allow_version_drift=true only for a deliberate re-publication."
+              exit 1
+            fi
+          fi
           # Consistency gate — validation target: the PUBLISHED-INPUT identity
           # (SPEC §12 product identity unification). `productVersion` and
           # `sourceCommit` below are the identity the publisher signs and the
@@ -395,10 +417,19 @@ jobs:
               exit 1
             }
             if ! EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_COMMIT="$EXPECTED_COMMIT" node -e '
-              const { productVersion, sourceCommit } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              // PRI-832 review: enforce the FULL strict stamp contract (the
+              // same shape parseEmbeddedProductIdentity enforces at install),
+              // not just the two identity fields — a shape regression that
+              // passed here would ship signed bytes every install refuses.
+              let parsed;
+              try { parsed = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { console.error("stamp is not valid JSON"); process.exit(1); }
               const problems = [];
-              if (productVersion !== process.env.EXPECTED_VERSION) problems.push(`productVersion ${JSON.stringify(productVersion)} != resolved ${JSON.stringify(process.env.EXPECTED_VERSION)}`);
-              if (sourceCommit !== process.env.EXPECTED_COMMIT) problems.push(`sourceCommit ${JSON.stringify(sourceCommit)} != resolved ${JSON.stringify(process.env.EXPECTED_COMMIT)}`);
+              if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) problems.push("stamp is not a JSON object");
+              if (parsed.schemaVersion !== 1) problems.push(`schemaVersion ${JSON.stringify(parsed.schemaVersion)} != 1`);
+              if (typeof parsed.productVersion !== "string" || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(parsed.productVersion)) problems.push(`productVersion ${JSON.stringify(parsed.productVersion)} is not strict x.y.z`);
+              if (typeof parsed.sourceCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.sourceCommit)) problems.push(`sourceCommit ${JSON.stringify(parsed.sourceCommit)} is not 40-hex`);
+              if (parsed.productVersion !== process.env.EXPECTED_VERSION) problems.push(`productVersion != resolved ${JSON.stringify(process.env.EXPECTED_VERSION)}`);
+              if (parsed.sourceCommit !== process.env.EXPECTED_COMMIT) problems.push(`sourceCommit != resolved ${JSON.stringify(process.env.EXPECTED_COMMIT)}`);
               if (problems.length > 0) {
                 console.error(problems.join("; "));
                 process.exit(1);
