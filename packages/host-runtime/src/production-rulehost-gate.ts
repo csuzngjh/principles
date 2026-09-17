@@ -12,6 +12,7 @@ import {
   validateRuleHostResult,
   type LoadedImplementation,
   type RuleContextV2,
+  type RuleHostEvaluatedEventData,
   type RuleHostInput,
   type RuleHostMeta,
   type RuleHostResult,
@@ -24,7 +25,6 @@ import {
   MAX_ACTIVE_RULES,
   RULE_BATCH_SOURCE_BYTES,
   RULE_SOURCE_BYTES,
-  type RuleBatchSource,
   type RuleImplementationRuntime,
 } from './rule-implementation-runtime.js';
 
@@ -193,7 +193,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     }
 
     const connection = new SqliteConnection({ workspaceDir: event.context.workspaceDir, readonly: true, bootstrapIfMissing: false });
-    const candidates: { implId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string }[] = [];
+    const candidates: { implId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string; activationMode: 'live' | 'shadow' }[] = [];
     try {
       const globalPause: unknown = connection.getDb().prepare(`
         SELECT pause_id FROM global_rulecode_pauses WHERE status = 'paused' LIMIT 1
@@ -257,7 +257,17 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             continue;
           }
           const [row] = group;
-          if (!row || row.action !== 'code_tool_hook_live_activate') continue;
+          if (!row) continue;
+          // PRI-813: shadow activations are no longer skipped here — they run
+          // through the SAME budget/content/context validation and
+          // evaluateBatch pipeline as live rows, but their results are
+          // collected as observations only and never join mergeDecisions
+          // (shadow observes, never enforces). The v2 gate below stays ahead
+          // of any evaluation, so Codex v2 shadow remains suspended.
+          const activationMode: 'live' | 'shadow' | null = row.action === 'code_tool_hook_live_activate'
+            ? 'live'
+            : row.action === 'code_tool_hook_shadow_activate' ? 'shadow' : null;
+          if (activationMode === null) continue;
           const activationId = row.activation_id;
           const artifactId = row.artifact_id;
           const expectedContentBytes = row.content_bytes;
@@ -277,9 +287,21 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           const contentJson = contentRow.content_json;
           const returnedContentBytes = Buffer.byteLength(contentJson, 'utf8');
           if (contentRow.content_bytes > ARTIFACT_CONTENT_BYTES || returnedContentBytes > ARTIFACT_CONTENT_BYTES) {
+            // CodeRabbit CR-3: a shadow row's envelope overrun must only skip
+            // the shadow observation — pre-PRI-813 this return was unreachable
+            // for shadow rows, and letting it fire now would suppress live
+            // enforcement (shadow may never influence the live outcome).
+            if (activationMode === 'shadow') {
+              addWarning(warnings, `artifact_content_budget_exceeded: activation=${activationId} bytes=${Math.max(contentRow.content_bytes, returnedContentBytes)} maximum=${ARTIFACT_CONTENT_BYTES}`, 'reduce the active shadow artifact envelope and reactivate the rule; live enforcement is unaffected');
+              continue;
+            }
             return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_budget_exceeded: activation=${activationId} bytes=${Math.max(contentRow.content_bytes, returnedContentBytes)} maximum=${ARTIFACT_CONTENT_BYTES}`, 'reduce the active artifact envelope and reactivate the rule')], metadata: { evaluatedLiveRules: 0 } };
           }
           if (contentRow.content_bytes !== expectedContentBytes || returnedContentBytes !== contentRow.content_bytes) {
+            if (activationMode === 'shadow') {
+              addWarning(warnings, `artifact_content_size_changed: activation=${activationId}`, 'retry after the active shadow artifact update completes; live enforcement is unaffected');
+              continue;
+            }
             return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_size_changed: activation=${activationId}`, 'retry after the active artifact update completes')], metadata: { evaluatedLiveRules: 0 } };
           }
           try {
@@ -290,6 +312,10 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             }
             const sourceBytes = Buffer.byteLength(content.implementationCode, 'utf8');
             if (sourceBytes > RULE_SOURCE_BYTES) {
+              if (activationMode === 'shadow') {
+                addWarning(warnings, `rule_source_budget_exceeded: activation=${activationId} bytes=${sourceBytes}`, `reduce the shadow RuleCode source below ${RULE_SOURCE_BYTES} bytes; live enforcement is unaffected`);
+                continue;
+              }
               return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_source_budget_exceeded: activation=${activationId} bytes=${sourceBytes}`, `reduce each RuleCode source below ${RULE_SOURCE_BYTES} bytes`)], metadata: { evaluatedLiveRules: 0 } };
             }
             if (Object.hasOwn(content, 'requiresContextVersion')) {
@@ -322,7 +348,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               continue;
             }
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
-            candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode });
+            candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode, activationMode });
           } catch (error: unknown) {
             addWarning(warnings, `implementation_unhealthy: ${error instanceof Error ? error.message : String(error)}`, 'fix the RuleCode and reactivate the rule');
           }
@@ -337,27 +363,97 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         derived: { estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }), bashRisk: enrichment.bashRisk },
         ...(context ? { context } : {}),
       };
-      const batchSourceBytes = candidates.reduce((sum, candidate) => sum + Buffer.byteLength(candidate.source, 'utf8'), 0);
-      if (batchSourceBytes > RULE_BATCH_SOURCE_BYTES) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_source_budget_exceeded: batchBytes=${batchSourceBytes}`, `reduce total active RuleCode below ${RULE_BATCH_SOURCE_BYTES} bytes`)], metadata: { evaluatedLiveRules: 0 } };
+      // CodeRabbit CR-3: live and shadow evaluate in SEPARATE batches so a
+      // shadow rule's timeout/budget failure can never suppress live
+      // enforcement (shadow observes; it must not influence the live
+      // outcome). Live keeps the exact pre-PRI-813 early-return semantics;
+      // every shadow-batch failure degrades to a warning and skips the
+      // shadow observation only.
+      const liveCandidates = candidates.filter((candidate) => candidate.activationMode === 'live');
+      const shadowCandidates = candidates.filter((candidate) => candidate.activationMode === 'shadow');
+      const liveBatchBytes = liveCandidates.reduce((sum, candidate) => sum + Buffer.byteLength(candidate.source, 'utf8'), 0);
+      if (liveBatchBytes > RULE_BATCH_SOURCE_BYTES) {
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_source_budget_exceeded: batchBytes=${liveBatchBytes}`, `reduce total active RuleCode below ${RULE_BATCH_SOURCE_BYTES} bytes`)], metadata: { evaluatedLiveRules: 0 } };
       }
-      const batchSources: RuleBatchSource[] = candidates.map((candidate) => ({ source: candidate.source, filename: `activation-${candidate.implId}` }));
-      const remaining = remainingGateMs(startedAt);
+      let remaining = remainingGateMs(startedAt);
       if (remaining <= 0) {
         return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'reduce active RuleCode count or source size and retry')], metadata: { evaluatedLiveRules: 0 } };
       }
-      const batch = implementationRuntime.evaluateBatch(batchSources, hostInput, remaining);
-      if (!batch.ok || !batch.results) {
-        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`${batch.reason ?? 'rule_batch_failed'}: ${batch.detail ?? 'unknown failure'}`, 'inspect active RuleCode resource use and repair or deactivate the unhealthy rule')], metadata: { evaluatedLiveRules: 0 } };
+      const liveBatch = implementationRuntime.evaluateBatch(
+        liveCandidates.map((candidate) => ({ source: candidate.source, filename: `activation-${candidate.implId}` })),
+        hostInput,
+        remaining,
+      );
+      if (!liveBatch.ok || !liveBatch.results) {
+        return { decision: 'allow', source: event.source, warnings: [boundedWarning(`${liveBatch.reason ?? 'rule_batch_failed'}: ${liveBatch.detail ?? 'unknown failure'}`, 'inspect active RuleCode resource use and repair or deactivate the unhealthy rule')], metadata: { evaluatedLiveRules: 0 } };
       }
-      const timedOutChild = batch.results.find((candidate) => !candidate.ok && candidate.error?.includes('timed out'));
+      const timedOutChild = liveBatch.results.find((candidate) => !candidate.ok && candidate.error?.includes('timed out'));
       if (timedOutChild) {
         return { decision: 'allow', source: event.source, warnings: [boundedWarning(`rule_batch_timeout: ${timedOutChild.error ?? 'unknown child timeout'}`, 'fix or deactivate the unhealthy RuleCode and retry')], metadata: { evaluatedLiveRules: 0 } };
       }
+
+      // PRI-813: one canonical evaluation fact per shadow activation —
+      // observations only. Shadow results never join mergeDecisions, never
+      // block/modify/require approval: they record what a live rule WOULD
+      // have decided (ACTIVATION_CHANNELS §3.4), mirroring the legacy
+      // RuleHost report's shadowDecisions. Every failure mode below skips
+      // shadow observation without touching the live decision.
+      const shadowEvaluations: RuleHostEvaluatedEventData[] = [];
+      if (shadowCandidates.length > 0) {
+        const shadowBatchBytes = shadowCandidates.reduce((sum, candidate) => sum + Buffer.byteLength(candidate.source, 'utf8'), 0);
+        remaining = remainingGateMs(startedAt);
+        if (shadowBatchBytes > RULE_BATCH_SOURCE_BYTES) {
+          addWarning(warnings, `rule_source_budget_exceeded: shadowBatchBytes=${shadowBatchBytes}`, `reduce total shadow RuleCode below ${RULE_BATCH_SOURCE_BYTES} bytes; shadow observation was skipped, live enforcement is unaffected`);
+        } else if (remaining <= 0) {
+          addWarning(warnings, 'gate_deadline_exceeded', 'shadow observation was skipped after the live evaluation budget; live enforcement is unaffected');
+        } else {
+          const shadowBatch = implementationRuntime.evaluateBatch(
+            shadowCandidates.map((candidate) => ({ source: candidate.source, filename: `activation-${candidate.implId}` })),
+            hostInput,
+            remaining,
+          );
+          const shadowTimedOut = shadowBatch.ok && shadowBatch.results
+            ? shadowBatch.results.find((candidate) => !candidate.ok && candidate.error?.includes('timed out'))
+            : undefined;
+          if (!shadowBatch.ok || !shadowBatch.results) {
+            addWarning(warnings, `${shadowBatch.ok ? 'rule_batch_failed' : shadowBatch.reason ?? 'rule_batch_failed'}: ${shadowBatch.ok ? 'unknown failure' : shadowBatch.detail ?? 'unknown failure'}`, 'inspect active shadow RuleCode; the shadow observation was skipped, live enforcement is unaffected');
+          } else if (shadowTimedOut) {
+            addWarning(warnings, `rule_batch_timeout: ${shadowTimedOut.error ?? 'unknown child timeout'}`, 'fix or deactivate the unhealthy shadow RuleCode; the shadow observation was skipped, live enforcement is unaffected');
+          } else {
+            for (let index = 0; index < shadowCandidates.length; index += 1) {
+              const candidate = shadowCandidates[index];
+              const batchResult = shadowBatch.results[index];
+              if (!candidate || !batchResult || !batchResult.ok) {
+                addWarning(warnings, `implementation_unhealthy: ${batchResult && !batchResult.ok ? batchResult.error ?? 'unknown child error' : 'rule_batch_result_missing'}`, 'fix the shadow RuleCode and reactivate the rule; live enforcement is unaffected');
+                continue;
+              }
+              const validation = validateRuleHostResult(batchResult.result);
+              if (!isRuleResult(batchResult.result)) {
+                addWarning(warnings, `invalid RuleHostResult: ${validation.errors.join('; ')}`, 'fix the shadow RuleCode result and reactivate the rule; live enforcement is unaffected');
+                continue;
+              }
+              const shadowResult = batchResult.result.matched
+                ? { ...batchResult.result, ruleId: candidate.ruleId, principleId: candidate.principleId }
+                : batchResult.result;
+              shadowEvaluations.push({
+                toolName: input.toolName,
+                filePath: action.normalizedPath,
+                matched: shadowResult.matched,
+                decision: shadowResult.decision,
+                ruleId: candidate.ruleId,
+                activationId: candidate.implId,
+                activationMode: 'shadow',
+              });
+            }
+          }
+        }
+      }
+
       const implementations: LoadedImplementation[] = [];
-      for (let index = 0; index < candidates.length; index += 1) {
-        const candidate = candidates[index];
-        const batchResult = batch.results[index];
+      const liveEvaluatedResults: RuleHostResult[] = [];
+      for (let index = 0; index < liveCandidates.length; index += 1) {
+        const candidate = liveCandidates[index];
+        const batchResult = liveBatch.results[index];
         if (!candidate || !batchResult) {
           addWarning(warnings, 'rule_batch_result_missing', 'inspect the RuleCode runtime result contract');
           continue;
@@ -375,18 +471,47 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           ? { ...batchResult.result, ruleId: candidate.ruleId, principleId: candidate.principleId }
           : batchResult.result;
         implementations.push({ ...candidate, evaluate: () => validatedResult });
+        liveEvaluatedResults.push(validatedResult);
       }
       const result = mergeDecisions(implementations, hostInput, {
         warn(message) { addWarning(warnings, message, 'inspect the unhealthy activation and RuleCode output'); },
       });
+      // PRI-813 + CodeRabbit CR-4: attribute the winning live activation by
+      // REFERENCE IDENTITY — mergeDecisions returns the winning candidate's
+      // own result object for block/auto_correct, so indexOf is exact even
+      // when two live activations share a ruleId (the previous ruleId
+      // reverse-lookup could mis-attribute). Unattributable outcomes
+      // (requireApproval aggregate, no winner) carry no activationId.
+      const winnerIndex = result === undefined ? -1 : liveEvaluatedResults.indexOf(result);
+      const liveActivationId = winnerIndex >= 0 ? implementations[winnerIndex]?.implId : undefined;
+      // PRI-813: per-activation evaluation facts for host-side telemetry
+      // writers. HostEventResult.metadata is the designed channel for
+      // host-neutral evaluation facts; each entry maps losslessly onto the
+      // canonical RuleHostEvaluatedEventData contract.
+      const evaluations: RuleHostEvaluatedEventData[] = [
+        {
+          toolName: input.toolName,
+          filePath: action.normalizedPath,
+          matched: result?.matched ?? false,
+          // CodeRabbit CR-5 / PRI-567: an EMPTY live set is 'no_rules_armed',
+          // not a live 'allow' — enforcement statistics must not read as if a
+          // live rule evaluated (the legacy writer already distinguishes
+          // this; the shared path now aligns).
+          decision: liveCandidates.length === 0 ? 'no_rules_armed' : result?.decision ?? 'allow',
+          ...(result?.ruleId !== undefined ? { ruleId: result.ruleId } : {}),
+          ...(liveActivationId !== undefined ? { activationId: liveActivationId } : {}),
+          activationMode: 'live',
+        },
+        ...shadowEvaluations,
+      ];
       if (result?.decision === 'block') {
         if (result.reason.trim().length === 0) {
           addWarning(warnings, 'deny_reason_missing', 'fix the RuleCode to return a non-empty block reason');
-          return { decision: 'allow', source: event.source, warnings, metadata: { evaluatedLiveRules: implementations.length } };
+          return { decision: 'allow', source: event.source, warnings, metadata: { evaluatedLiveRules: implementations.length, evaluations } };
         }
-        return { decision: 'deny', reason: result.reason, source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleId: result.ruleId, principleId: result.principleId } };
+        return { decision: 'deny', reason: result.reason, source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleId: result.ruleId, principleId: result.principleId, evaluations } };
       }
-      return { decision: 'allow', source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleDecision: result?.decision ?? 'allow' } };
+      return { decision: 'allow', source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleDecision: result?.decision ?? 'allow', evaluations } };
     } catch (error: unknown) {
       addWarning(warnings, `activation_read_failed: ${error instanceof Error ? error.message : String(error)}`, 'inspect state.db schema and integrity');
       return { decision: 'allow', source: event.source, warnings, metadata: { evaluatedLiveRules: 0 } };

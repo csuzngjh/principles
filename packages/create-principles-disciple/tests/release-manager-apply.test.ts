@@ -16,6 +16,10 @@
  * 3. Unexpected installer crash without a terminal state: ReleaseManager
  *    closes the transaction with `failed` (rc-7: state freshness — the
  *    journal never ends mid-chain for Phase 3 recovery to reason about).
+ * 4. PRI-726: a degraded success — the installer committed the update but its
+ *    gateway restart failed — keeps `success` and propagates the installer's
+ *    `gatewayNotice` verbatim onto the applied outcome (never regenerated);
+ *    a healthy restart leaves the field absent.
  *
  * The installer's `install()` is the deployment boundary and is mocked here
  * with `importOriginal` spread: everything else in the module (notably the
@@ -94,6 +98,15 @@ function fakeInstallResult(workspaceDir: string, overrides: Partial<InstallResul
   } as unknown as InstallResult;
 }
 
+/** Continue the SAME transaction the way the real installer does: staged → … → confirmed. */
+function confirmThroughInstaller(journal: InstallerJournal | undefined): void {
+  const handle = journal as InstallerJournal;
+  journalInstallerTransition(handle, handle.lastState, 'staged', 'test: runtime components installed');
+  journalInstallerTransition(handle, handle.lastState, 'probed', 'test: console verified');
+  journalInstallerTransition(handle, handle.lastState, 'activated', 'test: host installers completed');
+  journalInstallerTransition(handle, handle.lastState, 'confirmed', 'test: backup cleaned up');
+}
+
 describe('ReleaseManager.apply — orchestration through installer + journal (PRI-698 Phase 1)', () => {
   it('happy path: one journal file, signed identity, full chain planned → … → confirmed', async () => {
     const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
@@ -137,6 +150,50 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       // Generation continuity: the fixture's active record sits at 2.
       expect(t.generation).toBe(3);
     }
+  });
+
+  it('PRI-726: a degraded success (installer gatewayNotice) propagates verbatim onto the applied outcome', async () => {
+    const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+    const artifact = buildReleaseAssetPayload(payloadRoot);
+    const fixture = await createShadowFixture({
+      candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+      artifact: () => artifact,
+    });
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+
+    // The installer committed the update but its post-install gateway restart
+    // failed: success:true + gatewayNotice (the installer is the ONLY
+    // authority on that outcome — this layer must not re-derive it).
+    const notice = 'Gateway 未自动重启，请手动启动：openclaw gateway start (openclaw gateway start failed: spawn ENOENT)';
+    installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+      confirmThroughInstaller(journal);
+      return fakeInstallResult(options.workspaceDir, { gatewayNotice: notice });
+    });
+
+    const outcome: ApplyOutcome = await manager.apply({ workspaceDir: fixture.pdHome });
+    expect(outcome.kind).toBe('applied');
+    if (outcome.kind !== 'applied') return;
+    expect(outcome.gatewayNotice).toBe(notice);
+  });
+
+  it('PRI-726: a healthy restart keeps gatewayNotice absent on the applied outcome', async () => {
+    const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+    const artifact = buildReleaseAssetPayload(payloadRoot);
+    const fixture = await createShadowFixture({
+      candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+      artifact: () => artifact,
+    });
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+
+    installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+      confirmThroughInstaller(journal);
+      return fakeInstallResult(options.workspaceDir);
+    });
+
+    const outcome: ApplyOutcome = await manager.apply({ workspaceDir: fixture.pdHome });
+    expect(outcome.kind).toBe('applied');
+    if (outcome.kind !== 'applied') return;
+    expect(outcome.gatewayNotice).toBeUndefined();
   });
 
   it('installer failure after restore: journal ends rolled_back (terminal), apply refuses success', async () => {

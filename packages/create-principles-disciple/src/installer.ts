@@ -2528,6 +2528,12 @@ export interface InstallResult {
   /** ADR-0024 D-2 (PRI-664): transaction journal record for this install.
    * Undefined when the mutation never began (pre-mutation refusal/throw). */
   journal?: InstallJournalRecord;
+  /** PRI-726: degraded-success notice — the payload committed but the OpenClaw
+   * gateway did not come back up. Present ONLY on success results (a failed
+   * install reports its own error/nextAction); ReleaseManager.apply propagates
+   * it verbatim to the Console `gatewayNotice` contract (PRI-723 legacy path
+   * parity). */
+  gatewayNotice?: string;
 }
 
 /** Observability record for one installer transaction (ADR-0024 D-2). */
@@ -2865,6 +2871,10 @@ export async function install(
   // npm-distributed payload wrote PD-owned shims into the npm global bin
   // dir. Null until syncPdCli runs (or when no global write was attempted).
   let globalShimRecord: GlobalPdShimResult | null = null;
+  // PRI-726: the result object the try/catch is about to return, held so the
+  // finally block can attach the gateway restart notice to the SAME object
+  // the caller receives (a finally block cannot rewrite an inline return).
+  let pendingResult: InstallResult | undefined;
 
   const killConsoleChild = () => {
     if (consoleProcess) {
@@ -3244,7 +3254,7 @@ export async function install(
     if (launchResult.fallbackAction) {
       nextActions.push(launchResult.fallbackAction);
     }
-    return {
+    pendingResult = {
       success: isComplete,
       workspaceDir: options.workspaceDir,
       configYamlPath,
@@ -3257,6 +3267,7 @@ export async function install(
       hostResults,
       journal: installerJournalRecord(journal),
     };
+    return pendingResult;
   } catch (error) {
     if (spinner) spinner.fail('Install failed');
 
@@ -3373,7 +3384,7 @@ export async function install(
       : rollbackNextAction;
     const reason = error instanceof SelfContainedDependencyError ? error.reason : rollbackReason;
 
-    return {
+    pendingResult = {
       success: false,
       workspaceDir: options.workspaceDir,
       configYamlPath: getConfigYamlPath(options.workspaceDir),
@@ -3388,6 +3399,7 @@ export async function install(
       error: `${errorMsg} — ${rollbackSuffixFinal}`,
       journal: journal ? installerJournalRecord(journal) : undefined,
     };
+    return pendingResult;
   } finally {
     // If we stopped the gateway at the pre-flight, restart it regardless of
     // install outcome (success or failure) — never leave the gateway down.
@@ -3400,6 +3412,18 @@ export async function install(
         if (!quiet) logger.success(t('gateway_restarted'));
       } else {
         logger.error(`${t('gateway_restart_failed')} ${restartRes.error ?? ''}`);
+        // PRI-726 (rc-9): the failure must reach the Owner, not only this log.
+        // The pending result is still mutable here — finally runs before the
+        // caller sees the return value — so the degraded-success notice rides
+        // the SAME object out; ReleaseManager/Console propagate it verbatim
+        // as `gatewayNotice`. A FAILED install is never wrapped in a
+        // success-shaped notice: the payload did not commit, so "degraded
+        // success" would be a lie (failure isolation).
+        if (pendingResult?.success) {
+          pendingResult.gatewayNotice = restartRes.error
+            ? `${t('gateway_restart_failed')} (${restartRes.error})`
+            : t('gateway_restart_failed');
+        }
       }
     }
   }

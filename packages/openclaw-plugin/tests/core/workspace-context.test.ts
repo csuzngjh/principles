@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { EventLogService } from '../../src/core/event-log.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as principleTreeLedger from '../../src/core/principle-tree-ledger.js';
@@ -18,6 +19,17 @@ vi.mock('../../src/core/trajectory.js', () => ({
 vi.mock('../../src/core/principle-tree-ledger.js', () => ({
     getPrincipleSubtree: vi.fn(),
 }));
+const { mockRuleHostCalls } = vi.hoisted(() => ({
+    mockRuleHostCalls: [] as Array<{ stateDir: unknown; logger: unknown; options: unknown }>,
+}));
+vi.mock('../../src/core/rule-host.js', () => ({
+    // Plain constructor (not vi.fn) so vi.resetAllMocks() in afterEach cannot
+    // wipe the implementation and leave dispose-less instances behind.
+    RuleHost: function RuleHostMock(stateDir: unknown, logger: unknown, options: unknown) {
+        mockRuleHostCalls.push({ stateDir, logger, options });
+        return { updateLogger: () => {}, dispose: () => {} };
+    },
+}));
 
 describe('WorkspaceContext', () => {
     // Use path.resolve for cross-platform compatibility on Windows
@@ -31,25 +43,27 @@ describe('WorkspaceContext', () => {
 
     afterEach(() => {
         vi.resetAllMocks();
+        EventLogService.disposeAll();
     });
 
-    it('should create an instance from hook context', () => {
+    it('should bind the canonical workspace stateDir even when the host ctx carries a different stateDir (PRI-824 T824-1)', () => {
         const mockCtx = { workspaceDir, stateDir };
         const wctx = WorkspaceContext.fromHookContext(mockCtx);
-        
+
         expect(wctx.workspaceDir).toBe(workspaceDir);
-        expect(wctx.stateDir).toBe(stateDir);
+        expect(wctx.stateDir).toBe(path.join(workspaceDir, '.state'));
+        expect(wctx.stateDir).not.toBe(stateDir);
     });
 
-    it('should cache instances based on workspaceDir', () => {
-        const mockCtx1 = { workspaceDir, stateDir: path.resolve('/state1') };
-        const mockCtx2 = { workspaceDir, stateDir: path.resolve('/state2') };
-        
-        const wctx1 = WorkspaceContext.fromHookContext(mockCtx1);
-        const wctx2 = WorkspaceContext.fromHookContext(mockCtx2);
-        
+    it('should keep the cached instance on the canonical stateDir across differing host stateDirs (PRI-824 T824-2)', () => {
+        const gatewayStartLike = { workspaceDir, stateDir: path.resolve('/host/home') };
+        const beforeToolCallLike = { workspaceDir };
+
+        const wctx1 = WorkspaceContext.fromHookContext(gatewayStartLike);
+        const wctx2 = WorkspaceContext.fromHookContext(beforeToolCallLike);
+
         expect(wctx1).toBe(wctx2);
-        expect(wctx1.stateDir).toBe(path.resolve('/state1'));
+        expect(wctx1.stateDir).toBe(path.join(workspaceDir, '.state'));
     });
 
     it('should use fallback workspace when workspaceDir is missing', () => {
@@ -82,8 +96,78 @@ describe('WorkspaceContext', () => {
     it('should allow invalidation of internal state', () => {
         const mockCtx = { workspaceDir };
         const wctx = WorkspaceContext.fromHookContext(mockCtx);
-        
+
         expect(() => wctx.invalidate()).not.toThrow();
+    });
+
+    it('should construct RuleHost on the canonical workspace stateDir (PRI-824 T824-4)', () => {
+        mockRuleHostCalls.length = 0;
+        const wctx = WorkspaceContext.fromHookContext({ workspaceDir, stateDir: path.resolve('/host/home') });
+
+        wctx.getRuleHost({});
+
+        expect(mockRuleHostCalls).toEqual([
+            { stateDir: path.join(workspaceDir, '.state'), logger: {}, options: { workspaceDir } },
+        ]);
+    });
+
+    it('should report a diverging host stateDir exactly once via the structured PRI-824 warning (rc-9)', () => {
+        const warn = vi.fn();
+        const wctx = WorkspaceContext.fromHookContext({
+            workspaceDir,
+            stateDir: path.resolve('/host/home'),
+            logger: { warn },
+        });
+
+        expect(wctx.stateDir).toBe(path.join(workspaceDir, '.state'));
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0]?.[0])).toContain('PRI-824');
+    });
+
+    it('should not warn when the host stateDir already is the canonical path', () => {
+        const warn = vi.fn();
+        const canonical = path.join(workspaceDir, '.state');
+        const wctx = WorkspaceContext.fromHookContext({
+            workspaceDir,
+            stateDir: canonical,
+            logger: { warn },
+        });
+
+        expect(wctx.stateDir).toBe(canonical);
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('should treat separator variants of the canonical path as the same (no spurious warning)', () => {
+        const warn = vi.fn();
+        const canonical = path.join(workspaceDir, '.state');
+        const wctx = WorkspaceContext.fromHookContext({
+            workspaceDir,
+            stateDir: canonical.endsWith('\\') || canonical.endsWith('/')
+                ? canonical
+                : `${canonical}\\`,
+            logger: { warn },
+        });
+
+        expect(wctx.stateDir).toBe(canonical);
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('should ignore non-string or blank host stateDir values without warning', () => {
+        const warn = vi.fn();
+        WorkspaceContext.fromHookContext({ workspaceDir, stateDir: '   ', logger: { warn } });
+        WorkspaceContext.clearCache();
+        WorkspaceContext.fromHookContext({ workspaceDir, stateDir: 42, logger: { warn } });
+
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('should canonicalize through fromHookContextExplicit as well (PRI-824)', () => {
+        const wctx = WorkspaceContext.fromHookContextExplicit({
+            workspaceDir,
+            logger: { warn: vi.fn() },
+        });
+
+        expect(wctx.stateDir).toBe(path.join(workspaceDir, '.state'));
     });
 
     it('should lazy load ConfigService', () => {
@@ -176,7 +260,7 @@ describe('WorkspaceContext', () => {
         const activePrincipleSubtrees = (wctx as any).getActivePrincipleSubtrees();
 
         expect((wctx as any)._evolutionReducer.getActivePrinciples).toHaveBeenCalled();
-        expect(principleTreeLedger.getPrincipleSubtree).toHaveBeenCalledWith(stateDir, 'P-001');
+        expect(principleTreeLedger.getPrincipleSubtree).toHaveBeenCalledWith(path.join(workspaceDir, '.state'), 'P-001');
         expect(activePrincipleSubtrees).toEqual([
             {
                 principle: activePrinciples[0],

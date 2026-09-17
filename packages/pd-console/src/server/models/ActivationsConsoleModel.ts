@@ -15,7 +15,7 @@ import {
   buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
-import { OPENCLAW_HOST_LIVENESS_CONTRACT, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
+import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -450,6 +450,10 @@ export class ActivationsConsoleModel {
       // provenance degrades to the legacy readiness behavior (read-model
       // probe, not a mutation), consistent with the CLI readiness writer.
       const toolSemantics = resolveWorkspaceHostToolSemantics(this.workspaceDir);
+      // PRI-813: the promotion host contract follows the workspace's REAL
+      // host declarations — a Codex (or multi-host) workspace no longer
+      // inherits the OpenClaw capability claim (fail closed, null contract).
+      const promotionHost = resolvePromotionHostLiveness(this.workspaceDir);
       const writer = new RuleHostWriter({
         gateDeps: createProductionGateDeps({
           projectDir: this.workspaceDir,
@@ -474,7 +478,7 @@ export class ActivationsConsoleModel {
           return collectOpenClawPromotionChecks(value, {
             ownerIdentityConfigured,
             safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls'),
-            hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+            hostContract: promotionHost.ok ? promotionHost.hostContract : null,
             existingLiveArtifacts: liveArtifacts,
             validateProductionArtifact: candidate => writer.canActivate(candidate),
           });
@@ -489,7 +493,7 @@ export class ActivationsConsoleModel {
             // Bind the real authenticated actor; null (not a placeholder) when
             // the review is read without an Owner session.
             ownerIdentity: ownerActor ?? null,
-            hostRuntimeVersion: 'openclaw-legacy@1',
+            hostRuntimeVersion: promotionHost.ok ? promotionHost.hostRuntimeVersion : promotionHost.reason,
             shadowSummary: telemetry.shadowSummary,
           });
         },
@@ -530,8 +534,8 @@ export class ActivationsConsoleModel {
         globalPause: await safetyStore.getActiveGlobalPause(),
         ownerDecisionEnabled: isFeatureEnabled(flags, 'rulecode_owner_live_decision'),
         runtimeCapability: {
-          hostRuntimeVersion: OPENCLAW_HOST_LIVENESS_CONTRACT.version,
-          shadowEvidence: OPENCLAW_HOST_LIVENESS_CONTRACT.supportsShadowEvidence,
+          hostRuntimeVersion: promotionHost.ok ? promotionHost.hostRuntimeVersion : promotionHost.reason,
+          shadowEvidence: promotionHost.ok ? promotionHost.hostContract.supportsShadowEvidence : false,
         },
         liveMetrics: telemetry.metrics,
         behaviorDrift: {
