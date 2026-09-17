@@ -29,19 +29,9 @@ vi.mock('../../utils/cli-process-runner.js', () => ({
   runCliProcess: vi.fn(),
 }));
 
-// PRI-827: partially mock node:fs/promises so the failure path of
-// writeMessageFile (cleanup of its own mkdtemp root) is testable; all other
-// fs/promises operations (mkdir/mkdtemp/rm) stay real.
-vi.mock('node:fs/promises', async (importOriginal) => {
-  const original = await importOriginal();
-  return { ...original, writeFile: vi.fn(original.writeFile) };
-});
-
-import { writeFile } from 'node:fs/promises';
 import { runCliProcess } from '../../utils/cli-process-runner.js';
 
 const mockRunCliProcess = runCliProcess as ReturnType<typeof vi.fn>;
-const mockWriteFile = vi.mocked(writeFile);
 
 function makeCliOutput(overrides: Partial<CliOutput> = {}): CliOutput {
   return {
@@ -55,10 +45,6 @@ function makeCliOutput(overrides: Partial<CliOutput> = {}): CliOutput {
 }
 
 /** A successful probe-3 envelope: openclaw wraps the agent reply in stderr. */
-function listTempRoots(): string[] {
-  return fs.readdirSync(os.tmpdir()).filter((entry) => entry.startsWith('pd-msg-'));
-}
-
 function successEnvelope(): string {
   return JSON.stringify({ payloads: [{ text: '{"ok":true}' }] });
 }
@@ -195,18 +181,27 @@ describe('OpenClawCliRuntimeAdapter healthCheck message-file lifecycle', () => {
       expect(fs.existsSync(createdFilePath)).toBe(false);
     });
 
-    it('PRI-827: removes the unique fallback root when the message write itself fails', async () => {
-      const rootsBefore = listTempRoots();
-      mockWriteFile.mockRejectedValueOnce(new Error('ENOSPC: simulated write failure'));
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
-      stubFirstTwoProbes();
+    it('PRI-827: surfaces a message-write failure without removing shared workspace paths', async () => {
+      // Pre-create <workspace>/.pd as a FILE so writeMessageFile's recursive
+      // mkdir of <workspace>/.pd/tmp fails deterministically (no node-builtin
+      // mocks; the workspace dir is shared, not owned by the message writer,
+      // so it must be left intact on failure).
+      const blockedWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-msgfile-block-'));
+      const pdFile = path.join(blockedWorkspace, '.pd');
+      fs.writeFileSync(pdFile, 'not a dir', 'utf8');
 
-      const result = await adapter.healthCheck();
+      const result = await new OpenClawCliRuntimeAdapter({
+        runtimeMode: 'local',
+        agentId: 'diag',
+        workspaceDir: blockedWorkspace,
+      }).healthCheck();
 
-      // The write failure must surface as unhealthy, not crash.
+      // The write failure surfaces as unhealthy, not a crash.
       expect(result.healthy).toBe(false);
-      // No pd-msg-* temp root may be left behind by the failed probe.
-      expect(listTempRoots()).toEqual(rootsBefore);
+      // The pre-existing .pd file must be untouched (never removed).
+      expect(fs.readFileSync(pdFile, 'utf8')).toBe('not a dir');
+
+      fs.rmSync(blockedWorkspace, { recursive: true, force: true });
     });
 
     it('deletes the message file after a probe with non-zero exit code', async () => {
