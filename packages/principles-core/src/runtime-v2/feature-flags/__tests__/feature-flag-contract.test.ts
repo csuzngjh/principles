@@ -253,9 +253,9 @@ describe('computeEffectiveFlags', () => {
       // PRI-621 graduation (2026-08-29): artificer output_invalid retry
       // aligned with every other peer runner; see PRI-621 test block below.
       if (flag.id === 'artificer_output_retry') continue;
-      // PRI-672/698 graduation (Owner decision 2026-09-07): ReleaseManager
-      // governance (Gate B executed) + apply orchestration with the
-      // pre-transaction legacy fallback — see QUIET_FLAG_LIFECYCLE GRADUATE rows.
+      // PRI-738 retirement (2026-09-17): both migrated flags are 'gone'
+      // tombstones now — observable rejection of stale config, no lifecycle
+      // row, no runtime branch.
       if (flag.id === 'release_manager_shadow') continue;
       if (flag.id === 'release_manager_write_authority') continue;
       // PRI-780 graduation (2026-09-13): Runtime Governance Context converged

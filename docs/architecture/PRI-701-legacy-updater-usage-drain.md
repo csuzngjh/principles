@@ -1,5 +1,13 @@
 # PRI-701 — Legacy Updater Usage Drain Instrumentation
 
+> **Retired by Owner direction in PRI-738 (2026-09-17).** The legacy executor,
+> census script/tests and weekly CI invocation are physically removed. The
+> pre-delete read-only census observed 7 legacy attempts in the prior 30 days
+> (last attempt 2026-09-16T13:44:15.030Z), so its verdict was **IN_USE**, not a
+> claimed drain. PRI-738 replaces the executable path with ReleaseManager →
+> Installer and fail-loud refusal; no journal, backup or historical record is
+> deleted. This document is historical evidence, not an executable runbook.
+
 | Field | Value |
 | --- | --- |
 | Status | Implemented（reality-verified against current `main`） |

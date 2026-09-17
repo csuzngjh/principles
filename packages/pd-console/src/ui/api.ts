@@ -42,7 +42,6 @@ import {
   validateUpdateStatus,
   validateUpdateHistory,
   validateApplyUpdateResult,
-  validateRollbackResult,
   validateApprovalRecordDirect,
   validatePrinciplesList,
   validateCorePrinciples,
@@ -99,7 +98,6 @@ import type {
   UpdateStatusData,
   UpdateHistoryData,
   ApplyUpdateResultData,
-  RollbackResultData,
   ApprovalRecordData,
   PrinciplesListData,
   CorePrinciplesData,
@@ -892,25 +890,11 @@ async function fetchUpdateHistory(): Promise<ApiResponse<UpdateHistoryData>> {
   return request<UpdateHistoryData>('/api/update/history', undefined, validateUpdateHistory);
 }
 
-async function applyUpdate(): Promise<ApiResponse<ApplyUpdateResultData>> {
-  return request<ApplyUpdateResultData>('/api/update/apply', {
-    method: 'POST',
-    body: JSON.stringify({ mergeStrategy: 'smart', createBackup: true }),
-  }, validateApplyUpdateResult);
-}
-
 async function applyFullUpdate(): Promise<ApiResponse<ApplyUpdateResultData>> {
   return request<ApplyUpdateResultData>('/api/update/apply-full', {
     method: 'POST',
     body: JSON.stringify({}),
   }, validateApplyUpdateResult);
-}
-
-async function rollbackUpdate(backupDir: string): Promise<ApiResponse<RollbackResultData>> {
-  return request<RollbackResultData>('/api/update/rollback', {
-    method: 'POST',
-    body: JSON.stringify({ backupDir }),
-  }, validateRollbackResult);
 }
 
 // ── Evidence Chain (PRI-331) ──────────────────────────────────────────────────
@@ -1137,9 +1121,7 @@ export {
   fetchLifecycleMetrics,
   fetchUpdateStatus,
   fetchUpdateHistory,
-  applyUpdate,
   applyFullUpdate,
-  rollbackUpdate,
   fetchEvidenceChain,
   fetchIntentSummary,
   fetchIntentContent,
@@ -1186,7 +1168,6 @@ export type {
   UpdateStatusData,
   UpdateHistoryData,
   ApplyUpdateResultData,
-  RollbackResultData,
   ApprovalRecordData,
   PrinciplesListData,
   CorePrinciplesData,
