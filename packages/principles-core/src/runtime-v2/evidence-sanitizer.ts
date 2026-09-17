@@ -24,6 +24,19 @@
 // ── Limits ──
 
 export const MAX_EVIDENCE_VALUE_CHARS = 200;
+/**
+ * PRI-825: bound for execute-command evidence (`command` / string `args`).
+ *
+ * RuleCode anchor semantics (e.g. baseline-anchor gates) scan durable command
+ * history for evidence keywords; head-only truncation at the generic evidence
+ * bound systematically hid anchors placed late in long one-liner commands.
+ * A command-specific bound preserves head AND tail.
+ *
+ * Sizing: DEFAULT_HISTORY_LIMIT of 20 calls × 2KB ≤ 40KB worst-case evidence
+ * window per evaluation — 1/8 of the trajectory blob inline threshold
+ * (16KB) already accepted per result preview. Bounded, never unbounded.
+ */
+export const MAX_COMMAND_PREVIEW_CHARS = 2000;
 const MAX_DEPTH = 4;
 const MAX_KEYS = 50;
 const MAX_ARRAY_ITEMS = 20;
@@ -223,13 +236,11 @@ function replacePathsInString(value: string, workspaceDir?: string): string {
 // ── String sanitization ──
 
 /**
- * Sanitize a single string value:
- * 1. Strip internal PD tags
- * 2. Redact token-like patterns
- * 3. Replace absolute paths embedded in the string
- * 4. Bound length
+ * Sanitize a single string value (PD tags, tokens, embedded paths) WITHOUT
+ * applying any length bound. Bounds are applied by the callers so each
+ * evidence face can pick its own bounded shape (head-only vs head+tail).
  */
-export function sanitizeString(value: string, workspaceDir?: string): string {
+function sanitizeStringUnbounded(value: string, workspaceDir?: string): string {
   let result = value;
 
   // 1. Strip PD tags (empathy tags via the linear scanner — see NOTE above)
@@ -249,12 +260,36 @@ export function sanitizeString(value: string, workspaceDir?: string): string {
   // 3. Replace absolute paths embedded in the string
   result = replacePathsInString(result, workspaceDir);
 
-  // 4. Bound length
-  if (result.length > MAX_EVIDENCE_VALUE_CHARS) {
-    result = result.slice(0, MAX_EVIDENCE_VALUE_CHARS) + '___TRUNCATED___';
-  }
-
   return result.trim();
+}
+
+/**
+ * PRI-825: bounded head+tail preview for command evidence.
+ * Within bound: verbatim sanitized command. Over bound: head + explicit
+ * truncation marker + tail, so anchors near either end of a long one-liner
+ * survive the durable round-trip. The marker itself is the machine-visible
+ * truncation fact — no silent cuts.
+ */
+function boundCommandEvidence(sanitized: string): string {
+  if (sanitized.length <= MAX_COMMAND_PREVIEW_CHARS) return sanitized;
+  const headLength = Math.floor(MAX_COMMAND_PREVIEW_CHARS * 0.65);
+  const tailLength = Math.floor(MAX_COMMAND_PREVIEW_CHARS * 0.3);
+  return `${sanitized.slice(0, headLength)}___TRUNCATED___${sanitized.slice(sanitized.length - tailLength)}`;
+}
+
+/**
+ * Sanitize a single string value:
+ * 1. Strip internal PD tags
+ * 2. Redact token-like patterns
+ * 3. Replace absolute paths embedded in the string
+ * 4. Bound length (head-only — generic evidence face)
+ */
+export function sanitizeString(value: string, workspaceDir?: string): string {
+  const result = sanitizeStringUnbounded(value, workspaceDir);
+  if (result.length > MAX_EVIDENCE_VALUE_CHARS) {
+    return (result.slice(0, MAX_EVIDENCE_VALUE_CHARS) + '___TRUNCATED___').trim();
+  }
+  return result;
 }
 
 // ── Recursive value sanitization ──
@@ -306,11 +341,48 @@ export function sanitizeValue(
 }
 
 /**
+ * Execute-command-like param fields. Both OpenClaw (`command`) and the
+ * generic bash extraction contract (`command || args`, see
+ * extractFilePathFromParams) treat these as the durable shell-command face
+ * that RuleCode anchor semantics scan. Only STRING values get the command
+ * bound; array `args` (no producing host today) and non-string values keep
+ * the generic sanitizeValue bounds.
+ */
+const COMMAND_PARAM_KEYS = ['command', 'args'] as const;
+
+/**
+ * Re-apply the command-specific head+tail bound to string command fields.
+ * The generic sanitizeValue pass already redacted tokens/paths (identical
+ * pipeline via sanitizeStringUnbounded); it bounded them head-only, which is
+ * exactly the loss PRI-825 fixes, so string command fields are re-bounded
+ * from the ORIGINAL raw value through the same unbounded sanitizer.
+ */
+function applyCommandEvidenceBounds(
+  params: Record<string, unknown>,
+  sanitized: Record<string, unknown>,
+  workspaceDir?: string,
+): Record<string, unknown> {
+  for (const key of COMMAND_PARAM_KEYS) {
+    if (!Object.hasOwn(sanitized, key)) continue;
+    if (isSensitiveKey(key)) continue;
+    const raw = params[key];
+    if (typeof raw !== 'string') continue;
+    const bounded = boundCommandEvidence(sanitizeStringUnbounded(raw, workspaceDir));
+    if (typeof sanitized[key] === 'string') {
+      sanitized[key] = bounded;
+    }
+  }
+  return sanitized;
+}
+
+/**
  * Sanitize tool-call params for evidence/trajectory storage.
  *
  * ERR-001: accepts `unknown`, not `Record<string, unknown>`. Runtime guards only.
  * ERR-055: ANY-segment sensitive field matching.
- * ERR-056: token redaction runs on ALL strings via sanitizeValue recursion.
+ * ERR-056: token redaction runs on ALL strings via recursive sanitizeValue.
+ * PRI-825: string `command`/`args` keep a larger head+tail bounded preview so
+ * RuleCode anchor evidence survives the durable round-trip.
  */
 export function sanitizeToolParams(
   params: unknown,
@@ -339,7 +411,7 @@ export function sanitizeToolParams(
   if (isPlainRecord(params)) {
     const sanitized = sanitizeValue(params, 0, workspaceDir);
     if (isPlainRecord(sanitized)) {
-      return sanitized;
+      return applyCommandEvidenceBounds(params, sanitized, workspaceDir);
     }
     return {};
   }

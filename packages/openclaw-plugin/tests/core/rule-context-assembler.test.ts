@@ -15,6 +15,7 @@ import os from 'os';
 import path from 'path';
 import {
   UNAVAILABLE_RULE_CONTEXT,
+  sanitizeToolParams,
 } from '@principles/core/runtime-v2';
 import type {
   RuleToolCallRecord,
@@ -354,6 +355,51 @@ describe('buildProductionRuleContext (PRI-482 Phase 3)', () => {
     expect(ctx.history.status).toBe('available');
     expect(ctx.history.truncated).toBe(true);
     expect(ctx.history.calls).toHaveLength(3);
+    db.dispose();
+  });
+
+  // ── PRI-825: long baseline-command evidence survives the durable round-trip ──
+
+  it('PRI-825 T825-1: >1KB baseline command → sanitized row → RuleContext keeps anchor evidence', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-assembler-'));
+    const db = new TrajectoryDatabase({ workspaceDir });
+
+    // Produce the exact flow production uses: after_tool_call sanitizes the
+    // raw exec params, then the sanitized object is persisted via recordToolCall.
+    const filler = Array.from({ length: 100 }, (_, i) => `scan --module sim/module-${i}`).join(' && ');
+    const rawCommand = [
+      'node -e "',
+      "const fs=require('fs'),crypto=require('crypto');",
+      "const p='sim-fixture/assemble-final.txt';",
+      "const c=fs.readFileSync(p,'utf8');",
+      "const h=crypto.createHash('sha256').update(c).digest('hex');",
+      filler,
+      "fs.writeFileSync('sim-fixture/assemble-final.baseline.json',JSON.stringify({path:p,hash:h},null,2));",
+      "console.log('baseline persisted',h)",
+      '"',
+    ].join('');
+    expect(rawCommand.length).toBeGreaterThan(1000);
+
+    const sanitizedParams = sanitizeToolParams({ command: rawCommand }, workspaceDir);
+    db.recordToolCall({
+      sessionId: 's-ep002r4',
+      toolName: 'exec',
+      outcome: 'success',
+      paramsJson: sanitizedParams,
+    });
+
+    const ctx = buildProductionRuleContext('s-ep002r4', 'sim-fixture/assemble-final.txt', db, workspaceDir);
+    expect(ctx.history.status).toBe('available');
+    const call = (ctx.history.calls as RuleToolCallRecord[])[0];
+    expect(call.canonicalKind).toBe('execute');
+
+    // The exact loss PRI-825 fixes: RuleCode anchor scans read
+    // paramsSummary.command — the baseline anchor must still be visible.
+    const storedCommand = call.paramsSummary.command;
+    expect(typeof storedCommand).toBe('string');
+    expect(storedCommand).toContain("crypto.createHash('sha256')");
+    expect(storedCommand).toContain('assemble-final.baseline.json');
+    expect(storedCommand).toContain('___TRUNCATED___');
     db.dispose();
   });
 });
