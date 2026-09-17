@@ -353,6 +353,11 @@ function validateInternalAgentBinding(
 
 // ── Internal Agents Config Validation ───────────────────────────────────────
 
+// Retired internal-agent keys tolerated as no-ops in `internalAgents.agents`
+// (each entry must have had its runtime consumer physically removed; see the
+// agent's retirement note in docs/architecture/feature-flag-governance.md).
+const RETIRED_AGENT_NOOP_KEYS: ReadonlySet<string> = new Set(['empathyObserver']);
+
 function validateInternalAgents(raw: unknown, path: string): { ok: true; value: InternalAgentsConfig; warnings: string[] } | { ok: false; errors: PdConfigValidationError[] } {
   const errors: PdConfigValidationError[] = [];
   const warnings: string[] = [];
@@ -391,22 +396,25 @@ function validateInternalAgents(raw: unknown, path: string): { ok: true; value: 
       }
     }
 
-    // Reject unknown agent keys in agents sub-object. `empathyObserver` stays
-    // tolerated as a retired no-op (PRI-819, same pattern as evolutionContext):
-    // the agent had no runtime consumer, but installed workspaces carry the key
-    // written by older installers — accepting it keeps old configs loading and
-    // the warning keeps the tolerance observable (rc-9).
+    // Reject unknown agent keys in agents sub-object. Keys in
+    // RETIRED_AGENT_NOOP_KEYS stay tolerated as retired no-ops (PRI-819, same
+    // pattern as evolutionContext): the agent had no runtime consumer, but
+    // installed workspaces carry the key written by older installers —
+    // accepting it keeps old configs loading and the warning keeps the
+    // tolerance observable (rc-9).
     for (const key of Object.keys(agentsRaw)) {
       if (DANGEROUS_KEYS.has(key)) continue;
-      if (key === 'empathyObserver') continue;
+      if (RETIRED_AGENT_NOOP_KEYS.has(key)) continue;
       if (!INTERNAL_AGENT_NAMES.includes(key as InternalAgentName)) {
         errors.push(err(`${path}.agents.${key}`, `unknown agent key '${key}'`, `Remove unknown agent '${key}' or use a known agent name: ${INTERNAL_AGENT_NAMES.join(', ')}`));
       }
     }
-    if (Object.hasOwn(agentsRaw, 'empathyObserver')) {
-      warnings.push(
-        `${path}.agents.empathyObserver is a retired no-op (the agent had no runtime consumer and has been removed) and is now ignored — remove it from .pd/config.yaml`,
-      );
+    for (const key of RETIRED_AGENT_NOOP_KEYS) {
+      if (Object.hasOwn(agentsRaw, key)) {
+        warnings.push(
+          `${path}.agents.${key} is a retired no-op (the agent had no runtime consumer and has been removed) and is now ignored — remove it from .pd/config.yaml`,
+        );
+      }
     }
   }
 

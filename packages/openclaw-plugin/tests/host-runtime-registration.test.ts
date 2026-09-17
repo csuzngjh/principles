@@ -199,4 +199,26 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     expect(info).toHaveBeenCalledWith(expect.stringContaining('abstraction_layer_v1_disabled'));
     expect(info).toHaveBeenCalledWith(expect.stringContaining('openclaw_legacy'));
   });
+
+  it('PRI-819: surfaces a shared-runtime dispatch failure observably instead of crashing the hook', async () => {
+    const { api, hooks } = createApi();
+    plugin.register(api);
+    const workspaceDir = workspaceWithTrajectory();
+    dispatch.mockRejectedValueOnce(new Error('kernel dispatch exploded (PRI-819)'));
+
+    await expect(hooks.get('after_tool_call')?.(
+      { toolName: 'write_file', result: 'ok' },
+      { workspaceDir, sessionId: 'session-1', agentId: 'agent-1', trigger: 'user' },
+    )).resolves.toBeUndefined();
+
+    // rc-9: the degradation must be observable — structured hook-execution
+    // error row (via WorkspaceContext.eventLog, mocked here) plus a log line
+    // that names the live signal-collector path, not the retired agent.
+    expect(api.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('[PD:SignalCollector]'),
+    );
+    expect(api.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('kernel dispatch exploded (PRI-819)'),
+    );
+  });
 });
