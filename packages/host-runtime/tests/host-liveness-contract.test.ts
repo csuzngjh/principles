@@ -164,4 +164,23 @@ describe('resolvePromotionHostLiveness (PRI-813 fail-closed capability routing)'
       hostContract: null,
     });
   });
+
+  it('round-4: a pain_events table predating the host_kind column carries no evidence BY CONSTRUCTION — legacy default stands (e2e seed shape)', () => {
+    // The pd-console e2e seed hand-creates pain_events WITHOUT host_kind:
+    // rows written before the column existed could never record Codex
+    // evidence, so this is empty evidence, not unreadable provenance.
+    mkdirSync(path.join(ws, '.state'), { recursive: true });
+    const db = new Database(path.join(ws, '.state', 'trajectory.db'));
+    db.exec('CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL)');
+    db.prepare("INSERT INTO pain_events (session_id, source, score, created_at) VALUES ('s', 'manual', 0.8, '2026-09-01')").run();
+    db.close();
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toEqual({
+      ok: true,
+      hostKind: 'openclaw',
+      hostKinds: [],
+      hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+      hostRuntimeVersion: 'openclaw-legacy@1',
+    });
+  });
 });

@@ -60,8 +60,10 @@ export type PromotionHostLivenessResolution =
  * ingestion/admission path). It survives deletion of
  * `.pd/host-tool-semantics/<hostKind>.json`, which is exactly the
  * declaration-lost state a silent OpenClaw fallback would misread.
- * Absent file = no evidence (normal for quiet workspaces). Read-only,
- * never mutates workspace state.
+ * Absent file = no evidence (normal for quiet workspaces). A pain_events
+ * table predating the host_kind column carries no host evidence BY
+ * CONSTRUCTION (nothing could have been recorded before the column existed)
+ * — equivalent to empty, not unreadable. Read-only, never mutates state.
  */
 function readWorkspaceHostProvenance(workspaceDir: string): { ok: true; kinds: readonly string[] } | { ok: false; nextAction: string } {
   const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
@@ -73,6 +75,10 @@ function readWorkspaceHostProvenance(workspaceDir: string): { ok: true; kinds: r
     return { ok: false, nextAction: `inspect the workspace trajectory database before promoting: ${error instanceof Error ? error.message : String(error)}` };
   }
   try {
+    const columns: unknown = db.prepare('PRAGMA table_info(pain_events)').all();
+    const hasHostKindColumn = Array.isArray(columns)
+      && columns.some((column): column is Record<string, unknown> => typeof column === 'object' && column !== null && column.name === 'host_kind');
+    if (!hasHostKindColumn) return { ok: true, kinds: [] };
     const rows: unknown = db.prepare('SELECT DISTINCT host_kind FROM pain_events WHERE host_kind IS NOT NULL').all();
     if (!Array.isArray(rows)) {
       return { ok: false, nextAction: 'inspect the workspace trajectory database pain_events integrity before promoting' };
@@ -83,7 +89,7 @@ function readWorkspaceHostProvenance(workspaceDir: string): { ok: true; kinds: r
       .filter((kind): kind is string => typeof kind === 'string');
     return { ok: true, kinds };
   } catch (error: unknown) {
-    return { ok: false, nextAction: `inspect the workspace trajectory database (locked, or missing pain_events table) before promoting: ${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, nextAction: `inspect the workspace trajectory database (locked, or damaged pain_events table) before promoting: ${error instanceof Error ? error.message : String(error)}` };
   } finally {
     try { db.close(); } catch { /* best effort */ }
   }
