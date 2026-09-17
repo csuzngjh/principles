@@ -205,6 +205,33 @@ describe('PRI-569 gate-block trajectory persistence', () => {
     expect(logger.lines.some(line => line.includes('invalid evaluation entry'))).toBe(true);
   });
 
+  it.each(['', '   '])('rejects shadow activationId %j without losing a live deny', (activationId) => {
+    const dir = makeWorkspace();
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir });
+    const logger = makeLogger();
+    const filePath = path.join(dir, 'blank-shadow.txt');
+    handleSharedRuleHostResult(
+      { toolName: 'Write', params: { file_path: filePath } },
+      { workspaceDir: dir, logger },
+      {
+        decision: 'deny', reason: 'live-deny-with-invalid-shadow', source: 'test',
+        metadata: {
+          evaluatedLiveRules: 1,
+          evaluations: [
+            { toolName: 'Write', filePath, matched: true, decision: 'block', activationId: 'live-valid', activationMode: 'live' },
+            { toolName: 'Write', filePath, matched: true, decision: 'block', activationId, activationMode: 'shadow' },
+          ],
+        },
+      },
+    );
+    expect(readGateBlocks(dir)).toEqual([expect.objectContaining({ reason: 'live-deny-with-invalid-shadow' })]);
+    flushEventLog(wctx);
+    const evaluated = readJsonlEvents(dir).filter(e => e['type'] === 'rulehost_evaluated');
+    expect(evaluated).toHaveLength(1);
+    expect(evaluated[0]?.['data']).toMatchObject({ activationId: 'live-valid', activationMode: 'live', decision: 'block' });
+    expect(logger.lines.some(line => line.includes('invalid evaluation entry'))).toBe(true);
+  });
+
   it('PRI-813 (review S2): an evaluations array with only invalid entries persists NOTHING — no fabricated aggregate row', () => {
     const dir = makeWorkspace();
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir });

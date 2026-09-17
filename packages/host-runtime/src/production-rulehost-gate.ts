@@ -483,7 +483,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       // reverse-lookup could mis-attribute). Unattributable outcomes
       // (requireApproval aggregate, no winner) carry no activationId.
       const winnerIndex = result === undefined ? -1 : liveEvaluatedResults.indexOf(result);
-      const liveActivationId = winnerIndex >= 0 ? liveCandidates[winnerIndex]?.implId : undefined;
+      const liveActivationId = winnerIndex >= 0 ? implementations[winnerIndex]?.implId : undefined;
       // PRI-813: per-activation evaluation facts for host-side telemetry
       // writers. HostEventResult.metadata is the designed channel for
       // host-neutral evaluation facts; each entry maps losslessly onto the

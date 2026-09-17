@@ -31,9 +31,10 @@ import { observeRuleCodeSafety } from '../core/rulecode-safety-circuit.js';
 // CodeRabbit CR-6: a shadow observation without activationId is dead evidence
 // (the shadow summary keys on the exact id), so it is rejected at this
 // boundary even though the canonical schema keeps the field optional.
+// A blank/whitespace id is equally dead evidence.
 function isSharedRuleEvaluationEntry(value: unknown): value is RuleHostEvaluatedEventData {
   return isRuleHostEvaluatedEventData(value)
-    && (value.activationMode !== 'shadow' || typeof value.activationId === 'string');
+    && (value.activationMode !== 'shadow' || (typeof value.activationId === 'string' && value.activationId.trim().length > 0));
 }
 
 export function handleBeforeToolCall(

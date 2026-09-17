@@ -170,6 +170,42 @@ describe('PRI-813 shared shadow evidence reconnection', () => {
       && row.data['decision'] === 'block')).toBe(true);
   });
 
+  it.each(['', '   '])('rejects shadow activationId %j with a diagnostic and preserves host allow', async (activationId) => {
+    const root = workspace();
+    const connection = new SqliteConnection(root);
+    try {
+      const now = new Date().toISOString();
+      connection.getDb().prepare(`
+        INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+        VALUES ('art-blank-813', 'rule', 'task-blank-813', 'P_CODEX_BLANK_813', 'R_CODEX_BLANK_813', '[]', 'validated', ?, ?, ?)
+      `).run(JSON.stringify({ principleId: 'P_CODEX_BLANK_813', ruleId: 'R_CODEX_BLANK_813', implementationCode: SHADOW_RULE_CODE_813('R_CODEX_BLANK_813', 'blank-id-813') }), now, now);
+      await new SqliteActivationStateStore(connection).recordActivation({ activationId, idempotencyKey: 'blank::shadow', artifactId: 'art-blank-813', channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', targetRef: 'impl://R_CODEX_BLANK_813', activatedAt: now, deactivatedAt: null });
+    } finally { connection.close(); }
+
+    const result = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'blank-id-813.txt'), content: 'x' }, tool_use_id: 'call-blank-813' });
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    expect(readRuleHostEvaluated(root).filter(row => row.data['activationMode'] === 'shadow')).toEqual([]);
+    expect(result.stderr).toContain('rulehost_evaluation_entry_invalid');
+  });
+
+  it('keeps the computed deny when telemetry persistence fails (CR-1): fs failure degrades to a diagnostic, never drops the decision', async () => {
+    const root = workspace();
+    await artifact(root, { id: 'art-persist-813', kind: 'rule', principleId: 'P_CODEX_PERSIST_813', ruleId: 'R_CODEX_PERSIST_813', content: { principleId: 'P_CODEX_PERSIST_813', ruleId: 'R_CODEX_PERSIST_813', implementationCode: SHADOW_RULE_CODE_813('R_CODEX_PERSIST_813', 'persist-blocked-813') }, channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_CODEX_PERSIST_813' });
+    // Real fs failure at the writer: the events file path is a DIRECTORY, so
+    // appendFileSync throws. On the pre-CR-1 code this throw escaped
+    // recordRuleHostEvaluations into processHookInvocation's fail-open catch,
+    // which replaced the already-computed deny with `{}` on stdout and let
+    // the tool call proceed. PreToolUse reaches this writer before anything
+    // else touches .state/logs, so the failure is attributable exactly to the
+    // evidence writer.
+    const today = new Date().toISOString().slice(0, 10);
+    fs.mkdirSync(path.join(root, '.state', 'logs', `events_${today}.jsonl`), { recursive: true });
+
+    const result = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'persist-blocked-813.txt'), content: 'x' }, tool_use_id: 'call-persist-813' });
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'CODEX_SHADOW_WOULD_BLOCK_813' } });
+    expect(result.stderr).toContain('rulehost_evaluation_persist_failed');
+  });
+
   it('keeps a v2 shadow rule suspended: zero shadow evidence, structured warning (Codex v2 boundary extends to shadow)', async () => {
     const root = workspace();
     await artifact(root, { id: 'art-v2shadow-813', kind: 'rule', principleId: 'P_CODEX_V2SHADOW_813', ruleId: 'R_CODEX_V2SHADOW_813', content: { principleId: 'P_CODEX_V2SHADOW_813', ruleId: 'R_CODEX_V2SHADOW_813', requiresContextVersion: 2, implementationCode: SHADOW_RULE_CODE_813('R_CODEX_V2SHADOW_813', 'v2shadow-813') }, channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', target: 'impl://R_CODEX_V2SHADOW_813' });

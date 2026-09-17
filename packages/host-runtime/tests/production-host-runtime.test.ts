@@ -565,6 +565,19 @@ describe('shared production RuleHost gate kernel', () => {
     }));
   });
 
+  it('keeps winning activation identity after skipping an invalid earlier live result', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedRuleActivation(workspaceDir, { suffix: '-invalid-first', action: 'code_tool_hook_live_activate', implementationCode: 'function evaluate() { return { decision: "invalid" }; }' });
+    await seedRuleActivation(workspaceDir, { suffix: '-valid-second', action: 'code_tool_hook_live_activate', implementationCode: SHARED_GATE_CODE });
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
+    expect(result.decision).toBe('deny');
+    expect(result.warnings?.join('\n')).toContain('invalid RuleHostResult');
+    expect(readEvaluations(result.metadata).find(entry => entry.activationMode === 'live')).toMatchObject({
+      activationId: 'act-shared-gate-valid-second', decision: 'block',
+    });
+  });
+
   it('PRI-813: keeps a v2 shadow rule suspended when no context provider is wired (Codex posture)', async () => {
     const workspaceDir = tempWorkspace();
     await seedRuleActivation(workspaceDir, { suffix: '-v2shadow', action: 'code_tool_hook_shadow_activate', implementationCode: SHARED_GATE_CODE, requiresContextVersion: 2 });

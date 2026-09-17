@@ -69,13 +69,13 @@ function errorMessage(error: unknown): string {
 /**
  * PRI-813: admissible evaluation entry = the CANONICAL core schema guard
  * (rc-1/rc-2, P4: no hand-rolled field copy that could drift from the
- * contract) plus one caller policy: a shadow observation without
+ * contract) plus one caller policy: a shadow observation without a non-blank
  * activationId is dead evidence — the shadow summary keys on the exact id —
  * so it is rejected here (CodeRabbit CR-6).
  */
 function isAdmissibleRuleHostEvaluationEntry(value: unknown): value is RuleHostEvaluatedEventData {
   return isRuleHostEvaluatedEventData(value)
-    && (value.activationMode !== 'shadow' || typeof value.activationId === 'string');
+    && (value.activationMode !== 'shadow' || (typeof value.activationId === 'string' && value.activationId.trim().length > 0));
 }
 
 /**
