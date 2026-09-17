@@ -205,6 +205,31 @@ describe('PRI-569 gate-block trajectory persistence', () => {
     expect(logger.lines.some(line => line.includes('invalid evaluation entry'))).toBe(true);
   });
 
+  it('PRI-813 (review S2): an evaluations array with only invalid entries persists NOTHING — no fabricated aggregate row', () => {
+    const dir = makeWorkspace();
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir });
+    const logger = makeLogger();
+
+    handleSharedRuleHostResult(
+      { toolName: 'Write', params: { file_path: path.join(dir, 'c.txt') } },
+      { workspaceDir: dir, logger },
+      {
+        decision: 'allow', source: 'test',
+        metadata: {
+          evaluatedLiveRules: 1,
+          ruleDecision: 'allow',
+          evaluations: [{ toolName: 'Write', matched: 'nope', decision: 'block' }],
+        },
+      },
+    );
+
+    flushEventLog(wctx);
+    // rc-9: a contract-violating evaluations payload must not masquerade as
+    // ordinary evidence — zero rows plus the observable warn is the record.
+    expect(readJsonlEvents(dir).filter(e => e['type'] === 'rulehost_evaluated')).toHaveLength(0);
+    expect(logger.lines.some(line => line.includes('no valid entry'))).toBe(true);
+  });
+
   it('T11: unresolved-path deny still counts — null file_path in trajectory, placeholder in EventLog', () => {
     const dir = makeWorkspace();
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir });

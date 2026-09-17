@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1720,
+ "count": 1721,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -1568,6 +1568,7 @@
   "isRecord",
   "isResultRefImmutable",
   "isRetryWaitBackoffElapsed",
+  "isRuleHostEvaluatedEventData",
   "isRulePromotionEventEntry",
   "isRunnerKind",
   "isRuntimeConfigError",

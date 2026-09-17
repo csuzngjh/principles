@@ -12,8 +12,7 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { persistGateBlock, recordGateBlockAndReturn } from './gate-block-helper.js';
 import type { RuleHostInput, RuleContextV2, RuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
-import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, RuleHostEvaluatedEventDataSchema } from '@principles/core/runtime-v2';
-import { Value } from '@sinclair/typebox/value';
+import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, isRuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
@@ -27,13 +26,13 @@ import type { HostEventResult } from '@principles/core/host';
 import { observeRuleCodeSafety } from '../core/rulecode-safety-circuit.js';
 
 // PRI-813: metadata.evaluations entries cross the HostEventResult contract as
-// unknown — validate each against the CANONICAL event schema (rc-1/rc-2) so a
-// malformed gate payload can never become a persisted evidence row.
+// unknown — validate each against the CANONICAL schema authority in core
+// (rc-1/rc-2; P4: adapters must not keep hand-rolled field copies).
 // CodeRabbit CR-6: a shadow observation without activationId is dead evidence
 // (the shadow summary keys on the exact id), so it is rejected at this
 // boundary even though the canonical schema keeps the field optional.
 function isSharedRuleEvaluationEntry(value: unknown): value is RuleHostEvaluatedEventData {
-  return Value.Check(RuleHostEvaluatedEventDataSchema, value)
+  return isRuleHostEvaluatedEventData(value)
     && (value.activationMode !== 'shadow' || typeof value.activationId === 'string');
 }
 
@@ -599,8 +598,7 @@ export function handleSharedRuleHostResult(
       // canonical rulehost_evaluated row per shadow activation (exact
       // activationId) plus the live aggregate row, which now also carries its
       // winning activationId (the same audit gap ISSUE-023 closed for legacy).
-      // The entry shape is validated field-by-field: metadata crosses the
-      // HostEventResult contract as unknown (rc-1/rc-2).
+      // The entry shape is validated against the canonical core schema.
       let wroteEvaluationRow = false;
       for (const evaluation of evaluations) {
         if (!isSharedRuleEvaluationEntry(evaluation)) {
@@ -619,11 +617,13 @@ export function handleSharedRuleHostResult(
         wroteEvaluationRow = true;
       }
       if (!wroteEvaluationRow) {
-        eventLog.recordRuleHostEvaluated({
-          toolName: event.toolName, filePath: action.normalizedPath,
-          matched: result.decision === 'deny', decision: result.decision === 'deny' ? 'block' : 'allow',
-          ruleId, activationMode: 'live',
-        });
+        // rc-9 (review S2): a present-but-unusable evaluations array is a
+        // gate contract violation. Persist NOTHING — a fabricated aggregate
+        // row would mask the failure as ordinary evidence; the warns above
+        // plus this one are the observable record. The legacy single-row
+        // fallback below stays only for gate results that carry no
+        // evaluations array at all (rolling-upgrade compat).
+        logger.warn?.(`[PD_GATE:RULE_HOST] shared gate evaluations array carried no valid entry; no rulehost_evaluated row persisted (rc-9)`);
       }
     } else {
       eventLog.recordRuleHostEvaluated({

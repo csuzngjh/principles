@@ -44,11 +44,12 @@ const CODEX = {
 };
 
 describe('resolvePromotionHostLiveness (PRI-813 fail-closed capability routing)', () => {
-  it('keeps the historical OpenClaw contract when no host has declared anything yet', () => {
+  it('keeps the historical OpenClaw contract when no host has declared anything yet — distinguishable via empty hostKinds (review S3)', () => {
     const resolved = resolvePromotionHostLiveness(ws);
     expect(resolved).toEqual({
       ok: true,
       hostKind: 'openclaw',
+      hostKinds: [],
       hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
       hostRuntimeVersion: 'openclaw-legacy@1',
     });
@@ -61,6 +62,7 @@ describe('resolvePromotionHostLiveness (PRI-813 fail-closed capability routing)'
     expect(resolved).toEqual({
       ok: true,
       hostKind: 'openclaw',
+      hostKinds: ['openclaw'],
       hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
       hostRuntimeVersion: 'openclaw-legacy@1',
     });

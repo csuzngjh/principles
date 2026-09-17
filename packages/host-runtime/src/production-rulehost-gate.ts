@@ -399,52 +399,52 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       // RuleHost report's shadowDecisions. Every failure mode below skips
       // shadow observation without touching the live decision.
       const shadowEvaluations: RuleHostEvaluatedEventData[] = [];
-      const shadowBatchBytes = shadowCandidates.reduce((sum, candidate) => sum + Buffer.byteLength(candidate.source, 'utf8'), 0);
-      remaining = remainingGateMs(startedAt);
-      if (shadowCandidates.length === 0) {
-        // no shadow rows — nothing to observe
-      } else if (shadowBatchBytes > RULE_BATCH_SOURCE_BYTES) {
-        addWarning(warnings, `rule_source_budget_exceeded: shadowBatchBytes=${shadowBatchBytes}`, `reduce total shadow RuleCode below ${RULE_BATCH_SOURCE_BYTES} bytes; shadow observation was skipped, live enforcement is unaffected`);
-      } else if (remaining <= 0) {
-        addWarning(warnings, 'gate_deadline_exceeded', 'shadow observation was skipped after the live evaluation budget; live enforcement is unaffected');
-      } else {
-        const shadowBatch = implementationRuntime.evaluateBatch(
-          shadowCandidates.map((candidate) => ({ source: candidate.source, filename: `activation-${candidate.implId}` })),
-          hostInput,
-          remaining,
-        );
-        const shadowTimedOut = shadowBatch.ok && shadowBatch.results
-          ? shadowBatch.results.find((candidate) => !candidate.ok && candidate.error?.includes('timed out'))
-          : undefined;
-        if (!shadowBatch.ok || !shadowBatch.results) {
-          addWarning(warnings, `${shadowBatch.ok ? 'rule_batch_failed' : shadowBatch.reason ?? 'rule_batch_failed'}: ${shadowBatch.ok ? 'unknown failure' : shadowBatch.detail ?? 'unknown failure'}`, 'inspect active shadow RuleCode; the shadow observation was skipped, live enforcement is unaffected');
-        } else if (shadowTimedOut) {
-          addWarning(warnings, `rule_batch_timeout: ${shadowTimedOut.error ?? 'unknown child timeout'}`, 'fix or deactivate the unhealthy shadow RuleCode; the shadow observation was skipped, live enforcement is unaffected');
+      if (shadowCandidates.length > 0) {
+        const shadowBatchBytes = shadowCandidates.reduce((sum, candidate) => sum + Buffer.byteLength(candidate.source, 'utf8'), 0);
+        remaining = remainingGateMs(startedAt);
+        if (shadowBatchBytes > RULE_BATCH_SOURCE_BYTES) {
+          addWarning(warnings, `rule_source_budget_exceeded: shadowBatchBytes=${shadowBatchBytes}`, `reduce total shadow RuleCode below ${RULE_BATCH_SOURCE_BYTES} bytes; shadow observation was skipped, live enforcement is unaffected`);
+        } else if (remaining <= 0) {
+          addWarning(warnings, 'gate_deadline_exceeded', 'shadow observation was skipped after the live evaluation budget; live enforcement is unaffected');
         } else {
-          for (let index = 0; index < shadowCandidates.length; index += 1) {
-            const candidate = shadowCandidates[index];
-            const batchResult = shadowBatch.results[index];
-            if (!candidate || !batchResult || !batchResult.ok) {
-              addWarning(warnings, `implementation_unhealthy: ${batchResult && !batchResult.ok ? batchResult.error ?? 'unknown child error' : 'rule_batch_result_missing'}`, 'fix the shadow RuleCode and reactivate the rule; live enforcement is unaffected');
-              continue;
+          const shadowBatch = implementationRuntime.evaluateBatch(
+            shadowCandidates.map((candidate) => ({ source: candidate.source, filename: `activation-${candidate.implId}` })),
+            hostInput,
+            remaining,
+          );
+          const shadowTimedOut = shadowBatch.ok && shadowBatch.results
+            ? shadowBatch.results.find((candidate) => !candidate.ok && candidate.error?.includes('timed out'))
+            : undefined;
+          if (!shadowBatch.ok || !shadowBatch.results) {
+            addWarning(warnings, `${shadowBatch.ok ? 'rule_batch_failed' : shadowBatch.reason ?? 'rule_batch_failed'}: ${shadowBatch.ok ? 'unknown failure' : shadowBatch.detail ?? 'unknown failure'}`, 'inspect active shadow RuleCode; the shadow observation was skipped, live enforcement is unaffected');
+          } else if (shadowTimedOut) {
+            addWarning(warnings, `rule_batch_timeout: ${shadowTimedOut.error ?? 'unknown child timeout'}`, 'fix or deactivate the unhealthy shadow RuleCode; the shadow observation was skipped, live enforcement is unaffected');
+          } else {
+            for (let index = 0; index < shadowCandidates.length; index += 1) {
+              const candidate = shadowCandidates[index];
+              const batchResult = shadowBatch.results[index];
+              if (!candidate || !batchResult || !batchResult.ok) {
+                addWarning(warnings, `implementation_unhealthy: ${batchResult && !batchResult.ok ? batchResult.error ?? 'unknown child error' : 'rule_batch_result_missing'}`, 'fix the shadow RuleCode and reactivate the rule; live enforcement is unaffected');
+                continue;
+              }
+              const validation = validateRuleHostResult(batchResult.result);
+              if (!isRuleResult(batchResult.result)) {
+                addWarning(warnings, `invalid RuleHostResult: ${validation.errors.join('; ')}`, 'fix the shadow RuleCode result and reactivate the rule; live enforcement is unaffected');
+                continue;
+              }
+              const shadowResult = batchResult.result.matched
+                ? { ...batchResult.result, ruleId: candidate.ruleId, principleId: candidate.principleId }
+                : batchResult.result;
+              shadowEvaluations.push({
+                toolName: input.toolName,
+                filePath: action.normalizedPath,
+                matched: shadowResult.matched,
+                decision: shadowResult.decision,
+                ruleId: candidate.ruleId,
+                activationId: candidate.implId,
+                activationMode: 'shadow',
+              });
             }
-            const validation = validateRuleHostResult(batchResult.result);
-            if (!isRuleResult(batchResult.result)) {
-              addWarning(warnings, `invalid RuleHostResult: ${validation.errors.join('; ')}`, 'fix the shadow RuleCode result and reactivate the rule; live enforcement is unaffected');
-              continue;
-            }
-            const shadowResult = batchResult.result.matched
-              ? { ...batchResult.result, ruleId: candidate.ruleId, principleId: candidate.principleId }
-              : batchResult.result;
-            shadowEvaluations.push({
-              toolName: input.toolName,
-              filePath: action.normalizedPath,
-              matched: shadowResult.matched,
-              decision: shadowResult.decision,
-              ruleId: candidate.ruleId,
-              activationId: candidate.implId,
-              activationMode: 'shadow',
-            });
           }
         }
       }

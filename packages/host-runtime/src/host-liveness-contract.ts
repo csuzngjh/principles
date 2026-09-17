@@ -24,6 +24,14 @@ export type PromotionHostLivenessResolution =
   | {
       ok: true;
       hostKind: 'openclaw';
+      /**
+       * The workspace host declarations this resolution is based on.
+       * Empty array = nothing declared yet (the OpenClaw contract is the
+       * documented historical default, review S3: callers can now
+       * distinguish an undeclared workspace from a declared-OpenClaw one);
+       * `['openclaw']` = the OpenClaw host actually declared itself.
+       */
+      hostKinds: readonly string[];
       hostContract: HostLivenessContract;
       hostRuntimeVersion: string;
     }
@@ -68,9 +76,12 @@ export function resolvePromotionHostLiveness(workspaceDir: string): PromotionHos
       // the historical OpenClaw governance assumption, and existing
       // workspaces rely on it — keep the OpenClaw contract (the loader never
       // guesses policy; this resolver is the deciding consumer).
+      // hostKinds: [] lets callers distinguish this from a declared-OpenClaw
+      // workspace (review S3).
       return {
         ok: true,
         hostKind: 'openclaw',
+        hostKinds: [],
         hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
         hostRuntimeVersion: OPENCLAW_HOST_LIVENESS_CONTRACT.version,
       };
@@ -90,6 +101,7 @@ export function resolvePromotionHostLiveness(workspaceDir: string): PromotionHos
     return {
       ok: true,
       hostKind: 'openclaw',
+      hostKinds,
       hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
       hostRuntimeVersion: OPENCLAW_HOST_LIVENESS_CONTRACT.version,
     };

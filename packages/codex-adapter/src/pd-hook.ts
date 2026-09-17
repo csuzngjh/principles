@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import { appendEventLogLine, redactTelemetryString } from '@principles/core/runtime-v2';
+import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
@@ -15,6 +15,16 @@ import { runGovernanceAdmission } from './ingestion/admission.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface PdHookResult { stdout: unknown; exitCode: number; stderr: string[] }
+
+function redactStringFields(data: object): Record<string, unknown> {
+  // rc-8: telemetry is redacted string-field by string field (same policy as
+  // the OpenClaw EventLog redactEventData) — shared by every emitter here.
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    redacted[key] = typeof value === 'string' ? redactTelemetryString(value) : value;
+  }
+  return redacted;
+}
 
 /**
  * PRI-750: event emitter for the Codex subprocess model. Writes the same
@@ -34,18 +44,12 @@ function codexEventEmitter(stateDir: string): HostEventEmitter {
       });
     },
     recordToolCall(sessionId, data) {
-      // rc-8: tool events are telemetry — redact every string field before
-      // persisting (same policy as the OpenClaw EventLog redactEventData).
-      const redacted: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(data)) {
-        redacted[key] = typeof value === 'string' ? redactTelemetryString(value) : value;
-      }
       appendEventLogLine(stateDir, {
         ts: new Date().toISOString(),
         type: 'tool_call',
         category: data.error || (data.exitCode !== undefined && data.exitCode !== 0) ? 'failure' : 'success',
         sessionId,
-        data: redacted,
+        data: redactStringFields(data),
       });
     },
   };
@@ -62,25 +66,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, MAX_DIAGNOSTIC) : 'unknown_error';
 }
 
-const RULEHOST_EVALUATED_DECISIONS = new Set(['allow', 'block', 'requireApproval', 'auto_correct', 'no_rules_armed', 'evaluation_failed']);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isRuleHostEvaluationEntry(value: unknown): boolean {
-  // rc-1/rc-2/rc-4: metadata crosses the HostEventResult contract as unknown —
-  // validate every entry's shape before it becomes a persisted event.
-  // A shadow observation without activationId is dead evidence (the shadow
-  // summary keys on the exact id), so it is rejected here (CodeRabbit CR-6).
-  return isRecord(value)
-    && typeof value.toolName === 'string'
-    && typeof value.filePath === 'string'
-    && typeof value.matched === 'boolean'
-    && typeof value.decision === 'string' && RULEHOST_EVALUATED_DECISIONS.has(value.decision)
-    && (value.ruleId === undefined || typeof value.ruleId === 'string')
-    && (value.activationId === undefined || typeof value.activationId === 'string')
-    && (value.activationMode === undefined || value.activationMode === 'shadow' || value.activationMode === 'live')
+/**
+ * PRI-813: admissible evaluation entry = the CANONICAL core schema guard
+ * (rc-1/rc-2, P4: no hand-rolled field copy that could drift from the
+ * contract) plus one caller policy: a shadow observation without
+ * activationId is dead evidence — the shadow summary keys on the exact id —
+ * so it is rejected here (CodeRabbit CR-6).
+ */
+function isAdmissibleRuleHostEvaluationEntry(value: unknown): value is RuleHostEvaluatedEventData {
+  return isRuleHostEvaluatedEventData(value)
     && (value.activationMode !== 'shadow' || typeof value.activationId === 'string');
 }
 
@@ -95,16 +89,19 @@ function isRuleHostEvaluationEntry(value: unknown): boolean {
  */
 function recordRuleHostEvaluations(stateDir: string, sessionId: string | undefined, evaluations: unknown): string[] {
   if (!Array.isArray(evaluations)) return [];
+  // One bounded diagnostic per failure CLASS — an early entry-invalid must
+  // not swallow a later persist-failure (review S4).
   const diagnostics: string[] = [];
+  let sawInvalidEntry = false;
+  let sawPersistFailure = false;
   for (const entry of evaluations) {
-    if (!isRuleHostEvaluationEntry(entry)) {
+    if (!isAdmissibleRuleHostEvaluationEntry(entry)) {
       // rc-9: a skipped evidence row must be observable, never silent.
-      if (diagnostics.length === 0) diagnostics.push(diagnostic('rulehost_evaluation_entry_invalid', 'Inspect host-runtime gate metadata contract; the evaluation event was not persisted.'));
+      if (!sawInvalidEntry) {
+        sawInvalidEntry = true;
+        diagnostics.push(diagnostic('rulehost_evaluation_entry_invalid', 'Inspect host-runtime gate metadata contract; the evaluation event was not persisted.'));
+      }
       continue;
-    }
-    const redacted: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(entry)) {
-      redacted[key] = typeof value === 'string' ? redactTelemetryString(value) : value;
     }
     // CodeRabbit CR-1: evidence persistence is telemetry — an fs failure here
     // must never propagate into processHookInvocation's fail-open catch,
@@ -116,10 +113,13 @@ function recordRuleHostEvaluations(stateDir: string, sessionId: string | undefin
         type: 'rulehost_evaluated',
         category: 'evaluated',
         sessionId,
-        data: redacted,
+        data: redactStringFields(entry),
       });
     } catch (error: unknown) {
-      if (diagnostics.length === 0) diagnostics.push(diagnostic(`rulehost_evaluation_persist_failed:${errorMessage(error)}`, 'Inspect workspace .state/logs writability; the evaluation event was not persisted, the tool decision is unaffected.'));
+      if (!sawPersistFailure) {
+        sawPersistFailure = true;
+        diagnostics.push(diagnostic(`rulehost_evaluation_persist_failed:${errorMessage(error)}`, 'Inspect workspace .state/logs writability; the evaluation event was not persisted, the tool decision is unaffected.'));
+      }
     }
   }
   return diagnostics;
