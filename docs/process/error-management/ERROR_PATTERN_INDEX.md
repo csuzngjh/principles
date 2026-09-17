@@ -1,8 +1,8 @@
 # Error Pattern Index
 
-This compact index is the first stop for coding tasks. Use it to select the relevant detailed entries in `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` instead of loading the full incident log into context by default.
+This compact index is the first stop for coding tasks. Use it to select the relevant pattern records in `docs/process/error-management/records/patterns/` (the ERR authority since the PRI-799 Phase C cutover) instead of loading the whole records tree into context by default.
 
-For a task, pick the matching pattern cards, read the listed ERR entries, and state how the implementation avoids recurrence. If a review finding is another instance of an existing pattern, update that pattern or the matching handbook entry's Recurrence field instead of creating a new top-level error class.
+For a task, pick the matching pattern cards, read the listed ERR records, and state how the implementation avoids recurrence. If a review finding is another instance of an existing pattern, record an occurrence against it (`npm run error:record add-occurrence`) instead of creating a new top-level error class.
 
 ## Pattern Cards
 
@@ -520,10 +520,10 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 ## Maintenance Rules
 
-- Every ERR in a pattern card must exist in `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md`.
-- Every detailed ERR must be mapped to at least one pattern card. If an error is genuinely novel, add a new EP card before recording the ERR.
-- Prefer updating a pattern card or Recurrence field over adding a new top-level error class for the same root cause.
-- Run `npm run check:error-handbook` after editing this file or the handbook.
+- Every ERR in a pattern card must exist as a pattern record in `docs/process/error-management/records/` (validated by `npm run check:error-handbook`).
+- Every active pattern record must be mapped to at least one pattern card. If an error is genuinely novel, add a new EP card before recording the ERR.
+- Prefer updating a pattern card or recording an occurrence (`npm run error:record add-occurrence`) over adding a new top-level error class for the same root cause.
+- Run `npm run check:error-handbook` after editing this file or any record.
 
 ## Routing Metadata
 

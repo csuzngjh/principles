@@ -164,7 +164,7 @@ This creates `docs/quality-reports/YYYY-MM.md` with:
 (17 steps — the historical "9 checks" description had drifted; resynced when
 `check:pipeline-contract` was added, PRI-828):
 1. `check:generated-artifacts` — Generated artifacts consistency
-2. `check:error-handbook` — Error handbook integrity
+2. `check:error-handbook` — ERR structured records integrity (records tree + routing; the Markdown handbook/archive are frozen snapshots)
 3. `check:telemetry-events --strict` — Telemetry event catalog drift
 4. `check:repo-hygiene` — Repository hygiene (no temp files, DB files)
 5. `check:runtime-contract` — Runtime Contract incremental scan

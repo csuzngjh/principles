@@ -1,11 +1,15 @@
 ---
 name: record-error
-description: Record AI coding assistant errors into the Error Experience Handbook. Triggers when pr-review finds an AI error, a reviewer points out your mistake, or user says "record error", "log mistake", "记录错误", "add to handbook".
+description: Record AI coding assistant errors into the structured ERR records tree. Triggers when pr-review finds an AI error, a reviewer points out your mistake, or user says "record error", "log mistake", "记录错误", "add to handbook".
 ---
 
 # Record Error
 
-Record AI coding assistant errors into `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` so all AI assistants learn from past mistakes.
+Record AI coding assistant errors into `docs/process/error-management/records/` —
+the structured ERR records tree that is the single write authority since the
+PRI-799 Phase C cutover (2026-09-17). All writes go through
+`npm run error:record`. Never hand-edit record files, and never edit the frozen
+legacy snapshots `ERROR_EXPERIENCE_HANDBOOK.md` / `ERROR_ARCHIVE.md`.
 
 ## Trigger Conditions
 
@@ -18,75 +22,93 @@ Record AI coding assistant errors into `docs/process/error-management/ERROR_EXPE
 
 ### Step 1: Similarity Gate (ENFORCED)
 
-Before assigning a new number, you MUST:
+Before creating a new pattern, you MUST:
 
 1. Read `docs/process/error-management/ERROR_PATTERN_INDEX.md` — check if any EP card's "Failure mode" matches your incident.
-2. If a match exists → you MUST update recurrence on one of the EP card's "Representative ERRs", NOT create a new ERR.
+2. If a match exists → you MUST add an occurrence to one of the EP card's "Representative ERRs" (`error:record add-occurrence`), NOT create a new ERR.
 3. Only if NO EP card covers the failure mode → consider a new ERR + new EP card.
 
-**Hard rule**: If the incident's prevention rule can be stated as "When <X>, use <Y> instead of <Z>", and an existing ERR already teaches this exact rule → UPDATE, do not ADD.
+**Hard rule**: If the incident's prevention rule can be stated as "When <X>, use <Y> instead of <Z>", and an existing ERR already teaches this exact rule → occurrence, not a new pattern.
 
-**Self-check before adding**: "Could a reviewer confuse my new ERR with an existing one?" If yes → do not add.
+**Self-check before adding**: "Could a reviewer confuse my new ERR with an existing one?" If yes → do not add. To scan existing patterns: `ls docs/process/error-management/records/patterns/` and grep titles in the `<!-- pd-error-record -->` blocks.
 
 ### Step 2: Classify
 
-Read the error category table in `references/categories.md` and assign one of:
-1. Architecture Boundary | 2. Missing Tests | 3. Schema & Type | 4. Doc & Spec Drift | 5. Security | 6. Process & Workflow
+Assign one category (exact value required by the validator):
 
-Also classify the **pattern + invariant**: which EP card (EP-01..EP-13) does this recurrence belong to, and what is the short kebab-case invariant name for the specific failure shape (e.g. `test-asserts-source-substring-not-wiring`)? If the recurrence updates an existing ERR, the pattern is that ERR's EP card.
+`Architecture Boundary Violations` | `Missing Tests & Verification` | `Schema & Type Mistakes` | `Documentation & Spec Drift` | `Security & Safety` | `Process & Workflow`
 
-### Step 3: Assign Number
+Also classify the **pattern + invariant**: which EP card (EP-01..EP-13) does this belong to, and what is the short kebab-case invariant name for the specific failure shape (e.g. `test-asserts-source-substring-not-wiring`)? If this is a recurrence of an existing ERR, the pattern is that ERR's EP card.
 
-Read handbook Statistics section. Next = `ERR-{total+1}`, zero-padded to at least 3 digits (ERR-001 through ERR-999). If total exceeds 999, extend to 4 digits (ERR-1000).
+### Step 3: Assign Number (new ERR only)
+
+There is no statistics counter. Take the next free display id by scanning the records tree: the current max `ERR-NNN` number + 1 (zero-padded to 3 digits). Duplicate display ids fail loud at validation, so a collision can never merge silently.
+
+```bash
+ls docs/process/error-management/records/patterns/ | grep -oE 'ERR-[0-9]+' | sort -V | tail -1
+```
 
 ### Step 4: Linear Comment
 
-Add comment on the related Linear issue using the entry format in `references/entry-format.md`. Use the Linear MCP save_comment tool with the issue ID.
+Add a comment on the related Linear issue using the narrative format in `references/entry-format.md`. Use the Linear MCP save_comment tool with the issue ID.
 
 ### Step 5: Tag Issue
 
 Add `lesson-learned` label via the Linear MCP save_issue tool with `labels: ["lesson-learned"]`.
 
-### Step 6: Edit Handbook
+### Step 6: Write the Record
 
-Edit `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md`:
+The record body is Markdown using the `references/entry-format.md` narrative shape (What happened / Why it's wrong / Correct approach / How to prevent / Source / Date). Write the body to a temp file and pass it via `--body-file`.
 
-1. Add row to the relevant category table: `| ERR-XXX | <summary> | <issue ID> |`
-2. Add detailed entry in "Detailed Entries" section (use format from Step 3)
-3. Update Statistics: increment Total lessons, update Last updated, update Top category if needed, increment Recurring errors if recurrence
-4. **Recurrence truncation**: Keep at most the 3 most recent recurrence descriptions in full. For older recurrences, retain only `date + issue ID + one-sentence summary` (≤ 100 chars). Preserve the total count.
-5. **Structured recurrence metadata (MANDATORY for recurrences recorded from 2026-09-10)**: every recurrence line you add or update must be immediately followed by a `recurrence-meta` HTML-comment JSON block, adjacent to its narrative:
+**New ERR** (new pattern record):
 
-```md
-- 2026-09-10 PR #1600: one-sentence recurrence narrative.
-  <!-- recurrence-meta
-  {
-    "date": "2026-09-10",
-    "pattern": "EP-09",
-    "invariant": "test-asserts-source-substring-not-wiring",
-    "severity": "P2",
-    "escaped": "verify-merge",
-    "caughtBy": "pr-review",
-    "guard": "none"
-  }
-  -->
+```bash
+npm run error:record create-pattern \
+  --display ERR-NNN \
+  --title "Generalized failure mode, not the incident" \
+  --category "Process & Workflow" \
+  --ep EP-02 \
+  --source "PRI-YYY / PR #ZZZ" \
+  --body-file /tmp/err-nnn-body.md
 ```
 
-Field contract (validated by `npm run check:error-handbook`):
-- `date` — YYYY-MM-DD, the recurrence date
-- `pattern` — the EP card id (must exist in ERROR_PATTERN_INDEX.md)
-- `invariant` — short kebab-case name for the specific failure shape
-- `severity` — P0..P3
-- `escaped` — which gate the error escaped (e.g. `verify-merge`, `ci`, `none` if caught before any gate)
-- `caughtBy` — one of `self-review` | `pr-review` | `ci` | `runtime` | `owner`
-- `guard` — `none`, or the guard id that now mechanizes this invariant (e.g. `check:runtime-contract`)
+**Recurrence of an existing ERR** (add an occurrence to `P-ERR-NNN`):
 
-Do NOT bulk-backfill metadata onto historical recurrences — only the ones you record now.
+```bash
+npm run error:record add-occurrence \
+  --pattern P-ERR-NNN \
+  --date YYYY-MM-DD \
+  --source "PRI-YYY / PR #ZZZ" \
+  --invariant <kebab-invariant> \
+  --severity P0|P1|P2|P3 \
+  --escaped <gate-that-was-escaped|none> \
+  --caughtBy self-review|pr-review|ci|runtime|owner \
+  --guard <none|guard-id> \
+  --body "one-sentence recurrence narrative"
+```
+
+Field contract (validated fail-loud by the writer):
+- `--invariant` — short kebab-case name for the specific failure shape
+- `--severity` — P0..P3
+- `--escaped` — which gate the error escaped (e.g. `verify-merge`, `ci`, `none` if caught before any gate)
+- `--caughtBy` — one of `self-review` | `pr-review` | `ci` | `runtime` | `owner`
+- `--guard` — `none`, or the guard id that now mechanizes this invariant (e.g. `check:runtime-contract`)
+
+The five structured fields are stored as first-class occurrence metadata (the successor of the legacy `recurrence-meta` HTML blocks) and are what `npm run error:hotspots` aggregates. Do NOT bulk-backfill them onto historical occurrences — only the ones you record now.
+
+**Archive** (lifecycle flip only — never move Markdown by hand):
+
+```bash
+npm run error:record archive --pattern P-ERR-NNN
+```
+
+Then update the ERR token in `ERROR_PATTERN_INDEX.md` (`ERR-NNN` → `archived-NNN`) if present. Archiving never touches occurrences or narratives.
 
 ### Step 7: Validate & Escalate
 
-1. Run `npm run check:error-handbook` — it must PASS (it validates your routing/recurrence metadata).
-2. Run `npm run error:hotspots` — if your recurrence pushes a pattern+invariant to "ENFORCEMENT DECISION REQUIRED" (≥2 recurrences in 90 days, guard `none`), make an explicit enforcement decision and record it as a follow-up: blocking guard / advisory guard / semantic verification obligation (named in the PR's Task Risk Contract) / not-mechanizable with a written reason. The decision may be a follow-up ticket — it must not silently stay `guard: none` forever, and it must NOT auto-expand the current bug-fix PR with a large scanner (scope discipline).
+1. Run `npm run error:record validate` — the whole tree must pass.
+2. Run `npm run check:error-handbook` — it validates records + routing integrity and is the merge gate. There is NO size budget: you never need to free bytes before recording.
+3. Run `npm run error:hotspots` — if your occurrence pushes a pattern+invariant to "ENFORCEMENT DECISION REQUIRED" (≥2 recurrences in 90 days, guard `none`), make an explicit enforcement decision and record it as a follow-up: blocking guard / advisory guard / semantic verification obligation (named in the PR's Task Risk Contract) / not-mechanizable with a written reason. The decision may be a follow-up ticket — it must not silently stay `guard: none` forever, and it must NOT auto-expand the current bug-fix PR with a large scanner (scope discipline).
 
 ### Step 8: Commit & PR — Git workflow rules (MANDATORY)
 
@@ -97,21 +119,21 @@ commit fix + lesson TOGETHER in the same task worktree/branch. Do NOT create a s
 
 ```bash
 # already inside YOUR task worktree, on your task branch
-git add docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md
-git commit -m "docs: record ERR-XXX recurrence (current task lesson)"
+git add docs/process/error-management/records/
+git commit -m "docs: record ERR-NNN occurrence (current task lesson)"
 # continues with your PR's remaining commits
 ```
 
 **Case B — original PR already merged, current branch cannot legally take the edit, or the error recording IS the task:**
-create a dedicated worktree via the repository mechanism (`npm run dev:worktree -- <id> err-XXX`), acquire the lease, then branch/commit there. Never `git checkout -b` inside a worktree you do not own.
+create a dedicated worktree via the repository mechanism (`npm run dev:worktree -- <id> err-NNN`), acquire the lease, then branch/commit there. Never `git checkout -b` inside a worktree you do not own.
 
 ```bash
-npm run dev:worktree -- adhoc-errXXX err-XXX
+npm run dev:worktree -- adhoc-errNNN err-NNN
 cd <worktree-dir> && npm run dev:lease -- acquire --owner "<task> session"
-git add docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md
-git commit -m "docs: add ERR-XXX to error experience handbook"
+git add docs/process/error-management/records/
+git commit -m "docs: add ERR-NNN pattern record"
 git push origin <branch>
-gh pr create --title "docs: add ERR-XXX to error experience handbook" --body "Record error ERR-XXX found during code review."
+gh pr create --title "docs: add ERR-NNN to error experience records" --body "Record error ERR-NNN found during code review."
 ```
 
 **Do NOT merge the PR.** User merges manually.
@@ -125,15 +147,15 @@ When pr-review triage finds an AI error:
 
 ## Checklist
 
-- [ ] Error classified (category 1-6)
+- [ ] Error classified (category from the 6 exact values)
 - [ ] Pattern + invariant classified (EP card + kebab-case invariant)
-- [ ] ERR-XXX assigned (sequential, zero-padded)
-- [ ] Linear comment added (full entry format)
+- [ ] Existing-pattern check done → occurrence, not duplicate pattern
+- [ ] ERR-NNN assigned only for a genuinely new pattern (records max + 1)
+- [ ] Linear comment added (narrative format)
 - [ ] `lesson-learned` label applied
-- [ ] Category table row added
-- [ ] Detailed entry added
-- [ ] Recurrence + `recurrence-meta` structured block added (new recurrences)
-- [ ] Statistics updated
+- [ ] `npm run error:record create-pattern` or `add-occurrence` (or `archive`) succeeded
+- [ ] Structured occurrence fields supplied together (invariant/severity/escaped/caughtBy/guard)
+- [ ] `npm run error:record validate` PASS
 - [ ] `npm run check:error-handbook` PASS
 - [ ] `npm run error:hotspots` run; escalation decision recorded if flagged
 - [ ] Commit landed in the correct worktree (Case A same-branch / Case B dedicated worktree)

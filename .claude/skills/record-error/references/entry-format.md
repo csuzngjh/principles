@@ -1,6 +1,7 @@
 # Entry Format
 
-Use this format for Linear comments and handbook detailed entries:
+Use this narrative shape for Linear comments and for the Markdown body of a
+pattern/occurrence record (`--body-file` of `npm run error:record`):
 
 ```markdown
 **[ERR-XXX]** | <one-line summary>
@@ -13,3 +14,7 @@ Use this format for Linear comments and handbook detailed entries:
 - **Date**: <YYYY-MM-DD>
 - **Recurrence**: <if same pattern recurred, note date and issue>
 ```
+
+For an occurrence record the recurrence facts themselves are supplied as
+structured CLI flags (`--invariant / --severity / --escaped / --caughtBy /
+--guard`) — do not duplicate them in prose beyond the one-sentence narrative.
