@@ -29,9 +29,19 @@ vi.mock('../../utils/cli-process-runner.js', () => ({
   runCliProcess: vi.fn(),
 }));
 
+// PRI-827: partially mock node:fs/promises so the failure path of
+// writeMessageFile (cleanup of its own mkdtemp root) is testable; all other
+// fs/promises operations (mkdir/mkdtemp/rm) stay real.
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal();
+  return { ...original, writeFile: vi.fn(original.writeFile) };
+});
+
+import { writeFile } from 'node:fs/promises';
 import { runCliProcess } from '../../utils/cli-process-runner.js';
 
 const mockRunCliProcess = runCliProcess as ReturnType<typeof vi.fn>;
+const mockWriteFile = vi.mocked(writeFile);
 
 function makeCliOutput(overrides: Partial<CliOutput> = {}): CliOutput {
   return {
@@ -45,6 +55,10 @@ function makeCliOutput(overrides: Partial<CliOutput> = {}): CliOutput {
 }
 
 /** A successful probe-3 envelope: openclaw wraps the agent reply in stderr. */
+function listTempRoots(): string[] {
+  return fs.readdirSync(os.tmpdir()).filter((entry) => entry.startsWith('pd-msg-'));
+}
+
 function successEnvelope(): string {
   return JSON.stringify({ payloads: [{ text: '{"ok":true}' }] });
 }
@@ -179,6 +193,20 @@ describe('OpenClawCliRuntimeAdapter healthCheck message-file lifecycle', () => {
 
       // Even on timeout, the finally block must clean up.
       expect(fs.existsSync(createdFilePath)).toBe(false);
+    });
+
+    it('PRI-827: removes the unique fallback root when the message write itself fails', async () => {
+      const rootsBefore = listTempRoots();
+      mockWriteFile.mockRejectedValueOnce(new Error('ENOSPC: simulated write failure'));
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      stubFirstTwoProbes();
+
+      const result = await adapter.healthCheck();
+
+      // The write failure must surface as unhealthy, not crash.
+      expect(result.healthy).toBe(false);
+      // No pd-msg-* temp root may be left behind by the failed probe.
+      expect(listTempRoots()).toEqual(rootsBefore);
     });
 
     it('deletes the message file after a probe with non-zero exit code', async () => {
