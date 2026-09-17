@@ -569,6 +569,42 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     });
   });
 
+  it('PRI-726: a ReleaseManager degraded success reaches the Owner as the legacy gatewayNotice field', async () => {
+    enableWriteFlag();
+    authorityMock.readiness = { ready: true, reasons: [] };
+    authorityMock.applyFullReadiness = { ready: true, reasons: [] };
+    authorityMock.applyImpl = async () => ({
+      kind: 'applied',
+      productVersion: '1.223.0',
+      transactionId: 'update-1-abcdef01',
+      journalPath: '/tmp/transactions/update-1-abcdef01.jsonl',
+      // The installer committed the update but its gateway restart failed —
+      // the outcome must stay success:true and carry the SAME field the
+      // PRI-723 legacy path uses (one Owner-facing contract, no new name).
+      gatewayNotice: 'Gateway 未自动重启，请手动启动：openclaw gateway start',
+    });
+    const req = createMockRequest('POST');
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(req, res, tmpDir, '/apply-full');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res._body)).toEqual({
+      success: true,
+      data: {
+        success: true,
+        message: 'Updated to 1.223.0. Transaction update-1-abcdef01 confirmed in the journal.',
+        newVersion: '1.223.0',
+        requiresRestart: true,
+        nextAction: 'Restart PD Console to run the updated build.',
+        gatewayNotice: 'Gateway 未自动重启，请手动启动：openclaw gateway start',
+      },
+    });
+    // History still records exactly one plain success event — the gateway
+    // notice is presentation-layer, not a second decision record.
+    const history = readHistory(tmpDir);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ success: true, kind: 'update', authority: 'release-manager' });
+  });
+
   it('an unwritable history file must not misreport a mutation that already happened (PRI-702 rc-9)', async () => {
     enableWriteFlag();
     authorityMock.readiness = { ready: true, reasons: [] };
