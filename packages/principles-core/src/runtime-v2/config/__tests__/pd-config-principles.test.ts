@@ -33,7 +33,6 @@ function makeValidRawConfig(): Record<string, unknown> {
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: false },
-        empathyObserver: { enabled: false },
       },
     },
   };

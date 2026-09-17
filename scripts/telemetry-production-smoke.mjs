@@ -111,7 +111,6 @@ fs.writeFileSync(
     '      enabled: false',
     '    correctionObserver:',
     '      enabled: false',
-    '    empathyObserver:',
     '      enabled: false',
     '    signalCollector:',
     '      enabled: false',

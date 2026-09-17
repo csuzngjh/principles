@@ -375,12 +375,12 @@ export async function handleBeforePromptBuild(
   // not MVP-Core; agents discover what they need via tool calls.
   prependSystemContext = buildGovernanceContext();
 
-  // ──── 2. Empathy Observer Spawn (async sidecar)
+  // ──── 2. Behavioral constraints (structured-signal channel hygiene)
   const empathySilenceConstraint = buildEmpathySilenceConstraint();
 
-  // ─────────────────────────────────────────────────3. Empathy Observer Spawn
-  // Extract actual user message from prompt (handles boot checks + Feishu wrappers).
-  // Also detects empathy observer output (prevent recursion) and agent-to-agent messages.
+  // ─────────────────────────────────────────────────3. User message extraction
+  // Extract actual user message from prompt (handles boot checks + Feishu wrappers)
+  // and detect agent-to-agent messages.
   const { message: currentUserMessage, isAgentToAgent } =
     extractUserMessageFromPrompt(event.prompt, sessionId);
 

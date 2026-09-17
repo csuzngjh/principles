@@ -21,7 +21,6 @@ import { PrincipleDetailPage } from "./pages/principles/PrincipleDetailPage.js";
 import { ActivationPage } from "./pages/activation/ActivationPage.js";
 import { DebtPage } from "./pages/debt/DebtPage.js";
 import { ControlCenterPage } from "./pages/control-center/ControlCenterPage.js";
-import { SignalKeywordsPage } from "./pages/signal-keywords/SignalKeywordsPage.js";
 import { SettingsPage } from "./pages/settings/SettingsPage.js";
 import { UpdatePage } from "./pages/settings/UpdatePage.js";
 import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
@@ -192,7 +191,6 @@ function AuthRoutes() {
                     <Route path="/activation" element={<ActivationPage />} />
                     <Route path="/debt" element={<DebtPage />} />
                     <Route path="/control-center" element={<ControlCenterPage />} />
-                    <Route path="/control-center/signal-keywords" element={<SignalKeywordsPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/update" element={<UpdatePage />} />
                     <Route path="/report-problem" element={<ReportProblemPage />} />

@@ -73,7 +73,6 @@ function writeConfigYaml(workspaceDir: string, featureOverrides: Record<string, 
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: false },
-        empathyObserver: { enabled: false },
       },
     },
   };

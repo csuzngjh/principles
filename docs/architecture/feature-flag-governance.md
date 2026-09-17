@@ -89,6 +89,15 @@ agent 绑定不受影响（Control Center 的共情成本提示按 agent 绑定�
 unknown-flag 告警。EmpathyObserver 类与公开导出未随本 PR 删除——若 Owner 后续要真实观测器，
 按 census 程序重新注册 flag 并接线即可。
 
+**PRI-819 增补（2026-09-17，物理清理已执行）**：Owner 决策"长期休眠且零行为的能力直接退役"
+后，上述保留面已全部物理删除——EmpathyObserver 类/schema/导出、agent-scheduler 类型映射条目、
+output-schema-registry 条目、`internalAgents.empathyObserver` 绑定（defaults + installer 模板 +
+Control Center 卡片/成本提示/localStorage ack）、'共情观察器' 显示标签、#189 递归防护
+（isEmpathyPrompt）。存量 config 中的 `agents.empathyObserver` 键走 PRI-772 式 tolerated
+no-op + warning（不再报 unknown-key 错误）。flag 墓碑本身保持不动：无 runtime reader，
+`features.empathy_observer` 存量键仍走 unknown-flag 告警。live 的 empathy 检测
+（empathy-keyword-matcher、signal-collector-host、DetectionService、GFI/rollback 事件链）不受影响。
+
 ### 3.3 installer 默认值快照 — 已按 PRI-645 收敛为 sparse shell
 
 历史（PRI-574）：installer 模板硬编码 18 条与 registry 对齐的默认 entry，

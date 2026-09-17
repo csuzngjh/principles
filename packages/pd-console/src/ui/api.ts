@@ -2,15 +2,6 @@ import type { ApiResponse } from "../types.js";
 import type { OwnerDecisionsData, OwnerResolutionResultData } from "./utils/validators.js";
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import {
-  listActiveSignalKeywords,
-  listPendingSignalTerms,
-  fetchKeywordStore,
-  fetchPendingTerms,
-  updateKeywordStore,
-  admitPendingTerm,
-  rejectPendingTerm,
-} from "./utils/signal-keywords-api.js";
-import {
   validateErrorResponse,
   validateHeaders,
   validateFeedbackReport,
@@ -1072,14 +1063,6 @@ async function dispatchFollowUp(
 
 export {
   request,
-  // signal-keywords (UI stubs, see signal-keywords-api.ts)
-  listActiveSignalKeywords,
-  listPendingSignalTerms,
-  fetchKeywordStore,
-  fetchPendingTerms,
-  updateKeywordStore,
-  admitPendingTerm,
-  rejectPendingTerm,
 
   // auth
   getToken,
@@ -1212,7 +1195,6 @@ export type {
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)
-export type { SignalKeyword, PendingSignalTerm } from "./utils/signal-keywords-types.js";
 export type { ActivationRecordData as ActivationRecord } from "./utils/validators.js";
 export type { ApprovalRecordData as ApprovalRecord } from "./utils/validators.js";
 export type { WorkspaceEntryData as WorkspaceEntry } from "./utils/validators.js";

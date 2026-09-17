@@ -4,7 +4,7 @@
  * Extracted from hooks/prompt.ts per PRI-444. These functions contain NO I/O
  * and NO side effects — they are independently unit-testable.
  *
- * I/O helpers (cachedReadFile, loadContextInjectionConfig, resolveEmpathyObserver)
+ * I/O helpers (cachedReadFile, loadContextInjectionConfig)
  * remain in prompt.ts because they depend on module-level cache state and fs.
  *
  * Pattern follows after-tool-call-helpers.ts (PRI-326): plugin-internal
@@ -37,8 +37,8 @@ import type {
  * - Feishu wrapper format 2: "Conversation info (untrusted metadata): ```json {...}```  text"
  * - Clean user message text
  *
- * Also detects empathy observer output (to prevent recursive spawn) and
- * agent-to-agent messages (to skip empathy evaluation).
+ * Also detects agent-to-agent messages (so user-interaction-only injections —
+ * correction cues, behavioral constraints — are skipped for them).
  *
  * Pure logic — no I/O, no side effects.
  */
@@ -78,19 +78,14 @@ export function extractUserMessageFromPrompt(
     }
   }
 
-  // #189: Detect empathy observer output to prevent recursive spawn.
-  // The empathy observer runs with parentSessionId (not :subagent:), so its output
-  // would be treated as a user message and re-trigger empathy evaluation.
-  // Match distinctive patterns from the empathy observer prompt/output.
-  const isEmpathyPrompt =
-    /empathy\s*observer/i.test(message) &&
-    /damageDetected|severity|confidence/i.test(message);
+  // PRI-819: the empathy-observer recursion guard (#189) is removed — the
+  // agent it guarded no longer exists, and agent-to-agent traffic is already
+  // covered by the sourceSession/:subagent: markers below.
   const isAgentToAgent =
     message.includes('sourceSession=agent:') ||
-    sessionId?.includes(':subagent:') === true ||
-    isEmpathyPrompt;
+    sessionId?.includes(':subagent:') === true;
 
-  return { message, isAgentToAgent, isEmpathyPrompt };
+  return { message, isAgentToAgent };
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +126,13 @@ Principles Disciple (PD) provides governance boundaries for this session.
 /**
  * Build the empathy output restriction constraint text.
  *
+ * Still live after PRI-819: PD's signal pipeline parses structured empathy
+ * markers (damageDetected / <empathy> tags) out of agent output as evidence.
+ * A main agent emitting them itself would corrupt that evidence channel, so
+ * normal output must keep them out. (PRI-819: the stale claim that "the
+ * empathy observer subagent" handles detection was removed — detection is
+ * owned by signal-collector-host / DetectionService.)
+ *
  * Pure logic — returns a constant string.
  */
 export function buildEmpathySilenceConstraint(): string {
@@ -138,7 +140,7 @@ export function buildEmpathySilenceConstraint(): string {
 ### 【EMPATHY OUTPUT RESTRICTION】
 Do NOT output empathy diagnostic text in JSON, XML, or tag format.
 Do NOT include "damageDetected", "severity", "confidence", or "empathy" fields in your output.
-The empathy observer subagent handles pain detection independently.
+Pain detection is handled independently by PD's signal pipeline.
 `.trim();
 }
 
@@ -239,7 +241,7 @@ export function formatEvolutionPrinciples(
 export function assembleAppendSystemContext(parts: AppendSystemContextParts): string {
   const appendParts: string[] = [];
 
-  // 0. Behavioral Constraints (empathy observer coordination)
+  // 0. Behavioral Constraints (structured-signal channel hygiene)
   if (parts.behavioralConstraints) {
     appendParts.push(`<behavioral_constraints>
 ${parts.behavioralConstraints}
@@ -307,30 +309,3 @@ ${executionRules.join('\n')}
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Block H: Observer feedback → keyword phrase extraction
-// ---------------------------------------------------------------------------
-
-/**
- * Extracts short, distinct keyword phrases from an EmpathyObserver reason string.
- *
- * Used to feed newly detected expressions back into the keyword store, so the
- * keyword-based fast path can catch them on future turns without re-running
- * the more expensive observer.
- *
- * Pure function — no I/O, no side effects. Fully unit-testable.
- *
- * @param reason - observer's reason string (e.g., "用户表达了强烈的挫败感，提到反复尝试失败")
- * @param lang - UI locale for minimum length threshold (zh=2 chars, en=3 chars)
- * @returns deduplicated array of up to 3 candidate phrases
- */
-export function extractPhrasesFromReason(reason: string, lang: 'zh' | 'en'): string[] {
-  const MAX_PHRASES = 3;
-  const MIN_LENGTH = lang === 'zh' ? 2 : 3;
-  const MAX_LENGTH = 20;
-  const segments = reason
-    .split(/[,，。.！!？?、\n；;]/)
-    .map(s => s.trim())
-    .filter(s => s.length >= MIN_LENGTH && s.length <= MAX_LENGTH);
-  return [...new Set(segments)].slice(0, MAX_PHRASES);
-}

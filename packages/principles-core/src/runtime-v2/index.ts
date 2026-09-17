@@ -1746,19 +1746,10 @@ export {
   isEmpathyRollbackEventEntry,
 } from './types/event-payload.js';
 
-// ── Empathy and Correction Observers (Unified SDK Migration) ──
-export {
-  EmpathyObserverInputSchema,
-  EmpathyObserverOutputV1Schema,
-  EmpathyObserver,
-} from './observer/empathy-observer.js';
-export type {
-  EmpathyObserverInput,
-  EmpathyObserverOutputV1,
-  EmpathyObserverDeps,
-  EmpathyObserverOptions,
-} from './observer/empathy-observer.js';
-
+// ── Correction Observer (Unified SDK Migration) ──
+// (EmpathyObserver agent retired in PRI-819: no production instantiation since
+// detection moved to signal-collector-host; live empathy event infrastructure
+// lives in types/event-payload + eventLog, not here.)
 export {
   CorrectionObserverPayloadSchema,
   CorrectionObserverOutputV1Schema,
@@ -2092,8 +2083,6 @@ export type {
   TermSource,
   UnifiedKeyword,
   UnifiedKeywordStore,
-  PendingTerm,
-  PendingTermStore,
   SignalCollectorConfig,
   SignalStrength,
   DetectionSource,

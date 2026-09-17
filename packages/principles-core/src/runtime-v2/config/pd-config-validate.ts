@@ -353,8 +353,9 @@ function validateInternalAgentBinding(
 
 // ── Internal Agents Config Validation ───────────────────────────────────────
 
-function validateInternalAgents(raw: unknown, path: string): { ok: true; value: InternalAgentsConfig } | { ok: false; errors: PdConfigValidationError[] } {
+function validateInternalAgents(raw: unknown, path: string): { ok: true; value: InternalAgentsConfig; warnings: string[] } | { ok: false; errors: PdConfigValidationError[] } {
   const errors: PdConfigValidationError[] = [];
+  const warnings: string[] = [];
 
   if (!isRecord(raw)) {
     return { ok: false, errors: [err(path, `internalAgents must be an object, got ${typeof raw}`, 'Fix internalAgents to be an object with defaultRuntime and agents')] };
@@ -390,12 +391,22 @@ function validateInternalAgents(raw: unknown, path: string): { ok: true; value: 
       }
     }
 
-    // Reject unknown agent keys in agents sub-object
+    // Reject unknown agent keys in agents sub-object. `empathyObserver` stays
+    // tolerated as a retired no-op (PRI-819, same pattern as evolutionContext):
+    // the agent had no runtime consumer, but installed workspaces carry the key
+    // written by older installers — accepting it keeps old configs loading and
+    // the warning keeps the tolerance observable (rc-9).
     for (const key of Object.keys(agentsRaw)) {
       if (DANGEROUS_KEYS.has(key)) continue;
+      if (key === 'empathyObserver') continue;
       if (!INTERNAL_AGENT_NAMES.includes(key as InternalAgentName)) {
         errors.push(err(`${path}.agents.${key}`, `unknown agent key '${key}'`, `Remove unknown agent '${key}' or use a known agent name: ${INTERNAL_AGENT_NAMES.join(', ')}`));
       }
+    }
+    if (Object.hasOwn(agentsRaw, 'empathyObserver')) {
+      warnings.push(
+        `${path}.agents.empathyObserver is a retired no-op (the agent had no runtime consumer and has been removed) and is now ignored — remove it from .pd/config.yaml`,
+      );
     }
   }
 
@@ -414,6 +425,7 @@ function validateInternalAgents(raw: unknown, path: string): { ok: true; value: 
 
   return {
     ok: true,
+    warnings,
     value: {
       defaultRuntime: defaultRuntimeRaw as string,
       agents: agents,
@@ -698,6 +710,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     const agentsResult = validateInternalAgents(agentsRaw, 'internalAgents');
     if (agentsResult.ok) {
       internalAgents = agentsResult.value;
+      warnings.push(...agentsResult.warnings);
     } else {
       errors.push(...agentsResult.errors);
     }

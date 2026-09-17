@@ -12,7 +12,7 @@
 //     关闭时 capability.enabled=false，整个 rulehost 管道降级
 //
 // 测试策略：
-//   1. 页面结构：4 依赖分组 + 9 代理 + WorkflowDiagram + CompactStatusBar
+//   1. 页面结构：4 依赖分组 + 8 代理 + WorkflowDiagram + CompactStatusBar
 //   2. 核心代理开关（scribe）：内联确认 → PATCH → 持久化 → 状态栏反映
 //   3. 非核心代理开关（philosopher）：无确认 → PATCH → 持久化
 //
@@ -82,7 +82,7 @@ function attachErrorCollectors(page: Page): string[] {
 test.describe('Control Center 代理开关切换', () => {
   test.describe.configure({ mode: 'serial' });
 
-  test('页面结构：4 依赖分组 + 9 代理 + WorkflowDiagram + CompactStatusBar', async ({ page }) => {
+  test('页面结构：4 依赖分组 + 8 代理 + WorkflowDiagram + CompactStatusBar', async ({ page }) => {
     const errors = attachErrorCollectors(page);
 
     await page.goto('/#/control-center');
@@ -100,7 +100,9 @@ test.describe('Control Center 代理开关切换', () => {
       expect(bodyText, `group '${groupName}' should render`).toContain(groupName);
     }
 
-    // ── 9 代理 name（camelCase，出现在 L1 头部 mono span）──
+    // ── 8 代理 name（camelCase，出现在 L1 头部 mono span）──
+    // (empathyObserver retired in PRI-819; signalCollector is captured via the
+    // unified signal pipeline and stays hidden from the agent grid.)
     const expectedAgents = [
       'diagnostician',
       'dreamer',
@@ -110,11 +112,11 @@ test.describe('Control Center 代理开关切换', () => {
       'philosopher',
       'rolloutReviewer',
       'correctionObserver',
-      'empathyObserver',
     ];
     for (const agentName of expectedAgents) {
       expect(bodyText, `agent '${agentName}' should render`).toContain(agentName);
     }
+    expect(bodyText, 'retired empathyObserver must not render').not.toContain('empathyObserver');
 
     // ── WorkflowDiagram：4 个 phase 编号 ──
     const phaseNumbers = ['01', '02', '03', '04'];

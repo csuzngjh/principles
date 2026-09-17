@@ -504,14 +504,14 @@ const plugin = {
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
               hook: 'after_tool_call', error: errorPreview
             }, { flushImmediately: true });
-            api.logger.error(`[PD:EmpathyObserver] Error in after_tool_call: ${errorPreview}`);
+            api.logger.error(`[PD:SignalCollector] Error in after_tool_call: ${errorPreview}`);
           });
         } catch (err) {
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'after_tool_call',
             error: String(err)
           }, { flushImmediately: true });
-          api.logger.error(`[PD:EmpathyObserver] Error in after_tool_call: ${String(err)}`);
+            api.logger.error(`[PD:SignalCollector] Error in after_tool_call: ${String(err)}`);
         }
       }),
       { timeoutMs: 10_000 },
