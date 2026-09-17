@@ -336,7 +336,15 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
 
       - name: Build publisher
-        run: (cd packages/create-principles-disciple && npm run build)
+        run: |
+          # The publisher's tsc needs the workspace type declarations of the
+          # packages it imports (@principles/core/host, @principles/install-layout).
+          # A clean checkout has no dist/ until these are built — without this
+          # step the assemble job fails on TS2307 for every mode (observed
+          # 2026-09-16: dry-run run 35117774951).
+          npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/install-layout
+          (cd packages/create-principles-disciple && npm run build)
 
       - name: Download all platform assets
         uses: actions/download-artifact@v4

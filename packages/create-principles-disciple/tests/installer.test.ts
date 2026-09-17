@@ -424,6 +424,22 @@ describe('install() gateway lock pre-flight', () => {
     expect(result.success).toBe(false);
   });
 
+  // PRI-726 failure isolation: a FAILED install is never wrapped in a
+  // success-shaped gatewayNotice — the payload did not commit, so "degraded
+  // success" would be a lie. The restart failure stays log-only here; the
+  // notice rides SUCCESS results only (see installer-gateway-notice.test.ts).
+  it('does not attach gatewayNotice when the install itself failed (even if the restart also failed)', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
+    vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: false, error: 'openclaw gateway start failed: spawn ENOENT' });
+
+    const result = await install({ ...baseInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.gatewayNotice).toBeUndefined();
+    expect(restartOpenClawGateway).toHaveBeenCalledTimes(1);
+  });
+
   // ERR-046 / rc-9: when install fails before a backup is created, the result
   // must NOT claim "Previous install has been restored" (the old misleading
   // success-shaped message). backupDir stays null -> "not modified" branch.
