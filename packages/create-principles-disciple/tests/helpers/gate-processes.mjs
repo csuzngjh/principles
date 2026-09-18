@@ -51,8 +51,13 @@ function gateEnv(context, mode, extra) {
     PD_SKIP_CONSOLE_AUTOLAUNCH: '1',
     // Slow-disk machines legitimately exceed the console's default 180s
     // apply-full HTTP timeout (PRI-671 gate observation: 504 while the
-    // update succeeds server-side).
-    PD_UPDATE_APPLY_FULL_TIMEOUT_MS: '900000',
+    // update succeeds server-side). Windows 2025 + Defender measured the
+    // full server-side apply at 17-23 min (sync tar extraction 600-950s +
+    // installer deploy ~400s; 09-17/09-18 full-matrix evidence), so the
+    // console-side budget must exceed the gate's 30 min client bound —
+    // otherwise the console 504s at 15 min while the update is still
+    // applying (the worst possible signal).
+    PD_UPDATE_APPLY_FULL_TIMEOUT_MS: '1800000',
     PD_GATE_MODE: mode,
     PD_GATE_ROOT: context.root,
     ...extra,
