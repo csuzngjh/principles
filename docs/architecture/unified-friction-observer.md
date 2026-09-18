@@ -7,6 +7,12 @@
 > [!CAUTION]
 > **本文档不是可执行的设计方案。** 它记录了一次概念探索的过程和结论。
 >
+> **PRI-819（2026-09-17）增补**：文中作为"现有实现"引用的 `EmpathyObserver` 类
+> （`packages/principles-core/src/runtime-v2/observer/empathy-observer.ts`）已随该工单
+> **物理退役删除**——它自诞生起就没有生产实例化。本文保留为概念探索记录；文中相关
+> 相对链接不再解析。若未来重启此方向，检测入口是 live 的 signal-collector-host /
+> empathy-keyword-matcher，不是已删除的 observer 类。
+>
 > **前置依赖全部未实现：**
 > - ADR-0015 (Pain Evidence Ingestion) 仍为 Proposed 状态
 > - 代码中不存在 `RawObservation`、`ObservationNormalizer`、`EvidenceValidator`、`AdmissionController`、`TriggerController`

@@ -21,7 +21,6 @@ import { auditCandidateLedgerConsistency } from '@principles/core/runtime-v2';
 import { OperatorHealthReadModel } from '@principles/core/runtime-v2';
 import { createInternalizationQueueReadModel } from '@principles/core/runtime-v2';
 import { createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
-import { contentHashFn } from './rulehost-pipeline-runner.js';
 import {
   computeOverallStatus,
   boundedEvidence,
@@ -149,7 +148,6 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineRunnerOptions)
         artifactStore: stateManager.piArtifactStore,
         validator: new DefaultDiagRootCauseValidator(),
         contextAssembler,
-        contentHashFn,
       },
       {
         owner: 'synthetic-baseline',
@@ -166,7 +164,6 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineRunnerOptions)
         eventEmitter,
         artifactStore: stateManager.piArtifactStore,
         validator: new DefaultDiagDistillerValidator(),
-        contentHashFn,
       },
       {
         owner: 'synthetic-baseline',
@@ -183,7 +180,6 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineRunnerOptions)
         eventEmitter,
         artifactStore: stateManager.piArtifactStore,
         committer,
-        contentHashFn,
       },
       {
         owner: 'synthetic-baseline',

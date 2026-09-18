@@ -181,14 +181,12 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Executed: retry improves completion without masking real failures — dreamer same-category self-heal observed live; artificer chains recover instead of dead-ending (PRI-621 recovery plan)',
     retirementCriteria: 'Codex host output contract fixed upstream (submit_rulecode reliable) — retry unnecessary',
   },
-  artifact_summary_redundancy: {
-    decision: 'KEEP_QUIET',
-    consumers: ['principles-core internaliz* summary writers', 'pd-cli rulehost-pipeline runner'],
-    evidence: 'Progressive disclosure Layer 0 writer-side envelope (since 2026-07-26); default-off, byte-identical off',
-    decided: '2026-08-27',
-    graduationCriteria: 'Layer 0+1+2 validated together as the progressive-disclosure design (§6, §8)',
-    retirementCriteria: 'Progressive disclosure design descoped',
-  },
+  // artifact_summary_redundancy / context_manifest_budget / progressive_evaluator:
+  // RETIRED 2026-09-18 (PRI-819 R-06, Owner decision). The dormant
+  // progressive-disclosure design never graduated; the runtime readers and
+  // gated Layer 0/1/2 branches were deleted in the same change. Flags moved to
+  // `gone` tombstones in feature-flag-contract.ts. Gone flags carry no
+  // lifecycle entry (terminal state, enforced by feature-flag-lifecycle.test).
   prompt_full_pipeline: {
     decision: 'KEEP_QUIET',
     consumers: ['principles-core intake-to-internalization-bridge seeding (pipelineMode)', 'host-runtime governance-signal-admission', 'openclaw-plugin hooks/pain', 'pd-console settings toggle (PATCH /api/v1/config/features)'],
@@ -196,22 +194,6 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     decided: '2026-09-15',
     graduationCriteria: 'Not a graduation candidate — it is a permanent Owner control surface (like a rollback lever), not an unfinished feature; stays quiet by design',
     retirementCriteria: 'Only if the full-pipeline path is retired entirely (Owner decision); otherwise permanent',
-  },
-  context_manifest_budget: {
-    decision: 'KEEP_QUIET',
-    consumers: ['principles-core internaliz* context builders', 'principles-core/src/runtime-v2/runner/ba*'],
-    evidence: 'Progressive disclosure Layer 1 manifest+budget injection (since 2026-07-26); default-off, byte-identical off',
-    decided: '2026-08-27',
-    graduationCriteria: 'Layer 1 information-floor fallback validated against full-predecessor baseline',
-    retirementCriteria: 'Progressive disclosure design descoped',
-  },
-  progressive_evaluator: {
-    decision: 'KEEP_QUIET',
-    consumers: ['principles-core internaliz* evaluator', 'principles-core/src/runtime-v2/runner/ba*'],
-    evidence: 'Progressive disclosure Layer 2 two-stage evaluation (since 2026-07-26); default-off',
-    decided: '2026-08-27',
-    graduationCriteria: 'Two-stage evaluation quality validated over single-stage',
-    retirementCriteria: 'Progressive disclosure design descoped',
   },
   abstraction_layer_v1: {
     decision: 'KEEP_QUIET',

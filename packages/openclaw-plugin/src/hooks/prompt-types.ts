@@ -40,10 +40,8 @@ export interface PromptHookApi {
 export interface ExtractedUserMessage {
   /** Cleaned user message (empty string for boot checks). */
   message: string;
-  /** True if the message appears to be from another agent (skip empathy). */
+  /** True if the message appears to be from another agent (skip user-interaction-only injections). */
   isAgentToAgent: boolean;
-  /** True if the message looks like empathy observer output (prevent recursion). */
-  isEmpathyPrompt: boolean;
 }
 
 /** Input for formatting core principles into prompt text. */

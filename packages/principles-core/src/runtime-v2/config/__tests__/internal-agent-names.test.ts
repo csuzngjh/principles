@@ -11,6 +11,9 @@ describe('INTERNAL_AGENT_NAMES', () => {
     expect(INTERNAL_AGENT_NAMES).toContain('diagnostician');
     expect(INTERNAL_AGENT_NAMES).toContain('dreamer');
     expect(INTERNAL_AGENT_NAMES).toContain('correctionObserver');
-    expect(INTERNAL_AGENT_NAMES).toContain('empathyObserver');
+  });
+
+  it('no longer contains the retired empathyObserver agent (PRI-819)', () => {
+    expect(INTERNAL_AGENT_NAMES).not.toContain('empathyObserver');
   });
 });

@@ -346,7 +346,7 @@ describe('groupAgentsByDependency', () => {
     makeAgent('philosopher'),
     makeAgent('rolloutReviewer'),
     makeAgent('correctionObserver'),
-    makeAgent('empathyObserver'),
+    makeAgent('signalCollector'),
   ];
 
   it('assigns all 9 known agents to the correct 4 groups', () => {
@@ -367,7 +367,7 @@ describe('groupAgentsByDependency', () => {
     ]);
     expect(groups.sidechain.map((a) => a.name)).toEqual([
       'correctionObserver',
-      'empathyObserver',
+      'signalCollector',
     ]);
   });
 
@@ -375,13 +375,15 @@ describe('groupAgentsByDependency', () => {
     const agents = [
       makeAgent('diagnostician'),
       makeAgent('unknownAgent'),
+      // empathyObserver is no longer a known agent (PRI-819 retirement) — it
+      // now lands in the unknown bucket like any other unregistered name.
       makeAgent('empathyObserver'),
     ];
     const { groups, unknown } = groupAgentsByDependency(agents);
-    expect(unknown).toHaveLength(1);
-    expect(unknown[0].name).toBe('unknownAgent');
+    expect(unknown).toHaveLength(2);
+    expect(unknown.map((a) => a.name)).toEqual(['unknownAgent', 'empathyObserver']);
     expect(groups.core_trio).toHaveLength(1);
-    expect(groups.sidechain).toHaveLength(1);
+    expect(groups.sidechain).toHaveLength(0);
   });
 
   it('returns empty groups and empty unknown for an empty array', () => {

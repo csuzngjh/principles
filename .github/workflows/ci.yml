@@ -452,6 +452,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      # PRI-819: the telemetry smoke config regression test validates the
+      # generated YAML through the real @principles/core/runtime-v2
+      # validatePdConfig (production parser path), which resolves the built
+      # package exports — build core before running the scripts suite.
+      - name: Build @principles/core
+        run: npm run build --workspace=@principles/core
+
       - name: Test scripts
         run: npm run test:scripts
 

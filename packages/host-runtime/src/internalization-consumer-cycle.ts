@@ -20,7 +20,6 @@
  * Hosts inject: a logger, a structured-event sink, their tool catalog, and an
  * env getter. Everything else is the existing production path.
  */
-import { createHash } from 'node:crypto';
 import {
   createRuntimeStateHandle,
   InternalizationOrchestrator,
@@ -123,10 +122,6 @@ export interface InternalizationConsumerCycleOutcome {
   readonly taskId?: string;
   readonly taskKind?: string;
   readonly runStatus?: 'succeeded' | 'failed' | 'retried';
-}
-
-function contentHashFn(text: string): string {
-  return createHash('sha256').update(text).digest('hex');
 }
 
 function formatRunOnceCommand(workspaceDir: string): string {
@@ -595,25 +590,25 @@ export async function runInternalizationConsumerCycle(
     switch (taskKind) {
       case 'dreamer':
         runner = new DreamerRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDreamerValidator(), contentHashFn },
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDreamerValidator() },
           runnerOptions,
         );
         break;
       case 'philosopher':
         runner = new PhilosopherRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultPhilosopherValidator(), contentHashFn },
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultPhilosopherValidator() },
           runnerOptions,
         );
         break;
       case 'scribe':
         runner = new ScribeRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator(), contentHashFn },
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator() },
           runnerOptions,
         );
         break;
       case 'artificer':
         runner = new ArtificerRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultArtificerValidator(), contentHashFn },
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultArtificerValidator() },
           // PRI-741: thread the host semantic projection into generation.
           { ...runnerOptions, ...(artificerHostSemanticContext !== undefined ? { hostSemanticContext: artificerHostSemanticContext } : {}) },
         );

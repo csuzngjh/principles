@@ -3,10 +3,12 @@
  *
  * Pure data module (no React, no I/O), so we can import it directly and
  * assert on the runtime values. Verifies:
- * - AGENT_METADATA covers all 9 internal agent names
+ * - AGENT_METADATA covers all 9 internal agent names (empathyObserver
+ *   retired in PRI-819 — must NOT be present)
  * - AGENT_GROUPS has 4 groups matching GROUP_ORDER
  * - Each agent has non-empty bilingual fields
  * - isCore / group / impactLevel assignments match the design spec
+ * - no agent links to the retired signal-keywords page (PRI-819)
  */
 
 import { describe, it, expect } from "vitest";
@@ -25,7 +27,6 @@ const EXPECTED_AGENT_NAMES = [
   "philosopher",
   "rolloutReviewer",
   "correctionObserver",
-  "empathyObserver",
   "signalCollector",
 ] as const;
 
@@ -37,11 +38,15 @@ const EXPECTED_GROUP_IDS = [
 ] as const;
 
 describe("AGENT_METADATA: coverage", () => {
-  it("covers all 10 internal agent names", () => {
+  it("covers all 9 internal agent names", () => {
     for (const name of EXPECTED_AGENT_NAMES) {
       expect(Object.hasOwn(AGENT_METADATA, name)).toBe(true);
     }
-    expect(Object.keys(AGENT_METADATA)).toHaveLength(10);
+    expect(Object.keys(AGENT_METADATA)).toHaveLength(9);
+  });
+
+  it("retired empathyObserver is gone (PRI-819)", () => {
+    expect(Object.hasOwn(AGENT_METADATA, "empathyObserver")).toBe(false);
   });
 
   it("each agent has non-empty bilingual display name, role, detail, impact", () => {
@@ -59,12 +64,11 @@ describe("AGENT_METADATA: coverage", () => {
   });
 
   it("each agent has non-empty techDetail records (zh + en), or intentionally empty for sidechain agents", () => {
-    // sidechain agents (correctionObserver, empathyObserver) have simpler logic
+    // sidechain agents (correctionObserver, signalCollector) have simpler logic
     // where the detail text already covers technical aspects; AgentCard handles
     // empty techDetail gracefully via `Object.keys(techDetail).length > 0` guard
     const sidechainAgentsWithEmptyTechDetail = new Set([
       "correctionObserver",
-      "empathyObserver",
       "signalCollector",
     ]);
     for (const name of EXPECTED_AGENT_NAMES) {
@@ -105,7 +109,6 @@ describe("AGENT_METADATA: isCore assignment", () => {
       "evaluator",
       "rolloutReviewer",
       "correctionObserver",
-      "empathyObserver",
     ];
     for (const name of coreAgents) {
       expect(AGENT_METADATA[name].isCore).toBe(true);
@@ -113,7 +116,7 @@ describe("AGENT_METADATA: isCore assignment", () => {
   });
 
   it("isCore=false for optional agents (MVP-Quiet, direct toggle)", () => {
-    const optionalAgents = ["philosopher"];
+    const optionalAgents = ["philosopher", "signalCollector"];
     for (const name of optionalAgents) {
       expect(AGENT_METADATA[name].isCore).toBe(false);
     }
@@ -121,21 +124,17 @@ describe("AGENT_METADATA: isCore assignment", () => {
 });
 
 describe("AGENT_METADATA: action field", () => {
-  it("correctionObserver and empathyObserver have action with bilingual linkText and to", () => {
-    const agentsWithAction = ["correctionObserver", "empathyObserver"];
-    for (const name of agentsWithAction) {
+  it("no agent links to the retired signal-keywords page (PRI-819)", () => {
+    for (const name of EXPECTED_AGENT_NAMES) {
       const meta = AGENT_METADATA[name];
-      expect(meta.action).toBeDefined();
-      expect(typeof meta.action).toBe("object");
-      expect(meta.action!.linkTextZh.length).toBeGreaterThan(0);
-      expect(meta.action!.linkTextEn.length).toBeGreaterThan(0);
-      expect(meta.action!.to.length).toBeGreaterThan(0);
-      expect(meta.action!.to).toMatch(/^\/control-center\/signal-keywords\?category=/);
+      if (meta.action) {
+        expect(meta.action.to).not.toMatch(/signal-keywords/);
+      }
     }
-    // correction → ?category=correction
-    expect(AGENT_METADATA.correctionObserver.action!.to).toContain("category=correction");
-    // empathy → ?category=empathy
-    expect(AGENT_METADATA.empathyObserver.action!.to).toContain("category=empathy");
+  });
+
+  it("correctionObserver has no action (keyword learning is automatic, not Owner-managed)", () => {
+    expect(Object.hasOwn(AGENT_METADATA.correctionObserver, "action")).toBe(false);
   });
 
   it("signalCollector does not have action (infrastructure, not an agent)", () => {
@@ -160,9 +159,9 @@ describe("AGENT_METADATA: group assignment", () => {
     expect(AGENT_METADATA.rolloutReviewer.group).toBe("quality_polish");
   });
 
-  it("sidechain = correctionObserver, empathyObserver", () => {
+  it("sidechain = correctionObserver, signalCollector", () => {
     expect(AGENT_METADATA.correctionObserver.group).toBe("sidechain");
-    expect(AGENT_METADATA.empathyObserver.group).toBe("sidechain");
+    expect(AGENT_METADATA.signalCollector.group).toBe("sidechain");
   });
 });
 
