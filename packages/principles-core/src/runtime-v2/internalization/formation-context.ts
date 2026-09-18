@@ -495,6 +495,108 @@ function trimSection<T>(params: {
 }
 
 /**
+ * Reduces the remaining unbounded terms until the WHOLE serialized context fits
+ * `FORMATION_TOTAL_MAX_CHARS`, recording each step. Order — identity and
+ * bookkeeping before content, content last:
+ *
+ *   1. `lineageArtifactIds` below the per-id limit,
+ *   2. `dreamerContextRefs` (references, not content) dropped entirely,
+ *   3. `truncationNotes` collapsed to a bounded summary — the notes describe the
+ *      degradation, so they are the correct sacrifice once degradation is the
+ *      only thing keeping the block over budget,
+ *   4. whole `dreamerProposals` items dropped from the tail as the last resort.
+ *
+ * Never truncates mid-value and never emits partial JSON (rc-9): every step drops
+ * a whole item and records it. Terminates because each branch strictly shrinks a
+ * finite array.
+ */
+function enforceTotalBudget(params: {
+  readonly context: FormationContext;
+  readonly notes: readonly string[];
+}): FormationContext {
+  const { context: initialContext, notes: initialNotes } = params;
+  let context = initialContext;
+  const notes = [...initialNotes];
+
+  const size = (candidate: FormationContext): number => JSON.stringify(candidate).length;
+
+  if (size(context) <= FORMATION_TOTAL_MAX_CHARS) return context;
+
+  // 1. Lineage ids: identity, not content — cap to the last-resort limit.
+  if (context.provenance.lineageArtifactIds.length > FORMATION_LINEAGE_ID_LIMIT) {
+    notes.push(
+      `lineageArtifactIds truncated to ${FORMATION_LINEAGE_ID_LIMIT} to satisfy FORMATION_TOTAL_MAX_CHARS=${FORMATION_TOTAL_MAX_CHARS}`,
+    );
+    context = {
+      ...context,
+      provenance: {
+        ...context.provenance,
+        lineageArtifactIds: context.provenance.lineageArtifactIds.slice(0, FORMATION_LINEAGE_ID_LIMIT),
+      },
+      truncationNotes: notes,
+    };
+  }
+
+  // 2. Dreamer contextRefs are references to evidence the prompt cannot read
+  //    anyway — cheaper to lose than any projected proposal.
+  if (context.dreamerContextRefs.length > 0 && size(context) > FORMATION_TOTAL_MAX_CHARS) {
+    notes.push(
+      `dreamerContextRefs dropped (${context.dreamerContextRefs.length} refs) to satisfy FORMATION_TOTAL_MAX_CHARS=${FORMATION_TOTAL_MAX_CHARS}`,
+    );
+    context = { ...context, dreamerContextRefs: [], truncationNotes: notes };
+  }
+
+  // 3. Collapse the notes themselves. Keeping raw notes here would be circular:
+  //    they exist to explain the drops, and they are the term keeping us over.
+  if (size(context) > FORMATION_TOTAL_MAX_CHARS && context.truncationNotes.length > 1) {
+    const collapsed = [
+      ...context.truncationNotes.slice(0, 1),
+      `… ${context.truncationNotes.length - 1} further truncation note(s) collapsed to satisfy FORMATION_TOTAL_MAX_CHARS=${FORMATION_TOTAL_MAX_CHARS}`,
+    ];
+    context = { ...context, truncationNotes: collapsed };
+  }
+
+  // 4. Last resort: drop whole trailing proposals. Sections were already sized
+  //    against their own caps, so reaching here means the aggregate bound is the
+  //    binding constraint.
+  while (context.dreamerProposals.length > 0 && size(context) > FORMATION_TOTAL_MAX_CHARS) {
+    const dropped = context.dreamerProposals[context.dreamerProposals.length - 1];
+    context = {
+      ...context,
+      dreamerProposals: context.dreamerProposals.slice(0, -1),
+      truncationNotes: [
+        ...context.truncationNotes,
+        `dreamer candidate dropped to satisfy FORMATION_TOTAL_MAX_CHARS=${FORMATION_TOTAL_MAX_CHARS}: candidateIndex ${dropped?.candidateIndex ?? 'unknown'}`,
+      ],
+    };
+  }
+
+  // 5. Diagnosis block as the final content sacrifice.
+  if (context.sourceDiagnosis !== undefined && size(context) > FORMATION_TOTAL_MAX_CHARS) {
+    context = {
+      ...context,
+      truncationNotes: [
+        ...context.truncationNotes,
+        `diagnosis block dropped entirely to satisfy FORMATION_TOTAL_MAX_CHARS=${FORMATION_TOTAL_MAX_CHARS}`,
+      ],
+    };
+    const { sourceDiagnosis: _dropped, ...rest } = context;
+    context = rest;
+  }
+
+  // 6. If a pathological note set still exceeds the cap, keep collapsing to the
+  //    last note. The bound is a hard prompt-boundary contract.
+  while (context.truncationNotes.length > 1 && size(context) > FORMATION_TOTAL_MAX_CHARS) {
+    context = {
+      ...context,
+      truncationNotes: context.truncationNotes.slice(0, context.truncationNotes.length - 1),
+    };
+  }
+
+  return context;
+}
+
+/**
  * Apply the budget contract. Degradation order — cheapest information loss first:
  *   1. trailing dreamer candidates, then
  *   2. trailing diagnosis evidence, then violatedPrinciples, then recommendations,
@@ -570,22 +672,12 @@ function applyBudget(context: FormationContext): FormationContext {
     truncationNotes: notes,
   };
 
-  // Final guard: the per-section caps bound the two content blocks, but
-  // provenance (lineage ids) is unbounded by design above.
-  if (JSON.stringify(bounded).length > FORMATION_TOTAL_MAX_CHARS) {
-    notes.push(
-      `formation context exceeds FORMATION_TOTAL_MAX_CHARS=${FORMATION_TOTAL_MAX_CHARS} after section trimming: lineageArtifactIds truncated to ${FORMATION_LINEAGE_ID_LIMIT}`,
-    );
-    return {
-      ...bounded,
-      provenance: {
-        ...bounded.provenance,
-        lineageArtifactIds: bounded.provenance.lineageArtifactIds.slice(0, FORMATION_LINEAGE_ID_LIMIT),
-      },
-      truncationNotes: notes,
-    };
-  }
-  return bounded;
+  // Final guard: the per-section caps bound the two CONTENT blocks, but three
+  // terms remain unbounded above the section level — `provenance.lineageArtifactIds`,
+  // `dreamerContextRefs`, and `truncationNotes` itself — and every drop recorded
+  // by `trimSection` GROWS the last of those. A single lineage truncation is
+  // therefore not sufficient: it must be re-checked and the ladder continued.
+  return enforceTotalBudget({ context: bounded, notes });
 }
 
 /**

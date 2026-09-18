@@ -424,6 +424,75 @@ describe('PRI-838 Phase 2 — bounded projection', () => {
     expect(JSON.stringify(context).length).toBeLessThanOrEqual(FORMATION_TOTAL_MAX_CHARS);
     expect(context?.truncationNotes.length).toBeGreaterThan(0);
   });
+
+  it('holds the cap even when every field is maximal and the drops themselves add notes', async () => {
+    // Regression for review finding PRI-1756-P2: `trimSection` records one note
+    // per dropped item, and those notes are part of the serialized object. A
+    // single lineage truncation therefore could not bring the block back under
+    // the cap — five maximal candidates plus a maximal diagnosis produced 8550
+    // chars against an 8000 budget, leaving the prompt boundary unbounded.
+    const max = FORMATION_FIELD_MAX_CHARS;
+    const maximalCandidates = Array.from({ length: FORMATION_CANDIDATE_LIMIT }, (_, index) => ({
+      candidateIndex: index,
+      badDecision: 'B'.padEnd(max, 'b'),
+      betterDecision: 'D'.padEnd(max, 'd'),
+      rationale: 'R'.padEnd(max, 'r'),
+      confidence: 0.9,
+      riskLevel: 'medium',
+      strategicPerspective: 'S'.padEnd(max, 's'),
+    }));
+
+    const harness = await makeHarness({
+      artifacts: [
+        makeArtifact({
+          artifactId: DREAMER_ART_ID,
+          sourceTaskId: DREAMER_TASK_ID,
+          content: { ...dreamerContent(), candidates: maximalCandidates },
+          // Far more lineage ids than the last-resort limit.
+          lineageArtifactIds: Array.from({ length: 64 }, (_, i) => `lineage-artifact-id-${String(i).padStart(3, '0')}`),
+        }),
+        makeArtifact({
+          artifactId: DIAG_ART_ID,
+          sourceTaskId: DIAG_TASK_ID,
+          content: {
+            ...routerDiagnosisContent(),
+            summary: 'M'.padEnd(max, 'm'),
+            rootCause: 'C'.padEnd(max, 'c'),
+            violatedPrinciples: Array.from({ length: 8 }, (_, i) => ({
+              principleId: `P-${i}`,
+              title: 'T'.padEnd(max, 't'),
+              rationale: 'V'.padEnd(max, 'v'),
+            })),
+            evidence: Array.from({ length: 8 }, (_, i) => ({
+              sourceRef: `ref-${i}`.padEnd(max, 'e'),
+              note: 'N'.padEnd(max, 'n'),
+            })),
+            recommendations: Array.from({ length: 5 }, (_, i) => ({
+              kind: 'principle',
+              description: `R${i}`.padEnd(max - 8, 'x'),
+            })),
+          },
+        }),
+      ],
+      tasks: {
+        [DREAMER_TASK_ID]: DREAMER_TASK_WITH_ROUTER,
+        [DIAG_TASK_ID]: { taskKind: 'diag_router', status: 'succeeded', dependencyTaskIds: [] },
+      },
+    });
+
+    const context = await harness.resolve(DREAMER_ART_ID);
+    expect(context).toBeDefined();
+
+    // The cap is a hard prompt-boundary contract, not a best-effort target.
+    const serialized = JSON.stringify(context);
+    expect(serialized.length).toBeLessThanOrEqual(FORMATION_TOTAL_MAX_CHARS);
+
+    // Degradation must stay observable (rc-9) — never silent.
+    expect(context?.truncationNotes.length).toBeGreaterThan(0);
+
+    // And it must be VALID JSON, never a mid-value slice.
+    expect(() => JSON.parse(serialized)).not.toThrow();
+  });
 });
 
 // ── Difference summary (PRI-839) ────────────────────────────────────────────

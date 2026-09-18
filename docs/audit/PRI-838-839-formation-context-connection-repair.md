@@ -190,6 +190,36 @@ Per-field clamp 400 chars; ≤5 candidates; ≤8 evidence / ≤8 violated princi
 8000 serialized chars with a documented degradation order (candidates →
 evidence → violatedPrinciples → recommendations → diagnosis block → lineage ids).
 
+### 2.6.1 Review fix — the total cap is now actually enforced
+
+The first revision bounded the two *content* blocks per-section, then applied a
+"final guard" that truncated only `provenance.lineageArtifactIds` and returned
+**without re-checking the serialized size**. Three terms sit above the section
+level and were therefore unbounded: `lineageArtifactIds`, `dreamerContextRefs`,
+and `truncationNotes` — and every item `trimSection` drops *appends a note*, so
+the bound grew the very term that could push it over.
+
+Measured on the first revision through the real `resolveFormationContext`
+(five maximal candidates, each field at the 400-char clamp, plus a maximal
+diagnosis and 64 lineage ids): **8550 chars against the 8000 cap — 550 over.**
+The cap was advisory in the exact case it existed for.
+
+`enforceTotalBudget()` replaces the guard with a check-and-continue ladder that
+re-measures after every step:
+
+1. `lineageArtifactIds` capped to `FORMATION_LINEAGE_ID_LIMIT`;
+2. `dreamerContextRefs` dropped entirely (references, not content);
+3. `truncationNotes` collapsed to a bounded summary;
+4. whole trailing `dreamerProposals` dropped;
+5. the diagnosis block;
+6. notes collapsed to a single entry.
+
+Same input, after the fix: **7132 chars — 868 under the cap**, valid JSON, and
+the degradation is still recorded (rc-9). Regression test:
+`formation-context.test.ts` → "holds the cap even when every field is maximal
+and the drops themselves add notes".
+
+
 ---
 
 # 3. Method — paired A/B on real production formations
