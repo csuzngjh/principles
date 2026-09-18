@@ -52,6 +52,44 @@ import { isReleaseReadPathContained } from './release-containment';
 import { cleanupReleaseSmokeRoot } from './release-smoke-cleanup';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
+
+/**
+ * Timeout contract for the Console /api/update/apply-full transaction.
+ *
+ * The endpoint writes response headers only AFTER the ReleaseManager
+ * completes the whole update server-side (download → sync tar extraction →
+ * installer deploy → gateway probe), so the gate client must budget for the
+ * real Windows duration rather than undici's default 300s headersTimeout.
+ * Windows 2025 + Defender measured ~17-23 min (sync extraction 600-950s +
+ * deploy ~400s; 09-17/09-18 full-matrix evidence); the 30 min floor keeps
+ * headroom above the server-side budget (PD_UPDATE_APPLY_FULL_TIMEOUT_MS)
+ * and above the vitest scenario deadline that hosts it.
+ */
+const APPLY_FULL_CLIENT_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** After apply-full returns, the runtime version must converge within this budget. */
+const UPGRADE_RESULT_CONVERGE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Whole scenario budget (install N-1 → boot console → apply-full → restart verify). */
+const SCENARIO_UPGRADE_TIMEOUT_MS = 40 * 60 * 1000;
+
+/** Corrupted-artifact scenario budget (corruption refusal + health probes). */
+const SCENARIO_CORRUPT_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * beforeAll preparation budget (extract-n + extract-n1 + restamp-n1).
+ *
+ * The preparation phase is NOT a scenario: it materializes the N and N-1
+ * payloads from the release asset before the first test can run. On the CI
+ * windows-2025 + Defender runner the two extractions are dominated by
+ * real-time AV scanning and measured 941.5s + 901.2s = 1842.7s on
+ * 2026-09-18 — above the previous 30 min hook budget, which aborted the
+ * whole suite with "Hook timed out" before any test executed. The 60 min
+ * floor covers ONLY the preparation phase; the trade (install / apply-full
+ * / corrupt) is bounded by its own scenario deadlines and the 120 min job.
+ */
+const SCENARIO_PREPARE_TIMEOUT_MS = 60 * 60 * 1000;
+
 const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-upgrade-gate-'));
 
 const providedPublication = process.env.PD_RELEASE_SMOKE_PUBLICATION;
@@ -208,12 +246,24 @@ async function stopConsole(): Promise<void> {
 async function postApplyFull(): Promise<{ status: number; authority: string | null; fallbackReason: string | null; body: Record<string, unknown> }> {
   // node:http, not global fetch: undici aborts a response whose headers have
   // not arrived within its 300s default, but /apply-full legitimately blocks
-  // on the whole installer transaction (download + deploy + gateway restart),
-  // which exceeds 300s on a loaded machine (observed 2026-09-17). The test's
-  // own 900s budget remains the deadline.
+  // on the whole installer transaction (download + sync extraction + deploy +
+  // gateway restart), which exceeds 300s on a loaded machine (observed
+  // 2026-09-17).
+  //
+  // The response is awaited under an explicit TOTAL-duration budget
+  // (APPLY_FULL_CLIENT_TIMEOUT_MS). node:http has no implicit client
+  // deadline, so the explicit bound keeps the contract visible and prevents
+  // an infinite hang; it must stay above the measured Windows apply-full
+  // duration and the vitest scenario deadline that hosts it.
   return await new Promise((resolvePromise, reject) => {
+    const controller = new AbortController();
+    const deadlineTimer = setTimeout(() => controller.abort(), APPLY_FULL_CLIENT_TIMEOUT_MS);
+    const finish = (value: { status: number; authority: string | null; fallbackReason: string | null; body: Record<string, unknown> }): void => {
+      clearTimeout(deadlineTimer);
+      resolvePromise(value);
+    };
     const request = http.request(
-      { host: '127.0.0.1', port: consolePort, path: '/api/update/apply-full', method: 'POST', headers: { 'content-type': 'application/json' } },
+      { host: '127.0.0.1', port: consolePort, path: '/api/update/apply-full', method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal },
       (response) => {
         const chunks: Buffer[] = [];
         response.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -221,7 +271,7 @@ async function postApplyFull(): Promise<{ status: number; authority: string | nu
           let envelope: Record<string, unknown> = {};
           try { envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>; } catch { /* handler below surfaces it */ }
           const body = (typeof envelope.data === 'object' && envelope.data !== null ? envelope.data : envelope) as Record<string, unknown>;
-          resolvePromise({
+          finish({
             status: response.statusCode ?? 0,
             authority: response.headers['x-pd-mutation-authority'] ?? null,
             fallbackReason: response.headers['x-pd-mutation-fallback-reason'] ?? null,
@@ -230,13 +280,42 @@ async function postApplyFull(): Promise<{ status: number; authority: string | nu
         });
       },
     );
-    request.on('error', reject);
+    request.on('error', (error) => {
+      clearTimeout(deadlineTimer);
+      reject(error);
+    });
     request.end('{}');
   });
 }
 
 function readActiveRecord(): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(path.join(homeDir, '.pd', 'active.json'), 'utf8')) as Record<string, unknown>;
+}
+
+/**
+ * Poll active.json until the recorded product version equals 'expected'.
+ *
+ * apply-full returns as soon as the transaction commits, but the observable
+ * runtime state lands on the same slow Windows filesystem the update just
+ * hammered — wait for the version to converge instead of assuming an
+ * immediately-readable active.json. A console that looks unhealthy while an
+ * apply-full is still churning (its event loop is blocked by the sync
+ * extraction) is NOT a failed upgrade; observation order below confirms the
+ * runtime state first and the console health second.
+ */
+async function waitForRuntimeVersion(expectedVersion: string, timeoutMs: number, label: string): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastObserved = 'unknown';
+  while (Date.now() < deadline) {
+    try {
+      lastObserved = String(readActiveRecord().productVersion);
+      if (lastObserved === expectedVersion) return;
+    } catch {
+      // active.json mid-write or momentarily unavailable — keep polling.
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+  }
+  throw new Error(`${label} did not reach version ${expectedVersion} within ${timeoutMs}ms (last observed: ${lastObserved})`);
 }
 
 /**
@@ -336,7 +415,7 @@ beforeAll(async () => {
     fs.chmodSync(openclaw, 0o755);
     fs.chmodSync(npm, 0o755);
   }
-}, 1_800_000);
+}, SCENARIO_PREPARE_TIMEOUT_MS);
 
 afterAll(async () => {
   await stopConsole();
@@ -395,6 +474,12 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       expect(outcome.body.newVersion).toBe(candidateVersion);
       expect(String(outcome.authority)).toContain('release-manager');
 
+      // The response arrives as soon as the transaction commits, but the
+      // observable runtime state lands on the same slow Windows filesystem
+      // the update just hammered — wait for the version to converge before
+      // any follow-up probe.
+      await waitForRuntimeVersion(candidateVersion, UPGRADE_RESULT_CONVERGE_TIMEOUT_MS, 'upgraded runtime');
+
       // The runtime identity advanced to N.
       const active = readActiveRecord();
       expect(active.productVersion).toBe(candidateVersion);
@@ -430,7 +515,7 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       // No registry resolution anywhere in the upgrade.
       expect(fs.existsSync(npmMarker)).toBe(false);
     },
-    900_000,
+    SCENARIO_UPGRADE_TIMEOUT_MS,
   );
 
   it(
@@ -473,14 +558,13 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       });
       publishServedFiles(corruptedServed);
 
-      // Ensure the console from the previous scenario is still serving
-      // (restart it if a prior failure left it down).
-      try {
-        await waitForConsole();
-      } catch {
-        await stopConsole();
-        await startConsole();
-      }
+      // Observation order matters: confirm the N runtime state FIRST, then
+      // the console health. A console that looks unhealthy while an apply-full
+      // is still churning (its event loop is blocked by the sync extraction)
+      // is NOT a failed upgrade — restarting it would destroy the very runtime
+      // this gate validates.
+      await waitForRuntimeVersion(candidateVersion, UPGRADE_RESULT_CONVERGE_TIMEOUT_MS, 'N runtime before corruption injection');
+      await waitForConsole();
 
       const outcome = await phaseAsync('apply-full-corrupt', () => postApplyFull());
       expect(outcome.status).toBe(200);
@@ -495,9 +579,11 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       expect(pdVersion.exitCode).toBe(0);
       expect((JSON.parse(pdVersion.stdout) as Record<string, unknown>).productVersion).toBe(candidateVersion);
       expectCanonicalRuntimeLayout();
+      // Runtime state first, console health second (same ordering discipline).
+      await waitForRuntimeVersion(candidateVersion, UPGRADE_RESULT_CONVERGE_TIMEOUT_MS, 'N runtime after corruption refusal');
       await waitForConsole();
       expect(fs.existsSync(npmMarker)).toBe(false);
     },
-    900_000,
+    SCENARIO_CORRUPT_TIMEOUT_MS,
   );
 });
