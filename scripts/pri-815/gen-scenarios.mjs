@@ -35,7 +35,11 @@ Each text: 1-2 sentences, concrete, mentioning the actual tools/situations from 
 const KINDS = ['expected_trigger', 'valid_compliant', 'legitimate_exception', 'out_of_scope', 'target_violation', 'near_boundary_legal'];
 
 const groups = JSON.parse(fs.readFileSync(path.join(DATA, 'frozen-inputs.json'), 'utf8')).groups;
-const existing = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : { scenarios: {} };
+// existsSync→read TOCTOU-safe read (CodeQL): missing/unreadable file = fresh start
+function readJsonOr(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
+}
+const existing = readJsonOr(OUT, { scenarios: {} });
 let n = 0;
 for (const g of groups) {
   if (existing.scenarios[g.source_group_id]) continue;

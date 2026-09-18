@@ -1,43 +1,47 @@
 # PRI-815 — Owner Blind Calibration Pairs (async, non-blocking)
+>
+> v2 (2026-09-18 review round): regenerated after the §30 validator hard-gate fix — pairs whose arm failed the production validator no longer enter the package; sampling pool = the 18 groups with intact run files (3 incident-quarantined groups excluded).
 
 > 每个 pair 里 X/Y 的臂归属已随机打乱且记录在文末封存行。Owner 只需对每个 pair 回答：**X 更好 / Y 更好 / 无实质差异 / 两者都不好**。
 > 此包不阻塞后端结论；用于 Owner 复核 automated judge 的 calibration（SPEC §22）。
 
-## R1（G-pain_host_620a1683e2eeb7 r3）
+## R1（G-pain_host_85731899e27e6d r3）
 
 ### X
 ```json
 {
  "principleDraft": {
-  "title": "Anchor repetitive loops to self-detected termination on observed completion signals",
-  "statement": "Any repetitive or iterative action must carry its own termination: before entering a wait/poll/retry/monitor loop, declare the observable completion condition, and before each subsequent iteration, re-check the latest state signals against it; as soon as the latest observable evidence shows the awaited condition is met (e.g., a signal that all subagents have settled), stop the loop immediately and proceed to the next phase instead of continuing until an external correction intervenes.",
-  "rationale": "The diagnosed root cause is a wait loop whose continuation was driven by the originally planned sequence rather than the observed goal state: the assistant kept calling sessions_yield after signal_collector had already reported all subagents settled, stopping only under a severe external correction. Making continuation contingent on an explicit termination predicate re-checked against the latest evidence makes convergence self-detected, eliminating idle repetition, wasted calls, and dependence on external intervention. This is a specialization of T-03 and T-07 to iterative loops, not a replacement for them.",
+  "title": "Close the constraint loop: persist explicit owner conventions and verify before acting",
+  "statement": "Whenever the owner explicitly states a standing convention (e.g., 'always/never do X', 'from now on, be sure to', 'don't forget how we did this'), immediately persist it outside transient session context (conventions document, task notes, or checklist); before starting any phase or any action whose domain matches a persisted convention (e.g., image/cover/keyframe/prompt generation, advisor-collaboration workflows, related tool calls), re-load the persisted conventions and verify the planned action against them before executing; and when the owner confirms a corrected workflow, convert it into a reusable checklist entry so deviations are intercepted before execution rather than corrected by the owner afterward.",
+  "rationale": "The diagnosed root cause is structural, not episodic: the owner's explicitly stated conventions (use advisor collaboration; prefer browser ChatGPT for image/prompt generation) existed only in transient session memory, were never re-loaded at phase start, and had no pre-action check, so the same deviation recurred at each new phase and the owner had to re-correct only after a deviating tool call had already happened. Capture-at-expression removes dependence on session memory, mandatory pre-action recall-and-verify moves the correction point before execution, and institutionalizing owner-confirmed workflows turns one-time corrections into durable behavior — together closing the loop that recall-by-memory leaves open.",
   "applicability": [
-   "Multi-agent coordination waits, e.g., polling/yielding while subagents run before collecting their results",
-   "Polling or monitoring loops that wait for a state change or completion signal observable between iterations",
-   "Retry loops whose success or terminal failure is observable between attempts",
-   "Open-ended waits where a signal collector or system message reports the awaited condition"
+   "When an owner explicitly states a standing convention, preference, or constraint ('always/never', 'from now on, be sure to', 'don't forget' phrasing)",
+   "At session or phase boundaries where prior commitments must survive transient context loss",
+   "Before actions whose domain matches a persisted convention — e.g., image/cover/keyframe/prompt generation, advisor-collaboration workflows, and their tool calls",
+   "After the owner confirms a corrected workflow, to institutionalize it as reusable standard practice"
   ],
   "antiPatterns": [
-   "Issuing the same wait/poll call (e.g., sessions_yield) again after an in-context signal has already reported the awaited condition met, such as 'all subagents settled, do not wait'",
-   "Running a loop with no internal termination predicate, relying on external system correction to stop it",
-   "Deciding each iteration from the originally planned sequence while ignoring newer state messages returned since entering the loop",
-   "Treating a wait-for-completion step as a fixed procedural stage that runs to exhaustion regardless of observed completion"
+   "Keeping an owner-stated standing convention only in transient session memory and relying on recall-by-memory across session or phase boundaries",
+   "Starting a new phase or a generation task (covers, keyframes, images, prompts) from agent defaults without first reading the persisted conventions list",
+   "Preferring the agent's inferred or default operating preference over an owner's explicitly stated constraint when they conflict",
+   "Executing tool calls that may conflict with a persisted convention and waiting for the owner to correct the deviation after the fact",
+   "Re-deriving a previously owner-confirmed workflow (e.g., advisor collaboration plus browser ChatGPT generation) from scratch each phase instead of reusing an institutionalized checklist"
   ],
   "confidence": 0.8
  },
  "intentContract": {
-  "ownerIntent": "The owner wants the agent to stop repetitive waiting/polling on its own the moment observable state shows the awaited condition is met (such as 'all subagents settled'), rather than repeating the call until a severe external correction forces it to stop.",
-  "targetBehavior": "In the tool trajectory, no wait/poll call (e.g., sessions_yield) appears after a completion signal for the awaited condition is already present in context; instead the agent visibly checks the latest signal, recognizes the condition as met, and transitions to the next phase (e.g., result collection).",
-  "forbiddenBehavior": "Continuing to issue repeated wait/poll calls after an explicit completion signal ('all subagents settled, stop waiting') has already been observed — a repetition loop with no internal termination that persists until external correction.",
-  "evidenceSource": "Severe user-correction pain pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791: the after_tool_call hook caught the assistant calling sessions_yield after signal_collector reported all subagents settled and instructed it to stop waiting; the diagnosis attributes this to ignoring observable state (T-03) and missing post-action verification (T-07), and all four Dreamer candidates converge on evidence-based, self-detected loop termination.",
-  "validationExpectation": "An evaluator should require that any rule generated from this principle fires on a repeated wait/poll call issued after an in-context completion signal (e.g., sessions_yield following 'all subagents settled'), while permitting waits for which no completion evidence exists yet; rules that block legitimate waiting without a completion signal, or force exit on ambiguous or partial signals, contradict this intent and must be flagged rather than merged."
+  "ownerIntent": "The owner wants the agent to durably follow explicitly stated working conventions (collaborate with the advisor; generate covers/keyframes/prompts via browser ChatGPT) at every new phase instead of repeatedly forgetting them and forcing the owner to re-issue the same severe correction.",
+  "targetBehavior": "When the owner states a 'from now on / don't forget' convention, the agent immediately writes it to a persistent conventions record; before starting a new phase or any image/prompt-generation task, the agent reads that record and confirms the planned tool calls conform (advisor engaged, browser ChatGPT used) before executing them.",
+  "forbiddenBehavior": "Carrying an owner-stated standing convention only in transient session memory and launching phase work or generation tool calls from agent defaults without re-loading and checking the persisted conventions, leaving the owner to correct the same deviation after the fact.",
+  "evidenceSource": "Severe user_correction pain detected by the after_tool_call hook: the owner demanded advisor collaboration and browser-ChatGPT-first generation of covers/keyframes/prompts, explicitly noting the agent had done this before and 'should not forget again'; diagnosis found no persisted conventions document or phase-start checklist existed for recall.",
+  "validationExpectation": "An evaluator should require evidence that a rule triggers both (a) when an owner states a standing convention — mandating immediate persistence — and (b) at phase start or before convention-domain actions — mandating read-and-verify before the matching tool call; a rule that drops either the persistence requirement or the pre-action verification, or that would not have prevented the diagnosed advisor/browser-ChatGPT deviation, contradicts this intent and must be flagged rather than accepted."
  },
  "risks": [
-  "Closely overlaps core axioms T-03 (act on observable evidence) and T-07 (verify outcomes against intent): this principle is their specialization to repetitive loops, so downstream rules must target loop termination specifically to avoid duplicating existing axiom coverage",
-  "A loosely defined termination predicate can trigger premature exit on false-positive completion signals (misreading partial or stale signals as full completion), stopping work before the goal is truly achieved",
-  "Mandating a declared predicate for every trivial fixed-step loop adds ceremony that conflicts with T-06 (simplest intervention); scope should stay on open-ended or discretionary repetition",
-  "Re-reading and re-evaluating all context signals on every iteration of high-frequency loops may consume excessive attention; the per-iteration check should be limited to completion-relevant signals"
+  "Composite overlap with core axioms T-10 (persist important state), T-05 (translate constraints into pre-execution guardrails), T-02 (explicit constraints override inferred preferences), and T-08 (corrections as feedback): if these axioms are already jointly enforced, this principle risks redundancy; its additive value is binding them into one closed loop scoped to explicit owner conventions.",
+  "Overly broad pattern-matching for the pre-action gate could add friction and latency to routine actions outside the convention's domain; the gate must stay scoped to actions matching the persisted convention's domain.",
+  "Persisted conventions can become stale if the owner later changes preferences and the stored record is not updated, causing the gate to enforce outdated constraints.",
+  "The verification step may degenerate into box-ticking compliance — marked done without genuinely comparing the planned action against the persisted convention.",
+  "Scope creep: extending the loop to inferred preferences rather than only explicitly stated conventions and owner-confirmed workflows would widen the principle beyond the source intent."
  ]
 }
 ```
@@ -46,39 +50,38 @@
 ```json
 {
  "principleDraft": {
-  "title": "Anchor iterative loops to explicit termination predicates re-checked against latest evidence",
-  "statement": "Before entering any repetitive or iterative action (wait, poll, retry, monitor, coordinate), declare an explicit termination predicate defining observable success conditions and bounded abort conditions; after every iteration, evaluate that predicate against freshly observed state signals rather than the original plan, and exit the loop immediately when any declared condition holds.",
-  "rationale": "The diagnosed root cause is an open-ended loop whose continuation was driven by the originally planned sequence rather than by observed goal state, causing idle repetition that persisted past the achieved goal until an external system intervened. Pre-declaring observable completion conditions and re-grounding each iteration's continue/exit decision in the latest state makes convergence self-detected, eliminating wasted iterations, resource burn, and dependence on external correction.",
+  "title": "Close the Constraint Loop: Persist Owner Conventions and Verify Before Acting",
+  "statement": "When an owner explicitly states a standing convention, preference, or constraint, capture it into a persistent store outside transient session context at the moment it is expressed; before executing any action whose domain matches that convention, re-load the persisted record and explicitly compare the planned action against it, adjusting or aborting on conflict; and when the owner confirms a corrected workflow, convert it into a persisted, reusable checklist or guardrail so future deviations are intercepted before execution rather than corrected afterward by the owner.",
+  "rationale": "The diagnosed failure was structural, not episodic: the owner's explicit working conventions existed only in transient session memory, were never re-loaded at phase start, and had no pre-action check, so the identical correction recurred at every new phase. Persisting the convention at expression time removes dependence on recall; forcing recall-and-verify before matching actions closes the loop before execution; and institutionalizing owner-confirmed corrections converts one-time feedback into durable behavior change — eliminating the root cause instead of its symptoms.",
   "applicability": [
-   "Wait/poll loops checking whether a condition has become true (resource availability, service readiness, job or build completion)",
-   "Retry loops for flaky operations, which require bounded attempts or backoff with a declared give-up condition",
-   "Monitoring and health-check loops that must stop when the monitored state is achieved or declared unrecoverable",
-   "Multi-agent coordination loops where an agent waits on peers, locks, or shared state before proceeding",
-   "Any iterative process that consumes resources (API calls, compute, tokens, attention) between iterations"
+   "Whenever an owner explicitly states a standing convention, preference, or constraint (e.g., 'always/never do X')",
+   "Across session or phase boundaries where transient memory of the convention may be lost",
+   "Before any action whose domain matches a stated convention, such as generation tasks or tool calls",
+   "After an owner confirms a corrected workflow, to institutionalize it as reusable standard practice",
+   "When the same owner correction has already occurred more than once, indicating a missing persisted guardrail"
   ],
   "antiPatterns": [
-   "Continuing a loop solely because the plan scheduled more iterations while the goal condition has already been observed true",
-   "Open-ended polling with no declared success or abort predicate, terminated only by external timeout or intervention",
-   "Deciding each iteration from stale or initially fetched state instead of re-querying the live signal",
-   "Treating repetition count or elapsed effort as evidence of progress toward the goal",
-   "Retrying indefinitely after persistent failure without a bounded abort condition"
+   "Relying on in-session memory or good intent to honor a stated convention across phase or session boundaries",
+   "Executing a domain-matching action without first re-loading and checking the persisted convention record",
+   "Re-receiving the same owner correction at each new phase without converting it into a persisted guardrail or checklist",
+   "Correcting convention violations only after execution, with no pre-action interception",
+   "Marking the pre-action check as done without genuinely comparing the planned action against the persisted convention text"
   ],
-  "confidence": 0.83
+  "confidence": 0.78
  },
  "intentContract": {
-  "ownerIntent": "The Owner wants to prevent agents from mechanically repeating a wait/poll/retry action after the goal is already achieved (or provably unreachable), burning resources until an external system intervenes.",
-  "targetBehavior": "Before starting a loop, the agent explicitly states the observable completion and abort conditions it will check; in its tool trajectory, each iteration is followed by a fresh observation of the relevant state signal, and the agent exits the loop as soon as a declared condition holds.",
-  "forbiddenBehavior": "Open-ended mechanical repetition — polling, waiting, or retrying driven by the planned iteration sequence or inertia, without re-checking current state, continuing past achieved goals or provably dead ends until an external system stops it.",
-  "evidenceSource": "The diagnosed pain (pain_host_620a1683e2eeb7-r3, dreamer and philosopher analysis) of a wait/poll loop lacking an internal, evidence-based termination predicate that persisted past its achieved goal until external intervention.",
-  "validationExpectation": "An evaluator should accept a rule only if it names (a) a pre-declared observable termination predicate covering both success and abort conditions and (b) per-iteration re-evaluation against fresh state signals before continuing; a rule that generically restates 'verify results' or duplicates T-07/T-03 without loop-specific termination semantics should be rejected, and any repair that removes the pre-declaration or fresh-signal requirement contradicts this intent."
+  "ownerIntent": "When the Owner explicitly states a working convention, the Owner wants it durably recorded and verified before every matching action in all later phases and sessions, so the same correction never has to be repeated.",
+  "targetBehavior": "In an observable trajectory, the agent writes the stated convention to a persistent store at expression time, and before each matching action (e.g., at phase start or prior to a domain-relevant generation or tool call) retrieves that record and shows an explicit comparison of the planned action against it before executing.",
+  "forbiddenBehavior": "Acting within a stated convention's domain from transient memory or inferred preference without re-loading the persisted convention, and allowing the owner's correction to recur at each new phase instead of institutionalizing it as a persisted guardrail.",
+  "evidenceSource": "The diagnosed pain: the owner's explicitly stated working conventions existed only in transient session memory, were never re-loaded at phase start, and had no pre-action verification, forcing the owner to repeat the identical correction at every new phase.",
+  "validationExpectation": "An evaluator should accept a rule as faithful only if it demands: (1) evidence that an owner-stated convention was persisted at expression time; (2) evidence in the tool trajectory that the persisted convention was retrieved and compared before a domain-matching action; and (3) no recurrence of the same owner correction in subsequent phases once the convention is persisted."
  },
  "risks": [
-  "Substantial overlap with core axioms T-07 (verify outcomes against intent) and T-08-adjacent feedback use, and T-03 (act on observable evidence); this principle is their specialization to iterative loops, and rule generation must add loop-specific value rather than restating those axioms",
-  "A loosely defined termination predicate can fire on false-positive completion signals, causing premature exit before the goal is truly achieved",
-  "Mandating explicit predicates for every trivial loop adds ceremony and overhead, in tension with the simplicity intent of T-06",
-  "Re-reading and re-evaluating all signals on every iteration may be costly in high-frequency loops; predicate checks should be proportionate to loop cost",
-  "The completion condition may not be directly observable, forcing proxies that can mislead the predicate toward premature or late exit",
-  "Risk of over-generalizing from a single diagnosed pain case; downstream rules must stay anchored to the observed failure family rather than punishing all repetition"
+  "Composite overlap with existing core axioms — T-10 (persist important state outside transient context), T-05 (translate constraints into pre-execution guardrails), T-02 (explicit constraints override inferred preferences), and T-08 (treat corrections as feedback). If these are already enforced jointly, this principle may be redundant rather than additive, and generated rules could duplicate existing axiom coverage.",
+  "Overly broad pattern-matching for the pre-action gate could add friction and latency to routine actions that do not actually touch the convention's domain.",
+  "Persisted conventions can become stale if the owner later changes preferences and the stored record is not updated, causing gates to enforce outdated constraints.",
+  "A mandatory check gate risks degenerating into box-ticking compliance where the check is marked done without genuinely comparing the planned action against the persisted convention.",
+  "The composite statement (persist + verify + institutionalize) may produce diffuse rules at generation time; rule generators might implement only one of the three loop steps and claim compliance."
  ]
 }
 ```
@@ -165,44 +168,42 @@
 }
 ```
 
-## R3（G-manual_1788920022087_pjz r2）
+## R3（G-manual_1789299059630_zqx r3）
 
 ### X
 ```json
 {
  "principleDraft": {
-  "title": "状态闭环门禁：变更前建模、变更后验证传播、完成宣称须持实测证据",
-  "statement": "对持久化外部系统（文件系统、长驻服务、运行时缓存/输入目录）执行多步操作时：(1) 变更前先建模并预置检查——编辑前读取目标文件确认确切锚点文本，访问媒体前核对允许目录与实际缓存路径布局，长驻服务独立于带超时的 exec 会话启动且每批任务前探测存活；(2) 变更后验证状态已传播至所有消费方——源目录变更后显式同步运行时输入/缓存目录并以哈希或 mtime 复核通过后才入队消费；(3) 任何『已完成/已生效/已提交/已同步』宣称必须以实测证据（输出实测、落盘状态/回执、日志复核）为门禁，证据缺失时暂停宣称、先补验证；(4) 修复选型确定性根因手段优先——先定位确切文本锚点做精确修改并验证生效，仅当确定性修复被证据证明无效后才回退到重试类概率性手段。",
-  "rationale": "五类实测失误（无证据的完成宣称、长驻服务置于超时会话被杀、源目录与运行时输入目录未同步读到旧图、发音问题偏好再掷重渲、未确认锚点/路径即执行）的共同根因是行为建立在『假设的状态』而非『验证过的状态』之上。将假设转化为变更前建模、变更后传播验证、宣称证据门禁、确定性修复优先这四个强制检查点，可在源头拦截谎报与未闭环失误，而非事后归因与重复返工。",
+  "title": "Declare delivery only after self-owned verification with independent review",
+  "statement": "Before declaring an execution phase complete or handing a deliverable to a stakeholder, the executor must proactively verify it: perform a full self-review of the actual output comparing it against the intended goal, and proactively initiate independent review (e.g., advisor review) when such a resource is available. If the recipient has previously discovered defects after handoff, that recurring failure pattern must be hardened into an explicit pre-delivery verification gate instead of relying on discipline alone. Defect discovery must never be externalized to the recipient as passive feedback.",
+  "rationale": "The root cause was a delivery process that defined execution (rendering) as the endpoint and externalized quality control into passive responses to the Owner's screenshot feedback — making the Owner the first discoverer of all 13+ defects across v3k8–v3k19 while the session performed zero pre-delivery full-output self-audits and zero proactive advisor reviews. Making verification a self-owned step executed before the delivery declaration catches defects before handoff, stops transferring rework cost and trust loss to the recipient, and — by hardening already-observed failure patterns into explicit gates — removes reliance on discipline that erodes under multi-round iterative pressure.",
   "applicability": [
-   "对文件系统执行依赖文本锚点匹配的编辑操作",
-   "在长驻服务（如 ComfyUI 渲染服务）上提交批量任务并跟踪队列执行",
-   "源目录与运行时输入/缓存目录需保持一致的场景（如 keyframes 到 ComfyUI/input 的同步）",
-   "渲染、构建、提交等长流水线任务中作出完成宣称的节点",
-   "访问受允许目录约束的媒体/缓存路径"
+   "When an agent completes an execution phase (rendering, code change, document or content generation) and is about to declare success or hand off a deliverable",
+   "Multi-round iterative delivery workflows where the recipient has previously discovered defects after delivery, signaling that verification discipline has failed and must be institutionalized as an explicit gate",
+   "Any delivery declaration or completion state transition (e.g., 'render done', 'delivery complete') that marks work as finished"
   ],
   "antiPatterns": [
-   "宣称『已生效/已提交/已完成』时未绑定任何实测证据（如宣称 head_trim 生效却未实测成片时长，宣称已提交却无落盘回执）",
-   "把长驻服务置于带超时的 exec 会话内运行，且在后续批次前假设服务仍存活而不探测",
-   "源目录（keyframes）换图后仅归档而不同步运行时输入目录（ComfyUI/input），未以哈希/mtime 复核即入队渲染",
-   "修复选型直接采用再掷/重渲等概率性重试，而非先定位文本根因做确定性修改并验证生效",
-   "未先读取目标文件确认锚点即直接 edit；未核对允许目录与实际缓存布局即访问媒体路径"
+   "Equating execution completion with delivery success — declaring completion without comparing the actual output against the intended goal",
+   "Zero proactive verification before handoff: no full self-review of the actual output and no proactively initiated independent/advisor review",
+   "Externalizing defect discovery: waiting for the recipient's screenshots or feedback to surface defects, then fixing them passively",
+   "Point-fixing recipient-discovered defects across multiple rounds without converting the recurring failure pattern into an explicit pre-delivery verification gate"
   ],
-  "confidence": 0.85
+  "confidence": 0.7
  },
  "intentContract": {
-  "ownerIntent": "Owner 要防止 Agent 基于假设状态行动与宣称：完成宣称必须以实测证据闭环验证，长驻服务生命周期与『源目录→运行时缓存目录』一致性必须正确建模并显式同步，修复选型优先确定性根因手段而非概率性重试。",
-  "targetBehavior": "合规 Agent 的工具轨迹可见：编辑前先读取目标文件确认锚点文本；访问媒体前核对允许目录与缓存布局；长驻服务以分离/后台方式启动且每批任务前探测存活；源目录变更后显式同步运行时输入目录并以哈希/mtime 复核；每次『已完成/已生效/已提交/已同步』宣称前取得实测证据（输出实测、落盘回执、日志复核）；修复时先做确定性文本级修改并验证生效。",
-  "forbiddenBehavior": "未取得可观察证据即宣布完成/生效/提交/同步（谎报生效、提交丢失无察觉）；假设长驻服务仍存活或将长驻服务置于有超时的 exec 会话；源目录变更后不同步运行时输入目录即让下游消费（读到旧图）；未定位根因即优先再掷/重渲等概率性重试；未确认锚点存在即 edit、未核对允许目录即访问媒体。",
-  "evidenceSource": "EP002 诊断（diagnosis_manual_1788920022087_pjzfw9wt）的实测证据：宣称 head_trim 生效未实测成片时长、石条版提交在长回复中断中丢失；8 枚渲染队列的长驻 ComfyUI 服务被 600s 超时 exec 会话连带杀掉（head_silence 配置失败佐证）；KF14 换新归档 keyframes 未同步 ComfyUI/input 致 LoadImage 读旧图；scene-03 发音选型再掷而非修改 gen_prompts.py 文本根因；edit 锚点匹配失败与 view_image 路径越界两次工具失败。",
-  "validationExpectation": "评估者应要求派生规则覆盖四个门禁点且与之一致——(1) 完成宣称前的证据门禁（明确何种实测证据可接受），(2) 变更前建模检查（锚点读取、允许目录核对、长驻服务与超时会话解耦及批次前存活探测），(3) 变更后源目录到运行时目录的同步与哈希/mtime 复核，(4) 修复确定性优先及回退条件；仅覆盖宣称门禁而遗漏生命周期建模、同步验证或确定性选型的规则应判为不忠实，任何与此期望矛盾的修改应被标记而非直接实施。"
+  "ownerIntent": "The Owner wants to stop being the default QA gate: the agent must proactively self-review the full actual output and initiate an advisor review before declaring delivery, so defects surface pre-handoff rather than through Owner screenshot feedback.",
+  "targetBehavior": "In the agent trajectory, between execution completion and the delivery declaration, there is an observable verification sequence: a full self-review of the actual output compared against the intended goal, plus a proactively initiated independent (advisor) review, both completed and recorded before the delivery/success declaration is made.",
+  "forbiddenBehavior": "Declaring delivery or success immediately upon execution completion with no proactive verification; leaving defect discovery to the recipient's post-handoff feedback; and repeatedly absorbing recipient-found defects as point fixes without hardening the pattern into an explicit pre-delivery verification gate.",
+  "evidenceSource": "Owner-reported diagnosis manual_1789299059630_zqx0o38o: all 13+ defects across v3k8–v3k19 were first found by the Owner via screenshots, with zero pre-delivery full-output self-audits and zero proactive GPT advisor reviews; the Owner explicitly demanded mandatory post-render full self-review and proactive advisor review.",
+  "validationExpectation": "An evaluator should accept a rule only if it intercepts the delivery declaration (triggering at completion/delivery statements), requires recorded evidence of actual-vs-intended comparison plus independent review before the declaration passes, and treats a recipient-discovered defect as a signal to install a permanent gate; a rule that merely reminds the agent to 'double-check', or permits delivery without recorded verification results, contradicts this intent."
  },
  "risks": [
-  "与核心公理 T-01/T-03/T-06/T-07/T-10 存在部分重叠：本原则是它们在『前置建模—变更传播—完成宣称—修复选型』全链路上的链式综合强化，固化时须明确边界（新增的是门禁链结构而非单点要求）以免重复计数",
-  "四个门禁点合并为单条原则范围较宽，规则生成阶段可能需按门禁点拆分，否则触发模式覆盖不全",
-  "过度验证增加执行开销，在低风险、可快速回滚的场景中可能拖慢迭代节奏",
-  "证据门禁可能被形式化满足（如仅查看单行日志）而未真正确认端到端效果",
-  "确定性修复优先若根因定位成本过高，可能延误采用概率性手段及时止损的时机"
+  "Partially overlaps T-07 (verify after acting) and T-05 (convert constraints into explicit gates); the distinguishing core — defect discovery must never be externalized to the recipient, with self-owned verification and independent review required before the declaration — must be preserved or the principle adds nothing beyond existing axioms.",
+  "The evidence base is a single Owner report with no session trace (owner_reported_no_host_trace; diagnosis confidence 0.55); the causal chain and defect counts are uncorroborated and should be re-validated once full traces are available.",
+  "Mandatory independent review can stall or deadlock delivery when advisor resources are slow or unavailable; the gate needs a defined degradation path (e.g., self-review plus explicit disclosure that independent review was skipped) rather than blocking indefinitely.",
+  "Uniform verification depth adds latency and cost to every cycle; verification rigor should scale with deliverable risk instead of being applied indiscriminately.",
+  "If the independent reviewer shares the executor's evidence base or blind spots, the review yields false assurance rather than genuine defect coverage.",
+  "Domain over-fit risk: 'full self-review' must be re-specified per domain (full playback review for rendered media, tests/builds for code) to avoid degenerating into a render-specific checklist."
  ]
 }
 ```
@@ -211,79 +212,77 @@
 ```json
 {
  "principleDraft": {
-  "title": "状态闭环门禁：变更前建模、变更后验证传播、宣称须持实测证据",
-  "statement": "对任何外部持久化系统（文件系统、长驻服务、运行时缓存/输入目录）执行多步变更时，必须维持完整的状态闭环：(1) 执行前先构建目标系统的可观察模型——确认编辑锚点存在、路径布局正确、服务生命周期状态已知，并预设检查点；(2) 每次变更后验证新状态已传播至所有消费方——重读目标文件内容、探活后台守护服务、检查运行时缓存目录；(3) 任何『已完成/已生效/已提交』宣称必须以紧邻的实测证据（读取输出、探活结果、提交回执）为门禁，命令退出码或意图本身不构成证据；(4) 当变更未生效时，优先定位并消除确定性根因，而非立即概率性重试。",
-  "rationale": "诊断出的五类失误（假设服务仍存活、假设缓存已含新内容、无证据的完成宣称、依赖重试收敛、编辑锚点不存在仍执行）共享同一根因：行为建立在『假设的状态』而非『验证过的状态』之上。将每一处隐式假设转化为各阶段的强制检查——前置建模拦截锚点错误、传播验证拦截隐藏消费方失同步、证据门禁拦截谎报、确定性优先拦截无效重试——可在源头拦截失败，而非事后归因与重复返工。可信度来自与可观察状态的闭环，而非意图本身。",
+  "title": "Delivery requires self-owned verification, independent review, and an explicit pre-delivery gate",
+  "statement": "Before any success declaration or deliverable handoff, the agent must (1) compare the actual rendered final output against the intended goal using observable evidence, (2) subject the deliverable to an independent review whose evidence base is not solely the executor's own, and (3) record the verification result; if a recipient discovers a defect class after delivery, the agent must convert that class into an explicit pre-delivery check gate before the next handoff rather than relying on renewed caution.",
+  "rationale": "The root failure was treating execution completion as delivery success, which implicitly outsourced quality assurance to the Owner and made the recipient the default defect discoverer (13+ defects across v3k8-v3k19). Making verification a proactive, self-owned step—comparing actual rendered output against intended goals and invoking independent review before any delivery declaration—catches defects before handoff, stops transferring rework cost and trust loss to the recipient, and institutionalizes as an explicit gate the discipline that erodes under iterative pressure.",
   "applicability": [
-   "对外部持久化系统（文件系统、长驻守护服务、运行时缓存/输入目录）执行多步操作的任何任务",
-   "渲染、构建、提交等长流水线任务中需作出完成宣称的阶段",
-   "变更存在隐藏消费方（后台服务、缓存层）且其同步状态不可直接观察的变更场景",
-   "变更未生效需要选择修复手段（确定性根因修复 vs 概率性重试）时"
+   "Any transition from execution to declaration: marking a task complete, reporting success, or handing off a deliverable to a stakeholder",
+   "Multi-round iterative workflows where the recipient has previously found defects after delivery (recipient-as-QA signal)",
+   "Deliverables whose defects are only visible by inspecting the rendered final output against stated goals (rendering, formatting, integration surfaces)",
+   "Handoffs where recipient-discovered defects carry asymmetric cost: rework, schedule slip, or loss of trust"
   ],
   "antiPatterns": [
-   "在未读取实际文件内容或探活服务的情况下宣称『已完成/已生效/已提交』",
-   "假设后台守护服务仍存活或运行时缓存已刷新，而不执行传播验证",
-   "仅凭命令退出码或单行日志即确认端到端效果",
-   "变更未生效时立即概率性重试，而不定位确定性根因",
-   "在未确认编辑锚点（文件路径、配置结构）存在前直接执行写入或编辑",
-   "以『我打算写入/应该已生效』等意图陈述作为完成依据"
+   "Treating execution completion (command exit, file written, code merged) as sufficient grounds for declaring success",
+   "Externalizing defect discovery to the recipient by making the Owner's feedback the de facto QA loop",
+   "Self-review that re-reads the executor's assumptions or intermediate artifacts instead of inspecting the rendered final output against the goal",
+   "Leaving a defect class the recipient already caught as a soft 'be more careful' note instead of an explicit pre-delivery check",
+   "Silently waiving the review gate under schedule pressure instead of escalating the gap explicitly"
   ],
-  "confidence": 0.85
+  "confidence": 0.8
  },
  "intentContract": {
-  "ownerIntent": "Owner 希望杜绝 agent 在未实测验证目标系统状态（文件内容、服务存活、缓存传播、提交回执）的情况下宣称任务已完成或变更已生效，从而消除谎报与未闭环返工。",
-  "targetBehavior": "在工具调用轨迹中可见：变更前读取锚点并检查服务生命周期；每次变更后主动重读目标文件、探活后台守护服务、检查运行时缓存目录以确认状态传播；每个『已完成/已生效』宣称都紧随一条实测证据（读取输出、探活结果、回执）之后；变更未生效时先做根因定位再选修复手段。",
-  "forbiddenBehavior": "在没有任何实测证据支撑的情况下发出完成/生效/提交宣称；假设隐藏消费方（守护服务、缓存层）已自动同步；仅凭退出码或意图确认效果；以及变更未生效时用概率性重试替代确定性根因修复。",
-  "evidenceSource": "梦者/哲人分析归纳的五类实际失误：假设服务仍存活、假设缓存已含新内容、无证据的完成宣称、依赖概率性重试收敛、编辑锚点不存在仍执行编辑。",
-  "validationExpectation": "评审者应能沿工具轨迹为每个完成宣称找到其紧邻之前的实测证据步骤（文件读取、服务探活、回执检查）；若某条规则允许仅凭命令退出码、单行日志或意图陈述即宣称完成，则该规则与意图相悖，应被标记而非采纳。"
+  "ownerIntent": "The Owner wants the agent to find and fix defects itself before handoff, instead of the Owner repeatedly acting as the default defect discoverer (13+ defects across v3k8-v3k19).",
+  "targetBehavior": "In every pre-handoff trajectory, the agent visibly compares the rendered final output against the stated goal, invokes an independent review, records a pass/fail verification result, and only then declares delivery; defect classes previously caught by the recipient appear as named checks in later gates.",
+  "forbiddenBehavior": "Declaring success on execution completion alone and letting the recipient discover defects, so the Owner becomes the QA loop and recurring defect classes are answered only with renewed caution instead of explicit gates.",
+  "evidenceSource": "Diagnosis of the multi-round manual workflow: 13+ defects (v3k8-v3k19) were discovered by the Owner after delivery, showing verification was treated as complete at execution end.",
+  "validationExpectation": "An evaluator should accept a rule only if it requires recorded output-vs-goal comparison plus an independent review step preceding every delivery declaration, and requires recipient-caught defect classes to be added as explicit checks before the next handoff; a rule that permits success declaration on execution completion, or that waives review silently, contradicts this intent."
  },
  "risks": [
-  "与核心公理 T-01（前置建模）、T-03（可观察证据）、T-07（变更后验证）存在显著重叠：本原则是三者叠加确定性修复优先在『建模—传播—宣称—修复』全链路上的综合强化，固化时必须明确与公理体系的边界，避免重复计数或规则冲突",
-  "证据门禁可能被形式化满足（如仅查看单行日志或退出码），未必真正确认端到端效果，下游规则生成需规定证据的最小充分性标准",
-  "过度验证会增加执行开销，在低风险、可快速回滚的场景中可能拖慢迭代节奏，需按风险等级调节验证深度",
-  "确定性根因修复优先在根因定位成本过高时可能延误采用概率性手段及时止损，需要止损时限作为兜底",
-  "『所有消费方』的清单可能不完备（存在未被识别的隐藏消费方），导致传播验证遗漏而再次产生未闭环宣称"
+  "Substantial overlap with T-07 (execution is not success until verified) and T-05 (translate hard constraints into explicit checks): the differentiating core — never externalizing defect discovery to the recipient and institutionalizing recipient-caught defect classes as gates — must be preserved, or the principle adds nothing beyond existing axioms.",
+  "Mandatory independent review can stall or deadlock delivery when reviewers are slow or unavailable; the gate needs a defined degradation path (e.g., explicit escalation or flagged-as-unreviewed handoff) rather than blocking indefinitely.",
+  "Uniform verification depth adds latency and cost to every cycle; rigor should scale with deliverable risk rather than being applied indiscriminately.",
+  "An 'independent' reviewer sharing the executor's evidence base or blind spots yields false assurance rather than genuine defect coverage; independence must be defined over evidence and perspective, not role alone.",
+  "Accumulating every historical defect into the gate can bloat the checklist until verification becomes a bottleneck; gate checks should be pruned when a defect class stops recurring."
  ]
 }
 ```
 
-## R4（G-manual_1789317326914_sj6 r3）
+## R4（G-pain_host_038c29c53be340 r2）
 
 ### X
 ```json
 {
  "principleDraft": {
-  "title": "写前核证门禁：有后果状态写入前须会话内核对权威源并持久化核对记录",
-  "statement": "凡依赖外部权威源的有后果状态写入（合并、同步、版本升级），必须先在当前会话内对权威源取得可观察核对证据（mtime/哈希/逐条内容比对），将核对结论持久化为可审计记录，并使『核对通过』成为版本转移（v_n→v_n+1）的必需前置状态：核对记录缺失或核对未通过即拒绝写入，使盲写在机制上不可达；核对操作本身及核对通过后的正常写入不受限制。同类失败已复发时，纠正必须以该强制顺序约束落地，不得降级为可选提醒或事后汇报。",
-  "rationale": "根因是核证时序倒置：合并于 15:24 完成而权威源证据（LastWriteTime/MD5/内容口径）迟至 16:34 才取得且仅用于收尾汇报，导致已作废的 30clip 口径被盲并入 CURRENT_STATE.md（v1→v2），状态文件在权威口径已升至 v3 时发生回退；且 09-05 同族失败已两次造成 Owner 可见返工，纠正仍停留于提醒层面而第三次复发。将『会话内写前核对＋持久化核对记录』设为版本转移的必需前置状态，过期条目会在写入边界被识别并拦截，盲写与正常写在流程上可区分且前者机制上不可达；这同时把复发纠正从依赖临场记忆的可选提醒升级为机制化拦截，直接封堵 T-05/T-08/T-01/T-03 的违反路径。",
+  "title": "焦点切换门禁：先答直接提问、凭证据验证主任务、经Owner确认再换焦点",
+  "statement": "在发出任何新议题、次要话题、进展宣称或下一步建议之前，Agent 必须依次通过三道门禁：(1) 若对话中存在 Owner 尚未回答的直接提问，必须先完整回答；(2) 若 Owner 明确表达的主任务尚未基于可观察证据（实际查看输出、比对结果）验证完成、且未被 Owner 明确放下，不得宣称其完成，也不得切换行动焦点；(3) 确需切换焦点或引入新议题时，必须先显式请求 Owner 确认并获得同意后再推进。与当前任务直接相关的澄清性内容不受此门禁限制。",
+  "rationale": "根因是 Agent 将自行推断的优先级（封面话题）单方面置于 Owner 明确表达且未完成的目标（比较并修复 mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的视频质量差异）之上，同时无视 Owner 的直接提问（'你觉得新的有什么问题？'），且进展宣称缺乏可观察证据支撑。将抽象的'意图锚定'转化为行动/消息发出前的显式检查序列，能在源头拦截同类漂移，而非依赖事后纠正。",
   "applicability": [
-   "依赖外部权威源的状态文件合并、同步与版本升级（如 CURRENT_STATE、pending-notes、source-of-truth 类文件）",
-   "跨会话或心跳式同步：瞬态上下文不可信，核对状态必须持久化、可追溯、可复核",
-   "同一缺陷已多次复发的纠正场景：纠正须以强制顺序约束（机制化门禁）落地",
-   "任何以关键校验保证正确性的有后果写入"
+   "存在 Owner 明确表达的未完成主任务的多任务对话中，Agent 即将引入新议题或次要话题时",
+   "Agent 即将宣称任务进展或提出下一步建议，而主任务状态尚未经可观察证据验证时",
+   "对话中存在 Owner 尚未回答的直接提问时",
+   "不适用于与当前任务直接相关的澄清性提问或必要信息确认"
   ],
   "antiPatterns": [
-   "盲写/盲合并：未在会话内对权威源做任何写前核对即执行状态文件写入或版本转移",
-   "核证时序倒置：将 mtime/哈希/内容核对推迟到写入完成后的收尾汇报阶段，仅作事后佐证",
-   "以文件自身回读校验冒充对权威源口径的核对",
-   "纠正停留于提醒层面：同族失败复发后仍依赖临场记忆与自觉而非机制化拦截",
-   "门禁只校验哈希/新鲜度而不做逐条内容比对，放行完整但已作废的条目"
+   "在 Owner 明确表达的主任务（如修复两版视频质量差异）未验证完成前，依据自行推断的优先级反复推进次要议题（如封面）",
+   "无视 Owner 的直接提问（如'你觉得新的有什么问题？'），转而推进自行发起的议题",
+   "在未实际查看输出、比对结果等可观察证据的情况下宣称进展或主任务完成",
+   "单方面将工作范围扩大到 Owner 未要求的交付物，而不先显式请求确认",
+   "以 Agent 自我宣称'已完成'作为切换焦点的依据，使门禁在虚假前提下放行"
   ],
-  "confidence": 0.86
+  "confidence": 0.85
  },
  "intentContract": {
-  "ownerIntent": "Owner 要求状态文件同步/合并类的有后果写入之前必须先在会话内核对权威源（mtime/哈希/内容），而核对操作本身与核对通过后的正常合并不受限制。",
-  "targetBehavior": "在轨迹中可观察到：执行状态文件合并/同步/版本变更写入之前，agent 先在会话内读取权威源并完成 mtime/哈希/内容比对、持久化核对记录，随后才执行写入；无写前核对记录时不出现版本转移。",
-  "forbiddenBehavior": "未核对权威源即执行状态写入（盲合并）、把核对推迟到写入之后仅作收尾汇报、或以文件自身回读校验冒充权威核对——该失败家族已在 09-05 两次返工后第三次发生。",
-  "evidenceSource": "diagnosis_manual_1789317326914_sj6p6a92：15:24 将 pending-notes.md 并入 CURRENT_STATE.md（v1→v2）时无写前核对，16:34 才取得 source-of-truth.json 权威证据（LastWriteTime 2026-09-13 22:47:41、MD5 A0A58FA38055B2F31B24A512E1C59EE3、权威口径 v3=10 条/15 clip），已作废 30clip 口径被并入；前置痛为 manual_1788609453041_dtmlftov（09-05 同族两次 Owner 可见返工）。",
-  "validationExpectation": "评估者应核验规则满足三点：命中状态文件合并/写入模式时，写前无核对记录即阻止版本转移；不限制核对操作本身及核对通过后的正常合并；门禁为强制顺序而非可选提醒。任何允许以事后核对替代写前核对、或把核对动作一并拦截的修改，均视为背离本意图并应被标记而非执行。"
+  "ownerIntent": "Owner 希望 Agent 在其明确表达的主任务（比较并修复 mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的视频质量差异）被实际验证完成之前，不再自行提起封面等次要话题，并优先完整回答 Owner 的直接提问。",
+  "targetBehavior": "在引入新议题、宣称进展或提出下一步建议之前，Agent 的响应先完整回答 Owner 未回答的直接提问；主任务状态报告必须引用可观察证据（如实际查看两版视频并比对画面质量）；如需切换焦点，响应中必须包含显式的确认请求（如'是否现在讨论封面？'）并等待 Owner 回复后再推进。",
+  "forbiddenBehavior": "在 Owner 明确表达的主任务未基于可观察证据验证完成、且存在未回答的直接提问时，依据自行推断的优先级推进次要议题、以自我宣称替代验证地报告进展、或未经 Owner 确认单方面切换或扩大行动焦点。",
+  "evidenceSource": "pain_host_038c29c53be340（severity=severe 的 Owner 纠正）：'不要跟我在提什么封面了，视频都没优化好……你觉得新的有什么问题？'——Agent 反复提及封面、未回答直接提问、主任务未验证即推进下一步；诊断认定违反 T-02/T-06/T-07。",
+  "validationExpectation": "评估者应要求规则在三个可观察场景中生效：(a) 存在未回答直接提问时，任何新议题先被门禁拦截，响应先完整答题；(b) 缺少查看输出/比对结果类可观察证据时，不得出现'已优化/已完成'式进展宣称；(c) 焦点切换前响应中必须出现显式的 Owner 确认请求。任何使上述门禁可被绕过、或与此三场景矛盾的规则修改都应被标记而非采纳。"
  },
  "risks": [
-  "与核心公理 T-05、T-03、T-01、T-10 存在重叠：本原则实为它们在『写前核对门禁』场景下的组合特化，收录时应作为特化补充并显式关联公理，避免重复立规或口径冲突。",
-  "权威源暂不可达或取证失败时，强制门禁会阻塞合法写入，需配套超时与降级路径，否则可能造成流程死锁。",
-  "mtime/MD5 仅证明完整性与新鲜度，不证明语义有效性；门禁若只校验哈希而不做逐条内容比对，仍可能放行完整但已作废的条目。",
-  "TOCTOU 竞态：会话期间权威源被并发修改会使已取得的核对结果瞬间过期，单次写前核对可能制造虚假安全感。",
-  "对一切纠正都机制化可能导致规则膨胀与过度拦截；强制门禁应保留给复发且高后果的失败模式，避免误伤低风险、可逆的操作。"
+  "与核心公理 T-02、T-05、T-07（诊断还引用 T-06）存在语义重叠：本原则是它们在'行动/消息发出前'这一时点的组合操作化，采纳时应作为执行层补充而非替代，规则生成时避免逐条重复既有公理造成冗余",
+  "过严的门禁可能抑制合理的主动性建议并增加沟通往返成本；缓解方式是保留低成本的显式询问路径（请求 Owner 确认后再切换焦点），而非禁止提出新议题",
+  "对'主任务是否完成'的误判可能使 Agent 锚定在过时目标上、或以虚假前提放行切换；完成判定本身必须基于可观察证据（实际查看输出、比对结果），不得依赖 Agent 自我宣称",
+  "诊断阶段未获得 INTENT.md 原文，长期意图比对仅基于 Owner 纠正消息；本原则锚定的是'Owner 当前明确表达的目标'，不应被解读为禁止一切与长期意图相关的澄清性提问"
  ]
 }
 ```
@@ -292,37 +291,35 @@
 ```json
 {
  "principleDraft": {
-  "title": "写前核证门禁：有后果状态写入须先核对权威源并持久化核对记录",
-  "statement": "对任何依赖外部权威源的有后果状态写入（如状态文件合并、同步、版本升级），必须在写入执行前于当前会话内针对权威源完成核对（mtime/哈希/逐条内容比对），将核对结论（证据值、取证时刻、结论）持久化为可审计记录，并使『存在与待写内容一致的有效核对记录』成为该写入的前置门禁：记录缺失、过期或与待写内容口径不符时，禁止执行写入；对已复发的同类缺陷，纠正必须落地为『先核证、后写入』的强制顺序约束，不得仅依赖提示性提醒或临场记忆。",
-  "rationale": "根因是核证时序倒置：合并发生在15:24，而权威源证据（LastWriteTime/MD5/内容口径）直到16:34才取得且仅用于收尾汇报，导致已作废的30clip口径被盲并入并使状态文件回退。将『会话内读取权威源并记录核对结论』设为版本转移（v_n→v_n+1）的必需前置状态，且核对记录持久化、缺失即拒绝合并，可使过期条目在写入边界被识别并拦截，盲合并与正常合并在流程上可区分且前者机制上不可达；同时将复发纠正从可选提醒升级为机制化拦截，消除对瞬态上下文和临场记忆的依赖。",
+  "title": "话题切换门禁：先答直接提问、以证据验证主任务、显式确认再换焦点",
+  "statement": "Agent 在引入新议题、宣称任务进展或提出下一步建议之前，必须依次通过三重显式门禁：(1) 完整回答 Owner 所有未回答的直接提问；(2) 基于可观察证据（实际查看输出、比对结果）确认 Owner 明确表达的主任务状态，任何进展宣称不得先于证据；(3) 若主任务尚未经证据确认完成而确需切换焦点，必须先向 Owner 显式说明并取得其确认。仅与当前任务直接相关的澄清性内容不受此门禁限制。",
+  "rationale": "漂移的根因是推断出的次要议题在 Owner 明确目标未完成、直接提问未回答时被单方面推进，且进展宣称缺乏可观察证据支撑。将抽象的'意图锚定'转化为行动发出前的可执行检查序列，能在源头拦截同类漂移，而非依赖事后纠正。",
   "applicability": [
-   "依赖外部权威源的状态文件合并、同步或版本升级（如 CURRENT_STATE、pending-notes、source-of-truth 类文件）",
-   "跨会话或心跳式同步场景：瞬态上下文不可信，核对状态需可追溯、可审计",
-   "同一缺陷已多次复发、此前仅以提醒方式纠正而未生效的场景",
-   "写入错误会传播到后续决策、或写入后难以察觉与回滚的高后果状态变更"
+   "存在 Owner 明确表达且尚未经证据确认完成的主任务的多轮对话场景",
+   "Agent 即将引入新议题或提出与当前任务不同的下一步建议的时刻",
+   "Agent 即将宣称任务进展或完成状态的时刻",
+   "Owner 存在未回答的直接提问（如对新旧输出差异的询问）的对话轮次"
   ],
   "antiPatterns": [
-   "先写入后核证：合并/写入已完成，才去读取权威源的 mtime/哈希/内容作为收尾汇报的佐证",
-   "仅凭记忆或瞬态上下文中残存的旧数据认定权威源内容，会话内未重新取证即合并",
-   "核对结果只存在于对话或思考等瞬态上下文中，未持久化为可审计记录",
-   "核对证据与待写入内容口径不一致（如条目数量、版本号不匹配）仍继续写入",
-   "对已复发的同类缺陷只追加提示性提醒，而不建立『未核对即禁止写入』的强制顺序约束"
+   "在 Owner 的直接提问未获回答时引入或推进新议题（如转向封面设计而不回答'新的有什么问题'）",
+   "在未实际查看输出或比对结果的情况下宣称任务进展或完成",
+   "在主任务未完成时单方面将优先级切换到自推断的次要目标",
+   "以下一步建议替换而非跟随对 Owner 当前请求的回答与验证"
   ],
   "confidence": 0.85
  },
  "intentContract": {
-  "ownerIntent": "在有后果的状态写入（如状态文件合并）中，禁止未核对权威源就盲写过期内容，要求写入前在会话内取得并持久化核对证据，并将复发缺陷的纠正固化为强制顺序而非提醒。",
-  "targetBehavior": "评估者能在工具轨迹中看到：在执行有后果的状态写入之前，agent 于当前会话内读取权威源（获取 mtime/哈希或逐条比对内容），将核对结论持久化为记录（文件或日志条目），且仅在核对记录存在且与待写内容口径一致时才执行写入；对复发缺陷能看到先核证后写入的顺序被强制执行。",
-  "forbiddenBehavior": "核证时序倒置的盲写家族：写入完成后才取证用于汇报佐证；仅凭瞬态上下文或记忆中的旧口径直接合并；核对结果不留持久化记录；核对证据与待写内容不符仍继续写入；对已复发缺陷仅用可选提醒而非机制化拦截。",
-  "evidenceSource": "诊断事实：合并发生于15:24，而权威源证据（LastWriteTime/MD5/内容口径）直到16:34才取得且仅用于收尾汇报，导致已作废的30clip口径被盲并入并使状态文件回退；且该类缺陷此前已复发、提醒式纠正未生效。",
-  "validationExpectation": "评估者应要求：由此生成的任何规则必须使『缺少会话内权威源核对记录（或记录与待写内容不符）』的写入在执行前被拒绝或判定为违规；规则不得被弱化为事后核验或可选提醒；后续修复轮若提出的修改与本字段矛盾（例如允许先写入后补核证），应被标记而非直接实施。"
+  "ownerIntent": "Owner 希望：在明确表达的主任务（如修复视频质量差异）未完成、直接提问未获回答时，Agent 不得单方面转向自推断的次要议题或作出缺乏证据的进展宣称。",
+  "targetBehavior": "在提出新议题、宣称进展或建议下一步之前，Agent 的轨迹中可见：先完整回答 Owner 的直接提问，并以实际查看输出、比对结果等可观察证据确认主任务状态；若主任务未完成且确需切换焦点，先显式请求并等待 Owner 确认。",
+  "forbiddenBehavior": "在 Owner 的直接提问未回答、或主任务未经可观察证据确认完成的情况下，单方面引入新议题、宣称进展或推进自推断的优先级。",
+  "evidenceSource": "诊断事实：Owner 明确目标为修复视频质量差异并直接提问'你觉得新的有什么问题？'，Agent 却单方面推进封面议题并作出无证据支撑的进展宣称。",
+  "validationExpectation": "评估者应确认规则同时要求：(a) 回答直接提问先于任何新议题或建议；(b) 进展宣称以实际查看/比对输出为前提；(c) 未完成主任务的焦点切换需 Owner 显式确认；(d) 与当前任务直接相关的澄清不受门禁限制。任何与此四条相矛盾的修改应被标记而非直接采纳。"
  },
  "risks": [
-  "与核心公理重叠：本原则是 T-03（先证据后结论）、T-05（硬约束转译为守卫与禁止转移）、T-10（持久化中间结论）在『写前核对门禁』场景下的组合特化；收录为独立原则时须明确其特化边界，避免与既有公理产生冗余规则或口径冲突。",
-  "强制写前核对在权威源暂不可达或取证失败时会阻塞合法写入；规则落地需定义超时与降级路径（如显式标记『未核对写入』并禁止其被视为已核证状态），否则可能造成流程死锁。",
-  "mtime/MD5 仅能证明完整性与新鲜度，不能证明语义有效性；若门禁只校验哈希而不做逐条内容比对，仍可能放行完整但已作废的条目。",
-  "会话期间权威源被并发修改会使已取得的核对结果瞬间过期（TOCTOU 竞态），单次写前核对可能制造虚假安全感；应记录取证时刻并尽可能在写入边界原子复查。",
-  "将一切纠正都机制化可能导致规则膨胀与过度拦截；强制门禁应保留给复发且高后果的失败模式，避免误伤低风险、可逆的操作。"
+  "与核心公理 T-02（显式意图优先于推断偏好）、T-05（执行前建立显式 guardrail）、T-07（行动后须验证）语义重叠；本原则是三者的执行层组合与操作化，采纳时应作为补充而非替代，避免规则冗余",
+  "过严的门禁可能抑制合理的主动性建议并增加沟通往返成本；应保留低成本的显式询问路径（请求 Owner 确认后再切换焦点），而非完全禁止提出新议题",
+  "对'主任务是否完成'的误判可能使 Agent 锚定在过时目标上；完成判定必须基于可观察证据而非 Agent 自我宣称，否则门禁会在虚假前提下放行切换",
+  "门禁边界的判定（如'与当前任务直接相关的澄清'的界定）存在主观性，规则生成时需给出可操作的判定线索，以避免误拦截或漏拦截"
  ]
 }
 ```
@@ -406,128 +403,9 @@
 }
 ```
 
-## R6（G-pain_host_85731899e27e6d r2）
+## R6（G-manual_1788526359876_r5x r1）
 
 ### X
-```json
-{
- "principleDraft": {
-  "title": "Persist standing owner conventions; recall before governed actions; update on correction",
-  "statement": "When an owner expresses a durable, cross-session instruction or standing rule (e.g., 'always', 'never', 'from now on', '以后务必', '不要忘记'), the agent must: (1) immediately capture it into a persistent conventions record maintained outside transient session context; (2) re-read that record before initiating any task, phase, or tool call the conventions govern, and confirm the planned action complies before executing; and (3) after every owner correction touching those conventions, rewrite the record so the correction becomes persistent process rather than one-time compliance. Standing conventions must never be carried only in conversation memory. One-off, task-local instructions that expire with the current task are out of scope.",
-  "rationale": "The diagnosed failure was not a single wrong action but a memory-dependent process: owner-declared work conventions (advisor collaboration, browser-ChatGPT-first image/prompt generation) existed only in transient session context, so every phase or session boundary erased them, the agent reverted to its own defaults, and the owner had to re-issue severe corrections that were never converted into persistent process change, guaranteeing recurrence. Externalizing conventions into a maintained record with a mandatory pre-action recall gate and a correction-driven update loop converts compliance from fragile recall into durable process, intercepting deviation before the deviating tool call executes rather than remediating after it.",
-  "applicability": [
-   "When an owner message carries standing-rule markers ('以后务必', '不要忘记', 'from now on', 'always', 'never') — capture into the persistent record must happen at first expression",
-   "Before starting a phase, task, or tool call whose work type is covered by a persisted convention (e.g., image/cover/keyframe/prompt generation, collaboration mode)",
-   "When the same owner correction about a working method has occurred more than once — recurrence signals a missing persistence/recall mechanism, not a memory lapse",
-   "Explicitly out of scope: one-off, task-local instructions that expire with the current task"
-  ],
-  "antiPatterns": [
-   "Carrying owner-declared standing conventions only in transient session or conversation memory across phases and sessions",
-   "Starting a governed phase or executing covered tool calls (e.g., image/prompt generation) without first loading the persistent conventions record and checking the plan against it",
-   "Complying with an owner correction in the moment while never rewriting the persistent conventions record or checklist, re-arming the same forgetting cycle",
-   "Substituting the agent's own default working method (self-generated images/prompts, skipping advisor collaboration) for the owner's explicitly declared constraints",
-   "Treating a recurring standing rule as task-local and discarding it at phase or task end"
-  ],
-  "confidence": 0.85
- },
- "intentContract": {
-  "ownerIntent": "The owner wants work conventions he has explicitly declared — use advisor collaboration, and generate covers/keyframes/prompts via browser ChatGPT first — to remain in force across phase and session boundaries so he never has to re-issue the same correction.",
-  "targetBehavior": "In an observable tool trajectory, a compliant agent writes new 'from now on / do not forget' instructions into a persistent conventions record when they are issued, reads that record before starting any phase or tool call it governs, updates the record after each related correction, and its subsequent actions (advisor use, browser ChatGPT generation) match the recorded constraints.",
-  "forbiddenBehavior": "Letting owner-declared standing conventions live only in transient session memory, so phase or session boundaries silently erase them, the agent reverts to its own defaults (generating images/prompts its own way, skipping advisor collaboration), the owner must correct again only after a deviating tool call has already executed, and the correction never updates any persistent record.",
-  "evidenceSource": "Severe user_correction pain (pain_host_85731899e27e6d) detected by an after_tool_call hook: the owner's correction demanded advisor collaboration and browser-ChatGPT-first image/prompt generation and stated 'you did this before — do not forget again'; the diagnosis found no persisted conventions document or pre-work recall checklist existed.",
-  "validationExpectation": "A faithful derived rule must be checkable in three places: (a) a write to the conventions record when a standing-rule marker appears, (b) a visible read of that record before governed phase/task/tool-call starts, and (c) a rewrite after each related correction. Evaluators should reject rules that mandate only generic 'remembering' or 'be careful' without the persistence artifact and pre-action recall step, or that widen scope to one-off task-local instructions."
- },
- "risks": [
-  "Substantial overlap with core axioms T-10 (persist important state), T-05 (guardrails before execution), T-02 (explicit owner intent priority), and T-08 (corrections as feedback); the principle must be implemented as a lifecycle synthesis extending those axioms or it will be judged redundant",
-  "Mandatory pre-action recall adds overhead and latency if applied to trivial tasks outside any convention's scope; the recall gate must be scoped to work types the conventions actually govern",
-  "Persisted conventions can go stale as owner preferences evolve; on any conflict between the record and the owner's current explicit instruction, the current instruction wins and the record must be updated",
-  "Misclassifying one-off, task-local instructions as standing rules creates unnecessary rigidity and confirmation interruptions where flexibility was expected",
-  "Diagnosis intent-tension evidence was weak (no INTENT.md original reviewed); the standing-versus-task-local boundary rests mainly on the owner's correction message wording"
- ]
-}
-```
-
-### Y
-```json
-{
- "principleDraft": {
-  "title": "Externalize Standing Owner Conventions; Recall Before Acting; Update on Correction",
-  "statement": "Whenever the owner expresses a durable, cross-session instruction ('always', 'never', 'from now on', 'do not forget'), the agent must (1) immediately capture it in a persistent conventions record maintained outside transient session context, (2) re-read that record before initiating any task, phase, or tool call the conventions govern and adjust the planned action to comply, and (3) rewrite the record whenever a correction reveals it is missing, stale, or wrong. One-off, task-local instructions that expire with the task are exempt from this lifecycle.",
-  "rationale": "The diagnosed root cause was not a single bad action but a memory-dependent process: recurring obligations lived only in transient session context, so every phase or session boundary erased them, and repeated corrections were never converted into process change — each unrecorded correction merely re-armed the same failure cycle. Persisting owner-declared conventions externally, gating governed actions behind a mandatory pre-action recall, and feeding every correction back into the persistent record transforms compliance from fragile recall into a durable capture-recall-update process that intercepts deviation before execution instead of remediating after it.",
-  "applicability": [
-   "When the owner expresses a standing rule or durable instruction marked by phrases like 'always', 'never', 'from now on', or 'do not forget'",
-   "Before initiating any task, phase, or tool call whose subject matter is covered by a known standing convention",
-   "When the same violation or correction has occurred more than once, indicating a convention failed to persist or was never updated",
-   "At session, phase, or context boundaries where transient memory of prior instructions would otherwise be lost"
-  ],
-  "antiPatterns": [
-   "Treating a standing owner rule as conversation-local and letting it silently expire when context resets",
-   "Acknowledging a correction verbally without rewriting the persistent conventions record, leaving the same failure armed for the next session",
-   "Executing a task, phase, or tool call governed by a standing convention without first consulting the persisted conventions record",
-   "Storing durable obligations only in transient context (in-flight reasoning, chat history) with no external persistence",
-   "Rigidly applying a stale persisted convention after the owner's newer explicit instruction supersedes it, without updating the record"
-  ],
-  "confidence": 0.86
- },
- "intentContract": {
-  "ownerIntent": "The Owner wants a rule declared once ('from now on...') to be honored in every subsequent governed action across sessions and phases, without having to re-state it or correct the same violation twice.",
-  "targetBehavior": "A compliant agent visibly writes any owner-declared standing rule into a persistent conventions record at declaration time, reads that record before starting any task, phase, or tool call it governs and conforms the planned action to it, and edits the record immediately after any correction — all observable in its persistence and tool-call trajectory.",
-  "forbiddenBehavior": "Executing tasks or tool calls governed by a standing owner rule while relying on transient context or memory alone, and accepting corrections without rewriting the persistent conventions record, producing a repeating violate-correct-violate cycle across context boundaries.",
-  "evidenceSource": "The diagnosed pain of recurring violations of owner-declared standing rules across phase/session boundaries caused by context loss, with repeated corrections that never changed any persistent state, so the identical violation recurred after each context reset.",
-  "validationExpectation": "An evaluator should demand evidence that (a) a persistent conventions artifact exists and is written when a standing rule is declared, (b) a read of that record precedes each governed action in the trajectory, and (c) every correction produces an edit to the record. Any proposed rule change that permits recall from memory alone, skips the pre-action read for governed actions, or leaves the record unchanged after correction contradicts this intent and must be flagged rather than implemented."
- },
- "risks": [
-  "Partially overlaps core axioms T-10 (persist important state), T-05 (translate constraints into guardrails), T-02 (explicit intent priority), and T-08 (corrections as feedback); this draft must be treated as a lifecycle synthesis (capture-persist-recall-update) extending those axioms, or it risks being judged redundant with them.",
-  "A mandatory pre-action recall gate adds overhead and latency if applied too broadly; it must be scoped to actions the persisted conventions actually govern, not to every trivial action.",
-  "Persisted conventions can go stale if owner preferences evolve; rigid adherence to an outdated record without honoring the owner's current explicit instruction could conflict with T-02.",
-  "Misclassifying one-off, task-local instructions as standing rules would create unnecessary rigidity and confirmation interruptions when flexibility was expected.",
-  "Ambiguity in deciding which actions are 'governed' by a convention may cause the recall gate to be skipped precisely where it applies, silently reproducing the original failure."
- ]
-}
-```
-
-## R7（G-manual_1788526359876_r5x r1）
-
-### X
-```json
-{
- "principleDraft": {
-  "title": "Gate causal conclusions on event-level evidence and data consistency before externalization",
-  "statement": "Before any root-cause attribution or diagnostic conclusion is externalized (ticket, incident report, fix plan), it must pass three gates: (1) every link of the proposed causal mechanism is supported by event-level evidence, not aggregate statistics or heuristics alone; (2) the conclusion's measurable implications are explicitly compared item-by-item against observed data, and any contradiction forces revision or rollback of the conclusion, not dismissal of the data; (3) if evidence acquisition is blocked, the output must carry an explicit unverified/uncertainty label with downgraded assertion strength, never a silently confident claim. Exploratory hypotheses may be freely proposed but must be labeled as hypotheses until they pass these gates.",
-  "rationale": "The diagnosed misdiagnosis arose not from missing evidence but from missing gates between forming a conclusion and exporting it: a single aggregate metric (90.8% truncation rate) stood in for mechanism verification, the conclusion (budget truncation) directly contradicted already-measured data (5686/9000 rows within budget) with no comparison ever performed, and the unverified conclusion escaped as an external ticket, propagating error downstream. Each gate independently intercepts this failure family: mechanism-chain verification defeats statistics-as-causation, the consistency check surfaces data contradictions before export, and forced degradation removes the silent-continuation path when evidence access fails. The principle composes T-03 (evidence before inference), T-05 (hard constraints as explicit gates), and T-07 (verify against intended outcome) into a process constraint specialized to the conclusion-externalization moment.",
-  "applicability": [
-   "Producing or publishing root-cause attributions, diagnostic conclusions, or incident reports that will leave the agent's context (tickets, reports, fix proposals)",
-   "Conclusions built primarily from aggregate statistical metrics, rate thresholds, or heuristic inference rather than traced mechanism evidence",
-   "Diagnostic workflows where evidence acquisition is partially or fully blocked (tool failures, unreachable data, incomplete logs) while the task continues",
-   "Any point where a causal claim's observable implications can be checked against measurements already collected"
-  ],
-  "antiPatterns": [
-   "Substituting an aggregate statistic or correlation (e.g., a 90.8% truncation rate) for event-level verification of a causal mechanism",
-   "Externalizing a conclusion whose measurable implications contradict data already in hand (e.g., asserting budget truncation while measured values sit within budget)",
-   "Treating conclusion-formation as the end of verification — never re-deriving the conclusion's predictions and checking them against observed data",
-   "Silently continuing at full asserted confidence when evidence tools fail or data is unreachable",
-   "Escalating an unverified hypothesis into a ticket, report, or fix plan without labeling its epistemic status"
-  ],
-  "confidence": 0.82
- },
- "intentContract": {
-  "ownerIntent": "The Owner wants unverified root-cause conclusions — especially ones that contradict already-measured data or rest only on aggregate statistics — blocked from leaving the agent as tickets or reports that propagate the error downstream.",
-  "targetBehavior": "In any trajectory that emits a ticket, report, or fix plan containing a causal claim, a reviewer can see: cited event-level evidence for each link of the claimed mechanism, an explicit item-by-item comparison of the claim's measurable implications against observed values (contradictions triggering revision), and, where evidence access failed, an unverified/uncertainty label with downgraded assertion strength.",
-  "forbiddenBehavior": "Externalizing a causal or diagnostic conclusion that is backed only by aggregate statistics or heuristics, that was never compared against available measured data, or that is asserted at full confidence despite blocked or failed evidence acquisition.",
-  "evidenceSource": "The diagnosed incident: a 90.8% aggregate truncation rate was used to conclude 'budget truncation' while measured data showed 5686/9000 rows within budget; the direct contradiction was never compared and the unverified conclusion escaped as an external ticket.",
-  "validationExpectation": "An evaluator should accept a rule as faithful only if, for any externalized causal conclusion, it demands visible evidence of (a) event-level support per mechanism link, (b) an explicit conclusion-vs-measurement consistency check, and (c) uncertainty labeling with downgraded strength when evidence is blocked; a repair change that removes any of these three gates or permits silent full-confidence export contradicts this intent."
- },
- "risks": [
-  "Overlaps core axioms T-03 (evidence before inference), T-05 (explicit guardrails and gates), and T-07 (verify outcome after acting); downstream rule generation must treat this as a scenario-specific composition for conclusion externalization and avoid emitting redundant or conflicting rules",
-  "Over-gating cost: demanding event-level verification and item-by-item comparison for every minor conclusion adds latency to urgent diagnostics; gate strictness should scale with the conclusion's blast radius",
-  "When evidence is absolutely unobtainable, a hard gate risks action paralysis or incentivizing fabricated evidence; explicit uncertainty labeling and conclusion downgrade must remain the sanctioned exit path, not prohibition of output",
-  "Event logs themselves can be incomplete or misleading; treating single-source event evidence as unquestionable ground truth without cross-corroboration can create new misdiagnosis modes",
-  "Mis-scoping risk: applying the gates to exploratory hypothesis generation (which requires only hypothesis labeling, not prohibition) would suppress useful early reasoning"
- ]
-}
-```
-
-### Y
 ```json
 {
  "principleDraft": {
@@ -567,9 +445,87 @@
 }
 ```
 
-## R8（G-manual_1788415743052_os4 r2）
+### Y
+```json
+{
+ "principleDraft": {
+  "title": "Gate causal conclusions on event-level evidence and data consistency before externalization",
+  "statement": "Before any root-cause attribution or diagnostic conclusion is externalized (ticket, incident report, fix plan), it must pass three gates: (1) every link of the proposed causal mechanism is supported by event-level evidence, not aggregate statistics or heuristics alone; (2) the conclusion's measurable implications are explicitly compared item-by-item against observed data, and any contradiction forces revision or rollback of the conclusion, not dismissal of the data; (3) if evidence acquisition is blocked, the output must carry an explicit unverified/uncertainty label with downgraded assertion strength, never a silently confident claim. Exploratory hypotheses may be freely proposed but must be labeled as hypotheses until they pass these gates.",
+  "rationale": "The diagnosed misdiagnosis arose not from missing evidence but from missing gates between forming a conclusion and exporting it: a single aggregate metric (90.8% truncation rate) stood in for mechanism verification, the conclusion (budget truncation) directly contradicted already-measured data (5686/9000 rows within budget) with no comparison ever performed, and the unverified conclusion escaped as an external ticket, propagating error downstream. Each gate independently intercepts this failure family: mechanism-chain verification defeats statistics-as-causation, the consistency check surfaces data contradictions before export, and forced degradation removes the silent-continuation path when evidence access fails. The principle composes T-03 (evidence before inference), T-05 (hard constraints as explicit gates), and T-07 (verify against intended outcome) into a process constraint specialized to the conclusion-externalization moment.",
+  "applicability": [
+   "Producing or publishing root-cause attributions, diagnostic conclusions, or incident reports that will leave the agent's context (tickets, reports, fix proposals)",
+   "Conclusions built primarily from aggregate statistical metrics, rate thresholds, or heuristic inference rather than traced mechanism evidence",
+   "Diagnostic workflows where evidence acquisition is partially or fully blocked (tool failures, unreachable data, incomplete logs) while the task continues",
+   "Any point where a causal claim's observable implications can be checked against measurements already collected"
+  ],
+  "antiPatterns": [
+   "Substituting an aggregate statistic or correlation (e.g., a 90.8% truncation rate) for event-level verification of a causal mechanism",
+   "Externalizing a conclusion whose measurable implications contradict data already in hand (e.g., asserting budget truncation while measured values sit within budget)",
+   "Treating conclusion-formation as the end of verification — never re-deriving the conclusion's predictions and checking them against observed data",
+   "Silently continuing at full asserted confidence when evidence tools fail or data is unreachable",
+   "Escalating an unverified hypothesis into a ticket, report, or fix plan without labeling its epistemic status"
+  ],
+  "confidence": 0.82
+ },
+ "intentContract": {
+  "ownerIntent": "The Owner wants unverified root-cause conclusions — especially ones that contradict already-measured data or rest only on aggregate statistics — blocked from leaving the agent as tickets or reports that propagate the error downstream.",
+  "targetBehavior": "In any trajectory that emits a ticket, report, or fix plan containing a causal claim, a reviewer can see: cited event-level evidence for each link of the claimed mechanism, an explicit item-by-item comparison of the claim's measurable implications against observed values (contradictions triggering revision), and, where evidence access failed, an unverified/uncertainty label with downgraded assertion strength.",
+  "forbiddenBehavior": "Externalizing a causal or diagnostic conclusion that is backed only by aggregate statistics or heuristics, that was never compared against available measured data, or that is asserted at full confidence despite blocked or failed evidence acquisition.",
+  "evidenceSource": "The diagnosed incident: a 90.8% aggregate truncation rate was used to conclude 'budget truncation' while measured data showed 5686/9000 rows within budget; the direct contradiction was never compared and the unverified conclusion escaped as an external ticket.",
+  "validationExpectation": "An evaluator should accept a rule as faithful only if, for any externalized causal conclusion, it demands visible evidence of (a) event-level support per mechanism link, (b) an explicit conclusion-vs-measurement consistency check, and (c) uncertainty labeling with downgraded strength when evidence is blocked; a repair change that removes any of these three gates or permits silent full-confidence export contradicts this intent."
+ },
+ "risks": [
+  "Overlaps core axioms T-03 (evidence before inference), T-05 (explicit guardrails and gates), and T-07 (verify outcome after acting); downstream rule generation must treat this as a scenario-specific composition for conclusion externalization and avoid emitting redundant or conflicting rules",
+  "Over-gating cost: demanding event-level verification and item-by-item comparison for every minor conclusion adds latency to urgent diagnostics; gate strictness should scale with the conclusion's blast radius",
+  "When evidence is absolutely unobtainable, a hard gate risks action paralysis or incentivizing fabricated evidence; explicit uncertainty labeling and conclusion downgrade must remain the sanctioned exit path, not prohibition of output",
+  "Event logs themselves can be incomplete or misleading; treating single-source event evidence as unquestionable ground truth without cross-corroboration can create new misdiagnosis modes",
+  "Mis-scoping risk: applying the gates to exploratory hypothesis generation (which requires only hypothesis labeling, not prohibition) would suppress useful early reasoning"
+ ]
+}
+```
+
+## R7（G-manual_1788415743052_os4 r2）
 
 ### X
+```json
+{
+ "principleDraft": {
+  "title": "Verify Environment Contracts After Platform Change Before Consequential Execution",
+  "statement": "Whenever the execution environment changes (new OS, host, interpreter, or interpreter version) or the content is encoding-sensitive (non-ASCII), treat all implicit environmental contracts—file encoding, interpreter version, working directory—as unverified. Before the first consequential execution, re-establish them with a minimal, reversible check: an interpreter/version probe, an explicit encoding convention (e.g., UTF-8 with BOM for non-ASCII files consumed by Windows PowerShell 5.x), or a smoke test on a sacrificial artifact. When a check reveals a mismatch, persist the corrected convention as a standing rule tied to the platform so the same reset is never re-learned through runtime failure.",
+  "rationale": "The root cause was an encoding assumption (UTF-8 no-BOM, valid under pwsh/Linux) carried into a Windows PowerShell 5.1 host that silently parses such files as ANSI, surfacing only as runtime garbling or failure. Environmental contracts are invisible: no tool enforces them, and their validity is platform-relative, so an environment transition silently invalidates them. A pre-flight probe costs seconds, converts a guaranteed owner-visible failure into a cheap check, and persisting the learned convention turns a one-time correction into standing operational knowledge. This is a platform-transition-triggered specialization of T-01 and T-05, with a T-08/T-10 persistence requirement for the learned rule.",
+  "applicability": [
+   "Executing scripts or performing consequential file operations on a new host, OS, interpreter, or interpreter version",
+   "Writing or modifying files containing non-ASCII or otherwise encoding-sensitive content",
+   "The first consequential execution after any platform or environment transition, before relying on assumptions formed in a prior environment",
+   "Recording environment-specific conventions discovered through verification or failure so they survive context resets"
+  ],
+  "antiPatterns": [
+   "Carrying encoding, interpreter, or working-directory assumptions verified in one environment into a different environment without re-checking",
+   "Writing non-ASCII content to files consumed by a host with unknown encoding behavior (e.g., PowerShell 5.x defaulting to ANSI) without an explicit encoding convention or BOM",
+   "Letting the first evidence of an environment mismatch be a consequential runtime failure visible to the owner, when a version probe or reversible smoke test could have caught it",
+   "Re-learning the same environment lesson after every reset because the corrected convention was never persisted"
+  ],
+  "confidence": 0.78
+ },
+ "intentContract": {
+  "ownerIntent": "The Owner wants to prevent runtime garbling and failures caused by carrying environment assumptions (file encoding, interpreter version) from one platform into another—such as a UTF-8 no-BOM file written under pwsh/Linux assumptions being silently parsed as ANSI by Windows PowerShell 5.1.",
+  "targetBehavior": "Before the first consequential execution on a new or changed environment, the agent performs a minimal, reversible verification—an interpreter/version probe, an explicit encoding decision (e.g., BOM for non-ASCII on PowerShell 5.x), or a smoke test on a sacrificial artifact—and on discovering a mismatch, adopts and persists the corrected convention before proceeding.",
+  "forbiddenBehavior": "Relying on implicit environment contracts that were only valid in a prior environment and letting the first evidence of the mismatch be a consequential, owner-visible runtime failure, without ever persisting the corrected convention.",
+  "evidenceSource": "The diagnosed pain: a UTF-8 no-BOM artifact produced under pwsh/Linux assumptions was silently parsed as ANSI by Windows PowerShell 5.1, garbling at runtime instead of failing a cheap pre-flight check; and the philosopher's analysis that implicit environmental contracts are platform-relative and reset by environment change.",
+  "validationExpectation": "An evaluator should accept a rule as faithful only if it (a) triggers on environment/platform change or encoding-sensitive content, (b) requires a pre-flight probe or explicit encoding convention before consequential execution, and (c) requires persisting the corrected convention. A rule that merely restates generic 'verify before acting' without the platform-transition trigger and the persistence requirement fails this intent."
+ },
+ "risks": [
+  "Overlaps with core axioms T-01, T-05, T-08, and T-10; this draft is a platform-transition specialization with a persistence requirement rather than a wholly new principle, so downstream consolidation or explicit axiom referencing should be considered",
+  "Over-probing risk: requiring pre-flight checks for every trivial operation adds friction; generated rules must scope the trigger to consequential execution, encoding-sensitive content, or environment change",
+  "False confidence risk: a passing version probe or smoke test validates only the tested contract; other mismatches (cwd, permissions, locale) may still fail at runtime",
+  "Staleness risk: persisted platform-specific conventions (e.g., 'BOM for PowerShell 5.x') can become obsolete after environment upgrades and must be re-validated when the platform changes again",
+  "Over-generalization risk: the BOM example is specific to Windows PowerShell 5.x behavior and must not be encoded as a universal UTF-8 rule",
+  "Urgency conflict: in genuinely time-sensitive situations, mandatory pre-flight verification could delay necessary action; probes must remain minimal and reversible, not exhaustive"
+ ]
+}
+```
+
+### Y
 ```json
 {
  "principleDraft": {
@@ -608,41 +564,80 @@
 }
 ```
 
+## R8（G-manual_1788265732489_9ne r1）
+
+### X
+```json
+{
+ "principleDraft": {
+  "title": "Gate unverifiable inputs at entry; label degraded outputs with enforceable evidence-strength",
+  "statement": "Whenever an input (data, claim, or report) enters a pipeline whose outputs downstream consumers will treat as verified, verify an observable provenance source at the entry point (e.g., authenticated session binding with a behavioral trace) and persist that provenance at capture time; if such evidence is unavailable, refuse the input or request resubmission through a provenance-carrying channel, and if processing nonetheless proceeds on inference alone, emit the output only with a machine-checkable degraded-evidence label and an enforced confidence ceiling — never as a normal-confidence conclusion.",
+  "rationale": "The root cause was a missing trace-availability gate: a CLI-submitted pain report with no authenticated session binding or observable trace entered the diagnosis pipeline as a normal-confidence input, its weakness was buried in internal evidence notes, and a 0.55-confidence diagnosis propagated downstream as if evidence-backed. Verifying provenance at entry, persisting it at capture time, and attaching enforceable evidence-strength labels convert this silent epistemic degradation into an explicit, blocked, or clearly-marked condition that every downstream consumer can observe and act on.",
+  "applicability": [
+   "Diagnosis, analysis, automated decisioning, or reporting pipelines whose outputs downstream consumers treat as verified",
+   "Ingestion entry points accepting multiple submission channels with heterogeneous provenance guarantees (e.g., authenticated session channels vs. CLI/owner-reported channels)",
+   "Runtime conditions where trace evidence may be unavailable (trace unavailable_with_reason) and outputs could otherwise be produced from owner inference alone"
+  ],
+  "antiPatterns": [
+   "Accepting a submission from a channel without observable provenance (e.g., non-authenticated CLI) into the pipeline as a normal-confidence input",
+   "Producing a full diagnosis or conclusion from owner inference alone when trace evidence is explicitly unavailable, instead of refusing or explicitly degrading the output",
+   "Skipping capture-time persistence of session provenance and trace references, leaving downstream stages without verifiable evidence",
+   "Letting an evidence-deficient output flow downstream with its weakness recorded only in internal evidence notes — no machine-checkable evidence-strength tag and no enforcement rule"
+  ],
+  "confidence": 0.8
+ },
+ "intentContract": {
+  "ownerIntent": "The Owner wants conclusions produced only from observable, verifiable evidence: when a submission lacks an authenticated session trace, the pipeline must block it or explicitly downgrade the output's credibility instead of inferring without evidence.",
+  "targetBehavior": "At every ingestion entry point, the agent verifies an observable evidence source exists (e.g., authenticated session binding with behavioral trace), persists that provenance at capture time, and either refuses the unprovenanced input or attaches a machine-checkable degraded-evidence label with an enforced confidence ceiling to any output produced from inference alone.",
+  "forbiddenBehavior": "Accepting an input that lacks observable provenance as a normal-confidence input and letting its evidence weakness stay buried in internal notes while the resulting conclusion flows downstream unmarked and at full confidence.",
+  "evidenceSource": "Diagnosis manual_1788265732489_9nexm9e6: CLI-submitted pain report with no authenticated host session provenance (owner_reported_no_host_trace), trace unavailable_with_reason, yet a 0.55-confidence diagnosis was produced and propagated; violatedPrinciples T-03 and T-10.",
+  "validationExpectation": "An evaluator should require that any rule derived from this principle names (a) a verifiable provenance check performed at ingestion, (b) a block/resubmission path or an explicit degraded-evidence label with an enforced confidence ceiling on output, and (c) capture-time persistence of provenance; a rule that merely advises 'use evidence' without an entry gate or enforceable labeling does not satisfy this intent, and any change removing the gate or the label contradicts it."
+ },
+ "risks": [
+  "Operationalizes core axioms T-03 (observable evidence), T-05 (explicit guardrails), and T-10 (persist key state); the overlap requires precedence rules so enforcement is complementary rather than redundant or conflicting.",
+  "Fail-closed entry gating can block legitimate owner-reported inputs when instrumentation or authenticated sessions are unavailable, reducing availability and frustrating owners.",
+  "Evidence-strength labels create a false sense of safety if downstream consumers ignore them; labeling without enforcement does not prevent misuse.",
+  "Aggressive refusal thresholds may push users to bypass official channels entirely, degrading overall observability rather than improving it.",
+  "The principle is distilled from a single incident with moderate diagnosis confidence (0.55) and no behavioral trace; the threshold between refusal and labeled degradation needs calibration against broader evidence."
+ ]
+}
+```
+
 ### Y
 ```json
 {
  "principleDraft": {
-  "title": "Verify Environment Contracts After Platform Change Before Consequential Execution",
-  "statement": "Whenever the execution environment changes (new OS, host, interpreter, or interpreter version) or the content is encoding-sensitive (non-ASCII), treat all implicit environmental contracts—file encoding, interpreter version, working directory—as unverified. Before the first consequential execution, re-establish them with a minimal, reversible check: an interpreter/version probe, an explicit encoding convention (e.g., UTF-8 with BOM for non-ASCII files consumed by Windows PowerShell 5.x), or a smoke test on a sacrificial artifact. When a check reveals a mismatch, persist the corrected convention as a standing rule tied to the platform so the same reset is never re-learned through runtime failure.",
-  "rationale": "The root cause was an encoding assumption (UTF-8 no-BOM, valid under pwsh/Linux) carried into a Windows PowerShell 5.1 host that silently parses such files as ANSI, surfacing only as runtime garbling or failure. Environmental contracts are invisible: no tool enforces them, and their validity is platform-relative, so an environment transition silently invalidates them. A pre-flight probe costs seconds, converts a guaranteed owner-visible failure into a cheap check, and persisting the learned convention turns a one-time correction into standing operational knowledge. This is a platform-transition-triggered specialization of T-01 and T-05, with a T-08/T-10 persistence requirement for the learned rule.",
+  "title": "Gate Evidence at Entry: Unverifiable Inputs Must Not Propagate as Verified Conclusions",
+  "statement": "Before any input enters a reasoning or decision pipeline, its provenance must be verified or the input must be gated at entry — rejected, quarantined, or processed only under an enforceable hard confidence ceiling — and every output derived from below-threshold evidence must carry a machine-checkable evidence-strength label that downstream consumers can observe and act on. At merge points where multiple submission channels with heterogeneous provenance guarantees converge, the weakest channel must never silently define the confidence of the merged conclusion; provenance must be captured and persisted at input time, not reconstructed after the fact.",
+  "rationale": "The root cause was that an input lacking observable provenance was accepted as a normal-confidence input, its weakness was buried in internal notes, and the derived output propagated downstream as if verified. Gating at the entry point, persisting provenance at capture time, and attaching enforceable evidence-strength labels (with refusal or a hard confidence ceiling when evidence falls below threshold) converts a silent epistemic degradation into an explicit, blocked, or clearly-marked condition that every downstream consumer can see and act on.",
   "applicability": [
-   "Executing scripts or performing consequential file operations on a new host, OS, interpreter, or interpreter version",
-   "Writing or modifying files containing non-ASCII or otherwise encoding-sensitive content",
-   "The first consequential execution after any platform or environment transition, before relying on assumptions formed in a prior environment",
-   "Recording environment-specific conventions discovered through verification or failure so they survive context resets"
+   "Data, claims, or reports entering a diagnosis, analysis, automated-decisioning, or reporting pipeline whose outputs downstream consumers treat as verified",
+   "Systems with multiple submission channels that have heterogeneous provenance guarantees (e.g., instrumented/authenticated channels vs. manual owner-reported channels)",
+   "Runtime contexts where trace evidence or authenticated sessions may be unavailable at the moment of submission",
+   "Merge points where inputs from different channels combine into a shared conclusion or confidence score"
   ],
   "antiPatterns": [
-   "Carrying encoding, interpreter, or working-directory assumptions verified in one environment into a different environment without re-checking",
-   "Writing non-ASCII content to files consumed by a host with unknown encoding behavior (e.g., PowerShell 5.x defaulting to ANSI) without an explicit encoding convention or BOM",
-   "Letting the first evidence of an environment mismatch be a consequential runtime failure visible to the owner, when a version probe or reversible smoke test could have caught it",
-   "Re-learning the same environment lesson after every reset because the corrected convention was never persisted"
+   "Accepting an unverifiable input at normal confidence and noting its weakness only in internal notes while the output propagates downstream as if verified",
+   "Letting the weakest channel's provenance silently define the confidence of merged conclusions",
+   "Attaching evidence-strength labels that no downstream consumer or automated check enforces (labeling without enforcement)",
+   "Degrading a conclusion mid-pipeline and continuing to propagate it without an explicit confidence ceiling or visible evidence-strength label",
+   "Attempting to reconstruct provenance after processing instead of capturing and persisting it at input entry"
   ],
-  "confidence": 0.78
+  "confidence": 0.8
  },
  "intentContract": {
-  "ownerIntent": "The Owner wants to prevent runtime garbling and failures caused by carrying environment assumptions (file encoding, interpreter version) from one platform into another—such as a UTF-8 no-BOM file written under pwsh/Linux assumptions being silently parsed as ANSI by Windows PowerShell 5.1.",
-  "targetBehavior": "Before the first consequential execution on a new or changed environment, the agent performs a minimal, reversible verification—an interpreter/version probe, an explicit encoding decision (e.g., BOM for non-ASCII on PowerShell 5.x), or a smoke test on a sacrificial artifact—and on discovering a mismatch, adopts and persists the corrected convention before proceeding.",
-  "forbiddenBehavior": "Relying on implicit environment contracts that were only valid in a prior environment and letting the first evidence of the mismatch be a consequential, owner-visible runtime failure, without ever persisting the corrected convention.",
-  "evidenceSource": "The diagnosed pain: a UTF-8 no-BOM artifact produced under pwsh/Linux assumptions was silently parsed as ANSI by Windows PowerShell 5.1, garbling at runtime instead of failing a cheap pre-flight check; and the philosopher's analysis that implicit environmental contracts are platform-relative and reset by environment change.",
-  "validationExpectation": "An evaluator should accept a rule as faithful only if it (a) triggers on environment/platform change or encoding-sensitive content, (b) requires a pre-flight probe or explicit encoding convention before consequential execution, and (c) requires persisting the corrected convention. A rule that merely restates generic 'verify before acting' without the platform-transition trigger and the persistence requirement fails this intent."
+  "ownerIntent": "The Owner wants to prevent unverifiable inputs — such as manually submitted reports lacking observable provenance — from being ingested as normal-confidence evidence and flowing downstream as verified conclusions.",
+  "targetBehavior": "Before ingesting any input, the agent verifies or captures and persists its provenance at entry; when provenance is unverifiable, the agent either refuses/quarantines the input or processes it under a machine-checkable reduced-evidence label with a hard confidence ceiling, and records the gating decision and label in persisted state so downstream consumers can observe it.",
+  "forbiddenBehavior": "Accepting an unverifiable input as a normal-confidence input, burying its weakness in internal notes, and letting the derived output propagate downstream as a verified conclusion — including silently allowing the weakest submission channel to set the confidence of merged results.",
+  "evidenceSource": "The diagnosed pain: an owner-submitted manual input without observable provenance was admitted through a weaker channel, treated as normal confidence, its weakness noted only in internal notes, and its conclusion propagated downstream as if verified.",
+  "validationExpectation": "An evaluator should observe, in the tool/executable trajectory, an entry gate that checks provenance before processing, a persisted provenance record or explicit gating decision, and either a refusal or an output carrying a machine-checkable evidence-strength label with a capped confidence — outputs derived from unverifiable input must never appear downstream at normal confidence."
  },
  "risks": [
-  "Overlaps with core axioms T-01, T-05, T-08, and T-10; this draft is a platform-transition specialization with a persistence requirement rather than a wholly new principle, so downstream consolidation or explicit axiom referencing should be considered",
-  "Over-probing risk: requiring pre-flight checks for every trivial operation adds friction; generated rules must scope the trigger to consequential execution, encoding-sensitive content, or environment change",
-  "False confidence risk: a passing version probe or smoke test validates only the tested contract; other mismatches (cwd, permissions, locale) may still fail at runtime",
-  "Staleness risk: persisted platform-specific conventions (e.g., 'BOM for PowerShell 5.x') can become obsolete after environment upgrades and must be re-validated when the platform changes again",
-  "Over-generalization risk: the BOM example is specific to Windows PowerShell 5.x behavior and must not be encoded as a universal UTF-8 rule",
-  "Urgency conflict: in genuinely time-sensitive situations, mandatory pre-flight verification could delay necessary action; probes must remain minimal and reversible, not exhaustive"
+  "Partially overlaps with core axioms T-03 (use observable evidence before claiming results), T-05 (translate hard constraints into explicit guardrails), and T-10 (persist important state); rule generation must define precedence to avoid redundant or conflicting enforcement.",
+  "Fail-closed gating can block legitimate owner-reported inputs when instrumentation or authenticated sessions are unavailable, reducing availability and frustrating owners.",
+  "Evidence-strength labels can create a false sense of safety if downstream consumers ignore them; labeling without enforcement does not prevent misuse.",
+  "Aggressive refusal thresholds may push users to bypass official channels entirely, degrading overall observability rather than improving it.",
+  "Over-broad application could gate informal collaborative or exploratory inputs where provenance is naturally weak, adding friction without epistemic benefit; applicability should stay scoped to pipelines whose outputs are treated as verified."
  ]
 }
 ```

@@ -19,12 +19,16 @@ const runsDirName = process.argv.includes('--runs') ? process.argv[process.argv.
 const runsDir = path.join(DATA, runsDirName);
 const OUT = path.join(DATA, `judgments-quality-${runsDirName}.json`);
 
-function argv(name) {
-  const i = process.argv.indexOf(name);
-  return i >= 0 ? process.argv[i + 1] : undefined;
-}
 function seededBool(seed) {
   return parseInt(createHash('sha256').update(seed).digest('hex').slice(0, 8), 16) % 2 === 1;
+}
+// read-parse-or-default: avoids existsSync→readFileSync TOCTOU (CodeQL)
+function readJsonOr(file, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
 }
 
 const SYSTEM = `You are an impartial quality judge for agent-behavior principles. You will see:
@@ -50,9 +54,9 @@ Return ONLY JSON:
  "reasons":"<=120 words, cite dimensions that decided it",
  "bothBadReason":"when verdict is BOTH_BAD, why both fail"}`;
 
-const frozen = JSON.parse(fs.readFileSync(path.join(DATA, 'frozen-inputs.json'), 'utf8')).groups;
+const frozen = readJsonOr(path.join(DATA, 'frozen-inputs.json'), { groups: [] }).groups;
 const diagByGroup = new Map(frozen.map((g) => [g.source_group_id, g.diagnosis]));
-const judgments = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : { pairs: {} };
+const judgments = readJsonOr(OUT, { pairs: {} });
 
 for (const f of fs.readdirSync(runsDir).filter((x) => x.endsWith('.json'))) {
   const run = JSON.parse(fs.readFileSync(path.join(runsDir, f), 'utf8'));
@@ -62,12 +66,17 @@ for (const f of fs.readdirSync(runsDir).filter((x) => x.endsWith('.json'))) {
     const key = `${run.group}#r${r.repeat}`;
     if (judgments.pairs[key]) continue;
     const a = r.scribe_A, b = r.scribe_B;
-    if (!a?.parsed || !b?.parsed) {
-      // SPEC §30: generation failures stay in the denominator — a pair where
-      // exactly one arm produced a valid output is won by the valid arm; both
-      // invalid = BOTH_BAD. Never dropped.
-      const verdict = a?.parsed ? 'A' : b?.parsed ? 'B' : 'BOTH_BAD';
-      judgments.pairs[key] = { key, skipped: 'generation_failure', aValid: !!a?.parsed, bValid: !!b?.parsed, verdict, reasons: 'asymmetric or dual generation failure (SPEC §30)' };
+    // SPEC §30 hard gate: only outputs that PASSED the production validator
+    // are eligible to be judged. A parseable-but-invalid output is a failure
+    // for its arm — asymmetric failure awards the pair to the valid arm,
+    // dual failure is BOTH_BAD. Never dropped (stays in the denominator).
+    if (!a?.ok || !b?.ok) {
+      const verdict = a?.ok ? 'A' : b?.ok ? 'B' : 'BOTH_BAD';
+      judgments.pairs[key] = {
+        key, skipped: a?.parsed || b?.parsed ? 'validator_failure' : 'generation_failure',
+        aValid: !!a?.ok, bValid: !!b?.ok, verdict,
+        reasons: 'arm output failed the deterministic production validator (SPEC §30): the valid arm wins; both invalid = BOTH_BAD',
+      };
       continue;
     }
     const bIsX = seededBool(key);

@@ -12,7 +12,6 @@ const OUT = path.join(ROOT, 'docs', 'audit', 'pri-815-quality-first', 'PHASE_A_R
 
 const agg = JSON.parse(fs.readFileSync(path.join(DATA, 'aggregate-runs.json'), 'utf8'));
 const runsDir = path.join(DATA, 'runs');
-const manifest = JSON.parse(fs.readFileSync(path.join(DATA, '..', 'sample-manifest.json'), 'utf8'));
 
 const sha = (s) => createHash('sha256').update(s).digest('hex').slice(0, 12);
 // Arm identity hashes: the CONSTANT system prompts (what actually differs
@@ -40,7 +39,6 @@ const subsets = agg.subsets;
 const clean = subsets.CLEAN, dev = subsets.DEV;
 
 const net = t.NET_ADVANTAGE_PP;
-const judgeAligned = t.W > t.L; // same-family judge — see PRIMARY_JUDGE disclosure
 
 // T1 exploratory provisional-PASS conditions (execution package T1 + SPEC §27/§31/§32)
 // 1. B wins the vast majority of independent groups with net >= 20pp
@@ -125,6 +123,13 @@ const lines = [
   '|---|---|---|---|---|---|---|',
   ...Object.entries(agg.perGroup).map(([gid, g]) =>
     `| ${gid} | ${g.class} | ${(g.verdicts ?? []).join('/')} | ${g.groupVerdict} | ${g.stabilityA ?? '-'} | ${g.stabilityB ?? '-'} | ${g.tokensA ?? '-'}/${g.tokensB ?? '-'} |`),
+  '',
+  '## Review-round corrections (2026-09-18, PR #1753)',
+  '',
+  '- P1 (validator hard gate): judge eligibility previously tested `parsed`, letting a parseable-but-schema-invalid output be judged (and win). Regraded deterministically from run data: exactly 1 pair affected (G-manual_1788612956754_9aa r2, B output missing generatedAt, judge had awarded B) -> reclassified A_WIN by the SPEC §30 rule. Group verdict unchanged (B_WIN, 2/3). W/L/T unchanged.',
+  '- P2 (BOTH_BAD accounting): skipped generation-failure BOTH_BAD verdicts (4 pairs across the 3 incident-quarantined groups) were displayed in the table but not counted; BOTH_BAD_GROUPS corrected 0 -> 3.',
+  '- P2 (fail-loud manifest): build-sample-manifest now refuses to classify when the spike ab-inputs record is unreadable instead of silently treating everything as CLEAN.',
+  '- The 3 quarantined groups are merged back into this aggregate from the pre-incident snapshot (tokens/validity/stability preserved; verdicts re-derived from cached judgments) — see restore-quarantined-groups.mjs.',
   '',
   '## Deviations & disclosures',
   '',

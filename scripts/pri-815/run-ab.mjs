@@ -186,8 +186,14 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 const queue = [];
 for (const g of groups) {
   const file = path.join(OUT_DIR, `${g.source_group_id}.json`);
-  if (fs.existsSync(file)) {
-    const existing = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // TOCTOU-safe read (CodeQL): unreadable/incomplete file = redo the group
+  let existing = null;
+  try {
+    existing = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    existing = null;
+  }
+  if (existing) {
     if (existing.repeats?.length === repeats && existing.repeats.every((r) => r.complete)) {
       console.log(`[skip] ${g.source_group_id} (complete)`);
       continue;

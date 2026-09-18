@@ -1514,57 +1514,13 @@
   },
   "G-manual_1788612956754_9aa#r2": {
    "key": "G-manual_1788612956754_9aa#r2",
-   "bIsX": true,
-   "judgeValid": true,
-   "verdict": "B",
-   "scores": {
-    "1": [
-     9,
-     9
-    ],
-    "2": [
-     9,
-     6
-    ],
-    "3": [
-     9,
-     8
-    ],
-    "4": [
-     9,
-     7
-    ],
-    "5": [
-     7,
-     6
-    ],
-    "6": [
-     9,
-     9
-    ],
-    "7": [
-     9,
-     9
-    ],
-    "8": [
-     9,
-     8
-    ],
-    "9": [
-     9,
-     8
-    ],
-    "10": [
-     7,
-     7
-    ]
-   },
-   "reasons": "Both capture the core intent (mtime+content gate, source-file authority, refresh-or-defer) equally well (dims 1,6,7). X wins on evidence grounding: it cites the concrete incident (12:00 heartbeat, 08:12 snapshot, CURRENT_FOCUS v48, 19:08 broadcast, narration_lines_ep002.json 08:24, diagnosis ID, 0.35 confidence) while Y's evidenceSource vaguely references 'dreamer and philosopher artifacts' rather than the actual source evidence (dim 2). Y also overreaches by extending to 'consequential decisions' and 'task ledgers' the source pain doesn't support (dim 4), and its antiPatterns are slightly more generic (dim 8). X's risks additionally flag the owner-reported/no-host-trace evidence limitation (dim 9).",
-   "usage": {
-    "input": 3421,
-    "output": 2169,
-    "total": 5590
-   }
+   "skipped": "validator_failure",
+   "aValid": true,
+   "bValid": false,
+   "verdict": "A",
+   "reasons": "regraded by deterministic §30 hard gate (review fix): arm output failed the production validator; judge-issued verdict superseded",
+   "priorVerdict": "B",
+   "priorSkipped": null
   },
   "G-manual_1788612956754_9aa#r3": {
    "key": "G-manual_1788612956754_9aa#r3",

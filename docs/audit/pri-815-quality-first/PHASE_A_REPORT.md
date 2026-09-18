@@ -11,7 +11,7 @@ ARM_SYSTEM_PROMPT_HASHES: A = a47db8f47552   B = bc47a6df83bd (delta = B_ADDENDU
 B_ADDENDUM = pri815-b-addendum.v1 (frozen after Phase 3 dev calibration)
 REPEATS_PER_INPUT = 3 (paired: shared D/P outputs, scribe order interleaved)
 
-W = 19   L = 1   T = 1   BOTH_BAD_GROUPS = 0
+W = 19   L = 1   T = 1   BOTH_BAD_GROUPS = 3
 NET_ADVANTAGE = 85.7pp
 SIGN_TEST = N/A_EXPLORATORY
 
@@ -61,18 +61,25 @@ FINAL = HOLD
 | G-manual_1788578262338_kmp | DEV | B/B/B | B_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 45631/58022 |
 | G-manual_1788609453041_dtm | DEV | B/B/B | B_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 47457/60877 |
 | G-manual_1788610740431_xo5 | DEV | TIE/B/B | B_WIN | MATERIAL_DRIFT | CONTRADICTION | 46148/58337 |
-| G-manual_1788612956754_9aa | DEV | B/B/B | B_WIN | JUDGE_INVALID | CONTRADICTION | 44858/57729 |
-| G-manual_1788920022087_pjz | DEV | B/B/BOTH_BAD | B_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 32068/41003 |
+| G-manual_1788612956754_9aa | DEV | B/A/B | B_WIN | JUDGE_INVALID | CONTRADICTION | 44858/57729 |
 | G-manual_1789299059630_zqx | DEV | B/B/B | B_WIN | MATERIAL_DRIFT | CONTRADICTION | 50620/57857 |
-| G-manual_1789317326914_sj6 | DEV | B/BOTH_BAD/B | B_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 37431/48886 |
 | G-manual_1789398236238_04i | DEV | B/A/B | B_WIN | CONTRADICTION | CONTRADICTION | 48752/60317 |
 | G-pain_host_038c29c53be340 | CLEAN | B/B/B | B_WIN | MATERIAL_DRIFT | CONTRADICTION | 41058/47566 |
-| G-pain_host_198b8c4d901b5b | CLEAN | BOTH_BAD/A/BOTH_BAD | TIE | INSUFFICIENT_REPEATS | INSUFFICIENT_REPEATS | 15828/19617 |
 | G-pain_host_432596aee54456 | CLEAN | A/A/A | A_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 48414/58095 |
 | G-pain_host_620a1683e2eeb7 | CLEAN | B/B/B | B_WIN | CONTRADICTION | CONTRADICTION | 39617/49579 |
 | G-pain_host_6406fbff5ee282 | CLEAN | B/B/B | B_WIN | CONTRADICTION | CONTRADICTION | 44666/53036 |
 | G-pain_host_85731899e27e6d | CLEAN | B/B/B | B_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 42370/55632 |
 | G-pain_host_cffdcb9f5d0257 | DEV | B/B/A | B_WIN | MATERIAL_DRIFT | CONTRADICTION | 41382/53560 |
+| G-manual_1788920022087_pjz | DEV | B/B/BOTH_BAD | B_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 32068/41003 |
+| G-manual_1789317326914_sj6 | DEV | B/BOTH_BAD/B | B_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 37431/48886 |
+| G-pain_host_198b8c4d901b5b | CLEAN | BOTH_BAD/A/BOTH_BAD | TIE | INSUFFICIENT_REPEATS | INSUFFICIENT_REPEATS | 15828/19617 |
+
+## Review-round corrections (2026-09-18, PR #1753)
+
+- P1 (validator hard gate): judge eligibility previously tested `parsed`, letting a parseable-but-schema-invalid output be judged (and win). Regraded deterministically from run data: exactly 1 pair affected (G-manual_1788612956754_9aa r2, B output missing generatedAt, judge had awarded B) -> reclassified A_WIN by the SPEC §30 rule. Group verdict unchanged (B_WIN, 2/3). W/L/T unchanged.
+- P2 (BOTH_BAD accounting): skipped generation-failure BOTH_BAD verdicts (4 pairs across the 3 incident-quarantined groups) were displayed in the table but not counted; BOTH_BAD_GROUPS corrected 0 -> 3.
+- P2 (fail-loud manifest): build-sample-manifest now refuses to classify when the spike ab-inputs record is unreadable instead of silently treating everything as CLEAN.
+- The 3 quarantined groups are merged back into this aggregate from the pre-incident snapshot (tokens/validity/stability preserved; verdicts re-derived from cached judgments) — see restore-quarantined-groups.mjs.
 
 ## Deviations & disclosures
 

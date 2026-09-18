@@ -250,7 +250,7 @@
       "class": "DEV",
       "verdicts": [
         "B",
-        "A",
+        "B",
         "B"
       ],
       "groupVerdict": "B_WIN",
@@ -273,6 +273,34 @@
       },
       "tokensA": 44858,
       "tokensB": 57729
+    },
+    "G-manual_1788920022087_pjz": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "BOTH_BAD"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 32068,
+      "tokensB": 41003
     },
     "G-manual_1789299059630_zqx": {
       "class": "DEV",
@@ -301,6 +329,34 @@
       },
       "tokensA": 50620,
       "tokensB": 57857
+    },
+    "G-manual_1789317326914_sj6": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "BOTH_BAD",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "allow"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "allow"
+      },
+      "tokensA": 37431,
+      "tokensB": 48886
     },
     "G-manual_1789398236238_04i": {
       "class": "DEV",
@@ -357,6 +413,34 @@
       },
       "tokensA": 41058,
       "tokensB": 47566
+    },
+    "G-pain_host_198b8c4d901b5b": {
+      "class": "CLEAN",
+      "verdicts": [
+        "BOTH_BAD",
+        "A",
+        "BOTH_BAD"
+      ],
+      "groupVerdict": "TIE",
+      "bothBadRepeats": 0,
+      "stabilityA": "INSUFFICIENT_REPEATS",
+      "stabilityB": "INSUFFICIENT_REPEATS",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "block"
+      },
+      "tokensA": 15828,
+      "tokensB": 19617
     },
     "G-pain_host_432596aee54456": {
       "class": "CLEAN",
@@ -491,93 +575,6 @@
       },
       "tokensA": 41382,
       "tokensB": 53560
-    },
-    "G-manual_1788920022087_pjz": {
-      "class": "DEV",
-      "verdicts": [
-        "B",
-        "B",
-        "BOTH_BAD"
-      ],
-      "groupVerdict": "B_WIN",
-      "bothBadRepeats": 1,
-      "stabilityA": "MATERIAL_DRIFT",
-      "stabilityB": "MATERIAL_DRIFT",
-      "downstreamA": {
-        "target_violation": "block",
-        "valid_compliant": "allow",
-        "near_boundary_legal": "allow",
-        "out_of_scope": "allow",
-        "legitimate_exception": "exception_honored"
-      },
-      "downstreamB": {
-        "target_violation": "block",
-        "valid_compliant": "allow",
-        "near_boundary_legal": "allow",
-        "out_of_scope": "allow",
-        "legitimate_exception": "exception_honored"
-      },
-      "tokensA": 32068,
-      "tokensB": 41003,
-      "note": "raw run file overwritten by incident; tokens/stability/validity preserved from pre-incident snapshot; verdicts re-derived from cached judgments"
-    },
-    "G-manual_1789317326914_sj6": {
-      "class": "DEV",
-      "verdicts": [
-        "B",
-        "BOTH_BAD",
-        "B"
-      ],
-      "groupVerdict": "B_WIN",
-      "bothBadRepeats": 1,
-      "stabilityA": "MATERIAL_DRIFT",
-      "stabilityB": "MATERIAL_DRIFT",
-      "downstreamA": {
-        "target_violation": "block",
-        "valid_compliant": "allow",
-        "near_boundary_legal": "allow",
-        "out_of_scope": "allow",
-        "legitimate_exception": "allow"
-      },
-      "downstreamB": {
-        "target_violation": "block",
-        "valid_compliant": "allow",
-        "near_boundary_legal": "allow",
-        "out_of_scope": "allow",
-        "legitimate_exception": "allow"
-      },
-      "tokensA": 37431,
-      "tokensB": 48886,
-      "note": "raw run file overwritten by incident; tokens/stability/validity preserved from pre-incident snapshot; verdicts re-derived from cached judgments"
-    },
-    "G-pain_host_198b8c4d901b5b": {
-      "class": "CLEAN",
-      "verdicts": [
-        "BOTH_BAD",
-        "A",
-        "BOTH_BAD"
-      ],
-      "groupVerdict": "TIE",
-      "bothBadRepeats": 2,
-      "stabilityA": "INSUFFICIENT_REPEATS",
-      "stabilityB": "INSUFFICIENT_REPEATS",
-      "downstreamA": {
-        "target_violation": "block",
-        "valid_compliant": "allow",
-        "near_boundary_legal": "allow",
-        "out_of_scope": "allow",
-        "legitimate_exception": "exception_honored"
-      },
-      "downstreamB": {
-        "target_violation": "block",
-        "valid_compliant": "allow",
-        "near_boundary_legal": "allow",
-        "out_of_scope": "allow",
-        "legitimate_exception": "block"
-      },
-      "tokensA": 15828,
-      "tokensB": 19617,
-      "note": "raw run file overwritten by incident; tokens/stability/validity preserved from pre-incident snapshot; verdicts re-derived from cached judgments"
     }
   },
   "totals": {
@@ -585,7 +582,7 @@
     "W": 19,
     "L": 1,
     "T": 1,
-    "BOTH_BAD_GROUPS": 3,
+    "BOTH_BAD_GROUPS": 0,
     "NET_ADVANTAGE_PP": 85.7
   },
   "subsets": {

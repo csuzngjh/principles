@@ -33,8 +33,11 @@ Return ONLY JSON:
  "notes":"<=80 words on the most consequential misjudgment if any"}`;
 
 const scenarios = JSON.parse(fs.readFileSync(path.join(DATA, 'scenarios.json'), 'utf8')).scenarios;
-const frozen = JSON.parse(fs.readFileSync(path.join(DATA, 'frozen-inputs.json'), 'utf8')).groups;
-const out = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : { groups: {} };
+// existsSync→read TOCTOU-safe read (CodeQL); `frozen` removed (unused, CodeQL)
+function readJsonOr(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
+}
+const out = readJsonOr(OUT, { groups: {} });
 
 for (const f of fs.readdirSync(runsDir).filter((x) => x.endsWith('.json'))) {
   const run = JSON.parse(fs.readFileSync(path.join(runsDir, f), 'utf8'));

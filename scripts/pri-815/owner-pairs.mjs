@@ -14,14 +14,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const DATA = path.join(ROOT, 'docs', 'audit', 'pri-815-quality-first', 'data');
 const runsDirName = process.argv.includes('--runs') ? process.argv[process.argv.indexOf('--runs') + 1] : 'runs';
 const runsDir = path.join(DATA, runsDirName);
-const frozen = JSON.parse(fs.readFileSync(path.join(DATA, 'frozen-inputs.json'), 'utf8')).groups;
 const qual = JSON.parse(fs.readFileSync(path.join(DATA, `judgments-quality-${runsDirName}.json`), 'utf8')).pairs;
 
 const pairs = [];
 for (const f of fs.readdirSync(runsDir).filter((x) => x.endsWith('.json'))) {
   const run = JSON.parse(fs.readFileSync(path.join(runsDir, f), 'utf8'));
   for (const r of run.repeats) {
-    if (!r.scribe_A?.parsed || !r.scribe_B?.parsed) continue;
+    // §30 hard gate (review fix): only validator-passed outputs enter the
+    // Owner blind package
+    if (!r.scribe_A?.ok || !r.scribe_B?.ok) continue;
     pairs.push({ group: run.group, cls: run.class, repeat: r.repeat, A: r.scribe_A.parsed, B: r.scribe_B.parsed });
   }
 }

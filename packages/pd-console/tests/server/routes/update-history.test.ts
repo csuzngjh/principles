@@ -336,11 +336,11 @@ describe('Update History API route', () => {
   // existed.
   // -------------------------------------------------------------------------
   describe('authority (PRI-702)', () => {
-    it('defaults to the legacy console updater and persists it explicitly', () => {
+    it('defaults to ReleaseManager and persists it explicitly', () => {
       appendUpdateHistory(tempDir, { fromVersion: '1.0.0', toVersion: '1.1.0', success: true, kind: 'update' });
 
       const parsed = JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Record<string, unknown>[];
-      expect(parsed[0]?.authority).toBe('legacy-console-updater');
+      expect(parsed[0]?.authority).toBe('release-manager');
     });
 
     it('persists the authority that actually served the mutation', () => {
@@ -379,10 +379,10 @@ describe('Update History API route', () => {
       const after = JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Record<string, unknown>[];
       expect(after).toHaveLength(2);
       expect(after[0]?.authority).toBeUndefined();
-      expect(after[1]?.authority).toBe('legacy-console-updater');
+      expect(after[1]?.authority).toBe('release-manager');
     });
 
-    it('keeps the authority of an existing RM record across a later legacy append', () => {
+    it('keeps historical legacy authority across a new ReleaseManager append', () => {
       fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify([
         {
           id: 'rm-1',
@@ -391,7 +391,7 @@ describe('Update History API route', () => {
           toVersion: '1.1.0',
           success: true,
           kind: 'update',
-          authority: 'release-manager',
+          authority: 'legacy-console-updater',
           transactionId: 'update-1-abcdef01',
         },
       ]), 'utf8');
@@ -399,9 +399,9 @@ describe('Update History API route', () => {
       appendUpdateHistory(tempDir, { fromVersion: '1.1.0', toVersion: '1.2.0', success: false, kind: 'failure' });
 
       const after = JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Record<string, unknown>[];
-      expect(after[0]?.authority).toBe('release-manager');
+      expect(after[0]?.authority).toBe('legacy-console-updater');
       expect(after[0]?.transactionId).toBe('update-1-abcdef01');
-      expect(after[1]?.authority).toBe('legacy-console-updater');
+      expect(after[1]?.authority).toBe('release-manager');
     });
 
     it('drops an authority outside the closed vocabulary instead of failing the entry', async () => {

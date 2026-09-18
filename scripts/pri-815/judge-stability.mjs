@@ -38,7 +38,11 @@ Return ONLY JSON:
  "contradictionFindings":[{"betweenRepeats":[1,3],"scenarioKind":"...","detail":"repeat N obligates what repeat M forbids"}]}`;
 
 const scenarios = JSON.parse(fs.readFileSync(path.join(DATA, 'scenarios.json'), 'utf8')).scenarios;
-const out = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : { groups: {} };
+// existsSync→read TOCTOU-safe read (CodeQL)
+function readJsonOr(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
+}
+const out = readJsonOr(OUT, { groups: {} });
 
 for (const f of fs.readdirSync(runsDir).filter((x) => x.endsWith('.json'))) {
   const run = JSON.parse(fs.readFileSync(path.join(runsDir, f), 'utf8'));

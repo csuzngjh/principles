@@ -1,17 +1,17 @@
-// One-shot: record ERR-132 into the Error Experience Handbook (AGENTS.md §14).
+// One-shot: record ERR-133 into the Error Experience Handbook (AGENTS.md §14).
 const fs = require('node:fs');
 const p = 'docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md';
 let h = fs.readFileSync(p, 'utf8');
-if (h.includes('**[ERR-132]**')) { console.log('ERR-132 already present'); process.exit(0); }
+if (h.includes('**[ERR-133]**')) { console.log('ERR-133 already present'); process.exit(0); }
 
-const row = '| ERR-132 | Experiment tooling mutated evidence via import side effect: a script that is both module and CLI was imported for a constant, executing its top-level experiment driver and overwriting 3 groups\' raw data files | PRI-815 Phase A |\n';
+const row = '| ERR-133 | Experiment tooling mutated evidence via import side effect: a script that is both module and CLI was imported for a constant, executing its top-level experiment driver and overwriting 3 groups\' raw data files | PRI-815 Phase A |\n';
 const rowAnchor = h.indexOf('| ERR-131 |');
 const rowLineEnd = h.indexOf('\n', rowAnchor);
 h = h.slice(0, rowLineEnd + 1) + row + h.slice(rowLineEnd + 1);
 
 const entry = `
 ---
-**[ERR-132]** | Experiment tooling mutated evidence via import side effect — a file used as both module and CLI ran its top-level experiment driver when imported for a constant, overwriting raw evidence files
+**[ERR-133]** | Experiment tooling mutated evidence via import side effect — a file used as both module and CLI ran its top-level experiment driver when imported for a constant, overwriting raw evidence files
 
 - **What happened**: In the PRI-815 Phase A harness, the report generator imported \`run-ab.mjs\` to reuse the exported B-arm addendum constant. That file is dual-use: exported constants AND a top-level CLI driver (reads \`process.argv\`, launches the experiment loop at module scope). The import executed the driver, which found 3 run files not matching its completeness predicate, re-ran those groups against the real LLM, and OVERWROTE their raw evidence files before the process was killed.
 - **Why it's wrong**: Evidence/audit artifacts are frozen inputs (experiment SPEC §8/§12); a read-only reporting tool must be structurally incapable of mutating them. Import-for-constant is an invisible execution path — nobody "runs" anything, yet the driver executes. Cached judgments survived, but the overwritten raws are unrecoverable.
@@ -39,12 +39,12 @@ h = h.replace(/\n*$/, '\n') + entry;
 fs.writeFileSync(p, h);
 console.log('handbook updated, bytes:', Buffer.byteLength(h));
 
-// INDEX: add ERR-132 to EP-05 representative ERRs
+// INDEX: add ERR-133 to EP-05 representative ERRs
 const ip = 'docs/process/error-management/ERROR_PATTERN_INDEX.md';
 let idx = fs.readFileSync(ip, 'utf8');
 const rep = 'ERR-126, ERR-131.';
-if (idx.includes(rep) && !idx.includes('ERR-132')) {
-  idx = idx.replace(rep, 'ERR-126, ERR-131, ERR-132.');
+if (idx.includes(rep) && !idx.includes('ERR-133')) {
+  idx = idx.replace(rep, 'ERR-126, ERR-131, ERR-133.');
   fs.writeFileSync(ip, idx);
   console.log('index updated');
 } else {

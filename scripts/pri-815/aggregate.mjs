@@ -45,7 +45,14 @@ for (const [gid, run] of Object.entries(groups)) {
     const key = `${gid}#r${r.repeat}`;
     const j = qual[key];
     if (!j) continue;
-    if (j.skipped) { verdicts.push(j.verdict === 'BOTH_BAD' ? 'BOTH_BAD' : j.verdict); continue; }
+    if (j.skipped) {
+      // skipped pairs (generation/validator failure) still carry a §30
+      // verdict — count BOTH_BAD repeats here too, exactly as judge-issued
+      // ones below (review fix: the audit numbers must match the table).
+      if (j.verdict === 'BOTH_BAD') gBothBad += 1;
+      verdicts.push(j.verdict === 'BOTH_BAD' ? 'BOTH_BAD' : j.verdict);
+      continue;
+    }
     if (j.verdict === 'BOTH_BAD') { verdicts.push('BOTH_BAD'); gBothBad += 1; continue; }
     if (j.verdict === 'JUDGE_INVALID') { verdicts.push('JUDGE_INVALID'); continue; }
     verdicts.push(j.verdict);

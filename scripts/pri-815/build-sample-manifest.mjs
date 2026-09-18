@@ -39,12 +39,26 @@ function severityOf(diagnosis) {
 const db = new DatabaseSync(STATE_DB, { readOnly: true, open: true });
 
 // 1. spike-touched dreamer tasks (the 56-chain collection)
+// Fail loud when the authoritative spike record is unreadable: treating a
+// read failure as "nothing touched" would silently relabel every DEV group
+// as CLEAN and invalidate the contamination analysis (review fix, rc-3/rc-9).
 const spikeTouchedTasks = new Set();
-try {
-  const spike = JSON.parse(fs.readFileSync(SPIKE_AB_INPUTS, 'utf8'));
-  for (const e of spike) spikeTouchedTasks.add(e.dreamerTask);
-} catch {
-  // absent spike file ⇒ nothing is spike-touched
+{
+  const spikePath = process.env.PD_SPIKE_AB_INPUTS ?? SPIKE_AB_INPUTS;
+  let raw;
+  try {
+    raw = fs.readFileSync(spikePath, 'utf8');
+  } catch (error) {
+    console.error(`[build-sample-manifest] cannot read the spike ab-inputs record at ${spikePath} — refusing to classify without it.`);
+    console.error(`  (this file is the authoritative DEV/REGRESSION record; set PD_SPIKE_AB_INPUTS to its path on this machine)`);
+    process.exit(1);
+  }
+  try {
+    for (const e of JSON.parse(raw)) spikeTouchedTasks.add(e.dreamerTask);
+  } catch (error) {
+    console.error(`[build-sample-manifest] spike ab-inputs record is malformed JSON (${spikePath}) — refusing to classify without it.`);
+    process.exit(1);
+  }
 }
 
 // 2. all dreamer tasks grouped by sourcePainId
