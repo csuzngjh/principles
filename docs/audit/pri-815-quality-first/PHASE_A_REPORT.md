@@ -20,8 +20,8 @@ STABILITY (deterministic classification from frozen scenarios):
   B: CONTRADICTION=8 MATERIAL_DRIFT=12 STABLE=0
 
 DOWNSTREAM (scenario-gated proxy; production rulehost VM out of H1 scope):
-  A: correct=20 blockMiss=0 overblock=0
-  B: correct=20 blockMiss=0 overblock=0
+  A: correct=19 blockMiss=0 overblock=1
+  B: correct=19 blockMiss=0 overblock=1
 
 TOKENS A = 901453   B = 1125622   DELTA = 24.9% (guard: <= +20%)  COST_EXCEPTION = YES
 
@@ -45,7 +45,8 @@ T1 PROVISIONAL-PASS CONDITIONS:
 
 QUALITY_VERDICT = PROMISING
 STABILITY_OBSERVED = REGRESSED (B-only contradiction groups = 5; validity A 59ok/0fail vs B 57ok/2fail; 6A/8B contradiction groups, both dominated by legitimate_exception wording variance)
-FINAL = HOLD
+T1_VERDICT_EXPLORATORY = HOLD (round 1; conditions 2/5 FAIL — SUPERSEDED by the final closure round: condition 2 overturned by GPT6 0-TRUE_CONTRADICTION re-review, condition 5 satisfied by GPT6 independent calibration B6/A3/T3)
+FINAL = PROCEED_TO_PHASE_B (final blocker closure round — see FINAL GATE section; PrincipleFormation implementation NOT started in this PR)
 ```
 
 ## Per-group detail
@@ -73,6 +74,32 @@ FINAL = HOLD
 | G-manual_1788920022087_pjz | DEV | B/B/BOTH_BAD | B_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 32068/41003 |
 | G-manual_1789317326914_sj6 | DEV | B/BOTH_BAD/B | B_WIN | MATERIAL_DRIFT | MATERIAL_DRIFT | 37431/48886 |
 | G-pain_host_198b8c4d901b5b | CLEAN | BOTH_BAD/A/BOTH_BAD | TIE | INSUFFICIENT_REPEATS | INSUFFICIENT_REPEATS | 15828/19617 |
+
+## Final blocker closure (2026-09-18, PR #1753 round 3 — GPT6 adjudication round)
+
+- GPT6 independent blind calibration (12 pairs): B preferred 6 / A 3 / TIE 3 — same-family bias PLAUSIBLE but B direction independently supported; the 19:1 magnitude may be amplified.
+- GPT6 re-review of the 5 B-only contradictions: 0 TRUE_CONTRADICTION (3 MATERIAL_DRIFT + 2 classifier false positives) — no evidence B introduces critical behavioral reversal.
+- Validator failures (1 generatedAt jitter, 1 8k-token truncation): STRUCTURAL_RISK = NO (bounded).
+- COST +24.9%: NON_BLOCKING_BUT_OPTIMIZE.
+- §3 aggregation fix: legitimate_exception now counted in downstream correct/overblock. Historical "A 20/B 20 correct, 0 overblock" was WRONG (key ignored). Corrected: A 19/1/1, B 19/1/1 — symmetric, non-regressed.
+- Target case G-pain_host_198b8c4d901b5b: ORIGINAL_R2_RECOVERY = NOT_RECOVERABLE (runs/ never entered git; blind-pairs v1 did not sample it; caches hold no raw text). Targeted rerun (frozen protocol + harness fidelity fix restoring the production PRI-541 lineage-echo repair layer) produced 3/3 valid paired repeats: B = 2 ALLOW_OWNER_REANCHOR + 1 AMBIGUOUS + 0 TRUE_OVERBLOCK; A = 2 ALLOW + 1 TRUE_OVERBLOCK. Verdict: JUDGE_FALSE_POSITIVE — the pre-incident downstream judge over-read the adoption gate; B's contract fields normally carry the owner-authority re-anchor clause.
+- Downstream judge corrected (exemption adjudication rule: owner-authority clauses in contract fields honor the exception; generic escape hatches do not). Re-judged symmetrically: 198b8c4d both arms exception_honored; 6406fbff5ee282 both arms block (shared arm-symmetric weakness — owner-waived delivery exemption absent in BOTH contracts, not a B regression).
+- Targeted regression tests: scripts/pri-815/targeted-regression.test.mjs (4/4 green) — owner-authority clause detection (incl. negative controls) + legitimate_exception overblock accounting.
+
+## FINAL GATE (§10 eight conditions, supersedes the exploratory T1 table above)
+
+  PASS — 1. GPT6 calibration did not overturn B advantage
+  PASS — 2. no unresolved TRUE_CONTRADICTION among B-only contradictions
+  PASS — 3. Owner re-anchor negative case closed (JUDGE_FALSE_POSITIVE + judge fix + regression tests)
+  PASS — 4. no unresolved B-specific critical semantic regression
+  PASS — 5. validator failures bounded (STRUCTURAL_RISK=NO)
+  PASS — 6. no critical authority overblock in downstream (1:1 symmetric, shared weakness, non-regressed)
+  PASS — 7. +24.9% cost = NON_BLOCKING_BUT_OPTIMIZE
+  PASS — 8. incident evidence ambiguity closed (r2 not recoverable, disclosed; blocker semantics closed via targeted recheck)
+
+```text
+PHASE_A_GATE = PROCEED_TO_PHASE_B (final closure round; principleFormation implementation NOT started in this PR — Phase B is a separate effort with the frozen cognitive contract)
+```
 
 ## Review-round corrections (2026-09-18, PR #1753)
 

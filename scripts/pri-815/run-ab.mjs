@@ -36,6 +36,7 @@ const { DefaultDreamerValidator } = await import(`file://${CORE}/internalization
 const { DefaultPhilosopherValidator } = await import(`file://${CORE}/internalization/philosopher-output.js`.replace(/\\/g, '/'));
 const { DefaultScribeValidator } = await import(`file://${CORE}/internalization/scribe-output.js`.replace(/\\/g, '/'));
 const { BasePeerRunner } = await import(`file://${CORE}/runner/base-peer-runner.js`.replace(/\\/g, '/'));
+const { reconcileLineageEcho } = await import(`file://${CORE}/internalization/peer-runner-contracts.js`.replace(/\\/g, '/'));
 
 const hashContextRefs = (refs) => BasePeerRunner.hashContextRefs(refs);
 const sha = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
@@ -65,15 +66,25 @@ function buildArmBPrompt(input) {
 }
 
 // ── one LLM stage call with production-style validation ────────────────────
-async function runStage({ systemPrompt, message, validator, taskId, stage }) {
+// `echoRepairs` mirrors the production postFetchTransform lineage-echo gate
+// (PRI-541): the runner overwrites LLM-echoed lineage ids with authoritative
+// values BEFORE validation. Omitting it makes the harness stricter than
+// production (taskId truncation kills outputs production would repair).
+async function runStage({ systemPrompt, message, validator, taskId, stage, echoRepairs }) {
   const res = await chat([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: message },
   ]);
   const parsed = res.content ? extractJson(res.content) : null;
-  // production postFetchTransform re-injects taskId when the LLM dropped it
-  if (parsed && typeof parsed === 'object' && (!parsed.taskId || typeof parsed.taskId !== 'string')) {
-    parsed.taskId = taskId;
+  if (parsed && typeof parsed === 'object') {
+    if (echoRepairs && echoRepairs.length > 0) {
+      const corrected = reconcileLineageEcho(parsed, { topFields: echoRepairs });
+      if (corrected.length > 0) {
+        stageLogLineageEcho(stage, corrected);
+      }
+    } else if (!parsed.taskId || typeof parsed.taskId !== 'string') {
+      parsed.taskId = taskId;
+    }
   }
   const validation = parsed ? await validator.validate(parsed, taskId) : { valid: false, errors: ['unparseable_or_empty_output'] };
   return {
@@ -90,6 +101,10 @@ async function runStage({ systemPrompt, message, validator, taskId, stage }) {
   };
 }
 
+function stageLogLineageEcho(stage, corrected) {
+  console.log(`[echo-repair] ${stage}: corrected ${corrected.join(', ')}`);
+}
+
 async function runGroupRepeat(g, repeat) {
   const taskIdBase = `pri815-${g.source_group_id}-r${repeat}`;
   const contextHash = hashContextRefs(g.contextRefs);
@@ -104,7 +119,8 @@ async function runGroupRepeat(g, repeat) {
     predecessorOutput: g.diagnosis,
     coreGrounding: true,
   });
-  const dreamer = await runStage({ ...dPrompt, validator: new DefaultDreamerValidator(), taskId: `dreamer-${taskIdBase}`, stage: 'dreamer' });
+  const dreamer = await runStage({ ...dPrompt, validator: new DefaultDreamerValidator(), taskId: `dreamer-${taskIdBase}`, stage: 'dreamer',
+    echoRepairs: [{ field: 'taskId', authoritativeValue: `dreamer-${taskIdBase}` }] });
   log(`dreamer ok=${dreamer.ok} ms=${dreamer.latencyMs}`);
   if (!dreamer.ok) return { group: g.source_group_id, repeat, aborted: 'dreamer_invalid', dreamer };
 
@@ -118,7 +134,11 @@ async function runGroupRepeat(g, repeat) {
     sourceDreamerArtifactId: dreamerArtifactId,
     coreGrounding: true,
   });
-  const philosopher = await runStage({ ...pPrompt, validator: new DefaultPhilosopherValidator(), taskId: `philosopher-${taskIdBase}`, stage: 'philosopher' });
+  const philosopher = await runStage({ ...pPrompt, validator: new DefaultPhilosopherValidator(), taskId: `philosopher-${taskIdBase}`, stage: 'philosopher',
+    echoRepairs: [
+      { field: 'taskId', authoritativeValue: `philosopher-${taskIdBase}` },
+      { field: 'sourceDreamerArtifactId', authoritativeValue: dreamerArtifactId },
+    ] });
   log(`philosopher ok=${philosopher.ok} ms=${philosopher.latencyMs}`);
   if (!philosopher.ok) return { group: g.source_group_id, repeat, aborted: 'philosopher_invalid', dreamer, philosopher };
 
@@ -156,6 +176,10 @@ async function runGroupRepeat(g, repeat) {
     validator: new DefaultScribeValidator(),
     taskId: scribeInput.taskId,
     stage: `scribe_${arm}`,
+    echoRepairs: [
+      { field: 'taskId', authoritativeValue: scribeInput.taskId },
+      { field: 'sourcePhilosopherArtifactId', authoritativeValue: scribeInput.sourcePhilosopherArtifactId },
+    ],
   });
   // interleave order by repeat parity (SPEC §13)
   const [first, second] = repeat % 2 === 1 ? ['A', 'B'] : ['B', 'A'];

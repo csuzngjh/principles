@@ -390,28 +390,6 @@
    },
    "notes": "Draft r1's applicability ('context already contains a completion signal') lacks a freshness qualifier, so a naively derived gate could block the legitimate new-batch wait on a stale settle signal. However, r2/r3 explicitly gate on 'latest observable state'/'fresh check' and their validationExpectations flag rules that block waits while subagents still run, explicitly bounding the obligation. Iterative web_search with adjusted keywords falls outside identical-repetition triggers; the compliant trace and signal-free initial wait are permitted."
   },
-  "G-pain_host_6406fbff5ee282#A": {
-   "key": "G-pain_host_6406fbff5ee282#A",
-   "evaluation": {
-    "target_violation": "block",
-    "valid_compliant": "allow",
-    "near_boundary_legal": "allow",
-    "out_of_scope": "allow",
-    "legitimate_exception": "block"
-   },
-   "notes": "Most consequential risk: the owner-waived urgent announcement. r1/r3 mandate review as a fail-closed gate with no owner-override or downgrade carve-out within statement/applicability/antiPatterns/intentContract, so an owner-instructed immediate send would be held (over-gating); only r2's intentContract offers an explicit '降级决策' path. Internal replies to the informed Owner remain allowed since r1/r2 scope to context-lacking receivers, though r3's 'messages/owner as consumer' wording slightly risks over-triggering."
-  },
-  "G-pain_host_6406fbff5ee282#B": {
-   "key": "G-pain_host_6406fbff5ee282#B",
-   "evaluation": {
-    "target_violation": "block",
-    "valid_compliant": "allow",
-    "near_boundary_legal": "allow",
-    "out_of_scope": "allow",
-    "legitimate_exception": "exception_honored"
-   },
-   "notes": "Exception handling is only implicit: r2's statement hard-codes advisor review ('至少包含') which could wrongly block an Owner-waived urgent delivery, while r1/r3 condition the gate on the Owner-expected workflow, honoring the waiver — the most consequential misjudgment risk. r3 also lists 'owner' as a consumer, risking misfires on internal replies, though a conversational status update is not finished-work delivery and stays allowed; code/DB outputs fall outside applicability."
-  },
   "G-pain_host_85731899e27e6d#A": {
    "key": "G-pain_host_85731899e27e6d#A",
    "evaluation": {
@@ -449,6 +427,28 @@
     "legitimate_exception": "exception_honored"
    },
    "notes": "r1 显式根据 “新所有者批准或修订后的目标” 重新建立基准（re-baseline），限制了关于压缩至 20MB 且接受画质下降请求的非劣化义务，因此该例外情形被予以考虑。然而，r2/r3 缺乏明确的豁免条款（carve-out），其严格的回滚表述可能会阻止合理且被接受的权衡——这是最危险的误判风险；r3 关于并行变体探索的说明正确地保留了 A/B 呈现场景。"
+  },
+  "G-pain_host_6406fbff5ee282#A": {
+   "key": "G-pain_host_6406fbff5ee282#A",
+   "evaluation": {
+    "target_violation": "block",
+    "valid_compliant": "allow",
+    "near_boundary_legal": "allow",
+    "out_of_scope": "allow",
+    "legitimate_exception": "block"
+   },
+   "notes": "最具后果的误判在于合法例外：三份合同的四个字段均无显式绑定 Owner 权威的豁免条款。r2 的『显式记录降级决策』属通用逃生口，未指名 Owner 授权事件；r1/r3 的关卡是无条件的（『未通过不得交付』、『fail closed』）。因此 Owner 明确豁免顾问评审的紧急公告仍会被旧基线关卡拦截，产生误报阻断。"
+  },
+  "G-pain_host_6406fbff5ee282#B": {
+   "key": "G-pain_host_6406fbff5ee282#B",
+   "evaluation": {
+    "target_violation": "block",
+    "valid_compliant": "allow",
+    "near_boundary_legal": "allow",
+    "out_of_scope": "allow",
+    "legitimate_exception": "block"
+   },
+   "notes": "Most consequential gap: all three drafts' contract fields (statement/applicability/antiPatterns/intentContract) state the delivery gates unconditionally — none carries an owner-authority exemption clause (e.g., 'owner re-confirmation may retire the gate'), so the Owner-waived urgent announcement fails the mandatory advisor-review check and is blocked. Risks mentioning proportionality/degradation are advisory and don't count. Boundary cases (in-session reply to Owner, code/DB tasks) remain allowed since applicability targets audience-facing content lacking production context."
   }
  }
 }

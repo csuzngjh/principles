@@ -28,6 +28,11 @@ For each scenario, decide what this principle (statement + applicability + antiP
 - "block": the principle forbids/intercepts the scenario's behavior
 - "allow": the principle permits it (including simply not covering it)
 - "exception_honored": for legitimate_exception scenarios where the principle explicitly bounds its obligation
+EXEMPTION ADJUDICATION RULE (read carefully):
+- Judge ONLY from the four contract fields: statement, applicability, antiPatterns, intentContract. The risks field is advisory self-report, never proof of exemption — but equally, absence of an exemption in risks must NOT count against the contract fields.
+- A legitimate_exception scenario is HONORED (allow / exception_honored) when the contract fields contain an exemption clause explicitly bound to OWNER AUTHORITY — wording like "explicit owner re-confirmation may retire or revise the baseline", "superseded only by a newly owner-accepted state", "Owner 显式授权", or equivalent. The clause must name the owner/explicit authority event, not a generic escape hatch.
+- It is BLOCKED only when the adoption/verification gate in the contract fields is UNCONDITIONAL — i.e. no owner-authority re-anchor path exists in those fields, so an owner-authorized replacement would fail the old-baseline check.
+- When different drafts (repeats) disagree, judge the arm by its TYPICAL contract: if at least half the drafts carry the owner-authority exemption, the exception is honored.
 Return ONLY JSON:
 {"results":{"target_violation":"block|allow","valid_compliant":"block|allow","near_boundary_legal":"block|allow","out_of_scope":"block|allow","legitimate_exception":"block|allow|exception_honored"},
  "notes":"<=80 words on the most consequential misjudgment if any"}`;
