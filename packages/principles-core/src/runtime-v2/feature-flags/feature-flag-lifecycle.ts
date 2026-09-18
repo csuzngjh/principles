@@ -77,22 +77,6 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Channel is part of the default product experience already; category stays quiet for per-workspace disable',
     retirementCriteria: 'Owner removes the feedback product surface',
   },
-  release_manager_shadow: {
-    decision: 'GRADUATE',
-    consumers: ['pd-console/src/server/routes/update.ts — governed /check dispatch (wired by PRI-672, PR #1511)'],
-    evidence: 'Commercial update system Phase 3 (SPEC 2026-08-25): ReleaseManager shadow mode, read-only inspect/check with legacy comparison. Graduated 2026-09-07 by Owner decision after Gate B executed: PRI-672 (PR #1511) wired the live /check surface through ReleaseManager with parity evidence and byte-identical legacy bodies; default-on is availability-preserving (no metadata source ⇒ per-request explicit fallback).',
-    decided: '2026-09-07',
-    graduationCriteria: 'MET 2026-09-07 — Gate B executed by PRI-672 (live update surface routed through ReleaseManager with parity evidence)',
-    retirementCriteria: 'Shadow comparison retired once ReleaseManager is the sole update authority (Phase 2+ / Gate C)',
-  },
-  release_manager_write_authority: {
-    decision: 'GRADUATE',
-    consumers: ['pd-console/src/server/routes/update.ts — /apply-full authority routing'],
-    evidence: 'PRI-698 Phase 1 graduated 2026-09-07 by Owner decision after verification (release-manager-apply suite, wiring suite incl. flag-off rollback, BDD contract, full pd-console/core suites, verify:merge — all green). Default-on is availability-preserving: a ReleaseManager refusal BEFORE the update transaction opens has zero side effects and falls back to the legacy updater with release_manager_refused_pre_transaction:<reason>; effective RM takeover additionally requires PD_RELEASE_METADATA_URL and the pipeline publishing signed artifact targets.',
-    decided: '2026-09-07',
-    graduationCriteria: 'MET 2026-09-07 — Phase 1 verification green (unit/wiring/BDD/full suites + verify:merge) and pre-transaction runtime fallback proven; artifact-target pipeline alignment tracked on PRI-698',
-    retirementCriteria: 'Phase 2 rollback lands and ReleaseManager is the sole update authority — flag removed with the legacy updater (Gate C)',
-  },
   gfi: {
     decision: 'KEEP_QUIET',
     consumers: ['host-runtime/src/production-pain-evidence*'],
@@ -197,14 +181,12 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Executed: retry improves completion without masking real failures — dreamer same-category self-heal observed live; artificer chains recover instead of dead-ending (PRI-621 recovery plan)',
     retirementCriteria: 'Codex host output contract fixed upstream (submit_rulecode reliable) — retry unnecessary',
   },
-  artifact_summary_redundancy: {
-    decision: 'KEEP_QUIET',
-    consumers: ['principles-core internaliz* summary writers', 'pd-cli rulehost-pipeline runner'],
-    evidence: 'Progressive disclosure Layer 0 writer-side envelope (since 2026-07-26); default-off, byte-identical off',
-    decided: '2026-08-27',
-    graduationCriteria: 'Layer 0+1+2 validated together as the progressive-disclosure design (§6, §8)',
-    retirementCriteria: 'Progressive disclosure design descoped',
-  },
+  // artifact_summary_redundancy / context_manifest_budget / progressive_evaluator:
+  // RETIRED 2026-09-18 (PRI-819 R-06, Owner decision). The dormant
+  // progressive-disclosure design never graduated; the runtime readers and
+  // gated Layer 0/1/2 branches were deleted in the same change. Flags moved to
+  // `gone` tombstones in feature-flag-contract.ts. Gone flags carry no
+  // lifecycle entry (terminal state, enforced by feature-flag-lifecycle.test).
   prompt_full_pipeline: {
     decision: 'KEEP_QUIET',
     consumers: ['principles-core intake-to-internalization-bridge seeding (pipelineMode)', 'host-runtime governance-signal-admission', 'openclaw-plugin hooks/pain', 'pd-console settings toggle (PATCH /api/v1/config/features)'],
@@ -212,22 +194,6 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     decided: '2026-09-15',
     graduationCriteria: 'Not a graduation candidate — it is a permanent Owner control surface (like a rollback lever), not an unfinished feature; stays quiet by design',
     retirementCriteria: 'Only if the full-pipeline path is retired entirely (Owner decision); otherwise permanent',
-  },
-  context_manifest_budget: {
-    decision: 'KEEP_QUIET',
-    consumers: ['principles-core internaliz* context builders', 'principles-core/src/runtime-v2/runner/ba*'],
-    evidence: 'Progressive disclosure Layer 1 manifest+budget injection (since 2026-07-26); default-off, byte-identical off',
-    decided: '2026-08-27',
-    graduationCriteria: 'Layer 1 information-floor fallback validated against full-predecessor baseline',
-    retirementCriteria: 'Progressive disclosure design descoped',
-  },
-  progressive_evaluator: {
-    decision: 'KEEP_QUIET',
-    consumers: ['principles-core internaliz* evaluator', 'principles-core/src/runtime-v2/runner/ba*'],
-    evidence: 'Progressive disclosure Layer 2 two-stage evaluation (since 2026-07-26); default-off',
-    decided: '2026-08-27',
-    graduationCriteria: 'Two-stage evaluation quality validated over single-stage',
-    retirementCriteria: 'Progressive disclosure design descoped',
   },
   abstraction_layer_v1: {
     decision: 'KEEP_QUIET',

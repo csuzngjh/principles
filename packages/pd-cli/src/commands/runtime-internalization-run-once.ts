@@ -31,7 +31,7 @@ import {
 // repair-loop wiring (isRepairLoopEnabled + seeder) is invoked in this CLI
 // path. EP-02: prior code passed only the 5 base deps, leaving the repair
 // loop as dead code at runtime.
-import { createEvaluatorRunnerDeps, contentHashFn } from '../services/rulehost-pipeline-runner.js';
+import { createEvaluatorRunnerDeps } from '../services/rulehost-pipeline-runner.js';
 // PRI-708: the canonical rollout governance factory — the ONE builder the
 // consumer cycle spreads (internalization-consumer-cycle.ts). Host-neutral
 // CLI entries wire the same reopen semantics instead of hand-rolling them.
@@ -579,21 +579,21 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         if (runnerKind === 'dreamer') {
           const validator = new DefaultDreamerValidator();
           const runner = new DreamerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'philosopher') {
           const validator = new DefaultPhilosopherValidator();
           const runner = new PhilosopherRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'scribe') {
           const validator = new DefaultScribeValidator();
           const runner = new ScribeRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);
@@ -608,7 +608,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
             console.error(`[PD:run-once] artificer prompt without host tool semantics: ${hostSemantics.reason} — ${hostSemantics.nextAction}`);
           }
           const runner = new ArtificerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
             {
               owner: OWNER,
               runtimeKind: runtimeAdapter.kind(),
@@ -636,12 +636,6 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
               artifactStore,
               workspaceDir,
             }),
-            // PR B review round: effectiveConfig was missing here (only the
-            // Artificer branch passed it), so `progressive_evaluator` /
-            // `context_manifest_budget` were structurally unreadable on this
-            // path — the two-stage evaluator could never be enabled from the
-            // CLI. Mirrors line 525 (artificer) and rulehost runnerOptsFor.
-            //
             // PRI-661: gateDeps resolved ABOVE via the ONE
             // createEvaluatorRuntimeContext builder (durable workspace
             // provenance + workspace root) — replay/production parity with

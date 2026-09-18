@@ -1,0 +1,452 @@
+{
+  "summary": {
+    "TOTAL_SOURCE_GROUPS": 21,
+    "TOTAL_ARTIFACTS": 33,
+    "INDEPENDENT_N": 21,
+    "DEV_GROUPS": 15,
+    "CLEAN_HOLDOUT_N": 6,
+    "EXCLUDED": 0,
+    "MODE": "EXPLORATORY",
+    "MODE_REASON": "No clean holdout large enough for a confirmatory one-sided sign test (clean N=6 would require unanimity). All succeeded-dreamer groups were collected by the PRI-815 spike (ab-inputs.json, 56 chains) and are DEV/REGRESSION per SPEC §9."
+  },
+  "groups": [
+    {
+      "source_group_id": "G-manual_1788265732489_9ne",
+      "pain_id": "manual_1788265732489_9nexm9e6",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788265732489_9nexm9e6",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2557,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 2,
+      "artifact_count": 2,
+      "historical_outcome": "scribe_succeeded/evaluator_failed",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-01T12:31:27.000Z"
+    },
+    {
+      "source_group_id": "G-manual_1788268409354_vau",
+      "pain_id": "manual_1788268409354_vautfk3l",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788268409354_vautfk3l",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2727,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 3,
+      "dreamer_succeeded": 3,
+      "artifact_count": 3,
+      "historical_outcome": "scribe_succeeded/evaluator_succeeded",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-01T13:14:06.176Z"
+    },
+    {
+      "source_group_id": "G-manual_1788415743052_os4",
+      "pain_id": "manual_1788415743052_os4aicut",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788415743052_os4aicut",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2551,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 3,
+      "dreamer_succeeded": 3,
+      "artifact_count": 3,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-03T06:11:03.689Z"
+    },
+    {
+      "source_group_id": "G-manual_1788417947835_e99",
+      "pain_id": "manual_1788417947835_e99ujtms",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788417947835_e99ujtms",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 3049,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 3,
+      "dreamer_succeeded": 3,
+      "artifact_count": 3,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-03T06:46:31.337Z"
+    },
+    {
+      "source_group_id": "G-manual_1788424714466_wmn",
+      "pain_id": "manual_1788424714466_wmn09nli",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788424714466_wmn09nli",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2213,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 2,
+      "artifact_count": 2,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-03T08:38:56.517Z"
+    },
+    {
+      "source_group_id": "G-manual_1788526359876_r5x",
+      "pain_id": "manual_1788526359876_r5xgtgu9",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788526359876_r5xgtgu9",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 3613,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 3,
+      "dreamer_succeeded": 3,
+      "artifact_count": 3,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-04T12:53:12.798Z"
+    },
+    {
+      "source_group_id": "G-manual_1788578262338_kmp",
+      "pain_id": "manual_1788578262338_kmpbt77v",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788578262338_kmpbt77v",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2109,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 2,
+      "artifact_count": 2,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-05T03:18:04.797Z"
+    },
+    {
+      "source_group_id": "G-manual_1788609453041_dtm",
+      "pain_id": "manual_1788609453041_dtmlftov",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788609453041_dtmlftov",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2187,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 3,
+      "dreamer_succeeded": 3,
+      "artifact_count": 3,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-05T11:58:08.096Z"
+    },
+    {
+      "source_group_id": "G-manual_1788920022087_pjz",
+      "pain_id": "manual_1788920022087_pjzfw9wt",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788920022087_pjzfw9wt",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2831,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 2,
+      "artifact_count": 2,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-09T02:14:16.553Z"
+    },
+    {
+      "source_group_id": "G-manual_1788612956754_9aa",
+      "pain_id": "manual_1788612956754_9aaecyhq",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788612956754_9aaecyhq",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2205,
+      "channels": [
+        "code_tool_hook"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 1,
+      "dreamer_succeeded": 1,
+      "artifact_count": 1,
+      "historical_outcome": "scribe_succeeded/needs_human_review",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-12T04:18:44.817Z"
+    },
+    {
+      "source_group_id": "G-manual_1788610740431_xo5",
+      "pain_id": "manual_1788610740431_xo571ixc",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788610740431_xo571ixc",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 1449,
+      "channels": [
+        "code_tool_hook"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 1,
+      "dreamer_succeeded": 1,
+      "artifact_count": 1,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-12T19:15:52.991Z"
+    },
+    {
+      "source_group_id": "G-manual_1789299059630_zqx",
+      "pain_id": "manual_1789299059630_zqx0o38o",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1789299059630_zqx0o38o",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2067,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 2,
+      "artifact_count": 2,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-13T11:38:43.575Z"
+    },
+    {
+      "source_group_id": "G-manual_1789317326914_sj6",
+      "pain_id": "manual_1789317326914_sj6p6a92",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1789317326914_sj6p6a92",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 4486,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 2,
+      "artifact_count": 2,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-13T16:42:51.488Z"
+    },
+    {
+      "source_group_id": "G-manual_1789398236238_04i",
+      "pain_id": "manual_1789398236238_04iyw2k7",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1789398236238_04iyw2k7",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2222,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 2,
+      "artifact_count": 2,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-14T16:00:22.811Z"
+    },
+    {
+      "source_group_id": "G-pain_host_cffdcb9f5d0257",
+      "pain_id": "pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 1813,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 2,
+      "artifact_count": 2,
+      "historical_outcome": "scribe_succeeded/not_reached",
+      "seen_in_previous_spike": true,
+      "class": "DEV",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-15T00:18:17.376Z"
+    },
+    {
+      "source_group_id": "G-pain_host_038c29c53be340",
+      "pain_id": "pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2274,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 0,
+      "artifact_count": 0,
+      "historical_outcome": "never_reached",
+      "seen_in_previous_spike": false,
+      "class": "CLEAN",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-15T23:53:56.238Z"
+    },
+    {
+      "source_group_id": "G-pain_host_198b8c4d901b5b",
+      "pain_id": "pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2271,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 0,
+      "artifact_count": 0,
+      "historical_outcome": "never_reached",
+      "seen_in_previous_spike": false,
+      "class": "CLEAN",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-15T23:59:56.411Z"
+    },
+    {
+      "source_group_id": "G-pain_host_620a1683e2eeb7",
+      "pain_id": "pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 1789,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 0,
+      "artifact_count": 0,
+      "historical_outcome": "never_reached",
+      "seen_in_previous_spike": false,
+      "class": "CLEAN",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-17T02:35:43.447Z"
+    },
+    {
+      "source_group_id": "G-pain_host_432596aee54456",
+      "pain_id": "pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 1906,
+      "channels": [
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 1,
+      "dreamer_succeeded": 0,
+      "artifact_count": 0,
+      "historical_outcome": "never_reached",
+      "seen_in_previous_spike": false,
+      "class": "CLEAN",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-17T03:39:47.463Z"
+    },
+    {
+      "source_group_id": "G-pain_host_6406fbff5ee282",
+      "pain_id": "pain_host_6406fbff5ee282be2afb8d6d234af6054fd37ede688cd0be97760e212cd17e5f",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_6406fbff5ee282be2afb8d6d234af6054fd37ede688cd0be97760e212cd17e5f",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2263,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "unknown",
+      "language": "zh",
+      "dreamer_task_count": 2,
+      "dreamer_succeeded": 0,
+      "artifact_count": 0,
+      "historical_outcome": "never_reached",
+      "seen_in_previous_spike": false,
+      "class": "CLEAN",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-17T04:01:16.220Z"
+    },
+    {
+      "source_group_id": "G-pain_host_85731899e27e6d",
+      "pain_id": "pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+      "diagnosis_parseable": true,
+      "diagnosis_chars": 2596,
+      "channels": [
+        "code_tool_hook",
+        "prompt"
+      ],
+      "risk": "severe",
+      "language": "zh",
+      "dreamer_task_count": 3,
+      "dreamer_succeeded": 0,
+      "artifact_count": 0,
+      "historical_outcome": "never_reached",
+      "seen_in_previous_spike": false,
+      "class": "CLEAN",
+      "exclusion_reason": null,
+      "first_seen": "2026-09-17T04:58:17.006Z"
+    }
+  ]
+}

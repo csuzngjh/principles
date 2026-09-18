@@ -41,7 +41,6 @@ function makeValidConfig(): PdConfig {
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: false },
-        empathyObserver: { enabled: false },
         signalCollector: { enabled: false },
       },
     },
@@ -651,5 +650,68 @@ describe('Malformed profile validation through validatePdConfig', () => {
       e.path.includes('bad-type-profile') &&
       e.reason.includes('type')
     )).toBe(true);
+  });
+});
+
+// ── Retired internal-agent keys (PRI-819) ──────────────────────────────────
+
+describe('retired internal-agent keys are tolerated no-ops (PRI-819)', () => {
+  // Installed workspaces carry `internalAgents.agents.empathyObserver` written
+  // by older installers. The agent was physically retired, so the key must
+  // keep old configs loading (same contract as evolutionContext / PRI-772)
+  // while the warning keeps the tolerance observable (rc-9).
+
+  it('tolerates legacy agents.empathyObserver with a removal warning', () => {
+    const raw = makeValidConfig() as unknown as Record<string, unknown>;
+    (raw.internalAgents as Record<string, unknown>).agents = {
+      diagnostician: { enabled: true },
+      empathyObserver: { enabled: true },
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected ok');
+    expect(result.warnings.some(w => w.includes('empathyObserver') && w.includes('retired no-op'))).toBe(true);
+  });
+
+  it('tolerates legacy agents.empathyObserver regardless of value shape', () => {
+    const raw = makeValidConfig() as unknown as Record<string, unknown>;
+    (raw.internalAgents as Record<string, unknown>).agents = {
+      empathyObserver: 'enabled',
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected ok');
+    expect(result.warnings.some(w => w.includes('retired no-op'))).toBe(true);
+  });
+
+  it('omits the retired key from the validated agents map', () => {
+    const raw = makeValidConfig() as unknown as Record<string, unknown>;
+    (raw.internalAgents as Record<string, unknown>).agents = {
+      diagnostician: { enabled: true },
+      empathyObserver: { enabled: true },
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected ok');
+    expect(Object.hasOwn(result.value.internalAgents.agents, 'empathyObserver')).toBe(false);
+  });
+
+  it('emits no retired-key warning when agents.empathyObserver is absent', () => {
+    const raw = makeValidConfig();
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected ok');
+    expect(result.warnings.some(w => w.includes('empathyObserver'))).toBe(false);
+  });
+
+  it('still rejects unknown agent keys that are not retired no-ops', () => {
+    const raw = makeValidConfig() as unknown as Record<string, unknown>;
+    (raw.internalAgents as Record<string, unknown>).agents = {
+      empathyObserverTypos: { enabled: true },
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected error');
+    expect(result.errors.some(e => e.path.includes('empathyObserverTypos'))).toBe(true);
   });
 });

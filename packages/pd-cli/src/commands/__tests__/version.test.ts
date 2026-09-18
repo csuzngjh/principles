@@ -139,3 +139,113 @@ describe('canonical version report (SPEC 12 / 18-1, 18-10)', () => {
     }
   });
 });
+
+describe('runtime layout version report (SPEC 12, installed ~/.pd/runtime layout)', () => {
+  /** Mirrors the real installed layout: active.json + runtime/<component>/, no releases/, no logs/, no bootstrap/. */
+  function writeRuntimeOnlyHome(home: string): void {
+    const pdHome = path.join(home, '.pd');
+    fs.mkdirSync(pdHome, { recursive: true });
+    fs.writeFileSync(path.join(pdHome, 'active.json'), JSON.stringify({
+      schemaVersion: 1,
+      generation: 14,
+      releaseId: 'bundled-1.74.1-5eb58e30bfad',
+      releaseMetadataDigest: '5eb58e30bfad6205e3028b99fa7a3a6f67e138b9e97c7ed40b043ba9d8d85343',
+      previousReleaseId: 'bundled-1.74.1-9bbf8abc3b86',
+      transactionId: 'install-1789622247194-0346a565',
+      productVersion: '1.74.1',
+    }));
+    fs.writeFileSync(path.join(pdHome, 'install.json'), JSON.stringify({ channel: 'stable', autoCheck: true }));
+    const componentVersions: Readonly<Record<string, string>> = {
+      'codex-adapter': '0.1.0',
+      console: '0.1.0',
+      core: '1.74.1',
+      'host-runtime': '0.1.0',
+      'install-layout': '0.2.0',
+      'pd-cli': '1.74.1',
+      plugin: '1.76.1',
+      'release-manager': '1.74.1',
+    };
+    for (const [component, version] of Object.entries(componentVersions)) {
+      const dir = path.join(pdHome, 'runtime', component);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version }));
+    }
+    // The real runtime also carries non-package support directories.
+    fs.mkdirSync(path.join(pdHome, 'runtime', 'bin'), { recursive: true });
+  }
+
+  it('reads component versions from the live runtime layout and stays explicit about unverifiable identity', () => {
+    const home = tempHome();
+    writeRuntimeOnlyHome(home);
+    const report = buildVersionReport(home);
+    expect(report).toMatchObject({
+      productVersion: '1.74.1',
+      releaseId: 'bundled-1.74.1-5eb58e30bfad',
+      source: 'official-installer',
+      generation: 14,
+      channel: 'stable',
+    });
+    expect(report.components.plugin).toBe('1.76.1');
+    expect(report.components.core).toBe('1.74.1');
+    expect(report.components['pd-cli']).toBe('1.74.1');
+    expect(report.components['release-manager']).toBe('1.74.1');
+    expect(report.componentsSource).toBe('runtime');
+    // No release metadata exists to verify the active identity against, and
+    // independently versioned components are not corruption: the report stays
+    // honestly degraded instead of claiming health from package versions.
+    expect(report.health).toBe('degraded');
+    expect(report.lastTransaction).toBeNull();
+  });
+
+  it('degrades a malformed runtime component manifest to an omitted component instead of dying (PRI-833 review P1)', () => {
+    const home = tempHome();
+    writeRuntimeOnlyHome(home);
+    // Exactly the corruption this command exists to diagnose: one live
+    // component manifest is garbage. The report must survive with that
+    // component omitted — not abort with state_corrupt.
+    const corruptManifest = '{' + 'not-valid-json';
+    fs.writeFileSync(path.join(home, '.pd', 'runtime', 'plugin', 'package.json'), corruptManifest);
+    const report = buildVersionReport(home);
+    expect(report.components.plugin).toBeUndefined();
+    expect(report.components.core).toBe('1.74.1');
+    expect(report.componentsSource).toBe('runtime');
+    expect(report.health).toBe('degraded');
+  });
+
+  it('falls back to the release cache per component when the runtime copy is missing (PRI-833 review P2)', () => {
+    const home = tempHome();
+    writeRuntimeOnlyHome(home);
+    // Partially populated runtime: the core manifest vanished. The release
+    // cache (active releaseId dir) still knows core's version.
+    fs.rmSync(path.join(home, '.pd', 'runtime', 'core'), { recursive: true, force: true });
+    const coreFallbackDir = path.join(home, '.pd', 'releases', 'bundled-1.74.1-5eb58e30bfad', 'core');
+    fs.mkdirSync(coreFallbackDir, { recursive: true });
+    fs.writeFileSync(path.join(coreFallbackDir, 'package.json'), JSON.stringify({ name: '@principles/core', version: '1.60.0' }));
+    const report = buildVersionReport(home);
+    expect(report.components.core).toBe('1.60.0');
+    expect(report.components.plugin).toBe('1.76.1');
+    expect(report.componentsSource).toBe('runtime');
+  });
+
+  it('prefers live runtime component manifests over the release cache when both exist', () => {
+    const home = tempHome();
+    writeDualSlotHome(home);
+    const pdHome = path.join(home, '.pd');
+    fs.rmSync(path.join(pdHome, 'releases', 'b'.repeat(64), 'plugin'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(pdHome, 'runtime', 'plugin'), { recursive: true });
+    fs.writeFileSync(path.join(pdHome, 'runtime', 'plugin', 'package.json'), JSON.stringify({ version: '1.999.0' }));
+    const report = buildVersionReport(home);
+    expect(report.health).toBe('healthy');
+    expect(report.componentsSource).toBe('runtime');
+    expect(report.components.plugin).toBe('1.999.0');
+  });
+
+  it('keeps the release-cache fallback for installs without a runtime directory', () => {
+    const home = tempHome();
+    writeDualSlotHome(home);
+    const report = buildVersionReport(home);
+    expect(report.health).toBe('healthy');
+    expect(report.componentsSource).toBe('release-cached');
+    expect(report.components.plugin).toBe('1.76.1');
+  });
+});

@@ -17,11 +17,12 @@
  *   --help             Show help message
  */
 
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, realpathSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
+import { copyFileSync, cpSync, existsSync, lstatSync, realpathSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, dirname } from 'path';
 import { scanMissingTransitiveDeps, MAX_TRAVERSAL_PACKAGES } from './lib/transitive-deps.mjs';
 import { ensurePdCliPluginResolution } from './lib/pd-cli-resolution.mjs';
+import { createLocalPdShims, reportGlobalPdEntry } from './lib/pd-cli-shim.mjs';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 
@@ -770,14 +771,16 @@ function syncItem(item) {
     }
 }
 
-function quoteCmdPath(filePath) {
-    return filePath.replace(/"/g, '""');
-}
-
 /**
  * Copy the built pd-cli package into the plugin install directory and create
- * deterministic shims. The global shim points at the installed plugin copy, not
- * at a developer checkout.
+ * the plugin-local shims under <install>/bin.
+ *
+ * Ownership policy (PR-D dev-shim): this DEV sync path NEVER writes into the
+ * npm global bin dir — the global `pd` entry belongs to the official
+ * installer (`npx create-principles-disciple`), whose uninstaller also owns
+ * removing it. When no global `pd` entry can be verified, an actionable
+ * recovery nextAction naming the official installer is printed (rc-9) while
+ * the plugin-local shim keeps working.
  */
 function syncPdCli() {
     console.log('\n📦 Syncing PD CLI...');
@@ -800,77 +803,16 @@ function syncPdCli() {
     // smoke gate with ERR_MODULE_NOT_FOUND.
     ensurePdCliPluginResolution(INSTALLED_PD_CLI_DIR, INSTALL_DIR);
 
-    mkdirSync(INSTALLED_BIN_DIR, { recursive: true });
     const installedEntry = join(INSTALLED_PD_CLI_DIR, 'dist', 'index.js');
+    const { localShim } = createLocalPdShims({
+        installedEntry,
+        installedBinDir: INSTALLED_BIN_DIR,
+    });
+    console.log(`✅ Plugin-local pd shim installed: ${localShim}`);
 
-    if (isWindows()) {
-        const cmdShim = [
-            '@echo off',
-            `node "${quoteCmdPath(installedEntry)}" %*`,
-            '',
-        ].join('\r\n');
-        const psShim = [
-            '$ErrorActionPreference = "Stop"',
-            `$entry = "${installedEntry.replace(/`/g, '``').replace(/"/g, '`"')}"`,
-            '& node $entry @args',
-            'exit $LASTEXITCODE',
-            '',
-        ].join('\r\n');
-        writeFileSync(join(INSTALLED_BIN_DIR, 'pd.cmd'), cmdShim, 'utf-8');
-        writeFileSync(join(INSTALLED_BIN_DIR, 'pd.ps1'), psShim, 'utf-8');
-    } else {
-        const shShim = [
-            '#!/usr/bin/env sh',
-            `exec node "${installedEntry.replace(/"/g, '\\"')}" "$@"`,
-            '',
-        ].join('\n');
-        const target = join(INSTALLED_BIN_DIR, 'pd');
-        writeFileSync(target, shShim, 'utf-8');
-        chmodSync(target, 0o755);
-    }
-
-    installGlobalPdShim();
-}
-
-function getNpmGlobalBinDir() {
-    try {
-        const prefix = execSync('npm prefix -g', { encoding: 'utf-8' }).trim();
-        if (!prefix) return null;
-        return process.platform === 'win32' ? prefix : join(prefix, 'bin');
-    } catch {
-        return null;
-    }
-}
-
-function installGlobalPdShim() {
-    const globalBin = getNpmGlobalBinDir();
-    if (!globalBin) {
-        console.warn('⚠️  Could not resolve npm global bin directory. Use plugin-local bin/pd shim.');
-        return;
-    }
-
-    try {
-        mkdirSync(globalBin, { recursive: true });
-        if (isWindows()) {
-            const pluginCmd = join(INSTALLED_BIN_DIR, 'pd.cmd');
-            const pluginPs = join(INSTALLED_BIN_DIR, 'pd.ps1');
-            writeFileSync(join(globalBin, 'pd.cmd'), `@echo off\r\ncall "${quoteCmdPath(pluginCmd)}" %*\r\n`, 'utf-8');
-            writeFileSync(
-                join(globalBin, 'pd.ps1'),
-                `$shim = "${pluginPs.replace(/`/g, '``').replace(/"/g, '`"')}"\r\n& $shim @args\r\nexit $LASTEXITCODE\r\n`,
-                'utf-8'
-            );
-        } else {
-            const pluginSh = join(INSTALLED_BIN_DIR, 'pd');
-            const globalSh = join(globalBin, 'pd');
-            writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginSh.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
-            chmodSync(globalSh, 0o755);
-        }
-        console.log(`✅ Global pd shim installed: ${globalBin}`);
-    } catch (err) {
-        console.warn(`⚠️  Could not install global pd shim: ${err.message}`);
-        console.warn(`   Use plugin-local shim: ${join(INSTALLED_BIN_DIR, isWindows() ? 'pd.cmd' : 'pd')}`);
-    }
+    // Read-only check of the npm global bin dir; prints the official-installer
+    // recovery nextAction when no global pd entry is verifiable. Never writes.
+    reportGlobalPdEntry({ localShim });
 }
 
 function verifyPdCliShim() {

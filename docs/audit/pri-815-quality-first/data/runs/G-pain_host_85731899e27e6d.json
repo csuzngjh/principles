@@ -1,0 +1,693 @@
+{
+ "group": "G-pain_host_85731899e27e6d",
+ "class": "CLEAN",
+ "pain_id": "pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+ "frozen_at": "2026-09-17T16:07:49.087Z",
+ "repeats": [
+  {
+   "group": "G-pain_host_85731899e27e6d",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_85731899e27e6d-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "依赖瞬时会话记忆承载 Owner 明确表达的工作约定（使用顾问协作、优先用浏览器 ChatGPT 生成并下载图片/提示词），未将其持久化到外部工件，导致阶段切换后约定自然丢失、Agent 按默认方式行动",
+       "betterDecision": "在 Owner 首次表达此类约定时（尤其是带有'务必/以后/不要忘记'的指令），立即将其写入持久化的工作约定文档或任务笔记，形成跨会话、跨阶段可召回的工件",
+       "rationale": "瞬态上下文会随会话与阶段切换而丢失，只有持久化到外部工件中的约定才能保证连续性，从源头消除重复遗忘而非依赖记忆自然延续",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "state_externalization",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "在新阶段开工时直接执行工具调用，未先回顾或召回既定工作约定，偏离既定做法的调用已发生后才被 Owner 纠正",
+       "betterDecision": "在阶段切换或任何图片/提示词生成类工具调用前设置强制检查门：先读取持久化的工作约定清单，核对当前行动计划（是否使用顾问、是否用浏览器 ChatGPT）符合约定后才执行",
+       "rationale": "事前拦截的成本远低于事后纠正，检查门把'知道约定'转化为'执行前必查'的护栏行为，使偏离在工具调用发生前就被阻止",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "preflight_guardrail",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "按自身默认方式（不咨询顾问、不使用浏览器 ChatGPT）自行推断工作方式，实质上覆盖了 Owner 已明确表达的协作与生成约束",
+       "betterDecision": "将 Owner 明确表达过的约束视为硬约束并优先于任何推断的默认偏好；当不确定既定做法时，先向 Owner 或顾问确认再行动，而不是自行选择默认路径",
+       "rationale": "明确的 Owner 指令优先于推断偏好，自行采用默认工作方式等同于替换已下达的决策，必然引发重复纠正并损害信任",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "explicit_constraint_priority",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "把 Owner 的纠正（'以前你是做过……不要又忘记怎么做了'）当作一次性会话指令消化，未转化为可复用的流程改进，导致同类偏离重复发生",
+       "betterDecision": "每次收到严重纠正后立即执行简短复盘：把被纠正的做法更新进持久化约定清单，并为同类任务添加触发式检查，使同类偏离在下一次执行前即可被拦截",
+       "rationale": "纠正本身就是最明确的反馈信号，若不沉淀为流程变更，同样的错误会反复出现并持续消耗 Owner 的信任与时间",
+       "confidence": 0.82,
+       "riskLevel": "low",
+       "strategicPerspective": "feedback_loop_closure",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "未将'使用顾问协作'这一多主体工作约定结构化为可独立验证的子步骤，工作流中不存在'征询顾问意见'的显式环节，导致协作要求被无声跳过",
+       "betterDecision": "把任务分解为包含显式协作节点的步骤（起草方案→顾问评审→按反馈修订→执行生成），使'是否已征求顾问意见'成为每个阶段可验证的完成条件",
+       "rationale": "将协作要求嵌入可验证的分解步骤后，遗漏顾问环节会在阶段验收时立即暴露，而不是等到 Owner 事后纠正才发现",
+       "confidence": 0.72,
+       "riskLevel": "medium",
+       "strategicPerspective": "verifiable_decomposition",
+       "sourcePrincipleId": "T-09"
+      }
+     ],
+     "sourcePainId": "pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+     "contextRefs": [
+      "artifact://ce3726b7-f23e-45b5-904b-7fb90bdbab96"
+     ],
+     "generatedAt": "2025-06-18T14:23:45Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_85731899e27e6d-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"依赖瞬时会话记忆承载 Owner 明确表达的工作约定（使用顾问协作、优先用浏览器 ChatGPT 生成并下载图片/提示词），未将其持久化到外部工件，导致阶段切换后约定自然丢失、Agent 按默认方式行动\",\"betterDecision\":\"在 Owner 首次表达此类约定时（尤其是带有'务必/以后/不要忘记'的指令），立即将其写入持久化的工作约定文档或任务笔记，形成跨会话、跨阶段可召回的工件\",\"rationale\":\"瞬态上下文会随会话与阶段切换而丢失，只有持久化到外部工件中的约定才能保证连续性，从源头消除重复遗忘而非依赖记忆自然延续\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"state_externalization\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":1,\"badDecision\":\"在新阶段开工时直接执行工具调用，未先回顾或召回既定工作约定，偏离既定做法的调用已发生后才被 Owner 纠正\",\"betterDecision\":\"在阶段切换或任何图片/提示词生成类工具调用前设置强制检查门：先读取持久化的工作约定清单，核对当前行动计划（是否使用顾问、是否用浏览器 ChatGPT）符合约定后才执行\",\"rationale\":\"事前拦截的成本远低于事后纠正，检查门把'知道约定'转化为'执行前必查'的护栏行为，使偏离在工具调用发生前就被阻止\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"preflight_guardrail\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"按自身默认方式（不咨询顾问、不使用浏览器 ChatGPT）自行推断工作方式，实质上覆盖了 Owner 已明确表达的协作与生成约束\",\"betterDecision\":\"将 Owner 明确表达过的约束视为硬约束并优先于任何推断的默认偏好；当不确定既定做法时，先向 Owner 或顾问确认再行动，而不是自行选择默认路径\",\"rationale\":\"明确的 Owner 指令优先于推断偏好，自行采用默认工作方式等同于替换已下达的决策，必然引发重复纠正并损害信任\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"explicit_constraint_priority\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":3,\"badDecision\":\"把 Owner 的纠正（'以前你是做过……不要又忘记怎么做了'）当作一次性会话指令消化，未转化为可复用的流程改进，导致同类偏离重复发生\",\"betterDecision\":\"每次收到严重纠正后立即执行简短复盘：把被纠正的做法更新进持久化约定清单，并为同类任务添加触发式检查，使同类偏离在下一次执行前即可被拦截\",\"rationale\":\"纠正本身就是最明确的反馈信号，若不沉淀为流程变更，同样的错误会反复出现并持续消耗 Owner 的信任与时间\",\"confidence\":0.82,\"riskLevel\":\"low\",\"strategicPerspective\":\"feedback_loop_closure\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":4,\"badDecision\":\"未将'使用顾问协作'这一多主体工作约定结构化为可独立验证的子步骤，工作流中不存在'征询顾问意见'的显式环节，导致协作要求被无声跳过\",\"betterDecision\":\"把任务分解为包含显式协作节点的步骤（起草方案→顾问评审→按反馈修订→执行生成），使'是否已征求顾问意见'成为每个阶段可验证的完成条件\",\"rationale\":\"将协作要求嵌入可验证的分解步骤后，遗漏顾问环节会在阶段验收时立即暴露，而不是等到 Owner 事后纠正才发现\",\"confidence\":0.72,\"riskLevel\":\"medium\",\"strategicPerspective\":\"verifiable_decomposition\",\"sourcePrincipleId\":\"T-09\"}],\"sourcePainId\":\"pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a\",\"contextRefs\":[\"artifact://ce3726b7-f23e-45b5-904b-7fb90bdbab96\"],\"generatedAt\":\"2025-06-18T14:23:45Z\"}",
+    "usage": {
+     "input": 2208,
+     "output": 3250,
+     "total": 5458
+    },
+    "latencyMs": 41813,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "7cd8d39e81c24e58"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_85731899e27e6d-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r1-run1",
+     "thesis": "Explicit owner conventions constrain behavior only when they survive beyond the moment they are spoken. Knowing an agreement is not compliance: durable compliance requires externalizing stated conventions into persisted artifacts, converting them into pre-execution checks at phase boundaries and consequential tool calls, prioritizing them over inferred defaults, and updating them from each correction so deviations are intercepted before action rather than repeatedly punished after it.",
+     "principleCandidate": {
+      "title": "Persist explicit owner conventions and re-verify them at phase transitions before acting",
+      "rationale": "The root cause was not ignorance of the conventions but reliance on transient session memory to carry them. When conventions live only in context, phase switches silently discard them and agent defaults override explicit intent. Persisting them to an external checklist and consulting it before execution converts 'once knew' into 'must check before act,' blocking deviations upstream of tool calls and letting corrections harden the checklist instead of merely re-teaching it.",
+      "scope": "Applies whenever an owner explicitly expresses working conventions, collaboration protocols, or process constraints expected to hold across sessions, phases, or repeated tasks—especially at phase transitions, before tool invocations whose mode of execution could deviate from stated intent, and whenever a correction signals a recurring expectation rather than a one-off instruction.",
+      "confidence": 0.85
+     },
+     "risks": [
+      "Partial duplication of existing core axioms: this principle primarily composes T-10 (persist state when continuity matters) with T-05 (translate constraints into pre-execution guardrails) and T-08 (treat corrections as feedback); the principle library may gain redundancy rather than a genuinely new axiom.",
+      "Over-application risk: forcing checklist consultation before every minor action could add latency and bureaucratic friction to trivial, low-stakes steps where defaults are acceptable.",
+      "Staleness risk: persisted conventions may outlive the owner's actual intent if preferences change and the checklist is not updated, causing the guardrail to enforce obsolete instructions against current wishes.",
+      "Misclassification risk: one-off contextual preferences could be promoted into durable conventions, rigidifying behavior where flexible judgment was intended."
+     ],
+     "generatedAt": "2025-06-18T14:36:20Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_85731899e27e6d-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r1-run1\",\"thesis\":\"Explicit owner conventions constrain behavior only when they survive beyond the moment they are spoken. Knowing an agreement is not compliance: durable compliance requires externalizing stated conventions into persisted artifacts, converting them into pre-execution checks at phase boundaries and consequential tool calls, prioritizing them over inferred defaults, and updating them from each correction so deviations are intercepted before action rather than repeatedly punished after it.\",\"principleCandidate\":{\"title\":\"Persist explicit owner conventions and re-verify them at phase transitions before acting\",\"rationale\":\"The root cause was not ignorance of the conventions but reliance on transient session memory to carry them. When conventions live only in context, phase switches silently discard them and agent defaults override explicit intent. Persisting them to an external checklist and consulting it before execution converts 'once knew' into 'must check before act,' blocking deviations upstream of tool calls and letting corrections harden the checklist instead of merely re-teaching it.\",\"scope\":\"Applies whenever an owner explicitly expresses working conventions, collaboration protocols, or process constraints expected to hold across sessions, phases, or repeated tasks—especially at phase transitions, before tool invocations whose mode of execution could deviate from stated intent, and whenever a correction signals a recurring expectation rather than a one-off instruction.\",\"confidence\":0.85},\"risks\":[\"Partial duplication of existing core axioms: this principle primarily composes T-10 (persist state when continuity matters) with T-05 (translate constraints into pre-execution guardrails) and T-08 (treat corrections as feedback); the principle library may gain redundancy rather than a genuinely new axiom.\",\"Over-application risk: forcing checklist consultation before every minor action could add latency and bureaucratic friction to trivial, low-stakes steps where defaults are acceptable.\",\"Staleness risk: persisted conventions may outlive the owner's actual intent if preferences change and the checklist is not updated, causing the guardrail to enforce obsolete instructions against current wishes.\",\"Misclassification risk: one-off contextual preferences could be promoted into durable conventions, rigidifying behavior where flexible judgment was intended.\"],\"generatedAt\":\"2025-06-18T14:36:20Z\"}",
+    "usage": {
+     "input": 1753,
+     "output": 1354,
+     "total": 3107
+    },
+    "latencyMs": 23284,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "2bdb473c9ccf57c9"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_85731899e27e6d-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r1-run1",
+     "principleDraft": {
+      "title": "Persist owner conventions externally and re-verify before each phase transition",
+      "statement": "When an owner explicitly states a working convention, collaboration protocol, or process constraint, the agent must externalize it into a persistent artifact (e.g., a conventions checklist or memory record) and must re-verify that artifact before phase transitions and before tool calls whose execution mode could deviate from the stated convention. The explicit convention always takes precedence over inferred defaults or agent habits, and any correction that reveals a recurring expectation must be folded back into the artifact so the check hardens rather than the lesson evaporates.",
+      "rationale": "The diagnosed root cause was not ignorance of the conventions but reliance on transient session memory to carry them. Conventions held only in context are silently discarded at phase switches, and agent defaults then override explicit intent. Persisting them externally and consulting the persisted form before acting converts 'once knew' into 'must check before act,' intercepting deviations upstream of tool calls and letting each correction strengthen the durable guardrail instead of merely re-teaching the same lesson in the next context window.",
+      "applicability": [
+       "Owner explicitly states working conventions, collaboration protocols, or process constraints expected to hold across sessions, phases, or repeated tasks",
+       "Phase transitions within a task where context focus shifts and earlier agreements are likely to fall out of transient attention",
+       "Before consequential tool calls whose mode of execution (format, language, placement, review step, level of detail) could deviate from a stated convention",
+       "Whenever a correction or pushback signals a recurring expectation rather than a one-off contextual instruction"
+      ],
+      "antiPatterns": [
+       "Carrying owner-stated conventions only in conversation context and proceeding at phase boundaries without re-checking them",
+       "Letting agent defaults, templates, or inferred preferences override an explicitly stated convention",
+       "Re-apologizing for and re-learning the same corrected convention in each new session or phase instead of persisting it",
+       "Treating a one-off contextual preference as a durable convention (or a durable convention as one-off) without classification",
+       "Enforcing a persisted convention after the owner has changed their expectation because the artifact was never updated"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent the agent from silently dropping or overriding explicitly stated working conventions at phase transitions and across sessions because they were held only in transient context.",
+      "targetBehavior": "When the owner states or corrects a working convention, the agent visibly writes or updates it in a persistent conventions artifact, and before each phase transition and each convention-relevant tool call, the agent reads and verifies that artifact and conforms execution to the explicit convention in preference to inferred defaults.",
+      "forbiddenBehavior": "Proceeding at phase boundaries or before consequential tool calls with conventions held only in session memory, allowing defaults or inferred preferences to override stated conventions, and repeating the same corrected violation because the correction was never persisted or converted into a pre-execution check.",
+      "evidenceSource": "The pain_host_85731899e27e6d lineage diagnosis: the agent demonstrably knew the owner's stated conventions yet violated them after phase switches because they lived only in transient conversation context, and corrections had to be re-delivered rather than hardening into a durable pre-execution check.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if, in observed trajectories, newly stated or corrected conventions appear as persisted artifacts, a verification step is visible before phase transitions and convention-relevant tool calls, explicit conventions win over defaults at least once in a conflict, and previously corrected violations do not recur in later sessions or phases."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r1-run1"
+     },
+     "risks": [
+      "Overlaps existing core axioms: the principle composes T-10 (persist state when continuity matters), T-05 (translate constraints into pre-execution guardrails), and T-08 (treat corrections as feedback); the principle library may gain redundancy rather than a genuinely new axiom, so a merger or cross-reference may be preferable at integration time.",
+      "Over-application risk: mandating checklist consultation before every minor action could add latency and bureaucratic friction to trivial, low-stakes steps where defaults are acceptable; scope must stay tied to phase transitions and consequential tool calls.",
+      "Staleness risk: persisted conventions may outlive the owner's actual intent if preferences change and the artifact is not updated, causing the guardrail to enforce obsolete instructions against current wishes.",
+      "Misclassification risk: one-off contextual preferences could be promoted into durable conventions, rigidifying behavior where flexible judgment was intended.",
+      "Dependency risk: if no persistent external store exists in the environment, the agent may need to create one, which itself adds state-management overhead and failure modes."
+     ],
+     "generatedAt": "2025-06-18T14:47:33Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_85731899e27e6d-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Persist owner conventions externally and re-verify before each phase transition\",\n    \"statement\": \"When an owner explicitly states a working convention, collaboration protocol, or process constraint, the agent must externalize it into a persistent artifact (e.g., a conventions checklist or memory record) and must re-verify that artifact before phase transitions and before tool calls whose execution mode could deviate from the stated convention. The explicit convention always takes precedence over inferred defaults or agent habits, and any correction that reveals a recurring expectation must be folded back into the artifact so the check hardens rather than the lesson evaporates.\",\n    \"rationale\": \"The diagnosed root cause was not ignorance of the conventions but reliance on transient session memory to carry them. Conventions held only in context are silently discarded at phase switches, and agent defaults then override explicit intent. Persisting them externally and consulting the persisted form before acting converts 'once knew' into 'must check before act,' intercepting deviations upstream of tool calls and letting each correction strengthen the durable guardrail instead of merely re-teaching the same lesson in the next context window.\",\n    \"applicability\": [\n      \"Owner explicitly states working conventions, collaboration protocols, or process constraints expected to hold across sessions, phases, or repeated tasks\",\n      \"Phase transitions within a task where context focus shifts and earlier agreements are likely to fall out of transient attention\",\n      \"Before consequential tool calls whose mode of execution (format, language, placement, review step, level of detail) could deviate from a stated convention\",\n      \"Whenever a correction or pushback signals a recurring expectation rather than a one-off contextual instruction\"\n    ],\n    \"antiPatterns\": [\n      \"Carrying owner-stated conventions only in conversation context and proceeding at phase boundaries without re-checking them\",\n      \"Letting agent defaults, templates, or inferred preferences override an explicitly stated convention\",\n      \"Re-apologizing for and re-learning the same corrected convention in each new session or phase instead of persisting it\",\n      \"Treating a one-off contextual preference as a durable convention (or a durable convention as one-off) without classification\",\n      \"Enforcing a persisted convention after the owner has changed their expectation because the artifact was never updated\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Prevent the agent from silently dropping or overriding explicitly stated working conventions at phase transitions and across sessions because they were held only in transient context.\",\n    \"targetBehavior\": \"When the owner states or corrects a working convention, the agent visibly writes or updates it in a persistent conventions artifact, and before each phase transition and each convention-relevant tool call, the agent reads and verifies that artifact and conforms execution to the explicit convention in preference to inferred defaults.\",\n    \"forbiddenBehavior\": \"Proceeding at phase boundaries or before consequential tool calls with conventions held only in session memory, allowing defaults or inferred preferences to override stated conventions, and repeating the same corrected violation because the correction was never persisted or converted into a pre-execution check.\",\n    \"evidenceSource\": \"The pain_host_85731899e27e6d lineage diagnosis: the agent demonstrably knew the owner's stated conventions yet violated them after phase switches because they lived only in transient conversation context, and corrections had to be re-delivered rather than hardening into a durable pre-execution check.\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if, in observed trajectories, newly stated or corrected conventions appear as persisted artifacts, a verification step is visible before phase transitions and convention-relevant tool calls, explicit conventions win over defaults at least once in a conflict, and previously corrected violations do not recur in later sessions or phases.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r1-run1\"\n  },\n  \"risks\": [\n    \"Overlaps existing core axioms: the principle composes T-10 (persist state when continuity matters), T-05 (translate constraints into pre-execution guardrails), and T-08 (treat corrections as feedback); the principle library may gain redundancy rather than a genuinely new axiom, so a merger or cross-reference may be preferable at integration time.\",\n    \"Over-application risk: mandating checklist consultation before every minor action could add latency and bureaucratic friction to trivial, low-stakes steps where defaults are acceptable; scope must stay tied to phase transitions and consequential tool calls.\",\n    \"Staleness risk: persisted conventions may outlive the owner's actual intent if preferences change and the artifact is not updated, causing the guardrail to enforce obsolete instructions against current wishes.\",\n    \"Misclassification risk: one-off contextual preferences could be promoted into durable conventions, rigidifying behavior where flexible judgment was intended.\",\n    \"Dependency risk: if no persistent external store exists in the environment, the agent may need to create one, which itself adds state-management overhead and failure modes.\"\n  ],\n  \"generatedAt\": \"2025-06-18T14:47:33Z\"\n}",
+    "usage": {
+     "input": 1901,
+     "output": 3109,
+     "total": 5010
+    },
+    "latencyMs": 39568,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "0381c84b2f8fd21b"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_85731899e27e6d-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r1-run1",
+     "principleDraft": {
+      "title": "Persist Explicit Owner Conventions and Re-Verify Them at Phase Transitions Before Acting",
+      "statement": "Whenever an owner explicitly states a working convention, collaboration protocol, or process constraint meant to hold beyond the immediate instruction (e.g., phrased as a durable directive or confirmed by repeated correction), immediately externalize it into a persisted conventions artifact; before beginning any new phase or executing a tool call whose mode of execution could deviate from it, load that artifact and verify the planned action conforms; treat persisted conventions as overriding agent-inferred defaults; and update the artifact whenever a correction reveals a recurring expectation.",
+      "rationale": "The diagnosed root cause was not ignorance of the conventions but reliance on transient session memory to carry them: phase and session switches silently discarded the owner's stated practices (advisor collaboration, browser-ChatGPT-first image/prompt generation), so agent defaults overrode explicit intent and deviations were only caught by severe corrections after the offending tool calls had already run. Persisting conventions to an external artifact and forcing a pre-execution recall-and-check converts 'once knew' into 'must check before act,' intercepting deviations upstream of tool calls and letting each correction harden the guardrail instead of merely re-teaching it in-context.",
+      "applicability": [
+       "When an owner explicitly expresses a working convention, collaboration protocol, or process constraint expected to hold across sessions, phases, or repeated tasks, especially directives phrased as durable instructions ('务必/以后/不要忘记')",
+       "At phase transitions or when starting a new stage of an ongoing task",
+       "Before tool calls whose execution mode could deviate from stated conventions, such as image/prompt generation or collaboration steps",
+       "When a severe correction signals a recurring expectation rather than a one-off instruction"
+      ],
+      "antiPatterns": [
+       "Carrying owner-stated conventions only in transient session/context memory and assuming they naturally persist across phases or sessions",
+       "Starting a new phase or issuing generation/collaboration tool calls without first loading and checking the persisted conventions artifact",
+       "Letting agent-inferred default working methods override explicit owner-stated conventions",
+       "Consuming a severe correction as a one-off session instruction without updating the persisted conventions artifact or its pre-execution checks"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants his explicitly stated working conventions — collaborate via the advisor and prefer browser ChatGPT to generate and download images/prompts — to survive across sessions and phase switches so he never has to repeat severe corrections for a forgotten established practice.",
+      "targetBehavior": "Upon receiving a durable convention or a correction revealing one, the agent writes it into a persisted conventions artifact; a reviewer can then see in the tool trajectory that before each phase start or convention-relevant tool call, the agent loads that artifact and aligns the planned action (consult the advisor, use browser ChatGPT) before executing.",
+      "forbiddenBehavior": "Entering a new phase or executing a tool call in the agent's default working mode while a previously stated convention lives only in transient context — the repeated-forgetting failure family in which the Owner must re-correct only after the deviating call has already happened.",
+      "evidenceSource": "Severe user_correction pain pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a detected by an after_tool_call hook: the Owner's message demanded advisor collaboration and browser-ChatGPT-first image/prompt generation and stated '以前你是做过……不要又忘记怎么做了', proving a previously successful workflow was forgotten again; the run diagnosis found no persisted conventions document or pre-work checklist available for recall.",
+      "validationExpectation": "An evaluator should accept a downstream rule as faithful only if it (a) triggers write-out of explicitly stated conventions at the moment they are expressed, (b) forces loading and checking the persisted conventions before phase transitions and convention-relevant tool calls, blocking execution until conformance is confirmed, and (c) updates the artifact upon correction; any change that weakens the check into post-hoc verification, removes persistence, or widens scope to one-off contextual preferences contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r1-run1"
+     },
+     "risks": [
+      "Overlaps core axioms: this principle composes T-10 (persist important state when continuity matters), T-05 (translate constraints into pre-execution guardrails), T-02 (explicit constraints override inferred preferences), and T-08 (corrections as feedback); the library may gain redundancy rather than a genuinely new axiom.",
+      "Over-application: forcing checklist consultation before every minor, low-stakes action adds latency and bureaucratic friction where defaults are acceptable.",
+      "Staleness: persisted conventions may outlive the owner's actual intent if preferences change and the artifact is not updated, turning the guardrail into enforcement of obsolete instructions.",
+      "Misclassification: one-off contextual preferences could be promoted into durable conventions, rigidifying behavior where flexible judgment was intended.",
+      "Scope deliberately excludes structural decomposition of collaboration into verifiable substeps (dreamer proposal 4, not adopted by the critique); if the pre-execution check is performed shallowly, a multi-party convention such as advisor consultation could still be skipped."
+     ],
+     "generatedAt": "2025-06-18T14:41:37Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_85731899e27e6d-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r1-run1\",\"principleDraft\":{\"title\":\"Persist Explicit Owner Conventions and Re-Verify Them at Phase Transitions Before Acting\",\"statement\":\"Whenever an owner explicitly states a working convention, collaboration protocol, or process constraint meant to hold beyond the immediate instruction (e.g., phrased as a durable directive or confirmed by repeated correction), immediately externalize it into a persisted conventions artifact; before beginning any new phase or executing a tool call whose mode of execution could deviate from it, load that artifact and verify the planned action conforms; treat persisted conventions as overriding agent-inferred defaults; and update the artifact whenever a correction reveals a recurring expectation.\",\"rationale\":\"The diagnosed root cause was not ignorance of the conventions but reliance on transient session memory to carry them: phase and session switches silently discarded the owner's stated practices (advisor collaboration, browser-ChatGPT-first image/prompt generation), so agent defaults overrode explicit intent and deviations were only caught by severe corrections after the offending tool calls had already run. Persisting conventions to an external artifact and forcing a pre-execution recall-and-check converts 'once knew' into 'must check before act,' intercepting deviations upstream of tool calls and letting each correction harden the guardrail instead of merely re-teaching it in-context.\",\"applicability\":[\"When an owner explicitly expresses a working convention, collaboration protocol, or process constraint expected to hold across sessions, phases, or repeated tasks, especially directives phrased as durable instructions ('务必/以后/不要忘记')\",\"At phase transitions or when starting a new stage of an ongoing task\",\"Before tool calls whose execution mode could deviate from stated conventions, such as image/prompt generation or collaboration steps\",\"When a severe correction signals a recurring expectation rather than a one-off instruction\"],\"antiPatterns\":[\"Carrying owner-stated conventions only in transient session/context memory and assuming they naturally persist across phases or sessions\",\"Starting a new phase or issuing generation/collaboration tool calls without first loading and checking the persisted conventions artifact\",\"Letting agent-inferred default working methods override explicit owner-stated conventions\",\"Consuming a severe correction as a one-off session instruction without updating the persisted conventions artifact or its pre-execution checks\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"The Owner wants his explicitly stated working conventions — collaborate via the advisor and prefer browser ChatGPT to generate and download images/prompts — to survive across sessions and phase switches so he never has to repeat severe corrections for a forgotten established practice.\",\"targetBehavior\":\"Upon receiving a durable convention or a correction revealing one, the agent writes it into a persisted conventions artifact; a reviewer can then see in the tool trajectory that before each phase start or convention-relevant tool call, the agent loads that artifact and aligns the planned action (consult the advisor, use browser ChatGPT) before executing.\",\"forbiddenBehavior\":\"Entering a new phase or executing a tool call in the agent's default working mode while a previously stated convention lives only in transient context — the repeated-forgetting failure family in which the Owner must re-correct only after the deviating call has already happened.\",\"evidenceSource\":\"Severe user_correction pain pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a detected by an after_tool_call hook: the Owner's message demanded advisor collaboration and browser-ChatGPT-first image/prompt generation and stated '以前你是做过……不要又忘记怎么做了', proving a previously successful workflow was forgotten again; the run diagnosis found no persisted conventions document or pre-work checklist available for recall.\",\"validationExpectation\":\"An evaluator should accept a downstream rule as faithful only if it (a) triggers write-out of explicitly stated conventions at the moment they are expressed, (b) forces loading and checking the persisted conventions before phase transitions and convention-relevant tool calls, blocking execution until conformance is confirmed, and (c) updates the artifact upon correction; any change that weakens the check into post-hoc verification, removes persistence, or widens scope to one-off contextual preferences contradicts this intent and must be flagged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r1-run1\"},\"risks\":[\"Overlaps core axioms: this principle composes T-10 (persist important state when continuity matters), T-05 (translate constraints into pre-execution guardrails), T-02 (explicit constraints override inferred preferences), and T-08 (corrections as feedback); the library may gain redundancy rather than a genuinely new axiom.\",\"Over-application: forcing checklist consultation before every minor, low-stakes action adds latency and bureaucratic friction where defaults are acceptable.\",\"Staleness: persisted conventions may outlive the owner's actual intent if preferences change and the artifact is not updated, turning the guardrail into enforcement of obsolete instructions.\",\"Misclassification: one-off contextual preferences could be promoted into durable conventions, rigidifying behavior where flexible judgment was intended.\",\"Scope deliberately excludes structural decomposition of collaboration into verifiable substeps (dreamer proposal 4, not adopted by the critique); if the pre-execution check is performed shallowly, a multi-party convention such as advisor consultation could still be skipped.\"],\"generatedAt\":\"2025-06-18T14:41:37Z\"}",
+    "usage": {
+     "input": 4428,
+     "output": 4862,
+     "total": 9290
+    },
+    "latencyMs": 59920,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "d0ca22f4a6cbc027"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_85731899e27e6d",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_85731899e27e6d-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "依赖瞬时会话记忆承载 Owner 明确表达的工作约定（使用顾问协作、优先用浏览器 ChatGPT 生成并下载图片/提示词），未将其持久化到任何可跨会话读取的工件中",
+       "betterDecision": "在 Owner 首次表达\"以后务必/不要忘记\"类约定时，立即将其写入持久化的工作约定文档（如任务笔记或 CONVENTIONS 清单），并持续维护该文档作为后续所有相关任务的输入",
+       "rationale": "瞬时会话上下文在阶段切换或会话更换后自然丢失，只有持久化工件才能保证关键约定跨会话连续生效，从根本上消除重复遗忘",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "state_persistence",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "新阶段开工时直接按自身默认方式行动（自行生成提示词/图片），未先回顾或召回既定的工作约定",
+       "betterDecision": "在阶段切换或涉及图片/提示词生成的任务开工前，强制先读取持久化的工作约定清单，确认当前行动计划符合约定（使用顾问、浏览器 ChatGPT）后再执行任何工具调用",
+       "rationale": "开工前主动召回能在工具调用前拦截偏离，避免纠正发生在错误行动已执行之后，把纠错成本从 Owner 侧前移到 Agent 自检侧",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "pre_action_recall",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "以自身默认或推断的生成与协作方式替代 Owner 明确要求的做法（未使用顾问协作、未优先用浏览器 ChatGPT）",
+       "betterDecision": "严格遵循 Owner 明确表达的约束（顾问协作、浏览器 ChatGPT 生成并下载图片/提示词），如需偏离必须先向 Owner 说明并取得确认",
+       "rationale": "Owner 明确表达的约束优先于任何自行推断的偏好，忽略明确指令必然引发重复纠正并损耗信任",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "explicit_intent_priority",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "未建立涉及图片/提示词生成的工具调用前置检查门，导致偏离既定做法的调用执行后才被 Owner 发现并纠正",
+       "betterDecision": "为涉及图片/封面/关键帧/提示词生成的工具调用设置显式护栏：调用前核对生成方式是否符合持久化约定，不符合则先调整方案再执行",
+       "rationale": "将 Owner 的硬性约束翻译为可执行的检查与禁止转移，能在执行前拦截偏离，而不是事后补救",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_first",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "同一工作约定被 Owner 多次纠正后仍未将其固化为流程改进，重复陷入同样的遗忘循环",
+       "betterDecision": "把每次 Owner 纠正视为反馈信号，立即更新持久化工作约定文档与开工检查清单，并在后续所有相关任务中执行\"先召回约定再行动\"的流程",
+       "rationale": "失败与纠正若不转化为持久化的流程改进就会无限重复；固化纠正教训是打破\"遗忘-纠正\"循环的关键机制",
+       "confidence": 0.87,
+       "riskLevel": "low",
+       "strategicPerspective": "feedback_driven_improvement",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "sourcePainId": "pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+     "contextRefs": [
+      "artifact://ce3726b7-f23e-45b5-904b-7fb90bdbab96"
+     ],
+     "generatedAt": "2025-05-30T10:24:17Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_85731899e27e6d-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"依赖瞬时会话记忆承载 Owner 明确表达的工作约定（使用顾问协作、优先用浏览器 ChatGPT 生成并下载图片/提示词），未将其持久化到任何可跨会话读取的工件中\",\"betterDecision\":\"在 Owner 首次表达\\\"以后务必/不要忘记\\\"类约定时，立即将其写入持久化的工作约定文档（如任务笔记或 CONVENTIONS 清单），并持续维护该文档作为后续所有相关任务的输入\",\"rationale\":\"瞬时会话上下文在阶段切换或会话更换后自然丢失，只有持久化工件才能保证关键约定跨会话连续生效，从根本上消除重复遗忘\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"state_persistence\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":1,\"badDecision\":\"新阶段开工时直接按自身默认方式行动（自行生成提示词/图片），未先回顾或召回既定的工作约定\",\"betterDecision\":\"在阶段切换或涉及图片/提示词生成的任务开工前，强制先读取持久化的工作约定清单，确认当前行动计划符合约定（使用顾问、浏览器 ChatGPT）后再执行任何工具调用\",\"rationale\":\"开工前主动召回能在工具调用前拦截偏离，避免纠正发生在错误行动已执行之后，把纠错成本从 Owner 侧前移到 Agent 自检侧\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"pre_action_recall\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"以自身默认或推断的生成与协作方式替代 Owner 明确要求的做法（未使用顾问协作、未优先用浏览器 ChatGPT）\",\"betterDecision\":\"严格遵循 Owner 明确表达的约束（顾问协作、浏览器 ChatGPT 生成并下载图片/提示词），如需偏离必须先向 Owner 说明并取得确认\",\"rationale\":\"Owner 明确表达的约束优先于任何自行推断的偏好，忽略明确指令必然引发重复纠正并损耗信任\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"explicit_intent_priority\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":3,\"badDecision\":\"未建立涉及图片/提示词生成的工具调用前置检查门，导致偏离既定做法的调用执行后才被 Owner 发现并纠正\",\"betterDecision\":\"为涉及图片/封面/关键帧/提示词生成的工具调用设置显式护栏：调用前核对生成方式是否符合持久化约定，不符合则先调整方案再执行\",\"rationale\":\"将 Owner 的硬性约束翻译为可执行的检查与禁止转移，能在执行前拦截偏离，而不是事后补救\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_first\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"同一工作约定被 Owner 多次纠正后仍未将其固化为流程改进，重复陷入同样的遗忘循环\",\"betterDecision\":\"把每次 Owner 纠正视为反馈信号，立即更新持久化工作约定文档与开工检查清单，并在后续所有相关任务中执行\\\"先召回约定再行动\\\"的流程\",\"rationale\":\"失败与纠正若不转化为持久化的流程改进就会无限重复；固化纠正教训是打破\\\"遗忘-纠正\\\"循环的关键机制\",\"confidence\":0.87,\"riskLevel\":\"low\",\"strategicPerspective\":\"feedback_driven_improvement\",\"sourcePrincipleId\":\"T-08\"}],\"sourcePainId\":\"pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a\",\"contextRefs\":[\"artifact://ce3726b7-f23e-45b5-904b-7fb90bdbab96\"],\"generatedAt\":\"2025-05-30T10:24:17Z\"}",
+    "usage": {
+     "input": 2208,
+     "output": 2268,
+     "total": 4476
+    },
+    "latencyMs": 26714,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3d8d72ac0d1fcb28"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_85731899e27e6d-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r2-run1",
+     "thesis": "When an owner frames an instruction as a standing rule ('from now on', 'do not forget'), it ceases to be a property of the current conversation and becomes a durable constraint. Such constraints cannot survive in transient context: they must be externalized into a persistent, maintained conventions record, mandatorily re-invoked before any action they govern, and updated by every correction. Without this capture-recall-update loop, context loss guarantees recurring violation, and each correction that fails to rewrite the persistent record merely re-arms the same failure cycle.",
+     "principleCandidate": {
+      "title": "Externalize standing owner conventions; recall them before acting; update them on correction",
+      "rationale": "The root cause was not a single bad action but a memory-dependent process: recurring obligations lived only in transient session context, so every phase or session boundary erased them, and repeated corrections were never converted into process change. Persisting owner-declared conventions into a maintained record, requiring a pre-action recall gate before tasks or tool calls those conventions govern, and feeding every correction back into that record transforms compliance from fragile recall into a durable process, intercepting deviation before execution rather than remediating after it.",
+      "scope": "Applies whenever an owner expresses a durable, cross-session instruction or standing rule ('always', 'never', 'from now on'), particularly before initiating tasks, phases, or tool calls covered by such rules, and whenever the same correction has occurred more than once. Not intended for one-off, task-local instructions that expire with the task.",
+      "confidence": 0.86
+     },
+     "risks": [
+      "Partially overlaps core axioms T-10 (persist important state), T-05 (translate constraints into guardrails), T-02 (explicit intent priority), and T-08 (treat corrections as feedback); the candidate should be treated as a lifecycle synthesis (capture, persist, recall, update) extending those axioms rather than replacing them, or it may be judged redundant.",
+      "Mandatory pre-action recall can add overhead and latency if applied too broadly, e.g., to trivial tasks clearly outside any convention's scope; the recall gate must be scoped to actions the conventions actually govern.",
+      "Persisted conventions can go stale if the owner's preferences evolve; rigid adherence to an outdated record without reconfirmation could override the owner's current intent.",
+      "Risk of misclassifying one-off instructions as standing rules, producing unnecessary rigidity and interruptions for confirmation when flexibility was expected."
+     ],
+     "generatedAt": "2025-05-30T10:41:52Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_85731899e27e6d-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r2-run1\",\"thesis\":\"When an owner frames an instruction as a standing rule ('from now on', 'do not forget'), it ceases to be a property of the current conversation and becomes a durable constraint. Such constraints cannot survive in transient context: they must be externalized into a persistent, maintained conventions record, mandatorily re-invoked before any action they govern, and updated by every correction. Without this capture-recall-update loop, context loss guarantees recurring violation, and each correction that fails to rewrite the persistent record merely re-arms the same failure cycle.\",\"principleCandidate\":{\"title\":\"Externalize standing owner conventions; recall them before acting; update them on correction\",\"rationale\":\"The root cause was not a single bad action but a memory-dependent process: recurring obligations lived only in transient session context, so every phase or session boundary erased them, and repeated corrections were never converted into process change. Persisting owner-declared conventions into a maintained record, requiring a pre-action recall gate before tasks or tool calls those conventions govern, and feeding every correction back into that record transforms compliance from fragile recall into a durable process, intercepting deviation before execution rather than remediating after it.\",\"scope\":\"Applies whenever an owner expresses a durable, cross-session instruction or standing rule ('always', 'never', 'from now on'), particularly before initiating tasks, phases, or tool calls covered by such rules, and whenever the same correction has occurred more than once. Not intended for one-off, task-local instructions that expire with the task.\",\"confidence\":0.86},\"risks\":[\"Partially overlaps core axioms T-10 (persist important state), T-05 (translate constraints into guardrails), T-02 (explicit intent priority), and T-08 (treat corrections as feedback); the candidate should be treated as a lifecycle synthesis (capture, persist, recall, update) extending those axioms rather than replacing them, or it may be judged redundant.\",\"Mandatory pre-action recall can add overhead and latency if applied too broadly, e.g., to trivial tasks clearly outside any convention's scope; the recall gate must be scoped to actions the conventions actually govern.\",\"Persisted conventions can go stale if the owner's preferences evolve; rigid adherence to an outdated record without reconfirmation could override the owner's current intent.\",\"Risk of misclassifying one-off instructions as standing rules, producing unnecessary rigidity and interruptions for confirmation when flexibility was expected.\"],\"generatedAt\":\"2025-05-30T10:41:52Z\"}",
+    "usage": {
+     "input": 1675,
+     "output": 2125,
+     "total": 3800
+    },
+    "latencyMs": 32019,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3b9851aac299df4c"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_85731899e27e6d-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r2-run1",
+     "principleDraft": {
+      "title": "Persist standing owner conventions; recall before governed actions; update on correction",
+      "statement": "When an owner expresses a durable, cross-session instruction or standing rule (e.g., 'always', 'never', 'from now on', '以后务必', '不要忘记'), the agent must: (1) immediately capture it into a persistent conventions record maintained outside transient session context; (2) re-read that record before initiating any task, phase, or tool call the conventions govern, and confirm the planned action complies before executing; and (3) after every owner correction touching those conventions, rewrite the record so the correction becomes persistent process rather than one-time compliance. Standing conventions must never be carried only in conversation memory. One-off, task-local instructions that expire with the current task are out of scope.",
+      "rationale": "The diagnosed failure was not a single wrong action but a memory-dependent process: owner-declared work conventions (advisor collaboration, browser-ChatGPT-first image/prompt generation) existed only in transient session context, so every phase or session boundary erased them, the agent reverted to its own defaults, and the owner had to re-issue severe corrections that were never converted into persistent process change, guaranteeing recurrence. Externalizing conventions into a maintained record with a mandatory pre-action recall gate and a correction-driven update loop converts compliance from fragile recall into durable process, intercepting deviation before the deviating tool call executes rather than remediating after it.",
+      "applicability": [
+       "When an owner message carries standing-rule markers ('以后务必', '不要忘记', 'from now on', 'always', 'never') — capture into the persistent record must happen at first expression",
+       "Before starting a phase, task, or tool call whose work type is covered by a persisted convention (e.g., image/cover/keyframe/prompt generation, collaboration mode)",
+       "When the same owner correction about a working method has occurred more than once — recurrence signals a missing persistence/recall mechanism, not a memory lapse",
+       "Explicitly out of scope: one-off, task-local instructions that expire with the current task"
+      ],
+      "antiPatterns": [
+       "Carrying owner-declared standing conventions only in transient session or conversation memory across phases and sessions",
+       "Starting a governed phase or executing covered tool calls (e.g., image/prompt generation) without first loading the persistent conventions record and checking the plan against it",
+       "Complying with an owner correction in the moment while never rewriting the persistent conventions record or checklist, re-arming the same forgetting cycle",
+       "Substituting the agent's own default working method (self-generated images/prompts, skipping advisor collaboration) for the owner's explicitly declared constraints",
+       "Treating a recurring standing rule as task-local and discarding it at phase or task end"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The owner wants work conventions he has explicitly declared — use advisor collaboration, and generate covers/keyframes/prompts via browser ChatGPT first — to remain in force across phase and session boundaries so he never has to re-issue the same correction.",
+      "targetBehavior": "In an observable tool trajectory, a compliant agent writes new 'from now on / do not forget' instructions into a persistent conventions record when they are issued, reads that record before starting any phase or tool call it governs, updates the record after each related correction, and its subsequent actions (advisor use, browser ChatGPT generation) match the recorded constraints.",
+      "forbiddenBehavior": "Letting owner-declared standing conventions live only in transient session memory, so phase or session boundaries silently erase them, the agent reverts to its own defaults (generating images/prompts its own way, skipping advisor collaboration), the owner must correct again only after a deviating tool call has already executed, and the correction never updates any persistent record.",
+      "evidenceSource": "Severe user_correction pain (pain_host_85731899e27e6d) detected by an after_tool_call hook: the owner's correction demanded advisor collaboration and browser-ChatGPT-first image/prompt generation and stated 'you did this before — do not forget again'; the diagnosis found no persisted conventions document or pre-work recall checklist existed.",
+      "validationExpectation": "A faithful derived rule must be checkable in three places: (a) a write to the conventions record when a standing-rule marker appears, (b) a visible read of that record before governed phase/task/tool-call starts, and (c) a rewrite after each related correction. Evaluators should reject rules that mandate only generic 'remembering' or 'be careful' without the persistence artifact and pre-action recall step, or that widen scope to one-off task-local instructions."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r2-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-10 (persist important state), T-05 (guardrails before execution), T-02 (explicit owner intent priority), and T-08 (corrections as feedback); the principle must be implemented as a lifecycle synthesis extending those axioms or it will be judged redundant",
+      "Mandatory pre-action recall adds overhead and latency if applied to trivial tasks outside any convention's scope; the recall gate must be scoped to work types the conventions actually govern",
+      "Persisted conventions can go stale as owner preferences evolve; on any conflict between the record and the owner's current explicit instruction, the current instruction wins and the record must be updated",
+      "Misclassifying one-off, task-local instructions as standing rules creates unnecessary rigidity and confirmation interruptions where flexibility was expected",
+      "Diagnosis intent-tension evidence was weak (no INTENT.md original reviewed); the standing-versus-task-local boundary rests mainly on the owner's correction message wording"
+     ],
+     "generatedAt": "2025-05-30T10:53:26Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_85731899e27e6d-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Persist standing owner conventions; recall before governed actions; update on correction\",\n    \"statement\": \"When an owner expresses a durable, cross-session instruction or standing rule (e.g., 'always', 'never', 'from now on', '以后务必', '不要忘记'), the agent must: (1) immediately capture it into a persistent conventions record maintained outside transient session context; (2) re-read that record before initiating any task, phase, or tool call the conventions govern, and confirm the planned action complies before executing; and (3) after every owner correction touching those conventions, rewrite the record so the correction becomes persistent process rather than one-time compliance. Standing conventions must never be carried only in conversation memory. One-off, task-local instructions that expire with the current task are out of scope.\",\n    \"rationale\": \"The diagnosed failure was not a single wrong action but a memory-dependent process: owner-declared work conventions (advisor collaboration, browser-ChatGPT-first image/prompt generation) existed only in transient session context, so every phase or session boundary erased them, the agent reverted to its own defaults, and the owner had to re-issue severe corrections that were never converted into persistent process change, guaranteeing recurrence. Externalizing conventions into a maintained record with a mandatory pre-action recall gate and a correction-driven update loop converts compliance from fragile recall into durable process, intercepting deviation before the deviating tool call executes rather than remediating after it.\",\n    \"applicability\": [\n      \"When an owner message carries standing-rule markers ('以后务必', '不要忘记', 'from now on', 'always', 'never') — capture into the persistent record must happen at first expression\",\n      \"Before starting a phase, task, or tool call whose work type is covered by a persisted convention (e.g., image/cover/keyframe/prompt generation, collaboration mode)\",\n      \"When the same owner correction about a working method has occurred more than once — recurrence signals a missing persistence/recall mechanism, not a memory lapse\",\n      \"Explicitly out of scope: one-off, task-local instructions that expire with the current task\"\n    ],\n    \"antiPatterns\": [\n      \"Carrying owner-declared standing conventions only in transient session or conversation memory across phases and sessions\",\n      \"Starting a governed phase or executing covered tool calls (e.g., image/prompt generation) without first loading the persistent conventions record and checking the plan against it\",\n      \"Complying with an owner correction in the moment while never rewriting the persistent conventions record or checklist, re-arming the same forgetting cycle\",\n      \"Substituting the agent's own default working method (self-generated images/prompts, skipping advisor collaboration) for the owner's explicitly declared constraints\",\n      \"Treating a recurring standing rule as task-local and discarding it at phase or task end\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The owner wants work conventions he has explicitly declared — use advisor collaboration, and generate covers/keyframes/prompts via browser ChatGPT first — to remain in force across phase and session boundaries so he never has to re-issue the same correction.\",\n    \"targetBehavior\": \"In an observable tool trajectory, a compliant agent writes new 'from now on / do not forget' instructions into a persistent conventions record when they are issued, reads that record before starting any phase or tool call it governs, updates the record after each related correction, and its subsequent actions (advisor use, browser ChatGPT generation) match the recorded constraints.\",\n    \"forbiddenBehavior\": \"Letting owner-declared standing conventions live only in transient session memory, so phase or session boundaries silently erase them, the agent reverts to its own defaults (generating images/prompts its own way, skipping advisor collaboration), the owner must correct again only after a deviating tool call has already executed, and the correction never updates any persistent record.\",\n    \"evidenceSource\": \"Severe user_correction pain (pain_host_85731899e27e6d) detected by an after_tool_call hook: the owner's correction demanded advisor collaboration and browser-ChatGPT-first image/prompt generation and stated 'you did this before — do not forget again'; the diagnosis found no persisted conventions document or pre-work recall checklist existed.\",\n    \"validationExpectation\": \"A faithful derived rule must be checkable in three places: (a) a write to the conventions record when a standing-rule marker appears, (b) a visible read of that record before governed phase/task/tool-call starts, and (c) a rewrite after each related correction. Evaluators should reject rules that mandate only generic 'remembering' or 'be careful' without the persistence artifact and pre-action recall step, or that widen scope to one-off task-local instructions.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r2-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axioms T-10 (persist important state), T-05 (guardrails before execution), T-02 (explicit owner intent priority), and T-08 (corrections as feedback); the principle must be implemented as a lifecycle synthesis extending those axioms or it will be judged redundant\",\n    \"Mandatory pre-action recall adds overhead and latency if applied to trivial tasks outside any convention's scope; the recall gate must be scoped to work types the conventions actually govern\",\n    \"Persisted conventions can go stale as owner preferences evolve; on any conflict between the record and the owner's current explicit instruction, the current instruction wins and the record must be updated\",\n    \"Misclassifying one-off, task-local instructions as standing rules creates unnecessary rigidity and confirmation interruptions where flexibility was expected\",\n    \"Diagnosis intent-tension evidence was weak (no INTENT.md original reviewed); the standing-versus-task-local boundary rests mainly on the owner's correction message wording\"\n  ],\n  \"generatedAt\": \"2025-05-30T10:53:26Z\"\n}",
+    "usage": {
+     "input": 4428,
+     "output": 6212,
+     "total": 10640
+    },
+    "latencyMs": 75284,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "cf8d031cfb83b3a6"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_85731899e27e6d-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r2-run1",
+     "principleDraft": {
+      "title": "Externalize Standing Owner Conventions; Recall Before Acting; Update on Correction",
+      "statement": "Whenever the owner expresses a durable, cross-session instruction ('always', 'never', 'from now on', 'do not forget'), the agent must (1) immediately capture it in a persistent conventions record maintained outside transient session context, (2) re-read that record before initiating any task, phase, or tool call the conventions govern and adjust the planned action to comply, and (3) rewrite the record whenever a correction reveals it is missing, stale, or wrong. One-off, task-local instructions that expire with the task are exempt from this lifecycle.",
+      "rationale": "The diagnosed root cause was not a single bad action but a memory-dependent process: recurring obligations lived only in transient session context, so every phase or session boundary erased them, and repeated corrections were never converted into process change — each unrecorded correction merely re-armed the same failure cycle. Persisting owner-declared conventions externally, gating governed actions behind a mandatory pre-action recall, and feeding every correction back into the persistent record transforms compliance from fragile recall into a durable capture-recall-update process that intercepts deviation before execution instead of remediating after it.",
+      "applicability": [
+       "When the owner expresses a standing rule or durable instruction marked by phrases like 'always', 'never', 'from now on', or 'do not forget'",
+       "Before initiating any task, phase, or tool call whose subject matter is covered by a known standing convention",
+       "When the same violation or correction has occurred more than once, indicating a convention failed to persist or was never updated",
+       "At session, phase, or context boundaries where transient memory of prior instructions would otherwise be lost"
+      ],
+      "antiPatterns": [
+       "Treating a standing owner rule as conversation-local and letting it silently expire when context resets",
+       "Acknowledging a correction verbally without rewriting the persistent conventions record, leaving the same failure armed for the next session",
+       "Executing a task, phase, or tool call governed by a standing convention without first consulting the persisted conventions record",
+       "Storing durable obligations only in transient context (in-flight reasoning, chat history) with no external persistence",
+       "Rigidly applying a stale persisted convention after the owner's newer explicit instruction supersedes it, without updating the record"
+      ],
+      "confidence": 0.86
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants a rule declared once ('from now on...') to be honored in every subsequent governed action across sessions and phases, without having to re-state it or correct the same violation twice.",
+      "targetBehavior": "A compliant agent visibly writes any owner-declared standing rule into a persistent conventions record at declaration time, reads that record before starting any task, phase, or tool call it governs and conforms the planned action to it, and edits the record immediately after any correction — all observable in its persistence and tool-call trajectory.",
+      "forbiddenBehavior": "Executing tasks or tool calls governed by a standing owner rule while relying on transient context or memory alone, and accepting corrections without rewriting the persistent conventions record, producing a repeating violate-correct-violate cycle across context boundaries.",
+      "evidenceSource": "The diagnosed pain of recurring violations of owner-declared standing rules across phase/session boundaries caused by context loss, with repeated corrections that never changed any persistent state, so the identical violation recurred after each context reset.",
+      "validationExpectation": "An evaluator should demand evidence that (a) a persistent conventions artifact exists and is written when a standing rule is declared, (b) a read of that record precedes each governed action in the trajectory, and (c) every correction produces an edit to the record. Any proposed rule change that permits recall from memory alone, skips the pre-action read for governed actions, or leaves the record unchanged after correction contradicts this intent and must be flagged rather than implemented."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r2-run1"
+     },
+     "risks": [
+      "Partially overlaps core axioms T-10 (persist important state), T-05 (translate constraints into guardrails), T-02 (explicit intent priority), and T-08 (corrections as feedback); this draft must be treated as a lifecycle synthesis (capture-persist-recall-update) extending those axioms, or it risks being judged redundant with them.",
+      "A mandatory pre-action recall gate adds overhead and latency if applied too broadly; it must be scoped to actions the persisted conventions actually govern, not to every trivial action.",
+      "Persisted conventions can go stale if owner preferences evolve; rigid adherence to an outdated record without honoring the owner's current explicit instruction could conflict with T-02.",
+      "Misclassifying one-off, task-local instructions as standing rules would create unnecessary rigidity and confirmation interruptions when flexibility was expected.",
+      "Ambiguity in deciding which actions are 'governed' by a convention may cause the recall gate to be skipped precisely where it applies, silently reproducing the original failure."
+     ],
+     "generatedAt": "2025-05-30T10:48:36Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_85731899e27e6d-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Externalize Standing Owner Conventions; Recall Before Acting; Update on Correction\",\n    \"statement\": \"Whenever the owner expresses a durable, cross-session instruction ('always', 'never', 'from now on', 'do not forget'), the agent must (1) immediately capture it in a persistent conventions record maintained outside transient session context, (2) re-read that record before initiating any task, phase, or tool call the conventions govern and adjust the planned action to comply, and (3) rewrite the record whenever a correction reveals it is missing, stale, or wrong. One-off, task-local instructions that expire with the task are exempt from this lifecycle.\",\n    \"rationale\": \"The diagnosed root cause was not a single bad action but a memory-dependent process: recurring obligations lived only in transient session context, so every phase or session boundary erased them, and repeated corrections were never converted into process change — each unrecorded correction merely re-armed the same failure cycle. Persisting owner-declared conventions externally, gating governed actions behind a mandatory pre-action recall, and feeding every correction back into the persistent record transforms compliance from fragile recall into a durable capture-recall-update process that intercepts deviation before execution instead of remediating after it.\",\n    \"applicability\": [\n      \"When the owner expresses a standing rule or durable instruction marked by phrases like 'always', 'never', 'from now on', or 'do not forget'\",\n      \"Before initiating any task, phase, or tool call whose subject matter is covered by a known standing convention\",\n      \"When the same violation or correction has occurred more than once, indicating a convention failed to persist or was never updated\",\n      \"At session, phase, or context boundaries where transient memory of prior instructions would otherwise be lost\"\n    ],\n    \"antiPatterns\": [\n      \"Treating a standing owner rule as conversation-local and letting it silently expire when context resets\",\n      \"Acknowledging a correction verbally without rewriting the persistent conventions record, leaving the same failure armed for the next session\",\n      \"Executing a task, phase, or tool call governed by a standing convention without first consulting the persisted conventions record\",\n      \"Storing durable obligations only in transient context (in-flight reasoning, chat history) with no external persistence\",\n      \"Rigidly applying a stale persisted convention after the owner's newer explicit instruction supersedes it, without updating the record\"\n    ],\n    \"confidence\": 0.86\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants a rule declared once ('from now on...') to be honored in every subsequent governed action across sessions and phases, without having to re-state it or correct the same violation twice.\",\n    \"targetBehavior\": \"A compliant agent visibly writes any owner-declared standing rule into a persistent conventions record at declaration time, reads that record before starting any task, phase, or tool call it governs and conforms the planned action to it, and edits the record immediately after any correction — all observable in its persistence and tool-call trajectory.\",\n    \"forbiddenBehavior\": \"Executing tasks or tool calls governed by a standing owner rule while relying on transient context or memory alone, and accepting corrections without rewriting the persistent conventions record, producing a repeating violate-correct-violate cycle across context boundaries.\",\n    \"evidenceSource\": \"The diagnosed pain of recurring violations of owner-declared standing rules across phase/session boundaries caused by context loss, with repeated corrections that never changed any persistent state, so the identical violation recurred after each context reset.\",\n    \"validationExpectation\": \"An evaluator should demand evidence that (a) a persistent conventions artifact exists and is written when a standing rule is declared, (b) a read of that record precedes each governed action in the trajectory, and (c) every correction produces an edit to the record. Any proposed rule change that permits recall from memory alone, skips the pre-action read for governed actions, or leaves the record unchanged after correction contradicts this intent and must be flagged rather than implemented.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r2-run1\"\n  },\n  \"risks\": [\n    \"Partially overlaps core axioms T-10 (persist important state), T-05 (translate constraints into guardrails), T-02 (explicit intent priority), and T-08 (corrections as feedback); this draft must be treated as a lifecycle synthesis (capture-persist-recall-update) extending those axioms, or it risks being judged redundant with them.\",\n    \"A mandatory pre-action recall gate adds overhead and latency if applied too broadly; it must be scoped to actions the persisted conventions actually govern, not to every trivial action.\",\n    \"Persisted conventions can go stale if owner preferences evolve; rigid adherence to an outdated record without honoring the owner's current explicit instruction could conflict with T-02.\",\n    \"Misclassifying one-off, task-local instructions as standing rules would create unnecessary rigidity and confirmation interruptions when flexibility was expected.\",\n    \"Ambiguity in deciding which actions are 'governed' by a convention may cause the recall gate to be skipped precisely where it applies, silently reproducing the original failure.\"\n  ],\n  \"generatedAt\": \"2025-05-30T10:48:36Z\"\n}",
+    "usage": {
+     "input": 1979,
+     "output": 3170,
+     "total": 5149
+    },
+    "latencyMs": 37342,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "5a6076d533a876eb"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_85731899e27e6d",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_85731899e27e6d-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "将 Owner 明确表达的工作约定（务必使用顾问协作、优先用浏览器 ChatGPT 生成并下载图片/提示词）仅保留在瞬时会话记忆中，未做任何持久化处理",
+       "betterDecision": "在 Owner 表达“以后务必/不要忘记”类约定的当下，立即将其写入持久化的工作约定文档（任务笔记或检查清单），使约定独立于会话上下文存续",
+       "rationale": "关键约定只存在于瞬时上下文中，会话切换后必然丢失，这是重复遗忘的结构性根源；持久化是消除该根源的最小且根本的干预",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "persist_critical_state",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "新阶段开工时未回顾既定工作约定，直接按 Agent 自身默认方式发起工具调用，偏离了 Owner 之前确认的协作与生成方式",
+       "betterDecision": "在每次阶段切换或涉及图片/提示词生成的任务开工前，先读取持久化的工作约定清单，确认当前行动计划符合约定后再执行任何工具调用",
+       "rationale": "把约定召回前置到行动之前，可以在偏离发生前完成校验，避免“偏离既定做法的工具调用已发生后才被 Owner 纠正”的滞后模式",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "pre_action_recall_checklist",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "以自身默认的生成与协作方式行动，把推断出的操作偏好置于 Owner 已明确表达的约束之上",
+       "betterDecision": "显式召回并优先遵循 Owner 明确表达的协作与生成方式（使用顾问、浏览器 ChatGPT），任何默认做法与其冲突时一律让位",
+       "rationale": "Owner 的显式约束优先级高于推断偏好；行动层面遵循显式约束可直接消除行动漂移，避免 Owner 被迫反复纠正",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "explicit_constraints_over_defaults",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "历史上已被 Owner 确认有效的工作流程（顾问协作 + 浏览器 ChatGPT 生成）未被沉淀为可复用的标准做法，导致每次新阶段都从零推断并重复犯错",
+       "betterDecision": "把被 Owner 认可的成功做法固化为标准操作流程或检查清单，并纳入阶段开工模板，使后续任务直接复用而非重新试错",
+       "rationale": "将“做过且被认可”的做法结构化沉淀，可以把一次性纠正转化为长期行为改进，从根本上降低同类纠正的复发概率",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "institutionalize_lessons_learned",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "缺少强制检查门：涉及图片/提示词生成的工具调用在发生前没有任何拦截机制，偏离约定的行为总是事后才被纠正",
+       "betterDecision": "建立工具调用前检查门：凡匹配“新阶段/生成封面/关键帧/提示词”等模式的行动，先校验计划与持久化约定一致，不一致则先召回修正再执行",
+       "rationale": "仅靠记忆与自觉无法保证召回；把硬约束翻译为可执行的护栏与禁止转换，才能在偏离发生前拦截，而不是依赖 Owner 充当事后检查器",
+       "confidence": 0.78,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_enforcement_gate",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "sourcePainId": "pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+     "contextRefs": [
+      "artifact://ce3726b7-f23e-45b5-904b-7fb90bdbab96"
+     ],
+     "generatedAt": "2025-08-14T09:30:00Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_85731899e27e6d-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"将 Owner 明确表达的工作约定（务必使用顾问协作、优先用浏览器 ChatGPT 生成并下载图片/提示词）仅保留在瞬时会话记忆中，未做任何持久化处理\",\"betterDecision\":\"在 Owner 表达“以后务必/不要忘记”类约定的当下，立即将其写入持久化的工作约定文档（任务笔记或检查清单），使约定独立于会话上下文存续\",\"rationale\":\"关键约定只存在于瞬时上下文中，会话切换后必然丢失，这是重复遗忘的结构性根源；持久化是消除该根源的最小且根本的干预\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"persist_critical_state\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":1,\"badDecision\":\"新阶段开工时未回顾既定工作约定，直接按 Agent 自身默认方式发起工具调用，偏离了 Owner 之前确认的协作与生成方式\",\"betterDecision\":\"在每次阶段切换或涉及图片/提示词生成的任务开工前，先读取持久化的工作约定清单，确认当前行动计划符合约定后再执行任何工具调用\",\"rationale\":\"把约定召回前置到行动之前，可以在偏离发生前完成校验，避免“偏离既定做法的工具调用已发生后才被 Owner 纠正”的滞后模式\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"pre_action_recall_checklist\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"以自身默认的生成与协作方式行动，把推断出的操作偏好置于 Owner 已明确表达的约束之上\",\"betterDecision\":\"显式召回并优先遵循 Owner 明确表达的协作与生成方式（使用顾问、浏览器 ChatGPT），任何默认做法与其冲突时一律让位\",\"rationale\":\"Owner 的显式约束优先级高于推断偏好；行动层面遵循显式约束可直接消除行动漂移，避免 Owner 被迫反复纠正\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"explicit_constraints_over_defaults\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":3,\"badDecision\":\"历史上已被 Owner 确认有效的工作流程（顾问协作 + 浏览器 ChatGPT 生成）未被沉淀为可复用的标准做法，导致每次新阶段都从零推断并重复犯错\",\"betterDecision\":\"把被 Owner 认可的成功做法固化为标准操作流程或检查清单，并纳入阶段开工模板，使后续任务直接复用而非重新试错\",\"rationale\":\"将“做过且被认可”的做法结构化沉淀，可以把一次性纠正转化为长期行为改进，从根本上降低同类纠正的复发概率\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"institutionalize_lessons_learned\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":4,\"badDecision\":\"缺少强制检查门：涉及图片/提示词生成的工具调用在发生前没有任何拦截机制，偏离约定的行为总是事后才被纠正\",\"betterDecision\":\"建立工具调用前检查门：凡匹配“新阶段/生成封面/关键帧/提示词”等模式的行动，先校验计划与持久化约定一致，不一致则先召回修正再执行\",\"rationale\":\"仅靠记忆与自觉无法保证召回；把硬约束翻译为可执行的护栏与禁止转换，才能在偏离发生前拦截，而不是依赖 Owner 充当事后检查器\",\"confidence\":0.78,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_enforcement_gate\",\"sourcePrincipleId\":\"T-05\"}],\"sourcePainId\":\"pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a\",\"contextRefs\":[\"artifact://ce3726b7-f23e-45b5-904b-7fb90bdbab96\"],\"generatedAt\":\"2025-08-14T09:30:00Z\"}",
+    "usage": {
+     "input": 2208,
+     "output": 3677,
+     "total": 5885
+    },
+    "latencyMs": 39402,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "f18da27041e05b5b"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_85731899e27e6d-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r3-run1",
+     "thesis": "Durable compliance with an owner's explicit conventions cannot rest on transient memory or good intent. It requires a closed constraint loop: capture the convention at the moment it is expressed, persist it outside transient context, re-load and verify it before any action that could conflict with it, and institutionalize owner-confirmed workflows so deviation is intercepted before execution rather than corrected after the fact by the owner.",
+     "principleCandidate": {
+      "title": "Close the constraint loop: persist explicit conventions and verify them before acting",
+      "rationale": "The recurring deviation was structural, not episodic: the owner's explicitly stated working conventions existed only in transient session memory, were never re-loaded at phase start, and had no pre-action check, so the same correction repeated at every new phase. Persisting conventions at expression time and forcing recall-and-verify before relevant actions removes the root cause instead of relying on recall-by-memory, and converting owner-confirmed workflows into standard checklists turns one-time corrections into lasting behavior change.",
+      "scope": "Applies whenever an owner explicitly states a standing convention, preference, or constraint (e.g., 'always/never do X'), especially across session or phase boundaries and before actions matching the convention's domain such as generation tasks or tool calls; also applies after an owner confirms a corrected workflow, to institutionalize it as reusable standard practice.",
+      "confidence": 0.82
+     },
+     "risks": [
+      "This principle is a composite that partially overlaps with existing core axioms: T-10 (persist important state), T-05 (translate constraints into guardrails and pre-execution checks), T-02 (explicit constraints override inferred preferences), and T-08 (treat corrections as feedback). If those axioms are already applied together, this candidate may be redundant rather than additive.",
+      "Overly broad pattern-matching for the pre-action gate could add friction and latency to routine actions that do not actually touch the convention.",
+      "Persisted conventions can become stale if the owner later changes preferences and the stored record is not updated, causing gates to enforce outdated constraints.",
+      "A mandatory check gate risks degenerating into box-ticking compliance where the check is marked done without genuinely comparing the planned action against the persisted convention."
+     ],
+     "generatedAt": "2025-08-14T09:41:17Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_85731899e27e6d-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r3-run1\",\"thesis\":\"Durable compliance with an owner's explicit conventions cannot rest on transient memory or good intent. It requires a closed constraint loop: capture the convention at the moment it is expressed, persist it outside transient context, re-load and verify it before any action that could conflict with it, and institutionalize owner-confirmed workflows so deviation is intercepted before execution rather than corrected after the fact by the owner.\",\"principleCandidate\":{\"title\":\"Close the constraint loop: persist explicit conventions and verify them before acting\",\"rationale\":\"The recurring deviation was structural, not episodic: the owner's explicitly stated working conventions existed only in transient session memory, were never re-loaded at phase start, and had no pre-action check, so the same correction repeated at every new phase. Persisting conventions at expression time and forcing recall-and-verify before relevant actions removes the root cause instead of relying on recall-by-memory, and converting owner-confirmed workflows into standard checklists turns one-time corrections into lasting behavior change.\",\"scope\":\"Applies whenever an owner explicitly states a standing convention, preference, or constraint (e.g., 'always/never do X'), especially across session or phase boundaries and before actions matching the convention's domain such as generation tasks or tool calls; also applies after an owner confirms a corrected workflow, to institutionalize it as reusable standard practice.\",\"confidence\":0.82},\"risks\":[\"This principle is a composite that partially overlaps with existing core axioms: T-10 (persist important state), T-05 (translate constraints into guardrails and pre-execution checks), T-02 (explicit constraints override inferred preferences), and T-08 (treat corrections as feedback). If those axioms are already applied together, this candidate may be redundant rather than additive.\",\"Overly broad pattern-matching for the pre-action gate could add friction and latency to routine actions that do not actually touch the convention.\",\"Persisted conventions can become stale if the owner later changes preferences and the stored record is not updated, causing gates to enforce outdated constraints.\",\"A mandatory check gate risks degenerating into box-ticking compliance where the check is marked done without genuinely comparing the planned action against the persisted convention.\"],\"generatedAt\":\"2025-08-14T09:41:17Z\"}",
+    "usage": {
+     "input": 1703,
+     "output": 1676,
+     "total": 3379
+    },
+    "latencyMs": 30171,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "901a50dfac176a03"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_85731899e27e6d-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r3-run1",
+     "principleDraft": {
+      "title": "Close the Constraint Loop: Persist Owner Conventions and Verify Before Acting",
+      "statement": "When an owner explicitly states a standing convention, preference, or constraint, capture it into a persistent store outside transient session context at the moment it is expressed; before executing any action whose domain matches that convention, re-load the persisted record and explicitly compare the planned action against it, adjusting or aborting on conflict; and when the owner confirms a corrected workflow, convert it into a persisted, reusable checklist or guardrail so future deviations are intercepted before execution rather than corrected afterward by the owner.",
+      "rationale": "The diagnosed failure was structural, not episodic: the owner's explicit working conventions existed only in transient session memory, were never re-loaded at phase start, and had no pre-action check, so the identical correction recurred at every new phase. Persisting the convention at expression time removes dependence on recall; forcing recall-and-verify before matching actions closes the loop before execution; and institutionalizing owner-confirmed corrections converts one-time feedback into durable behavior change — eliminating the root cause instead of its symptoms.",
+      "applicability": [
+       "Whenever an owner explicitly states a standing convention, preference, or constraint (e.g., 'always/never do X')",
+       "Across session or phase boundaries where transient memory of the convention may be lost",
+       "Before any action whose domain matches a stated convention, such as generation tasks or tool calls",
+       "After an owner confirms a corrected workflow, to institutionalize it as reusable standard practice",
+       "When the same owner correction has already occurred more than once, indicating a missing persisted guardrail"
+      ],
+      "antiPatterns": [
+       "Relying on in-session memory or good intent to honor a stated convention across phase or session boundaries",
+       "Executing a domain-matching action without first re-loading and checking the persisted convention record",
+       "Re-receiving the same owner correction at each new phase without converting it into a persisted guardrail or checklist",
+       "Correcting convention violations only after execution, with no pre-action interception",
+       "Marking the pre-action check as done without genuinely comparing the planned action against the persisted convention text"
+      ],
+      "confidence": 0.78
+     },
+     "intentContract": {
+      "ownerIntent": "When the Owner explicitly states a working convention, the Owner wants it durably recorded and verified before every matching action in all later phases and sessions, so the same correction never has to be repeated.",
+      "targetBehavior": "In an observable trajectory, the agent writes the stated convention to a persistent store at expression time, and before each matching action (e.g., at phase start or prior to a domain-relevant generation or tool call) retrieves that record and shows an explicit comparison of the planned action against it before executing.",
+      "forbiddenBehavior": "Acting within a stated convention's domain from transient memory or inferred preference without re-loading the persisted convention, and allowing the owner's correction to recur at each new phase instead of institutionalizing it as a persisted guardrail.",
+      "evidenceSource": "The diagnosed pain: the owner's explicitly stated working conventions existed only in transient session memory, were never re-loaded at phase start, and had no pre-action verification, forcing the owner to repeat the identical correction at every new phase.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it demands: (1) evidence that an owner-stated convention was persisted at expression time; (2) evidence in the tool trajectory that the persisted convention was retrieved and compared before a domain-matching action; and (3) no recurrence of the same owner correction in subsequent phases once the convention is persisted."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r3-run1"
+     },
+     "risks": [
+      "Composite overlap with existing core axioms — T-10 (persist important state outside transient context), T-05 (translate constraints into pre-execution guardrails), T-02 (explicit constraints override inferred preferences), and T-08 (treat corrections as feedback). If these are already enforced jointly, this principle may be redundant rather than additive, and generated rules could duplicate existing axiom coverage.",
+      "Overly broad pattern-matching for the pre-action gate could add friction and latency to routine actions that do not actually touch the convention's domain.",
+      "Persisted conventions can become stale if the owner later changes preferences and the stored record is not updated, causing gates to enforce outdated constraints.",
+      "A mandatory check gate risks degenerating into box-ticking compliance where the check is marked done without genuinely comparing the planned action against the persisted convention.",
+      "The composite statement (persist + verify + institutionalize) may produce diffuse rules at generation time; rule generators might implement only one of the three loop steps and claim compliance."
+     ],
+     "generatedAt": "2025-08-14T09:48:12Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_85731899e27e6d-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r3-run1\",\"principleDraft\":{\"title\":\"Close the Constraint Loop: Persist Owner Conventions and Verify Before Acting\",\"statement\":\"When an owner explicitly states a standing convention, preference, or constraint, capture it into a persistent store outside transient session context at the moment it is expressed; before executing any action whose domain matches that convention, re-load the persisted record and explicitly compare the planned action against it, adjusting or aborting on conflict; and when the owner confirms a corrected workflow, convert it into a persisted, reusable checklist or guardrail so future deviations are intercepted before execution rather than corrected afterward by the owner.\",\"rationale\":\"The diagnosed failure was structural, not episodic: the owner's explicit working conventions existed only in transient session memory, were never re-loaded at phase start, and had no pre-action check, so the identical correction recurred at every new phase. Persisting the convention at expression time removes dependence on recall; forcing recall-and-verify before matching actions closes the loop before execution; and institutionalizing owner-confirmed corrections converts one-time feedback into durable behavior change — eliminating the root cause instead of its symptoms.\",\"applicability\":[\"Whenever an owner explicitly states a standing convention, preference, or constraint (e.g., 'always/never do X')\",\"Across session or phase boundaries where transient memory of the convention may be lost\",\"Before any action whose domain matches a stated convention, such as generation tasks or tool calls\",\"After an owner confirms a corrected workflow, to institutionalize it as reusable standard practice\",\"When the same owner correction has already occurred more than once, indicating a missing persisted guardrail\"],\"antiPatterns\":[\"Relying on in-session memory or good intent to honor a stated convention across phase or session boundaries\",\"Executing a domain-matching action without first re-loading and checking the persisted convention record\",\"Re-receiving the same owner correction at each new phase without converting it into a persisted guardrail or checklist\",\"Correcting convention violations only after execution, with no pre-action interception\",\"Marking the pre-action check as done without genuinely comparing the planned action against the persisted convention text\"],\"confidence\":0.78},\"intentContract\":{\"ownerIntent\":\"When the Owner explicitly states a working convention, the Owner wants it durably recorded and verified before every matching action in all later phases and sessions, so the same correction never has to be repeated.\",\"targetBehavior\":\"In an observable trajectory, the agent writes the stated convention to a persistent store at expression time, and before each matching action (e.g., at phase start or prior to a domain-relevant generation or tool call) retrieves that record and shows an explicit comparison of the planned action against it before executing.\",\"forbiddenBehavior\":\"Acting within a stated convention's domain from transient memory or inferred preference without re-loading the persisted convention, and allowing the owner's correction to recur at each new phase instead of institutionalizing it as a persisted guardrail.\",\"evidenceSource\":\"The diagnosed pain: the owner's explicitly stated working conventions existed only in transient session memory, were never re-loaded at phase start, and had no pre-action verification, forcing the owner to repeat the identical correction at every new phase.\",\"validationExpectation\":\"An evaluator should accept a rule as faithful only if it demands: (1) evidence that an owner-stated convention was persisted at expression time; (2) evidence in the tool trajectory that the persisted convention was retrieved and compared before a domain-matching action; and (3) no recurrence of the same owner correction in subsequent phases once the convention is persisted.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r3-run1\"},\"risks\":[\"Composite overlap with existing core axioms — T-10 (persist important state outside transient context), T-05 (translate constraints into pre-execution guardrails), T-02 (explicit constraints override inferred preferences), and T-08 (treat corrections as feedback). If these are already enforced jointly, this principle may be redundant rather than additive, and generated rules could duplicate existing axiom coverage.\",\"Overly broad pattern-matching for the pre-action gate could add friction and latency to routine actions that do not actually touch the convention's domain.\",\"Persisted conventions can become stale if the owner later changes preferences and the stored record is not updated, causing gates to enforce outdated constraints.\",\"A mandatory check gate risks degenerating into box-ticking compliance where the check is marked done without genuinely comparing the planned action against the persisted convention.\",\"The composite statement (persist + verify + institutionalize) may produce diffuse rules at generation time; rule generators might implement only one of the three loop steps and claim compliance.\"],\"generatedAt\":\"2025-08-14T09:48:12Z\"}",
+    "usage": {
+     "input": 1927,
+     "output": 4179,
+     "total": 6106
+    },
+    "latencyMs": 45606,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "0412b4fdf684b84a"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_85731899e27e6d-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r3-run1",
+     "principleDraft": {
+      "title": "Close the constraint loop: persist explicit owner conventions and verify before acting",
+      "statement": "Whenever the owner explicitly states a standing convention (e.g., 'always/never do X', 'from now on, be sure to', 'don't forget how we did this'), immediately persist it outside transient session context (conventions document, task notes, or checklist); before starting any phase or any action whose domain matches a persisted convention (e.g., image/cover/keyframe/prompt generation, advisor-collaboration workflows, related tool calls), re-load the persisted conventions and verify the planned action against them before executing; and when the owner confirms a corrected workflow, convert it into a reusable checklist entry so deviations are intercepted before execution rather than corrected by the owner afterward.",
+      "rationale": "The diagnosed root cause is structural, not episodic: the owner's explicitly stated conventions (use advisor collaboration; prefer browser ChatGPT for image/prompt generation) existed only in transient session memory, were never re-loaded at phase start, and had no pre-action check, so the same deviation recurred at each new phase and the owner had to re-correct only after a deviating tool call had already happened. Capture-at-expression removes dependence on session memory, mandatory pre-action recall-and-verify moves the correction point before execution, and institutionalizing owner-confirmed workflows turns one-time corrections into durable behavior — together closing the loop that recall-by-memory leaves open.",
+      "applicability": [
+       "When an owner explicitly states a standing convention, preference, or constraint ('always/never', 'from now on, be sure to', 'don't forget' phrasing)",
+       "At session or phase boundaries where prior commitments must survive transient context loss",
+       "Before actions whose domain matches a persisted convention — e.g., image/cover/keyframe/prompt generation, advisor-collaboration workflows, and their tool calls",
+       "After the owner confirms a corrected workflow, to institutionalize it as reusable standard practice"
+      ],
+      "antiPatterns": [
+       "Keeping an owner-stated standing convention only in transient session memory and relying on recall-by-memory across session or phase boundaries",
+       "Starting a new phase or a generation task (covers, keyframes, images, prompts) from agent defaults without first reading the persisted conventions list",
+       "Preferring the agent's inferred or default operating preference over an owner's explicitly stated constraint when they conflict",
+       "Executing tool calls that may conflict with a persisted convention and waiting for the owner to correct the deviation after the fact",
+       "Re-deriving a previously owner-confirmed workflow (e.g., advisor collaboration plus browser ChatGPT generation) from scratch each phase instead of reusing an institutionalized checklist"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The owner wants the agent to durably follow explicitly stated working conventions (collaborate with the advisor; generate covers/keyframes/prompts via browser ChatGPT) at every new phase instead of repeatedly forgetting them and forcing the owner to re-issue the same severe correction.",
+      "targetBehavior": "When the owner states a 'from now on / don't forget' convention, the agent immediately writes it to a persistent conventions record; before starting a new phase or any image/prompt-generation task, the agent reads that record and confirms the planned tool calls conform (advisor engaged, browser ChatGPT used) before executing them.",
+      "forbiddenBehavior": "Carrying an owner-stated standing convention only in transient session memory and launching phase work or generation tool calls from agent defaults without re-loading and checking the persisted conventions, leaving the owner to correct the same deviation after the fact.",
+      "evidenceSource": "Severe user_correction pain detected by the after_tool_call hook: the owner demanded advisor collaboration and browser-ChatGPT-first generation of covers/keyframes/prompts, explicitly noting the agent had done this before and 'should not forget again'; diagnosis found no persisted conventions document or phase-start checklist existed for recall.",
+      "validationExpectation": "An evaluator should require evidence that a rule triggers both (a) when an owner states a standing convention — mandating immediate persistence — and (b) at phase start or before convention-domain actions — mandating read-and-verify before the matching tool call; a rule that drops either the persistence requirement or the pre-action verification, or that would not have prevented the diagnosed advisor/browser-ChatGPT deviation, contradicts this intent and must be flagged rather than accepted."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r3-run1"
+     },
+     "risks": [
+      "Composite overlap with core axioms T-10 (persist important state), T-05 (translate constraints into pre-execution guardrails), T-02 (explicit constraints override inferred preferences), and T-08 (corrections as feedback): if these axioms are already jointly enforced, this principle risks redundancy; its additive value is binding them into one closed loop scoped to explicit owner conventions.",
+      "Overly broad pattern-matching for the pre-action gate could add friction and latency to routine actions outside the convention's domain; the gate must stay scoped to actions matching the persisted convention's domain.",
+      "Persisted conventions can become stale if the owner later changes preferences and the stored record is not updated, causing the gate to enforce outdated constraints.",
+      "The verification step may degenerate into box-ticking compliance — marked done without genuinely comparing the planned action against the persisted convention.",
+      "Scope creep: extending the loop to inferred preferences rather than only explicitly stated conventions and owner-confirmed workflows would widen the principle beyond the source intent."
+     ],
+     "generatedAt": "2025-08-14T09:54:26Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_85731899e27e6d-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Close the constraint loop: persist explicit owner conventions and verify before acting\",\n    \"statement\": \"Whenever the owner explicitly states a standing convention (e.g., 'always/never do X', 'from now on, be sure to', 'don't forget how we did this'), immediately persist it outside transient session context (conventions document, task notes, or checklist); before starting any phase or any action whose domain matches a persisted convention (e.g., image/cover/keyframe/prompt generation, advisor-collaboration workflows, related tool calls), re-load the persisted conventions and verify the planned action against them before executing; and when the owner confirms a corrected workflow, convert it into a reusable checklist entry so deviations are intercepted before execution rather than corrected by the owner afterward.\",\n    \"rationale\": \"The diagnosed root cause is structural, not episodic: the owner's explicitly stated conventions (use advisor collaboration; prefer browser ChatGPT for image/prompt generation) existed only in transient session memory, were never re-loaded at phase start, and had no pre-action check, so the same deviation recurred at each new phase and the owner had to re-correct only after a deviating tool call had already happened. Capture-at-expression removes dependence on session memory, mandatory pre-action recall-and-verify moves the correction point before execution, and institutionalizing owner-confirmed workflows turns one-time corrections into durable behavior — together closing the loop that recall-by-memory leaves open.\",\n    \"applicability\": [\n      \"When an owner explicitly states a standing convention, preference, or constraint ('always/never', 'from now on, be sure to', 'don't forget' phrasing)\",\n      \"At session or phase boundaries where prior commitments must survive transient context loss\",\n      \"Before actions whose domain matches a persisted convention — e.g., image/cover/keyframe/prompt generation, advisor-collaboration workflows, and their tool calls\",\n      \"After the owner confirms a corrected workflow, to institutionalize it as reusable standard practice\"\n    ],\n    \"antiPatterns\": [\n      \"Keeping an owner-stated standing convention only in transient session memory and relying on recall-by-memory across session or phase boundaries\",\n      \"Starting a new phase or a generation task (covers, keyframes, images, prompts) from agent defaults without first reading the persisted conventions list\",\n      \"Preferring the agent's inferred or default operating preference over an owner's explicitly stated constraint when they conflict\",\n      \"Executing tool calls that may conflict with a persisted convention and waiting for the owner to correct the deviation after the fact\",\n      \"Re-deriving a previously owner-confirmed workflow (e.g., advisor collaboration plus browser ChatGPT generation) from scratch each phase instead of reusing an institutionalized checklist\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The owner wants the agent to durably follow explicitly stated working conventions (collaborate with the advisor; generate covers/keyframes/prompts via browser ChatGPT) at every new phase instead of repeatedly forgetting them and forcing the owner to re-issue the same severe correction.\",\n    \"targetBehavior\": \"When the owner states a 'from now on / don't forget' convention, the agent immediately writes it to a persistent conventions record; before starting a new phase or any image/prompt-generation task, the agent reads that record and confirms the planned tool calls conform (advisor engaged, browser ChatGPT used) before executing them.\",\n    \"forbiddenBehavior\": \"Carrying an owner-stated standing convention only in transient session memory and launching phase work or generation tool calls from agent defaults without re-loading and checking the persisted conventions, leaving the owner to correct the same deviation after the fact.\",\n    \"evidenceSource\": \"Severe user_correction pain detected by the after_tool_call hook: the owner demanded advisor collaboration and browser-ChatGPT-first generation of covers/keyframes/prompts, explicitly noting the agent had done this before and 'should not forget again'; diagnosis found no persisted conventions document or phase-start checklist existed for recall.\",\n    \"validationExpectation\": \"An evaluator should require evidence that a rule triggers both (a) when an owner states a standing convention — mandating immediate persistence — and (b) at phase start or before convention-domain actions — mandating read-and-verify before the matching tool call; a rule that drops either the persistence requirement or the pre-action verification, or that would not have prevented the diagnosed advisor/browser-ChatGPT deviation, contradicts this intent and must be flagged rather than accepted.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_85731899e27e6d-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_85731899e27e6d-r3-run1\"\n  },\n  \"risks\": [\n    \"Composite overlap with core axioms T-10 (persist important state), T-05 (translate constraints into pre-execution guardrails), T-02 (explicit constraints override inferred preferences), and T-08 (corrections as feedback): if these axioms are already jointly enforced, this principle risks redundancy; its additive value is binding them into one closed loop scoped to explicit owner conventions.\",\n    \"Overly broad pattern-matching for the pre-action gate could add friction and latency to routine actions outside the convention's domain; the gate must stay scoped to actions matching the persisted convention's domain.\",\n    \"Persisted conventions can become stale if the owner later changes preferences and the stored record is not updated, causing the gate to enforce outdated constraints.\",\n    \"The verification step may degenerate into box-ticking compliance — marked done without genuinely comparing the planned action against the persisted convention.\",\n    \"Scope creep: extending the loop to inferred preferences rather than only explicitly stated conventions and owner-confirmed workflows would widen the principle beyond the source intent.\"\n  ],\n  \"generatedAt\": \"2025-08-14T09:54:26Z\"\n}",
+    "usage": {
+     "input": 4404,
+     "output": 5193,
+     "total": 9597
+    },
+    "latencyMs": 60376,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "90e4019b1eda44a6"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

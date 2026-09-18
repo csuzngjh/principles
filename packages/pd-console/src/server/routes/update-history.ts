@@ -2,28 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { sendSuccess, sendMethodNotAllowed } from '../utils/response.js';
-import {
-  LEGACY_MUTATION_AUTHORITY,
-  RELEASE_MANAGER_AUTHORITY,
-} from '../update/mutation-controller.js';
-
-/**
- * PRI-702 (ADR-0024 D-7): which authority actually performed the mutation.
- *
- * The vocabulary is REUSED from the MutationController — the one place that
- * already names mutation authorities — so the history stream can never drift
- * into a second authority vocabulary. `legacy-migration` is deliberately not
- * listed: it writes the separate SPEC §12 stream (`<pdHome>/logs/history.jsonl`)
- * and must not be conflated with this Owner-facing one.
- *
- * The field is additive and optional. Records written before PRI-702 have no
- * `authority`; they are kept verbatim (no migration) and the reader never
- * fabricates a value for them.
- */
-export const UPDATE_HISTORY_AUTHORITIES = [
-  RELEASE_MANAGER_AUTHORITY,
-  LEGACY_MUTATION_AUTHORITY,
-] as const;
+/** Historical authority values remain readable; only ReleaseManager writes new attempts. */
+export const UPDATE_HISTORY_AUTHORITIES = ['release-manager', 'legacy-console-updater'] as const;
 
 export type UpdateHistoryAuthority = (typeof UPDATE_HISTORY_AUTHORITIES)[number];
 
@@ -127,19 +107,7 @@ function loadHistory(historyPath: string): UpdateHistoryEntry[] {
   return [];
 }
 
-/**
- * PRI-702 (ADR-0024 D-7): the ONE Owner-facing update-history writer.
- *
- * Both mutation authorities append through this function — the legacy console
- * updater (every existing call site in `routes/update.ts`) and the
- * ReleaseManager-served apply-full dispatch. There is no second writer and no
- * authority-specific schema: callers differ only in the `authority` they pass.
- *
- * `authority` defaults to `legacy-console-updater` because that is the writer
- * that has owned this stream since before PRI-702; a caller that omits it is
- * by definition the legacy path. Every entry written from now on carries the
- * field explicitly, so PRI-701's legacy-usage census can read it directly.
- */
+/** Append new ReleaseManager attempts without rewriting historical records. */
 export function appendUpdateHistory(
   workspaceDir: string,
   entry: Omit<UpdateHistoryEntry, 'id' | 'timestamp'>,
@@ -148,7 +116,7 @@ export function appendUpdateHistory(
   const history = loadHistory(historyPath);
   history.push({
     ...entry,
-    authority: entry.authority ?? LEGACY_MUTATION_AUTHORITY,
+    authority: entry.authority ?? 'release-manager',
     id: `update-${Date.now()}`,
     timestamp: new Date().toISOString(),
   });

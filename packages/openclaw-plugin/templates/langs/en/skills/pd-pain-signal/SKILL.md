@@ -6,10 +6,11 @@ disable-model-invocation: false
 
 # Pain Signal (Runtime V2)
 
-Session evidence is what makes a pain diagnosable. A pain recorded without a
-session carries no trajectory evidence, its candidates score below the
-admission threshold (0.5) and are gated as `needs_evidence` — the Owner's
-report is stored, but nothing is internalized.
+Session evidence is what lets a diagnosis carry real trajectory evidence. A
+pain recorded without a session is a legal unbound Owner report: it carries no
+trajectory evidence, its diagnosis confidence tends to be low, and its
+candidates are likely gated as `needs_evidence` by the admission gate — the
+Owner's report is stored, but usually nothing is internalized.
 
 ## In an OpenClaw session (preferred)
 
@@ -35,6 +36,11 @@ pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --s
 
 - `--session <id>` is validated against the workspace trajectory: a missing
   session fails with `session_not_found` before anything is written.
+- When the `--session` binding is verified but the trajectory evidence is
+  empty or unreadable (the session is real), the record is submitted as an
+  honest bound + evidence-unavailable degrade: no evidence is fabricated and
+  the admission gate decides what empty evidence is worth, instead of a hard
+  refusal.
 - Recording without `--session` is allowed as an unbound Owner report, but it
   attaches no evidence and its candidates will likely be gated
   (`needs_evidence`) by the admission gate — the CLI output says so explicitly.
@@ -57,6 +63,9 @@ pd runtime flow show --workspace "<workspace>" --json
 
 Success requires admitted candidates, not merely generated ones: check
 `admissionResults` for `admitted` decisions and non-empty `ledgerEntryIds`.
+A successful command returning a `painId` is only a record receipt — it does
+not mean the diagnosis produced candidates or that anything was admitted.
 Candidates reported as `needs_evidence` or `deferred` were NOT internalized —
-if all candidates are gated, re-record with `/pd-pain` or `--session` so the
-diagnosis carries real trajectory evidence.
+if candidates are gated, re-record with `/pd-pain` or `--session` so the
+diagnosis carries real trajectory evidence. Activation is a separate stage
+that follows Owner approval; this flow never activates anything by itself.

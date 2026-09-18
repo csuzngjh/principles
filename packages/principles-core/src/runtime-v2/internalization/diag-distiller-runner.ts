@@ -41,7 +41,6 @@ import type {
   PeerRunnerResult,
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
-import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 
 // ── Stage B context ──────────────────────────────────────────────────────────
 
@@ -52,21 +51,6 @@ interface DiagDistillerContext {
   readonly rootCauseArtifactId: string;
   readonly rootCauseOutput: DiagRootCauseOutputV1;
   readonly coreGrounding: boolean;
-}
-
-/**
- * Layer 0 (design §6.1): diag_distiller's edge predecessor is
- * `diag_rootcause`, whose artifact buildContext already loaded and schema-
- * validated. Reusing that already-parsed object keeps the writer path at zero
- * extra store reads (F3). Writer-side only — no manifest, no prompt change,
- * no output-schema change (design §4.7.1).
- */
-function toRootCausePredecessor(context: DiagDistillerContext): LoadedPredecessorArtifact {
-  return {
-    artifactId: context.rootCauseArtifactId,
-    runnerKind: 'diag_rootcause',
-    contentJson: context.rootCauseOutput,
-  };
 }
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
@@ -229,7 +213,7 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
     output: DiagDistillerOutputV1,
     task: TaskRecord,
     contextHash: string,
-    context: DiagDistillerContext,
+    _context: DiagDistillerContext,
   ): Promise<PeerRunnerResult<DiagDistillerOutputV1>> {
     // 1. Store output before marking succeeded
     try {
@@ -273,10 +257,7 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        // Layer 0 (design §6.1, task 3.11): diag_distiller forwards the root
-        // cause stage's summary so downstream stages can read it at tier0/tier1
-        // without a cross-level fetch. Writer-side only (design §4.7.1).
-        contentJson: this.buildArtifactContentJson(taskId, 'diag_distiller', output, toRootCausePredecessor(context)),
+        contentJson: JSON.stringify(output),
         createdAt: now,
         updatedAt: now,
       });

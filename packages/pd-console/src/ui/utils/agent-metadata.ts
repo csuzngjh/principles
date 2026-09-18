@@ -347,36 +347,14 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     techDetailZh: {},
     techDetailEn: {},
     isCore: true,
-    action: {
-      linkTextZh: '管理关键词',
-      linkTextEn: 'Manage Keywords',
-      to: '/control-center/signal-keywords?category=correction',
-    },
+    // action link removed in PRI-819: it pointed at the retired signal-keywords
+    // page (every endpoint was a stub); keyword learning is automatic via
+    // correctionObserver → keyword store → governance-signal-admission.
   },
 
-  empathyObserver: {
-    name: 'empathyObserver',
-    group: 'sidechain',
-    displayNameZh: '共情观察员',
-    displayNameEn: 'Empathy Observer',
-    roleZh: '从用户语气中捕捉传统检测漏掉的挫败感',
-    roleEn: 'Catches frustration that traditional detection misses',
-    detailZh:
-      '传统 pain 检测只能抓"命令失败""抛异常"这类硬错误。但用户说"又来了""怎么还是这样"时，其实已经很不满意了——这种情感摩擦硬检测抓不到。\n\n共情观察员用语义分析实时捕捉这类信号，弥补检测盲区。',
-    detailEn:
-      'Traditional pain detection only catches hard errors like "command failed" or "exception thrown". But when a user says "here we go again" or "why is this still happening", they are already frustrated — this emotional friction is invisible to hard detection.\n\nThe Empathy Observer uses semantic analysis to catch these signals in real time, covering the detection blind spot.',
-    impactLevel: 'amber',
-    impactZh: '退回纯确定性 pain 检测。常规对话下 pain 触发稀疏，内化速度显著下降。',
-    impactEn: 'Falls back to deterministic-only pain detection. In normal conversation, pain triggers become sparse — internalization speed drops significantly.',
-    techDetailZh: {},
-    techDetailEn: {},
-    isCore: true,
-    action: {
-      linkTextZh: '管理关键词',
-      linkTextEn: 'Manage Keywords',
-      to: '/control-center/signal-keywords?category=empathy',
-    },
-  },
+  // empathyObserver card removed in PRI-819: the agent had no runtime consumer;
+  // empathy detection lives in signalCollector (keyword + LLM deep judgment).
+
   signalCollector: {
     name: 'signalCollector',
     group: 'sidechain',

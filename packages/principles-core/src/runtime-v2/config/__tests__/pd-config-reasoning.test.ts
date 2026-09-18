@@ -37,7 +37,6 @@ function makeRawConfigWithReasoning(reasoning: unknown): Record<string, unknown>
         evaluator: { enabled: true },
         rolloutReviewer: { enabled: true },
         correctionObserver: { enabled: false },
-        empathyObserver: { enabled: false },
         signalCollector: { enabled: false },
       },
     },

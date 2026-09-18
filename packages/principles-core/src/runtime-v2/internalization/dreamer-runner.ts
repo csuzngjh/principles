@@ -21,11 +21,9 @@ import type { OutputLanguage } from '../language-directive.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
-import { DREAMER_MANIFEST } from './context-manifests.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { stripFabricatedCorePrincipleIds } from '../core-principles/index.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
-import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 import type {
   PeerRunnerOptions,
   PeerRunnerDeps,
@@ -40,13 +38,6 @@ interface DreamerContext {
   readonly contextHash: string;
   readonly contextRefs: string[];
   readonly predecessorOutput: unknown;
-  /**
-   * Layer 0 (design §6.1): the edge predecessor as already loaded above —
-   * `diag_router` for dreamer. Carried on the context so the writer path can
-   * attach `predecessorSummary` with zero additional store reads (F3).
-   * Null when no succeeded dependency artifact was found.
-   */
-  readonly edgePredecessor: LoadedPredecessorArtifact | null;
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -148,7 +139,6 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     const contextRefs: string[] = [];
     const rejectedDeps: string[] = [];
     let predecessorOutput: unknown = null;
-    let edgePredecessor: LoadedPredecessorArtifact | null = null;
 
     if (deps.length > 0) {
       const results = await Promise.allSettled(
@@ -179,21 +169,6 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
                 parsedContent = first.contentJson;
               }
               predecessorOutput = parsedContent;
-              // Layer 0 (design §6.1): dreamer's edge predecessor is
-              // diag_router. Claim the edge from the SAME already-fetched
-              // artifact (zero extra store reads, F3) when this dependency
-              // really is the diag_router stage. In the production pipeline
-              // diag_router is dreamer's only dependency, so it is always the
-              // first succeeded dep; the edgePredecessor===null guard keeps
-              // this correct even if a pathological multi-dep list surfaces a
-              // non-router first. rc-6: the label matches the dep's taskKind.
-              if (edgePredecessor === null && result.value.taskKind === 'diag_router') {
-                edgePredecessor = {
-                  artifactId: first.artifactId,
-                  runnerKind: 'diag_router',
-                  contentJson: parsedContent,
-                };
-              }
             }
           }
         }
@@ -208,28 +183,17 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     }
 
     const contextHash = BasePeerRunner.hashContextRefs(contextRefs);
-    return { contextHash, contextRefs, predecessorOutput, edgePredecessor };
+    return { contextHash, contextRefs, predecessorOutput };
   }
 
   async invokeRuntime(taskId: string, context: DreamerContext): Promise<RunHandle> {
     const {coreGrounding, outputLanguage} = this.resolvedOptions;
     const builder = new DreamerPromptBuilder({ coreGrounding, outputLanguage });
-    // Layer 1 (design §6.2/§6.3, task 5.9): when context_manifest_budget is on,
-    // resolve the dreamer manifest against the loaded diag_router predecessor.
-    // Focused → inject only the manifest-allocated summary fields; fallback →
-    // legacy full predecessorOutput (F13); disabled → unchanged.
-    let predecessorOutput: unknown = context.predecessorOutput;
-    if (context.edgePredecessor !== null) {
-      const resolved = this.resolveContextInjection(taskId, DREAMER_MANIFEST, context.edgePredecessor.contentJson);
-      if (resolved.mode === 'focused') {
-        predecessorOutput = resolved.fields;
-      }
-    }
     const { message, systemPrompt } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       contextRefs: context.contextRefs,
-      predecessorOutput,
+      predecessorOutput: context.predecessorOutput,
       coreGrounding,
       outputLanguage,
     });
@@ -261,7 +225,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     output: DreamerOutput,
     task: TaskRecord,
     contextHash: string,
-    context: DreamerContext,
+    _context: DreamerContext,
   ): Promise<PeerRunnerResult<DreamerOutput>> {
     // Store output before marking succeeded
     try {
@@ -309,10 +273,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
         sourcePrincipleId: output.sourcePrincipleId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        // Layer 0 (design §6.1, task 3.11): carries `summary` /
-        // `predecessorSummary` only when artifact_summary_redundancy is on;
-        // otherwise byte-identical to JSON.stringify(output).
-        contentJson: this.buildArtifactContentJson(taskId, 'dreamer', output, context.edgePredecessor),
+        contentJson: JSON.stringify(output),
         createdAt: now,
         updatedAt: now,
       });

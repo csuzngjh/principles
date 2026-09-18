@@ -2,15 +2,6 @@ import type { ApiResponse } from "../types.js";
 import type { OwnerDecisionsData, OwnerResolutionResultData } from "./utils/validators.js";
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import {
-  listActiveSignalKeywords,
-  listPendingSignalTerms,
-  fetchKeywordStore,
-  fetchPendingTerms,
-  updateKeywordStore,
-  admitPendingTerm,
-  rejectPendingTerm,
-} from "./utils/signal-keywords-api.js";
-import {
   validateErrorResponse,
   validateHeaders,
   validateFeedbackReport,
@@ -42,7 +33,6 @@ import {
   validateUpdateStatus,
   validateUpdateHistory,
   validateApplyUpdateResult,
-  validateRollbackResult,
   validateApprovalRecordDirect,
   validatePrinciplesList,
   validateCorePrinciples,
@@ -99,7 +89,6 @@ import type {
   UpdateStatusData,
   UpdateHistoryData,
   ApplyUpdateResultData,
-  RollbackResultData,
   ApprovalRecordData,
   PrinciplesListData,
   CorePrinciplesData,
@@ -892,25 +881,11 @@ async function fetchUpdateHistory(): Promise<ApiResponse<UpdateHistoryData>> {
   return request<UpdateHistoryData>('/api/update/history', undefined, validateUpdateHistory);
 }
 
-async function applyUpdate(): Promise<ApiResponse<ApplyUpdateResultData>> {
-  return request<ApplyUpdateResultData>('/api/update/apply', {
-    method: 'POST',
-    body: JSON.stringify({ mergeStrategy: 'smart', createBackup: true }),
-  }, validateApplyUpdateResult);
-}
-
 async function applyFullUpdate(): Promise<ApiResponse<ApplyUpdateResultData>> {
   return request<ApplyUpdateResultData>('/api/update/apply-full', {
     method: 'POST',
     body: JSON.stringify({}),
   }, validateApplyUpdateResult);
-}
-
-async function rollbackUpdate(backupDir: string): Promise<ApiResponse<RollbackResultData>> {
-  return request<RollbackResultData>('/api/update/rollback', {
-    method: 'POST',
-    body: JSON.stringify({ backupDir }),
-  }, validateRollbackResult);
 }
 
 // ── Evidence Chain (PRI-331) ──────────────────────────────────────────────────
@@ -1072,14 +1047,6 @@ async function dispatchFollowUp(
 
 export {
   request,
-  // signal-keywords (UI stubs, see signal-keywords-api.ts)
-  listActiveSignalKeywords,
-  listPendingSignalTerms,
-  fetchKeywordStore,
-  fetchPendingTerms,
-  updateKeywordStore,
-  admitPendingTerm,
-  rejectPendingTerm,
 
   // auth
   getToken,
@@ -1137,9 +1104,7 @@ export {
   fetchLifecycleMetrics,
   fetchUpdateStatus,
   fetchUpdateHistory,
-  applyUpdate,
   applyFullUpdate,
-  rollbackUpdate,
   fetchEvidenceChain,
   fetchIntentSummary,
   fetchIntentContent,
@@ -1186,7 +1151,6 @@ export type {
   UpdateStatusData,
   UpdateHistoryData,
   ApplyUpdateResultData,
-  RollbackResultData,
   ApprovalRecordData,
   PrinciplesListData,
   CorePrinciplesData,
@@ -1212,7 +1176,6 @@ export type {
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)
-export type { SignalKeyword, PendingSignalTerm } from "./utils/signal-keywords-types.js";
 export type { ActivationRecordData as ActivationRecord } from "./utils/validators.js";
 export type { ApprovalRecordData as ApprovalRecord } from "./utils/validators.js";
 export type { WorkspaceEntryData as WorkspaceEntry } from "./utils/validators.js";

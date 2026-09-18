@@ -65,7 +65,6 @@ function makeValidConfigWithObserverEnabled(): string {
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: true, runtimeProfile: 'pd.anthropic-sonnet' },
-        empathyObserver: { enabled: false },
       },
     },
     ui: { diagnostics: { mode: 'simple' } },
@@ -96,7 +95,6 @@ function makeValidConfigWithObserverDisabled(): string {
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: false },
-        empathyObserver: { enabled: false },
       },
     },
     ui: { diagnostics: { mode: 'simple' } },
@@ -174,7 +172,6 @@ describe('Observer needs_setup', () => {
           evaluator: { enabled: false },
           rolloutReviewer: { enabled: false },
           correctionObserver: { enabled: true, runtimeProfile: 'nonexistent.profile' },
-          empathyObserver: { enabled: false },
         },
       },
     });
@@ -229,7 +226,6 @@ describe('Observer ready', () => {
           evaluator: { enabled: false },
           rolloutReviewer: { enabled: false },
           correctionObserver: { enabled: true, runtimeProfile: 'pi-ai.local' },
-          empathyObserver: { enabled: false },
         },
       },
     });
@@ -272,7 +268,6 @@ describe('Observer ready', () => {
           evaluator: { enabled: false },
           rolloutReviewer: { enabled: false },
           correctionObserver: { enabled: true },
-          empathyObserver: { enabled: false },
         },
       },
     });
@@ -459,7 +454,6 @@ describe('Feature flag vs agent enabled mismatch', () => {
           evaluator: { enabled: false },
           rolloutReviewer: { enabled: false },
           correctionObserver: { enabled: false },  // agent.enabled OFF
-          empathyObserver: { enabled: false },
         },
       },
     });
