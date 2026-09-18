@@ -6,7 +6,7 @@ import * as path from 'node:path';
  * PRI-561 follow-up — delivery-surface parity contract (ERR-040 lesson).
  *
  * Every `@principles/*` (and `principles-disciple`) RUNTIME dependency of a
- * bundled package must be handled by ALL THREE delivery surfaces:
+ * bundled package must be handled by publish and installer delivery surfaces:
  *
  *   S1 publish   — create-principles-disciple/scripts/bundle-plugin.mjs
  *                  rewrites/removes the dep and copies the providing package
@@ -14,15 +14,9 @@ import * as path from 'node:path';
  *   S2 install   — create-principles-disciple/src/installer.ts delivers the
  *                  providing directory and creates the resolution links
  *                  (syncPdCli) so fresh installs resolve it.
- *   S3 update    — packages/pd-console/src/server/routes/update.ts
- *                  (/apply-full) copies the providing directory and creates
- *                  the same resolution links; the inline updater skips
- *                  npm install, so it must self-provision.
- *
- * Missing ONE surface is exactly how PRI-561 happened: PR #1371 wired S1+S2
- * for @principles/host-runtime but S3 copied only plugin/console/core/
- * pd-cli, so pre-2026-08-14 installs crashed their console on first start
- * after a full update. This test turns the handbook lesson into a CI gate.
+ * PRI-738 retires the independent Console deployment surface. The real
+ * Console update gate proves it uses ReleaseManager -> Installer, so update
+ * delivery is covered by S2 rather than a second component list.
  */
 describe('delivery-surface parity for @principles/* runtime dependencies (PRI-561 / ERR-040)', () => {
   // Repo roots, resolved relative to THIS file so the test works in any
@@ -39,9 +33,6 @@ describe('delivery-surface parity for @principles/* runtime dependencies (PRI-56
 
   const bundleScript = read(path.join(INSTALLER_PKG_ROOT, 'scripts', 'bundle-plugin.mjs'));
   const installerSource = read(path.join(INSTALLER_PKG_ROOT, 'src', 'installer.ts'));
-  const updaterSource = read(
-    path.join(MONOREPO_ROOT, 'packages', 'pd-console', 'src', 'server', 'routes', 'update.ts'),
-  );
 
   // Package directories whose dist/ the installer delivers. Must mirror
   // bundle-plugin.mjs's DEST constants (PLUGIN/PD_CLI/CONSOLE/CORE/
@@ -151,7 +142,7 @@ describe('delivery-surface parity for @principles/* runtime dependencies (PRI-56
     }
   });
 
-  it('every shipped @principles/* dependency is handled by ALL THREE delivery surfaces', () => {
+  it('every shipped @principles/* dependency is handled by publish and installer delivery surfaces', () => {
     const failures: string[] = [];
     const s1Calls = parseBundleRewrites();
 
@@ -189,14 +180,9 @@ describe('delivery-surface parity for @principles/* runtime dependencies (PRI-56
         );
       }
 
-      // ── S3: full-update surface (pd-console update.ts /apply-full) ──
-      const s3Hit =
-        updaterSource.includes(`'${providerSlug}'`) || updaterSource.includes(dep);
-      if (!s3Hit) {
-        failures.push(
-          `S3(updater): ${consumerDir} depends on ${dep} but update.ts /apply-full never references '${providerSlug}' — a full update will not deliver it (PRI-561 class)`,
-        );
-      }
+      // PRI-738: updates delegate deployment to this same installer (S2).
+      // Real Console → ReleaseManager → Installer resolution is exercised by
+      // release-upgrade-gate.test.ts, not a duplicate component-name census.
     }
 
     expect(failures, failures.join('\n')).toEqual([]);

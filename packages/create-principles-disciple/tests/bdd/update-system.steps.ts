@@ -19,7 +19,7 @@ import { Key, MetaFile, Metadata, Root, Signature, Snapshot, TargetFile, Targets
 import { createStepRegistry, defineFeature } from '../../../pd-cli/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../../pd-cli/tests/bdd/support/repo-root.js';
 
-import { ReleaseManager, ReleaseManagerError, type LegacyUpdaterDecision } from '../../src/update/release-manager.js';
+import { ReleaseManager, ReleaseManagerError } from '../../src/update/release-manager.js';
 import { evaluateReleaseAdvancement, type ReleasePolicyDecision } from '../../src/update/release-policy.js';
 import {
   appendJournalTransition,
@@ -31,7 +31,6 @@ import {
   type JournalTransition,
 } from '../../src/update/transaction-journal.js';
 import { decideHostCoordination, type HostObservation } from '../../src/update/rollback-policy.js';
-import { migrateLegacyOverlay } from '../../src/update/legacy-migration.js';
 import { classifyDirection, readHistoryEvents } from '../../src/update/update-history.js';
 import { ensurePdHomeLayout, resolvePdHomePaths } from '../../src/update/install-layout.js';
 import { buildReleaseMetadata, type ReleaseMetadata } from '../../src/update/release-metadata.js';
@@ -211,11 +210,9 @@ registry.given(/一个带 bootstrap 与双槽安装状态的 ~\/\.pd 布局/, (c
 
 registry.when(/对 stable 渠道执行 ReleaseManager\.check/, async (ctx) => {
   const fixture = fixtureOf(ctx);
-  const legacy: LegacyUpdaterDecision = { source: 'legacy-updater', latestVersion: '1.223.0', updateAvailable: true };
   const manager = new ReleaseManager({
     pdHome: fixture.paths.home,
     metadataBaseUrl: fixture.repositoryUrl,
-    legacyCheck: async () => legacy,
   });
   ctx.state['check'] = await manager.check('stable');
 });
@@ -405,64 +402,6 @@ registry.then(/nextAction 说明保留最后确认版本并要求显式 Owner �
 
 registry.then(/协调决策为 retry_handshake 而非回滚/, (ctx) => {
   expect(ctx.state['coordination']).toMatchObject({ action: 'retry_handshake' });
-});
-
-registry.when(/由官方安装器对存在的 overlay 执行迁移/, (ctx) => {
-  const fixture = fixtureOf(ctx);
-  const overlayPlugin = withinHome(fixture.home, path.join(fixture.home, '.openclaw', 'extensions', 'principles-disciple', 'plugin'));
-  fs.mkdirSync(overlayPlugin, { recursive: true });
-  fs.writeFileSync(withinHome(fixture.home, path.join(overlayPlugin, 'package.json')), JSON.stringify({ version: '1.218.0' }));
-  ctx.state['overlayBefore'] = fs.readFileSync(path.join(overlayPlugin, 'package.json'), 'utf8');
-  ctx.state['migration'] = migrateLegacyOverlay({
-    homeDir: path.join(fixture.home, 'fresh-home'),
-    openclawHome: path.join(fixture.home, '.openclaw'),
-    invokedByOfficialInstaller: true,
-    dryRun: false,
-    bootstrapVersion: '1.0.0',
-    transactionId: 'bdd-migration',
-  });
-});
-
-registry.when(/非官方安装器调用方对 overlay 执行迁移/, (ctx) => {
-  const fixture = fixtureOf(ctx);
-  const overlayPlugin = withinHome(fixture.home, path.join(fixture.home, '.openclaw', 'extensions', 'principles-disciple', 'plugin'));
-  fs.mkdirSync(overlayPlugin, { recursive: true });
-  fs.writeFileSync(withinHome(fixture.home, path.join(overlayPlugin, 'package.json')), JSON.stringify({ version: '1.218.0' }));
-  ctx.state['migration'] = migrateLegacyOverlay({
-    homeDir: path.join(fixture.home, 'scope-home'),
-    openclawHome: path.join(fixture.home, '.openclaw'),
-    invokedByOfficialInstaller: false,
-    dryRun: false,
-    bootstrapVersion: '1.0.0',
-    transactionId: 'bdd-scope',
-  });
-});
-
-registry.then(/迁移成功且 active\.json 记录 generation 1/, (ctx) => {
-  const migration = ctx.state['migration'] as { migrated: boolean; pdHome: string };
-  expect(migration.migrated).toBe(true);
-  expect(readActiveRecord(path.join(migration.pdHome, 'active.json'))?.generation).toBe(1);
-});
-
-registry.then(/overlay 目录保持只读原样/, (ctx) => {
-  const fixture = fixtureOf(ctx);
-  const overlayPlugin = withinHome(fixture.home, path.join(fixture.home, '.openclaw', 'extensions', 'principles-disciple', 'plugin'));
-  expect(fs.readFileSync(path.join(overlayPlugin, 'package.json'), 'utf8')).toBe(ctx.state['overlayBefore']);
-});
-
-registry.then(/历史记录追加 legacy_migration 事件/, (ctx) => {
-  const migration = ctx.state['migration'] as { historyEventPath: string };
-  const events = readHistoryEvents(migration.historyEventPath);
-  expect(events[events.length - 1]).toMatchObject({ kind: 'legacy_migration', outcome: 'succeeded' });
-});
-
-registry.then(/迁移被拒绝且原因为 bootstrap_write_out_of_scope/, (ctx) => {
-  expect(ctx.state['migration']).toMatchObject({ migrated: false, reason: 'bootstrap_write_out_of_scope' });
-});
-
-registry.then(/磁盘上不产生任何 ~\/\.pd 写入/, (ctx) => {
-  const fixture = fixtureOf(ctx);
-  expect(fs.existsSync(path.join(fixture.home, 'scope-home', '.pd'))).toBe(false);
 });
 
 registry.when(/构建 ~\/\.pd 安装的 canonical 版本报告/, (ctx) => {

@@ -2,14 +2,10 @@
  * PRI-672 ("PRI-661" adoption) — ReleaseManager mutation authority surface.
  *
  * Contracts under test:
- * 1. Readiness matrix: structured, stable reason codes; check vs mutation-kind
- *    capability split (mutation kinds carry rollback_not_available until the
- *    Phase 4 activation rollout).
+ * 1. Readiness matrix for the two surviving kinds (check, apply-full).
  * 2. Zero-write readiness: probing never creates or modifies anything.
- * 3. Governed shadow check through the exact same signed-TUF fixture the
- *    ReleaseManager shadow tests use — the console serves its legacy body only
- *    after this governance path succeeds.
- * 4. Explicit-fallback error mapping (rc-9).
+ * 3. Signed check through the same signed-TUF fixture the ReleaseManager tests use.
+ * 4. Error mapping (rc-9): every refusal keeps reason, message, nextAction.
  */
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -20,7 +16,7 @@ import { ReleaseManagerError } from '../src/update/release-manager.js';
 import {
   RELEASE_MANAGER_AUTHORITY_KINDS,
   createReleaseManagerAuthority,
-  mapReleaseManagerErrorToFallback,
+  mapReleaseManagerError,
 } from '../src/update/release-manager-authority.js';
 import { ensurePdHomeLayout, resolvePdHomePaths } from '../src/update/install-layout.js';
 import { writeActiveRecord } from '../src/update/transaction-journal.js';
@@ -66,31 +62,14 @@ describe('ReleaseManager authority readiness', () => {
     expect(authority.kinds.check.reasons).toEqual(['metadata_source_unconfigured']);
   });
 
-  it('a dual-slot fixture is check- and apply-full-ready the moment a metadata source exists; apply/rollback stay blocked', async () => {
+  it('a dual-slot fixture is check- and apply-full-ready once a metadata source exists', async () => {
     const fixture = await createShadowFixture();
     const unconfigured = createReleaseManagerAuthority({ pdHome: fixture.pdHome, metadataBaseUrl: undefined });
-    expect(unconfigured.kinds.check).toEqual({
-      ready: false,
-      reasons: ['metadata_source_unconfigured'],
-    });
-
-    const ready = createReleaseManagerAuthority({
-      pdHome: fixture.pdHome,
-      metadataBaseUrl: fixture.repository.baseUrl,
-      legacyCheck: async () => null,
-    });
+    expect(unconfigured.kinds.check).toEqual({ ready: false, reasons: ['metadata_source_unconfigured'] });
+    const ready = createReleaseManagerAuthority({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
     expect(ready.installStatus).toMatchObject({ layout: 'dual-slot', productVersion: '1.222.0' });
     expect(ready.kinds.check).toEqual({ ready: true, reasons: [] });
-    // PRI-698 Phase 1: the full-runtime write path exists, so apply-full
-    // carries the base readiness; the CONSOLE gates its routing behind the
-    // release_manager_write_authority flag. The plugin-diff `apply` mechanism
-    // and the Phase 2 `rollback` stay structurally not-ready.
     expect(ready.kinds['apply-full']).toEqual({ ready: true, reasons: [] });
-    // The two structural gaps are independent, and the reasons say so
-    // (PRI-729): the plugin-diff `apply` is not a ReleaseManager mechanism at
-    // all, while `rollback` waits on the Phase 2 same-version restore.
-    expect(ready.kinds.apply).toEqual({ ready: false, reasons: ['plugin_diff_not_supported'] });
-    expect(ready.kinds.rollback).toEqual({ ready: false, reasons: ['rollback_not_available'] });
   });
 
   it('maps a corrupt active record to install_state_corrupt instead of guessing', () => {
@@ -107,8 +86,8 @@ describe('ReleaseManager authority readiness', () => {
     expect(authority.kinds.check.reasons).toContain('install_state_corrupt');
   });
 
-  it('keeps the mutation-kind union aligned with the console MutationController contract', () => {
-    expect(RELEASE_MANAGER_AUTHORITY_KINDS).toEqual(['check', 'apply', 'apply-full', 'rollback']);
+  it('keeps the mutation-kind union aligned with the console update route', () => {
+    expect(RELEASE_MANAGER_AUTHORITY_KINDS).toEqual(['check', 'apply-full']);
   });
 });
 
@@ -156,43 +135,23 @@ describe('ReleaseManager authority zero-write readiness', () => {
   });
 });
 
-describe('ReleaseManager governed shadow check (kind check)', () => {
-  it('serves a verified check with an agreeing legacy comparison', async () => {
+describe('ReleaseManager check through the authority', () => {
+  it('serves a verified signed-metadata check without any legacy comparison', async () => {
     const fixture = await createShadowFixture();
-    const authority = createReleaseManagerAuthority({
-      pdHome: fixture.pdHome,
-      metadataBaseUrl: fixture.repository.baseUrl,
-      legacyCheck: async () => ({ source: 'legacy-updater', latestVersion: '1.223.0', updateAvailable: true }),
-    });
+    const authority = createReleaseManagerAuthority({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
     expect(authority.kinds.check.ready).toBe(true);
     const check = await authority.manager.check('stable');
     expect(check.candidate).toMatchObject({ productVersion: '1.223.0', publicationSequence: 9 });
-    expect(check.shadowComparison.agrees).toBe(true);
-  });
-
-  it('records a structured disagreement when the legacy updater decides differently', async () => {
-    const fixture = await createShadowFixture();
-    const authority = createReleaseManagerAuthority({
-      pdHome: fixture.pdHome,
-      metadataBaseUrl: fixture.repository.baseUrl,
-      legacyCheck: async () => ({ source: 'legacy-updater', latestVersion: '1.222.0', updateAvailable: false }),
-    });
-    const check = await authority.manager.check('stable');
-    expect(check.shadowComparison.agrees).toBe(false);
-    expect(check.shadowComparison.note).toMatch(/decision mismatch/);
+    expect(check.decision).toEqual({ allowed: true, direction: 'update' });
   });
 
   it('refuses with a stable ReleaseManager reason when the metadata source is unreachable', async () => {
     const fixture = await createShadowFixture();
-    const authority = createReleaseManagerAuthority({
-      pdHome: fixture.pdHome,
-      // Nothing listens on port 1 — refresh fails loud, never degrades.
-      metadataBaseUrl: 'http://127.0.0.1:1',
-    });
+    const authority = createReleaseManagerAuthority({ pdHome: fixture.pdHome, metadataBaseUrl: 'http://127.0.0.1:1' });
     expect(authority.kinds.check.ready).toBe(true);
     const failure = await authority.manager.check('stable').then(
       () => null,
-      (error: unknown) => mapReleaseManagerErrorToFallback(error),
+      (error: unknown) => mapReleaseManagerError(error),
     );
     expect(failure).not.toBeNull();
     expect(failure?.reason).toBe('metadata_refresh_failed');
@@ -200,29 +159,23 @@ describe('ReleaseManager governed shadow check (kind check)', () => {
   });
 });
 
-describe('explicit-fallback error mapping', () => {
+describe('explicit error mapping', () => {
   it('maps ReleaseManagerError refusals onto their stable reason and next action', () => {
-    const mapped = mapReleaseManagerErrorToFallback(
-      new ReleaseManagerError('shadow_mode_read_only', 'not enabled yet', 'continue using the current update path'),
+    const mapped = mapReleaseManagerError(
+      new ReleaseManagerError('metadata_refresh_failed', 'not enabled yet', 'continue using the current update path', true),
     );
     expect(mapped).toEqual({
-      reason: 'shadow_mode_read_only',
+      reason: 'metadata_refresh_failed',
       message: 'not enabled yet',
       nextAction: 'continue using the current update path',
-      transactionOpened: false,
+      transactionOpened: true,
     });
-    // PRI-698 default-on safety net: post-transaction refusals carry the flag
-    // through so the console surfaces them as failures, never as fallbacks.
-    const postTransaction = mapReleaseManagerErrorToFallback(
-      new ReleaseManagerError('apply_failed', 'installer failed mid-swap', 'inspect the journal', true),
-    );
-    expect(postTransaction.transactionOpened).toBe(true);
   });
 
   it('maps unexpected errors to a generic failure reason without losing the message', () => {
-    const mapped = mapReleaseManagerErrorToFallback(new Error('boom'));
-    expect(mapped.reason).toBe('release_manager_check_failed');
+    const mapped = mapReleaseManagerError(new Error('boom'));
+    expect(mapped.reason).toBe('release_manager_failed');
     expect(mapped.message).toBe('boom');
-    expect(mapped.nextAction).toBeNull();
+    expect(mapped.nextAction.length).toBeGreaterThan(10);
   });
 });

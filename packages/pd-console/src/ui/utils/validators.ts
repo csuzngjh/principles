@@ -1373,21 +1373,15 @@ export function validateLifecycleMetrics(v: unknown): LifecycleMetricsData | nul
 }
 
 // ── Update validators ─────────────────────────────────────────────────────────
-// Contract aligned with backend routes/update.ts doCheckForUpdates() response.
+// Contract aligned with the ReleaseManager check response.
 
 export interface UpdateStatusData {
   currentVersion: string;
   latestVersion: string;
   hasUpdate: boolean;
   error?: string;
-  /** True when Codex host is also installed (triggers a warning banner). */
-  codexInstalled?: boolean;
-  /** Release notes for the latest version (markdown, from GitHub Releases). */
-  changelog?: string;
-  /** Newest plugin version published to npm (may exceed what the installer can deliver). */
-  pluginLatestVersion?: string;
-  /** True when a newer plugin is published but the installer has not been republished to bundle it. */
-  syncPending?: boolean;
+  reason?: string;
+  nextAction?: string;
 }
 
 export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
@@ -1403,18 +1397,8 @@ export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
   if (Object.hasOwn(v, 'error') && isString(v.error)) {
     result.error = v.error;
   }
-  if (Object.hasOwn(v, 'codexInstalled') && typeof v.codexInstalled === 'boolean') {
-    result.codexInstalled = v.codexInstalled;
-  }
-  if (Object.hasOwn(v, 'changelog') && isString(v.changelog)) {
-    result.changelog = v.changelog;
-  }
-  if (Object.hasOwn(v, 'pluginLatestVersion') && isString(v.pluginLatestVersion)) {
-    result.pluginLatestVersion = v.pluginLatestVersion;
-  }
-  if (Object.hasOwn(v, 'syncPending') && typeof v.syncPending === 'boolean') {
-    result.syncPending = v.syncPending;
-  }
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
   return result;
 }
 
@@ -2470,20 +2454,6 @@ export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | n
     result.gatewayNotice = v.gatewayNotice;
   }
   return result;
-}
-
-// ── Rollback Result ──────────────────────────────────────────────────────────
-
-export interface RollbackResultData {
-  success: boolean;
-  message: string;
-}
-
-export function validateRollbackResult(v: unknown): RollbackResultData | null {
-  if (!isObject(v)) return null;
-  if (!Object.hasOwn(v, 'success') || typeof v.success !== 'boolean') return null;
-  if (!Object.hasOwn(v, 'message') || !isString(v.message)) return null;
-  return { success: v.success, message: v.message };
 }
 
 // ── Principle Trajectory validators ─────────────────────────────────────────
