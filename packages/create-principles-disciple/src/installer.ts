@@ -1399,17 +1399,41 @@ function globalShimPath(globalBin: string, basename: string): string {
   return target;
 }
 
-/**
- * Global `pd` shim ownership, mirroring the uninstaller's isPdOwnedShim
- * discipline: a shim whose content points at the PD install dir belongs to
- * us and may be updated in place; anything else (another tool's `pd`, a
- * broken/unreadable entry) is foreign — refuse to overwrite it and surface
- * a warning + next action instead (review P1: the pre-PRI-697 code
- * writeFileSync'd blindly, but that path was only reachable via the
- * explicit legacy-recovery env; the npm channel makes it default, so the
- * write now needs the same ownership discipline the uninstaller already
- * has).
- */
+// A legacy path mentioned in a comment is not proof of ownership. Only
+// complete known forwarding scripts may be migrated when their target is gone.
+// The substitutions below REPLICATE the historical writers' exact byte output
+// (format parity, not output escaping): none of the writers escape backslashes
+// in Windows paths, so detection must not add escaping either — split/join is
+// used instead of String.replace to keep that intent explicit.
+function duplicateDoubleQuotes(value: string): string {
+  return value.split('"').join('""');
+}
+
+function doubleBackticksThenBacktickQuotes(value: string): string {
+  return value.split('`').join('``').split('"').join('`"');
+}
+
+function backslashQuote(value: string): string {
+  return value.split('"').join('\\"');
+}
+
+function isLegacyPdShim(content: string): boolean {
+  const scripts: string[] = [];
+  const bin = path.join(getPluginExtDir(), 'bin');
+  const cmd = duplicateDoubleQuotes(path.join(bin, 'pd.cmd'));
+  const ps = doubleBackticksThenBacktickQuotes(path.join(bin, 'pd.ps1'));
+  scripts.push(`@echo off\ncall "${cmd}" %*`);
+  scripts.push(`$shim = "${ps}"\n& $shim @args\nexit $LASTEXITCODE`);
+  scripts.push(`#!/usr/bin/env sh\nexec "${backslashQuote(path.join(bin, 'pd'))}" "$@"`);
+  for (const root of [getPdRuntimeDir(), getPluginExtDir()]) {
+    const entry = path.join(root, 'pd-cli', 'dist', 'index.js');
+    scripts.push(`@echo off\nnode "${duplicateDoubleQuotes(entry)}" %*`);
+    scripts.push(`$ErrorActionPreference = "Stop"\n$entry = "${doubleBackticksThenBacktickQuotes(entry)}"\n& node $entry @args\nexit $LASTEXITCODE`);
+    scripts.push(`#!/usr/bin/env sh\nexec node "${backslashQuote(entry)}" "$@"`);
+  }
+  return scripts.includes(content.replace(/\r\n/g, '\n').trim());
+}
+
 function classifyGlobalPdShim(globalBin: string, installedBinDir: string): { foreignPaths: string[]; existingPdOwned: boolean } {
   const foreignPaths: string[] = [];
   let existingPdOwned = false;
@@ -1423,8 +1447,11 @@ function classifyGlobalPdShim(globalBin: string, installedBinDir: string): { for
       foreignPaths.push(shimPath); // unreadable → do not touch
       continue;
     }
-    if (content.includes(installedBinDir)) existingPdOwned = true;
-    else foreignPaths.push(shimPath);
+    if (content.includes(installedBinDir) || isLegacyPdShim(content)) {
+      existingPdOwned = true;
+    } else {
+      foreignPaths.push(shimPath);
+    }
   }
   return { foreignPaths, existingPdOwned };
 }
