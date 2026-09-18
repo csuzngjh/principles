@@ -41,7 +41,7 @@ export type {
 export { OwnerDecisionInputsSchema } from './owner-decision/owner-decision-view.js';
 export type { OwnerDecisionInputs } from './owner-decision/owner-decision-view.js';
 export { deriveOwnerDecisionView } from './owner-decision/owner-decision-view.js';
-export { selectLearnedPrincipleV0, isWholeFieldHumanReadable } from './owner-decision/semantic-selector.js';
+export { selectLearnedPrincipleV0, selectLearnedPrincipleV1, extractStandaloneBehaviorSentence, isWholeFieldHumanReadable } from './owner-decision/semantic-selector.js';
 export type { SemanticSource, SemanticSelectionResult } from './owner-decision/semantic-selector.js';
 export {
   GovernancePrimaryAttentionSchema, GovernanceExperienceReasonCodeSchema, GovernanceExperienceNextActionCodeSchema,

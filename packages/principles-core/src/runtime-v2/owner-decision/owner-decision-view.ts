@@ -25,7 +25,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { GovernanceFactsSchema } from '../governance-projection-contract.js';
 import type { GovernanceFacts } from '../governance-projection-contract.js';
 import { deriveOwnerGovernanceView } from '../governance-projection.js';
-import { selectLearnedPrincipleV0, isWholeFieldHumanReadable } from './semantic-selector.js';
+import { selectLearnedPrincipleV1, isWholeFieldHumanReadable } from './semantic-selector.js';
 import type {
   Action, Blocker, DecisionMaterialGate, DecisionState, DecisionSubject,
   EnforcementItem, EnforcementSummary, EvidenceSummary, NarrativeField,
@@ -288,14 +288,16 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
   }
 
   // ── learned_principle (Semantic Selector v0) ─────────────────────────────
-  const selection = selectLearnedPrincipleV0(input.semanticSources);
+  // Semantic Selector v1 (Phase D): whole-field first, bounded verbatim
+  // sentence extraction as the only fallback (SPEC §10.3 — no rewriting).
+  const selection = selectLearnedPrincipleV1(input.semanticSources);
   const learnedPrinciple: OwnerDecisionViewCore['learnedPrinciple'] = selection.status === 'known'
     ? {
         status: 'known',
         value: {
           text: selection.text,
           sourceTier: selection.sourceTier,
-          selectionMode: 'whole_field',
+          selectionMode: selection.selectionMode,
           selectionReason: selection.selectionReason,
           sourceVersion: selection.sourceVersion,
         },

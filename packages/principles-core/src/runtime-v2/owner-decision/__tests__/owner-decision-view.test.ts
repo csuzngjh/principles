@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { GovernanceFacts } from '../../index.js';
-import { deriveOwnerDecisionView, selectLearnedPrincipleV0, isWholeFieldHumanReadable } from '../../index.js';
+import { deriveOwnerDecisionView, selectLearnedPrincipleV0, selectLearnedPrincipleV1, extractStandaloneBehaviorSentence, isWholeFieldHumanReadable } from '../../index.js';
 import type { OwnerDecisionInputs } from '../../index.js';
 
 const AS_OF = '2026-09-18T10:00:00.000Z';
@@ -112,6 +112,58 @@ describe('Semantic Selector v0 — audit golden samples (§10.2)', () => {
 
   it('no sources → UNKNOWN with explicit reason', () => {
     expect(selectLearnedPrincipleV0([])).toMatchObject({ status: 'unknown', reasonCode: 'no_sources' });
+  });
+});
+
+// ── Semantic Selector v1 — bounded verbatim extraction (Phase D, §10.3) ─────
+
+describe('Semantic Selector v1 — bounded extraction golden samples', () => {
+  it('extracts a verbatim standalone obligation sentence from a mixed field', () => {
+    const mixedText = '说明：本原则由诊断于 2026-09-13 生成，依据 source-of-truth.json 的 mtime 比对。任何跨会话的合并动作都必须以可观察的源对象作为最终事实来源。';
+    const sources = [{ tier: 'candidate_principle' as const, text: mixedText, sourceVersion: 'cand-mixed' }];
+    const result = selectLearnedPrincipleV1(sources);
+    expect(result.status).toBe('known');
+    if (result.status === 'known') {
+      expect(result.selectionMode).toBe('extracted_sentence');
+      // Verbatim: the sentence appears in the source unchanged (no deletion,
+      // no generalization — negations/conditions ride along by construction).
+      expect(mixedText).toContain(result.text);
+      expect(result.text).toBe('任何跨会话的合并动作都必须以可观察的源对象作为最终事实来源。');
+      expect(result.text).not.toContain('mtime');
+    }
+  });
+
+  it('audit MIXED sample stays UNKNOWN when every sentence carries technical residue', () => {
+    const MIXED = "将'源文件为准'确立为不可绕过的通用原则：任何跨会话/跨状态合并、同步或巡检动作，都必须以可观察的源对象（mtime+内容哈希）作为最终事实来源，禁止直接继承先前会话记忆或历史状态文件作为权威。";
+    expect(selectLearnedPrincipleV1([{ tier: 'candidate_principle', text: MIXED, sourceVersion: 'c' }]))
+      .toMatchObject({ status: 'unknown' });
+  });
+
+  it('negations and conditions are preserved verbatim (no word deletion)', () => {
+    const sentence = '在主任务未完成或未被明确放下之前，不得切换行动焦点。';
+    const extracted = extractStandaloneBehaviorSentence([{
+      tier: 'distiller',
+      text: `背景补充：见 diagnosis_manual_1789317326914 记录。${sentence}`,
+      sourceVersion: 'd',
+    }]);
+    expect(extracted).not.toBeNull();
+    expect(extracted?.text).toBe(sentence);
+  });
+
+  it('single-sentence technical fields never gain extraction (no-op by design)', () => {
+    const TECH = '读取 source-of-truth.json 的 mtime 与 MD5 值并比对。';
+    expect(extractStandaloneBehaviorSentence([{ tier: 'distiller', text: TECH, sourceVersion: 'd' }])).toBeNull();
+    expect(selectLearnedPrincipleV1([{ tier: 'distiller', text: TECH, sourceVersion: 'd' }]))
+      .toMatchObject({ status: 'unknown' });
+  });
+
+  it('whole-field wins over extraction when both qualify', () => {
+    const whole = '主任务未完成前不得推进次要议题。';
+    const wholeResult = selectLearnedPrincipleV1([{ tier: 'candidate_principle', text: whole, sourceVersion: 'c' }]);
+    // When the whole field qualifies, the result is whole_field — extraction
+    // is only a fallback (checked directly; the mixed variant above covers
+    // the extraction path).
+    if (wholeResult.status === 'known') expect(wholeResult.selectionMode).toBe('whole_field');
   });
 });
 

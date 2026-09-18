@@ -34,7 +34,7 @@ export interface SemanticSelection {
   status: 'known';
   text: string;
   sourceTier: SemanticSource['tier'];
-  selectionMode: 'whole_field';
+  selectionMode: 'whole_field' | 'extracted_sentence';
   selectionReason: string;
   sourceVersion: string;
 }
@@ -133,4 +133,69 @@ export function selectLearnedPrincipleV0(sources: SemanticSource[]): SemanticSel
     selectionReason: `${tierNames[selected.tier]}的完整字段，未经改写。`,
     sourceVersion: selected.sourceVersion,
   };
+}
+
+// ── Semantic Selector v1 — bounded verbatim extraction (SPEC §10.3) ────────
+//
+// v1 only ADDS a fallback on top of v0: when no whole field qualifies, extract
+// ONE already-existing standalone human behavior sentence from the same tier
+// sources, VERBATIM (whole sentence, no word deletion — so negations,
+// conditions, exceptions and quantifiers are preserved by construction).
+// Never: interpret hooks as principles, generalize by deleting words, rewrite
+// rationale, or upgrade rule/implementation/prompt descriptions.
+
+const OBLIGATION_MARKERS = /必须|不得|应当|应该|禁止|需要先|要先|避免|须|shall|must|never|always/i;
+
+/** Splits a field into sentence units without dropping any characters. */
+function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[。！？!?；;])\s*/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+}
+
+/**
+ * Extracts the first standalone human behavior sentence (verbatim) from the
+ * given sources, or null when none qualifies. A sentence qualifies when it
+ * (a) passes the same whole-field technical-residue gate per sentence,
+ * (b) carries an explicit behavioral obligation marker, and
+ * (c) is long enough to be a standalone obligation.
+ * Extraction only helps multi-sentence fields: a single-sentence field that
+ * failed the whole-field gate fails the same gate per sentence.
+ */
+export function extractStandaloneBehaviorSentence(sources: SemanticSource[]): { text: string; tier: SemanticSource['tier']; sourceVersion: string } | null {
+  const tierOrder: SemanticSource['tier'][] = ['scribe', 'distiller', 'philosopher', 'candidate_principle'];
+  const ordered = [...sources].sort((a, b) => tierOrder.indexOf(a.tier) - tierOrder.indexOf(b.tier));
+  for (const source of ordered) {
+    if (isWholeFieldHumanReadable(source.text)) continue; // v0 already covers this field
+    const sentences = splitSentences(source.text);
+    if (sentences.length < 2) continue;
+    for (const sentence of sentences) {
+      if (sentence.length >= 10 && OBLIGATION_MARKERS.test(sentence) && isWholeFieldHumanReadable(sentence)) {
+        return { text: sentence, tier: source.tier, sourceVersion: source.sourceVersion };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Semantic Selector v1: v0 whole-field selection first; bounded verbatim
+ * sentence extraction as the only fallback. No rewriting, ever.
+ */
+export function selectLearnedPrincipleV1(sources: SemanticSource[]): SemanticSelectionResult {
+  const wholeField = selectLearnedPrincipleV0(sources);
+  if (wholeField.status === 'known') return wholeField;
+  const extracted = extractStandaloneBehaviorSentence(sources);
+  if (extracted !== null) {
+    return {
+      status: 'known',
+      text: extracted.text,
+      sourceTier: extracted.tier,
+      selectionMode: 'extracted_sentence',
+      selectionReason: '从同一来源字段中逐字摘录的独立行为句（未删词、未改写；保留原有否定与条件）。',
+      sourceVersion: extracted.sourceVersion,
+    };
+  }
+  return wholeField;
 }

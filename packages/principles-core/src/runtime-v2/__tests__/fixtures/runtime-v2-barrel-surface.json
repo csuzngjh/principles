@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1766,
+ "count": 1768,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -1530,6 +1530,7 @@
   "extractFilePathFromParams",
   "extractPIMetadata",
   "extractPrincipleId",
+  "extractStandaloneBehaviorSentence",
   "factStoreFromStateManager",
   "filterPromptActivations",
   "findAppliedVerdictOverrideResolution",
@@ -1723,6 +1724,7 @@
   "schemaRef",
   "seedIntakeTask",
   "selectLearnedPrincipleV0",
+  "selectLearnedPrincipleV1",
   "serializeAdmissionEvent",
   "serializePITaskMetadata",
   "shouldCreateTask",
