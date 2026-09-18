@@ -634,7 +634,7 @@
         "reflectionQ3": "如果它错了，我是否知道如何回滚？",
         "receipts": {
           "title": "生效履历",
-          "headline": "你的原则正在影响智能体行为",
+          "headline": "保留记录中有 {{effectCount}} 次行为影响（最近 {{lastEffectAt}}）——记录属历史观察，不代表当前仍在生效",
           "headlinePresence": "原则已进入智能体决策上下文——尚无行为生效记录",
           "counts": "行为生效 {{effectCount}} 次 · 参与上下文 {{presenceCount}} 次",
           "zeroEffect": "为什么「行为生效」是 0？生效需要证据：一次拦截、一次自动纠正，或智能体自述遵循。目前这条原则只进入过任务上下文（Presence）——参与决策 ≠ 已改变行为。随着运行积累出第一条证据，「行为生效」会从这里开始计数。",
@@ -729,7 +729,7 @@
           "derived": "推导",
           "actionsNotAuthorized": "当前不需要拥有者决策。",
           "confidence": { "strong": "有来源支撑", "degraded": "证据不完整" },
-          "state": { "candidate": "候选", "active": "已生效", "archived": "已归档", "deprecated": "已弃用", "probation": "观察中" },
+          "state": { "candidate": "候选", "active": "已批准", "archived": "已归档", "deprecated": "已弃用", "probation": "观察中" },
           "stage": { "generating": "生成中", "reviewing": "审查中", "revising": "修订中", "approval": "待审批", "activation": "激活中" },
           "automationState": { "idle": "空闲", "queued": "已排队", "running": "运行中", "retry_scheduled": "已安排重试", "stalled": "已停滞" },
           "headline": {
@@ -825,6 +825,9 @@
           "riskNotAssessed": "尚未做过风险评估；这不代表没有风险。",
           "rollback": "如何停止影响",
           "decision": "你的决定",
+          "history": "决定历史",
+          "historyState": { "approved": "已批准", "rejected": "已拒绝", "cancelled": "已取消", "pending": "待决定" },
+          "channel": { "prompt": "上下文提示通道", "code_tool_hook": "RuleCode 执行通道", "defer_archive": "归档通道" },
           "actionLabel": { "approve": "批准", "reject": "拒绝", "edit_approval": "替换审批工件", "disable": "停止此执行方式今后的影响" },
           "next": { "review": "有一项决定需要你审阅：请阅读上方说明后选择批准或拒绝。", "wait": "系统正在处理这项提案，请等待处理完成。", "inspect_data": "系统暂时无法建立完整的治理判断。", "inspect_recovery": "这项处理存在历史遗留问题；可查看恢复信息。", "monitor": "此提案已有完成的决定。可查看执行状态与行为记录。", "none": "目前没有需要你决定的事项。" },
           "blocker": { "decision_material_missing": "这个对象缺少足够的信息让你安全地批准；拒绝仍可单独评估。", "lineage_not_available": "治理身份尚未建立，系统暂时无法判断是否需要你决定。", "historical_processing_issue": "存在历史处理问题，其与当前操作的关系尚未确认。" },

@@ -660,7 +660,30 @@ export function PrincipleDetailPage() {
             </div>
 
             {/* 8. Owner Decision — backend-assessed actions only */}
-            <div className="mt-5 border-t border-line pt-4" data-testid="owner-decision-actions">
+              {/* S3 finding (AI User QA): decided subjects were invisible on the
+                  Detail page — the Owner could not see WHEN/HOW this principle
+                  was approved. Render completed decisions as history. */}
+              {ownerDecision.decisionSubjects.some((subject) => subject.state !== 'pending') && (
+                <div className="mt-3" data-testid="owner-decision-history">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                    {t("principles.detail.ownerDecision.history", { defaultValue: "决定历史" })}
+                  </p>
+                  <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
+                    {ownerDecision.decisionSubjects.filter((subject) => subject.state !== 'pending').map((subject) => {
+                      const decidedAt = subject.targetRefs.find((target) => target.kind === 'approval')?.recordedAt;
+                      const stateKey = `principles.detail.ownerDecision.historyState.${subject.state}`;
+                      return (
+                        <li key={`hist-${subject.key}`}>
+                          {t(stateKey, { defaultValue: subject.state })}
+                          {decidedAt !== undefined ? ` · ${decidedAt.slice(0, 10)}` : ''}
+                          {' · '}{t(`principles.detail.ownerDecision.channel.${subject.channel}`, { defaultValue: subject.channel })}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              <div className="mt-5 border-t border-line pt-4" data-testid="owner-decision-actions">
               <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
                 {t("principles.detail.ownerDecision.decision", { defaultValue: "你的决定" })}
               </p>
