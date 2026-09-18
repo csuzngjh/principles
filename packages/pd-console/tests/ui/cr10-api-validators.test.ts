@@ -628,6 +628,51 @@ describe('validateUpdateStatus', () => {
     const result = validateUpdateStatus({ ...validStatus, hasUpdate: false, latestVersion: '', error: 'Trust unavailable', reason: 'metadata_refresh_failed', nextAction: 'Repair trust metadata.' });
     expect(result).toMatchObject({ hasUpdate: false, error: 'Trust unavailable', reason: 'metadata_refresh_failed', nextAction: 'Repair trust metadata.' });
   });
+
+  // ── PR-C: active-release identity diagnostics (additive, backward-compatible)
+
+  it('accepts governed-check identity diagnostics and passes them through', () => {
+    const result = validateUpdateStatus({
+      ...validStatus,
+      versionSource: 'active-release',
+      identityDivergence: {
+        activeVersion: '1.222.0',
+        pluginVersion: '1.999.0',
+        releaseId: 'r'.repeat(64),
+        generation: 2,
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.versionSource).toBe('active-release');
+    expect(result!.identityDivergence).toEqual({
+      activeVersion: '1.222.0',
+      pluginVersion: '1.999.0',
+      releaseId: 'r'.repeat(64),
+      generation: 2,
+    });
+  });
+
+  it('accepts the legacy body without identity fields (old installs stay valid)', () => {
+    const result = validateUpdateStatus(validStatus);
+    expect(result).not.toBeNull();
+    expect(result!.versionSource).toBeUndefined();
+    expect(result!.identityDivergence).toBeUndefined();
+  });
+
+  it('drops a malformed identityDivergence instead of emitting an unvalidated object (EP-01)', () => {
+    const result = validateUpdateStatus({
+      ...validStatus,
+      identityDivergence: { activeVersion: 1, pluginVersion: 'x', releaseId: 'r', generation: 'two' },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.identityDivergence).toBeUndefined();
+  });
+
+  it('drops an unknown versionSource value', () => {
+    const result = validateUpdateStatus({ ...validStatus, versionSource: 'something-else' });
+    expect(result).not.toBeNull();
+    expect(result!.versionSource).toBeUndefined();
+  });
 });
 
 // ── validateConfigSummary ─────────────────────────────────────────────────────

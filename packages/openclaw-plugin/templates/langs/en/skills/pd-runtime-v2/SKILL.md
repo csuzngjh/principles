@@ -21,8 +21,11 @@ Manual:
 pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json
 ```
 `--session` binds the report to a recorded session (validated up front) so
-diagnosis carries real trajectory evidence; without it the record is an
-unbound Owner report with no evidence and candidates will likely be gated.
+diagnosis carries real trajectory evidence; when the binding is verified but
+the trajectory evidence is empty or unreadable, the record degrades honestly
+to bound + evidence-unavailable and the admission gate decides; without
+`--session` the record is a legal unbound Owner report with no evidence and
+its candidates will likely be gated.
 
 Forbidden:
 - Do not write `.state/.pain_flag`.
@@ -59,16 +62,25 @@ pd candidate show --candidate-id "<candidateId>" --workspace "<workspace>" --jso
 
 ## Success Criteria
 
+A pain travels through four stages: record receipt (`painId`) → diagnosis
+(produces candidates) → admission (`admitted`, into the ledger) → Owner
+approval and activation.
+
 A diagnosis is successful only when:
 - `status` is `succeeded`
 - `candidateIds` is non-empty
-- `ledgerEntryIds` is non-empty
+- `admissionResults` contains `admitted` decisions with non-empty
+  `ledgerEntryIds`
 
-Task creation alone is not success. A run without candidates or ledger entries is failed/retried/incomplete.
+Task creation alone, candidate generation alone, or a ledger entry alone is
+not success — candidates without an `admitted` decision were never admitted.
+Activation is a separate stage that follows Owner approval; `pd pain record`
+never activates anything by itself.
 
 ## If Manual Diagnosis Is Needed
 
 1. Use `pd pain record`.
 2. Inspect JSON output.
-3. If `candidateIds` or `ledgerEntryIds` is empty, treat it as not completed.
+3. If `candidateIds` or `ledgerEntryIds` is empty, or candidates are gated as
+   `needs_evidence` / `deferred`, treat it as not completed (not internalized).
 4. Use `pd candidate list/show` and `pd runtime flow show` for follow-up.

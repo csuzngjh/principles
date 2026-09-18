@@ -21,7 +21,9 @@ disable-model-invocation: false
 pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json
 ```
 `--session` 把报告绑定到已记录的会话（先校验），让诊断携带真实轨迹
-证据；不带它则是无证据的 unbound Owner 报告，候选大概率被拦。
+证据；会话验证通过但轨迹证据为空或不可读时，按 bound + 证据不可用诚实
+降级提交，由 admission gate 评判；不带 `--session` 则是无证据的 unbound
+Owner 报告（合法），候选大概率被拦。
 
 禁止入口：
 - 不要写 `.state/.pain_flag`。
@@ -58,16 +60,22 @@ pd candidate show --candidate-id "<candidateId>" --workspace "<workspace>" --jso
 
 ## 成功标准
 
+一条痛苦的完整链路分四个阶段：记录回执（`painId`）→ 诊断（产出候选）→
+准入（`admitted`，进入 ledger）→ Owner 批准与激活（activation）。
+
 一次诊断只有在同时满足以下条件时才算成功：
 - `status` 是 `succeeded`
 - `candidateIds` 非空
-- `ledgerEntryIds` 非空
+- `admissionResults` 中出现 `admitted` 决策，且对应 `ledgerEntryIds` 非空
 
-只创建 task 不算成功。没有 candidate 或 ledger entry 的 run 是失败、重试或未完成。
+只创建 task、只生成候选或只有 ledger entry 都不算成功——没有 `admitted`
+决策的候选并未被准入。激活是 Owner 决策之后的独立阶段，`pd pain record`
+不会直接产生激活。
 
 ## 需要手动诊断时
 
 1. 使用 `pd pain record`。
 2. 检查 JSON 输出。
-3. 如果 `candidateIds` 或 `ledgerEntryIds` 为空，视为未完成。
+3. 如果 `candidateIds` 或 `ledgerEntryIds` 为空，或候选被拦为
+   `needs_evidence` / `deferred`，视为未完成（未内化）。
 4. 用 `pd candidate list/show` 和 `pd runtime flow show` 继续排查。
