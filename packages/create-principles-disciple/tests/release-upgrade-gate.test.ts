@@ -76,6 +76,20 @@ const SCENARIO_UPGRADE_TIMEOUT_MS = 40 * 60 * 1000;
 /** Corrupted-artifact scenario budget (corruption refusal + health probes). */
 const SCENARIO_CORRUPT_TIMEOUT_MS = 30 * 60 * 1000;
 
+/**
+ * beforeAll preparation budget (extract-n + extract-n1 + restamp-n1).
+ *
+ * The preparation phase is NOT a scenario: it materializes the N and N-1
+ * payloads from the release asset before the first test can run. On the CI
+ * windows-2025 + Defender runner the two extractions are dominated by
+ * real-time AV scanning and measured 941.5s + 901.2s = 1842.7s on
+ * 2026-09-18 — above the previous 30 min hook budget, which aborted the
+ * whole suite with "Hook timed out" before any test executed. The 60 min
+ * floor covers ONLY the preparation phase; the trade (install / apply-full
+ * / corrupt) is bounded by its own scenario deadlines and the 120 min job.
+ */
+const SCENARIO_PREPARE_TIMEOUT_MS = 60 * 60 * 1000;
+
 const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-upgrade-gate-'));
 
 const providedPublication = process.env.PD_RELEASE_SMOKE_PUBLICATION;
@@ -401,7 +415,7 @@ beforeAll(async () => {
     fs.chmodSync(openclaw, 0o755);
     fs.chmodSync(npm, 0o755);
   }
-}, 1_800_000);
+}, SCENARIO_PREPARE_TIMEOUT_MS);
 
 afterAll(async () => {
   await stopConsole();
