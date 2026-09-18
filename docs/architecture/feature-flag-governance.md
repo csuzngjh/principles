@@ -45,7 +45,8 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 | **artificer_output_retry** | **ON（毕业）** | principles-core artificer-runner.ts permanentErrorCategories（PRI-621，2026-08-29 毕业：与其他 peer runner 的 output_invalid 重试语义对齐） | ✅ 已毕业 |
 | **rulecode_context_v2** | **ON（毕业）** | openclaw-plugin gate.ts buildRuleContextIfEnabled（双路径）、core rule-host-writer canActivate、pd-cli run-rulehost contextMode、pd-console/runtime-activation suspended_by_flag、codex-adapter pd-hook 声明（PRI-780，2026-09-13 毕业：Runtime Governance Context 成为默认治理路径；ADR 2026-06-28 amendment；显式 false = 迁移期熔断） | ✅ 已毕业 |
 | principle_receipt_self_report | OFF | prompt 注入 📝 行 + llm_output/before_message_write 捕获（PRI-532）；installer 与 registry 均保持关闭 | ✅ 实验性，保持默认关 |
-| correction_observer / signal_collector / l2_dreamer / intent_engineering / artifact_summary_redundancy / context_manifest_budget / progressive_evaluator / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence / gfi | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
+| correction_observer / signal_collector / l2_dreamer / intent_engineering / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence / gfi | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
+| artifact_summary_redundancy / context_manifest_budget / progressive_evaluator | ~~OFF (quiet)~~ **RETIRED 2026-09-18 (PRI-819 R-06, Owner 决策)** | **已退役**：三个 dormant progressive-disclosure flag 的运行时读者与 Layer 0/1/2 门控分支同批删除（summary envelope 写入、manifest+budget 注入、双阶段 evaluator、CandidateLineage、context-trace CLI）；evaluator 恢复纯单阶段。flag 移入 gone 墓碑——存量 `enabled: true` 覆盖被 computeEffectiveFlags 可观察拒绝 | ✅ 正常退役 |
 | nocturnal / idle_trigger / evolution_worker / empathy_observer / internalization_core_grounding（PRI-751 墓碑化） | gone | 无（禁止复活，computeEffectiveFlags 强制拒绝）。evolution_worker：worker 已于 PRI-737 删除，flag 2026-09-12 随 PRI-752 移入 gone（live 证据：flag=off、evolution_tasks/events 0 行；census 原 2026-12-01 隔离窗口因其主体（worker）已不存在而提前满足）。empathy_observer：随 #1625 退役（零可执行消费者，检测经 signal-collector-host 无条件运行）。internalization_core_grounding：随 #1624 退役——grounding 由 runner 默认值无条件启用，flag 从未有可执行消费者（PRI-752 复核一致确认） | ✅ 正常退役 |
 
 ## 3. 重点案例（本任务结论）
@@ -88,6 +89,15 @@ agent 绑定不受影响（Control Center 的共情成本提示按 agent 绑定�
 '共情观察器' 标签保留（兼作 agent 显示名）。存量 `features.empathy_observer` 配置键此后走
 unknown-flag 告警。EmpathyObserver 类与公开导出未随本 PR 删除——若 Owner 后续要真实观测器，
 按 census 程序重新注册 flag 并接线即可。
+
+**PRI-819 增补（2026-09-17，物理清理已执行）**：Owner 决策"长期休眠且零行为的能力直接退役"
+后，上述保留面已全部物理删除——EmpathyObserver 类/schema/导出、agent-scheduler 类型映射条目、
+output-schema-registry 条目、`internalAgents.empathyObserver` 绑定（defaults + installer 模板 +
+Control Center 卡片/成本提示/localStorage ack）、'共情观察器' 显示标签、#189 递归防护
+（isEmpathyPrompt）。存量 config 中的 `agents.empathyObserver` 键走 PRI-772 式 tolerated
+no-op + warning（不再报 unknown-key 错误）。flag 墓碑本身保持不动：无 runtime reader，
+`features.empathy_observer` 存量键仍走 unknown-flag 告警。live 的 empathy 检测
+（empathy-keyword-matcher、signal-collector-host、DetectionService、GFI/rollback 事件链）不受影响。
 
 ### 3.3 installer 默认值快照 — 已按 PRI-645 收敛为 sparse shell
 

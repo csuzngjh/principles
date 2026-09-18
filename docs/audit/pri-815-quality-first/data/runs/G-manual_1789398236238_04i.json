@@ -1,0 +1,696 @@
+{
+ "group": "G-manual_1789398236238_04i",
+ "class": "DEV",
+ "pain_id": "manual_1789398236238_04iyw2k7",
+ "frozen_at": "2026-09-17T15:49:01.802Z",
+ "repeats": [
+  {
+   "group": "G-manual_1789398236238_04i",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1789398236238_04i-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "手调定稿金色华丽 HUD 后，仅将精修结果保留在 PNG 成品中，未把精修参数/效果回写同步到生成器源头 hud_gen.py，形成代码-产物同步缺口",
+       "betterDecision": "手调定稿后立即将精修成果回写生成器源头，或将定稿产物提交版本控制并锁定、移出生成器的可覆盖路径，确保任何重跑都无法抹掉人工精修成果",
+       "rationale": "人工精修与自动化管线并存时，源头与产物必须保持单一事实来源；否则下一次重跑必然静默覆盖定稿皮肤",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "single_source_of_truth",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "15:46 未经任何核对直接重跑旧生成器 hud_gen.py 覆盖产物，重跑前未以可观察证据确认当前皮肤是否仍等于定稿设计，也未确认定稿已回写源头",
+       "betterDecision": "任何重跑/覆盖前先执行预检门禁：帧级对账（如 MAD）确认当前产物与定稿设计一致，且生成器源头已包含人工精修；预检不通过则禁止覆盖执行",
+       "rationale": "覆盖型操作难以逆转，行动前以盘上证据建立对当前状态的理解是防止不可逆破坏定稿的第一道防线",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_overwrite",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "21:41 恢复轮未确认正确管线即调用生成器，误用 hud_gen.py 而非真管线 gpt_hud_key.py（读取 hud-gpt-src），导致恢复二次失败",
+       "betterDecision": "恢复行动前先用盘上证据（源文件、生成器入口、配置指向）确认真管线身份，并在副本上试跑恢复流程验证有效后，再应用到正式产物",
+       "rationale": "基于可观察证据选择恢复路径并以可逆的副本试跑先行，可避免在错误前提上叠加第二次失败",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "evidence_based_recovery",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "恢复完成后仅以口头声明方式销账『已恢复/已修复』，未经任何独立盘上验证，二次恢复失败因此未被及时发现",
+       "betterDecision": "将恢复视为未完成状态，直到独立的像素级/帧级比对确认恢复后产物与定稿金色 HUD 设计一致并留档证据后，才标记任务完成",
+       "rationale": "执行不等于成功，完成声明必须经独立验证；无验证的销账会让失败持续潜伏并放大下游损失",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "independent_verification",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "『定稿皮肤不可被自动化流程覆盖』这一硬约束仅存在于操作者记忆中，未转化为任何门禁、检查或禁止转移，重跑与恢复得以畅通无阻",
+       "betterDecision": "将硬约束显式化为守门机制：定稿产物提交版本控制留档，并在重跑/恢复入口（匹配 rerun|restore|hud_gen 等触发模式）设置拦截，要求真管线确认、帧级对账证据、精修回写三项全部通过才放行",
+       "rationale": "依赖操作者时刻保持注意不可持续；把硬约束翻译为显式检查与禁止转移，才能在无人值守时同样阻止同类覆盖事故复发",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_automation",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "contextRefs": [
+      "artifact://979f7795-9e82-447a-88d0-45dbc544258f"
+     ],
+     "generatedAt": "2026-09-14T22:45:30.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1789398236238_04i-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"手调定稿金色华丽 HUD 后，仅将精修结果保留在 PNG 成品中，未把精修参数/效果回写同步到生成器源头 hud_gen.py，形成代码-产物同步缺口\",\"betterDecision\":\"手调定稿后立即将精修成果回写生成器源头，或将定稿产物提交版本控制并锁定、移出生成器的可覆盖路径，确保任何重跑都无法抹掉人工精修成果\",\"rationale\":\"人工精修与自动化管线并存时，源头与产物必须保持单一事实来源；否则下一次重跑必然静默覆盖定稿皮肤\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"single_source_of_truth\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":1,\"badDecision\":\"15:46 未经任何核对直接重跑旧生成器 hud_gen.py 覆盖产物，重跑前未以可观察证据确认当前皮肤是否仍等于定稿设计，也未确认定稿已回写源头\",\"betterDecision\":\"任何重跑/覆盖前先执行预检门禁：帧级对账（如 MAD）确认当前产物与定稿设计一致，且生成器源头已包含人工精修；预检不通过则禁止覆盖执行\",\"rationale\":\"覆盖型操作难以逆转，行动前以盘上证据建立对当前状态的理解是防止不可逆破坏定稿的第一道防线\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_overwrite\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":2,\"badDecision\":\"21:41 恢复轮未确认正确管线即调用生成器，误用 hud_gen.py 而非真管线 gpt_hud_key.py（读取 hud-gpt-src），导致恢复二次失败\",\"betterDecision\":\"恢复行动前先用盘上证据（源文件、生成器入口、配置指向）确认真管线身份，并在副本上试跑恢复流程验证有效后，再应用到正式产物\",\"rationale\":\"基于可观察证据选择恢复路径并以可逆的副本试跑先行，可避免在错误前提上叠加第二次失败\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"evidence_based_recovery\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":3,\"badDecision\":\"恢复完成后仅以口头声明方式销账『已恢复/已修复』，未经任何独立盘上验证，二次恢复失败因此未被及时发现\",\"betterDecision\":\"将恢复视为未完成状态，直到独立的像素级/帧级比对确认恢复后产物与定稿金色 HUD 设计一致并留档证据后，才标记任务完成\",\"rationale\":\"执行不等于成功，完成声明必须经独立验证；无验证的销账会让失败持续潜伏并放大下游损失\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"independent_verification\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":4,\"badDecision\":\"『定稿皮肤不可被自动化流程覆盖』这一硬约束仅存在于操作者记忆中，未转化为任何门禁、检查或禁止转移，重跑与恢复得以畅通无阻\",\"betterDecision\":\"将硬约束显式化为守门机制：定稿产物提交版本控制留档，并在重跑/恢复入口（匹配 rerun|restore|hud_gen 等触发模式）设置拦截，要求真管线确认、帧级对账证据、精修回写三项全部通过才放行\",\"rationale\":\"依赖操作者时刻保持注意不可持续；把硬约束翻译为显式检查与禁止转移，才能在无人值守时同样阻止同类覆盖事故复发\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_automation\",\"sourcePrincipleId\":\"T-05\"}],\"contextRefs\":[\"artifact://979f7795-9e82-447a-88d0-45dbc544258f\"],\"generatedAt\":\"2026-09-14T22:45:30.000Z\"}",
+    "usage": {
+     "input": 2097,
+     "output": 5454,
+     "total": 7551
+    },
+    "latencyMs": 70662,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "8fb2094c88c27373"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1789398236238_04i-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1789398236238_04i-r1-run1",
+     "thesis": "The safety of a definitive, human-refined artifact that coexists with an automated pipeline can never rest on operator attention or memory; it must be made structural: anchor the finalized state in the system's single source of truth, gate every overwrite-capable rerun or restore behind observable pre-checks (state reconciliation, correct-pipeline identity, refinement write-back), and treat any recovery as incomplete until independent evidence confirms the definitive state has been restored.",
+     "principleCandidate": {
+      "title": "Anchor-and-gate definitive states against automated overwrite",
+      "rationale": "The entire failure chain stems from one root condition: a finalized, human-refined artifact existed only in overwrite-prone outputs, while its protection ('this skin must not be overwritten') existed only in the operator's memory. Anchoring the definitive state (write-back to generator source, version-control archival, removal from overwrite paths) closes the code-artifact sync gap; gating destructive reruns with pre-flight reconciliation and pipeline-identity confirmation blocks blind overwrites; requiring independent verification before declaring completion prevents latent second failures from compounding. Together these convert an attentional constraint into a structural one that holds even unattended.",
+      "scope": "Applies whenever manually refined or otherwise irreplaceable definitive artifacts coexist with automated regeneration, rebuild, or restore pipelines capable of overwriting them — e.g., build/render/codegen outputs, migrations, deployment artifacts — and specifically before any rerun, restore, or overwrite action targeting such artifacts.",
+      "confidence": 0.88
+     },
+     "risks": [
+      "Overlaps with core axioms T-01, T-05, T-07 and T-10; this candidate is a composition of existing axioms around the new concept of 'definitive state protection' rather than a wholly new axiom, and should be evaluated as such to avoid redundancy with the core set.",
+      "Over-gating risk: mandatory pre-flight reconciliation and pipeline confirmation on every rerun can slow iteration and invite bypasses when speed is valued; gates must scale with the irreversibility of the action, not be applied uniformly.",
+      "Misclassification risk: labeling intermediate work as 'definitive' too early can freeze a wrong version or anchor erroneous state as the single source of truth, making later corrections harder.",
+      "Anchoring may be lossy or infeasible when manual refinements cannot be expressed in generator parameters; a nominal write-back that does not fully reproduce the finalized output creates a false sense of single-source truth."
+     ],
+     "generatedAt": "2026-09-14T22:51:18.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1789398236238_04i-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1789398236238_04i-r1-run1\",\"thesis\":\"The safety of a definitive, human-refined artifact that coexists with an automated pipeline can never rest on operator attention or memory; it must be made structural: anchor the finalized state in the system's single source of truth, gate every overwrite-capable rerun or restore behind observable pre-checks (state reconciliation, correct-pipeline identity, refinement write-back), and treat any recovery as incomplete until independent evidence confirms the definitive state has been restored.\",\"principleCandidate\":{\"title\":\"Anchor-and-gate definitive states against automated overwrite\",\"rationale\":\"The entire failure chain stems from one root condition: a finalized, human-refined artifact existed only in overwrite-prone outputs, while its protection ('this skin must not be overwritten') existed only in the operator's memory. Anchoring the definitive state (write-back to generator source, version-control archival, removal from overwrite paths) closes the code-artifact sync gap; gating destructive reruns with pre-flight reconciliation and pipeline-identity confirmation blocks blind overwrites; requiring independent verification before declaring completion prevents latent second failures from compounding. Together these convert an attentional constraint into a structural one that holds even unattended.\",\"scope\":\"Applies whenever manually refined or otherwise irreplaceable definitive artifacts coexist with automated regeneration, rebuild, or restore pipelines capable of overwriting them — e.g., build/render/codegen outputs, migrations, deployment artifacts — and specifically before any rerun, restore, or overwrite action targeting such artifacts.\",\"confidence\":0.88},\"risks\":[\"Overlaps with core axioms T-01, T-05, T-07 and T-10; this candidate is a composition of existing axioms around the new concept of 'definitive state protection' rather than a wholly new axiom, and should be evaluated as such to avoid redundancy with the core set.\",\"Over-gating risk: mandatory pre-flight reconciliation and pipeline confirmation on every rerun can slow iteration and invite bypasses when speed is valued; gates must scale with the irreversibility of the action, not be applied uniformly.\",\"Misclassification risk: labeling intermediate work as 'definitive' too early can freeze a wrong version or anchor erroneous state as the single source of truth, making later corrections harder.\",\"Anchoring may be lossy or infeasible when manual refinements cannot be expressed in generator parameters; a nominal write-back that does not fully reproduce the finalized output creates a false sense of single-source truth.\"],\"generatedAt\":\"2026-09-14T22:51:18.000Z\"}",
+    "usage": {
+     "input": 1706,
+     "output": 2748,
+     "total": 4454
+    },
+    "latencyMs": 40503,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "5de620b615b8b8a4"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1789398236238_04i-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r1-run1",
+     "principleDraft": {
+      "title": "Anchor Definitive Artifacts in Source-of-Truth and Gate Overwrite-Capable Reruns",
+      "statement": "When a manually refined or otherwise irreplaceable artifact is declared definitive, its finalized state must be anchored structurally in the system's single source of truth — via write-back to the generator source, versioned archival outside overwrite paths, and removal from automated regeneration output paths — and never left protected only by operator memory. Before any rerun, rebuild, restore, or other overwrite-capable action, the agent must perform observable pre-checks: reconcile the current artifact state against the anchored state, confirm the pipeline identity is the intended one, and verify no definitive artifact lies in the action's overwrite path. Any recovery from an overwrite is incomplete until independent evidence confirms the definitive state is fully restored.",
+      "rationale": "The diagnosed failure chain has one root condition: a finalized, human-refined artifact existed only in overwrite-prone pipeline outputs while its protection existed only in the operator's memory. A blind rerun of an automated pipeline then destroyed it, and the recovery was declared complete on process success alone while a latent second failure left the definitive state unrestored. Anchoring the definitive state closes the code-artifact sync gap; gating destructive reruns with pre-flight reconciliation and pipeline-identity confirmation blocks blind overwrites; requiring independent post-restore verification prevents latent failures from compounding silently. Together these convert an attentional constraint (remember not to rerun) into a structural one that holds even unattended.",
+      "applicability": [
+       "Manually refined or irreplaceable artifacts (skins, generated code, configs, rendered outputs) coexisting with automated regeneration, rebuild, or restore pipelines",
+       "Before any rerun, restore, migration, or overwrite-capable pipeline action targeting shared output paths",
+       "Environments where multiple pipelines can write to the same output directory and pipeline identity confusion is possible",
+       "Recovery or restoration of a definitive artifact after an overwrite or failed pipeline run"
+      ],
+      "antiPatterns": [
+       "Relying on operator memory, notes, or comments ('do not rerun this pipeline') as the sole protection for a finalized artifact",
+       "Leaving a manually refined definitive artifact only in overwrite-prone output paths without write-back to the generator source or versioned archival",
+       "Executing a rebuild or restore that can overwrite outputs without first reconciling current artifact state against the anchored state and confirming the pipeline identity",
+       "Declaring a restore or recovery complete based solely on the pipeline command exiting successfully, without independently comparing the restored artifact to the anchored definitive state",
+       "Running multiple pipelines against shared output paths with no pre-flight check distinguishing which pipeline owns which artifacts"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner never wants a manually refined, definitive artifact to be silently destroyed by an automated rerun or restore, and never wants a recovery reported as complete while the finalized artifact is still missing or wrong.",
+      "targetBehavior": "On declaring an artifact definitive, the agent visibly writes the finalized state back to the source of truth and archives it outside overwrite paths; before any overwrite-capable rerun or restore, the agent performs and records pre-flight checks (state reconciliation, pipeline-identity confirmation, overwrite-path scan); after any restore, the agent independently compares the restored artifact against the anchored definitive state before reporting success.",
+      "forbiddenBehavior": "Blindly executing an overwrite-capable pipeline run or restore that can destroy an unanchored, finalized human-refined artifact, or declaring recovery complete on command success without verifying the definitive state was actually restored.",
+      "evidenceSource": "The diagnosed pain chain: a manually refined skin existed only in overwrite-prone pipeline output, its protection existed only in operator memory, an automated rerun of the wrong pipeline overwrote it, and the recovery was declared done while a second latent failure left the definitive state unrestored.",
+      "validationExpectation": "An evaluator should accept a rule only if it (a) forces an observable pre-flight state reconciliation and pipeline-identity check before any overwrite-capable action, and (b) forces independent post-restore verification against the anchored definitive state. A rule that lets a rerun proceed while an unanchored definitive artifact sits in the overwrite path, or that accepts a restore as complete on exit-status alone, contradicts this intent and must be flagged rather than merged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1789398236238_04i-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r1-run1"
+     },
+     "risks": [
+      "Overlaps with core axioms T-01, T-05, T-07 and T-10: this draft is a composition of existing axioms around the new concept of 'definitive state protection', not a wholly new axiom; rule generation must avoid emitting rules that merely restate the core set.",
+      "Over-gating risk: mandatory pre-flight reconciliation and pipeline confirmation on every rerun can slow iteration and invite bypasses when speed is valued; gates must scale with the irreversibility of the action, not be applied uniformly.",
+      "Misclassification risk: labeling intermediate work as 'definitive' too early can freeze a wrong version or anchor erroneous state as the single source of truth, making later corrections harder; the declaration of definitiveness needs an explicit criterion.",
+      "Anchoring may be lossy or infeasible when manual refinements cannot be expressed in generator parameters; a nominal write-back that does not fully reproduce the finalized output creates a false sense of single-source truth.",
+      "Ambiguity in what counts as 'definitive' or as an overwrite-capable path may cause an agent to over-protect everything or under-protect the wrong artifact, weakening the gate's signal.",
+      "In unattended CI contexts, hard gating on pre-flight checks could conflict with automation expectations and push operators to disable the gates rather than satisfy them."
+     ],
+     "generatedAt": "2026-09-14T22:54:07.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1789398236238_04i-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r1-run1\",\"principleDraft\":{\"title\":\"Anchor Definitive Artifacts in Source-of-Truth and Gate Overwrite-Capable Reruns\",\"statement\":\"When a manually refined or otherwise irreplaceable artifact is declared definitive, its finalized state must be anchored structurally in the system's single source of truth — via write-back to the generator source, versioned archival outside overwrite paths, and removal from automated regeneration output paths — and never left protected only by operator memory. Before any rerun, rebuild, restore, or other overwrite-capable action, the agent must perform observable pre-checks: reconcile the current artifact state against the anchored state, confirm the pipeline identity is the intended one, and verify no definitive artifact lies in the action's overwrite path. Any recovery from an overwrite is incomplete until independent evidence confirms the definitive state is fully restored.\",\"rationale\":\"The diagnosed failure chain has one root condition: a finalized, human-refined artifact existed only in overwrite-prone pipeline outputs while its protection existed only in the operator's memory. A blind rerun of an automated pipeline then destroyed it, and the recovery was declared complete on process success alone while a latent second failure left the definitive state unrestored. Anchoring the definitive state closes the code-artifact sync gap; gating destructive reruns with pre-flight reconciliation and pipeline-identity confirmation blocks blind overwrites; requiring independent post-restore verification prevents latent failures from compounding silently. Together these convert an attentional constraint (remember not to rerun) into a structural one that holds even unattended.\",\"applicability\":[\"Manually refined or irreplaceable artifacts (skins, generated code, configs, rendered outputs) coexisting with automated regeneration, rebuild, or restore pipelines\",\"Before any rerun, restore, migration, or overwrite-capable pipeline action targeting shared output paths\",\"Environments where multiple pipelines can write to the same output directory and pipeline identity confusion is possible\",\"Recovery or restoration of a definitive artifact after an overwrite or failed pipeline run\"],\"antiPatterns\":[\"Relying on operator memory, notes, or comments ('do not rerun this pipeline') as the sole protection for a finalized artifact\",\"Leaving a manually refined definitive artifact only in overwrite-prone output paths without write-back to the generator source or versioned archival\",\"Executing a rebuild or restore that can overwrite outputs without first reconciling current artifact state against the anchored state and confirming the pipeline identity\",\"Declaring a restore or recovery complete based solely on the pipeline command exiting successfully, without independently comparing the restored artifact to the anchored definitive state\",\"Running multiple pipelines against shared output paths with no pre-flight check distinguishing which pipeline owns which artifacts\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"The Owner never wants a manually refined, definitive artifact to be silently destroyed by an automated rerun or restore, and never wants a recovery reported as complete while the finalized artifact is still missing or wrong.\",\"targetBehavior\":\"On declaring an artifact definitive, the agent visibly writes the finalized state back to the source of truth and archives it outside overwrite paths; before any overwrite-capable rerun or restore, the agent performs and records pre-flight checks (state reconciliation, pipeline-identity confirmation, overwrite-path scan); after any restore, the agent independently compares the restored artifact against the anchored definitive state before reporting success.\",\"forbiddenBehavior\":\"Blindly executing an overwrite-capable pipeline run or restore that can destroy an unanchored, finalized human-refined artifact, or declaring recovery complete on command success without verifying the definitive state was actually restored.\",\"evidenceSource\":\"The diagnosed pain chain: a manually refined skin existed only in overwrite-prone pipeline output, its protection existed only in operator memory, an automated rerun of the wrong pipeline overwrote it, and the recovery was declared done while a second latent failure left the definitive state unrestored.\",\"validationExpectation\":\"An evaluator should accept a rule only if it (a) forces an observable pre-flight state reconciliation and pipeline-identity check before any overwrite-capable action, and (b) forces independent post-restore verification against the anchored definitive state. A rule that lets a rerun proceed while an unanchored definitive artifact sits in the overwrite path, or that accepts a restore as complete on exit-status alone, contradicts this intent and must be flagged rather than merged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1789398236238_04i-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r1-run1\"},\"risks\":[\"Overlaps with core axioms T-01, T-05, T-07 and T-10: this draft is a composition of existing axioms around the new concept of 'definitive state protection', not a wholly new axiom; rule generation must avoid emitting rules that merely restate the core set.\",\"Over-gating risk: mandatory pre-flight reconciliation and pipeline confirmation on every rerun can slow iteration and invite bypasses when speed is valued; gates must scale with the irreversibility of the action, not be applied uniformly.\",\"Misclassification risk: labeling intermediate work as 'definitive' too early can freeze a wrong version or anchor erroneous state as the single source of truth, making later corrections harder; the declaration of definitiveness needs an explicit criterion.\",\"Anchoring may be lossy or infeasible when manual refinements cannot be expressed in generator parameters; a nominal write-back that does not fully reproduce the finalized output creates a false sense of single-source truth.\",\"Ambiguity in what counts as 'definitive' or as an overwrite-capable path may cause an agent to over-protect everything or under-protect the wrong artifact, weakening the gate's signal.\",\"In unattended CI contexts, hard gating on pre-flight checks could conflict with automation expectations and push operators to disable the gates rather than satisfy them.\"],\"generatedAt\":\"2026-09-14T22:54:07.000Z\"}",
+    "usage": {
+     "input": 1984,
+     "output": 3209,
+     "total": 5193
+    },
+    "latencyMs": 48221,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "0fcb75d3cb953077"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1789398236238_04i-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r1-run1",
+     "principleDraft": {
+      "title": "Anchor-and-gate definitive human-refined artifacts against automated overwrite",
+      "statement": "When a manually refined or otherwise irreplaceable definitive artifact coexists with an automated pipeline capable of overwriting it, its safety must be structural, never attentional: (1) anchor the definitive state in the system's single source of truth — write the refinement back to the generator source, or commit the artifact to version control and remove it from overwrite-capable output paths; (2) before any rerun, restore, or overwrite action on such artifacts, pass observable pre-flight checks: frame/pixel-level reconciliation of current outputs against the definitive design, on-disk confirmation of the correct pipeline identity, and confirmation that the refinement write-back has occurred; (3) treat any recovery as incomplete until independent on-disk evidence confirms the definitive state has been restored.",
+      "rationale": "The failure chain stems from one root condition: the finalized golden HUD existed only in overwrite-prone PNG outputs while its protection ('this skin must not be overwritten') existed only in operator memory — so a blind rerun destroyed it, a wrong-pipeline recovery (hud_gen.py instead of gpt_hud_key.py) caused a second failure, and an unverified completion claim let the damage stay hidden. Anchoring closes the code-artifact sync gap; pre-flight gating blocks blind overwrites and wrong-pipeline recoveries; independent verification of recovery prevents latent second failures from compounding. Together these convert an attentional constraint into a structural one that holds even unattended.",
+      "applicability": [
+       "Whenever manually refined or human-finalized artifacts (hand-tuned skins, renders, generated media, codegen/build outputs) coexist with automated regeneration, rebuild, migration, or restore pipelines",
+       "Immediately upon finalizing a manual refinement that diverges from what the generator currently produces",
+       "Before executing any rerun, restore, or overwrite-capable action on pipeline outputs that may contain irreplaceable refinements",
+       "During any recovery round following an overwrite incident, up to and including the completion declaration"
+      ],
+      "antiPatterns": [
+       "Leaving a human-refined definitive artifact only in overwrite-prone outputs (final PNG/render) with no write-back to the generator source and no version-control archival",
+       "Rerunning an overwrite-capable generator or restore without pre-flight frame/pixel-level reconciliation of current outputs against the definitive design",
+       "Executing a recovery on assumed pipeline identity (e.g., calling the old generator) instead of on-disk evidence of the true pipeline entry and its source",
+       "Marking a recovery 'restored/fixed' on assertion or process exit alone, without independent pixel/frame-level comparison and archived evidence",
+       "Keeping the hard constraint 'this definitive artifact must not be overwritten' only in operator memory or chat context, with no explicit gate, check, or forbidden transition"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants manually refined final artifacts to survive alongside automated pipelines: never silently overwritten by a rerun, never re-damaged by a wrong-pipeline or unverified recovery, and never declared restored without on-disk proof.",
+      "targetBehavior": "In a compliant trajectory a reviewer sees: the refinement written back to the generator source (or the artifact committed to version control and moved out of overwrite paths) at finalization; before any rerun/restore, an explicit pre-flight that reconciles current outputs against the definitive design with frame/pixel-level evidence, confirms the correct pipeline identity from on-disk facts, and verifies the write-back; and a recovery marked complete only after an independent comparison confirming the definitive state is archived.",
+      "forbiddenBehavior": "Executing overwrite-capable reruns or restores against human-refined artifacts while the refinement lives only in outputs, with no state reconciliation, no pipeline-identity confirmation, and no post-recovery independent verification; and closing recovery tasks via assertion-based completion claims.",
+      "evidenceSource": "09-14 HUD overwrite incident (diagnosis_manual_1789398236238_04iyw2k7): golden hand-refined HUD existed only in PNG outputs with hud_gen.py unsynced; the 15:46 blind rerun overwrote the final skin; the 21:41 recovery invoked the wrong pipeline (hud_gen.py instead of gpt_hud_key.py reading hud-gpt-src) causing a second failure; the 'restored' claim was never independently verified.",
+      "validationExpectation": "A rule is faithful only if it (a) triggers on rerun/restore/overwrite actions that can affect human-refined artifacts, (b) blocks execution until on-disk evidence shows state reconciliation against the definitive design, correct pipeline identity, and refinement write-back (or VCS archival), and (c) forbids marking any recovery complete without an independent comparison confirming the definitive state; any change that drops one of these gates or permits assertion-based completion contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1789398236238_04i-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r1-run1"
+     },
+     "risks": [
+      "Compositional overlap with core axioms T-01, T-05, T-07 and T-10: this principle composes existing axioms around the new concept of 'definitive state protection' rather than introducing a wholly new one; downstream rule generation should avoid emitting rules that merely restate those axioms.",
+      "Over-gating risk: mandatory full pre-flight reconciliation and pipeline confirmation on every rerun can slow iteration and invite bypasses when speed is valued; gate strictness must scale with the irreversibility of the action, not be applied uniformly.",
+      "Misclassification risk: labeling intermediate work as 'definitive' too early can freeze a wrong version or anchor erroneous state as the single source of truth, making later corrections harder.",
+      "Anchoring may be lossy or infeasible when manual refinements cannot be expressed in generator parameters; a nominal write-back that does not reproduce the finalized output creates a false sense of single-source truth.",
+      "Applicability weakens in environments without the dual-source condition (human refinement + automated pipeline); trigger patterns like rerun/restore must not be enforced where no irreplaceable artifact exists."
+     ],
+     "generatedAt": "2026-09-14T22:59:41.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1789398236238_04i-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Anchor-and-gate definitive human-refined artifacts against automated overwrite\",\n    \"statement\": \"When a manually refined or otherwise irreplaceable definitive artifact coexists with an automated pipeline capable of overwriting it, its safety must be structural, never attentional: (1) anchor the definitive state in the system's single source of truth — write the refinement back to the generator source, or commit the artifact to version control and remove it from overwrite-capable output paths; (2) before any rerun, restore, or overwrite action on such artifacts, pass observable pre-flight checks: frame/pixel-level reconciliation of current outputs against the definitive design, on-disk confirmation of the correct pipeline identity, and confirmation that the refinement write-back has occurred; (3) treat any recovery as incomplete until independent on-disk evidence confirms the definitive state has been restored.\",\n    \"rationale\": \"The failure chain stems from one root condition: the finalized golden HUD existed only in overwrite-prone PNG outputs while its protection ('this skin must not be overwritten') existed only in operator memory — so a blind rerun destroyed it, a wrong-pipeline recovery (hud_gen.py instead of gpt_hud_key.py) caused a second failure, and an unverified completion claim let the damage stay hidden. Anchoring closes the code-artifact sync gap; pre-flight gating blocks blind overwrites and wrong-pipeline recoveries; independent verification of recovery prevents latent second failures from compounding. Together these convert an attentional constraint into a structural one that holds even unattended.\",\n    \"applicability\": [\n      \"Whenever manually refined or human-finalized artifacts (hand-tuned skins, renders, generated media, codegen/build outputs) coexist with automated regeneration, rebuild, migration, or restore pipelines\",\n      \"Immediately upon finalizing a manual refinement that diverges from what the generator currently produces\",\n      \"Before executing any rerun, restore, or overwrite-capable action on pipeline outputs that may contain irreplaceable refinements\",\n      \"During any recovery round following an overwrite incident, up to and including the completion declaration\"\n    ],\n    \"antiPatterns\": [\n      \"Leaving a human-refined definitive artifact only in overwrite-prone outputs (final PNG/render) with no write-back to the generator source and no version-control archival\",\n      \"Rerunning an overwrite-capable generator or restore without pre-flight frame/pixel-level reconciliation of current outputs against the definitive design\",\n      \"Executing a recovery on assumed pipeline identity (e.g., calling the old generator) instead of on-disk evidence of the true pipeline entry and its source\",\n      \"Marking a recovery 'restored/fixed' on assertion or process exit alone, without independent pixel/frame-level comparison and archived evidence\",\n      \"Keeping the hard constraint 'this definitive artifact must not be overwritten' only in operator memory or chat context, with no explicit gate, check, or forbidden transition\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants manually refined final artifacts to survive alongside automated pipelines: never silently overwritten by a rerun, never re-damaged by a wrong-pipeline or unverified recovery, and never declared restored without on-disk proof.\",\n    \"targetBehavior\": \"In a compliant trajectory a reviewer sees: the refinement written back to the generator source (or the artifact committed to version control and moved out of overwrite paths) at finalization; before any rerun/restore, an explicit pre-flight that reconciles current outputs against the definitive design with frame/pixel-level evidence, confirms the correct pipeline identity from on-disk facts, and verifies the write-back; and a recovery marked complete only after an independent comparison confirming the definitive state is archived.\",\n    \"forbiddenBehavior\": \"Executing overwrite-capable reruns or restores against human-refined artifacts while the refinement lives only in outputs, with no state reconciliation, no pipeline-identity confirmation, and no post-recovery independent verification; and closing recovery tasks via assertion-based completion claims.\",\n    \"evidenceSource\": \"09-14 HUD overwrite incident (diagnosis_manual_1789398236238_04iyw2k7): golden hand-refined HUD existed only in PNG outputs with hud_gen.py unsynced; the 15:46 blind rerun overwrote the final skin; the 21:41 recovery invoked the wrong pipeline (hud_gen.py instead of gpt_hud_key.py reading hud-gpt-src) causing a second failure; the 'restored' claim was never independently verified.\",\n    \"validationExpectation\": \"A rule is faithful only if it (a) triggers on rerun/restore/overwrite actions that can affect human-refined artifacts, (b) blocks execution until on-disk evidence shows state reconciliation against the definitive design, correct pipeline identity, and refinement write-back (or VCS archival), and (c) forbids marking any recovery complete without an independent comparison confirming the definitive state; any change that drops one of these gates or permits assertion-based completion contradicts this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1789398236238_04i-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r1-run1\"\n  },\n  \"risks\": [\n    \"Compositional overlap with core axioms T-01, T-05, T-07 and T-10: this principle composes existing axioms around the new concept of 'definitive state protection' rather than introducing a wholly new one; downstream rule generation should avoid emitting rules that merely restate those axioms.\",\n    \"Over-gating risk: mandatory full pre-flight reconciliation and pipeline confirmation on every rerun can slow iteration and invite bypasses when speed is valued; gate strictness must scale with the irreversibility of the action, not be applied uniformly.\",\n    \"Misclassification risk: labeling intermediate work as 'definitive' too early can freeze a wrong version or anchor erroneous state as the single source of truth, making later corrections harder.\",\n    \"Anchoring may be lossy or infeasible when manual refinements cannot be expressed in generator parameters; a nominal write-back that does not reproduce the finalized output creates a false sense of single-source truth.\",\n    \"Applicability weakens in environments without the dual-source condition (human refinement + automated pipeline); trigger patterns like rerun/restore must not be enforced where no irreplaceable artifact exists.\"\n  ],\n  \"generatedAt\": \"2026-09-14T22:59:41.000Z\"\n}",
+    "usage": {
+     "input": 4339,
+     "output": 5463,
+     "total": 9802
+    },
+    "latencyMs": 68636,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "854573cce8cc6c99"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1789398236238_04i",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1789398236238_04i-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "手调定稿的金色华丽 HUD 仅保存在 PNG 成品中，未回写同步到生成器 hud_gen.py，形成代码-产物同步缺口，重跑即覆盖定稿",
+       "betterDecision": "人工精修定稿后立即将最终参数/源回写到生成器（或建立『成品即单一事实源』机制），确保 hud_gen.py 重跑可复现定稿皮肤；回写完成前对定稿 PNG 做版本化归档",
+       "rationale": "自动化管线与人工精修成果并存时，源头不同步意味着任何一次重跑都会静默摧毁人工成果；同步回写并归档定稿，从根上消除覆盖风险",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "single_source_of_truth",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "15:46 在未备份、未核对当前皮肤状态的情况下直接重跑旧生成器 hud_gen.py，对定稿皮肤造成不可逆覆盖",
+       "betterDecision": "重跑前先对当前定稿产物做快照/版本化备份，或让生成器输出到新目录进行干跑比对；确认具备回滚能力后才执行覆盖型生成",
+       "rationale": "覆盖型操作在无备份时不可逆；先快照把不可逆动作转化为可逆动作，即使重跑出错也能恢复定稿",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "reversible_by_default",
+       "sourcePrincipleId": "T-04"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "恢复轮在未确认真管线身份的情况下调用生成器，误用 gpt_hud_key.py（读 hud-gpt-src）的错误管线，导致恢复二次失败并可能引入新破坏",
+       "betterDecision": "恢复前先用可观察证据确认正确管线：检查脚本实际读取的源目录、参数与输出目标，并在单帧/小范围试跑验证输出与预期一致后，再执行全量恢复",
+       "rationale": "恢复动作的失败成本最高；先建立对系统真实状态与管线身份的充分模型，可避免在错误前提上叠加二次破坏",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "model_before_restore",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "『已恢复/已修复』声明仅凭口述销账，未以盘上证据（帧级 MAD 对账、文件哈希）独立验证，导致恢复二次失败长期未被发现",
+       "betterDecision": "任何恢复/修复完成声明前必须执行独立终验：将当前产物与定稿参考帧做像素级/MAD 对账并留存证据，全部通过后方可销账；验证与执行分离",
+       "rationale": "执行不等于成功；未经独立验证的完成声明掩盖了二次失败，延长了定稿损失窗口并消耗了 owner 的信任",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_then_claim",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "生成器重跑与恢复操作缺乏任何门禁或检查清单，覆盖型重跑可在任意时刻被直接触发，全靠当事人记忆与自觉防护",
+       "betterDecision": "建立显式门禁规则：命中触发词（重跑|恢复|rerun|restore 匹配 hud_gen/generator 等）即拦截执行，强制先完成 ①真管线身份确认 ②当前产物与定稿的帧级对账证据 ③精修成果已回写源头，三项全通过才放行",
+       "rationale": "依赖记忆防护的高风险操作终将失误；把硬约束翻译为显式检查与禁止转移，用机制而非自觉防住人为遗漏",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrails_before_execution",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "sourcePainId": "manual_1789398236238_04iyw2k7",
+     "contextRefs": [
+      "artifact://979f7795-9e82-447a-88d0-45dbc544258f"
+     ],
+     "generatedAt": "2026-09-14T14:35:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1789398236238_04i-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"手调定稿的金色华丽 HUD 仅保存在 PNG 成品中，未回写同步到生成器 hud_gen.py，形成代码-产物同步缺口，重跑即覆盖定稿\",\"betterDecision\":\"人工精修定稿后立即将最终参数/源回写到生成器（或建立『成品即单一事实源』机制），确保 hud_gen.py 重跑可复现定稿皮肤；回写完成前对定稿 PNG 做版本化归档\",\"rationale\":\"自动化管线与人工精修成果并存时，源头不同步意味着任何一次重跑都会静默摧毁人工成果；同步回写并归档定稿，从根上消除覆盖风险\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"single_source_of_truth\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":1,\"badDecision\":\"15:46 在未备份、未核对当前皮肤状态的情况下直接重跑旧生成器 hud_gen.py，对定稿皮肤造成不可逆覆盖\",\"betterDecision\":\"重跑前先对当前定稿产物做快照/版本化备份，或让生成器输出到新目录进行干跑比对；确认具备回滚能力后才执行覆盖型生成\",\"rationale\":\"覆盖型操作在无备份时不可逆；先快照把不可逆动作转化为可逆动作，即使重跑出错也能恢复定稿\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"reversible_by_default\",\"sourcePrincipleId\":\"T-04\"},{\"candidateIndex\":2,\"badDecision\":\"恢复轮在未确认真管线身份的情况下调用生成器，误用 gpt_hud_key.py（读 hud-gpt-src）的错误管线，导致恢复二次失败并可能引入新破坏\",\"betterDecision\":\"恢复前先用可观察证据确认正确管线：检查脚本实际读取的源目录、参数与输出目标，并在单帧/小范围试跑验证输出与预期一致后，再执行全量恢复\",\"rationale\":\"恢复动作的失败成本最高；先建立对系统真实状态与管线身份的充分模型，可避免在错误前提上叠加二次破坏\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"model_before_restore\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":3,\"badDecision\":\"『已恢复/已修复』声明仅凭口述销账，未以盘上证据（帧级 MAD 对账、文件哈希）独立验证，导致恢复二次失败长期未被发现\",\"betterDecision\":\"任何恢复/修复完成声明前必须执行独立终验：将当前产物与定稿参考帧做像素级/MAD 对账并留存证据，全部通过后方可销账；验证与执行分离\",\"rationale\":\"执行不等于成功；未经独立验证的完成声明掩盖了二次失败，延长了定稿损失窗口并消耗了 owner 的信任\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_then_claim\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":4,\"badDecision\":\"生成器重跑与恢复操作缺乏任何门禁或检查清单，覆盖型重跑可在任意时刻被直接触发，全靠当事人记忆与自觉防护\",\"betterDecision\":\"建立显式门禁规则：命中触发词（重跑|恢复|rerun|restore 匹配 hud_gen/generator 等）即拦截执行，强制先完成 ①真管线身份确认 ②当前产物与定稿的帧级对账证据 ③精修成果已回写源头，三项全通过才放行\",\"rationale\":\"依赖记忆防护的高风险操作终将失误；把硬约束翻译为显式检查与禁止转移，用机制而非自觉防住人为遗漏\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrails_before_execution\",\"sourcePrincipleId\":\"T-05\"}],\"sourcePainId\":\"manual_1789398236238_04iyw2k7\",\"contextRefs\":[\"artifact://979f7795-9e82-447a-88d0-45dbc544258f\"],\"generatedAt\":\"2026-09-14T14:35:00.000Z\"}",
+    "usage": {
+     "input": 2097,
+     "output": 3584,
+     "total": 5681
+    },
+    "latencyMs": 44570,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "ca0f52cfe46ec72d"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1789398236238_04i-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1789398236238_04i-r2-run1",
+     "thesis": "当不可复现的人工精修成果与可重放的自动化管线共存时，安全性不能寄托于操作者的记忆、自觉或口头确认；必须以机制链——源头同步、可逆快照、管线身份验证、独立终验、显式门禁——将每个高风险前置条件从软性的人为依赖转化为强制检查，使覆盖型操作在证据齐备前无法执行。五个失败分支（源不同步、无备份覆盖、错管线恢复、口头销账、无门禁）共享同一根因：对不可逆操作的防护靠人而非靠机制。",
+     "principleCandidate": {
+      "title": "破坏性重跑须以机制门禁替代记忆防护：同步源头、确保可逆、验证身份、独立终验",
+      "rationale": "根因是覆盖型操作（重跑/恢复/销账）的前置安全条件仅存在于人的即时记忆与善意中，而非可执行的机制里。将『精修成果已回写源头、已具备回滚快照、已用可观察证据确认管线身份、已通过独立终验』固化为强制门禁，可从结构上消除静默覆盖、二次破坏与虚假完成声明这一整类失败，而非逐案补救。",
+      "scope": "适用于自动化生成/处理管线与人工精修产物并存的环境，尤其当存在重跑、恢复、迁移、重生成或完成销账等可能覆盖高价值产物或宣称修复成功的操作时；产物越不可逆、越难复现，门禁强度应越高；对低成本、易重做的操作可按比例放宽。",
+      "confidence": 0.85
+     },
+     "risks": [
+      "与既有核心公理存在显著重叠：本原则实质上是 T-04（可逆优先）、T-05（硬约束转显式门禁）、T-07（验证后才算成功）、T-10（状态持久化与单一事实源）的组合，可能被视为派生规则而非独立新公理",
+      "对所有重跑一律施加完整门禁可能在低风险、易重做的操作上造成不成比例的流程摩擦，降低迭代效率并诱发绕过行为",
+      "『成品即单一事实源』机制若实现不当，可能形成生成器与归档双源并存，反而引入新的同步歧义",
+      "强制快照与版本化归档在长期运行中会累积存储与状态膨胀，需要配套的清理与保留策略"
+     ],
+     "generatedAt": "2026-09-14T14:36:30.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1789398236238_04i-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1789398236238_04i-r2-run1\",\"thesis\":\"当不可复现的人工精修成果与可重放的自动化管线共存时，安全性不能寄托于操作者的记忆、自觉或口头确认；必须以机制链——源头同步、可逆快照、管线身份验证、独立终验、显式门禁——将每个高风险前置条件从软性的人为依赖转化为强制检查，使覆盖型操作在证据齐备前无法执行。五个失败分支（源不同步、无备份覆盖、错管线恢复、口头销账、无门禁）共享同一根因：对不可逆操作的防护靠人而非靠机制。\",\"principleCandidate\":{\"title\":\"破坏性重跑须以机制门禁替代记忆防护：同步源头、确保可逆、验证身份、独立终验\",\"rationale\":\"根因是覆盖型操作（重跑/恢复/销账）的前置安全条件仅存在于人的即时记忆与善意中，而非可执行的机制里。将『精修成果已回写源头、已具备回滚快照、已用可观察证据确认管线身份、已通过独立终验』固化为强制门禁，可从结构上消除静默覆盖、二次破坏与虚假完成声明这一整类失败，而非逐案补救。\",\"scope\":\"适用于自动化生成/处理管线与人工精修产物并存的环境，尤其当存在重跑、恢复、迁移、重生成或完成销账等可能覆盖高价值产物或宣称修复成功的操作时；产物越不可逆、越难复现，门禁强度应越高；对低成本、易重做的操作可按比例放宽。\",\"confidence\":0.85},\"risks\":[\"与既有核心公理存在显著重叠：本原则实质上是 T-04（可逆优先）、T-05（硬约束转显式门禁）、T-07（验证后才算成功）、T-10（状态持久化与单一事实源）的组合，可能被视为派生规则而非独立新公理\",\"对所有重跑一律施加完整门禁可能在低风险、易重做的操作上造成不成比例的流程摩擦，降低迭代效率并诱发绕过行为\",\"『成品即单一事实源』机制若实现不当，可能形成生成器与归档双源并存，反而引入新的同步歧义\",\"强制快照与版本化归档在长期运行中会累积存储与状态膨胀，需要配套的清理与保留策略\"],\"generatedAt\":\"2026-09-14T14:36:30.000Z\"}",
+    "usage": {
+     "input": 1746,
+     "output": 2330,
+     "total": 4076
+    },
+    "latencyMs": 34507,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "34178bb181b4822f"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1789398236238_04i-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r2-run1",
+     "principleDraft": {
+      "title": "覆盖型重跑/恢复须过机制门禁：源头同步、可逆快照、管线身份核验、独立终验",
+      "statement": "当人工精修成果与可重放的自动化生成管线并存时，任何可能覆盖高价值产物或宣称修复完成的操作（重跑、恢复、重生成、迁移、完成销账）不得依赖操作者的记忆、自觉或口头确认防护；执行前必须以机制门禁核验：①精修定稿已回写生成器源头或已版本化归档；②当前产物已具备可逆快照；③已以可观察证据（脚本实际读取的源目录、参数、输出目标）确认所调管线身份正确；④完成销账前已通过与执行分离的独立终验（如帧级/像素级对账）。任一证据缺失即禁止执行该操作。",
+      "rationale": "根因（diagnosis_manual_1789398236238_04iyw2k7）是覆盖型操作的前置安全条件仅存在于人的即时记忆与善意中，而非可执行的机制里：定稿未回写源头、重跑无备份、恢复未核对管线身份、销账无独立验证。将这四个前置条件固化为强制门禁，可从结构上消除静默覆盖、二次破坏与虚假完成声明这一整类失败，而非逐案补救。",
+      "applicability": [
+       "人工精修产物与自动化生成/处理管线并存的环境（如手调皮肤/美术定稿与代码生成器共存）",
+       "执行重跑、恢复、重生成、迁移等可能覆盖不可复现产物的操作之前",
+       "宣布恢复/修复完成并销账之前",
+       "产物越不可逆、越难复现，门禁强度应越高；对低成本、易重做的操作可按比例放宽"
+      ],
+      "antiPatterns": [
+       "手调定稿仅保存在成品文件（如 PNG）中而未回写生成器源头，留下代码-产物同步缺口",
+       "在无快照、无备份的情况下直接执行覆盖型生成或重跑",
+       "恢复前未以可观察证据确认管线身份（脚本实际读取的源目录、参数、输出目标）即调用生成器",
+       "仅凭口头或记忆宣布『已恢复/已修复』并销账，无独立盘上证据验证",
+       "覆盖型操作可在任意时刻被直接触发，防护完全依赖当事人的记忆与自觉"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 要求重跑或恢复自动化管线时不得静默覆盖人工精修的定稿成果（如金色 HUD 皮肤），且修复完成必须以盘上证据独立验证后才可销账，不得依赖口头确认。",
+      "targetBehavior": "agent 在触发重跑/恢复/覆盖型生成前，先取得并留存四类证据：源头同步（定稿已回写生成器或已版本化归档）、当前产物的可逆快照、管线身份核验（脚本实际读取的源目录/参数/输出目标）、以及销账前与执行分离的独立终验（如帧级/像素级对账）；任一缺失即不执行操作、不销账。",
+      "forbiddenBehavior": "在源头未同步、无快照备份、未以可观察证据核对管线身份的情况下直接执行覆盖型重跑/恢复，或仅凭口头/记忆宣布修复完成并销账。",
+      "evidenceSource": "09-14 HUD 覆盖事故诊断（diagnosis_manual_1789398236238_04iyw2k7）：金色华丽 HUD 定稿仅存于 PNG 成品、hud_gen.py 未同步，15:46 重跑静默覆盖定稿；21:41 恢复轮误用 gpt_hud_key.py（读 hud-gpt-src）错误管线二次失败；恢复声明全程未经独立盘上验证即销账。",
+      "validationExpectation": "评估者应确认由本原则生成的规则在命中重跑/恢复/销账触发时强制拦截，并要求管线身份证据、可逆快照与源头同步核验三者齐备方可放行，销账前要求独立盘上验证证据（如帧级 MAD 对账、文件哈希）；若规则仅泛泛要求『谨慎操作』，或允许在任一证据缺失时放行执行/销账，则判定为不忠实。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1789398236238_04i-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r2-run1"
+     },
+     "risks": [
+      "与核心公理显著重叠：本原则实质是 T-04（可逆优先）、T-05（硬约束转显式门禁）、T-07（验证后才算成功）、T-10（状态持久化/单一事实源）在『人工精修×自动化管线』情境下的组合，下游应将其定位为情境化实施原则而非独立新公理",
+      "对所有重跑一律施加完整门禁，可能在低风险、易重做的操作上造成不成比例的流程摩擦，降低迭代效率并诱发绕过行为",
+      "『成品即单一事实源』机制若实现不当，可能形成生成器与归档双源并存，反而引入新的同步歧义",
+      "强制快照与版本化归档长期运行会累积存储与状态膨胀，需要配套的清理与保留策略",
+      "适用性依赖环境中存在人工精修与自动化管线两类产物源；若不存在该二元结构，本原则适用性减弱（见诊断 ambiguityNotes）"
+     ],
+     "generatedAt": "2026-09-14T14:37:42.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1789398236238_04i-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r2-run1\",\"principleDraft\":{\"title\":\"覆盖型重跑/恢复须过机制门禁：源头同步、可逆快照、管线身份核验、独立终验\",\"statement\":\"当人工精修成果与可重放的自动化生成管线并存时，任何可能覆盖高价值产物或宣称修复完成的操作（重跑、恢复、重生成、迁移、完成销账）不得依赖操作者的记忆、自觉或口头确认防护；执行前必须以机制门禁核验：①精修定稿已回写生成器源头或已版本化归档；②当前产物已具备可逆快照；③已以可观察证据（脚本实际读取的源目录、参数、输出目标）确认所调管线身份正确；④完成销账前已通过与执行分离的独立终验（如帧级/像素级对账）。任一证据缺失即禁止执行该操作。\",\"rationale\":\"根因（diagnosis_manual_1789398236238_04iyw2k7）是覆盖型操作的前置安全条件仅存在于人的即时记忆与善意中，而非可执行的机制里：定稿未回写源头、重跑无备份、恢复未核对管线身份、销账无独立验证。将这四个前置条件固化为强制门禁，可从结构上消除静默覆盖、二次破坏与虚假完成声明这一整类失败，而非逐案补救。\",\"applicability\":[\"人工精修产物与自动化生成/处理管线并存的环境（如手调皮肤/美术定稿与代码生成器共存）\",\"执行重跑、恢复、重生成、迁移等可能覆盖不可复现产物的操作之前\",\"宣布恢复/修复完成并销账之前\",\"产物越不可逆、越难复现，门禁强度应越高；对低成本、易重做的操作可按比例放宽\"],\"antiPatterns\":[\"手调定稿仅保存在成品文件（如 PNG）中而未回写生成器源头，留下代码-产物同步缺口\",\"在无快照、无备份的情况下直接执行覆盖型生成或重跑\",\"恢复前未以可观察证据确认管线身份（脚本实际读取的源目录、参数、输出目标）即调用生成器\",\"仅凭口头或记忆宣布『已恢复/已修复』并销账，无独立盘上证据验证\",\"覆盖型操作可在任意时刻被直接触发，防护完全依赖当事人的记忆与自觉\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"Owner 要求重跑或恢复自动化管线时不得静默覆盖人工精修的定稿成果（如金色 HUD 皮肤），且修复完成必须以盘上证据独立验证后才可销账，不得依赖口头确认。\",\"targetBehavior\":\"agent 在触发重跑/恢复/覆盖型生成前，先取得并留存四类证据：源头同步（定稿已回写生成器或已版本化归档）、当前产物的可逆快照、管线身份核验（脚本实际读取的源目录/参数/输出目标）、以及销账前与执行分离的独立终验（如帧级/像素级对账）；任一缺失即不执行操作、不销账。\",\"forbiddenBehavior\":\"在源头未同步、无快照备份、未以可观察证据核对管线身份的情况下直接执行覆盖型重跑/恢复，或仅凭口头/记忆宣布修复完成并销账。\",\"evidenceSource\":\"09-14 HUD 覆盖事故诊断（diagnosis_manual_1789398236238_04iyw2k7）：金色华丽 HUD 定稿仅存于 PNG 成品、hud_gen.py 未同步，15:46 重跑静默覆盖定稿；21:41 恢复轮误用 gpt_hud_key.py（读 hud-gpt-src）错误管线二次失败；恢复声明全程未经独立盘上验证即销账。\",\"validationExpectation\":\"评估者应确认由本原则生成的规则在命中重跑/恢复/销账触发时强制拦截，并要求管线身份证据、可逆快照与源头同步核验三者齐备方可放行，销账前要求独立盘上验证证据（如帧级 MAD 对账、文件哈希）；若规则仅泛泛要求『谨慎操作』，或允许在任一证据缺失时放行执行/销账，则判定为不忠实。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1789398236238_04i-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r2-run1\"},\"risks\":[\"与核心公理显著重叠：本原则实质是 T-04（可逆优先）、T-05（硬约束转显式门禁）、T-07（验证后才算成功）、T-10（状态持久化/单一事实源）在『人工精修×自动化管线』情境下的组合，下游应将其定位为情境化实施原则而非独立新公理\",\"对所有重跑一律施加完整门禁，可能在低风险、易重做的操作上造成不成比例的流程摩擦，降低迭代效率并诱发绕过行为\",\"『成品即单一事实源』机制若实现不当，可能形成生成器与归档双源并存，反而引入新的同步歧义\",\"强制快照与版本化归档长期运行会累积存储与状态膨胀，需要配套的清理与保留策略\",\"适用性依赖环境中存在人工精修与自动化管线两类产物源；若不存在该二元结构，本原则适用性减弱（见诊断 ambiguityNotes）\"],\"generatedAt\":\"2026-09-14T14:37:42.000Z\"}",
+    "usage": {
+     "input": 4365,
+     "output": 5079,
+     "total": 9444
+    },
+    "latencyMs": 60511,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "722bc04e86eb7bcc"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1789398236238_04i-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r2-run1",
+     "principleDraft": {
+      "title": "破坏性重跑须以机制门禁替代记忆防护：同步源头、可逆快照、身份核验、独立终验",
+      "statement": "任何会覆盖或替换不可复现人工精修成果的自动化操作（重跑、恢复、迁移、重生成、完成销账）在执行前必须依次通过机器可检查的门禁链，任一门禁未通过则操作被阻断而非警告后继续：(1) 源头同步门禁——以可观察证据确认最新精修成果已回写至管线读取的单一事实源，而非仅存在于工作副本、聊天记录或操作者记忆中；(2) 可逆性门禁——对将被覆盖的状态创建可恢复快照并记录存放位置与恢复路径，未具备回滚手段不得执行；(3) 身份门禁——用可观察证据（绝对路径、版本号、内容指纹、配置摘要）核验目标管线/产物确为操作者所认定的那一个，不得依赖名称相似或口头确认；(4) 独立终验门禁——执行后由独立于执行过程的检查（重新读取结果、对照预期输出、验证产物完整性）确认成功，执行无报错不等于销账；(5) 放行记录门禁——各检查的通过/阻断以显式、可审计的动作记录。门禁强度与产物的不可复现性成正比；对低成本、易重做的操作可按比例简化，但同步与终验两项最小检查不可为零。",
+      "rationale": "根因诊断表明五个失败分支（源不同步、无备份覆盖、错管线恢复、口头销账、无门禁）共享同一根因：覆盖型操作的高风险前置条件仅存在于操作者的即时记忆、自觉与口头承诺中，而记忆会失效、自觉会波动、口头确认无法被机器验证。将每个前置条件转化为执行前必须通过的门禁检查，使不安全状态在结构上无法到达执行点，从而消除整类静默覆盖、二次破坏与虚假完成声明，而非依赖逐案补救或事后追责。",
+      "applicability": [
+       "自动化生成/处理管线与人工精修产物并存的环境，尤其是文档、配置、代码等可被管线重生成覆盖的场景",
+       "执行重跑、恢复、迁移、重生成或完成销账等可能覆盖高价值产物或宣称修复成功的操作之前",
+       "产物精修成本高、不可复现或难以从历史版本重建时（门禁强度随不可复现性提升）",
+       "多管线、多版本或同名产物并存，存在『用错管线恢复到旧状态』风险的场景",
+       "低风险、易重做的操作可按比例简化门禁，但须保留最小限度的同步与终验检查"
+      ],
+      "antiPatterns": [
+       "以操作者记忆或『我记得已经回写了』式口头确认作为覆盖操作的前置条件",
+       "在未创建可恢复快照的情况下执行覆盖型重跑或恢复",
+       "仅凭名称或路径相似即认定管线身份，未用内容指纹或版本证据核验",
+       "以执行完成（退出码为0、无报错）作为成功销账依据，不做独立终验",
+       "门禁不通过时仅打印警告后继续执行（warn-and-proceed）",
+       "精修成果仅存在于工作副本或对话记录中，未回写至管线读取的单一事实源"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "在不可复现的人工精修成果可能被自动化重跑/恢复覆盖的环境中，防止因依赖操作者记忆与口头确认而导致的静默覆盖、二次破坏或虚假完成声明。",
+      "targetBehavior": "合规智能体在执行任何覆盖或销账型操作前，其工具轨迹中可见：读取并比对源头与工作副本的同步证据、创建快照并记录恢复路径、以内容指纹或版本证据核验目标管线身份；执行后重新读取结果与预期对照，并将每项门禁的通过或阻断显式记录，任一项未通过即停止执行而非继续。",
+      "forbiddenBehavior": "在精修成果未确认回写源头、无回滚快照、管线身份未经验证或终验未通过的情况下执行覆盖/销账操作；以操作者记忆、口头确认或『无报错即成功』替代机器可检查的证据；门禁不通过时警告后继续。",
+      "evidenceSource": "根因诊断中的五个实际失败分支：源未同步导致精修丢失、无备份状态下直接覆盖、用错管线恢复到旧状态、仅凭口头确认即销账、以及无任何门禁的直通执行——它们共同指向『防护靠人而非靠机制』。",
+      "validationExpectation": "评估者应要求规则显式覆盖四类门禁（源头同步、可逆快照、身份核验、独立终验）中的每一类，并绑定『证据未齐备则操作不得执行』的阻断语义而非警告语义；规则须说明与既有公理 T-04/T-05/T-07/T-10 的关系为组合细化而非矛盾；任何将门禁弱化为警告后继续、或允许口头确认替代证据的改动都应被标记为与该意图相悖。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1789398236238_04i-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r2-run1"
+     },
+     "risks": [
+      "与核心公理存在显著重叠：本原则实质上是 T-04（可逆优先）、T-05（硬约束转显式门禁）、T-07（验证后才算成功）、T-10（状态持久化与单一事实源）的领域化组合，可能在下游被视为派生规则而非独立增量；规则生成阶段须明确其相对增量——针对『管线与人工精修共存』场景的多门禁链式阻断语义",
+      "对所有重跑一律施加完整门禁可能在低风险、易重做操作上造成不成比例的流程摩擦，降低迭代效率并诱发绕过行为；规则生成时必须保留按不可复现性分级的放宽条款，且最小门禁不可为零",
+      "『成品即单一事实源』机制实现不当可能形成生成器与归档双源并存，反而引入新的同步歧义",
+      "强制快照与版本化归档在长期运行中会累积存储与状态膨胀，若无配套保留/清理策略，门禁可能因存储压力被人为禁用",
+      "『独立终验』若由同一执行主体以同一方式完成，独立性不足，可能退化为自我确认；需要求终验重新读取外部状态而非复用执行内上下文",
+      "门禁检查本身若依赖可被覆盖的元数据或未受保护的脚本，可能被后续操作篡改或跳过，门禁自身需要防绕过设计"
+     ],
+     "generatedAt": "2026-09-14T14:48:00.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1789398236238_04i-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r2-run1\",\"principleDraft\":{\"title\":\"破坏性重跑须以机制门禁替代记忆防护：同步源头、可逆快照、身份核验、独立终验\",\"statement\":\"任何会覆盖或替换不可复现人工精修成果的自动化操作（重跑、恢复、迁移、重生成、完成销账）在执行前必须依次通过机器可检查的门禁链，任一门禁未通过则操作被阻断而非警告后继续：(1) 源头同步门禁——以可观察证据确认最新精修成果已回写至管线读取的单一事实源，而非仅存在于工作副本、聊天记录或操作者记忆中；(2) 可逆性门禁——对将被覆盖的状态创建可恢复快照并记录存放位置与恢复路径，未具备回滚手段不得执行；(3) 身份门禁——用可观察证据（绝对路径、版本号、内容指纹、配置摘要）核验目标管线/产物确为操作者所认定的那一个，不得依赖名称相似或口头确认；(4) 独立终验门禁——执行后由独立于执行过程的检查（重新读取结果、对照预期输出、验证产物完整性）确认成功，执行无报错不等于销账；(5) 放行记录门禁——各检查的通过/阻断以显式、可审计的动作记录。门禁强度与产物的不可复现性成正比；对低成本、易重做的操作可按比例简化，但同步与终验两项最小检查不可为零。\",\"rationale\":\"根因诊断表明五个失败分支（源不同步、无备份覆盖、错管线恢复、口头销账、无门禁）共享同一根因：覆盖型操作的高风险前置条件仅存在于操作者的即时记忆、自觉与口头承诺中，而记忆会失效、自觉会波动、口头确认无法被机器验证。将每个前置条件转化为执行前必须通过的门禁检查，使不安全状态在结构上无法到达执行点，从而消除整类静默覆盖、二次破坏与虚假完成声明，而非依赖逐案补救或事后追责。\",\"applicability\":[\"自动化生成/处理管线与人工精修产物并存的环境，尤其是文档、配置、代码等可被管线重生成覆盖的场景\",\"执行重跑、恢复、迁移、重生成或完成销账等可能覆盖高价值产物或宣称修复成功的操作之前\",\"产物精修成本高、不可复现或难以从历史版本重建时（门禁强度随不可复现性提升）\",\"多管线、多版本或同名产物并存，存在『用错管线恢复到旧状态』风险的场景\",\"低风险、易重做的操作可按比例简化门禁，但须保留最小限度的同步与终验检查\"],\"antiPatterns\":[\"以操作者记忆或『我记得已经回写了』式口头确认作为覆盖操作的前置条件\",\"在未创建可恢复快照的情况下执行覆盖型重跑或恢复\",\"仅凭名称或路径相似即认定管线身份，未用内容指纹或版本证据核验\",\"以执行完成（退出码为0、无报错）作为成功销账依据，不做独立终验\",\"门禁不通过时仅打印警告后继续执行（warn-and-proceed）\",\"精修成果仅存在于工作副本或对话记录中，未回写至管线读取的单一事实源\"],\"confidence\":0.8},\"intentContract\":{\"ownerIntent\":\"在不可复现的人工精修成果可能被自动化重跑/恢复覆盖的环境中，防止因依赖操作者记忆与口头确认而导致的静默覆盖、二次破坏或虚假完成声明。\",\"targetBehavior\":\"合规智能体在执行任何覆盖或销账型操作前，其工具轨迹中可见：读取并比对源头与工作副本的同步证据、创建快照并记录恢复路径、以内容指纹或版本证据核验目标管线身份；执行后重新读取结果与预期对照，并将每项门禁的通过或阻断显式记录，任一项未通过即停止执行而非继续。\",\"forbiddenBehavior\":\"在精修成果未确认回写源头、无回滚快照、管线身份未经验证或终验未通过的情况下执行覆盖/销账操作；以操作者记忆、口头确认或『无报错即成功』替代机器可检查的证据；门禁不通过时警告后继续。\",\"evidenceSource\":\"根因诊断中的五个实际失败分支：源未同步导致精修丢失、无备份状态下直接覆盖、用错管线恢复到旧状态、仅凭口头确认即销账、以及无任何门禁的直通执行——它们共同指向『防护靠人而非靠机制』。\",\"validationExpectation\":\"评估者应要求规则显式覆盖四类门禁（源头同步、可逆快照、身份核验、独立终验）中的每一类，并绑定『证据未齐备则操作不得执行』的阻断语义而非警告语义；规则须说明与既有公理 T-04/T-05/T-07/T-10 的关系为组合细化而非矛盾；任何将门禁弱化为警告后继续、或允许口头确认替代证据的改动都应被标记为与该意图相悖。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1789398236238_04i-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r2-run1\"},\"risks\":[\"与核心公理存在显著重叠：本原则实质上是 T-04（可逆优先）、T-05（硬约束转显式门禁）、T-07（验证后才算成功）、T-10（状态持久化与单一事实源）的领域化组合，可能在下游被视为派生规则而非独立增量；规则生成阶段须明确其相对增量——针对『管线与人工精修共存』场景的多门禁链式阻断语义\",\"对所有重跑一律施加完整门禁可能在低风险、易重做操作上造成不成比例的流程摩擦，降低迭代效率并诱发绕过行为；规则生成时必须保留按不可复现性分级的放宽条款，且最小门禁不可为零\",\"『成品即单一事实源』机制实现不当可能形成生成器与归档双源并存，反而引入新的同步歧义\",\"强制快照与版本化归档在长期运行中会累积存储与状态膨胀，若无配套保留/清理策略，门禁可能因存储压力被人为禁用\",\"『独立终验』若由同一执行主体以同一方式完成，独立性不足，可能退化为自我确认；需要求终验重新读取外部状态而非复用执行内上下文\",\"门禁检查本身若依赖可被覆盖的元数据或未受保护的脚本，可能被后续操作篡改或跳过，门禁自身需要防绕过设计\"],\"generatedAt\":\"2026-09-14T14:48:00.000Z\"}",
+    "usage": {
+     "input": 1993,
+     "output": 4381,
+     "total": 6374
+    },
+    "latencyMs": 54927,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e9d456362f079821"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1789398236238_04i",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1789398236238_04i-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在手调定稿的金色华丽 HUD 仅存在于 PNG 成品、生成器 hud_gen.py 源码未同步的情况下，直接重跑旧生成器，导致定稿皮肤被旧管线覆盖",
+       "betterDecision": "重跑任何生成器之前，先把手调定稿成果回写同步到生成器源头（或在管线中建立跳过已定稿资产的标记），确认代码与产物一致后才允许重新生成",
+       "rationale": "代码-产物同步缺口是覆盖事故的直接来源；人工精修成果若只存在于临时产物中，一旦重跑即被抹除，先同步再重跑才能保证自动化输出与定稿一致",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "sync_source_of_truth_before_rerun",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "恢复轮未先核对管线身份与当前产物状态，误用 gpt_hud_key.py（读取 hud-gpt-src 的错误管线）执行恢复，造成二次失败",
+       "betterDecision": "执行任何重跑或恢复前，先用盘上证据确认管线真实身份（实际读取的源目录与脚本）以及当前产物状态与预期一致，核对无误后再执行操作",
+       "rationale": "覆盖与恢复属于后果重大的操作，行动前必须建立对真实系统状态与调用对象的充分模型，否则会因错误前提导致二次破坏",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_pipeline_identity_before_execute",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "对唯一的定稿 PNG 皮肤执行可能覆盖的生成器重跑，事先未做任何备份或保留可恢复副本，使覆盖成为不可逆损失",
+       "betterDecision": "任何覆盖性操作前，先对现有成品做版本化备份（git 提交或快照目录），保留明确回滚路径后再执行生成或恢复",
+       "rationale": "唯一副本上的不可逆覆盖是最大风险点；备份把不可逆操作转化为可逆操作，即使管线出错也能回到定稿状态",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "backup_before_destructive_overwrite",
+       "sourcePrincipleId": "T-04"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "『已恢复/已修复』的完成声明仅凭口述销账，未做独立盘上验证即宣布任务达成，导致恢复二次失败未被及时发现",
+       "betterDecision": "恢复完成后必须以独立证据核验结果：对恢复产物与定稿设计做帧级对账（如 MAD），证据全绿并通过独立复核后才能销账并声明完成",
+       "rationale": "执行不等于成功；未经验证的完成声明会掩盖二次失败并延误修复窗口，只有观察结果并与预期比对后才算真正达成",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_claiming_success",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "缺少针对重跑/恢复/覆盖的校验门禁，任何触发词都能直接放行执行生成器，无法在执行前拦截误用管线或未同步的重跑",
+       "betterDecision": "建立显式拦截规则：当操作匹配『重跑|恢复|rerun|restore|hud_gen|gpt_hud_key』时，强制完成①确认真管线身份②当前产物与定稿的帧级对账证据③精修成果已回写生成器源头，三项全部通过方可放行执行",
+       "rationale": "把同步与校验要求转化为显式门禁和检查点，能在执行前拦住误操作，防止同类覆盖事故复发；代价是增加少量流程开销",
+       "confidence": 0.82,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_gate_before_regenerate",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "contextRefs": [
+      "artifact://979f7795-9e82-447a-88d0-45dbc544258f"
+     ],
+     "generatedAt": "2026-09-14T15:30:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1789398236238_04i-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在手调定稿的金色华丽 HUD 仅存在于 PNG 成品、生成器 hud_gen.py 源码未同步的情况下，直接重跑旧生成器，导致定稿皮肤被旧管线覆盖\",\"betterDecision\":\"重跑任何生成器之前，先把手调定稿成果回写同步到生成器源头（或在管线中建立跳过已定稿资产的标记），确认代码与产物一致后才允许重新生成\",\"rationale\":\"代码-产物同步缺口是覆盖事故的直接来源；人工精修成果若只存在于临时产物中，一旦重跑即被抹除，先同步再重跑才能保证自动化输出与定稿一致\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"sync_source_of_truth_before_rerun\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":1,\"badDecision\":\"恢复轮未先核对管线身份与当前产物状态，误用 gpt_hud_key.py（读取 hud-gpt-src 的错误管线）执行恢复，造成二次失败\",\"betterDecision\":\"执行任何重跑或恢复前，先用盘上证据确认管线真实身份（实际读取的源目录与脚本）以及当前产物状态与预期一致，核对无误后再执行操作\",\"rationale\":\"覆盖与恢复属于后果重大的操作，行动前必须建立对真实系统状态与调用对象的充分模型，否则会因错误前提导致二次破坏\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_pipeline_identity_before_execute\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":2,\"badDecision\":\"对唯一的定稿 PNG 皮肤执行可能覆盖的生成器重跑，事先未做任何备份或保留可恢复副本，使覆盖成为不可逆损失\",\"betterDecision\":\"任何覆盖性操作前，先对现有成品做版本化备份（git 提交或快照目录），保留明确回滚路径后再执行生成或恢复\",\"rationale\":\"唯一副本上的不可逆覆盖是最大风险点；备份把不可逆操作转化为可逆操作，即使管线出错也能回到定稿状态\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"backup_before_destructive_overwrite\",\"sourcePrincipleId\":\"T-04\"},{\"candidateIndex\":3,\"badDecision\":\"『已恢复/已修复』的完成声明仅凭口述销账，未做独立盘上验证即宣布任务达成，导致恢复二次失败未被及时发现\",\"betterDecision\":\"恢复完成后必须以独立证据核验结果：对恢复产物与定稿设计做帧级对账（如 MAD），证据全绿并通过独立复核后才能销账并声明完成\",\"rationale\":\"执行不等于成功；未经验证的完成声明会掩盖二次失败并延误修复窗口，只有观察结果并与预期比对后才算真正达成\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_claiming_success\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":4,\"badDecision\":\"缺少针对重跑/恢复/覆盖的校验门禁，任何触发词都能直接放行执行生成器，无法在执行前拦截误用管线或未同步的重跑\",\"betterDecision\":\"建立显式拦截规则：当操作匹配『重跑|恢复|rerun|restore|hud_gen|gpt_hud_key』时，强制完成①确认真管线身份②当前产物与定稿的帧级对账证据③精修成果已回写生成器源头，三项全部通过方可放行执行\",\"rationale\":\"把同步与校验要求转化为显式门禁和检查点，能在执行前拦住误操作，防止同类覆盖事故复发；代价是增加少量流程开销\",\"confidence\":0.82,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_gate_before_regenerate\",\"sourcePrincipleId\":\"T-05\"}],\"contextRefs\":[\"artifact://979f7795-9e82-447a-88d0-45dbc544258f\"],\"generatedAt\":\"2026-09-14T15:30:00.000Z\"}",
+    "usage": {
+     "input": 2097,
+     "output": 3683,
+     "total": 5780
+    },
+    "latencyMs": 46902,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "d5b722b373dcf1be"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1789398236238_04i-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1789398236238_04i-r3-run1",
+     "thesis": "Hand-refined value that exists only in transient outputs is fragile in the face of automated regeneration. The root cause of the overwrite accident and its failed recovery is not one bad command but the absence of a discipline treating destructive reruns as consequential: pipeline identity and current state must be established from on-disk evidence before execution, manually refined state must be persisted to the generator source of truth, reversibility must be preserved via backups, execution must pass explicit gates, and completion must be proven by independent evidence rather than assertion.",
+     "principleCandidate": {
+      "title": "Gate destructive regeneration: sync source, verify pipeline, back up, prove success",
+      "rationale": "All five failure modes trace to executing consequential overwrite/restore operations on unverified premises: refined state never synced to generator source (rerun erases it), wrong pipeline identity assumed (recovery fails), no rollback copy (loss becomes irreversible), and success claimed without evidence (second failure hidden). A pre-execution gate enforcing source reconciliation, identity verification, and backup—plus post-execution independent verification—removes the shared root cause: treating automated reruns as safe defaults instead of consequential actions requiring proof of readiness.",
+      "scope": "Applies whenever an automated generator, script, pipeline, or batch process can overwrite existing artifacts—especially single-copy or manually refined finalized outputs. Covers rerun, restore, rebuild, and migrate operations on persistent state where the artifact embodies work not reproducible from code alone. Not applicable to throwaway or trivially reversible operations where no irreplaceable state is at risk.",
+      "confidence": 0.86
+     },
+     "risks": [
+      "Composite overlap: this principle spans existing axioms T-01, T-04, T-05, T-07, and T-10; adopting it as a new foundational axiom risks duplicating core guidance rather than adding distinct value—it may be better treated as an operational pattern composing them",
+      "Rigid trigger-based gating can impede legitimate fast iteration when assets are experimental or regeneration is cheap; gate weight should scale with the irreplaceability of the state at risk, not fire uniformly on keywords",
+      "Requiring every hand refinement to be synced back to generator source may be impractical for exploratory edits and can create false confidence if the sync is partial or stale",
+      "Frame-level reconciliation and forced verification add process overhead that may be bypassed under time pressure unless the gate is enforced by tooling rather than convention"
+     ],
+     "generatedAt": "2026-09-14T15:42:00.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1789398236238_04i-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1789398236238_04i-r3-run1\",\"thesis\":\"Hand-refined value that exists only in transient outputs is fragile in the face of automated regeneration. The root cause of the overwrite accident and its failed recovery is not one bad command but the absence of a discipline treating destructive reruns as consequential: pipeline identity and current state must be established from on-disk evidence before execution, manually refined state must be persisted to the generator source of truth, reversibility must be preserved via backups, execution must pass explicit gates, and completion must be proven by independent evidence rather than assertion.\",\"principleCandidate\":{\"title\":\"Gate destructive regeneration: sync source, verify pipeline, back up, prove success\",\"rationale\":\"All five failure modes trace to executing consequential overwrite/restore operations on unverified premises: refined state never synced to generator source (rerun erases it), wrong pipeline identity assumed (recovery fails), no rollback copy (loss becomes irreversible), and success claimed without evidence (second failure hidden). A pre-execution gate enforcing source reconciliation, identity verification, and backup—plus post-execution independent verification—removes the shared root cause: treating automated reruns as safe defaults instead of consequential actions requiring proof of readiness.\",\"scope\":\"Applies whenever an automated generator, script, pipeline, or batch process can overwrite existing artifacts—especially single-copy or manually refined finalized outputs. Covers rerun, restore, rebuild, and migrate operations on persistent state where the artifact embodies work not reproducible from code alone. Not applicable to throwaway or trivially reversible operations where no irreplaceable state is at risk.\",\"confidence\":0.86},\"risks\":[\"Composite overlap: this principle spans existing axioms T-01, T-04, T-05, T-07, and T-10; adopting it as a new foundational axiom risks duplicating core guidance rather than adding distinct value—it may be better treated as an operational pattern composing them\",\"Rigid trigger-based gating can impede legitimate fast iteration when assets are experimental or regeneration is cheap; gate weight should scale with the irreplaceability of the state at risk, not fire uniformly on keywords\",\"Requiring every hand refinement to be synced back to generator source may be impractical for exploratory edits and can create false confidence if the sync is partial or stale\",\"Frame-level reconciliation and forced verification add process overhead that may be bypassed under time pressure unless the gate is enforced by tooling rather than convention\"],\"generatedAt\":\"2026-09-14T15:42:00.000Z\"}",
+    "usage": {
+     "input": 1712,
+     "output": 2207,
+     "total": 3919
+    },
+    "latencyMs": 38097,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6ebfd8ae7e4ca409"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1789398236238_04i-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r3-run1",
+     "principleDraft": {
+      "title": "Gate destructive regeneration: reconcile source, verify target, back up, prove completion",
+      "statement": "Before any automated rerun, rebuild, restore, or migration that can overwrite existing artifacts, an agent must (1) reconcile manually refined state into the generator's source of truth so regeneration reproduces it, (2) verify the pipeline/run identity and the current on-disk state from observable evidence rather than assumption, and (3) create a rollback backup of the artifacts to be overwritten; after execution, the agent must verify success by independently inspecting the resulting artifact (diff, checksum, content check) rather than trusting exit status or assertion. Every destructive regeneration is treated as a consequential action until proven trivially reversible.",
+      "rationale": "All diagnosed failure modes share one root cause: consequential overwrite and restore operations were executed on unverified premises — refined state existed only in the output file, the wrong pipeline identity was assumed, no rollback copy existed, and success was asserted without evidence. A pre-execution gate (sync source, verify identity and state, back up) plus post-execution proof removes that shared root cause by making destructive regeneration impossible to start without verified readiness and impossible to declare complete without observed results. This operationalizes existing axioms T-01, T-04, T-05, T-07, and T-10 as a single gated workflow for the destructive-regeneration failure family.",
+      "applicability": [
+       "Automated generators, scripts, pipelines, or batch processes whose rerun can overwrite existing artifact files (rerun, rebuild, restore, migrate)",
+       "Finalized or manually refined outputs that embody work not reproducible from code alone, especially single-copy deliverables",
+       "Restore or recovery operations targeting persistent state whose identity must match the producing pipeline or run",
+       "Overwrites of persistent state with no version control or cheap regeneration path available"
+      ],
+      "antiPatterns": [
+       "Running a generator over existing outputs while hand refinements exist only in the output file, silently erasing them",
+       "Assuming pipeline or run identity from memory, naming conventions, or prior context without checking on-disk evidence before a restore",
+       "Executing an overwrite or destructive restore without first creating a rollback copy of the affected artifacts",
+       "Declaring a rerun or restore successful based on command exit status or assertion alone, without inspecting the resulting artifact",
+       "Treating automated reruns as safe defaults because the script previously ran without incident"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants automated reruns, rebuilds, and restores to never destroy hand-refined or otherwise irreplaceable artifact state, and to never be reported as successful without independently observed evidence.",
+      "targetBehavior": "Before a destructive rerun or restore, the agent visibly syncs or confirms refined state in the generator source, checks on-disk evidence to confirm pipeline/target identity and current state, and produces a backup of the artifacts to be overwritten; after execution, it inspects the resulting artifact content (diff, checksum, or direct read) and reports success only if the observed output matches the intended outcome.",
+      "forbiddenBehavior": "Executing an overwrite, rebuild, restore, or migration on assumed premises — without reconciling refinements to source, verifying identity/state on disk, or taking a rollback backup — and claiming success from exit status or assertion instead of inspected output.",
+      "evidenceSource": "The diagnosed incident: a regeneration overwrote manually refined output because refinements lived only in the generated file and were never synced to the generator source; the subsequent recovery targeted the wrong pipeline identity and success was asserted without independent verification, hiding the second failure (dreamer/philosopher analysis of the pri815 overwrite accident and failed recovery).",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it demands observable pre-execution steps (source reconciliation, on-disk identity/state check, backup artifact creation) and post-execution content verification for operations that overwrite non-trivially-reproducible state; a rule that merely says 'be careful when rerunning scripts', triggers on keywords without scaling gate weight to the irreplaceability of the state at risk, or omits the post-execution evidence check should be flagged as unfaithful."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1789398236238_04i-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r3-run1"
+     },
+     "risks": [
+      "Composite overlap: the principle spans existing core axioms T-01, T-04, T-05, T-07, and T-10; adopting it as a new foundational axiom risks duplication, so it should be instantiated as an operational pattern or scoped rule composing those axioms rather than a replacement for them",
+      "Rigid keyword-triggered gating can impede legitimate fast iteration when artifacts are experimental or regeneration is cheap; gate strictness must scale with the irreplaceability of the state at risk, not fire uniformly on any rerun",
+      "Requiring every hand refinement to be synced back to generator source may be impractical for exploratory edits, and partial or stale syncs create false confidence that regeneration is safe",
+      "Convention-only gates tend to be bypassed under time pressure; without tool-enforced pre-flight checks inside the pipeline itself, the principle degrades into unenforced advice",
+      "Misclassifying which artifacts count as irreplaceable can cause either over-gating (blocking cheap regenerations) or under-gating (leaving refined outputs unprotected), and over-broad post-execution verification requirements may push agents to skip the gate entirely"
+     ],
+     "generatedAt": "2026-09-14T15:48:12.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1789398236238_04i-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Gate destructive regeneration: reconcile source, verify target, back up, prove completion\",\n    \"statement\": \"Before any automated rerun, rebuild, restore, or migration that can overwrite existing artifacts, an agent must (1) reconcile manually refined state into the generator's source of truth so regeneration reproduces it, (2) verify the pipeline/run identity and the current on-disk state from observable evidence rather than assumption, and (3) create a rollback backup of the artifacts to be overwritten; after execution, the agent must verify success by independently inspecting the resulting artifact (diff, checksum, content check) rather than trusting exit status or assertion. Every destructive regeneration is treated as a consequential action until proven trivially reversible.\",\n    \"rationale\": \"All diagnosed failure modes share one root cause: consequential overwrite and restore operations were executed on unverified premises — refined state existed only in the output file, the wrong pipeline identity was assumed, no rollback copy existed, and success was asserted without evidence. A pre-execution gate (sync source, verify identity and state, back up) plus post-execution proof removes that shared root cause by making destructive regeneration impossible to start without verified readiness and impossible to declare complete without observed results. This operationalizes existing axioms T-01, T-04, T-05, T-07, and T-10 as a single gated workflow for the destructive-regeneration failure family.\",\n    \"applicability\": [\n      \"Automated generators, scripts, pipelines, or batch processes whose rerun can overwrite existing artifact files (rerun, rebuild, restore, migrate)\",\n      \"Finalized or manually refined outputs that embody work not reproducible from code alone, especially single-copy deliverables\",\n      \"Restore or recovery operations targeting persistent state whose identity must match the producing pipeline or run\",\n      \"Overwrites of persistent state with no version control or cheap regeneration path available\"\n    ],\n    \"antiPatterns\": [\n      \"Running a generator over existing outputs while hand refinements exist only in the output file, silently erasing them\",\n      \"Assuming pipeline or run identity from memory, naming conventions, or prior context without checking on-disk evidence before a restore\",\n      \"Executing an overwrite or destructive restore without first creating a rollback copy of the affected artifacts\",\n      \"Declaring a rerun or restore successful based on command exit status or assertion alone, without inspecting the resulting artifact\",\n      \"Treating automated reruns as safe defaults because the script previously ran without incident\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants automated reruns, rebuilds, and restores to never destroy hand-refined or otherwise irreplaceable artifact state, and to never be reported as successful without independently observed evidence.\",\n    \"targetBehavior\": \"Before a destructive rerun or restore, the agent visibly syncs or confirms refined state in the generator source, checks on-disk evidence to confirm pipeline/target identity and current state, and produces a backup of the artifacts to be overwritten; after execution, it inspects the resulting artifact content (diff, checksum, or direct read) and reports success only if the observed output matches the intended outcome.\",\n    \"forbiddenBehavior\": \"Executing an overwrite, rebuild, restore, or migration on assumed premises — without reconciling refinements to source, verifying identity/state on disk, or taking a rollback backup — and claiming success from exit status or assertion instead of inspected output.\",\n    \"evidenceSource\": \"The diagnosed incident: a regeneration overwrote manually refined output because refinements lived only in the generated file and were never synced to the generator source; the subsequent recovery targeted the wrong pipeline identity and success was asserted without independent verification, hiding the second failure (dreamer/philosopher analysis of the pri815 overwrite accident and failed recovery).\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if it demands observable pre-execution steps (source reconciliation, on-disk identity/state check, backup artifact creation) and post-execution content verification for operations that overwrite non-trivially-reproducible state; a rule that merely says 'be careful when rerunning scripts', triggers on keywords without scaling gate weight to the irreplaceability of the state at risk, or omits the post-execution evidence check should be flagged as unfaithful.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1789398236238_04i-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r3-run1\"\n  },\n  \"risks\": [\n    \"Composite overlap: the principle spans existing core axioms T-01, T-04, T-05, T-07, and T-10; adopting it as a new foundational axiom risks duplication, so it should be instantiated as an operational pattern or scoped rule composing those axioms rather than a replacement for them\",\n    \"Rigid keyword-triggered gating can impede legitimate fast iteration when artifacts are experimental or regeneration is cheap; gate strictness must scale with the irreplaceability of the state at risk, not fire uniformly on any rerun\",\n    \"Requiring every hand refinement to be synced back to generator source may be impractical for exploratory edits, and partial or stale syncs create false confidence that regeneration is safe\",\n    \"Convention-only gates tend to be bypassed under time pressure; without tool-enforced pre-flight checks inside the pipeline itself, the principle degrades into unenforced advice\",\n    \"Misclassifying which artifacts count as irreplaceable can cause either over-gating (blocking cheap regenerations) or under-gating (leaving refined outputs unprotected), and over-broad post-execution verification requirements may push agents to skip the gate entirely\"\n  ],\n  \"generatedAt\": \"2026-09-14T15:48:12.000Z\"\n}",
+    "usage": {
+     "input": 1973,
+     "output": 3751,
+     "total": 5724
+    },
+    "latencyMs": 48259,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "cc2a56266e318b28"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1789398236238_04i-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r3-run1",
+     "principleDraft": {
+      "title": "Gate destructive regeneration: sync source, verify pipeline, back up, prove completion",
+      "statement": "Treat any rerun, restore, rebuild, or regenerate operation that can overwrite persistent artifacts as consequential and gate it: (1) before execution, persist manually refined state to the generator/source of truth (or explicitly mark the finalized asset to be skipped) so no irreplaceable value lives only in transient outputs; (2) confirm from on-disk evidence which pipeline/script and source the operation actually uses, and reconcile current artifact state against the finalized design; (3) preserve a rollback copy (versioned backup or snapshot) of the at-risk artifact; (4) after execution, prove the result matches the intended finalized state with independent on-disk evidence (e.g., frame-level reconciliation) before declaring completion. Gate weight scales with the irreplaceability of the state at risk, not with keywords.",
+      "rationale": "All observed failure modes trace to executing consequential overwrite/restore operations on unverified premises: hand-refined state never synced to the generator source (rerun erases it), wrong pipeline identity assumed (recovery fails again), no rollback copy (loss becomes irreversible), and success claimed by assertion (the second failure stays hidden). The shared root cause is treating automated reruns as safe defaults instead of consequential actions requiring proof of readiness; closing the code-artifact sync gap and enforcing a pre-execution gate plus post-execution independent verification removes that root cause.",
+      "applicability": [
+       "Automated generators, scripts, pipelines, or batch processes whose execution can overwrite existing persistent artifacts",
+       "Workflows where hand-refined or manually finalized outputs coexist with an automated generation pipeline",
+       "Rerun, restore, rebuild, migrate, or regenerate operations on persistent state that embodies work not reproducible from code alone (e.g., single-copy finalized skins/assets)",
+       "Recovery or restore rounds following an overwrite or corruption incident, including verification of the recovery claim itself",
+       "Closure of tasks whose completion depends on artifact state matching a finalized design (e.g., pixel/frame-level agreement)"
+      ],
+      "antiPatterns": [
+       "Re-running a generator while the finalized hand-refined state exists only in the output artifact (code-artifact sync gap), letting the rerun erase it",
+       "Executing restore or recovery without first confirming from on-disk evidence which script and source the pipeline actually reads (wrong-pipeline recovery)",
+       "Overwriting the only copy of an artifact with no versioned backup, snapshot, or rollback path",
+       "Declaring 'restored/fixed/complete' on the operator's assertion alone, without independent on-disk evidence such as frame-level comparison against the finalized design",
+       "Treating an automated rerun as a safe default because it previously ran successfully"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants no rerun, restore, or recovery operation to destroy hand-refined finalized artifacts whose value exists only in output files (as with the golden HUD that lived only in the finalized PNG), and wants every completion claim backed by independent on-disk evidence.",
+      "targetBehavior": "In any trajectory involving a generator rerun or restore, a compliant agent visibly: confirms the true pipeline identity (which script and source directory it actually reads) from on-disk evidence, reconciles current artifact state against the finalized design, ensures hand-refined state is synced to the generator source or the finalized asset is marked to skip, takes a backup or snapshot of the at-risk artifact before execution, and closes with independent comparison evidence (e.g., frame-level reconciliation) rather than assertion.",
+      "forbiddenBehavior": "Executing overwrite-capable rerun/restore operations on unverified premises: running a generator while hand-refined value lives only in transient outputs, restoring through an unconfirmed pipeline, overwriting the sole artifact copy without a rollback path, and closing a recovery with an unverified completion claim.",
+      "evidenceSource": "Diagnosis diagnosis_manual_1789398236238_04iyw2k7: the 15:46 rerun of hud_gen.py (never synced with the hand-refined golden HUD that existed only in the finalized PNG) overwrote the finalized skin; the 21:41 recovery round invoked the wrong pipeline gpt_hud_key.py (reads hud-gpt-src) and failed again; the recovery claim was closed without independent verification, as recorded by the Owner at 22:39.",
+      "validationExpectation": "An evaluator should accept a derived rule as faithful only if it requires, before any regenerate/restore execution: verified pipeline identity, on-disk state reconciliation against the finalized design, synced or skip-marked hand-refined state, and a rollback copy of the at-risk artifact — and after execution, independent on-disk evidence before any completion claim; a rule permitting assertion-based closure or skipping the sync/backup checks for irreplaceable artifacts contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1789398236238_04i-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1789398236238_04i-r3-run1"
+     },
+     "risks": [
+      "Composite overlap with core axioms T-01, T-04, T-05, T-07, and T-10: this principle composes existing axioms into an operational gate pattern rather than adding a wholly distinct axiom; downstream rule generation should reference those axioms instead of duplicating them",
+      "Uniform trigger-based gating (e.g., firing on any 'rerun' keyword) can block legitimate fast iteration on experimental, cheaply regenerable assets; gate weight must scale with the irreplaceability of the state at risk",
+      "Mandating that every hand refinement be synced back to the generator source is impractical for exploratory edits and can create false confidence when the sync is partial or stale",
+      "Frame-level reconciliation and forced gates add process overhead that may be bypassed under time pressure unless the gate is enforced by tooling rather than convention",
+      "Applicability weakens in environments where manual refinement and automated pipelines do not coexist; the full trajectory was unavailable (traceAvailability=unavailable_with_reason), so details rely on the diagnosis summary"
+     ],
+     "generatedAt": "2026-09-14T16:05:00.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1789398236238_04i-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r3-run1\",\"principleDraft\":{\"title\":\"Gate destructive regeneration: sync source, verify pipeline, back up, prove completion\",\"statement\":\"Treat any rerun, restore, rebuild, or regenerate operation that can overwrite persistent artifacts as consequential and gate it: (1) before execution, persist manually refined state to the generator/source of truth (or explicitly mark the finalized asset to be skipped) so no irreplaceable value lives only in transient outputs; (2) confirm from on-disk evidence which pipeline/script and source the operation actually uses, and reconcile current artifact state against the finalized design; (3) preserve a rollback copy (versioned backup or snapshot) of the at-risk artifact; (4) after execution, prove the result matches the intended finalized state with independent on-disk evidence (e.g., frame-level reconciliation) before declaring completion. Gate weight scales with the irreplaceability of the state at risk, not with keywords.\",\"rationale\":\"All observed failure modes trace to executing consequential overwrite/restore operations on unverified premises: hand-refined state never synced to the generator source (rerun erases it), wrong pipeline identity assumed (recovery fails again), no rollback copy (loss becomes irreversible), and success claimed by assertion (the second failure stays hidden). The shared root cause is treating automated reruns as safe defaults instead of consequential actions requiring proof of readiness; closing the code-artifact sync gap and enforcing a pre-execution gate plus post-execution independent verification removes that root cause.\",\"applicability\":[\"Automated generators, scripts, pipelines, or batch processes whose execution can overwrite existing persistent artifacts\",\"Workflows where hand-refined or manually finalized outputs coexist with an automated generation pipeline\",\"Rerun, restore, rebuild, migrate, or regenerate operations on persistent state that embodies work not reproducible from code alone (e.g., single-copy finalized skins/assets)\",\"Recovery or restore rounds following an overwrite or corruption incident, including verification of the recovery claim itself\",\"Closure of tasks whose completion depends on artifact state matching a finalized design (e.g., pixel/frame-level agreement)\"],\"antiPatterns\":[\"Re-running a generator while the finalized hand-refined state exists only in the output artifact (code-artifact sync gap), letting the rerun erase it\",\"Executing restore or recovery without first confirming from on-disk evidence which script and source the pipeline actually reads (wrong-pipeline recovery)\",\"Overwriting the only copy of an artifact with no versioned backup, snapshot, or rollback path\",\"Declaring 'restored/fixed/complete' on the operator's assertion alone, without independent on-disk evidence such as frame-level comparison against the finalized design\",\"Treating an automated rerun as a safe default because it previously ran successfully\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"The Owner wants no rerun, restore, or recovery operation to destroy hand-refined finalized artifacts whose value exists only in output files (as with the golden HUD that lived only in the finalized PNG), and wants every completion claim backed by independent on-disk evidence.\",\"targetBehavior\":\"In any trajectory involving a generator rerun or restore, a compliant agent visibly: confirms the true pipeline identity (which script and source directory it actually reads) from on-disk evidence, reconciles current artifact state against the finalized design, ensures hand-refined state is synced to the generator source or the finalized asset is marked to skip, takes a backup or snapshot of the at-risk artifact before execution, and closes with independent comparison evidence (e.g., frame-level reconciliation) rather than assertion.\",\"forbiddenBehavior\":\"Executing overwrite-capable rerun/restore operations on unverified premises: running a generator while hand-refined value lives only in transient outputs, restoring through an unconfirmed pipeline, overwriting the sole artifact copy without a rollback path, and closing a recovery with an unverified completion claim.\",\"evidenceSource\":\"Diagnosis diagnosis_manual_1789398236238_04iyw2k7: the 15:46 rerun of hud_gen.py (never synced with the hand-refined golden HUD that existed only in the finalized PNG) overwrote the finalized skin; the 21:41 recovery round invoked the wrong pipeline gpt_hud_key.py (reads hud-gpt-src) and failed again; the recovery claim was closed without independent verification, as recorded by the Owner at 22:39.\",\"validationExpectation\":\"An evaluator should accept a derived rule as faithful only if it requires, before any regenerate/restore execution: verified pipeline identity, on-disk state reconciliation against the finalized design, synced or skip-marked hand-refined state, and a rollback copy of the at-risk artifact — and after execution, independent on-disk evidence before any completion claim; a rule permitting assertion-based closure or skipping the sync/backup checks for irreplaceable artifacts contradicts this intent and must be flagged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1789398236238_04i-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1789398236238_04i-r3-run1\"},\"risks\":[\"Composite overlap with core axioms T-01, T-04, T-05, T-07, and T-10: this principle composes existing axioms into an operational gate pattern rather than adding a wholly distinct axiom; downstream rule generation should reference those axioms instead of duplicating them\",\"Uniform trigger-based gating (e.g., firing on any 'rerun' keyword) can block legitimate fast iteration on experimental, cheaply regenerable assets; gate weight must scale with the irreplaceability of the state at risk\",\"Mandating that every hand refinement be synced back to the generator source is impractical for exploratory edits and can create false confidence when the sync is partial or stale\",\"Frame-level reconciliation and forced gates add process overhead that may be bypassed under time pressure unless the gate is enforced by tooling rather than convention\",\"Applicability weakens in environments where manual refinement and automated pipelines do not coexist; the full trajectory was unavailable (traceAvailability=unavailable_with_reason), so details rely on the diagnosis summary\"],\"generatedAt\":\"2026-09-14T16:05:00.000Z\"}",
+    "usage": {
+     "input": 4334,
+     "output": 5276,
+     "total": 9610
+    },
+    "latencyMs": 62784,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e1d188e60c711c91"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

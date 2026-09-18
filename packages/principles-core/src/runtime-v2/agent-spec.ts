@@ -97,7 +97,9 @@ export const AGENT_IDS = {
   ARTIFICER: 'artificer',
   REPLAY_JUDGE: 'replay-judge',
   RULE_AUTHOR: 'rule-author',
-  EMPATHY_OBSERVER: 'empathy-observer',
+  // EMPATHY_OBSERVER removed in PRI-819: the agent was physically retired
+  // (no production instantiation); historical evidence rows may still carry
+  // the 'empathy-observer' agentId string.
   CORRECTION_OBSERVER: 'correction-observer',
 } as const;
 

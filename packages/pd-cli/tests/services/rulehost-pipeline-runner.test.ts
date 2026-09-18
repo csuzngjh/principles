@@ -761,7 +761,6 @@ function writeLanguageConfig(dir: string, outputLanguage?: 'en'): void {
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: false },
-        empathyObserver: { enabled: false },
       },
     },
     ui: { diagnostics: { mode: 'simple' } },

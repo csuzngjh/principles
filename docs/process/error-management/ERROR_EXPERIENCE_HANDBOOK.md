@@ -90,6 +90,8 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-122 | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side README/package.json and tutorial-style verifier comments ship to the subject agent's workspace; audit the DEPLOYED FILE LIST as the answer surface, enforced by a deploy-shape assertion + hint scan | PRI-684 PR #1584 |
 | ERR-124 | Test mutates a process-global singleton without try/finally restore — sibling tests run under hijacked state | PRI-723 / PR #1596 review |
 | ERR-131 | Dependency-bump blast radius unverified: path-filtered CI skips package test/typecheck jobs for lockfile/manifest-only PRs, so ESM default-export removal, 0.x pairing dual-installs, and renamed APIs ship green | adhoc 2026-09-14 PRs #1689-#1692 repair |
+| ERR-132 | Test client for a long-blocking endpoint uses global fetch — undici's default 300s headers timeout aborts a response that legitimately waits for the whole server-side transaction, misreporting a healthy slow path as a failure; use a `node:http` client with an explicit budget | PRI-738 upgrade gate 2026-09-17 |
+| ERR-133 | Experiment tooling mutated evidence via import side effect: a script that is both module and CLI was imported for a constant, executing its top-level experiment driver and overwriting 3 groups' raw data files | PRI-815 Phase A |
 
 ---
 
@@ -1702,3 +1704,40 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: adhoc 2026-09-14 dependabot repair campaign (PRs #1689/#1690/#1692)
 - **Date**: 2026-09-15
 - **Recurrence**: None
+
+**[ERR-132]** | Test client for a long-blocking endpoint uses global fetch — undici's default 300s headers timeout aborts the response while the server-side transaction is still legitimately running
+
+- **What happened**: PRI-738's real upgrade gate drove the installed Console's `POST /api/update/apply-full` with global `fetch`. The endpoint blocks on the whole installer transaction (download + deploy + gateway restart); on a loaded machine it exceeded undici's default 300s `headersTimeout`, so the test failed with `HeadersTimeoutError (UND_ERR_HEADERS_TIMEOUT)` in two consecutive runs while the update itself was healthy. The cascade made the follow-on corruption-injection test read the pre-upgrade active record.
+- **Why it's wrong**: The client-side timeout ceiling was an implicit library default, not a decision — a healthy slow path (multi-minute transaction) is indistinguishable from a hung server, and the failure pointed at the wrong layer (product) instead of the harness.
+- **Correct approach**: For endpoints that legitimately block for the duration of a long server-side transaction, drive them from tests with a `node:http` request (no undici headers timeout) and set the budget explicitly (here: the test's own 900s limit). Server-side `requestTimeout`/`headersTimeout` knobs do NOT help — they govern receiving the request, not sending the response.
+- **How to prevent**: When a test POST/GET can outlive ~5 minutes, name the transport budget in the test file. Browsers (Console UI) have no such cap; only Node test clients hit this.
+- **Regression guard**: `release-upgrade-gate.test.ts` `postApplyFull()` uses `node:http`; the gate re-runs the real transaction end-to-end.
+- **Related ERRs**: ERR-101 (port/test-server selection), ERR-124 (test-global hygiene)
+- **Source**: PRI-738 final retirement PR #1750
+- **Date**: 2026-09-17
+- **Recurrence**: None
+
+---
+**[ERR-133]** | Experiment tooling mutated evidence via import side effect — a file used as both module and CLI ran its top-level experiment driver when imported for a constant, overwriting raw evidence files
+
+- **What happened**: In the PRI-815 Phase A harness, the report generator imported `run-ab.mjs` to reuse the exported B-arm addendum constant. That file is dual-use: exported constants AND a top-level CLI driver (reads `process.argv`, launches the experiment loop at module scope). The import executed the driver, which found 3 run files not matching its completeness predicate, re-ran those groups against the real LLM, and OVERWROTE their raw evidence files before the process was killed.
+- **Why it's wrong**: Evidence/audit artifacts are frozen inputs (experiment SPEC §8/§12); a read-only reporting tool must be structurally incapable of mutating them. Import-for-constant is an invisible execution path — nobody "runs" anything, yet the driver executes. Cached judgments survived, but the overwritten raws are unrecoverable.
+- **Correct approach**: Constants shared between a driver script and other tooling live in a separate side-effect-free module (`b-addendum.mjs`); the driver imports from it. Guard evidence immutability structurally: report/judge tooling opens evidence read-only, or asserts evidence hashes/mtimes unchanged after a report run.
+- **How to prevent**: Before importing any script, check it for module-scope side effects (driver loops, `process.argv` reads). Rule of thumb: a file that reads `process.argv` at top level is a CLI — never import it; extract shared exports into a plain module first.
+- **Regression guard**: none mechanized (one-off experiment tooling); structural fix = import-safe module split, committed in the same PR.
+- **Related ERRs**: ERR-024 (side-effect/write discipline), EP-05 (evidence & tooling hazards)
+- **Source**: PRI-815 Phase A data incident 2026-09-17 (disclosed in docs/audit/pri-815-quality-first/PHASE_A_REPORT.md)
+- **Date**: 2026-09-18
+- **Recurrence**: None
+
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-18",
+    "pattern": "EP-05",
+    "invariant": "evidence-immutability-under-read-only-tooling",
+    "severity": "P2",
+    "escaped": "none",
+    "caughtBy": "self-review",
+    "guard": "import-safe module split (b-addendum.mjs); no mechanized guard"
+  }
+  -->

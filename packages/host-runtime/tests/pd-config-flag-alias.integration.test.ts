@@ -54,7 +54,6 @@ internalAgents:
     evaluator:          { enabled: false, runtimeProfile: pd.default }
     rolloutReviewer:    { enabled: false, runtimeProfile: pd.default }
     correctionObserver: { enabled: false, runtimeProfile: pd.default }
-    empathyObserver:    { enabled: false, runtimeProfile: pd.default }
     signalCollector:    { enabled: false, runtimeProfile: pd.default }
 ui:
   diagnostics: { mode: simple }

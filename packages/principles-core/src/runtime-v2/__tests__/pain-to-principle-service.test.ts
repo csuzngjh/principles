@@ -246,7 +246,6 @@ describe('PainToPrincipleService', () => {
             evaluator: { enabled: true },
             rolloutReviewer: { enabled: true },
             correctionObserver: { enabled: true },
-            empathyObserver: { enabled: true },
             signalCollector: { enabled: false },
           },
         },

@@ -1,0 +1,689 @@
+{
+ "group": "G-manual_1788268409354_vau",
+ "class": "DEV",
+ "pain_id": "manual_1788268409354_vautfk3l",
+ "frozen_at": "2026-09-17T15:12:03.011Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788268409354_vau",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788268409354_vau-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "未先核查 Episode 001 的既有脚本、代码与输出规范，就直接自创 whisper->SRT->ASS 字幕管线",
+       "betterDecision": "在任何字幕制作操作前，先调用目录扫描/读取工具检查既有资产，提取 Episode 001 的字体、字号、简繁体、标点切分等规范并直接复用其模式",
+       "rationale": "既有资产是 owner 真实意图与既定规范的最可靠证据，复用其模式可从源头避免繁体、标点切分、字号超标等返工",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_first_asset_reuse",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "基于模型自身推断的偏好（繁体、标点、字号）设定输出参数，而非围绕用户既有产出与明确要求行动",
+       "betterDecision": "输出参数必须从既有成品文件与用户显式指令中推导；规范不确定时先向用户确认再执行",
+       "rationale": "推断偏好与真实意图的偏差导致用户多次纠正；以显式证据和前置确认可将偏差消除在执行之前",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "intent_alignment_via_explicit_evidence",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "一次性编写并执行完整脚本，未先核对工作目录路径、未做小样本试运行，连续触发 FileNotFoundError、PowerShell ParserError、Python SyntaxError",
+       "betterDecision": "先确认工作目录与目标路径存在，再在单个样本文件上验证脚本语法与输出效果，通过后才批量执行",
+       "rationale": "将管线分解为可独立验证的小步骤能在早期暴露路径与语法错误，避免整条管线反复试错",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "incremental_verification",
+       "sourcePrincipleId": "T-09"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "工作流中缺少执行前的强制既有资产核查门控，完全依赖 agent 自觉遵守核查步骤",
+       "betterDecision": "在文件创建/修改前注入强制门控：自动扫描相关目录，存在匹配资产时输出其摘要并要求确认后方可自创新方案",
+       "rationale": "结构化门控将好习惯固化为可执行流程，防止 People 类盲区再次绕过核查，弥补设计层面的缺失",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "process_gate_design",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "首次被用户纠正（繁体、标点切分问题）后仍继续修补自创管线，未停下来重新审视既有资产",
+       "betterDecision": "收到第一次用户纠正时立即暂停当前方案，回查 Episode 001 既有资产并基于其规范重建执行计划",
+       "rationale": "用户早期纠正行为是强反馈信号，及时止损并修正方向比在错误地基上持续打补丁成本更低",
+       "confidence": 0.82,
+       "riskLevel": "low",
+       "strategicPerspective": "feedback_driven_course_correction",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "sourcePainId": "pain_score75_severe_subtitle_overengineering",
+     "contextRefs": [
+      "artifact://0b740830-6722-4781-8d8c-ff3feceb50b0"
+     ],
+     "generatedAt": "2026-09-01T13:16:30.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788268409354_vau-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"未先核查 Episode 001 的既有脚本、代码与输出规范，就直接自创 whisper->SRT->ASS 字幕管线\",\"betterDecision\":\"在任何字幕制作操作前，先调用目录扫描/读取工具检查既有资产，提取 Episode 001 的字体、字号、简繁体、标点切分等规范并直接复用其模式\",\"rationale\":\"既有资产是 owner 真实意图与既定规范的最可靠证据，复用其模式可从源头避免繁体、标点切分、字号超标等返工\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_first_asset_reuse\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"基于模型自身推断的偏好（繁体、标点、字号）设定输出参数，而非围绕用户既有产出与明确要求行动\",\"betterDecision\":\"输出参数必须从既有成品文件与用户显式指令中推导；规范不确定时先向用户确认再执行\",\"rationale\":\"推断偏好与真实意图的偏差导致用户多次纠正；以显式证据和前置确认可将偏差消除在执行之前\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"intent_alignment_via_explicit_evidence\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":2,\"badDecision\":\"一次性编写并执行完整脚本，未先核对工作目录路径、未做小样本试运行，连续触发 FileNotFoundError、PowerShell ParserError、Python SyntaxError\",\"betterDecision\":\"先确认工作目录与目标路径存在，再在单个样本文件上验证脚本语法与输出效果，通过后才批量执行\",\"rationale\":\"将管线分解为可独立验证的小步骤能在早期暴露路径与语法错误，避免整条管线反复试错\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"incremental_verification\",\"sourcePrincipleId\":\"T-09\"},{\"candidateIndex\":3,\"badDecision\":\"工作流中缺少执行前的强制既有资产核查门控，完全依赖 agent 自觉遵守核查步骤\",\"betterDecision\":\"在文件创建/修改前注入强制门控：自动扫描相关目录，存在匹配资产时输出其摘要并要求确认后方可自创新方案\",\"rationale\":\"结构化门控将好习惯固化为可执行流程，防止 People 类盲区再次绕过核查，弥补设计层面的缺失\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"process_gate_design\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"首次被用户纠正（繁体、标点切分问题）后仍继续修补自创管线，未停下来重新审视既有资产\",\"betterDecision\":\"收到第一次用户纠正时立即暂停当前方案，回查 Episode 001 既有资产并基于其规范重建执行计划\",\"rationale\":\"用户早期纠正行为是强反馈信号，及时止损并修正方向比在错误地基上持续打补丁成本更低\",\"confidence\":0.82,\"riskLevel\":\"low\",\"strategicPerspective\":\"feedback_driven_course_correction\",\"sourcePrincipleId\":\"T-08\"}],\"sourcePainId\":\"pain_score75_severe_subtitle_overengineering\",\"contextRefs\":[\"artifact://0b740830-6722-4781-8d8c-ff3feceb50b0\"],\"generatedAt\":\"2026-09-01T13:16:30.000Z\"}",
+    "usage": {
+     "input": 2201,
+     "output": 3128,
+     "total": 5329
+    },
+    "latencyMs": 51876,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "de377a85d7e47d45"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788268409354_vau-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1",
+     "thesis": "既有成品资产是 owner 真实意图与既定规范的最可靠证据。在创造新方案之前，必须先扫描、提取并复用相关既有资产的模式；当推断与显式证据冲突时，应立即回到证据而非在自创方案上打补丁。创造性重建应作为核查之后的最优解，而核查应是可执行的门控，而非依赖自觉。",
+     "principleCandidate": {
+      "title": "Assets Before Invention: 既有资产核查优先于自创新方案",
+      "rationale": "根因在于跳过对既有资产的核查而依赖模型推断，导致参数偏差（繁简体、标点、字号）引发多次返工。既有资产将 owner 意图具象化为可观察证据，复用其模式可从源头消除偏差；配合前置门控与早期纠正止损，将好习惯固化为流程而非依赖自觉。",
+      "scope": "适用于任何在已有工作产物（脚本、成品文件、规范文档）的上下文中创建或修改输出的任务，尤其当输出参数存在多种合理选择且既有先例可查时。不适用于确无既有资产的全新领域，或既有资产已被明确废弃的场景。",
+      "confidence": 0.85
+     },
+     "risks": [
+      "过度应用可能导致盲目复用过时或低质量的既有资产，即使任务确实需要新方案（例如 owner 明确要求改变风格时强制复用旧规范）",
+      "该原则与 T-01（先建模再变更）、T-02（显式意图优先于推断）、T-03（可观察证据优先）在方向上重叠，应用时应视为对三者的操作性细化而非替代，避免规则冗余或优先级冲突",
+      "前置门控若缺乏差异化设计（如对琐碎任务也强制扫描确认），会引入不必要的摩擦与延迟",
+      "既有资产与当前任务的上下文差异（如不同剧集采用不同规范）可能导致错误提取规范，需辅以 owner 确认"
+     ],
+     "generatedAt": "2026-09-01T13:19:45.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788268409354_vau-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1\",\"thesis\":\"既有成品资产是 owner 真实意图与既定规范的最可靠证据。在创造新方案之前，必须先扫描、提取并复用相关既有资产的模式；当推断与显式证据冲突时，应立即回到证据而非在自创方案上打补丁。创造性重建应作为核查之后的最优解，而核查应是可执行的门控，而非依赖自觉。\",\"principleCandidate\":{\"title\":\"Assets Before Invention: 既有资产核查优先于自创新方案\",\"rationale\":\"根因在于跳过对既有资产的核查而依赖模型推断，导致参数偏差（繁简体、标点、字号）引发多次返工。既有资产将 owner 意图具象化为可观察证据，复用其模式可从源头消除偏差；配合前置门控与早期纠正止损，将好习惯固化为流程而非依赖自觉。\",\"scope\":\"适用于任何在已有工作产物（脚本、成品文件、规范文档）的上下文中创建或修改输出的任务，尤其当输出参数存在多种合理选择且既有先例可查时。不适用于确无既有资产的全新领域，或既有资产已被明确废弃的场景。\",\"confidence\":0.85},\"risks\":[\"过度应用可能导致盲目复用过时或低质量的既有资产，即使任务确实需要新方案（例如 owner 明确要求改变风格时强制复用旧规范）\",\"该原则与 T-01（先建模再变更）、T-02（显式意图优先于推断）、T-03（可观察证据优先）在方向上重叠，应用时应视为对三者的操作性细化而非替代，避免规则冗余或优先级冲突\",\"前置门控若缺乏差异化设计（如对琐碎任务也强制扫描确认），会引入不必要的摩擦与延迟\",\"既有资产与当前任务的上下文差异（如不同剧集采用不同规范）可能导致错误提取规范，需辅以 owner 确认\"],\"generatedAt\":\"2026-09-01T13:19:45.000Z\"}",
+    "usage": {
+     "input": 1571,
+     "output": 1155,
+     "total": 2726
+    },
+    "latencyMs": 20240,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "4e1c1c66ad50845b"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788268409354_vau-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1",
+     "principleDraft": {
+      "title": "Assets Before Invention: 先核查既有资产再自创新方案",
+      "statement": "在已有工作产物的上下文中创建或修改任何输出之前，必须先扫描相关既有资产（成品文件、脚本、规范文档、模板），提取其可观察的参数与模式（繁简体、标点、字号、格式等）并复用；仅当核查确认无相关既有资产、或其已被显式废弃、或 owner 明确要求变更时，才可自创新方案；当模型推断与既有资产的显式证据冲突时，必须立即回到证据重新对齐，而非在自创方案上打补丁；该核查应实现为可执行的前置门控（如未完成资产扫描即禁止产出最终输出），而非依赖自觉遵守的软性建议。",
+      "rationale": "根因是跳过对既有资产的核查而依赖模型内部推断，导致繁简体、标点、字号等参数偏差并引发多次返工。既有成品资产将 owner 的真实意图与既定规范具象化为可观察证据，复用其模式可在源头消除参数歧义，而不是在偏差暴露后再修补；将'先核查'固化为可执行门控而非依赖自觉，可防止长任务中好习惯衰减，并使偏差在最早步骤被纠正而非累积。本原则是 T-01/T-02/T-03 在'输出参数选择'场景下的操作性细化，不替代三者。",
+      "applicability": [
+       "在存在既有工作产物（成品文件、脚本、规范文档、模板）的上下文中创建或修改任何输出",
+       "输出参数存在多种合理选择且既有先例可查时（如繁简体、标点风格、字号、排版格式）",
+       "接续先前会话或他人产出的系列任务（如多集/多文件同系列内容）需保持一致性时",
+       "模型推断结果与既有资产证据出现冲突、需决定对齐方向的时刻"
+      ],
+      "antiPatterns": [
+       "跳过既有资产扫描，仅凭模型推断直接生成输出参数（繁简体、标点、字号等）并直出成品",
+       "发现参数偏差后在自创方案上迭代打补丁，而不回到既有资产证据重新对齐",
+       "将'先核查'当作依赖自觉的软性建议：无门控、无检查点即进入最终产出",
+       "在 owner 明确要求变更风格或既有资产已被显式废弃时，仍强制复用旧资产模式",
+       "从不相关上下文（如采用不同规范的其他剧集/项目）的既有资产中提取规范而不核对当前任务适用性"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望 agent 在存在可查的成品先例时，产出与既有资产完全一致的参数（繁简体、标点、字号等），而不是凭推断自行发明规范导致返工。",
+      "targetBehavior": "在生成或修改输出前，agent 的工具轨迹中可见：先检索并读取相关既有资产，显式列出将复用的参数规范（字体变体、标点规则、字号等），再据此产出；当产出与资产证据冲突时，回到资产重新对齐并记录而非继续修补。",
+      "forbiddenBehavior": "失败家族：未扫描既有资产即凭模型推断自定参数并直接输出成品；偏差暴露后仍在自创方案上打补丁而不回源对齐；把资产核查当作可选步骤（无任何门控、仅靠自觉）而跳过。",
+      "evidenceSource": "诊断事实：因跳过既有资产核查、依赖模型推断，繁简体、标点、字号等参数发生偏差，引发多次返工与 owner 逐项纠正——根因被诊断为'未先核查既有资产、未复用其显式规范'。",
+      "validationExpectation": "评估者应要求规则满足：1) 产出前存在可见的既有资产读取/扫描轨迹，且产出参数与所读资产的显式规范一致；2) 存在门控机制使'未经扫描即直出最终输出'被判违规；3) 推断与证据冲突时，修正方向是回源对齐而非局部打补丁；4) 规则须豁免'确无既有资产/资产已显式废弃/owner 明确要求变更'三种场景，以避免过度应用。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1"
+     },
+     "risks": [
+      "过度应用风险：盲目复用过时或低质量的既有资产；当 owner 明确要求变更风格（显式意图，T-02 优先）或资产已被显式废弃时，强制复用反而违背意图，规则必须包含显式豁免分支",
+      "与核心公理重叠：本原则与 T-01（先建模再变更）、T-02（显式意图优先于推断）、T-03（可观察证据优先）方向重叠，应定位为其在'输出参数复用'场景的操作性细化；下游规则生成须避免与既有公理规则产生冗余或优先级冲突",
+      "门控摩擦风险：若门控无差异化设计（对琐碎任务、无既有资产的全新领域也强制扫描确认），会引入不必要摩擦与延迟；门控强度应与任务的参数歧义度和先例可得性成比例",
+      "错误提取风险：既有资产与当前任务的上下文差异（如不同剧集采用不同规范）可能导致提取错误规范；当资产上下文与当前任务不匹配或存在多套冲突先例时，应升级为向 owner 确认而非自行择一"
+     ],
+     "generatedAt": "2026-09-01T13:22:10.318Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788268409354_vau-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1\",\"principleDraft\":{\"title\":\"Assets Before Invention: 先核查既有资产再自创新方案\",\"statement\":\"在已有工作产物的上下文中创建或修改任何输出之前，必须先扫描相关既有资产（成品文件、脚本、规范文档、模板），提取其可观察的参数与模式（繁简体、标点、字号、格式等）并复用；仅当核查确认无相关既有资产、或其已被显式废弃、或 owner 明确要求变更时，才可自创新方案；当模型推断与既有资产的显式证据冲突时，必须立即回到证据重新对齐，而非在自创方案上打补丁；该核查应实现为可执行的前置门控（如未完成资产扫描即禁止产出最终输出），而非依赖自觉遵守的软性建议。\",\"rationale\":\"根因是跳过对既有资产的核查而依赖模型内部推断，导致繁简体、标点、字号等参数偏差并引发多次返工。既有成品资产将 owner 的真实意图与既定规范具象化为可观察证据，复用其模式可在源头消除参数歧义，而不是在偏差暴露后再修补；将'先核查'固化为可执行门控而非依赖自觉，可防止长任务中好习惯衰减，并使偏差在最早步骤被纠正而非累积。本原则是 T-01/T-02/T-03 在'输出参数选择'场景下的操作性细化，不替代三者。\",\"applicability\":[\"在存在既有工作产物（成品文件、脚本、规范文档、模板）的上下文中创建或修改任何输出\",\"输出参数存在多种合理选择且既有先例可查时（如繁简体、标点风格、字号、排版格式）\",\"接续先前会话或他人产出的系列任务（如多集/多文件同系列内容）需保持一致性时\",\"模型推断结果与既有资产证据出现冲突、需决定对齐方向的时刻\"],\"antiPatterns\":[\"跳过既有资产扫描，仅凭模型推断直接生成输出参数（繁简体、标点、字号等）并直出成品\",\"发现参数偏差后在自创方案上迭代打补丁，而不回到既有资产证据重新对齐\",\"将'先核查'当作依赖自觉的软性建议：无门控、无检查点即进入最终产出\",\"在 owner 明确要求变更风格或既有资产已被显式废弃时，仍强制复用旧资产模式\",\"从不相关上下文（如采用不同规范的其他剧集/项目）的既有资产中提取规范而不核对当前任务适用性\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"Owner 希望 agent 在存在可查的成品先例时，产出与既有资产完全一致的参数（繁简体、标点、字号等），而不是凭推断自行发明规范导致返工。\",\"targetBehavior\":\"在生成或修改输出前，agent 的工具轨迹中可见：先检索并读取相关既有资产，显式列出将复用的参数规范（字体变体、标点规则、字号等），再据此产出；当产出与资产证据冲突时，回到资产重新对齐并记录而非继续修补。\",\"forbiddenBehavior\":\"失败家族：未扫描既有资产即凭模型推断自定参数并直接输出成品；偏差暴露后仍在自创方案上打补丁而不回源对齐；把资产核查当作可选步骤（无任何门控、仅靠自觉）而跳过。\",\"evidenceSource\":\"诊断事实：因跳过既有资产核查、依赖模型推断，繁简体、标点、字号等参数发生偏差，引发多次返工与 owner 逐项纠正——根因被诊断为'未先核查既有资产、未复用其显式规范'。\",\"validationExpectation\":\"评估者应要求规则满足：1) 产出前存在可见的既有资产读取/扫描轨迹，且产出参数与所读资产的显式规范一致；2) 存在门控机制使'未经扫描即直出最终输出'被判违规；3) 推断与证据冲突时，修正方向是回源对齐而非局部打补丁；4) 规则须豁免'确无既有资产/资产已显式废弃/owner 明确要求变更'三种场景，以避免过度应用。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1\"},\"risks\":[\"过度应用风险：盲目复用过时或低质量的既有资产；当 owner 明确要求变更风格（显式意图，T-02 优先）或资产已被显式废弃时，强制复用反而违背意图，规则必须包含显式豁免分支\",\"与核心公理重叠：本原则与 T-01（先建模再变更）、T-02（显式意图优先于推断）、T-03（可观察证据优先）方向重叠，应定位为其在'输出参数复用'场景的操作性细化；下游规则生成须避免与既有公理规则产生冗余或优先级冲突\",\"门控摩擦风险：若门控无差异化设计（对琐碎任务、无既有资产的全新领域也强制扫描确认），会引入不必要摩擦与延迟；门控强度应与任务的参数歧义度和先例可得性成比例\",\"错误提取风险：既有资产与当前任务的上下文差异（如不同剧集采用不同规范）可能导致提取错误规范；当资产上下文与当前任务不匹配或存在多套冲突先例时，应升级为向 owner 确认而非自行择一\"],\"generatedAt\":\"2026-09-01T13:22:10.318Z\"}",
+    "usage": {
+     "input": 1890,
+     "output": 3891,
+     "total": 5781
+    },
+    "latencyMs": 53835,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "f2c7a2d6e54bf396"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788268409354_vau-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1",
+     "principleDraft": {
+      "title": "Assets Before Invention: 既有资产核查与复用优先于自创新方案",
+      "statement": "在存在同类成品资产（既有脚本、代码、成品文件、规范文档）的上下文中创建或修改任何输出之前，必须先通过实际工具调用（如列目录、读取文件）核查相关既有资产，提取其可复用模式与参数规范（如字体、字号、简繁体、标点切分），并以这些证据驱动输出参数与方案选择；仅当核查确认无可复用资产、资产已被明确废弃、或与用户显式指令冲突时才自创新方案，且规范不确定时先向用户确认。当自创方案与既有资产证据或用户纠正发生冲突时，必须立即停止在自创方案上打补丁，回到既有资产重建方案；该前置核查是执行前的流程性步骤，而非依赖自觉的可选项。",
+      "rationale": "根因是 Agent 跳过对既有资产的核查、凭模型推断自创 whisper->SRT->ASS 管线（Agent 自述“想当然地自创了一套方案”），导致繁体、标点切分、字号超标，引发多次返工与脚本执行失败。既有成品资产把 owner 真实意图具象化为可观察证据，从既有资产推导参数可从源头消除推断偏差；把“先核查”固化为执行前的强制动作，并在首次纠正时立即回查既有资产而非继续修补，可在偏差扩大前止损，将好习惯从依赖自觉升级为流程。",
+      "applicability": [
+       "在已有同类成品资产（脚本、代码、成品文件、规范文档）的工作区内创建或修改交付物输出的任务，例如为新一集制作字幕时核对 Episode 001 的既有管线与规范",
+       "输出参数存在多种合理取值（字体、字号、简繁体、标点切分、文件格式等）且存在可查先例的场景",
+       "用户对输出格式或参数提出纠正后的处理：暂停自创方案、回查既有资产重建方案",
+       "需要编写/执行脚本且工作区内已存在同类脚本或管线，可复用其路径、结构与调用方式的场景"
+      ],
+      "antiPatterns": [
+       "未扫描或读取工作区内既有脚本/代码/输出规范，即自创全新管线或方案（如自建 whisper->SRT->ASS 而无视 Episode 001 既有流程）",
+       "输出参数（字体、字号、简繁体、标点切分等）取自模型推断的偏好，而非从既有成品文件或用户显式指令中提取",
+       "收到用户首次纠正（如繁体、标点问题）后仍继续在自创方案上打补丁，不回查既有资产",
+       "把资产核查当作“本打算做”的可选步骤，轨迹中没有任何先于文件创建/修改的核查工具调用",
+       "在 owner 显式要求改变方案/风格、既有资产已明确废弃、或资产上下文与当前任务不符（如不同剧集规范不同）时，未经确认直接套用既有资产规范"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望 Agent 在制作新的输出（如新一集字幕）之前，先核查并复用 Episode 001 等既有成品资产的脚本与输出规范来设定参数和方案，而不是凭模型推断自创管线导致繁体、标点切分、字号超标等反复返工。",
+      "targetBehavior": "在合规轨迹中可观察到：任何文件创建/修改之前先出现列目录/读取文件等核查工具调用，并给出从既有资产提取的关键规范（字体、字号、简繁体、标点切分等）作为输出参数依据；参数无法从资产或显式指令确定时先向用户确认；收到用户纠正时暂停当前方案并回查既有资产。",
+      "forbiddenBehavior": "在未核查既有资产的情况下自创新管线/方案并按模型推断设定输出参数，以及被用户纠正后继续在自创方案上打补丁而不回查既有资产。",
+      "evidenceSource": "Pain manual_1788268409354_vautfk3l（score 75 severe）：Agent 未核对 Episode 001 既有脚本/代码/输出规范即自创 whisper->SRT->ASS 管线，导致繁体、标点切分、字号超标，用户多次纠正；Agent 自认“没有先仔细看第一集的脚本和代码”；并伴生 FileNotFoundError、PowerShell ParserError、Python SyntaxError 等执行失败。诊断 diagnosis_manual_1788268409354_vautfk3l 判定违反 T-01/T-02，根因为 People 类核查盲区叠加缺少执行前强制核查门控。",
+      "validationExpectation": "评估者应确认派生规则同时满足：1) 前置核查以实际工具调用（列目录/读文件）发生在任何文件创建或修改之前；2) 输出参数必须可溯源到既有资产或用户显式指令，无来源即先确认；3) 用户纠正触发“回查既有资产”而非继续修补；4) 规则保留例外——owner 显式要求新方案、资产已废弃或上下文不符时不强制复用。若某项修改与以上任一点相矛盾（例如允许凭推断设定参数、或在纠正后允许继续打补丁），应被标记拒绝而非采纳。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1"
+     },
+     "risks": [
+      "过度应用可能导致盲目复用过时或低质量的既有资产；当 owner 显式要求改变风格或方案时强制复用旧规范会违背 T-02（显式意图优先于推断），规则必须保留该例外",
+      "与 T-01（先建模再变更）、T-02（显式意图优先）、T-03（可观察证据优先）方向重叠，本原则应作为三者在“既有资产核查”场景下的操作性细化而非替代；规则生成时须避免与既有公理规则冗余或产生优先级冲突",
+      "前置门控若不做差异化设计（对确无既有资产的全新领域或琐碎任务也强制扫描确认），会引入不必要的摩擦与延迟，触发条件应限定在存在匹配资产可能的文件创建/修改场景",
+      "既有资产与当前任务的上下文差异（如不同剧集采用不同规范）可能导致错误提取规范，需辅以 owner 确认作为兜底",
+      "诊断证据有限（trace 不可用、仅 2 个会话条目且内容为空、部分行为证据来自 agent 自我陈述、诊断 confidence 0.62），原则的行为普适性未经更大样本验证，派生规则应限定在本诊断刻画的失败族内"
+     ],
+     "generatedAt": "2026-09-01T13:26:08.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788268409354_vau-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1\",\"principleDraft\":{\"title\":\"Assets Before Invention: 既有资产核查与复用优先于自创新方案\",\"statement\":\"在存在同类成品资产（既有脚本、代码、成品文件、规范文档）的上下文中创建或修改任何输出之前，必须先通过实际工具调用（如列目录、读取文件）核查相关既有资产，提取其可复用模式与参数规范（如字体、字号、简繁体、标点切分），并以这些证据驱动输出参数与方案选择；仅当核查确认无可复用资产、资产已被明确废弃、或与用户显式指令冲突时才自创新方案，且规范不确定时先向用户确认。当自创方案与既有资产证据或用户纠正发生冲突时，必须立即停止在自创方案上打补丁，回到既有资产重建方案；该前置核查是执行前的流程性步骤，而非依赖自觉的可选项。\",\"rationale\":\"根因是 Agent 跳过对既有资产的核查、凭模型推断自创 whisper->SRT->ASS 管线（Agent 自述“想当然地自创了一套方案”），导致繁体、标点切分、字号超标，引发多次返工与脚本执行失败。既有成品资产把 owner 真实意图具象化为可观察证据，从既有资产推导参数可从源头消除推断偏差；把“先核查”固化为执行前的强制动作，并在首次纠正时立即回查既有资产而非继续修补，可在偏差扩大前止损，将好习惯从依赖自觉升级为流程。\",\"applicability\":[\"在已有同类成品资产（脚本、代码、成品文件、规范文档）的工作区内创建或修改交付物输出的任务，例如为新一集制作字幕时核对 Episode 001 的既有管线与规范\",\"输出参数存在多种合理取值（字体、字号、简繁体、标点切分、文件格式等）且存在可查先例的场景\",\"用户对输出格式或参数提出纠正后的处理：暂停自创方案、回查既有资产重建方案\",\"需要编写/执行脚本且工作区内已存在同类脚本或管线，可复用其路径、结构与调用方式的场景\"],\"antiPatterns\":[\"未扫描或读取工作区内既有脚本/代码/输出规范，即自创全新管线或方案（如自建 whisper->SRT->ASS 而无视 Episode 001 既有流程）\",\"输出参数（字体、字号、简繁体、标点切分等）取自模型推断的偏好，而非从既有成品文件或用户显式指令中提取\",\"收到用户首次纠正（如繁体、标点问题）后仍继续在自创方案上打补丁，不回查既有资产\",\"把资产核查当作“本打算做”的可选步骤，轨迹中没有任何先于文件创建/修改的核查工具调用\",\"在 owner 显式要求改变方案/风格、既有资产已明确废弃、或资产上下文与当前任务不符（如不同剧集规范不同）时，未经确认直接套用既有资产规范\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"Owner 希望 Agent 在制作新的输出（如新一集字幕）之前，先核查并复用 Episode 001 等既有成品资产的脚本与输出规范来设定参数和方案，而不是凭模型推断自创管线导致繁体、标点切分、字号超标等反复返工。\",\"targetBehavior\":\"在合规轨迹中可观察到：任何文件创建/修改之前先出现列目录/读取文件等核查工具调用，并给出从既有资产提取的关键规范（字体、字号、简繁体、标点切分等）作为输出参数依据；参数无法从资产或显式指令确定时先向用户确认；收到用户纠正时暂停当前方案并回查既有资产。\",\"forbiddenBehavior\":\"在未核查既有资产的情况下自创新管线/方案并按模型推断设定输出参数，以及被用户纠正后继续在自创方案上打补丁而不回查既有资产。\",\"evidenceSource\":\"Pain manual_1788268409354_vautfk3l（score 75 severe）：Agent 未核对 Episode 001 既有脚本/代码/输出规范即自创 whisper->SRT->ASS 管线，导致繁体、标点切分、字号超标，用户多次纠正；Agent 自认“没有先仔细看第一集的脚本和代码”；并伴生 FileNotFoundError、PowerShell ParserError、Python SyntaxError 等执行失败。诊断 diagnosis_manual_1788268409354_vautfk3l 判定违反 T-01/T-02，根因为 People 类核查盲区叠加缺少执行前强制核查门控。\",\"validationExpectation\":\"评估者应确认派生规则同时满足：1) 前置核查以实际工具调用（列目录/读文件）发生在任何文件创建或修改之前；2) 输出参数必须可溯源到既有资产或用户显式指令，无来源即先确认；3) 用户纠正触发“回查既有资产”而非继续修补；4) 规则保留例外——owner 显式要求新方案、资产已废弃或上下文不符时不强制复用。若某项修改与以上任一点相矛盾（例如允许凭推断设定参数、或在纠正后允许继续打补丁），应被标记拒绝而非采纳。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1\"},\"risks\":[\"过度应用可能导致盲目复用过时或低质量的既有资产；当 owner 显式要求改变风格或方案时强制复用旧规范会违背 T-02（显式意图优先于推断），规则必须保留该例外\",\"与 T-01（先建模再变更）、T-02（显式意图优先）、T-03（可观察证据优先）方向重叠，本原则应作为三者在“既有资产核查”场景下的操作性细化而非替代；规则生成时须避免与既有公理规则冗余或产生优先级冲突\",\"前置门控若不做差异化设计（对确无既有资产的全新领域或琐碎任务也强制扫描确认），会引入不必要的摩擦与延迟，触发条件应限定在存在匹配资产可能的文件创建/修改场景\",\"既有资产与当前任务的上下文差异（如不同剧集采用不同规范）可能导致错误提取规范，需辅以 owner 确认作为兜底\",\"诊断证据有限（trace 不可用、仅 2 个会话条目且内容为空、部分行为证据来自 agent 自我陈述、诊断 confidence 0.62），原则的行为普适性未经更大样本验证，派生规则应限定在本诊断刻画的失败族内\"],\"generatedAt\":\"2026-09-01T13:26:08.000Z\"}",
+    "usage": {
+     "input": 4195,
+     "output": 7248,
+     "total": 11443
+    },
+    "latencyMs": 98436,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "948d14a37dc0377f"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788268409354_vau",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788268409354_vau-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "未先核查 Episode 001 的既有脚本、代码与输出规范，就直接自创 whisper->SRT->ASS 字幕管线",
+       "betterDecision": "在设计任何字幕方案前，先扫描目标目录并读取 Episode 001 的既有脚本/代码/成品字幕，提取其语言（简体）、标点切分、字号等规范，优先复用既有管线与模式",
+       "rationale": "既有资产是已验证的事实来源，复用可从源头避免繁体、标点切分、字号超标等返工，并直接对齐 Owner 的真实意图（与第一集保持一致）",
+       "confidence": 0.95,
+       "riskLevel": "low",
+       "strategicPerspective": "reuse_existing_assets_first",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "基于模型自身推断的偏好（语言变体、断句规则、字号）生成字幕，而不是基于可观察证据确认输出规范",
+       "betterDecision": "输出规范存在不确定性时，先读取第一集成品的实际字幕文件或直接向 Owner 确认关键格式参数，确认无误后再开始批量生成",
+       "rationale": "显式的既有输出与 Owner 确认优先于推断偏好，可消除后续多轮人工纠正的沟通成本",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "confirm_spec_before_generation",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "在未确认工作目录与目标路径是否存在的情况下直接执行文件操作，导致 FileNotFoundError 等环境类失败",
+       "betterDecision": "任何文件创建/修改前，先调用 list_files 或目录扫描工具确认当前工作目录、路径结构与既有资产分布，再决定写入位置",
+       "rationale": "先观察环境状态再行动可将环境类失败消解在执行之前，而不是依赖报错试错来发现路径问题",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "observe_environment_before_acting",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "一次性搭建整条管线并批量产出全部字幕，格式偏差（繁体、标点切分、字号超标）直到 Owner 审查阶段才暴露",
+       "betterDecision": "先产出小样本输出（如前几分钟的字幕），与 Episode 001 规范逐项比对并请 Owner 确认后，再进行全量生成",
+       "rationale": "小步、可逆的交付能在偏差扩散到全量产物之前捕获错误，避免整批返工并降低纠正成本",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "incremental_reversible_delivery",
+       "sourcePrincipleId": "T-04"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "提交未经校验的脚本直接执行，连续触发 PowerShell ParserError 与 Python SyntaxError 等低级执行失败",
+       "betterDecision": "执行前先做语法校验或小规模 dry-run，确认脚本可运行且输出符合预期后，再作用于真实资产，并对每步执行结果进行验证",
+       "rationale": "执行失败消耗了大量来回轮次；先验证脚本正确性并核对执行结果可显著降低试错成本，防止把未验证的执行当作成功",
+       "confidence": 0.82,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_and_after_execution",
+       "sourcePrincipleId": "T-07"
+      }
+     ],
+     "sourcePainId": null,
+     "contextRefs": [
+      "artifact://0b740830-6722-4781-8d8c-ff3feceb50b0"
+     ],
+     "generatedAt": "2026-09-01T13:14:12.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788268409354_vau-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"未先核查 Episode 001 的既有脚本、代码与输出规范，就直接自创 whisper->SRT->ASS 字幕管线\",\"betterDecision\":\"在设计任何字幕方案前，先扫描目标目录并读取 Episode 001 的既有脚本/代码/成品字幕，提取其语言（简体）、标点切分、字号等规范，优先复用既有管线与模式\",\"rationale\":\"既有资产是已验证的事实来源，复用可从源头避免繁体、标点切分、字号超标等返工，并直接对齐 Owner 的真实意图（与第一集保持一致）\",\"confidence\":0.95,\"riskLevel\":\"low\",\"strategicPerspective\":\"reuse_existing_assets_first\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"基于模型自身推断的偏好（语言变体、断句规则、字号）生成字幕，而不是基于可观察证据确认输出规范\",\"betterDecision\":\"输出规范存在不确定性时，先读取第一集成品的实际字幕文件或直接向 Owner 确认关键格式参数，确认无误后再开始批量生成\",\"rationale\":\"显式的既有输出与 Owner 确认优先于推断偏好，可消除后续多轮人工纠正的沟通成本\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"confirm_spec_before_generation\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":2,\"badDecision\":\"在未确认工作目录与目标路径是否存在的情况下直接执行文件操作，导致 FileNotFoundError 等环境类失败\",\"betterDecision\":\"任何文件创建/修改前，先调用 list_files 或目录扫描工具确认当前工作目录、路径结构与既有资产分布，再决定写入位置\",\"rationale\":\"先观察环境状态再行动可将环境类失败消解在执行之前，而不是依赖报错试错来发现路径问题\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"observe_environment_before_acting\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":3,\"badDecision\":\"一次性搭建整条管线并批量产出全部字幕，格式偏差（繁体、标点切分、字号超标）直到 Owner 审查阶段才暴露\",\"betterDecision\":\"先产出小样本输出（如前几分钟的字幕），与 Episode 001 规范逐项比对并请 Owner 确认后，再进行全量生成\",\"rationale\":\"小步、可逆的交付能在偏差扩散到全量产物之前捕获错误，避免整批返工并降低纠正成本\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"incremental_reversible_delivery\",\"sourcePrincipleId\":\"T-04\"},{\"candidateIndex\":4,\"badDecision\":\"提交未经校验的脚本直接执行，连续触发 PowerShell ParserError 与 Python SyntaxError 等低级执行失败\",\"betterDecision\":\"执行前先做语法校验或小规模 dry-run，确认脚本可运行且输出符合预期后，再作用于真实资产，并对每步执行结果进行验证\",\"rationale\":\"执行失败消耗了大量来回轮次；先验证脚本正确性并核对执行结果可显著降低试错成本，防止把未验证的执行当作成功\",\"confidence\":0.82,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_and_after_execution\",\"sourcePrincipleId\":\"T-07\"}],\"sourcePainId\":null,\"contextRefs\":[\"artifact://0b740830-6722-4781-8d8c-ff3feceb50b0\"],\"generatedAt\":\"2026-09-01T13:14:12.000Z\"}",
+    "usage": {
+     "input": 2201,
+     "output": 3169,
+     "total": 5370
+    },
+    "latencyMs": 44488,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3b039ec4dd560b72"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788268409354_vau-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r2-run1",
+     "thesis": "Every failure in this trace shares one root: the agent generated output from inferred assumptions when ground truth already existed in the environment. Prior validated artifacts—an existing episode's finished subtitles, its scripts, its pipeline—are not merely context, they are the specification. When acting in an environment that contains prior validated examples, observation and reuse must precede invention, uncertain parameters must be resolved against observable evidence or explicit owner confirmation, and generation must proceed through small reversible samples validated against the spec before any batch production. Errors caught on a single small sample cost minutes; the same errors discovered after full-batch production cost rounds of rework and owner correction.",
+     "principleCandidate": {
+      "title": "Treat existing validated artifacts as the spec; validate small samples before batch production",
+      "rationale": "The root cause across all five candidates is unverified assumption substituting for observable ground truth. Language variant, punctuation rules, font size, directory structure, and script syntax were all discoverable before action—by reading existing outputs, scanning the environment, or dry-running—yet each was assumed instead, and the resulting deviations propagated through the entire batch before discovery. Converting unknowns into knowns via existing assets, then front-loading error discovery onto a small reversible sample, collapses the cost of correction from full-batch rework to a single iteration.",
+      "scope": "Applies whenever producing artifacts at scale in an environment that already contains prior validated examples, existing pipelines, or established conventions—subtitle/media processing, document or code generation, migrations, templated outputs, and any batch operation where a reference implementation or finished exemplar exists. Especially relevant when output format details matter to the owner and are easy to get subtly wrong.",
+      "confidence": 0.88
+     },
+     "risks": [
+      "This principle is largely a composite of existing core axioms—T-01 (model the system before changes), T-03 (use observable evidence), T-04 (prefer reversible actions), and T-07 (verify after acting)—and may not add net-new guidance beyond restating them for generation pipelines",
+      "Over-indexing on existing artifacts can propagate outdated or non-representative conventions if the prior exemplar is itself flawed, deprecated, or an exception rather than the rule",
+      "Requiring owner confirmation of every format parameter can stall progress where reasonable defaults plus fast small-sample feedback would converge faster",
+      "Small-sample validation may miss errors that only emerge at scale—edge cases appearing late in the data, encoding anomalies, or resource exhaustion—creating false confidence in the validated prefix"
+     ],
+     "generatedAt": "2026-09-01T13:17:35.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788268409354_vau-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r2-run1\",\"thesis\":\"Every failure in this trace shares one root: the agent generated output from inferred assumptions when ground truth already existed in the environment. Prior validated artifacts—an existing episode's finished subtitles, its scripts, its pipeline—are not merely context, they are the specification. When acting in an environment that contains prior validated examples, observation and reuse must precede invention, uncertain parameters must be resolved against observable evidence or explicit owner confirmation, and generation must proceed through small reversible samples validated against the spec before any batch production. Errors caught on a single small sample cost minutes; the same errors discovered after full-batch production cost rounds of rework and owner correction.\",\"principleCandidate\":{\"title\":\"Treat existing validated artifacts as the spec; validate small samples before batch production\",\"rationale\":\"The root cause across all five candidates is unverified assumption substituting for observable ground truth. Language variant, punctuation rules, font size, directory structure, and script syntax were all discoverable before action—by reading existing outputs, scanning the environment, or dry-running—yet each was assumed instead, and the resulting deviations propagated through the entire batch before discovery. Converting unknowns into knowns via existing assets, then front-loading error discovery onto a small reversible sample, collapses the cost of correction from full-batch rework to a single iteration.\",\"scope\":\"Applies whenever producing artifacts at scale in an environment that already contains prior validated examples, existing pipelines, or established conventions—subtitle/media processing, document or code generation, migrations, templated outputs, and any batch operation where a reference implementation or finished exemplar exists. Especially relevant when output format details matter to the owner and are easy to get subtly wrong.\",\"confidence\":0.88},\"risks\":[\"This principle is largely a composite of existing core axioms—T-01 (model the system before changes), T-03 (use observable evidence), T-04 (prefer reversible actions), and T-07 (verify after acting)—and may not add net-new guidance beyond restating them for generation pipelines\",\"Over-indexing on existing artifacts can propagate outdated or non-representative conventions if the prior exemplar is itself flawed, deprecated, or an exception rather than the rule\",\"Requiring owner confirmation of every format parameter can stall progress where reasonable defaults plus fast small-sample feedback would converge faster\",\"Small-sample validation may miss errors that only emerge at scale—edge cases appearing late in the data, encoding anomalies, or resource exhaustion—creating false confidence in the validated prefix\"],\"generatedAt\":\"2026-09-01T13:17:35.000Z\"}",
+    "usage": {
+     "input": 1609,
+     "output": 1564,
+     "total": 3173
+    },
+    "latencyMs": 28286,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6c0776f21a5c9f15"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788268409354_vau-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r2-run1",
+     "principleDraft": {
+      "title": "Treat existing validated artifacts as the spec; validate small samples before batch",
+      "statement": "When the environment contains prior validated artifacts for the task—existing finished outputs, scripts, or pipelines—treat them as the output specification: read them before designing or generating anything, resolve every uncertain format parameter against them (or explicit owner confirmation when they do not disambiguate), reuse their patterns in preference to invented ones, and validate a small reversible sample against that specification before any batch production.",
+      "rationale": "The diagnosed root cause is inferred preference substituting for observable ground truth: the agent built a new whisper->SRT->ASS pipeline without reading Episode 001's existing scripts or finished subtitles, so assumed parameters (traditional-Chinese variant, punctuation splitting, oversized font) propagated through the full batch and surfaced only at owner review, costing multiple correction rounds plus avoidable execution failures (FileNotFoundError, PowerShell ParserError, Python SyntaxError from unverified paths and scripts). Every deviated parameter was discoverable before action by reading existing assets; treating those assets as the spec and front-loading error discovery onto a small validated sample collapses correction cost from full-batch rework to a single iteration.",
+      "applicability": [
+       "Subtitle/media production when a prior episode's finished outputs, scripts, or pipeline already exist in the workspace",
+       "Batch generation, migration, or templated output where a validated exemplar or reference implementation exists (documents, code, config)",
+       "File creation or modification in directories that may already contain matching scripts, code, or convention documents",
+       "Tasks where output format details (language variant, punctuation, typography) matter to the owner and are easy to get subtly wrong"
+      ],
+      "antiPatterns": [
+       "Inventing a new pipeline or output format when a validated exemplar already exists in the environment, without reading it first",
+       "Generating batch output from inferred format preferences (language variant, punctuation rules, font size) instead of the observable exemplar or owner-confirmed parameters",
+       "Producing the full batch before any small sample has been compared against the existing spec or confirmed by the owner",
+       "Executing unverified scripts or writing to unverified paths, relying on runtime errors (FileNotFoundError, ParserError, SyntaxError) to reveal assumptions"
+      ],
+      "confidence": 0.84
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants new episodes' outputs to match Episode 001's existing scripts and finished-output conventions (simplified Chinese, punctuation splitting, font size) instead of the agent inventing its own pipeline, so format deviations never reach full-batch output.",
+      "targetBehavior": "Before generating output, the agent lists and reads the existing exemplar assets, extracts their format parameters and pipeline, reuses them (or confirms deviations with the Owner), then produces a small sample and compares it against the exemplar before batch generation—visible as read/list tool calls preceding creation calls and a sample artifact preceding the full batch.",
+      "forbiddenBehavior": "Designing and batch-generating artifacts from assumed parameters and an invented pipeline without reading the existing validated exemplars, letting inferred preferences substitute for the observable spec until the Owner discovers deviations in the finished batch.",
+      "evidenceSource": "Diagnosis manual_1788268409354_vautfk3l (score-75 severe pain): agent self-admitted it never read Episode 001's script/code and improvised a whisper->SRT->ASS pipeline; owner corrections for traditional Chinese, punctuation splitting, and oversized font surfaced only at review; subsequent FileNotFoundError, PowerShell ParserError, and Python SyntaxError tool failures from unverified paths and scripts.",
+      "validationExpectation": "An evaluator should accept a rule only if it demands reading existing exemplar assets (or owner confirmation) BEFORE generation and sample-vs-spec validation BEFORE full batch; a rule that permits inventing formats when exemplars exist, or that only verifies after full-batch delivery, contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r2-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-01, T-02, T-03, T-04, and T-07: the principle is an operational composite of them, so rule generation should encode its specific mechanics (exemplar-as-spec, sample-before-batch) rather than restate the axioms",
+      "Over-indexing on a prior exemplar can propagate flawed, deprecated, or non-representative conventions if the exemplar is itself an exception rather than the rule",
+      "Requiring owner confirmation for every format parameter can stall progress where reasonable defaults plus fast small-sample feedback would converge faster",
+      "Small-sample validation can miss errors that only emerge at scale (edge cases late in the data, encoding anomalies), creating false confidence in the validated prefix",
+      "Diagnosis confidence was moderate (0.62): the full trace was unavailable and behavior evidence partly comes from agent self-report, so the pattern's stability is not yet confirmed"
+     ],
+     "generatedAt": "2026-09-01T13:24:10.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788268409354_vau-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r2-run1\",\"principleDraft\":{\"title\":\"Treat existing validated artifacts as the spec; validate small samples before batch\",\"statement\":\"When the environment contains prior validated artifacts for the task—existing finished outputs, scripts, or pipelines—treat them as the output specification: read them before designing or generating anything, resolve every uncertain format parameter against them (or explicit owner confirmation when they do not disambiguate), reuse their patterns in preference to invented ones, and validate a small reversible sample against that specification before any batch production.\",\"rationale\":\"The diagnosed root cause is inferred preference substituting for observable ground truth: the agent built a new whisper->SRT->ASS pipeline without reading Episode 001's existing scripts or finished subtitles, so assumed parameters (traditional-Chinese variant, punctuation splitting, oversized font) propagated through the full batch and surfaced only at owner review, costing multiple correction rounds plus avoidable execution failures (FileNotFoundError, PowerShell ParserError, Python SyntaxError from unverified paths and scripts). Every deviated parameter was discoverable before action by reading existing assets; treating those assets as the spec and front-loading error discovery onto a small validated sample collapses correction cost from full-batch rework to a single iteration.\",\"applicability\":[\"Subtitle/media production when a prior episode's finished outputs, scripts, or pipeline already exist in the workspace\",\"Batch generation, migration, or templated output where a validated exemplar or reference implementation exists (documents, code, config)\",\"File creation or modification in directories that may already contain matching scripts, code, or convention documents\",\"Tasks where output format details (language variant, punctuation, typography) matter to the owner and are easy to get subtly wrong\"],\"antiPatterns\":[\"Inventing a new pipeline or output format when a validated exemplar already exists in the environment, without reading it first\",\"Generating batch output from inferred format preferences (language variant, punctuation rules, font size) instead of the observable exemplar or owner-confirmed parameters\",\"Producing the full batch before any small sample has been compared against the existing spec or confirmed by the owner\",\"Executing unverified scripts or writing to unverified paths, relying on runtime errors (FileNotFoundError, ParserError, SyntaxError) to reveal assumptions\"],\"confidence\":0.84},\"intentContract\":{\"ownerIntent\":\"The Owner wants new episodes' outputs to match Episode 001's existing scripts and finished-output conventions (simplified Chinese, punctuation splitting, font size) instead of the agent inventing its own pipeline, so format deviations never reach full-batch output.\",\"targetBehavior\":\"Before generating output, the agent lists and reads the existing exemplar assets, extracts their format parameters and pipeline, reuses them (or confirms deviations with the Owner), then produces a small sample and compares it against the exemplar before batch generation—visible as read/list tool calls preceding creation calls and a sample artifact preceding the full batch.\",\"forbiddenBehavior\":\"Designing and batch-generating artifacts from assumed parameters and an invented pipeline without reading the existing validated exemplars, letting inferred preferences substitute for the observable spec until the Owner discovers deviations in the finished batch.\",\"evidenceSource\":\"Diagnosis manual_1788268409354_vautfk3l (score-75 severe pain): agent self-admitted it never read Episode 001's script/code and improvised a whisper->SRT->ASS pipeline; owner corrections for traditional Chinese, punctuation splitting, and oversized font surfaced only at review; subsequent FileNotFoundError, PowerShell ParserError, and Python SyntaxError tool failures from unverified paths and scripts.\",\"validationExpectation\":\"An evaluator should accept a rule only if it demands reading existing exemplar assets (or owner confirmation) BEFORE generation and sample-vs-spec validation BEFORE full batch; a rule that permits inventing formats when exemplars exist, or that only verifies after full-batch delivery, contradicts this intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r2-run1\"},\"risks\":[\"Substantial overlap with core axioms T-01, T-02, T-03, T-04, and T-07: the principle is an operational composite of them, so rule generation should encode its specific mechanics (exemplar-as-spec, sample-before-batch) rather than restate the axioms\",\"Over-indexing on a prior exemplar can propagate flawed, deprecated, or non-representative conventions if the exemplar is itself an exception rather than the rule\",\"Requiring owner confirmation for every format parameter can stall progress where reasonable defaults plus fast small-sample feedback would converge faster\",\"Small-sample validation can miss errors that only emerge at scale (edge cases late in the data, encoding anomalies), creating false confidence in the validated prefix\",\"Diagnosis confidence was moderate (0.62): the full trace was unavailable and behavior evidence partly comes from agent self-report, so the pattern's stability is not yet confirmed\"],\"generatedAt\":\"2026-09-01T13:24:10.000Z\"}",
+    "usage": {
+     "input": 4338,
+     "output": 5850,
+     "total": 10188
+    },
+    "latencyMs": 74115,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "f86585b185ac48fd"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788268409354_vau-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r2-run1",
+     "principleDraft": {
+      "title": "Use Existing Validated Artifacts as Spec; Validate Small Samples Before Batch Production",
+      "statement": "When generating artifacts in an environment that contains prior validated examples, existing pipelines, or established conventions, treat those artifacts as the binding specification: extract format, structure, and parameter rules from them before generating anything new; resolve any parameter that cannot be determined from observable evidence through explicit owner confirmation; and produce a single small reversible sample that is verified against the reference spec (including dry-runs or syntax checks) before any batch production begins. Batch output is permitted only after the sample is verified.",
+      "rationale": "The root cause across every diagnosed failure is unverified assumption substituting for observable ground truth. Parameters such as language variant, punctuation rules, font size, directory structure, and script syntax were all discoverable before action by reading existing outputs, scanning the environment, or dry-running, yet each was assumed instead, and each deviation propagated through the entire batch before discovery. Converting unknowns into knowns via existing assets, then front-loading error discovery onto a small reversible sample, collapses correction cost from full-batch rework rounds to a single small iteration.",
+      "applicability": [
+       "Subtitle and media processing pipelines where finished episodes, scripts, and working pipeline code already exist in the environment",
+       "Batch generation of templated documents, code, or configuration where a reference implementation or finished exemplar is present",
+       "Migrations and format conversions where target-format details are observable from existing validated outputs",
+       "Any batch operation where output format details matter to the owner and are easy to get subtly wrong"
+      ],
+      "antiPatterns": [
+       "Inferring format parameters (language variant, punctuation, font size, directory layout, syntax) from assumptions when a validated exemplar exists in the environment",
+       "Running full-batch generation before any single-item sample has been validated against the reference spec",
+       "Inventing new conventions, scripts, or pipelines when a working prior pipeline can be inspected and reused",
+       "Treating prior validated artifacts as optional context rather than the specification to match",
+       "Guessing parameters that are not determinable from observation instead of asking the owner for explicit confirmation"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants batch outputs to match the conventions of existing validated artifacts exactly, with any format error surfaced by a small validated sample instead of being discovered across an entire finished batch that then requires rework.",
+      "targetBehavior": "Before generating at scale, the agent visibly reads existing validated artifacts and pipelines to extract format and parameter rules, asks the owner to confirm parameters that observation cannot resolve, produces one small sample, verifies it against the reference (including dry-run or syntax checks), and only then executes batch production — the tool trajectory shows a read-then-confirm-then-sample-then-batch ordering.",
+      "forbiddenBehavior": "Generating full batches from inferred format assumptions — skipping inspection of existing exemplars, leaving unobservable parameters unresolved or guessed, and producing batch output with no small sample validated against the spec first.",
+      "evidenceSource": "The diagnosed trace in which five separate unverified assumptions (language variant, punctuation rules, font size, directory structure, script syntax) each propagated through an entire batch before discovery, forcing rounds of rework and owner correction, despite the correct answers being observable beforehand in existing episodes' finished subtitles, scripts, and pipeline.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it (a) mandates inspecting existing validated artifacts before generation begins, (b) requires explicit owner confirmation for parameters not determinable from evidence, (c) requires one small reversible sample verified against the spec before batch production, and (d) forbids batch output prior to sample verification; any change that permits batch generation on inferred parameters contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r2-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-01, T-03, T-04, T-06, and T-07: this principle mainly composes them into an operational ordering for generation pipelines and may not add net-new guidance beyond the axioms",
+      "Over-indexing on existing artifacts can propagate flawed, deprecated, or exceptional conventions if the chosen exemplar is itself unrepresentative",
+      "Requiring owner confirmation of every uncertain parameter can stall progress where reasonable defaults plus fast small-sample feedback would converge faster",
+      "Small-sample validation can create false confidence for errors that only emerge at scale, such as late edge cases, encoding anomalies, or resource exhaustion",
+      "Downstream rule generation may overfit to subtitle/media specifics; rules must remain generic to any batch generation where an exemplar exists"
+     ],
+     "generatedAt": "2026-09-01T13:26:48.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788268409354_vau-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Use Existing Validated Artifacts as Spec; Validate Small Samples Before Batch Production\",\n    \"statement\": \"When generating artifacts in an environment that contains prior validated examples, existing pipelines, or established conventions, treat those artifacts as the binding specification: extract format, structure, and parameter rules from them before generating anything new; resolve any parameter that cannot be determined from observable evidence through explicit owner confirmation; and produce a single small reversible sample that is verified against the reference spec (including dry-runs or syntax checks) before any batch production begins. Batch output is permitted only after the sample is verified.\",\n    \"rationale\": \"The root cause across every diagnosed failure is unverified assumption substituting for observable ground truth. Parameters such as language variant, punctuation rules, font size, directory structure, and script syntax were all discoverable before action by reading existing outputs, scanning the environment, or dry-running, yet each was assumed instead, and each deviation propagated through the entire batch before discovery. Converting unknowns into knowns via existing assets, then front-loading error discovery onto a small reversible sample, collapses correction cost from full-batch rework rounds to a single small iteration.\",\n    \"applicability\": [\n      \"Subtitle and media processing pipelines where finished episodes, scripts, and working pipeline code already exist in the environment\",\n      \"Batch generation of templated documents, code, or configuration where a reference implementation or finished exemplar is present\",\n      \"Migrations and format conversions where target-format details are observable from existing validated outputs\",\n      \"Any batch operation where output format details matter to the owner and are easy to get subtly wrong\"\n    ],\n    \"antiPatterns\": [\n      \"Inferring format parameters (language variant, punctuation, font size, directory layout, syntax) from assumptions when a validated exemplar exists in the environment\",\n      \"Running full-batch generation before any single-item sample has been validated against the reference spec\",\n      \"Inventing new conventions, scripts, or pipelines when a working prior pipeline can be inspected and reused\",\n      \"Treating prior validated artifacts as optional context rather than the specification to match\",\n      \"Guessing parameters that are not determinable from observation instead of asking the owner for explicit confirmation\"\n    ],\n    \"confidence\": 0.82\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants batch outputs to match the conventions of existing validated artifacts exactly, with any format error surfaced by a small validated sample instead of being discovered across an entire finished batch that then requires rework.\",\n    \"targetBehavior\": \"Before generating at scale, the agent visibly reads existing validated artifacts and pipelines to extract format and parameter rules, asks the owner to confirm parameters that observation cannot resolve, produces one small sample, verifies it against the reference (including dry-run or syntax checks), and only then executes batch production — the tool trajectory shows a read-then-confirm-then-sample-then-batch ordering.\",\n    \"forbiddenBehavior\": \"Generating full batches from inferred format assumptions — skipping inspection of existing exemplars, leaving unobservable parameters unresolved or guessed, and producing batch output with no small sample validated against the spec first.\",\n    \"evidenceSource\": \"The diagnosed trace in which five separate unverified assumptions (language variant, punctuation rules, font size, directory structure, script syntax) each propagated through an entire batch before discovery, forcing rounds of rework and owner correction, despite the correct answers being observable beforehand in existing episodes' finished subtitles, scripts, and pipeline.\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if it (a) mandates inspecting existing validated artifacts before generation begins, (b) requires explicit owner confirmation for parameters not determinable from evidence, (c) requires one small reversible sample verified against the spec before batch production, and (d) forbids batch output prior to sample verification; any change that permits batch generation on inferred parameters contradicts this intent and must be flagged.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r2-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axioms T-01, T-03, T-04, T-06, and T-07: this principle mainly composes them into an operational ordering for generation pipelines and may not add net-new guidance beyond the axioms\",\n    \"Over-indexing on existing artifacts can propagate flawed, deprecated, or exceptional conventions if the chosen exemplar is itself unrepresentative\",\n    \"Requiring owner confirmation of every uncertain parameter can stall progress where reasonable defaults plus fast small-sample feedback would converge faster\",\n    \"Small-sample validation can create false confidence for errors that only emerge at scale, such as late edge cases, encoding anomalies, or resource exhaustion\",\n    \"Downstream rule generation may overfit to subtitle/media specifics; rules must remain generic to any batch generation where an exemplar exists\"\n  ],\n  \"generatedAt\": \"2026-09-01T13:26:48.000Z\"\n}",
+    "usage": {
+     "input": 1988,
+     "output": 3070,
+     "total": 5058
+    },
+    "latencyMs": 38863,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e8a1cff009825121"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788268409354_vau",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788268409354_vau-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "未先核查 Episode 001 的既有脚本、代码与输出规范，直接自创 whisper->SRT->ASS 字幕管线",
+       "betterDecision": "开始字幕制作前，先扫描工作目录并读取 Episode 001 的既有脚本/代码/输出规范，复用其已验证的管线与格式约定；仅在确认无既有资产可复用后才自创方案",
+       "rationale": "既有资产承载了已验证的格式要求（简体、标点切分、字号限制），先核查再动手可从源头避免繁体输出、切分错误与字号超标，消除大量用户纠正往返",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "reuse_existing_assets_first",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "基于模型自行推断的偏好（语言变体、标点处理、字号）设计字幕规格，而非以 Episode 001 的实际输出为基准",
+       "betterDecision": "从 Episode 001 既有产物中提取硬性规格（简体中文、标点切分规则、字号上限）作为显式约束，任何偏离既有规格的选择都先向 Owner 确认后再执行",
+       "rationale": "显性证据（既有产物与用户已确认的规范）优先于模型推断的偏好，能确保行动对齐 Owner 的真实意图而非想象中的意图",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_over_inference",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "未确认目标路径与工作目录结构就执行文件操作，导致 FileNotFoundError",
+       "betterDecision": "执行任何文件读写前，先用 list_files/read_file 等工具确认目录结构与目标路径存在，再执行写入或转换操作",
+       "rationale": "先用可观察证据核实环境状态，可避免路径错误引发的失败重试，减少无效操作和状态污染",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_environment_before_action",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "将带复杂转义的长 PowerShell/Python 脚本直接拼入命令行一次性执行，接连触发 ParserError 与 SyntaxError 反复试错",
+       "betterDecision": "将脚本先写入独立文件并分小步生成，先做语法检查或小样本试运行，验证通过后再全量执行",
+       "rationale": "把复杂脚本工作分解为可独立验证的小步骤，能显著降低语法与转义错误率，并让失败点可快速定位而非整段重写",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "decompose_and_verify_steps",
+       "sourcePrincipleId": "T-09"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "变更流程缺少'执行前强制核对既有资产'的门控，允许 Agent 在零核查状态下直接生成全新方案",
+       "betterDecision": "在文件创建/修改前注入强制性核查门控：必须先扫描既有资产目录，若存在匹配脚本/规范则输出其内容摘要并复用，确认无可复用资产后才允许自创方案",
+       "rationale": "把'先查再建'固化为硬性门控与禁止转换，可系统性防止同类过度工程化错误在后续任务中重演，而非依赖 Agent 自觉",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_by_design",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "contextRefs": [
+      "artifact://0b740830-6722-4781-8d8c-ff3feceb50b0"
+     ],
+     "generatedAt": "2026-09-01T13:25:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788268409354_vau-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"未先核查 Episode 001 的既有脚本、代码与输出规范，直接自创 whisper->SRT->ASS 字幕管线\",\"betterDecision\":\"开始字幕制作前，先扫描工作目录并读取 Episode 001 的既有脚本/代码/输出规范，复用其已验证的管线与格式约定；仅在确认无既有资产可复用后才自创方案\",\"rationale\":\"既有资产承载了已验证的格式要求（简体、标点切分、字号限制），先核查再动手可从源头避免繁体输出、切分错误与字号超标，消除大量用户纠正往返\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"reuse_existing_assets_first\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"基于模型自行推断的偏好（语言变体、标点处理、字号）设计字幕规格，而非以 Episode 001 的实际输出为基准\",\"betterDecision\":\"从 Episode 001 既有产物中提取硬性规格（简体中文、标点切分规则、字号上限）作为显式约束，任何偏离既有规格的选择都先向 Owner 确认后再执行\",\"rationale\":\"显性证据（既有产物与用户已确认的规范）优先于模型推断的偏好，能确保行动对齐 Owner 的真实意图而非想象中的意图\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_over_inference\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":2,\"badDecision\":\"未确认目标路径与工作目录结构就执行文件操作，导致 FileNotFoundError\",\"betterDecision\":\"执行任何文件读写前，先用 list_files/read_file 等工具确认目录结构与目标路径存在，再执行写入或转换操作\",\"rationale\":\"先用可观察证据核实环境状态，可避免路径错误引发的失败重试，减少无效操作和状态污染\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_environment_before_action\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":3,\"badDecision\":\"将带复杂转义的长 PowerShell/Python 脚本直接拼入命令行一次性执行，接连触发 ParserError 与 SyntaxError 反复试错\",\"betterDecision\":\"将脚本先写入独立文件并分小步生成，先做语法检查或小样本试运行，验证通过后再全量执行\",\"rationale\":\"把复杂脚本工作分解为可独立验证的小步骤，能显著降低语法与转义错误率，并让失败点可快速定位而非整段重写\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"decompose_and_verify_steps\",\"sourcePrincipleId\":\"T-09\"},{\"candidateIndex\":4,\"badDecision\":\"变更流程缺少'执行前强制核对既有资产'的门控，允许 Agent 在零核查状态下直接生成全新方案\",\"betterDecision\":\"在文件创建/修改前注入强制性核查门控：必须先扫描既有资产目录，若存在匹配脚本/规范则输出其内容摘要并复用，确认无可复用资产后才允许自创方案\",\"rationale\":\"把'先查再建'固化为硬性门控与禁止转换，可系统性防止同类过度工程化错误在后续任务中重演，而非依赖 Agent 自觉\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_by_design\",\"sourcePrincipleId\":\"T-05\"}],\"contextRefs\":[\"artifact://0b740830-6722-4781-8d8c-ff3feceb50b0\"],\"generatedAt\":\"2026-09-01T13:25:00.000Z\"}",
+    "usage": {
+     "input": 2201,
+     "output": 4019,
+     "total": 6220
+    },
+    "latencyMs": 48634,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "f1817c1fa9aa897f"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788268409354_vau-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r3-run1",
+     "thesis": "行动的正当性源于对现状的先验观察：在生成任何新方案之前，必须先核查并优先复用环境中既有的资产、规范与已验证管线，因为它们编码了 Owner 已确认的真实意图与经过验证的规格；自创方案应是在穷尽复用之后的最后手段，而非默认起点。Dreamer 的五个候选共同揭示：跳过核查直接创造，本质是用模型推断替代可观察证据，必然引发过度工程化、格式偏差与反复纠错的浪费。",
+     "principleCandidate": {
+      "title": "先察后建：创建新工件前必须核查并优先复用既有资产与已验证规范",
+      "rationale": "既有资产是已验证意图与规格的物质载体（如 Episode 001 承载的简体、标点切分、字号上限）。跳过核查直接自创方案，等于以推断替代证据、以想象意图替代真实意图，导致 FileNotFoundError、格式偏差、转义错误等系统性失败。将'先查再建'固化为强制前置步骤，可从源头消除过度工程化与纠错往返，而非依赖事后补救。",
+      "scope": "适用于任何涉及创建新工件的任务——脚本、配置、格式化输出、流程管线、方案设计——尤其当工作目录、任务历史或同级产物中可能存在同类既有资产或已确认规范时。当核查确认环境为空白（无可复用资产）时，本原则自然退化为正常创建流程；当既有资产与 Owner 显式指令冲突时，以显式指令为准。",
+      "confidence": 0.85
+     },
+     "risks": [
+      "与 T-01（先建系统模型）、T-03（以可观察证据为准）、T-06（最简干预）存在部分语义重叠，可能被视为这三者的派生组合而非独立新增原则，需在评审时裁决其增量价值",
+      "过度强调复用可能造成路径依赖：当既有资产本身有缺陷、过时或不适用于新任务时，复用会固化坏设计，抑制必要的重新设计",
+      "核查既有资产会消耗时间与上下文窗口，在明确空白或简单的一次性任务中可能引入不必要的开销，应保留'快速确认无可复用资产即放行'的轻量路径",
+      "既有资产的规格可能已过时或与 Owner 当前意图冲突，复用时必须让 Owner 的显式指令与最新约束（T-02）优先于历史产物中隐含的规格"
+     ],
+     "generatedAt": "2026-09-01T13:27:12.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788268409354_vau-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r3-run1\",\"thesis\":\"行动的正当性源于对现状的先验观察：在生成任何新方案之前，必须先核查并优先复用环境中既有的资产、规范与已验证管线，因为它们编码了 Owner 已确认的真实意图与经过验证的规格；自创方案应是在穷尽复用之后的最后手段，而非默认起点。Dreamer 的五个候选共同揭示：跳过核查直接创造，本质是用模型推断替代可观察证据，必然引发过度工程化、格式偏差与反复纠错的浪费。\",\"principleCandidate\":{\"title\":\"先察后建：创建新工件前必须核查并优先复用既有资产与已验证规范\",\"rationale\":\"既有资产是已验证意图与规格的物质载体（如 Episode 001 承载的简体、标点切分、字号上限）。跳过核查直接自创方案，等于以推断替代证据、以想象意图替代真实意图，导致 FileNotFoundError、格式偏差、转义错误等系统性失败。将'先查再建'固化为强制前置步骤，可从源头消除过度工程化与纠错往返，而非依赖事后补救。\",\"scope\":\"适用于任何涉及创建新工件的任务——脚本、配置、格式化输出、流程管线、方案设计——尤其当工作目录、任务历史或同级产物中可能存在同类既有资产或已确认规范时。当核查确认环境为空白（无可复用资产）时，本原则自然退化为正常创建流程；当既有资产与 Owner 显式指令冲突时，以显式指令为准。\",\"confidence\":0.85},\"risks\":[\"与 T-01（先建系统模型）、T-03（以可观察证据为准）、T-06（最简干预）存在部分语义重叠，可能被视为这三者的派生组合而非独立新增原则，需在评审时裁决其增量价值\",\"过度强调复用可能造成路径依赖：当既有资产本身有缺陷、过时或不适用于新任务时，复用会固化坏设计，抑制必要的重新设计\",\"核查既有资产会消耗时间与上下文窗口，在明确空白或简单的一次性任务中可能引入不必要的开销，应保留'快速确认无可复用资产即放行'的轻量路径\",\"既有资产的规格可能已过时或与 Owner 当前意图冲突，复用时必须让 Owner 的显式指令与最新约束（T-02）优先于历史产物中隐含的规格\"],\"generatedAt\":\"2026-09-01T13:27:12.000Z\"}",
+    "usage": {
+     "input": 1623,
+     "output": 1684,
+     "total": 3307
+    },
+    "latencyMs": 26201,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6490f29902898230"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788268409354_vau-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r3-run1",
+     "principleDraft": {
+      "title": "先察后建：创建新工件前必先核查并优先复用既有资产与已验证规范",
+      "statement": "在创建任何新工件（脚本、配置、格式化输出、管线、方案设计）之前，必须先核查工作目录、任务历史与同级产物中是否存在同类既有资产、已确认规范或已验证管线；若存在且与 Owner 显式指令不冲突，必须优先复用或适配它们；只有当核查确认无可复用资产，或既有资产与 Owner 显式指令冲突时，才从零创建新方案。",
+      "rationale": "既有资产是 Owner 已确认意图与已验证规格的物质载体（如 Episode 001 承载的简体要求、标点切分规则、字号上限）。跳过核查直接自创方案，本质是以模型推断替代可观察证据、以想象意图替代真实意图，必然引发 FileNotFoundError、格式偏差、转义错误等系统性失败与多轮纠错往返。将先核查再创建固化为强制前置步骤，可从源头消除过度工程化与返工浪费，而非依赖事后补救。",
+      "applicability": [
+       "创建新脚本、工具或自动化管线之前：先检索工作目录与任务历史中的同类实现并评估复用可行性",
+       "生成格式化输出（字幕、文档、报告）之前：先读取既有成品以确认实际格式规范（标点切分、字号上限、简繁体、转义规则）",
+       "引用数据文件或配置路径之前：先核实文件在环境中的实际存在与实际命名",
+       "设计新方案或流程之前：将环境中已验证管线与规范的复用评估作为方案设计的前置输入",
+       "核查确认环境为空白（无可复用资产）时：本原则退化为正常创建流程，不额外阻塞"
+      ],
+      "antiPatterns": [
+       "未经核查工作目录、任务历史或同级产物，直接凭模型推断自创方案或自拟文件路径，导致 FileNotFoundError 类失败",
+       "环境中已存在满足需求的已验证资产或规范，仍重新实现全新版本（重复造轮子、过度工程化）",
+       "从想象或通用先验推断格式规范（标点、字号、简繁体、转义），而不对照既有成品的实际格式，造成格式偏差与多轮返工",
+       "在 Owner 显式指令要求不同做法时，仍机械复用既有资产中隐含的过时规格"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望代理在创建任何新工件前，先核查环境中已被确认的资产与规范并优先复用，而不是凭模型推断自创规格、路径与方案。",
+      "targetBehavior": "合规轨迹中可见：任何新建或写入动作之前，存在对工作目录、任务历史或同级产物的明确核查动作（列目录、检索、读取既有脚本或成品样例），且当存在可复用资产时，产出的是基于该资产的适配或扩展，而非全新自创实现。",
+      "forbiddenBehavior": "跳过环境核查，直接凭推断生成新方案、自拟文件路径或自创格式规范——即使环境中已存在可复用的已验证资产，由此引发 FileNotFoundError、格式偏差与反复纠错往返。",
+      "evidenceSource": "Episode 001 系列任务中因未核查既有成品与文件实际状态而出现的 FileNotFoundError、格式偏差（标点切分、字号上限、简繁体）与转义错误，以及由此产生的多轮纠错浪费——Dreamer 五个候选共同指向的痛点。",
+      "validationExpectation": "评审者在接受由此生成的规则前，应确认：规则要求在创建动作之前存在可审计的核查证据（目录列举或既有文件读取记录）；规则保留核查确认为空白即放行、以及 Owner 显式指令优先于既有资产这两个出口；后续修复轮次中任何允许先创建后核查、或删除核查前置要求的改动，应被标记为与本意图矛盾。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r3-run1"
+     },
+     "risks": [
+      "与核心公理 T-01（先建系统模型）、T-03（以可观察证据为准）、T-06（最简干预）存在语义重叠；若被视为派生组合而非独立原则，可能造成规则库冗余与裁决冲突，评审需裁决其增量价值（可定位为三者在新工件创建场景下的具体化）",
+      "过度强调复用可能造成路径依赖：当既有资产本身有缺陷、过时或不适用于新任务时，强制复用会固化坏设计并抑制必要的重新设计",
+      "核查步骤消耗时间与上下文窗口；在明确空白或简单一次性任务中可能引入不必要开销，需保留快速确认无可复用资产即放行的轻量路径，否则规则可能被规避",
+      "既有资产中隐含的规格可能与 Owner 当前意图冲突；原则必须显式让 Owner 的显式指令与最新约束（T-02）优先于历史产物中隐含的规格，否则复用会以历史规格覆盖现行意图",
+      "充分核查缺乏可操作的最小标准，规则执行可能流于形式（仅列一次目录即视为合规），需要评测端配套可观测的核查证据要求"
+     ],
+     "generatedAt": "2026-09-01T13:32:47.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788268409354_vau-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"先察后建：创建新工件前必先核查并优先复用既有资产与已验证规范\",\n    \"statement\": \"在创建任何新工件（脚本、配置、格式化输出、管线、方案设计）之前，必须先核查工作目录、任务历史与同级产物中是否存在同类既有资产、已确认规范或已验证管线；若存在且与 Owner 显式指令不冲突，必须优先复用或适配它们；只有当核查确认无可复用资产，或既有资产与 Owner 显式指令冲突时，才从零创建新方案。\",\n    \"rationale\": \"既有资产是 Owner 已确认意图与已验证规格的物质载体（如 Episode 001 承载的简体要求、标点切分规则、字号上限）。跳过核查直接自创方案，本质是以模型推断替代可观察证据、以想象意图替代真实意图，必然引发 FileNotFoundError、格式偏差、转义错误等系统性失败与多轮纠错往返。将先核查再创建固化为强制前置步骤，可从源头消除过度工程化与返工浪费，而非依赖事后补救。\",\n    \"applicability\": [\n      \"创建新脚本、工具或自动化管线之前：先检索工作目录与任务历史中的同类实现并评估复用可行性\",\n      \"生成格式化输出（字幕、文档、报告）之前：先读取既有成品以确认实际格式规范（标点切分、字号上限、简繁体、转义规则）\",\n      \"引用数据文件或配置路径之前：先核实文件在环境中的实际存在与实际命名\",\n      \"设计新方案或流程之前：将环境中已验证管线与规范的复用评估作为方案设计的前置输入\",\n      \"核查确认环境为空白（无可复用资产）时：本原则退化为正常创建流程，不额外阻塞\"\n    ],\n    \"antiPatterns\": [\n      \"未经核查工作目录、任务历史或同级产物，直接凭模型推断自创方案或自拟文件路径，导致 FileNotFoundError 类失败\",\n      \"环境中已存在满足需求的已验证资产或规范，仍重新实现全新版本（重复造轮子、过度工程化）\",\n      \"从想象或通用先验推断格式规范（标点、字号、简繁体、转义），而不对照既有成品的实际格式，造成格式偏差与多轮返工\",\n      \"在 Owner 显式指令要求不同做法时，仍机械复用既有资产中隐含的过时规格\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Owner 希望代理在创建任何新工件前，先核查环境中已被确认的资产与规范并优先复用，而不是凭模型推断自创规格、路径与方案。\",\n    \"targetBehavior\": \"合规轨迹中可见：任何新建或写入动作之前，存在对工作目录、任务历史或同级产物的明确核查动作（列目录、检索、读取既有脚本或成品样例），且当存在可复用资产时，产出的是基于该资产的适配或扩展，而非全新自创实现。\",\n    \"forbiddenBehavior\": \"跳过环境核查，直接凭推断生成新方案、自拟文件路径或自创格式规范——即使环境中已存在可复用的已验证资产，由此引发 FileNotFoundError、格式偏差与反复纠错往返。\",\n    \"evidenceSource\": \"Episode 001 系列任务中因未核查既有成品与文件实际状态而出现的 FileNotFoundError、格式偏差（标点切分、字号上限、简繁体）与转义错误，以及由此产生的多轮纠错浪费——Dreamer 五个候选共同指向的痛点。\",\n    \"validationExpectation\": \"评审者在接受由此生成的规则前，应确认：规则要求在创建动作之前存在可审计的核查证据（目录列举或既有文件读取记录）；规则保留核查确认为空白即放行、以及 Owner 显式指令优先于既有资产这两个出口；后续修复轮次中任何允许先创建后核查、或删除核查前置要求的改动，应被标记为与本意图矛盾。\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r3-run1\"\n  },\n  \"risks\": [\n    \"与核心公理 T-01（先建系统模型）、T-03（以可观察证据为准）、T-06（最简干预）存在语义重叠；若被视为派生组合而非独立原则，可能造成规则库冗余与裁决冲突，评审需裁决其增量价值（可定位为三者在新工件创建场景下的具体化）\",\n    \"过度强调复用可能造成路径依赖：当既有资产本身有缺陷、过时或不适用于新任务时，强制复用会固化坏设计并抑制必要的重新设计\",\n    \"核查步骤消耗时间与上下文窗口；在明确空白或简单一次性任务中可能引入不必要开销，需保留快速确认无可复用资产即放行的轻量路径，否则规则可能被规避\",\n    \"既有资产中隐含的规格可能与 Owner 当前意图冲突；原则必须显式让 Owner 的显式指令与最新约束（T-02）优先于历史产物中隐含的规格，否则复用会以历史规格覆盖现行意图\",\n    \"充分核查缺乏可操作的最小标准，规则执行可能流于形式（仅列一次目录即视为合规），需要评测端配套可观测的核查证据要求\"\n  ],\n  \"generatedAt\": \"2026-09-01T13:32:47.000Z\"\n}",
+    "usage": {
+     "input": 1994,
+     "output": 5117,
+     "total": 7111
+    },
+    "latencyMs": 71576,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "f22d1a85ff79cdf2"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788268409354_vau-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r3-run1",
+     "principleDraft": {
+      "title": "先察后建：创建新工件前必须核查并优先复用既有资产与已验证规范",
+      "statement": "在创建任何新工件（脚本、配置、格式化输出、处理管线）之前，必须先核查工作目录、任务历史与同级产物中是否存在同类既有资产或已验证规范（既有脚本、代码、输出样例及其承载的硬性规格），并确认目标路径与目录结构存在；若存在匹配资产，必须优先复用其管线与格式约定，仅在确认无可复用资产时才自创方案；当既有资产与 Owner 显式指令冲突时，以显式指令为准。",
+      "rationale": "既有资产是 Owner 已确认意图与已验证规格的物质载体（Episode 001 承载简体中文、标点切分规则、字号上限）。跳过核查直接自创方案，等于以模型推断替代可观察证据、以想象的意图替代真实意图，在本案例中直接导致繁体输出、标点切分错误、字号超标及 FileNotFoundError、ParserError、SyntaxError 等试错往返。将'先查再建'固化为创建类任务的强制前置步骤，可从源头消除过度工程化与纠错浪费，而非依赖事后补救。",
+      "applicability": [
+       "创建新脚本、配置文件或数据处理管线的任务（如字幕制作 whisper->SRT->ASS 类流水线）",
+       "生成需符合既有格式硬性规范的输出（语言变体、标点切分、字号上限等）",
+       "工作目录、任务历史或同级产物中可能存在同类既有资产或已确认规范时",
+       "对既有系统进行扩展或制作同类新产物的场景；确认环境无既有资产时本原则退化为正常创建流程"
+      ],
+      "antiPatterns": [
+       "跳过环境核查直接自创全新方案（如未读 Episode 001 脚本/代码/输出规范即新建字幕管线）",
+       "以模型自行推断的偏好（语言变体、标点处理、字号）替代既有产物中的已验证规格",
+       "未确认目录结构与目标路径存在就执行文件写入，导致路径类失败重试",
+       "在存在可复用的已验证资产时仍重新造轮子，造成过度工程化与 Owner 反复纠正"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望在制作同类新产物时，Agent 先核对并复用既有已验证规范与既有脚本/代码（如 Episode 001 的简体中文、标点切分、字号上限），而不是凭模型推断自创方案后被反复纠正。",
+      "targetBehavior": "在创建或写入任何新工件前，Agent 的工具轨迹中可见先执行的核查调用（list_files/read_file 等确认目录结构与既有资产内容），存在匹配资产时其产出复用该资产的规格与管线模式，仅在确认无可复用资产后才创建新方案。",
+      "forbiddenBehavior": "在未核查既有资产与已验证规范的情况下，直接自创全新管线、脚本或输出规格——即以模型推断的偏好替代环境中可观察的已验证规范与 Owner 真实意图。",
+      "evidenceSource": "诊断 diagnosis_manual_1788268409354_vautfk3l：Agent 未核对 Episode 001 既有脚本/代码/输出规范即自创 whisper->SRT->ASS 管线，导致繁体、标点切分、字号超标（pain score 75 severe），并伴随 FileNotFoundError、PowerShell ParserError、Python SyntaxError 等多次试错失败。",
+      "validationExpectation": "评审者应要求由本原则生成的规则包含三点可观察要求：(1) 创建前核查既有资产的前置工具调用；(2) 存在匹配资产时优先复用其规格；(3) Owner 显式指令优先于历史资产隐含规格。任何与这三点矛盾的规则修改应被标记而非直接采纳。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r3-run1"
+     },
+     "risks": [
+      "与核心公理 T-01（变更前建模）、T-03（以可观察证据为准）、T-06（最简干预）存在语义重叠，可能被评审裁决为派生组合而非独立新增原则，需论证其增量价值（将'先查再建'固化为创建类任务的前置门控）",
+      "过度强调复用可能造成路径依赖：既有资产本身有缺陷、过时或不适用于新任务时，复用会固化坏设计、抑制必要的重新设计",
+      "核查既有资产会消耗时间与上下文窗口；在明确空白或简单一次性任务中应保留'快速确认无可复用资产即放行'的轻量路径，避免规则被僵化执行",
+      "既有资产的规格可能过时或与 Owner 当前意图冲突；规则生成时必须让显式指令与最新约束（T-02）优先于历史产物中隐含的规格",
+      "源头诊断 confidence 仅 0.62（trace 不可用、仅 2 个会话条目且内容为空），行为样本有限，依据本原则生成的规则应容忍后续观察修正"
+     ],
+     "generatedAt": "2026-09-01T13:33:45.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788268409354_vau-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r3-run1\",\"principleDraft\":{\"title\":\"先察后建：创建新工件前必须核查并优先复用既有资产与已验证规范\",\"statement\":\"在创建任何新工件（脚本、配置、格式化输出、处理管线）之前，必须先核查工作目录、任务历史与同级产物中是否存在同类既有资产或已验证规范（既有脚本、代码、输出样例及其承载的硬性规格），并确认目标路径与目录结构存在；若存在匹配资产，必须优先复用其管线与格式约定，仅在确认无可复用资产时才自创方案；当既有资产与 Owner 显式指令冲突时，以显式指令为准。\",\"rationale\":\"既有资产是 Owner 已确认意图与已验证规格的物质载体（Episode 001 承载简体中文、标点切分规则、字号上限）。跳过核查直接自创方案，等于以模型推断替代可观察证据、以想象的意图替代真实意图，在本案例中直接导致繁体输出、标点切分错误、字号超标及 FileNotFoundError、ParserError、SyntaxError 等试错往返。将'先查再建'固化为创建类任务的强制前置步骤，可从源头消除过度工程化与纠错浪费，而非依赖事后补救。\",\"applicability\":[\"创建新脚本、配置文件或数据处理管线的任务（如字幕制作 whisper->SRT->ASS 类流水线）\",\"生成需符合既有格式硬性规范的输出（语言变体、标点切分、字号上限等）\",\"工作目录、任务历史或同级产物中可能存在同类既有资产或已确认规范时\",\"对既有系统进行扩展或制作同类新产物的场景；确认环境无既有资产时本原则退化为正常创建流程\"],\"antiPatterns\":[\"跳过环境核查直接自创全新方案（如未读 Episode 001 脚本/代码/输出规范即新建字幕管线）\",\"以模型自行推断的偏好（语言变体、标点处理、字号）替代既有产物中的已验证规格\",\"未确认目录结构与目标路径存在就执行文件写入，导致路径类失败重试\",\"在存在可复用的已验证资产时仍重新造轮子，造成过度工程化与 Owner 反复纠正\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"Owner 希望在制作同类新产物时，Agent 先核对并复用既有已验证规范与既有脚本/代码（如 Episode 001 的简体中文、标点切分、字号上限），而不是凭模型推断自创方案后被反复纠正。\",\"targetBehavior\":\"在创建或写入任何新工件前，Agent 的工具轨迹中可见先执行的核查调用（list_files/read_file 等确认目录结构与既有资产内容），存在匹配资产时其产出复用该资产的规格与管线模式，仅在确认无可复用资产后才创建新方案。\",\"forbiddenBehavior\":\"在未核查既有资产与已验证规范的情况下，直接自创全新管线、脚本或输出规格——即以模型推断的偏好替代环境中可观察的已验证规范与 Owner 真实意图。\",\"evidenceSource\":\"诊断 diagnosis_manual_1788268409354_vautfk3l：Agent 未核对 Episode 001 既有脚本/代码/输出规范即自创 whisper->SRT->ASS 管线，导致繁体、标点切分、字号超标（pain score 75 severe），并伴随 FileNotFoundError、PowerShell ParserError、Python SyntaxError 等多次试错失败。\",\"validationExpectation\":\"评审者应要求由本原则生成的规则包含三点可观察要求：(1) 创建前核查既有资产的前置工具调用；(2) 存在匹配资产时优先复用其规格；(3) Owner 显式指令优先于历史资产隐含规格。任何与这三点矛盾的规则修改应被标记而非直接采纳。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r3-run1\"},\"risks\":[\"与核心公理 T-01（变更前建模）、T-03（以可观察证据为准）、T-06（最简干预）存在语义重叠，可能被评审裁决为派生组合而非独立新增原则，需论证其增量价值（将'先查再建'固化为创建类任务的前置门控）\",\"过度强调复用可能造成路径依赖：既有资产本身有缺陷、过时或不适用于新任务时，复用会固化坏设计、抑制必要的重新设计\",\"核查既有资产会消耗时间与上下文窗口；在明确空白或简单一次性任务中应保留'快速确认无可复用资产即放行'的轻量路径，避免规则被僵化执行\",\"既有资产的规格可能过时或与 Owner 当前意图冲突；规则生成时必须让显式指令与最新约束（T-02）优先于历史产物中隐含的规格\",\"源头诊断 confidence 仅 0.62（trace 不可用、仅 2 个会话条目且内容为空），行为样本有限，依据本原则生成的规则应容忍后续观察修正\"],\"generatedAt\":\"2026-09-01T13:33:45.000Z\"}",
+    "usage": {
+     "input": 4365,
+     "output": 5228,
+     "total": 9593
+    },
+    "latencyMs": 228124,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "963d482780b82528"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

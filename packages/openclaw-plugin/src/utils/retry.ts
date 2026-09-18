@@ -412,7 +412,7 @@ export function clampTimeout(ms: number): number {
  * This is the primary function used by WorkflowManager.
  *
  * @param dataSource - Source for historical duration data
- * @param workflowType - e.g. 'empathy-observer'
+ * @param workflowType - e.g. 'correction-observer'
  * @param defaultTimeout - Fallback when insufficient data (from spec)
  * @returns Computed timeout in milliseconds
  */

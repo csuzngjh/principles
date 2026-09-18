@@ -208,7 +208,7 @@ describe('GET /api/v1/config/summary', () => {
     // 3 user profiles; openclaw.default is already in VALID_CONFIG, so the MVP
     // default profile is not merged again by computeEffectivePdConfig.
     expect(data.runtimeProfiles).toHaveLength(3);
-    expect(data.agents).toHaveLength(10); // all internal agents (incl. signalCollector)
+    expect(data.agents).toHaveLength(9); // all internal agents (empathyObserver retired in PRI-819)
   });
 
   it('never returns raw secret values in summary', async () => {

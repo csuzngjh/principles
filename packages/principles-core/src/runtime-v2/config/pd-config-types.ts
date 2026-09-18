@@ -121,7 +121,6 @@ export const INTERNAL_AGENT_NAMES = [
   'evaluator',
   'rolloutReviewer',
   'correctionObserver',
-  'empathyObserver',
   'signalCollector',
 ] as const;
 

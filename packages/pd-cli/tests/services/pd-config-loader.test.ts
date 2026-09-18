@@ -76,7 +76,6 @@ function makeValidConfigYaml(): string {
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: false },
-        empathyObserver: { enabled: false },
       },
     },
     ui: { diagnostics: { mode: 'simple' } },

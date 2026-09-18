@@ -1,10 +1,10 @@
-import type { EmpathyObserverInput, EmpathyObserverOutputV1 } from './empathy-observer.js';
 import type { CorrectionObserverPayload, CorrectionObserverOutputV1 } from './correction-observer.js';
 
 // ── AgentTypeMap: SSOT for all Scheduler-routed Agent input/output contracts ──
+// ('empathy-observer' removed in PRI-819: the agent was never registered with
+// any scheduler and had no production runner.)
 
 export interface AgentTypeMap {
-  'empathy-observer': { input: EmpathyObserverInput; output: EmpathyObserverOutputV1 };
   'correction-observer': { input: CorrectionObserverPayload; output: CorrectionObserverOutputV1 };
 }
 

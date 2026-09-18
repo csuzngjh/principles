@@ -18,21 +18,11 @@ export interface UnifiedKeywordStore {
   terms: Record<string, UnifiedKeyword>;  // key = term
 }
 
-// ── Pending Terms (LLM 发现词候选池, owner-governed, 评审意见3) ──
-
-export interface PendingTerm {
-  term: string;
-  suggestedCategory: KeywordCategory;
-  suggestedPrecision: 'high' | 'ambiguous';
-  reason: string;          // LLM 给出的理由
-  discoveredAt: string;    // ISO
-  source: 'llm_candidate';
-}
-
-export interface PendingTermStore {
-  version: number;
-  terms: PendingTerm[];
-}
+// ── Pending Terms ──
+// (PendingTerm / PendingTermStore removed in PRI-819: the "LLM learns term →
+// Owner approves from pending pool" design never got a production writer or
+// server routes. The live learning path is correctionObserver → keyword store
+// (source='llm_learned') → governance-signal-admission → earned precision.)
 
 // ── SignalCollector Input / Output ──
 

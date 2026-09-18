@@ -67,7 +67,6 @@ vi.mock('../../src/core/pd-config-loader.js', () => {
               evaluator: { enabled: false },
               rolloutReviewer: { enabled: false },
               correctionObserver: { enabled: true, runtimeProfile: 'pd.anthropic-sonnet' },
-              empathyObserver: { enabled: false },
             },
           },
         },

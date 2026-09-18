@@ -1,0 +1,237 @@
+{
+ "group": "G-manual_1788268409354_vau",
+ "class": "DEV",
+ "pain_id": "manual_1788268409354_vautfk3l",
+ "frozen_at": "2026-09-17T14:58:05.729Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788268409354_vau",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788268409354_vau-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Built a self-invented whisper->SRT->ASS subtitle pipeline without first inspecting Episode 001's existing scripts, code, and output specifications, producing traditional Chinese text, wrong punctuation splitting, and oversized fonts",
+       "betterDecision": "Before any subtitle work, scan the project directory and read Episode 001's existing scripts/code/output specs, then reuse the established pipeline and its formatting conventions (script conversion, punctuation rules, font sizes)",
+       "rationale": "Existing assets encode the owner's verified conventions and demonstrated intent; building an accurate model of the current system first prevents the exact class of format mismatches that occurred",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "reuse_existing_assets_first",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "Acted on self-inferred preferences (a novel pipeline and guessed styling) instead of the owner's actual intent, which was consistency with Episode 001's output, requiring multiple user corrections",
+       "betterDecision": "Treat prior episodes' outputs and recorded specs as explicit expressions of owner intent; when the target format is ambiguous, confirm against existing outputs or ask the owner before choosing an approach",
+       "rationale": "Explicit artifacts and stated goals override inferred preferences; aligning with demonstrated intent from the start avoids repeated corrections and a severe pain event (score 75)",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "intent_alignment_over_inference",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "Executed file operations against unverified paths, causing FileNotFoundError, and iterated blindly through trial-and-error",
+       "betterDecision": "Verify the working directory and target file paths with listing/reading tools before invoking scripts that reference them, confirming the assets actually exist at the expected locations",
+       "rationale": "Observable state (directory contents, file existence) should be checked directly rather than assumed; grounding execution in verified state eliminates a whole category of avoidable tool failures",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_state_before_execution",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "Wrote new PowerShell/Python scripts from scratch with escaping and syntax errors (PowerShell ParserError, Python SyntaxError), compounding a custom pipeline with fragile one-shot scripts",
+       "betterDecision": "Choose the simplest intervention that satisfies the intent: reuse Episode 001's proven scripts where possible, and when new code is needed, write and syntax-check small pieces incrementally, testing on a short sample before running the full pipeline",
+       "rationale": "Minimal, incremental changes are easier to verify and debug than a large hand-written pipeline; this reduces cascading errors and the rework cost observed in the session",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "simplest_intervention_incremental_verification",
+       "sourcePrincipleId": "T-06"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "Continued patching output after the first user corrections (traditional Chinese, punctuation, font size) without pausing to rebuild an accurate specification from Episode 001's outputs",
+       "betterDecision": "On the first correction, stop, compare current output against Episode 001's actual subtitle files to extract the correct spec, and confirm the corrected plan with the owner before continuing bulk processing",
+       "rationale": "Early corrections are feedback signaling a faulty model of the system; re-modeling at the first signal prevents repeating the same mistake across the whole deliverable and reduces owner friction",
+       "confidence": 0.82,
+       "riskLevel": "medium",
+       "strategicPerspective": "feedback_triggers_remodeling",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "contextRefs": [
+      "artifact://0b740830-6722-4781-8d8c-ff3feceb50b0"
+     ],
+     "generatedAt": "2026-09-01T13:30:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788268409354_vau-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Built a self-invented whisper->SRT->ASS subtitle pipeline without first inspecting Episode 001's existing scripts, code, and output specifications, producing traditional Chinese text, wrong punctuation splitting, and oversized fonts\",\"betterDecision\":\"Before any subtitle work, scan the project directory and read Episode 001's existing scripts/code/output specs, then reuse the established pipeline and its formatting conventions (script conversion, punctuation rules, font sizes)\",\"rationale\":\"Existing assets encode the owner's verified conventions and demonstrated intent; building an accurate model of the current system first prevents the exact class of format mismatches that occurred\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"reuse_existing_assets_first\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"Acted on self-inferred preferences (a novel pipeline and guessed styling) instead of the owner's actual intent, which was consistency with Episode 001's output, requiring multiple user corrections\",\"betterDecision\":\"Treat prior episodes' outputs and recorded specs as explicit expressions of owner intent; when the target format is ambiguous, confirm against existing outputs or ask the owner before choosing an approach\",\"rationale\":\"Explicit artifacts and stated goals override inferred preferences; aligning with demonstrated intent from the start avoids repeated corrections and a severe pain event (score 75)\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"intent_alignment_over_inference\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":2,\"badDecision\":\"Executed file operations against unverified paths, causing FileNotFoundError, and iterated blindly through trial-and-error\",\"betterDecision\":\"Verify the working directory and target file paths with listing/reading tools before invoking scripts that reference them, confirming the assets actually exist at the expected locations\",\"rationale\":\"Observable state (directory contents, file existence) should be checked directly rather than assumed; grounding execution in verified state eliminates a whole category of avoidable tool failures\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_state_before_execution\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":3,\"badDecision\":\"Wrote new PowerShell/Python scripts from scratch with escaping and syntax errors (PowerShell ParserError, Python SyntaxError), compounding a custom pipeline with fragile one-shot scripts\",\"betterDecision\":\"Choose the simplest intervention that satisfies the intent: reuse Episode 001's proven scripts where possible, and when new code is needed, write and syntax-check small pieces incrementally, testing on a short sample before running the full pipeline\",\"rationale\":\"Minimal, incremental changes are easier to verify and debug than a large hand-written pipeline; this reduces cascading errors and the rework cost observed in the session\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"simplest_intervention_incremental_verification\",\"sourcePrincipleId\":\"T-06\"},{\"candidateIndex\":4,\"badDecision\":\"Continued patching output after the first user corrections (traditional Chinese, punctuation, font size) without pausing to rebuild an accurate specification from Episode 001's outputs\",\"betterDecision\":\"On the first correction, stop, compare current output against Episode 001's actual subtitle files to extract the correct spec, and confirm the corrected plan with the owner before continuing bulk processing\",\"rationale\":\"Early corrections are feedback signaling a faulty model of the system; re-modeling at the first signal prevents repeating the same mistake across the whole deliverable and reduces owner friction\",\"confidence\":0.82,\"riskLevel\":\"medium\",\"strategicPerspective\":\"feedback_triggers_remodeling\",\"sourcePrincipleId\":\"T-08\"}],\"contextRefs\":[\"artifact://0b740830-6722-4781-8d8c-ff3feceb50b0\"],\"generatedAt\":\"2026-09-01T13:30:00.000Z\"}",
+    "usage": {
+     "input": 2201,
+     "output": 2022,
+     "total": 4223
+    },
+    "latencyMs": 30900,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "de377a85d7e47d45"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788268409354_vau-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1",
+     "thesis": "In an ongoing project, the most reliable specification is the corpus of already-accepted artifacts: prior outputs, proven scripts, and established conventions encode the owner's verified intent. The agent should reconstruct requirements from that observable evidence before inventing anything new, and re-derive the specification from reference artifacts again at the first correction signal rather than patching forward on a faulty model.",
+     "principleCandidate": {
+      "title": "Precedent-first: derive specifications from existing project artifacts before creating new work",
+      "rationale": "The root cause across all five Dreamer candidates is invention without consultation: the agent self-inferred formats, assumed file paths, and wrote novel pipelines even though the project contained a verified reference (Episode 001's scripts and outputs). Mining precedent converts unknowns into observable requirements, aligns new deliverables with demonstrated owner intent, and eliminates the class of format mismatches, path failures, and repeated corrections observed in the session.",
+      "scope": "Applies whenever an agent begins or continues work in a project where prior outputs, scripts, or accepted conventions exist—especially deliverables that must stay consistent with previous instances (documents, media, subtitles, code style, file formats). Weaker applicability in greenfield contexts with no precedent, and explicit new owner instructions always override precedent.",
+      "confidence": 0.86
+     },
+     "risks": [
+      "Partially overlaps with core axioms T-01 (model the system before changes) and T-02 (explicit intent over inference); this candidate is a precedent-mining specialization of those axioms rather than wholly novel behavior",
+      "Existing artifacts may encode outdated, erroneous, or one-off conventions; copying precedent without judgment could propagate defects when the owner's intent has evolved",
+      "Excessive precedent-hunting can add latency and complexity in greenfield or unrelated tasks, in tension with T-06 (simplest intervention)",
+      "Precedent can conflict with explicit current instructions; the principle must be subordinate to direct owner direction to avoid privileging history over stated intent"
+     ],
+     "generatedAt": "2026-09-01T13:36:00.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788268409354_vau-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1\",\"thesis\":\"In an ongoing project, the most reliable specification is the corpus of already-accepted artifacts: prior outputs, proven scripts, and established conventions encode the owner's verified intent. The agent should reconstruct requirements from that observable evidence before inventing anything new, and re-derive the specification from reference artifacts again at the first correction signal rather than patching forward on a faulty model.\",\"principleCandidate\":{\"title\":\"Precedent-first: derive specifications from existing project artifacts before creating new work\",\"rationale\":\"The root cause across all five Dreamer candidates is invention without consultation: the agent self-inferred formats, assumed file paths, and wrote novel pipelines even though the project contained a verified reference (Episode 001's scripts and outputs). Mining precedent converts unknowns into observable requirements, aligns new deliverables with demonstrated owner intent, and eliminates the class of format mismatches, path failures, and repeated corrections observed in the session.\",\"scope\":\"Applies whenever an agent begins or continues work in a project where prior outputs, scripts, or accepted conventions exist—especially deliverables that must stay consistent with previous instances (documents, media, subtitles, code style, file formats). Weaker applicability in greenfield contexts with no precedent, and explicit new owner instructions always override precedent.\",\"confidence\":0.86},\"risks\":[\"Partially overlaps with core axioms T-01 (model the system before changes) and T-02 (explicit intent over inference); this candidate is a precedent-mining specialization of those axioms rather than wholly novel behavior\",\"Existing artifacts may encode outdated, erroneous, or one-off conventions; copying precedent without judgment could propagate defects when the owner's intent has evolved\",\"Excessive precedent-hunting can add latency and complexity in greenfield or unrelated tasks, in tension with T-06 (simplest intervention)\",\"Precedent can conflict with explicit current instructions; the principle must be subordinate to direct owner direction to avoid privileging history over stated intent\"],\"generatedAt\":\"2026-09-01T13:36:00.000Z\"}",
+    "usage": {
+     "input": 1641,
+     "output": 1455,
+     "total": 3096
+    },
+    "latencyMs": 22542,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6a39a3a189d5345a"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788268409354_vau-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1",
+     "principleDraft": {
+      "title": "Precedent-First: Derive Specs from Accepted Artifacts; Re-Derive on Correction",
+      "statement": "Whenever starting or correcting work in a project that contains accepted prior artifacts (outputs, proven scripts, established conventions), the agent must first locate the nearest reference artifact, extract its concrete specification — file format, structure, naming, paths, and style — from that artifact itself, and construct the new deliverable to match that extracted specification rather than an invented one; upon receiving any owner correction, the agent must return to the reference corpus and re-derive the specification before fixing, never patching forward on the faulty model; explicit current owner instructions override precedent wherever they conflict.",
+      "rationale": "The root cause of the observed failures is invention without consultation: the agent self-inferred formats, assumed file paths, and wrote novel pipelines even though the project contained a verified reference (Episode 001's accepted scripts and outputs). Mining precedent converts unknowns into observable requirements, aligns new deliverables with demonstrated owner intent, and eliminates the observed class of format mismatches, path failures, and repeated correction cycles.",
+      "applicability": [
+       "Creating the next instance of a recurring deliverable (documents, media, subtitles, reports) that must stay consistent with prior accepted instances",
+       "Writing or modifying scripts, pipelines, or code in a project with established conventions and proven tooling",
+       "Selecting file formats, directory layouts, naming schemes, or output paths in an established project",
+       "Responding to the first correction on a deliverable that has accepted precedents",
+       "Limited application in greenfield contexts with no precedent, where explicit instructions are the only specification"
+      ],
+      "antiPatterns": [
+       "Inventing a deliverable's format, structure, or naming from general knowledge when an accepted reference artifact exists in the project",
+       "Assuming output directories, file paths, or naming conventions without verifying them against the existing project corpus",
+       "Writing a novel pipeline or script when a proven script for the same purpose already exists in the project",
+       "Patching forward after an owner correction using the same faulty mental model instead of re-deriving the specification from the reference artifact",
+       "Treating any conveniently present example file as the contract without confirming it is the accepted, canonical reference",
+       "Letting precedent override explicit current owner instructions"
+      ],
+      "confidence": 0.86
+     },
+     "intentContract": {
+      "ownerIntent": "New deliverables in an ongoing project must match the exact formats, paths, and conventions of the project's already-accepted artifacts instead of the agent inventing or assuming them.",
+      "targetBehavior": "Before any write that produces or corrects a deliverable, the agent's tool trajectory shows it reading the nearest accepted reference artifact (prior outputs, proven scripts) and extracting format, structure, path, and naming details from it, then conforming the new work to those details; after a correction, it re-reads the reference before fixing.",
+      "forbiddenBehavior": "Producing formats, paths, pipelines, or structures that were self-invented or assumed from general knowledge or a non-canonical example when a verified reference artifact existed, and patching forward after a correction without re-deriving the specification from that reference.",
+      "evidenceSource": "Session diagnosis across the Dreamer candidates: the agent self-inferred formats, assumed file paths, and wrote novel pipelines despite a verified Episode 001 reference (accepted scripts and outputs), causing format mismatches, path failures, and repeated correction cycles.",
+      "validationExpectation": "An evaluator should accept a rule only if it requires observable evidence of precedent consultation (reads or inspections of reference artifacts in the tool trajectory) before writes and re-consultation after corrections, and only if it keeps explicit owner instructions above precedent; rules that merely say 'be consistent' or that let precedent override stated intent fail this check."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1"
+     },
+     "risks": [
+      "Overlaps core axioms T-01 (build a sufficient model before consequential changes) and T-02 (explicit owner intent over inference), and partially T-03 and T-08; rule generation must treat this as a precedent-mining specialization rather than emitting rules that duplicate those axioms",
+      "Accepted artifacts may encode outdated, erroneous, or one-off conventions; uncritical copying can propagate defects when the owner's intent has evolved",
+      "Precedent-hunting adds latency and steps in greenfield or unrelated tasks, in tension with T-06 (simplest intervention); implementation needs a materiality threshold such as 'a reference artifact exists and the deliverable must match its kind'",
+      "Precedent may conflict with explicit current instructions; the principle must remain subordinate to direct owner direction to avoid privileging history over stated intent",
+      "A single sampled artifact may be unrepresentative; an agent could anchor on one arbitrary example instead of the canonical accepted reference, reintroducing guessing under the guise of precedent"
+     ],
+     "generatedAt": "2026-09-01T13:42:17.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788268409354_vau-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1\",\"principleDraft\":{\"title\":\"Precedent-First: Derive Specs from Accepted Artifacts; Re-Derive on Correction\",\"statement\":\"Whenever starting or correcting work in a project that contains accepted prior artifacts (outputs, proven scripts, established conventions), the agent must first locate the nearest reference artifact, extract its concrete specification — file format, structure, naming, paths, and style — from that artifact itself, and construct the new deliverable to match that extracted specification rather than an invented one; upon receiving any owner correction, the agent must return to the reference corpus and re-derive the specification before fixing, never patching forward on the faulty model; explicit current owner instructions override precedent wherever they conflict.\",\"rationale\":\"The root cause of the observed failures is invention without consultation: the agent self-inferred formats, assumed file paths, and wrote novel pipelines even though the project contained a verified reference (Episode 001's accepted scripts and outputs). Mining precedent converts unknowns into observable requirements, aligns new deliverables with demonstrated owner intent, and eliminates the observed class of format mismatches, path failures, and repeated correction cycles.\",\"applicability\":[\"Creating the next instance of a recurring deliverable (documents, media, subtitles, reports) that must stay consistent with prior accepted instances\",\"Writing or modifying scripts, pipelines, or code in a project with established conventions and proven tooling\",\"Selecting file formats, directory layouts, naming schemes, or output paths in an established project\",\"Responding to the first correction on a deliverable that has accepted precedents\",\"Limited application in greenfield contexts with no precedent, where explicit instructions are the only specification\"],\"antiPatterns\":[\"Inventing a deliverable's format, structure, or naming from general knowledge when an accepted reference artifact exists in the project\",\"Assuming output directories, file paths, or naming conventions without verifying them against the existing project corpus\",\"Writing a novel pipeline or script when a proven script for the same purpose already exists in the project\",\"Patching forward after an owner correction using the same faulty mental model instead of re-deriving the specification from the reference artifact\",\"Treating any conveniently present example file as the contract without confirming it is the accepted, canonical reference\",\"Letting precedent override explicit current owner instructions\"],\"confidence\":0.86},\"intentContract\":{\"ownerIntent\":\"New deliverables in an ongoing project must match the exact formats, paths, and conventions of the project's already-accepted artifacts instead of the agent inventing or assuming them.\",\"targetBehavior\":\"Before any write that produces or corrects a deliverable, the agent's tool trajectory shows it reading the nearest accepted reference artifact (prior outputs, proven scripts) and extracting format, structure, path, and naming details from it, then conforming the new work to those details; after a correction, it re-reads the reference before fixing.\",\"forbiddenBehavior\":\"Producing formats, paths, pipelines, or structures that were self-invented or assumed from general knowledge or a non-canonical example when a verified reference artifact existed, and patching forward after a correction without re-deriving the specification from that reference.\",\"evidenceSource\":\"Session diagnosis across the Dreamer candidates: the agent self-inferred formats, assumed file paths, and wrote novel pipelines despite a verified Episode 001 reference (accepted scripts and outputs), causing format mismatches, path failures, and repeated correction cycles.\",\"validationExpectation\":\"An evaluator should accept a rule only if it requires observable evidence of precedent consultation (reads or inspections of reference artifacts in the tool trajectory) before writes and re-consultation after corrections, and only if it keeps explicit owner instructions above precedent; rules that merely say 'be consistent' or that let precedent override stated intent fail this check.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1\"},\"risks\":[\"Overlaps core axioms T-01 (build a sufficient model before consequential changes) and T-02 (explicit owner intent over inference), and partially T-03 and T-08; rule generation must treat this as a precedent-mining specialization rather than emitting rules that duplicate those axioms\",\"Accepted artifacts may encode outdated, erroneous, or one-off conventions; uncritical copying can propagate defects when the owner's intent has evolved\",\"Precedent-hunting adds latency and steps in greenfield or unrelated tasks, in tension with T-06 (simplest intervention); implementation needs a materiality threshold such as 'a reference artifact exists and the deliverable must match its kind'\",\"Precedent may conflict with explicit current instructions; the principle must remain subordinate to direct owner direction to avoid privileging history over stated intent\",\"A single sampled artifact may be unrepresentative; an agent could anchor on one arbitrary example instead of the canonical accepted reference, reintroducing guessing under the guise of precedent\"],\"generatedAt\":\"2026-09-01T13:42:17.000Z\"}",
+    "usage": {
+     "input": 1882,
+     "output": 3854,
+     "total": 5736
+    },
+    "latencyMs": 48356,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "d46b13da79dde00a"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788268409354_vau-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1",
+     "principleDraft": {
+      "title": "Precedent-first: derive specifications from existing project artifacts before new work",
+      "statement": "When beginning or continuing deliverable work in a project that contains prior accepted outputs, proven scripts, or established conventions, the agent must first inspect those reference artifacts (list the relevant directories, read the existing scripts/outputs/specs) and derive the deliverable's specification — formats, styles, pipeline, and asset paths — from them before creating anything new; and at the first owner correction, the agent must stop and re-derive the specification from the reference artifacts rather than patching forward on a faulty model. Explicit current owner instructions always override precedent.",
+      "rationale": "The diagnosed root cause is invention without consultation: the agent self-inferred a whisper->SRT->ASS subtitle pipeline and guessed styling even though Episode 001's scripts and outputs existed as a verified reference, producing traditional Chinese text, wrong punctuation splitting, and oversized fonts that required repeated owner corrections and cascading into script and path errors. Reference artifacts encode the owner's verified intent; mining them converts unknowns into observable requirements and eliminates this entire class of format mismatches, path failures, and repeated corrections.",
+      "applicability": [
+       "Creating or modifying deliverables (documents, media, subtitles, code, configs) in a project where prior accepted outputs or proven scripts already exist",
+       "Producing a new instance of a recurring deliverable (e.g., the next episode, the next report) that must stay consistent with previous instances",
+       "Resuming deliverable work immediately after an owner correction on format, style, or specification",
+       "Choosing pipelines, output formats, styling conventions, or asset paths when the project directory contains candidate references"
+      ],
+      "antiPatterns": [
+       "Self-inventing a pipeline, format, or styling (e.g., a novel whisper->SRT->ASS subtitle chain with guessed font sizes and punctuation rules) when the project already contains a proven reference implementation",
+       "Acting on model-inferred preferences for a deliverable's format instead of the conventions demonstrated in prior accepted outputs",
+       "Executing scripts against assumed asset paths without first listing/reading the project directory to locate existing assets",
+       "Continuing to patch output forward after the first owner correction without pausing to re-derive the specification from the reference artifacts"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants new deliverables (e.g., Episode 002 subtitles) to follow the formats, styles, and pipelines already proven in the project's existing assets (e.g., Episode 001's scripts and outputs), with the agent consulting those assets before starting and again at the first correction instead of inventing its own scheme.",
+      "targetBehavior": "In a tool trajectory, a compliant agent shows list/read calls against the project's existing scripts, outputs, or spec files BEFORE any file creation or modification for a deliverable, reuses the observed conventions, and after the first owner correction stops bulk work and re-reads the reference artifacts to rebuild the spec before continuing.",
+      "forbiddenBehavior": "Inventing formats, pipelines, styling, or asset locations from the model's own preference when a verified reference exists in the project, and patching output forward after corrections without re-deriving the specification from reference artifacts — the exact failure chain that produced traditional Chinese text, wrong punctuation splitting, oversized fonts, FileNotFoundError, and repeated script errors.",
+      "evidenceSource": "Severe pain (score 75) from the self-created whisper->SRT->ASS subtitle pipeline that ignored Episode 001's existing scripts and output specs; the agent's own admission of not reading Episode 001's code; tool failures (FileNotFoundError on unverified paths, PowerShell ParserError, Python SyntaxError) recorded in diagnosis_manual_1788268409354_vautfk3l.",
+      "validationExpectation": "An evaluator should accept a rule only if it demands observable evidence of listing/reading existing project assets before file creation/modification in projects with precedent, treats a first owner correction as a trigger to re-derive the spec from reference artifacts, and remains subordinate to explicit owner instructions; a rule that merely says 'be careful with formats', hardcodes subtitle-specific triggers, or lets precedent override stated owner direction is unfaithful to this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1"
+     },
+     "risks": [
+      "Overlaps with core axioms T-01 (build a sufficient model before changes) and T-02 (act on actual intent over inferred preferences); this draft is a precedent-mining specialization of those axioms, and partially overlaps T-03 (verify observable state) and T-08 (corrections as feedback), so downstream rule generation must not emit rules that duplicate existing axiom coverage",
+      "Existing artifacts may encode outdated, erroneous, or one-off conventions; copying precedent without judgment could propagate defects when the owner's intent has evolved",
+      "Precedent can conflict with explicit current owner instructions; the principle must remain subordinate to direct owner direction to avoid privileging history over stated intent",
+      "Excessive precedent-hunting adds latency in greenfield or unrelated tasks, in tension with T-06 (simplest intervention); applicability should exclude projects with no prior accepted artifacts",
+      "Evidence base is limited (2 session entries, trace unavailable, diagnosis confidence 0.62), so the pattern is confirmed mainly for subtitle/media deliverables and generalization to other deliverable types is less certain"
+     ],
+     "generatedAt": "2026-09-01T13:42:00.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788268409354_vau-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Precedent-first: derive specifications from existing project artifacts before new work\",\n    \"statement\": \"When beginning or continuing deliverable work in a project that contains prior accepted outputs, proven scripts, or established conventions, the agent must first inspect those reference artifacts (list the relevant directories, read the existing scripts/outputs/specs) and derive the deliverable's specification — formats, styles, pipeline, and asset paths — from them before creating anything new; and at the first owner correction, the agent must stop and re-derive the specification from the reference artifacts rather than patching forward on a faulty model. Explicit current owner instructions always override precedent.\",\n    \"rationale\": \"The diagnosed root cause is invention without consultation: the agent self-inferred a whisper->SRT->ASS subtitle pipeline and guessed styling even though Episode 001's scripts and outputs existed as a verified reference, producing traditional Chinese text, wrong punctuation splitting, and oversized fonts that required repeated owner corrections and cascading into script and path errors. Reference artifacts encode the owner's verified intent; mining them converts unknowns into observable requirements and eliminates this entire class of format mismatches, path failures, and repeated corrections.\",\n    \"applicability\": [\n      \"Creating or modifying deliverables (documents, media, subtitles, code, configs) in a project where prior accepted outputs or proven scripts already exist\",\n      \"Producing a new instance of a recurring deliverable (e.g., the next episode, the next report) that must stay consistent with previous instances\",\n      \"Resuming deliverable work immediately after an owner correction on format, style, or specification\",\n      \"Choosing pipelines, output formats, styling conventions, or asset paths when the project directory contains candidate references\"\n    ],\n    \"antiPatterns\": [\n      \"Self-inventing a pipeline, format, or styling (e.g., a novel whisper->SRT->ASS subtitle chain with guessed font sizes and punctuation rules) when the project already contains a proven reference implementation\",\n      \"Acting on model-inferred preferences for a deliverable's format instead of the conventions demonstrated in prior accepted outputs\",\n      \"Executing scripts against assumed asset paths without first listing/reading the project directory to locate existing assets\",\n      \"Continuing to patch output forward after the first owner correction without pausing to re-derive the specification from the reference artifacts\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants new deliverables (e.g., Episode 002 subtitles) to follow the formats, styles, and pipelines already proven in the project's existing assets (e.g., Episode 001's scripts and outputs), with the agent consulting those assets before starting and again at the first correction instead of inventing its own scheme.\",\n    \"targetBehavior\": \"In a tool trajectory, a compliant agent shows list/read calls against the project's existing scripts, outputs, or spec files BEFORE any file creation or modification for a deliverable, reuses the observed conventions, and after the first owner correction stops bulk work and re-reads the reference artifacts to rebuild the spec before continuing.\",\n    \"forbiddenBehavior\": \"Inventing formats, pipelines, styling, or asset locations from the model's own preference when a verified reference exists in the project, and patching output forward after corrections without re-deriving the specification from reference artifacts — the exact failure chain that produced traditional Chinese text, wrong punctuation splitting, oversized fonts, FileNotFoundError, and repeated script errors.\",\n    \"evidenceSource\": \"Severe pain (score 75) from the self-created whisper->SRT->ASS subtitle pipeline that ignored Episode 001's existing scripts and output specs; the agent's own admission of not reading Episode 001's code; tool failures (FileNotFoundError on unverified paths, PowerShell ParserError, Python SyntaxError) recorded in diagnosis_manual_1788268409354_vautfk3l.\",\n    \"validationExpectation\": \"An evaluator should accept a rule only if it demands observable evidence of listing/reading existing project assets before file creation/modification in projects with precedent, treats a first owner correction as a trigger to re-derive the spec from reference artifacts, and remains subordinate to explicit owner instructions; a rule that merely says 'be careful with formats', hardcodes subtitle-specific triggers, or lets precedent override stated owner direction is unfaithful to this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788268409354_vau-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788268409354_vau-r1-run1\"\n  },\n  \"risks\": [\n    \"Overlaps with core axioms T-01 (build a sufficient model before changes) and T-02 (act on actual intent over inferred preferences); this draft is a precedent-mining specialization of those axioms, and partially overlaps T-03 (verify observable state) and T-08 (corrections as feedback), so downstream rule generation must not emit rules that duplicate existing axiom coverage\",\n    \"Existing artifacts may encode outdated, erroneous, or one-off conventions; copying precedent without judgment could propagate defects when the owner's intent has evolved\",\n    \"Precedent can conflict with explicit current owner instructions; the principle must remain subordinate to direct owner direction to avoid privileging history over stated intent\",\n    \"Excessive precedent-hunting adds latency in greenfield or unrelated tasks, in tension with T-06 (simplest intervention); applicability should exclude projects with no prior accepted artifacts\",\n    \"Evidence base is limited (2 session entries, trace unavailable, diagnosis confidence 0.62), so the pattern is confirmed mainly for subtitle/media deliverables and generalization to other deliverable types is less certain\"\n  ],\n  \"generatedAt\": \"2026-09-01T13:42:00.000Z\"\n}",
+    "usage": {
+     "input": 4271,
+     "output": 3751,
+     "total": 8022
+    },
+    "latencyMs": 52783,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "cd9733f1a7919a09"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

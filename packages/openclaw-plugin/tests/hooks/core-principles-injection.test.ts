@@ -264,7 +264,6 @@ function makeConfigWorkspace(principlesYaml: string): string {
     '    evaluator: { enabled: false }',
     '    rolloutReviewer: { enabled: false }',
     '    correctionObserver: { enabled: false }',
-    '    empathyObserver: { enabled: false }',
     principlesYaml,
     '',
   ].join('\n');

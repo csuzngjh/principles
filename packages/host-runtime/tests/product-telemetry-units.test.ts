@@ -376,8 +376,6 @@ describe('milestone readers', () => {
     '      enabled: false',
     '    correctionObserver:',
     '      enabled: false',
-    '    empathyObserver:',
-    '      enabled: false',
     '    signalCollector:',
     '      enabled: false',
   ].join('\n');

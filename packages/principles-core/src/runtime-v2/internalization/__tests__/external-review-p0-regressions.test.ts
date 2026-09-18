@@ -214,7 +214,7 @@ describe('P1-1 — artificer 真实消费 rollout requiredChanges', () => {
 
     const runner = new ArtificerRunner({
       stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
-      artifactStore, validator: new DefaultArtificerValidator(), contentHashFn: undefined,
+      artifactStore, validator: new DefaultArtificerValidator(),
       behaviorExamplePack: P0_TEST_PACK,
     }, { owner: 'p11', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
 

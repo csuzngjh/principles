@@ -18,7 +18,6 @@ import { PainSignalBridge } from '@principles/core/runtime-v2';
 import { CandidateIntakeService } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
 import { makeDeterministicDiagnosticianOutput } from '@principles/core/runtime-v2';
-import { contentHashFn } from './rulehost-pipeline-runner.js';
 import type {
   PainFloodSimulationSummary,
   PainFloodStage,
@@ -252,7 +251,6 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
         artifactStore: stateManager.piArtifactStore,
         validator: new DefaultDiagRootCauseValidator(),
         contextAssembler,
-        contentHashFn,
       },
       {
         owner: 'pain-flood-simulation',
@@ -269,7 +267,6 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
         eventEmitter,
         artifactStore: stateManager.piArtifactStore,
         validator: new DefaultDiagDistillerValidator(),
-        contentHashFn,
       },
       {
         owner: 'pain-flood-simulation',
@@ -286,7 +283,6 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
         eventEmitter,
         artifactStore: stateManager.piArtifactStore,
         committer,
-        contentHashFn,
       },
       {
         owner: 'pain-flood-simulation',

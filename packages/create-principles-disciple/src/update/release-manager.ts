@@ -1,23 +1,11 @@
 /**
- * ReleaseManager — the deep module behind every update surface (SPEC §6.2).
+ * ReleaseManager — the sole update authority (PRI-738).
  *
- * External surface is intentionally small: inspect / check / apply /
- * rollback. The module hides metadata validation, download, extraction,
- * staging, probes, journaling, host control, rollback, and cleanup.
- *
- * PRI-698 Phase 1: `apply()` is the update ORCHESTRATOR. It acquires the
- * signed release payload into the staging area (apply-payload.ts) and hands
- * deployment to the installer — the only direct artifact deployment authority
- * (ADR-0024 §2.1) — as ONE journaled transaction (planned → downloaded →
- * verified by this module; staged → probed → activated → confirmed by the
- * installer's existing cycle, same journal file). This module performs ZERO
- * deployment-side filesystem mutation: no writes under `~/.pd/runtime` or the
- * host extension directories ever originate here. `rollback()` still refuses:
- * rollback migration is Phase 2 and must prove same-version restore before it
- * replaces the legacy rollback.
- *
- * Every refusal carries a stable reason and an Owner-visible next action
- * (rc-9) and is computed BEFORE any installation state is mutated.
+ * inspect / check / apply only. apply() orchestrates installer deployment as
+ * ONE journaled transaction; this module performs ZERO deployment-side
+ * filesystem mutation. Automatic previous-release restore stays inside the
+ * installer on transaction failure. Every refusal carries a stable reason
+ * and an Owner-visible next action (rc-9), computed BEFORE any mutation.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -55,10 +43,9 @@ import { downloadReleaseAsset, extractAndVerifyReleaseAsset, ApplyPayloadError }
 import type { InstallerJournal } from '../installer.js';
 import type { Language } from '../i18n.js';
 import type { HostTarget } from '../installers/index.js';
-import type { ReleaseChannelName } from './product-identity.js';
+import { compareProductVersions, parseProductVersion, type ReleaseChannelName } from './product-identity.js';
 
 export type ReleaseManagerReason =
-  | 'shadow_mode_read_only'
   | 'bootstrap_not_installed'
   | 'metadata_refresh_failed'
   | 'release_metadata_unavailable'
@@ -72,12 +59,9 @@ export class ReleaseManagerError extends Error {
   readonly reason: ReleaseManagerReason;
   readonly nextAction: string;
   /**
-   * PRI-698 Phase 1 default-on safety net: true when the refusal happened
-   * AFTER the apply transaction was opened (planned journaled) — runtime
-   * state may include staging writes and a terminal journal tail. False for
-   * pre-transaction refusals (layout, metadata, journal-unavailable): the
-   * caller can safely fall back to the legacy updater with an explicit
-   * reason, because zero side effects exist.
+   * True when the refusal happened AFTER the apply transaction was opened
+   * (planned journaled) — runtime state may include staging writes and a
+   * terminal journal tail. False for pre-transaction refusals.
    */
   readonly transactionOpened: boolean;
 
@@ -102,13 +86,6 @@ export interface InstallStatus {
   readonly channel: ReleaseChannelName;
 }
 
-/** What the legacy updater decided for the same question (shadow comparison). */
-export interface LegacyUpdaterDecision {
-  readonly source: 'legacy-updater';
-  readonly latestVersion: string | null;
-  readonly updateAvailable: boolean | null;
-}
-
 export interface UpdateCheck {
   readonly channel: ReleaseChannelName;
   readonly candidate: {
@@ -119,11 +96,7 @@ export interface UpdateCheck {
   } | null;
   readonly decision: ReleasePolicyDecision;
   readonly trustedTarget: TrustedReleaseTarget | null;
-  readonly shadowComparison: {
-    readonly legacy: LegacyUpdaterDecision | null;
-    readonly agrees: boolean | null;
-    readonly note: string | null;
-  };
+
 }
 
 /** Caller-supplied deployment context for apply() (PRI-698 Phase 1). */
@@ -132,7 +105,7 @@ export interface ApplyOptions {
   readonly workspaceDir: string;
   /** Installer language; defaults to 'zh' (the installer's default locale). */
   readonly language?: Language;
-  /** Host installers to run; defaults to 'openclaw' (matches the legacy full-update sync). */
+  /** Host installers to run; defaults to 'openclaw' (matches the prior full-update sync). */
   readonly host?: HostTarget;
 }
 
@@ -145,8 +118,7 @@ export type ApplyOutcome =
     /** PRI-726: degraded-success notice propagated VERBATIM from the
      * installer's InstallResult — the payload committed but the OpenClaw
      * gateway restart failed. Undefined on a healthy restart; the Console
-     * merges it into the same `gatewayNotice` HTTP field the PRI-723 legacy
-     * path uses. Never regenerated or parsed from logs here. */
+     * is served verbatim on the update response (PRI-726 contract). */
     readonly gatewayNotice?: string;
   }
   | {
@@ -226,8 +198,6 @@ export interface ReleaseManagerOptions {
   readonly metadataBaseUrl: string;
   readonly fetcher?: Parameters<typeof resolveTrustedReleaseTarget>[0]['fetcher'];
   readonly now?: () => Date;
-  /** Injected in production from the legacy updater; tests inject fakes. */
-  readonly legacyCheck?: (currentVersion: string) => Promise<LegacyUpdaterDecision | null>;
   /**
    * Explicit OpenClaw home directory for legacy-overlay detection.  When
    * omitted, falls back to `~/.openclaw` relative to the OS home — correct
@@ -319,7 +289,7 @@ export class ReleaseManager {
     const status = this.inspect();
 
     const { channelMetadata, trustedTarget } = await this.refreshSignedChannel(channel);
-    const releaseMetadata = this.readReleaseMetadataDocument(channelMetadata, now);
+    const releaseMetadata = await this.ensureReleaseMetadataDocument(channelMetadata);
     const decision = this.evaluateCandidateDecision({ channelMetadata, releaseMetadata, status, now: now() });
 
     const candidate = {
@@ -333,14 +303,11 @@ export class ReleaseManager {
       })),
     };
 
-    const shadowComparison = await this.compareWithLegacyUpdater(status, decision, candidate.productVersion);
-
     return {
       channel,
       candidate,
       decision,
       trustedTarget,
-      shadowComparison,
     };
   }
 
@@ -364,7 +331,7 @@ export class ReleaseManager {
       throw new ReleaseManagerError(
         'legacy_layout_not_supported',
         'This installation uses the legacy overlay layout, which the transactional updater does not serve.',
-        'Run the official installer once to migrate into the dual-slot layout; the current updater continues to serve this installation until then.',
+        'Run the official installer to repair this installation into the supported layout, then retry.',
       );
     }
 
@@ -487,22 +454,13 @@ export class ReleaseManager {
       );
       // The transaction was opened (planned journaled): mark the refusal so
       // the caller knows runtime-side effects may exist (staging writes +
-      // terminal journal tail) and must NOT auto-fallback to the legacy
-      // updater over it.
+      // terminal journal tail) and must NOT be reported as a pre-transaction
+      // refusal.
       const mapped = toReleaseManagerError(error);
       throw mapped.transactionOpened
         ? mapped
         : new ReleaseManagerError(mapped.reason, mapped.message, mapped.nextAction, true);
     }
-  }
-
-  async rollback(): Promise<never> {
-    void this.paths; // reserved: Phase 2 rollback drives this.paths / this.options
-    throw new ReleaseManagerError(
-      'shadow_mode_read_only',
-      'Rollback is not enabled yet: the ReleaseManager runs in read-only shadow mode while the transactional activation system is brought up.',
-      'Continue using the current update path. Rollback arrives with the dual-slot transaction rollout.',
-    );
   }
 
   /**
@@ -567,6 +525,19 @@ export class ReleaseManager {
     });
     if (status.releaseId !== null && status.productVersion !== null) {
       const activeMetadata = this.readActiveReleaseMetadata(status.releaseId);
+      // Bundled installs carry an authoritative active product version but no
+      // publication metadata. Do not mistake that for an empty installation.
+      // Never invent a publication sequence or overwrite the installed identity.
+      if (activeMetadata === null && decision.allowed && compareProductVersions(
+        parseProductVersion(releaseMetadata.productVersion), parseProductVersion(status.productVersion),
+      ) <= 0) {
+        return {
+          allowed: false,
+          reason: 'downgrade_blocked',
+          message: `Signed release ${releaseMetadata.productVersion} does not advance installed ${status.productVersion}.`,
+          nextAction: 'No runtime change was made. Retry when a newer signed product version is published.',
+        };
+      }
       if (activeMetadata !== null) {
         decision = evaluateReleaseAdvancement({
           channel: channelMetadata,
@@ -655,7 +626,7 @@ export class ReleaseManager {
       throw new ReleaseManagerError(
         'release_metadata_unavailable',
         `Release metadata for ${channel.productVersion} is not available locally: ${metadataPath}`,
-        'This shadow-mode check only evaluates already-verified metadata. Download arrives with the transactional updater.',
+        'Retry the update check to download the signed release metadata.',
       );
     }
     const document: unknown = parseCachedJson(metadataPath);
@@ -678,36 +649,7 @@ export class ReleaseManager {
     return metadata;
   }
 
-  private async compareWithLegacyUpdater(
-    status: InstallStatus,
-    decision: ReleasePolicyDecision,
-    candidateVersion: string,
-  ): Promise<UpdateCheck['shadowComparison']> {
-    if (this.options.legacyCheck === undefined || status.productVersion === null) {
-      return { legacy: null, agrees: null, note: 'legacy comparison unavailable (no legacy updater or no active release)' };
-    }
-    let failureNote: string | null = null;
-    const legacy = await this.options.legacyCheck(status.productVersion).catch((error: unknown) => {
-      failureNote = `legacy updater failed: ${error instanceof Error ? error.message : String(error)}`;
-      return null;
-    });
-    if (failureNote !== null) {
-      return { legacy: null, agrees: null, note: failureNote };
-    }
-    if (legacy === null) {
-      return { legacy: null, agrees: null, note: 'legacy updater returned no decision' };
-    }
-    const newWouldAdvance = decision.allowed && decision.direction !== 'reinstall';
-    const legacyWouldAdvance = legacy.updateAvailable === true
-      && legacy.latestVersion !== null
-      && legacy.latestVersion !== status.productVersion;
-    const agrees = newWouldAdvance === legacyWouldAdvance;
-    return {
-      legacy,
-      agrees,
-      note: agrees ? null : `decision mismatch: new=${newWouldAdvance ? 'advance' : 'no-advance'} (${candidateVersion}) legacy=${legacyWouldAdvance ? 'advance' : 'no-advance'} (${legacy.latestVersion ?? 'unknown'})`,
-    };
-  }
+
 }
 
 /** Producer helper re-exported for the publication pipeline. */

@@ -16,9 +16,7 @@ import { SectionTitle } from "../../components/layout/section-title.js";
 import {
   fetchUpdateStatus,
   fetchUpdateHistory,
-  applyUpdate,
   applyFullUpdate,
-  rollbackUpdate,
 } from "../../api.js";
 import type {
   UpdateStatusData,
@@ -36,9 +34,8 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "../../components/ui/alert-dialog.js";
-import { Loader2, RotateCcw, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import { formatDate } from "../../utils/format-date.js";
-import { MarkdownRenderer } from "../../components/ui/markdown.js";
 
 // ── Main page component ──────────────────────────────────────────────────────
 
@@ -52,25 +49,18 @@ export function UpdatePage() {
   const [checking, setChecking] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [historyErrorReason, setHistoryErrorReason] = useState<string | null>(null);
-  const [updating, setUpdating] = useState(false);
   const [updateResult, setUpdateResult] = useState<{
     success: boolean;
     message: string;
     newVersion?: string;
-    updatedFiles?: string[];
     fromVersion?: string;
-    partialUpdate?: boolean;
     requiresRestart?: boolean;
     reason?: string;
     nextAction?: string;
     gatewayNotice?: string;
   } | null>(null);
-  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
   const [showFullUpdateDialog, setShowFullUpdateDialog] = useState(false);
   const [fullUpdating, setFullUpdating] = useState(false);
-  const [showRollbackDialog, setShowRollbackDialog] = useState<string | null>(null);
-  const [rollingBack, setRollingBack] = useState(false);
-  const [rollbackResult, setRollbackResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -133,36 +123,6 @@ export function UpdatePage() {
     setChecking(false);
   }, [t]);
 
-  const handleApplyUpdate = useCallback(async () => {
-    setShowUpdateDialog(false);
-    setUpdating(true);
-    setUpdateResult(null);
-    const result = await applyUpdate();
-    setUpdating(false);
-    if (!result.success) {
-      setUpdateResult({ success: false, message: result.error ?? 'Unknown error' });
-      toast.error(t('pages.update.updateFailed', { message: result.error ?? 'Unknown error' }));
-      return;
-    }
-    const data = result.data as ApplyUpdateResultData;
-    if (data.success) {
-      setUpdateResult({
-        success: true,
-        message: data.message,
-        newVersion: data.newVersion,
-        updatedFiles: data.updatedFiles,
-        fromVersion: statusData?.currentVersion,
-        partialUpdate: data.partialUpdate,
-        gatewayNotice: data.gatewayNotice,
-      });
-      toast.success(t('pages.update.updateSuccess', { version: data.newVersion ?? 'latest' }));
-      await loadData();
-    } else {
-      setUpdateResult({ success: false, message: data.message, reason: data.reason, nextAction: data.nextAction, gatewayNotice: data.gatewayNotice });
-      toast.error(t('pages.update.updateFailed', { message: data.message }));
-    }
-  }, [t, loadData]);
-
   const handleApplyFullUpdate = useCallback(async () => {
     setShowFullUpdateDialog(false);
     setFullUpdating(true);
@@ -182,7 +142,6 @@ export function UpdatePage() {
         newVersion: data.newVersion,
         fromVersion: statusData?.currentVersion,
         requiresRestart: data.requiresRestart,
-        partialUpdate: data.partialUpdate,
         gatewayNotice: data.gatewayNotice,
       });
       toast.success(t('pages.update.fullUpdateSuccess'));
@@ -192,27 +151,6 @@ export function UpdatePage() {
       toast.error(t('pages.update.updateFailed', { message: data.message }));
     }
   }, [t, loadData, statusData?.currentVersion]);
-
-  const handleRollback = useCallback(async (backupDir: string) => {
-    setShowRollbackDialog(null);
-    setRollingBack(true);
-    setRollbackResult(null);
-    const result = await rollbackUpdate(backupDir);
-    setRollingBack(false);
-    if (!result.success) {
-      setRollbackResult({ success: false, message: result.error ?? 'Unknown error' });
-      toast.error(t('pages.update.rollbackFailed', { message: result.error ?? 'Unknown error' }));
-      return;
-    }
-    if (result.data.success) {
-      setRollbackResult({ success: true, message: result.data.message });
-      toast.success(t('pages.update.rollbackSuccess'));
-      await loadData();
-    } else {
-      setRollbackResult({ success: false, message: result.data.message });
-      toast.error(t('pages.update.rollbackFailed', { message: result.data.message }));
-    }
-  }, [t, loadData]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
@@ -277,6 +215,18 @@ export function UpdatePage() {
               </span>
             </div>
 
+            {/* PR-C: identity divergence — the plugin-directory copy disagrees
+                with the signed active release. Surfaced, never hidden: the
+                active release stays authoritative, the Owner sees why. */}
+            {statusData?.identityDivergence && (
+              <div className="border border-amber/35 rounded-[4px] px-3 py-2 text-[12px] leading-relaxed text-ink-2">
+                {t("pages.update.identityDivergence", {
+                  active: statusData.identityDivergence.activeVersion,
+                  plugin: statusData.identityDivergence.pluginVersion,
+                })}
+              </div>
+            )}
+
             {/* Latest version */}
             <div className="flex items-center justify-between">
               <span className="text-ink-3 text-[13px]">{t("pages.update.latestVersion")}</span>
@@ -284,7 +234,9 @@ export function UpdatePage() {
                 <span className="font-mono text-[13px] text-ink">
                   {statusData?.latestVersion ?? "—"}
                 </span>
-                {isUpToDate ? (
+                {statusData?.error ? (
+                  <span className="text-amber text-[12px]">{t("pages.update.checkFailed")}</span>
+                ) : isUpToDate ? (
                   <span className="inline-flex items-center border border-green/35 text-green rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
                     {t("pages.update.upToDate")}
                   </span>
@@ -304,38 +256,6 @@ export function UpdatePage() {
             </div>
           )}
 
-          {/* Sync-pending notice: a newer plugin is published but the installer
-              has not been republished to bundle it. Show it honestly instead of
-              offering a version the full update cannot install. */}
-          {statusData?.syncPending && (
-            <div className="mt-4 p-3 rounded-[4px] border border-amber/30 bg-amber/5">
-              <p className="text-[12px] text-amber leading-relaxed">
-                {t("pages.update.syncPending", { pluginVersion: statusData.pluginLatestVersion ?? "" })}
-              </p>
-            </div>
-          )}
-
-          {/* Codex host warning — Web UI update only covers the OpenClaw plugin */}
-          {statusData?.codexInstalled && (
-            <div className="mt-4 p-3 rounded-[4px] border border-amber/30 bg-amber/5">
-              <p className="text-[12px] text-amber leading-relaxed">
-                {t("pages.update.codexWarning")}
-              </p>
-            </div>
-          )}
-
-          {/* What's new — changelog from GitHub Release */}
-          {statusData?.changelog && statusData.hasUpdate && (
-            <div className="mt-4 p-4 rounded-[4px] border border-line bg-surface/50">
-              <p className="text-[12px] font-mono text-ink-3 uppercase tracking-wide mb-2">
-                {t("pages.update.whatsNew")}
-              </p>
-              <div className="text-[13px] text-ink-2 leading-relaxed max-h-[300px] overflow-y-auto">
-                <MarkdownRenderer content={statusData.changelog} />
-              </div>
-            </div>
-          )}
-
           {/* Buttons — one check + one update */}
           <div className="mt-5 pt-4 border-t border-line flex items-center gap-3 flex-wrap">
             <button
@@ -346,7 +266,7 @@ export function UpdatePage() {
             >
               {checking ? t("pages.update.checking") : t("pages.update.checkForUpdates")}
             </button>
-            {!isUpToDate && (
+            {!isUpToDate && !statusData?.error && (
               <button
                 type="button"
                 onClick={() => setShowFullUpdateDialog(true)}
@@ -388,26 +308,10 @@ export function UpdatePage() {
                   <p className={`text-[13px] ${updateResult.success ? 'text-green' : 'text-red'}`}>
                     {updateResult.message}
                   </p>
-                  {/* File count (success only) */}
-                  {updateResult.success && updateResult.updatedFiles && updateResult.updatedFiles.length > 0 && (
-                    <p className="mt-1 text-[12px] text-ink-4 font-mono">
-                      {t("pages.update.filesUpdated", { count: updateResult.updatedFiles.length })}
-                    </p>
-                  )}
-                  {/* Restart hint (success only) */}
-                  {updateResult.success && !updateResult.requiresRestart && (
-                    <p className="mt-2 text-[12px] font-mono text-ink-4">{t("pages.update.restartHint")}</p>
-                  )}
                   {/* Full update restart prompt (requires console restart) */}
                   {updateResult.success && updateResult.requiresRestart && (
                     <p className="mt-2 p-2 rounded-[3px] bg-amber/5 border border-amber/20 text-[12px] text-amber leading-relaxed">
                       {t("pages.update.fullUpdateRestartPrompt")}
-                    </p>
-                  )}
-                  {/* Partial update hint (success + Codex installed) */}
-                  {updateResult.success && updateResult.partialUpdate && (
-                    <p className="mt-1 text-[12px] text-amber leading-relaxed">
-                      {t("pages.update.partialUpdateHint")}
                     </p>
                   )}
                   {/* Gateway coordination degraded during the update (PRI-723) —
@@ -432,8 +336,8 @@ export function UpdatePage() {
                       )}
                       <button
                         type="button"
-                        onClick={handleApplyUpdate}
-                        disabled={updating}
+                        onClick={() => setShowFullUpdateDialog(true)}
+                        disabled={fullUpdating}
                         className="text-[12px] text-red underline hover:text-red/80 disabled:opacity-50"
                       >
                         {t("pages.update.retry")}
@@ -496,18 +400,6 @@ export function UpdatePage() {
                         minute: "2-digit",
                       })}
                     </span>
-                    {entry.backupPath && (
-                      <button
-                        type="button"
-                        onClick={() => setShowRollbackDialog(entry.backupPath!)}
-                        disabled={rollingBack || updating}
-                        className="flex items-center gap-1 border border-line bg-surface text-ink-3 rounded-[3px] px-[8px] py-[4px] text-[11px] hover:text-ink hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={t("pages.update.rollback")}
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                        {t("pages.update.rollback")}
-                      </button>
-                    )}
                   </div>
                 </div>
                 {(entry.reason || entry.nextAction) && (
@@ -545,33 +437,6 @@ export function UpdatePage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Rollback confirmation dialog */}
-      <AlertDialog open={showRollbackDialog !== null} onOpenChange={(open) => { if (!open) setShowRollbackDialog(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("pages.update.confirmRollbackTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("pages.update.confirmRollbackDesc")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { if (showRollbackDialog) handleRollback(showRollbackDialog); }}>
-              {t("pages.update.rollback")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Rollback result message */}
-      {rollbackResult && (
-        <div className={`fixed bottom-4 right-4 max-w-md p-3 rounded-[4px] text-[13px] z-50 ${rollbackResult.success ? 'bg-green/10 border border-green/20 text-green' : 'bg-red/10 border border-red/20 text-red'}`}>
-          <p>{rollbackResult.message}</p>
-          {rollbackResult.success && (
-            <p className="mt-1 text-[12px] font-mono opacity-80">{t("pages.update.restartHintAfterRollback")}</p>
-          )}
-        </div>
-      )}
     </PageShell>
   );
 }

@@ -379,7 +379,6 @@ export function generateConfigYamlContent(
         evaluator:         { enabled: false, runtimeProfile: 'pd.default' },
         rolloutReviewer:   { enabled: false, runtimeProfile: 'pd.default' },
         correctionObserver:{ enabled: false, runtimeProfile: 'pd.default' },
-        empathyObserver:   { enabled: false, runtimeProfile: 'pd.default' },
         // PRI-797: 默认启用——未配置 API 端点时降级为关键词-only 并 WARN 提醒，
         // 不静默。Owner 配好 provider 后语义确认链自动生效。
         signalCollector:   { enabled: true,  runtimeProfile: 'pd.default' },
