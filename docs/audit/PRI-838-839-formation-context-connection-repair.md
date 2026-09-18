@@ -219,6 +219,17 @@ the degradation is still recorded (rc-9). Regression test:
 `formation-context.test.ts` → "holds the cap even when every field is maximal
 and the drops themselves add notes".
 
+The regression test is load-bearing, not tautological: restoring the pre-fix
+guard and re-running it fails with
+
+```text
+AssertionError: expected 12227 to be less than or equal to 8000
+```
+
+on a maximally-padded chain — so the test detects the *class* of defect
+(unbounded final guard), not merely the first input that happened to trip it.
+Restoring the fix returns 19/19 green.
+
 
 ---
 
