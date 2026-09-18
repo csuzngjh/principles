@@ -1373,21 +1373,16 @@ export function validateLifecycleMetrics(v: unknown): LifecycleMetricsData | nul
 }
 
 // ── Update validators ─────────────────────────────────────────────────────────
-// Contract aligned with backend routes/update.ts doCheckForUpdates() response.
+// Contract aligned with the ReleaseManager check response.
 
 export interface UpdateStatusData {
   currentVersion: string;
   latestVersion: string;
   hasUpdate: boolean;
   error?: string;
-  /** True when Codex host is also installed (triggers a warning banner). */
-  codexInstalled?: boolean;
-  /** Release notes for the latest version (markdown, from GitHub Releases). */
-  changelog?: string;
-  /** Newest plugin version published to npm (may exceed what the installer can deliver). */
-  pluginLatestVersion?: string;
-  /** True when a newer plugin is published but the installer has not been republished to bundle it. */
-  syncPending?: boolean;
+  /** PRI-738 legacy-updater retirement: why a check degraded / what to do next. */
+  reason?: string;
+  nextAction?: string;
   /** PR-C: present on governed checks — the reported currentVersion comes from the active release identity. */
   versionSource?: 'active-release' | 'plugin-package';
   /** PR-C: the plugin-directory copy disagrees with the signed active release. Surfaced, never silently resolved. */
@@ -1412,18 +1407,8 @@ export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
   if (Object.hasOwn(v, 'error') && isString(v.error)) {
     result.error = v.error;
   }
-  if (Object.hasOwn(v, 'codexInstalled') && typeof v.codexInstalled === 'boolean') {
-    result.codexInstalled = v.codexInstalled;
-  }
-  if (Object.hasOwn(v, 'changelog') && isString(v.changelog)) {
-    result.changelog = v.changelog;
-  }
-  if (Object.hasOwn(v, 'pluginLatestVersion') && isString(v.pluginLatestVersion)) {
-    result.pluginLatestVersion = v.pluginLatestVersion;
-  }
-  if (Object.hasOwn(v, 'syncPending') && typeof v.syncPending === 'boolean') {
-    result.syncPending = v.syncPending;
-  }
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
   if (Object.hasOwn(v, 'versionSource') && (v.versionSource === 'active-release' || v.versionSource === 'plugin-package')) {
     result.versionSource = v.versionSource;
   }
@@ -2498,20 +2483,6 @@ export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | n
     result.gatewayNotice = v.gatewayNotice;
   }
   return result;
-}
-
-// ── Rollback Result ──────────────────────────────────────────────────────────
-
-export interface RollbackResultData {
-  success: boolean;
-  message: string;
-}
-
-export function validateRollbackResult(v: unknown): RollbackResultData | null {
-  if (!isObject(v)) return null;
-  if (!Object.hasOwn(v, 'success') || typeof v.success !== 'boolean') return null;
-  if (!Object.hasOwn(v, 'message') || !isString(v.message)) return null;
-  return { success: v.success, message: v.message };
 }
 
 // ── Principle Trajectory validators ─────────────────────────────────────────

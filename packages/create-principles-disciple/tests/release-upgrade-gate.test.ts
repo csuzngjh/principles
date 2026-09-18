@@ -206,21 +206,33 @@ async function stopConsole(): Promise<void> {
 }
 
 async function postApplyFull(): Promise<{ status: number; authority: string | null; fallbackReason: string | null; body: Record<string, unknown> }> {
-  const response = await fetch(`http://127.0.0.1:${consolePort}/api/update/apply-full`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: '{}',
+  // node:http, not global fetch: undici aborts a response whose headers have
+  // not arrived within its 300s default, but /apply-full legitimately blocks
+  // on the whole installer transaction (download + deploy + gateway restart),
+  // which exceeds 300s on a loaded machine (observed 2026-09-17). The test's
+  // own 900s budget remains the deadline.
+  return await new Promise((resolvePromise, reject) => {
+    const request = http.request(
+      { host: '127.0.0.1', port: consolePort, path: '/api/update/apply-full', method: 'POST', headers: { 'content-type': 'application/json' } },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => {
+          let envelope: Record<string, unknown> = {};
+          try { envelope = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>; } catch { /* handler below surfaces it */ }
+          const body = (typeof envelope.data === 'object' && envelope.data !== null ? envelope.data : envelope) as Record<string, unknown>;
+          resolvePromise({
+            status: response.statusCode ?? 0,
+            authority: response.headers['x-pd-mutation-authority'] ?? null,
+            fallbackReason: response.headers['x-pd-mutation-fallback-reason'] ?? null,
+            body,
+          });
+        });
+      },
+    );
+    request.on('error', reject);
+    request.end('{}');
   });
-  const envelope = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  // sendSuccess wraps route payloads in a { success, data } envelope; the
-  // update route's own body (with newVersion/reason) lives under `data`.
-  const body = (typeof envelope.data === 'object' && envelope.data !== null ? envelope.data : envelope) as Record<string, unknown>;
-  return {
-    status: response.status,
-    authority: response.headers.get('x-pd-mutation-authority'),
-    fallbackReason: response.headers.get('x-pd-mutation-fallback-reason'),
-    body,
-  };
 }
 
 function readActiveRecord(): Record<string, unknown> {
@@ -337,7 +349,9 @@ afterAll(async () => {
       skip: process.env.CI === 'true' && process.platform === 'win32',
     });
   });
-}, 300_000);
+  // The gate home carries multi-GB runtime trees; deleting them took 450s on
+  // a loaded machine (2026-09-17), far past vitest's 300s default hook cap.
+}, 1_800_000);
 
 describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
   it(

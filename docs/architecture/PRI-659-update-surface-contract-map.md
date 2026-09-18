@@ -1,6 +1,19 @@
 # PRI-659 — Update Surface Contract Map
 
-> **Status**: Living document（随迁移阶段更新）
+> **Status**: Historical migration snapshot — superseded by PRI-738 on 2026-09-17.
+>
+> **Current contract (PRI-738)**: Console exposes `GET /api/update/check` and
+> `POST /api/update/apply-full`, with read-only history retained. ReleaseManager
+> is the sole update authority and Installer the sole deployment writer.
+> Plugin-diff `/apply`, manual `/rollback`, legacy executor/controller/journal,
+> shadow comparison and migration flags have been removed. Missing metadata,
+> trust or readiness fails explicitly with reason and nextAction; there is no
+> alternate updater. Signed metadata supplies latestVersion and active.json
+> supplies currentVersion. Installer automatic restore, terminal journal states,
+> Owner data, gatewayNotice and historical update records remain protected.
+>
+> The following sections preserve the migration's original evidence, not current
+> operational instructions.
 > **Date**: 2026-09-04
 > **Baseline**: `origin/main` @ `3bed0856`（PR #1496，ADR-0023 已合并）
 > **Governed by**: ADR-0023（PD Installation Architecture Decisions）、ADR-0024（PD Runtime Mutation Governance，D-1：console updater 收敛为 ReleaseManager 触发器/呈现层）

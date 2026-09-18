@@ -3,8 +3,8 @@ Feature: 商业级版本更新系统行为契约
 
   对应 SPEC docs/superpowers/specs/2026-08-25-commercial-grade-update-system-design.md §18。
   覆盖 check / apply / reinstall / refusal / interrupted recovery / rollback /
-  legacy migration / version display / history classification 九类可观察行为。
-  步骤驱动真实模块（ReleaseManager、事务 journal、恢复器、迁移器、版本报告），
+  version display / history classification 可观察行为（PRI-738 删除未接线的迁移器场景）。
+  步骤驱动真实模块（ReleaseManager、事务 journal、恢复器、版本报告），
   不允许 mock 掉被测行为。
 
   Background:
@@ -62,19 +62,6 @@ Feature: 商业级版本更新系统行为契约
   Scenario: 网络类失败不触发自动回滚
     When 一个先前运行中的 host 出现 network_unavailable
     Then 协调决策为 retry_handshake 而非回滚
-
-  @update-legacy-migration
-  Scenario: 官方安装器将 overlay 安装迁移到双槽布局
-    When 由官方安装器对存在的 overlay 执行迁移
-    Then 迁移成功且 active.json 记录 generation 1
-    And overlay 目录保持只读原样
-    And 历史记录追加 legacy_migration 事件
-
-  @update-legacy-migration-scope
-  Scenario: 非官方调用方不得迁移 bootstrap
-    When 非官方安装器调用方对 overlay 执行迁移
-    Then 迁移被拒绝且原因为 bootstrap_write_out_of_scope
-    And 磁盘上不产生任何 ~/.pd 写入
 
   @update-version
   Scenario: pd 版本表面报告 canonical 身份而非 checkout 包版本
