@@ -13,6 +13,7 @@ import { createPITaskDiagnosticJson, parsePITaskMetadata } from '../internalizat
 import type { PITaskMetadata, RepairPayload } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
 import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter.js';
+import { FORMATION_CANDIDATE_LIMIT } from '../internalization/formation-context.js';
 
 import { PDRuntimeError } from '../error-categories.js';
 
@@ -1021,15 +1022,17 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
     const result = await runner.run(ARTIFICER_TASK_ID_PRI508);
     expect(result.status).toBe('succeeded');
 
-    // Assert the prompt captured at startRun contains dreamerContext 5维字段
+    // Assert the prompt captured at startRun contains the dreamer candidate set
     expect(capturedPrompt).toBeDefined();
     const parsed = JSON.parse(capturedPrompt as string);
     expect(parsed.dreamerContext).toBeDefined();
-    expect(parsed.dreamerContext.badDecision).toBe('agent called write_file without resolving parent path');
-    expect(parsed.dreamerContext.betterDecision).toBe('agent must resolve and validate parent path before write_file');
-    expect(parsed.dreamerContext.rationale).toBe('parent path resolution prevents path traversal exploits');
-    expect(parsed.dreamerContext.riskLevel).toBe('medium');
-    expect(parsed.dreamerContext.strategicPerspective).toBe('proactive validation beats reactive cleanup');
+    expect(parsed.dreamerContext.candidates).toHaveLength(1);
+    expect(parsed.dreamerContext.candidates[0].badDecision).toBe('agent called write_file without resolving parent path');
+    expect(parsed.dreamerContext.candidates[0].betterDecision).toBe('agent must resolve and validate parent path before write_file');
+    expect(parsed.dreamerContext.candidates[0].rationale).toBe('parent path resolution prevents path traversal exploits');
+    expect(parsed.dreamerContext.candidates[0].riskLevel).toBe('medium');
+    expect(parsed.dreamerContext.candidates[0].strategicPerspective).toBe('proactive validation beats reactive cleanup');
+    expect(parsed.dreamerContext.omittedCandidateCount).toBe(0);
   });
 
   it('dreamerArtifactId 缺失时 dreamerContext undefined (向后兼容)', async () => {
@@ -1451,9 +1454,10 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
     );
   });
 
-  it('edge: dreamer candidates[0] with only required 3 fields + no optional → dreamerContext resolved (no riskLevel/strategicPerspective)', async () => {
-    // Validates the optional-field spread path: riskLevel/strategicPerspective absent
-    // should still yield a valid dreamerContext with only the 3 required fields.
+  it('edge: dreamer proposal with only required 3 fields + no optional → dreamerContext resolved (explicit nulls)', async () => {
+    // Validates the optional-field path: riskLevel/strategicPerspective/confidence
+    // absent should still yield a valid candidate, with the unresolvable signals
+    // carried as explicit nulls rather than silently dropped (rc-9).
     const dreamerArtifact = makeDreamerWithContentJson(JSON.stringify({
       candidates: [{
         badDecision: 'bad',
@@ -1472,11 +1476,109 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
     expect(capturedPrompt).toBeDefined();
     const parsed = JSON.parse(capturedPrompt as string);
     expect(parsed.dreamerContext).toBeDefined();
-    expect(parsed.dreamerContext.badDecision).toBe('bad');
-    expect(parsed.dreamerContext.betterDecision).toBe('better');
-    expect(parsed.dreamerContext.rationale).toBe('why');
-    expect(parsed.dreamerContext.riskLevel).toBeUndefined();
-    expect(parsed.dreamerContext.strategicPerspective).toBeUndefined();
+    const [candidate] = parsed.dreamerContext.candidates;
+    expect(candidate.badDecision).toBe('bad');
+    expect(candidate.betterDecision).toBe('better');
+    expect(candidate.rationale).toBe('why');
+    expect(candidate.riskLevel).toBeNull();
+    expect(candidate.strategicPerspective).toBeNull();
+    expect(candidate.confidence).toBeNull();
+    expect(parsed.dreamerContext.omittedCandidateCount).toBe(0);
+  });
+
+  // ── PRI-839: bounded candidate set (was candidates[0]-only) ──────────────
+
+  it('PRI-839: EVERY dreamer candidate reaches the prompt, priority-ranked by confidence', async () => {
+    const dreamerArtifact = makeDreamerWithContentJson(JSON.stringify({
+      candidates: [
+        { candidateIndex: 0, badDecision: 'bad-0', betterDecision: 'better-0', rationale: 'why-0', confidence: 0.4, riskLevel: 'high', strategicPerspective: 'lens-0' },
+        { candidateIndex: 1, badDecision: 'bad-1', betterDecision: 'better-1', rationale: 'why-1', confidence: 0.9, riskLevel: 'low', strategicPerspective: 'lens-1' },
+        { candidateIndex: 2, badDecision: 'bad-2', betterDecision: 'better-2', rationale: 'why-2', confidence: 0.6, riskLevel: 'medium', strategicPerspective: 'lens-2' },
+      ],
+    }));
+
+    const { result, capturedPrompt } = await runPri508EdgeCase({
+      scribeArtifact: makeScribeWithDreamerRef(),
+      dreamerArtifact,
+    });
+
+    expect(result.status).toBe('succeeded');
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.dreamerContext).toBeDefined();
+
+    // The DC-3 fix: all three alternatives survive — not just candidates[0].
+    expect(parsed.dreamerContext.candidates).toHaveLength(3);
+    // Deterministic priority: confidence DESC, then authored index.
+    expect(parsed.dreamerContext.candidates.map((c: { candidateIndex: number }) => c.candidateIndex)).toEqual([1, 2, 0]);
+    expect(parsed.dreamerContext.candidates.map((c: { priorityRank: number }) => c.priorityRank)).toEqual([1, 2, 3]);
+    expect(parsed.dreamerContext.omittedCandidateCount).toBe(0);
+    expect(parsed.dreamerContext.differenceSummary).toContain('3 mutually distinct proposals');
+    expect(parsed.dreamerContext.differenceSummary).toContain('risk spread');
+  });
+
+  it('PRI-839: candidates beyond the bound are dropped, counted, and announced', async () => {
+    const candidates = Array.from({ length: FORMATION_CANDIDATE_LIMIT + 2 }, (_, index) => ({
+      candidateIndex: index,
+      badDecision: `bad-${index}`,
+      betterDecision: `better-${index}`,
+      rationale: `why-${index}`,
+      confidence: 0.5,
+      riskLevel: 'low',
+      strategicPerspective: `lens-${index}`,
+    }));
+
+    const { result, capturedPrompt, emitTelemetry } = await runPri508EdgeCase({
+      scribeArtifact: makeScribeWithDreamerRef(),
+      dreamerArtifact: makeDreamerWithContentJson(JSON.stringify({ candidates })),
+    });
+
+    expect(result.status).toBe('succeeded');
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.dreamerContext.candidates).toHaveLength(FORMATION_CANDIDATE_LIMIT);
+    expect(parsed.dreamerContext.omittedCandidateCount).toBe(2);
+    // rc-9: the truncation is observable, not silent.
+    expect(emitTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: expect.stringContaining('dreamer_context_partial'),
+        traceId: ARTIFICER_TASK_ID_PRI508,
+      }),
+    );
+  });
+
+  it('PRI-839 legacy: a malformed candidate is skipped without discarding the valid ones', async () => {
+    const dreamerArtifact = makeDreamerWithContentJson(JSON.stringify({
+      candidates: [
+        { badDecision: 'bad-0', betterDecision: 'better-0', rationale: 'why-0' },
+        { betterDecision: 'b', rationale: 'r' },   // malformed: no badDecision
+        'not-a-record',                            // malformed: not an object
+        { badDecision: 'bad-3', betterDecision: 'better-3', rationale: 'why-3' },
+      ],
+    }));
+
+    const { result, capturedPrompt } = await runPri508EdgeCase({
+      scribeArtifact: makeScribeWithDreamerRef(),
+      dreamerArtifact,
+    });
+
+    expect(result.status).toBe('succeeded');
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.dreamerContext.candidates).toHaveLength(2);
+    expect(parsed.dreamerContext.candidates.map((c: { candidateIndex: number }) => c.candidateIndex)).toEqual([0, 3]);
+  });
+
+  it('PRI-839: single candidate still resolves (no behaviour change from the old path)', async () => {
+    const { result, capturedPrompt } = await runPri508EdgeCase({
+      scribeArtifact: makeScribeWithDreamerRef(),
+      dreamerArtifact: makeDreamerWithContentJson(JSON.stringify({
+        candidates: [{ badDecision: 'only-bad', betterDecision: 'only-better', rationale: 'only-why', confidence: 0.7, riskLevel: 'medium', strategicPerspective: 'lens' }],
+      })),
+    });
+
+    expect(result.status).toBe('succeeded');
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.dreamerContext.candidates).toHaveLength(1);
+    expect(parsed.dreamerContext.candidates[0].badDecision).toBe('only-bad');
+    expect(parsed.dreamerContext.differenceSummary).toContain('no alternatives were proposed');
   });
 });
 

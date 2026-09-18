@@ -2,6 +2,7 @@ import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
 import type { CoreAxiomBlockOptions } from '../core-principles/core-axiom-block.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
+import type { FormationContext } from './formation-context.js';
 
 export interface ScribePromptBuilderInput {
   taskId: string;
@@ -15,6 +16,13 @@ export interface ScribePromptBuilderInput {
    */
   sourceDreamerArtifactId?: string;
   philosopherArtifact: unknown;
+  /**
+   * PRI-838: bounded projection of the formation evidence this formation was
+   * built from (dreamer proposals + source diagnosis + provenance). Absent when
+   * the dreamer artifact could not be resolved — the prompt then keeps its
+   * pre-PRI-838 shape exactly (legacy / degraded compatibility).
+   */
+  formationContext?: FormationContext;
   /** Owner's preferred language for principle generation (PRI-336). */
   outputLanguage?: OutputLanguage;
   /** Inject core axiom grounding section (default: false). */
@@ -27,6 +35,8 @@ export interface ScribePromptInput {
   sourcePhilosopherArtifactId: string;
   sourceDreamerArtifactId?: string;
   philosopherArtifact: unknown;
+  /** PRI-838: present only when formation evidence resolved for this run. */
+  formationContext?: FormationContext;
   promptContractVersion: string;
 }
 
@@ -42,18 +52,62 @@ export interface ScribePromptBuildResult {
 }
 
 /**
+ * PRI-838: the formation-evidence addendum (system-prompt half of the repair).
+ *
+ * The CANDIDATE PRIORITY contract below is reused **byte-identical** from the
+ * frozen PRI-815 Phase A addendum (`scripts/pri-815/b-addendum.mjs`,
+ * `B_ADDENDUM_VERSION = 'pri815-b-addendum.v1'`). That exact text is the
+ * information channel which produced the measured
+ * `NET_ADVANTAGE = 85.7pp` (W=19 / L=1 / T=1) in PR #1753, so re-deriving or
+ * paraphrasing it would discard the only quantitative evidence we have for it.
+ *
+ * Two deliberate deltas from the frozen text, both required to productionise it:
+ *   1. the locator paragraph — the production payload nests the three blocks
+ *      under `formationContext`, where the harness passed them flat;
+ *   2. one degradation bullet — production formations include legacy artifacts
+ *      with no resolvable diagnosis (PRI-838 Phase 4 Case 2/3), and the model
+ *      must be told to degrade rather than invent a missing source intent.
+ *
+ * Every other line is unchanged.
+ */
+export const FORMATION_EVIDENCE_ADDENDUM_VERSION = 'pri815-b-addendum.v1';
+
+export const FORMATION_EVIDENCE_ADDENDUM = `
+
+ADDITIONAL CONTEXT (formation evidence recovery):
+Your input additionally carries \`formationContext\` — the ORIGINAL FORMATION EVIDENCE that started this formation:
+- formationContext.sourceDiagnosis: the diagnostician output that started this formation, including its rootCause, summary, violatedPrinciples and evidence array (the primary source intent).
+- formationContext.dreamerProposals: ALL alternative candidates the Dreamer proposed (not only the selected one), each with badDecision / betterDecision / rationale / confidence / riskLevel / strategicPerspective. \`priorityRank\` is a derived reading aid over the Dreamer's own signals, not an authority.
+- formationContext.provenance: lineage ids linking this formation back to the source pain and diagnosis.
+
+CANDIDATE PRIORITY (must obey):
+source intent (sourceDiagnosis) > critique conclusions (philosopherArtifact) > proposals as candidate evidence (dreamerProposals).
+- The philosopher's critique already evaluated the proposals: do NOT revive a proposal the critique explicitly rejected.
+- Do NOT merge mutually exclusive proposals into one principle.
+- Use the proposals as EVIDENCE for specificity (concrete failure modes, concrete better decisions), never to widen the principle's scope beyond the source intent.
+- Ground every concrete claim in the formation evidence (diagnosis evidence, a proposal's concrete decision, or the critique). Do NOT invent specifics that are absent from this formation context.
+- Longer output is not better: the goal is a MORE FAITHFUL, MORE SPECIFIC, correctly-bounded principle, not a longer one.
+- When \`formationContext.sourceDiagnosis\` is absent, the source intent is UNAVAILABLE: say so in \`risks\` instead of inventing one, and let the critique conclusions carry the intent.
+- All other PROTOCOL, OUTPUT FORMAT and CONSTRAINTS above remain unchanged.`;
+
+/**
  * Build the Scribe protocol instruction with optional core axiom grounding.
  *
  * When `coreGrounding` is true, a CORE AXIOMS section is injected so the
  * Scribe can ensure the formal principle draft is consistent with the
  * existing core principle framework.
+ *
+ * When `formationEvidence` is true (PRI-838), the formation-evidence addendum
+ * is appended after the CONSTRAINTS section — the same system-channel placement
+ * the validated PRI-815 Phase A Arm B used.
  */
 export function buildScribeProtocolInstruction(
-  opts: CoreAxiomBlockOptions & { outputLanguage?: OutputLanguage } = {},
+  opts: CoreAxiomBlockOptions & { outputLanguage?: OutputLanguage; formationEvidence?: boolean } = {},
 ): string {
-  const { outputLanguage, ...axiomOpts } = opts;
+  const { outputLanguage, formationEvidence = false, ...axiomOpts } = opts;
   const coreAxiomsBlock = buildCoreAxiomBlock({ ...axiomOpts, outputLanguage });
   const languageDirective = buildLanguageDirective(outputLanguage);
+  const formationEvidenceBlock = formationEvidence ? FORMATION_EVIDENCE_ADDENDUM : '';
 
   return `You are a Scribe agent in a principle internalization pipeline. Your role is to distill the Philosopher's analysis into a formal, implementable principle draft.
 
@@ -115,7 +169,7 @@ CONSTRAINTS:
 - risks MUST be an array of strings (can be empty if no risks identified)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 - If the CORE AXIOMS section is provided, ensure the principle draft does not duplicate or contradict any existing core axiom. If overlap exists, note it in risks
-${languageDirective}`;
+${formationEvidenceBlock}${languageDirective}`;
 }
 
 /**
@@ -132,7 +186,16 @@ ${languageDirective}`;
  * exactly" — the prompt input gained `sourceDreamerArtifactId`, and the
  * CONSTRAINTS text tightened accordingly (audit R-01 lineage fix).
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v3';
+/**
+ * PRI-838: bumped v3 → v4. The prompt input gained the optional
+ * `formationContext` block (dreamer proposals + source diagnosis + provenance)
+ * and the system prompt conditionally carries the formation-evidence addendum
+ * (`FORMATION_EVIDENCE_ADDENDUM`, the frozen Phase A text). Additive: the
+ * OUTPUT FORMAT, the CONSTRAINTS, the validator and `ScribeOutputV1` are
+ * unchanged, and a run without formation evidence emits exactly the v3 wire
+ * shape plus the new version string.
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v4';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;
@@ -153,6 +216,7 @@ export class ScribePromptBuilder {
     const scribeInstruction = buildScribeProtocolInstruction({
       coreGrounding,
       outputLanguage,
+      formationEvidence: input.formationContext !== undefined,
     });
 
     const promptInput: ScribePromptInput = {
@@ -163,6 +227,9 @@ export class ScribePromptBuilder {
         ? { sourceDreamerArtifactId: input.sourceDreamerArtifactId }
         : {}),
       philosopherArtifact: input.philosopherArtifact,
+      // PRI-838: only included when formation evidence actually resolved, so a
+      // degraded run's payload stays byte-compatible with the v3 shape.
+      ...(input.formationContext !== undefined ? { formationContext: input.formationContext } : {}),
       promptContractVersion: SCRIBE_PROMPT_CONTRACT_VERSION,
     };
 

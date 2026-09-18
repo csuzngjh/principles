@@ -32,6 +32,8 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { ScribePromptBuilder } from './scribe-prompt-builder.js';
+import { resolveFormationContext } from './formation-context.js';
+import type { FormationContext, FormationTaskView } from './formation-context.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -56,6 +58,14 @@ interface ScribeContext {
    * `sourceTrace.dreamerArtifactId` (backward compatible).
    */
   readonly sourceDreamerArtifactId?: string;
+  /**
+   * PRI-838: bounded projection of the formation evidence this formation was
+   * built from — the dreamer's full (bounded) proposal set, the source
+   * diagnosis, and provenance. Optional: undefined when the dreamer artifact
+   * could not be resolved, in which case the prompt keeps its pre-PRI-838
+   * shape exactly (legacy / degraded compatibility).
+   */
+  readonly formationContext?: FormationContext;
 }
 
 /**
@@ -193,21 +203,69 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
         const [firstArtifact] = artifacts;
         if (!firstArtifact) continue;
         const artifactRef = depPiTask?.outputArtifactRefs?.[0]?.ref ?? `pi-artifact://${depId}`;
+        // PRI-816 (R-01): authoritative dreamer lineage, extracted from the
+        // philosopher artifact's own `sourceDreamerArtifactId` (a required
+        // field of philosopher-output-v1). The scribe prompt copies this
+        // into `sourceTrace.dreamerArtifactId` instead of scraping artifact
+        // content with a mismatched field name.
+        const sourceDreamerArtifactId = extractSourceDreamerArtifactId(firstArtifact.contentJson);
+
+        // PRI-838 (DC-1): resolve the formation evidence the id above points
+        // at. Before this, the scribe held the identifier and never dereferenced
+        // it — the source pain, the diagnosis and the dreamer's alternatives
+        // were structurally dropped. Best-effort and never blocking: an
+        // unresolvable formation yields `undefined` and the prompt keeps its
+        // pre-PRI-838 shape. rc-9: every degradation emits an observable event.
+        const formationContext = await resolveFormationContext({
+          sourceDreamerArtifactId,
+          artifactStore: this.artifactStore,
+          lookupTask: (id) => this.lookupFormationTask(id),
+          emitEvent: (eventName, eventTaskId, payload) => this.emitEvent(eventName, eventTaskId, payload),
+          taskId,
+        });
+
+        // The context hash now covers the evidence the prompt actually carries,
+        // matching what dreamer-runner already does for its own predecessors.
+        const contextRefs = [
+          artifactRef,
+          ...(formationContext !== undefined
+            ? [
+                formationContext.provenance.sourceDreamerArtifactId,
+                ...(formationContext.provenance.sourceDiagnosisArtifactId !== null
+                  ? [formationContext.provenance.sourceDiagnosisArtifactId]
+                  : []),
+              ]
+            : []),
+        ];
+
         return {
-          contextHash: BasePeerRunner.hashContextRefs([artifactRef]),
+          contextHash: BasePeerRunner.hashContextRefs(contextRefs),
           philosopherArtifact: firstArtifact.contentJson,
           sourcePhilosopherArtifactId: firstArtifact.artifactId,
-          // PRI-816 (R-01): authoritative dreamer lineage, extracted from the
-          // philosopher artifact's own `sourceDreamerArtifactId` (a required
-          // field of philosopher-output-v1). The scribe prompt copies this
-          // into `sourceTrace.dreamerArtifactId` instead of scraping artifact
-          // content with a mismatched field name.
-          sourceDreamerArtifactId: extractSourceDreamerArtifactId(firstArtifact.contentJson),
+          sourceDreamerArtifactId,
+          ...(formationContext !== undefined ? { formationContext } : {}),
         };
       }
     }
 
     throw new PDRuntimeError('input_invalid', 'Philosopher dependency artifact not found');
+  }
+
+  /**
+   * PRI-838: narrow task view for formation-context resolution.
+   *
+   * Phase identity exists ONLY on the task row — every PI artifact is written
+   * with `artifact_kind = 'principle'`, so the diagnostic predecessor cannot be
+   * identified from artifact records alone (see formation-context.ts).
+   */
+  private async lookupFormationTask(taskId: string): Promise<FormationTaskView | null> {
+    const task = await this.stateManager.getTask(taskId);
+    if (!task) return null;
+    return {
+      taskKind: task.taskKind,
+      status: task.status,
+      dependencyTaskIds: hydratePITaskRecord(task)?.dependencyTaskIds ?? [],
+    };
   }
 
   async invokeRuntime(taskId: string, context: ScribeContext): Promise<RunHandle> {
@@ -229,6 +287,10 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       ...(context.sourceDreamerArtifactId !== undefined
         ? { sourceDreamerArtifactId: context.sourceDreamerArtifactId }
         : {}),
+      // PRI-838: formation evidence (dreamer proposals + source diagnosis +
+      // provenance) rides in the payload; the addendum that assigns it priority
+      // is appended to the system prompt by the builder.
+      ...(context.formationContext !== undefined ? { formationContext: context.formationContext } : {}),
       outputLanguage: this.resolvedOptions.outputLanguage,
       coreGrounding,
     });

@@ -69,15 +69,71 @@ jobs:
         run: npm test --workspace=create-principles-disciple -- --run tests/release-asset-smoke.test.ts
         env:
           PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
-      # PRI-671: the N-1 → candidate N REAL upgrade gate. Installs an N-1
-      # derived from the candidate asset, drives the installed Console's
-      # /api/update/apply-full against a locally served signed publication
-      # (pre-publish validation — nothing touches the npm registry), and
-      # verifies the upgraded runtime plus the corrupted-artifact failure
-      # path. Cost-bounded: two of the 15 matrix entries (the incident
-      # platform windows-2025 + one linux).
-      - name: N-1 to N real upgrade gate (Console /apply-full)
-        if: (matrix.runner == 'windows-2025' || matrix.runner == 'ubuntu-24.04') && matrix.node == '22.22.2'
+      # PRI-671: the LINUX N-1 → candidate N upgrade gate stays cost-cheap in
+      # the matrix (~8 min on ubuntu, run evidence) and keeps per-release Linux
+      # gate evidence. The WINDOWS gate is its own job (upgrade-gate-windows):
+      # Windows apply-full measures 17-23 min and cannot share the smoke job's
+      # 60 min budget.
+      - name: N-1 to N real upgrade gate (Console /apply-full, linux)
+        if: matrix.runner == 'ubuntu-24.04' && matrix.node == '22.22.2'
+        run: npm test --workspace=create-principles-disciple -- --run tests/release-upgrade-gate.test.ts
+        env:
+          PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
+      # Hand the double-build-verified WINDOWS asset to the standalone
+      # upgrade-gate-windows job (incident platform only — the gate derives
+      # its N-1 payload from THIS exact asset).
+      - name: Upload release asset for the windows upgrade gate
+        if: matrix.runner == 'windows-2025' && matrix.node == '22.22.2'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-asset-windows
+          path: ${{ runner.temp }}/pd-publication-two
+          if-no-files-found: error
+          retention-days: 1
+
+  # PRI-671 Phase 2: the Windows N-1 → candidate N upgrade gate is a
+  # disaster-recovery rehearsal, not a release smoke — it gets its own runner
+  # slot and its own 120 min budget. It reuses the double-build-verified
+  # windows asset (no asset rebuild) plus the same package build steps the
+  # gate harness needs. Windows-only: the incident platform; ubuntu coverage
+  # stays inside the matrix.
+  upgrade-gate-windows:
+    name: N-1 to N real upgrade gate (windows-2025, 22.22.2)
+    needs: native-release-matrix
+    runs-on: windows-2025
+    # 120 min: measured full gate on Windows ≈ 50-60 min (extract-n + extract
+    # -n1 ≈ 21 min, install ≈ 7 min, apply-full ≈ 17-23 min) plus workspace
+    # build and artifact download; the smoke job's 60 min budget cannot hold
+    # it.
+    timeout-minutes: 120
+    env:
+      SOURCE_DATE_EPOCH: '1700000000'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '22.22.2'
+          cache: npm
+      - run: npm ci
+      # The gate restamps the derived N-1 payload with the production asset
+      # builder and drives the installed console; both need the workspace
+      # build artifacts (not a rebuild of the release asset itself).
+      - name: Build every release component from the clean checkout
+        run: |
+          npm run build
+          npm run build:production --workspace=principles-disciple
+          npm run build --workspace=principles-disciple
+          npm run build --workspace=@principles/pd-cli
+          npm run build --workspace=@principles/pd-console
+          npm run build --workspace=create-principles-disciple
+      - name: Download the double-build-verified windows release asset
+        uses: actions/download-artifact@v4
+        with:
+          name: release-asset-windows
+          path: ${{ runner.temp }}/pd-publication-two
+      - name: N-1 to N real upgrade gate (Console /apply-full, windows)
         run: npm test --workspace=create-principles-disciple -- --run tests/release-upgrade-gate.test.ts
         env:
           PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two

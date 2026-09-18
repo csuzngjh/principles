@@ -41,6 +41,7 @@ import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-co
 import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
 import { extractIntentContract } from './intent-contract.js';
 import { ArtificerPromptBuilder, boundPackForPrompt, type ArtificerDreamerContext, type ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
+import { projectDreamerProposals, summarizeCandidateDifferences } from './formation-context.js';
 
 // PRI-741: the host semantic projection DTO travels with the runner options,
 // so it is re-exported alongside them (barrel exports it from this module).
@@ -209,8 +210,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // ── PRI-508: Dreamer context extraction ─────────────────────────────────────
 
 /**
- * Resolve the dreamer candidate 5-dim context from the dreamer artifact
- * referenced by `scribe.sourceTrace.dreamerArtifactId`.
+ * Resolve the dreamer candidate context from the dreamer artifact referenced
+ * by `scribe.sourceTrace.dreamerArtifactId`.
+ *
+ * PRI-839: this previously projected `candidates[0]` and silently discarded the
+ * rest (PRI-835 §DC-3). Production has 31 of 33 dreamer artifacts carrying ≥2
+ * candidates, so the upstream exploration cost was paid and then thrown away.
+ * The projection is now a BOUNDED, priority-ranked SET — the shape validation,
+ * per-field clamping and deterministic ranking live in
+ * `formation-context.ts` (`projectDreamerProposals`), which the Scribe's
+ * formation context also uses, so there is ONE definition of a projected
+ * dreamer proposal rather than two divergent ones.
+ *
+ * The bounding idiom is not new to this file: `boundPackForPrompt`
+ * (artificer-prompt-builder.ts, EP002-R4) already bounds the BehaviorExamplePack
+ * at the same prompt boundary for the same reason — the persisted evidence
+ * keeps full fidelity while the LLM receives a bounded preview.
  *
  * Trust boundary (rc-1, rc-2): scribe contentJson and dreamer contentJson are
  * untrusted. All field access uses Object.hasOwn (rc-5) and typeof / Array.isArray
@@ -224,6 +239,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `dreamer_artifact_missing` / `dreamer_context_invalid` event so the gap is
  * observable. Returns undefined (best-effort, non-blocking) so the artificer
  * can still proceed with the scribe principle alone.
+ *
+ * The event vocabulary below is deliberately UNCHANGED from pre-PRI-839 so the
+ * existing observability contract still holds.
  */
 async function resolveDreamerContext(params: {
   scribeContentJson: string;
@@ -287,60 +305,45 @@ async function resolveDreamerContext(params: {
     return undefined;
   }
 
-  // rc-4: validate candidates is a non-empty array, then element[0] shape.
-  // rc-2: avoid `as` cast — let `Array.isArray` type-guard narrow the local var.
-  if (!Object.hasOwn(dreamerParsed, 'candidates')) {
-    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'candidates_not_array' });
-    return undefined;
-  }
-  const candidatesField: unknown = dreamerParsed.candidates;
-  if (!Array.isArray(candidatesField)) {
-    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'candidates_not_array' });
-    return undefined;
-  }
-  if (candidatesField.length === 0) {
-    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'candidates_empty' });
-    return undefined;
-  }
-  const [firstCandidate] = candidatesField;
-  if (!isRecord(firstCandidate)) {
-    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'candidate0_not_record' });
-    return undefined;
-  }
+  // PRI-839: one bounded projection shared with the scribe's formation context.
+  const projection = projectDreamerProposals(dreamerParsed);
 
-  // Validate the 5-dim fields. badDecision/betterDecision/rationale are required strings.
-  // riskLevel/strategicPerspective are optional but must be string when present.
-  const requiredString = (key: string): string | undefined => {
-    if (!Object.hasOwn(firstCandidate, key)) return undefined;
-    const value = firstCandidate[key];
-    return typeof value === 'string' && value.trim() !== '' ? value : undefined;
-  };
-
-  const badDecision = requiredString('badDecision');
-  const betterDecision = requiredString('betterDecision');
-  const rationale = requiredString('rationale');
-  if (badDecision === undefined || betterDecision === undefined || rationale === undefined) {
+  if (projection.candidates.length === 0) {
+    // No usable proposal. Preserve the pre-PRI-839 reason vocabulary so the
+    // observability contract is unchanged even though the check is now set-wide.
+    const candidatesField: unknown = dreamerParsed.candidates;
+    let reason = 'missing_required_5dim_fields';
+    if (!Array.isArray(candidatesField)) {
+      reason = 'candidates_not_array';
+    } else if (candidatesField.length === 0) {
+      reason = 'candidates_empty';
+    } else if (!isRecord(candidatesField[0])) {
+      reason = 'candidate0_not_record';
+    }
     emitEvent('dreamer_context_invalid', taskId, {
       dreamerArtifactId,
-      reason: 'missing_required_5dim_fields',
-      hasBadDecision: badDecision !== undefined,
-      hasBetterDecision: betterDecision !== undefined,
-      hasRationale: rationale !== undefined,
+      reason,
+      truncationNotes: projection.truncationNotes,
     });
     return undefined;
   }
 
-  const riskLevel = requiredString('riskLevel');
-  const strategicPerspective = requiredString('strategicPerspective');
+  if (projection.truncationNotes.length > 0) {
+    // rc-9: a partially usable set still carries an explicit trace of what was
+    // dropped, so a quality regression can be traced back to the bound.
+    emitEvent('dreamer_context_partial', taskId, {
+      dreamerArtifactId,
+      candidateCount: projection.candidates.length,
+      omittedCandidateCount: projection.omittedCandidateCount,
+      truncationNotes: projection.truncationNotes,
+    });
+  }
 
-  const dreamerContext: ArtificerDreamerContext = {
-    badDecision,
-    betterDecision,
-    rationale,
-    ...(riskLevel !== undefined ? { riskLevel } : {}),
-    ...(strategicPerspective !== undefined ? { strategicPerspective } : {}),
+  return {
+    candidates: projection.candidates,
+    differenceSummary: summarizeCandidateDifferences(projection.candidates),
+    omittedCandidateCount: projection.omittedCandidateCount,
   };
-  return dreamerContext;
 }
 
 // ── PRI-509: Evaluator repair feedback formatting ───────────────────────────
