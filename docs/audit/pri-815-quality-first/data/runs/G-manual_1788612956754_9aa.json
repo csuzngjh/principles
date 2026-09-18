@@ -1,0 +1,694 @@
+{
+ "group": "G-manual_1788612956754_9aa",
+ "class": "DEV",
+ "pain_id": "manual_1788612956754_9aaecyhq",
+ "frozen_at": "2026-09-17T15:38:43.214Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788612956754_9aa",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788612956754_9aa-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "跨会话同步时将易失的会话记录当作权威来源，12:00 心跳直接把 08:12 的陈旧信任版主题合并入 CURRENT_FOCUS v48",
+       "betterDecision": "任何心跳/同步合并前，先读取源文件 mtime+内容，以最新持久化状态为权威基准，再执行合并",
+       "rationale": "会话记录是易失快照，可能滞后于已落盘的源文件；以源文件 mtime+内容为权威可避免陈旧状态被重复合并",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "single_source_of_truth",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "同步/心跳流程缺少强制一致性门，陈旧状态未经校验即被合并并进入播报链路",
+       "betterDecision": "在同步与播报之间插入强制核对源文件 mtime+内容的一致性门：若源文件晚于会话记录或内容不一致，以源文件为准并回写会话记录",
+       "rationale": "将跨会话以源文件为准的硬约束翻译为显式守卫检查，可在执行前拦截陈旧合并（触发：心跳|同步|merge|CURRENT_FOCUS|播报|narration_lines）",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_before_merge",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "CURRENT_FOCUS 与 narration_lines_ep002.json 的关键中间状态主要依赖会话记忆维护，未强制持久化并以源文件为准",
+       "betterDecision": "将关键中间结论与状态即时写入源文件，会话恢复时一律从文件重新读取并以此为准",
+       "rationale": "把重要状态持久化到易失上下文之外，跨会话连续性才有可靠事实基础，不会因会话记忆陈旧而同一坑摔两次",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "persistence_over_volatile_context",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "19:08 直接基于陈旧状态播报 narration，未在播报前核对源文件（08:24 已改为 10 原则总纲 15 clip）",
+       "betterDecision": "播报前对源文件做最终核对：发现待播报内容与源文件不一致时，先刷新为源文件状态再播报或推迟播报",
+       "rationale": "执行未与实际状态核对即视为成功是错误的；用户可见动作前的最后校验能在出口拦截陈旧内容，避免二次纠正",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_user_facing_action",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "12:00 陈旧合并事件发生后未将其作为反馈修正同步机制，导致 19:08 播报在同一坑上第二次失败",
+       "betterDecision": "首次事故后立即以源文件刷新会话记录，并将 mtime+内容核对门固化到同步流程，阻断同类错误再次发生",
+       "rationale": "失败与纠正是改进未来行为的反馈；只纠正结果而不修正机制，必然导致重复犯错",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "feedback_driven_mechanism_fix",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "contextRefs": [
+      "artifact://d0df9b9a-b766-45ae-bb00-dabb2e38117d"
+     ],
+     "generatedAt": "2026-09-05T13:15:30.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788612956754_9aa-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"跨会话同步时将易失的会话记录当作权威来源，12:00 心跳直接把 08:12 的陈旧信任版主题合并入 CURRENT_FOCUS v48\",\"betterDecision\":\"任何心跳/同步合并前，先读取源文件 mtime+内容，以最新持久化状态为权威基准，再执行合并\",\"rationale\":\"会话记录是易失快照，可能滞后于已落盘的源文件；以源文件 mtime+内容为权威可避免陈旧状态被重复合并\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"single_source_of_truth\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":1,\"badDecision\":\"同步/心跳流程缺少强制一致性门，陈旧状态未经校验即被合并并进入播报链路\",\"betterDecision\":\"在同步与播报之间插入强制核对源文件 mtime+内容的一致性门：若源文件晚于会话记录或内容不一致，以源文件为准并回写会话记录\",\"rationale\":\"将跨会话以源文件为准的硬约束翻译为显式守卫检查，可在执行前拦截陈旧合并（触发：心跳|同步|merge|CURRENT_FOCUS|播报|narration_lines）\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_before_merge\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"CURRENT_FOCUS 与 narration_lines_ep002.json 的关键中间状态主要依赖会话记忆维护，未强制持久化并以源文件为准\",\"betterDecision\":\"将关键中间结论与状态即时写入源文件，会话恢复时一律从文件重新读取并以此为准\",\"rationale\":\"把重要状态持久化到易失上下文之外，跨会话连续性才有可靠事实基础，不会因会话记忆陈旧而同一坑摔两次\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"persistence_over_volatile_context\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":3,\"badDecision\":\"19:08 直接基于陈旧状态播报 narration，未在播报前核对源文件（08:24 已改为 10 原则总纲 15 clip）\",\"betterDecision\":\"播报前对源文件做最终核对：发现待播报内容与源文件不一致时，先刷新为源文件状态再播报或推迟播报\",\"rationale\":\"执行未与实际状态核对即视为成功是错误的；用户可见动作前的最后校验能在出口拦截陈旧内容，避免二次纠正\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_user_facing_action\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":4,\"badDecision\":\"12:00 陈旧合并事件发生后未将其作为反馈修正同步机制，导致 19:08 播报在同一坑上第二次失败\",\"betterDecision\":\"首次事故后立即以源文件刷新会话记录，并将 mtime+内容核对门固化到同步流程，阻断同类错误再次发生\",\"rationale\":\"失败与纠正是改进未来行为的反馈；只纠正结果而不修正机制，必然导致重复犯错\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"feedback_driven_mechanism_fix\",\"sourcePrincipleId\":\"T-08\"}],\"contextRefs\":[\"artifact://d0df9b9a-b766-45ae-bb00-dabb2e38117d\"],\"generatedAt\":\"2026-09-05T13:15:30.000Z\"}",
+    "usage": {
+     "input": 2003,
+     "output": 3678,
+     "total": 5681
+    },
+    "latencyMs": 43624,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "2d8a067e36279414"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788612956754_9aa-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r1-run1",
+     "thesis": "当同一状态存在易失副本（会话记录、内存缓存）与持久化源文件两种表示时，必须将最新落盘的持久化状态视为唯一权威；任何合并、同步或用户可见输出前都应重新读取并以源文件为基准核对，易失上下文只是缓存而非事实，首次事故后还须将该核对固化为机制而非仅纠正结果。",
+     "principleCandidate": {
+      "title": "持久态为唯一权威：任何合并或播报前必须刷新并核对源文件",
+      "rationale": "根因是把易失的会话记录当作权威状态，在未核对源文件的情况下合并陈旧内容并进入播报链路。将最新落盘状态（mtime+内容）设为唯一事实来源，并在合并与用户可见动作前强制刷新核对，可在入口和出口双重拦截陈旧状态，避免同一坑摔两次。",
+      "scope": "适用于任何存在易失缓存/会话副本与持久化源文件双轨状态的场景，尤其是跨会话同步、状态合并、心跳任务，以及对外播报/用户可见输出前的最终校验。",
+      "confidence": 0.85
+     },
+     "risks": [
+      "与核心公理存在部分重叠：T-10（重要状态须持久化）、T-03（以可观察证据为准）、T-05（硬约束转显式守卫）已覆盖部分内容，本原则是对它们在'权威来源选择与核对时机'维度上的组合细化，需注意重复立项",
+      "每次合并/播报前重读源文件可能引入延迟，高频循环场景需要带失效机制的缓存，否则守卫本身成为性能瓶颈",
+      "依赖 mtime 判断新鲜度在时钟偏移或文件系统时间粒度较粗时可能失效，需辅以内容比对或哈希校验",
+      "若源文件本身被错误写入，'以最新持久化为准'会忠实传播错误；权威性不等于正确性，缺少对源文件自身质量的校验",
+      "在每个用户可见动作前插入强制核对门，可能在紧急播报场景造成不必要延迟，需要允许推迟而非阻塞的降级路径"
+     ],
+     "generatedAt": "2026-09-05T13:17:42.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788612956754_9aa-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r1-run1\",\"thesis\":\"当同一状态存在易失副本（会话记录、内存缓存）与持久化源文件两种表示时，必须将最新落盘的持久化状态视为唯一权威；任何合并、同步或用户可见输出前都应重新读取并以源文件为基准核对，易失上下文只是缓存而非事实，首次事故后还须将该核对固化为机制而非仅纠正结果。\",\"principleCandidate\":{\"title\":\"持久态为唯一权威：任何合并或播报前必须刷新并核对源文件\",\"rationale\":\"根因是把易失的会话记录当作权威状态，在未核对源文件的情况下合并陈旧内容并进入播报链路。将最新落盘状态（mtime+内容）设为唯一事实来源，并在合并与用户可见动作前强制刷新核对，可在入口和出口双重拦截陈旧状态，避免同一坑摔两次。\",\"scope\":\"适用于任何存在易失缓存/会话副本与持久化源文件双轨状态的场景，尤其是跨会话同步、状态合并、心跳任务，以及对外播报/用户可见输出前的最终校验。\",\"confidence\":0.85},\"risks\":[\"与核心公理存在部分重叠：T-10（重要状态须持久化）、T-03（以可观察证据为准）、T-05（硬约束转显式守卫）已覆盖部分内容，本原则是对它们在'权威来源选择与核对时机'维度上的组合细化，需注意重复立项\",\"每次合并/播报前重读源文件可能引入延迟，高频循环场景需要带失效机制的缓存，否则守卫本身成为性能瓶颈\",\"依赖 mtime 判断新鲜度在时钟偏移或文件系统时间粒度较粗时可能失效，需辅以内容比对或哈希校验\",\"若源文件本身被错误写入，'以最新持久化为准'会忠实传播错误；权威性不等于正确性，缺少对源文件自身质量的校验\",\"在每个用户可见动作前插入强制核对门，可能在紧急播报场景造成不必要延迟，需要允许推迟而非阻塞的降级路径\"],\"generatedAt\":\"2026-09-05T13:17:42.000Z\"}",
+    "usage": {
+     "input": 1616,
+     "output": 1856,
+     "total": 3472
+    },
+    "latencyMs": 28116,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "38ae14c9f6b42245"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788612956754_9aa-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r1-run1",
+     "principleDraft": {
+      "title": "持久态为唯一权威：合并与用户可见输出前必须刷新核对源文件",
+      "statement": "当同一状态同时存在易失副本（会话记录、内存缓存）与持久化源文件时，必须将最新落盘的持久化状态视为唯一权威：(1) 在任何合并、同步或基于该状态生成用户可见输出/播报之前，必须重新读取源文件，并以源文件内容为基准核对易失副本，冲突时以源文件为准；(2) 不得将易失副本直接当作事实来源；(3) 首次因陈旧副本引发事故后，必须将上述核对固化为显式守卫/检查机制，而非仅修正单次结果。",
+      "rationale": "根因是把易失的会话记录当作权威状态，在未核对源文件的情况下合并陈旧内容并送入用户可见的播报链路。将'最新落盘状态'设为唯一事实来源，并在入口（合并/同步）与出口（用户可见输出）两处强制刷新核对，可在两个关口拦截陈旧状态；将核对固化为机制则确保同一失败模式不会重复发生。本原则是 T-03（以可观察证据为准）、T-05（硬约束转显式守卫）、T-10（重要状态须持久化）在'权威来源选择与核对时机'维度上的组合细化。",
+      "applicability": [
+       "同一状态存在易失副本（会话记录、内存缓存）与持久化源文件双轨表示的场景",
+       "跨会话或跨进程的状态同步与合并操作",
+       "定时/心跳任务基于状态生成播报内容的链路",
+       "任何用户可见输出（播报、报告、通知、状态汇报）前的最终校验",
+       "因陈旧副本引发事故后的修复与机制固化"
+      ],
+      "antiPatterns": [
+       "将会话记录或内存缓存直接视为权威事实进行合并，而不重读源文件核对",
+       "用陈旧易失副本的内容覆盖或混入最新持久化状态",
+       "基于未核对的缓存或上下文记忆生成用户可见播报",
+       "事故后仅修正本次错误数据，而不把'合并/播报前核对源文件'固化为守卫机制",
+       "仅凭上下文记忆断言持久化状态与缓存一致，而不以落盘文件为证据"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "当状态同时存在于易失上下文与持久化源文件时，Owner 要求代理永远以最新落盘的源文件为唯一权威，在合并或对外播报前重读核对，绝不允许陈旧的会话/缓存副本被当作事实传播给用户。",
+      "targetBehavior": "在工具轨迹中可见：每次合并、同步或生成用户可见输出之前，代理都重新读取了持久化源文件，并以源文件为基准核对/修正易失副本，冲突时以源文件为准；事故后的修复包含把该核对固化为可复用的检查或守卫，而不是只改本次数据。",
+      "forbiddenBehavior": "把易失会话记录或内存缓存当作权威状态，未重读源文件核对就合并陈旧内容并播报给用户；事故后只修正结果而不建立核对机制（同坑摔两次）。",
+      "evidenceSource": "Philosopher 根因诊断：事故源于将易失会话记录当作权威状态，未核对源文件即合并陈旧内容并进入播报链路。",
+      "validationExpectation": "评估者应核验规则同时包含三要素：(a) 最新落盘持久化状态为唯一权威；(b) 合并与用户可见输出前必须重读并核对源文件；(c) 首次事故后核对必须固化为机制。任何允许缓存直接作为事实、或仅修数据不建机制的改动应被标记为与本意图矛盾。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r1-run1"
+     },
+     "risks": [
+      "与核心公理 T-03（可观察证据）、T-05（硬约束转显式守卫）、T-10（重要状态持久化）部分重叠：本原则是它们在'权威来源选择与核对时机'维度的组合细化，规则生成阶段需去重，避免产出重复规则",
+      "每次合并/播报前强制重读源文件在高频循环场景可能成为性能瓶颈，落地需配合带失效机制的缓存策略",
+      "以 mtime 判断新鲜度在时钟偏移或文件系统时间粒度较粗时可能失效，落地时应辅以内容或哈希比对",
+      "权威性不等于正确性：若源文件本身被错误写入，'以最新持久化为准'会忠实传播错误，还需对源文件写入质量另行校验",
+      "在每个用户可见动作前插入阻塞式核对门可能在紧急播报场景造成延迟，需设计'先播报后核对并告警'一类的降级路径而非一刀切阻塞"
+     ],
+     "generatedAt": "2026-09-05T13:20:05.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788612956754_9aa-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r1-run1\",\"principleDraft\":{\"title\":\"持久态为唯一权威：合并与用户可见输出前必须刷新核对源文件\",\"statement\":\"当同一状态同时存在易失副本（会话记录、内存缓存）与持久化源文件时，必须将最新落盘的持久化状态视为唯一权威：(1) 在任何合并、同步或基于该状态生成用户可见输出/播报之前，必须重新读取源文件，并以源文件内容为基准核对易失副本，冲突时以源文件为准；(2) 不得将易失副本直接当作事实来源；(3) 首次因陈旧副本引发事故后，必须将上述核对固化为显式守卫/检查机制，而非仅修正单次结果。\",\"rationale\":\"根因是把易失的会话记录当作权威状态，在未核对源文件的情况下合并陈旧内容并送入用户可见的播报链路。将'最新落盘状态'设为唯一事实来源，并在入口（合并/同步）与出口（用户可见输出）两处强制刷新核对，可在两个关口拦截陈旧状态；将核对固化为机制则确保同一失败模式不会重复发生。本原则是 T-03（以可观察证据为准）、T-05（硬约束转显式守卫）、T-10（重要状态须持久化）在'权威来源选择与核对时机'维度上的组合细化。\",\"applicability\":[\"同一状态存在易失副本（会话记录、内存缓存）与持久化源文件双轨表示的场景\",\"跨会话或跨进程的状态同步与合并操作\",\"定时/心跳任务基于状态生成播报内容的链路\",\"任何用户可见输出（播报、报告、通知、状态汇报）前的最终校验\",\"因陈旧副本引发事故后的修复与机制固化\"],\"antiPatterns\":[\"将会话记录或内存缓存直接视为权威事实进行合并，而不重读源文件核对\",\"用陈旧易失副本的内容覆盖或混入最新持久化状态\",\"基于未核对的缓存或上下文记忆生成用户可见播报\",\"事故后仅修正本次错误数据，而不把'合并/播报前核对源文件'固化为守卫机制\",\"仅凭上下文记忆断言持久化状态与缓存一致，而不以落盘文件为证据\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"当状态同时存在于易失上下文与持久化源文件时，Owner 要求代理永远以最新落盘的源文件为唯一权威，在合并或对外播报前重读核对，绝不允许陈旧的会话/缓存副本被当作事实传播给用户。\",\"targetBehavior\":\"在工具轨迹中可见：每次合并、同步或生成用户可见输出之前，代理都重新读取了持久化源文件，并以源文件为基准核对/修正易失副本，冲突时以源文件为准；事故后的修复包含把该核对固化为可复用的检查或守卫，而不是只改本次数据。\",\"forbiddenBehavior\":\"把易失会话记录或内存缓存当作权威状态，未重读源文件核对就合并陈旧内容并播报给用户；事故后只修正结果而不建立核对机制（同坑摔两次）。\",\"evidenceSource\":\"Philosopher 根因诊断：事故源于将易失会话记录当作权威状态，未核对源文件即合并陈旧内容并进入播报链路。\",\"validationExpectation\":\"评估者应核验规则同时包含三要素：(a) 最新落盘持久化状态为唯一权威；(b) 合并与用户可见输出前必须重读并核对源文件；(c) 首次事故后核对必须固化为机制。任何允许缓存直接作为事实、或仅修数据不建机制的改动应被标记为与本意图矛盾。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r1-run1\"},\"risks\":[\"与核心公理 T-03（可观察证据）、T-05（硬约束转显式守卫）、T-10（重要状态持久化）部分重叠：本原则是它们在'权威来源选择与核对时机'维度的组合细化，规则生成阶段需去重，避免产出重复规则\",\"每次合并/播报前强制重读源文件在高频循环场景可能成为性能瓶颈，落地需配合带失效机制的缓存策略\",\"以 mtime 判断新鲜度在时钟偏移或文件系统时间粒度较粗时可能失效，落地时应辅以内容或哈希比对\",\"权威性不等于正确性：若源文件本身被错误写入，'以最新持久化为准'会忠实传播错误，还需对源文件写入质量另行校验\",\"在每个用户可见动作前插入阻塞式核对门可能在紧急播报场景造成延迟，需设计'先播报后核对并告警'一类的降级路径而非一刀切阻塞\"],\"generatedAt\":\"2026-09-05T13:20:05.000Z\"}",
+    "usage": {
+     "input": 1936,
+     "output": 4244,
+     "total": 6180
+    },
+    "latencyMs": 50233,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "442439642263b3b8"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788612956754_9aa-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r1-run1",
+     "principleDraft": {
+      "title": "持久态为唯一权威：合并与用户可见输出前必须刷新并核对源文件",
+      "statement": "当同一状态同时存在易失副本（会话记录、内存缓存）与持久化源文件时，必须以最新落盘的持久化状态为唯一权威：执行任何跨会话同步/心跳合并前，以及产生任何用户可见输出（播报/narration）前，必须重新读取源文件并以 mtime+内容为基准与副本核对；不一致时以源文件为准并回写副本；首次因陈旧副本发生事故后，必须将此核对固化为流程中的显式核对门，而非仅纠正本次结果。",
+      "rationale": "根因是同步机制把易失会话记录当作权威状态，在未核对源文件的情况下将陈旧内容合并（12:00 心跳将 08:12 陈旧信任版主题合并入 CURRENT_FOCUS v48）并送入播报链路（19:08 播报致用户二次纠正，而 narration_lines_ep002.json 08:24 已更新）。将最新落盘状态设为唯一事实来源，并在合并入口与用户可见输出出口双重强制刷新核对，可在两端拦截陈旧状态；首次事故后把核对固化为机制而非只改结果，才能阻断同一坑摔两次。",
+      "applicability": [
+       "跨会话状态同步与心跳合并（触发场景：心跳|同步|merge|合并|CURRENT_FOCUS）",
+       "用户可见输出/播报前的最终校验（触发场景：播报|narration_lines）",
+       "任何存在易失副本（会话记录、缓存）与持久化源文件双轨表示的关键中间状态（如 CURRENT_FOCUS、narration_lines_ep002.json）"
+      ],
+      "antiPatterns": [
+       "以易失会话记录/内存缓存为权威直接执行合并或播报，全程不读取源文件",
+       "仅凭 mtime 判断新鲜度而不做内容比对（时钟偏移或文件系统时间粒度粗时失效）",
+       "发现副本滞后后仅手工纠正本次结果，不将核对门固化进同步/播报流程，导致同类错误重复发生",
+       "把缓存命中或会话记忆当作事实来源，替代源文件证据"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 要求跨会话同步与播报以已落盘源文件的 mtime+内容为权威基准，杜绝陈旧会话记录被重复合并与播报导致的用户二次纠正。",
+      "targetBehavior": "在工具轨迹中可见：任何心跳/同步/合并或播报动作执行前，agent 先读取源文件 mtime 与内容并与易失副本比对，不一致时以源文件为准回写副本后才继续；首次事故后将该核对固化为流程中的显式核对门。",
+      "forbiddenBehavior": "以易失会话记录或缓存为权威，未经源文件 mtime+内容核对即合并状态或对外播报，且首次事故后仍不把核对固化为机制，导致同一坑摔两次。",
+      "evidenceSource": "09-05 两例：12:00 心跳将 08:12 陈旧信任版主题合并入 CURRENT_FOCUS v48；19:08 播报未核对 narration_lines_ep002.json（08:24 已改为 10 原则总纲 15 clip）致用户二次纠正；Owner 教训 T-08 明确跨会话同步应以源文件 mtime+内容为准，不能只信会话记录。",
+      "validationExpectation": "评估者应确认生成的规则在（心跳|同步|merge|CURRENT_FOCUS|播报|narration_lines）触发下强制'先读源文件 mtime+内容并比对，不一致时以源文件为准回写副本'的步骤，并包含首次事故后将核对固化为流程门的要求；任何允许'仅信会话记录'或'仅凭 mtime 不做内容比对'的规则均违背此意图，应被拒绝。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r1-run1"
+     },
+     "risks": [
+      "与核心公理 T-10（重要状态持久化）、T-03（以可观察证据为准）、T-05（硬约束转显式守卫）、T-08 存在部分重叠，本原则是对它们在'权威来源选择与核对时机'维度上的组合细化，下游规则立项需去重，避免重复约束",
+      "每次合并/播报前重读源文件在高频循环场景可能引入延迟，守卫本身可能成为性能瓶颈；规则实现需允许带失效机制的缓存或降级路径",
+      "mtime 在时钟偏移或文件系统时间粒度较粗时不可靠，核对必须包含内容比对；若下游规则把 mtime 作为唯一判据将偏离本原则",
+      "权威性不等于正确性：若源文件本身被错误写入，'以最新持久化为准'会忠实传播错误，本原则不覆盖对源文件自身写入质量的校验",
+      "紧急播报场景下强制核对门可能造成不必要延迟，需为时间敏感输出设计'先核对、不一致则推迟播报'而非硬阻塞的降级语义"
+     ],
+     "generatedAt": "2026-09-05T13:24:10.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788612956754_9aa-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r1-run1\",\"principleDraft\":{\"title\":\"持久态为唯一权威：合并与用户可见输出前必须刷新并核对源文件\",\"statement\":\"当同一状态同时存在易失副本（会话记录、内存缓存）与持久化源文件时，必须以最新落盘的持久化状态为唯一权威：执行任何跨会话同步/心跳合并前，以及产生任何用户可见输出（播报/narration）前，必须重新读取源文件并以 mtime+内容为基准与副本核对；不一致时以源文件为准并回写副本；首次因陈旧副本发生事故后，必须将此核对固化为流程中的显式核对门，而非仅纠正本次结果。\",\"rationale\":\"根因是同步机制把易失会话记录当作权威状态，在未核对源文件的情况下将陈旧内容合并（12:00 心跳将 08:12 陈旧信任版主题合并入 CURRENT_FOCUS v48）并送入播报链路（19:08 播报致用户二次纠正，而 narration_lines_ep002.json 08:24 已更新）。将最新落盘状态设为唯一事实来源，并在合并入口与用户可见输出出口双重强制刷新核对，可在两端拦截陈旧状态；首次事故后把核对固化为机制而非只改结果，才能阻断同一坑摔两次。\",\"applicability\":[\"跨会话状态同步与心跳合并（触发场景：心跳|同步|merge|合并|CURRENT_FOCUS）\",\"用户可见输出/播报前的最终校验（触发场景：播报|narration_lines）\",\"任何存在易失副本（会话记录、缓存）与持久化源文件双轨表示的关键中间状态（如 CURRENT_FOCUS、narration_lines_ep002.json）\"],\"antiPatterns\":[\"以易失会话记录/内存缓存为权威直接执行合并或播报，全程不读取源文件\",\"仅凭 mtime 判断新鲜度而不做内容比对（时钟偏移或文件系统时间粒度粗时失效）\",\"发现副本滞后后仅手工纠正本次结果，不将核对门固化进同步/播报流程，导致同类错误重复发生\",\"把缓存命中或会话记忆当作事实来源，替代源文件证据\"],\"confidence\":0.8},\"intentContract\":{\"ownerIntent\":\"Owner 要求跨会话同步与播报以已落盘源文件的 mtime+内容为权威基准，杜绝陈旧会话记录被重复合并与播报导致的用户二次纠正。\",\"targetBehavior\":\"在工具轨迹中可见：任何心跳/同步/合并或播报动作执行前，agent 先读取源文件 mtime 与内容并与易失副本比对，不一致时以源文件为准回写副本后才继续；首次事故后将该核对固化为流程中的显式核对门。\",\"forbiddenBehavior\":\"以易失会话记录或缓存为权威，未经源文件 mtime+内容核对即合并状态或对外播报，且首次事故后仍不把核对固化为机制，导致同一坑摔两次。\",\"evidenceSource\":\"09-05 两例：12:00 心跳将 08:12 陈旧信任版主题合并入 CURRENT_FOCUS v48；19:08 播报未核对 narration_lines_ep002.json（08:24 已改为 10 原则总纲 15 clip）致用户二次纠正；Owner 教训 T-08 明确跨会话同步应以源文件 mtime+内容为准，不能只信会话记录。\",\"validationExpectation\":\"评估者应确认生成的规则在（心跳|同步|merge|CURRENT_FOCUS|播报|narration_lines）触发下强制'先读源文件 mtime+内容并比对，不一致时以源文件为准回写副本'的步骤，并包含首次事故后将核对固化为流程门的要求；任何允许'仅信会话记录'或'仅凭 mtime 不做内容比对'的规则均违背此意图，应被拒绝。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r1-run1\"},\"risks\":[\"与核心公理 T-10（重要状态持久化）、T-03（以可观察证据为准）、T-05（硬约束转显式守卫）、T-08 存在部分重叠，本原则是对它们在'权威来源选择与核对时机'维度上的组合细化，下游规则立项需去重，避免重复约束\",\"每次合并/播报前重读源文件在高频循环场景可能引入延迟，守卫本身可能成为性能瓶颈；规则实现需允许带失效机制的缓存或降级路径\",\"mtime 在时钟偏移或文件系统时间粒度较粗时不可靠，核对必须包含内容比对；若下游规则把 mtime 作为唯一判据将偏离本原则\",\"权威性不等于正确性：若源文件本身被错误写入，'以最新持久化为准'会忠实传播错误，本原则不覆盖对源文件自身写入质量的校验\",\"紧急播报场景下强制核对门可能造成不必要延迟，需为时间敏感输出设计'先核对、不一致则推迟播报'而非硬阻塞的降级语义\"],\"generatedAt\":\"2026-09-05T13:24:10.000Z\"}",
+    "usage": {
+     "input": 4105,
+     "output": 4900,
+     "total": 9005
+    },
+    "latencyMs": 55242,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "8519a3126f01c823"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788612956754_9aa",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788612956754_9aa-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "12:00 心跳直接将 08:12 陈旧信任版主题合并入 CURRENT_FOCUS v48，以会话记录为权威来源，未核对源文件 mtime+内容",
+       "betterDecision": "在心跳/同步合并前插入强制一致性门：将会话内快照与源文件 mtime+内容逐一比对，若源文件更新或内容不一致，则以源文件为准并先刷新会话记录，再执行合并",
+       "rationale": "mtime+内容双重核对能同时捕获时间性陈旧与内容性陈旧，从源头阻断陈旧状态进入权威工件，防止重复合并同类错误",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "single_source_of_truth",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "跨会话连续性依赖易失的会话记忆（CURRENT_FOCUS、narration_lines_ep002.json 均未持久化为权威基准），导致换会话后状态回退",
+       "betterDecision": "将关键中间状态持久化到源文件，并在会话启动及每次重大动作前强制从源文件重建（rehydrate）状态，而非依赖会话转录或记忆",
+       "rationale": "持久化工件可跨会话存活，易失上下文正是连续性断点所在；以文件为唯一读取入口可消除会话间状态漂移",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "persistence_first",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "19:08 播报直接使用会话内陈旧快照，未核实 narration_lines_ep002.json 已于 08:24 更新为 10 原则总纲 15 clip，致用户二次纠正",
+       "betterDecision": "播报前立即重读源文件最新内容并与会话快照 diff，不一致时先刷新状态（必要时标记变更）再播报，禁止基于记忆直接输出",
+       "rationale": "可观测证据（文件实际内容）优先于推断或回忆的状态；输出前验证可避免面向用户的错误信息扩散",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_broadcast",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "教训 T-08（跨会话以源文件为准）虽已记录但仅停留在建议层面，未被编译为可执行步骤，导致同一坑摔两次",
+       "betterDecision": "将 T-08 教训编译为绑定触发模式（心跳|同步|merge|CURRENT_FOCUS|播报|narration_lines）的强制执行检查项，使纠正从记忆性约束升级为结构性守卫",
+       "rationale": "反馈只有转化为强制守卫才能真正阻断复发；纯建议性教训在上下文压力下必然退化失效",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "institutionalize_learning",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "将陈旧主题不可逆地合并入 CURRENT_FOCUS v48，无合并前快照与回滚手段，迫使 owner 在 19:08 手动二次纠正",
+       "betterDecision": "使 CURRENT_FOCUS 合并可逆：合并前对 v48 做快照备份，并在新鲜度校验未通过时暂缓合并，保证不确定合并可低成本回滚",
+       "rationale": "当下行影响（面向用户的误导信息）显著时，应优先选择可逆动作并保留硬安全边界，将爆炸半径限制在单次会话内",
+       "confidence": 0.7,
+       "riskLevel": "medium",
+       "strategicPerspective": "reversibility_by_default",
+       "sourcePrincipleId": "T-04"
+      }
+     ],
+     "contextRefs": [
+      "artifact://d0df9b9a-b766-45ae-bb00-dabb2e38117d"
+     ],
+     "generatedAt": "2026-09-06T01:43:20.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788612956754_9aa-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"12:00 心跳直接将 08:12 陈旧信任版主题合并入 CURRENT_FOCUS v48，以会话记录为权威来源，未核对源文件 mtime+内容\",\"betterDecision\":\"在心跳/同步合并前插入强制一致性门：将会话内快照与源文件 mtime+内容逐一比对，若源文件更新或内容不一致，则以源文件为准并先刷新会话记录，再执行合并\",\"rationale\":\"mtime+内容双重核对能同时捕获时间性陈旧与内容性陈旧，从源头阻断陈旧状态进入权威工件，防止重复合并同类错误\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"single_source_of_truth\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":1,\"badDecision\":\"跨会话连续性依赖易失的会话记忆（CURRENT_FOCUS、narration_lines_ep002.json 均未持久化为权威基准），导致换会话后状态回退\",\"betterDecision\":\"将关键中间状态持久化到源文件，并在会话启动及每次重大动作前强制从源文件重建（rehydrate）状态，而非依赖会话转录或记忆\",\"rationale\":\"持久化工件可跨会话存活，易失上下文正是连续性断点所在；以文件为唯一读取入口可消除会话间状态漂移\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"persistence_first\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":2,\"badDecision\":\"19:08 播报直接使用会话内陈旧快照，未核实 narration_lines_ep002.json 已于 08:24 更新为 10 原则总纲 15 clip，致用户二次纠正\",\"betterDecision\":\"播报前立即重读源文件最新内容并与会话快照 diff，不一致时先刷新状态（必要时标记变更）再播报，禁止基于记忆直接输出\",\"rationale\":\"可观测证据（文件实际内容）优先于推断或回忆的状态；输出前验证可避免面向用户的错误信息扩散\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_broadcast\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":3,\"badDecision\":\"教训 T-08（跨会话以源文件为准）虽已记录但仅停留在建议层面，未被编译为可执行步骤，导致同一坑摔两次\",\"betterDecision\":\"将 T-08 教训编译为绑定触发模式（心跳|同步|merge|CURRENT_FOCUS|播报|narration_lines）的强制执行检查项，使纠正从记忆性约束升级为结构性守卫\",\"rationale\":\"反馈只有转化为强制守卫才能真正阻断复发；纯建议性教训在上下文压力下必然退化失效\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"institutionalize_learning\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":4,\"badDecision\":\"将陈旧主题不可逆地合并入 CURRENT_FOCUS v48，无合并前快照与回滚手段，迫使 owner 在 19:08 手动二次纠正\",\"betterDecision\":\"使 CURRENT_FOCUS 合并可逆：合并前对 v48 做快照备份，并在新鲜度校验未通过时暂缓合并，保证不确定合并可低成本回滚\",\"rationale\":\"当下行影响（面向用户的误导信息）显著时，应优先选择可逆动作并保留硬安全边界，将爆炸半径限制在单次会话内\",\"confidence\":0.7,\"riskLevel\":\"medium\",\"strategicPerspective\":\"reversibility_by_default\",\"sourcePrincipleId\":\"T-04\"}],\"contextRefs\":[\"artifact://d0df9b9a-b766-45ae-bb00-dabb2e38117d\"],\"generatedAt\":\"2026-09-06T01:43:20.000Z\"}",
+    "usage": {
+     "input": 2003,
+     "output": 3327,
+     "total": 5330
+    },
+    "latencyMs": 47947,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "44c5638ce5ce1e41"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788612956754_9aa-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r2-run1",
+     "thesis": "Volatile session memory is a cache, never an authority: every action that propagates internal state into authoritative or user-facing artifacts must first re-verify freshness and content against the durable source of truth, and should remain reversible until that verification passes. The recurring failure was not a single bad merge or broadcast, but the absence of a mandatory freshness gate at each propagation point, allowing stale snapshots to contaminate authoritative work across session boundaries.",
+     "principleCandidate": {
+      "title": "Re-verify volatile state against the durable source before any merge or broadcast",
+      "rationale": "The root cause was treating in-session snapshots as authoritative, so stale state flowed into CURRENT_FOCUS and user-facing narration without any freshness check. A forced mtime+content comparison against the persistent source at every propagation point (merge, sync, broadcast) blocks both temporal and content staleness at the source, prevents cross-session regression, and—if the check fails—defers the action rather than propagating error.",
+      "scope": "Applies whenever internal, cached, or recalled state is about to be merged into authoritative artifacts, broadcast to users, or used as the basis for consequential decisions—especially across session or process boundaries where context was rehydrated from transient memory.",
+      "confidence": 0.82
+     },
+     "risks": [
+      "Overlaps partially with existing core axioms: T-03 (observable evidence over inference), T-07 (verify after acting), and T-10 (persist state when continuity matters); the distinct contribution is the mandatory pre-propagation freshness gate on volatile state, but reviewers may consider it derivative",
+      "Re-reading and diffing source files at every propagation point adds latency and cost; over-application to high-frequency, low-stakes actions could cause unnecessary thrashing",
+      "Assumes a single, unambiguous durable source of truth exists; with multiple candidate sources the verification itself may compare against the wrong authority",
+      "Strict gating could stall time-critical actions if the verification mechanism or source file is unavailable, trading correctness for responsiveness"
+     ],
+     "generatedAt": "2026-09-06T01:47:52.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788612956754_9aa-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r2-run1\",\"thesis\":\"Volatile session memory is a cache, never an authority: every action that propagates internal state into authoritative or user-facing artifacts must first re-verify freshness and content against the durable source of truth, and should remain reversible until that verification passes. The recurring failure was not a single bad merge or broadcast, but the absence of a mandatory freshness gate at each propagation point, allowing stale snapshots to contaminate authoritative work across session boundaries.\",\"principleCandidate\":{\"title\":\"Re-verify volatile state against the durable source before any merge or broadcast\",\"rationale\":\"The root cause was treating in-session snapshots as authoritative, so stale state flowed into CURRENT_FOCUS and user-facing narration without any freshness check. A forced mtime+content comparison against the persistent source at every propagation point (merge, sync, broadcast) blocks both temporal and content staleness at the source, prevents cross-session regression, and—if the check fails—defers the action rather than propagating error.\",\"scope\":\"Applies whenever internal, cached, or recalled state is about to be merged into authoritative artifacts, broadcast to users, or used as the basis for consequential decisions—especially across session or process boundaries where context was rehydrated from transient memory.\",\"confidence\":0.82},\"risks\":[\"Overlaps partially with existing core axioms: T-03 (observable evidence over inference), T-07 (verify after acting), and T-10 (persist state when continuity matters); the distinct contribution is the mandatory pre-propagation freshness gate on volatile state, but reviewers may consider it derivative\",\"Re-reading and diffing source files at every propagation point adds latency and cost; over-application to high-frequency, low-stakes actions could cause unnecessary thrashing\",\"Assumes a single, unambiguous durable source of truth exists; with multiple candidate sources the verification itself may compare against the wrong authority\",\"Strict gating could stall time-critical actions if the verification mechanism or source file is unavailable, trading correctness for responsiveness\"],\"generatedAt\":\"2026-09-06T01:47:52.000Z\"}",
+    "usage": {
+     "input": 1681,
+     "output": 1485,
+     "total": 3166
+    },
+    "latencyMs": 22870,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "9cac9389efa34a24"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": false,
+    "errors": [
+     "generatedAt must be non-empty string"
+    ],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788612956754_9aa-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r2-run1",
+     "principleDraft": {
+      "title": "Re-verify volatile state against the durable source before any merge or broadcast",
+      "statement": "Before propagating volatile session state — merging an in-session snapshot into an authoritative artifact, syncing across a session boundary, or broadcasting/narrating to users — the agent must re-read the durable source of truth and compare mtime and content against the session snapshot; if the source is newer or content differs, the session state is refreshed from the source before proceeding; if the check fails or the source is unavailable, the action is deferred rather than propagating the stale snapshot; the propagation remains reversible (e.g., via a pre-merge snapshot) until the freshness check passes.",
+      "rationale": "The root cause was that cross-session sync treated session records as authoritative: a 12:00 heartbeat merged an 08:12 stale snapshot into CURRENT_FOCUS v48, and a 19:08 broadcast used stale state although narration_lines_ep002.json had already been updated at 08:24 — the same pit hit twice. A mandatory mtime+content comparison against the durable source at every propagation point blocks both temporal and content staleness at the source, prevents cross-session regression, and turns a failed check into deferral instead of error propagation.",
+      "applicability": [
+       "Heartbeat or sync operations that merge rehydrated session state into authoritative artifacts (e.g., CURRENT_FOCUS version merges) across session boundaries",
+       "User-facing broadcasts or narrations built from recalled state (e.g., narration_lines files) — re-read and diff the source file immediately before output",
+       "Any merge or broadcast performed in a context that was rehydrated from transient session memory rather than read directly from persistent files"
+      ],
+      "antiPatterns": [
+       "Merging a session-memory snapshot into an authoritative artifact without first diffing its mtime and content against the durable source file",
+       "Broadcasting or narrating to users directly from remembered state without re-reading the current source file",
+       "Treating session records or transcripts as the authority for cross-session sync instead of persistent source files",
+       "Propagating state irreversibly (no pre-merge snapshot) while its freshness against the durable source is still unverified",
+       "Silently proceeding with propagation when the freshness check fails or the source file is unavailable"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent stale session-memory state from contaminating authoritative artifacts and user-facing broadcasts: cross-session syncs, merges, and broadcasts must treat the persistent source file's mtime and content as the authority, never the volatile session record.",
+      "targetBehavior": "In the tool trajectory, every merge into an authoritative artifact and every user-facing broadcast is immediately preceded by a re-read of the durable source file plus an mtime+content diff against the session snapshot; on mismatch the agent refreshes from the source before acting, and on a failed or unavailable check it defers the action (keeping a pre-merge snapshot) instead of propagating.",
+      "forbiddenBehavior": "Propagating volatile session-memory state into authoritative artifacts or user-facing output without a fresh mtime+content check against the durable source — e.g., a 12:00 heartbeat merging an 08:12 stale snapshot into CURRENT_FOCUS v48, or a 19:08 broadcast narrating from memory after narration_lines_ep002.json was updated at 08:24, forcing the user to correct it a second time.",
+      "evidenceSource": "Owner-reported pain in diagnosis_manual_1788612956754_9aaecyhq: the same pit hit twice — the 12:00 heartbeat merged the 08:12 stale trust-version theme into CURRENT_FOCUS v48, and the 19:08 broadcast used stale state although narration_lines_ep002.json had been updated at 08:24 to the 10-principle/15-clip version; recorded lesson T-08 (cross-session sync follows source-file mtime+content) existed but was never compiled into an enforced pre-propagation gate.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it fires BEFORE merges into authoritative artifacts and BEFORE broadcasts (trigger surface covering heartbeat/sync/merge/CURRENT_FOCUS/narration), requires an actual re-read plus mtime+content diff of the durable source file, resolves any mismatch in favor of the source file, and defers or rolls back when the check fails; a rule that verifies only after propagation, or that lets session memory override the source file, contradicts this intent and must be flagged rather than implemented."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r2-run1"
+     },
+     "risks": [
+      "Overlaps with core axioms T-03 (evidence over inference), T-04 (reversible actions), T-05 (guardrails), T-07 (post-action verification), and T-10 (persist state); the distinct contribution is the mandatory PRE-propagation freshness gate on volatile state — verification precedes the merge/broadcast rather than following it — but reviewers may judge it derivative",
+      "Re-reading and diffing source files at every propagation point adds latency and cost; over-application to high-frequency, low-stakes actions could cause unnecessary thrashing",
+      "Assumes a single, unambiguous durable source of truth; with multiple candidate sources the verification itself may compare against the wrong authority",
+      "Strict gating could stall time-critical actions when the source file or verification mechanism is unavailable, trading responsiveness for correctness",
+      "Underlying evidence is owner-reported without host trace (diagnosis confidence 0.35), so exact timestamps and details are unverified; downstream rules should bind to the trigger pattern (heartbeat/sync/merge/broadcast), not to the specific incident data",
+      "The reversibility component (pre-merge snapshots) adds state-management overhead and could be viewed as scope beyond the core freshness gate; if cut during rule generation, the pre-propagation gate itself must remain intact"
+     ]
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788612956754_9aa-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r2-run1\",\"principleDraft\":{\"title\":\"Re-verify volatile state against the durable source before any merge or broadcast\",\"statement\":\"Before propagating volatile session state — merging an in-session snapshot into an authoritative artifact, syncing across a session boundary, or broadcasting/narrating to users — the agent must re-read the durable source of truth and compare mtime and content against the session snapshot; if the source is newer or content differs, the session state is refreshed from the source before proceeding; if the check fails or the source is unavailable, the action is deferred rather than propagating the stale snapshot; the propagation remains reversible (e.g., via a pre-merge snapshot) until the freshness check passes.\",\"rationale\":\"The root cause was that cross-session sync treated session records as authoritative: a 12:00 heartbeat merged an 08:12 stale snapshot into CURRENT_FOCUS v48, and a 19:08 broadcast used stale state although narration_lines_ep002.json had already been updated at 08:24 — the same pit hit twice. A mandatory mtime+content comparison against the durable source at every propagation point blocks both temporal and content staleness at the source, prevents cross-session regression, and turns a failed check into deferral instead of error propagation.\",\"applicability\":[\"Heartbeat or sync operations that merge rehydrated session state into authoritative artifacts (e.g., CURRENT_FOCUS version merges) across session boundaries\",\"User-facing broadcasts or narrations built from recalled state (e.g., narration_lines files) — re-read and diff the source file immediately before output\",\"Any merge or broadcast performed in a context that was rehydrated from transient session memory rather than read directly from persistent files\"],\"antiPatterns\":[\"Merging a session-memory snapshot into an authoritative artifact without first diffing its mtime and content against the durable source file\",\"Broadcasting or narrating to users directly from remembered state without re-reading the current source file\",\"Treating session records or transcripts as the authority for cross-session sync instead of persistent source files\",\"Propagating state irreversibly (no pre-merge snapshot) while its freshness against the durable source is still unverified\",\"Silently proceeding with propagation when the freshness check fails or the source file is unavailable\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"Prevent stale session-memory state from contaminating authoritative artifacts and user-facing broadcasts: cross-session syncs, merges, and broadcasts must treat the persistent source file's mtime and content as the authority, never the volatile session record.\",\"targetBehavior\":\"In the tool trajectory, every merge into an authoritative artifact and every user-facing broadcast is immediately preceded by a re-read of the durable source file plus an mtime+content diff against the session snapshot; on mismatch the agent refreshes from the source before acting, and on a failed or unavailable check it defers the action (keeping a pre-merge snapshot) instead of propagating.\",\"forbiddenBehavior\":\"Propagating volatile session-memory state into authoritative artifacts or user-facing output without a fresh mtime+content check against the durable source — e.g., a 12:00 heartbeat merging an 08:12 stale snapshot into CURRENT_FOCUS v48, or a 19:08 broadcast narrating from memory after narration_lines_ep002.json was updated at 08:24, forcing the user to correct it a second time.\",\"evidenceSource\":\"Owner-reported pain in diagnosis_manual_1788612956754_9aaecyhq: the same pit hit twice — the 12:00 heartbeat merged the 08:12 stale trust-version theme into CURRENT_FOCUS v48, and the 19:08 broadcast used stale state although narration_lines_ep002.json had been updated at 08:24 to the 10-principle/15-clip version; recorded lesson T-08 (cross-session sync follows source-file mtime+content) existed but was never compiled into an enforced pre-propagation gate.\",\"validationExpectation\":\"An evaluator should accept a rule as faithful only if it fires BEFORE merges into authoritative artifacts and BEFORE broadcasts (trigger surface covering heartbeat/sync/merge/CURRENT_FOCUS/narration), requires an actual re-read plus mtime+content diff of the durable source file, resolves any mismatch in favor of the source file, and defers or rolls back when the check fails; a rule that verifies only after propagation, or that lets session memory override the source file, contradicts this intent and must be flagged rather than implemented.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r2-run1\"},\"risks\":[\"Overlaps with core axioms T-03 (evidence over inference), T-04 (reversible actions), T-05 (guardrails), T-07 (post-action verification), and T-10 (persist state); the distinct contribution is the mandatory PRE-propagation freshness gate on volatile state — verification precedes the merge/broadcast rather than following it — but reviewers may judge it derivative\",\"Re-reading and diffing source files at every propagation point adds latency and cost; over-application to high-frequency, low-stakes actions could cause unnecessary thrashing\",\"Assumes a single, unambiguous durable source of truth; with multiple candidate sources the verification itself may compare against the wrong authority\",\"Strict gating could stall time-critical actions when the source file or verification mechanism is unavailable, trading responsiveness for correctness\",\"Underlying evidence is owner-reported without host trace (diagnosis confidence 0.35), so exact timestamps and details are unverified; downstream rules should bind to the trigger pattern (heartbeat/sync/merge/broadcast), not to the specific incident data\",\"The reversibility component (pre-merge snapshots) adds state-management overhead and could be viewed as scope beyond the core freshness gate; if cut during rule generation, the pre-propagation gate itself must remain intact\"]}",
+    "usage": {
+     "input": 4123,
+     "output": 5936,
+     "total": 10059
+    },
+    "latencyMs": 73504,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "728e55932c08ae0c"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788612956754_9aa-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r2-run1",
+     "principleDraft": {
+      "title": "Verify volatile state against the durable source before any merge or broadcast",
+      "statement": "Before cached, recalled, or rehydrated in-session state is merged into an authoritative artifact, broadcast or narrated to a user, or used as the basis for a consequential decision, the agent must re-read the durable source of truth and compare both freshness (e.g., modification time) and content against the in-memory snapshot. If the snapshot is stale or divergent, the agent must refresh from the source or defer the propagation rather than push the stale state, and must keep the propagation reversible until the verification passes.",
+      "rationale": "The diagnosed root cause was not a single bad merge but the absence of a mandatory freshness gate at each propagation point: in-session snapshots were treated as authoritative, so stale state flowed into CURRENT_FOCUS and user-facing narration across session boundaries without any check. Forcing a pre-propagation mtime+content comparison against the persistent source blocks both temporal and content staleness at the source, prevents cross-session regression, and converts a would-be silent contamination into a defer-or-refresh decision.",
+      "applicability": [
+       "Merging, syncing, or writing cached or recalled in-session state into authoritative artifacts (e.g., CURRENT_FOCUS, task ledgers, records of decision)",
+       "Broadcasting or narrating internal state to users (status updates, summaries, reports) when derived from session memory",
+       "Using rehydrated context as the basis for consequential decisions after crossing a session or process boundary",
+       "Any propagation point where transient memory is about to become durable or user-visible state"
+      ],
+      "antiPatterns": [
+       "Treating volatile session memory as authoritative and merging it without re-reading the durable source",
+       "Broadcasting user-facing content derived from a stale in-session snapshot with no freshness or content check",
+       "Trusting rehydrated context across a session boundary as current without an mtime+content comparison",
+       "Proceeding with a merge or broadcast when the freshness check fails, instead of refreshing from the source or deferring the action",
+       "Skipping the verification gate for speed on frequent actions that still touch authoritative or user-facing state"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent stale in-session snapshots from contaminating authoritative artifacts or user-facing output: volatile session memory must be treated as a cache that is re-verified against the durable source of truth before it is merged, synced, or broadcast.",
+      "targetBehavior": "Immediately before each merge, sync, or broadcast of cached or rehydrated state, the agent visibly re-reads the durable source, performs an mtime and content comparison against the in-memory snapshot, and proceeds only if the snapshot is fresh and identical; otherwise it refreshes from the source or defers the action while keeping it reversible.",
+      "forbiddenBehavior": "Propagating volatile in-session state into authoritative artifacts or user-facing narration without a pre-propagation freshness and content check against the durable source — i.e., treating session memory as authority and letting stale snapshots flow unchecked across session boundaries.",
+      "evidenceSource": "The diagnosed incident family in the pri815-G-manual r2 lineage: stale snapshots merged into CURRENT_FOCUS and emitted in user-facing narration after context rehydration, with no freshness gate at any propagation point (dreamer and philosopher artifacts for this task).",
+      "validationExpectation": "An evaluator should require that any rule generated from this principle mandates an observable pre-propagation re-read plus mtime/content comparison against a named durable source, with explicit refresh-or-defer behavior on check failure and reversibility preserved until verification passes; a rule that permits merging cached state without that gate, or that only verifies after propagation, contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r2-run1"
+     },
+     "risks": [
+      "Partial overlap with core axioms T-03 (observable evidence before inference), T-07 (verify after acting), and T-10 (persist state when continuity matters); the distinct contribution is the mandatory PRE-propagation freshness gate on volatile state, but reviewers may judge the draft derivative of existing axioms",
+      "Re-reading and diffing the durable source at every propagation point adds latency and cost; over-application to high-frequency, low-stakes internal updates could cause unnecessary thrashing",
+      "Assumes a single, unambiguous durable source of truth exists; with multiple candidate sources the verification may compare against the wrong authority and pass while still propagating divergent state",
+      "Strict gating can stall time-critical actions if the verification mechanism or source file is unavailable; no fallback policy for source unavailability is defined, trading correctness for responsiveness",
+      "Ambiguity in what counts as a propagation point (authoritative write vs. internal read vs. casual mention) may cause either over-triggering of the gate or missed gates at genuine propagation points"
+     ],
+     "generatedAt": "2026-09-06T01:49:15.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788612956754_9aa-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r2-run1\",\"principleDraft\":{\"title\":\"Verify volatile state against the durable source before any merge or broadcast\",\"statement\":\"Before cached, recalled, or rehydrated in-session state is merged into an authoritative artifact, broadcast or narrated to a user, or used as the basis for a consequential decision, the agent must re-read the durable source of truth and compare both freshness (e.g., modification time) and content against the in-memory snapshot. If the snapshot is stale or divergent, the agent must refresh from the source or defer the propagation rather than push the stale state, and must keep the propagation reversible until the verification passes.\",\"rationale\":\"The diagnosed root cause was not a single bad merge but the absence of a mandatory freshness gate at each propagation point: in-session snapshots were treated as authoritative, so stale state flowed into CURRENT_FOCUS and user-facing narration across session boundaries without any check. Forcing a pre-propagation mtime+content comparison against the persistent source blocks both temporal and content staleness at the source, prevents cross-session regression, and converts a would-be silent contamination into a defer-or-refresh decision.\",\"applicability\":[\"Merging, syncing, or writing cached or recalled in-session state into authoritative artifacts (e.g., CURRENT_FOCUS, task ledgers, records of decision)\",\"Broadcasting or narrating internal state to users (status updates, summaries, reports) when derived from session memory\",\"Using rehydrated context as the basis for consequential decisions after crossing a session or process boundary\",\"Any propagation point where transient memory is about to become durable or user-visible state\"],\"antiPatterns\":[\"Treating volatile session memory as authoritative and merging it without re-reading the durable source\",\"Broadcasting user-facing content derived from a stale in-session snapshot with no freshness or content check\",\"Trusting rehydrated context across a session boundary as current without an mtime+content comparison\",\"Proceeding with a merge or broadcast when the freshness check fails, instead of refreshing from the source or deferring the action\",\"Skipping the verification gate for speed on frequent actions that still touch authoritative or user-facing state\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"The Owner wants to prevent stale in-session snapshots from contaminating authoritative artifacts or user-facing output: volatile session memory must be treated as a cache that is re-verified against the durable source of truth before it is merged, synced, or broadcast.\",\"targetBehavior\":\"Immediately before each merge, sync, or broadcast of cached or rehydrated state, the agent visibly re-reads the durable source, performs an mtime and content comparison against the in-memory snapshot, and proceeds only if the snapshot is fresh and identical; otherwise it refreshes from the source or defers the action while keeping it reversible.\",\"forbiddenBehavior\":\"Propagating volatile in-session state into authoritative artifacts or user-facing narration without a pre-propagation freshness and content check against the durable source — i.e., treating session memory as authority and letting stale snapshots flow unchecked across session boundaries.\",\"evidenceSource\":\"The diagnosed incident family in the pri815-G-manual r2 lineage: stale snapshots merged into CURRENT_FOCUS and emitted in user-facing narration after context rehydration, with no freshness gate at any propagation point (dreamer and philosopher artifacts for this task).\",\"validationExpectation\":\"An evaluator should require that any rule generated from this principle mandates an observable pre-propagation re-read plus mtime/content comparison against a named durable source, with explicit refresh-or-defer behavior on check failure and reversibility preserved until verification passes; a rule that permits merging cached state without that gate, or that only verifies after propagation, contradicts this intent and must be flagged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r2-run1\"},\"risks\":[\"Partial overlap with core axioms T-03 (observable evidence before inference), T-07 (verify after acting), and T-10 (persist state when continuity matters); the distinct contribution is the mandatory PRE-propagation freshness gate on volatile state, but reviewers may judge the draft derivative of existing axioms\",\"Re-reading and diffing the durable source at every propagation point adds latency and cost; over-application to high-frequency, low-stakes internal updates could cause unnecessary thrashing\",\"Assumes a single, unambiguous durable source of truth exists; with multiple candidate sources the verification may compare against the wrong authority and pass while still propagating divergent state\",\"Strict gating can stall time-critical actions if the verification mechanism or source file is unavailable; no fallback policy for source unavailability is defined, trading correctness for responsiveness\",\"Ambiguity in what counts as a propagation point (authoritative write vs. internal read vs. casual mention) may cause either over-triggering of the gate or missed gates at genuine propagation points\"],\"generatedAt\":\"2026-09-06T01:49:15.000Z\"}",
+    "usage": {
+     "input": 1889,
+     "output": 3505,
+     "total": 5394
+    },
+    "latencyMs": 45327,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "1ec9432b937616ef"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788612956754_9aa",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788612956754_9aa-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "12:00 心跳合并时以会话记录中的 08:12 陈旧信任版主题为权威来源，未核对源文件当前状态即合并入 CURRENT_FOCUS v48",
+       "betterDecision": "在执行任何跨会话合并前，先读取源文件 mtime 与内容，若源文件晚于会话记录或内容不一致（如 08:24 已改为 10 原则总纲 15 clip），则以源文件为准刷新会话记录后再合并",
+       "rationale": "以可观测的持久化状态（源文件 mtime+内容）为权威基准，可直接拦截陈旧状态进入合并路径，避免易失会话记忆覆盖事实",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "observable_state_first",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "19:08 播报时直接使用会话记忆中的 narration_lines 陈旧版本，未在播报前从源文件重新加载核对，致用户被迫二次纠正",
+       "betterDecision": "在播报等对外输出前加入读前核对步骤：从源文件重新加载 narration_lines_ep002.json，与将播报内容逐项比对，不一致即中止并以源文件为准",
+       "rationale": "对外播报前将输出与当前事实比对，把'用户二次纠正'这类事后摩擦前置为系统自检，一次执行即验证成功",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_broadcast",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "关键中间状态（CURRENT_FOCUS 版本、narration_lines_ep002.json 修订）仅保留在易失会话上下文中，未强制持久化并以源文件为权威读取来源",
+       "betterDecision": "每次修订后立即将 CURRENT_FOCUS 与 narration_lines 内容写回源文件，并让所有读取路径默认以源文件 mtime+内容为权威基准重建状态",
+       "rationale": "跨会话连续性依赖持久化事实而非会话记忆，将关键状态落盘并以此为准可从根本上消除陈旧状态复现",
+       "confidence": 0.88,
+       "riskLevel": "medium",
+       "strategicPerspective": "persist_critical_state",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "同步/心跳/合并/播报流程中缺少一致性门，任何会话记录状态都可无条件进入合并与播报路径",
+       "betterDecision": "在心跳、同步、merge、CURRENT_FOCUS 更新、播报等触发点插入显式一致性门：比对源文件 mtime 与会话记录时间戳及内容，源文件较新或内容不一致时禁止合并、告警并回源刷新",
+       "rationale": "将'以源文件为准'的硬约束翻译为执行前的显式检查与禁止转换，可在陈旧状态造成外部影响前被结构化拦截",
+       "confidence": 0.86,
+       "riskLevel": "medium",
+       "strategicPerspective": "explicit_guardrail_gate",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "同日已因陈旧状态合并被纠正一次后，未将教训固化为可执行规则，19:08 播报再次使用陈旧状态，同一坑摔两次",
+       "betterDecision": "首次纠正后立即记录'跨会话同步以源文件 mtime+内容为准'的强制规则，并挂接到心跳/同步/播报触发模式上，使后续同类操作自动执行核对",
+       "rationale": "将纠正与摩擦沉淀为规则并自动应用，才能把一次性教训转化为行为改进，阻断同类错误的重复发生",
+       "confidence": 0.82,
+       "riskLevel": "low",
+       "strategicPerspective": "feedback_to_guardrail",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "contextRefs": [
+      "artifact://d0df9b9a-b766-45ae-bb00-dabb2e38117d"
+     ],
+     "generatedAt": "2026-09-05T13:15:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788612956754_9aa-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"12:00 心跳合并时以会话记录中的 08:12 陈旧信任版主题为权威来源，未核对源文件当前状态即合并入 CURRENT_FOCUS v48\",\"betterDecision\":\"在执行任何跨会话合并前，先读取源文件 mtime 与内容，若源文件晚于会话记录或内容不一致（如 08:24 已改为 10 原则总纲 15 clip），则以源文件为准刷新会话记录后再合并\",\"rationale\":\"以可观测的持久化状态（源文件 mtime+内容）为权威基准，可直接拦截陈旧状态进入合并路径，避免易失会话记忆覆盖事实\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"observable_state_first\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"19:08 播报时直接使用会话记忆中的 narration_lines 陈旧版本，未在播报前从源文件重新加载核对，致用户被迫二次纠正\",\"betterDecision\":\"在播报等对外输出前加入读前核对步骤：从源文件重新加载 narration_lines_ep002.json，与将播报内容逐项比对，不一致即中止并以源文件为准\",\"rationale\":\"对外播报前将输出与当前事实比对，把'用户二次纠正'这类事后摩擦前置为系统自检，一次执行即验证成功\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_broadcast\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"关键中间状态（CURRENT_FOCUS 版本、narration_lines_ep002.json 修订）仅保留在易失会话上下文中，未强制持久化并以源文件为权威读取来源\",\"betterDecision\":\"每次修订后立即将 CURRENT_FOCUS 与 narration_lines 内容写回源文件，并让所有读取路径默认以源文件 mtime+内容为权威基准重建状态\",\"rationale\":\"跨会话连续性依赖持久化事实而非会话记忆，将关键状态落盘并以此为准可从根本上消除陈旧状态复现\",\"confidence\":0.88,\"riskLevel\":\"medium\",\"strategicPerspective\":\"persist_critical_state\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":3,\"badDecision\":\"同步/心跳/合并/播报流程中缺少一致性门，任何会话记录状态都可无条件进入合并与播报路径\",\"betterDecision\":\"在心跳、同步、merge、CURRENT_FOCUS 更新、播报等触发点插入显式一致性门：比对源文件 mtime 与会话记录时间戳及内容，源文件较新或内容不一致时禁止合并、告警并回源刷新\",\"rationale\":\"将'以源文件为准'的硬约束翻译为执行前的显式检查与禁止转换，可在陈旧状态造成外部影响前被结构化拦截\",\"confidence\":0.86,\"riskLevel\":\"medium\",\"strategicPerspective\":\"explicit_guardrail_gate\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"同日已因陈旧状态合并被纠正一次后，未将教训固化为可执行规则，19:08 播报再次使用陈旧状态，同一坑摔两次\",\"betterDecision\":\"首次纠正后立即记录'跨会话同步以源文件 mtime+内容为准'的强制规则，并挂接到心跳/同步/播报触发模式上，使后续同类操作自动执行核对\",\"rationale\":\"将纠正与摩擦沉淀为规则并自动应用，才能把一次性教训转化为行为改进，阻断同类错误的重复发生\",\"confidence\":0.82,\"riskLevel\":\"low\",\"strategicPerspective\":\"feedback_to_guardrail\",\"sourcePrincipleId\":\"T-08\"}],\"contextRefs\":[\"artifact://d0df9b9a-b766-45ae-bb00-dabb2e38117d\"],\"generatedAt\":\"2026-09-05T13:15:00.000Z\"}",
+    "usage": {
+     "input": 2003,
+     "output": 4405,
+     "total": 6408
+    },
+    "latencyMs": 50916,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "026d83337d39f3bc"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788612956754_9aa-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r3-run1",
+     "thesis": "Transient working memory is a cache, never an authority. When state loaded into volatile context is about to be used for a consequential action—merging, broadcasting, or handing off across a session boundary—it must be revalidated against its durable, observable source at the moment of use, and divergence must be treated as a blocking condition rather than a hint. Corrections that arise from staleness failures should crystallize into standing checks attached to the trigger points where the failure occurred, so the lesson enforces itself instead of relying on memory.",
+     "principleCandidate": {
+      "title": "Re-verify volatile state against the authoritative persistent source before consequential use",
+      "rationale": "The root cause across all five candidates is treating in-session memory as authoritative when a durable source file exists. Stale state then flowed unchecked into merges and external broadcasts, forcing repeated user correction. Declaring the persisted source (mtime + content) as the single authority and mandating a compare-and-block step immediately before each consequential action structurally intercepts staleness before it causes external impact, and converts one-time friction into a reusable pre-flight gate.",
+      "scope": "Applies whenever state held in volatile working memory (session context, in-memory caches, loaded copies) will be used in consequential actions such as cross-session merges, external broadcasts, state updates, or handoffs—especially when time gaps, multiple writers, or prior corrections exist between load and use. Less relevant for trivial, read-only, or purely internal operations where staleness is harmless.",
+      "confidence": 0.86
+     },
+     "risks": [
+      "Partially overlaps with existing axioms: T-03 (observable evidence first) and T-10 (persist important state); this principle narrows them to source-precedence and pre-use revalidation rather than contradicting them, but consolidation should be considered.",
+      "Performance overhead: mandatory reload-and-compare before every consequential action can introduce redundant reads and latency in high-frequency operations; scope must exclude low-stakes internal reads.",
+      "Blocking behavior on transient source unavailability could stall workflows; the gate needs a defined fallback (halt-and-alert) rather than deadlocking.",
+      "Freshness signals like mtime can be unreliable (coarse granularity, clock skew), risking false confidence in the check if content comparison is omitted.",
+      "Over-application risk: treating all in-memory state as suspect may cause excessive conservatism and inhibit fluid operation where reconciliation is genuinely unnecessary."
+     ],
+     "generatedAt": "2026-09-05T13:21:00.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788612956754_9aa-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r3-run1\",\"thesis\":\"Transient working memory is a cache, never an authority. When state loaded into volatile context is about to be used for a consequential action—merging, broadcasting, or handing off across a session boundary—it must be revalidated against its durable, observable source at the moment of use, and divergence must be treated as a blocking condition rather than a hint. Corrections that arise from staleness failures should crystallize into standing checks attached to the trigger points where the failure occurred, so the lesson enforces itself instead of relying on memory.\",\"principleCandidate\":{\"title\":\"Re-verify volatile state against the authoritative persistent source before consequential use\",\"rationale\":\"The root cause across all five candidates is treating in-session memory as authoritative when a durable source file exists. Stale state then flowed unchecked into merges and external broadcasts, forcing repeated user correction. Declaring the persisted source (mtime + content) as the single authority and mandating a compare-and-block step immediately before each consequential action structurally intercepts staleness before it causes external impact, and converts one-time friction into a reusable pre-flight gate.\",\"scope\":\"Applies whenever state held in volatile working memory (session context, in-memory caches, loaded copies) will be used in consequential actions such as cross-session merges, external broadcasts, state updates, or handoffs—especially when time gaps, multiple writers, or prior corrections exist between load and use. Less relevant for trivial, read-only, or purely internal operations where staleness is harmless.\",\"confidence\":0.86},\"risks\":[\"Partially overlaps with existing axioms: T-03 (observable evidence first) and T-10 (persist important state); this principle narrows them to source-precedence and pre-use revalidation rather than contradicting them, but consolidation should be considered.\",\"Performance overhead: mandatory reload-and-compare before every consequential action can introduce redundant reads and latency in high-frequency operations; scope must exclude low-stakes internal reads.\",\"Blocking behavior on transient source unavailability could stall workflows; the gate needs a defined fallback (halt-and-alert) rather than deadlocking.\",\"Freshness signals like mtime can be unreliable (coarse granularity, clock skew), risking false confidence in the check if content comparison is omitted.\",\"Over-application risk: treating all in-memory state as suspect may cause excessive conservatism and inhibit fluid operation where reconciliation is genuinely unnecessary.\"],\"generatedAt\":\"2026-09-05T13:21:00.000Z\"}",
+    "usage": {
+     "input": 1692,
+     "output": 1706,
+     "total": 3398
+    },
+    "latencyMs": 28524,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "13e04f40172b222a"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788612956754_9aa-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1",
+     "principleDraft": {
+      "title": "Re-verify volatile state against the authoritative persistent source before consequential use",
+      "statement": "Whenever state held in volatile working memory (session context, in-memory cache, or a loaded copy) is about to drive a consequential action—cross-session merge, external broadcast, persistent state update, or handoff—the agent must re-read the durable source and compare it against the in-memory copy immediately before the action. The persisted source is the single authority; divergence detected by content comparison (not mtime alone) is a blocking condition requiring reconciliation before proceeding, and if the durable source is unreachable the agent must halt and alert rather than act on the stale copy. When a staleness failure does occur, the correction must be persisted as a standing pre-flight check attached to the trigger point where the failure happened, not retained as informal memory.",
+      "rationale": "The diagnosed root cause is treating in-session memory as authoritative when a durable source exists, allowing stale state to flow unchecked into merges and external broadcasts and forcing repeated user correction. Declaring the persisted source the single authority and inserting a mandatory compare-and-block step immediately before each consequential action structurally intercepts staleness before it causes external impact, and crystallizing the resulting correction into a standing gate at the trigger point makes the lesson self-enforcing instead of dependent on memory.",
+      "applicability": [
+       "State loaded into volatile context will be used in a cross-session merge, external broadcast, persistent state update, or handoff across a session boundary",
+       "Time gaps, multiple writers, or prior user corrections exist between when state was loaded and when it is used",
+       "Cross-session resumption where in-memory state may not reflect the durable store",
+       "Explicitly out of scope: trivial, read-only, or purely internal operations where staleness is harmless"
+      ],
+      "antiPatterns": [
+       "Treating in-session memory as authoritative and acting on it without checking the durable source",
+       "Merging, broadcasting, or handing off a stale in-memory copy without a fresh pre-use comparison",
+       "Treating detected divergence as a non-blocking hint and proceeding anyway",
+       "Relying on mtime or other freshness metadata alone without content comparison",
+       "Fixing a staleness failure once and relying on informal memory to avoid repeating it, instead of persisting a standing check at the trigger point",
+       "Proceeding on a stale copy because the durable source is temporarily unreachable"
+      ],
+      "confidence": 0.86
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to never merge, broadcast, persist, or hand off state straight from in-session memory without first re-reading the durable source and halting on any mismatch, so stale data never reaches external or persistent surfaces.",
+      "targetBehavior": "Immediately before each consequential use (merge, external broadcast, persistent write, cross-session handoff), the agent re-reads the durable source, compares its content to the in-memory copy, proceeds only on a match, and otherwise halts and reports the divergence; after a staleness failure it persists a standing pre-flight check at that trigger point.",
+      "forbiddenBehavior": "Acting on volatile in-memory state as if it were authoritative—merging, broadcasting, writing, or handing off a copy without a fresh source comparison, proceeding past detected divergence, trusting mtime alone, or continuing on stale data when the source is unreachable.",
+      "evidenceSource": "The dreamer/philosopher diagnosis of five staleness failure candidates where state held in volatile working memory flowed unchecked into cross-session merges and external broadcasts, forcing repeated user corrections (philosopher artifact pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1).",
+      "validationExpectation": "An evaluator should accept a rule only if it (a) mandates a durable-source re-read with content comparison immediately before merge/broadcast/persistent-write/handoff actions, (b) makes divergence a blocking halt rather than a warning, (c) requires content comparison rather than mtime alone, (d) specifies halt-and-alert behavior when the source is unreachable, and (e) excludes low-stakes internal reads from the gate."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1"
+     },
+     "risks": [
+      "Overlaps with core axioms T-03 (observable evidence before claims) and T-10 (persist important state); this principle narrows both into source-precedence and pre-use revalidation rather than contradicting them, but downstream consolidation should be considered, and it also composes T-08's feedback-crystallization intent.",
+      "Mandatory reload-and-compare before every consequential action adds latency and redundant reads; scope must remain limited to consequential actions and exclude low-stakes internal reads.",
+      "A hard block when the durable source is transiently unavailable could stall workflows; the gate needs a defined halt-and-alert fallback rather than deadlocking or silently proceeding.",
+      "Freshness signals like mtime are unreliable (coarse granularity, clock skew); if rules implement only metadata checks, the gate can produce false confidence without content comparison.",
+      "Over-application risk: treating all in-memory state as suspect may cause excessive conservatism and inhibit fluid operation where reconciliation is genuinely unnecessary.",
+      "Divergence handling is deliberately blocking but prescribes no merge-resolution policy; when both copies contain legitimate concurrent changes, escalation to the owner must occur rather than silent resolution, which downstream rule generation must not bypass."
+     ],
+     "generatedAt": "2026-09-05T13:24:12.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788612956754_9aa-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1\",\"principleDraft\":{\"title\":\"Re-verify volatile state against the authoritative persistent source before consequential use\",\"statement\":\"Whenever state held in volatile working memory (session context, in-memory cache, or a loaded copy) is about to drive a consequential action—cross-session merge, external broadcast, persistent state update, or handoff—the agent must re-read the durable source and compare it against the in-memory copy immediately before the action. The persisted source is the single authority; divergence detected by content comparison (not mtime alone) is a blocking condition requiring reconciliation before proceeding, and if the durable source is unreachable the agent must halt and alert rather than act on the stale copy. When a staleness failure does occur, the correction must be persisted as a standing pre-flight check attached to the trigger point where the failure happened, not retained as informal memory.\",\"rationale\":\"The diagnosed root cause is treating in-session memory as authoritative when a durable source exists, allowing stale state to flow unchecked into merges and external broadcasts and forcing repeated user correction. Declaring the persisted source the single authority and inserting a mandatory compare-and-block step immediately before each consequential action structurally intercepts staleness before it causes external impact, and crystallizing the resulting correction into a standing gate at the trigger point makes the lesson self-enforcing instead of dependent on memory.\",\"applicability\":[\"State loaded into volatile context will be used in a cross-session merge, external broadcast, persistent state update, or handoff across a session boundary\",\"Time gaps, multiple writers, or prior user corrections exist between when state was loaded and when it is used\",\"Cross-session resumption where in-memory state may not reflect the durable store\",\"Explicitly out of scope: trivial, read-only, or purely internal operations where staleness is harmless\"],\"antiPatterns\":[\"Treating in-session memory as authoritative and acting on it without checking the durable source\",\"Merging, broadcasting, or handing off a stale in-memory copy without a fresh pre-use comparison\",\"Treating detected divergence as a non-blocking hint and proceeding anyway\",\"Relying on mtime or other freshness metadata alone without content comparison\",\"Fixing a staleness failure once and relying on informal memory to avoid repeating it, instead of persisting a standing check at the trigger point\",\"Proceeding on a stale copy because the durable source is temporarily unreachable\"],\"confidence\":0.86},\"intentContract\":{\"ownerIntent\":\"The Owner wants the agent to never merge, broadcast, persist, or hand off state straight from in-session memory without first re-reading the durable source and halting on any mismatch, so stale data never reaches external or persistent surfaces.\",\"targetBehavior\":\"Immediately before each consequential use (merge, external broadcast, persistent write, cross-session handoff), the agent re-reads the durable source, compares its content to the in-memory copy, proceeds only on a match, and otherwise halts and reports the divergence; after a staleness failure it persists a standing pre-flight check at that trigger point.\",\"forbiddenBehavior\":\"Acting on volatile in-memory state as if it were authoritative—merging, broadcasting, writing, or handing off a copy without a fresh source comparison, proceeding past detected divergence, trusting mtime alone, or continuing on stale data when the source is unreachable.\",\"evidenceSource\":\"The dreamer/philosopher diagnosis of five staleness failure candidates where state held in volatile working memory flowed unchecked into cross-session merges and external broadcasts, forcing repeated user corrections (philosopher artifact pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1).\",\"validationExpectation\":\"An evaluator should accept a rule only if it (a) mandates a durable-source re-read with content comparison immediately before merge/broadcast/persistent-write/handoff actions, (b) makes divergence a blocking halt rather than a warning, (c) requires content comparison rather than mtime alone, (d) specifies halt-and-alert behavior when the source is unreachable, and (e) excludes low-stakes internal reads from the gate.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1\"},\"risks\":[\"Overlaps with core axioms T-03 (observable evidence before claims) and T-10 (persist important state); this principle narrows both into source-precedence and pre-use revalidation rather than contradicting them, but downstream consolidation should be considered, and it also composes T-08's feedback-crystallization intent.\",\"Mandatory reload-and-compare before every consequential action adds latency and redundant reads; scope must remain limited to consequential actions and exclude low-stakes internal reads.\",\"A hard block when the durable source is transiently unavailable could stall workflows; the gate needs a defined halt-and-alert fallback rather than deadlocking or silently proceeding.\",\"Freshness signals like mtime are unreliable (coarse granularity, clock skew); if rules implement only metadata checks, the gate can produce false confidence without content comparison.\",\"Over-application risk: treating all in-memory state as suspect may cause excessive conservatism and inhibit fluid operation where reconciliation is genuinely unnecessary.\",\"Divergence handling is deliberately blocking but prescribes no merge-resolution policy; when both copies contain legitimate concurrent changes, escalation to the owner must occur rather than silent resolution, which downstream rule generation must not bypass.\"],\"generatedAt\":\"2026-09-05T13:24:12.000Z\"}",
+    "usage": {
+     "input": 1967,
+     "output": 3862,
+     "total": 5829
+    },
+    "latencyMs": 50117,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "f4c1230c7f48b830"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788612956754_9aa-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1",
+     "principleDraft": {
+      "title": "Revalidate volatile state against the authoritative source file before consequential use",
+      "statement": "State loaded into volatile working memory is a cache, never an authority: immediately before any consequential action that consumes cross-session state (merge, heartbeat sync, external broadcast, or session handoff), re-read the authoritative persistent source file and compare both mtime and content against the in-session copy; on any divergence (source newer or content differs), block the action, alert, and refresh state from the source before proceeding. A correction arising from a staleness failure must be crystallized into a standing check bound to the trigger pattern (heartbeat, sync, merge, broadcast) where the failure occurred.",
+      "rationale": "The diagnosed root cause is a design flaw in which cross-session sync treated session records as authoritative and lacked a source-file mtime+content consistency gate, so stale state flowed unchecked into merges and external broadcasts: on 09-05 the 12:00 heartbeat merged the 08:12 stale trust-version theme into CURRENT_FOCUS v48, and the 19:08 broadcast used stale narration_lines even though narration_lines_ep002.json had already been updated at 08:24, forcing the Owner to correct the same pit twice in one day. Declaring the persisted source file (mtime + content) the single authority and mandating a compare-and-block gate at the moment of consequential use intercepts staleness before external impact, and binding crystallized checks to the failure's trigger points makes the lesson self-enforcing rather than dependent on memory.",
+      "applicability": [
+       "Cross-session merges and heartbeat syncs that write persistent state (e.g., CURRENT_FOCUS version updates)",
+       "External broadcasts or announcements derived from previously loaded content (e.g., narration_lines_ep002.json)",
+       "State handoffs across session boundaries where time gaps, multiple writers, or a prior correction exist between load and use",
+       "Consequential writes or external outputs consuming state loaded earlier into volatile working memory"
+      ],
+      "antiPatterns": [
+       "Merging or broadcasting state taken directly from in-session memory without re-reading the durable source file first",
+       "Proceeding on detected source/session divergence and treating divergence as a non-blocking hint",
+       "Declaring freshness from mtime alone (or content alone) without comparing both against the source file",
+       "Re-absorbing a staleness correction as one-off context instead of a standing check bound to the trigger point where the failure occurred"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants cross-session merges, syncs, and broadcasts to treat the persisted source file (mtime + content) as the sole authority over volatile session records, so stale state is never merged or broadcast and the same mistake is not corrected twice.",
+      "targetBehavior": "Before any cross-session merge, heartbeat sync, or external broadcast, the agent's tool trajectory shows a re-read of the authoritative source file and a mtime+content comparison against the in-session copy, with divergence causing a halt, an alert, and a refresh-from-source before the action proceeds.",
+      "forbiddenBehavior": "Using volatile in-session memory as the authority for a merge, sync, or broadcast without re-validating against the durable source, or proceeding past a detected source/session divergence instead of blocking on it.",
+      "evidenceSource": "Diagnosis manual_1788612956754_9aaecyhq (09-05, two same-day failures): the 12:00 heartbeat merged the 08:12 stale trust-version theme into CURRENT_FOCUS v48, and the 19:08 broadcast used stale narration_lines although narration_lines_ep002.json had been changed at 08:24 to the 10-principles/15-clip version, forcing repeated user correction.",
+      "validationExpectation": "An evaluator should accept a rule only if it fires at the diagnosed trigger points (heartbeat, sync, merge, CURRENT_FOCUS update, broadcast), requires both mtime AND content comparison against the source file, makes divergence blocking with halt-alert-refresh behavior (halting and alerting rather than deadlocking if the source is transiently unavailable), and stays out of trivial read-only internal operations; any change permitting action on unverified or divergent state contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1"
+     },
+     "risks": [
+      "Overlaps with core axioms T-03 (observable evidence first) and T-10 (persist important state), and its crystallization clause overlaps T-08 (corrections as feedback); this draft is a narrowing composite (source-precedence plus a pre-use revalidation gate) and downstream consolidation should be considered to avoid duplicate rules.",
+      "Mandatory reload-and-compare before every consequential action adds latency and redundant reads; scope must exclude low-stakes, read-only, or purely internal operations.",
+      "A hard block on transient source-file unavailability can stall workflows; the gate needs a defined halt-and-alert fallback rather than a deadlock.",
+      "mtime signals alone are unreliable (coarse granularity, clock skew); content comparison must be mandatory or the gate gives false confidence.",
+      "Over-application risk: treating all in-memory state as suspect may cause excessive conservatism where reconciliation is genuinely unnecessary.",
+      "The source diagnosis carries low confidence (0.35) with no authenticated host trace (fullTrace unavailable); the trigger patterns derive from Owner report and should be validated against observed trajectories before strict enforcement."
+     ],
+     "generatedAt": "2026-09-05T13:22:30.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788612956754_9aa-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1\",\"principleDraft\":{\"title\":\"Revalidate volatile state against the authoritative source file before consequential use\",\"statement\":\"State loaded into volatile working memory is a cache, never an authority: immediately before any consequential action that consumes cross-session state (merge, heartbeat sync, external broadcast, or session handoff), re-read the authoritative persistent source file and compare both mtime and content against the in-session copy; on any divergence (source newer or content differs), block the action, alert, and refresh state from the source before proceeding. A correction arising from a staleness failure must be crystallized into a standing check bound to the trigger pattern (heartbeat, sync, merge, broadcast) where the failure occurred.\",\"rationale\":\"The diagnosed root cause is a design flaw in which cross-session sync treated session records as authoritative and lacked a source-file mtime+content consistency gate, so stale state flowed unchecked into merges and external broadcasts: on 09-05 the 12:00 heartbeat merged the 08:12 stale trust-version theme into CURRENT_FOCUS v48, and the 19:08 broadcast used stale narration_lines even though narration_lines_ep002.json had already been updated at 08:24, forcing the Owner to correct the same pit twice in one day. Declaring the persisted source file (mtime + content) the single authority and mandating a compare-and-block gate at the moment of consequential use intercepts staleness before external impact, and binding crystallized checks to the failure's trigger points makes the lesson self-enforcing rather than dependent on memory.\",\"applicability\":[\"Cross-session merges and heartbeat syncs that write persistent state (e.g., CURRENT_FOCUS version updates)\",\"External broadcasts or announcements derived from previously loaded content (e.g., narration_lines_ep002.json)\",\"State handoffs across session boundaries where time gaps, multiple writers, or a prior correction exist between load and use\",\"Consequential writes or external outputs consuming state loaded earlier into volatile working memory\"],\"antiPatterns\":[\"Merging or broadcasting state taken directly from in-session memory without re-reading the durable source file first\",\"Proceeding on detected source/session divergence and treating divergence as a non-blocking hint\",\"Declaring freshness from mtime alone (or content alone) without comparing both against the source file\",\"Re-absorbing a staleness correction as one-off context instead of a standing check bound to the trigger point where the failure occurred\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"The Owner wants cross-session merges, syncs, and broadcasts to treat the persisted source file (mtime + content) as the sole authority over volatile session records, so stale state is never merged or broadcast and the same mistake is not corrected twice.\",\"targetBehavior\":\"Before any cross-session merge, heartbeat sync, or external broadcast, the agent's tool trajectory shows a re-read of the authoritative source file and a mtime+content comparison against the in-session copy, with divergence causing a halt, an alert, and a refresh-from-source before the action proceeds.\",\"forbiddenBehavior\":\"Using volatile in-session memory as the authority for a merge, sync, or broadcast without re-validating against the durable source, or proceeding past a detected source/session divergence instead of blocking on it.\",\"evidenceSource\":\"Diagnosis manual_1788612956754_9aaecyhq (09-05, two same-day failures): the 12:00 heartbeat merged the 08:12 stale trust-version theme into CURRENT_FOCUS v48, and the 19:08 broadcast used stale narration_lines although narration_lines_ep002.json had been changed at 08:24 to the 10-principles/15-clip version, forcing repeated user correction.\",\"validationExpectation\":\"An evaluator should accept a rule only if it fires at the diagnosed trigger points (heartbeat, sync, merge, CURRENT_FOCUS update, broadcast), requires both mtime AND content comparison against the source file, makes divergence blocking with halt-alert-refresh behavior (halting and alerting rather than deadlocking if the source is transiently unavailable), and stays out of trivial read-only internal operations; any change permitting action on unverified or divergent state contradicts this intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788612956754_9aa-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788612956754_9aa-r3-run1\"},\"risks\":[\"Overlaps with core axioms T-03 (observable evidence first) and T-10 (persist important state), and its crystallization clause overlaps T-08 (corrections as feedback); this draft is a narrowing composite (source-precedence plus a pre-use revalidation gate) and downstream consolidation should be considered to avoid duplicate rules.\",\"Mandatory reload-and-compare before every consequential action adds latency and redundant reads; scope must exclude low-stakes, read-only, or purely internal operations.\",\"A hard block on transient source-file unavailability can stall workflows; the gate needs a defined halt-and-alert fallback rather than a deadlock.\",\"mtime signals alone are unreliable (coarse granularity, clock skew); content comparison must be mandatory or the gate gives false confidence.\",\"Over-application risk: treating all in-memory state as suspect may cause excessive conservatism where reconciliation is genuinely unnecessary.\",\"The source diagnosis carries low confidence (0.35) with no authenticated host trace (fullTrace unavailable); the trigger patterns derive from Owner report and should be validated against observed trajectories before strict enforcement.\"],\"generatedAt\":\"2026-09-05T13:22:30.000Z\"}",
+    "usage": {
+     "input": 4212,
+     "output": 6998,
+     "total": 11210
+    },
+    "latencyMs": 98471,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6817e68a50737a8d"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

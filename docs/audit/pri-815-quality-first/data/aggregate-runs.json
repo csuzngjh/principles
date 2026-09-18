@@ -1,0 +1,653 @@
+{
+  "perGroup": {
+    "G-manual_1788265732489_9ne": {
+      "class": "DEV",
+      "verdicts": [
+        "A",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 45079,
+      "tokensB": 57262
+    },
+    "G-manual_1788268409354_vau": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "CONTRADICTION",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 44075,
+      "tokensB": 57349
+    },
+    "G-manual_1788415743052_os4": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "CONTRADICTION",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 45276,
+      "tokensB": 58414
+    },
+    "G-manual_1788417947835_e99": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "CONTRADICTION",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": "JUDGE_INVALID",
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 48469,
+      "tokensB": 59211
+    },
+    "G-manual_1788424714466_wmn": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 43584,
+      "tokensB": 52455
+    },
+    "G-manual_1788526359876_r5x": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "TIE",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 48670,
+      "tokensB": 60818
+    },
+    "G-manual_1788578262338_kmp": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 45631,
+      "tokensB": 58022
+    },
+    "G-manual_1788609453041_dtm": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "allow"
+      },
+      "tokensA": 47457,
+      "tokensB": 60877
+    },
+    "G-manual_1788610740431_xo5": {
+      "class": "DEV",
+      "verdicts": [
+        "TIE",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "CONTRADICTION",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "allow"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "allow"
+      },
+      "tokensA": 46148,
+      "tokensB": 58337
+    },
+    "G-manual_1788612956754_9aa": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "A",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "JUDGE_INVALID",
+      "stabilityB": "CONTRADICTION",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 44858,
+      "tokensB": 57729
+    },
+    "G-manual_1789299059630_zqx": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "CONTRADICTION",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 50620,
+      "tokensB": 57857
+    },
+    "G-manual_1789398236238_04i": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "A",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "CONTRADICTION",
+      "stabilityB": "CONTRADICTION",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 48752,
+      "tokensB": 60317
+    },
+    "G-pain_host_038c29c53be340": {
+      "class": "CLEAN",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "CONTRADICTION",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 41058,
+      "tokensB": 47566
+    },
+    "G-pain_host_432596aee54456": {
+      "class": "CLEAN",
+      "verdicts": [
+        "A",
+        "A",
+        "A"
+      ],
+      "groupVerdict": "A_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 48414,
+      "tokensB": 58095
+    },
+    "G-pain_host_620a1683e2eeb7": {
+      "class": "CLEAN",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "CONTRADICTION",
+      "stabilityB": "CONTRADICTION",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 39617,
+      "tokensB": 49579
+    },
+    "G-pain_host_6406fbff5ee282": {
+      "class": "CLEAN",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "CONTRADICTION",
+      "stabilityB": "CONTRADICTION",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "block"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "block"
+      },
+      "tokensA": 44666,
+      "tokensB": 53036
+    },
+    "G-pain_host_85731899e27e6d": {
+      "class": "CLEAN",
+      "verdicts": [
+        "B",
+        "B",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": "JUDGE_INVALID",
+      "tokensA": 42370,
+      "tokensB": 55632
+    },
+    "G-pain_host_cffdcb9f5d0257": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "A"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 0,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "CONTRADICTION",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 41382,
+      "tokensB": 53560
+    },
+    "G-manual_1788920022087_pjz": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "B",
+        "BOTH_BAD"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 1,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 32068,
+      "tokensB": 41003,
+      "note": "raw run file unrecoverable (incident); tokens preserved from pre-incident snapshot; verdicts re-derived from cached judgments"
+    },
+    "G-manual_1789317326914_sj6": {
+      "class": "DEV",
+      "verdicts": [
+        "B",
+        "BOTH_BAD",
+        "B"
+      ],
+      "groupVerdict": "B_WIN",
+      "bothBadRepeats": 1,
+      "stabilityA": "MATERIAL_DRIFT",
+      "stabilityB": "MATERIAL_DRIFT",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "allow"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "allow"
+      },
+      "tokensA": 37431,
+      "tokensB": 48886,
+      "note": "raw run file unrecoverable (incident); tokens preserved from pre-incident snapshot; verdicts re-derived from cached judgments"
+    },
+    "G-pain_host_198b8c4d901b5b": {
+      "class": "CLEAN",
+      "verdicts": [
+        "BOTH_BAD",
+        "A",
+        "BOTH_BAD"
+      ],
+      "groupVerdict": "TIE",
+      "bothBadRepeats": 2,
+      "stabilityA": "INSUFFICIENT_REPEATS",
+      "stabilityB": "INSUFFICIENT_REPEATS",
+      "downstreamA": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "downstreamB": {
+        "target_violation": "block",
+        "valid_compliant": "allow",
+        "near_boundary_legal": "allow",
+        "out_of_scope": "allow",
+        "legitimate_exception": "exception_honored"
+      },
+      "tokensA": 15828,
+      "tokensB": 19617,
+      "note": "raw run file unrecoverable (incident); tokens preserved from pre-incident snapshot; verdicts re-derived from cached judgments"
+    }
+  },
+  "totals": {
+    "N": 21,
+    "W": 19,
+    "L": 1,
+    "T": 1,
+    "BOTH_BAD_GROUPS": 3,
+    "NET_ADVANTAGE_PP": 85.7
+  },
+  "subsets": {
+    "DEV": {
+      "w": 15,
+      "l": 0,
+      "t": 0
+    },
+    "CLEAN": {
+      "w": 4,
+      "l": 1,
+      "t": 1
+    }
+  },
+  "cost": {
+    "tokensA": 901453,
+    "tokensB": 1125622,
+    "deltaPct": 24.9,
+    "budgetGuard": "B total <= A + 20% (SPEC §31)"
+  },
+  "stability": {
+    "A": {
+      "CONTRADICTION": 6,
+      "MATERIAL_DRIFT": 13,
+      "STABLE": 0,
+      "other": 0,
+      "JUDGE_INVALID": 1,
+      "INSUFFICIENT_REPEATS": 1
+    },
+    "B": {
+      "CONTRADICTION": 8,
+      "MATERIAL_DRIFT": 12,
+      "STABLE": 0,
+      "other": 0,
+      "INSUFFICIENT_REPEATS": 1
+    }
+  },
+  "downstream": {
+    "A": {
+      "correct": 19,
+      "blockMiss": 0,
+      "overblock": 1,
+      "invalid": 1
+    },
+    "B": {
+      "correct": 19,
+      "blockMiss": 0,
+      "overblock": 1,
+      "invalid": 1
+    }
+  },
+  "validity": {
+    "A": {
+      "ok": 59,
+      "fail": 0
+    },
+    "B": {
+      "ok": 57,
+      "fail": 2
+    },
+    "abortedRepeats": 4
+  },
+  "validitySource": "pre-incident snapshot (quarantined groups have no run files; nothing new occurred)",
+  "downstreamScope": "cache-wide, all 21 groups (incl. quarantined), legitimate_exception included since final-blocker-closure fix"
+}
