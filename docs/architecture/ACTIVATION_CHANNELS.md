@@ -99,16 +99,19 @@ type DispatchResult =
     };
 ```
 
-**路由决策表**：
+**路由决策表**（PRI-811 Phase B, 2026-09-19 起：任何 rollout 推荐都不直接激活，
+只有经 Owner approval 的 `approved` 派发才会产生 activation 事实）：
 
 | RolloutDecision | 通道 | Dispatch 决策 |
 |----------------|------|---------------|
 | `reject` | 任意 | `rejected` + 写 RejectionFeedback |
-| `auto_activate` | `prompt` / `defer_archive` | `activated`（直接调用 ChannelWriter）|
-| `auto_activate` | `skill` | 取决于 config：默认 `activated`，配置 require_approval 后 `queued_for_approval` |
-| `auto_activate` | `code_tool_hook` | **强制** `queued_for_approval`（覆盖 auto_activate）|
-| `auto_activate` | `model_training` | **强制** `queued_for_approval` + `requiresSecondConfirmation=true` |
+| `auto_activate` | 任意 | `queued_for_approval`（推荐只入队，Owner 批准后经 ApprovalCompletionService 激活）|
 | `require_approval` | 任意 | `queued_for_approval`（含通道默认风险等级）|
+| `approved` | 任意 | `activated`（dispatcher 独立核验 approval 行后激活；唯一可直接激活的决策）|
+
+> 历史注：Phase B 之前 `auto_activate` + 低风险通道（prompt/defer_archive）会
+> 直接激活（`system_policy` authority），该路径已被 Owner 治理决策关闭。
+> 已有无 approval 行的存量 prompt 激活在读取层仍标注 `system_policy`。
 
 ### 2.2 ChannelWriter 接口
 
@@ -1010,7 +1013,7 @@ activation:
 
 ### 9.2 集成测试场景
 
-1. **prompt 通道全自动**：RolloutReviewer auto_activate → ActivationDispatcher → Ledger.active
+1. **prompt 通道审批链（PRI-811 Phase B）**：RolloutReviewer auto_activate → approval 队列 → Owner 批准 → ApprovalCompletionService → Ledger.active
 2. **code_tool_hook 完整审批链**：auto_activate → 强制入队 → pd-console 批准 → shadow mode → live
 3. **model_training 双人审批**：入队 → 第一审批 → 24h 冷却 → 第二审批 → export
 4. **拒绝反馈环**：Reject → RejectionFeedback → 新 Dreamer task 触发

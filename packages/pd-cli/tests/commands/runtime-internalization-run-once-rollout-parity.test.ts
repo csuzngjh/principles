@@ -598,6 +598,31 @@ async function readDispatchOutcome(sm: RuntimeStateManager, workspaceDir: string
   }
 }
 
+/** PRI-811 Phase B: read the pending approval row a rollout recommendation must produce. */
+async function readPendingApproval(
+  workspaceDir: string,
+  artifactId: string,
+  channel: 'prompt' | 'code_tool_hook' | 'defer_archive',
+): Promise<{ artifactId: string; channel: string; status: string } | null> {
+  const connection = new SqliteConnection(workspaceDir);
+  try {
+    const rows = connection.getDb().prepare(
+      'SELECT artifact_id, channel, status FROM approvals WHERE artifact_id = ? AND channel = ? AND status = \'pending\''
+    ).all(artifactId, channel) as unknown;
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const row: unknown = rows[0];
+    if (typeof row !== 'object' || row === null || Array.isArray(row)) return null;
+    const record = row as Record<string, unknown>;
+    return {
+      artifactId: String(record['artifact_id']),
+      channel: String(record['channel']),
+      status: String(record['status']),
+    };
+  } finally {
+    try { connection.close(); } catch { /* best-effort */ }
+  }
+}
+
 describe('PRI-713 dispatch parity: approve_rollout through the run-once entry', () => {
   const dirs: string[] = [];
   const states: RuntimeStateManager[] = [];
@@ -631,13 +656,13 @@ describe('PRI-713 dispatch parity: approve_rollout through the run-once entry', 
     // rollout 侧: dispatch 完成治理迁移 — 无 NHR、任务 succeeded
     expect(outcome.rolloutStatus).toBe('succeeded');
     expect(outcome.humanReviewReasonCode).toBeUndefined();
-    // 激活事实: prompt 渠道低风险 auto_activate — activations 表有持久记录,
-    // 幂等键 = <scribe artifact>::prompt, activationId 由 PromptWriter 生成
-    expect(outcome.activation).not.toBeNull();
-    expect(outcome.activation!.artifactId).toBe(SCRIBE_ART);
-    expect(outcome.activation!.channel).toBe('prompt');
-    expect(outcome.activation!.activationId).toBe('act_prompt_parity-p');
-    expect(outcome.activation!.deactivatedAt).toBeNull();
+    // PRI-811 Phase B: prompt 渠道推荐只入 approval 队列, activations 表无行;
+    // 幂等键 = <scribe artifact>::prompt 等待 Owner 批准
+    expect(outcome.activation).toBeNull();
+    const pending = await readPendingApproval(ws, SCRIBE_ART, 'prompt');
+    expect(pending).not.toBeNull();
+    expect(pending!.artifactId).toBe(SCRIBE_ART);
+    expect(pending!.channel).toBe('prompt');
   });
 
   it('EQUIVALENCE: production consumer-cycle assembly on the same durable input yields the same dispatch outcome', async () => {
@@ -672,9 +697,10 @@ describe('PRI-713 dispatch parity: approve_rollout through the run-once entry', 
     const outcome = await readDispatchOutcome(sm, ws, rolloutTaskId);
     expect(outcome.rolloutStatus).toBe('succeeded');
     expect(outcome.humanReviewReasonCode).toBeUndefined();
-    expect(outcome.activation).not.toBeNull();
-    expect(outcome.activation!.artifactId).toBe(SCRIBE_ART);
-    expect(outcome.activation!.channel).toBe('prompt');
-    expect(outcome.activation!.activationId).toBe('act_prompt_parity-p');
+    expect(outcome.activation).toBeNull();
+    const pending = await readPendingApproval(ws, SCRIBE_ART, 'prompt');
+    expect(pending).not.toBeNull();
+    expect(pending!.artifactId).toBe(SCRIBE_ART);
+    expect(pending!.channel).toBe('prompt');
   });
 });

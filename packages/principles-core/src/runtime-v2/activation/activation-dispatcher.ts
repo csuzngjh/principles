@@ -16,11 +16,9 @@ import type {
   WriterResult,
 } from './activation-types.js';
 import {
-  isLowRiskChannel,
   getChannelRiskLevel,
   makeIdempotencyKey,
 } from './activation-types.js';
-import { decideAutoPromotion } from './approval-queue.js';
 import { extractPrincipleId } from './low-risk-writers.js';
 
 /**
@@ -260,17 +258,14 @@ export class ActivationDispatcher {
       return this.activateArtifact(input, artifact, idempotencyKey);
     }
 
-    // Auto-promotion bypasses both channel-risk gating AND explicit require_approval from the rollout gate.
-    // This is intentional: high-confidence skill artifacts are safe enough to activate without human review.
-    const needsApproval = input.rolloutDecision === 'require_approval' || !isLowRiskChannel(input.channel);
-    if (needsApproval) {
-      if (decideAutoPromotion(input.channel, input.confidence)) {
-        return this.activateArtifact(input, artifact, idempotencyKey);
-      }
-      return this.enqueueForApproval(input, artifact, idempotencyKey);
-    }
-
-    return this.activateArtifact(input, artifact, idempotencyKey);
+    // PRI-811 Phase B (Owner governance): rollout recommendations NEVER
+    // self-execute. 'auto_activate' (reviewer recommends activation) and
+    // 'require_approval' both enqueue for Owner approval; only a verified
+    // 'approved' record (above) may create an activation fact. This closes the
+    // former low-risk prompt/defer_archive auto-activation path and the
+    // high-confidence skill auto-promotion bypass — an LLM rollout reviewer
+    // can no longer create an activation directly.
+    return this.enqueueForApproval(input, artifact, idempotencyKey);
   }
 
   private async enqueueForApproval(input: DispatchInput, artifact: PIArtifactSnapshot, idempotencyKey: string): Promise<ActivationDecision> {

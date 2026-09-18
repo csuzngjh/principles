@@ -657,9 +657,9 @@ export async function runInternalizationConsumerCycle(
         // authoritative values before validation, so a bad echo no longer
         // dead-ends the candidate before the approval queue.
         //
-        // P0-E/F 治理接线: approve_rollout → 自动 ActivationDispatcher (低风险
-        // auto_activate / 高风险 approvals.pending); needs_revision → reopen
-        // scribe/artificer 修订 (绝不进入 approval 队列, INV-04)。
+        // P0-E/F 治理接线: approve_rollout → 自动 ActivationDispatcher (PRI-811
+        // Phase B: 一律 approvals.pending, Owner 批准后才激活); needs_revision →
+        // reopen scribe/artificer 修订 (绝不进入 approval 队列, INV-04)。
         runner = new RolloutReviewerRunner(
           {
             stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
