@@ -262,6 +262,20 @@ export const DecisionSubjectSchema = Type.Object({
   ]),
   reason: ReasonSchema,
   materialGates: Type.Array(DecisionMaterialGateSchema),
+  /**
+   * Fix 1 (review P1): subject-SCOPED decision material. Approval decisions
+   * are made on artifact+channel — the material shown for this subject must
+   * come from THIS subject's own revision (its scribe statement/rationale, or
+   * the candidate-wide tier when the selected material is not
+   * revision-scoped). Never borrowed from another revision's pending
+   * subject. The principle-level `learnedPrinciple` on the view remains the
+   * Library/overview summary only.
+   */
+  decisionMaterial: Type.Object({
+    learnedPrinciple: NarrativeFieldSchema,
+    rationale: NarrativeFieldSchema,
+    consequence: NarrativeFieldSchema,
+  }, { additionalProperties: false }),
 });
 export type DecisionSubject = Static<typeof DecisionSubjectSchema>;
 

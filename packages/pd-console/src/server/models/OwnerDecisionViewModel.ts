@@ -440,11 +440,16 @@ export class OwnerDecisionViewModel {
       technicalRecommendationAvailable: candidate !== undefined
         && candidate.recommendationKind !== 'principle'
         && candidate.description.trim() !== '',
-      // Codex review P1 fix: scribe-tier material is only usable by subjects
-      // on the SAME revision (the scribe artifact itself, or a bound artifact
-      // whose lineage closure contains it). Distiller/philosopher material is
-      // candidate-wide, so the gate ignores this list for those tiers.
-      readableSubjectArtifacts: semantic.readableSubjectArtifacts,
+      // Fix 1 (review P1): per-artifact scribe materials — subject material
+      // resolves against this list by the subject's own artifactId; unrelated
+      // revisions never borrow each other's text.
+      scribeMaterials: semantic.scribeMaterials.map((material) => ({
+        artifactId: material.artifactId,
+        statement: material.statement ?? '',
+        ...(material.rationale === undefined ? {} : { rationale: material.rationale }),
+        ...(material.targetBehavior === undefined ? {} : { targetBehavior: material.targetBehavior }),
+        sourceVersion: material.artifactId,
+      })),
       piRootBound,
       sourceReads,
     };
@@ -495,13 +500,12 @@ export class OwnerDecisionViewModel {
   private readSemanticArtifacts(principleId: string, snapshot: BatchSnapshot, compact: boolean): {
     scribe: ScribeMaterial | null;
     philosopher: PhilosopherMaterial | null;
-    readableSubjectArtifacts: string[];
+    scribeMaterials: ScribeMaterial[];
   } {
     let scribe: ScribeMaterial | null = null;
+    const scribeMaterials: ScribeMaterial[] = [];
     let philosopher: PhilosopherMaterial | null = null;
-    let scribeArtifactId: string | undefined;
-    const readableSubjectArtifacts: string[] = [];
-    if (!snapshot.dbAvailable) return { scribe, philosopher, readableSubjectArtifacts };
+    if (!snapshot.dbAvailable) return { scribe, philosopher, scribeMaterials };
     // Content rows are a separate targeted read: the shared governance batch
     // SELECT intentionally omits content_json (heavy) — the semantic read-through
     // needs it only for artifacts bound to THIS principle.
@@ -517,25 +521,13 @@ export class OwnerDecisionViewModel {
       const taskKind = snapshot.piArtifactTaskKinds.get(sourceTaskId);
       if (taskKind === 'scribe') {
         const material = parseScribeContent(artifactId, contentJson, updatedAt);
-        if (material !== null && (scribe === null || material.updatedAt >= scribe.updatedAt)) {
-          scribe = material;
-          scribeArtifactId = artifactId;
-        }
-      }
-    }
-    // Codex review P1 fix (per-subject revision gating): a bound artifact may
-    // rely on the selected SCRIBE material when it IS that artifact (text
-    // path) or its lineage closure contains it (rule path echoes the scribe
-    // artifact via evaluator lineage). Unrelated revisions must gate.
-    if (scribeArtifactId !== undefined) {
-      const rowsById = this.piContentRowsById(snapshot);
-      for (const row of boundRows) {
-        if (!isRecord(row)) continue;
-        const artifactId = readOwnString(row, 'artifact_id');
-        if (artifactId === undefined) continue;
-        if (artifactId === scribeArtifactId || this.closureOf(artifactId, rowsById).has(scribeArtifactId)) {
-          readableSubjectArtifacts.push(artifactId);
-        }
+        if (material === null) continue;
+        // Fix 1 (review P1): EVERY bound scribe artifact with a statement is
+        // per-artifact decision material — subject material resolves against
+        // this list by the subject's own artifactId, never borrowed across
+        // revisions.
+        scribeMaterials.push(material);
+        if (scribe === null || material.updatedAt >= scribe.updatedAt) scribe = material;
       }
     }
     if (!compact) {
@@ -551,7 +543,7 @@ export class OwnerDecisionViewModel {
         if (material !== null) philosopher = material;
       }
     }
-    return { scribe, philosopher, readableSubjectArtifacts };
+    return { scribe, philosopher, scribeMaterials };
   }
 
   private piContentRowsById(snapshot: BatchSnapshot): Map<string, unknown> {
@@ -563,32 +555,6 @@ export class OwnerDecisionViewModel {
       }
     }
     return rowsById;
-  }
-
-  /** Lineage closure of ONE artifact (BFS over lineage_artifact_ids). */
-  private closureOf(startId: string, rowsById: Map<string, unknown>): Set<string> {
-    const closure = new Set<string>();
-    const queue = [startId];
-    while (queue.length > 0) {
-      const current = queue.shift();
-      if (current === undefined || closure.has(current)) continue;
-      closure.add(current);
-      const row = rowsById.get(current);
-      if (!isRecord(row)) continue;
-      const lineageJson = readOwnString(row, 'lineage_artifact_ids');
-      if (lineageJson === undefined) continue;
-      try {
-        const parsed: unknown = JSON.parse(lineageJson);
-        if (Array.isArray(parsed)) {
-          for (const id of parsed) {
-            if (typeof id === 'string' && !closure.has(id)) queue.push(id);
-          }
-        }
-      } catch {
-        // malformed lineage on one row — skip its expansion only
-      }
-    }
-    return closure;
   }
 
   private philosopherRowsInBoundClosure(snapshot: BatchSnapshot, boundRows: unknown[]): unknown[] {

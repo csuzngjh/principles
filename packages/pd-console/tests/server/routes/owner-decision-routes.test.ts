@@ -190,6 +190,17 @@ describe('GET /api/v1/principles/:id/owner-decision-view', () => {
     const semantics = data.availableActions.map((action: { semantic: string }) => action.semantic);
     expect(semantics).toContain('approve');
     expect(semantics).toContain('reject');
+    // Fix 3 (review P2): edit_approval is a REAL capability (POST
+    // /api/v1/approvals/:id/edit + ApprovalsConsoleModel.editApproval with
+    // pending-only/validated-artifact/lineage checks, exercised by
+    // approvals-api.test.ts) — the advertised operation must match it exactly.
+    expect(semantics).toContain('edit_approval');
+    const editAction = data.availableActions.find((action: { semantic: string }) => action.semantic === 'edit_approval');
+    expect(editAction.serviceOperation).toBe('POST /api/v1/approvals/:id/edit');
+    // Per-subject material is present on every pending subject (Fix 1).
+    for (const subject of data.decisionSubjects) {
+      expect(Object.hasOwn(subject, 'decisionMaterial')).toBe(true);
+    }
     // Scribe tier wins for the learned principle.
     expect(data.learnedPrinciple.status).toBe('known');
     expect(data.learnedPrinciple.value.sourceTier).toBe('scribe');

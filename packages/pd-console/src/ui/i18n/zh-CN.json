@@ -272,7 +272,8 @@
       "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",
       "evidenceInProgress": "{{count}} 条行为证据已记录，正在诊断和处理中。",
       "ownerInbox": {
-        "group": { "decision": "待决定", "blocked": "被阻塞", "recovery": "需要恢复" },
+        "group": { "subjectMaterial": "这项决定的材料（按修订隔离，不含其他修订的文本）",
+          "decision": "待决定", "blocked": "被阻塞", "recovery": "需要恢复" },
         "sectionTitle": "原则决定动态",
         "loadError": "决定动态暂时不可用。",
         "empty": "当前没有已确认的待决定、被阻塞或需要恢复的原则事项。",

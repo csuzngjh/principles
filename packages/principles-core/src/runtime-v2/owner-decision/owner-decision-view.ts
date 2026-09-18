@@ -130,15 +130,19 @@ export const OwnerDecisionInputsSchema = Type.Object({
    */
   technicalRecommendationAvailable: Type.Boolean(),
   /**
-   * Codex review P1 fix (per-subject revision gating, SPEC §8.1/§10.2): when
-   * the selected learned principle comes from a SCRIBE artifact, only pending
-   * subjects whose artifact IS that scribe artifact (text path) or carries it
-   * in its lineage closure (rule path) may rely on that text. Subjects on
-   * unrelated revisions must not be approved using another revision's
-   * readable material. Empty/omitted + non-scribe tier = material is
-   * candidate-wide and applies to every subject.
+   * Fix 1 (review P1): every bound scribe artifact of THIS principle that
+   * carries a statement — per-artifact decision material. Subject-level
+   * material resolves against this list by the subject's own artifactId;
+   * an unrelated revision's pending subject never borrows another
+   * revision's text (SPEC §10.2 per-branch material rule).
    */
-  readableSubjectArtifacts: Type.Array(NonEmptyString),
+  scribeMaterials: Type.Array(Type.Object({
+    artifactId: NonEmptyString,
+    statement: NonEmptyString,
+    rationale: Type.Optional(Type.String()),
+    targetBehavior: Type.Optional(Type.String()),
+    sourceVersion: NonEmptyString,
+  })),
   /** True iff ≥1 pi_artifacts row carries source_principle_id = this principle. */
   piRootBound: Type.Boolean(),
   sourceReads: Type.Array(Type.Object({
@@ -594,21 +598,48 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
       kind: 'pi_artifact', id: row.artifactId, fieldPath: 'artifact_id', relation: 'exact_id',
       claimClass: 'system_state', producer: { status: 'known', value: 'pi-artifact-store' }, capturedAt,
     });
-    // Codex review P1 fix: human-readable material is per-subject when it
-    // comes from a SCRIBE artifact — an unrelated revision's pending subject
-    // must not be approvable using another revision's readable text
-    // (SPEC §10.2: different artifact branches each show their own material).
-    const subjectReadableSatisfied = learnedPrinciple.status === 'known'
-      && (learnedPrinciple.status !== 'known'
-        || learnedPrinciple.value.sourceTier !== 'scribe'
-        || input.readableSubjectArtifacts.includes(row.artifactId));
+    // Fix 1 (review P1): subject-SCOPED decision material. When the selected
+    // material tier is scribe (revision-scoped), a subject's material comes
+    // ONLY from its own artifact's scribe entry — pending approval A can
+    // never borrow pending approval B's text (SPEC §10.2). Non-scribe tiers
+    // (distiller/philosopher/candidate) are candidate-wide and apply to every
+    // subject. Principle-level learnedPrinciple stays a Library/overview
+    // summary; it does not leak into another revision's approval context.
+    const tier = learnedPrinciple.status === 'known' ? learnedPrinciple.value.sourceTier : null;
+    const subjectScribe = tier === 'scribe'
+      ? input.scribeMaterials.find((entry) => entry.artifactId === row.artifactId) ?? null
+      : null;
+    const subjectReadableSatisfied = tier === null
+      ? false
+      : tier === 'scribe'
+        ? subjectScribe !== null
+        : true;
     const subjectBlockerText = learnedPrinciple.status !== 'known'
       ? '缺少可读的行为准则：目前只有技术建议，无法呈现为可理解的批准对象。'
       : '该待批对象所属修订没有自己的可读行为准则材料（不能借用其他修订的文本作为批准依据）。';
+    const subjectLearnedMaterial: NarrativeField = subjectReadableSatisfied
+      ? knownNarrative(
+          [narrativeItem(
+            tier === 'scribe' && subjectScribe !== null ? subjectScribe.statement : learnedPrinciple.status === 'known' ? learnedPrinciple.value.text : '',
+            'proposed_behavior',
+            [artifactRef],
+          )],
+          [artifactRef],
+        )
+      : unknownField('subject_material_unavailable', subjectBlockerText, [artifactRef]);
+    const subjectRationaleMaterial: NarrativeField = tier === 'scribe'
+      ? (subjectScribe?.rationale !== undefined && subjectScribe.rationale.trim() !== ''
+          ? knownNarrative([narrativeItem(`【正式草案理由】${subjectScribe.rationale.trim()}`, 'pd_interpretation', [artifactRef])], [artifactRef])
+          : unknownField('subject_rationale_unavailable', '该修订没有自己的理由说明。', [artifactRef]))
+      : rationale;
     // §7.4 item 3: the approve consequence is CHANNEL-level ("批准以后这个
     // subject 会发生什么") — derivable from the subject's real channel
     // semantics, never "批准=已 live". The principle-level proposed behavior
     // is a separate field (expectedBehavior) and does not gate this item.
+    const subjectConsequenceMaterial: NarrativeField = knownNarrative(
+      [narrativeItem(approveConsequenceText(row.channel), 'system_state', [approvalRef, artifactRef])],
+      [approvalRef, artifactRef],
+    );
     const approveGate: DecisionMaterialGate = {
       actionSemantic: 'approve',
       status: subjectReadableSatisfied ? 'ready' : 'blocked',
@@ -671,6 +702,11 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
         [approvalRef],
       ),
       materialGates: [approveGate, rejectGate],
+      decisionMaterial: {
+        learnedPrinciple: subjectLearnedMaterial,
+        rationale: subjectRationaleMaterial,
+        consequence: subjectConsequenceMaterial,
+      },
     };
   });
 

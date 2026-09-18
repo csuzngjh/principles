@@ -272,7 +272,8 @@
       "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here.",
       "evidenceInProgress": "{{count}} behavior evidence item(s) recorded, being diagnosed and processed.",
       "ownerInbox": {
-        "group": { "decision": "Needs decision", "blocked": "Blocked", "recovery": "Needs recovery" },
+        "group": { "subjectMaterial": "Material for this decision (scoped to its own revision — no text borrowed from other revisions)",
+          "decision": "Needs decision", "blocked": "Blocked", "recovery": "Needs recovery" },
         "sectionTitle": "Principle decisions",
         "loadError": "Principle decision updates are temporarily unavailable.",
         "empty": "No confirmed pending, blocked, or recovery-needed principle items right now.",

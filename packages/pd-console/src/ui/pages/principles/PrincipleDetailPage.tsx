@@ -669,6 +669,33 @@ export function PrincipleDetailPage() {
                   {t("principles.detail.ownerDecision.noActions", { defaultValue: "当前没有可以执行的操作。" })}
                 </p>
               )}
+              {/* Fix 1 (review P1): per-subject decision material. Each pending
+                  decision shows ITS OWN revision's material — never another
+                  revision's text. Principle-level learnedPrinciple above stays
+                  the overview summary only. */}
+              {ownerDecision.decisionSubjects.filter((subject) => subject.state === 'pending').length > 0 && (
+                <div className="mt-3 space-y-3" data-testid="owner-decision-subject-materials">
+                  {ownerDecision.decisionSubjects.filter((subject) => subject.state === 'pending').map((subject) => (
+                    <div key={subject.key} className="rounded-[var(--radius-sm)] border border-line p-3" data-subject-key={subject.key}>
+                      <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                        {t("principles.detail.ownerDecision.subjectMaterial", { defaultValue: "这项决定的材料" })}
+                      </p>
+                      {subject.decisionMaterial.learnedPrinciple.status === 'known' ? (
+                        subject.decisionMaterial.learnedPrinciple.value.map((item, index) => (
+                          <p key={`sm-${index}`} className="mt-1 text-ink-2 text-[13px] leading-relaxed">{item.text}</p>
+                        ))
+                      ) : (
+                        <p className="mt-1 text-amber text-[13px]">{subject.decisionMaterial.learnedPrinciple.reason.ownerText}</p>
+                      )}
+                      {subject.decisionMaterial.consequence.status === 'known' && (
+                        <p className="mt-1 text-ink-3 text-[12px] leading-relaxed">
+                          {subject.decisionMaterial.consequence.value.map((item) => item.text).join(' ')}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="mt-2 flex flex-wrap gap-3">
                 {ownerDecision.availableActions.map((action) => (
                   <Button

@@ -58,7 +58,7 @@ function baseInputs(overrides: Partial<OwnerDecisionInputs> = {}): OwnerDecision
       { tier: 'candidate_principle', text: '主任务未完成前不得推进次要议题。', sourceVersion: 'cand-1' },
     ],
     technicalRecommendationAvailable: false,
-    readableSubjectArtifacts: [],
+    scribeMaterials: [],
     piRootBound: true,
     sourceReads: [{ source: 'ledger', status: 'available', capturedAt: AS_OF, scope: 'ledger entry' }],
     ...overrides,
@@ -198,18 +198,18 @@ describe('deriveOwnerDecisionView — per-subject readable-material gate (Codex 
     ],
   });
 
-  function scribeInput(readableSubjectArtifacts: string[]) {
+  function scribeInput(scribeMaterials: { artifactId: string; statement: string; rationale?: string; sourceVersion?: string }[]) {
     return baseInputs({
       governance: twoPending,
-      semanticSources: [
-        { tier: 'scribe', text: '主任务未完成前不得推进次要议题。', sourceVersion: 'art-scribe' },
-      ],
-      readableSubjectArtifacts,
+      semanticSources: scribeMaterials.map((entry) => ({ tier: 'scribe' as const, text: entry.statement, sourceVersion: entry.artifactId })),
+      scribeMaterials: scribeMaterials.map((entry) => ({ ...entry, sourceVersion: entry.sourceVersion ?? entry.artifactId })),
     });
   }
 
   it('a pending subject on an unrelated revision is NOT approvable via another revision scribe text', () => {
-    const view = deriveOwnerDecisionView(scribeInput(['art-scribe']));
+    const view = deriveOwnerDecisionView(scribeInput([
+      { artifactId: 'art-scribe', statement: '主任务未完成前不得推进次要议题。' },
+    ]));
     const approveKeys = view.availableActions.filter((action) => action.semantic === 'approve').map((action) => action.key);
     expect(approveKeys).toContain('approve:apr-scribe');
     expect(approveKeys).not.toContain('approve:apr-unrelated');
@@ -220,7 +220,13 @@ describe('deriveOwnerDecisionView — per-subject readable-material gate (Codex 
   });
 
   it('a rule artifact whose lineage carries the scribe artifact stays approvable', () => {
-    const view = deriveOwnerDecisionView(scribeInput(['art-scribe', 'art-unrelated']));
+    // Rule-path subjects are backed by their own scribe material entry: the
+    // collector emits one scribeMaterials entry per bound scribe artifact, and
+    // a rule artifact sharing that revision resolves to the same material.
+    const view = deriveOwnerDecisionView(scribeInput([
+      { artifactId: 'art-scribe', statement: '主任务未完成前不得推进次要议题。' },
+      { artifactId: 'art-unrelated', statement: '修改状态类文件前必须核对真实来源。' },
+    ]));
     const approveKeys = view.availableActions.filter((action) => action.semantic === 'approve').map((action) => action.key);
     expect(approveKeys).toContain('approve:apr-scribe');
     expect(approveKeys).toContain('approve:apr-unrelated');
@@ -230,11 +236,104 @@ describe('deriveOwnerDecisionView — per-subject readable-material gate (Codex 
     const view = deriveOwnerDecisionView(baseInputs({
       governance: twoPending,
       semanticSources: [{ tier: 'distiller', text: '修改状态类文件前必须核对真实来源。', sourceVersion: 'cand-1' }],
-      readableSubjectArtifacts: [],
+      scribeMaterials: [],
     }));
     const approveKeys = view.availableActions.filter((action) => action.semantic === 'approve').map((action) => action.key);
     expect(approveKeys).toContain('approve:apr-scribe');
     expect(approveKeys).toContain('approve:apr-unrelated');
+  });
+});
+
+// ── Fix 1 (review P1): subject-level decisionMaterial isolation ─────────────
+
+describe('deriveOwnerDecisionView — subject decisionMaterial isolation (two revisions)', () => {
+  const twoScribeRevisions = facts({
+    approvals: [
+      {
+        schemaVersion: '1', family: 'approval', sourceRef: { type: 'approval', id: 'apr-v1' }, principleId: 'p1',
+        artifactId: 'art-v1', approvalId: 'apr-v1', channel: 'prompt', outcome: 'pending',
+        lineageConfidence: 'strong', recordedAt: '2026-09-18T09:00:00.000Z',
+      },
+      {
+        schemaVersion: '1', family: 'approval', sourceRef: { type: 'approval', id: 'apr-v2' }, principleId: 'p1',
+        artifactId: 'art-v2', approvalId: 'apr-v2', channel: 'prompt', outcome: 'pending',
+        lineageConfidence: 'strong', recordedAt: '2026-09-18T09:30:00.000Z',
+      },
+    ],
+  });
+  const TEXT_A = '修订一：写入系统目录前必须先通过路径白名单检查。';
+  const TEXT_B = '修订二：任何删除操作前必须取得 Owner 明确确认。';
+
+  function twoRevisionInput() {
+    return baseInputs({
+      governance: twoScribeRevisions,
+      semanticSources: [
+        { tier: 'scribe', text: TEXT_A, sourceVersion: 'art-v1' },
+        { tier: 'scribe', text: TEXT_B, sourceVersion: 'art-v2' },
+      ],
+      scribeMaterials: [
+        { artifactId: 'art-v1', statement: TEXT_A, rationale: '修订一的理由。', sourceVersion: 'art-v1' },
+        { artifactId: 'art-v2', statement: TEXT_B, rationale: '修订二的理由。', sourceVersion: 'art-v2' },
+      ],
+    });
+  }
+
+  it('each subject decisionMaterial shows ONLY its own revision text — no borrowing, no newest-wins', () => {
+    const view = deriveOwnerDecisionView(twoRevisionInput());
+    const v1 = view.decisionSubjects.find((subject) => subject.key === 'apr-v1');
+    const v2 = view.decisionSubjects.find((subject) => subject.key === 'apr-v2');
+    expect(v1).toBeDefined();
+    expect(v2).toBeDefined();
+    if (v1?.decisionMaterial.learnedPrinciple.status === 'known') {
+      expect(v1.decisionMaterial.learnedPrinciple.value[0]?.text).toBe(TEXT_A);
+      expect(v1.decisionMaterial.learnedPrinciple.value[0]?.text).not.toBe(TEXT_B);
+    } else throw new Error('v1 material must be known');
+    if (v2?.decisionMaterial.learnedPrinciple.status === 'known') {
+      expect(v2.decisionMaterial.learnedPrinciple.value[0]?.text).toBe(TEXT_B);
+      expect(v2.decisionMaterial.learnedPrinciple.value[0]?.text).not.toBe(TEXT_A);
+    } else throw new Error('v2 material must be known');
+    // Both are approvable — each on its own material.
+    const approveKeys = view.availableActions.filter((action) => action.semantic === 'approve').map((action) => action.key);
+    expect(approveKeys).toContain('approve:apr-v1');
+    expect(approveKeys).toContain('approve:apr-v2');
+    // Rationale is likewise subject-scoped.
+    if (v1.decisionMaterial.rationale.status === 'known') {
+      expect(v1.decisionMaterial.rationale.value[0]?.text).toContain('修订一');
+    }
+    if (v2.decisionMaterial.rationale.status === 'known') {
+      expect(v2.decisionMaterial.rationale.value[0]?.text).toContain('修订二');
+    }
+  });
+
+  it('principle-level learnedPrinciple remains the overview summary (newest tier selection) — unchanged contract', () => {
+    const view = deriveOwnerDecisionView(twoRevisionInput());
+    // The overview still exists for Library/principle context…
+    expect(view.learnedPrinciple.status).toBe('known');
+    // …and the decision block is where per-subject material lives.
+    for (const subject of view.decisionSubjects) {
+      expect(Object.hasOwn(subject, 'decisionMaterial')).toBe(true);
+    }
+  });
+
+  it('a subject with no own scribe material gets UNKNOWN material, never a fallback', () => {
+    const view = deriveOwnerDecisionView(baseInputs({
+      governance: facts({
+        approvals: [{
+          schemaVersion: '1', family: 'approval', sourceRef: { type: 'approval', id: 'apr-x' }, principleId: 'p1',
+          artifactId: 'art-orphan', approvalId: 'apr-x', channel: 'prompt', outcome: 'pending',
+          lineageConfidence: 'strong', recordedAt: '2026-09-18T09:00:00.000Z',
+        }],
+      }),
+      semanticSources: [{ tier: 'scribe', text: TEXT_A, sourceVersion: 'art-v1' }],
+      scribeMaterials: [{ artifactId: 'art-v1', statement: TEXT_A, sourceVersion: 'art-v1' }],
+    }));
+    const subject = view.decisionSubjects.find((row) => row.key === 'apr-x');
+    expect(subject).toBeDefined();
+    expect(subject?.decisionMaterial.learnedPrinciple.status).toBe('unknown');
+    if (subject?.decisionMaterial.learnedPrinciple.status === 'unknown') {
+      expect(subject.decisionMaterial.learnedPrinciple.reason.ownerText).toContain('不能借用');
+    }
+    expect(view.availableActions.filter((action) => action.semantic === 'approve')).toHaveLength(0);
   });
 });
 
