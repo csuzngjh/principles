@@ -18,7 +18,11 @@ pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --s
 - 不带 `--session` 的记录是诚实的 unbound Owner 报告：没有轨迹证据，
   候选大概率被准入阈值拦为 `needs_evidence` —— CLI 输出会明确警告。
 - `--session <id>` 会先校验；会话不存在时以 `session_not_found` 失败，
-  不会写入任何内容。
+  不会写入任何内容。会话验证通过但轨迹证据为空或不可读时，按
+  bound + 证据不可用诚实降级提交，由 admission gate 评判，不会伪造证据。
+- 命令成功返回 `painId` 只代表记录回执；诊断是否产出候选、候选是否被
+  准入，以 JSON 输出中的 `candidateIds` / `admissionResults` /
+  `ledgerEntryIds` 为准。激活是 Owner 批准之后的独立阶段。
 
 成功标准：
 - `status` 是 `succeeded`

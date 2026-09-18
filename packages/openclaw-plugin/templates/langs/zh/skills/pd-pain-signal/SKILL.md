@@ -6,9 +6,10 @@ disable-model-invocation: false
 
 # Pain Signal（Runtime V2）
 
-会话证据决定一条痛苦能否被诊断。未绑定会话的记录不携带任何轨迹证据，
-候选 confidence 低于准入阈值（0.5），全部被 admission gate 拦为
-`needs_evidence` —— Owner 的报告被保存，但不会进入内化。
+会话证据决定诊断能否携带真实轨迹证据。未绑定会话的记录是合法的 unbound
+Owner 报告：它不携带轨迹证据，诊断 confidence 通常偏低，候选大概率被
+admission gate 拦为 `needs_evidence` —— Owner 的报告被保存，但通常不会进入
+内化。
 
 ## 在 OpenClaw 会话中（首选）
 
@@ -32,6 +33,9 @@ pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --s
 
 - `--session <id>` 会先对工作区轨迹做校验：会话不存在时以
   `session_not_found` 失败，不会写入任何内容。
+- `--session` 验证通过但轨迹证据为空或不可读（会话真实存在）时，记录按
+  bound + 证据不可用诚实降级提交：不伪造证据，由 admission gate 评判空
+  证据的价值，而不是直接拒绝。
 - 不带 `--session` 的记录是允许的 unbound Owner 报告，但不附带证据，
   候选大概率被 admission gate 拦为 `needs_evidence` —— CLI 输出会明确
   提示这一点。
@@ -53,6 +57,8 @@ pd runtime flow show --workspace "<workspace>" --json
 ```
 
 成功标准是候选被**准入**（admitted），而不只是被生成：检查
-`admissionResults` 中的 `admitted` 决策和 `ledgerEntryIds` 非空。
-`needs_evidence` 或 `deferred` 的候选没有被内化 —— 若全部候选被拦截，
+`admissionResults` 中的 `admitted` 决策和 `ledgerEntryIds` 非空。命令成功
+返回 `painId` 只代表记录回执，不代表诊断或准入成功。
+`needs_evidence` 或 `deferred` 的候选没有被内化 —— 若候选被拦截，
 请用 `/pd-pain` 或 `--session` 重新记录，让诊断携带真实轨迹证据。
+激活（activation）是 Owner 批准之后的独立阶段，本流程不会直接产生激活。

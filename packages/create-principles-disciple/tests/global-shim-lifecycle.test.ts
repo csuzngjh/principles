@@ -203,6 +203,46 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     expect(shimFilesInGlobalBin()).toEqual([foreignPath]);
   });
 
+  it('takes over a dangling legacy extension global shim', async () => {
+    const firstRun = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
+    expect(firstRun.success).toBe(false);
+    expect(firstRun.error).toMatch(/PD CLI verification failed/);
+
+    const legacyBin = realPath.join(sandboxRoot, '.openclaw', 'extensions', 'principles-disciple', 'bin');
+    const shimPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]);
+    const legacyTarget = realPath.join(legacyBin, SHIM_BASENAMES[0]);
+    const content = process.platform === 'win32'
+      ? `@echo off\r\ncall "${legacyTarget}" %*\r\n`
+      : `#!/usr/bin/env sh\nexec "${legacyTarget}" "$@"\n`;
+    realFs.writeFileSync(shimPath, content);
+    expect(realFs.existsSync(legacyTarget)).toBe(false);
+
+    const result = installGlobalPdShim();
+
+    expect(result).toMatchObject({
+      installed: true,
+      skippedForeignPaths: [],
+      replacedPaths: [shimPath],
+    });
+    expect(realFs.readFileSync(shimPath, 'utf8')).toContain(getInstalledBinDir());
+    expect(realFs.readFileSync(shimPath, 'utf8')).not.toContain(legacyBin);
+  });
+
+  it('preserves an external script that only mentions a legacy PD path', async () => {
+    const firstRun = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
+    expect(firstRun.error).toMatch(/PD CLI verification failed/);
+    const target = realPath.join(sandboxRoot, '.openclaw', 'extensions', 'principles-disciple', 'bin', SHIM_BASENAMES[0]);
+    const shimPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]);
+    const content = process.platform === 'win32'
+      ? `@echo off\r\nrem Former PD entry: "${target}"\r\nother-tool %*\r\n`
+      : `#!/usr/bin/env sh\n# Former PD entry: "${target}"\nexec other-tool "$@"\n`;
+    realFs.writeFileSync(shimPath, content);
+
+    expect(installGlobalPdShim()).toMatchObject({ installed: false, skippedForeignPaths: [shimPath] });
+    expect(realFs.readFileSync(shimPath, 'utf8')).toBe(content);
+    expect(shimFilesInGlobalBin()).toEqual([shimPath]);
+  });
+
   it('PD-owned pre-existing shims are updated in place and recorded as replaced, not created', async () => {
     // Drive install() once so activePayloadMode reflects the fixture's
     // npm-distributed shape (the helpers read the module-level mode; the
