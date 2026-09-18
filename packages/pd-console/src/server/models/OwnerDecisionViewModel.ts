@@ -210,6 +210,41 @@ export class OwnerDecisionViewModel {
     };
   }
 
+  /** Compact per-principle projection for the Library list (§11.2). */
+  async getLibraryCompact(now: string = ISO_NOW()): Promise<{
+    schemaVersion: '1';
+    generatedAt: string;
+    entries: Record<string, { decisionState: OwnerDecisionViewCore['decisionState']; learnedPrinciple: OwnerDecisionInboxItem['learnedPrinciple'] }>;
+    degraded?: { reason: string };
+  }> {
+    const snapshot = this.readBatchSnapshot();
+    let ledgerParsed: unknown;
+    try {
+      ledgerParsed = this.parseLedger();
+    } catch {
+      return { schemaVersion: '1', generatedAt: now, entries: {}, degraded: { reason: 'principle ledger unavailable' } };
+    }
+    const principlesTree = GovernanceProjectionCollector.principleTreeFromLedger(ledgerParsed);
+    if (principlesTree === null) {
+      return { schemaVersion: '1', generatedAt: now, entries: {}, degraded: { reason: 'principle ledger unavailable' } };
+    }
+    const entries: Record<string, { decisionState: OwnerDecisionViewCore['decisionState']; learnedPrinciple: OwnerDecisionInboxItem['learnedPrinciple'] }> = {};
+    for (const principleId of Object.keys(principlesTree).sort()) {
+      try {
+        const view = deriveOwnerDecisionView(this.buildInputsFor({ principleId, ledgerParsed, snapshot, now, compact: true }));
+        entries[principleId] = {
+          decisionState: view.decisionState,
+          learnedPrinciple: view.learnedPrinciple.status === 'known'
+            ? { status: 'known', text: view.learnedPrinciple.value.text, sourceTier: view.learnedPrinciple.value.sourceTier }
+            : { status: 'unknown', reasonText: view.learnedPrinciple.reason.ownerText },
+        };
+      } catch {
+        // Skip unreadable entries — the Library falls back to neutral copy.
+      }
+    }
+    return { schemaVersion: '1', generatedAt: now, entries };
+  }
+
   // ── input assembly ────────────────────────────────────────────────────────
 
   private async collectInputs(principleId: string, now: string): Promise<OwnerDecisionInputs> {

@@ -45,6 +45,21 @@ export async function handleOwnerDecisionInboxRoute(params: OwnerDecisionRoutePa
   }
 }
 
+/** GET /api/v1/principles/owner-decision-library — compact titles/states for the Library list (§11.2). */
+export async function handleOwnerDecisionLibraryRoute(params: OwnerDecisionRouteParams): Promise<void> {
+  const { res, workspaceDir, featureFlags, now } = params;
+  if (featureFlags?.principle_governance_projection_v2?.enabled !== true) {
+    featureDisabled(res);
+    return;
+  }
+  try {
+    const library = await new OwnerDecisionViewModel(workspaceDir).getLibraryCompact(now());
+    sendSuccess(res, library);
+  } catch (error: unknown) {
+    sendError(res, 500, 'owner_decision_library_error', error instanceof Error ? error.message : String(error), { nextAction: 'inspect_runtime_state' });
+  }
+}
+
 /**
  * Parses `/:id/owner-decision-view` sub paths. Returns the decoded principle
  * id, or null when the sub path is not this route (caller continues routing),

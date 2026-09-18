@@ -271,6 +271,12 @@
       "zeroStateHealthy": "当前没有需要你判断的事项。PD 已检查行为证据、原则审查队列和系统信号。",
       "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",
       "evidenceInProgress": "{{count}} 条行为证据已记录，正在诊断和处理中。",
+      "ownerInbox": {
+        "sectionTitle": "原则决定动态",
+        "loadError": "决定动态暂时不可用。",
+        "empty": "当前没有已确认的待决定、被阻塞或需要恢复的原则事项。",
+        "viewLibrary": "查看原则库 →"
+      },
       "ownerDecision": {
         "evidenceUnavailable": "这项裁决仍在等待你，但证据链目前不完整。PD 已暂停所有裁决动作，避免你在看不到正确版本时做决定。",
         "goRecoverCta": "查看恢复详情",
@@ -573,6 +579,17 @@
       "channelDeferArchive": "延迟归档",
       "channelCodeToolHook": "Code Tool Hook",
       "confidence": "置信度",
+      "evaluabilityLabel": "可评价性",
+      "ownerDecision": {
+        "state": {
+          "needs_owner_decision": "待你决定",
+          "processing": "处理中",
+          "blocked": "判断暂不可建立",
+          "recovery_needed": "需要恢复",
+          "decided": "已有决定",
+          "no_action": "无需决定"
+        }
+      },
       "languageHintEn": "以英文生成",
       "languageHintZh": "以中文生成",
       "languageHintUnknown": "语言未知",
@@ -770,6 +787,44 @@
             "failed": "Runtime 任务失败",
             "human_review": "已请求人工恢复审查"
           }
+        },
+        "ownerDecision": {
+          "title": "这条原则的决策视图",
+          "technicalOriginalNote": "以上为原始技术建议文本；可读的行为准则暂缺（保留原文以保证可追溯）。",
+          "state": {
+            "needs_owner_decision": "有一项决定需要你审阅",
+            "processing": "系统正在处理这项提案",
+            "blocked": "系统暂时无法建立完整的治理判断",
+            "recovery_needed": "这项处理需要恢复",
+            "decided": "此提案已有完成的决定",
+            "no_action": "目前没有需要你决定的事项"
+          },
+          "readsComplete": "本次所需数据已读取",
+          "readsPartial": "部分数据源读取失败",
+          "incident": "发生了什么",
+          "learned": "智能体学到的行为准则",
+          "sourceTier": "来源：{{tier}}（未经改写）",
+          "rationale": "为什么这么判断",
+          "applicability": "什么时候适用",
+          "expected": "批准后会怎样（拟议行为，未部署）",
+          "enforcement": {
+            "active": "当前有正在执行的生效方式（见下方明细）。",
+            "deactivated": "此前的执行方式已停用；当前没有正在执行的生效方式。",
+            "partial": "部分执行方式仍在运行（见下方明细）。",
+            "none": "这条原则当前没有生效中的执行方式。",
+            "since": "生效中（自 {{since}}）",
+            "stopped": "已停用"
+          },
+          "evidence": "行为证据",
+          "uncertainty": "风险与不确定性",
+          "riskNotAssessed": "尚未做过风险评估；这不代表没有风险。",
+          "rollback": "如何停止影响",
+          "decision": "你的决定",
+          "noActions": "当前没有可以执行的操作。",
+          "unavailable": "决策视图暂时不可用，无法据此做决定。",
+          "invalidTarget": "动作目标缺失，无法提交。",
+          "actionDone": "操作已提交。",
+          "actionFailed": "操作被拒绝：{{detail}} 可用操作已刷新，请基于最新状态重新决定。"
         }
       }
     },

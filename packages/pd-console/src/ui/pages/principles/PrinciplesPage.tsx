@@ -9,12 +9,14 @@ import { ShinyText } from "../../components/ui/shiny-text.js";
 import {
   fetchPrinciples,
   fetchApprovalsGrouped,
+  fetchOwnerDecisionLibrary,
 } from "../../api.js";
 import type {
   ApprovalGroup,
   PrincipleListItem,
   PrinciplesListData,
   ApprovalsGroupedData,
+  OwnerDecisionLibraryData,
 } from "../../api.js";
 import { enumLabel } from "../../utils/enum-labels.js";
 import { formatDate } from "../../utils/format-date.js";
@@ -36,7 +38,10 @@ interface PrincipleCard {
   action: string;
   status: ReviewStatus;
   channels: string[];
-  confidence: string;
+  /** T10: evaluability as evaluability — never relabeled as confidence. */
+  evaluability: string;
+  /** Owner Decision Experience v1: backend-derived decision state (display only). */
+  decisionState?: string;
   updatedAt: string;
   createdAt: string;
   priority: string;
@@ -197,16 +202,22 @@ export function PrinciplesPage() {
   // "只看待决策"不再作为默认视图 (真实决策在治理焦点)。
   const [filterMode, setFilterMode] = useState<'actionable' | 'all'>('all');
   const [categories, setCategories] = useState<Record<string, number> | undefined>();
+  // Owner Decision Experience v1: backend semantic titles + decision states
+  // (display-only — the page never re-derives decision qualification).
+  const [ownerDecisionLibrary, setOwnerDecisionLibrary] = useState<OwnerDecisionLibraryData | null>(null);
 
   // Fetch data
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [pResult, aResult] = await Promise.all([
+      const [pResult, aResult, dResult] = await Promise.all([
         fetchPrinciples(filterMode),
         fetchApprovalsGrouped(),
+        fetchOwnerDecisionLibrary(),
       ]);
+
+      setOwnerDecisionLibrary(dResult.success && dResult.data ? dResult.data : null);
 
       if (!pResult.success) {
         setError(pResult.error ?? "Failed to load principles");
@@ -250,12 +261,13 @@ export function PrinciplesPage() {
       ? ag.records.map((r) => r.channel).filter(isString)
       : ["prompt"];
     const uniqueChannels = [...new Set(channels)];
-    const confidence =
-      p.evaluability === "deterministic"
-        ? "high"
-        : p.evaluability === "weak_heuristic"
-          ? "low"
-          : "medium";
+
+    // Owner Decision Experience v1 (SPEC §10/§11.2): the card title comes
+    // from the backend Semantic Selector; when no readable principle exists
+    // the card shows a NEUTRAL placeholder — the technical trigger/original
+    // text stays reachable in the collapsed details below (never the title).
+    const decision = ownerDecisionLibrary?.entries[p.id];
+    const semanticTitle = decision?.learnedPrinciple.status === 'known' ? decision.learnedPrinciple.text : undefined;
 
     // PRI-332: Determine display title with bounded fallback for unreadable titles
     const rawTitle = p.triggerPattern || p.text.slice(0, 80);
@@ -263,7 +275,12 @@ export function PrinciplesPage() {
     const readWarningCode = p.readabilityWarningCode;
     let displayTitle = rawTitle;
     let usedFallback = false;
-    if (readWarningCode) {
+    if (semanticTitle !== undefined) {
+      displayTitle = semanticTitle;
+      usedFallback = rawTitle !== semanticTitle;
+    } else if (readWarningCode || decision !== undefined) {
+      // No qualified semantic text: neutral placeholder instead of a
+      // technical trigger as the Owner-facing title.
       displayTitle = t("principles.readabilityFallbackTitle");
       usedFallback = true;
     }
@@ -277,7 +294,8 @@ export function PrinciplesPage() {
       action: p.action,
       status: toReviewStatus(p.status, ag?.status),
       channels: uniqueChannels,
-      confidence,
+      evaluability: p.evaluability,
+      decisionState: decision?.decisionState,
       updatedAt: p.updatedAt,
       createdAt: p.createdAt,
       priority: p.priority,
@@ -550,8 +568,13 @@ export function PrinciplesPage() {
                     </span>
                   )}
                   <span className="font-mono text-[11px] text-ink-4">
-                    {t("principles.confidence")}: {enumLabel('confidence', card.confidence, t)}
+                    {t("principles.evaluabilityLabel", { defaultValue: "可评价性" })}: {enumLabel('evaluability', card.evaluability, t)}
                   </span>
+                  {card.decisionState !== undefined && (
+                    <span className="font-mono text-[11px] tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
+                      {t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState })}
+                    </span>
+                  )}
                 </div>
 
                 {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}

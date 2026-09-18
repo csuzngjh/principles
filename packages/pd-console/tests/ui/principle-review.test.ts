@@ -209,7 +209,11 @@ describe("Channel display honesty — no fake selector", () => {
   });
 
   it("channel info is read-only text", () => {
-    expect(principleDetailSrc).toMatch(/channelPromptReversible/);
+    // Owner Decision Experience v1 (SPEC §14/F10): the static
+    // "prompt-activated · reversible" copy is GONE — rollback wording now
+    // comes from the capability-proven OwnerDecisionView rollback block.
+    expect(principleDetailSrc).not.toMatch(/channelPromptReversible/);
+    expect(principleDetailSrc).toMatch(/ownerDecision\.rollback/);
   });
 
   it("channel labels exist in both languages", () => {
@@ -493,19 +497,17 @@ describe("Validators use isRecord + Object.hasOwn + per-field checks", () => {
 // ════════════════════════════════════════════════════════════════════════════
 // 13. Grouped decision applies to all records (P1 fix)
 // ════════════════════════════════════════════════════════════════════════════
-describe("Grouped decision applies to all records", () => {
-  it("PrincipleDetailPage has applyDecisionToAllRecords function", () => {
-    expect(principleDetailSrc).toMatch(/applyDecisionToAllRecords/);
+describe("Per-target decision submission (Owner Decision Experience v1)", () => {
+  it("submissions target the action's own approval/activation id, not the whole group", () => {
+    // SPEC §8.4: 每次提交都使用 action 的具体目标 — no applyDecisionToAllRecords.
+    expect(principleDetailSrc).not.toMatch(/applyDecisionToAllRecords/);
+    expect(principleDetailSrc).toMatch(/actionTargetId\(action, 'approval'\)/);
+    expect(principleDetailSrc).toMatch(/actionTargetId\(action, 'activation'\)/);
   });
 
-  it("applyDecisionToAllRecords iterates all records in the group", () => {
-    expect(principleDetailSrc).toMatch(/for.*record.*of.*records/);
-  });
-
-  it("partial failure is reported with specific count (fail loud)", () => {
-    expect(principleDetailSrc).toMatch(/partialFailure/);
-    expect(principleDetailSrc).toMatch(/failedCount/);
-    expect(principleDetailSrc).toMatch(/totalCount/);
+  it("failure surfaces the service reason and refreshes the view without auto-retry", () => {
+    expect(principleDetailSrc).toMatch(/ownerDecision\.actionFailed/);
+    expect(principleDetailSrc).toMatch(/await loadData\(\)/);
   });
 
   it("partialFailure i18n key exists in both languages", () => {
@@ -514,20 +516,7 @@ describe("Grouped decision applies to all records", () => {
   });
 
   it("approve does NOT only process records[0]", () => {
-    // The old pattern "approvalGroup.records[0]" should not appear in confirmApprove
-    const approveSection = principleDetailSrc.substring(
-      principleDetailSrc.indexOf("confirmApprove"),
-      principleDetailSrc.indexOf("handleReject"),
-    );
-    expect(approveSection).not.toMatch(/records\[0\]/);
-  });
-
-  it("reject does NOT only process records[0]", () => {
-    const rejectSection = principleDetailSrc.substring(
-      principleDetailSrc.indexOf("confirmReject"),
-      principleDetailSrc.indexOf("handlePark"),
-    );
-    expect(rejectSection).not.toMatch(/records\[0\]/);
+    expect(principleDetailSrc).not.toMatch(/records\[0\]/);
   });
 });
 
@@ -539,12 +528,12 @@ describe("PrincipleDetail validator normalizes all page-accessed fields", () => 
     expect(principleDetailSrc).toMatch(/safeStringArray\(raw\.derivedFromPainIds\)/);
   });
 
-  it("validator normalizes triggerPattern with safeString", () => {
-    expect(principleDetailSrc).toMatch(/safeString\(raw\.triggerPattern\)/);
+  it("validator normalizes triggerPattern with a type-checked default", () => {
+    expect(principleDetailSrc).toMatch(/typeof raw\.triggerPattern === "string" \? raw\.triggerPattern : ""/);
   });
 
-  it("validator normalizes action with safeString", () => {
-    expect(principleDetailSrc).toMatch(/safeString\(raw\.action\)/);
+  it("validator normalizes action with a type-checked default", () => {
+    expect(principleDetailSrc).toMatch(/typeof raw\.action === "string" \? raw\.action : ""/);
   });
 
   it("validator normalizes rules with safe default empty array", () => {
@@ -670,60 +659,31 @@ describe("PRI-332: Backend contract validators", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// 17. PRI-387: Principle Detail Action Honesty
+// 17. Principle Detail Action Honesty — Owner Decision Experience v1 contract
+//     (SPEC §§8/11.3/20: the backend view is the single eligibility authority;
+//      the page renders available_actions and never re-derives qualification.)
 // ════════════════════════════════════════════════════════════════════════════
-describe("PRI-387: Principle Detail Action Honesty", () => {
-  it("detail page checks if any record is in an MVP-supported channel", () => {
-    expect(principleDetailSrc).toMatch(/channel === "prompt" \|\| r\.channel === "defer_archive"/);
+describe("Owner Decision Experience v1: Principle Detail Action Honesty", () => {
+  it("no local MVP-channel allowlist / group-pending re-derivation", () => {
+    expect(principleDetailSrc).not.toMatch(/channel === "prompt" \|\| r\.channel === "defer_archive"/);
+    expect(principleDetailSrc).not.toMatch(/reasonDataUnavailable/);
+    expect(principleDetailSrc).not.toMatch(/reasonAlreadyHandled/);
+    expect(principleDetailSrc).not.toMatch(/reasonNoRecords/);
+    expect(principleDetailSrc).not.toMatch(/reasonUnsupportedChannel/);
   });
 
-  it("detail page checks for data unavailable reason", () => {
-    expect(principleDetailSrc).toMatch(/reasonDataUnavailable|reasonKey = "principles\.detail\.reasonDataUnavailable"/);
-    expect(getPagesKey("principles.detail.reasonDataUnavailable")).toBeTruthy();
-    expect(getPagesKeyZh("principles.detail.reasonDataUnavailable")).toBeTruthy();
+  it("no park/defer button is fabricated (SPEC §20)", () => {
+    expect(principleDetailSrc).not.toMatch(/handlePark/);
+    expect(principleDetailSrc).not.toMatch(/parkUnavailable/);
   });
 
-  it("detail page checks for already handled reason", () => {
-    expect(principleDetailSrc).toMatch(/reasonAlreadyHandled|reasonKey = "principles\.detail\.reasonAlreadyHandled"/);
-    expect(getPagesKey("principles.detail.reasonAlreadyHandled")).toBeTruthy();
-    expect(getPagesKeyZh("principles.detail.reasonAlreadyHandled")).toBeTruthy();
+  it("submissions are guarded by the backend action, not a local isActionable flag", () => {
+    expect(principleDetailSrc).not.toMatch(/isActionable/);
+    expect(principleDetailSrc).toMatch(/ownerDecision\.availableActions/);
   });
 
-  it("detail page checks for no records reason", () => {
-    expect(principleDetailSrc).toMatch(/reasonNoRecords|reasonKey = "principles\.detail\.reasonNoRecords"/);
-    expect(getPagesKey("principles.detail.reasonNoRecords")).toBeTruthy();
-    expect(getPagesKeyZh("principles.detail.reasonNoRecords")).toBeTruthy();
-  });
-
-  it("detail page checks for unsupported channel reason", () => {
-    expect(principleDetailSrc).toMatch(/reasonUnsupportedChannel|reasonKey = "principles\.detail\.reasonUnsupportedChannel"/);
-    expect(getPagesKey("principles.detail.reasonUnsupportedChannel")).toBeTruthy();
-    expect(getPagesKeyZh("principles.detail.reasonUnsupportedChannel")).toBeTruthy();
-  });
-
-  it("Park action is disabled and has unavailable message", () => {
-    expect(principleDetailSrc).toMatch(/onClick=\{handlePark\}\s+disabled/);
-    expect(principleDetailSrc).toMatch(/parkUnavailable/);
-    expect(getPagesKey("principles.detail.parkUnavailable")).toBeTruthy();
-    expect(getPagesKeyZh("principles.detail.parkUnavailable")).toBeTruthy();
-  });
-
-  it("handlePark does not trigger toast or claim persistence", () => {
-    const parkFunc = principleDetailSrc.substring(
-      principleDetailSrc.indexOf("const handlePark = () =>"),
-      principleDetailSrc.indexOf("const handlePark = () =>") + 150
-    );
-    expect(parkFunc).not.toMatch(/toast\.success/);
-    expect(parkFunc).not.toMatch(/toast\.error/);
-  });
-
-  it("confirmApprove and confirmReject are guarded by isActionable check", () => {
-    expect(principleDetailSrc).toMatch(/confirmApprove = async \(\) => \{\s*if \(!isActionable/);
-    expect(principleDetailSrc).toMatch(/confirmReject = async \(\) => \{\s*if \(!isActionable/);
-  });
-
-  it("only status pending allows approve/reject actionability (fail-closed check)", () => {
-    expect(principleDetailSrc).toMatch(/status !== "pending"/);
-    expect(principleDetailSrc).not.toMatch(/status === "approved" \|\| approvalGroup\.status === "rejected"/);
+  it("actions render only from the backend list (fail-closed by construction)", () => {
+    expect(principleDetailSrc).not.toMatch(/status !== "pending"/);
+    expect(principleDetailSrc).toMatch(/data-testid="owner-decision-actions"/);
   });
 });

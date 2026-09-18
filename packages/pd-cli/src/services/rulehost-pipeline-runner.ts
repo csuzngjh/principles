@@ -914,7 +914,9 @@ export type ScribeIdentityBinding =
   | { status: 'binding_readback_failed'; expectedPrincipleId: string; errorMessage: string };
 
 /** Only these two statuses authorize governance publication (approval enqueue). */
-export function isIdentityBindingVerified(binding: ScribeIdentityBinding): boolean {
+export function isIdentityBindingVerified(
+  binding: ScribeIdentityBinding,
+): binding is Extract<ScribeIdentityBinding, { status: 'bound' | 'already_bound' }> {
   return binding.status === 'bound' || binding.status === 'already_bound';
 }
 
@@ -1124,7 +1126,7 @@ async function resolveRuleArtifactIdentity(
   } catch {
     return null;
   }
-  if (artifactSourcePrincipleId !== identityBinding.principleId) return null;
+  if (artifactSourcePrincipleId === undefined || artifactSourcePrincipleId !== identityBinding.principleId) return null;
   return artifactSourcePrincipleId;
 }
 

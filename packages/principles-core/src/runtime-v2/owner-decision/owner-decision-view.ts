@@ -692,6 +692,25 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
       confirmation: { required: true, text: '确认拒绝该对象？此操作不会删除已产生的记录。' },
       sourceRefs: subjectFull.targetRefs,
     });
+    // edit_approval (SPEC §8.2): a REAL existing capability with a concrete
+    // pending target — kept on genuinely supported subjects, with its real
+    // operator-grade requirements surfaced (validated artifact id + reason).
+    availableActions.push({
+      key: `edit:${subject.approvalId}`,
+      semantic: 'edit_approval',
+      label: '替换审批工件',
+      targetRefs: subjectFull.targetRefs,
+      serviceOperation: 'POST /api/v1/approvals/:id/edit',
+      channel: subject.channel,
+      assessedAt: capturedAt,
+      requirements: [
+        { name: 'newArtifactId', ownerText: '需要提供新的已验证工件 ID（操作员级输入）。', required: true },
+        { name: 'reason', ownerText: '需要填写编辑原因。', required: true },
+      ],
+      expectedConsequence: knownNarrative([narrativeItem('将该审批的目标工件替换为你指定的新工件（需要已验证的工件 ID）。这是替换审批对象，不是修改原则措辞。', 'system_state', subjectFull.targetRefs)], subjectFull.targetRefs),
+      confirmation: { required: true, text: '确认替换该审批的目标工件？需要新的已验证工件 ID 与编辑原因。' },
+      sourceRefs: subjectFull.targetRefs,
+    });
   }
   for (const row of foldedActivations.filter((item) => item.deactivatedAt === undefined)) {
     const activationRef = ref({

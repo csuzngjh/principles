@@ -31,7 +31,7 @@ import { handleReceiptsRoute, disposeReceiptsModels } from './routes/receipts.js
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
 import { handleGovernanceRoute, handleGovernanceExperienceRoute, resolveOwnerConfigSnapshot, disposeGovernanceModels } from './routes/governance.js';
 import { handleOwnerDecisionsRoute } from './routes/owner-decisions.js';
-import { handleOwnerDecisionInboxRoute, handleOwnerDecisionViewRoute, parseOwnerDecisionViewSubPath } from './routes/owner-decision.js';
+import { handleOwnerDecisionInboxRoute, handleOwnerDecisionViewRoute, handleOwnerDecisionLibraryRoute, parseOwnerDecisionViewSubPath } from './routes/owner-decision.js';
 import { handleOwnerIdentityRoute } from './routes/owner-identity.js';
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
 import { handleIntentRoute, disposeIntentModels } from './routes/intent.js';
@@ -438,6 +438,10 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         const subPath = urlPath.slice('/api/v1/principles'.length);
         if (subPath === '/owner-decision-inbox') {
           asyncHandler(() => handleOwnerDecisionInboxRoute({ req, res, workspaceDir: services.workspaceDir, featureFlags: services.feedbackFlags, now: () => new Date().toISOString() }))(req, res);
+          return;
+        }
+        if (subPath === '/owner-decision-library') {
+          asyncHandler(() => handleOwnerDecisionLibraryRoute({ req, res, workspaceDir: services.workspaceDir, featureFlags: services.feedbackFlags, now: () => new Date().toISOString() }))(req, res);
           return;
         }
         const ownerDecisionHandled = parseOwnerDecisionViewSubPath(subPath) !== null;

@@ -33,7 +33,8 @@ export type EnumCategory =
   | 'featureId'
   | 'confidence'
   | 'feedbackType'
-  | 'admission';
+  | 'admission'
+  | 'evaluability';
 
 // ── Local fallback maps ──────────────────────────────────────────────────────
 // Used when the i18n key `common.enums.<category>.<snake_value>` is missing.
@@ -116,6 +117,14 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'store_signal': '已录入信号',
     'evidence_only': '仅作证据',
     'owner_confirmation_required': '待确认',
+  },
+  // Owner Decision Experience v1 (T10): evaluability is NOT confidence — it
+  // describes how the principle's adherence can be evaluated, and must never
+  // be displayed as a confidence score.
+  evaluability: {
+    'deterministic': '可确定性检查',
+    'weak_heuristic': '弱启发式',
+    'manual_only': '仅人工',
   },
 };
 

@@ -271,6 +271,12 @@
       "zeroStateHealthy": "No items need your judgment right now. PD has checked behavior evidence, principle review queue, and system signals.",
       "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here.",
       "evidenceInProgress": "{{count}} behavior evidence item(s) recorded, being diagnosed and processed.",
+      "ownerInbox": {
+        "sectionTitle": "Principle decisions",
+        "loadError": "Principle decision updates are temporarily unavailable.",
+        "empty": "No confirmed pending, blocked, or recovery-needed principle items right now.",
+        "viewLibrary": "View the principle library →"
+      },
       "ownerDecision": {
         "evidenceUnavailable": "This decision still needs you, but its evidence chain is incomplete. PD has paused all decision actions so you cannot approve the wrong version.",
         "goRecoverCta": "View recovery details",
@@ -573,6 +579,17 @@
       "channelDeferArchive": "Defer Archive",
       "channelCodeToolHook": "Code Tool Hook",
       "confidence": "Confidence",
+      "evaluabilityLabel": "Evaluability",
+      "ownerDecision": {
+        "state": {
+          "needs_owner_decision": "Needs your decision",
+          "processing": "Processing",
+          "blocked": "Judgment unavailable",
+          "recovery_needed": "Needs recovery",
+          "decided": "Decided",
+          "no_action": "No action needed"
+        }
+      },
       "languageHintEn": "Generated in English",
       "languageHintZh": "Generated in Chinese",
       "languageHintUnknown": "Language unknown",
@@ -770,6 +787,44 @@
             "failed": "Runtime task failed",
             "human_review": "Human recovery review requested"
           }
+        },
+        "ownerDecision": {
+          "title": "Decision view for this principle",
+          "technicalOriginalNote": "The text above is the original technical recommendation; no readable principle statement is available yet (kept verbatim for traceability).",
+          "state": {
+            "needs_owner_decision": "A decision is waiting for your review",
+            "processing": "The system is processing this proposal",
+            "blocked": "The system cannot establish a complete governance judgment yet",
+            "recovery_needed": "This processing needs recovery",
+            "decided": "This proposal already has a completed decision",
+            "no_action": "Nothing needs your decision right now"
+          },
+          "readsComplete": "All requested sources were read",
+          "readsPartial": "Some sources failed to read",
+          "incident": "What happened",
+          "learned": "The behavior principle the agent learned",
+          "sourceTier": "Source: {{tier}} (verbatim)",
+          "rationale": "Why PD judged it this way",
+          "applicability": "When it applies",
+          "expected": "What changes if approved (proposed, not deployed)",
+          "enforcement": {
+            "active": "An enforcement method is currently active (see details below).",
+            "deactivated": "The previous enforcement method is deactivated; nothing is enforcing right now.",
+            "partial": "Some enforcement methods are still running (see details below).",
+            "none": "No enforcement method is active for this principle.",
+            "since": "Active (since {{since}})",
+            "stopped": "Deactivated"
+          },
+          "evidence": "Behavior evidence",
+          "uncertainty": "Risks and uncertainty",
+          "riskNotAssessed": "No risk assessment has been done; that does not mean there are no risks.",
+          "rollback": "How to stop its influence",
+          "decision": "Your decision",
+          "noActions": "No action is currently available.",
+          "unavailable": "The decision view is temporarily unavailable; do not decide based on this page alone.",
+          "invalidTarget": "Action target missing; cannot submit.",
+          "actionDone": "Submitted.",
+          "actionFailed": "Refused: {{detail}} Available actions were refreshed — decide again from the latest state."
         }
       }
     },

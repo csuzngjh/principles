@@ -132,15 +132,20 @@ describe("FocusPage exposes edit action (PRI-447)", () => {
 
 // ── PrincipleDetailPage wiring tests ─────────────────────────────────────────
 
-describe("PrincipleDetailPage exposes edit action (PRI-447)", () => {
-  it("contains an Edit button/action label", () => {
+describe("PrincipleDetailPage exposes edit action (PRI-447 / Owner Decision v1)", () => {
+  it("renders the backend edit_approval action from availableActions", () => {
     const src = detailSrc();
-    expect(src).toMatch(/editAction|principles\.detail\.editAction/);
+    // SPEC §8.2: edit_approval stays a real action on genuinely supported
+    // (pending) subjects — now delivered by the canonical OwnerDecisionView
+    // instead of a locally derived button.
+    expect(src).toMatch(/edit_approval/);
+    expect(src).toMatch(/ownerDecision\.availableActions/);
   });
 
   it("contains edit form state and handler wiring", () => {
     const src = detailSrc();
-    expect(src).toMatch(/showEditInput|handleEdit|editReason|newArtifactId/);
+    expect(src).toMatch(/newArtifactId/);
+    expect(src).toMatch(/editApproval/);
   });
 
   it("imports editApproval from the API client", () => {

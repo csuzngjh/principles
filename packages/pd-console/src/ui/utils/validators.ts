@@ -8,7 +8,21 @@
  * - Uses `Object.hasOwn()` for untrusted object keys (Rule 5)
  * - Graceful degradation includes a reason (Rule 9)
  */
-import type { GovernanceExperienceSnapshot, OwnerGovernanceView } from '@principles/core/runtime-v2';
+import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime-v2';
+
+/** Browser-local structural type for the compact inbox response (SPEC §11.1). */
+export interface OwnerDecisionInboxData {
+  schemaVersion: '1';
+  generatedAt: string;
+  totalPrinciples: number;
+  groups: {
+    decision: { principleId: string; decisionState: string; learnedPrinciple: { status: 'known'; text: string } | { status: 'unknown'; reasonText: string }; inbox: { group: string; attention: string }; blockerCodes: string[]; nextAction: { ownerText: string } }[];
+    blocked: { principleId: string; decisionState: string; learnedPrinciple: { status: 'known'; text: string } | { status: 'unknown'; reasonText: string }; inbox: { group: string; attention: string }; blockerCodes: string[]; nextAction: { ownerText: string } }[];
+    recovery: { principleId: string; decisionState: string; learnedPrinciple: { status: 'known'; text: string } | { status: 'unknown'; reasonText: string }; inbox: { group: string; attention: string }; blockerCodes: string[]; nextAction: { ownerText: string } }[];
+  };
+  historicalUnknown: { count: number; reasonText: string };
+  degraded?: { reason: string; nextAction: string };
+}
 
 // PRI-613: feedback submit-ladder data shapes derive from the canonical shared
 // schema contract via `import type` ONLY — a runtime import would bundle
@@ -167,6 +181,98 @@ function isOwnerGovernanceView(value: unknown): value is OwnerGovernanceView {
 
 export function validateOwnerGovernanceView(value: unknown): OwnerGovernanceView | null {
   return isOwnerGovernanceView(value) ? value : null;
+}
+
+// ── Owner Decision Experience v1 — browser-local structural validator ───────
+//
+// Mirrors the authoritative TypeBox contract in principles-core
+// (owner-decision-view-contract.ts). Type-only import keeps the browser bundle
+// free of the Node-oriented core barrel (same reason as the governance
+// validator above, ERR-100).
+
+const ownerDecisionStates = new Set(['needs_owner_decision', 'processing', 'blocked', 'recovery_needed', 'decided', 'no_action']);
+
+function isOwnerReason(value: unknown): boolean {
+  return isObject(value) && hasOwnFields(value, ['code', 'ownerText', 'sourceRefs'])
+    && isString(value.code) && value.code.length > 0
+    && isString(value.ownerText) && value.ownerText.length > 0
+    && Array.isArray(value.sourceRefs);
+}
+
+function isOwnerAction(value: unknown): boolean {
+  return isObject(value) && hasOwnFields(value, ['key', 'semantic', 'label', 'channel', 'confirmation', 'expectedConsequence'])
+    && isString(value.key) && value.key.length > 0
+    && isString(value.semantic) && value.semantic.length > 0
+    && isString(value.label)
+    && isObject(value.confirmation) && typeof value.confirmation.required === 'boolean' && isString(value.confirmation.text);
+}
+
+export function isOwnerDecisionViewCore(value: unknown): value is OwnerDecisionViewCore {
+  if (!isObject(value) || !hasOwnFields(value, ['schemaVersion', 'principleId', 'asOf', 'sourceReadStatus', 'sourceReads',
+    'incidentSummary', 'learnedPrinciple', 'rationale', 'applicability', 'nonApplicabilityOrUnknown', 'expectedBehavior',
+    'currentEnforcement', 'evidenceSummary', 'uncertainty', 'risk', 'rollback', 'decisionState', 'decisionSubjects',
+    'availableActions', 'blockers', 'nextAction', 'inbox', 'technicalDetails'])) return false;
+  if (value.schemaVersion !== '1' || !isString(value.principleId) || !isString(value.asOf)) return false;
+  if (value.sourceReadStatus !== 'complete' && value.sourceReadStatus !== 'partial') return false;
+  if (!isStringEnum(value.decisionState, ownerDecisionStates)) return false;
+  if (!Array.isArray(value.availableActions) || !value.availableActions.every(isOwnerAction)) return false;
+  if (!Array.isArray(value.blockers) || !value.blockers.every(item =>
+    isObject(item) && hasOwnFields(item, ['subjectKey', 'kind', 'reason']) && isOwnerReason(item.reason))) return false;
+  return isObject(value.nextAction) && hasOwnFields(value.nextAction, ['code', 'ownerText'])
+    && isString(value.nextAction.ownerText)
+    && isObject(value.inbox) && hasOwnFields(value.inbox, ['group', 'attention', 'reason']) && isOwnerReason(value.inbox.reason);
+}
+
+export function validateOwnerDecisionViewCore(value: unknown): OwnerDecisionViewCore | null {
+  return isOwnerDecisionViewCore(value) ? value : null;
+}
+
+export function isOwnerDecisionInbox(value: unknown): value is OwnerDecisionInboxData {
+  return isObject(value)
+    && hasOwnFields(value, ['schemaVersion', 'generatedAt', 'totalPrinciples', 'groups', 'historicalUnknown'])
+    && value.schemaVersion === '1'
+    && isString(value.generatedAt)
+    && typeof value.totalPrinciples === 'number'
+    && isObject(value.groups) && hasOwnFields(value.groups, ['decision', 'blocked', 'recovery'])
+    && ['decision', 'blocked', 'recovery'].every((key) => Array.isArray((value.groups as Record<string, unknown>)[key]))
+    && isObject(value.historicalUnknown) && typeof (value.historicalUnknown).count === 'number';
+}
+
+export function validateOwnerDecisionInbox(value: unknown): OwnerDecisionInboxData | null {
+  return isOwnerDecisionInbox(value) ? value : null;
+}
+
+/** Browser-local structural type for the compact library projection (SPEC §11.2). */
+export interface OwnerDecisionLibraryData {
+  schemaVersion: '1';
+  generatedAt: string;
+  entries: Record<string, {
+    decisionState: string;
+    learnedPrinciple: { status: 'known'; text: string; sourceTier: string } | { status: 'unknown'; reasonText: string };
+  }>;
+  degraded?: { reason: string };
+}
+
+function isOwnerDecisionLibraryEntry(value: unknown): boolean {
+  return isObject(value) && hasOwnFields(value, ['decisionState', 'learnedPrinciple'])
+    && isString(value.decisionState)
+    && isObject(value.learnedPrinciple)
+    && (value.learnedPrinciple.status === 'known'
+      ? isString(value.learnedPrinciple.text) && isString(value.learnedPrinciple.sourceTier)
+      : value.learnedPrinciple.status === 'unknown' && isString(value.learnedPrinciple.reasonText));
+}
+
+export function isOwnerDecisionLibrary(value: unknown): value is OwnerDecisionLibraryData {
+  return isObject(value)
+    && hasOwnFields(value, ['schemaVersion', 'generatedAt', 'entries'])
+    && value.schemaVersion === '1'
+    && isString(value.generatedAt)
+    && isObject(value.entries)
+    && Object.values(value.entries).every(isOwnerDecisionLibraryEntry);
+}
+
+export function validateOwnerDecisionLibrary(value: unknown): OwnerDecisionLibraryData | null {
+  return isOwnerDecisionLibrary(value) ? value : null;
 }
 
 // ── PRI-586: Governance Experience Snapshot v1.5.1 (browser-local validator) ──
