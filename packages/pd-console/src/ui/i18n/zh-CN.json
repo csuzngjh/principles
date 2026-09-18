@@ -733,7 +733,7 @@
           "automationState": { "idle": "空闲", "queued": "已排队", "running": "运行中", "retry_scheduled": "已安排重试", "stalled": "已停滞" },
           "headline": {
             "owner_decision": "需要你的决策",
-            "recovery": "需要恢复 Runtime",
+            "recovery": "存在待恢复的处理",
             "revision": "PD 正在修订这条原则",
             "processing": "PD 正在处理这条原则",
             "active": "这条原则正在生效",
@@ -751,7 +751,7 @@
           },
           "next": {
             "review": "使用下方现有审批操作完成审查。",
-            "inspect_recovery": "先检查阻塞证据；Runtime 恢复前不要批准。",
+            "inspect_recovery": "存在历史处理问题；先查看恢复信息，其与当前操作的关系尚未确认，相关决定以决策视图为准。",
             "wait": "当前无需操作，等待 PD 完成正在进行的工作。",
             "monitor": "当前无需操作，继续观察生效通道。",
             "inspect_data": "检查证据诊断，并修复所引用的持久化记录。",

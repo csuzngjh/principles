@@ -733,7 +733,7 @@
           "automationState": { "idle": "Idle", "queued": "Queued", "running": "Running", "retry_scheduled": "Retry scheduled", "stalled": "Stalled" },
           "headline": {
             "owner_decision": "Your decision is needed",
-            "recovery": "Runtime recovery is needed",
+            "recovery": "Recovery processing is needed",
             "revision": "PD is revising this principle",
             "processing": "PD is processing this principle",
             "active": "This principle is active",
@@ -751,7 +751,7 @@
           },
           "next": {
             "review": "Review the existing approval actions below.",
-            "inspect_recovery": "Inspect the blocker evidence; do not approve until Runtime recovers.",
+            "inspect_recovery": "A historical processing issue exists; inspect recovery info first — its relation to the current action is unconfirmed, and any decision should rely on the decision view.",
             "wait": "No action is needed now. Wait for PD to finish the current work.",
             "monitor": "No action is needed. Monitor the active behavior channel.",
             "inspect_data": "Inspect the evidence diagnostics and repair the referenced durable record.",
