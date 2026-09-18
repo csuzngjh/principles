@@ -32,7 +32,6 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { ScribePromptBuilder } from './scribe-prompt-builder.js';
-import { SCRIBE_MANIFEST } from './context-manifests.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -42,7 +41,6 @@ import type {
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
 import type { OutputLanguage } from '../language-directive.js';
-import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 
 // ── Scribe-specific context ──────────────────────────────────────────────────
 
@@ -79,25 +77,6 @@ function extractSourceDreamerArtifactId(philosopherContentJson: string): string 
   const value = Reflect.get(parsed, 'sourceDreamerArtifactId');
   if (typeof value !== 'string' || value.trim() === '') return undefined;
   return value;
-}
-
-/**
- * Layer 0 (design §6.1): scribe's edge predecessor is `philosopher`, whose
- * artifact `buildContext` already loaded — this only re-parses the string the
- * runner already holds, so the writer path adds zero store reads (F3).
- */
-function toPhilosopherPredecessor(context: ScribeContext): LoadedPredecessorArtifact {
-  let contentJson: unknown;
-  try {
-    contentJson = JSON.parse(context.philosopherArtifact);
-  } catch {
-    contentJson = context.philosopherArtifact;
-  }
-  return {
-    artifactId: context.sourcePhilosopherArtifactId,
-    runnerKind: 'philosopher',
-    contentJson,
-  };
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -241,16 +220,6 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       parsedPhilosopherArtifact = context.philosopherArtifact;
     }
 
-    // Layer 1 (design §6.2/§6.3, task 5.9): resolve the scribe manifest against
-    // the loaded philosopher predecessor (carries dreamer 5-dim via its
-    // predecessorSummary). Focused → inject only allocated summary fields;
-    // fallback → legacy full philosopherArtifact; disabled → unchanged.
-    const philosopherPred = toPhilosopherPredecessor(context);
-    const resolved = this.resolveContextInjection(taskId, SCRIBE_MANIFEST, philosopherPred.contentJson);
-    if (resolved.mode === 'focused') {
-      parsedPhilosopherArtifact = resolved.fields;
-    }
-
     const builder = new ScribePromptBuilder({ coreGrounding, outputLanguage: this.resolvedOptions.outputLanguage });
     const { message, systemPrompt } = builder.buildPrompt({
       taskId,
@@ -382,10 +351,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        // Layer 0 (design §6.1, task 3.11): scribe's principle text plus the
-        // philosopher-forwarded dreamer dimensions become the summary that
-        // artificer/evaluator read at tier0/tier1.
-        contentJson: this.buildArtifactContentJson(taskId, 'scribe', output, toPhilosopherPredecessor(context)),
+        contentJson: JSON.stringify(output),
         createdAt: now,
         updatedAt: now,
       });

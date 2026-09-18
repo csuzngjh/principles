@@ -208,53 +208,13 @@ export const TelemetryEventType = Type.Union([
   //   refuses to blind-retry and fails loud (payload: reason, detail).
   Type.Literal('artificer_repair_replay_evidence_resolved'),
   Type.Literal('artificer_repair_replay_evidence_unavailable'),
-  // PRI-634 PR-B: Shared Information Plane context-resolution telemetry.
-  // NOTE ON NAMING: `BasePeerRunner.emitEvent` prefixes every event with
-  // `runnerName` (`evaluator_manifest_resolution_insufficient`), so this union
-  // must list the PREFIXED literal — an unprefixed entry can never match and
-  // the event is silently rewritten to `degradation_triggered`.
-  // - <kind>_context_lineage_unavailable: CandidateLineage hit data corruption
-  //   or a store failure while resolving ancestry evidence (payload: errorKind,
-  //   detail). The runner degrades to the legacy full-predecessor injection —
-  //   never a silently thinner context.
-  // - <kind>_required_context_evidence_unresolved: a caller-declared required
-  //   field (e.g. Stage2's `diagnostician.raw.evidence`, or a repair's replay
-  //   evidence) was absent OR budget-truncated, so the focused context was
-  //   rejected in favor of the authoritative fallback (payload: requiredPaths).
-  //   Only artificer/evaluator declare required paths today, so only those two
-  //   prefixes are registered.
-  Type.Literal('artificer_context_lineage_unavailable'),
-  Type.Literal('artificer_required_context_evidence_unresolved'),
-  Type.Literal('evaluator_context_lineage_unavailable'),
-  Type.Literal('evaluator_required_context_evidence_unresolved'),
-  // - evaluator_stage2_required_evidence_unavailable: the progressive
-  //   evaluator reached Stage 2 (deep-evidence re-evaluation) but the REQUIRED
-  //   tier2 evidence could not be resolved from the durable lineage. The
-  //   runner REFUSES the Stage-2 LLM round (0 extra calls) and fails loud
-  //   (input_invalid, permanent) — telemetry alone is not correctness, and no
-  //   legacy fallback can carry the missing deep evidence (payload:
-  //   requiredPaths). Mirror of PR-A's repair-evidence-unavailable contract.
-  Type.Literal('evaluator_stage2_required_evidence_unavailable'),
-  // Layer 1 allocation degradations, emitted by the shared
-  // `runResolveInjection` core and therefore reachable from ALL FOUR
-  // manifest-owning runners. These were already emitted but missing from this
-  // union, so schema validation silently rewrote every one of them to
-  // `degradation_triggered` — the Layer 3 surface could never see which
-  // manifest went thin or which field the budget dropped. Registered so the
-  // information floor stays observable (rc-9).
-  // - <kind>_manifest_resolution_insufficient: too many declared fields were
-  //   absent; the runner fell back to the full-predecessor injection (payload:
-  //   absentCount, declaredCount, absentRatio).
-  // - <kind>_context_truncated: the budget dropped or truncated a field
-  //   (payload: fieldPath, reason, remainingBudgetTokens).
-  Type.Literal('dreamer_manifest_resolution_insufficient'),
-  Type.Literal('dreamer_context_truncated'),
-  Type.Literal('scribe_manifest_resolution_insufficient'),
-  Type.Literal('scribe_context_truncated'),
-  Type.Literal('artificer_manifest_resolution_insufficient'),
-  Type.Literal('artificer_context_truncated'),
-  Type.Literal('evaluator_manifest_resolution_insufficient'),
-  Type.Literal('evaluator_context_truncated'),
+  // PRI-819 R-06: the Layer 1/2 context-resolution telemetry members
+  // (<kind>_manifest_resolution_insufficient, <kind>_context_truncated,
+  // <kind>_context_lineage_unavailable, <kind>_required_context_evidence_unresolved,
+  // evaluator_stage2_required_evidence_unavailable,
+  // evaluator_stage1_output_contract_violation) and the Layer 0
+  // <kind>_artifact_summary_* members were removed together with their emit
+  // sites when the dormant progressive-disclosure flags were retired.
   // PRI-426: Evaluator single-round adversarial sandbox replay telemetry.
   // - evaluator_adversarial_replay: emitted after each gate invocation with the
   //   gate decision, case count, and failed-case count.
@@ -294,8 +254,6 @@ export const TelemetryEventType = Type.Union([
   // Artificer runner (PRI-302 family, expanded surface)
   Type.Literal('artificer_agent_draft_insert_failed'),
   Type.Literal('artificer_agent_draft_inserted'),
-  Type.Literal('artificer_artifact_summary_predecessor_skipped'),
-  Type.Literal('artificer_artifact_summary_skipped'),
   Type.Literal('artificer_diag_llm_rate_limit_degraded'),
   Type.Literal('artificer_lineage_echo_corrected'),
   Type.Literal('artificer_no_dependencies'),
@@ -305,43 +263,27 @@ export const TelemetryEventType = Type.Union([
   // Dreamer runner (expanded surface)
   Type.Literal('dreamer_agent_draft_insert_failed'),
   Type.Literal('dreamer_agent_draft_inserted'),
-  Type.Literal('dreamer_artifact_summary_predecessor_skipped'),
-  Type.Literal('dreamer_artifact_summary_skipped'),
   Type.Literal('dreamer_artifact_write_failed'),
-  Type.Literal('dreamer_context_lineage_unavailable'),
   Type.Literal('dreamer_diag_llm_rate_limit_degraded'),
   Type.Literal('dreamer_lineage_echo_corrected'),
   Type.Literal('dreamer_lineage_partial'),
   Type.Literal('dreamer_lineage_resolve_failed'),
-  Type.Literal('dreamer_required_context_evidence_unresolved'),
   Type.Literal('dreamer_wrong_task_kind'),
   // Philosopher runner (expanded surface)
   Type.Literal('philosopher_agent_draft_insert_failed'),
   Type.Literal('philosopher_agent_draft_inserted'),
-  Type.Literal('philosopher_artifact_summary_predecessor_skipped'),
-  Type.Literal('philosopher_artifact_summary_skipped'),
-  Type.Literal('philosopher_context_lineage_unavailable'),
-  Type.Literal('philosopher_context_truncated'),
   Type.Literal('philosopher_diag_llm_rate_limit_degraded'),
   Type.Literal('philosopher_lineage_echo_corrected'),
-  Type.Literal('philosopher_manifest_resolution_insufficient'),
-  Type.Literal('philosopher_required_context_evidence_unresolved'),
   // Scribe runner (expanded surface)
   Type.Literal('scribe_agent_draft_insert_failed'),
   Type.Literal('scribe_agent_draft_inserted'),
-  Type.Literal('scribe_artifact_summary_predecessor_skipped'),
-  Type.Literal('scribe_artifact_summary_skipped'),
-  Type.Literal('scribe_context_lineage_unavailable'),
   Type.Literal('scribe_diag_llm_rate_limit_degraded'),
   Type.Literal('scribe_lineage_echo_corrected'),
-  Type.Literal('scribe_required_context_evidence_unresolved'),
   // Evaluator runner (expanded surface)
   Type.Literal('evaluator_adversarial_replay_error'),
   Type.Literal('evaluator_adversarial_result_persist_failed'),
   Type.Literal('evaluator_agent_draft_insert_failed'),
   Type.Literal('evaluator_agent_draft_inserted'),
-  Type.Literal('evaluator_artifact_summary_predecessor_skipped'),
-  Type.Literal('evaluator_artifact_summary_skipped'),
   Type.Literal('evaluator_artificer_dep_selected'),
   Type.Literal('evaluator_attribution_scope_resolve_failed'),
   Type.Literal('evaluator_completion_intent_finalize_terminal'),
@@ -375,7 +317,6 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_scribe_artifact_unresolvable'),
   Type.Literal('evaluator_source_validation_update_failed'),
   Type.Literal('evaluator_source_validation_update_not_found'),
-  Type.Literal('evaluator_stage1_output_contract_violation'),
   Type.Literal('evaluator_task_needs_human_review'),
   Type.Literal('evaluator_v2_adversarial_cases_skipped'),
   // Diag router runner (PRI-625 split pipeline)
@@ -383,23 +324,17 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diag_router_agent_draft_inserted'),
   Type.Literal('diag_router_artifact_commit_failed'),
   Type.Literal('diag_router_artifact_committed'),
-  Type.Literal('diag_router_artifact_summary_predecessor_skipped'),
-  Type.Literal('diag_router_artifact_summary_skipped'),
   Type.Literal('diag_router_artifact_write_failed'),
   Type.Literal('diag_router_cancel_run_failed'),
   Type.Literal('diag_router_candidate_registered'),
   Type.Literal('diag_router_context_built'),
-  Type.Literal('diag_router_context_lineage_unavailable'),
-  Type.Literal('diag_router_context_truncated'),
   Type.Literal('diag_router_diag_llm_rate_limit_degraded'),
-  Type.Literal('diag_router_manifest_resolution_insufficient'),
   Type.Literal('diag_router_mark_failed_error'),
   Type.Literal('diag_router_mark_retry_error'),
   Type.Literal('diag_router_mark_succeeded_failed'),
   Type.Literal('diag_router_output_extraction_failed'),
   Type.Literal('diag_router_output_invalid'),
   Type.Literal('diag_router_output_validated'),
-  Type.Literal('diag_router_required_context_evidence_unresolved'),
   Type.Literal('diag_router_router_completed'),
   Type.Literal('diag_router_run_failed'),
   Type.Literal('diag_router_run_started'),
@@ -412,26 +347,20 @@ export const TelemetryEventType = Type.Union([
   // Diag distiller runner (PRI-625 split pipeline)
   Type.Literal('diag_distiller_agent_draft_insert_failed'),
   Type.Literal('diag_distiller_agent_draft_inserted'),
-  Type.Literal('diag_distiller_artifact_summary_predecessor_skipped'),
-  Type.Literal('diag_distiller_artifact_summary_skipped'),
   Type.Literal('diag_distiller_artifact_write_failed'),
   Type.Literal('diag_distiller_cancel_run_failed'),
   Type.Literal('diag_distiller_context_built'),
-  Type.Literal('diag_distiller_context_lineage_unavailable'),
-  Type.Literal('diag_distiller_context_truncated'),
   Type.Literal('diag_distiller_diag_llm_rate_limit_degraded'),
   Type.Literal('diag_distiller_distiller_completed'),
   Type.Literal('diag_distiller_lineage_integrity_violation'),
   Type.Literal('diag_distiller_lineage_partial'),
   Type.Literal('diag_distiller_lineage_resolve_failed'),
-  Type.Literal('diag_distiller_manifest_resolution_insufficient'),
   Type.Literal('diag_distiller_mark_failed_error'),
   Type.Literal('diag_distiller_mark_retry_error'),
   Type.Literal('diag_distiller_mark_succeeded_failed'),
   Type.Literal('diag_distiller_output_extraction_failed'),
   Type.Literal('diag_distiller_output_invalid'),
   Type.Literal('diag_distiller_output_validated'),
-  Type.Literal('diag_distiller_required_context_evidence_unresolved'),
   Type.Literal('diag_distiller_run_failed'),
   Type.Literal('diag_distiller_run_started'),
   Type.Literal('diag_distiller_task_failed'),
@@ -443,25 +372,19 @@ export const TelemetryEventType = Type.Union([
   // Diag rootcause runner (PRI-625 split pipeline)
   Type.Literal('diag_rootcause_agent_draft_insert_failed'),
   Type.Literal('diag_rootcause_agent_draft_inserted'),
-  Type.Literal('diag_rootcause_artifact_summary_predecessor_skipped'),
-  Type.Literal('diag_rootcause_artifact_summary_skipped'),
   Type.Literal('diag_rootcause_artifact_write_failed'),
   Type.Literal('diag_rootcause_cancel_run_failed'),
   Type.Literal('diag_rootcause_context_built'),
-  Type.Literal('diag_rootcause_context_lineage_unavailable'),
-  Type.Literal('diag_rootcause_context_truncated'),
   Type.Literal('diag_rootcause_diag_llm_rate_limit_degraded'),
   Type.Literal('diag_rootcause_intent_doc_read_failed'),
   Type.Literal('diag_rootcause_lineage_partial'),
   Type.Literal('diag_rootcause_lineage_resolve_failed'),
-  Type.Literal('diag_rootcause_manifest_resolution_insufficient'),
   Type.Literal('diag_rootcause_mark_failed_error'),
   Type.Literal('diag_rootcause_mark_retry_error'),
   Type.Literal('diag_rootcause_mark_succeeded_failed'),
   Type.Literal('diag_rootcause_output_extraction_failed'),
   Type.Literal('diag_rootcause_output_invalid'),
   Type.Literal('diag_rootcause_output_validated'),
-  Type.Literal('diag_rootcause_required_context_evidence_unresolved'),
   Type.Literal('diag_rootcause_rootcause_completed'),
   Type.Literal('diag_rootcause_run_failed'),
   Type.Literal('diag_rootcause_run_started'),

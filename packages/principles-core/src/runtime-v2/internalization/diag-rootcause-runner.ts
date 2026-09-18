@@ -291,11 +291,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        // Layer 0 (design §6.1, task 3.11): diag_rootcause is the chain root —
-        // its edge predecessor is null, so only the self `summary` is written
-        // (no `predecessorSummary`). Writer-side only: no manifest, no prompt
-        // change, no output-schema change (design §4.7.1).
-        contentJson: this.buildArtifactContentJson(taskId, 'diag_rootcause', output, null),
+        contentJson: JSON.stringify(output),
         createdAt: now,
         updatedAt: now,
       });

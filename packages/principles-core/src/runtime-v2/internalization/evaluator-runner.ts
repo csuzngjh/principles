@@ -24,7 +24,7 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
-import type { RunHandle, RunStatus } from '../runtime-protocol.js';
+import type { RunHandle } from '../runtime-protocol.js';
 import type {
   EvaluatorOutputV1,
   EvaluatorOutputV2,
@@ -57,12 +57,9 @@ import type {
   PeerRunnerResult,
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
-import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import type { OutputLanguage } from '../language-directive.js';
-import { EVALUATOR_STAGE1_MANIFEST, EVALUATOR_STAGE2_MANIFEST } from './context-manifests.js';
 import { extractIntentContract, type IntentContractV1 } from './intent-contract.js';
-import { evaluateFlaggedCriteria, isForcedStage2 } from './progressive-evaluator.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
 import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './refiner-rulehost-gate.js';
 import { attributionFromLayer, partitionV2OutOfScopeFailures, resolveRequiresContextVersionFromArtifact } from './rule-reliability-validation.js';
@@ -212,55 +209,6 @@ function extractScribeArtifactId(artificerContentJson: string): string | null {
   return null;
 }
 
-
-/**
- * Layer 0 (design §6.1, F17): evaluator's edge predecessor is `artificer` —
- * NOT scribe, even though buildContext loads both. The scribe artifact is
- * still consumed by invokeRuntime for code-review intent consistency; only the
- * artificer goes into `predecessorSummary`. Reusing the already-loaded string
- * keeps the writer path at zero extra store reads (F3). Returns null when no
- * artificer artifact was resolved — the writer then emits
- * `artifact_summary_predecessor_absent` and writes only the self `summary`.
- */
-function toArtificerPredecessor(context: EvaluatorContext): LoadedPredecessorArtifact | null {
-  if (!context.artificerArtifact || !context.sourceArtificerArtifactId) return null;
-  let contentJson: unknown;
-  try {
-    contentJson = JSON.parse(context.artificerArtifact);
-  } catch {
-    contentJson = context.artificerArtifact;
-  }
-  return {
-    artifactId: context.sourceArtificerArtifactId,
-    runnerKind: 'artificer',
-    contentJson,
-  };
-}
-
-/**
- * Check Stage 1 output for contract violations (design §6.5.4, Req 7.18).
- * Returns a reason string when the output is malformed, or null when valid.
- * Covers the failure modes observed in Phase 0 testing:
- *   - non-object (null, string, array)
- *   - missing `evaluation` sub-object (the core evaluator output structure)
- *   - `evaluation.decision` absent or not a string
- */
-function checkStage1ContractOutput(output: unknown): string | null {
-  if (output === null || typeof output !== 'object' || Array.isArray(output)) {
-    return 'output_not_object';
-  }
-  const rec = output as Record<string, unknown>;
-  if (!Object.hasOwn(rec, 'evaluation') || rec.evaluation === null || typeof rec.evaluation !== 'object' || Array.isArray(rec.evaluation)) {
-    return 'evaluation_missing';
-  }
-  const ev = rec.evaluation as Record<string, unknown>;
-  if (!Object.hasOwn(ev, 'decision') || typeof ev.decision !== 'string') {
-    return 'decision_missing';
-  }
-  return null;
-}
-
-
 // ── Result Types (backward-compatible exports) ────────────────────────────────
 
 export type EvaluatorRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
@@ -307,10 +255,7 @@ export interface EvaluatorRunnerOptions extends PeerRunnerOptions {
   readonly hostSemanticContext?: ArtificerHostSemanticContext;
   /**
    * PR B (ADR-0019 pattern, mirrors ArtificerRunner): effective config for
-   * feature flag resolution. Without it the evaluator's flag helpers
-   * (progressive_evaluator / context_manifest_budget) always saw undefined and
-   * silently stayed legacy — the two-stage path could never be enabled even
-   * when the config asked for it.
+   * feature flag resolution (e.g. the repair-loop and degradation flags).
    */
   readonly effectiveConfig?: EffectivePdConfig;
 }
@@ -376,14 +321,6 @@ export interface SeedArtificerRepairParams {
   /** Input artifact refs inherited from the original artificer task. */
   readonly inheritedInputArtifactRefs: readonly ArtifactRef[];
 }
-
-/**
- * Outcome of resolving a Stage-2 prompt's required deep evidence (review
- * round). Drives the fail-loud gate in the progressive path.
- */
-export type EvaluatorStage2Evidence =
-  | { readonly state: 'not_stage2' | 'focused' | 'fallback_other' }
-  | { readonly state: 'required_unavailable'; readonly unresolvedRequired: readonly string[] };
 
 export interface EvaluatorRunnerDeps extends PeerRunnerDeps {
   readonly validator: EvaluatorValidator;
@@ -559,126 +496,21 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     throw new PDRuntimeError('input_invalid', 'Artificer dependency artifact not found');
   }
 
-  /** Synthetic RunHandle prefix for progressive-evaluator pre-resolved output. */
-  static readonly PROGRESSIVE_RUN_ID_PREFIX = '__progressive_evaluator_';
-  private progressiveFinalOutput: unknown = undefined;
-  private progressiveRunActive = false;
-
   async invokeRuntime(taskId: string, context: EvaluatorContext): Promise<RunHandle> {
-    // Layer 2 (design §6.5, task 9.11): when progressive_evaluator flag is on,
-    // run two-stage evaluation (Stage 1 summary → flagged? → Stage 2 tier2).
-    // When off, the existing single-stage path runs unchanged.
-    if (!this.isProgressiveEvaluatorEnabled()) {
-      return this.invokeRuntimeSingleStage(taskId, context);
-    }
-
-    // ── Two-stage progressive evaluation ──
-    // Stage 1: summary-level evaluation (same prompt as single-stage, but
-    // uses EVALUATOR_STAGE1_MANIFEST for focused context).
-    const { message: stage1Message, systemPrompt: stage1SystemPrompt } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
-    const stage1Output = await this.runSingleEvaluation(taskId, stage1Message, stage1SystemPrompt);
-
-    // 9.4c (design §6.5.4): Stage 1 output contract violation check.
-    // Detect malformed Stage 1 output shapes that Phase 0 testing identified:
-    // non-object, missing required evaluator fields, or the output being a
-    // string (markdown-fenced / truncated). In all cases, emit a structured
-    // degradation event and force Stage 2 (rc-3 + rc-9: never silently pass).
-    //
-    // NOTE (Req 7.18): The full attemptStructuredOutputRepair channel is not
-    // wired here because it requires an llmCaller callback that connects to
-    // runtimeAdapter's internal LLM invocation path — a complex integration
-    // deferred to a follow-up PR. This simplified check covers the detected
-    // failure modes (non-object, missing evaluation field) and ensures they
-    // are never silently treated as "pass".
-    const stage1ContractViolated = checkStage1ContractOutput(stage1Output);
-    if (stage1ContractViolated !== null) {
-      this.emitEvent('stage1_output_contract_violation', taskId, {
-        reason: stage1ContractViolated,
-        detail: `Stage 1 output contract violated (${stage1ContractViolated}) — forcing Stage 2.`,
-      });
-    }
-
-    // Evaluate flagged criteria on Stage 1 output.
-    // When contract is violated, ALL criteria fields are undetermined → forces Stage 2.
-    const d1 = stage1ContractViolated !== null
-      ? { flagged: false, reasons: [] as const, undetermined: ['stage1_output_contract_violation'] }
-      : evaluateFlaggedCriteria(stage1Output);
-    const forced = isForcedStage2(taskId);
-
-    if (!d1.flagged && !forced && d1.undetermined.length === 0) {
-      // Stage 1 is sufficient — return its output as the final result.
-      this.progressiveFinalOutput = stage1Output;
-      this.progressiveRunActive = true;
-      return { runId: `${EvaluatorRunner.PROGRESSIVE_RUN_ID_PREFIX}stage1`, runtimeKind: this.getRuntimeKind(), startedAt: new Date().toISOString() };
-    }
-
-    // Stage 2 triggered: independent re-evaluation with tier2 context.
-    // rc-7 / ERR-015 / ERR-018 / ERR-019: Stage 2 does NOT receive Stage 1
-    // output, concerns, or the FlaggedDecision. It is a fully independent call.
-    const { message: stage2Message, systemPrompt: stage2SystemPrompt, stage2Evidence } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE2_MANIFEST);
-    if (stage2Evidence.state === 'required_unavailable') {
-      // Review round (information floor): Stage 2 is the deep-evidence stage;
-      // its REQUIRED evidence is unavailable, so there is NO safe fallback
-      // that still carries it — the full artificer artifact is the
-      // implementer's view, not the pain/dreamer deep evidence. Telemetry
-      // alone is not correctness: issuing an authoritative verdict from a
-      // Stage-2 prompt that lacks its declared evidence would silently
-      // proceed. Refuse the LLM round entirely (0 extra calls) and fail
-      // loud (input_invalid is permanent — no blind retry), mirroring the
-      // PR-A repair-evidence-unavailable contract.
-      this.emitEvent('stage2_required_evidence_unavailable', taskId, {
-        manifestId: EVALUATOR_STAGE2_MANIFEST.manifestId,
-        requiredPaths: stage2Evidence.unresolvedRequired,
-        nextAction: 'verify_durable_diagnosis_and_dreamer_ancestry_before_reevaluation',
-      });
-      throw new PDRuntimeError(
-        'input_invalid',
-        `evaluator stage2: required tier2 evidence unavailable (${stage2Evidence.unresolvedRequired.join(', ')}) — refusing to issue a deep-evidence verdict without it.`,
-      );
-    }
-    const stage2Output = await this.runSingleEvaluation(taskId, stage2Message, stage2SystemPrompt);
-
-    this.progressiveFinalOutput = stage2Output;
-    this.progressiveRunActive = true;
-    return { runId: `${EvaluatorRunner.PROGRESSIVE_RUN_ID_PREFIX}stage2`, runtimeKind: this.getRuntimeKind(), startedAt: new Date().toISOString() };
+    // Single-stage evaluation is the only path — the two-stage
+    // progressive_evaluator branch was retired with PRI-819 R-06.
+    const { message, systemPrompt } = await this.buildEvaluatorPrompt(taskId, context);
+    return this.runtimeAdapter.startRun({
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      taskRef: { taskId },
+      inputPayload: message,
+      contextItems: [],
+      outputSchemaRef: 'evaluator-output-v1',
+      timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
+    });
   }
 
-  /**
-   * Override pollUntilTerminal: for synthetic progressive-evaluator RunHandles,
-   * the LLM call already completed inside invokeRuntime — return succeeded
-   * immediately without hitting the real runtime adapter (which would fail on
-   * the synthetic runId). For normal handles, delegate to the base class.
-   */
-  protected override async pollUntilTerminal(runHandle: RunHandle): Promise<RunStatus> {
-    if (this.progressiveRunActive && runHandle.runId.startsWith(EvaluatorRunner.PROGRESSIVE_RUN_ID_PREFIX)) {
-      return { status: 'succeeded', runId: runHandle.runId };
-    }
-    return super.pollUntilTerminal(runHandle);
-  }
-
-  /**
-   * Intercept fetchAndParseOutput for progressive-evaluator runs: when the
-   * runId is a synthetic progressive handle, return the pre-resolved output
-   * directly (the actual LLM call already happened inside invokeRuntime).
-   */
-  protected override async fetchAndParseOutput(runId: string, taskId: string): Promise<unknown> {
-    if (this.progressiveRunActive && runId.startsWith(EvaluatorRunner.PROGRESSIVE_RUN_ID_PREFIX)) {
-      return this.progressiveFinalOutput;
-    }
-    return super.fetchAndParseOutput(runId, taskId);
-  }
-
-  /**
-   * Check Stage 1 output for contract violations (design §6.5.4, Req 7.18).
-   * Returns a reason string when the output is malformed, or null when valid.
-   */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- pure function, no instance state needed
-  private checkStage1Contract(_output: unknown): string | null { return null; }
-
-  /**
-   * Build the evaluator prompt with the given manifest's resolved context.
-   * Shared by single-stage and two-stage paths.
-   */
   /**
    * PRI-630 收敛契约 (SPEC §18.1): 解析上轮评估上下文 — 从 dependency
    * artificer 的 repairPayload.sourceEvaluatorTaskId 找到上轮 evaluator,
@@ -785,23 +617,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   /**
-   * Stage 2 required-evidence outcome (review round / information floor):
-   *  - `focused`            — required tier2 (`diagnostician.raw.evidence`,
-   *                           `dreamer.raw.candidates`) resolved from the
-   *                           durable CandidateLineage.
-   *  - `fallback_other`     — non-required fallback (envelope sparsity, budget
-   *                           flag off): the full artificer artifact is used,
-   *                           which is the pre-PR-B legacy assembly.
-   *  - `required_unavailable` — REQUIRED deep evidence is absent/truncated or
-   *                           the lineage is corrupt. No safe legacy fallback
-   *                           exists for a deep-evidence stage: the caller MUST
-   *                           refuse to send the Stage 2 prompt.
+   * Build the evaluator prompt from the full predecessor artifacts.
    */
   private async buildEvaluatorPrompt(
     taskId: string,
     context: EvaluatorContext,
-    manifest: typeof EVALUATOR_STAGE1_MANIFEST,
-  ): Promise<{ readonly message: string; readonly systemPrompt: string; readonly stage2Evidence: EvaluatorStage2Evidence }> {
+  ): Promise<{ readonly message: string; readonly systemPrompt: string }> {
     let parsedArtificerArtifact: unknown = null;
     if (context.artificerArtifact) {
       try { parsedArtificerArtifact = JSON.parse(context.artificerArtifact); } catch { parsedArtificerArtifact = context.artificerArtifact; }
@@ -809,46 +630,6 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     let parsedScribeArtifact: unknown = undefined;
     if (context.scribeArtifact) {
       try { parsedScribeArtifact = JSON.parse(context.scribeArtifact); } catch { parsedScribeArtifact = context.scribeArtifact; }
-    }
-    // Resolve manifest-injected focused fields (Layer 1 + PR B tier2).
-    const artificerPred = toArtificerPredecessor(context);
-    const isStage2 = manifest.manifestId === EVALUATOR_STAGE2_MANIFEST.manifestId;
-    let resolutionOutcome: EvaluatorStage2Evidence = isStage2
-      ? { state: 'fallback_other' }
-      : { state: 'not_stage2' };
-    if (artificerPred !== null) {
-      // Stage 2 is by definition the deep-evidence stage, so its tier2 raw
-      // fields (`diagnostician.raw.evidence`, `dreamer.raw.candidates`) are
-      // REQUIRED. When they cannot be resolved from the durable CandidateLineage
-      // — or the budget cannot carry them — resolution falls back to the
-      // authoritative full artificer artifact rather than injecting a silently
-      // thinner context (design §34/§35: no silent required-field loss).
-      const requiredPaths = isStage2 ? [...EVALUATOR_STAGE2_MANIFEST.tier2] : [];
-      const resolved = await this.resolveContextInjectionAsync({
-        taskId,
-        manifest,
-        predecessorContentJson: artificerPred.contentJson,
-        startArtifactId: context.sourceArtificerArtifactId ?? undefined,
-        requiredPaths,
-      });
-      if (resolved.mode === 'focused') {
-        parsedArtificerArtifact = resolved.fields;
-        if (isStage2) resolutionOutcome = { state: 'focused' };
-      } else if (
-        isStage2
-        && resolved.mode === 'fallback'
-        && (resolved.reason === 'required_evidence_unresolved' || resolved.reason === 'lineage_unavailable')
-      ) {
-        // Review round: telemetry alone is not correctness. A deep-evidence
-        // stage whose REQUIRED evidence is unavailable must NOT proceed —
-        // there is no safe legacy fallback that contains the missing evidence
-        // (the full artificer artifact is the implementer's view, not the
-        // pain/dreamer deep evidence). The caller aborts before any LLM call.
-        resolutionOutcome = {
-          state: 'required_unavailable',
-          unresolvedRequired: resolved.unresolvedRequired,
-        };
-      }
     }
     const builder = new EvaluatorPromptBuilder();
     const { message, systemPrompt } = builder.buildPrompt({
@@ -868,21 +649,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // undefined → prompt unchanged (backward compatible).
       intentContract: extractIntentContract(parsedScribeArtifact) ?? undefined,
     });
-    return { message, systemPrompt, stage2Evidence: resolutionOutcome };
-  }
-
-  /** Original single-stage invokeRuntime (flag-off path). */
-  private async invokeRuntimeSingleStage(taskId: string, context: EvaluatorContext): Promise<RunHandle> {
-    const { message, systemPrompt } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
-    return this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
-      taskRef: { taskId },
-      inputPayload: message,
-      contextItems: [],
-      outputSchemaRef: 'evaluator-output-v1',
-      timeoutMs: this.resolvedOptions.timeoutMs,
-      systemPrompt,
-    });
+    return { message, systemPrompt };
   }
 
   async validateOutput(output: unknown, taskId: string, context: EvaluatorContext): Promise<PeerRunnerValidationResult> {
@@ -988,11 +755,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        // Layer 0 (design §6.1, task 3.11): evaluator's edge predecessor is
-        // artificer (NOT scribe — scribe is loaded for code review but is not
-        // the edge predecessor, F17). The scribe artifact still flows through
-        // the separate extractScribeArtifactId path (F3).
-        contentJson: this.buildArtifactContentJson(taskId, 'evaluator', output, toArtificerPredecessor(context)),
+        contentJson: JSON.stringify(output),
         createdAt: now,
         updatedAt: now,
       });
@@ -1089,7 +852,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
                   sourceTaskId: taskId,
                   lineageArtifactIds,
                   validationStatus: 'pending',
-                  contentJson: this.buildArtifactContentJson(taskId, 'evaluator', finalOutput, toArtificerPredecessor(context)),
+                  contentJson: JSON.stringify(finalOutput),
                   createdAt: now,
                   updatedAt: new Date().toISOString(),
                 });
@@ -1180,11 +943,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
             sourceTaskId: taskId,
             lineageArtifactIds,
             validationStatus: 'pending',
-            // Layer 0 (design §6.1): re-build the envelope on the final output
-            // so the replay re-persist keeps the same `summary` /
-            // `predecessorSummary` fields as the initial write (the first write
-            // would otherwise be overwritten with a bare JSON.stringify).
-            contentJson: this.buildArtifactContentJson(taskId, 'evaluator', finalOutput, toArtificerPredecessor(context)),
+            contentJson: JSON.stringify(finalOutput),
             createdAt: now,
             updatedAt: new Date().toISOString(),
           });

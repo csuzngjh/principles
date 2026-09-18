@@ -101,11 +101,7 @@ function flagsOffConfig(): EffectivePdConfig {
   return {
     config: {
       version: 1,
-      features: {
-        artifact_summary_redundancy: { category: 'quiet', enabled: false },
-        context_manifest_budget: { category: 'quiet', enabled: false },
-        progressive_evaluator: { category: 'quiet', enabled: false },
-      },
+      features: {},
       runtimeProfiles: {},
       internalAgents: {},
       ui: { diagnostics: { mode: 'simple' } },

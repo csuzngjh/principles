@@ -88,6 +88,18 @@ export interface ArtifactSummaryEnvelope {
   readonly predecessorSummary?: PredecessorSummaryRef;
 }
 
+/**
+ * The predecessor artifact as already loaded by the runner's buildContext
+ * (design F3: zero additional store reads). Shared type of the runner
+ * context predecessor fields; moved here from the retired Layer 0
+ * attach-summary-envelope module (PRI-819 R-06).
+ */
+export interface LoadedPredecessorArtifact {
+  readonly artifactId: string;
+  readonly runnerKind: SummaryRunnerKind;
+  readonly contentJson: unknown;
+}
+
 export type DeriveSummaryFailureReason =
   | 'unsupported_runner_kind'
   | 'output_not_object'

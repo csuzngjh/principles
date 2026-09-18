@@ -38,7 +38,6 @@ import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { SqlitePIArtifactStore } from '../../store/artifact/sqlite-pi-artifact-store.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { createProductionGateDeps } from '../../activation/production-gate-deps.js';
-import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../../config/pd-config-feature-flags.js';
 import type { EffectivePdConfig } from '../../config/pd-config-types.js';
 import type { PDRuntimeAdapter } from '../../runtime-protocol.js';
 
@@ -100,11 +99,7 @@ function flagsOffConfig(): EffectivePdConfig {
   return {
     config: {
       version: 1,
-      features: {
-        artifact_summary_redundancy: { category: 'quiet', enabled: false },
-        context_manifest_budget: { category: 'quiet', enabled: false },
-        progressive_evaluator: { category: 'quiet', enabled: false },
-      },
+      features: {},
       runtimeProfiles: {},
       internalAgents: {},
       ui: { diagnostics: { mode: 'simple' } },
@@ -216,15 +211,8 @@ afterEach(async () => {
   try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* temp */ }
 });
 
-describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS → pi-rule (flags OFF)', () => {
+describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS → pi-rule', () => {
   it('closes the full self-healing loop through the REAL deterministic replay gate', async () => {
-    // SPEC §38 acceptance: prove the fix works with all Progressive
-    // Disclosure quiet features explicitly OFF (they default off; pin them).
-    const flags = computeFeatureFlagsFromConfig(flagsOffConfig());
-    expect(isFeatureEnabled(flags, 'artifact_summary_redundancy')).toBe(false);
-    expect(isFeatureEnabled(flags, 'context_manifest_budget')).toBe(false);
-    expect(isFeatureEnabled(flags, 'progressive_evaluator')).toBe(false);
-
     // ── lineage: scribe task + artifact ──
     await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: [] });
     await succeed(SCRIBE_ID);

@@ -318,29 +318,14 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Flag-off = legacy behavior: output_invalid is permanent. Roll back = set
   // enabled: false in .pd/config.yaml (quiet category keeps the override path).
   { id: 'artificer_output_retry', category: 'quiet', enabled: true, since: '2026-08-20', description: 'Issue 2/PRI-621: retry Artificer `output_invalid` (malformed LLM output, e.g. missed submit_rulecode) via the base retry policy (max 3 attempts) instead of permanent failure. Graduated default-on 2026-08-29 — aligns artificer with every other peer runner; flag-off reverts output_invalid to permanent (legacy).' },
-  // Internalization progressive disclosure — Layer 0 (design §6.1, §8, PR 1).
-  // Writer-side ArtifactSummary + PredecessorSummaryRef envelope, merged into
-  // contentJson for all 8 SummaryRunnerKind stages. Default off; flag-off =
-  // no `summary` / `predecessorSummary` fields written, byte-identical to
-  // current contentJson shape (Requirement 11.5/11.8/11.9, CP-32).
-  { id: 'artifact_summary_redundancy', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 0 — writer-side ArtifactSummary + predecessorSummary envelope on all 8 SummaryRunnerKind stages. Default off; flag-off = current contentJson shape unchanged.' },
-  // Internalization progressive disclosure — Layer 1 (design §6.2/§6.3/§8, PR 2).
-  // Runners use a ContextManifest + PromptBudgetManager to focus injection with
-  // a token budget, with an information-floor fallback to the legacy
-  // full-predecessor injection when resolution is too sparse. Default off;
-  // flag-off = runners use the existing buildContext assembly (byte-identical).
-  // Independent of core grounding (§8.1): budgetTokens covers ONLY
-  // manifest-declared fields, never core grounding text (which is injected
-  // unconditionally via runner defaults; the former
-  // internalization_core_grounding flag was retired in PRI-751 — it never had
-  // runtime readers, as PRI-752's audit independently confirmed).
-  { id: 'context_manifest_budget', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 1 — manifest + budget-driven context injection with information-floor fallback. Default off; flag-off = existing buildContext assembly unchanged.' },
-  // Internalization progressive disclosure — Layer 2 two-stage evaluation
-  // (design §6.5/§8, PR 4). Evaluator runs Stage 1 (summary) then optionally
-  // Stage 2 (tier2 full contentJson) when flagged/forced. Adds optional
-  // painCoverage / compressionFidelity to evaluator output. Default off;
-  // flag-off = single-stage evaluation (current behavior).
-  { id: 'progressive_evaluator', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 2 — two-stage evaluation with flagged criteria + painCoverage/compressionFidelity output fields. Default off; flag-off = single-stage evaluation unchanged.' },
+  // PRI-819 R-06 (Owner decision 2026-09-18): the three dormant
+  // progressive-disclosure flags are retired — their runtime readers and the
+  // gated Layer 0/1/2 branches were deleted in the same change. Kept as gone
+  // tombstones per the census lifecycle contract so a stale `enabled: true`
+  // override is rejected observably instead of being silently ignored.
+  { id: 'artifact_summary_redundancy', category: 'gone', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 0 (writer-side ArtifactSummary envelope) — retired PRI-819 R-06: runtime reader and gated branch deleted; gone tombstone' },
+  { id: 'context_manifest_budget', category: 'gone', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 1 (manifest + budget context injection) — retired PRI-819 R-06: runtime reader and gated branch deleted; gone tombstone' },
+  { id: 'progressive_evaluator', category: 'gone', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 2 (two-stage evaluation) — retired PRI-819 R-06: runtime reader and gated branch deleted; evaluator is single-stage only; gone tombstone' },
   // ADR-0020: Codex CLI host adapter. Flipped to MVP-Core (default ON) on
   // 2026-08-12 after PRI-282 E2E validation passed (pd-hook stdin/stdout
   // contract, output whitelist, HostAdapter decode/encode for all 4 events).

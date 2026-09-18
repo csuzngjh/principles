@@ -45,14 +45,12 @@ import { ArtificerPromptBuilder, boundPackForPrompt, type ArtificerDreamerContex
 // PRI-741: the host semantic projection DTO travels with the runner options,
 // so it is re-exported alongside them (barrel exports it from this module).
 export type { ArtificerHostSemanticContext };
-import { ARTIFICER_MANIFEST, ARTIFICER_REPAIR_MANIFEST } from './context-manifests.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import {
   resolveRepairReplayContext,
   type RepairReplayContext,
 } from './repair-replay-resolver.js';
-import type { RelatedContextSource } from './context-resolution.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -61,7 +59,6 @@ import type {
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
-import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 
 // ── Artificer-specific context ──────────────────────────────────────────────
 
@@ -135,29 +132,6 @@ interface ArtificerContext {
    * 契约原因——不再零新信息重试。Ephemeral，不回写、不进 RepairPayload。
    */
   readonly priorValidatorErrors?: LastValidatorErrors;
-}
-
-/**
- * Layer 0 (design §6.1): artificer's edge predecessor is `scribe`, whose
- * artifact `buildContext` already loaded. Reusing that string keeps the writer
- * path at zero extra store reads (F3). Returns null when no scribe artifact
- * was resolved (buildContext's `empty-context` short-circuit, or a missing
- * sourceTrace) — the writer then emits `artifact_summary_predecessor_absent`
- * and writes only the self `summary` (rc-9).
- */
-function toScribePredecessor(context: ArtificerContext): LoadedPredecessorArtifact | null {
-  if (!context.scribeArtifact || !context.sourceScribeArtifactId) return null;
-  let contentJson: unknown;
-  try {
-    contentJson = JSON.parse(context.scribeArtifact);
-  } catch {
-    contentJson = context.scribeArtifact;
-  }
-  return {
-    artifactId: context.sourceScribeArtifactId,
-    runnerKind: 'scribe',
-    contentJson,
-  };
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -404,54 +378,6 @@ function formatReplayEvidenceBlock(context: RepairReplayContext): string {
     lines.push(`- (evidence truncated: ${context.failedCaseCount} durable entries, showing ${shown} stratified representatives)`);
   }
   return lines.join('\n');
-}
-
-/**
- * PR B: expose the RepairPayload and the PR-A replay evidence as RELATED
- * context sources (design §33). They are causal references — NOT ancestry — so
- * nothing here reaches into `lineageArtifactIds`.
- *
- * The replay values come straight from the already-bounded
- * `RepairReplayContext`: the information plane therefore inherits PR A's ≤16
- * selection (`MAX_REPLAY_FAILURES_IN_REPAIR`) and never re-expands the durable
- * `failedCases` array (design §43).
- */
-function buildRepairRelatedSources(context: ArtificerContext): readonly RelatedContextSource[] {
-  const sources: RelatedContextSource[] = [];
-  const { replayContext, repairPayload } = context;
-
-  if (repairPayload !== undefined) {
-    sources.push({
-      namespace: 'repair',
-      summary: {
-        requiredChanges: repairPayload.requiredChanges,
-        concerns: repairPayload.concerns,
-      },
-    });
-  }
-
-  if (replayContext !== undefined) {
-    const failureTypes = new Set<string>();
-    for (const failure of [...replayContext.systemFailures, ...replayContext.traceFailures]) {
-      failureTypes.add(failure.errorType);
-    }
-    sources.push({
-      namespace: 'replay',
-      summary: {
-        passed: replayContext.passed,
-        failedCaseCount: replayContext.failedCaseCount,
-        // Deterministic: sorted, so the same context always renders identically.
-        failureTypes: [...failureTypes].sort(),
-      },
-      raw: {
-        traceFailures: replayContext.traceFailures,
-        systemFailures: replayContext.systemFailures,
-        globalViolations: replayContext.globalViolations,
-      },
-    });
-  }
-
-  return sources;
 }
 
 /**
@@ -846,50 +772,17 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     } catch {
       scribeArtifactInput = context.scribeArtifact;
     }
-    // PRI-703 Phase 1（评审 P1 修正）：intent contract 必须在 manifest 收窄
-    // 之前从完整 scribe 工件提取——focused 模式会把 scribeArtifactInput 替换
-    // 为扁平 summary 字段（intentOwner 等），根级 intentContract 对象不再
-    // 存在，收窄后提取恒为 null（context_manifest_budget 开启即丢契约）。
+    // PRI-703 Phase 1：intent contract 从完整 scribe 工件提取
+    //（manifest 收窄路径已随 PRI-819 R-06 退役，工件不再被替换）。
     const fullScribeArtifact = scribeArtifactInput;
 
-    // Layer 1 (design §6.2/§6.3, task 5.9) + PR B Shared Information Plane:
-    // resolve the manifest against the scribe predecessor's summary envelope,
-    // the durable CandidateLineage ancestry (tier2 raw), and — for repair
-    // rounds — the related replay evidence. Focused → inject only the
-    // allocated fields; fallback/disabled → legacy full scribeArtifact (F13).
-    const scribePred = toScribePredecessor(context);
-    let replayViaManifest = false;
-    if (scribePred !== null) {
-      const isRepair = context.replayContext !== undefined;
-      const manifest = isRepair ? ARTIFICER_REPAIR_MANIFEST : ARTIFICER_MANIFEST;
-      const relatedSources = isRepair ? buildRepairRelatedSources(context) : undefined;
-      // Required-evidence gate (design §35/§43): on a repair round the replay
-      // evidence MUST reach the prompt. If the manifest budget cannot carry it,
-      // resolution falls back and the bounded PR-A string channel is used
-      // instead of injecting a thinner prompt. Normal artificer tier2 stays
-      // optional — `dreamerContext` (PRI-508, F2) is its safety net.
-      const resolved = await this.resolveContextInjectionAsync({
-        taskId,
-        manifest,
-        predecessorContentJson: scribePred.contentJson,
-        startArtifactId: context.sourceScribeArtifactId ?? undefined,
-        ...(relatedSources !== undefined ? { relatedSources } : {}),
-        requiredPaths: isRepair ? [...ARTIFICER_REPAIR_MANIFEST.tier2] : [],
-      });
-      if (resolved.mode === 'focused') {
-        scribeArtifactInput = resolved.fields;
-        replayViaManifest = isRepair;
-      }
-    }
-
-    // PR B (design §26): pick the replay-evidence channel. When the manifest
-    // carried it, the base string keeps concerns + required changes only; when
-    // the flag is off (or the budget could not carry the evidence) the PR-A
-    // bounded evidence block is appended — exactly the pre-PR-B behavior, so
-    // the replay evidence never depends on a quiet flag being on.
+    // PR B (design §26): the replay-evidence channel. The manifest channel was
+    // retired with PRI-819 R-06 (context_manifest_budget gone); the PR-A
+    // bounded evidence block is the unconditional channel, so the replay
+    // evidence never depended on a quiet flag being on.
     let { repairFeedback } = context;
     const { replayContext, repairPayload } = context;
-    if (replayContext !== undefined && repairPayload !== undefined && !replayViaManifest) {
+    if (replayContext !== undefined && repairPayload !== undefined) {
       repairFeedback = formatRepairFeedback(repairPayload, formatReplayEvidenceBlock(replayContext));
     }
 
@@ -1094,7 +987,7 @@ ${context.revisionFeedback}
         // scribe. The dreamer 5-dim context still flows through the separate
         // PRI-508 `resolveDreamerContext` path (F2) — it does NOT enter
         // `predecessorSummary` (which holds exactly one edge predecessor).
-        contentJson: this.buildArtifactContentJson(taskId, 'artificer', output, toScribePredecessor(context)),
+        contentJson: JSON.stringify(output),
         createdAt: now,
         updatedAt: now,
       });

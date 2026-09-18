@@ -263,8 +263,8 @@ describe('DiagRouterRunner V-slice', () => {
     const result = await runner.run(ROUTER_TASK_ID);
     expect(result.status).toBe('succeeded');
 
-    // The pi_artifacts row the tier2 lineage (CandidateLineage) resolves
-    // `diagnostician.raw.evidence` from — previously missing entirely
+    // The pi_artifacts row downstream internalization runners resolve their
+    // predecessor artifacts from — previously missing entirely
     // (committer writes only the legacy `artifacts` table).
     const artifacts = await deps.artifactStore.listBySourceTaskId(ROUTER_TASK_ID);
     expect(artifacts.length).toBe(1);

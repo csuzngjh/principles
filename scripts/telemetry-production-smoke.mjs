@@ -29,6 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { createRequire } from 'node:module';
+import { buildTelemetrySmokeConfigYaml } from './lib/telemetry-smoke-config.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -77,46 +78,7 @@ fs.symlinkSync(path.join(REPO_ROOT, 'node_modules', '@sinclair', 'typebox'), pat
 
 fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
 fs.mkdirSync(path.join(workspace, '.state'), { recursive: true });
-fs.writeFileSync(
-  path.join(workspace, '.pd', 'config.yaml'),
-  [
-    'version: 1',
-    'workspace:',
-    `  default: ${workspace.split(path.sep).join('/')}`,
-    '  environment: production',
-    'features:',
-    '  anonymous_product_telemetry:',
-    '    category: quiet',
-    '    enabled: true',
-    'runtimeProfiles:',
-    '  openclaw.default:',
-    '    type: openclaw',
-    '    source: default',
-    'internalAgents:',
-    '  defaultRuntime: openclaw.default',
-    '  agents:',
-    '    diagnostician:',
-    '      enabled: false',
-    '    dreamer:',
-    '      enabled: false',
-    '    scribe:',
-    '      enabled: false',
-    '    artificer:',
-    '      enabled: false',
-    '    philosopher:',
-    '      enabled: false',
-    '    evaluator:',
-    '      enabled: false',
-    '    rolloutReviewer:',
-    '      enabled: false',
-    '    correctionObserver:',
-    '      enabled: false',
-    '      enabled: false',
-    '    signalCollector:',
-    '      enabled: false',
-    '',
-  ].join('\n'),
-);
+fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), buildTelemetrySmokeConfigYaml(workspace));
 
 const Database = require('better-sqlite3');
 const stateDb = new Database(path.join(workspace, '.pd', 'state.db'));
