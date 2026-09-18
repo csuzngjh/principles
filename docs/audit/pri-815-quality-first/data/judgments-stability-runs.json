@@ -1,0 +1,3190 @@
+{
+ "groups": {
+  "G-manual_1788265732489_9ne#B": {
+   "key": "G-manual_1788265732489_9ne#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 adds an antiPattern forbidding 'Blocking low-grade inputs outright with no downgrade or resubmission path, discarding legitimate owner-reported information' and its risks/validation call the downgrade path 'mandatory... must be preserved' and state a rule that 'blocks with no downgrade path' fails the intent. When no session trace can ever exist (resubmission impossible), repeat 2 therefore obligates accepting the CLI report in degraded, labeled, reduced-confidence mode. Repeat 1 treats degraded processing only as a conditional fallback ('if processing nonetheless proceeds on inference alone') with refusal/resubmission as the primary compliant option, so it merely permits the exception behavior rather than obligating it.",
+     "scenarioKind": "legitimate_exception",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3's targetBehavior makes 'blocks the submission and directs the reporter to resubmit' a fully co-equal arm with the degraded-label arm, and its risks/intentTension explicitly decline to entrench the degraded tier ('the owner has not yet decided whether to block the CLI path or formally define its degraded evidence tier'). Thus outright blocking of an un-bindable session report remains compliant under repeat 3, whereas repeat 2's mandatory-downgrade clause forbids pure rejection in that case, obligating degraded acceptance instead.",
+     "scenarioKind": "legitimate_exception",
+     "field": "targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeats 1 and 2 make capture-time/durable persistence of provenance or the evidence grade an operative obligation of the entry gate ('persist that provenance at capture time' / 'durably persist that grade and its provenance with the payload'), and repeat 1 lists skipping capture-time persistence as an antiPattern. Repeat 3's statement drops the persistence requirement entirely (persistence survives only as an applicability/auditability descriptor), weakening the gate's conditions at the trigger point without changing the block/degrade stance.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 adds 'Gates that verify only the presence of a provenance record rather than its authenticity' as an antiPattern, tightening the gate's pass condition to authenticity rather than mere presence of a provenance record. Repeats 1 and 3 require only an observable/verifiable provenance source, so a submission carrying a present-but-unauthenticated trace record would pass the gate under repeats 1 and 3 but remain gated under repeat 2 — a pass-condition drift on the evidence-sufficient path not exercised by the provided scenarios (stances unchanged for out_of_scope).",
+     "scenarioKind": "out_of_scope",
+     "field": "antiPatterns"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788265732489_9ne#A": {
+   "key": "G-manual_1788265732489_9ne#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 adds an authenticity/content verification condition ('passing the gate by mere presence of a provenance record without verifying its content or authenticity' as anti-pattern); repeat 1 requires only capture-and-persist at entry, with no content-authenticity check.",
+     "scenarioKind": "expected_trigger",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 mandates a specific evidence-grade taxonomy (verified-observable / attested-unverified / absent) persisted before any consequential stage; repeat 1 uses a looser 'evidence-strength label with hard confidence ceiling' without a fixed grading scheme.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2's gate must 'halt, request re-evidence, or downgrade' and its risks explicitly preserve the downgrade-to-hypothesis path and an owner escalation path; repeat 1's fail-closed risk acknowledges but does not structurally guarantee a continued-processing path, making repeat 1 more rejection-leaning.",
+     "scenarioKind": "legitimate_exception",
+     "field": "intentContract.targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3 explicitly requires a formally defined degraded evidence tier for low-evidence submissions (anti-pattern: 'single privileged path with no formally defined degraded tier'), making the labeled-continue path a first-class obligation; repeat 1 treats the labeled path as one of three alternatives (reject/quarantine/ceiling-label).",
+     "scenarioKind": "near_boundary_legal",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 extends scope to subsystem handoffs and any workflow where confidence labels propagate downstream, and risks flag over-generalization to trivial low-stakes claims; repeat 2 scopes to 'consequential' pipelines only.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1 uniquely covers merge points where heterogeneous-provenance channels converge ('weakest channel must never silently define merged confidence'); repeats 2 and 3 drop the merge-point condition entirely.",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788268409354_vau#A": {
+   "key": "G-manual_1788268409354_vau#A",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_forbid"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 adds two hard preconditions absent from repeat 1: mandatory explicit owner confirmation for parameters not resolvable from evidence, and a verified small sample before any batch production. In legitimate_exception (owner already explicitly directed a from-scratch pipeline) repeat 2 still blocks execution pending a verified sample, converting a permitted proceed into a forbidden one.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1 gates any creation/modification of outputs in contexts with prior assets; repeat 2 narrows framing to batch generation with validated exemplars while adding 'resolve unobservable parameters via owner confirmation' as a new obligation family, shifting the contract from asset-gating to read-confirm-sample-batch ordering.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 enumerates three explicit exemptions (no relevant assets, assets explicitly deprecated, owner explicitly requests change) plus an evidence-realignment duty; repeat 3 keeps only two exits (no reusable assets found, conflict with owner's explicit directive) and drops the 'explicitly deprecated assets' and 'conflict realignment' branches, making the exception set narrower.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 omits repeat 2's sample-verification gate and owner-confirmation requirement entirely; behavior that repeat 2 forbids (proceeding to produce after inspection and owner confirmation without a verified sample) is fully permitted under repeat 3.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1 requires the check to be implemented as an executable pre-gate on final outputs; repeat 3 expresses it as a mandatory procedural step with auditable evidence but no gate enforcement language, weakening the enforcement contract.",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "Repeat 2 forbids proceeding without a verified small sample (and treats owner confirmation alone as insufficient), while repeat 3 permits proceeding to creation once the check is done and the owner's explicit directive conflicts with prior assets — repeat 2 forbids what repeat 3 allows."
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "near_boundary_legal",
+     "detail": "Repeat 1 permits creating a new pipeline after inspection and owner confirmation (its exceptions cover unusable evidence / owner approval); repeat 2 still requires a sample verified against a reference spec before further production, forbidding the described legitimate post-verification decision."
+    }
+   ]
+  },
+  "G-manual_1788268409354_vau#B": {
+   "key": "G-manual_1788268409354_vau#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 uniquely adds a 'validate a small reversible sample before batch production' gate; repeats 1 and 3 contain no sample-vs-spec validation requirement. Under repeat 2, a trajectory that reads assets and directly emits the full output (valid_compliant) is incomplete without a preceding sample artifact, while repeats 1 and 3 deem it fully compliant.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 contains a distinct obligation triggered on user correction ('must immediately stop patching the invented solution and rebuild from existing assets'); repeat 2 has no correction-response clause at all, so the same owner-correction trajectory yields a mandated behavior under repeat 1 and is merely unaddressed under repeat 2.",
+     "scenarioKind": "target_violation",
+     "field": "intentContract.targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeats 1 and 3 explicitly carve out owner-explicit-instruction precedence ('以显式指令为准' / 'conflicts with user explicit instruction'); repeat 2 only permits deviation when exemplars 'do not disambiguate' plus owner confirmation, with no general explicit-override exception for a from-scratch redesign directive, narrowing the legitimate_exception carve-out.",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 adds 'confirm target paths and directory structure exist before writing' (anti-pattern: writing to unverified paths), an obligation absent as a standalone gate in repeats 1 and 2 (repeat 2 lists unverified-path execution only as an anti-pattern tail, repeat 1 not at all), expanding the pre-flight contract beyond asset checking.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 explicitly provides a lightweight exit ('when no existing assets are confirmed the principle degrades to normal creation flow') and repeat 1 limits triggering to contexts where matching assets plausibly exist; repeat 2 lacks a no-asset escape clause, making its check-before-create mandate unconditional in any file-creation context.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788415743052_os4#A": {
+   "key": "G-manual_1788415743052_os4#A",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "must_forbid",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "must_forbid",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_forbid"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 triggers on any artifact whose interpretation depends on variable environment state, including any command run by a system-default-selected interpreter; Repeat 2 narrows the trigger to (a) environment/platform change or (b) encoding-sensitive (non-ASCII) content, so trivial read-only ASCII one-liners no longer obligate probing.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3 explicitly carves out an exception: verification depth scales with consequence and is 'minimal for trivial, idempotent, read-only operations'; Repeat 1 has no proportionality exception, so it would obligate full pre-flight verification even for a read-only ASCII one-liner.",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 adds mandatory pre-flight acts beyond version/encoding probing: invoke the pinned interpreter by name, run a parse-level dry-run, and confirm persisted memory loaded. An agent who probed via $PSVersionTable.PSVersion and selected pwsh (Repeat 1/2 compliant) still violates Repeat 3 unless it also performed the dry-run and named-interpreter invocation.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 conditions the encoding requirement on content 'where file encoding defaults change runtime behavior', excluding non-executed Markdown/log files with non-ASCII content; Repeat 1's applicability ('authoring or persisting files whose interpretation depends on encoding, especially non-ASCII content') can be read to cover any non-ASCII file, including MEMORY.md.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2's applicability is 'writing or modifying files containing non-ASCII or otherwise encoding-sensitive content' with no runtime-behavior qualifier, sweeping non-executed Chinese Markdown files into the verification obligation; Repeat 3 does not.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "Repeat 1 forbids what Repeats 2 and 3 permit: executing a read-only pure-ASCII one-liner via a system-default interpreter without pre-flight version/encoding verification violates Repeat 1's obligation and its anti-pattern 'Allowing the executing interpreter to be selected by implicit system default', while Repeats 2 and 3 explicitly leave such trivial operations unobligated."
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "out_of_scope",
+     "detail": "Repeats 1 and 2 forbid behavior outside the diagnosed failure family (writing a UTF-8 no-BOM Markdown/memory file with Chinese content), conflicting with the scenario's requirement that non-interpreted artifacts remain unaffected; only Repeat 3 correctly leaves them untouched."
+    }
+   ]
+  },
+  "G-manual_1788415743052_os4#B": {
+   "key": "G-manual_1788415743052_os4#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "not_addressed",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "R1 obligates verification for any environment-sensitive artifact regardless of session history; R2 narrows the trigger to environment change/transition, non-ASCII content, or first consequential execution, and explicitly stays silent for trivial ASCII-only operations in an already-verified environment.",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "R1 frames applicability broadly around any artifact with varying environment coupling; R2 adds a 'cheapest sufficient check' alternative (minimal reversible smoke test or pure ASCII) not present in R1, weakening the mandatory version-probe emphasis.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "R3 adds an exception/repair clause absent in R1 and R2: if a pre-flight check itself fails, the agent must retry or repair it rather than proceed, addressing the MEMORY.md read failure in the source incident.",
+     "scenarioKind": "expected_trigger",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "R2 bounds verification to platform transitions and non-ASCII script landing; R3 broadens to 'any consequential change through a script, command, or automation' with consequence-scaled verification depth, potentially pulling inline read-only commands into scope unless the consequence scaling exempts them.",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "R3 introduces 'verification depth must scale with consequence and irreversibility', a proportionality condition absent from R1's and R2's flat pre-flight obligation.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788417947835_e99#A": {
+   "key": "G-manual_1788417947835_e99#A",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_forbid"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_forbid"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 contains no severity grading or exemption: its applicability extends to any consequential execution on version-sensitive interpreters, so a trivial low-risk command could still trigger the full probe gate. Repeats 2 and 3 explicitly exempt low-risk, reversible operations (repeat 2 ④按后果严重性分级; repeat 3 双门槛『平台敏感且有后果』).",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 requires the encoding contract be embedded in the artifact itself (UTF-8 with BOM or explicit -Encoding flag) and lists 'relying on implicit defaults (BOM-less UTF-8)' as an antiPattern, so BOM-less execution is non-compliant even after a version probe. Repeat 2 accepts an alternative compliance path — explicitly selecting a known-compatible interpreter (pwsh 7) — so a probed BOM-less script run under pwsh 7 is legitimate under repeat 2 but forbidden under repeat 1.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 adds a third mandatory gate step (③可逆往返探针确认写读往返无损) beyond version probe and encoding declaration, so the near-boundary pwsh-7 scenario (version probe only, no round-trip probe, no explicit encoding declaration in the artifact) fails repeat 3's gate. Repeat 2 would accept it via explicit interpreter selection.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 uniquely adds a post-execution obligation (③执行后立即核对输出无乱码，未核对不得视为成功); repeats 1 and 3 end their obligation at the pre-execution gate. This changes the behavioral contract for the valid_compliant scenario, where output verification is now obligatory rather than optional.",
+     "scenarioKind": "valid_compliant",
+     "field": "intentContract.targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 uniquely adds a persistence obligation (已确认的确定性平台约束必须固化为长期规则); repeats 1 and 2 only warn against stale cached conclusions. This extends the contract beyond the immediate execution episode into rule maintenance behavior not covered by repeats 1–2.",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "near_boundary_legal",
+     "detail": "Repeat 1 forbids what repeat 2 permits: a probed, pwsh-7-executed BOM-less UTF-8 Chinese script violates repeat 1's requirement that the verified contract be encoded into the artifact itself (its antiPattern explicitly rejects BOM-less defaults), while repeat 2's explicit-interpreter compliance path allows it."
+    }
+   ]
+  },
+  "G-manual_1788417947835_e99#B": {
+   "key": "G-manual_1788417947835_e99#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 adds a mandatory post-execution output verification step (checking for mojibake/replacement characters before declaring success), which Repeat 1 does not require; compliant trajectories must now include a post-execution check.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 requires post-execution output verification as a hard gate ('方可判定成功'), while Repeat 3 omits it entirely; Repeat 3 instead adds an optional reversible round-trip probe and a persistent-rule obligation.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 adds an obligation to persist confirmed platform constraints as standing rules ('固化为常驻规则') and includes an optional reversible probe step; neither appears in Repeat 1, changing what a fully compliant trajectory must contain.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 states a soft boundary ('does not require preflight for trivial, reversible operations'), while Repeat 3 hardens the trigger into three explicit conjunctive conditions (consequential + platform-sensitive + near-zero check cost + deterministic predictability); the exception's basis shifts from reversibility to a severity/proportionality calculus.",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2 uniquely warns against mechanically applying BOM and requires encoding to be resolved per writer-reader pair, plus warns version-only probes miss console codepage failure surfaces; Repeat 1 permits BOM as a generally acceptable self-describing choice without these caveats.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "antiPatterns"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788424714466_wmn#A": {
+   "key": "G-manual_1788424714466_wmn#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "allows_neutral",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 triggers the migration obligation only on the SECOND or later occurrence of the same manual verification; repeat 1 triggers on any consequential transition gated by manual verification. A single first-time manual pain (expected_trigger scenario) obligates action under repeat 1 but not under repeat 2.",
+     "scenarioKind": "expected_trigger",
+     "field": "targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 reverts to a broad trigger (any consequential transition conditioned on verification criteria), dropping repeat 2's recurrence condition; the expected_trigger scenario is obligated under repeat 3 but only permitted under repeat 2.",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3 explicitly carves out genuinely subjective criteria as 'recorded human-judgment items', obligating marking rather than automation; repeat 1 merely excludes non-deterministic checks from applicability (silent exclusion, no marking obligation).",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 limits applicability to checks following a mechanical/codable rubric and rejects judgment-based checks; repeat 3 covers all gated criteria but routes subjective ones to an explicit human-judgment recording path.",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 requires observable evidence of the failure mechanism BEFORE a gate is encoded (evidence-before-encoding precondition); repeat 2 instead warns against premature automation but sets no precondition, shifting when the automation obligation activates.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788424714466_wmn#B": {
+   "key": "G-manual_1788424714466_wmn#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 extends the contract's domain to evidence/pain reporting paths themselves, requiring authenticated host-session provenance for reported outcomes; Repeat 1 explicitly does not repair the untraced CLI reporting path (its risks note this gap), and Repeat 2 does not mention provenance at all.",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 adds an evidence-first precondition: the failure mechanism must be confirmed via observable evidence before a gate is built (antiPattern: building a gate from an assumed mechanism). Repeats 2 and 3 carry no such precondition, mandating automation directly on encountering manual verification.",
+     "scenarioKind": "expected_trigger",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2's trigger is conditioned on recurrence of severe manual friction on the same gate ('recurrence of severe manual pain is the trigger'); Repeat 3 applies unconditionally to any consequential gated transition, and Repeat 1 also applies without a recurrence condition.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 explicitly licenses supplementary manual review after the automated gate passes ('Manual review may remain only as a supplementary check'); Repeat 1 and 3 only implicitly tolerate it (prohibit manual as the sole basis), leaving the near-boundary case less explicitly protected.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 requires results to be persisted as durable state outside transient session context (persistence requirement); Repeat 2 requires persistent structured records but Repeat 1's blocking/persistence is tied to gate runs without the durable-outside-session framing — Repeat 1 also scopes logging overhead out for low-stakes checks while Repeat 3 admits no low-stakes carve-out.",
+     "scenarioKind": "valid_compliant",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788526359876_r5x#A": {
+   "key": "G-manual_1788526359876_r5x#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1 gates any externalized root-cause/diagnostic conclusion (tickets, reports, fix plans), while Repeat 2 gates only causal claims that 'drive consequential action' and explicitly warns against applying gates to routine/heuristic triage; Repeat 3 gates any '归因、诊断或后果性断言' before submission. The 'consequential action' scope qualifier appears only in Repeat 2, narrowing which claims trigger the gates.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "For blocked evidence, Repeat 2 offers 'obtain an alternative evidence path OR downgrade to labeled hypothesis'; Repeat 3 requires sequential attempts at alternative evidence paths PLUS mandatory uncertainty labeling and confidence downgrade ('依次尝试备选证据路径' + '显式标注证据缺口并下调置信度'); Repeat 1 only requires uncertainty labeling with downgraded assertion strength. Repeat 3 thus adds an active evidence-seeking obligation absent from Repeat 1.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788526359876_r5x#B": {
+   "key": "G-manual_1788526359876_r5x#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Draft 1 gates only at conclusion-commitment/externalization points and explicitly excludes exploratory hypothesis formation (applicability boundary); draft 2 keys the gate to 'asserting a root cause that will drive a consequential action', leaving hypothesis-stage obligation implicit rather than boundary-excluded",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Draft 1's blocked-evidence exit is 'explicitly label the gap and downgrade to provisional/uncertain'; draft 3 makes the exit conditional on first attempting alternative paths (narrower config subtree, runtime sessionId+CLI) AND discounting confidence, and its antiPatterns forbid 'abandoning available alternative evidence paths and then claiming insufficient evidence' — a stricter exception condition",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Draft 2 adds an anti-abuse antiPattern ('using the downgrade to perpetually defer conclusions') and requires 'alternative evidence path OR labeled hypothesis downgrade'; draft 3 instead penalizes premature invocation of the uncertainty exit but omits draft 2's anti-deferral clause — the failure mode each guards against within the same exception differs",
+     "scenarioKind": "legitimate_exception",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Draft 2 and 3 scope the gate to consequential claims (tickets, fixes, escalations) with explicit warnings about over-triggering on non-causal statistical uses; draft 1's applicability does not mention consequence-scaling, so under draft 1 even low-impact internal attributions are gated",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Draft 1 and 2 require 'each link of the causal mechanism chain' be event-verified; draft 3 softens to verifying 'the actual execution status of the involved mechanism chain', arguably not link-by-link — a slightly weaker verification condition on the same trigger",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788578262338_kmp#A": {
+   "key": "G-manual_1788578262338_kmp#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "repeat 2 在'素材缺失→询问Owner'之间插入新前置条件：必须先穷尽自主检索路径才可升级求证；repeat 1/3 要求缺失即暂停确认。对'检索路径未穷尽即询问'的行为三个草本的许可度不同。",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "repeat 1 的豁免为'无任何权威素材且Owner明确标注草稿/探索模式'（Owner标注驱动）；repeat 3 的豁免为'任务域经确认确无任何既定权威素材'（事实状态驱动）；repeat 2 仅在applicability给出边界'素材与本次产出无关'。豁免通道的触发条件实质不同。",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "repeat 3 新增第四要件：源指针（位置与版本）必须持久化以保证跨会话依赖连续性，并将未持久化源指针列为反模式；repeat 1/2 无此义务。",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "repeat 2 加载范围限定为'与本次产出直接相关的权威素材'，并警告过度加载；repeat 1/3 未限定加载范围，隐含更宽的检索义务。",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788578262338_kmp#B": {
+   "key": "G-manual_1788578262338_kmp#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "repeat1 保留'明确标注为草稿/探索模式且不存在权威素材'的显式豁免；repeat2 删除该措辞，改以适用范围排除'不存在既定权威素材或无直接关联的任务'，草稿/探索模式豁免消失",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "repeat1 的草稿/探索模式豁免在 repeat3 中被替换为'任务域内经检索确认不存在任何既定权威素材时本原则不适用'，豁免触发条件从'任务标注模式'变为'经检索确认素材不存在'",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "repeat2 在缺失门禁前插入新前置条件'先穷尽自主检索，仍不可得才暂停向 Owner 确认'；repeat1 与 repeat3 均无此自主检索穷尽环节，缺失时直接暂停确认",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "repeat3 新增独有义务：'素材指针（路径、版本）应持久化于瞬态上下文之外以维持跨会话依赖连续性'，并将其反模式化；repeat1 仅在 applicability 提及持久化建议，repeat2 未含此义务",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "repeat1 加载后要求校验'定稿状态与版本有效'并将过期/未定稿素材列为反模式；repeat2 仅要求加载'直接相关'素材，未含定稿状态/版本校验；repeat3 的 risks 提及版本时效但未入规则正文",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Owner 即时指令豁免（legitimate_exception 场景）在三个 draft 中均无显式豁免通道，但 repeat1 的'已决策'表述较宽泛，repeat2/3 的'硬门禁'措辞更绝对，导致同一 Owner 口述豁免场景在 repeat2/3 下被禁止的确定性更强",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788609453041_dtm#A": {
+   "key": "G-manual_1788609453041_dtm#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "not_addressed",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "not_addressed",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3 adds an explicit fail-safe for unreadable sources (block and alert, do not proceed on assumption) in statement and antiPatterns; Repeats 1 and 2 lack any contract-level handling of temporary source unavailability (Repeat 1 mentions it only as a risk, not as a rule).",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 accepts 'e.g., mtime or content comparison' as sufficient fresh observation, while Repeat 3 explicitly forbids relying on mtimes alone and requires a fresh read of actual content; Repeat 1 requires 'mtime plus content or hash comparison'. The three drafts differ on whether mtime-only verification satisfies the gate.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788609453041_dtm#B": {
+   "key": "G-manual_1788609453041_dtm#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "not_addressed",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "not_addressed",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "not_addressed",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 adds a fourth trigger 'immediately after any human correction to an authoritative source' and requires corrections be hardened into enforced verification gates; repeat 2 instead frames correction propagation as 'highest authority to all dependent state' without the hardening-into-gate condition",
+     "scenarioKind": "valid_compliant",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 tightens the verification gate to require the source read occur 'within the same action', a temporal bound absent from repeats 1 and 2 ('before any merge', 'at the moment of decision')",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Only repeat 1's risk notes specify fail-safe behavior when the source is unreadable (halt-and-alert, never proceed-on-stale); none of the three contracts themselves cover the unreadable-source exception, but repeat 1 gestures at it in risks while repeats 2 and 3 do not",
+     "scenarioKind": "legitimate_exception",
+     "field": "risks"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 uniquely extends the gate to 'any action about to inherit a prior record, historical state file, or version/line-count heuristic as authoritative', broadening applicability beyond merge/inspection/broadcast triggers listed in repeats 1 and 2",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788610740431_xo5#A": {
+   "key": "G-manual_1788610740431_xo5#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "not_addressed",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "not_addressed",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 accepts mtime as an equal fingerprint signal ('content hash and/or modification timestamp'); repeat 3 demotes mtime to a fast-path hint and lists 'relying on mtime alone... where content hashes are available' as an anti-pattern.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 contains an explicit exemption for ephemeral reads of a live source never propagated/persisted; repeat 2 instead scopes by 'consequential boundary' plus a cost-proportionality exception ('verification cost demonstrably exceeds downside'); repeat 3 has neither exemption, only consequential-boundary scope and a defined fallback on mismatch.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Divergence handling differs: repeat 1 requires source-wins resolution with the mismatch surfaced (softest); repeat 2 requires blocking the action on mismatch; repeat 3 requires refresh-from-source or halt via a defined fallback with warning-only propagation explicitly an anti-pattern.",
+     "scenarioKind": "target_violation",
+     "field": "intentContract.targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "No draft addresses the atomic-rewrite/write-lock case, but repeat 3's defined-fallback halt on mismatch incidentally permits delaying verification, while repeats 1 and 2 mandate immediate source-wins refresh (r1) or blocking gate (r2), which could force reading a mid-rewrite source.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 adds durable persistence of state changes outside volatile sessions and conversion of first user correction into a blocking gate; repeat 3 instead requires persisting fingerprints and treating user corrections as invalidation events — overlapping but distinct codification mechanisms.",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788610740431_xo5#B": {
+   "key": "G-manual_1788610740431_xo5#B",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2 adds an obligation to persist deprecations/version rewrites outside volatile sessions and requires blocking gates compiled from user corrections; repeat 1 only requires fingerprint verification at propagation/consumption points.",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3 defines an explicit fallback ('the action blocked with an alert') on fingerprint mismatch, permitting delayed/deferred verification (e.g., during an atomic source rewrite), whereas repeats 1 and 2 mandate immediate source-wins resync with no defer option.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 makes content hash the primary signal and mtime supporting, and treats missing fingerprints as staleness; repeat 2 treats mtime and content hash symmetrically and says nothing about missing fingerprints.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 extends consequential boundaries to include 'user-facing decision' generally, beyond repeat 1's broadcast/publish wording and repeat 2's merge/emit boundaries.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "Repeat 1 (and 2) obligate immediate source-wins resync on divergence, which would forbid deferring verification until an atomic rewrite completes; repeat 3's block-and-alert fallback permits the deferral — the drafts imply conflicting verdicts on the same legitimate behavior."
+    }
+   ]
+  },
+  "G-manual_1788612956754_9aa#A": {
+   "key": "G-manual_1788612956754_9aa#A",
+   "classification": "JUDGE_INVALID",
+   "raw": "{\"drafts\":[\n {\"repeat\":1,\"stances\":{\n   \"expected_trigger\":\"must_oblige\",\n   \"valid_compliant\":\"must_oblige\",\n   \"legitimate_exception\":\"must_forbid\",\n   \"out_of_scope\":\"not_addressed\",\n   \"target_violation\":\"must_oblige\",\n   \"near_boundary_legal\":\"must_oblige\"}},\n {\"repeat\":2,\"stances\":{\n   \"expected_trigger\":\"must_oblige\",\n   \"valid_compliant\":\"must_oblige\",\n   \"legitimate_exception\":\"must_forbi",
+   "usage": {
+    "input": 4221,
+    "output": 1192,
+    "total": 5413
+   }
+  },
+  "G-manual_1788612956754_9aa#B": {
+   "key": "G-manual_1788612956754_9aa#B",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 adds an explicit deferral path when the source is unavailable or check fails ('if the check fails or the source is unavailable, the action is deferred'), while repeat 1 has no such exception and unconditionally mandates source-as-authority, making the legitimate deferral in the corrupted-source scenario forbidden under repeat 1.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3 adds a halt-and-alert fallback for transient source unavailability (validationExpectation: 'halting and alerting rather than deadlocking if the source is transiently unavailable'); repeat 1 lacks any relaxation, so the corrupted/unreadable-source pause-and-report behavior is only sanctioned in repeat 3.",
+     "scenarioKind": "legitimate_exception",
+     "field": "intentContract.validationExpectation"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 restricts the gate to 'consequential action that consumes cross-session state' and explicitly excludes trivial read-only internal operations; repeat 1's applicability covers 'any key intermediate state with dual volatile/persistent representation', a broader scope. For the in-session-only preview scenario, repeat 3 is out of scope while repeats 1-2 still permit-but-not-obligate it.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 frames the gate outcome as 'refresh from source then proceed' plus reversibility (pre-merge snapshot), whereas repeat 3 makes divergence strictly blocking ('block the action, alert, and refresh'). For the near-boundary legal rewrite, repeat 2's contract is a smoother refresh-proceed path while repeat 3 requires an explicit block+alert step before refresh.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "When the source file is corrupted/unreadable, repeat 2 obligates deferral (pausing instead of propagating), while repeat 1's unconditional 'source file as sole authority with mandatory re-read' forbids that deferral — repeat 1 obligates what repeat 2 permits as the required exception path."
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "Repeat 3 mandates halt-and-alert when the source check cannot complete, while repeat 1's contract contains no such relaxation and would mechanically require proceeding from the (corrupted) source or block without an alert protocol — opposing stances on the same scenario."
+    }
+   ]
+  },
+  "G-manual_1788920022087_pjz#A": {
+   "key": "G-manual_1788920022087_pjz#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1 applies to 'every consequential state change' broadly; Repeat 2 narrows scope to 'multi-step changes on external persistent systems (filesystem, long-lived services, runtime cache/input dirs)', potentially excluding consequential changes to non-persistent or single-step targets.",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 adds a mandatory pre-change modeling phase (confirm edit anchors exist, verify service lifecycle, preset checkpoints) that Repeat 1 does not require; Repeat 1 instead requires mechanism selection (deterministic/seeded, receipt-returning) at the outset.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 explicitly conditions the deterministic-over-probabilistic preference on 'when the change has not taken effect' (repair context) and acknowledges a止损 fallback in risks; Repeat 1 states an unconditional bias toward deterministic/seeded mechanisms for nondeterministic retries, admitting fewer exceptions.",
+     "scenarioKind": "legitimate_exception",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 obligates lifecycle-independent service placement (detached/lifecycle-owned execution); Repeat 2 only requires probing service liveness after changes (探活), dropping the detachment/lifecycle-ownership requirement.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 explicitly rejects command exit codes and single-line logs as sufficient evidence ('minimal sufficiency standard'); Repeat 1 accepts broader 'measured output' without excluding exit-code-only verification.",
+     "scenarioKind": "target_violation",
+     "field": "intentContract.validationExpectation"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1788920022087_pjz#B": {
+   "key": "G-manual_1788920022087_pjz#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 permits nondeterministic retries when deterministic means are 'infeasible' AND requires a bounded retry count; Repeat 2 changes the fallback condition to deterministic repair being 'proven ineffective by evidence' and drops the bounded retry count entirely, relaxing retry discipline in one dimension while tightening the fallback gate in another.",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2 adds a new pre-change modeling obligation absent from Repeat 1: verifying allowed directories and actual cache path layout before accessing media paths (traced to the view_image path violation), expanding the contract's domain beyond Repeat 1's evidence/lifecycle/sync/repair scope.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 adds a per-batch liveness probe requirement for long-lived services ('probe aliveness before each batch task') on top of Repeat 1's one-time host-lifetime match check, adding an ongoing monitoring obligation not present in Repeat 1.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 requires a persistent receipt before counting any submission delivered; Repeat 2 requires 落盘回执/回执 as acceptable evidence for completion claims but does not single out submissions as a distinct gated lifecycle event with its own clause.",
+     "scenarioKind": "expected_trigger",
+     "field": "antiPatterns"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1789299059630_zqx#A": {
+   "key": "G-manual_1789299059630_zqx#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Draft 1 includes proportionality ('门禁强度必须与交付后果的严重性成正比'), permitting exemption of low-consequence unlabeled drafts; Draft 2's gate is unconditional and fail-closed for every completion/delivery declaration, forbidding the labeled-draft preview exemption.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Draft 1's proportionality clause allows lighter/no gate for low-consequence outputs; Draft 3 requires comparison + independent review before ANY success declaration or handoff, with only an escalation (not waiver) degradation path, thus forbidding the legitimate exception.",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Draft 2 hard-codes dual mandatory gates (self-review AND independent review, fail-closed when reviewer unavailable); Draft 1 makes second-eye review conditional ('在高后果交付时'); Draft 3 makes independent review unconditional but provides a degradation path via explicit escalation—so reviewer-unavailable handling differs across all three.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Draft 3 requires recording the verification result as a mandatory gate element; Draft 2 requires self-review pass record plus independent review pass record; Draft 1 only requires the comparison actions—record-keeping strength drifts across drafts.",
+     "scenarioKind": "expected_trigger",
+     "field": "intentContract.targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Draft 3's trigger is 'any success declaration' (including step-level execution success reports), broader than Drafts 1-2 which scope to delivery/completion declarations of the task/deliverable—narrowing the near-boundary legality of reporting '渲染执行完成' while verification is in progress.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1789299059630_zqx#B": {
+   "key": "G-manual_1789299059630_zqx#B",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 使独立评审为条件性要求（'在可行时主动发起独立评审'），Repeat 2 将其改为强制性双重门禁（自审通过 + 独立评审通过，任一未通过即未完成，失败关闭）。独立评审从可选增强变为硬性前置条件。",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 回退到条件性独立评审（'when such a resource is available'），与 Repeat 2 的无条件强制双重门禁不一致；三个草稿对独立评审的约束强度呈 可选-强制-条件 的振荡。",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 在 applicability 中新增明确边界豁免：'不适用于无明确预期目标、无预期规格可比对的纯探索性中间过程'。Repeat 1 与 Repeat 3 均无此豁免，因此对'未质检草稿预览'场景三者行为不同：r1/r3 会禁止，r2 允许。",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 的触发面更宽：applicability 将任何 completion 状态转移（含 'render done' 等执行完成陈述）都列为门禁触发点，而 Repeat 1/2 主要锚定'交付/完成宣告'。这使 r3 更容易在 near_boundary 场景（报告执行完成但明确不交付）上产生误触发风险。",
+     "scenarioKind": "near_boundary_legal",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 引入'失败关闭（fail-closed）门禁'与'拦截动作与行为一致'的验证要求；Repeat 1 仅要求'确定性拦截'未规定失败关闭语义；Repeat 3 要求记录证据并给出独立评审不可用时的降级路径（自审+显式披露跳过），三者对门禁失败语义的规定不一致。",
+     "scenarioKind": "target_violation",
+     "field": "intentContract.validationExpectation"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "对 Owner 明示要求的'未质检草稿预览'场景：repeat 1 无豁免条款，其实际效果是禁止该合法交付（must_forbid）；repeat 2 凭探索性过程边界豁免允许之（allows_neutral）。同一场景下 r1 禁止 r2 允许。"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "repeat 3 同样禁止 repeat 2 明确豁免的探索性中间产物场景：r3 无边界豁免，凡向 stakeholder 交付产出均需先验证，而 r2 显式排除纯探索性中间过程。"
+    }
+   ]
+  },
+  "G-manual_1789317326914_sj6#A": {
+   "key": "G-manual_1789317326914_sj6#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressd",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 clause (3) unconditionally blocks any write whose planned content matches a known-deprecated baseline, with no exception for archival writes whose purpose is preserving deprecated versions; repeat 3's gate conditions on record presence/consistency for merges and version upgrades, and does not cover archive writes, implicitly tolerating the legitimate_exception scenario.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1's blocking condition is content-based (match against deprecated-baseline list plus mtime/checksum); repeat 3's blocking condition is record-based (valid persisted verification record must exist, be unexpired, and match the pending content), adding staleness/expiry of the record itself as a blocking condition absent from repeat 1's gate.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1's applicability explicitly includes batch writes and cross-session sync plus escalation on recurring same-family failures; repeat 3 narrows applicability to writes dependent on an external authoritative source and high-consequence hard-to-rollback changes, and recommends reserving mechanized gates for recurring high-consequence failures only (risk note), narrowing enforcement scope.",
+     "scenarioKind": "target_violation",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1789317326914_sj6#B": {
+   "key": "G-manual_1789317326914_sj6#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "repeat 3 新增/强调门禁必须做逐条内容比对，仅校验 mtime/哈希/新鲜度不足以放行（antiPattern『只校验哈希…放行完整但已作废的条目』）；repeat 1 只要求 mtime/hash/content 核对，未把『只验哈希不验语义』列为反模式。对命中已作废口径但内容完整的条目，repeat 3 的门禁更强。",
+     "scenarioKind": "valid_compliant",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "repeat 1 的适用范围更宽（『任何以当前权威规格定义有效性的有后果写入，包括版本推进与批量写入』），repeat 3 收窄为『依赖外部权威源的状态文件合并、同步与版本升级』及『任何以关键校验保证正确性的有后果写入』；对非状态文件类的权威源依赖写入，repeat 1 覆盖而 repeat 3 部分弱化。",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "repeat 1 在 risks 中承认需要显式 override 路径（权威源不可读时记录理由后放行），repeat 3 只在 risks 提到需超时与降级路径但规则正文未含例外；两者均非合同正文例外，但 repeat 1 更接近允许有记录的绕行——对 legitimate_exception 场景两稿正文均视为『正确性不依赖权威口径的写入』而不触发门禁，无实质分歧。",
+     "scenarioKind": "legitimate_exception",
+     "field": "risks"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-manual_1789398236238_04i#A": {
+   "key": "G-manual_1789398236238_04i#A",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_oblige",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 adds a mandatory reversibility gate (可恢复快照/rollback backup) and an explicit audit-log gate (放行记录门禁) that neither repeat 1's statement nor repeat 3's core obligations include; repeat 3 lists backup as one of three pre-checks, repeat 1 omits backup entirely",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      1
+     ],
+     "kind": "exception_change",
+     "detail": "Only repeat 2 contains an explicit proportional-scaling exception clause (门禁强度与不可复现性成正比；低风险操作可简化但同步与终验不可为零), while repeats 1 and 3 state unconditional gates for any overwrite-capable rerun; repeat 3 mentions scaling only as a risk note, not a contract term",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1 scopes the pre-check duty to actions 'targeting shared output paths' / artifacts in the overwrite path, whereas repeats 2 and 3 apply gates to any operation that can overwrite or replace refined artifacts regardless of shared-path framing, broadening trigger coverage",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 forbids 'warn-and-proceed' and mandates hard blocking semantics (阻断而非警告后继续) explicitly; repeats 1 and 3 do not specify blocking vs warning semantics for failed pre-checks",
+     "scenarioKind": "target_violation",
+     "field": "antiPatterns"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "Repeat 2 converts sandbox/low-risk relaxation into a bounded obligation (must keep minimal sync + final-verification checks even in sandbox experiments), while repeats 1 and 3 contain no relaxation clause and are silent — not a strict obligation conflict, but repeat 2 imposes nonzero minimal duties where the others impose none"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "target_violation",
+     "detail": "No direct contradiction: all three repeats forbid the blind rerun and verbal-only recovery claim; divergence is only in gate inventory (snapshot/audit-log) and blocking vs unspecified enforcement semantics"
+    }
+   ]
+  },
+  "G-manual_1789398236238_04i#B": {
+   "key": "G-manual_1789398236238_04i#B",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_forbid",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_oblige"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 adds a mandatory reversible-snapshot/backup gate (②) as a hard precondition for any overwrite-capable rerun; repeat 1 has no backup requirement at all. This makes the valid_compliant trajectory (which omits any snapshot step) non-compliant under repeat 2.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 adds a mandatory rollback copy/backup of the at-risk artifact as gate condition (3); repeat 1's pre-flight consists only of write-back confirmation, pipeline identity, and frame-level reconciliation, with no backup requirement.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2 explicitly permits proportional relaxation of gate strength for cheap/easily-redone operations ('对低成本、易重做的操作可按比例放宽'); repeat 1's text states the gates as unconditional ('before any rerun... pass observable pre-flight checks'), with scaling appearing only in its risks commentary, not in the contract itself.",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 hard-codes gate-weight scaling into the principle ('Gate weight scales with the irreplaceability of the state at risk, not with keywords'), whereas repeat 1 applies uniform pre-flight requirements to all covered reruns; this changes when the principle's obligations bind for low-stakes sandbox experimentation.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 accepts 'explicitly mark the finalized asset to be skipped' as an alternative to write-back of manual refinement to the generator source; repeats 1 and 2 accept only write-back or version-control archival, so the set of discharging conditions differs across drafts.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2 triggers the gate on any rerun/regeneration plus completion declarations ('完成销账'), including gating the closure act itself; repeat 3 gates execution and completion-claims but conditions applicability on operations 'that can overwrite persistent artifacts', narrowing the trigger for writes to new output directories (near_boundary case falls out of repeat 3's trigger scope but stays inside repeat 2's read of '重跑').",
+     "scenarioKind": "near_boundary_legal",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "valid_compliant",
+     "detail": "Repeat 1 obligates exactly the compliant trajectory described (write-back, pipeline identity, MAD reconciliation → proceed), but repeat 2 forbids proceeding because the required reversible-snapshot evidence (gate ②) is absent: repeat 1 obligates what repeat 2 forbids."
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "scenarioKind": "valid_compliant",
+     "detail": "Repeat 3's backup requirement is conditioned on the artifact being at-risk/irreplaceable and its gate-weight scaling can discharge it, permitting the trajectory; repeat 2's unconditional four-evidence gate forbids the same snapshot-less compliant trajectory."
+    }
+   ]
+  },
+  "G-pain_host_038c29c53be340#A": {
+   "key": "G-pain_host_038c29c53be340#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 permits exactly one exception (material hazard/blocker, labeled as interruption). Repeat 3 adds a second, broader escape: non-urgent self-initiated items may be 'recorded as deferred proposals' rather than fully suppressed, plus an urgency/safety/blocked carve-out. The exception set widened from 1 to 2 categories.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1's only exception is hazard surfacing; Repeat 2 instead carves out '内容与当前任务直接相关的澄清性内容' from the gate. This changes which legitimate cases escape blocking (hazard escalation vs. task-relevant clarification), affecting near-boundary behavior differently.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2 extends the gate to cover progress/completion claims themselves ('任何进展宣称不得先于证据'), a domain Repeat 1 only touches indirectly via 'verified completion'; Repeat 3 similarly adds tracking/dropping of open items ('Dropping open items from tracking across turns') — both broaden the contract beyond focus-shift gating.",
+     "scenarioKind": "target_violation",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 mandates obtaining explicit owner consent for EVERY focus shift; Repeat 3 offers a disjunctive alternative ('record as deferred proposal ... or obtain explicit confirmation'), weakening the hard consent requirement into a consent-or-deferral choice. Behavioral contract differs when consent is unavailable.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-pain_host_038c29c53be340#B": {
+   "key": "G-pain_host_038c29c53be340#B",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "allows_neutral",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "allows_neutral",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "allows_neutral",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 carves out a hazard/blocker alert exception (may surface immediately as an alert); repeat 2 has no such exception, instead exempting 'clarification content directly related to the current task'. The two drafts permit different bypass paths.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3's contract text contains no hazard-alert exception (it appears only as a risk note, not as contract), so repeat 3 forbids immediate surfacing of urgent blockers that repeat 1 explicitly allows as alerts.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 adds an explicit progress-claim gate: no completion/progress claims (e.g. '已优化/已完成') without observable evidence, made a first-class gate; repeats 1 and 3 fold evidence-verification only into the task-completion check, not into message-level progress claims.",
+     "scenarioKind": "valid_compliant",
+     "field": "targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 broadens the trigger from introducing a 'secondary topic' (repeat 1) to introducing, promoting, OR CONTINUING any non-requested topic, and adds a concrete deferral mechanism (record as deferred proposal) absent from repeats 1 and 2.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "scenarioKind": "expected_trigger",
+     "detail": "For an urgent blocker discovered mid-task that the agent surfaces as an alert while the main task is unverified: repeat 1 explicitly permits it (narrow exception), while repeat 3's statement, read literally, forbids introducing any non-owner-requested topic until the pending question is answered and the goal is verified — repeat 1 allows what repeat 3 forbids."
+    }
+   ]
+  },
+  "G-pain_host_198b8c4d901b5b#A": {
+   "key": "G-pain_host_198b8c4d901b5b#A",
+   "classification": "INSUFFICIENT_REPEATS",
+   "drafts": 1
+  },
+  "G-pain_host_198b8c4d901b5b#B": {
+   "key": "G-pain_host_198b8c4d901b5b#B",
+   "classification": "INSUFFICIENT_REPEATS",
+   "drafts": 1
+  },
+  "G-pain_host_432596aee54456#A": {
+   "key": "G-pain_host_432596aee54456#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3 adds a third compliant path — proceeding under a conservatively declared assumption without owner confirmation — whereas Repeat 1 mandates candidate-set + checkpoint confirmation and Repeat 2 mandates surfacing options and waiting for the owner's choice. Under Repeat 3, an agent can skip the confirmation checkpoint entirely on the expected_trigger scenario if it declares an assumption.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 introduces an explicit reversibility carve-out: 'trivially reversible, low-stakes choices proceed without interruption.' Repeat 1 has no such exception, so borderline low-stakes writing choices could obligate a checkpoint under Repeat 1 but be explicitly exempt under Repeat 2 and 3 (Repeat 3 scopes to 'direction-shaping' constraints only).",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeats 2 and 3 add a mandatory persistence requirement for owner directional corrections (persist the correction as a durable constraint / distill into a reusable standard), closing the recurrence loop; Repeat 1 contains no persistence clause, so the repeated-violation scenario (target_violation) is only weakly obligated by Repeat 1 relative to 2/3.",
+     "scenarioKind": "target_violation",
+     "field": "intentContract.targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 forbids unbatched scattered clarification questions and prefers selectable candidates or channel-routed assumption declarations; Repeat 2 requires explicit options with suitability criteria and waiting for owner choice. The mechanism of the compliance gate differs (three-way disjunction in 3 vs. options-plus-wait in 2), affecting how valid_compliant trajectories are recognized.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1 additionally requires the candidate set be non-homogeneous (not all from the agent's own knowledge circle) with audience-fit rationale attached; Repeats 2 and 3 impose weaker requirements (filtered by suitability criteria / 'short list'), so the near_boundary_legal and valid_compliant judgments differ in strictness of candidate construction.",
+     "scenarioKind": "valid_compliant",
+     "field": "antiPatterns"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-pain_host_432596aee54456#B": {
+   "key": "G-pain_host_432596aee54456#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 contains an explicit escape clause '除非 Owner 明确要求跳过对齐' (unless Owner explicitly requests skipping alignment); repeat 2 replaces this with a reversibility/cost-based scaling carve-out ('does not require asking for low-stakes, easily reversible decisions'). The Owner-explicit-skip exception disappears in repeat 2, so a direct 'just write it' instruction is only explicitly protected in repeat 1.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2 adds an entirely new obligation: after an owner correction, the agent must persist the correction as a durable constraint (INTENT.md non-negotiables or long-term memory). Repeat 1 has no persistence requirement; under repeat 2 the target_violation scenario (recurrence after correction) additionally violates the persistence clause.",
+     "scenarioKind": "target_violation",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Trigger condition widens: repeat 1 fires when intent specs are '缺失、空白或模糊' within creation/content-production tasks; repeat 2 fires whenever acceptability 'depends on owner or audience context that cannot be inferred from the task alone', extending beyond pure content tasks (e.g., examples/tone in any deliverable).",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-pain_host_620a1683e2eeb7#A": {
+   "key": "G-pain_host_620a1683e2eeb7#A",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "must_oblige",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1's applicability explicitly extends to '重复工具调用：同一工具或等价操作的连续多次调用', so iterative web_search refinement falls under the rule and incurs a pre-declared exit-condition obligation; Repeat 2 scopes the gate to loops where a termination condition may already be satisfied, leaving result-driven iterative searching effectively untouched.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 explicitly warns against 'over-generalizing from a single diagnosed pain case' and limits rules to the observed failure family, whereas Repeat 1's blanket coverage of any consecutive same-tool calls pulls unrelated domains (e.g., iterative web_search) into scope.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 requires pre-declared exit conditions (completion criteria plus hard iteration/time caps) before entering any loop; Repeat 2 and 3 replace the pre-declared cap requirement with a per-repetition fresh state check, so what counts as compliant entry into a wait differs across drafts.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 adds a freshness/completeness validation requirement for the 'settled' signal (antiPattern: treating a stale or partial settle signal as sufficient), while Repeat 1 and 3 do not; this changes how the legitimate_exception and expected_trigger scenarios are adjudicated when signals may be stale.",
+     "scenarioKind": "legitimate_exception",
+     "field": "antiPatterns"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "out_of_scope",
+     "detail": "For result-driven iterative web_search repetition, repeat 1's rule imposes a must_oblige (pre-declared exit conditions and per-iteration state comparison on any consecutive same-tool calls) while repeat 2 leaves the same behavior essentially unregulated — an obligation-vs-no-coverage divergence on identical behavior."
+    }
+   ]
+  },
+  "G-pain_host_620a1683e2eeb7#B": {
+   "key": "G-pain_host_620a1683e2eeb7#B",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "must_oblige",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1 extends applicability to 'any iterative action', 'repeated identical tool calls', and periodic monitoring generally, pulling non-subagent iteration (e.g., iterative web_search refinement) into scope; repeats 2 and 3 stay confined to wait/poll/retry loops with a termination goal, leaving such iteration untouched.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeats 2 and 3 require the completion signal to be checked fresh against the latest state before each repeat, so a stale settle signal followed by newly running subagents still permits waiting; repeat 1 only requires that a completion signal be 'observed in context', with no freshness/current-state qualifier, so a stale signal would mechanically trigger a stop.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 explicitly carves out over-triggering as a risk ('must distinguish all settled from some still running', 'signal must be explicit and current'), and repeat 3's validationExpectation explicitly flags rules that block legitimate waiting without a completion signal; repeat 1 contains no such stale/partial-signal exception.",
+     "scenarioKind": "legitimate_exception",
+     "field": "intentContract"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "Repeat 1 obligates stopping (forbids further sessions_yield) whenever a settle signal exists in context, which would forbid the legitimate wait after a new batch of running subagents that repeats 2 and 3 explicitly permit under their fresh-state gate."
+    }
+   ]
+  },
+  "G-pain_host_6406fbff5ee282#A": {
+   "key": "G-pain_host_6406fbff5ee282#A",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "not_addressed"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 的关卡是刚性的（'未通过不得交付'），没有任何 Owner 豁免或降级路径；Repeat 2 在 targetBehavior 与 risks 中新增'显式记录降级决策'的例外机制。",
+     "scenarioKind": "legitimate_exception",
+     "field": "intentContract.targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3 将必须完成的评审关卡锚定于'explicitly required'并要求 anchored in explicit owner instructions（T-02），Owner 显式豁免后关卡不再强制；Repeat 1 无此锚定，关卡无条件阻断。",
+     "scenarioKind": "legitimate_exception",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 要求开工前从 Owner 意图导出书面完成定义（DoD）作为前置动作；Repeat 3 仅要求交付前的阻断式检查，不包含前置 DoD 显式化步骤，义务触发时点不同。",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2 的适用域限定为'验收标准超出技术产出本身的交付'，内部沟通回复明确不在域内；Repeat 3 明确把 owner/messages 列为 consumer，覆盖面更宽。",
+     "scenarioKind": "near_boundary_legal",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "repeat 1 must_forbid（Owner 豁免的紧急直发仍被'未通过不得交付'阻断）而 repeat 2 允许（显式降级决策路径），两稿对同一合法豁免行为的契约方向相反。"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "repeat 1 无例外条款、阻断 Owner 显式豁免的交付（must_forbid），repeat 3 以'explicitly required'锚定使同一行为被允许（allows_neutral），构成跨稿行为契约冲突。"
+    }
+   ]
+  },
+  "G-pain_host_6406fbff5ee282#B": {
+   "key": "G-pain_host_6406fbff5ee282#B",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "must_forbid"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 makes all gates absolute ('任一项未通过不得将任务标记为完成') with no Owner-override or degradation path; repeat 2 explicitly contemplates a downgrade path when advisor review is unavailable ('记录自检结果并显式标记评审待补…而不是…完全阻塞交付'), softening the blocking contract.",
+     "scenarioKind": "legitimate_exception",
+     "field": "risks"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3 adds an explicit escalation alternative ('resolve the gap or escalate first') to the gate, whereas repeat 1's gate is unconditionally blocking; this changes behavior under Owner-exempted urgent deliveries.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 3 broadens the consumer definition to include 'audience, owner, advisor, downstream system' and gates 'any deliverable… handed to its consumer', while repeats 1–2 restrict scope to audience-facing content lacking production context; the broader trigger catches internal replies to the Owner and possibly technical outputs.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 mandates (a) upfront explicit confirmation of completion criteria before starting novel tasks and (b) institutionalizing Owner corrections as persistent process checkpoints; repeat 3 drops both the pre-work confirmation clause and the correction-sedimentation mechanism, weakening the contract's upstream and longitudinal conditions.",
+     "scenarioKind": "target_violation",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 hard-codes '互动设计' as a required check item; repeat 2 derives required items from Owner intent ('从 Owner 意图导出显式的完成定义'), making interaction design conditional on intent rather than unconditional.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "scenarioKind": "near_boundary_legal",
+     "detail": "Repeat 1's audience-facing scope permits an internal reply to the already-informed Owner, while repeat 3's 'any deliverable handed to a consumer (… owner …)' with a comprehension-gate forbids that same legitimate internal communication (background not self-contained) — repeat 3 forbids what repeat 1 allows."
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "Under an Owner-explicit urgent exemption, repeat 1 obligates blocking the delivery (gate unconditional), whereas repeat 3's escalation path permits proceeding — direct conflict on the same scenario."
+    }
+   ]
+  },
+  "G-pain_host_85731899e27e6d#A": {
+   "key": "G-pain_host_85731899e27e6d#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "not_addressed",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeats 1 and 2 include an explicit antiPattern against enforcing a stale persisted convention after a newer owner instruction supersedes it; repeat 3's contract (statement, applicability, antiPatterns) contains no supersession/staleness exception, so the legitimate_exception scenario is only protected in repeats 1–2.",
+     "scenarioKind": "legitimate_exception",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 gates the pre-tool-call re-verification on tool calls 'whose execution mode could deviate' from a stated convention; repeat 2 gates on 'any task, phase, or tool call the conventions govern'; repeat 3 gates on 'any action whose domain matches' the convention. The trigger predicate differs in breadth and specificity, changing which concrete tool calls trigger the mandatory recall.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 2 restricts the capture obligation to instructions marked by durable markers ('always', 'never', 'from now on', 'do not forget') and explicitly exempts one-off task-local instructions in the statement; repeats 1 and 3 use broader language ('explicitly states a working convention/preference/constraint') with the one-off distinction relegated to an antiPattern (R1) or absent from the contract (R3).",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1's antiPattern 'Enforcing a persisted convention after the owner has changed their expectation because the artifact was never updated' operationalizes owner-instruction currency; repeat 3 has this only as an integration 'risk' outside the contract, so the drift moves a behavioral exception out of the enforceable rule text.",
+     "scenarioKind": "legitimate_exception",
+     "field": "antiPatterns"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-pain_host_85731899e27e6d#B": {
+   "key": "G-pain_host_85731899e27e6d#B",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 gates pre-execution recall on 'any tool call whose mode of execution could deviate from' a convention — a broad, agent-judged condition; Repeat 2 narrows the gate to tasks/phases/tool calls 'the conventions govern'. This changes how near-boundary routine calls are classified.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2 explicitly writes the one-off, task-local instruction exclusion into the statement and applicability; Repeat 1 only implies it via the 'meant to hold beyond the immediate instruction' qualifier, leaving the boundary softer.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 adds a distinct obligation absent from Repeats 1 and 2: after an owner confirms a corrected workflow, the agent must convert it into a reusable checklist entry — an institutionalization step beyond simply updating the persisted conventions artifact.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 2 conditions capture/recall/update on explicit standing-rule markers ('以后务必', '不要忘记', 'always', 'never'); Repeat 3 broadens the trigger phrasing to 'from now on, be sure to' and 'don't forget how we did this' style statements plus 'preference' in applicability, slightly widening what counts as a persisted convention.",
+     "scenarioKind": "expected_trigger",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 2's risks note that on conflict between the persisted record and the owner's current explicit instruction, the current instruction wins; Repeat 3's risks acknowledge staleness but prescribe no precedence rule — however, since neither includes this in the contract fields, both mechanically forbid the legitimate_exception scenario.",
+     "scenarioKind": "legitimate_exception",
+     "field": "risks"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-pain_host_cffdcb9f5d0257#A": {
+   "key": "G-pain_host_cffdcb9f5d0257#A",
+   "classification": "MATERIAL_DRIFT",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "allows_neutral",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 adds a clarification-or-no-change fallback for undefined improvement targets; Repeat 2 omits this entirely, leaving undefined-target behavior unspecified.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 explicitly states vague 'optimize/improve' instructions never license self-judged modification, directly matching the trigger scenario; Repeat 1 only implicitly covers this via its clarification clause, Repeat 2 not at all.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      2,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 3 requires the baseline be recorded with a specific identifier plus reference evidence; Repeat 2 only requires a 'named, recoverable' snapshot — weaker evidentiary bar.",
+     "scenarioKind": "valid_compliant",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "No draft includes an exception for owner-pre-accepted lossy tradeoffs (e.g., explicit size-compression requests); all three would force non-degradation gates or rollback on owner-sanctioned degradation. Repeat 3's re-anchoring clause is closest (owner 'changes intent') but still gates on non-degradation rather than waiving the gate.",
+     "scenarioKind": "legitimate_exception",
+     "field": "antiPatterns"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1 scopes to any explicitly approved artifact plus underspecified-target domains; Repeat 3 narrows to artifacts 'whose quality is judged by owner preference or subjective standards'; Repeat 2 covers 'deliverables the owner has approved' broadly — boundary coverage differs at the edges (e.g., code/configs covered by R1/R2 but arguably out of R3's subjective-quality scope).",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3's risks explicitly preserve sandboxed parallel variants (never promoting degraded outputs), making near-boundary A/B variant behavior clearly allowed; Repeats 1 and 2 permit it only implicitly via 'reversible experiments' language.",
+     "scenarioKind": "near_boundary_legal",
+     "field": "applicability"
+    }
+   ],
+   "contradictionFindings": []
+  },
+  "G-pain_host_cffdcb9f5d0257#B": {
+   "key": "G-pain_host_cffdcb9f5d0257#B",
+   "classification": "CONTRADICTION",
+   "stances": {
+    "1": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "allows_neutral",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "2": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    },
+    "3": {
+     "expected_trigger": "must_oblige",
+     "valid_compliant": "must_oblige",
+     "legitimate_exception": "must_forbid",
+     "out_of_scope": "not_addressed",
+     "target_violation": "must_oblige",
+     "near_boundary_legal": "allows_neutral"
+    }
+   },
+   "driftFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 1 includes an exception path: when 'better' is undefined the agent must ask the owner and default to minimal change, and re-baselines on any 'revised goal' — so owner-accepted quality tradeoffs (e.g., compression) are accommodated. Repeat 2 permits re-anchoring only on a 'new explicit approval', so an owner-accepted lossy tradeoff before any new approval is blocked by the mandatory rollback gate.",
+     "scenarioKind": "legitimate_exception",
+     "field": "statement"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "exception_change",
+     "detail": "Repeat 3's statement and targetBehavior mandate unconditional rollback of any degrading change with re-anchoring only when the owner approves a new version; unlike repeat 1 it contains no clarified-tradeoff or revised-goal exception, so pre-approved degradation is forbidden rather than permitted.",
+     "scenarioKind": "legitimate_exception",
+     "field": "intentContract.targetBehavior"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "kind": "scope_change",
+     "detail": "Repeat 1's applicability covers 'any artifact the owner has explicitly approved' including code and configurations; repeat 2 narrows to owner-approved media/design deliverables and stakeholder-signed-off revisions, slightly changing domain coverage of the same rule.",
+     "scenarioKind": "out_of_scope",
+     "field": "applicability"
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "kind": "key_condition_change",
+     "detail": "Repeat 1 adds a clarification-first condition ('when the requested better is undefined, first ask the owner... default to minimal or no change'); repeat 3's validationExpectation explicitly rejects rules that 'merely ask the owner' as insufficient, dropping that condition in favor of pure baseline-anchored gating.",
+     "scenarioKind": "expected_trigger",
+     "field": "statement"
+    }
+   ],
+   "contradictionFindings": [
+    {
+     "betweenRepeats": [
+      1,
+      2
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "Repeat 1 permits (allows_neutral) an owner-accepted lossy tradeoff via its revised-goal re-baselining clause, while repeat 2 forbids the same behavior by mandating rollback of any change that degrades relative to the frozen baseline until a new explicit approval exists."
+    },
+    {
+     "betweenRepeats": [
+      1,
+      3
+     ],
+     "scenarioKind": "legitimate_exception",
+     "detail": "Repeat 1 allows the owner-accepted degradation scenario; repeat 3 obligates rollback of it ('roll back any change that degrades relative quality'), forbidding behavior repeat 1 treats as legitimate."
+    }
+   ]
+  }
+ }
+}

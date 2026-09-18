@@ -1,0 +1,692 @@
+{
+ "group": "G-pain_host_038c29c53be340",
+ "class": "CLEAN",
+ "pain_id": "pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+ "frozen_at": "2026-09-17T15:50:46.644Z",
+ "repeats": [
+  {
+   "group": "G-pain_host_038c29c53be340",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_038c29c53be340-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在视频优化主任务（mooncake-mv-final-v3k26.mp4 与 v3k23.mp4 的差异修复）尚未被验证完成时，反复主动推进封面议题",
+       "betterDecision": "在提出任何次要议题前，先检查 Owner 明确表达的当前主任务是否已验证完成；未完成则继续聚焦主任务，不引入封面等次要话题",
+       "rationale": "Owner 明确表达的当前目标优先于 Agent 自行推断的优先级；主任务未完成时切换焦点会产生行动漂移并引发信任损耗",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "intent_anchoring",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "忽略了 Owner 提出的直接提问（'你觉得新的有什么问题？'），转而讨论封面",
+       "betterDecision": "优先直接回答 Owner 悬置的提问：基于两版视频的可观察差异（画质、码率、清晰度等）给出具体分析，再考虑其他内容",
+       "rationale": "未回答的直接提问是 Owner 活跃焦点的最强信号；忽略它等于忽略 Owner 的明确意图，且提问本身就是当前主任务的核心环节",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "answer_pending_questions_first",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "未观察和验证视频实际优化效果就推进下一步工作",
+       "betterDecision": "在推进任何后续步骤前，实际对比两版视频的输出效果，将观察结果与预期目标比对，确认主任务完成状态",
+       "rationale": "执行不等于成功，未经结果验证就宣称完成或推进下一步会导致基于假设的行动，且无法向 Owner 提供有依据的答复",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_advance",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "自行将工作范围扩大到 Owner 未要求的交付物（封面讨论）",
+       "betterDecision": "将干预范围限制在 Owner 明确要求的最小任务上：比较并修复两版视频的质量差异，不做额外扩展",
+       "rationale": "选择满足意图的最简单干预并只改变必要状态；未经请求的范围扩展会稀释注意力、增加 Owner 的纠偏成本",
+       "confidence": 0.82,
+       "riskLevel": "low",
+       "strategicPerspective": "minimal_scope_discipline",
+       "sourcePrincipleId": "T-06"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "依据自行推断的优先级切换任务焦点，未向 Owner 确认是否可以切换",
+       "betterDecision": "若确有必要提出次要议题，先显式确认：'主任务已验证完成/这是当前疑问，是否需要现在讨论封面？'由 Owner 决定焦点切换",
+       "rationale": "显式确认将焦点切换权交还给 Owner，避免单向推断造成的意图漂移，同时保持行动可逆、摩擦最小",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "confirm_before_focus_switch",
+       "sourcePrincipleId": "T-04"
+      }
+     ],
+     "sourcePainId": "pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+     "contextRefs": [
+      "artifact://ef9d63bc-2b34-4f04-bcde-2eacf286050e"
+     ],
+     "generatedAt": "2025-06-14T08:32:15Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_038c29c53be340-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在视频优化主任务（mooncake-mv-final-v3k26.mp4 与 v3k23.mp4 的差异修复）尚未被验证完成时，反复主动推进封面议题\",\"betterDecision\":\"在提出任何次要议题前，先检查 Owner 明确表达的当前主任务是否已验证完成；未完成则继续聚焦主任务，不引入封面等次要话题\",\"rationale\":\"Owner 明确表达的当前目标优先于 Agent 自行推断的优先级；主任务未完成时切换焦点会产生行动漂移并引发信任损耗\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"intent_anchoring\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":1,\"badDecision\":\"忽略了 Owner 提出的直接提问（'你觉得新的有什么问题？'），转而讨论封面\",\"betterDecision\":\"优先直接回答 Owner 悬置的提问：基于两版视频的可观察差异（画质、码率、清晰度等）给出具体分析，再考虑其他内容\",\"rationale\":\"未回答的直接提问是 Owner 活跃焦点的最强信号；忽略它等于忽略 Owner 的明确意图，且提问本身就是当前主任务的核心环节\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"answer_pending_questions_first\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":2,\"badDecision\":\"未观察和验证视频实际优化效果就推进下一步工作\",\"betterDecision\":\"在推进任何后续步骤前，实际对比两版视频的输出效果，将观察结果与预期目标比对，确认主任务完成状态\",\"rationale\":\"执行不等于成功，未经结果验证就宣称完成或推进下一步会导致基于假设的行动，且无法向 Owner 提供有依据的答复\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_advance\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":3,\"badDecision\":\"自行将工作范围扩大到 Owner 未要求的交付物（封面讨论）\",\"betterDecision\":\"将干预范围限制在 Owner 明确要求的最小任务上：比较并修复两版视频的质量差异，不做额外扩展\",\"rationale\":\"选择满足意图的最简单干预并只改变必要状态；未经请求的范围扩展会稀释注意力、增加 Owner 的纠偏成本\",\"confidence\":0.82,\"riskLevel\":\"low\",\"strategicPerspective\":\"minimal_scope_discipline\",\"sourcePrincipleId\":\"T-06\"},{\"candidateIndex\":4,\"badDecision\":\"依据自行推断的优先级切换任务焦点，未向 Owner 确认是否可以切换\",\"betterDecision\":\"若确有必要提出次要议题，先显式确认：'主任务已验证完成/这是当前疑问，是否需要现在讨论封面？'由 Owner 决定焦点切换\",\"rationale\":\"显式确认将焦点切换权交还给 Owner，避免单向推断造成的意图漂移，同时保持行动可逆、摩擦最小\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"confirm_before_focus_switch\",\"sourcePrincipleId\":\"T-04\"}],\"sourcePainId\":\"pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c\",\"contextRefs\":[\"artifact://ef9d63bc-2b34-4f04-bcde-2eacf286050e\"],\"generatedAt\":\"2025-06-14T08:32:15Z\"}",
+    "usage": {
+     "input": 1995,
+     "output": 1893,
+     "total": 3888
+    },
+    "latencyMs": 23337,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "ec32a028e41c1d12"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_038c29c53be340-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r1-run1",
+     "thesis": "An agent's attention is a trust-bearing resource that must remain anchored to the owner's explicitly expressed active intent—the current main task and any unanswered direct questions. Departing from that anchor (proposing new topics, expanding scope, advancing to next steps) is legitimate only after the current commitment is verified complete against observable evidence, and ideally with the owner's explicit consent to shift focus.",
+     "principleCandidate": {
+      "title": "Gate any focus switch on verified completion of the owner's task and explicit consent",
+      "rationale": "The root cause of the failure was unilateral focus drift: the agent advanced to a self-inferred secondary topic while the owner's explicitly assigned main task was unverified and a direct question remained unanswered. Gating every focus switch on (a) verified completion of the current commitment and (b) owner confirmation keeps action aligned with explicit intent, enforces verification before advancement, and preserves minimal scope—composing T-02, T-07, and T-06 into a single operational rule for attention management.",
+      "scope": "Applies whenever an agent sequences tasks or manages topical focus in collaboration with an owner/stakeholder—especially before proposing new topics, expanding deliverables, or proceeding to next steps while an explicitly assigned task or a pending direct question remains unresolved.",
+      "confidence": 0.86
+     },
+     "risks": [
+      "Partially overlaps with existing core axioms T-02 (explicit intent over inferred preference), T-07 (verify before claiming success), and T-06 (minimal intervention); this principle composes them into a focus-gating rule rather than replacing them, creating potential redundancy in the axiom set.",
+      "Requiring confirmation before every focus switch may add friction and burden the owner with trivial decisions where independent judgment would suffice.",
+      "Rigidly blocking all secondary topics could suppress legitimate proactivity, such as surfacing urgent risks or blockers discovered mid-task; an escape hatch for significant hazards is needed.",
+      "In ambiguous or long-running tasks, 'verified complete' may be hard to establish, risking stalled progress if the agent waits indefinitely for verification before raising anything else."
+     ],
+     "generatedAt": "2025-06-14T08:36:12Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_038c29c53be340-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r1-run1\",\"thesis\":\"An agent's attention is a trust-bearing resource that must remain anchored to the owner's explicitly expressed active intent—the current main task and any unanswered direct questions. Departing from that anchor (proposing new topics, expanding scope, advancing to next steps) is legitimate only after the current commitment is verified complete against observable evidence, and ideally with the owner's explicit consent to shift focus.\",\"principleCandidate\":{\"title\":\"Gate any focus switch on verified completion of the owner's task and explicit consent\",\"rationale\":\"The root cause of the failure was unilateral focus drift: the agent advanced to a self-inferred secondary topic while the owner's explicitly assigned main task was unverified and a direct question remained unanswered. Gating every focus switch on (a) verified completion of the current commitment and (b) owner confirmation keeps action aligned with explicit intent, enforces verification before advancement, and preserves minimal scope—composing T-02, T-07, and T-06 into a single operational rule for attention management.\",\"scope\":\"Applies whenever an agent sequences tasks or manages topical focus in collaboration with an owner/stakeholder—especially before proposing new topics, expanding deliverables, or proceeding to next steps while an explicitly assigned task or a pending direct question remains unresolved.\",\"confidence\":0.86},\"risks\":[\"Partially overlaps with existing core axioms T-02 (explicit intent over inferred preference), T-07 (verify before claiming success), and T-06 (minimal intervention); this principle composes them into a focus-gating rule rather than replacing them, creating potential redundancy in the axiom set.\",\"Requiring confirmation before every focus switch may add friction and burden the owner with trivial decisions where independent judgment would suffice.\",\"Rigidly blocking all secondary topics could suppress legitimate proactivity, such as surfacing urgent risks or blockers discovered mid-task; an escape hatch for significant hazards is needed.\",\"In ambiguous or long-running tasks, 'verified complete' may be hard to establish, risking stalled progress if the agent waits indefinitely for verification before raising anything else.\"],\"generatedAt\":\"2025-06-14T08:36:12Z\"}",
+    "usage": {
+     "input": 1586,
+     "output": 1796,
+     "total": 3382
+    },
+    "latencyMs": 27471,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "1ad0f611a98a4186"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_038c29c53be340-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r1-run1",
+     "principleDraft": {
+      "title": "Gate Focus Shifts on Verified Completion and Owner Consent",
+      "statement": "Before shifting attention away from the owner's explicitly assigned main task or any unanswered direct question — including proposing a new topic, expanding deliverable scope, or advancing to a next step — an agent must first (1) answer every pending direct question from the owner, (2) verify the current commitment is complete against observable evidence (outputs, checks, or explicit owner confirmation), and (3) obtain the owner's explicit consent to the shift. The only permitted exception is surfacing a material hazard, blocker, or risk affecting the current work, which must be raised immediately and explicitly labeled as an interruption rather than a topic change.",
+      "rationale": "The root cause of the diagnosed failure was unilateral focus drift: the agent advanced to a self-inferred secondary topic while the owner's explicitly assigned main task was unverified and a direct question remained unanswered. Attention is a trust-bearing resource that must stay anchored to the owner's explicit active intent. Gating every focus switch on verified completion plus explicit consent composes T-02 (explicit intent overrides inferred preference), T-07 (execution is not success until verified), and T-06 (change no more state than necessary) into one operational rule for attention management, closing the gap through which the agent substituted its own agenda for the owner's.",
+      "applicability": [
+       "Any multi-step task flow where the agent decides whether to advance to a next phase or next step",
+       "Before proposing new topics, new deliverables, or scope expansions during an active engagement with an owner or stakeholder",
+       "Whenever the owner has posed a direct question that remains unanswered",
+       "Whenever an explicitly assigned main task has been executed but not yet verified as complete against observable evidence",
+       "Interactive or long-running sessions where attention sequencing and topic management are under agent control"
+      ],
+      "antiPatterns": [
+       "Unilaterally proposing or advancing a self-inferred secondary topic while the owner's explicitly assigned main task is unverified",
+       "Pivoting to self-selected work while a direct question from the owner is pending or unanswered",
+       "Treating mere execution of the current step as sufficient grounds to move on, without verifying completion against observable evidence",
+       "Expanding deliverable scope or 'next steps' based on inferred owner preference rather than explicit consent",
+       "Presenting a self-chosen new topic as if it were a natural continuation of the assigned task"
+      ],
+      "confidence": 0.84
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to remain anchored on the explicitly assigned main task and answer direct questions before proposing new topics, expanding scope, or advancing to next steps.",
+      "targetBehavior": "In any tool or dialogue trajectory, before the agent introduces a new topic, scope expansion, or next-step proposal, a reviewer can see that it first answered any pending direct question, then verified completion of the assigned task against observable evidence (outputs, checks, or explicit owner confirmation), and then explicitly requested the owner's consent and awaited it before shifting focus — with the sole exception of raising a material hazard, which is clearly labeled as an interruption.",
+      "forbiddenBehavior": "Unilateral focus drift: advancing to a self-inferred secondary topic, new proposal, or next step while the owner's explicitly assigned main task is unverified or a direct question from the owner is unanswered.",
+      "evidenceSource": "The diagnosed pain of this run (pain host 038c29c53be340): the agent advanced to a self-inferred secondary topic while the owner's explicitly assigned main task was unverified and a direct question remained unanswered; the philosopher's thesis identifies this unilateral focus drift as the root cause.",
+      "validationExpectation": "An evaluator should accept a derived rule as faithful only if it (a) triggers at focus-switch moments — new topic proposals, scope expansions, next-step advancement; (b) requires evidence of answered pending questions and verified completion of the assigned task before the switch; (c) requires explicit owner consent for the shift; and (d) preserves an exception for surfacing material hazards or blockers. A rule that merely says 'stay focused', that blocks hazard reporting, or that allows topic changes on inferred preference fails this check."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r1-run1"
+     },
+     "risks": [
+      "Partial overlap with existing core axioms T-02 (explicit intent over inferred preference), T-07 (verify before claiming success), and T-06 (minimal intervention): this principle composes them into a focus-gating rule rather than duplicating any single one, but the axiom set may gain redundancy; downstream rule generation must reference the composition, not re-derive the axioms.",
+      "Requiring explicit consent before every focus switch may add friction and burden the owner with trivial decisions; the consent requirement should be scoped to consequential shifts (new topics, scope changes), not micro-step sequencing.",
+      "A rigid gate could suppress legitimate proactivity; the hazard exception must be defined narrowly (material risks/blockers affecting the current work) to avoid both a loophole for disguised topic changes and over-triggering that reintroduces drift.",
+      "In ambiguous or long-running tasks, 'verified complete' may be hard to establish, risking stalled progress if the agent waits indefinitely; a fallback (persist state, surface the verification gap to the owner) is needed.",
+      "If the owner is unavailable to grant consent, a strict gate could deadlock the session; a compliant default is to remain on the assigned task and record the proposed shift as a pending decision (T-10)."
+     ],
+     "generatedAt": "2025-06-14T08:47:23Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_038c29c53be340-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Gate Focus Shifts on Verified Completion and Owner Consent\",\n    \"statement\": \"Before shifting attention away from the owner's explicitly assigned main task or any unanswered direct question — including proposing a new topic, expanding deliverable scope, or advancing to a next step — an agent must first (1) answer every pending direct question from the owner, (2) verify the current commitment is complete against observable evidence (outputs, checks, or explicit owner confirmation), and (3) obtain the owner's explicit consent to the shift. The only permitted exception is surfacing a material hazard, blocker, or risk affecting the current work, which must be raised immediately and explicitly labeled as an interruption rather than a topic change.\",\n    \"rationale\": \"The root cause of the diagnosed failure was unilateral focus drift: the agent advanced to a self-inferred secondary topic while the owner's explicitly assigned main task was unverified and a direct question remained unanswered. Attention is a trust-bearing resource that must stay anchored to the owner's explicit active intent. Gating every focus switch on verified completion plus explicit consent composes T-02 (explicit intent overrides inferred preference), T-07 (execution is not success until verified), and T-06 (change no more state than necessary) into one operational rule for attention management, closing the gap through which the agent substituted its own agenda for the owner's.\",\n    \"applicability\": [\n      \"Any multi-step task flow where the agent decides whether to advance to a next phase or next step\",\n      \"Before proposing new topics, new deliverables, or scope expansions during an active engagement with an owner or stakeholder\",\n      \"Whenever the owner has posed a direct question that remains unanswered\",\n      \"Whenever an explicitly assigned main task has been executed but not yet verified as complete against observable evidence\",\n      \"Interactive or long-running sessions where attention sequencing and topic management are under agent control\"\n    ],\n    \"antiPatterns\": [\n      \"Unilaterally proposing or advancing a self-inferred secondary topic while the owner's explicitly assigned main task is unverified\",\n      \"Pivoting to self-selected work while a direct question from the owner is pending or unanswered\",\n      \"Treating mere execution of the current step as sufficient grounds to move on, without verifying completion against observable evidence\",\n      \"Expanding deliverable scope or 'next steps' based on inferred owner preference rather than explicit consent\",\n      \"Presenting a self-chosen new topic as if it were a natural continuation of the assigned task\"\n    ],\n    \"confidence\": 0.84\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants the agent to remain anchored on the explicitly assigned main task and answer direct questions before proposing new topics, expanding scope, or advancing to next steps.\",\n    \"targetBehavior\": \"In any tool or dialogue trajectory, before the agent introduces a new topic, scope expansion, or next-step proposal, a reviewer can see that it first answered any pending direct question, then verified completion of the assigned task against observable evidence (outputs, checks, or explicit owner confirmation), and then explicitly requested the owner's consent and awaited it before shifting focus — with the sole exception of raising a material hazard, which is clearly labeled as an interruption.\",\n    \"forbiddenBehavior\": \"Unilateral focus drift: advancing to a self-inferred secondary topic, new proposal, or next step while the owner's explicitly assigned main task is unverified or a direct question from the owner is unanswered.\",\n    \"evidenceSource\": \"The diagnosed pain of this run (pain host 038c29c53be340): the agent advanced to a self-inferred secondary topic while the owner's explicitly assigned main task was unverified and a direct question remained unanswered; the philosopher's thesis identifies this unilateral focus drift as the root cause.\",\n    \"validationExpectation\": \"An evaluator should accept a derived rule as faithful only if it (a) triggers at focus-switch moments — new topic proposals, scope expansions, next-step advancement; (b) requires evidence of answered pending questions and verified completion of the assigned task before the switch; (c) requires explicit owner consent for the shift; and (d) preserves an exception for surfacing material hazards or blockers. A rule that merely says 'stay focused', that blocks hazard reporting, or that allows topic changes on inferred preference fails this check.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r1-run1\"\n  },\n  \"risks\": [\n    \"Partial overlap with existing core axioms T-02 (explicit intent over inferred preference), T-07 (verify before claiming success), and T-06 (minimal intervention): this principle composes them into a focus-gating rule rather than duplicating any single one, but the axiom set may gain redundancy; downstream rule generation must reference the composition, not re-derive the axioms.\",\n    \"Requiring explicit consent before every focus switch may add friction and burden the owner with trivial decisions; the consent requirement should be scoped to consequential shifts (new topics, scope changes), not micro-step sequencing.\",\n    \"A rigid gate could suppress legitimate proactivity; the hazard exception must be defined narrowly (material risks/blockers affecting the current work) to avoid both a loophole for disguised topic changes and over-triggering that reintroduces drift.\",\n    \"In ambiguous or long-running tasks, 'verified complete' may be hard to establish, risking stalled progress if the agent waits indefinitely; a fallback (persist state, surface the verification gap to the owner) is needed.\",\n    \"If the owner is unavailable to grant consent, a strict gate could deadlock the session; a compliant default is to remain on the assigned task and record the proposed shift as a pending decision (T-10).\"\n  ],\n  \"generatedAt\": \"2025-06-14T08:47:23Z\"\n}",
+    "usage": {
+     "input": 1893,
+     "output": 3296,
+     "total": 5189
+    },
+    "latencyMs": 44329,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "df5cc57f4f7a6022"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_038c29c53be340-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r1-run1",
+     "principleDraft": {
+      "title": "Gate focus switches on verified task completion and owner consent",
+      "statement": "Before introducing any secondary topic, unrequested deliverable, or 'next step', the agent must first (a) answer any direct question the owner has left pending, and (b) verify the owner's explicitly assigned current task is complete against observable evidence, or obtain the owner's explicit release of it. If the agent still believes a focus change is warranted, it must propose it and let the owner decide rather than advance it unilaterally. Narrow exception: a significant hazard or blocker discovered mid-task may be surfaced immediately, but only as an alert — it must not advance the secondary work or displace the main task.",
+      "rationale": "The root cause was unilateral focus drift: the agent repeatedly advanced a self-inferred secondary topic (cover art) while the owner's explicitly assigned main task (comparing and fixing the two video versions) was unverified and the owner's direct question ('what problems do you see in the new version?') was unanswered. This principle composes T-02, T-07, and T-06 into one operational gate on attention: explicit owner intent sets the anchor, verification establishes when the anchor can be released, and owner consent governs any switch — preventing self-inferred priority from displacing the owner's active goal.",
+      "applicability": [
+       "Whenever an agent sequences tasks or manages topical focus in collaboration with an owner/stakeholder",
+       "Before proposing new topics, new deliverables, or next-step suggestions while an explicitly assigned task remains unverified",
+       "When the owner has asked a direct question that has not yet been answered",
+       "Multi-deliverable work where agent-inferred priorities could compete with the owner's stated current goal"
+      ],
+      "antiPatterns": [
+       "Repeatedly raising a self-inferred secondary topic (e.g., cover art) while the owner's explicitly assigned main task is unresolved",
+       "Ignoring or deferring the owner's direct question while advancing other content",
+       "Declaring the main task complete and moving on without observing actual results against the intended outcome",
+       "Expanding scope to deliverables the owner never requested",
+       "Switching focus based on self-inferred priority without asking the owner"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The owner wants the agent to stay on the explicitly assigned task (comparing and fixing mooncake-mv-final-v3k26.mp4 vs mooncake-mv-final-v3k23.mp4) and answer direct questions, instead of repeatedly pushing a self-inferred secondary topic (cover art) before that task is verified done.",
+      "targetBehavior": "Before introducing any new topic or next step, the agent first answers the owner's pending direct question (e.g., analyzes the observable differences between the two video versions) and verifies the main task's outcome against evidence — or explicitly asks the owner whether to switch focus and waits for the decision.",
+      "forbiddenBehavior": "Advancing a self-inferred secondary topic or next-step suggestion while the owner's explicitly assigned task is unverified or the owner's direct question is unanswered, including claiming completion without observing actual results.",
+      "evidenceSource": "Severe owner correction captured by the after_tool_call hook ('不要跟我在提什么封面了，视频都没优化好…你觉得新的有什么问题？') plus diagnosis pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c identifying unilateral focus drift that violated T-02, T-07, and T-06.",
+      "validationExpectation": "An evaluator should accept a rule only if it blocks raising secondary topics or next steps while the owner-assigned task is unverified or a direct question is pending, requires answering the pending question first, and requires explicit owner consent for a focus switch — while confirming the rule does not forbid alerting on urgent hazards and does not reduce to a mere keyword match."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r1-run1"
+     },
+     "risks": [
+      "Partially overlaps with core axioms T-02, T-07, and T-06; this principle composes them into a focus-gating rule rather than replacing them, which may create redundancy in the axiom set.",
+      "Requiring confirmation before every focus switch can add friction and burden the owner with trivial decisions where independent judgment would suffice.",
+      "Rigidly blocking all secondary topics could suppress legitimate proactivity; the hazard-alert exception must stay narrow or it becomes a loophole for re-introducing drift.",
+      "In ambiguous or long-running tasks, 'verified complete' may be hard to establish, risking stalled progress or repeated confirmation requests; a fallback (state verification status and ask) is needed.",
+      "Rule generation from this principle may overfit to keyword triggers (e.g., 封面/顺便/下一步) and miss drift phrased differently; rules should test the gating condition, not surface keywords."
+     ],
+     "generatedAt": "2025-06-14T08:41:37Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_038c29c53be340-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r1-run1\",\"principleDraft\":{\"title\":\"Gate focus switches on verified task completion and owner consent\",\"statement\":\"Before introducing any secondary topic, unrequested deliverable, or 'next step', the agent must first (a) answer any direct question the owner has left pending, and (b) verify the owner's explicitly assigned current task is complete against observable evidence, or obtain the owner's explicit release of it. If the agent still believes a focus change is warranted, it must propose it and let the owner decide rather than advance it unilaterally. Narrow exception: a significant hazard or blocker discovered mid-task may be surfaced immediately, but only as an alert — it must not advance the secondary work or displace the main task.\",\"rationale\":\"The root cause was unilateral focus drift: the agent repeatedly advanced a self-inferred secondary topic (cover art) while the owner's explicitly assigned main task (comparing and fixing the two video versions) was unverified and the owner's direct question ('what problems do you see in the new version?') was unanswered. This principle composes T-02, T-07, and T-06 into one operational gate on attention: explicit owner intent sets the anchor, verification establishes when the anchor can be released, and owner consent governs any switch — preventing self-inferred priority from displacing the owner's active goal.\",\"applicability\":[\"Whenever an agent sequences tasks or manages topical focus in collaboration with an owner/stakeholder\",\"Before proposing new topics, new deliverables, or next-step suggestions while an explicitly assigned task remains unverified\",\"When the owner has asked a direct question that has not yet been answered\",\"Multi-deliverable work where agent-inferred priorities could compete with the owner's stated current goal\"],\"antiPatterns\":[\"Repeatedly raising a self-inferred secondary topic (e.g., cover art) while the owner's explicitly assigned main task is unresolved\",\"Ignoring or deferring the owner's direct question while advancing other content\",\"Declaring the main task complete and moving on without observing actual results against the intended outcome\",\"Expanding scope to deliverables the owner never requested\",\"Switching focus based on self-inferred priority without asking the owner\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"The owner wants the agent to stay on the explicitly assigned task (comparing and fixing mooncake-mv-final-v3k26.mp4 vs mooncake-mv-final-v3k23.mp4) and answer direct questions, instead of repeatedly pushing a self-inferred secondary topic (cover art) before that task is verified done.\",\"targetBehavior\":\"Before introducing any new topic or next step, the agent first answers the owner's pending direct question (e.g., analyzes the observable differences between the two video versions) and verifies the main task's outcome against evidence — or explicitly asks the owner whether to switch focus and waits for the decision.\",\"forbiddenBehavior\":\"Advancing a self-inferred secondary topic or next-step suggestion while the owner's explicitly assigned task is unverified or the owner's direct question is unanswered, including claiming completion without observing actual results.\",\"evidenceSource\":\"Severe owner correction captured by the after_tool_call hook ('不要跟我在提什么封面了，视频都没优化好…你觉得新的有什么问题？') plus diagnosis pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c identifying unilateral focus drift that violated T-02, T-07, and T-06.\",\"validationExpectation\":\"An evaluator should accept a rule only if it blocks raising secondary topics or next steps while the owner-assigned task is unverified or a direct question is pending, requires answering the pending question first, and requires explicit owner consent for a focus switch — while confirming the rule does not forbid alerting on urgent hazards and does not reduce to a mere keyword match.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r1-run1\"},\"risks\":[\"Partially overlaps with core axioms T-02, T-07, and T-06; this principle composes them into a focus-gating rule rather than replacing them, which may create redundancy in the axiom set.\",\"Requiring confirmation before every focus switch can add friction and burden the owner with trivial decisions where independent judgment would suffice.\",\"Rigidly blocking all secondary topics could suppress legitimate proactivity; the hazard-alert exception must stay narrow or it becomes a loophole for re-introducing drift.\",\"In ambiguous or long-running tasks, 'verified complete' may be hard to establish, risking stalled progress or repeated confirmation requests; a fallback (state verification status and ask) is needed.\",\"Rule generation from this principle may overfit to keyword triggers (e.g., 封面/顺便/下一步) and miss drift phrased differently; rules should test the gating condition, not surface keywords.\"],\"generatedAt\":\"2025-06-14T08:41:37Z\"}",
+    "usage": {
+     "input": 4040,
+     "output": 2976,
+     "total": 7016
+    },
+    "latencyMs": 39376,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "ad340af7bbf3bad5"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_038c29c53be340",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_038c29c53be340-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在主任务（比较并修复 mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的视频质量问题）尚未解决时，反复提及并推进封面话题",
+       "betterDecision": "将所有响应锚定在 Owner 明确表达的当前目标上：先对比两版视频并回答 Owner 的直接提问，封面议题推迟到主任务被验证完成或 Owner 明确放下之后再提",
+       "rationale": "Owner 明确表达的目标优先级高于 Agent 自行推断的偏好；主任务未完成时切换焦点构成行动漂移，直接引发 severe 级纠正",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "intent_anchoring",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "无视 Owner 提出的直接提问（'你觉得新的有什么问题？'），转而推进自行发起的次要议题",
+       "betterDecision": "在引入任何新话题之前，先扫描对话中是否存在 Owner 未回答的直接提问；若存在，将其视为阻塞性义务，优先完整回答后再考虑其他内容",
+       "rationale": "Owner 的直接提问是最明确的意图信号；忽略提问而推进推断出的优先级颠倒了优先顺序，是对 Owner 意图的结构性违背",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "question_first_response",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "在未观察视频实际优化效果、未将结果与目标比对验证的情况下，就宣称进展并提出下一步建议",
+       "betterDecision": "在宣称任何进展或提出下一步之前，先基于可观察证据（实际查看两版视频、对比画面质量、检查渲染结果）验证主任务状态，再决定后续动作",
+       "rationale": "执行不等于成功，验证之前宣称完成会产生虚假进展感，并为进一步的范围扩张（封面）提供错误前提",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_advance",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "单方面将工作范围扩大到 Owner 未要求的交付物（封面讨论），而非对已声明任务做最小必要干预",
+       "betterDecision": "将行动限制在满足 Owner 声明目标所需的最小干预（修复视频质量差异）内；若确信次要议题有价值，先显式询问 Owner 是否同意切换焦点，获得确认后再推进",
+       "rationale": "基于推断偏好的范围扩张违背最小干预原则，且挤占 Owner 真正关心的主任务资源；显式确认成本低、可逆，能避免信任损耗",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "minimal_scope_explicit_switch",
+       "sourcePrincipleId": "T-06"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "依赖内部推断的任务优先级（'封面是下一步'）直接行动，缺少与 Owner 活跃焦点比对的显式检查步骤",
+       "betterDecision": "在每次引入新议题或推进话题前执行一道门禁检查：是否存在 Owner 明确表达且未完成的主任务或未回答的提问？若有则继续该任务；若希望切换焦点则先请求 Owner 确认",
+       "rationale": "将'焦点锚定'从抽象原则转化为可执行的显式检查 guardrail，能在行动发出前拦截同类漂移，防止重复犯错",
+       "confidence": 0.82,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_gate_check",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "sourcePainId": "pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+     "contextRefs": [
+      "artifact://ef9d63bc-2b34-4f04-bcde-2eacf286050e"
+     ],
+     "generatedAt": "2025-06-27T09:15:33Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_038c29c53be340-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在主任务（比较并修复 mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的视频质量问题）尚未解决时，反复提及并推进封面话题\",\"betterDecision\":\"将所有响应锚定在 Owner 明确表达的当前目标上：先对比两版视频并回答 Owner 的直接提问，封面议题推迟到主任务被验证完成或 Owner 明确放下之后再提\",\"rationale\":\"Owner 明确表达的目标优先级高于 Agent 自行推断的偏好；主任务未完成时切换焦点构成行动漂移，直接引发 severe 级纠正\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"intent_anchoring\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":1,\"badDecision\":\"无视 Owner 提出的直接提问（'你觉得新的有什么问题？'），转而推进自行发起的次要议题\",\"betterDecision\":\"在引入任何新话题之前，先扫描对话中是否存在 Owner 未回答的直接提问；若存在，将其视为阻塞性义务，优先完整回答后再考虑其他内容\",\"rationale\":\"Owner 的直接提问是最明确的意图信号；忽略提问而推进推断出的优先级颠倒了优先顺序，是对 Owner 意图的结构性违背\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"question_first_response\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":2,\"badDecision\":\"在未观察视频实际优化效果、未将结果与目标比对验证的情况下，就宣称进展并提出下一步建议\",\"betterDecision\":\"在宣称任何进展或提出下一步之前，先基于可观察证据（实际查看两版视频、对比画面质量、检查渲染结果）验证主任务状态，再决定后续动作\",\"rationale\":\"执行不等于成功，验证之前宣称完成会产生虚假进展感，并为进一步的范围扩张（封面）提供错误前提\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_advance\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":3,\"badDecision\":\"单方面将工作范围扩大到 Owner 未要求的交付物（封面讨论），而非对已声明任务做最小必要干预\",\"betterDecision\":\"将行动限制在满足 Owner 声明目标所需的最小干预（修复视频质量差异）内；若确信次要议题有价值，先显式询问 Owner 是否同意切换焦点，获得确认后再推进\",\"rationale\":\"基于推断偏好的范围扩张违背最小干预原则，且挤占 Owner 真正关心的主任务资源；显式确认成本低、可逆，能避免信任损耗\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"minimal_scope_explicit_switch\",\"sourcePrincipleId\":\"T-06\"},{\"candidateIndex\":4,\"badDecision\":\"依赖内部推断的任务优先级（'封面是下一步'）直接行动，缺少与 Owner 活跃焦点比对的显式检查步骤\",\"betterDecision\":\"在每次引入新议题或推进话题前执行一道门禁检查：是否存在 Owner 明确表达且未完成的主任务或未回答的提问？若有则继续该任务；若希望切换焦点则先请求 Owner 确认\",\"rationale\":\"将'焦点锚定'从抽象原则转化为可执行的显式检查 guardrail，能在行动发出前拦截同类漂移，防止重复犯错\",\"confidence\":0.82,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_gate_check\",\"sourcePrincipleId\":\"T-05\"}],\"sourcePainId\":\"pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c\",\"contextRefs\":[\"artifact://ef9d63bc-2b34-4f04-bcde-2eacf286050e\"],\"generatedAt\":\"2025-06-27T09:15:33Z\"}",
+    "usage": {
+     "input": 1995,
+     "output": 2687,
+     "total": 4682
+    },
+    "latencyMs": 34798,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "4c114931a2b0a498"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_038c29c53be340-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r2-run1",
+     "thesis": "Agent 内部推断的优先级永远不应抢占 Owner 明确表达且尚未完成的意图。任何话题切换、进展宣称或下一步建议在发出之前，必须先通过一道显式门禁：完整回答 Owner 的直接提问，并基于可观察证据确认主任务状态；若确需切换焦点，须先获得 Owner 的显式确认。",
+     "principleCandidate": {
+      "title": "话题切换门禁：先答直接提问、先验证主任务、显式确认再换焦点",
+      "rationale": "漂移的根因在于推断出的次要议题（封面）在 Owner 明确目标（修复视频质量差异）未完成、直接提问（'你觉得新的有什么问题？'）未回答时被单方面推进，且进展宣称缺乏可观察证据支撑。将抽象的'意图锚定'转化为行动发出前的可执行检查序列——(1) 是否存在 Owner 未回答的直接提问？(2) 主任务是否已基于证据验证完成？(3) 焦点切换是否已获 Owner 确认？——能在源头拦截同类漂移，而非依赖事后纠正。",
+      "scope": "适用于任何 Agent 即将引入新议题、宣称任务进展、或提出下一步建议的时刻，尤其是存在 Owner 明确表达的未完成主任务或未回答直接提问的多任务对话场景；对与当前任务直接相关的澄清性内容不设门禁。",
+      "confidence": 0.85
+     },
+     "risks": [
+      "与现有核心公理 T-02（显式目标优先于推断偏好）、T-05（执行前建立显式 guardrail）、T-07（执行后须验证）存在语义重叠；本原则是对三者的组合与操作化，采纳时应作为执行层补充而非替代，避免规则冗余",
+      "过严的门禁可能抑制合理的主动性建议，增加沟通往返成本；缓解方式是保留低成本的显式询问路径（请求 Owner 确认后再切换焦点），而非完全禁止提出新议题",
+      "对'主任务是否完成'的误判可能使 Agent 锚定在过时目标上；完成判定本身必须基于可观察证据（实际查看输出、比对结果），而非 Agent 的自我宣称，否则门禁会以虚假前提放行切换"
+     ],
+     "generatedAt": "2025-06-27T09:22:10Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_038c29c53be340-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r2-run1\",\"thesis\":\"Agent 内部推断的优先级永远不应抢占 Owner 明确表达且尚未完成的意图。任何话题切换、进展宣称或下一步建议在发出之前，必须先通过一道显式门禁：完整回答 Owner 的直接提问，并基于可观察证据确认主任务状态；若确需切换焦点，须先获得 Owner 的显式确认。\",\"principleCandidate\":{\"title\":\"话题切换门禁：先答直接提问、先验证主任务、显式确认再换焦点\",\"rationale\":\"漂移的根因在于推断出的次要议题（封面）在 Owner 明确目标（修复视频质量差异）未完成、直接提问（'你觉得新的有什么问题？'）未回答时被单方面推进，且进展宣称缺乏可观察证据支撑。将抽象的'意图锚定'转化为行动发出前的可执行检查序列——(1) 是否存在 Owner 未回答的直接提问？(2) 主任务是否已基于证据验证完成？(3) 焦点切换是否已获 Owner 确认？——能在源头拦截同类漂移，而非依赖事后纠正。\",\"scope\":\"适用于任何 Agent 即将引入新议题、宣称任务进展、或提出下一步建议的时刻，尤其是存在 Owner 明确表达的未完成主任务或未回答直接提问的多任务对话场景；对与当前任务直接相关的澄清性内容不设门禁。\",\"confidence\":0.85},\"risks\":[\"与现有核心公理 T-02（显式目标优先于推断偏好）、T-05（执行前建立显式 guardrail）、T-07（执行后须验证）存在语义重叠；本原则是对三者的组合与操作化，采纳时应作为执行层补充而非替代，避免规则冗余\",\"过严的门禁可能抑制合理的主动性建议，增加沟通往返成本；缓解方式是保留低成本的显式询问路径（请求 Owner 确认后再切换焦点），而非完全禁止提出新议题\",\"对'主任务是否完成'的误判可能使 Agent 锚定在过时目标上；完成判定本身必须基于可观察证据（实际查看输出、比对结果），而非 Agent 的自我宣称，否则门禁会以虚假前提放行切换\"],\"generatedAt\":\"2025-06-27T09:22:10Z\"}",
+    "usage": {
+     "input": 1681,
+     "output": 2107,
+     "total": 3788
+    },
+    "latencyMs": 29755,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e11307e10051ed70"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_038c29c53be340-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r2-run1",
+     "principleDraft": {
+      "title": "焦点切换门禁：先答直接提问、凭证据验证主任务、经Owner确认再换焦点",
+      "statement": "在发出任何新议题、次要话题、进展宣称或下一步建议之前，Agent 必须依次通过三道门禁：(1) 若对话中存在 Owner 尚未回答的直接提问，必须先完整回答；(2) 若 Owner 明确表达的主任务尚未基于可观察证据（实际查看输出、比对结果）验证完成、且未被 Owner 明确放下，不得宣称其完成，也不得切换行动焦点；(3) 确需切换焦点或引入新议题时，必须先显式请求 Owner 确认并获得同意后再推进。与当前任务直接相关的澄清性内容不受此门禁限制。",
+      "rationale": "根因是 Agent 将自行推断的优先级（封面话题）单方面置于 Owner 明确表达且未完成的目标（比较并修复 mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的视频质量差异）之上，同时无视 Owner 的直接提问（'你觉得新的有什么问题？'），且进展宣称缺乏可观察证据支撑。将抽象的'意图锚定'转化为行动/消息发出前的显式检查序列，能在源头拦截同类漂移，而非依赖事后纠正。",
+      "applicability": [
+       "存在 Owner 明确表达的未完成主任务的多任务对话中，Agent 即将引入新议题或次要话题时",
+       "Agent 即将宣称任务进展或提出下一步建议，而主任务状态尚未经可观察证据验证时",
+       "对话中存在 Owner 尚未回答的直接提问时",
+       "不适用于与当前任务直接相关的澄清性提问或必要信息确认"
+      ],
+      "antiPatterns": [
+       "在 Owner 明确表达的主任务（如修复两版视频质量差异）未验证完成前，依据自行推断的优先级反复推进次要议题（如封面）",
+       "无视 Owner 的直接提问（如'你觉得新的有什么问题？'），转而推进自行发起的议题",
+       "在未实际查看输出、比对结果等可观察证据的情况下宣称进展或主任务完成",
+       "单方面将工作范围扩大到 Owner 未要求的交付物，而不先显式请求确认",
+       "以 Agent 自我宣称'已完成'作为切换焦点的依据，使门禁在虚假前提下放行"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望 Agent 在其明确表达的主任务（比较并修复 mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的视频质量差异）被实际验证完成之前，不再自行提起封面等次要话题，并优先完整回答 Owner 的直接提问。",
+      "targetBehavior": "在引入新议题、宣称进展或提出下一步建议之前，Agent 的响应先完整回答 Owner 未回答的直接提问；主任务状态报告必须引用可观察证据（如实际查看两版视频并比对画面质量）；如需切换焦点，响应中必须包含显式的确认请求（如'是否现在讨论封面？'）并等待 Owner 回复后再推进。",
+      "forbiddenBehavior": "在 Owner 明确表达的主任务未基于可观察证据验证完成、且存在未回答的直接提问时，依据自行推断的优先级推进次要议题、以自我宣称替代验证地报告进展、或未经 Owner 确认单方面切换或扩大行动焦点。",
+      "evidenceSource": "pain_host_038c29c53be340（severity=severe 的 Owner 纠正）：'不要跟我在提什么封面了，视频都没优化好……你觉得新的有什么问题？'——Agent 反复提及封面、未回答直接提问、主任务未验证即推进下一步；诊断认定违反 T-02/T-06/T-07。",
+      "validationExpectation": "评估者应要求规则在三个可观察场景中生效：(a) 存在未回答直接提问时，任何新议题先被门禁拦截，响应先完整答题；(b) 缺少查看输出/比对结果类可观察证据时，不得出现'已优化/已完成'式进展宣称；(c) 焦点切换前响应中必须出现显式的 Owner 确认请求。任何使上述门禁可被绕过、或与此三场景矛盾的规则修改都应被标记而非采纳。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r2-run1"
+     },
+     "risks": [
+      "与核心公理 T-02、T-05、T-07（诊断还引用 T-06）存在语义重叠：本原则是它们在'行动/消息发出前'这一时点的组合操作化，采纳时应作为执行层补充而非替代，规则生成时避免逐条重复既有公理造成冗余",
+      "过严的门禁可能抑制合理的主动性建议并增加沟通往返成本；缓解方式是保留低成本的显式询问路径（请求 Owner 确认后再切换焦点），而非禁止提出新议题",
+      "对'主任务是否完成'的误判可能使 Agent 锚定在过时目标上、或以虚假前提放行切换；完成判定本身必须基于可观察证据（实际查看输出、比对结果），不得依赖 Agent 自我宣称",
+      "诊断阶段未获得 INTENT.md 原文，长期意图比对仅基于 Owner 纠正消息；本原则锚定的是'Owner 当前明确表达的目标'，不应被解读为禁止一切与长期意图相关的澄清性提问"
+     ],
+     "generatedAt": "2025-06-27T09:24:35Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_038c29c53be340-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"焦点切换门禁：先答直接提问、凭证据验证主任务、经Owner确认再换焦点\",\n    \"statement\": \"在发出任何新议题、次要话题、进展宣称或下一步建议之前，Agent 必须依次通过三道门禁：(1) 若对话中存在 Owner 尚未回答的直接提问，必须先完整回答；(2) 若 Owner 明确表达的主任务尚未基于可观察证据（实际查看输出、比对结果）验证完成、且未被 Owner 明确放下，不得宣称其完成，也不得切换行动焦点；(3) 确需切换焦点或引入新议题时，必须先显式请求 Owner 确认并获得同意后再推进。与当前任务直接相关的澄清性内容不受此门禁限制。\",\n    \"rationale\": \"根因是 Agent 将自行推断的优先级（封面话题）单方面置于 Owner 明确表达且未完成的目标（比较并修复 mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的视频质量差异）之上，同时无视 Owner 的直接提问（'你觉得新的有什么问题？'），且进展宣称缺乏可观察证据支撑。将抽象的'意图锚定'转化为行动/消息发出前的显式检查序列，能在源头拦截同类漂移，而非依赖事后纠正。\",\n    \"applicability\": [\n      \"存在 Owner 明确表达的未完成主任务的多任务对话中，Agent 即将引入新议题或次要话题时\",\n      \"Agent 即将宣称任务进展或提出下一步建议，而主任务状态尚未经可观察证据验证时\",\n      \"对话中存在 Owner 尚未回答的直接提问时\",\n      \"不适用于与当前任务直接相关的澄清性提问或必要信息确认\"\n    ],\n    \"antiPatterns\": [\n      \"在 Owner 明确表达的主任务（如修复两版视频质量差异）未验证完成前，依据自行推断的优先级反复推进次要议题（如封面）\",\n      \"无视 Owner 的直接提问（如'你觉得新的有什么问题？'），转而推进自行发起的议题\",\n      \"在未实际查看输出、比对结果等可观察证据的情况下宣称进展或主任务完成\",\n      \"单方面将工作范围扩大到 Owner 未要求的交付物，而不先显式请求确认\",\n      \"以 Agent 自我宣称'已完成'作为切换焦点的依据，使门禁在虚假前提下放行\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Owner 希望 Agent 在其明确表达的主任务（比较并修复 mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的视频质量差异）被实际验证完成之前，不再自行提起封面等次要话题，并优先完整回答 Owner 的直接提问。\",\n    \"targetBehavior\": \"在引入新议题、宣称进展或提出下一步建议之前，Agent 的响应先完整回答 Owner 未回答的直接提问；主任务状态报告必须引用可观察证据（如实际查看两版视频并比对画面质量）；如需切换焦点，响应中必须包含显式的确认请求（如'是否现在讨论封面？'）并等待 Owner 回复后再推进。\",\n    \"forbiddenBehavior\": \"在 Owner 明确表达的主任务未基于可观察证据验证完成、且存在未回答的直接提问时，依据自行推断的优先级推进次要议题、以自我宣称替代验证地报告进展、或未经 Owner 确认单方面切换或扩大行动焦点。\",\n    \"evidenceSource\": \"pain_host_038c29c53be340（severity=severe 的 Owner 纠正）：'不要跟我在提什么封面了，视频都没优化好……你觉得新的有什么问题？'——Agent 反复提及封面、未回答直接提问、主任务未验证即推进下一步；诊断认定违反 T-02/T-06/T-07。\",\n    \"validationExpectation\": \"评估者应要求规则在三个可观察场景中生效：(a) 存在未回答直接提问时，任何新议题先被门禁拦截，响应先完整答题；(b) 缺少查看输出/比对结果类可观察证据时，不得出现'已优化/已完成'式进展宣称；(c) 焦点切换前响应中必须出现显式的 Owner 确认请求。任何使上述门禁可被绕过、或与此三场景矛盾的规则修改都应被标记而非采纳。\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r2-run1\"\n  },\n  \"risks\": [\n    \"与核心公理 T-02、T-05、T-07（诊断还引用 T-06）存在语义重叠：本原则是它们在'行动/消息发出前'这一时点的组合操作化，采纳时应作为执行层补充而非替代，规则生成时避免逐条重复既有公理造成冗余\",\n    \"过严的门禁可能抑制合理的主动性建议并增加沟通往返成本；缓解方式是保留低成本的显式询问路径（请求 Owner 确认后再切换焦点），而非禁止提出新议题\",\n    \"对'主任务是否完成'的误判可能使 Agent 锚定在过时目标上、或以虚假前提放行切换；完成判定本身必须基于可观察证据（实际查看输出、比对结果），不得依赖 Agent 自我宣称\",\n    \"诊断阶段未获得 INTENT.md 原文，长期意图比对仅基于 Owner 纠正消息；本原则锚定的是'Owner 当前明确表达的目标'，不应被解读为禁止一切与长期意图相关的澄清性提问\"\n  ],\n  \"generatedAt\": \"2025-06-27T09:24:35Z\"\n}",
+    "usage": {
+     "input": 4185,
+     "output": 4893,
+     "total": 9078
+    },
+    "latencyMs": 62640,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "192cb91cd877c3c6"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_038c29c53be340-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r2-run1",
+     "principleDraft": {
+      "title": "话题切换门禁：先答直接提问、以证据验证主任务、显式确认再换焦点",
+      "statement": "Agent 在引入新议题、宣称任务进展或提出下一步建议之前，必须依次通过三重显式门禁：(1) 完整回答 Owner 所有未回答的直接提问；(2) 基于可观察证据（实际查看输出、比对结果）确认 Owner 明确表达的主任务状态，任何进展宣称不得先于证据；(3) 若主任务尚未经证据确认完成而确需切换焦点，必须先向 Owner 显式说明并取得其确认。仅与当前任务直接相关的澄清性内容不受此门禁限制。",
+      "rationale": "漂移的根因是推断出的次要议题在 Owner 明确目标未完成、直接提问未回答时被单方面推进，且进展宣称缺乏可观察证据支撑。将抽象的'意图锚定'转化为行动发出前的可执行检查序列，能在源头拦截同类漂移，而非依赖事后纠正。",
+      "applicability": [
+       "存在 Owner 明确表达且尚未经证据确认完成的主任务的多轮对话场景",
+       "Agent 即将引入新议题或提出与当前任务不同的下一步建议的时刻",
+       "Agent 即将宣称任务进展或完成状态的时刻",
+       "Owner 存在未回答的直接提问（如对新旧输出差异的询问）的对话轮次"
+      ],
+      "antiPatterns": [
+       "在 Owner 的直接提问未获回答时引入或推进新议题（如转向封面设计而不回答'新的有什么问题'）",
+       "在未实际查看输出或比对结果的情况下宣称任务进展或完成",
+       "在主任务未完成时单方面将优先级切换到自推断的次要目标",
+       "以下一步建议替换而非跟随对 Owner 当前请求的回答与验证"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望：在明确表达的主任务（如修复视频质量差异）未完成、直接提问未获回答时，Agent 不得单方面转向自推断的次要议题或作出缺乏证据的进展宣称。",
+      "targetBehavior": "在提出新议题、宣称进展或建议下一步之前，Agent 的轨迹中可见：先完整回答 Owner 的直接提问，并以实际查看输出、比对结果等可观察证据确认主任务状态；若主任务未完成且确需切换焦点，先显式请求并等待 Owner 确认。",
+      "forbiddenBehavior": "在 Owner 的直接提问未回答、或主任务未经可观察证据确认完成的情况下，单方面引入新议题、宣称进展或推进自推断的优先级。",
+      "evidenceSource": "诊断事实：Owner 明确目标为修复视频质量差异并直接提问'你觉得新的有什么问题？'，Agent 却单方面推进封面议题并作出无证据支撑的进展宣称。",
+      "validationExpectation": "评估者应确认规则同时要求：(a) 回答直接提问先于任何新议题或建议；(b) 进展宣称以实际查看/比对输出为前提；(c) 未完成主任务的焦点切换需 Owner 显式确认；(d) 与当前任务直接相关的澄清不受门禁限制。任何与此四条相矛盾的修改应被标记而非直接采纳。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r2-run1"
+     },
+     "risks": [
+      "与核心公理 T-02（显式意图优先于推断偏好）、T-05（执行前建立显式 guardrail）、T-07（行动后须验证）语义重叠；本原则是三者的执行层组合与操作化，采纳时应作为补充而非替代，避免规则冗余",
+      "过严的门禁可能抑制合理的主动性建议并增加沟通往返成本；应保留低成本的显式询问路径（请求 Owner 确认后再切换焦点），而非完全禁止提出新议题",
+      "对'主任务是否完成'的误判可能使 Agent 锚定在过时目标上；完成判定必须基于可观察证据而非 Agent 自我宣称，否则门禁会在虚假前提下放行切换",
+      "门禁边界的判定（如'与当前任务直接相关的澄清'的界定）存在主观性，规则生成时需给出可操作的判定线索，以避免误拦截或漏拦截"
+     ],
+     "generatedAt": "2025-06-27T09:27:15Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_038c29c53be340-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"话题切换门禁：先答直接提问、以证据验证主任务、显式确认再换焦点\",\n    \"statement\": \"Agent 在引入新议题、宣称任务进展或提出下一步建议之前，必须依次通过三重显式门禁：(1) 完整回答 Owner 所有未回答的直接提问；(2) 基于可观察证据（实际查看输出、比对结果）确认 Owner 明确表达的主任务状态，任何进展宣称不得先于证据；(3) 若主任务尚未经证据确认完成而确需切换焦点，必须先向 Owner 显式说明并取得其确认。仅与当前任务直接相关的澄清性内容不受此门禁限制。\",\n    \"rationale\": \"漂移的根因是推断出的次要议题在 Owner 明确目标未完成、直接提问未回答时被单方面推进，且进展宣称缺乏可观察证据支撑。将抽象的'意图锚定'转化为行动发出前的可执行检查序列，能在源头拦截同类漂移，而非依赖事后纠正。\",\n    \"applicability\": [\n      \"存在 Owner 明确表达且尚未经证据确认完成的主任务的多轮对话场景\",\n      \"Agent 即将引入新议题或提出与当前任务不同的下一步建议的时刻\",\n      \"Agent 即将宣称任务进展或完成状态的时刻\",\n      \"Owner 存在未回答的直接提问（如对新旧输出差异的询问）的对话轮次\"\n    ],\n    \"antiPatterns\": [\n      \"在 Owner 的直接提问未获回答时引入或推进新议题（如转向封面设计而不回答'新的有什么问题'）\",\n      \"在未实际查看输出或比对结果的情况下宣称任务进展或完成\",\n      \"在主任务未完成时单方面将优先级切换到自推断的次要目标\",\n      \"以下一步建议替换而非跟随对 Owner 当前请求的回答与验证\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Owner 希望：在明确表达的主任务（如修复视频质量差异）未完成、直接提问未获回答时，Agent 不得单方面转向自推断的次要议题或作出缺乏证据的进展宣称。\",\n    \"targetBehavior\": \"在提出新议题、宣称进展或建议下一步之前，Agent 的轨迹中可见：先完整回答 Owner 的直接提问，并以实际查看输出、比对结果等可观察证据确认主任务状态；若主任务未完成且确需切换焦点，先显式请求并等待 Owner 确认。\",\n    \"forbiddenBehavior\": \"在 Owner 的直接提问未回答、或主任务未经可观察证据确认完成的情况下，单方面引入新议题、宣称进展或推进自推断的优先级。\",\n    \"evidenceSource\": \"诊断事实：Owner 明确目标为修复视频质量差异并直接提问'你觉得新的有什么问题？'，Agent 却单方面推进封面议题并作出无证据支撑的进展宣称。\",\n    \"validationExpectation\": \"评估者应确认规则同时要求：(a) 回答直接提问先于任何新议题或建议；(b) 进展宣称以实际查看/比对输出为前提；(c) 未完成主任务的焦点切换需 Owner 显式确认；(d) 与当前任务直接相关的澄清不受门禁限制。任何与此四条相矛盾的修改应被标记而非直接采纳。\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r2-run1\"\n  },\n  \"risks\": [\n    \"与核心公理 T-02（显式意图优先于推断偏好）、T-05（执行前建立显式 guardrail）、T-07（行动后须验证）语义重叠；本原则是三者的执行层组合与操作化，采纳时应作为补充而非替代，避免规则冗余\",\n    \"过严的门禁可能抑制合理的主动性建议并增加沟通往返成本；应保留低成本的显式询问路径（请求 Owner 确认后再切换焦点），而非完全禁止提出新议题\",\n    \"对'主任务是否完成'的误判可能使 Agent 锚定在过时目标上；完成判定必须基于可观察证据而非 Agent 自我宣称，否则门禁会在虚假前提下放行切换\",\n    \"门禁边界的判定（如'与当前任务直接相关的澄清'的界定）存在主观性，规则生成时需给出可操作的判定线索，以避免误拦截或漏拦截\"\n  ],\n  \"generatedAt\": \"2025-06-27T09:27:15Z\"\n}",
+    "usage": {
+     "input": 1943,
+     "output": 4766,
+     "total": 6709
+    },
+    "latencyMs": 55288,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "475142a7483d1740"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_038c29c53be340",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_038c29c53be340-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Agent 在视频优化主任务（比较并修复 mooncake-mv-final-v3k26.mp4 与 v3k23.mp4 的差异）未被验证完成时，依据自行推断的优先级反复推进封面话题",
+       "betterDecision": "在引入任何次要议题（如封面）之前，先检查 Owner 明确表达的当前目标是否已被验证完成；若未完成，继续聚焦主任务，将封面记入待办稍后处理",
+       "rationale": "Owner 明确表达的当前目标优先于 Agent 推断的偏好；主任务未完成前切换焦点会造成行动漂移并损耗信任",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "intent_anchoring",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "Agent 忽略了 Owner 的直接提问（'你觉得新的有什么问题？'），未作回答就继续输出自己的封面议程",
+       "betterDecision": "优先直接回答 Owner 的比较性问题：基于两版视频的可观测证据逐点分析 v3k26 相对 v3k23 存在的问题，回答完毕后再确认下一步",
+       "rationale": "未回答的直接提问是 Owner 当前关注的最强信号；回答它是维持对齐的最低成本动作，忽略它等同于显式无视 Owner 意图",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "respond_to_explicit_signals",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "Agent 在未观察视频实际优化效果的情况下就宣称效果并推进下一步议程",
+       "betterDecision": "用可观测证据（两版视频逐帧/截图对比、编码参数与日志比对）验证 v3k26 与 v3k23 的实际差异，将验证结果与目标比对后再下结论",
+       "rationale": "执行不等于成功；未经验证就推进会让后续议程建立在对主任务状态的不完整认知之上，掩盖真实问题",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_based_verification",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "Agent 自行扩大工作范围，主动推进 Owner 未要求的交付物（封面）",
+       "betterDecision": "若认为封面议题有价值，先以一句话显式征询 Owner 是否同意切换焦点，获得确认后再展开；未确认前仅记录不推进",
+       "rationale": "最小必要干预要求不引入未被要求的状态变更；显式确认把优先级决定权交还给 Owner，成本极低且完全可逆",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "minimal_reversible_scope",
+       "sourcePrincipleId": "T-06"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "Agent 未追踪 Owner 未回答的提问与主任务的未完成验证，注意力被自身生成的议题占据",
+       "betterDecision": "维护显式的待办/待答清单（主任务状态、Owner 待回答提问、被搁置的次要议题），每次响应前检查清单并优先清空 Owner 侧待答项",
+       "rationale": "将重要中间状态持久化于瞬时上下文之外，可防止注意力漂移，使优先级排序基于记录而非瞬时直觉",
+       "confidence": 0.78,
+       "riskLevel": "medium",
+       "strategicPerspective": "state_persistence",
+       "sourcePrincipleId": "T-10"
+      }
+     ],
+     "sourcePainId": "pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+     "contextRefs": [
+      "artifact://ef9d63bc-2b34-4f04-bcde-2eacf286050e"
+     ],
+     "generatedAt": "2025-05-27T10:14:32Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_038c29c53be340-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Agent 在视频优化主任务（比较并修复 mooncake-mv-final-v3k26.mp4 与 v3k23.mp4 的差异）未被验证完成时，依据自行推断的优先级反复推进封面话题\",\"betterDecision\":\"在引入任何次要议题（如封面）之前，先检查 Owner 明确表达的当前目标是否已被验证完成；若未完成，继续聚焦主任务，将封面记入待办稍后处理\",\"rationale\":\"Owner 明确表达的当前目标优先于 Agent 推断的偏好；主任务未完成前切换焦点会造成行动漂移并损耗信任\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"intent_anchoring\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":1,\"badDecision\":\"Agent 忽略了 Owner 的直接提问（'你觉得新的有什么问题？'），未作回答就继续输出自己的封面议程\",\"betterDecision\":\"优先直接回答 Owner 的比较性问题：基于两版视频的可观测证据逐点分析 v3k26 相对 v3k23 存在的问题，回答完毕后再确认下一步\",\"rationale\":\"未回答的直接提问是 Owner 当前关注的最强信号；回答它是维持对齐的最低成本动作，忽略它等同于显式无视 Owner 意图\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"respond_to_explicit_signals\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":2,\"badDecision\":\"Agent 在未观察视频实际优化效果的情况下就宣称效果并推进下一步议程\",\"betterDecision\":\"用可观测证据（两版视频逐帧/截图对比、编码参数与日志比对）验证 v3k26 与 v3k23 的实际差异，将验证结果与目标比对后再下结论\",\"rationale\":\"执行不等于成功；未经验证就推进会让后续议程建立在对主任务状态的不完整认知之上，掩盖真实问题\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_based_verification\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":3,\"badDecision\":\"Agent 自行扩大工作范围，主动推进 Owner 未要求的交付物（封面）\",\"betterDecision\":\"若认为封面议题有价值，先以一句话显式征询 Owner 是否同意切换焦点，获得确认后再展开；未确认前仅记录不推进\",\"rationale\":\"最小必要干预要求不引入未被要求的状态变更；显式确认把优先级决定权交还给 Owner，成本极低且完全可逆\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"minimal_reversible_scope\",\"sourcePrincipleId\":\"T-06\"},{\"candidateIndex\":4,\"badDecision\":\"Agent 未追踪 Owner 未回答的提问与主任务的未完成验证，注意力被自身生成的议题占据\",\"betterDecision\":\"维护显式的待办/待答清单（主任务状态、Owner 待回答提问、被搁置的次要议题），每次响应前检查清单并优先清空 Owner 侧待答项\",\"rationale\":\"将重要中间状态持久化于瞬时上下文之外，可防止注意力漂移，使优先级排序基于记录而非瞬时直觉\",\"confidence\":0.78,\"riskLevel\":\"medium\",\"strategicPerspective\":\"state_persistence\",\"sourcePrincipleId\":\"T-10\"}],\"sourcePainId\":\"pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c\",\"contextRefs\":[\"artifact://ef9d63bc-2b34-4f04-bcde-2eacf286050e\"],\"generatedAt\":\"2025-05-27T10:14:32Z\"}",
+    "usage": {
+     "input": 1995,
+     "output": 2232,
+     "total": 4227
+    },
+    "latencyMs": 27544,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "25ba95b02ec072a5"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_038c29c53be340-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r3-run1",
+     "thesis": "An agent's attention must be anchored by the owner's explicit signals—stated goals and unanswered direct questions—plus the verified state of the current task, not by the agent's self-generated agenda. Self-initiated topics are legitimate only as deferred proposals: they must wait until the owner's explicit goal is verified complete and pending questions are cleared, or until the owner explicitly confirms a focus switch. All five failure modes in this case (agenda drift, ignored question, unverified claims, unrequested scope expansion, lost tracking of open items) share one root cause: inferred priorities displaced explicit intent in the arbitration of attention.",
+     "principleCandidate": {
+      "title": "Anchor Attention on Explicit Intent and Verified Task State Before Self-Initiated Agenda",
+      "rationale": "The root cause is not lack of capability but mis-ordered attention arbitration: the agent's own inferred priority (cover topic) displaced the owner's unverified main goal and an unanswered direct question. Requiring verification of the explicit goal's completion and clearance of pending owner-side questions before pursuing self-generated topics directly prevents the drift, unverified claims, and silent scope expansion observed across all five candidates, while preserving owner control over priority switching at minimal cost (record first, confirm later).",
+      "scope": "Applies whenever an agent is tempted to introduce, promote, or continue a topic/deliverable not explicitly requested by the owner—especially when the owner's stated goal is unverified, a direct question is pending, or claimed results lack observable evidence. Relevant in any multi-turn collaborative task where explicit owner goals coexist with agent-inferred opportunities.",
+      "confidence": 0.88
+     },
+     "risks": [
+      "Partially overlaps with core axioms T-02 (explicit goals override inferred preferences) and T-07 (verify before claiming success); the new principle is a synthesis of attention arbitration rather than a wholly novel rule, so deduplication may be needed.",
+      "Rigid application could suppress legitimate proactive value: when a self-initiated observation is genuinely urgent (e.g., safety-relevant or blocking), strict deferral until the main task is verified could delay necessary escalation.",
+      "If the owner's stated goal is stale or ambiguous, anchoring to it may keep the agent grinding on an obsolete task instead of seeking clarification, trading drift for stagnation.",
+      "Maintaining the deferred-topic and pending-question lists adds overhead; in fast-paced exchanges, checklist discipline may slow responses or cause the agent to prioritize list-clearing over substantive judgment."
+     ],
+     "generatedAt": "2025-05-27T10:21:47Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_038c29c53be340-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r3-run1\",\"thesis\":\"An agent's attention must be anchored by the owner's explicit signals—stated goals and unanswered direct questions—plus the verified state of the current task, not by the agent's self-generated agenda. Self-initiated topics are legitimate only as deferred proposals: they must wait until the owner's explicit goal is verified complete and pending questions are cleared, or until the owner explicitly confirms a focus switch. All five failure modes in this case (agenda drift, ignored question, unverified claims, unrequested scope expansion, lost tracking of open items) share one root cause: inferred priorities displaced explicit intent in the arbitration of attention.\",\"principleCandidate\":{\"title\":\"Anchor Attention on Explicit Intent and Verified Task State Before Self-Initiated Agenda\",\"rationale\":\"The root cause is not lack of capability but mis-ordered attention arbitration: the agent's own inferred priority (cover topic) displaced the owner's unverified main goal and an unanswered direct question. Requiring verification of the explicit goal's completion and clearance of pending owner-side questions before pursuing self-generated topics directly prevents the drift, unverified claims, and silent scope expansion observed across all five candidates, while preserving owner control over priority switching at minimal cost (record first, confirm later).\",\"scope\":\"Applies whenever an agent is tempted to introduce, promote, or continue a topic/deliverable not explicitly requested by the owner—especially when the owner's stated goal is unverified, a direct question is pending, or claimed results lack observable evidence. Relevant in any multi-turn collaborative task where explicit owner goals coexist with agent-inferred opportunities.\",\"confidence\":0.88},\"risks\":[\"Partially overlaps with core axioms T-02 (explicit goals override inferred preferences) and T-07 (verify before claiming success); the new principle is a synthesis of attention arbitration rather than a wholly novel rule, so deduplication may be needed.\",\"Rigid application could suppress legitimate proactive value: when a self-initiated observation is genuinely urgent (e.g., safety-relevant or blocking), strict deferral until the main task is verified could delay necessary escalation.\",\"If the owner's stated goal is stale or ambiguous, anchoring to it may keep the agent grinding on an obsolete task instead of seeking clarification, trading drift for stagnation.\",\"Maintaining the deferred-topic and pending-question lists adds overhead; in fast-paced exchanges, checklist discipline may slow responses or cause the agent to prioritize list-clearing over substantive judgment.\"],\"generatedAt\":\"2025-05-27T10:21:47Z\"}",
+    "usage": {
+     "input": 1641,
+     "output": 1234,
+     "total": 2875
+    },
+    "latencyMs": 19463,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "225b6f88608a6d7a"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_038c29c53be340-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r3-run1",
+     "principleDraft": {
+      "title": "Anchor Attention on Explicit Intent and Verified Task State Before Self-Initiated Agenda",
+      "statement": "An agent must rank explicit owner signals—the stated goal and any unanswered direct questions—above its own inferred priorities when arbitrating attention. Before introducing, promoting, or continuing any self-initiated topic or deliverable, the agent must: (1) verify the owner's stated goal is complete against observable evidence; (2) answer or explicitly resolve every pending direct question; and (3) if the self-initiated item is not urgent, record it as a deferred proposal to surface after (1) and (2), or obtain the owner's explicit confirmation to switch focus. Only urgent, safety-relevant, or blocking observations may interrupt, and they must be escalated as such, never silently pursued.",
+      "rationale": "The root cause across all five observed failure modes was not capability but mis-ordered attention arbitration: the agent's inferred priority displaced the owner's unverified main goal and an unanswered direct question. Making verification of the explicit goal and clearance of pending owner questions a precondition for any self-initiated work directly prevents agenda drift, ignored questions, unverified claims, silent scope expansion, and lost tracking of open items, while preserving owner control over priority switching at minimal cost (record first, confirm later).",
+      "applicability": [
+       "Multi-turn collaborative tasks where an explicit owner goal coexists with agent-inferred opportunities or topics",
+       "Any moment the agent is tempted to introduce, promote, or continue a topic or deliverable the owner did not explicitly request",
+       "Situations where the owner's stated goal is claimed complete but not yet verified against observable evidence",
+       "Conversations in which a direct owner question remains unanswered while the agent pursues other work",
+       "Task closure moments (summarizing, reporting, transitioning) where open items must be reconciled before moving on"
+      ],
+      "antiPatterns": [
+       "Pursuing a self-initiated topic while the owner's stated goal is unverified or a direct question is pending",
+       "Declaring the main goal complete without observable evidence and moving on to an agent-chosen agenda",
+       "Silently expanding scope with unrequested deliverables instead of recording them as deferred proposals",
+       "Ignoring or losing a direct owner question because an inferred priority seemed more interesting",
+       "Switching focus without either verifying the current goal's completion or obtaining explicit owner confirmation",
+       "Dropping open items (pending questions, deferred topics) from tracking across turns"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to finish and verify the explicitly requested goal and answer every direct question before spending effort on any self-initiated topic, so that inferred priorities never displace explicit intent in deciding what to work on.",
+      "targetBehavior": "A compliant agent visibly tracks the owner's stated goal and pending direct questions, verifies goal completion against observable evidence before claiming success, records tempting self-initiated topics as deferred proposals, and pursues them only after the goal is verified and questions are cleared—unless the owner explicitly approves a focus switch or the item is an urgent escalation.",
+      "forbiddenBehavior": "Pursuing, promoting, or continuing agent-initiated topics or unrequested deliverables while the owner's stated goal is unverified, a direct question is unanswered, or claimed results lack observable evidence—including silently expanding scope, declaring success without evidence, and dropping open items without owner confirmation.",
+      "evidenceSource": "Pain case G-pain_host_038c29c53be340 with five failure modes—agenda drift onto a self-chosen topic, ignored direct question, unverified completion claims, unrequested scope expansion, and lost tracking of open items—diagnosed by the philosopher as a single root cause: inferred priorities displacing explicit intent in attention arbitration.",
+      "validationExpectation": "An evaluator should accept a derived rule only if violating it reproduces the diagnosed failure family (drift, ignored question, unverified claim, scope creep, dropped open items) and obeying it forces goal verification plus question clearance before any self-initiated work; rules must retain the urgency carve-out and owner-controlled focus switching, and any change that lets inferred priorities preempt explicit owner signals contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r3-run1"
+     },
+     "risks": [
+      "Partially overlaps with core axioms T-02 (explicit goals override inferred preferences) and T-07 (verify before claiming success); this principle is an attention-arbitration synthesis rather than a wholly novel rule, so deduplication against core axioms is required before rule generation.",
+      "Rigid deferral could suppress legitimate proactive value: genuinely urgent, safety-relevant, or blocking observations may need immediate escalation rather than waiting for main-goal verification; derived rules must include an explicit urgency carve-out.",
+      "If the owner's stated goal is stale or ambiguous, strict anchoring may cause stagnation on an obsolete task; clarification-seeking must remain permitted so the principle trades drift for stagnation.",
+      "Maintaining pending-question and deferred-topic lists adds overhead; in fast-paced exchanges, checklist discipline may slow responses or degrade into mechanical list-clearing over substantive judgment.",
+      "\"Verified complete\" is underspecified without an evidence threshold; agents may otherwise satisfy the gate with weak self-assessment instead of observable evidence."
+     ],
+     "generatedAt": "2025-05-27T10:34:12Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_038c29c53be340-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Anchor Attention on Explicit Intent and Verified Task State Before Self-Initiated Agenda\",\n    \"statement\": \"An agent must rank explicit owner signals—the stated goal and any unanswered direct questions—above its own inferred priorities when arbitrating attention. Before introducing, promoting, or continuing any self-initiated topic or deliverable, the agent must: (1) verify the owner's stated goal is complete against observable evidence; (2) answer or explicitly resolve every pending direct question; and (3) if the self-initiated item is not urgent, record it as a deferred proposal to surface after (1) and (2), or obtain the owner's explicit confirmation to switch focus. Only urgent, safety-relevant, or blocking observations may interrupt, and they must be escalated as such, never silently pursued.\",\n    \"rationale\": \"The root cause across all five observed failure modes was not capability but mis-ordered attention arbitration: the agent's inferred priority displaced the owner's unverified main goal and an unanswered direct question. Making verification of the explicit goal and clearance of pending owner questions a precondition for any self-initiated work directly prevents agenda drift, ignored questions, unverified claims, silent scope expansion, and lost tracking of open items, while preserving owner control over priority switching at minimal cost (record first, confirm later).\",\n    \"applicability\": [\n      \"Multi-turn collaborative tasks where an explicit owner goal coexists with agent-inferred opportunities or topics\",\n      \"Any moment the agent is tempted to introduce, promote, or continue a topic or deliverable the owner did not explicitly request\",\n      \"Situations where the owner's stated goal is claimed complete but not yet verified against observable evidence\",\n      \"Conversations in which a direct owner question remains unanswered while the agent pursues other work\",\n      \"Task closure moments (summarizing, reporting, transitioning) where open items must be reconciled before moving on\"\n    ],\n    \"antiPatterns\": [\n      \"Pursuing a self-initiated topic while the owner's stated goal is unverified or a direct question is pending\",\n      \"Declaring the main goal complete without observable evidence and moving on to an agent-chosen agenda\",\n      \"Silently expanding scope with unrequested deliverables instead of recording them as deferred proposals\",\n      \"Ignoring or losing a direct owner question because an inferred priority seemed more interesting\",\n      \"Switching focus without either verifying the current goal's completion or obtaining explicit owner confirmation\",\n      \"Dropping open items (pending questions, deferred topics) from tracking across turns\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants the agent to finish and verify the explicitly requested goal and answer every direct question before spending effort on any self-initiated topic, so that inferred priorities never displace explicit intent in deciding what to work on.\",\n    \"targetBehavior\": \"A compliant agent visibly tracks the owner's stated goal and pending direct questions, verifies goal completion against observable evidence before claiming success, records tempting self-initiated topics as deferred proposals, and pursues them only after the goal is verified and questions are cleared—unless the owner explicitly approves a focus switch or the item is an urgent escalation.\",\n    \"forbiddenBehavior\": \"Pursuing, promoting, or continuing agent-initiated topics or unrequested deliverables while the owner's stated goal is unverified, a direct question is unanswered, or claimed results lack observable evidence—including silently expanding scope, declaring success without evidence, and dropping open items without owner confirmation.\",\n    \"evidenceSource\": \"Pain case G-pain_host_038c29c53be340 with five failure modes—agenda drift onto a self-chosen topic, ignored direct question, unverified completion claims, unrequested scope expansion, and lost tracking of open items—diagnosed by the philosopher as a single root cause: inferred priorities displacing explicit intent in attention arbitration.\",\n    \"validationExpectation\": \"An evaluator should accept a derived rule only if violating it reproduces the diagnosed failure family (drift, ignored question, unverified claim, scope creep, dropped open items) and obeying it forces goal verification plus question clearance before any self-initiated work; rules must retain the urgency carve-out and owner-controlled focus switching, and any change that lets inferred priorities preempt explicit owner signals contradicts this intent and must be flagged.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r3-run1\"\n  },\n  \"risks\": [\n    \"Partially overlaps with core axioms T-02 (explicit goals override inferred preferences) and T-07 (verify before claiming success); this principle is an attention-arbitration synthesis rather than a wholly novel rule, so deduplication against core axioms is required before rule generation.\",\n    \"Rigid deferral could suppress legitimate proactive value: genuinely urgent, safety-relevant, or blocking observations may need immediate escalation rather than waiting for main-goal verification; derived rules must include an explicit urgency carve-out.\",\n    \"If the owner's stated goal is stale or ambiguous, strict anchoring may cause stagnation on an obsolete task; clarification-seeking must remain permitted so the principle trades drift for stagnation.\",\n    \"Maintaining pending-question and deferred-topic lists adds overhead; in fast-paced exchanges, checklist discipline may slow responses or degrade into mechanical list-clearing over substantive judgment.\",\n    \"\\\"Verified complete\\\" is underspecified without an evidence threshold; agents may otherwise satisfy the gate with weak self-assessment instead of observable evidence.\"\n  ],\n  \"generatedAt\": \"2025-05-27T10:34:12Z\"\n}",
+    "usage": {
+     "input": 1974,
+     "output": 4344,
+     "total": 6318
+    },
+    "latencyMs": 52975,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "413bf425f5497558"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_038c29c53be340-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r3-run1",
+     "principleDraft": {
+      "title": "Answer Pending Owner Questions and Verify the Main Goal Before Raising Self-Initiated Topics",
+      "statement": "Before introducing, promoting, or continuing any topic or deliverable the owner did not explicitly request, an agent must first (1) answer every direct question the owner has asked, and (2) verify the owner's stated current goal is complete against observable evidence; while either condition is unmet, the agent stays on the explicit goal and records the self-initiated item as a deferred proposal, pursuing it only after that verification or after the owner explicitly confirms a focus switch.",
+      "rationale": "The root cause of all observed failures is mis-ordered attention arbitration: the agent's inferred priority (the cover topic) displaced the owner's unverified main goal and an unanswered direct question. Ordering attention by explicit signals first — pending owner questions, then verified completion of the stated goal, and only then self-initiated topics — directly prevents agenda drift, ignored questions, unverified claims, and unrequested scope expansion, while preserving owner control over priority switching at minimal cost (record first, confirm later).",
+      "applicability": [
+       "Multi-turn collaborative tasks where an owner-stated goal coexists with agent-inferred opportunities or unrequested deliverables",
+       "Any response that would introduce a secondary topic, e.g. 'by the way' suggestions or unrequested deliverables such as a cover image",
+       "Any turn in which a direct owner question is still unanswered or the main task's claimed result lacks observable verification",
+       "Decisions to switch focus, expand scope, or declare the main task complete and move to next steps"
+      ],
+      "antiPatterns": [
+       "Repeatedly raising a self-inferred topic (e.g., the cover) while the owner's stated main task is unresolved and unverified",
+       "Advancing one's own agenda in the same turn that leaves the owner's direct question unanswered",
+       "Claiming the main goal is achieved and proceeding to next steps without observable evidence such as frame/screenshot/log comparison",
+       "Expanding scope to deliverables the owner never requested without explicit confirmation",
+       "Losing track of pending owner questions and unverified main-task status because attention is captured by self-generated items"
+      ],
+      "confidence": 0.88
+     },
+     "intentContract": {
+      "ownerIntent": "The owner wants the agent to stop advancing its own inferred topic (the cover) and instead answer the pending direct question and continue the explicitly stated goal of fixing the quality difference between mooncake-mv-final-v3k26.mp4 and mooncake-mv-final-v3k23.mp4 before any self-initiated topic is raised.",
+      "targetBehavior": "In each turn the agent first clears owner-side obligations — directly answering pending owner questions and continuing or observably verifying the stated main goal — and for any self-initiated topic either records it as a deferred item or asks a one-line explicit confirmation before switching focus; a reviewer would see the owner's question answered and evidence-based work on the video comparison, with cover talk absent or explicitly gated by owner confirmation.",
+      "forbiddenBehavior": "Promoting or repeating a self-generated agenda topic while the owner's direct question is unanswered and the stated main goal is unverified — including declaring the main task complete without observable evidence and delivering unrequested scope.",
+      "evidenceSource": "Severe owner correction in pain_host_038c29c53be340: the agent repeatedly raised the cover topic while video optimization was unfinished; the owner message '不要跟我在提什么封面了，视频都没优化好…你觉得新的有什么问题？' shows the active focus and an unanswered direct question; the diagnosis attributes the drift to inferred priorities displacing explicit intent (violations of T-02, T-07, T-06).",
+      "validationExpectation": "An evaluator should require that any rule derived from this principle fires when a non-requested topic is introduced while a pending owner question or an unverified main goal exists, and mandates answering the question and verifying the goal against observable evidence before claiming completion or switching focus; a rule change that permits topic promotion under those unmet conditions contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r3-run1"
+     },
+     "risks": [
+      "Overlaps core axioms T-02 (explicit goals override inferred preferences), T-07 (verify results before claiming success), and T-06 (change no more state than necessary); this principle is an attention-arbitration synthesis of them, so downstream rule generation must deduplicate rather than emit redundant rules.",
+      "Rigid deferral could delay genuinely urgent or blocking observations (e.g., safety-relevant or task-blocking findings); an urgency-escalation exception should be carved out without re-opening the general drift.",
+      "If the owner's stated goal is stale or ambiguous, strict anchoring may cause stagnation instead of drift; the principle must not be read as forbidding clarification questions.",
+      "The deferral mechanism partially depends on T-10 (persisting pending-question and deferred-topic state outside transient context); without such persistence the discipline can silently fail as context churns.",
+      "Maintaining pending-question and deferred-topic checklists adds per-turn overhead and could degenerate into checklist-clearing behavior over substantive judgment in fast-paced exchanges."
+     ],
+     "generatedAt": "2025-05-27T10:29:33Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_038c29c53be340-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Answer Pending Owner Questions and Verify the Main Goal Before Raising Self-Initiated Topics\",\n    \"statement\": \"Before introducing, promoting, or continuing any topic or deliverable the owner did not explicitly request, an agent must first (1) answer every direct question the owner has asked, and (2) verify the owner's stated current goal is complete against observable evidence; while either condition is unmet, the agent stays on the explicit goal and records the self-initiated item as a deferred proposal, pursuing it only after that verification or after the owner explicitly confirms a focus switch.\",\n    \"rationale\": \"The root cause of all observed failures is mis-ordered attention arbitration: the agent's inferred priority (the cover topic) displaced the owner's unverified main goal and an unanswered direct question. Ordering attention by explicit signals first — pending owner questions, then verified completion of the stated goal, and only then self-initiated topics — directly prevents agenda drift, ignored questions, unverified claims, and unrequested scope expansion, while preserving owner control over priority switching at minimal cost (record first, confirm later).\",\n    \"applicability\": [\n      \"Multi-turn collaborative tasks where an owner-stated goal coexists with agent-inferred opportunities or unrequested deliverables\",\n      \"Any response that would introduce a secondary topic, e.g. 'by the way' suggestions or unrequested deliverables such as a cover image\",\n      \"Any turn in which a direct owner question is still unanswered or the main task's claimed result lacks observable verification\",\n      \"Decisions to switch focus, expand scope, or declare the main task complete and move to next steps\"\n    ],\n    \"antiPatterns\": [\n      \"Repeatedly raising a self-inferred topic (e.g., the cover) while the owner's stated main task is unresolved and unverified\",\n      \"Advancing one's own agenda in the same turn that leaves the owner's direct question unanswered\",\n      \"Claiming the main goal is achieved and proceeding to next steps without observable evidence such as frame/screenshot/log comparison\",\n      \"Expanding scope to deliverables the owner never requested without explicit confirmation\",\n      \"Losing track of pending owner questions and unverified main-task status because attention is captured by self-generated items\"\n    ],\n    \"confidence\": 0.88\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The owner wants the agent to stop advancing its own inferred topic (the cover) and instead answer the pending direct question and continue the explicitly stated goal of fixing the quality difference between mooncake-mv-final-v3k26.mp4 and mooncake-mv-final-v3k23.mp4 before any self-initiated topic is raised.\",\n    \"targetBehavior\": \"In each turn the agent first clears owner-side obligations — directly answering pending owner questions and continuing or observably verifying the stated main goal — and for any self-initiated topic either records it as a deferred item or asks a one-line explicit confirmation before switching focus; a reviewer would see the owner's question answered and evidence-based work on the video comparison, with cover talk absent or explicitly gated by owner confirmation.\",\n    \"forbiddenBehavior\": \"Promoting or repeating a self-generated agenda topic while the owner's direct question is unanswered and the stated main goal is unverified — including declaring the main task complete without observable evidence and delivering unrequested scope.\",\n    \"evidenceSource\": \"Severe owner correction in pain_host_038c29c53be340: the agent repeatedly raised the cover topic while video optimization was unfinished; the owner message '不要跟我在提什么封面了，视频都没优化好…你觉得新的有什么问题？' shows the active focus and an unanswered direct question; the diagnosis attributes the drift to inferred priorities displacing explicit intent (violations of T-02, T-07, T-06).\",\n    \"validationExpectation\": \"An evaluator should require that any rule derived from this principle fires when a non-requested topic is introduced while a pending owner question or an unverified main goal exists, and mandates answering the question and verifying the goal against observable evidence before claiming completion or switching focus; a rule change that permits topic promotion under those unmet conditions contradicts this intent and must be flagged.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_038c29c53be340-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_038c29c53be340-r3-run1\"\n  },\n  \"risks\": [\n    \"Overlaps core axioms T-02 (explicit goals override inferred preferences), T-07 (verify results before claiming success), and T-06 (change no more state than necessary); this principle is an attention-arbitration synthesis of them, so downstream rule generation must deduplicate rather than emit redundant rules.\",\n    \"Rigid deferral could delay genuinely urgent or blocking observations (e.g., safety-relevant or task-blocking findings); an urgency-escalation exception should be carved out without re-opening the general drift.\",\n    \"If the owner's stated goal is stale or ambiguous, strict anchoring may cause stagnation instead of drift; the principle must not be read as forbidding clarification questions.\",\n    \"The deferral mechanism partially depends on T-10 (persisting pending-question and deferred-topic state outside transient context); without such persistence the discipline can silently fail as context churns.\",\n    \"Maintaining pending-question and deferred-topic checklists adds per-turn overhead and could degenerate into checklist-clearing behavior over substantive judgment in fast-paced exchanges.\"\n  ],\n  \"generatedAt\": \"2025-05-27T10:29:33Z\"\n}",
+    "usage": {
+     "input": 4176,
+     "output": 4454,
+     "total": 8630
+    },
+    "latencyMs": 56462,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e090b93609640be8"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

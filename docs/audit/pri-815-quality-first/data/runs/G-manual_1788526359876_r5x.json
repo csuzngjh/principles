@@ -1,0 +1,695 @@
+{
+ "group": "G-manual_1788526359876_r5x",
+ "class": "DEV",
+ "pain_id": "manual_1788526359876_r5xgtgu9",
+ "frozen_at": "2026-09-17T15:21:54.520Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788526359876_r5x",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788526359876_r5x-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "仅凭统计指标（90.8%截断率）断言根因为size-guard预算截断core axioms，未先查事件日志验证before_prompt_build钩子是否真正执行成功",
+       "betterDecision": "形成根因结论前，先以可观察事件级证据验证机制链路：检查hook执行日志、数据库连接状态与错误trace，确认钩子实际执行结果后再归因",
+       "rationale": "事件级证据直接反映机制链路真实状态，统计启发式只能提示相关性而非因果。本例中hook执行日志会直接暴露TypeError: The database connection is not open，可从根本上避免误诊",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_before_conclusion",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "得出截断根因结论后，未将结论与实测数据对照校验（实测5686/9000未超预算，与截断理论直接矛盾），存在'完成即成功'盲区",
+       "betterDecision": "结论形成后强制执行一致性校验：将根因理论与实际观测数据逐项比对，发现矛盾立即回退重新调查，而不是直接产出PRI-646工单",
+       "rationale": "结果校验是拦截错误结论的最后防线；本例中实测数据与截断理论明显矛盾，简单的逐项比对即可发现误诊并阻止误报外流",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "conclusion_consistency_check",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "在未建立对注入机制链路（before_prompt_build钩子→数据库连接→prompt组装）准确模型的情况下，仅凭单一统计指标即下根因结论",
+       "betterDecision": "先绘制并逐环节验证机制链路模型：钩子注册、触发、执行、数据库依赖、输出注入点，确认每环节实际状态后再定位根因",
+       "rationale": "准确的系统模型是正确归因的前提；一旦理解链路中存在数据库依赖，自然会优先排查连接状态而非依赖统计巧合",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "model_before_attribution",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "诊断流程缺少机制链路验证门控，基于统计启发式的未验证结论直接流出为PRI-646工单，造成误报",
+       "betterDecision": "将'证据优先'约束翻译为显式门控：根因结论若仅基于统计指标而非事件级证据，必须先补齐hook日志、连接状态等事件证据才允许提交工单；证据不可用时显式标注不确定性并降级处理",
+       "rationale": "流程级检查能系统性拦截证据不足的结论外流，避免单点人为疏漏演变为下游误报工单与错误修复成本",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "gate_before_externalization",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "诊断中config.get响应过大、tool exec失败导致证据获取持续受阻时静默继续，基于不完整证据形成根因结论",
+       "betterDecision": "证据获取受阻时启用显式降级路径：用窄化path查询config子树、改走CLI路径（node dist/index.js）获取替代证据，或明确标注证据缺口与结论不确定性而非静默继续",
+       "rationale": "受阻时的显式降级保证结论可靠性可追溯；本例中CLI源码仓库完好且窄化查询可行，替代证据路径本可获得指向正确根因的线索",
+       "confidence": 0.78,
+       "riskLevel": "medium",
+       "strategicPerspective": "explicit_degradation_on_blocked_evidence",
+       "sourcePrincipleId": "T-03"
+      }
+     ],
+     "sourcePainId": "manual_1788526359876_r5x",
+     "contextRefs": [
+      "artifact://7b001334-7167-4687-bcd6-87c242231b57"
+     ],
+     "generatedAt": "2026-09-04T13:00:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788526359876_r5x-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"仅凭统计指标（90.8%截断率）断言根因为size-guard预算截断core axioms，未先查事件日志验证before_prompt_build钩子是否真正执行成功\",\"betterDecision\":\"形成根因结论前，先以可观察事件级证据验证机制链路：检查hook执行日志、数据库连接状态与错误trace，确认钩子实际执行结果后再归因\",\"rationale\":\"事件级证据直接反映机制链路真实状态，统计启发式只能提示相关性而非因果。本例中hook执行日志会直接暴露TypeError: The database connection is not open，可从根本上避免误诊\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_before_conclusion\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"得出截断根因结论后，未将结论与实测数据对照校验（实测5686/9000未超预算，与截断理论直接矛盾），存在'完成即成功'盲区\",\"betterDecision\":\"结论形成后强制执行一致性校验：将根因理论与实际观测数据逐项比对，发现矛盾立即回退重新调查，而不是直接产出PRI-646工单\",\"rationale\":\"结果校验是拦截错误结论的最后防线；本例中实测数据与截断理论明显矛盾，简单的逐项比对即可发现误诊并阻止误报外流\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"conclusion_consistency_check\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"在未建立对注入机制链路（before_prompt_build钩子→数据库连接→prompt组装）准确模型的情况下，仅凭单一统计指标即下根因结论\",\"betterDecision\":\"先绘制并逐环节验证机制链路模型：钩子注册、触发、执行、数据库依赖、输出注入点，确认每环节实际状态后再定位根因\",\"rationale\":\"准确的系统模型是正确归因的前提；一旦理解链路中存在数据库依赖，自然会优先排查连接状态而非依赖统计巧合\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"model_before_attribution\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":3,\"badDecision\":\"诊断流程缺少机制链路验证门控，基于统计启发式的未验证结论直接流出为PRI-646工单，造成误报\",\"betterDecision\":\"将'证据优先'约束翻译为显式门控：根因结论若仅基于统计指标而非事件级证据，必须先补齐hook日志、连接状态等事件证据才允许提交工单；证据不可用时显式标注不确定性并降级处理\",\"rationale\":\"流程级检查能系统性拦截证据不足的结论外流，避免单点人为疏漏演变为下游误报工单与错误修复成本\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"gate_before_externalization\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"诊断中config.get响应过大、tool exec失败导致证据获取持续受阻时静默继续，基于不完整证据形成根因结论\",\"betterDecision\":\"证据获取受阻时启用显式降级路径：用窄化path查询config子树、改走CLI路径（node dist/index.js）获取替代证据，或明确标注证据缺口与结论不确定性而非静默继续\",\"rationale\":\"受阻时的显式降级保证结论可靠性可追溯；本例中CLI源码仓库完好且窄化查询可行，替代证据路径本可获得指向正确根因的线索\",\"confidence\":0.78,\"riskLevel\":\"medium\",\"strategicPerspective\":\"explicit_degradation_on_blocked_evidence\",\"sourcePrincipleId\":\"T-03\"}],\"sourcePainId\":\"manual_1788526359876_r5x\",\"contextRefs\":[\"artifact://7b001334-7167-4687-bcd6-87c242231b57\"],\"generatedAt\":\"2026-09-04T13:00:00.000Z\"}",
+    "usage": {
+     "input": 2669,
+     "output": 4451,
+     "total": 7120
+    },
+    "latencyMs": 53628,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "cac168e9aab4de39"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788526359876_r5x-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r1-run1",
+     "thesis": "统计相关性不是因果证据：一个根因结论在机制链路被事件级证据逐环节验证、且其推论与实测数据无矛盾之前，不构成知识。误诊的根源不仅是证据不足，更是缺少'结论形成后与观测数据比对、矛盾即回退'的强制一致性校验，以及证据获取受阻时的显式降级与不确定性标注——否则未验证的结论会以工单形式外流，将错误传播到下游。",
+     "principleCandidate": {
+      "title": "Gate causal conclusions on event evidence and data consistency before externalization",
+      "rationale": "本例误诊的根因是：以单一统计指标（90.8%截断率）替代机制链路验证，且结论（预算截断）与实测数据（5686/9000未超预算）的直接矛盾从未被比对。若在结论外流前强制要求：(1)事件级证据验证机制链路各环节，(2)结论推论与实测数据逐项一致性比对，(3)证据受阻时显式标注不确定性并降级而非静默继续，则误诊会在三个独立关卡被拦截。该原则将T-03（证据优先）、T-07（结果校验）与T-05（门控）合成为针对'归因结论外流'这一特定失效模式的过程性约束。",
+      "scope": "适用于任何形成根因归因、诊断结论或事件报告的场景，尤其是当结论即将以外化形式流出（工单、报告、修复方案）时；特别适用于结论基于聚合统计指标、启发式推断或证据获取受阻（工具失败、数据不可达）而继续推进的情形。不适用于纯探索性假设生成阶段——此时只需标注假设性质而非禁止提出。",
+      "confidence": 0.85
+     },
+     "risks": [
+      "与核心公理T-03（证据优先于推断）、T-07（行动后验证结果）和T-05（硬约束转化为显式门控）存在部分重叠，本原则是其针对'归因结论外流'场景的组合强化，推广时需注意与现有公理的边界划分",
+      "过度门控可能拖慢紧急诊断：对每个次要结论都要求事件级证据与逐项比对会显著增加时延，应按结论影响度分级适用",
+      "证据绝对不可用时，强制门控可能导致行动瘫痪或变相诱发证据伪造；必须以显式不确定性标注与结论降级作为合法出路，而非禁止输出",
+      "事件日志本身可能不完整或具有误导性，将单一事件证据视为不容置疑的地面真值而不再交叉印证，仍可能产生新形态误诊"
+     ],
+     "generatedAt": "2026-09-04T13:05:42.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788526359876_r5x-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r1-run1\",\"thesis\":\"统计相关性不是因果证据：一个根因结论在机制链路被事件级证据逐环节验证、且其推论与实测数据无矛盾之前，不构成知识。误诊的根源不仅是证据不足，更是缺少'结论形成后与观测数据比对、矛盾即回退'的强制一致性校验，以及证据获取受阻时的显式降级与不确定性标注——否则未验证的结论会以工单形式外流，将错误传播到下游。\",\"principleCandidate\":{\"title\":\"Gate causal conclusions on event evidence and data consistency before externalization\",\"rationale\":\"本例误诊的根因是：以单一统计指标（90.8%截断率）替代机制链路验证，且结论（预算截断）与实测数据（5686/9000未超预算）的直接矛盾从未被比对。若在结论外流前强制要求：(1)事件级证据验证机制链路各环节，(2)结论推论与实测数据逐项一致性比对，(3)证据受阻时显式标注不确定性并降级而非静默继续，则误诊会在三个独立关卡被拦截。该原则将T-03（证据优先）、T-07（结果校验）与T-05（门控）合成为针对'归因结论外流'这一特定失效模式的过程性约束。\",\"scope\":\"适用于任何形成根因归因、诊断结论或事件报告的场景，尤其是当结论即将以外化形式流出（工单、报告、修复方案）时；特别适用于结论基于聚合统计指标、启发式推断或证据获取受阻（工具失败、数据不可达）而继续推进的情形。不适用于纯探索性假设生成阶段——此时只需标注假设性质而非禁止提出。\",\"confidence\":0.85},\"risks\":[\"与核心公理T-03（证据优先于推断）、T-07（行动后验证结果）和T-05（硬约束转化为显式门控）存在部分重叠，本原则是其针对'归因结论外流'场景的组合强化，推广时需注意与现有公理的边界划分\",\"过度门控可能拖慢紧急诊断：对每个次要结论都要求事件级证据与逐项比对会显著增加时延，应按结论影响度分级适用\",\"证据绝对不可用时，强制门控可能导致行动瘫痪或变相诱发证据伪造；必须以显式不确定性标注与结论降级作为合法出路，而非禁止输出\",\"事件日志本身可能不完整或具有误导性，将单一事件证据视为不容置疑的地面真值而不再交叉印证，仍可能产生新形态误诊\"],\"generatedAt\":\"2026-09-04T13:05:42.000Z\"}",
+    "usage": {
+     "input": 1718,
+     "output": 1740,
+     "total": 3458
+    },
+    "latencyMs": 27993,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "ce93db9f1a6c107a"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788526359876_r5x-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r1-run1",
+     "principleDraft": {
+      "title": "Gate causal conclusions on event-level evidence and data consistency before externalization",
+      "statement": "Before any root-cause attribution or diagnostic conclusion is externalized (ticket, incident report, fix plan), it must pass three gates: (1) every link of the proposed causal mechanism is supported by event-level evidence, not aggregate statistics or heuristics alone; (2) the conclusion's measurable implications are explicitly compared item-by-item against observed data, and any contradiction forces revision or rollback of the conclusion, not dismissal of the data; (3) if evidence acquisition is blocked, the output must carry an explicit unverified/uncertainty label with downgraded assertion strength, never a silently confident claim. Exploratory hypotheses may be freely proposed but must be labeled as hypotheses until they pass these gates.",
+      "rationale": "The diagnosed misdiagnosis arose not from missing evidence but from missing gates between forming a conclusion and exporting it: a single aggregate metric (90.8% truncation rate) stood in for mechanism verification, the conclusion (budget truncation) directly contradicted already-measured data (5686/9000 rows within budget) with no comparison ever performed, and the unverified conclusion escaped as an external ticket, propagating error downstream. Each gate independently intercepts this failure family: mechanism-chain verification defeats statistics-as-causation, the consistency check surfaces data contradictions before export, and forced degradation removes the silent-continuation path when evidence access fails. The principle composes T-03 (evidence before inference), T-05 (hard constraints as explicit gates), and T-07 (verify against intended outcome) into a process constraint specialized to the conclusion-externalization moment.",
+      "applicability": [
+       "Producing or publishing root-cause attributions, diagnostic conclusions, or incident reports that will leave the agent's context (tickets, reports, fix proposals)",
+       "Conclusions built primarily from aggregate statistical metrics, rate thresholds, or heuristic inference rather than traced mechanism evidence",
+       "Diagnostic workflows where evidence acquisition is partially or fully blocked (tool failures, unreachable data, incomplete logs) while the task continues",
+       "Any point where a causal claim's observable implications can be checked against measurements already collected"
+      ],
+      "antiPatterns": [
+       "Substituting an aggregate statistic or correlation (e.g., a 90.8% truncation rate) for event-level verification of a causal mechanism",
+       "Externalizing a conclusion whose measurable implications contradict data already in hand (e.g., asserting budget truncation while measured values sit within budget)",
+       "Treating conclusion-formation as the end of verification — never re-deriving the conclusion's predictions and checking them against observed data",
+       "Silently continuing at full asserted confidence when evidence tools fail or data is unreachable",
+       "Escalating an unverified hypothesis into a ticket, report, or fix plan without labeling its epistemic status"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants unverified root-cause conclusions — especially ones that contradict already-measured data or rest only on aggregate statistics — blocked from leaving the agent as tickets or reports that propagate the error downstream.",
+      "targetBehavior": "In any trajectory that emits a ticket, report, or fix plan containing a causal claim, a reviewer can see: cited event-level evidence for each link of the claimed mechanism, an explicit item-by-item comparison of the claim's measurable implications against observed values (contradictions triggering revision), and, where evidence access failed, an unverified/uncertainty label with downgraded assertion strength.",
+      "forbiddenBehavior": "Externalizing a causal or diagnostic conclusion that is backed only by aggregate statistics or heuristics, that was never compared against available measured data, or that is asserted at full confidence despite blocked or failed evidence acquisition.",
+      "evidenceSource": "The diagnosed incident: a 90.8% aggregate truncation rate was used to conclude 'budget truncation' while measured data showed 5686/9000 rows within budget; the direct contradiction was never compared and the unverified conclusion escaped as an external ticket.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if, for any externalized causal conclusion, it demands visible evidence of (a) event-level support per mechanism link, (b) an explicit conclusion-vs-measurement consistency check, and (c) uncertainty labeling with downgraded strength when evidence is blocked; a repair change that removes any of these three gates or permits silent full-confidence export contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r1-run1"
+     },
+     "risks": [
+      "Overlaps core axioms T-03 (evidence before inference), T-05 (explicit guardrails and gates), and T-07 (verify outcome after acting); downstream rule generation must treat this as a scenario-specific composition for conclusion externalization and avoid emitting redundant or conflicting rules",
+      "Over-gating cost: demanding event-level verification and item-by-item comparison for every minor conclusion adds latency to urgent diagnostics; gate strictness should scale with the conclusion's blast radius",
+      "When evidence is absolutely unobtainable, a hard gate risks action paralysis or incentivizing fabricated evidence; explicit uncertainty labeling and conclusion downgrade must remain the sanctioned exit path, not prohibition of output",
+      "Event logs themselves can be incomplete or misleading; treating single-source event evidence as unquestionable ground truth without cross-corroboration can create new misdiagnosis modes",
+      "Mis-scoping risk: applying the gates to exploratory hypothesis generation (which requires only hypothesis labeling, not prohibition) would suppress useful early reasoning"
+     ],
+     "generatedAt": "2026-09-04T13:12:08.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788526359876_r5x-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r1-run1\",\"principleDraft\":{\"title\":\"Gate causal conclusions on event-level evidence and data consistency before externalization\",\"statement\":\"Before any root-cause attribution or diagnostic conclusion is externalized (ticket, incident report, fix plan), it must pass three gates: (1) every link of the proposed causal mechanism is supported by event-level evidence, not aggregate statistics or heuristics alone; (2) the conclusion's measurable implications are explicitly compared item-by-item against observed data, and any contradiction forces revision or rollback of the conclusion, not dismissal of the data; (3) if evidence acquisition is blocked, the output must carry an explicit unverified/uncertainty label with downgraded assertion strength, never a silently confident claim. Exploratory hypotheses may be freely proposed but must be labeled as hypotheses until they pass these gates.\",\"rationale\":\"The diagnosed misdiagnosis arose not from missing evidence but from missing gates between forming a conclusion and exporting it: a single aggregate metric (90.8% truncation rate) stood in for mechanism verification, the conclusion (budget truncation) directly contradicted already-measured data (5686/9000 rows within budget) with no comparison ever performed, and the unverified conclusion escaped as an external ticket, propagating error downstream. Each gate independently intercepts this failure family: mechanism-chain verification defeats statistics-as-causation, the consistency check surfaces data contradictions before export, and forced degradation removes the silent-continuation path when evidence access fails. The principle composes T-03 (evidence before inference), T-05 (hard constraints as explicit gates), and T-07 (verify against intended outcome) into a process constraint specialized to the conclusion-externalization moment.\",\"applicability\":[\"Producing or publishing root-cause attributions, diagnostic conclusions, or incident reports that will leave the agent's context (tickets, reports, fix proposals)\",\"Conclusions built primarily from aggregate statistical metrics, rate thresholds, or heuristic inference rather than traced mechanism evidence\",\"Diagnostic workflows where evidence acquisition is partially or fully blocked (tool failures, unreachable data, incomplete logs) while the task continues\",\"Any point where a causal claim's observable implications can be checked against measurements already collected\"],\"antiPatterns\":[\"Substituting an aggregate statistic or correlation (e.g., a 90.8% truncation rate) for event-level verification of a causal mechanism\",\"Externalizing a conclusion whose measurable implications contradict data already in hand (e.g., asserting budget truncation while measured values sit within budget)\",\"Treating conclusion-formation as the end of verification — never re-deriving the conclusion's predictions and checking them against observed data\",\"Silently continuing at full asserted confidence when evidence tools fail or data is unreachable\",\"Escalating an unverified hypothesis into a ticket, report, or fix plan without labeling its epistemic status\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"The Owner wants unverified root-cause conclusions — especially ones that contradict already-measured data or rest only on aggregate statistics — blocked from leaving the agent as tickets or reports that propagate the error downstream.\",\"targetBehavior\":\"In any trajectory that emits a ticket, report, or fix plan containing a causal claim, a reviewer can see: cited event-level evidence for each link of the claimed mechanism, an explicit item-by-item comparison of the claim's measurable implications against observed values (contradictions triggering revision), and, where evidence access failed, an unverified/uncertainty label with downgraded assertion strength.\",\"forbiddenBehavior\":\"Externalizing a causal or diagnostic conclusion that is backed only by aggregate statistics or heuristics, that was never compared against available measured data, or that is asserted at full confidence despite blocked or failed evidence acquisition.\",\"evidenceSource\":\"The diagnosed incident: a 90.8% aggregate truncation rate was used to conclude 'budget truncation' while measured data showed 5686/9000 rows within budget; the direct contradiction was never compared and the unverified conclusion escaped as an external ticket.\",\"validationExpectation\":\"An evaluator should accept a rule as faithful only if, for any externalized causal conclusion, it demands visible evidence of (a) event-level support per mechanism link, (b) an explicit conclusion-vs-measurement consistency check, and (c) uncertainty labeling with downgraded strength when evidence is blocked; a repair change that removes any of these three gates or permits silent full-confidence export contradicts this intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r1-run1\"},\"risks\":[\"Overlaps core axioms T-03 (evidence before inference), T-05 (explicit guardrails and gates), and T-07 (verify outcome after acting); downstream rule generation must treat this as a scenario-specific composition for conclusion externalization and avoid emitting redundant or conflicting rules\",\"Over-gating cost: demanding event-level verification and item-by-item comparison for every minor conclusion adds latency to urgent diagnostics; gate strictness should scale with the conclusion's blast radius\",\"When evidence is absolutely unobtainable, a hard gate risks action paralysis or incentivizing fabricated evidence; explicit uncertainty labeling and conclusion downgrade must remain the sanctioned exit path, not prohibition of output\",\"Event logs themselves can be incomplete or misleading; treating single-source event evidence as unquestionable ground truth without cross-corroboration can create new misdiagnosis modes\",\"Mis-scoping risk: applying the gates to exploratory hypothesis generation (which requires only hypothesis labeling, not prohibition) would suppress useful early reasoning\"],\"generatedAt\":\"2026-09-04T13:12:08.000Z\"}",
+    "usage": {
+     "input": 2046,
+     "output": 5426,
+     "total": 7472
+    },
+    "latencyMs": 67030,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "1a06b10641f2ecf6"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788526359876_r5x-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r1-run1",
+     "principleDraft": {
+      "title": "Gate causal conclusions on event evidence and data consistency before externalization",
+      "statement": "Before any root-cause attribution or diagnostic conclusion is externalized (ticket, report, remediation plan), it must pass three gates: (1) each link of the claimed causal mechanism chain is verified with event-level evidence (execution logs, error traces, state), never with an aggregate statistical indicator standing in as causal proof; (2) the conclusion's testable implications are compared item-by-item against measured data, and any contradiction forces rollback and re-investigation rather than publication; (3) if evidence acquisition is blocked (tool failure, oversized response, unreachable data), the agent must explicitly label the evidence gap and downgrade the conclusion to provisional/uncertain instead of silently continuing to a definitive claim.",
+      "rationale": "The misdiagnosis under treatment had three independently interceptable failure points: the root cause was asserted from a single statistic (90.8% truncation rate) without checking the before_prompt_build hook's actual execution; the conclusion (budget truncation) directly contradicted measured data (5686/9000, under budget) but was never compared; and blocked evidence (config.get response too large, tool exec exit 1) led to silent continuation. The false PRI-646 ticket then propagated the error downstream. Each gate breaks this chain at a different point: event evidence would have exposed the hook crash (TypeError: The database connection is not open), the data comparison would have falsified the truncation theory, and explicit degradation would have prevented an unverified conclusion from masquerading as knowledge. This composes T-03 (evidence over inference), T-07 (verify results against expectation) and T-05 (hard constraints as explicit gates) into a process constraint for the specific failure mode of attribution-conclusion externalization.",
+      "applicability": [
+       "Forming or publishing root-cause attributions, diagnostic conclusions, or incident reports that will flow out as tickets, reports, or remediation plans",
+       "Conclusions derived from aggregate statistical indicators, ratios, or heuristics (e.g., truncation rates, percentages) rather than event-level evidence",
+       "Investigations where evidence acquisition is blocked or degraded (tool gateway failures, oversized responses, exec failures)",
+       "Any causal claim that will drive downstream actions (fixes, prioritization, component blame)",
+       "Boundary: applies at conclusion-commitment/externalization points; exploratory hypothesis generation is out of scope — hypotheses there only need explicit labeling as hypotheses, not gating"
+      ],
+      "antiPatterns": [
+       "Asserting a root cause from a statistical indicator (e.g., a 90.8% truncation rate) without reading the event logs of the mechanism's actual execution",
+       "Externalizing a conclusion whose implications contradict measured data (e.g., claiming budget truncation while measured sizes are under budget) without any comparison step",
+       "Treating 'analysis produced an answer' as 'answer verified' — skipping the conclusion-versus-observation consistency check",
+       "Silently continuing to a definitive conclusion after evidence-acquisition failures, without labeling the gap or trying explicit alternative paths (narrower config subtree query, CLI fallback)",
+       "Filing a ticket or report that presents a partially verified or heuristic-based attribution as established fact, with no uncertainty qualification"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent unverified root-cause conclusions from flowing out as tickets or reports — specifically attributions built on statistical indicators instead of event-level evidence, conclusions that contradict the measured data they must explain, and definitive claims issued after evidence acquisition was blocked.",
+      "targetBehavior": "In any tool trajectory that ends in an externalized diagnosis, a reviewer can see: (a) event-level evidence (logs/traces/state) retrieved for each link of the claimed mechanism chain, (b) an explicit comparison of the conclusion's implications against measured data with rollback on contradiction, and (c) when evidence tools failed, either successful alternative evidence paths (narrower query, CLI fallback) or an explicit uncertainty label with a downgraded provisional conclusion instead of a definitive claim.",
+      "forbiddenBehavior": "Externalizing a causal conclusion that rests on aggregate statistics or heuristics without event-level mechanism verification, that was never checked against observed data (or that survives a known contradiction), or that was reached by silently continuing past blocked evidence — the failure family that produced the false PRI-646 ticket from the truncation-rate theory.",
+      "evidenceSource": "Diagnosis manual_1788526359876_r5xgtgu9 (pain manual_1788526359876_r5xgtgu9): root cause asserted from a 90.8% truncation statistic while the before_prompt_build hook had actually crashed (TypeError: The database connection is not open); measured 5686/9000 under budget contradicted the truncation theory; false PRI-646 ticket filed; tool_call_failures (config.get response too large twice, tool exec exitCode 1) evidence the blocked-evidence silent-continuation mode. Dreamer proposals 0 (event evidence before conclusion), 1 (consistency check with rollback), 3 (gate before externalization) and 4 (explicit degradation when blocked) supply the concrete better-decision variants; the philosopher endorsed their synthesis as three gates.",
+      "validationExpectation": "A rule is faithful only if it (a) blocks or forces rollback for conclusions resting on statistics without event-log verification, (b) requires item-by-item comparison of conclusion implications against measured data with contradiction-then-rollback, (c) mandates explicit uncertainty labeling and conclusion downgrade when evidence is blocked, with legitimate alternative evidence paths, and (d) does not prohibit or gate exploratory hypothesis generation itself. Any repair change that lets statistical indicators count as sufficient causal proof, removes the contradiction-rollback requirement, or permits silent continuation after evidence blockage contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r1-run1"
+     },
+     "risks": [
+      "Overlaps core axioms T-03 (evidence before inference), T-07 (verify result versus expectation) and T-05 (hard constraints as explicit gates); this principle is a composite gate for the attribution-externalization scenario, and rule generation must demarcate boundaries to avoid duplicate or conflicting rules",
+      "Over-gating may slow urgent diagnosis; gates should scale with the conclusion's impact rather than being applied with equal force to minor intermediate findings",
+      "When evidence is absolutely unavailable, a hard gate risks analysis paralysis or incentivizing fabricated evidence; explicit uncertainty labeling and conclusion downgrade must remain a legitimate exit path, not a prohibited state",
+      "Event logs themselves can be incomplete or misleading; single-source event evidence must still be cross-checked rather than treated as unquestionable ground truth",
+      "Scope creep risk: applying the gate at ideation rather than commitment points would suppress exploratory hypothesis generation, which the source scope explicitly excludes"
+     ],
+     "generatedAt": "2026-09-04T13:16:47.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788526359876_r5x-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r1-run1\",\"principleDraft\":{\"title\":\"Gate causal conclusions on event evidence and data consistency before externalization\",\"statement\":\"Before any root-cause attribution or diagnostic conclusion is externalized (ticket, report, remediation plan), it must pass three gates: (1) each link of the claimed causal mechanism chain is verified with event-level evidence (execution logs, error traces, state), never with an aggregate statistical indicator standing in as causal proof; (2) the conclusion's testable implications are compared item-by-item against measured data, and any contradiction forces rollback and re-investigation rather than publication; (3) if evidence acquisition is blocked (tool failure, oversized response, unreachable data), the agent must explicitly label the evidence gap and downgrade the conclusion to provisional/uncertain instead of silently continuing to a definitive claim.\",\"rationale\":\"The misdiagnosis under treatment had three independently interceptable failure points: the root cause was asserted from a single statistic (90.8% truncation rate) without checking the before_prompt_build hook's actual execution; the conclusion (budget truncation) directly contradicted measured data (5686/9000, under budget) but was never compared; and blocked evidence (config.get response too large, tool exec exit 1) led to silent continuation. The false PRI-646 ticket then propagated the error downstream. Each gate breaks this chain at a different point: event evidence would have exposed the hook crash (TypeError: The database connection is not open), the data comparison would have falsified the truncation theory, and explicit degradation would have prevented an unverified conclusion from masquerading as knowledge. This composes T-03 (evidence over inference), T-07 (verify results against expectation) and T-05 (hard constraints as explicit gates) into a process constraint for the specific failure mode of attribution-conclusion externalization.\",\"applicability\":[\"Forming or publishing root-cause attributions, diagnostic conclusions, or incident reports that will flow out as tickets, reports, or remediation plans\",\"Conclusions derived from aggregate statistical indicators, ratios, or heuristics (e.g., truncation rates, percentages) rather than event-level evidence\",\"Investigations where evidence acquisition is blocked or degraded (tool gateway failures, oversized responses, exec failures)\",\"Any causal claim that will drive downstream actions (fixes, prioritization, component blame)\",\"Boundary: applies at conclusion-commitment/externalization points; exploratory hypothesis generation is out of scope — hypotheses there only need explicit labeling as hypotheses, not gating\"],\"antiPatterns\":[\"Asserting a root cause from a statistical indicator (e.g., a 90.8% truncation rate) without reading the event logs of the mechanism's actual execution\",\"Externalizing a conclusion whose implications contradict measured data (e.g., claiming budget truncation while measured sizes are under budget) without any comparison step\",\"Treating 'analysis produced an answer' as 'answer verified' — skipping the conclusion-versus-observation consistency check\",\"Silently continuing to a definitive conclusion after evidence-acquisition failures, without labeling the gap or trying explicit alternative paths (narrower config subtree query, CLI fallback)\",\"Filing a ticket or report that presents a partially verified or heuristic-based attribution as established fact, with no uncertainty qualification\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"Prevent unverified root-cause conclusions from flowing out as tickets or reports — specifically attributions built on statistical indicators instead of event-level evidence, conclusions that contradict the measured data they must explain, and definitive claims issued after evidence acquisition was blocked.\",\"targetBehavior\":\"In any tool trajectory that ends in an externalized diagnosis, a reviewer can see: (a) event-level evidence (logs/traces/state) retrieved for each link of the claimed mechanism chain, (b) an explicit comparison of the conclusion's implications against measured data with rollback on contradiction, and (c) when evidence tools failed, either successful alternative evidence paths (narrower query, CLI fallback) or an explicit uncertainty label with a downgraded provisional conclusion instead of a definitive claim.\",\"forbiddenBehavior\":\"Externalizing a causal conclusion that rests on aggregate statistics or heuristics without event-level mechanism verification, that was never checked against observed data (or that survives a known contradiction), or that was reached by silently continuing past blocked evidence — the failure family that produced the false PRI-646 ticket from the truncation-rate theory.\",\"evidenceSource\":\"Diagnosis manual_1788526359876_r5xgtgu9 (pain manual_1788526359876_r5xgtgu9): root cause asserted from a 90.8% truncation statistic while the before_prompt_build hook had actually crashed (TypeError: The database connection is not open); measured 5686/9000 under budget contradicted the truncation theory; false PRI-646 ticket filed; tool_call_failures (config.get response too large twice, tool exec exitCode 1) evidence the blocked-evidence silent-continuation mode. Dreamer proposals 0 (event evidence before conclusion), 1 (consistency check with rollback), 3 (gate before externalization) and 4 (explicit degradation when blocked) supply the concrete better-decision variants; the philosopher endorsed their synthesis as three gates.\",\"validationExpectation\":\"A rule is faithful only if it (a) blocks or forces rollback for conclusions resting on statistics without event-log verification, (b) requires item-by-item comparison of conclusion implications against measured data with contradiction-then-rollback, (c) mandates explicit uncertainty labeling and conclusion downgrade when evidence is blocked, with legitimate alternative evidence paths, and (d) does not prohibit or gate exploratory hypothesis generation itself. Any repair change that lets statistical indicators count as sufficient causal proof, removes the contradiction-rollback requirement, or permits silent continuation after evidence blockage contradicts this intent and must be flagged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r1-run1\"},\"risks\":[\"Overlaps core axioms T-03 (evidence before inference), T-07 (verify result versus expectation) and T-05 (hard constraints as explicit gates); this principle is a composite gate for the attribution-externalization scenario, and rule generation must demarcate boundaries to avoid duplicate or conflicting rules\",\"Over-gating may slow urgent diagnosis; gates should scale with the conclusion's impact rather than being applied with equal force to minor intermediate findings\",\"When evidence is absolutely unavailable, a hard gate risks analysis paralysis or incentivizing fabricated evidence; explicit uncertainty labeling and conclusion downgrade must remain a legitimate exit path, not a prohibited state\",\"Event logs themselves can be incomplete or misleading; single-source event evidence must still be cross-checked rather than treated as unquestionable ground truth\",\"Scope creep risk: applying the gate at ideation rather than commitment points would suppress exploratory hypothesis generation, which the source scope explicitly excludes\"],\"generatedAt\":\"2026-09-04T13:16:47.000Z\"}",
+    "usage": {
+     "input": 4963,
+     "output": 6780,
+     "total": 11743
+    },
+    "latencyMs": 79439,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "87e15808dc15e689"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788526359876_r5x",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788526359876_r5x-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "断言根因时仅依赖统计指标（90.8%截断率）推断为size-guard预算截断，未先查看before_prompt_build钩子的执行事件日志",
+       "betterDecision": "在形成根因结论前，强制先以事件级证据验证机制链路：检查hook执行日志、数据库连接状态与错误trace，确认钩子实际执行状态后再归因",
+       "rationale": "统计启发式只能提示相关性，无法证明因果链路；事件日志直接显示钩子因TypeError: The database connection is not open崩溃，那才是注入缺失的真实根因",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_first_verification",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "得出截断理论后未用实测数据校验一致性，实测5686/9000未超预算明显与理论矛盾却未被察觉，直接提交了PRI-646误报工单",
+       "betterDecision": "结论形成后立即以实测数据反证校验：比对注入内容实际长度与预算阈值，发现矛盾即回溯假设链而非发布结论或开单",
+       "rationale": "行动后以实际结果比对预期能在发布前拦截矛盾结论，避免误报工单的下游处理成本与信任损耗",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "falsification_check_before_commit",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "未建立对core axioms注入机制链路（before_prompt_build钩子→数据库连接→prompt组装）运行状态的准确理解即下结论，导致在错误层级归因",
+       "betterDecision": "先逐环节验证机制链路：钩子是否被调用、数据库连接是否正常、注入输出是否实际进入prompt，再定位失效环节作为根因",
+       "rationale": "机制链路建模能把'预算截断'与'钩子崩溃导致注入缺失'两种假说区分开，防止归因停留在统计表象层",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "mechanism_modeling_first",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "当config.get响应过大、tool exec失败等证据获取渠道受阻时静默继续，基于不完整证据直接形成根因断言",
+       "betterDecision": "证据获取受阻时切换替代路径（CLI执行node dist/index.js、以path请求更窄的config子树）获取替代证据，或显式将结论降级为带不确定性标注的假设而非根因断言",
+       "rationale": "证据不可用时静默继续会系统性放大误诊风险；降级为假设或走替代路径能守住结论的证据底线，避免不完整证据被当作事实",
+       "confidence": 0.78,
+       "riskLevel": "medium",
+       "strategicPerspective": "graceful_evidence_degradation",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "诊断流程缺少强制机制链路验证门控，允许基于统计启发式的根因结论未经拦截直接进入工单系统",
+       "betterDecision": "在诊断流程中建立硬门控：当根因断言依据含统计指标（截断率、比例等）时，强制回退并要求先取得事件级证据（hook日志、数据库连接状态、trace）验证机制链路后方可放行",
+       "rationale": "个体习惯缺陷难以靠自觉纠正，流程级显式检查点能把证据优先约束固化为不可绕过的放行条件，系统性拦截同类误诊",
+       "confidence": 0.82,
+       "riskLevel": "medium",
+       "strategicPerspective": "process_guardrail_gating",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "contextRefs": [
+      "artifact://7b001334-7167-4687-bcd6-87c242231b57"
+     ],
+     "generatedAt": "2026-09-04T13:04:12.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788526359876_r5x-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"断言根因时仅依赖统计指标（90.8%截断率）推断为size-guard预算截断，未先查看before_prompt_build钩子的执行事件日志\",\"betterDecision\":\"在形成根因结论前，强制先以事件级证据验证机制链路：检查hook执行日志、数据库连接状态与错误trace，确认钩子实际执行状态后再归因\",\"rationale\":\"统计启发式只能提示相关性，无法证明因果链路；事件日志直接显示钩子因TypeError: The database connection is not open崩溃，那才是注入缺失的真实根因\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_first_verification\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"得出截断理论后未用实测数据校验一致性，实测5686/9000未超预算明显与理论矛盾却未被察觉，直接提交了PRI-646误报工单\",\"betterDecision\":\"结论形成后立即以实测数据反证校验：比对注入内容实际长度与预算阈值，发现矛盾即回溯假设链而非发布结论或开单\",\"rationale\":\"行动后以实际结果比对预期能在发布前拦截矛盾结论，避免误报工单的下游处理成本与信任损耗\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"falsification_check_before_commit\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"未建立对core axioms注入机制链路（before_prompt_build钩子→数据库连接→prompt组装）运行状态的准确理解即下结论，导致在错误层级归因\",\"betterDecision\":\"先逐环节验证机制链路：钩子是否被调用、数据库连接是否正常、注入输出是否实际进入prompt，再定位失效环节作为根因\",\"rationale\":\"机制链路建模能把'预算截断'与'钩子崩溃导致注入缺失'两种假说区分开，防止归因停留在统计表象层\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"mechanism_modeling_first\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":3,\"badDecision\":\"当config.get响应过大、tool exec失败等证据获取渠道受阻时静默继续，基于不完整证据直接形成根因断言\",\"betterDecision\":\"证据获取受阻时切换替代路径（CLI执行node dist/index.js、以path请求更窄的config子树）获取替代证据，或显式将结论降级为带不确定性标注的假设而非根因断言\",\"rationale\":\"证据不可用时静默继续会系统性放大误诊风险；降级为假设或走替代路径能守住结论的证据底线，避免不完整证据被当作事实\",\"confidence\":0.78,\"riskLevel\":\"medium\",\"strategicPerspective\":\"graceful_evidence_degradation\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":4,\"badDecision\":\"诊断流程缺少强制机制链路验证门控，允许基于统计启发式的根因结论未经拦截直接进入工单系统\",\"betterDecision\":\"在诊断流程中建立硬门控：当根因断言依据含统计指标（截断率、比例等）时，强制回退并要求先取得事件级证据（hook日志、数据库连接状态、trace）验证机制链路后方可放行\",\"rationale\":\"个体习惯缺陷难以靠自觉纠正，流程级显式检查点能把证据优先约束固化为不可绕过的放行条件，系统性拦截同类误诊\",\"confidence\":0.82,\"riskLevel\":\"medium\",\"strategicPerspective\":\"process_guardrail_gating\",\"sourcePrincipleId\":\"T-05\"}],\"contextRefs\":[\"artifact://7b001334-7167-4687-bcd6-87c242231b57\"],\"generatedAt\":\"2026-09-04T13:04:12.000Z\"}",
+    "usage": {
+     "input": 2669,
+     "output": 3848,
+     "total": 6517
+    },
+    "latencyMs": 46864,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "7668886646dd5a6d"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788526359876_r5x-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r2-run1",
+     "thesis": "Statistical indicators reveal correlation, not causation: a root-cause assertion is only justified after the causal mechanism chain has been verified with event-level evidence, the conclusion has survived cross-checking against actual measured data, and any blocked evidence channel forces either an alternative evidence path or an explicit downgrade to a labeled hypothesis—because individual vigilance fails systematically, these evidence gates must be enforced as process-level checkpoints rather than relied upon as personal habits.",
+     "principleCandidate": {
+      "title": "Gate root-cause claims on event-level mechanism evidence, not statistical correlation",
+      "rationale": "The misdiagnosis occurred because an aggregate heuristic (90.8% truncation rate) was treated as proof of a causal mechanism, while event-level evidence (hook crash due to closed database connection) contradicted it and measured data (5686/9000, under budget) was never cross-checked before filing a ticket. Requiring direct verification of the mechanism chain, falsification checks against observed values, and hypothesis-downgrade when evidence is unavailable intercepts attribution errors at the layer where they form, and process hard-gates make this constraint non-bypassable.",
+      "scope": "Applies to any diagnostic or root-cause analysis whose conclusion will drive consequential actions (bug tickets, fixes, escalations, published claims), especially when initial attribution rests on aggregate metrics, rates, or statistical indicators rather than direct observation of the mechanism; also applies when evidence-gathering channels are blocked or degraded.",
+      "confidence": 0.85
+     },
+     "risks": [
+      "Substantial overlap with existing axioms: this principle is a specialization of T-03 (evidence before inferring causes) and T-01 (sufficient system model before changes), and the process-gating aspect extends T-05—must be applied as a refinement, not a contradiction or replacement.",
+      "Requiring event-level mechanism verification for every judgment may cause analysis paralysis or excessive latency in routine triage where statistical heuristics are adequate; the gate should be scoped to consequential causal claims only.",
+      "The 'downgrade to hypothesis' escape hatch could be abused to perpetually defer conclusions or avoid accountability, trading false certainty for chronic indecision.",
+      "Hard process gates can ossify into bureaucratic friction; gates must be tied to claim severity rather than applied uniformly.",
+      "Pursuing alternative evidence paths when primary channels are blocked may incur significant cost or touch risky system surfaces, requiring judgment about when to seek alternatives versus halt."
+     ],
+     "generatedAt": "2026-09-04T13:06:48.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788526359876_r5x-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r2-run1\",\"thesis\":\"Statistical indicators reveal correlation, not causation: a root-cause assertion is only justified after the causal mechanism chain has been verified with event-level evidence, the conclusion has survived cross-checking against actual measured data, and any blocked evidence channel forces either an alternative evidence path or an explicit downgrade to a labeled hypothesis—because individual vigilance fails systematically, these evidence gates must be enforced as process-level checkpoints rather than relied upon as personal habits.\",\"principleCandidate\":{\"title\":\"Gate root-cause claims on event-level mechanism evidence, not statistical correlation\",\"rationale\":\"The misdiagnosis occurred because an aggregate heuristic (90.8% truncation rate) was treated as proof of a causal mechanism, while event-level evidence (hook crash due to closed database connection) contradicted it and measured data (5686/9000, under budget) was never cross-checked before filing a ticket. Requiring direct verification of the mechanism chain, falsification checks against observed values, and hypothesis-downgrade when evidence is unavailable intercepts attribution errors at the layer where they form, and process hard-gates make this constraint non-bypassable.\",\"scope\":\"Applies to any diagnostic or root-cause analysis whose conclusion will drive consequential actions (bug tickets, fixes, escalations, published claims), especially when initial attribution rests on aggregate metrics, rates, or statistical indicators rather than direct observation of the mechanism; also applies when evidence-gathering channels are blocked or degraded.\",\"confidence\":0.85},\"risks\":[\"Substantial overlap with existing axioms: this principle is a specialization of T-03 (evidence before inferring causes) and T-01 (sufficient system model before changes), and the process-gating aspect extends T-05—must be applied as a refinement, not a contradiction or replacement.\",\"Requiring event-level mechanism verification for every judgment may cause analysis paralysis or excessive latency in routine triage where statistical heuristics are adequate; the gate should be scoped to consequential causal claims only.\",\"The 'downgrade to hypothesis' escape hatch could be abused to perpetually defer conclusions or avoid accountability, trading false certainty for chronic indecision.\",\"Hard process gates can ossify into bureaucratic friction; gates must be tied to claim severity rather than applied uniformly.\",\"Pursuing alternative evidence paths when primary channels are blocked may incur significant cost or touch risky system surfaces, requiring judgment about when to seek alternatives versus halt.\"],\"generatedAt\":\"2026-09-04T13:06:48.000Z\"}",
+    "usage": {
+     "input": 1681,
+     "output": 1694,
+     "total": 3375
+    },
+    "latencyMs": 30823,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "5abed9257529d2b0"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788526359876_r5x-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r2-run1",
+     "principleDraft": {
+      "title": "Gate root-cause claims on event-level mechanism evidence, not statistical correlation",
+      "statement": "Before asserting a root cause that will drive a consequential action (bug ticket, fix, escalation, published claim), the causal mechanism chain must be verified with event-level evidence — logs, execution traces, or system state showing each link actually behaved as claimed — never with aggregate statistical indicators alone; the conclusion must then be cross-checked against actual measured data before it is filed or published; and if an evidence channel is blocked, the agent must either obtain an alternative evidence path or explicitly downgrade the claim to a labeled, uncertainty-marked hypothesis. These checks are enforced as process-level gates that reject causal claims supported only by statistical heuristics, not as personal habits relying on individual vigilance.",
+      "rationale": "The misdiagnosis occurred because an aggregate heuristic (90.8% truncation rate) was treated as proof that size-guard budget truncation removed core axioms, while event-level evidence (the before_prompt_build hook crashing with 'TypeError: The database connection is not open') pointed to a different mechanism, and measured data (5686/9000, under budget) contradicted the truncation theory yet was never cross-checked before the false PRI-646 ticket was filed; blocked evidence channels (config.get response too large, tool exec exit 1) were passed through silently. Because the diagnosis classifies this as a systematic People-level habit gap (a T-03 blind spot) rather than a one-off lapse, intercepting it at the point of claim formation — mechanism-chain verification (refining T-03/T-01), falsification cross-check against measured values (refining T-07), a degradation path for blocked evidence, and a hard process gate (extending T-05) — closes the specific route by which the wrong attribution escaped into a consequential artifact.",
+      "applicability": [
+       "Diagnostic or root-cause analyses whose conclusion will drive consequential actions (bug tickets, code fixes, escalations, published claims)",
+       "Attributions initially resting on aggregate metrics, rates, percentages, or statistical indicators rather than direct observation of the mechanism",
+       "Causal claims about multi-link mechanism chains (e.g., hook → data source → prompt assembly) where the failing link has not been localized by event evidence",
+       "Diagnosis sessions where evidence-gathering channels are blocked or degraded (tool failures, oversized responses)"
+      ],
+      "antiPatterns": [
+       "Asserting a root cause from a statistical indicator (e.g., a truncation rate) without reading event logs to confirm the mechanism actually executed",
+       "Filing a ticket or publishing a conclusion without cross-checking it against actual measured values, leaving contradictions (e.g., observed size under budget) undetected",
+       "Silently continuing to a root-cause assertion when evidence tools fail, treating incomplete evidence as established fact",
+       "Replacing a definitive claim with vague hedges instead of an explicit labeled hypothesis, or using the downgrade to perpetually defer conclusions and avoid accountability",
+       "Relying on individual vigilance or prompt reminders to enforce evidence-first behavior instead of a non-bypassable process gate"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent the agent from filing consequential root-cause claims (like the false PRI-646 ticket) that rest on statistical heuristics such as a 90.8% truncation rate instead of event-level evidence of the actual mechanism.",
+      "targetBehavior": "In any tool trajectory producing a root-cause conclusion, the agent is seen (a) pulling event-level evidence — logs, traces, or state — that verifies each link of the claimed causal chain, (b) comparing the theory's predicted values against actual measured data before submission, and (c) when an evidence tool fails, either switching to an alternative evidence path or labeling the conclusion as an unverified hypothesis rather than asserting it.",
+      "forbiddenBehavior": "Submitting or asserting a causal root-cause claim whose only support is an aggregate statistical indicator, that skips event-level mechanism verification, that ignores contradictions between the claim and measured data, or that silently proceeds to a definitive assertion while evidence channels are blocked.",
+      "evidenceSource": "Diagnosis diagnosis_manual_1788526359876_r5xgtgu9: truncation-rate attribution (90.8%) contradicted by event evidence of a before_prompt_build hook crash ('The database connection is not open') and by measured 5686/9000 under-budget data; the contradiction was never cross-checked, producing the false PRI-646 ticket; repeated tool_call_failures (config.get response too large, tool exec exit 1) were passed through without alternative evidence paths or uncertainty labels.",
+      "validationExpectation": "An evaluator should accept a downstream rule only if it blocks causal claims supported solely by statistical indicators, requires event-level mechanism verification plus a measured-data cross-check before any consequential submission, and mandates an alternative-evidence-path-or-hypothesis-downgrade on evidence-channel failure; any change that re-permits statistical-heuristic attribution, removes the degradation requirement, or turns the gate into non-binding advice contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r2-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms: this principle specializes T-03 (observable evidence before inferring causes), refines T-01 (sufficient mechanism model) and T-07 (verify result against intended outcome), and extends T-05 (hard guardrails) with process gating — it must be applied as a refinement of those axioms, never as a replacement or contradiction.",
+      "Requiring event-level mechanism verification for every judgment may cause analysis paralysis or latency in routine triage where statistical heuristics are adequate; the gate must be scoped to consequential causal claims only.",
+      "The 'downgrade to labeled hypothesis' escape hatch could be abused to perpetually defer conclusions or avoid accountability, trading false certainty for chronic indecision.",
+      "Hard process gates can ossify into bureaucratic friction if applied uniformly; gates must scale with the consequence of the claim rather than its surface form.",
+      "Pursuing alternative evidence paths when primary channels are blocked (e.g., direct CLI execution via node dist/index.js, narrower config subtree queries) may incur cost or touch riskier system surfaces, requiring judgment about when to seek alternatives versus halt.",
+      "Keyword-based trigger patterns (e.g., matching 'rate'/'percentage' plus 'root cause') may over-trigger on legitimate statistical analyses that make no causal claim, so the gate must key on the presence of a consequential causal assertion, not on statistical vocabulary alone."
+     ],
+     "generatedAt": "2026-09-04T13:22:41.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788526359876_r5x-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r2-run1\",\"principleDraft\":{\"title\":\"Gate root-cause claims on event-level mechanism evidence, not statistical correlation\",\"statement\":\"Before asserting a root cause that will drive a consequential action (bug ticket, fix, escalation, published claim), the causal mechanism chain must be verified with event-level evidence — logs, execution traces, or system state showing each link actually behaved as claimed — never with aggregate statistical indicators alone; the conclusion must then be cross-checked against actual measured data before it is filed or published; and if an evidence channel is blocked, the agent must either obtain an alternative evidence path or explicitly downgrade the claim to a labeled, uncertainty-marked hypothesis. These checks are enforced as process-level gates that reject causal claims supported only by statistical heuristics, not as personal habits relying on individual vigilance.\",\"rationale\":\"The misdiagnosis occurred because an aggregate heuristic (90.8% truncation rate) was treated as proof that size-guard budget truncation removed core axioms, while event-level evidence (the before_prompt_build hook crashing with 'TypeError: The database connection is not open') pointed to a different mechanism, and measured data (5686/9000, under budget) contradicted the truncation theory yet was never cross-checked before the false PRI-646 ticket was filed; blocked evidence channels (config.get response too large, tool exec exit 1) were passed through silently. Because the diagnosis classifies this as a systematic People-level habit gap (a T-03 blind spot) rather than a one-off lapse, intercepting it at the point of claim formation — mechanism-chain verification (refining T-03/T-01), falsification cross-check against measured values (refining T-07), a degradation path for blocked evidence, and a hard process gate (extending T-05) — closes the specific route by which the wrong attribution escaped into a consequential artifact.\",\"applicability\":[\"Diagnostic or root-cause analyses whose conclusion will drive consequential actions (bug tickets, code fixes, escalations, published claims)\",\"Attributions initially resting on aggregate metrics, rates, percentages, or statistical indicators rather than direct observation of the mechanism\",\"Causal claims about multi-link mechanism chains (e.g., hook → data source → prompt assembly) where the failing link has not been localized by event evidence\",\"Diagnosis sessions where evidence-gathering channels are blocked or degraded (tool failures, oversized responses)\"],\"antiPatterns\":[\"Asserting a root cause from a statistical indicator (e.g., a truncation rate) without reading event logs to confirm the mechanism actually executed\",\"Filing a ticket or publishing a conclusion without cross-checking it against actual measured values, leaving contradictions (e.g., observed size under budget) undetected\",\"Silently continuing to a root-cause assertion when evidence tools fail, treating incomplete evidence as established fact\",\"Replacing a definitive claim with vague hedges instead of an explicit labeled hypothesis, or using the downgrade to perpetually defer conclusions and avoid accountability\",\"Relying on individual vigilance or prompt reminders to enforce evidence-first behavior instead of a non-bypassable process gate\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"Prevent the agent from filing consequential root-cause claims (like the false PRI-646 ticket) that rest on statistical heuristics such as a 90.8% truncation rate instead of event-level evidence of the actual mechanism.\",\"targetBehavior\":\"In any tool trajectory producing a root-cause conclusion, the agent is seen (a) pulling event-level evidence — logs, traces, or state — that verifies each link of the claimed causal chain, (b) comparing the theory's predicted values against actual measured data before submission, and (c) when an evidence tool fails, either switching to an alternative evidence path or labeling the conclusion as an unverified hypothesis rather than asserting it.\",\"forbiddenBehavior\":\"Submitting or asserting a causal root-cause claim whose only support is an aggregate statistical indicator, that skips event-level mechanism verification, that ignores contradictions between the claim and measured data, or that silently proceeds to a definitive assertion while evidence channels are blocked.\",\"evidenceSource\":\"Diagnosis diagnosis_manual_1788526359876_r5xgtgu9: truncation-rate attribution (90.8%) contradicted by event evidence of a before_prompt_build hook crash ('The database connection is not open') and by measured 5686/9000 under-budget data; the contradiction was never cross-checked, producing the false PRI-646 ticket; repeated tool_call_failures (config.get response too large, tool exec exit 1) were passed through without alternative evidence paths or uncertainty labels.\",\"validationExpectation\":\"An evaluator should accept a downstream rule only if it blocks causal claims supported solely by statistical indicators, requires event-level mechanism verification plus a measured-data cross-check before any consequential submission, and mandates an alternative-evidence-path-or-hypothesis-downgrade on evidence-channel failure; any change that re-permits statistical-heuristic attribution, removes the degradation requirement, or turns the gate into non-binding advice contradicts this intent and must be flagged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r2-run1\"},\"risks\":[\"Substantial overlap with core axioms: this principle specializes T-03 (observable evidence before inferring causes), refines T-01 (sufficient mechanism model) and T-07 (verify result against intended outcome), and extends T-05 (hard guardrails) with process gating — it must be applied as a refinement of those axioms, never as a replacement or contradiction.\",\"Requiring event-level mechanism verification for every judgment may cause analysis paralysis or latency in routine triage where statistical heuristics are adequate; the gate must be scoped to consequential causal claims only.\",\"The 'downgrade to labeled hypothesis' escape hatch could be abused to perpetually defer conclusions or avoid accountability, trading false certainty for chronic indecision.\",\"Hard process gates can ossify into bureaucratic friction if applied uniformly; gates must scale with the consequence of the claim rather than its surface form.\",\"Pursuing alternative evidence paths when primary channels are blocked (e.g., direct CLI execution via node dist/index.js, narrower config subtree queries) may incur cost or touch riskier system surfaces, requiring judgment about when to seek alternatives versus halt.\",\"Keyword-based trigger patterns (e.g., matching 'rate'/'percentage' plus 'root cause') may over-trigger on legitimate statistical analyses that make no causal claim, so the gate must key on the presence of a consequential causal assertion, not on statistical vocabulary alone.\"],\"generatedAt\":\"2026-09-04T13:22:41.000Z\"}",
+    "usage": {
+     "input": 4877,
+     "output": 5277,
+     "total": 10154
+    },
+    "latencyMs": 66191,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "39324c1faf043e5e"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788526359876_r5x-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r2-run1",
+     "principleDraft": {
+      "title": "Gate root-cause claims on event-level mechanism evidence, not statistical correlation",
+      "statement": "Any root-cause assertion that will drive consequential action must pass three evidence gates before it is stated as a cause: (1) the causal mechanism chain is verified with event-level evidence, not inferred solely from aggregate metrics, rates, or statistical indicators; (2) the conclusion is cross-checked against directly measured data before action is taken; (3) if an evidence channel is blocked or degraded, the agent either obtains an alternative evidence path or explicitly downgrades the claim to a labeled hypothesis. These gates must exist as explicit, severity-scaled process checkpoints, not as reliance on individual vigilance.",
+      "rationale": "The diagnosed failure formed because an aggregate heuristic (a 90.8% truncation rate) was treated as proof of mechanism while event-level evidence (a hook crash from a closed database connection) contradicted it, and measured data (5686/9000, under budget) was never cross-checked before a ticket was filed. Individual vigilance fails systematically; placing hard evidence gates at the exact point where causal claims form—and scaling them to claim severity—intercepts attribution errors before they propagate into consequential actions.",
+      "applicability": [
+       "Any diagnostic or root-cause analysis whose conclusion will drive consequential actions (bug tickets, code fixes, escalations, published claims)",
+       "Attributions that initially rest on aggregate metrics, rates, dashboards, or statistical indicators rather than direct observation of the failure mechanism",
+       "Cases where evidence-gathering channels (logs, traces, databases, monitoring) are blocked, degraded, or incomplete at claim time",
+       "Recurring incident triage where a statistical heuristic has previously been accepted without mechanism verification"
+      ],
+      "antiPatterns": [
+       "Treating an aggregate statistic or rate (e.g., a 90.8% truncation rate) as proof of a causal mechanism",
+       "Filing a ticket or starting a fix on a causal claim without cross-checking it against directly measured values",
+       "Ignoring or failing to retrieve event-level evidence (crash logs, traces, error chains) that could falsify a statistical hypothesis",
+       "Stating a conclusion as verified root cause when the evidence channel needed to confirm it was blocked",
+       "Relying on reviewer or personal vigilance to catch attribution errors instead of explicit process checkpoints"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent the agent from taking consequential action (e.g., filing bug tickets) on root-cause claims derived from statistical correlation—claims must be verified via event-level mechanism evidence and cross-checked against measured data, or explicitly labeled as unverified hypotheses.",
+      "targetBehavior": "Before any consequential action based on a causal claim, the agent's trajectory shows retrieval of event-level evidence for the mechanism, an explicit comparison of the claim against directly measured values, and—when evidence channels are blocked—either an alternative evidence path or an explicit 'unverified hypothesis' label attached to the conclusion.",
+      "forbiddenBehavior": "Asserting a root cause from aggregate statistics without mechanism-level verification, proceeding to consequential action on an un-cross-checked claim, dismissing contradicting event-level evidence, and presenting blocked-evidence conclusions as established fact.",
+      "evidenceSource": "The misdiagnosis incident: a 90.8% truncation-rate heuristic was accepted as causal proof while event-level evidence showed a hook crash from a closed database connection, and the measured count (5686/9000, under budget) was never checked before the ticket was filed.",
+      "validationExpectation": "An evaluator should accept a derived rule only if it (a) triggers before consequential action on statistical-only causal claims, (b) demands event-level mechanism evidence and a measured-data cross-check, and (c) forces a labeled-hypothesis downgrade when evidence is unavailable; any later repair change that removes one of these three gates contradicts this intent and must be flagged rather than applied."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r2-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-03 (observable evidence before inferring causes) and T-01 (sufficient system model before consequential changes), with the process-gating aspect extending T-05; this draft must be applied as a specialization of those axioms, never as a contradiction or replacement.",
+      "Requiring event-level mechanism verification for every judgment may cause analysis paralysis or excessive latency in routine triage where statistical heuristics suffice; the gate must be scoped to consequential causal claims only.",
+      "The downgrade-to-hypothesis escape hatch could be abused to perpetually defer conclusions or avoid accountability, trading false certainty for chronic indecision.",
+      "Hard process gates can ossify into bureaucratic friction; gates must scale with claim severity rather than apply uniformly.",
+      "Seeking alternative evidence paths when primary channels are blocked may incur significant cost or touch risky system surfaces, requiring judgment about when to seek alternatives versus halt.",
+      "The threshold for what counts as 'consequential action' is not precisely defined here, which may lead to inconsistent gate application or gate evasion via low-stakes framing."
+     ],
+     "generatedAt": "2026-09-04T13:11:32.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788526359876_r5x-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r2-run1\",\"principleDraft\":{\"title\":\"Gate root-cause claims on event-level mechanism evidence, not statistical correlation\",\"statement\":\"Any root-cause assertion that will drive consequential action must pass three evidence gates before it is stated as a cause: (1) the causal mechanism chain is verified with event-level evidence, not inferred solely from aggregate metrics, rates, or statistical indicators; (2) the conclusion is cross-checked against directly measured data before action is taken; (3) if an evidence channel is blocked or degraded, the agent either obtains an alternative evidence path or explicitly downgrades the claim to a labeled hypothesis. These gates must exist as explicit, severity-scaled process checkpoints, not as reliance on individual vigilance.\",\"rationale\":\"The diagnosed failure formed because an aggregate heuristic (a 90.8% truncation rate) was treated as proof of mechanism while event-level evidence (a hook crash from a closed database connection) contradicted it, and measured data (5686/9000, under budget) was never cross-checked before a ticket was filed. Individual vigilance fails systematically; placing hard evidence gates at the exact point where causal claims form—and scaling them to claim severity—intercepts attribution errors before they propagate into consequential actions.\",\"applicability\":[\"Any diagnostic or root-cause analysis whose conclusion will drive consequential actions (bug tickets, code fixes, escalations, published claims)\",\"Attributions that initially rest on aggregate metrics, rates, dashboards, or statistical indicators rather than direct observation of the failure mechanism\",\"Cases where evidence-gathering channels (logs, traces, databases, monitoring) are blocked, degraded, or incomplete at claim time\",\"Recurring incident triage where a statistical heuristic has previously been accepted without mechanism verification\"],\"antiPatterns\":[\"Treating an aggregate statistic or rate (e.g., a 90.8% truncation rate) as proof of a causal mechanism\",\"Filing a ticket or starting a fix on a causal claim without cross-checking it against directly measured values\",\"Ignoring or failing to retrieve event-level evidence (crash logs, traces, error chains) that could falsify a statistical hypothesis\",\"Stating a conclusion as verified root cause when the evidence channel needed to confirm it was blocked\",\"Relying on reviewer or personal vigilance to catch attribution errors instead of explicit process checkpoints\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"The Owner wants to prevent the agent from taking consequential action (e.g., filing bug tickets) on root-cause claims derived from statistical correlation—claims must be verified via event-level mechanism evidence and cross-checked against measured data, or explicitly labeled as unverified hypotheses.\",\"targetBehavior\":\"Before any consequential action based on a causal claim, the agent's trajectory shows retrieval of event-level evidence for the mechanism, an explicit comparison of the claim against directly measured values, and—when evidence channels are blocked—either an alternative evidence path or an explicit 'unverified hypothesis' label attached to the conclusion.\",\"forbiddenBehavior\":\"Asserting a root cause from aggregate statistics without mechanism-level verification, proceeding to consequential action on an un-cross-checked claim, dismissing contradicting event-level evidence, and presenting blocked-evidence conclusions as established fact.\",\"evidenceSource\":\"The misdiagnosis incident: a 90.8% truncation-rate heuristic was accepted as causal proof while event-level evidence showed a hook crash from a closed database connection, and the measured count (5686/9000, under budget) was never checked before the ticket was filed.\",\"validationExpectation\":\"An evaluator should accept a derived rule only if it (a) triggers before consequential action on statistical-only causal claims, (b) demands event-level mechanism evidence and a measured-data cross-check, and (c) forces a labeled-hypothesis downgrade when evidence is unavailable; any later repair change that removes one of these three gates contradicts this intent and must be flagged rather than applied.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r2-run1\"},\"risks\":[\"Substantial overlap with core axioms T-03 (observable evidence before inferring causes) and T-01 (sufficient system model before consequential changes), with the process-gating aspect extending T-05; this draft must be applied as a specialization of those axioms, never as a contradiction or replacement.\",\"Requiring event-level mechanism verification for every judgment may cause analysis paralysis or excessive latency in routine triage where statistical heuristics suffice; the gate must be scoped to consequential causal claims only.\",\"The downgrade-to-hypothesis escape hatch could be abused to perpetually defer conclusions or avoid accountability, trading false certainty for chronic indecision.\",\"Hard process gates can ossify into bureaucratic friction; gates must scale with claim severity rather than apply uniformly.\",\"Seeking alternative evidence paths when primary channels are blocked may incur significant cost or touch risky system surfaces, requiring judgment about when to seek alternatives versus halt.\",\"The threshold for what counts as 'consequential action' is not precisely defined here, which may lead to inconsistent gate application or gate evasion via low-stakes framing.\"],\"generatedAt\":\"2026-09-04T13:11:32.000Z\"}",
+    "usage": {
+     "input": 1978,
+     "output": 4099,
+     "total": 6077
+    },
+    "latencyMs": 46186,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "0a265822437f4dcf"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788526359876_r5x",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788526359876_r5x-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "仅凭统计指标（90.8%截断率）断言根因是size-guard预算截断core axioms，未先查事件日志验证before_prompt_build钩子是否真正执行成功",
+       "betterDecision": "在形成根因结论前，强制先获取事件级证据（hook执行日志、数据库连接状态、事件trace）验证机制链路实际执行状态，将统计指标仅作为待验证假设而非结论依据",
+       "rationale": "可观察的事件级证据是事实依据，统计启发式只能生成假设；真实根因（数据库连接未打开导致钩子崩溃）只有通过事件日志才能发现，用统计指标替代事件证据必然导致错误归因",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_first",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "得出截断理论后未用实测数据反向校验（实测5686/9000未超预算，与截断理论直接矛盾），直接提交结论导致PRI-646误报工单",
+       "betterDecision": "形成根因假设后执行证伪校验：将假设与实测数据逐项比对（如实际token数是否超出预算），发现矛盾时立即回退重新调查而非提交结论",
+       "rationale": "以实际结果校验预期是拦截错误的关键防线；截断理论与实测数据的矛盾在提交前即可被发现，一次反向校验就能避免整个误报工单的产生",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_after_act",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "在未建立对注入机制链路（hook触发→执行→数据库连接依赖）的准确理解前，直接跳到统计层面的根因结论",
+       "betterDecision": "先逐环节梳理并验证机制链路各节点的执行状态（钩子是否被调用、是否抛出异常、依赖的数据库连接是否打开），建立足够的系统模型后再定位故障环节",
+       "rationale": "准确的根因定位依赖对机制链路的完整理解；逐环节验证能把故障精确定位到具体环节（数据库连接未打开），而笼统的统计猜测会掩盖真实故障点",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "model_before_concluding",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "诊断过程中遭遇tool_call_failure（config.get响应过大、tool exec退出码1）后静默继续推进结论，未显式标注证据缺口或采用降级路径",
+       "betterDecision": "证据获取工具失败时按错误提示采用更窄的配置子树查询（用path请求更窄的config subtree），并在结论中显式标注证据不充分带来的置信度折扣，而非在证据残缺时维持高置信结论",
+       "rationale": "证据获取受阻时静默继续会制造证据充分的假象；gateway错误信息本身已给出解决线索，显式标注不确定性比带着隐藏缺口下结论更诚实可靠",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "graceful_degradation",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "接受'不能取得可信会话ID'的说法而放弃CLI备选路径，未利用runtime上下文中现成的sessionId",
+       "betterDecision": "首选证据路径受阻时，利用runtime上下文中的当前sessionId走CLI备选路径（pd-cli v1.76.1源码完好，node dist/index.js直接可用）补齐事件级证据",
+       "rationale": "证据优先原则要求穷尽可用路径获取可观察证据；上下文中已有sessionId且CLI路径实际可用，轻易放弃备选路径导致钩子崩溃的关键证据被遗漏",
+       "confidence": 0.72,
+       "riskLevel": "medium",
+       "strategicPerspective": "path_fallback",
+       "sourcePrincipleId": "T-03"
+      }
+     ],
+     "sourcePainId": "manual_1788523406387_rwyk0e0y",
+     "contextRefs": [
+      "artifact://7b001334-7167-4687-bcd6-87c242231b57"
+     ],
+     "generatedAt": "2026-09-04T12:58:47.512Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788526359876_r5x-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"仅凭统计指标（90.8%截断率）断言根因是size-guard预算截断core axioms，未先查事件日志验证before_prompt_build钩子是否真正执行成功\",\"betterDecision\":\"在形成根因结论前，强制先获取事件级证据（hook执行日志、数据库连接状态、事件trace）验证机制链路实际执行状态，将统计指标仅作为待验证假设而非结论依据\",\"rationale\":\"可观察的事件级证据是事实依据，统计启发式只能生成假设；真实根因（数据库连接未打开导致钩子崩溃）只有通过事件日志才能发现，用统计指标替代事件证据必然导致错误归因\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_first\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"得出截断理论后未用实测数据反向校验（实测5686/9000未超预算，与截断理论直接矛盾），直接提交结论导致PRI-646误报工单\",\"betterDecision\":\"形成根因假设后执行证伪校验：将假设与实测数据逐项比对（如实际token数是否超出预算），发现矛盾时立即回退重新调查而非提交结论\",\"rationale\":\"以实际结果校验预期是拦截错误的关键防线；截断理论与实测数据的矛盾在提交前即可被发现，一次反向校验就能避免整个误报工单的产生\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_after_act\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"在未建立对注入机制链路（hook触发→执行→数据库连接依赖）的准确理解前，直接跳到统计层面的根因结论\",\"betterDecision\":\"先逐环节梳理并验证机制链路各节点的执行状态（钩子是否被调用、是否抛出异常、依赖的数据库连接是否打开），建立足够的系统模型后再定位故障环节\",\"rationale\":\"准确的根因定位依赖对机制链路的完整理解；逐环节验证能把故障精确定位到具体环节（数据库连接未打开），而笼统的统计猜测会掩盖真实故障点\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"model_before_concluding\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":3,\"badDecision\":\"诊断过程中遭遇tool_call_failure（config.get响应过大、tool exec退出码1）后静默继续推进结论，未显式标注证据缺口或采用降级路径\",\"betterDecision\":\"证据获取工具失败时按错误提示采用更窄的配置子树查询（用path请求更窄的config subtree），并在结论中显式标注证据不充分带来的置信度折扣，而非在证据残缺时维持高置信结论\",\"rationale\":\"证据获取受阻时静默继续会制造证据充分的假象；gateway错误信息本身已给出解决线索，显式标注不确定性比带着隐藏缺口下结论更诚实可靠\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"graceful_degradation\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":4,\"badDecision\":\"接受'不能取得可信会话ID'的说法而放弃CLI备选路径，未利用runtime上下文中现成的sessionId\",\"betterDecision\":\"首选证据路径受阻时，利用runtime上下文中的当前sessionId走CLI备选路径（pd-cli v1.76.1源码完好，node dist/index.js直接可用）补齐事件级证据\",\"rationale\":\"证据优先原则要求穷尽可用路径获取可观察证据；上下文中已有sessionId且CLI路径实际可用，轻易放弃备选路径导致钩子崩溃的关键证据被遗漏\",\"confidence\":0.72,\"riskLevel\":\"medium\",\"strategicPerspective\":\"path_fallback\",\"sourcePrincipleId\":\"T-03\"}],\"sourcePainId\":\"manual_1788523406387_rwyk0e0y\",\"contextRefs\":[\"artifact://7b001334-7167-4687-bcd6-87c242231b57\"],\"generatedAt\":\"2026-09-04T12:58:47.512Z\"}",
+    "usage": {
+     "input": 2669,
+     "output": 2710,
+     "total": 5379
+    },
+    "latencyMs": 34606,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "c7706e54661c34c5"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788526359876_r5x-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r3-run1",
+     "thesis": "统计指标与启发式只能生成假设，唯有事件级证据与实测反证校验能确立根因。归因结论必须在提交前经过机制链路验证与证伪比对；当证据获取受阻时，应显式标注证据缺口并折扣置信度、穷尽备选证据路径，而非带着隐藏缺口维持高置信结论。",
+     "principleCandidate": {
+      "title": "先验证再归因：根因结论须由事件级证据确立并经实测反证，统计指标仅为待验假设",
+      "rationale": "本次失败的根本机制是用聚合统计（90.8%截断率）替代了机制实际执行状态的直接证据，而真实根因（数据库连接未打开导致钩子崩溃）只能通过事件级日志发现；且实测数据（5686/9000未超预算）与截断理论直接矛盾，一次提交前的反证比对即可拦截误报。将'事件级机制验证+证伪校验+证据缺口显式化'作为归因的前置门槛，直接消除此类错误归因的失败模式。",
+      "scope": "适用于任何由间接指标（统计数据、模式匹配、二手报告）形成诊断结论、根因归因或后果性断言的场景，尤其是提交结论、申报工单、触发变更之前；同时约束证据获取工具失败时的行为：显式标注证据不充分、折扣置信度、并利用上下文中可用的备选证据路径。",
+      "confidence": 0.88
+     },
+     "risks": [
+      "与现有核心公理存在部分重叠：本原则实质上组合了T-01（建立系统模型）、T-03（证据优先）与T-07（结果校验），可能构成冗余而非新增行为指导",
+      "过度验证会给低风险结论增加不必要的延迟与成本；应用时应与错误后果的严重性成比例，否则可能导致分析瘫痪",
+      "反证校验依赖的实测数据本身可能有噪声或不完整，单点比对可能产生虚假的'矛盾'或'确认'，导致误回退或误坚持",
+      "'穷尽备选证据路径'的要求可能消耗过多资源；在证据获取代价过高时，显式标注不确定性并升级上报可能是更优选择"
+     ],
+     "generatedAt": "2026-09-04T13:04:22.318Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788526359876_r5x-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r3-run1\",\"thesis\":\"统计指标与启发式只能生成假设，唯有事件级证据与实测反证校验能确立根因。归因结论必须在提交前经过机制链路验证与证伪比对；当证据获取受阻时，应显式标注证据缺口并折扣置信度、穷尽备选证据路径，而非带着隐藏缺口维持高置信结论。\",\"principleCandidate\":{\"title\":\"先验证再归因：根因结论须由事件级证据确立并经实测反证，统计指标仅为待验假设\",\"rationale\":\"本次失败的根本机制是用聚合统计（90.8%截断率）替代了机制实际执行状态的直接证据，而真实根因（数据库连接未打开导致钩子崩溃）只能通过事件级日志发现；且实测数据（5686/9000未超预算）与截断理论直接矛盾，一次提交前的反证比对即可拦截误报。将'事件级机制验证+证伪校验+证据缺口显式化'作为归因的前置门槛，直接消除此类错误归因的失败模式。\",\"scope\":\"适用于任何由间接指标（统计数据、模式匹配、二手报告）形成诊断结论、根因归因或后果性断言的场景，尤其是提交结论、申报工单、触发变更之前；同时约束证据获取工具失败时的行为：显式标注证据不充分、折扣置信度、并利用上下文中可用的备选证据路径。\",\"confidence\":0.88},\"risks\":[\"与现有核心公理存在部分重叠：本原则实质上组合了T-01（建立系统模型）、T-03（证据优先）与T-07（结果校验），可能构成冗余而非新增行为指导\",\"过度验证会给低风险结论增加不必要的延迟与成本；应用时应与错误后果的严重性成比例，否则可能导致分析瘫痪\",\"反证校验依赖的实测数据本身可能有噪声或不完整，单点比对可能产生虚假的'矛盾'或'确认'，导致误回退或误坚持\",\"'穷尽备选证据路径'的要求可能消耗过多资源；在证据获取代价过高时，显式标注不确定性并升级上报可能是更优选择\"],\"generatedAt\":\"2026-09-04T13:04:22.318Z\"}",
+    "usage": {
+     "input": 1740,
+     "output": 2009,
+     "total": 3749
+    },
+    "latencyMs": 32472,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "8a514acd0aaf9c65"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788526359876_r5x-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r3-run1",
+     "principleDraft": {
+      "title": "先验证再归因：根因结论须由事件级证据确立并经实测反证，统计指标仅为待验假设",
+      "statement": "任何归因、诊断或后果性断言在提交前，必须先用事件级证据（日志、执行轨迹、运行时状态）核实其依赖的机制链路确实发生，并用实测数据执行至少一次证伪比对；间接指标（统计聚合、模式匹配、二手报告）只能产生假设，不得单独支撑结论。当证据获取受阻时，必须显式标注证据缺口、下调置信度并依次尝试上下文中可用的备选证据路径，禁止在隐藏缺口的情况下维持原置信度提交。",
+      "rationale": "误报的直接机制是用聚合统计（90.8%截断率）替代了机制实际执行状态的直接证据，而真实根因（数据库连接未打开导致钩子崩溃）仅存在于事件级日志中；且实测数据（5686/9000未超预算）与截断理论直接矛盾，一次提交前的反证比对即可拦截误报。将'事件级机制验证+实测反证+证据缺口显式化'设为归因结论提交的前置门槛，直接封堵此类错误归因的失败模式。相对T-03（证据优先）与T-07（事后结果验证），本原则的增量在于把证据门槛前置到结论提交时刻，并规定证据缺失时的置信度处理义务。",
+      "applicability": [
+       "基于间接指标（统计聚合、模式匹配、二手报告）形成根因归因或诊断结论的场景",
+       "提交结论、申报工单、触发修复或变更等后果性动作之前",
+       "证据获取工具失败或证据不完整、需决定是否仍提交结论的场景",
+       "事后复盘中对既有归因结论进行复核的场景"
+      ],
+      "antiPatterns": [
+       "用聚合统计指标（如截断率）直接断言机制级根因，未查看事件级日志即提交",
+       "仅凭指标表面一致即提交结论，未执行实测反证比对",
+       "证据获取工具失败后静默沿用原结论与置信度，隐藏证据缺口",
+       "把模式匹配命中或二手报告当作机制确实发生的直接证明",
+       "实测数据与结论矛盾时仍以统计显著性为由坚持原结论"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "Owner希望杜绝基于聚合统计的误报归因：任何根因结论提交前必须先以事件级证据验证机制并完成一次实测反证比对，且证据缺口不得被隐藏。",
+      "targetBehavior": "在提交任何归因或诊断结论前，Agent的工具轨迹中可见：调取事件级日志或执行状态证据核对机制链路，并执行至少一次与实测数据的反证比对；若证据获取失败，输出中显式标注证据缺口并下调置信度。",
+      "forbiddenBehavior": "仅凭统计聚合指标（如截断率）直接断言机制级根因并提交，未做事件级验证与反证比对；或在证据获取失败时隐藏缺口、维持高置信结论。",
+      "evidenceSource": "本次失败事实：以90.8%截断率的聚合统计替代机制执行状态证据，误将截断报为根因；真实根因（数据库连接未打开导致钩子崩溃）仅在事件级日志中可见；实测数据5686/9000未超预算与截断理论直接矛盾，一次提交前反证比对即可拦截该误报。",
+      "validationExpectation": "评估者应要求规则满足以下可核查条件：结论提交前存在事件级证据核查与反证比对的工具轨迹；间接指标被降级为假设而非结论依据；证据缺口必须显式标注并伴随置信度折扣；且规则与T-03/T-07分工清晰——本原则约束归因提交前的证据门槛与缺口披露义务，而非事后结果验证。与validationExpectation相矛盾的修订应被标记而非直接采纳。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r3-run1"
+     },
+     "risks": [
+      "与核心公理T-01、T-03、T-07存在功能重叠，可能造成规则冗余或评估冲突；下游规则生成时须明确本原则的增量（归因提交前的事件级证据门槛+反证比对+缺口披露），避免与既有公理规则重复计分或互相覆盖",
+      "无差别应用于低风险结论会显著增加延迟与成本；应与结论的后果严重性成比例，否则可能引发分析瘫痪",
+      "反证比对所依赖的实测数据本身可能噪声或不完整，单点矛盾可能造成误回退；规则宜要求多源印证或至少标注比对的不确定性",
+      "'依次尝试备选证据路径'在证据获取代价极高时可能不经济；规则需允许'显式标注不确定性并升级上报'作为例外路径",
+      "本原则陈述为复合义务（机制验证+反证+缺口披露三者同为提交前门槛），下游拆分为单条规则时可能丢失整体性约束，导致只执行其中一项即判定合规"
+     ],
+     "generatedAt": "2026-09-04T13:06:12.447Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788526359876_r5x-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r3-run1\",\"principleDraft\":{\"title\":\"先验证再归因：根因结论须由事件级证据确立并经实测反证，统计指标仅为待验假设\",\"statement\":\"任何归因、诊断或后果性断言在提交前，必须先用事件级证据（日志、执行轨迹、运行时状态）核实其依赖的机制链路确实发生，并用实测数据执行至少一次证伪比对；间接指标（统计聚合、模式匹配、二手报告）只能产生假设，不得单独支撑结论。当证据获取受阻时，必须显式标注证据缺口、下调置信度并依次尝试上下文中可用的备选证据路径，禁止在隐藏缺口的情况下维持原置信度提交。\",\"rationale\":\"误报的直接机制是用聚合统计（90.8%截断率）替代了机制实际执行状态的直接证据，而真实根因（数据库连接未打开导致钩子崩溃）仅存在于事件级日志中；且实测数据（5686/9000未超预算）与截断理论直接矛盾，一次提交前的反证比对即可拦截误报。将'事件级机制验证+实测反证+证据缺口显式化'设为归因结论提交的前置门槛，直接封堵此类错误归因的失败模式。相对T-03（证据优先）与T-07（事后结果验证），本原则的增量在于把证据门槛前置到结论提交时刻，并规定证据缺失时的置信度处理义务。\",\"applicability\":[\"基于间接指标（统计聚合、模式匹配、二手报告）形成根因归因或诊断结论的场景\",\"提交结论、申报工单、触发修复或变更等后果性动作之前\",\"证据获取工具失败或证据不完整、需决定是否仍提交结论的场景\",\"事后复盘中对既有归因结论进行复核的场景\"],\"antiPatterns\":[\"用聚合统计指标（如截断率）直接断言机制级根因，未查看事件级日志即提交\",\"仅凭指标表面一致即提交结论，未执行实测反证比对\",\"证据获取工具失败后静默沿用原结论与置信度，隐藏证据缺口\",\"把模式匹配命中或二手报告当作机制确实发生的直接证明\",\"实测数据与结论矛盾时仍以统计显著性为由坚持原结论\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"Owner希望杜绝基于聚合统计的误报归因：任何根因结论提交前必须先以事件级证据验证机制并完成一次实测反证比对，且证据缺口不得被隐藏。\",\"targetBehavior\":\"在提交任何归因或诊断结论前，Agent的工具轨迹中可见：调取事件级日志或执行状态证据核对机制链路，并执行至少一次与实测数据的反证比对；若证据获取失败，输出中显式标注证据缺口并下调置信度。\",\"forbiddenBehavior\":\"仅凭统计聚合指标（如截断率）直接断言机制级根因并提交，未做事件级验证与反证比对；或在证据获取失败时隐藏缺口、维持高置信结论。\",\"evidenceSource\":\"本次失败事实：以90.8%截断率的聚合统计替代机制执行状态证据，误将截断报为根因；真实根因（数据库连接未打开导致钩子崩溃）仅在事件级日志中可见；实测数据5686/9000未超预算与截断理论直接矛盾，一次提交前反证比对即可拦截该误报。\",\"validationExpectation\":\"评估者应要求规则满足以下可核查条件：结论提交前存在事件级证据核查与反证比对的工具轨迹；间接指标被降级为假设而非结论依据；证据缺口必须显式标注并伴随置信度折扣；且规则与T-03/T-07分工清晰——本原则约束归因提交前的证据门槛与缺口披露义务，而非事后结果验证。与validationExpectation相矛盾的修订应被标记而非直接采纳。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r3-run1\"},\"risks\":[\"与核心公理T-01、T-03、T-07存在功能重叠，可能造成规则冗余或评估冲突；下游规则生成时须明确本原则的增量（归因提交前的事件级证据门槛+反证比对+缺口披露），避免与既有公理规则重复计分或互相覆盖\",\"无差别应用于低风险结论会显著增加延迟与成本；应与结论的后果严重性成比例，否则可能引发分析瘫痪\",\"反证比对所依赖的实测数据本身可能噪声或不完整，单点矛盾可能造成误回退；规则宜要求多源印证或至少标注比对的不确定性\",\"'依次尝试备选证据路径'在证据获取代价极高时可能不经济；规则需允许'显式标注不确定性并升级上报'作为例外路径\",\"本原则陈述为复合义务（机制验证+反证+缺口披露三者同为提交前门槛），下游拆分为单条规则时可能丢失整体性约束，导致只执行其中一项即判定合规\"],\"generatedAt\":\"2026-09-04T13:06:12.447Z\"}",
+    "usage": {
+     "input": 1952,
+     "output": 3571,
+     "total": 5523
+    },
+    "latencyMs": 44893,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "1678f4b3589c0e6e"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788526359876_r5x-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r3-run1",
+     "principleDraft": {
+      "title": "先验证再归因：根因结论须由事件级证据确立并经提交前实测反证，统计指标仅为待验假设",
+      "statement": "凡由间接指标（统计比例、截断率、模式匹配、二手报告）形成的根因归因或后果性断言，统计指标只能作为待验证假设：提交前必须(1)以事件级证据（执行日志、状态检查、事件trace）验证所涉机制链路的实际执行状态，(2)将假设与实测数据逐项比对做反证校验，出现矛盾即回退重新调查而非提交结论。当证据获取工具失败时，必须按错误提示改用更窄查询（如用path请求更窄的config子树）或上下文可用的备选路径（如runtime中现成的sessionId配合CLI），仍无法补齐时在结论中显式标注证据缺口并折扣置信度，禁止在证据残缺时静默维持高置信结论。",
+      "rationale": "失败的根本机制是用聚合统计（90.8%截断率）替代了机制执行状态的直接证据：真实根因（数据库连接未打开导致before_prompt_build钩子崩溃）只有事件级日志能揭示，而实测数据（5686/9000未超预算）与截断理论直接矛盾——一次提交前的反证比对即可拦截PRI-646误报工单。同时诊断过程中证据获取工具失败（config.get响应过大、tool exec退出码1）被静默略过，制造了证据充分的假象。将'事件级机制验证+提交前反证比对+证据缺口显式化与降级取证'设为归因的前置门槛，直接消除此类错误归因的失败模式。",
+      "applicability": [
+       "形成或提交根因归因、诊断结论、故障/问题申报（如工单）之前",
+       "结论依据来自间接指标（统计比例、截断率、模式匹配、二手报告）而非可观察事件证据的任何诊断或调查场景",
+       "结论将触发后果性动作（创建工单、上报、触发变更）时的提交关口",
+       "证据获取工具失败（如gateway响应过大、执行退出码非零）时的调查与取证过程"
+      ],
+      "antiPatterns": [
+       "仅凭统计指标（如90.8%截断率）直接断言根因，未先以事件级日志验证机制（如hook）的实际执行状态",
+       "形成根因假设后不做实测反证比对即提交结论（如实测5686/9000未超预算与截断理论矛盾仍申报）",
+       "证据获取工具失败后静默继续推进，维持高置信结论而不显式标注证据缺口与置信度折扣",
+       "放弃上下文中可用的备选证据路径（如runtime现成的sessionId配合CLI路径）后仍宣称证据不足",
+       "将统计启发式当作事实依据而非待验证假设"
+      ],
+      "confidence": 0.86
+     },
+     "intentContract": {
+      "ownerIntent": "Owner要求：根因归因必须先以事件级证据验证机制链路实际执行状态、并经提交前实测反证比对才可提交（避免如PRI-646误报工单），统计指标只能作待验假设；证据获取受阻时须显式标注缺口、折扣置信度并尝试可用备选路径，不得静默维持高置信结论。",
+      "targetBehavior": "观察者可在工具轨迹中看到：agent形成根因假设后，先调用事件级证据工具（执行日志、状态检查、trace）验证机制链路各节点实际执行状态，再将假设与实测数据逐项比对，发现矛盾即回退重查而非提交；提交的结论中附有证据覆盖情况与置信度说明；证据工具失败时按错误提示改用更窄查询（如path请求config子树）或备选路径（runtime sessionId+CLI），仍失败则在结论中显式列出证据缺口并降低置信度。",
+      "forbiddenBehavior": "仅凭聚合统计指标（截断率、比例）或启发式直接断言根因并提交申报而不验证机制实际执行状态；不做提交前的假设-实测反证比对；证据获取工具失败后静默继续并维持高置信结论，或轻易放弃上下文中可用的备选证据路径。",
+      "evidenceSource": "T-03误诊案例（diagnosis_manual_1788526359876_r5xgtgu9）：诊断者仅凭90.8%截断率误归因为size-guard预算截断core axioms，真实根因为before_prompt_build钩子崩溃（TypeError: The database connection is not open），实测5686/9000未超预算与截断理论直接矛盾，导致PRI-646误报工单；诊断中config.get响应过大、tool exec退出码1等证据获取失败被静默略过。",
+      "validationExpectation": "评估者应要求规则做到：当结论依据为间接统计指标时强制回退至事件级证据验证机制链路；提交前强制假设与实测数据的逐项反证比对且矛盾即回退；证据工具失败触发显式缺口标注、置信度折扣与备选路径尝试（更窄查询/runtime sessionId+CLI）；任何与上述相悖的修改（如允许统计指标直接支撑根因结论、允许静默跳过证据获取失败）应被标记而非采纳。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r3-run1"
+     },
+     "risks": [
+      "与现有核心公理T-01/T-03/T-07存在重叠：本原则实质是三者在此场景的组合操作化；其增量在于'统计指标仅为待验假设'、'提交前反证比对'与'证据工具失败时的显式降级义务'的具体化，下游规则生成时须避免与既有公理规则重复",
+      "过度验证可能拖慢低风险结论：应用强度应与结论后果严重性成比例（如仅内部备注与创建工单/触发变更应区别对待），否则可能导致分析瘫痪",
+      "反证比对依赖实测数据本身的质量：单点数据噪声可能产生虚假'矛盾'或虚假'确认'，需区分硬矛盾与噪声，避免误回退或误坚持",
+      "'尝试备选证据路径'若被解读为无限穷举会消耗过多资源：证据获取代价过高时，显式标注不确定性并上报可能是更优终止条件"
+     ],
+     "generatedAt": "2026-09-04T13:16:08.542Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788526359876_r5x-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r3-run1\",\"principleDraft\":{\"title\":\"先验证再归因：根因结论须由事件级证据确立并经提交前实测反证，统计指标仅为待验假设\",\"statement\":\"凡由间接指标（统计比例、截断率、模式匹配、二手报告）形成的根因归因或后果性断言，统计指标只能作为待验证假设：提交前必须(1)以事件级证据（执行日志、状态检查、事件trace）验证所涉机制链路的实际执行状态，(2)将假设与实测数据逐项比对做反证校验，出现矛盾即回退重新调查而非提交结论。当证据获取工具失败时，必须按错误提示改用更窄查询（如用path请求更窄的config子树）或上下文可用的备选路径（如runtime中现成的sessionId配合CLI），仍无法补齐时在结论中显式标注证据缺口并折扣置信度，禁止在证据残缺时静默维持高置信结论。\",\"rationale\":\"失败的根本机制是用聚合统计（90.8%截断率）替代了机制执行状态的直接证据：真实根因（数据库连接未打开导致before_prompt_build钩子崩溃）只有事件级日志能揭示，而实测数据（5686/9000未超预算）与截断理论直接矛盾——一次提交前的反证比对即可拦截PRI-646误报工单。同时诊断过程中证据获取工具失败（config.get响应过大、tool exec退出码1）被静默略过，制造了证据充分的假象。将'事件级机制验证+提交前反证比对+证据缺口显式化与降级取证'设为归因的前置门槛，直接消除此类错误归因的失败模式。\",\"applicability\":[\"形成或提交根因归因、诊断结论、故障/问题申报（如工单）之前\",\"结论依据来自间接指标（统计比例、截断率、模式匹配、二手报告）而非可观察事件证据的任何诊断或调查场景\",\"结论将触发后果性动作（创建工单、上报、触发变更）时的提交关口\",\"证据获取工具失败（如gateway响应过大、执行退出码非零）时的调查与取证过程\"],\"antiPatterns\":[\"仅凭统计指标（如90.8%截断率）直接断言根因，未先以事件级日志验证机制（如hook）的实际执行状态\",\"形成根因假设后不做实测反证比对即提交结论（如实测5686/9000未超预算与截断理论矛盾仍申报）\",\"证据获取工具失败后静默继续推进，维持高置信结论而不显式标注证据缺口与置信度折扣\",\"放弃上下文中可用的备选证据路径（如runtime现成的sessionId配合CLI路径）后仍宣称证据不足\",\"将统计启发式当作事实依据而非待验证假设\"],\"confidence\":0.86},\"intentContract\":{\"ownerIntent\":\"Owner要求：根因归因必须先以事件级证据验证机制链路实际执行状态、并经提交前实测反证比对才可提交（避免如PRI-646误报工单），统计指标只能作待验假设；证据获取受阻时须显式标注缺口、折扣置信度并尝试可用备选路径，不得静默维持高置信结论。\",\"targetBehavior\":\"观察者可在工具轨迹中看到：agent形成根因假设后，先调用事件级证据工具（执行日志、状态检查、trace）验证机制链路各节点实际执行状态，再将假设与实测数据逐项比对，发现矛盾即回退重查而非提交；提交的结论中附有证据覆盖情况与置信度说明；证据工具失败时按错误提示改用更窄查询（如path请求config子树）或备选路径（runtime sessionId+CLI），仍失败则在结论中显式列出证据缺口并降低置信度。\",\"forbiddenBehavior\":\"仅凭聚合统计指标（截断率、比例）或启发式直接断言根因并提交申报而不验证机制实际执行状态；不做提交前的假设-实测反证比对；证据获取工具失败后静默继续并维持高置信结论，或轻易放弃上下文中可用的备选证据路径。\",\"evidenceSource\":\"T-03误诊案例（diagnosis_manual_1788526359876_r5xgtgu9）：诊断者仅凭90.8%截断率误归因为size-guard预算截断core axioms，真实根因为before_prompt_build钩子崩溃（TypeError: The database connection is not open），实测5686/9000未超预算与截断理论直接矛盾，导致PRI-646误报工单；诊断中config.get响应过大、tool exec退出码1等证据获取失败被静默略过。\",\"validationExpectation\":\"评估者应要求规则做到：当结论依据为间接统计指标时强制回退至事件级证据验证机制链路；提交前强制假设与实测数据的逐项反证比对且矛盾即回退；证据工具失败触发显式缺口标注、置信度折扣与备选路径尝试（更窄查询/runtime sessionId+CLI）；任何与上述相悖的修改（如允许统计指标直接支撑根因结论、允许静默跳过证据获取失败）应被标记而非采纳。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788526359876_r5x-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788526359876_r5x-r3-run1\"},\"risks\":[\"与现有核心公理T-01/T-03/T-07存在重叠：本原则实质是三者在此场景的组合操作化；其增量在于'统计指标仅为待验假设'、'提交前反证比对'与'证据工具失败时的显式降级义务'的具体化，下游规则生成时须避免与既有公理规则重复\",\"过度验证可能拖慢低风险结论：应用强度应与结论后果严重性成比例（如仅内部备注与创建工单/触发变更应区别对待），否则可能导致分析瘫痪\",\"反证比对依赖实测数据本身的质量：单点数据噪声可能产生虚假'矛盾'或虚假'确认'，需区分硬矛盾与噪声，避免误回退或误坚持\",\"'尝试备选证据路径'若被解读为无限穷举会消耗过多资源：证据获取代价过高时，显式标注不确定性并上报可能是更优终止条件\"],\"generatedAt\":\"2026-09-04T13:16:08.542Z\"}",
+    "usage": {
+     "input": 4888,
+     "output": 4435,
+     "total": 9323
+    },
+    "latencyMs": 61382,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "9b984618bbb4cf5c"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

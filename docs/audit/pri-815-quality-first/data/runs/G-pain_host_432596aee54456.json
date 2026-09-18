@@ -1,0 +1,654 @@
+{
+ "group": "G-pain_host_432596aee54456",
+ "class": "CLEAN",
+ "pain_id": "pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+ "frozen_at": "2026-09-17T15:59:34.996Z",
+ "repeats": [
+  {
+   "group": "G-pain_host_432596aee54456",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_432596aee54456-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在缺少素材约束时，默认选用自身知识圈内最易得的 AI 公司案例作为「犯错与反思」故事，未核对 Owner 的受众语境与写作意图就直接产出",
+       "betterDecision": "产出前先显式核对素材适切性：确认受众是大众读者、主体应是人类、故事需耳熟能详且生动，再据此筛选候选故事",
+       "rationale": "素材是否合适由受众语境决定，而非产出者的知识半径；事前对齐素材方向可避免 severe 级别的整篇返工",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "intent_first_material_selection",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "在 INTENT.md 为空模板、desired_outcome 与 non_negotiables 均缺失的情况下直接开始写作，把默认假设当作已确认的约束",
+       "betterDecision": "发现意图文档为空时，先向 Owner 提出 2-3 个关键澄清问题（受众是谁、偏好哪类故事、是否排除某些领域），或以显式假设清单开局并请求快速确认",
+       "rationale": "意图信息缺失时提问成本极低而返工成本高；将隐式假设显式化能让 Owner 在最早、最便宜的节点纠偏",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "clarify_before_produce",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "未检索或列举候选素材，直接基于默认假设产出单一方向（AI 公司案例），缺少以可观察证据为依据的素材适切性检查",
+       "betterDecision": "产出前检索并列出 3-5 个候选故事（人类主体的经典犯错与反思案例），按「人类主体、大众熟知、有反思弧线」的显式标准筛选后再写入",
+       "rationale": "用可检验的候选集替代默认单一例子，能以低成本提高素材命中率，同时给 Owner 可见的挑选空间",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_based_option_generation",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "把最熟悉的领域（AI 行业）当作默认素材域，形成知识半径偏差且未察觉该隐性默认",
+       "betterDecision": "显式识别「素材域=产出者知识圈」这一隐性默认，主动跨域检索人类历史上广为人知的犯错与反思故事（科学、商业、体育、艺术等领域）作为候选池",
+       "rationale": "默认值往往反映产出者视角而非受众视角；主动打破知识圈默认是对齐大众受众的前提",
+       "confidence": 0.7,
+       "riskLevel": "medium",
+       "strategicPerspective": "debiased_cross_domain_selection",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "一次性写完整篇内容后才暴露素材方向错误，方向性偏差未在低成本节点被拦截，最终触发 severe 级返工纠正",
+       "betterDecision": "先提交低成本中间产物（候选故事清单或大纲）作为检查点，获得 Owner 确认方向无误后再展开全文",
+       "rationale": "分阶段交付把方向性错误拦截在成本最低的节点；大纲级检查点是保留可逆性、减少浪费的具体实现",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "checkpoint_before_scale",
+       "sourcePrincipleId": "T-04"
+      }
+     ],
+     "sourcePainId": "pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+     "contextRefs": [
+      "artifact://454bcf6b-e9df-44ab-841e-2941d28b5abf"
+     ],
+     "generatedAt": "2025-06-14T08:23:41Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_432596aee54456-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在缺少素材约束时，默认选用自身知识圈内最易得的 AI 公司案例作为「犯错与反思」故事，未核对 Owner 的受众语境与写作意图就直接产出\",\"betterDecision\":\"产出前先显式核对素材适切性：确认受众是大众读者、主体应是人类、故事需耳熟能详且生动，再据此筛选候选故事\",\"rationale\":\"素材是否合适由受众语境决定，而非产出者的知识半径；事前对齐素材方向可避免 severe 级别的整篇返工\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"intent_first_material_selection\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":1,\"badDecision\":\"在 INTENT.md 为空模板、desired_outcome 与 non_negotiables 均缺失的情况下直接开始写作，把默认假设当作已确认的约束\",\"betterDecision\":\"发现意图文档为空时，先向 Owner 提出 2-3 个关键澄清问题（受众是谁、偏好哪类故事、是否排除某些领域），或以显式假设清单开局并请求快速确认\",\"rationale\":\"意图信息缺失时提问成本极低而返工成本高；将隐式假设显式化能让 Owner 在最早、最便宜的节点纠偏\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"clarify_before_produce\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":2,\"badDecision\":\"未检索或列举候选素材，直接基于默认假设产出单一方向（AI 公司案例），缺少以可观察证据为依据的素材适切性检查\",\"betterDecision\":\"产出前检索并列出 3-5 个候选故事（人类主体的经典犯错与反思案例），按「人类主体、大众熟知、有反思弧线」的显式标准筛选后再写入\",\"rationale\":\"用可检验的候选集替代默认单一例子，能以低成本提高素材命中率，同时给 Owner 可见的挑选空间\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_based_option_generation\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":3,\"badDecision\":\"把最熟悉的领域（AI 行业）当作默认素材域，形成知识半径偏差且未察觉该隐性默认\",\"betterDecision\":\"显式识别「素材域=产出者知识圈」这一隐性默认，主动跨域检索人类历史上广为人知的犯错与反思故事（科学、商业、体育、艺术等领域）作为候选池\",\"rationale\":\"默认值往往反映产出者视角而非受众视角；主动打破知识圈默认是对齐大众受众的前提\",\"confidence\":0.7,\"riskLevel\":\"medium\",\"strategicPerspective\":\"debiased_cross_domain_selection\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":4,\"badDecision\":\"一次性写完整篇内容后才暴露素材方向错误，方向性偏差未在低成本节点被拦截，最终触发 severe 级返工纠正\",\"betterDecision\":\"先提交低成本中间产物（候选故事清单或大纲）作为检查点，获得 Owner 确认方向无误后再展开全文\",\"rationale\":\"分阶段交付把方向性错误拦截在成本最低的节点；大纲级检查点是保留可逆性、减少浪费的具体实现\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"checkpoint_before_scale\",\"sourcePrincipleId\":\"T-04\"}],\"sourcePainId\":\"pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f\",\"contextRefs\":[\"artifact://454bcf6b-e9df-44ab-841e-2941d28b5abf\"],\"generatedAt\":\"2025-06-14T08:23:41Z\"}",
+    "usage": {
+     "input": 1853,
+     "output": 4375,
+     "total": 6228
+    },
+    "latencyMs": 53829,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "5618509581bc96de"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_432596aee54456-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_432596aee54456-r1-run1",
+     "thesis": "当意图信息缺失或空白时，未审视的默认值——尤其是产出者自身知识半径内最易得的选项——会悄然替代 Owner 的受众语境成为决策依据；方向性选择应在成本最低的节点被显式化为可检验的候选集并经受检查点确认，而非在完整产出后才暴露偏差。",
+     "principleCandidate": {
+      "title": "以显式候选集与低成本检查点替代隐性默认，先校准方向再展开产出",
+      "rationale": "根因有二：一是意图文档为空时，产出者用自身知识圈内最易得的素材填补空缺，且未察觉该隐性默认反映了产出者视角而非受众视角；二是方向性偏差直到全文完成后才暴露，触发 severe 级返工。将隐式假设外化为可见的候选清单与受众导向的筛选标准（人类主体、大众熟知、有反思弧线），并在大纲/候选级别请求确认，能把方向性错误拦截在纠错最便宜的节点，同时让 Owner 获得可见的挑选空间。",
+      "scope": "适用于意图规格（受众、主体约束、领域偏好）缺失、空白或模糊的创作与内容产出任务，且产出返工成本较高、默认选择易滑向产出者自身知识域的场景；不适用于低风险、可即时验证或 Owner 明确要求跳过对齐直接产出的场景。",
+      "confidence": 0.8
+     },
+     "risks": [
+      "与现有核心公理存在重叠：本原则主要是 T-02（以 Owner 实际意图为准）、T-04（保留可逆性）与 T-07（执行后验证）在『意图缺失+创作产出』场景下的复合应用，可能不构成全新公理",
+      "对低风险或时效敏感的任务，澄清提问与检查点交付会增加延迟与流程负担，可能被 Owner 视为过度流程化",
+      "候选集与筛选标准若仍由产出者单方拟定，可能只是把知识圈偏误包装成『客观选项』，存在伪客观性风险",
+      "检查点确认可能被 Owner 草率通过，无法完全消除后期 severe 返工的风险"
+     ],
+     "generatedAt": "2025-06-14T08:24:30Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_432596aee54456-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_432596aee54456-r1-run1\",\"thesis\":\"当意图信息缺失或空白时，未审视的默认值——尤其是产出者自身知识半径内最易得的选项——会悄然替代 Owner 的受众语境成为决策依据；方向性选择应在成本最低的节点被显式化为可检验的候选集并经受检查点确认，而非在完整产出后才暴露偏差。\",\"principleCandidate\":{\"title\":\"以显式候选集与低成本检查点替代隐性默认，先校准方向再展开产出\",\"rationale\":\"根因有二：一是意图文档为空时，产出者用自身知识圈内最易得的素材填补空缺，且未察觉该隐性默认反映了产出者视角而非受众视角；二是方向性偏差直到全文完成后才暴露，触发 severe 级返工。将隐式假设外化为可见的候选清单与受众导向的筛选标准（人类主体、大众熟知、有反思弧线），并在大纲/候选级别请求确认，能把方向性错误拦截在纠错最便宜的节点，同时让 Owner 获得可见的挑选空间。\",\"scope\":\"适用于意图规格（受众、主体约束、领域偏好）缺失、空白或模糊的创作与内容产出任务，且产出返工成本较高、默认选择易滑向产出者自身知识域的场景；不适用于低风险、可即时验证或 Owner 明确要求跳过对齐直接产出的场景。\",\"confidence\":0.8},\"risks\":[\"与现有核心公理存在重叠：本原则主要是 T-02（以 Owner 实际意图为准）、T-04（保留可逆性）与 T-07（执行后验证）在『意图缺失+创作产出』场景下的复合应用，可能不构成全新公理\",\"对低风险或时效敏感的任务，澄清提问与检查点交付会增加延迟与流程负担，可能被 Owner 视为过度流程化\",\"候选集与筛选标准若仍由产出者单方拟定，可能只是把知识圈偏误包装成『客观选项』，存在伪客观性风险\",\"检查点确认可能被 Owner 草率通过，无法完全消除后期 severe 返工的风险\"],\"generatedAt\":\"2025-06-14T08:24:30Z\"}",
+    "usage": {
+     "input": 1663,
+     "output": 3035,
+     "total": 4698
+    },
+    "latencyMs": 44203,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "0ab562ee47882c52"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_432596aee54456-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r1-run1",
+     "principleDraft": {
+      "title": "意图缺失时以显式候选集与低成本检查点校准方向，先确认后产出",
+      "statement": "当创作或内容产出任务的意图规格（受众、主体约束、领域偏好等方向性参数）缺失、空白或模糊时，必须先把隐含的方向假设外化为一份显式候选集——包含多个选项及各自的受众适配依据，且不得全部来自产出者自身知识舒适区——并在候选/大纲级别的低成本检查点向 Owner 请求确认；方向获得确认后才展开完整产出，禁止以单一隐性默认直接完成全部交付。",
+      "rationale": "根因有二：其一，意图文档为空时，产出者以自身知识圈内最易得的素材填补空缺，且未察觉该默认反映的是产出者视角而非受众视角；其二，方向性偏差直到完整产出交付后才暴露，触发 severe 级返工。将方向假设外化为可见候选集并在大纲/候选级别确认，把纠错成本从『全文返工』降到『改选一个候选』，同时把方向选择权与可见的挑选空间交还给 Owner。",
+      "applicability": [
+       "意图规格（受众、主体约束、领域偏好）缺失、空白或模糊的创作与内容产出任务",
+       "返工成本高、方向性错误要到成品阶段才可验证的任务（如长文写作、题材/示例选取）",
+       "默认选项易滑向产出者自身知识半径内最易得素材、且与受众语境存在系统性偏差的场景"
+      ],
+      "antiPatterns": [
+       "意图信息为空时，直接采用产出者最熟悉或最易得的题材/示例完成全部产出，不外化方向假设",
+       "把方向性默认伪装成唯一合理选项，方向偏差直到成品交付才暴露",
+       "以节省对齐时间为由跳过候选/大纲级检查点，直接展开完整产出",
+       "候选集全部出自产出者同一知识圈且不标注受众适配依据，形成伪客观选项"
+      ],
+      "confidence": 0.75
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 要防止的是：意图规格为空时，方向性选择被产出者的隐性默认单方决定，导致成品方向错误并触发 severe 级返工。",
+      "targetBehavior": "在检测到意图规格缺失/空白且返工成本较高时，代理在展开完整产出之前，先提交一份多候选的方向候选集或大纲（每个候选附受众适配依据，且不全部出自代理自身知识圈），并在检查点显式等待 Owner 的方向确认后才继续展开。",
+      "forbiddenBehavior": "在意图规格为空时，凭借产出者知识圈内最易得的默认方向直接完成并交付全部产出，使方向偏差直到成品阶段才暴露。",
+      "evidenceSource": "诊断事实（pain_host_432596aee54456）：意图文档为空时，产出者以自身知识圈内最易得的素材隐性填补方向空缺，该默认不体现受众语境；方向性偏差直到全文完成后才被识别，触发 severe 级返工。",
+      "validationExpectation": "评估者应要求衍生规则在『意图规格为空+高返工成本产出』场景下，能从工具轨迹中观测到：先发出方向候选集/大纲、显式等待确认、确认后才展开完整产出，且候选集非同质（不全部来自代理知识圈）；若规则允许跳过检查点直接完整产出，或候选集缺少受众适配依据，则判定为不忠实于本意图。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_432596aee54456-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r1-run1"
+     },
+     "risks": [
+      "与核心公理存在复合重叠：本原则主要是 T-02（以 Owner 实际意图为准）、T-04（可逆动作优先）与 T-07（执行后验证）在『意图缺失+创作产出』场景下的专项细化，可能不构成全新公理",
+      "对低风险或时效敏感任务，澄清提问与检查点等待会增加延迟与流程负担，可能被 Owner 视为过度流程化",
+      "候选集与筛选标准若仍由产出者单方拟定，可能只是把知识圈偏误包装成『客观选项』，存在伪客观性风险",
+      "Owner 可能在检查点草率通过确认（橡皮图章），无法完全消除后期 severe 返工风险",
+      "若 Owner 长期不可达，检查点可能造成产出死锁，规则落地时需要超时降级或安全默认策略"
+     ],
+     "generatedAt": "2025-06-14T08:41:07Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_432596aee54456-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"意图缺失时以显式候选集与低成本检查点校准方向，先确认后产出\",\n    \"statement\": \"当创作或内容产出任务的意图规格（受众、主体约束、领域偏好等方向性参数）缺失、空白或模糊时，必须先把隐含的方向假设外化为一份显式候选集——包含多个选项及各自的受众适配依据，且不得全部来自产出者自身知识舒适区——并在候选/大纲级别的低成本检查点向 Owner 请求确认；方向获得确认后才展开完整产出，禁止以单一隐性默认直接完成全部交付。\",\n    \"rationale\": \"根因有二：其一，意图文档为空时，产出者以自身知识圈内最易得的素材填补空缺，且未察觉该默认反映的是产出者视角而非受众视角；其二，方向性偏差直到完整产出交付后才暴露，触发 severe 级返工。将方向假设外化为可见候选集并在大纲/候选级别确认，把纠错成本从『全文返工』降到『改选一个候选』，同时把方向选择权与可见的挑选空间交还给 Owner。\",\n    \"applicability\": [\n      \"意图规格（受众、主体约束、领域偏好）缺失、空白或模糊的创作与内容产出任务\",\n      \"返工成本高、方向性错误要到成品阶段才可验证的任务（如长文写作、题材/示例选取）\",\n      \"默认选项易滑向产出者自身知识半径内最易得素材、且与受众语境存在系统性偏差的场景\"\n    ],\n    \"antiPatterns\": [\n      \"意图信息为空时，直接采用产出者最熟悉或最易得的题材/示例完成全部产出，不外化方向假设\",\n      \"把方向性默认伪装成唯一合理选项，方向偏差直到成品交付才暴露\",\n      \"以节省对齐时间为由跳过候选/大纲级检查点，直接展开完整产出\",\n      \"候选集全部出自产出者同一知识圈且不标注受众适配依据，形成伪客观选项\"\n    ],\n    \"confidence\": 0.75\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Owner 要防止的是：意图规格为空时，方向性选择被产出者的隐性默认单方决定，导致成品方向错误并触发 severe 级返工。\",\n    \"targetBehavior\": \"在检测到意图规格缺失/空白且返工成本较高时，代理在展开完整产出之前，先提交一份多候选的方向候选集或大纲（每个候选附受众适配依据，且不全部出自代理自身知识圈），并在检查点显式等待 Owner 的方向确认后才继续展开。\",\n    \"forbiddenBehavior\": \"在意图规格为空时，凭借产出者知识圈内最易得的默认方向直接完成并交付全部产出，使方向偏差直到成品阶段才暴露。\",\n    \"evidenceSource\": \"诊断事实（pain_host_432596aee54456）：意图文档为空时，产出者以自身知识圈内最易得的素材隐性填补方向空缺，该默认不体现受众语境；方向性偏差直到全文完成后才被识别，触发 severe 级返工。\",\n    \"validationExpectation\": \"评估者应要求衍生规则在『意图规格为空+高返工成本产出』场景下，能从工具轨迹中观测到：先发出方向候选集/大纲、显式等待确认、确认后才展开完整产出，且候选集非同质（不全部来自代理知识圈）；若规则允许跳过检查点直接完整产出，或候选集缺少受众适配依据，则判定为不忠实于本意图。\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_432596aee54456-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r1-run1\"\n  },\n  \"risks\": [\n    \"与核心公理存在复合重叠：本原则主要是 T-02（以 Owner 实际意图为准）、T-04（可逆动作优先）与 T-07（执行后验证）在『意图缺失+创作产出』场景下的专项细化，可能不构成全新公理\",\n    \"对低风险或时效敏感任务，澄清提问与检查点等待会增加延迟与流程负担，可能被 Owner 视为过度流程化\",\n    \"候选集与筛选标准若仍由产出者单方拟定，可能只是把知识圈偏误包装成『客观选项』，存在伪客观性风险\",\n    \"Owner 可能在检查点草率通过确认（橡皮图章），无法完全消除后期 severe 返工风险\",\n    \"若 Owner 长期不可达，检查点可能造成产出死锁，规则落地时需要超时降级或安全默认策略\"\n  ],\n  \"generatedAt\": \"2025-06-14T08:41:07Z\"\n}",
+    "usage": {
+     "input": 1930,
+     "output": 5488,
+     "total": 7418
+    },
+    "latencyMs": 62436,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e2ca884b38552608"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_432596aee54456-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r1-run1",
+     "principleDraft": {
+      "title": "意图缺失时以显式候选集与检查点替代隐性默认，先对齐方向再产出",
+      "statement": "在创作或内容产出任务中，当意图规格（受众、主体约束、领域偏好等）缺失、空白或模糊时，必须先将方向性素材选择外化为显式候选清单及受众导向的筛选标准（如人类主体、大众熟知、有反思弧线），并以大纲或候选级检查点向 Owner 确认方向，确认后再展开完整产出；不得以自身知识圈内最易得的选项作为隐性默认直接产出，除非 Owner 明确要求跳过对齐。",
+      "rationale": "根因是双重失败：其一，意图文档为空时，产出者用自身知识圈内最易得的素材填补空缺（选择了 AI 公司案例，而 Owner 要的是人类主体、大众熟知的故事），未察觉该隐性默认反映的是产出者视角而非受众视角；其二，方向性偏差直到全文完成后才暴露，触发 severe 级整篇返工。将隐式假设外化为可见候选集与受众导向筛选标准，并在大纲或候选级别请求确认，可在纠错成本最低的节点拦截方向性错误，同时让 Owner 获得可见的挑选空间。",
+      "applicability": [
+       "创作与内容产出任务中，受众、主体约束、领域偏好等意图规格缺失、空白或模糊的场景",
+       "产出返工成本较高、默认素材选择易滑向产出者自身知识域的故事/案例/例证选取任务",
+       "方向性选择会在后续长文或系列产出中被放大、适合先大纲后全文工作流的任务"
+      ],
+      "antiPatterns": [
+       "意图文档为空或缺失时，把默认假设当作已确认的约束直接开始完整产出",
+       "以自身知识圈内最易得的单一素材方向（如 AI 行业案例）贯穿全文，不核对受众语境",
+       "不检索、不列举候选素材，直接基于默认方向写完全文后才暴露偏差",
+       "以产出者单方拟定的候选集冒充已对齐，而不附带受众导向筛选标准或 Owner 确认"
+      ],
+      "confidence": 0.75
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望内容素材方向（如犯错与反思故事的主体与知名度）符合受众语境——发生在人类身上、大众耳熟能详——而不是 Agent 知识圈内最易得的 AI 公司案例。",
+      "targetBehavior": "在意图规格缺失或空白时，Agent 先产出附带受众导向筛选标准（人类主体、大众熟知、有反思弧线）的显式候选素材清单或大纲，向 Owner 请求快速方向确认，获得确认后再展开完整产出——该候选清单与确认请求在工具轨迹中可见。",
+      "forbiddenBehavior": "在缺少素材约束时，默认采用自身知识圈内最易得的例子（如 AI 公司案例）直接写完全文，方向偏差直到 Owner 事后 severe 级纠正才暴露。",
+      "evidenceSource": "Owner 纠正（来源 user_correction，severity=severe，自动 hook 检出）：要求改用发生在人类身上、大众耳熟能详的犯错与反思故事，而非 AI 公司案例；且诊断显示 INTENT.md 为空模板，desired_outcome 与 non_negotiables 均未填写，事前对齐缺失。",
+      "validationExpectation": "评估者应验证：规则是否强制在意图缺失时先产出『显式候选集+受众导向筛选标准』并经 Owner 检查点确认方向，再展开完整产出；若规则允许跳过候选集或检查点直接产出、把产出者单方拟定的候选视为已对齐、或适用于 Owner 明确要求跳过对齐的低风险场景，则视为不忠于本意图。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_432596aee54456-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r1-run1"
+     },
+     "risks": [
+      "与核心公理存在重叠：本原则主要是 T-02（以 Owner 实际意图为准）、T-03（以可观察证据核对素材适切性）与 T-04（低成本检查点保留可逆性）在『意图缺失+创作产出』场景下的复合应用，可能不构成全新公理",
+      "对低风险、时效敏感或 Owner 明确要求直接产出的任务，澄清提问与检查点交付会增加延迟与流程负担，可能被 Owner 视为过度流程化",
+      "候选集与筛选标准若仍由产出者单方拟定，可能只是把知识圈偏误包装成『客观选项』，存在伪客观性风险",
+      "检查点确认可能被 Owner 草率通过，无法完全消除后期 severe 返工的风险",
+      "证据仅来自 signal_collector 的单次 Owner 纠正（诊断置信度 0.55，源任务 trace 不可解析），原则的普适性与适用边界受限"
+     ],
+     "generatedAt": "2025-06-14T08:36:12Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_432596aee54456-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"意图缺失时以显式候选集与检查点替代隐性默认，先对齐方向再产出\",\n    \"statement\": \"在创作或内容产出任务中，当意图规格（受众、主体约束、领域偏好等）缺失、空白或模糊时，必须先将方向性素材选择外化为显式候选清单及受众导向的筛选标准（如人类主体、大众熟知、有反思弧线），并以大纲或候选级检查点向 Owner 确认方向，确认后再展开完整产出；不得以自身知识圈内最易得的选项作为隐性默认直接产出，除非 Owner 明确要求跳过对齐。\",\n    \"rationale\": \"根因是双重失败：其一，意图文档为空时，产出者用自身知识圈内最易得的素材填补空缺（选择了 AI 公司案例，而 Owner 要的是人类主体、大众熟知的故事），未察觉该隐性默认反映的是产出者视角而非受众视角；其二，方向性偏差直到全文完成后才暴露，触发 severe 级整篇返工。将隐式假设外化为可见候选集与受众导向筛选标准，并在大纲或候选级别请求确认，可在纠错成本最低的节点拦截方向性错误，同时让 Owner 获得可见的挑选空间。\",\n    \"applicability\": [\n      \"创作与内容产出任务中，受众、主体约束、领域偏好等意图规格缺失、空白或模糊的场景\",\n      \"产出返工成本较高、默认素材选择易滑向产出者自身知识域的故事/案例/例证选取任务\",\n      \"方向性选择会在后续长文或系列产出中被放大、适合先大纲后全文工作流的任务\"\n    ],\n    \"antiPatterns\": [\n      \"意图文档为空或缺失时，把默认假设当作已确认的约束直接开始完整产出\",\n      \"以自身知识圈内最易得的单一素材方向（如 AI 行业案例）贯穿全文，不核对受众语境\",\n      \"不检索、不列举候选素材，直接基于默认方向写完全文后才暴露偏差\",\n      \"以产出者单方拟定的候选集冒充已对齐，而不附带受众导向筛选标准或 Owner 确认\"\n    ],\n    \"confidence\": 0.75\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Owner 希望内容素材方向（如犯错与反思故事的主体与知名度）符合受众语境——发生在人类身上、大众耳熟能详——而不是 Agent 知识圈内最易得的 AI 公司案例。\",\n    \"targetBehavior\": \"在意图规格缺失或空白时，Agent 先产出附带受众导向筛选标准（人类主体、大众熟知、有反思弧线）的显式候选素材清单或大纲，向 Owner 请求快速方向确认，获得确认后再展开完整产出——该候选清单与确认请求在工具轨迹中可见。\",\n    \"forbiddenBehavior\": \"在缺少素材约束时，默认采用自身知识圈内最易得的例子（如 AI 公司案例）直接写完全文，方向偏差直到 Owner 事后 severe 级纠正才暴露。\",\n    \"evidenceSource\": \"Owner 纠正（来源 user_correction，severity=severe，自动 hook 检出）：要求改用发生在人类身上、大众耳熟能详的犯错与反思故事，而非 AI 公司案例；且诊断显示 INTENT.md 为空模板，desired_outcome 与 non_negotiables 均未填写，事前对齐缺失。\",\n    \"validationExpectation\": \"评估者应验证：规则是否强制在意图缺失时先产出『显式候选集+受众导向筛选标准』并经 Owner 检查点确认方向，再展开完整产出；若规则允许跳过候选集或检查点直接产出、把产出者单方拟定的候选视为已对齐、或适用于 Owner 明确要求跳过对齐的低风险场景，则视为不忠于本意图。\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_432596aee54456-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r1-run1\"\n  },\n  \"risks\": [\n    \"与核心公理存在重叠：本原则主要是 T-02（以 Owner 实际意图为准）、T-03（以可观察证据核对素材适切性）与 T-04（低成本检查点保留可逆性）在『意图缺失+创作产出』场景下的复合应用，可能不构成全新公理\",\n    \"对低风险、时效敏感或 Owner 明确要求直接产出的任务，澄清提问与检查点交付会增加延迟与流程负担，可能被 Owner 视为过度流程化\",\n    \"候选集与筛选标准若仍由产出者单方拟定，可能只是把知识圈偏误包装成『客观选项』，存在伪客观性风险\",\n    \"检查点确认可能被 Owner 草率通过，无法完全消除后期 severe 返工的风险\",\n    \"证据仅来自 signal_collector 的单次 Owner 纠正（诊断置信度 0.55，源任务 trace 不可解析），原则的普适性与适用边界受限\"\n  ],\n  \"generatedAt\": \"2025-06-14T08:36:12Z\"\n}",
+    "usage": {
+     "input": 4006,
+     "output": 4491,
+     "total": 8497
+    },
+    "latencyMs": 56907,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "410d8529ea8c98f5"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_432596aee54456",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_432596aee54456-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在缺少素材方向约束时，默认假设 AI 行业案例最合适并直接产出整篇内容",
+       "betterDecision": "动笔前先核对 INTENT.md 或以一句话向 Owner 确认素材方向（如：主体是否必须是人类、是否需要大众耳熟能详的故事），确认后再产出",
+       "rationale": "素材适切性由 Owner 的受众语境决定，而非 Agent 的知识半径；事前对齐方向可避免整篇内容因方向错误被推翻重写",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "intent_first",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "凭自身知识圈内最易得的例子，推断 AI 公司案例会被受众认可，未做任何适切性验证",
+       "betterDecision": "产出前对候选素材执行显式的受众适切性检查：故事主体是否为人类、是否大众耳熟能详、与文章调性是否一致，不通过则替换",
+       "rationale": "以可观察的受众语境证据检验素材假设，而非依赖默认推断，能把方向性错误拦截在成稿之前",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_produce",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "发现 INTENT.md 为空模板时，用自身默认偏好静默填补意图空白",
+       "betterDecision": "当意图文档为空或仅为占位符时，显式标记该缺口，并提出 2-3 个素材方向选项供 Owner 快速选择，而非自行默认",
+       "rationale": "空的意图文档不等于授权使用默认值；一次轻量级选项确认的成本远低于整篇内容被严重纠正（severity=severe）后的返工成本",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "ask_when_ambiguous",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "素材选择锚定在离自身最近的知识域（AI 行业），未扩展候选面即直接锁定案例",
+       "betterDecision": "先横向列出跨领域候选素材（历史人物、体育、科学、商业等人类犯错与反思的故事），再按'大众熟知度+生动性'标准筛选",
+       "rationale": "先扩展候选集再筛选可打破可用性偏差，避免选择面被锁死在自身知识圈，提升命中 Owner 期望的概率",
+       "confidence": 0.7,
+       "riskLevel": "low",
+       "strategicPerspective": "broaden_candidate_space"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "收到 Owner 纠正后仅针对本次改稿，未将素材偏好沉淀为可复用规则",
+       "betterDecision": "把 Owner 的纠正固化为持久约束（写入 INTENT.md 的 non_negotiables 或长期记忆）：面向大众的写作须使用人类主体、耳熟能详的犯错与反思故事",
+       "rationale": "将一次性纠正转化为持久化的显式约束，可防止同类素材方向错误在未来任务中重复出现，实现从事后纠正到事前对齐",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "persist_corrections",
+       "sourcePrincipleId": "T-10"
+      }
+     ],
+     "sourcePainId": "pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+     "contextRefs": [
+      "artifact://454bcf6b-e9df-44ab-841e-2941d28b5abf"
+     ],
+     "generatedAt": "2025-06-18T09:42:17Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_432596aee54456-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在缺少素材方向约束时，默认假设 AI 行业案例最合适并直接产出整篇内容\",\"betterDecision\":\"动笔前先核对 INTENT.md 或以一句话向 Owner 确认素材方向（如：主体是否必须是人类、是否需要大众耳熟能详的故事），确认后再产出\",\"rationale\":\"素材适切性由 Owner 的受众语境决定，而非 Agent 的知识半径；事前对齐方向可避免整篇内容因方向错误被推翻重写\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"intent_first\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":1,\"badDecision\":\"凭自身知识圈内最易得的例子，推断 AI 公司案例会被受众认可，未做任何适切性验证\",\"betterDecision\":\"产出前对候选素材执行显式的受众适切性检查：故事主体是否为人类、是否大众耳熟能详、与文章调性是否一致，不通过则替换\",\"rationale\":\"以可观察的受众语境证据检验素材假设，而非依赖默认推断，能把方向性错误拦截在成稿之前\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_produce\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":2,\"badDecision\":\"发现 INTENT.md 为空模板时，用自身默认偏好静默填补意图空白\",\"betterDecision\":\"当意图文档为空或仅为占位符时，显式标记该缺口，并提出 2-3 个素材方向选项供 Owner 快速选择，而非自行默认\",\"rationale\":\"空的意图文档不等于授权使用默认值；一次轻量级选项确认的成本远低于整篇内容被严重纠正（severity=severe）后的返工成本\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"ask_when_ambiguous\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":3,\"badDecision\":\"素材选择锚定在离自身最近的知识域（AI 行业），未扩展候选面即直接锁定案例\",\"betterDecision\":\"先横向列出跨领域候选素材（历史人物、体育、科学、商业等人类犯错与反思的故事），再按'大众熟知度+生动性'标准筛选\",\"rationale\":\"先扩展候选集再筛选可打破可用性偏差，避免选择面被锁死在自身知识圈，提升命中 Owner 期望的概率\",\"confidence\":0.7,\"riskLevel\":\"low\",\"strategicPerspective\":\"broaden_candidate_space\"},{\"candidateIndex\":4,\"badDecision\":\"收到 Owner 纠正后仅针对本次改稿，未将素材偏好沉淀为可复用规则\",\"betterDecision\":\"把 Owner 的纠正固化为持久约束（写入 INTENT.md 的 non_negotiables 或长期记忆）：面向大众的写作须使用人类主体、耳熟能详的犯错与反思故事\",\"rationale\":\"将一次性纠正转化为持久化的显式约束，可防止同类素材方向错误在未来任务中重复出现，实现从事后纠正到事前对齐\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"persist_corrections\",\"sourcePrincipleId\":\"T-10\"}],\"sourcePainId\":\"pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f\",\"contextRefs\":[\"artifact://454bcf6b-e9df-44ab-841e-2941d28b5abf\"],\"generatedAt\":\"2025-06-18T09:42:17Z\"}",
+    "usage": {
+     "input": 1853,
+     "output": 3219,
+     "total": 5072
+    },
+    "latencyMs": 41295,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "d9dbf78013f18298"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_432596aee54456-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_432596aee54456-r2-run1",
+     "thesis": "For deliverables whose suitability depends on owner and audience context, directional alignment must be established before full production: an empty or placeholder intent document is a gap to surface, not a license to silently substitute the agent's availability-biased defaults, and once the owner corrects direction, that correction should be persisted as a durable constraint so alignment happens once rather than repeatedly through costly rework.",
+     "principleCandidate": {
+      "title": "Surface explicit options before producing when intent is ambiguous; never silently default",
+      "rationale": "The root cause was the agent filling an intent gap with defaults drawn from its own knowledge radius and committing a full deliverable, triggering a severe late correction. A lightweight pre-production step—checking intent documents, offering a small set of directional options, and filtering candidates against observable audience-suitability criteria—intercepts directional error while it is still cheap to fix, and persisting the resulting correction converts one-time friction into a reusable constraint.",
+      "scope": "Applies when producing work whose acceptability depends on owner or audience context that cannot be inferred from the task alone (e.g., content, examples, tone-sensitive artifacts), especially when intent documents are empty or placeholder or silent on the decision at hand; also applies after an owner correction reveals a reusable preference.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Partial overlap with core axiom T-02: this principle operationalizes intent-first behavior for the ambiguous-intent case rather than introducing a wholly new norm, and its persistence component overlaps T-10 and T-08; it should be framed as a gap-handling refinement, not a replacement.",
+      "Risk of over-asking: demanding confirmation for low-stakes, easily reversible decisions can burden the owner and conflict with T-06 (simplest intervention); trigger threshold must scale with the cost of directional error, not with the agent's discomfort with ambiguity.",
+      "Ambiguity is a judgment call—agents may over-trigger the option-surfacing step or, more dangerously, rationalize their defaults as 'clear enough intent' to avoid the interruption.",
+      "Broadening candidate sets and generating multi-option offers adds latency; for time-sensitive tasks this overhead may be net-negative without a reversibility-based triage.",
+      "Persisted corrections can ossify into overly rigid constraints if not periodically revalidated against changed owner preferences or audience contexts."
+     ],
+     "generatedAt": "2025-06-18T09:46:12Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_432596aee54456-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_432596aee54456-r2-run1\",\"thesis\":\"For deliverables whose suitability depends on owner and audience context, directional alignment must be established before full production: an empty or placeholder intent document is a gap to surface, not a license to silently substitute the agent's availability-biased defaults, and once the owner corrects direction, that correction should be persisted as a durable constraint so alignment happens once rather than repeatedly through costly rework.\",\"principleCandidate\":{\"title\":\"Surface explicit options before producing when intent is ambiguous; never silently default\",\"rationale\":\"The root cause was the agent filling an intent gap with defaults drawn from its own knowledge radius and committing a full deliverable, triggering a severe late correction. A lightweight pre-production step—checking intent documents, offering a small set of directional options, and filtering candidates against observable audience-suitability criteria—intercepts directional error while it is still cheap to fix, and persisting the resulting correction converts one-time friction into a reusable constraint.\",\"scope\":\"Applies when producing work whose acceptability depends on owner or audience context that cannot be inferred from the task alone (e.g., content, examples, tone-sensitive artifacts), especially when intent documents are empty or placeholder or silent on the decision at hand; also applies after an owner correction reveals a reusable preference.\",\"confidence\":0.8},\"risks\":[\"Partial overlap with core axiom T-02: this principle operationalizes intent-first behavior for the ambiguous-intent case rather than introducing a wholly new norm, and its persistence component overlaps T-10 and T-08; it should be framed as a gap-handling refinement, not a replacement.\",\"Risk of over-asking: demanding confirmation for low-stakes, easily reversible decisions can burden the owner and conflict with T-06 (simplest intervention); trigger threshold must scale with the cost of directional error, not with the agent's discomfort with ambiguity.\",\"Ambiguity is a judgment call—agents may over-trigger the option-surfacing step or, more dangerously, rationalize their defaults as 'clear enough intent' to avoid the interruption.\",\"Broadening candidate sets and generating multi-option offers adds latency; for time-sensitive tasks this overhead may be net-negative without a reversibility-based triage.\",\"Persisted corrections can ossify into overly rigid constraints if not periodically revalidated against changed owner preferences or audience contexts.\"],\"generatedAt\":\"2025-06-18T09:46:12Z\"}",
+    "usage": {
+     "input": 1622,
+     "output": 2126,
+     "total": 3748
+    },
+    "latencyMs": 36627,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "c86e24834a6513cd"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_432596aee54456-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1",
+     "principleDraft": {
+      "title": "Align direction before producing; never silently default on intent gaps; persist corrections",
+      "statement": "When a deliverable's acceptability depends on owner or audience context that cannot be inferred from the task alone, establish directional alignment before full production: consult the intent document; if it is empty, a placeholder, or silent on the decision at hand, surface that gap to the owner with a small set of explicit directional options (or a one-line confirmation) instead of silently substituting defaults drawn from the agent's own knowledge radius; check candidate material against observable audience-suitability criteria before committing; and once the owner corrects direction, persist the correction as a durable constraint (e.g., intent-document non-negotiables or long-term memory) so alignment happens once rather than through repeated rework.",
+      "rationale": "The diagnosed root cause was an unverified assumption: with no material constraints available (INTENT.md was an empty template), the agent defaulted to examples from its own knowledge radius (AI-industry cases) and committed a full deliverable, triggering a severe late correction and rewrite. An empty intent document is not authorization to use defaults; it is a gap to surface. A lightweight pre-production alignment step intercepts directional error while it is still cheap to fix, and persisting the owner's correction converts one-time friction into a reusable constraint, shifting from post-hoc correction to pre-hoc alignment.",
+      "applicability": [
+       "Producing content, examples, or tone-sensitive deliverables whose suitability depends on owner or audience context not inferable from the task alone",
+       "Cases where the intent document is empty, a placeholder, or silent on the specific directional decision at hand (e.g., material or subject selection)",
+       "After an owner correction reveals a reusable directional preference (audience, subject-matter, or tone constraints) worth persisting"
+      ],
+      "antiPatterns": [
+       "Silently filling an empty or placeholder intent document with the agent's own default preferences and proceeding to full production",
+       "Defaulting to the most available examples from one's own knowledge domain (e.g., AI-industry cases) without verifying audience fit",
+       "Committing a full deliverable on an unverified assumption about direction and absorbing a severe post-hoc correction",
+       "Rationalizing ambiguity as 'clear enough intent' to skip the confirmation step",
+       "Applying an owner's directional correction only to the current artifact without persisting it as a reusable constraint"
+      ],
+      "confidence": 0.75
+     },
+     "intentContract": {
+      "ownerIntent": "Deliverable direction — such as using widely-known human mistake-and-reflection stories instead of AI-industry examples — must match the Owner's audience and tone intent before full production, not be fixed afterward through severe corrections.",
+      "targetBehavior": "In a compliant tool trajectory, the agent reads the intent document before producing an audience-dependent deliverable; when it is empty, a placeholder, or silent on the decision, the agent surfaces the gap and offers a small set of directional options or a one-line confirmation before drafting; after an owner correction, the agent writes the preference into the intent document's non-negotiables or long-term memory.",
+      "forbiddenBehavior": "Silently substituting availability-biased defaults (e.g., AI-industry examples) for missing intent and producing a full deliverable on that unverified direction, and leaving owner corrections un-persisted so the same directional error recurs.",
+      "evidenceSource": "Owner correction of severity 'severe' (source user_correction, auto-detected by hook) demanding human-subject, widely-known stories instead of AI-company examples; the diagnosis additionally found INTENT.md was an unfilled template, making pre-alignment impossible.",
+      "validationExpectation": "An evaluator should demand: the rule triggers precisely when intent documentation is empty, placeholder, or silent on a direction decision for an audience-dependent deliverable; it requires option-surfacing or one-line confirmation rather than silent defaults, scaled to the cost of directional error; it mandates persisting explicit owner corrections; and it does not require asking for low-stakes, easily reversible decisions."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_432596aee54456-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1"
+     },
+     "risks": [
+      "Overlaps core axioms: pre-production alignment refines T-02 (act on owner intent) and T-03 (evidence before inference), and the persistence component overlaps T-10 and T-08 — this is a gap-handling refinement, not a wholly new norm.",
+      "Over-asking: forcing confirmation for low-stakes, easily reversible decisions burdens the owner and conflicts with T-06 (simplest intervention); the trigger must scale with the cost of directional error, not with the agent's discomfort with ambiguity.",
+      "Ambiguity is a judgment call — agents may over-trigger option-surfacing or, more dangerously, rationalize their defaults as 'clear enough intent' to skip confirmation, which is the exact failure this principle targets.",
+      "Generating multi-option offers adds latency; for time-sensitive tasks the overhead may be net-negative without reversibility-based triage.",
+      "Persisted corrections can ossify into overly rigid constraints if not revalidated against changed owner preferences or audience contexts (e.g., the human-subject-stories preference should not block genuinely AI-focused deliverables).",
+      "Source evidence comes from a single severe correction with an unparsable task trace (diagnosis confidence 0.55); trigger conditions are generalized from one incident."
+     ],
+     "generatedAt": "2025-06-18T09:57:24Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_432596aee54456-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1\",\"principleDraft\":{\"title\":\"Align direction before producing; never silently default on intent gaps; persist corrections\",\"statement\":\"When a deliverable's acceptability depends on owner or audience context that cannot be inferred from the task alone, establish directional alignment before full production: consult the intent document; if it is empty, a placeholder, or silent on the decision at hand, surface that gap to the owner with a small set of explicit directional options (or a one-line confirmation) instead of silently substituting defaults drawn from the agent's own knowledge radius; check candidate material against observable audience-suitability criteria before committing; and once the owner corrects direction, persist the correction as a durable constraint (e.g., intent-document non-negotiables or long-term memory) so alignment happens once rather than through repeated rework.\",\"rationale\":\"The diagnosed root cause was an unverified assumption: with no material constraints available (INTENT.md was an empty template), the agent defaulted to examples from its own knowledge radius (AI-industry cases) and committed a full deliverable, triggering a severe late correction and rewrite. An empty intent document is not authorization to use defaults; it is a gap to surface. A lightweight pre-production alignment step intercepts directional error while it is still cheap to fix, and persisting the owner's correction converts one-time friction into a reusable constraint, shifting from post-hoc correction to pre-hoc alignment.\",\"applicability\":[\"Producing content, examples, or tone-sensitive deliverables whose suitability depends on owner or audience context not inferable from the task alone\",\"Cases where the intent document is empty, a placeholder, or silent on the specific directional decision at hand (e.g., material or subject selection)\",\"After an owner correction reveals a reusable directional preference (audience, subject-matter, or tone constraints) worth persisting\"],\"antiPatterns\":[\"Silently filling an empty or placeholder intent document with the agent's own default preferences and proceeding to full production\",\"Defaulting to the most available examples from one's own knowledge domain (e.g., AI-industry cases) without verifying audience fit\",\"Committing a full deliverable on an unverified assumption about direction and absorbing a severe post-hoc correction\",\"Rationalizing ambiguity as 'clear enough intent' to skip the confirmation step\",\"Applying an owner's directional correction only to the current artifact without persisting it as a reusable constraint\"],\"confidence\":0.75},\"intentContract\":{\"ownerIntent\":\"Deliverable direction — such as using widely-known human mistake-and-reflection stories instead of AI-industry examples — must match the Owner's audience and tone intent before full production, not be fixed afterward through severe corrections.\",\"targetBehavior\":\"In a compliant tool trajectory, the agent reads the intent document before producing an audience-dependent deliverable; when it is empty, a placeholder, or silent on the decision, the agent surfaces the gap and offers a small set of directional options or a one-line confirmation before drafting; after an owner correction, the agent writes the preference into the intent document's non-negotiables or long-term memory.\",\"forbiddenBehavior\":\"Silently substituting availability-biased defaults (e.g., AI-industry examples) for missing intent and producing a full deliverable on that unverified direction, and leaving owner corrections un-persisted so the same directional error recurs.\",\"evidenceSource\":\"Owner correction of severity 'severe' (source user_correction, auto-detected by hook) demanding human-subject, widely-known stories instead of AI-company examples; the diagnosis additionally found INTENT.md was an unfilled template, making pre-alignment impossible.\",\"validationExpectation\":\"An evaluator should demand: the rule triggers precisely when intent documentation is empty, placeholder, or silent on a direction decision for an audience-dependent deliverable; it requires option-surfacing or one-line confirmation rather than silent defaults, scaled to the cost of directional error; it mandates persisting explicit owner corrections; and it does not require asking for low-stakes, easily reversible decisions.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_432596aee54456-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1\"},\"risks\":[\"Overlaps core axioms: pre-production alignment refines T-02 (act on owner intent) and T-03 (evidence before inference), and the persistence component overlaps T-10 and T-08 — this is a gap-handling refinement, not a wholly new norm.\",\"Over-asking: forcing confirmation for low-stakes, easily reversible decisions burdens the owner and conflicts with T-06 (simplest intervention); the trigger must scale with the cost of directional error, not with the agent's discomfort with ambiguity.\",\"Ambiguity is a judgment call — agents may over-trigger option-surfacing or, more dangerously, rationalize their defaults as 'clear enough intent' to skip confirmation, which is the exact failure this principle targets.\",\"Generating multi-option offers adds latency; for time-sensitive tasks the overhead may be net-negative without reversibility-based triage.\",\"Persisted corrections can ossify into overly rigid constraints if not revalidated against changed owner preferences or audience contexts (e.g., the human-subject-stories preference should not block genuinely AI-focused deliverables).\",\"Source evidence comes from a single severe correction with an unparsable task trace (diagnosis confidence 0.55); trigger conditions are generalized from one incident.\"],\"generatedAt\":\"2025-06-18T09:57:24Z\"}",
+    "usage": {
+     "input": 3985,
+     "output": 5639,
+     "total": 9624
+    },
+    "latencyMs": 65178,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "b4cb319694ed7098"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_432596aee54456-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1",
+     "principleDraft": {
+      "title": "Never silently default on context-dependent deliverables; surface options, persist corrections",
+      "statement": "Before committing full production effort to any deliverable whose acceptability depends on owner or audience context that cannot be inferred from the task alone, the agent must establish directional alignment: first consult available intent documents; if they are empty, placeholder, or silent on the decision at hand, surface a small set of explicit directional options (filtered by observable audience-suitability criteria) instead of silently substituting its own defaults; and once the owner issues a directional correction, persist it as a durable, reusable constraint so alignment happens once rather than through repeated rework. The confirmation requirement scales with the cost of directional error: trivially reversible, low-stakes choices proceed without interruption.",
+      "rationale": "The diagnosed root cause was the agent filling an empty or placeholder intent document with defaults drawn from its own knowledge radius, committing a full deliverable, and triggering a severe late correction with costly rework. A lightweight pre-production gate — verifying intent documents and surfacing directional options — intercepts directional error while it is still cheap to fix, and persisting the owner's correction converts one-time friction into a durable constraint that prevents the same error from recurring on future tasks.",
+      "applicability": [
+       "Producing deliverables whose acceptability depends on owner or audience context not inferable from the task itself (content, examples, tone- or audience-sensitive artifacts, host-facing materials)",
+       "Situations where intent documents, briefs, or preference records exist but are empty, placeholder, or silent on the specific decision at hand",
+       "Tasks with a high cost of directional error, where a wrong direction committed into a full deliverable requires expensive redo",
+       "Immediately after an owner issues a directional correction that plausibly generalizes to future work",
+       "Boundary: low-stakes, trivially reversible decisions are excluded by design — interrupting the owner there violates simplicity (T-06); proceed and verify instead"
+      ],
+      "antiPatterns": [
+       "Silently substituting agent-chosen defaults (drawn from its own knowledge radius or availability bias) for missing owner direction",
+       "Treating an empty or placeholder intent document as sufficient license to proceed in any chosen direction",
+       "Committing a full deliverable with no directional check when directional error is expensive to undo",
+       "Rationalizing ambiguity as 'clear enough intent' to avoid the interruption of surfacing options",
+       "Applying an owner's directional correction to the current task only, leaving it out of persistent state so the same correction must be re-earned on every subsequent task"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to never guess the direction of context-dependent deliverables: when intent documents are empty, placeholder, or silent, the agent must surface explicit directional options before full production, and once corrected, must persist that correction as a durable constraint instead of re-triggering the same costly rework.",
+      "targetBehavior": "In a reviewable trajectory, a compliant agent reads the intent document or brief before producing a context-dependent deliverable; when that document is empty, placeholder, or silent on the decision at hand, the agent emits a short set of explicit directional options with suitability criteria and waits for the owner's choice (or proceeds without asking only for low-stakes, trivially reversible decisions); after a directional correction, the agent records the corrected preference in persistent state retrievable by future tasks.",
+      "forbiddenBehavior": "Silently filling intent gaps with the agent's own availability-biased defaults and committing a full deliverable that then requires a severe late correction — and repeating the same directional error on later tasks because the owner's correction was applied to one task and never persisted.",
+      "evidenceSource": "The diagnosed pain incident behind this pipeline: the intent document was empty or placeholder, the agent defaulted from its knowledge radius, produced a full deliverable, and received a severe late correction requiring costly rework; root-cause analysis in philosopher artifact pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1.",
+      "validationExpectation": "An evaluator should accept a derived rule only if it (1) keys on the observable trigger — intent documents empty, placeholder, or silent on the decision — for deliverables whose acceptability depends on owner/audience context; (2) explicitly forbids silent default substitution; (3) requires offering directional options before full production when directional error is costly; (4) requires persisting owner directional corrections for reuse; and (5) does not mandate asking for trivially reversible low-stakes decisions. Any repair that permits silent defaulting under the trigger, or drops the persistence requirement, contradicts this intent and must be flagged rather than implemented."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_432596aee54456-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1"
+     },
+     "risks": [
+      "Overlaps core axioms: T-02 (act toward owner intent) covers the intent-first norm, and the persistence component overlaps T-10 and T-08; this principle must be framed as a gap-handling refinement for the ambiguous-intent case, and rule generation must avoid emitting duplicates of those axioms.",
+      "Over-asking risk: if the trigger threshold is not tied to the cost of directional error, agents may interrupt the owner for low-stakes reversible decisions, conflicting with T-06 (simplest intervention) and burdening the owner.",
+      "Ambiguity is a judgment call: agents may rationalize their defaults as 'clear enough intent' to bypass option-surfacing; enforcement must anchor on the observable trigger (intent document empty/placeholder/silent on the decision) rather than a subjective ambiguity test.",
+      "Latency overhead: broadening candidate sets and generating multi-option offers delays delivery; for time-sensitive or cheaply reversible tasks this may be net-negative without reversibility-based triage.",
+      "Persisted corrections can ossify into rigid constraints if never revalidated against changed owner preferences or audience contexts; persisted preferences must remain subordinate to newer explicit owner instructions (T-02 precedence).",
+      "Rule generation may produce an unenforceable 'check your own bias' rule; faithful rules must bind to observable artifacts — the state of the intent document, the presence of an options-surfacing message before production, and the presence of a persisted constraint entry after correction."
+     ],
+     "generatedAt": "2025-06-18T09:52:41Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_432596aee54456-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Never silently default on context-dependent deliverables; surface options, persist corrections\",\n    \"statement\": \"Before committing full production effort to any deliverable whose acceptability depends on owner or audience context that cannot be inferred from the task alone, the agent must establish directional alignment: first consult available intent documents; if they are empty, placeholder, or silent on the decision at hand, surface a small set of explicit directional options (filtered by observable audience-suitability criteria) instead of silently substituting its own defaults; and once the owner issues a directional correction, persist it as a durable, reusable constraint so alignment happens once rather than through repeated rework. The confirmation requirement scales with the cost of directional error: trivially reversible, low-stakes choices proceed without interruption.\",\n    \"rationale\": \"The diagnosed root cause was the agent filling an empty or placeholder intent document with defaults drawn from its own knowledge radius, committing a full deliverable, and triggering a severe late correction with costly rework. A lightweight pre-production gate — verifying intent documents and surfacing directional options — intercepts directional error while it is still cheap to fix, and persisting the owner's correction converts one-time friction into a durable constraint that prevents the same error from recurring on future tasks.\",\n    \"applicability\": [\n      \"Producing deliverables whose acceptability depends on owner or audience context not inferable from the task itself (content, examples, tone- or audience-sensitive artifacts, host-facing materials)\",\n      \"Situations where intent documents, briefs, or preference records exist but are empty, placeholder, or silent on the specific decision at hand\",\n      \"Tasks with a high cost of directional error, where a wrong direction committed into a full deliverable requires expensive redo\",\n      \"Immediately after an owner issues a directional correction that plausibly generalizes to future work\",\n      \"Boundary: low-stakes, trivially reversible decisions are excluded by design — interrupting the owner there violates simplicity (T-06); proceed and verify instead\"\n    ],\n    \"antiPatterns\": [\n      \"Silently substituting agent-chosen defaults (drawn from its own knowledge radius or availability bias) for missing owner direction\",\n      \"Treating an empty or placeholder intent document as sufficient license to proceed in any chosen direction\",\n      \"Committing a full deliverable with no directional check when directional error is expensive to undo\",\n      \"Rationalizing ambiguity as 'clear enough intent' to avoid the interruption of surfacing options\",\n      \"Applying an owner's directional correction to the current task only, leaving it out of persistent state so the same correction must be re-earned on every subsequent task\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants the agent to never guess the direction of context-dependent deliverables: when intent documents are empty, placeholder, or silent, the agent must surface explicit directional options before full production, and once corrected, must persist that correction as a durable constraint instead of re-triggering the same costly rework.\",\n    \"targetBehavior\": \"In a reviewable trajectory, a compliant agent reads the intent document or brief before producing a context-dependent deliverable; when that document is empty, placeholder, or silent on the decision at hand, the agent emits a short set of explicit directional options with suitability criteria and waits for the owner's choice (or proceeds without asking only for low-stakes, trivially reversible decisions); after a directional correction, the agent records the corrected preference in persistent state retrievable by future tasks.\",\n    \"forbiddenBehavior\": \"Silently filling intent gaps with the agent's own availability-biased defaults and committing a full deliverable that then requires a severe late correction — and repeating the same directional error on later tasks because the owner's correction was applied to one task and never persisted.\",\n    \"evidenceSource\": \"The diagnosed pain incident behind this pipeline: the intent document was empty or placeholder, the agent defaulted from its knowledge radius, produced a full deliverable, and received a severe late correction requiring costly rework; root-cause analysis in philosopher artifact pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1.\",\n    \"validationExpectation\": \"An evaluator should accept a derived rule only if it (1) keys on the observable trigger — intent documents empty, placeholder, or silent on the decision — for deliverables whose acceptability depends on owner/audience context; (2) explicitly forbids silent default substitution; (3) requires offering directional options before full production when directional error is costly; (4) requires persisting owner directional corrections for reuse; and (5) does not mandate asking for trivially reversible low-stakes decisions. Any repair that permits silent defaulting under the trigger, or drops the persistence requirement, contradicts this intent and must be flagged rather than implemented.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_432596aee54456-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r2-run1\"\n  },\n  \"risks\": [\n    \"Overlaps core axioms: T-02 (act toward owner intent) covers the intent-first norm, and the persistence component overlaps T-10 and T-08; this principle must be framed as a gap-handling refinement for the ambiguous-intent case, and rule generation must avoid emitting duplicates of those axioms.\",\n    \"Over-asking risk: if the trigger threshold is not tied to the cost of directional error, agents may interrupt the owner for low-stakes reversible decisions, conflicting with T-06 (simplest intervention) and burdening the owner.\",\n    \"Ambiguity is a judgment call: agents may rationalize their defaults as 'clear enough intent' to bypass option-surfacing; enforcement must anchor on the observable trigger (intent document empty/placeholder/silent on the decision) rather than a subjective ambiguity test.\",\n    \"Latency overhead: broadening candidate sets and generating multi-option offers delays delivery; for time-sensitive or cheaply reversible tasks this may be net-negative without reversibility-based triage.\",\n    \"Persisted corrections can ossify into rigid constraints if never revalidated against changed owner preferences or audience contexts; persisted preferences must remain subordinate to newer explicit owner instructions (T-02 precedence).\",\n    \"Rule generation may produce an unenforceable 'check your own bias' rule; faithful rules must bind to observable artifacts — the state of the intent document, the presence of an options-surfacing message before production, and the presence of a persisted constraint entry after correction.\"\n  ],\n  \"generatedAt\": \"2025-06-18T09:52:41Z\"\n}",
+    "usage": {
+     "input": 1950,
+     "output": 5915,
+     "total": 7865
+    },
+    "latencyMs": 74695,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "788b09f096040d26"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_432596aee54456",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_432596aee54456-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在缺少明确素材约束时，默认从自身知识圈内选取 AI 公司案例作为错误与反思素材，未验证该假设是否符合 Owner 的写作意图",
+       "betterDecision": "产出前先向 Owner 提出简短澄清请求（素材主体类型、知名度要求、调性偏好），或提供 2-3 个不同方向的候选素材供 Owner 快速选择后再展开写作",
+       "rationale": "主动确认成本低且完全可逆，能在产出前对齐受众语境，避免整篇内容方向性返工；远比事后被 Owner 纠正的代价小",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "clarify_before_create",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "基于默认假设直接产出完整内容，未先检索或列举候选素材核对适切性",
+       "betterDecision": "写作前先列出候选故事清单（标注主体类型、大众知名度、主题相关性），必要时检索'耳熟能详的人类犯错与反思故事'作为证据基础，再从中择优",
+       "rationale": "以可观察的候选清单为依据做选择，比凭默认假设直接产出更能命中受众语境，也让素材适切性可被检验",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_based_selection",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "在 INTENT.md 为空模板、任务缺少素材约束的情况下未识别该信息缺口，隐式地用自身偏好填补了空白",
+       "betterDecision": "识别到意图文档为空时，将素材方向标记为未决项，向 Owner 提出澄清请求；若无法确认，则按最保守的通用假设（人类主体、大众熟知）执行并在产出中显式声明该假设",
+       "rationale": "意图信息缺失时，显式暴露假设比隐式默认更安全，Owner 可以低成本快速纠偏，而非在成品后才发现方向错误",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "surface_assumptions",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "素材选择未经过受众视角校验——目标读者是大众，需要生动、耳熟能详的故事，而 Agent 选了偏行业向的 AI 公司案例",
+       "betterDecision": "在写作流程中加入受众适切性检查步骤：产出前自问'该例子对目标读者是否熟悉、是否生动、叙事主体是否符合内容逻辑'，不通过则替换素材",
+       "rationale": "内容创作的素材适切性直接决定受众接受度，事前的轻量检查成本远低于方向性返工",
+       "confidence": 0.7,
+       "riskLevel": "low",
+       "strategicPerspective": "audience_first_checklist",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "收到方向性纠正后若仅做局部素材替换，可能保留与人类叙事不匹配的整体结构与论述方式",
+       "betterDecision": "先从纠正中提炼出可复用的素材标准（人类主体、大众耳熟能详、生动），再整体审视内容结构与叙事是否适配新素材类型，必要时重构而非局部替换；并将该偏好沉淀到意图文档供后续任务使用",
+       "rationale": "方向性纠正通常影响全局叙事结构，系统性重审可避免残留不一致；沉淀偏好能让同类错误不再重复",
+       "confidence": 0.6,
+       "riskLevel": "medium",
+       "strategicPerspective": "systemic_correction_and_persistence",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "sourcePainId": "pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+     "contextRefs": [
+      "artifact://454bcf6b-e9df-44ab-841e-2941d28b5abf"
+     ],
+     "generatedAt": "2025-05-24T10:17:42Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_432596aee54456-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在缺少明确素材约束时，默认从自身知识圈内选取 AI 公司案例作为错误与反思素材，未验证该假设是否符合 Owner 的写作意图\",\"betterDecision\":\"产出前先向 Owner 提出简短澄清请求（素材主体类型、知名度要求、调性偏好），或提供 2-3 个不同方向的候选素材供 Owner 快速选择后再展开写作\",\"rationale\":\"主动确认成本低且完全可逆，能在产出前对齐受众语境，避免整篇内容方向性返工；远比事后被 Owner 纠正的代价小\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"clarify_before_create\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":1,\"badDecision\":\"基于默认假设直接产出完整内容，未先检索或列举候选素材核对适切性\",\"betterDecision\":\"写作前先列出候选故事清单（标注主体类型、大众知名度、主题相关性），必要时检索'耳熟能详的人类犯错与反思故事'作为证据基础，再从中择优\",\"rationale\":\"以可观察的候选清单为依据做选择，比凭默认假设直接产出更能命中受众语境，也让素材适切性可被检验\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_based_selection\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":2,\"badDecision\":\"在 INTENT.md 为空模板、任务缺少素材约束的情况下未识别该信息缺口，隐式地用自身偏好填补了空白\",\"betterDecision\":\"识别到意图文档为空时，将素材方向标记为未决项，向 Owner 提出澄清请求；若无法确认，则按最保守的通用假设（人类主体、大众熟知）执行并在产出中显式声明该假设\",\"rationale\":\"意图信息缺失时，显式暴露假设比隐式默认更安全，Owner 可以低成本快速纠偏，而非在成品后才发现方向错误\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"surface_assumptions\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":3,\"badDecision\":\"素材选择未经过受众视角校验——目标读者是大众，需要生动、耳熟能详的故事，而 Agent 选了偏行业向的 AI 公司案例\",\"betterDecision\":\"在写作流程中加入受众适切性检查步骤：产出前自问'该例子对目标读者是否熟悉、是否生动、叙事主体是否符合内容逻辑'，不通过则替换素材\",\"rationale\":\"内容创作的素材适切性直接决定受众接受度，事前的轻量检查成本远低于方向性返工\",\"confidence\":0.7,\"riskLevel\":\"low\",\"strategicPerspective\":\"audience_first_checklist\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":4,\"badDecision\":\"收到方向性纠正后若仅做局部素材替换，可能保留与人类叙事不匹配的整体结构与论述方式\",\"betterDecision\":\"先从纠正中提炼出可复用的素材标准（人类主体、大众耳熟能详、生动），再整体审视内容结构与叙事是否适配新素材类型，必要时重构而非局部替换；并将该偏好沉淀到意图文档供后续任务使用\",\"rationale\":\"方向性纠正通常影响全局叙事结构，系统性重审可避免残留不一致；沉淀偏好能让同类错误不再重复\",\"confidence\":0.6,\"riskLevel\":\"medium\",\"strategicPerspective\":\"systemic_correction_and_persistence\",\"sourcePrincipleId\":\"T-08\"}],\"sourcePainId\":\"pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f\",\"contextRefs\":[\"artifact://454bcf6b-e9df-44ab-841e-2941d28b5abf\"],\"generatedAt\":\"2025-05-24T10:17:42Z\"}",
+    "usage": {
+     "input": 1853,
+     "output": 2352,
+     "total": 4205
+    },
+    "latencyMs": 31738,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "c3153e49c39d7320"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_432596aee54456-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_432596aee54456-r3-run1",
+     "thesis": "An information gap in owner intent is not a neutral void the agent may fill with its own defaults; it is an active decision point. When direction-shaping guidance (subject type, audience fit, tone) is missing or ambiguous, the agent must either obtain cheap clarification or offer selectable candidates before consequential production, or proceed under an explicitly declared conservative assumption—never let unexamined self-preference silently steer output that surfaces as costly rework. Directional corrections, once received, should be distilled into reusable standards and persisted so the same gap is never refilled the same way.",
+     "principleCandidate": {
+      "title": "Treat missing intent as a decision point: clarify cheaply or declare conservative assumptions",
+      "rationale": "The root cause was not poor execution but implicit gap-filling: with an empty intent document and no material constraints, the agent silently substituted its own knowledge-circle preferences, producing directionally wrong output for the actual audience. Converting the hidden assumption into an explicit, low-cost decision—via a brief clarification request, a candidate list for quick selection, or a declared conservative default—lets the owner correct course before full production, far cheaper than post-hoc correction. Extracting and persisting material standards from corrections closes the loop against recurrence.",
+      "scope": "Any task where a materially direction-shaping constraint (subject matter, audience, tone, selection criteria) is absent, ambiguous, or sits in an empty intent document—especially content creation, material selection, and design choices where a mismatch demands structural rework rather than a local fix. Also applies when processing directional feedback: distill it into reusable criteria before revising.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Over-clarification risk: asking questions on every minor gap can burden the owner or stall work; clarification should be batched, minimal, and prioritized only for direction-shaping decisions, ideally paired with selectable candidate options",
+      "Partial overlap with T-02 (act toward owner's actual intent; explicit goals override inferred preferences): this principle extends T-02 to the missing-information case rather than contradicting it—check for redundancy before promotion to a core axiom",
+      "A 'most conservative assumption' may not exist or be identifiable in every domain; even a declared assumption can incur high rework cost if long production runs before any owner review point",
+      "Explicitly declaring assumptions inside the deliverable may pollute the output when the owner expects clean artifacts; declarations should be routed to an appropriate channel (e.g., task notes) rather than the content itself"
+     ],
+     "generatedAt": "2025-05-24T10:24:18Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_432596aee54456-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_432596aee54456-r3-run1\",\"thesis\":\"An information gap in owner intent is not a neutral void the agent may fill with its own defaults; it is an active decision point. When direction-shaping guidance (subject type, audience fit, tone) is missing or ambiguous, the agent must either obtain cheap clarification or offer selectable candidates before consequential production, or proceed under an explicitly declared conservative assumption—never let unexamined self-preference silently steer output that surfaces as costly rework. Directional corrections, once received, should be distilled into reusable standards and persisted so the same gap is never refilled the same way.\",\"principleCandidate\":{\"title\":\"Treat missing intent as a decision point: clarify cheaply or declare conservative assumptions\",\"rationale\":\"The root cause was not poor execution but implicit gap-filling: with an empty intent document and no material constraints, the agent silently substituted its own knowledge-circle preferences, producing directionally wrong output for the actual audience. Converting the hidden assumption into an explicit, low-cost decision—via a brief clarification request, a candidate list for quick selection, or a declared conservative default—lets the owner correct course before full production, far cheaper than post-hoc correction. Extracting and persisting material standards from corrections closes the loop against recurrence.\",\"scope\":\"Any task where a materially direction-shaping constraint (subject matter, audience, tone, selection criteria) is absent, ambiguous, or sits in an empty intent document—especially content creation, material selection, and design choices where a mismatch demands structural rework rather than a local fix. Also applies when processing directional feedback: distill it into reusable criteria before revising.\",\"confidence\":0.8},\"risks\":[\"Over-clarification risk: asking questions on every minor gap can burden the owner or stall work; clarification should be batched, minimal, and prioritized only for direction-shaping decisions, ideally paired with selectable candidate options\",\"Partial overlap with T-02 (act toward owner's actual intent; explicit goals override inferred preferences): this principle extends T-02 to the missing-information case rather than contradicting it—check for redundancy before promotion to a core axiom\",\"A 'most conservative assumption' may not exist or be identifiable in every domain; even a declared assumption can incur high rework cost if long production runs before any owner review point\",\"Explicitly declaring assumptions inside the deliverable may pollute the output when the owner expects clean artifacts; declarations should be routed to an appropriate channel (e.g., task notes) rather than the content itself\"],\"generatedAt\":\"2025-05-24T10:24:18Z\"}",
+    "usage": {
+     "input": 1689,
+     "output": 2241,
+     "total": 3930
+    },
+    "latencyMs": 32683,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "5701c7cc76dc9d83"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_432596aee54456-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r3-run1",
+     "principleDraft": {
+      "title": "Treat Missing Intent as a Decision Point: Clarify, Offer Candidates, or Declare Assumptions",
+      "statement": "Before consequential production, whenever a materially direction-shaping constraint (subject type, audience fit, tone, selection criteria) is missing, ambiguous, or backed by an empty intent document, the agent must convert the gap into an explicit decision: request a minimal batched clarification, present a short list of selectable candidates for owner choice, or proceed only under a conservative assumption explicitly declared to the owner through an appropriate channel — never silently substitute its own preferences or defaults. When a directional correction is received, the agent must distill it into a reusable standard and persist it outside transient context before or alongside applying the revision.",
+      "rationale": "The diagnosed root cause was not execution error but implicit gap-filling: with an empty intent document and no material constraints, the agent silently substituted its own knowledge-circle preferences and produced directionally wrong output for the actual audience, requiring structural rework. Converting the hidden assumption into an explicit, low-cost decision point lets the owner correct course before full production, which is far cheaper than post-hoc correction. Persisting material standards extracted from corrections closes the loop so the same gap is never refilled the same way.",
+      "applicability": [
+       "Content creation, curation, or design tasks where subject matter, audience, tone, or selection criteria shape the entire output direction and a mismatch demands structural rework rather than a local fix",
+       "Tasks whose intent document or brief is empty, ambiguous, or silent on materially direction-shaping constraints",
+       "Situations where no owner review point is scheduled before full production, so wrong direction compounds cost unchecked",
+       "Processing directional feedback or corrections: distill the correction into reusable criteria and persist it before or when revising"
+      ],
+      "antiPatterns": [
+       "Silently substituting agent defaults or self-preferences when direction-shaping guidance is missing or ambiguous",
+       "Treating an empty intent document as permission to fill gaps with unexamined assumptions",
+       "Running long production on an unvalidated direction with no owner checkpoint before consequential output",
+       "Firing scattered, unbatched clarification questions at every minor gap without offering selectable candidates, stalling work",
+       "Embedding assumption declarations inside the deliverable content itself when the owner expects clean artifacts, instead of routing them to task notes or a review channel",
+       "Applying a directional correction only to the current artifact without distilling and persisting the underlying standard, inviting recurrence"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent the agent from silently guessing at direction-shaping choices (subject type, audience, tone, selection criteria) when intent is missing or ambiguous, by forcing a cheap explicit decision — clarify, offer candidates, or declare a conservative assumption — before producing work whose direction would demand structural rework if wrong.",
+      "targetBehavior": "In a tool/communication trajectory, the agent visibly handles the intent gap before consequential production: a minimal batched clarification request or a short candidate list presented to the owner, or a stated conservative assumption recorded in a task-notes channel; and after a directional correction, a distilled criterion written to persistent state (not just transient context).",
+      "forbiddenBehavior": "Silently filling a missing or ambiguous direction-shaping constraint with the agent's own defaults or preferences, running production to completion on that unexamined direction, and surfacing the mismatch only as post-hoc structural rework; likewise, consuming a directional correction without distilling and persisting the standard it implies.",
+      "evidenceSource": "The diagnosed pain (pain_host_432596aee54456): given an empty intent document and no material constraints, the agent substituted its own knowledge-circle preferences and produced directionally wrong output for the actual audience, forcing costly structural rework instead of a cheap pre-production correction.",
+      "validationExpectation": "An evaluator should accept a derived rule as faithful only if it (a) triggers on missing/ambiguous direction-shaping constraints BEFORE consequential production, (b) recognizes all three compliant paths — batched clarification, selectable candidates, declared conservative assumption surfaced to the owner, (c) scopes itself to direction-shaping decisions rather than every minor gap to avoid over-clarification, and (d) requires persisting standards distilled from directional corrections; a rule that permits silent defaulting or mandates clarification on trivial gaps contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_432596aee54456-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_432596aee54456-r3-run1"
+     },
+     "risks": [
+      "Over-clarification: asking questions on every minor gap burdens the owner or stalls work; clarification must be batched, minimal, prioritized to direction-shaping decisions, and ideally paired with selectable candidates",
+      "Partial overlap with core axiom T-02 (explicit goals override inferred preferences): this principle extends T-02 to the missing-information case rather than contradicting it; derived rules must not contradict T-02, and redundancy should be checked before any promotion to a core axiom",
+      "Partial overlap with core axiom T-10 (persist important conclusions outside transient context) for the correction-distillation clause; derived persistence rules should stay narrowly scoped to distilling directional standards",
+      "A 'most conservative assumption' may not exist or be identifiable in every domain; even a declared assumption can incur high rework if long production precedes any owner review point",
+      "Declaring assumptions inside the deliverable may pollute output the owner expects clean; declarations should be routed to an appropriate channel (task notes, review message) rather than the artifact itself",
+      "Misclassifying gaps — treating minor gaps as direction-shaping stalls work with unnecessary questions, while treating a direction-shaping gap as minor lets a structural mismatch slip through to costly rework"
+     ],
+     "generatedAt": "2025-05-24T10:31:42Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_432596aee54456-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Treat Missing Intent as a Decision Point: Clarify, Offer Candidates, or Declare Assumptions\",\n    \"statement\": \"Before consequential production, whenever a materially direction-shaping constraint (subject type, audience fit, tone, selection criteria) is missing, ambiguous, or backed by an empty intent document, the agent must convert the gap into an explicit decision: request a minimal batched clarification, present a short list of selectable candidates for owner choice, or proceed only under a conservative assumption explicitly declared to the owner through an appropriate channel — never silently substitute its own preferences or defaults. When a directional correction is received, the agent must distill it into a reusable standard and persist it outside transient context before or alongside applying the revision.\",\n    \"rationale\": \"The diagnosed root cause was not execution error but implicit gap-filling: with an empty intent document and no material constraints, the agent silently substituted its own knowledge-circle preferences and produced directionally wrong output for the actual audience, requiring structural rework. Converting the hidden assumption into an explicit, low-cost decision point lets the owner correct course before full production, which is far cheaper than post-hoc correction. Persisting material standards extracted from corrections closes the loop so the same gap is never refilled the same way.\",\n    \"applicability\": [\n      \"Content creation, curation, or design tasks where subject matter, audience, tone, or selection criteria shape the entire output direction and a mismatch demands structural rework rather than a local fix\",\n      \"Tasks whose intent document or brief is empty, ambiguous, or silent on materially direction-shaping constraints\",\n      \"Situations where no owner review point is scheduled before full production, so wrong direction compounds cost unchecked\",\n      \"Processing directional feedback or corrections: distill the correction into reusable criteria and persist it before or when revising\"\n    ],\n    \"antiPatterns\": [\n      \"Silently substituting agent defaults or self-preferences when direction-shaping guidance is missing or ambiguous\",\n      \"Treating an empty intent document as permission to fill gaps with unexamined assumptions\",\n      \"Running long production on an unvalidated direction with no owner checkpoint before consequential output\",\n      \"Firing scattered, unbatched clarification questions at every minor gap without offering selectable candidates, stalling work\",\n      \"Embedding assumption declarations inside the deliverable content itself when the owner expects clean artifacts, instead of routing them to task notes or a review channel\",\n      \"Applying a directional correction only to the current artifact without distilling and persisting the underlying standard, inviting recurrence\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Prevent the agent from silently guessing at direction-shaping choices (subject type, audience, tone, selection criteria) when intent is missing or ambiguous, by forcing a cheap explicit decision — clarify, offer candidates, or declare a conservative assumption — before producing work whose direction would demand structural rework if wrong.\",\n    \"targetBehavior\": \"In a tool/communication trajectory, the agent visibly handles the intent gap before consequential production: a minimal batched clarification request or a short candidate list presented to the owner, or a stated conservative assumption recorded in a task-notes channel; and after a directional correction, a distilled criterion written to persistent state (not just transient context).\",\n    \"forbiddenBehavior\": \"Silently filling a missing or ambiguous direction-shaping constraint with the agent's own defaults or preferences, running production to completion on that unexamined direction, and surfacing the mismatch only as post-hoc structural rework; likewise, consuming a directional correction without distilling and persisting the standard it implies.\",\n    \"evidenceSource\": \"The diagnosed pain (pain_host_432596aee54456): given an empty intent document and no material constraints, the agent substituted its own knowledge-circle preferences and produced directionally wrong output for the actual audience, forcing costly structural rework instead of a cheap pre-production correction.\",\n    \"validationExpectation\": \"An evaluator should accept a derived rule as faithful only if it (a) triggers on missing/ambiguous direction-shaping constraints BEFORE consequential production, (b) recognizes all three compliant paths — batched clarification, selectable candidates, declared conservative assumption surfaced to the owner, (c) scopes itself to direction-shaping decisions rather than every minor gap to avoid over-clarification, and (d) requires persisting standards distilled from directional corrections; a rule that permits silent defaulting or mandates clarification on trivial gaps contradicts this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_432596aee54456-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_432596aee54456-r3-run1\"\n  },\n  \"risks\": [\n    \"Over-clarification: asking questions on every minor gap burdens the owner or stalls work; clarification must be batched, minimal, prioritized to direction-shaping decisions, and ideally paired with selectable candidates\",\n    \"Partial overlap with core axiom T-02 (explicit goals override inferred preferences): this principle extends T-02 to the missing-information case rather than contradicting it; derived rules must not contradict T-02, and redundancy should be checked before any promotion to a core axiom\",\n    \"Partial overlap with core axiom T-10 (persist important conclusions outside transient context) for the correction-distillation clause; derived persistence rules should stay narrowly scoped to distilling directional standards\",\n    \"A 'most conservative assumption' may not exist or be identifiable in every domain; even a declared assumption can incur high rework if long production precedes any owner review point\",\n    \"Declaring assumptions inside the deliverable may pollute output the owner expects clean; declarations should be routed to an appropriate channel (task notes, review message) rather than the artifact itself\",\n    \"Misclassifying gaps — treating minor gaps as direction-shaping stalls work with unnecessary questions, while treating a direction-shaping gap as minor lets a structural mismatch slip through to costly rework\"\n  ],\n  \"generatedAt\": \"2025-05-24T10:31:42Z\"\n}",
+    "usage": {
+     "input": 1991,
+     "output": 3259,
+     "total": 5250
+    },
+    "latencyMs": 40466,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "35e382e9294d99c9"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": false,
+    "errors": [
+     "unparseable_or_empty_output"
+    ],
+    "parsed": null,
+    "raw": "",
+    "usage": {
+     "input": 4093,
+     "output": 8000,
+     "total": 12093
+    },
+    "latencyMs": 93131,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "30f4efa26ce7ad62"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

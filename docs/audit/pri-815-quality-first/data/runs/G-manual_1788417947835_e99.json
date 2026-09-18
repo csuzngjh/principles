@@ -1,0 +1,690 @@
+{
+ "group": "G-manual_1788417947835_e99",
+ "class": "DEV",
+ "pain_id": "manual_1788417947835_e99ujtms",
+ "frozen_at": "2026-09-17T15:19:03.007Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788417947835_e99",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788417947835_e99-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在 Windows 上创建并执行含中文字符的 UTF-8 无 BOM PowerShell 脚本前，未先探测目标解释器是 Windows PowerShell 5.1 还是 pwsh 7，直接用 5.1 执行导致中文乱码",
+       "betterDecision": "在写入或执行脚本前先运行一次廉价预检（如 $PSVersionTable.PSVersion 或 Get-Command powershell/pwsh）确认目标解释器版本及其编码行为，再据此选择脚本与执行方式",
+       "rationale": "Windows PowerShell 5.1 将无 BOM 的 UTF-8 按 ANSI 解析是已知的确定性行为，一次几秒的版本探测即可避免整轮返工；先建立对目标环境的准确认知是执行有后果操作的前提",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "preflight_environment_verification",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "脚本编码选择是隐式的：对含非 ASCII 字符的脚本输出为无 BOM UTF-8，把正确解码寄托于解释器版本恰好兼容",
+       "betterDecision": "为含非 ASCII 字符的脚本显式声明编码契约：写入 UTF-8 with BOM，或在脚本/命令中显式设置 [Console]::OutputEncoding 或 -Encoding UTF8，使编码自描述",
+       "rationale": "BOM 使编码自描述，Windows PowerShell 5.1 与 pwsh 7 都能正确识别，从根上消除对解释器版本的依赖，把硬约束固化为脚本自身的显式属性",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "self_describing_encoding_contract",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "把第一次真实执行当作兼容性测试，让已知的 5.1 编码缺陷通过有后果的运行失败暴露出来，产出乱码结果后才返工",
+       "betterDecision": "先用最小无害探针验证目标解释器的非 ASCII 处理（如让目标解释器回显一个中文字符串并检查输出），或以 dry-run/临时输出方式小规模验证后再执行正式脚本",
+       "rationale": "以可逆、低成本的小实验换取可观察证据，把『未知兼容性』在正式执行前转化为『已知结论』，避免用有后果的失败来换取本可预先获得的信息",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "probe_before_commit",
+       "sourcePrincipleId": "T-04"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "对一个已被文档化的平台级硬约束（5.1 + 无 BOM UTF-8 乱码）没有建立任何不可跳过的预检门禁，依赖临场记忆与运气",
+       "betterDecision": "将『脚本含非 ASCII 字符且将在 Windows 执行』固化为强制预检门禁：必须先确认解释器版本与编码策略（BOM 或显式 -Encoding），未通过门禁不得执行；可将该检查嵌入脚本生成模板或命令执行钩子",
+       "rationale": "已知硬约束若不前置为显式检查关卡，就会在不同会话中反复以运行时失败的形式重现；把约束结构化为门禁比依赖记忆更可靠",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "guardrail_before_execution",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "目标机器的解释器版本与编码契约这类稳定环境事实未在本次会话前持久化（且事后的 MEMORY.md 写入也因路径问题失败），导致环境知识每次都要靠失败重新发现",
+       "betterDecision": "将环境契约类事实（本机可用解释器及版本、编码兼容性结论）持久化到可靠的记忆位置，并在每次执行有后果的跨平台脚本前先查阅该记录；同时修复记忆文件路径问题确保写入可验证",
+       "rationale": "环境契约是跨任务稳定的结论，持久化并在行动前查阅可避免重复的失败驱动式学习；记忆写入本身也应被验证而非假定成功",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "durable_environment_memory",
+       "sourcePrincipleId": "T-10"
+      }
+     ],
+     "contextRefs": [
+      "artifact://7280b877-4cd9-499a-a8a6-bad9a4d803d6"
+     ],
+     "generatedAt": "2026-09-03T06:06:12.482Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788417947835_e99-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在 Windows 上创建并执行含中文字符的 UTF-8 无 BOM PowerShell 脚本前，未先探测目标解释器是 Windows PowerShell 5.1 还是 pwsh 7，直接用 5.1 执行导致中文乱码\",\"betterDecision\":\"在写入或执行脚本前先运行一次廉价预检（如 $PSVersionTable.PSVersion 或 Get-Command powershell/pwsh）确认目标解释器版本及其编码行为，再据此选择脚本与执行方式\",\"rationale\":\"Windows PowerShell 5.1 将无 BOM 的 UTF-8 按 ANSI 解析是已知的确定性行为，一次几秒的版本探测即可避免整轮返工；先建立对目标环境的准确认知是执行有后果操作的前提\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"preflight_environment_verification\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"脚本编码选择是隐式的：对含非 ASCII 字符的脚本输出为无 BOM UTF-8，把正确解码寄托于解释器版本恰好兼容\",\"betterDecision\":\"为含非 ASCII 字符的脚本显式声明编码契约：写入 UTF-8 with BOM，或在脚本/命令中显式设置 [Console]::OutputEncoding 或 -Encoding UTF8，使编码自描述\",\"rationale\":\"BOM 使编码自描述，Windows PowerShell 5.1 与 pwsh 7 都能正确识别，从根上消除对解释器版本的依赖，把硬约束固化为脚本自身的显式属性\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"self_describing_encoding_contract\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"把第一次真实执行当作兼容性测试，让已知的 5.1 编码缺陷通过有后果的运行失败暴露出来，产出乱码结果后才返工\",\"betterDecision\":\"先用最小无害探针验证目标解释器的非 ASCII 处理（如让目标解释器回显一个中文字符串并检查输出），或以 dry-run/临时输出方式小规模验证后再执行正式脚本\",\"rationale\":\"以可逆、低成本的小实验换取可观察证据，把『未知兼容性』在正式执行前转化为『已知结论』，避免用有后果的失败来换取本可预先获得的信息\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"probe_before_commit\",\"sourcePrincipleId\":\"T-04\"},{\"candidateIndex\":3,\"badDecision\":\"对一个已被文档化的平台级硬约束（5.1 + 无 BOM UTF-8 乱码）没有建立任何不可跳过的预检门禁，依赖临场记忆与运气\",\"betterDecision\":\"将『脚本含非 ASCII 字符且将在 Windows 执行』固化为强制预检门禁：必须先确认解释器版本与编码策略（BOM 或显式 -Encoding），未通过门禁不得执行；可将该检查嵌入脚本生成模板或命令执行钩子\",\"rationale\":\"已知硬约束若不前置为显式检查关卡，就会在不同会话中反复以运行时失败的形式重现；把约束结构化为门禁比依赖记忆更可靠\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"guardrail_before_execution\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"目标机器的解释器版本与编码契约这类稳定环境事实未在本次会话前持久化（且事后的 MEMORY.md 写入也因路径问题失败），导致环境知识每次都要靠失败重新发现\",\"betterDecision\":\"将环境契约类事实（本机可用解释器及版本、编码兼容性结论）持久化到可靠的记忆位置，并在每次执行有后果的跨平台脚本前先查阅该记录；同时修复记忆文件路径问题确保写入可验证\",\"rationale\":\"环境契约是跨任务稳定的结论，持久化并在行动前查阅可避免重复的失败驱动式学习；记忆写入本身也应被验证而非假定成功\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"durable_environment_memory\",\"sourcePrincipleId\":\"T-10\"}],\"contextRefs\":[\"artifact://7280b877-4cd9-499a-a8a6-bad9a4d803d6\"],\"generatedAt\":\"2026-09-03T06:06:12.482Z\"}",
+    "usage": {
+     "input": 2390,
+     "output": 2775,
+     "total": 5165
+    },
+    "latencyMs": 39524,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "29d005b94236710b"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788417947835_e99-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788417947835_e99-r1-run1",
+     "thesis": "The root failure was executing a consequential artifact while relying on unverified, environment-dependent behavior: an implicitly encoded script was trusted to a specific interpreter version's compatibility. All of the Dreamer's alternatives converge on one insight — unknowns about the execution environment's hard behavioral constraints (encoding, version, platform) must be converted into knowns through cheap preflight probes, embedded into self-describing artifacts, and gated before execution, rather than discovered through consequential runtime failure. Luck and implicit compatibility are not valid execution strategies; explicit, verified environment contracts are.",
+     "principleCandidate": {
+      "title": "Verify environment contracts and make artifacts self-describing before consequential execution",
+      "rationale": "The bad decision class across all candidates is acting on an untested assumption about how the target environment interprets an artifact (e.g., Windows PowerShell 5.1 reading BOM-less UTF-8 as ANSI). A seconds-cheap probe of the environment, combined with encoding the constraint into the artifact itself (BOM, explicit -Encoding), removes dependence on version-specific luck and prevents an entire round of failed, consequential execution. Constraints that are known but not gated recur as runtime failures; converting them into preflight checks plus self-describing artifacts addresses the root cause rather than the symptom.",
+      "scope": "Applies whenever generating or executing artifacts (scripts, files, commands) whose behavior depends on version- or platform-specific interpretation — especially non-ASCII content, encoding, or interpreter differences — on target environments whose characteristics have not been verified in the current context. Most relevant for consequential or hard-to-reverse executions; less relevant for trivial, reversible, or already-verified environments.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "This principle substantially overlaps with existing core axioms: T-01 (model the system before consequential changes) and T-05 (translate hard constraints into explicit guardrails before execution); it is largely a composite application of them to encoding/interpreter-specific behavior rather than a wholly new axiom",
+      "Self-describing encodings (e.g., UTF-8 BOM) can break other consumers such as Unix tools that mishandle BOMs; the chosen contract must account for all downstream readers, not just the immediate interpreter",
+      "Mandatory preflight gates add latency to every execution; over-applying them to trivial or already-verified operations creates friction without risk reduction",
+      "Persisted environment facts (candidate 4) can become stale if the environment changes, turning a cached conclusion into a new silent failure mode",
+      "Probe-based verification covers only the probed dimension; passing an encoding echo probe does not guarantee compatibility of the full script, which can induce false confidence"
+     ],
+     "generatedAt": "2026-09-03T06:07:41.318Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788417947835_e99-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788417947835_e99-r1-run1\",\"thesis\":\"The root failure was executing a consequential artifact while relying on unverified, environment-dependent behavior: an implicitly encoded script was trusted to a specific interpreter version's compatibility. All of the Dreamer's alternatives converge on one insight — unknowns about the execution environment's hard behavioral constraints (encoding, version, platform) must be converted into knowns through cheap preflight probes, embedded into self-describing artifacts, and gated before execution, rather than discovered through consequential runtime failure. Luck and implicit compatibility are not valid execution strategies; explicit, verified environment contracts are.\",\"principleCandidate\":{\"title\":\"Verify environment contracts and make artifacts self-describing before consequential execution\",\"rationale\":\"The bad decision class across all candidates is acting on an untested assumption about how the target environment interprets an artifact (e.g., Windows PowerShell 5.1 reading BOM-less UTF-8 as ANSI). A seconds-cheap probe of the environment, combined with encoding the constraint into the artifact itself (BOM, explicit -Encoding), removes dependence on version-specific luck and prevents an entire round of failed, consequential execution. Constraints that are known but not gated recur as runtime failures; converting them into preflight checks plus self-describing artifacts addresses the root cause rather than the symptom.\",\"scope\":\"Applies whenever generating or executing artifacts (scripts, files, commands) whose behavior depends on version- or platform-specific interpretation — especially non-ASCII content, encoding, or interpreter differences — on target environments whose characteristics have not been verified in the current context. Most relevant for consequential or hard-to-reverse executions; less relevant for trivial, reversible, or already-verified environments.\",\"confidence\":0.8},\"risks\":[\"This principle substantially overlaps with existing core axioms: T-01 (model the system before consequential changes) and T-05 (translate hard constraints into explicit guardrails before execution); it is largely a composite application of them to encoding/interpreter-specific behavior rather than a wholly new axiom\",\"Self-describing encodings (e.g., UTF-8 BOM) can break other consumers such as Unix tools that mishandle BOMs; the chosen contract must account for all downstream readers, not just the immediate interpreter\",\"Mandatory preflight gates add latency to every execution; over-applying them to trivial or already-verified operations creates friction without risk reduction\",\"Persisted environment facts (candidate 4) can become stale if the environment changes, turning a cached conclusion into a new silent failure mode\",\"Probe-based verification covers only the probed dimension; passing an encoding echo probe does not guarantee compatibility of the full script, which can induce false confidence\"],\"generatedAt\":\"2026-09-03T06:07:41.318Z\"}",
+    "usage": {
+     "input": 1792,
+     "output": 1514,
+     "total": 3306
+    },
+    "latencyMs": 26592,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6aad1ff769406b3e"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788417947835_e99-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r1-run1",
+     "principleDraft": {
+      "title": "Probe environment contracts and self-describe artifacts before consequential execution",
+      "statement": "Before generating or executing any consequential artifact whose interpretation depends on environment-specific behavior (character encoding, interpreter version, platform), the agent must (1) verify the relevant environment contract with a cheap read-only preflight probe against the actual target environment (e.g., non-ASCII round-trip echo, interpreter version query), (2) encode the verified contract into the artifact itself so it is self-describing (e.g., UTF-8 with BOM, explicit -Encoding flag), and (3) gate execution on the probe's confirmation — never rely on implicit compatibility luck or on behavior observed only in a different environment or version.",
+      "rationale": "The root cause of the diagnosed failure was acting on an untested assumption about how the target environment interprets an artifact: a BOM-less UTF-8 script was trusted to Windows PowerShell 5.1, which decoded it as ANSI and corrupted the execution. A seconds-cheap probe converts the environment unknown into a known, and a self-describing artifact removes dependence on version-specific decoding defaults entirely. Constraints that are known but not gated recur as runtime failures; probe-plus-gate addresses the root cause instead of the symptom of post-execution corruption.",
+      "applicability": [
+       "Generating or executing scripts, files, or commands containing non-ASCII content on environments whose encoding behavior has not been verified in the current context",
+       "Writing artifacts interpreted by version-sensitive interpreters or shells (e.g., Windows PowerShell 5.1 vs PowerShell 7+, cmd vs bash) whose defaults differ",
+       "Consequential or hard-to-reverse executions whose success depends on platform-, version-, or locale-specific interpretation",
+       "Cross-platform file generation where downstream consumers may differ in BOM and code-page handling"
+      ],
+      "antiPatterns": [
+       "Executing a consequential script containing non-ASCII characters written without an explicit encoding contract, assuming the interpreter will auto-detect it correctly",
+       "Treating 'it worked in my environment or a different version' as evidence of compatibility on the target environment",
+       "Discovering encoding or interpreter incompatibilities only through consequential runtime failure (mojibake, corrupted output) after the action has already run",
+       "Relying on implicit defaults (BOM-less UTF-8, locale-dependent code pages) for artifacts consumed by multiple interpreters",
+       "Caching a one-time environment conclusion and reusing it indefinitely after the environment may have changed"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent consequential executions from failing because the agent guessed, instead of verifying, how the target environment would decode or interpret an artifact — e.g., a BOM-less UTF-8 script being read as ANSI by Windows PowerShell 5.1.",
+      "targetBehavior": "Before writing or executing a consequential environment-dependent artifact, the agent's tool trajectory shows a cheap read-only probe of the actual target environment (e.g., echoing a non-ASCII string and verifying round-trip fidelity, querying interpreter version) and the artifact being written with an explicit self-describing contract (e.g., UTF-8 with BOM or explicit encoding flags), with execution proceeding only after the probe confirms the contract.",
+      "forbiddenBehavior": "Executing consequential scripts or files whose non-ASCII content or interpreter-version compatibility was never verified against the target environment, so that incompatibility surfaces only as runtime corruption (mojibake, wrong output) after the consequential action has already run.",
+      "evidenceSource": "The diagnosed pain: a script with non-ASCII content was written BOM-less and handed to Windows PowerShell 5.1, which decoded it as ANSI, corrupting the execution — an entire round of consequential work failed on an unprobed environment contract.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it demands observable preflight evidence against the actual target environment plus an explicit encoding contract embedded in the artifact before consequential execution; a rule that merely instructs 'check the encoding' without requiring a probe of the real environment, or that permits proceeding on cross-environment assumptions, should be flagged as unfaithful."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788417947835_e99-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-01 (build a sufficient model before consequential changes) and T-05 (translate hard constraints into explicit guardrails before execution); this principle is largely a composite application of them to encoding/interpreter contracts, so downstream rules may be redundant with existing axiom-derived rules",
+      "Self-describing encodings such as UTF-8 BOM can break other downstream consumers (e.g., Unix tools that mishandle BOMs); the chosen contract must account for all readers, not just the immediate interpreter, and a generated rule must not hard-code BOM as universally correct",
+      "Mandatory preflight gates add latency; over-application to trivial, reversible, or already-verified operations creates friction without risk reduction",
+      "Persisted environment facts can become stale if the environment changes, turning a cached conclusion into a new silent failure mode",
+      "A probe verifies only the probed dimension — passing a non-ASCII echo probe does not guarantee full script compatibility and may induce false confidence",
+      "Rule generation may over-generalize this into 'probe everything before every action,' producing unfalsifiable or excessively costly rules that evaluators cannot distinguish from compliance theater"
+     ],
+     "generatedAt": "2026-09-03T06:13:52.407Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788417947835_e99-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r1-run1\",\"principleDraft\":{\"title\":\"Probe environment contracts and self-describe artifacts before consequential execution\",\"statement\":\"Before generating or executing any consequential artifact whose interpretation depends on environment-specific behavior (character encoding, interpreter version, platform), the agent must (1) verify the relevant environment contract with a cheap read-only preflight probe against the actual target environment (e.g., non-ASCII round-trip echo, interpreter version query), (2) encode the verified contract into the artifact itself so it is self-describing (e.g., UTF-8 with BOM, explicit -Encoding flag), and (3) gate execution on the probe's confirmation — never rely on implicit compatibility luck or on behavior observed only in a different environment or version.\",\"rationale\":\"The root cause of the diagnosed failure was acting on an untested assumption about how the target environment interprets an artifact: a BOM-less UTF-8 script was trusted to Windows PowerShell 5.1, which decoded it as ANSI and corrupted the execution. A seconds-cheap probe converts the environment unknown into a known, and a self-describing artifact removes dependence on version-specific decoding defaults entirely. Constraints that are known but not gated recur as runtime failures; probe-plus-gate addresses the root cause instead of the symptom of post-execution corruption.\",\"applicability\":[\"Generating or executing scripts, files, or commands containing non-ASCII content on environments whose encoding behavior has not been verified in the current context\",\"Writing artifacts interpreted by version-sensitive interpreters or shells (e.g., Windows PowerShell 5.1 vs PowerShell 7+, cmd vs bash) whose defaults differ\",\"Consequential or hard-to-reverse executions whose success depends on platform-, version-, or locale-specific interpretation\",\"Cross-platform file generation where downstream consumers may differ in BOM and code-page handling\"],\"antiPatterns\":[\"Executing a consequential script containing non-ASCII characters written without an explicit encoding contract, assuming the interpreter will auto-detect it correctly\",\"Treating 'it worked in my environment or a different version' as evidence of compatibility on the target environment\",\"Discovering encoding or interpreter incompatibilities only through consequential runtime failure (mojibake, corrupted output) after the action has already run\",\"Relying on implicit defaults (BOM-less UTF-8, locale-dependent code pages) for artifacts consumed by multiple interpreters\",\"Caching a one-time environment conclusion and reusing it indefinitely after the environment may have changed\"],\"confidence\":0.8},\"intentContract\":{\"ownerIntent\":\"The Owner wants to prevent consequential executions from failing because the agent guessed, instead of verifying, how the target environment would decode or interpret an artifact — e.g., a BOM-less UTF-8 script being read as ANSI by Windows PowerShell 5.1.\",\"targetBehavior\":\"Before writing or executing a consequential environment-dependent artifact, the agent's tool trajectory shows a cheap read-only probe of the actual target environment (e.g., echoing a non-ASCII string and verifying round-trip fidelity, querying interpreter version) and the artifact being written with an explicit self-describing contract (e.g., UTF-8 with BOM or explicit encoding flags), with execution proceeding only after the probe confirms the contract.\",\"forbiddenBehavior\":\"Executing consequential scripts or files whose non-ASCII content or interpreter-version compatibility was never verified against the target environment, so that incompatibility surfaces only as runtime corruption (mojibake, wrong output) after the consequential action has already run.\",\"evidenceSource\":\"The diagnosed pain: a script with non-ASCII content was written BOM-less and handed to Windows PowerShell 5.1, which decoded it as ANSI, corrupting the execution — an entire round of consequential work failed on an unprobed environment contract.\",\"validationExpectation\":\"An evaluator should accept a rule as faithful only if it demands observable preflight evidence against the actual target environment plus an explicit encoding contract embedded in the artifact before consequential execution; a rule that merely instructs 'check the encoding' without requiring a probe of the real environment, or that permits proceeding on cross-environment assumptions, should be flagged as unfaithful.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788417947835_e99-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r1-run1\"},\"risks\":[\"Substantial overlap with core axioms T-01 (build a sufficient model before consequential changes) and T-05 (translate hard constraints into explicit guardrails before execution); this principle is largely a composite application of them to encoding/interpreter contracts, so downstream rules may be redundant with existing axiom-derived rules\",\"Self-describing encodings such as UTF-8 BOM can break other downstream consumers (e.g., Unix tools that mishandle BOMs); the chosen contract must account for all readers, not just the immediate interpreter, and a generated rule must not hard-code BOM as universally correct\",\"Mandatory preflight gates add latency; over-application to trivial, reversible, or already-verified operations creates friction without risk reduction\",\"Persisted environment facts can become stale if the environment changes, turning a cached conclusion into a new silent failure mode\",\"A probe verifies only the probed dimension — passing a non-ASCII echo probe does not guarantee full script compatibility and may induce false confidence\",\"Rule generation may over-generalize this into 'probe everything before every action,' producing unfalsifiable or excessively costly rules that evaluators cannot distinguish from compliance theater\"],\"generatedAt\":\"2026-09-03T06:13:52.407Z\"}",
+    "usage": {
+     "input": 2017,
+     "output": 2973,
+     "total": 4990
+    },
+    "latencyMs": 39272,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6c21a2a40d9a8bab"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788417947835_e99-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r1-run1",
+     "principleDraft": {
+      "title": "Gate consequential script execution on verified interpreter and encoding contracts",
+      "statement": "Before creating or executing any consequential artifact whose interpretation depends on version- or platform-specific behavior, first establish the target environment's contract as a non-skippable preflight gate: probe the target interpreter's identity and version (e.g., $PSVersionTable.PSVersion or Get-Command powershell/pwsh) and its encoding behavior, then make the artifact self-describing (UTF-8 with BOM or an explicit -Encoding parameter) whenever it contains non-ASCII characters, or select an interpreter verified compatible with the artifact; never let the first consequential execution serve as the compatibility test for a known constraint.",
+      "rationale": "The diagnosed root cause was a missing mandatory preflight gate: the agent wrote a UTF-8 no-BOM PowerShell script containing Chinese text and executed it under Windows PowerShell 5.1, which deterministically decodes BOM-less UTF-8 as ANSI — a documented constraint — producing garbled output ('鐢熸垚鏃堕棿锛') and forcing a full rework under pwsh 7. A seconds-cheap version probe combined with an explicit encoding contract removes dependence on interpreter-version luck and prevents the entire failed execution round. Hard constraints that are known but not front-loaded as gates recur as runtime failures across sessions; gating on verified environment contracts addresses the root cause rather than the garbled-output symptom.",
+      "applicability": [
+       "Creating or executing scripts, files, or commands whose behavior depends on interpreter version, platform, or encoding — especially PowerShell scripts containing non-ASCII (e.g., Chinese) content on Windows",
+       "Consequential or hard-to-reverse executions targeting an environment whose interpreter version or encoding contract has not been verified in the current session",
+       "Cross-interpreter or cross-runtime script execution (Windows PowerShell 5.1 vs pwsh 7+, cmd, bash) where decoding behavior differs by version",
+       "Boundary: does not require preflight for trivial, reversible operations or environments already verified in the current session"
+      ],
+      "antiPatterns": [
+       "Executing a non-ASCII script on an unverified interpreter and using the consequential run itself as the compatibility test",
+       "Leaving artifact encoding implicit (BOM-less UTF-8 containing non-ASCII text) and trusting that the interpreter version happens to be compatible",
+       "Knowing a documented platform constraint (e.g., Windows PowerShell 5.1 reading BOM-less UTF-8 as ANSI) but skipping the check and relying on memory or luck",
+       "Remediating only after garbled runtime output by switching interpreters, instead of verifying the contract before the first execution"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to confirm the target interpreter's version and encoding compatibility before writing or executing scripts on Windows (especially scripts with non-ASCII content), so that known incompatibilities like PowerShell 5.1 misreading BOM-less UTF-8 are caught by a preflight gate rather than by failed consequential runs.",
+      "targetBehavior": "Before creating or executing a non-ASCII script on Windows, the agent's tool trajectory shows a cheap preflight probe identifying the target interpreter (e.g., $PSVersionTable.PSVersion or Get-Command powershell/pwsh) followed by an explicit encoding contract — writing UTF-8 with BOM, passing an explicit -Encoding parameter, or selecting a verified-compatible interpreter — before the consequential execution occurs.",
+      "forbiddenBehavior": "Creating or executing a version- or encoding-sensitive artifact (e.g., a BOM-less UTF-8 PowerShell script with Chinese content) on an unverified interpreter with implicit encoding, letting the consequential run itself serve as the compatibility test and remediating only after runtime failure produces garbled output.",
+      "evidenceSource": "Diagnosis manual_1788417947835_e99ujtms: Windows PowerShell 5.1 executed a UTF-8 no-BOM script with Chinese content and garbled the output ('鐢熸垚鏃堕棿锛'), forcing rework under pwsh 7; the agent admitted no pre-execution compatibility check was done and subsequently recorded an owner instruction to confirm interpreter and encoding compatibility before landing scripts on Windows (agent_turn 2026-09-03T06:05:07.757Z; tool_call_failure 2026-09-03T06:00:16.593Z).",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it demands a preflight interpreter/encoding verification before consequential execution of non-ASCII scripts on Windows and rejects trajectories where such a script runs on an unverified interpreter with implicit encoding; the rule must not be so broad that it demands preflight probes for every trivial command, nor so narrow that it hardcodes the exact 5.1/BOM incident without capturing the underlying environment-contract gate."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788417947835_e99-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-01 (build a sufficient model before consequential changes) and T-05 (translate hard constraints into explicit guardrails before execution): this principle is a domain-specific composite of them for interpreter/encoding contracts, not a wholly new axiom; downstream rule generation should specialize rather than restate them",
+      "Self-describing encodings such as UTF-8 with BOM can break other downstream consumers (e.g., Unix tools that mishandle BOMs); the chosen encoding contract must account for all readers of the artifact, not just the immediate interpreter",
+      "Over-application: enforcing the preflight gate on every trivial or already-verified operation adds latency and friction without risk reduction, inviting agents to bypass the gate",
+      "Probe-based verification covers only the probed dimension — an encoding echo probe passing does not guarantee full script compatibility, which can induce false confidence",
+      "Persisted environment facts (dreamer candidate on durable environment memory) can become stale if the environment changes; persistence should complement per-session verification, not replace the gate"
+     ],
+     "generatedAt": "2026-09-03T06:09:15.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788417947835_e99-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Gate consequential script execution on verified interpreter and encoding contracts\",\n    \"statement\": \"Before creating or executing any consequential artifact whose interpretation depends on version- or platform-specific behavior, first establish the target environment's contract as a non-skippable preflight gate: probe the target interpreter's identity and version (e.g., $PSVersionTable.PSVersion or Get-Command powershell/pwsh) and its encoding behavior, then make the artifact self-describing (UTF-8 with BOM or an explicit -Encoding parameter) whenever it contains non-ASCII characters, or select an interpreter verified compatible with the artifact; never let the first consequential execution serve as the compatibility test for a known constraint.\",\n    \"rationale\": \"The diagnosed root cause was a missing mandatory preflight gate: the agent wrote a UTF-8 no-BOM PowerShell script containing Chinese text and executed it under Windows PowerShell 5.1, which deterministically decodes BOM-less UTF-8 as ANSI — a documented constraint — producing garbled output ('鐢熸垚鏃堕棿锛') and forcing a full rework under pwsh 7. A seconds-cheap version probe combined with an explicit encoding contract removes dependence on interpreter-version luck and prevents the entire failed execution round. Hard constraints that are known but not front-loaded as gates recur as runtime failures across sessions; gating on verified environment contracts addresses the root cause rather than the garbled-output symptom.\",\n    \"applicability\": [\n      \"Creating or executing scripts, files, or commands whose behavior depends on interpreter version, platform, or encoding — especially PowerShell scripts containing non-ASCII (e.g., Chinese) content on Windows\",\n      \"Consequential or hard-to-reverse executions targeting an environment whose interpreter version or encoding contract has not been verified in the current session\",\n      \"Cross-interpreter or cross-runtime script execution (Windows PowerShell 5.1 vs pwsh 7+, cmd, bash) where decoding behavior differs by version\",\n      \"Boundary: does not require preflight for trivial, reversible operations or environments already verified in the current session\"\n    ],\n    \"antiPatterns\": [\n      \"Executing a non-ASCII script on an unverified interpreter and using the consequential run itself as the compatibility test\",\n      \"Leaving artifact encoding implicit (BOM-less UTF-8 containing non-ASCII text) and trusting that the interpreter version happens to be compatible\",\n      \"Knowing a documented platform constraint (e.g., Windows PowerShell 5.1 reading BOM-less UTF-8 as ANSI) but skipping the check and relying on memory or luck\",\n      \"Remediating only after garbled runtime output by switching interpreters, instead of verifying the contract before the first execution\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants the agent to confirm the target interpreter's version and encoding compatibility before writing or executing scripts on Windows (especially scripts with non-ASCII content), so that known incompatibilities like PowerShell 5.1 misreading BOM-less UTF-8 are caught by a preflight gate rather than by failed consequential runs.\",\n    \"targetBehavior\": \"Before creating or executing a non-ASCII script on Windows, the agent's tool trajectory shows a cheap preflight probe identifying the target interpreter (e.g., $PSVersionTable.PSVersion or Get-Command powershell/pwsh) followed by an explicit encoding contract — writing UTF-8 with BOM, passing an explicit -Encoding parameter, or selecting a verified-compatible interpreter — before the consequential execution occurs.\",\n    \"forbiddenBehavior\": \"Creating or executing a version- or encoding-sensitive artifact (e.g., a BOM-less UTF-8 PowerShell script with Chinese content) on an unverified interpreter with implicit encoding, letting the consequential run itself serve as the compatibility test and remediating only after runtime failure produces garbled output.\",\n    \"evidenceSource\": \"Diagnosis manual_1788417947835_e99ujtms: Windows PowerShell 5.1 executed a UTF-8 no-BOM script with Chinese content and garbled the output ('鐢熸垚鏃堕棿锛'), forcing rework under pwsh 7; the agent admitted no pre-execution compatibility check was done and subsequently recorded an owner instruction to confirm interpreter and encoding compatibility before landing scripts on Windows (agent_turn 2026-09-03T06:05:07.757Z; tool_call_failure 2026-09-03T06:00:16.593Z).\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if it demands a preflight interpreter/encoding verification before consequential execution of non-ASCII scripts on Windows and rejects trajectories where such a script runs on an unverified interpreter with implicit encoding; the rule must not be so broad that it demands preflight probes for every trivial command, nor so narrow that it hardcodes the exact 5.1/BOM incident without capturing the underlying environment-contract gate.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788417947835_e99-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r1-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axioms T-01 (build a sufficient model before consequential changes) and T-05 (translate hard constraints into explicit guardrails before execution): this principle is a domain-specific composite of them for interpreter/encoding contracts, not a wholly new axiom; downstream rule generation should specialize rather than restate them\",\n    \"Self-describing encodings such as UTF-8 with BOM can break other downstream consumers (e.g., Unix tools that mishandle BOMs); the chosen encoding contract must account for all readers of the artifact, not just the immediate interpreter\",\n    \"Over-application: enforcing the preflight gate on every trivial or already-verified operation adds latency and friction without risk reduction, inviting agents to bypass the gate\",\n    \"Probe-based verification covers only the probed dimension — an encoding echo probe passing does not guarantee full script compatibility, which can induce false confidence\",\n    \"Persisted environment facts (dreamer candidate on durable environment memory) can become stale if the environment changes; persistence should complement per-session verification, not replace the gate\"\n  ],\n  \"generatedAt\": \"2026-09-03T06:09:15.000Z\"\n}",
+    "usage": {
+     "input": 4744,
+     "output": 4701,
+     "total": 9445
+    },
+    "latencyMs": 61556,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "15ce667f3b559adc"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788417947835_e99",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788417947835_e99-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在 Windows 上创建含中文字符的 UTF-8 无 BOM PowerShell 脚本后，未确认目标解释器版本与编码契约，直接用 Windows PowerShell 5.1 执行，导致中文乱码失败",
+       "betterDecision": "执行有后果的脚本前，先运行预检（如 $PSVersionTable.PSVersion）确认目标解释器版本，并确认编码契约：若目标为 5.1 且脚本含非 ASCII 字符，则写入 UTF-8 with BOM 或显式指定编码后再执行",
+       "rationale": "Windows PowerShell 5.1 将无 BOM UTF-8 按 ANSI 解析是已知确定行为，预检门禁可在执行前消除该已知不兼容，避免依赖运行失败来发现问题和后续返工",
+       "confidence": 0.95,
+       "riskLevel": "low",
+       "strategicPerspective": "preflight_environment_gate",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "以 UTF-8 无 BOM 编码落盘含非 ASCII 字符的 .ps1 文件，未定义跨解释器的编码契约",
+       "betterDecision": "写入 PowerShell 脚本时统一采用 UTF-8 with BOM（或在调用时显式指定 -Encoding），使脚本在 5.1 与 pwsh 7 下均能正确解析",
+       "rationale": "带 BOM 的 UTF-8 是两个 PowerShell 版本共同兼容的编码，一次写入即跨解释器安全，将硬约束前置为固定写入策略，降低对逐次版本预检的依赖",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "defensive_encoding_contract",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "默认使用系统 powershell.exe（5.1）执行脚本，未显式选择已知兼容的解释器",
+       "betterDecision": "在 Windows 上执行含非 ASCII 内容的脚本时显式调用 pwsh（PowerShell 7+），若环境中无 pwsh 或版本未知，先确认版本再执行",
+       "rationale": "pwsh 7 默认按 UTF-8 解析无 BOM 脚本，显式选择已知兼容的解释器是最简单可控的干预；但需先确认 pwsh 存在，故仍保留版本确认步骤",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "explicit_runtime_selection",
+       "sourcePrincipleId": "T-06"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "把有后果的正式执行当作探测手段，首次失败输出乱码后才意识到编码问题",
+       "betterDecision": "在执行完整脚本前，先用低成本的只读探测验证编码兼容性（例如先执行一条输出中文字符串的命令并核对回显是否正常），确认后再执行完整脚本",
+       "rationale": "以可逆的微小探测替代直接执行有后果的操作，在不确定性下保留安全边界，把发现问题的成本降到最低",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "safe_probe_first",
+       "sourcePrincipleId": "T-04"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "执行后未主动核对输出与预期，直到乱码被后续流程暴露才发现失败",
+       "betterDecision": "每次脚本执行后立即比对输出与预期（检查是否出现乱码或替换字符等失败信号），发现异常立即停止并修正编码，而非继续推进",
+       "rationale": "执行不等于成功，只有验证输出符合预期才算完成；将结果校验固化为执行流程的一部分，可在最早时点发现并纠正编码问题",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_then_proceed",
+       "sourcePrincipleId": "T-07"
+      }
+     ],
+     "contextRefs": [
+      "artifact://7280b877-4cd9-499a-a8a6-bad9a4d803d6"
+     ],
+     "generatedAt": "2026-09-03T06:10:12.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788417947835_e99-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在 Windows 上创建含中文字符的 UTF-8 无 BOM PowerShell 脚本后，未确认目标解释器版本与编码契约，直接用 Windows PowerShell 5.1 执行，导致中文乱码失败\",\"betterDecision\":\"执行有后果的脚本前，先运行预检（如 $PSVersionTable.PSVersion）确认目标解释器版本，并确认编码契约：若目标为 5.1 且脚本含非 ASCII 字符，则写入 UTF-8 with BOM 或显式指定编码后再执行\",\"rationale\":\"Windows PowerShell 5.1 将无 BOM UTF-8 按 ANSI 解析是已知确定行为，预检门禁可在执行前消除该已知不兼容，避免依赖运行失败来发现问题和后续返工\",\"confidence\":0.95,\"riskLevel\":\"low\",\"strategicPerspective\":\"preflight_environment_gate\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"以 UTF-8 无 BOM 编码落盘含非 ASCII 字符的 .ps1 文件，未定义跨解释器的编码契约\",\"betterDecision\":\"写入 PowerShell 脚本时统一采用 UTF-8 with BOM（或在调用时显式指定 -Encoding），使脚本在 5.1 与 pwsh 7 下均能正确解析\",\"rationale\":\"带 BOM 的 UTF-8 是两个 PowerShell 版本共同兼容的编码，一次写入即跨解释器安全，将硬约束前置为固定写入策略，降低对逐次版本预检的依赖\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"defensive_encoding_contract\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"默认使用系统 powershell.exe（5.1）执行脚本，未显式选择已知兼容的解释器\",\"betterDecision\":\"在 Windows 上执行含非 ASCII 内容的脚本时显式调用 pwsh（PowerShell 7+），若环境中无 pwsh 或版本未知，先确认版本再执行\",\"rationale\":\"pwsh 7 默认按 UTF-8 解析无 BOM 脚本，显式选择已知兼容的解释器是最简单可控的干预；但需先确认 pwsh 存在，故仍保留版本确认步骤\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"explicit_runtime_selection\",\"sourcePrincipleId\":\"T-06\"},{\"candidateIndex\":3,\"badDecision\":\"把有后果的正式执行当作探测手段，首次失败输出乱码后才意识到编码问题\",\"betterDecision\":\"在执行完整脚本前，先用低成本的只读探测验证编码兼容性（例如先执行一条输出中文字符串的命令并核对回显是否正常），确认后再执行完整脚本\",\"rationale\":\"以可逆的微小探测替代直接执行有后果的操作，在不确定性下保留安全边界，把发现问题的成本降到最低\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"safe_probe_first\",\"sourcePrincipleId\":\"T-04\"},{\"candidateIndex\":4,\"badDecision\":\"执行后未主动核对输出与预期，直到乱码被后续流程暴露才发现失败\",\"betterDecision\":\"每次脚本执行后立即比对输出与预期（检查是否出现乱码或替换字符等失败信号），发现异常立即停止并修正编码，而非继续推进\",\"rationale\":\"执行不等于成功，只有验证输出符合预期才算完成；将结果校验固化为执行流程的一部分，可在最早时点发现并纠正编码问题\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_then_proceed\",\"sourcePrincipleId\":\"T-07\"}],\"contextRefs\":[\"artifact://7280b877-4cd9-499a-a8a6-bad9a4d803d6\"],\"generatedAt\":\"2026-09-03T06:10:12.000Z\"}",
+    "usage": {
+     "input": 2390,
+     "output": 3984,
+     "total": 6374
+    },
+    "latencyMs": 46306,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "0e8c1a923313a8a7"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788417947835_e99-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788417947835_e99-r2-run1",
+     "thesis": "文件写入方与执行解释器之间存在隐式契约——编码、运行时版本、平台默认值。当这类契约未被显式化并在有后果的执行前验证时，跨边界执行会以乱码等沉默方式失败，且只能靠事后返工来发现。Dreamer 的全部候选共同指向：应把隐式环境契约转化为固定的写入策略（如 UTF-8 with BOM）或显式的解释器选择（pwsh 7），配合低成本预检探测与执行后的输出核对，在不兼容暴露之前就消除它。",
+     "principleCandidate": {
+      "title": "将隐式环境契约显式化：有后果执行前固定并验证编码与解释器契约",
+      "rationale": "根因是写入者默认『UTF-8 无 BOM 会被任何解释器一致解析』，而 Windows PowerShell 5.1 实际按 ANSI 解析——这是一个从未被任何环节检查的隐式契约。将编码契约固化为写入策略、或显式选择已知兼容的解释器，并在执行前用可逆的低成本探测验证、执行后立即核对输出，可将失败模式的发现时点从『乱码暴露后的返工』提前到『执行前的门禁』，以最低成本消除已知不兼容。",
+      "scope": "适用于任何『产物写入方』与『消费解释器』默认值可能不一致的场景：跨 Windows/Linux 分发含非 ASCII 内容的脚本或配置、PowerShell 5.1 与 pwsh 7 混用环境、被不同版本工具读取的数据文件，以及对运行时版本或编码敏感的有后果执行。",
+      "confidence": 0.85
+     },
+     "risks": [
+      "与核心公理存在部分重叠：T-01（先建模再变更）、T-04（不确定时用可逆探测）、T-05（硬约束转为显式护栏）、T-07（执行后验证）各自覆盖了本原则的一个侧面；本原则是它们在编码/运行时契约场景下的具体化，采纳时应作为特化规则而非独立新公理",
+      "统一采用 UTF-8 with BOM 并非普适安全：不容忍 BOM 的消费方（部分 Unix 工具链、shebang 处理、某些解析器）可能因此失败，编码契约需按具体写入方-读取方对确定，而非机械套用单一编码",
+      "预检门禁若只验证解释器版本而不覆盖实际失败模式（如控制台代码页、重定向输出编码），会产生虚假安全感，误以为契约已验证",
+      "对低风险、易回滚的操作强制执行预检与编码策略会引入不必要开销，违背 T-06 的最简干预要求，需按后果严重性分级应用"
+     ],
+     "generatedAt": "2026-09-03T06:11:05.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788417947835_e99-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788417947835_e99-r2-run1\",\"thesis\":\"文件写入方与执行解释器之间存在隐式契约——编码、运行时版本、平台默认值。当这类契约未被显式化并在有后果的执行前验证时，跨边界执行会以乱码等沉默方式失败，且只能靠事后返工来发现。Dreamer 的全部候选共同指向：应把隐式环境契约转化为固定的写入策略（如 UTF-8 with BOM）或显式的解释器选择（pwsh 7），配合低成本预检探测与执行后的输出核对，在不兼容暴露之前就消除它。\",\"principleCandidate\":{\"title\":\"将隐式环境契约显式化：有后果执行前固定并验证编码与解释器契约\",\"rationale\":\"根因是写入者默认『UTF-8 无 BOM 会被任何解释器一致解析』，而 Windows PowerShell 5.1 实际按 ANSI 解析——这是一个从未被任何环节检查的隐式契约。将编码契约固化为写入策略、或显式选择已知兼容的解释器，并在执行前用可逆的低成本探测验证、执行后立即核对输出，可将失败模式的发现时点从『乱码暴露后的返工』提前到『执行前的门禁』，以最低成本消除已知不兼容。\",\"scope\":\"适用于任何『产物写入方』与『消费解释器』默认值可能不一致的场景：跨 Windows/Linux 分发含非 ASCII 内容的脚本或配置、PowerShell 5.1 与 pwsh 7 混用环境、被不同版本工具读取的数据文件，以及对运行时版本或编码敏感的有后果执行。\",\"confidence\":0.85},\"risks\":[\"与核心公理存在部分重叠：T-01（先建模再变更）、T-04（不确定时用可逆探测）、T-05（硬约束转为显式护栏）、T-07（执行后验证）各自覆盖了本原则的一个侧面；本原则是它们在编码/运行时契约场景下的具体化，采纳时应作为特化规则而非独立新公理\",\"统一采用 UTF-8 with BOM 并非普适安全：不容忍 BOM 的消费方（部分 Unix 工具链、shebang 处理、某些解析器）可能因此失败，编码契约需按具体写入方-读取方对确定，而非机械套用单一编码\",\"预检门禁若只验证解释器版本而不覆盖实际失败模式（如控制台代码页、重定向输出编码），会产生虚假安全感，误以为契约已验证\",\"对低风险、易回滚的操作强制执行预检与编码策略会引入不必要开销，违背 T-06 的最简干预要求，需按后果严重性分级应用\"],\"generatedAt\":\"2026-09-03T06:11:05.000Z\"}",
+    "usage": {
+     "input": 1675,
+     "output": 2442,
+     "total": 4117
+    },
+    "latencyMs": 35721,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "b1eaa1cb060fde84"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788417947835_e99-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r2-run1",
+     "principleDraft": {
+      "title": "有后果执行前显式化并验证编码与解释器契约",
+      "statement": "当产物的写入方与消费解释器之间存在未显式确定的编码或运行时契约，且执行是有后果的（产生状态变更、对外输出或难以撤销的结果）时，必须先显式化契约再执行：先确认目标解释器版本（如 Windows PowerShell 5.1 还是 pwsh 7+）；对含非 ASCII 字符的脚本，按具体的写入方-读取方对显式确定编码策略（写入 UTF-8 with BOM、调用时显式指定 -Encoding，或显式选择默认按 UTF-8 解析的解释器）；执行后立即核对输出无乱码/替换字符等失败信号，方可判定成功。禁止凭隐式默认（『UTF-8 无 BOM 总会被正确解析』）执行有后果的跨解释器操作。",
+      "rationale": "根因是写入方隐式假设『UTF-8 无 BOM 会被任何解释器一致解析』，而 Windows PowerShell 5.1 实际按 ANSI 解析——该契约从未被任何环节检查，失败只能在运行时以乱码暴露并引发返工。将契约前置为固定的写入策略或显式的解释器选择，并以低成本预检（版本查询、探测回显）与执行后输出核对封住两端，可把该已知不兼容的发现时点从『乱码暴露后返工』提前到『执行前门禁』，以接近最低的成本消除它。",
+      "applicability": [
+       "在 Windows 上创建或执行含非 ASCII（如中文）字符的 PowerShell 脚本，尤其是 Windows PowerShell 5.1 与 pwsh 7 混用的环境",
+       "跨平台分发、含非 ASCII 内容的脚本或配置文件，其编码默认值在 Windows/Linux 间不一致",
+       "被多个运行时版本读取的数据文件或模板，版本间存在已知的解析差异（编码、语法、平台默认值）",
+       "任何『产物写入方』与『消费解释器』默认值可能不一致、且执行会产生状态变更或难以撤销后果的场景"
+      ],
+      "antiPatterns": [
+       "以 UTF-8 无 BOM 落盘含中文字符的 .ps1，未确认解释器版本即用 Windows PowerShell 5.1 执行",
+       "依赖运行失败（乱码输出）来发现已知、可预检的编码/解释器不兼容，事后返工修复",
+       "把带 BOM 的 UTF-8 当作普适安全编码机械套用，忽略不容忍 BOM 的消费方（部分 Unix 工具链、shebang 处理）——编码契约须按写入方-读取方对确定",
+       "预检只查解释器版本号，不覆盖实际失败面（控制台代码页、重定向输出编码），造成虚假安全感",
+       "执行后不核对输出即判定成功，让乱码由后续流程才暴露"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 要求在 Windows 上落地/执行脚本前先确认解释器版本与编码兼容性，防止已知的编码不兼容（如 PowerShell 5.1 将无 BOM UTF-8 按 ANSI 解析）以乱码形式在运行时才暴露并造成返工。",
+      "targetBehavior": "在创建或执行含非 ASCII 字符的 PowerShell 脚本时，工具轨迹中可见执行前的版本/编码契约确认或显式化动作（如查询 $PSVersionTable.PSVersion、显式调用 pwsh、或以 UTF-8 with BOM / 显式 -Encoding 写入），以及执行后对输出的乱码/替换字符核对，核对通过后才报告成功。",
+      "forbiddenBehavior": "未确认目标解释器版本与编码契约，即凭隐式默认（UTF-8 无 BOM）直接执行含非 ASCII 内容的脚本，依赖运行失败暴露已知不兼容后再返工修复。",
+      "evidenceSource": "diagnosis_manual_1788417947835_e99ujtms 及其证据链：tool_call_failure:2026-09-03T06:00:16.593Z（Windows PowerShell 5.1 执行含中文脚本，输出乱码『鐢熸垚鏃堕棿锛』）、agent_turn:2026-09-03T06:05:07.757Z（Agent 自认未做执行前兼容性检查，靠失败发现已知行为，并记录 owner 指令：Windows 上落地脚本前先确认解释器与编码兼容性）、返工改用 pwsh 7 后执行成功。",
+      "validationExpectation": "评估者应核验派生规则：(1) 在含非 ASCII 的 PowerShell 脚本执行前，存在可观察的版本/编码契约确认或显式编码写入动作；(2) 规则不得退化为『一律写 UTF-8 with BOM』或『一切操作都预检』——编码须按写入方-读取方对确定，预检范围须与后果严重性相称；(3) 规则应能区分于 T-01/T-05 的通用表述，具体绑定到编码/解释器契约触发场景；违背上述任一点的修改应在修复轮被标记而非直接实施。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788417947835_e99-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r2-run1"
+     },
+     "risks": [
+      "与核心公理部分重叠：本原则是 T-01（先建模）、T-04（可逆探测）、T-05（硬约束前置为护栏）、T-07（执行后验证）在编码/解释器契约场景下的具体化，采纳时应作为特化规则而非新增独立公理，避免规则集冗余",
+      "统一采用 UTF-8 with BOM 并非普适安全：不容忍 BOM 的消费方（部分 Unix 工具链、shebang 处理、某些解析器）可能因此失败，编码契约需按具体写入方-读取方对确定，而非机械套用单一编码",
+      "预检门禁若只验证解释器版本而未覆盖实际失败面（控制台代码页、重定向输出编码），会产生虚假安全感，误以为契约已验证",
+      "对低风险、易回滚的操作强制同样的预检与编码策略会引入不必要开销，违背 T-06 最简干预要求，需按后果严重性分级应用"
+     ],
+     "generatedAt": "2026-09-03T06:12:18.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788417947835_e99-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r2-run1\",\"principleDraft\":{\"title\":\"有后果执行前显式化并验证编码与解释器契约\",\"statement\":\"当产物的写入方与消费解释器之间存在未显式确定的编码或运行时契约，且执行是有后果的（产生状态变更、对外输出或难以撤销的结果）时，必须先显式化契约再执行：先确认目标解释器版本（如 Windows PowerShell 5.1 还是 pwsh 7+）；对含非 ASCII 字符的脚本，按具体的写入方-读取方对显式确定编码策略（写入 UTF-8 with BOM、调用时显式指定 -Encoding，或显式选择默认按 UTF-8 解析的解释器）；执行后立即核对输出无乱码/替换字符等失败信号，方可判定成功。禁止凭隐式默认（『UTF-8 无 BOM 总会被正确解析』）执行有后果的跨解释器操作。\",\"rationale\":\"根因是写入方隐式假设『UTF-8 无 BOM 会被任何解释器一致解析』，而 Windows PowerShell 5.1 实际按 ANSI 解析——该契约从未被任何环节检查，失败只能在运行时以乱码暴露并引发返工。将契约前置为固定的写入策略或显式的解释器选择，并以低成本预检（版本查询、探测回显）与执行后输出核对封住两端，可把该已知不兼容的发现时点从『乱码暴露后返工』提前到『执行前门禁』，以接近最低的成本消除它。\",\"applicability\":[\"在 Windows 上创建或执行含非 ASCII（如中文）字符的 PowerShell 脚本，尤其是 Windows PowerShell 5.1 与 pwsh 7 混用的环境\",\"跨平台分发、含非 ASCII 内容的脚本或配置文件，其编码默认值在 Windows/Linux 间不一致\",\"被多个运行时版本读取的数据文件或模板，版本间存在已知的解析差异（编码、语法、平台默认值）\",\"任何『产物写入方』与『消费解释器』默认值可能不一致、且执行会产生状态变更或难以撤销后果的场景\"],\"antiPatterns\":[\"以 UTF-8 无 BOM 落盘含中文字符的 .ps1，未确认解释器版本即用 Windows PowerShell 5.1 执行\",\"依赖运行失败（乱码输出）来发现已知、可预检的编码/解释器不兼容，事后返工修复\",\"把带 BOM 的 UTF-8 当作普适安全编码机械套用，忽略不容忍 BOM 的消费方（部分 Unix 工具链、shebang 处理）——编码契约须按写入方-读取方对确定\",\"预检只查解释器版本号，不覆盖实际失败面（控制台代码页、重定向输出编码），造成虚假安全感\",\"执行后不核对输出即判定成功，让乱码由后续流程才暴露\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"Owner 要求在 Windows 上落地/执行脚本前先确认解释器版本与编码兼容性，防止已知的编码不兼容（如 PowerShell 5.1 将无 BOM UTF-8 按 ANSI 解析）以乱码形式在运行时才暴露并造成返工。\",\"targetBehavior\":\"在创建或执行含非 ASCII 字符的 PowerShell 脚本时，工具轨迹中可见执行前的版本/编码契约确认或显式化动作（如查询 $PSVersionTable.PSVersion、显式调用 pwsh、或以 UTF-8 with BOM / 显式 -Encoding 写入），以及执行后对输出的乱码/替换字符核对，核对通过后才报告成功。\",\"forbiddenBehavior\":\"未确认目标解释器版本与编码契约，即凭隐式默认（UTF-8 无 BOM）直接执行含非 ASCII 内容的脚本，依赖运行失败暴露已知不兼容后再返工修复。\",\"evidenceSource\":\"diagnosis_manual_1788417947835_e99ujtms 及其证据链：tool_call_failure:2026-09-03T06:00:16.593Z（Windows PowerShell 5.1 执行含中文脚本，输出乱码『鐢熸垚鏃堕棿锛』）、agent_turn:2026-09-03T06:05:07.757Z（Agent 自认未做执行前兼容性检查，靠失败发现已知行为，并记录 owner 指令：Windows 上落地脚本前先确认解释器与编码兼容性）、返工改用 pwsh 7 后执行成功。\",\"validationExpectation\":\"评估者应核验派生规则：(1) 在含非 ASCII 的 PowerShell 脚本执行前，存在可观察的版本/编码契约确认或显式编码写入动作；(2) 规则不得退化为『一律写 UTF-8 with BOM』或『一切操作都预检』——编码须按写入方-读取方对确定，预检范围须与后果严重性相称；(3) 规则应能区分于 T-01/T-05 的通用表述，具体绑定到编码/解释器契约触发场景；违背上述任一点的修改应在修复轮被标记而非直接实施。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788417947835_e99-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r2-run1\"},\"risks\":[\"与核心公理部分重叠：本原则是 T-01（先建模）、T-04（可逆探测）、T-05（硬约束前置为护栏）、T-07（执行后验证）在编码/解释器契约场景下的具体化，采纳时应作为特化规则而非新增独立公理，避免规则集冗余\",\"统一采用 UTF-8 with BOM 并非普适安全：不容忍 BOM 的消费方（部分 Unix 工具链、shebang 处理、某些解析器）可能因此失败，编码契约需按具体写入方-读取方对确定，而非机械套用单一编码\",\"预检门禁若只验证解释器版本而未覆盖实际失败面（控制台代码页、重定向输出编码），会产生虚假安全感，误以为契约已验证\",\"对低风险、易回滚的操作强制同样的预检与编码策略会引入不必要开销，违背 T-06 最简干预要求，需按后果严重性分级应用\"],\"generatedAt\":\"2026-09-03T06:12:18.000Z\"}",
+    "usage": {
+     "input": 4668,
+     "output": 5891,
+     "total": 10559
+    },
+    "latencyMs": 68129,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "12e22b559536a1d2"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788417947835_e99-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r2-run1",
+     "principleDraft": {
+      "title": "显式化编码与解释器契约：有后果执行前固定、探测并核对",
+      "statement": "当写入的产物（脚本、配置、数据）将被另一个解释器或工具消费、且双方默认值（字符编码、运行时版本、平台约定）可能不一致时，必须：①将契约显式化——固化为按消费方验证过的写入策略（如按写入方-读取方对确定是否带 BOM）或显式指定已知兼容的解释器（如 pwsh 7）；②在有后果的执行前用低成本、可逆的探测验证契约覆盖实际失败模式（解析正确性、控制台代码页、输出编码），而非仅核对版本号；③执行后立即核对输出无乱码或异常，未核对不得视为成功；④按后果严重性分级应用，对低风险、易回滚的操作不强制全量预检。禁止依赖任何未经验证的隐式默认契约直接执行。",
+      "rationale": "根因是写入方默认『UTF-8 无 BOM 会被任何解释器一致解析』，而 Windows PowerShell 5.1 实际按 ANSI 解析——该隐式契约从未被任何环节检查，失败只能在乱码暴露后靠事后返工发现。将契约前置显式化（固定写入策略或显式选择解释器），配合执行前可逆探测与执行后输出核对，把失败发现时点从『乱码暴露后的返工』提前到『执行前的门禁』，以最低成本在已知不兼容暴露之前消除它，避免沉默失败。",
+      "applicability": [
+       "跨 Windows/Linux 分发含非 ASCII 内容的脚本或配置文件",
+       "PowerShell 5.1 与 PowerShell 7 (pwsh) 混用环境下写入或执行 .ps1 脚本",
+       "写入将被不同版本工具或解释器读取的数据/配置文件，且对编码或版本语义敏感",
+       "对运行时版本、字符编码、控制台代码页、重定向输出编码敏感的有后果执行"
+      ],
+      "antiPatterns": [
+       "依赖隐式默认值：写入含非 ASCII 内容的产物而不指定编码策略，假设任何解释器都会一致解析",
+       "以 UTF-8 无 BOM 写入含非 ASCII 字符的脚本后直接交由 Windows PowerShell 5.1 执行，不做任何预检",
+       "仅核对解释器版本号即宣称契约已验证，不探测实际失败模式（控制台代码页、重定向输出编码、非 ASCII 解析）",
+       "执行后不核对输出是否乱码或异常即视为成功",
+       "机械地对所有写入统一套用单一编码（如盲目全部加 BOM）而不按具体写入方-读取方对确定契约"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "避免代理凭隐式默认值假设写入方与解释器在编码、运行时版本上兼容，导致跨解释器执行以乱码等沉默方式失败并需事后返工。",
+      "targetBehavior": "代理在写入将被解释器消费的含非 ASCII 内容的产物前，可被观察到：显式确定编码写入策略或显式指定兼容解释器（如 pwsh 7）；在有后果的执行前运行低成本可逆探测（如含非 ASCII 字符的探针脚本经目标解释器解析）验证实际失败模式；执行后立即核对输出无乱码或异常。",
+      "forbiddenBehavior": "在写入方与解释器之间的环境契约未经显式化与验证的情况下直接执行有后果操作——例如以 UTF-8 无 BOM 写入含中文的脚本后交由 Windows PowerShell 5.1 执行且不做预检，直到乱码暴露后才返工。",
+      "evidenceSource": "Dreamer/Philosopher 的诊断：UTF-8 无 BOM 写入的含非 ASCII 脚本被 Windows PowerShell 5.1 按 ANSI 解析导致乱码，该隐式编码契约未被任何环节检查，属于写入方-解释器跨边界的沉默失败，只能事后返工发现。",
+      "validationExpectation": "评估者应要求规则同时体现四点：①执行前显式化契约（按写入方-读取方对确定编码策略，或显式指定解释器）；②预检探测覆盖实际失败模式（解析、代码页、输出编码）而非仅版本号；③执行后输出核对；④按后果严重性分级、对低风险可逆操作不强加全量预检。若规则退化为『一律加 BOM』的机械规则，或对低风险操作强制全量预检（违背 T-06），应判定为不忠实并标记而非直接采纳。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788417947835_e99-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r2-run1"
+     },
+     "risks": [
+      "与核心公理部分重叠：T-01（先建模）、T-04（可逆探测）、T-05（硬约束转显式护栏）、T-07（执行后验证）各自覆盖本原则的一个侧面；本原则应作为它们在编码/解释器契约场景下的特化规则落地，而非新增独立公理，否则会造成公理冗余",
+      "统一采用 UTF-8 with BOM 并非普适安全：不容忍 BOM 的消费方（部分 Unix 工具链、shebang 处理、某些解析器）可能因此失败；编码契约必须按具体写入方-读取方对确定，规则生成时若退化为单一编码策略会引入新失败面",
+      "预检门禁若只验证解释器版本而不覆盖实际失败模式（控制台代码页、重定向输出编码），会产生虚假安全感，误判契约已验证",
+      "对低风险、易回滚的操作强制执行预检与编码策略会引入不必要开销，违背 T-06 最简干预要求，规则需内置按后果严重性分级的豁免，否则可能被评估为过度保守",
+      "规则过严可能导致代理为规避风险而拒绝跨平台写入任务，或过度依赖探针脚本本身引入新的隐式假设（探针执行环境与真实执行环境不一致）"
+     ],
+     "generatedAt": "2026-09-03T06:12:47.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788417947835_e99-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r2-run1\",\"principleDraft\":{\"title\":\"显式化编码与解释器契约：有后果执行前固定、探测并核对\",\"statement\":\"当写入的产物（脚本、配置、数据）将被另一个解释器或工具消费、且双方默认值（字符编码、运行时版本、平台约定）可能不一致时，必须：①将契约显式化——固化为按消费方验证过的写入策略（如按写入方-读取方对确定是否带 BOM）或显式指定已知兼容的解释器（如 pwsh 7）；②在有后果的执行前用低成本、可逆的探测验证契约覆盖实际失败模式（解析正确性、控制台代码页、输出编码），而非仅核对版本号；③执行后立即核对输出无乱码或异常，未核对不得视为成功；④按后果严重性分级应用，对低风险、易回滚的操作不强制全量预检。禁止依赖任何未经验证的隐式默认契约直接执行。\",\"rationale\":\"根因是写入方默认『UTF-8 无 BOM 会被任何解释器一致解析』，而 Windows PowerShell 5.1 实际按 ANSI 解析——该隐式契约从未被任何环节检查，失败只能在乱码暴露后靠事后返工发现。将契约前置显式化（固定写入策略或显式选择解释器），配合执行前可逆探测与执行后输出核对，把失败发现时点从『乱码暴露后的返工』提前到『执行前的门禁』，以最低成本在已知不兼容暴露之前消除它，避免沉默失败。\",\"applicability\":[\"跨 Windows/Linux 分发含非 ASCII 内容的脚本或配置文件\",\"PowerShell 5.1 与 PowerShell 7 (pwsh) 混用环境下写入或执行 .ps1 脚本\",\"写入将被不同版本工具或解释器读取的数据/配置文件，且对编码或版本语义敏感\",\"对运行时版本、字符编码、控制台代码页、重定向输出编码敏感的有后果执行\"],\"antiPatterns\":[\"依赖隐式默认值：写入含非 ASCII 内容的产物而不指定编码策略，假设任何解释器都会一致解析\",\"以 UTF-8 无 BOM 写入含非 ASCII 字符的脚本后直接交由 Windows PowerShell 5.1 执行，不做任何预检\",\"仅核对解释器版本号即宣称契约已验证，不探测实际失败模式（控制台代码页、重定向输出编码、非 ASCII 解析）\",\"执行后不核对输出是否乱码或异常即视为成功\",\"机械地对所有写入统一套用单一编码（如盲目全部加 BOM）而不按具体写入方-读取方对确定契约\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"避免代理凭隐式默认值假设写入方与解释器在编码、运行时版本上兼容，导致跨解释器执行以乱码等沉默方式失败并需事后返工。\",\"targetBehavior\":\"代理在写入将被解释器消费的含非 ASCII 内容的产物前，可被观察到：显式确定编码写入策略或显式指定兼容解释器（如 pwsh 7）；在有后果的执行前运行低成本可逆探测（如含非 ASCII 字符的探针脚本经目标解释器解析）验证实际失败模式；执行后立即核对输出无乱码或异常。\",\"forbiddenBehavior\":\"在写入方与解释器之间的环境契约未经显式化与验证的情况下直接执行有后果操作——例如以 UTF-8 无 BOM 写入含中文的脚本后交由 Windows PowerShell 5.1 执行且不做预检，直到乱码暴露后才返工。\",\"evidenceSource\":\"Dreamer/Philosopher 的诊断：UTF-8 无 BOM 写入的含非 ASCII 脚本被 Windows PowerShell 5.1 按 ANSI 解析导致乱码，该隐式编码契约未被任何环节检查，属于写入方-解释器跨边界的沉默失败，只能事后返工发现。\",\"validationExpectation\":\"评估者应要求规则同时体现四点：①执行前显式化契约（按写入方-读取方对确定编码策略，或显式指定解释器）；②预检探测覆盖实际失败模式（解析、代码页、输出编码）而非仅版本号；③执行后输出核对；④按后果严重性分级、对低风险可逆操作不强加全量预检。若规则退化为『一律加 BOM』的机械规则，或对低风险操作强制全量预检（违背 T-06），应判定为不忠实并标记而非直接采纳。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788417947835_e99-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r2-run1\"},\"risks\":[\"与核心公理部分重叠：T-01（先建模）、T-04（可逆探测）、T-05（硬约束转显式护栏）、T-07（执行后验证）各自覆盖本原则的一个侧面；本原则应作为它们在编码/解释器契约场景下的特化规则落地，而非新增独立公理，否则会造成公理冗余\",\"统一采用 UTF-8 with BOM 并非普适安全：不容忍 BOM 的消费方（部分 Unix 工具链、shebang 处理、某些解析器）可能因此失败；编码契约必须按具体写入方-读取方对确定，规则生成时若退化为单一编码策略会引入新失败面\",\"预检门禁若只验证解释器版本而不覆盖实际失败模式（控制台代码页、重定向输出编码），会产生虚假安全感，误判契约已验证\",\"对低风险、易回滚的操作强制执行预检与编码策略会引入不必要开销，违背 T-06 最简干预要求，规则需内置按后果严重性分级的豁免，否则可能被评估为过度保守\",\"规则过严可能导致代理为规避风险而拒绝跨平台写入任务，或过度依赖探针脚本本身引入新的隐式假设（探针执行环境与真实执行环境不一致）\"],\"generatedAt\":\"2026-09-03T06:12:47.000Z\"}",
+    "usage": {
+     "input": 2057,
+     "output": 4182,
+     "total": 6239
+    },
+    "latencyMs": 53905,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "2fd735e208727af3"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788417947835_e99",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788417947835_e99-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在 Windows 上创建含中文字符的 UTF-8 无 BOM PowerShell 脚本后，未探测目标解释器版本（Windows PowerShell 5.1 还是 pwsh 7）就直接执行",
+       "betterDecision": "写脚本前先用一行探测命令（如 $PSVersionTable 或 which pwsh）确认实际执行的解释器版本，再据此决定编码契约：若为 5.1 则写 UTF-8 with BOM，若为 pwsh 7 才可用无 BOM UTF-8",
+       "rationale": "5.1 将无 BOM 文件按 ANSI 解码是确定性已知行为，一条版本探测只需数秒，而跳过它导致一次必然失败的执行与完整返工周期",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "preflight_environment_verification",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "把已知的编码不兼容问题留给运行时失败去暴露，没有在执行有后果的脚本前设置任何预检门禁",
+       "betterDecision": "建立不可跳过的预检门禁：凡脚本含非 ASCII 字符且将在 Windows 上执行，必须先确认解释器版本与编码策略（BOM 或显式 -Encoding 参数）并显式声明，才能进入执行阶段",
+       "rationale": "将已知平台约束前置为显式检查关卡，把必然失败的执行模式转化为廉价的事前验证步骤，符合把硬约束翻译为不可跳过检查的要求",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "guardrail_before_execution",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "在 Windows 平台上以无 BOM UTF-8 写入含中文的脚本文件，编码契约完全隐式依赖解释器默认行为",
+       "betterDecision": "在 Windows 上落地含非 ASCII 字符的脚本时，始终写入带 BOM 的 UTF-8（或显式传 -Encoding UTF8），或将中文字符串移到以显式编码读取的数据/参数中，使编码契约与解释器版本解耦",
+       "rationale": "BOM 是 Windows PowerShell 5.1 唯一可靠的 UTF-8 识别信号；显式编码声明在 5.1 与 pwsh 7 下都能消除歧义，使脚本可移植",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "explicit_encoding_contract",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "把首次真实执行当作对环境假设的试验，未先以可逆的小探针验证编码往返是否正确",
+       "betterDecision": "执行正式脚本前，先跑一个最小探针（在目标解释器下打印一条中文字符串并回读），确认编码往返无损后再执行有后果的操作",
+       "rationale": "可逆的探针以近乎零成本验证环境契约，在造成实际后果前保留中止能力；执行成功不等于假设正确，验证必须先行",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "reversible_probe_first",
+       "sourcePrincipleId": "T-04"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "对『5.1 与 pwsh 编码差异』这类确定性平台行为没有任何预置知识，只能靠一次失败被动学到后才补记规则",
+       "betterDecision": "主动将此类平台级确定性约束固化为常驻指令与工具模板（Windows 落地脚本前强制确认解释器与编码兼容性），在失败发生前就内化为不可跳过的前置规则",
+       "rationale": "确定性的平台行为应作为长期规则持久化在记忆与指令中，而不是每次通过失败重新发现；把摩擦转化为事前规则才能真正阻断同类错误重演",
+       "confidence": 0.78,
+       "riskLevel": "low",
+       "strategicPerspective": "durable_constraint_internalization",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "sourcePainId": "manual_1788417947835_e99ujtms",
+     "contextRefs": [
+      "artifact://7280b877-4cd9-499a-a8a6-bad9a4d803d6"
+     ],
+     "generatedAt": "2026-09-03T06:06:30.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788417947835_e99-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在 Windows 上创建含中文字符的 UTF-8 无 BOM PowerShell 脚本后，未探测目标解释器版本（Windows PowerShell 5.1 还是 pwsh 7）就直接执行\",\"betterDecision\":\"写脚本前先用一行探测命令（如 $PSVersionTable 或 which pwsh）确认实际执行的解释器版本，再据此决定编码契约：若为 5.1 则写 UTF-8 with BOM，若为 pwsh 7 才可用无 BOM UTF-8\",\"rationale\":\"5.1 将无 BOM 文件按 ANSI 解码是确定性已知行为，一条版本探测只需数秒，而跳过它导致一次必然失败的执行与完整返工周期\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"preflight_environment_verification\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"把已知的编码不兼容问题留给运行时失败去暴露，没有在执行有后果的脚本前设置任何预检门禁\",\"betterDecision\":\"建立不可跳过的预检门禁：凡脚本含非 ASCII 字符且将在 Windows 上执行，必须先确认解释器版本与编码策略（BOM 或显式 -Encoding 参数）并显式声明，才能进入执行阶段\",\"rationale\":\"将已知平台约束前置为显式检查关卡，把必然失败的执行模式转化为廉价的事前验证步骤，符合把硬约束翻译为不可跳过检查的要求\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"guardrail_before_execution\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"在 Windows 平台上以无 BOM UTF-8 写入含中文的脚本文件，编码契约完全隐式依赖解释器默认行为\",\"betterDecision\":\"在 Windows 上落地含非 ASCII 字符的脚本时，始终写入带 BOM 的 UTF-8（或显式传 -Encoding UTF8），或将中文字符串移到以显式编码读取的数据/参数中，使编码契约与解释器版本解耦\",\"rationale\":\"BOM 是 Windows PowerShell 5.1 唯一可靠的 UTF-8 识别信号；显式编码声明在 5.1 与 pwsh 7 下都能消除歧义，使脚本可移植\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"explicit_encoding_contract\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":3,\"badDecision\":\"把首次真实执行当作对环境假设的试验，未先以可逆的小探针验证编码往返是否正确\",\"betterDecision\":\"执行正式脚本前，先跑一个最小探针（在目标解释器下打印一条中文字符串并回读），确认编码往返无损后再执行有后果的操作\",\"rationale\":\"可逆的探针以近乎零成本验证环境契约，在造成实际后果前保留中止能力；执行成功不等于假设正确，验证必须先行\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"reversible_probe_first\",\"sourcePrincipleId\":\"T-04\"},{\"candidateIndex\":4,\"badDecision\":\"对『5.1 与 pwsh 编码差异』这类确定性平台行为没有任何预置知识，只能靠一次失败被动学到后才补记规则\",\"betterDecision\":\"主动将此类平台级确定性约束固化为常驻指令与工具模板（Windows 落地脚本前强制确认解释器与编码兼容性），在失败发生前就内化为不可跳过的前置规则\",\"rationale\":\"确定性的平台行为应作为长期规则持久化在记忆与指令中，而不是每次通过失败重新发现；把摩擦转化为事前规则才能真正阻断同类错误重演\",\"confidence\":0.78,\"riskLevel\":\"low\",\"strategicPerspective\":\"durable_constraint_internalization\",\"sourcePrincipleId\":\"T-08\"}],\"sourcePainId\":\"manual_1788417947835_e99ujtms\",\"contextRefs\":[\"artifact://7280b877-4cd9-499a-a8a6-bad9a4d803d6\"],\"generatedAt\":\"2026-09-03T06:06:30.000Z\"}",
+    "usage": {
+     "input": 2390,
+     "output": 3640,
+     "total": 6030
+    },
+    "latencyMs": 42797,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "63ee7cc7930d79f4"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788417947835_e99-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788417947835_e99-r3-run1",
+     "thesis": "确定性的环境不兼容不应由失败来揭示：当平台行为（如解释器版本对无 BOM 文件的解码规则）是可预知且可用数秒级探测确认时，有后果的执行必须先通过显式的预检门禁——探测解释器版本、显式声明编码契约、以可逆探针确认往返无损——并将此类确定性平台约束固化为长期规则，从而把必然失败的执行与返工周期转化为廉价的事前验证。",
+     "principleCandidate": {
+      "title": "预检门禁：有后果执行前以廉价探测显式化环境契约",
+      "rationale": "根因是让编码契约隐式依赖解释器默认行为，而该行为是确定性且可预知的。一条版本探测、一个 BOM 或显式编码声明、一次可逆往返探针，成本以秒计，却能阻断一次必然失败的执行与完整返工；再将门禁固化为常驻规则，避免每次靠失败重新发现同一约束。",
+      "scope": "适用于在存在版本相关确定性行为的平台上执行含平台敏感内容（非 ASCII 字符、编码契约、解释器/运行时差异）的有后果操作，尤其是检查成本近为零而失败代价为完整返工的场景；不适用于无已知平台敏感性或后果可忽略的琐碎操作。",
+      "confidence": 0.85
+     },
+     "risks": [
+      "与现有核心公理高度重叠：本原则实质是 T-01（先建模再行动）、T-04（可逆探针优先）、T-05（硬约束转不可跳过门禁）、T-08（摩擦转长期规则）在编码/平台契约场景下的合取，需评估是否构成对公理体系的冗余稀释",
+      "过度门禁风险：对低风险、易回滚的操作强制预检会引入不成比例的摩擦，与 T-06（最小干预）产生张力",
+      "『带 BOM』并非普适安全解：BOM 会破坏部分 Unix 工具、YAML/JSON 解析与 shebang 脚本，盲目加 BOM 可能在跨平台流转时引入新故障",
+      "预检结果可能过时或探测本身失效（探测命令不可用、执行环境与探测环境不一致），缓存的环境结论需与实际执行上下文绑定"
+     ],
+     "generatedAt": "2026-09-03T06:07:52.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788417947835_e99-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788417947835_e99-r3-run1\",\"thesis\":\"确定性的环境不兼容不应由失败来揭示：当平台行为（如解释器版本对无 BOM 文件的解码规则）是可预知且可用数秒级探测确认时，有后果的执行必须先通过显式的预检门禁——探测解释器版本、显式声明编码契约、以可逆探针确认往返无损——并将此类确定性平台约束固化为长期规则，从而把必然失败的执行与返工周期转化为廉价的事前验证。\",\"principleCandidate\":{\"title\":\"预检门禁：有后果执行前以廉价探测显式化环境契约\",\"rationale\":\"根因是让编码契约隐式依赖解释器默认行为，而该行为是确定性且可预知的。一条版本探测、一个 BOM 或显式编码声明、一次可逆往返探针，成本以秒计，却能阻断一次必然失败的执行与完整返工；再将门禁固化为常驻规则，避免每次靠失败重新发现同一约束。\",\"scope\":\"适用于在存在版本相关确定性行为的平台上执行含平台敏感内容（非 ASCII 字符、编码契约、解释器/运行时差异）的有后果操作，尤其是检查成本近为零而失败代价为完整返工的场景；不适用于无已知平台敏感性或后果可忽略的琐碎操作。\",\"confidence\":0.85},\"risks\":[\"与现有核心公理高度重叠：本原则实质是 T-01（先建模再行动）、T-04（可逆探针优先）、T-05（硬约束转不可跳过门禁）、T-08（摩擦转长期规则）在编码/平台契约场景下的合取，需评估是否构成对公理体系的冗余稀释\",\"过度门禁风险：对低风险、易回滚的操作强制预检会引入不成比例的摩擦，与 T-06（最小干预）产生张力\",\"『带 BOM』并非普适安全解：BOM 会破坏部分 Unix 工具、YAML/JSON 解析与 shebang 脚本，盲目加 BOM 可能在跨平台流转时引入新故障\",\"预检结果可能过时或探测本身失效（探测命令不可用、执行环境与探测环境不一致），缓存的环境结论需与实际执行上下文绑定\"],\"generatedAt\":\"2026-09-03T06:07:52.000Z\"}",
+    "usage": {
+     "input": 1741,
+     "output": 2355,
+     "total": 4096
+    },
+    "latencyMs": 36354,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "437517ce81db48fa"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788417947835_e99-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1",
+     "principleDraft": {
+      "title": "预检门禁：有后果执行前以廉价探测显式化环境契约",
+      "statement": "在具有版本相关确定性行为的平台上执行含平台敏感内容（非 ASCII 字符、编码契约、解释器/运行时差异）的有后果操作前，必须先通过显式预检门禁：①探测实际执行将使用的解释器/运行时版本；②显式声明编码契约（依据目标平台选择 BOM 或显式编码声明，而非依赖默认解码）；③以可逆探针确认写读往返无损。门禁未通过则禁止执行主操作并先修复契约；已确认的确定性平台约束必须固化为长期规则。禁止以执行失败作为发现环境不兼容的手段。",
+      "rationale": "根因是让编码契约隐式依赖解释器/运行时的默认行为，而该行为是确定且可预知的。一次版本探测、一个显式编码声明、一次可逆往返探针，成本以秒计，却能阻断一次必然失败的执行与完整返工；将门禁固化为常驻规则，可避免每次靠失败重新发现同一约束。本原则是 T-01（先建模）、T-04（可逆探针优先）、T-05（硬约束转不可跳过门禁）、T-08（摩擦转长期规则）在编码/平台契约场景下的具体化操作。",
+      "applicability": [
+       "在解释器/运行时版本会确定性地改变行为（如对无 BOM 文件的解码规则）的平台上执行写文件、构建、部署等有后果操作",
+       "操作内容含非 ASCII 字符或隐含编码契约（源码、配置、数据导出等），且失败代价为完整返工或不可逆后果",
+       "检查成本以秒计（版本探测、编码声明、往返探针）而失败代价高昂的场景",
+       "首次在某环境执行，或环境（解释器版本、locale、默认编码）可能已发生变化的重复操作"
+      ],
+      "antiPatterns": [
+       "让编码契约隐式依赖解释器/运行时的默认行为（如依赖特定版本对无 BOM 文件的默认解码规则）",
+       "跳过预检直接执行平台敏感的有后果操作，以运行失败作为发现环境不兼容的手段",
+       "探测已显示确定性不兼容后仍按原方案执行，触发本可避免的失败与完整返工",
+       "每次通过失败重新发现同一平台约束而不将其固化为长期规则",
+       "把『加 BOM』当作普适安全解，不评估其对部分 Unix 工具、YAML/JSON 解析与 shebang 脚本的破坏",
+       "对无平台敏感性、后果可忽略的琐碎操作机械套用全量预检门禁，引入不成比例的摩擦"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望有后果的平台敏感执行（尤其涉及非 ASCII 内容与编码契约）不再因隐式依赖解释器默认行为而必然失败并引发完整返工，而应被秒级预检在事前拦截并将确认的约束固化为规则。",
+      "targetBehavior": "在工具轨迹中可见：执行主操作前先探测目标解释器/运行时版本、显式选择并声明编码契约（BOM 或显式编码声明）、以可逆读写往返探针确认无损，且仅当探针通过后才执行主操作；已确认的确定性平台约束被写入持久化规则。",
+      "forbiddenBehavior": "在未探测版本、未显式声明编码契约、未验证往返无损的情况下直接执行平台敏感的有后果操作，令契约隐式依赖平台默认行为，以失败揭示本可预知的不兼容，或在探测发现不兼容后仍按原方案执行。",
+      "evidenceSource": "Philosopher 对 Dreamer 原型的诊断：无 BOM 文件的解码规则随解释器版本确定性地变化、秒级探测即可确认，但系统以『执行失败→完整返工→重复发现同一约束且不固化』的方式揭示该不兼容（见 pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1）。",
+      "validationExpectation": "评估者应核验：①由该原则生成的规则触发条件须同时满足『平台敏感』与『有后果』双门槛；②门禁步骤为可观测的版本探测＋显式编码契约＋可逆往返探针序列，且执行决策与探针结果存在因果关联（未通过则中止并修复）；③规则要求将确认的约束固化为持久规则；④规则不得把『加 BOM』当作普适解，也不得将预检泛化为无条件的普适步骤或与核心公理（T-01/T-04/T-05/T-08）逐字重复。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788417947835_e99-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1"
+     },
+     "risks": [
+      "与核心公理高度重叠：本原则实质是 T-01、T-04、T-05、T-08 在编码/平台契约场景下的合取；下游应将其定位为场景化具体化而非新公理，避免规则层冗余稀释公理体系",
+      "过度门禁风险：对低风险、易回滚的操作强制预检会引入不成比例的摩擦，与 T-06（最小干预）存在张力；须以『平台敏感且有后果』双门槛严格限定触发范围",
+      "『带 BOM』并非普适安全解：BOM 会破坏部分 Unix 工具、YAML/JSON 解析与 shebang 脚本，盲目加 BOM 可能在跨平台流转时引入新故障；编码契约须按目标平台显式选择",
+      "预检结论可能过时或探测本身失效（探测命令不可用、探测环境与实际执行环境不一致）；缓存的环境结论须与实际执行上下文绑定并在关键节点复核",
+      "门禁被形式化执行的风险：仅机械运行探测命令但不据结果改变行为（探测显示不兼容后仍执行）；评估需检查探针结果与执行/中止决策之间的因果关联"
+     ],
+     "generatedAt": "2026-09-03T06:16:40.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788417947835_e99-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"预检门禁：有后果执行前以廉价探测显式化环境契约\",\n    \"statement\": \"在具有版本相关确定性行为的平台上执行含平台敏感内容（非 ASCII 字符、编码契约、解释器/运行时差异）的有后果操作前，必须先通过显式预检门禁：①探测实际执行将使用的解释器/运行时版本；②显式声明编码契约（依据目标平台选择 BOM 或显式编码声明，而非依赖默认解码）；③以可逆探针确认写读往返无损。门禁未通过则禁止执行主操作并先修复契约；已确认的确定性平台约束必须固化为长期规则。禁止以执行失败作为发现环境不兼容的手段。\",\n    \"rationale\": \"根因是让编码契约隐式依赖解释器/运行时的默认行为，而该行为是确定且可预知的。一次版本探测、一个显式编码声明、一次可逆往返探针，成本以秒计，却能阻断一次必然失败的执行与完整返工；将门禁固化为常驻规则，可避免每次靠失败重新发现同一约束。本原则是 T-01（先建模）、T-04（可逆探针优先）、T-05（硬约束转不可跳过门禁）、T-08（摩擦转长期规则）在编码/平台契约场景下的具体化操作。\",\n    \"applicability\": [\n      \"在解释器/运行时版本会确定性地改变行为（如对无 BOM 文件的解码规则）的平台上执行写文件、构建、部署等有后果操作\",\n      \"操作内容含非 ASCII 字符或隐含编码契约（源码、配置、数据导出等），且失败代价为完整返工或不可逆后果\",\n      \"检查成本以秒计（版本探测、编码声明、往返探针）而失败代价高昂的场景\",\n      \"首次在某环境执行，或环境（解释器版本、locale、默认编码）可能已发生变化的重复操作\"\n    ],\n    \"antiPatterns\": [\n      \"让编码契约隐式依赖解释器/运行时的默认行为（如依赖特定版本对无 BOM 文件的默认解码规则）\",\n      \"跳过预检直接执行平台敏感的有后果操作，以运行失败作为发现环境不兼容的手段\",\n      \"探测已显示确定性不兼容后仍按原方案执行，触发本可避免的失败与完整返工\",\n      \"每次通过失败重新发现同一平台约束而不将其固化为长期规则\",\n      \"把『加 BOM』当作普适安全解，不评估其对部分 Unix 工具、YAML/JSON 解析与 shebang 脚本的破坏\",\n      \"对无平台敏感性、后果可忽略的琐碎操作机械套用全量预检门禁，引入不成比例的摩擦\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Owner 希望有后果的平台敏感执行（尤其涉及非 ASCII 内容与编码契约）不再因隐式依赖解释器默认行为而必然失败并引发完整返工，而应被秒级预检在事前拦截并将确认的约束固化为规则。\",\n    \"targetBehavior\": \"在工具轨迹中可见：执行主操作前先探测目标解释器/运行时版本、显式选择并声明编码契约（BOM 或显式编码声明）、以可逆读写往返探针确认无损，且仅当探针通过后才执行主操作；已确认的确定性平台约束被写入持久化规则。\",\n    \"forbiddenBehavior\": \"在未探测版本、未显式声明编码契约、未验证往返无损的情况下直接执行平台敏感的有后果操作，令契约隐式依赖平台默认行为，以失败揭示本可预知的不兼容，或在探测发现不兼容后仍按原方案执行。\",\n    \"evidenceSource\": \"Philosopher 对 Dreamer 原型的诊断：无 BOM 文件的解码规则随解释器版本确定性地变化、秒级探测即可确认，但系统以『执行失败→完整返工→重复发现同一约束且不固化』的方式揭示该不兼容（见 pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1）。\",\n    \"validationExpectation\": \"评估者应核验：①由该原则生成的规则触发条件须同时满足『平台敏感』与『有后果』双门槛；②门禁步骤为可观测的版本探测＋显式编码契约＋可逆往返探针序列，且执行决策与探针结果存在因果关联（未通过则中止并修复）；③规则要求将确认的约束固化为持久规则；④规则不得把『加 BOM』当作普适解，也不得将预检泛化为无条件的普适步骤或与核心公理（T-01/T-04/T-05/T-08）逐字重复。\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788417947835_e99-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1\"\n  },\n  \"risks\": [\n    \"与核心公理高度重叠：本原则实质是 T-01、T-04、T-05、T-08 在编码/平台契约场景下的合取；下游应将其定位为场景化具体化而非新公理，避免规则层冗余稀释公理体系\",\n    \"过度门禁风险：对低风险、易回滚的操作强制预检会引入不成比例的摩擦，与 T-06（最小干预）存在张力；须以『平台敏感且有后果』双门槛严格限定触发范围\",\n    \"『带 BOM』并非普适安全解：BOM 会破坏部分 Unix 工具、YAML/JSON 解析与 shebang 脚本，盲目加 BOM 可能在跨平台流转时引入新故障；编码契约须按目标平台显式选择\",\n    \"预检结论可能过时或探测本身失效（探测命令不可用、探测环境与实际执行环境不一致）；缓存的环境结论须与实际执行上下文绑定并在关键节点复核\",\n    \"门禁被形式化执行的风险：仅机械运行探测命令但不据结果改变行为（探测显示不兼容后仍执行）；评估需检查探针结果与执行/中止决策之间的因果关联\"\n  ],\n  \"generatedAt\": \"2026-09-03T06:16:40.000Z\"\n}",
+    "usage": {
+     "input": 1966,
+     "output": 6186,
+     "total": 8152
+    },
+    "latencyMs": 79413,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "2c7fab0c4c3a57fe"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788417947835_e99-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1",
+     "principleDraft": {
+      "title": "预检门禁：有后果执行前显式确认环境契约（解释器版本与编码）",
+      "statement": "凡执行有后果的操作且其内容含平台敏感要素（非 ASCII 字符、编码契约、解释器/运行时版本差异），而相关平台行为是确定性可预知的，必须先通过不可跳过的预检门禁：以廉价探测确认目标解释器/运行时版本，据探测结果显式声明并落实编码契约（如带 BOM 的 UTF-8 或显式编码参数），必要时以可逆探针验证编码往返无损，之后才允许执行；并将已确认的确定性平台约束固化为常驻规则，禁止以运行失败作为发现已知环境不兼容的手段。",
+      "rationale": "根因是让编码契约隐式依赖解释器默认行为，而该行为（如 Windows PowerShell 5.1 将无 BOM 文件按 ANSI 解码）是确定且可预知的。一次版本探测（$PSVersionTable / which pwsh）加一条显式编码声明，成本以秒计，却能阻断一次必然失败的执行与完整返工；再把该门禁固化为常驻规则，避免每次靠失败重新发现同一平台约束。",
+      "applicability": [
+       "在 Windows 等存在版本相关确定性编码行为的平台上，创建或执行含非 ASCII 字符（如中文）的脚本",
+       "跨解释器/运行时（如 Windows PowerShell 5.1 与 pwsh 7）执行有后果操作，且检查成本近为零、失败代价为完整返工的场景",
+       "写入或修改携带编码契约假设、并将被确定性解释器或工具链消费的文件（脚本、配置、数据文件）",
+       "将已确认的平台级确定性约束沉淀为常驻指令或工具模板的记忆维护场景"
+      ],
+      "antiPatterns": [
+       "依赖运行失败来暴露已知（或可廉价确认）的环境不兼容——『靠报错学环境』",
+       "编码契约隐式依赖解释器默认行为，如以无 BOM UTF-8 写入含中文脚本后直接交给 Windows PowerShell 5.1 执行",
+       "把首次有后果的真实执行当作对环境假设的试验",
+       "仅在事后补记经验，而不将已确认的确定性平台约束前置为不可跳过的门禁"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 要求 Agent 在 Windows 上创建或执行含非 ASCII 字符的脚本前，必须先确认目标解释器版本与编码契约（5.1 需带 BOM 的 UTF-8 或显式 -Encoding 参数），不得靠运行失败来发现编码不兼容而返工。",
+      "targetBehavior": "在创建或执行含非 ASCII 字符的 PowerShell（或跨解释器）脚本前，工具轨迹中可见顺序化预检：先探测解释器版本（如 $PSVersionTable、which pwsh），据此显式选定并声明编码契约（BOM 或显式编码参数），必要时先以中文字符串往返探针验证，然后才执行有后果的命令。",
+      "forbiddenBehavior": "在有后果的执行前跳过环境预检：不探测目标解释器版本、不显式声明编码契约，以隐式编码假设直接执行含非 ASCII 内容的脚本，让确定性的平台不兼容（如 Windows PowerShell 5.1 将无 BOM 文件按 ANSI 解码）由运行失败来揭示。",
+      "evidenceSource": "diagnosis_manual_1788417947835_e99ujtms 及其证据链：Windows PowerShell 5.1 执行 UTF-8 无 BOM 中文脚本按 ANSI 解码产生乱码失败（tool_call_failure 2026-09-03T06:00:16.593Z），Agent 自认未做事前兼容性检查，返工改用 pwsh 7 后才成功，并记录『Windows 上落地脚本前先确认解释器与编码兼容性』为 owner 指令。",
+      "validationExpectation": "评估者应核实派生规则同时具备：触发条件（有后果执行 + 内容含非 ASCII/平台敏感要素 + 目标平台存在已知确定性行为）、必需动作（版本探测与显式编码声明，可选可逆探针）、禁止项（以隐式编码假设直接执行）；并核实规则既未被放宽为对所有操作一律预检，也未被窄化为『一律加 BOM』——编码契约的选择必须依据探测到的解释器版本。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788417947835_e99-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1"
+     },
+     "risks": [
+      "与核心公理 T-01/T-04/T-05/T-08 高度重叠：本原则实质是它们在平台/编码契约场景下的具体化合取；落地时必须以场景化的门禁顺序（探测版本→显式契约→可逆验证→固化为常驻规则）为增量价值，否则构成对公理体系的冗余稀释",
+      "过度门禁风险：对低风险、易回滚或无平台敏感性的琐碎操作强制预检会引入不成比例的摩擦，与 T-06（最小干预）冲突；适用边界必须守住『有后果 + 平台敏感 + 检查成本近为零』三条件",
+      "『带 BOM』并非普适安全解：BOM 可破坏部分 Unix 工具、YAML/JSON 解析与 shebang 脚本；派生规则必须要求依据探测到的解释器显式选定契约，而非机械加 BOM",
+      "预检结论可能过时或探测环境与实际执行环境不一致（探测命令不可用、缓存结论失效）；规则应要求探测结论与实际执行上下文绑定，不得信任跨会话未绑定的环境缓存"
+     ],
+     "generatedAt": "2026-09-03T06:08:41.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788417947835_e99-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1\",\"principleDraft\":{\"title\":\"预检门禁：有后果执行前显式确认环境契约（解释器版本与编码）\",\"statement\":\"凡执行有后果的操作且其内容含平台敏感要素（非 ASCII 字符、编码契约、解释器/运行时版本差异），而相关平台行为是确定性可预知的，必须先通过不可跳过的预检门禁：以廉价探测确认目标解释器/运行时版本，据探测结果显式声明并落实编码契约（如带 BOM 的 UTF-8 或显式编码参数），必要时以可逆探针验证编码往返无损，之后才允许执行；并将已确认的确定性平台约束固化为常驻规则，禁止以运行失败作为发现已知环境不兼容的手段。\",\"rationale\":\"根因是让编码契约隐式依赖解释器默认行为，而该行为（如 Windows PowerShell 5.1 将无 BOM 文件按 ANSI 解码）是确定且可预知的。一次版本探测（$PSVersionTable / which pwsh）加一条显式编码声明，成本以秒计，却能阻断一次必然失败的执行与完整返工；再把该门禁固化为常驻规则，避免每次靠失败重新发现同一平台约束。\",\"applicability\":[\"在 Windows 等存在版本相关确定性编码行为的平台上，创建或执行含非 ASCII 字符（如中文）的脚本\",\"跨解释器/运行时（如 Windows PowerShell 5.1 与 pwsh 7）执行有后果操作，且检查成本近为零、失败代价为完整返工的场景\",\"写入或修改携带编码契约假设、并将被确定性解释器或工具链消费的文件（脚本、配置、数据文件）\",\"将已确认的平台级确定性约束沉淀为常驻指令或工具模板的记忆维护场景\"],\"antiPatterns\":[\"依赖运行失败来暴露已知（或可廉价确认）的环境不兼容——『靠报错学环境』\",\"编码契约隐式依赖解释器默认行为，如以无 BOM UTF-8 写入含中文脚本后直接交给 Windows PowerShell 5.1 执行\",\"把首次有后果的真实执行当作对环境假设的试验\",\"仅在事后补记经验，而不将已确认的确定性平台约束前置为不可跳过的门禁\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"Owner 要求 Agent 在 Windows 上创建或执行含非 ASCII 字符的脚本前，必须先确认目标解释器版本与编码契约（5.1 需带 BOM 的 UTF-8 或显式 -Encoding 参数），不得靠运行失败来发现编码不兼容而返工。\",\"targetBehavior\":\"在创建或执行含非 ASCII 字符的 PowerShell（或跨解释器）脚本前，工具轨迹中可见顺序化预检：先探测解释器版本（如 $PSVersionTable、which pwsh），据此显式选定并声明编码契约（BOM 或显式编码参数），必要时先以中文字符串往返探针验证，然后才执行有后果的命令。\",\"forbiddenBehavior\":\"在有后果的执行前跳过环境预检：不探测目标解释器版本、不显式声明编码契约，以隐式编码假设直接执行含非 ASCII 内容的脚本，让确定性的平台不兼容（如 Windows PowerShell 5.1 将无 BOM 文件按 ANSI 解码）由运行失败来揭示。\",\"evidenceSource\":\"diagnosis_manual_1788417947835_e99ujtms 及其证据链：Windows PowerShell 5.1 执行 UTF-8 无 BOM 中文脚本按 ANSI 解码产生乱码失败（tool_call_failure 2026-09-03T06:00:16.593Z），Agent 自认未做事前兼容性检查，返工改用 pwsh 7 后才成功，并记录『Windows 上落地脚本前先确认解释器与编码兼容性』为 owner 指令。\",\"validationExpectation\":\"评估者应核实派生规则同时具备：触发条件（有后果执行 + 内容含非 ASCII/平台敏感要素 + 目标平台存在已知确定性行为）、必需动作（版本探测与显式编码声明，可选可逆探针）、禁止项（以隐式编码假设直接执行）；并核实规则既未被放宽为对所有操作一律预检，也未被窄化为『一律加 BOM』——编码契约的选择必须依据探测到的解释器版本。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788417947835_e99-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788417947835_e99-r3-run1\"},\"risks\":[\"与核心公理 T-01/T-04/T-05/T-08 高度重叠：本原则实质是它们在平台/编码契约场景下的具体化合取；落地时必须以场景化的门禁顺序（探测版本→显式契约→可逆验证→固化为常驻规则）为增量价值，否则构成对公理体系的冗余稀释\",\"过度门禁风险：对低风险、易回滚或无平台敏感性的琐碎操作强制预检会引入不成比例的摩擦，与 T-06（最小干预）冲突；适用边界必须守住『有后果 + 平台敏感 + 检查成本近为零』三条件\",\"『带 BOM』并非普适安全解：BOM 可破坏部分 Unix 工具、YAML/JSON 解析与 shebang 脚本；派生规则必须要求依据探测到的解释器显式选定契约，而非机械加 BOM\",\"预检结论可能过时或探测环境与实际执行环境不一致（探测命令不可用、缓存结论失效）；规则应要求探测结论与实际执行上下文绑定，不得信任跨会话未绑定的环境缓存\"],\"generatedAt\":\"2026-09-03T06:08:41.000Z\"}",
+    "usage": {
+     "input": 4622,
+     "output": 5497,
+     "total": 10119
+    },
+    "latencyMs": 67742,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "4e982a5e49f4bd49"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}
