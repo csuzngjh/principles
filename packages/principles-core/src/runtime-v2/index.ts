@@ -23,6 +23,27 @@ export { GovernanceChannelSchema, LineageConfidenceSchema, SourceRefSchema, Revi
 export type { GovernanceChannel, LineageConfidence, SourceRef, RevisionIdentity, PrincipleFact, TaskFact, RunnerVerdictFact, ApprovalFact, ActivationFact, DerivedRelationFact, TimelineEvent, DataQualityIssue, LineageContext, GovernanceFacts, PrincipleState, ProcessView, AutomationView, AttentionItem, AttentionView, ActivationSummary, OwnerGovernanceSummary, DataQuality, OwnerGovernanceView } from './governance-projection-contract.js';
 export { GOVERNANCE_HEADLINE_CODES, deriveOwnerGovernanceView } from './governance-projection.js';
 export {
+  OwnerDecisionViewCoreSchema, OwnerSourceRefSchema, ReasonSchema, ClaimClassSchema,
+  ProducerRefSchema, SourceRelationSchema, OwnerSourceKindSchema,
+  NarrativeItemSchema, NarrativeSchema, StringFieldSchema, NumberFieldSchema,
+  NarrativeListFieldSchema, NarrativeFieldSchema, PrincipleTextSchema, RiskSummarySchema,
+  EnforcementSummarySchema, EvidenceSummarySchema, RollbackSummarySchema, CapabilitySchema,
+  DecisionMaterialGateSchema, DecisionSubjectSchema, ActionSchema, BlockerSchema,
+  NextActionSchema, DecisionStateSchema, InboxPlacementSchema, SourceReadSchema,
+} from './owner-decision/owner-decision-view-contract.js';
+export type {
+  OwnerDecisionViewCore, OwnerSourceRef, Reason, ClaimClass, ProducerRef, SourceRelation,
+  OwnerSourceKind, NarrativeItem, Narrative, StringField, NumberField, NarrativeListField,
+  NarrativeField, PrincipleText, RiskSummary, EnforcementSummary, EvidenceSummary,
+  RollbackSummary, Capability, DecisionMaterialGate, DecisionSubject, Action, Blocker,
+  NextAction, DecisionState, InboxPlacement, SourceRead,
+} from './owner-decision/owner-decision-view-contract.js';
+export { OwnerDecisionInputsSchema } from './owner-decision/owner-decision-view.js';
+export type { OwnerDecisionInputs } from './owner-decision/owner-decision-view.js';
+export { deriveOwnerDecisionView } from './owner-decision/owner-decision-view.js';
+export { selectLearnedPrincipleV0, isWholeFieldHumanReadable } from './owner-decision/semantic-selector.js';
+export type { SemanticSource, SemanticSelectionResult } from './owner-decision/semantic-selector.js';
+export {
   GovernancePrimaryAttentionSchema, GovernanceExperienceReasonCodeSchema, GovernanceExperienceNextActionCodeSchema,
   WorkspaceEnvironmentSchema, EnvironmentContextInputSchema, SourceAvailabilityInputSchema, UnlinkedRecordGroupSchema,
   OwnerConfigSnapshotSchema, GovernanceViewInputSchema, FrontierEvidenceSchema, GovernanceExperienceInputsSchema,
