@@ -1,0 +1,239 @@
+{
+ "group": "G-manual_1788265732489_9ne",
+ "class": "DEV",
+ "pain_id": "manual_1788265732489_9nexm9e6",
+ "frozen_at": "2026-09-17T14:35:43.562Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788265732489_9ne",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788265732489_9ne-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "允许疼痛报告从非认证来源（CLI）提交并直接进入诊断流程，未在入口处强制校验是否存在经过认证的会话上下文与可观察的行为trace",
+       "betterDecision": "在疼痛报告提交入口实现跟踪可用性门控：仅当报告绑定经过认证的OpenClaw会话上下文且行为trace可用时才允许进入诊断；否则阻断并提示报告方从会话内重新提交",
+       "rationale": "在证据缺失时强行推进诊断违背T-03，产出的结论无法验证；在入口处门控可在最早阶段拦截问题，避免下游诊断基于空证据空转",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "fail_fast_gating",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "诊断在明确记录'无可观察证据、仅依赖owner报告'的情况下仍继续输出结论（confidence 0.55），未显式降级可信度或拒绝推进",
+       "betterDecision": "当trace不可用时，诊断应显式进入降级模式：要么拒绝推进并要求从认证会话重新提交，要么输出带明确标记的'仅基于owner推断'低可信度结论",
+       "rationale": "在不确定性与下行风险显著时应保持保守并显式标注结论质量（T-04、T-03）；隐式推进会掩盖不确定性，使低质量结论被下游当作可靠依据",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "graceful_degradation",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "CLI提交路径未持久化会话绑定状态与关键中间结论，导致trace以'unavailable_with_reason'形式丢失，诊断环节失去连续性与可追溯性",
+       "betterDecision": "强制在提交时绑定并持久化认证会话上下文与行为trace到瞬时上下文之外（如持久化存储），使下游诊断随时可取回可验证证据",
+       "rationale": "T-10要求在连续性重要时将关键状态持久化到瞬时上下文之外；上游持久化缺失使所有下游环节都无法补救证据，必须在源头修复",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "durable_state_persistence",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "系统在'非协商约束要求可观察trace证据'与'CLI路径可绕过该要求'之间存在设计意图冲突，却未将其作为显式决策点提交给owner裁决",
+       "betterDecision": "将intent tension（non_negotiables与CLI路径能力的冲突）显式上报owner：要么为owner报告类疼痛放宽证据要求并接受降级可信度，要么禁止非会话来源提交，由owner修订意图后系统再执行",
+       "rationale": "T-02规定显式目标与约束优先于推断偏好；当设计意图与实现能力冲突时，应由owner显式决策，而非系统静默漂移",
+       "confidence": 0.7,
+       "riskLevel": "medium",
+       "strategicPerspective": "intent_alignment",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "系统隐式假设所有疼痛报告都来自带trace的认证会话，未为非会话来源设计显式处理分支，导致CLI报告落入无证据即可诊断的灰色路径",
+       "betterDecision": "在提交入口按来源显式分流：认证会话来源走完整诊断；CLI/owner报告来源进入显式标记的'仅owner推断'降级通道并附重新提交指引；将该硬约束编码为入口守卫与禁止转换",
+       "rationale": "T-05要求将硬约束翻译为显式守卫、检查与禁止转换后再执行；显式分流消除未定义处理路径，使每类输入都有确定且合规的处理方式",
+       "confidence": 0.7,
+       "riskLevel": "low",
+       "strategicPerspective": "explicit_source_routing",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "contextRefs": [
+      "artifact://051773d9-a79e-4fee-8570-d611843b2704"
+     ],
+     "generatedAt": "2026-09-01T12:28:52Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788265732489_9ne-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"允许疼痛报告从非认证来源（CLI）提交并直接进入诊断流程，未在入口处强制校验是否存在经过认证的会话上下文与可观察的行为trace\",\"betterDecision\":\"在疼痛报告提交入口实现跟踪可用性门控：仅当报告绑定经过认证的OpenClaw会话上下文且行为trace可用时才允许进入诊断；否则阻断并提示报告方从会话内重新提交\",\"rationale\":\"在证据缺失时强行推进诊断违背T-03，产出的结论无法验证；在入口处门控可在最早阶段拦截问题，避免下游诊断基于空证据空转\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"fail_fast_gating\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"诊断在明确记录'无可观察证据、仅依赖owner报告'的情况下仍继续输出结论（confidence 0.55），未显式降级可信度或拒绝推进\",\"betterDecision\":\"当trace不可用时，诊断应显式进入降级模式：要么拒绝推进并要求从认证会话重新提交，要么输出带明确标记的'仅基于owner推断'低可信度结论\",\"rationale\":\"在不确定性与下行风险显著时应保持保守并显式标注结论质量（T-04、T-03）；隐式推进会掩盖不确定性，使低质量结论被下游当作可靠依据\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"graceful_degradation\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":2,\"badDecision\":\"CLI提交路径未持久化会话绑定状态与关键中间结论，导致trace以'unavailable_with_reason'形式丢失，诊断环节失去连续性与可追溯性\",\"betterDecision\":\"强制在提交时绑定并持久化认证会话上下文与行为trace到瞬时上下文之外（如持久化存储），使下游诊断随时可取回可验证证据\",\"rationale\":\"T-10要求在连续性重要时将关键状态持久化到瞬时上下文之外；上游持久化缺失使所有下游环节都无法补救证据，必须在源头修复\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"durable_state_persistence\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":3,\"badDecision\":\"系统在'非协商约束要求可观察trace证据'与'CLI路径可绕过该要求'之间存在设计意图冲突，却未将其作为显式决策点提交给owner裁决\",\"betterDecision\":\"将intent tension（non_negotiables与CLI路径能力的冲突）显式上报owner：要么为owner报告类疼痛放宽证据要求并接受降级可信度，要么禁止非会话来源提交，由owner修订意图后系统再执行\",\"rationale\":\"T-02规定显式目标与约束优先于推断偏好；当设计意图与实现能力冲突时，应由owner显式决策，而非系统静默漂移\",\"confidence\":0.7,\"riskLevel\":\"medium\",\"strategicPerspective\":\"intent_alignment\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":4,\"badDecision\":\"系统隐式假设所有疼痛报告都来自带trace的认证会话，未为非会话来源设计显式处理分支，导致CLI报告落入无证据即可诊断的灰色路径\",\"betterDecision\":\"在提交入口按来源显式分流：认证会话来源走完整诊断；CLI/owner报告来源进入显式标记的'仅owner推断'降级通道并附重新提交指引；将该硬约束编码为入口守卫与禁止转换\",\"rationale\":\"T-05要求将硬约束翻译为显式守卫、检查与禁止转换后再执行；显式分流消除未定义处理路径，使每类输入都有确定且合规的处理方式\",\"confidence\":0.7,\"riskLevel\":\"low\",\"strategicPerspective\":\"explicit_source_routing\",\"sourcePrincipleId\":\"T-05\"}],\"contextRefs\":[\"artifact://051773d9-a79e-4fee-8570-d611843b2704\"],\"generatedAt\":\"2026-09-01T12:28:52Z\"}",
+    "usage": {
+     "input": 1998,
+     "output": 4812,
+     "total": 6810
+    },
+    "latencyMs": 64266,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "c4a35c58ad426791"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788265732489_9ne-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1",
+     "thesis": "A system's commitment to verifiable evidence is only as strong as its weakest entry point. When a non-negotiable constraint requires observable evidence, every input path must either satisfy it, be explicitly routed into a labeled degraded channel, or be escalated to the owner for adjudication—silent bypass of the constraint converts a hard requirement into a mere suggestion and produces conclusions downstream actors cannot verify.",
+     "principleCandidate": {
+      "title": "Gate unverifiable inputs: block, degrade, or escalate—never process on the verified path",
+      "rationale": "The root failure was an entry point (CLI submission) that lacked the required observable evidence (behavioral trace) yet flowed into the same diagnostic path as verified inputs, yielding an unverifiable conclusion. The Dreamer's candidates consistently converge on fixing this at the boundary: entry gating, explicit source routing, labeled degraded modes, durable evidence binding, and owner escalation of the intent conflict. The principle generalizes this: evidence availability must be checked before processing, and its absence must trigger a defined transition (block, degrade with explicit labeling, or escalate) rather than silent continuation. This makes the evidence constraint operational at the point where it can still be enforced, instead of being discovered downstream where evidence can no longer be recovered.",
+      "scope": "Applies at any system boundary or input ingestion point where downstream processing depends on verifiable evidence mandated by a hard constraint—diagnostics, verification pipelines, decision workflows, and multi-stage processing chains. Particularly relevant when multiple input sources exist (authenticated sessions vs. direct/CLI submissions) and when evidence produced upstream cannot be reconstructed later.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Over-strict gating could block legitimate owner-direct reports entirely, creating friction; the principle must be paired with an owner-approved degraded channel rather than hard rejection alone (Dreamer candidate 3's intent-tension escalation).",
+      "Explicitly labeled low-confidence conclusions may still be consumed downstream as if reliable if downstream consumers ignore degradation labels, partially reproducing the original failure.",
+      "Entry gates create a new failure surface: if the gate itself misjudges source authenticity or trace availability, valid inputs could be wrongly blocked or degraded, requiring the gate to be observable and correctable.",
+      "This principle substantially overlaps with existing core axioms—T-03 (use observable evidence before claiming results), T-05 (translate hard constraints into explicit guardrails and forbidden transitions), and partially T-04 (conservative handling under uncertainty). It may be judged as a boundary-focused synthesis of these rather than a novel axiom, which could lead to rejection as a duplicate."
+     ],
+     "generatedAt": "2026-09-01T12:31:18Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788265732489_9ne-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1\",\"thesis\":\"A system's commitment to verifiable evidence is only as strong as its weakest entry point. When a non-negotiable constraint requires observable evidence, every input path must either satisfy it, be explicitly routed into a labeled degraded channel, or be escalated to the owner for adjudication—silent bypass of the constraint converts a hard requirement into a mere suggestion and produces conclusions downstream actors cannot verify.\",\"principleCandidate\":{\"title\":\"Gate unverifiable inputs: block, degrade, or escalate—never process on the verified path\",\"rationale\":\"The root failure was an entry point (CLI submission) that lacked the required observable evidence (behavioral trace) yet flowed into the same diagnostic path as verified inputs, yielding an unverifiable conclusion. The Dreamer's candidates consistently converge on fixing this at the boundary: entry gating, explicit source routing, labeled degraded modes, durable evidence binding, and owner escalation of the intent conflict. The principle generalizes this: evidence availability must be checked before processing, and its absence must trigger a defined transition (block, degrade with explicit labeling, or escalate) rather than silent continuation. This makes the evidence constraint operational at the point where it can still be enforced, instead of being discovered downstream where evidence can no longer be recovered.\",\"scope\":\"Applies at any system boundary or input ingestion point where downstream processing depends on verifiable evidence mandated by a hard constraint—diagnostics, verification pipelines, decision workflows, and multi-stage processing chains. Particularly relevant when multiple input sources exist (authenticated sessions vs. direct/CLI submissions) and when evidence produced upstream cannot be reconstructed later.\",\"confidence\":0.8},\"risks\":[\"Over-strict gating could block legitimate owner-direct reports entirely, creating friction; the principle must be paired with an owner-approved degraded channel rather than hard rejection alone (Dreamer candidate 3's intent-tension escalation).\",\"Explicitly labeled low-confidence conclusions may still be consumed downstream as if reliable if downstream consumers ignore degradation labels, partially reproducing the original failure.\",\"Entry gates create a new failure surface: if the gate itself misjudges source authenticity or trace availability, valid inputs could be wrongly blocked or degraded, requiring the gate to be observable and correctable.\",\"This principle substantially overlaps with existing core axioms—T-03 (use observable evidence before claiming results), T-05 (translate hard constraints into explicit guardrails and forbidden transitions), and partially T-04 (conservative handling under uncertainty). It may be judged as a boundary-focused synthesis of these rather than a novel axiom, which could lead to rejection as a duplicate.\"],\"generatedAt\":\"2026-09-01T12:31:18Z\"}",
+    "usage": {
+     "input": 1729,
+     "output": 1462,
+     "total": 3191
+    },
+    "latencyMs": 26504,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "5dd685d0012c47ae"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788265732489_9ne-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1",
+     "principleDraft": {
+      "title": "Gate unverifiable inputs at entry: block, label-degrade, or escalate—never silently process",
+      "statement": "At every input boundary where downstream processing depends on observable evidence mandated by a hard constraint, the agent must check evidence availability before processing begins; if the required evidence is absent, the input must be blocked, routed into an explicitly labeled degraded channel, or escalated to the owner for adjudication—and never silently admitted into the verified processing path.",
+      "rationale": "The diagnosed root failure was an entry point (a CLI submission lacking the required behavioral trace) flowing into the same diagnostic path as verified inputs, producing a downstream conclusion no actor could verify. Enforcing the evidence requirement at the boundary makes the constraint operational at the only point where it can still be enforced: upstream, the input can still be blocked, labeled, or adjudicated; downstream, the missing evidence can no longer be reconstructed. The principle converts a hard constraint from a suggestion (applied when convenient) into a gate with defined transitions for every input path.",
+      "applicability": [
+       "Any input ingestion point or system boundary (CLI, API, UI, direct file submission) feeding diagnostic, verification, or decision pipelines that mandate observable evidence",
+       "Multi-source systems where authenticated or verified channels coexist with direct or unauthenticated submission paths",
+       "Multi-stage processing chains where evidence produced upstream cannot be reconstructed at later stages",
+       "Situations where a non-negotiable constraint requires a specific evidence artifact (e.g., a behavioral trace) before conclusions are drawn",
+       "Cases where inputs arrive directly from the owner or privileged users and tempting to exempt from evidence checks"
+      ],
+      "antiPatterns": [
+       "Silently processing inputs that lack the required evidence through the same path as verified inputs",
+       "Softening or bypassing a hard evidence requirement without explicit owner adjudication",
+       "Fabricating or inferring a plausible evidence substitute (e.g., synthesizing a trace-like artifact) to satisfy the gate",
+       "Label-only degradation: marking an output low-confidence while leaving it in the same channel and format so downstream consumers treat it as verified",
+       "Hard-blocking owner-direct input with no owner-approved degraded channel and no escalation path",
+       "Discovering missing evidence downstream and continuing anyway because the input was already accepted"
+      ],
+      "confidence": 0.75
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent unevidenced inputs (e.g., submissions lacking the required behavioral trace) from flowing into the verified processing path and yielding conclusions that downstream actors cannot verify.",
+      "targetBehavior": "Before processing any input against an evidence-mandated constraint, the agent performs an explicit evidence-availability check at the boundary and, when evidence is missing, visibly transitions the input to a defined state: block with reason, route to an explicitly labeled degraded channel, or escalate the intent conflict to the owner—recording which transition was taken.",
+      "forbiddenBehavior": "Silently admitting evidence-less inputs into the verified path, or quietly downgrading the evidence requirement without owner adjudication, such that unverifiable conclusions are produced downstream.",
+      "evidenceSource": "Diagnosed pain in lineage pri815-G-manual: a CLI submission lacking the required behavioral trace entered the same diagnostic path as verified inputs and produced an unverifiable conclusion; Dreamer and Philosopher analyses converged on boundary gating, labeled degraded routing, and owner escalation as the corrective structure.",
+      "validationExpectation": "An evaluator should observe, in the tool trajectory, a pre-processing evidence check at each relevant input boundary and a recorded decision (block / labeled-degrade / escalate) for every input failing the check; no unevidenced input reaches the verified path, and any degraded output carries a durable, consumer-visible degradation label plus routing separation."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-03 (use observable evidence before claiming results) and T-05 (translate hard constraints into explicit guardrails and forbidden transitions); this draft is best treated as a boundary-focused operationalization of those axioms, and may be rejected as duplicative if the entry-gating transition requirement is judged non-additive",
+      "Over-strict gating could block legitimate owner-direct reports entirely; the principle must always be paired with an owner-approved degraded channel or escalation path rather than hard rejection alone",
+      "Degradation labels may be ignored by downstream consumers who treat labeled low-confidence conclusions as reliable, partially reproducing the original failure; labeling must be coupled with channel or format separation",
+      "The gate itself is a new failure surface: if it misjudges source authenticity or trace availability, valid inputs may be wrongly blocked or degraded; gate decisions must be observable and correctable",
+      "Ambiguity about what constitutes sufficient evidence per input type could yield inconsistent gating decisions across entry points",
+      "Partial overlap with T-04 (prefer reversible actions under meaningful uncertainty) in the escalation/degrade preference ordering"
+     ],
+     "generatedAt": "2026-09-01T12:32:47Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788265732489_9ne-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Gate unverifiable inputs at entry: block, label-degrade, or escalate—never silently process\",\n    \"statement\": \"At every input boundary where downstream processing depends on observable evidence mandated by a hard constraint, the agent must check evidence availability before processing begins; if the required evidence is absent, the input must be blocked, routed into an explicitly labeled degraded channel, or escalated to the owner for adjudication—and never silently admitted into the verified processing path.\",\n    \"rationale\": \"The diagnosed root failure was an entry point (a CLI submission lacking the required behavioral trace) flowing into the same diagnostic path as verified inputs, producing a downstream conclusion no actor could verify. Enforcing the evidence requirement at the boundary makes the constraint operational at the only point where it can still be enforced: upstream, the input can still be blocked, labeled, or adjudicated; downstream, the missing evidence can no longer be reconstructed. The principle converts a hard constraint from a suggestion (applied when convenient) into a gate with defined transitions for every input path.\",\n    \"applicability\": [\n      \"Any input ingestion point or system boundary (CLI, API, UI, direct file submission) feeding diagnostic, verification, or decision pipelines that mandate observable evidence\",\n      \"Multi-source systems where authenticated or verified channels coexist with direct or unauthenticated submission paths\",\n      \"Multi-stage processing chains where evidence produced upstream cannot be reconstructed at later stages\",\n      \"Situations where a non-negotiable constraint requires a specific evidence artifact (e.g., a behavioral trace) before conclusions are drawn\",\n      \"Cases where inputs arrive directly from the owner or privileged users and tempting to exempt from evidence checks\"\n    ],\n    \"antiPatterns\": [\n      \"Silently processing inputs that lack the required evidence through the same path as verified inputs\",\n      \"Softening or bypassing a hard evidence requirement without explicit owner adjudication\",\n      \"Fabricating or inferring a plausible evidence substitute (e.g., synthesizing a trace-like artifact) to satisfy the gate\",\n      \"Label-only degradation: marking an output low-confidence while leaving it in the same channel and format so downstream consumers treat it as verified\",\n      \"Hard-blocking owner-direct input with no owner-approved degraded channel and no escalation path\",\n      \"Discovering missing evidence downstream and continuing anyway because the input was already accepted\"\n    ],\n    \"confidence\": 0.75\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Prevent unevidenced inputs (e.g., submissions lacking the required behavioral trace) from flowing into the verified processing path and yielding conclusions that downstream actors cannot verify.\",\n    \"targetBehavior\": \"Before processing any input against an evidence-mandated constraint, the agent performs an explicit evidence-availability check at the boundary and, when evidence is missing, visibly transitions the input to a defined state: block with reason, route to an explicitly labeled degraded channel, or escalate the intent conflict to the owner—recording which transition was taken.\",\n    \"forbiddenBehavior\": \"Silently admitting evidence-less inputs into the verified path, or quietly downgrading the evidence requirement without owner adjudication, such that unverifiable conclusions are produced downstream.\",\n    \"evidenceSource\": \"Diagnosed pain in lineage pri815-G-manual: a CLI submission lacking the required behavioral trace entered the same diagnostic path as verified inputs and produced an unverifiable conclusion; Dreamer and Philosopher analyses converged on boundary gating, labeled degraded routing, and owner escalation as the corrective structure.\",\n    \"validationExpectation\": \"An evaluator should observe, in the tool trajectory, a pre-processing evidence check at each relevant input boundary and a recorded decision (block / labeled-degrade / escalate) for every input failing the check; no unevidenced input reaches the verified path, and any degraded output carries a durable, consumer-visible degradation label plus routing separation.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axioms T-03 (use observable evidence before claiming results) and T-05 (translate hard constraints into explicit guardrails and forbidden transitions); this draft is best treated as a boundary-focused operationalization of those axioms, and may be rejected as duplicative if the entry-gating transition requirement is judged non-additive\",\n    \"Over-strict gating could block legitimate owner-direct reports entirely; the principle must always be paired with an owner-approved degraded channel or escalation path rather than hard rejection alone\",\n    \"Degradation labels may be ignored by downstream consumers who treat labeled low-confidence conclusions as reliable, partially reproducing the original failure; labeling must be coupled with channel or format separation\",\n    \"The gate itself is a new failure surface: if it misjudges source authenticity or trace availability, valid inputs may be wrongly blocked or degraded; gate decisions must be observable and correctable\",\n    \"Ambiguity about what constitutes sufficient evidence per input type could yield inconsistent gating decisions across entry points\",\n    \"Partial overlap with T-04 (prefer reversible actions under meaningful uncertainty) in the escalation/degrade preference ordering\"\n  ],\n  \"generatedAt\": \"2026-09-01T12:32:47Z\"\n}",
+    "usage": {
+     "input": 2006,
+     "output": 2877,
+     "total": 4883
+    },
+    "latencyMs": 38269,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "7a73c1bf7cb9731a"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788265732489_9ne-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1",
+     "principleDraft": {
+      "title": "Gate unverifiable inputs: block, degrade, or escalate—never process on the verified path",
+      "statement": "At every input boundary where a hard constraint requires observable evidence for downstream processing, evidence availability must be verified before processing begins. When the required evidence is absent, the input must undergo exactly one defined transition — block with resubmission guidance, route into an explicitly labeled degraded channel with reduced confidence, or escalate the constraint-vs-capability conflict to the owner — never silent continuation on the verified processing path.",
+      "rationale": "The root cause was a missing trace-availability gate at the submission boundary: a CLI pain report with no authenticated session trace flowed into the same diagnostic path as verified inputs, producing a conclusion no downstream actor could verify. Enforcing the evidence constraint at the point of entry makes it operational while the input can still be redirected or its evidence bound and persisted; discovered downstream, the evidence can no longer be recovered. This boundary focus operationalizes T-03 and T-05 at the system's weakest entry point rather than restating them as general virtues.",
+      "applicability": [
+       "Input ingestion points (API, CLI, report submission, queue consumers) feeding diagnostics, verification, or decision pipelines that depend on evidence mandated by a hard constraint",
+       "Systems with heterogeneous input sources (authenticated sessions vs. direct submissions) where some paths cannot carry the required evidence",
+       "Multi-stage processing chains where evidence produced at ingestion (e.g., session-bound behavioral trace) cannot be reconstructed by later stages",
+       "Handling of non-negotiable evidence requirements when some input paths structurally cannot satisfy them, creating an intent conflict that may need owner adjudication"
+      ],
+      "antiPatterns": [
+       "Allowing inputs lacking the required evidence to flow into the same processing path as verified inputs",
+       "Continuing diagnosis or conclusion output on the verified path when trace is recorded as 'unavailable_with_reason'",
+       "Emitting conclusions from owner-reported-only input without an explicit degraded-confidence label or escalation",
+       "Implicitly assuming all inputs originate from evidence-bearing sources, leaving non-session sources in an undefined gray path",
+       "Resolving a constraint-vs-capability conflict through silent design drift instead of escalating it to the owner"
+      ],
+      "confidence": 0.78
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent inputs that lack the required observable evidence (e.g., CLI-submitted pain reports with no authenticated session trace) from being processed as if verified, so every downstream conclusion is either evidence-backed, explicitly labeled as degraded, or escalated for owner adjudication.",
+      "targetBehavior": "Before processing any input, the agent verifies evidence availability at the entry point and, when the required trace is absent, performs a visible defined transition in the tool trajectory: block with resubmission guidance, route into an explicitly labeled degraded channel with reduced confidence, or escalate the conflict to the owner.",
+      "forbiddenBehavior": "Silently accepting evidence-less inputs onto the verified processing path and emitting conclusions from them (e.g., a diagnosis at confidence 0.55 based solely on owner report with 'trace unavailable_with_reason') without blocking, degradation labeling, or owner escalation.",
+      "evidenceSource": "Diagnosis manual_1788265732489_9nexm9e6: a CLI-submitted pain report with trace 'unavailable_with_reason' and no authenticated host session provenance flowed into standard diagnosis producing an unverifiable conclusion; the diagnosis's intentTension between non_negotiables (observable trace) and CLI-path capability; Dreamer proposals 0-4 and the philosopher critique, all converging on boundary gating with defined transitions.",
+      "validationExpectation": "An evaluator should verify that rules derived from this principle (a) trigger at the input boundary before processing begins, (b) enumerate the three defined transitions (block with guidance, labeled degraded channel, owner escalation), (c) contain no path that allows evidence-less inputs onto the verified processing path, and (d) preserve evidence binding/persistence at submission; any change permitting silent processing of unverifiable input contradicts this intent and must be flagged rather than implemented."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-03, T-04, and T-05: this principle may be judged a boundary-focused synthesis rather than a novel axiom and rejected as a duplicate; it must be framed strictly as entry-point operationalization of those axioms.",
+      "Hard blocking alone would reject legitimate owner-direct reports entirely; the defined transitions must include an owner-approved degraded channel or entry friction becomes a new failure mode.",
+      "Downstream consumers may ignore degradation labels and consume explicitly low-confidence conclusions as reliable, partially reproducing the original failure after the gate.",
+      "The gate itself is a new failure surface: if it misjudges source authenticity or trace availability, valid inputs will be wrongly blocked or degraded, so the gate's decisions must be observable and correctable.",
+      "If the criteria for choosing among block, degrade, and escalate are left implicit, handlers may default to silent continuation, reintroducing the exact failure this principle exists to kill."
+     ],
+     "generatedAt": "2026-09-01T12:33:07Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788265732489_9ne-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1\",\"principleDraft\":{\"title\":\"Gate unverifiable inputs: block, degrade, or escalate—never process on the verified path\",\"statement\":\"At every input boundary where a hard constraint requires observable evidence for downstream processing, evidence availability must be verified before processing begins. When the required evidence is absent, the input must undergo exactly one defined transition — block with resubmission guidance, route into an explicitly labeled degraded channel with reduced confidence, or escalate the constraint-vs-capability conflict to the owner — never silent continuation on the verified processing path.\",\"rationale\":\"The root cause was a missing trace-availability gate at the submission boundary: a CLI pain report with no authenticated session trace flowed into the same diagnostic path as verified inputs, producing a conclusion no downstream actor could verify. Enforcing the evidence constraint at the point of entry makes it operational while the input can still be redirected or its evidence bound and persisted; discovered downstream, the evidence can no longer be recovered. This boundary focus operationalizes T-03 and T-05 at the system's weakest entry point rather than restating them as general virtues.\",\"applicability\":[\"Input ingestion points (API, CLI, report submission, queue consumers) feeding diagnostics, verification, or decision pipelines that depend on evidence mandated by a hard constraint\",\"Systems with heterogeneous input sources (authenticated sessions vs. direct submissions) where some paths cannot carry the required evidence\",\"Multi-stage processing chains where evidence produced at ingestion (e.g., session-bound behavioral trace) cannot be reconstructed by later stages\",\"Handling of non-negotiable evidence requirements when some input paths structurally cannot satisfy them, creating an intent conflict that may need owner adjudication\"],\"antiPatterns\":[\"Allowing inputs lacking the required evidence to flow into the same processing path as verified inputs\",\"Continuing diagnosis or conclusion output on the verified path when trace is recorded as 'unavailable_with_reason'\",\"Emitting conclusions from owner-reported-only input without an explicit degraded-confidence label or escalation\",\"Implicitly assuming all inputs originate from evidence-bearing sources, leaving non-session sources in an undefined gray path\",\"Resolving a constraint-vs-capability conflict through silent design drift instead of escalating it to the owner\"],\"confidence\":0.78},\"intentContract\":{\"ownerIntent\":\"Prevent inputs that lack the required observable evidence (e.g., CLI-submitted pain reports with no authenticated session trace) from being processed as if verified, so every downstream conclusion is either evidence-backed, explicitly labeled as degraded, or escalated for owner adjudication.\",\"targetBehavior\":\"Before processing any input, the agent verifies evidence availability at the entry point and, when the required trace is absent, performs a visible defined transition in the tool trajectory: block with resubmission guidance, route into an explicitly labeled degraded channel with reduced confidence, or escalate the conflict to the owner.\",\"forbiddenBehavior\":\"Silently accepting evidence-less inputs onto the verified processing path and emitting conclusions from them (e.g., a diagnosis at confidence 0.55 based solely on owner report with 'trace unavailable_with_reason') without blocking, degradation labeling, or owner escalation.\",\"evidenceSource\":\"Diagnosis manual_1788265732489_9nexm9e6: a CLI-submitted pain report with trace 'unavailable_with_reason' and no authenticated host session provenance flowed into standard diagnosis producing an unverifiable conclusion; the diagnosis's intentTension between non_negotiables (observable trace) and CLI-path capability; Dreamer proposals 0-4 and the philosopher critique, all converging on boundary gating with defined transitions.\",\"validationExpectation\":\"An evaluator should verify that rules derived from this principle (a) trigger at the input boundary before processing begins, (b) enumerate the three defined transitions (block with guidance, labeled degraded channel, owner escalation), (c) contain no path that allows evidence-less inputs onto the verified processing path, and (d) preserve evidence binding/persistence at submission; any change permitting silent processing of unverifiable input contradicts this intent and must be flagged rather than implemented.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1\"},\"risks\":[\"Substantial overlap with core axioms T-03, T-04, and T-05: this principle may be judged a boundary-focused synthesis rather than a novel axiom and rejected as a duplicate; it must be framed strictly as entry-point operationalization of those axioms.\",\"Hard blocking alone would reject legitimate owner-direct reports entirely; the defined transitions must include an owner-approved degraded channel or entry friction becomes a new failure mode.\",\"Downstream consumers may ignore degradation labels and consume explicitly low-confidence conclusions as reliable, partially reproducing the original failure after the gate.\",\"The gate itself is a new failure surface: if it misjudges source authenticity or trace availability, valid inputs will be wrongly blocked or degraded, so the gate's decisions must be observable and correctable.\",\"If the criteria for choosing among block, degrade, and escalate are left implicit, handlers may default to silent continuation, reintroducing the exact failure this principle exists to kill.\"],\"generatedAt\":\"2026-09-01T12:33:07Z\"}",
+    "usage": {
+     "input": 4287,
+     "output": 4068,
+     "total": 8355
+    },
+    "latencyMs": 58025,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "75b5e4d79da61a8d"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}
