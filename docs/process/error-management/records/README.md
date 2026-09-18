@@ -65,5 +65,5 @@ identity model.
 
 `migration-manifest.json` maps every legacy block (handbook + archive) to its
 record (`structured`) or its preserved copy (`preserved_raw`). Summary at
-cutover: 366 legacy blocks → 365 structured + 1 preserved_raw, unmapped = 0,
-parity losses = 0, 131 patterns, 221 occurrences.
+cutover: 370 legacy blocks → 369 structured + 1 preserved_raw, unmapped = 0,
+parity losses = 0, 133 patterns, 223 occurrences.

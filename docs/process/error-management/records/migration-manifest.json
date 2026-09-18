@@ -1,15 +1,15 @@
 {
   "summary": {
-    "legacyBlocks": 366,
-    "structured": 365,
+    "legacyBlocks": 370,
+    "structured": 369,
     "preservedRaw": 1,
     "unmapped": 0,
-    "legacyEntries": 132,
-    "patternRecordsAfter": 131,
-    "occurrenceRecordsAfter": 221,
+    "legacyEntries": 134,
+    "patternRecordsAfter": 133,
+    "occurrenceRecordsAfter": 223,
     "archivedBefore": 41,
     "archivedAfter": 40,
-    "recurrenceBlocksBefore": 18,
+    "recurrenceBlocksBefore": 19,
     "duplicateIdentities": 1,
     "warnings": 7,
     "problems": [
@@ -2243,7 +2243,7 @@
       "legacySource": "HANDBOOK",
       "displayId": "ERR-131",
       "block": "entry-header",
-      "sourceHash": "f40ddfdcd4ff",
+      "sourceHash": "b9558462b24e",
       "target": "P-ERR-131",
       "status": "structured"
     },
@@ -2253,6 +2253,38 @@
       "block": "initial",
       "sourceHash": "22954b364e29",
       "target": "OCC-2026-09-15-err-131-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-132",
+      "block": "entry-header",
+      "sourceHash": "e61b4e14a9cf",
+      "target": "P-ERR-132",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-132",
+      "block": "initial",
+      "sourceHash": "137d497c9595",
+      "target": "OCC-2026-09-17-err-132-r0",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-133",
+      "block": "entry-header",
+      "sourceHash": "57d416ba6fe6",
+      "target": "P-ERR-133",
+      "status": "structured"
+    },
+    {
+      "legacySource": "HANDBOOK",
+      "displayId": "ERR-133",
+      "block": "initial",
+      "sourceHash": "27b429bc1b4f",
+      "target": "OCC-2026-09-18-err-133-r0",
       "status": "structured"
     },
     {
