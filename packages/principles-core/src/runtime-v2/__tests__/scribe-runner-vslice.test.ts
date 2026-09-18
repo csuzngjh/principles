@@ -1069,3 +1069,256 @@ describe('DefaultScribeValidator (PRI-109)', () => {
     expect(result.valid).toBe(true);
   });
 });
+
+// ── PRI-838: formation evidence reaches the scribe prompt (the DC-1 seam) ───
+//
+// The unit tests cover the resolver and the prompt builder separately; this
+// block covers the WIRING between them — the actual defect PRI-838 fixes. If
+// ScribeRunner stopped threading formationContext from buildContext into
+// invokeRuntime, these are the tests that would fail.
+
+describe('PRI-838: ScribeRunner resolves formation evidence into the prompt', () => {
+  const DREAMER_TASK_ID = 'dreamer-838';
+  const DIAG_TASK_ID = 'diag-router-838';
+  const DREAMER_ART_ID = 'pi-art-dreamer-838';
+  const DIAG_ART_ID = 'pi-art-diag-838';
+  const PHILOSOPHER_ART_ID = 'pi-art-philosopher-001-run-001';
+
+  function makeArtifact(params: {
+    artifactId: string;
+    sourceTaskId: string;
+    content: unknown;
+  }): PIArtifactRecord {
+    return {
+      artifactId: params.artifactId,
+      artifactKind: 'principle',
+      sourceTaskId: params.sourceTaskId,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify(params.content),
+      createdAt: '2026-09-18T00:00:00.000Z',
+      updatedAt: '2026-09-18T00:00:00.000Z',
+    };
+  }
+
+  const philosopherContent = {
+    taskId: PHILOSOPHER_TASK_ID,
+    sourceDreamerArtifactId: DREAMER_ART_ID,
+    thesis: 'prefer reading contracts over guessing them',
+    principleCandidate: { title: 'Contract First', rationale: 'R', scope: 'S', confidence: 0.9 },
+    risks: [],
+    generatedAt: '2026-09-18T00:00:00.000Z',
+  };
+
+  const dreamerContent = {
+    valid: true,
+    taskId: DREAMER_TASK_ID,
+    candidates: [
+      { candidateIndex: 0, badDecision: 'guessed the contract from examples', betterDecision: 'read the contract', rationale: 'guessing drifts', confidence: 0.4, riskLevel: 'high', strategicPerspective: 'defensive' },
+      { candidateIndex: 1, badDecision: 'skipped the contract file', betterDecision: 'read it before acting', rationale: 'silent drift', confidence: 0.9, riskLevel: 'low', strategicPerspective: 'evidence-first' },
+    ],
+    sourcePainId: 'pain-838',
+    contextRefs: ['pi-art-pain-838'],
+    generatedAt: '2026-09-18T00:00:00.000Z',
+  };
+
+  const diagnosisContent = {
+    valid: true,
+    diagnosisId: 'diag-838',
+    summary: 'contract guessed',
+    rootCause: 'Assumption: the contract was inferred from example files',
+    violatedPrinciples: [{ principleId: 'T-03', title: 'Evidence first', rationale: 'read, do not guess' }],
+    evidence: [{ sourceRef: 'trajectory://s-838/t-4', note: 'wrote config without reading the contract' }],
+    recommendations: [{ kind: 'principle', description: 'read the authoritative contract first' }],
+    confidence: 0.8,
+  };
+
+  async function runScribe(params: {
+    withDreamer?: boolean;
+    withDiagnosis?: boolean;
+    dreamerArtifactId?: string;
+  }) {
+    const artifactStore = new MemoryPIArtifactStore();
+    await artifactStore.upsertArtifact(makeArtifact({
+      artifactId: PHILOSOPHER_ART_ID,
+      sourceTaskId: PHILOSOPHER_TASK_ID,
+      content: params.dreamerArtifactId === undefined
+        ? philosopherContent
+        : { ...philosopherContent, sourceDreamerArtifactId: params.dreamerArtifactId },
+    }));
+
+    if (params.withDreamer !== false) {
+      await artifactStore.upsertArtifact(makeArtifact({
+        artifactId: DREAMER_ART_ID,
+        sourceTaskId: DREAMER_TASK_ID,
+        content: dreamerContent,
+      }));
+    }
+    if (params.withDiagnosis !== false) {
+      await artifactStore.upsertArtifact(makeArtifact({
+        artifactId: DIAG_ART_ID,
+        sourceTaskId: DIAG_TASK_ID,
+        content: diagnosisContent,
+      }));
+    }
+
+    const scribeTask = makeScribeTask();
+    const philosopherTask = makePhilosopherTask();
+    const dreamerTask: TaskRecord = {
+      taskId: DREAMER_TASK_ID,
+      taskKind: 'dreamer',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'dreamer://run-838',
+      createdAt: '2026-09-18T00:00:00.000Z',
+      updatedAt: '2026-09-18T00:00:00.000Z',
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [DIAG_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [{ artifactType: 'principle', ref: DREAMER_ART_ID }],
+      }),
+    };
+    const diagTask: TaskRecord = {
+      taskId: DIAG_TASK_ID,
+      taskKind: 'diag_router',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'diag-router://run-838',
+      createdAt: '2026-09-18T00:00:00.000Z',
+      updatedAt: '2026-09-18T00:00:00.000Z',
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [{ artifactType: 'principle', ref: DIAG_ART_ID }],
+      }),
+    };
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(scribeTask),
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
+        if (id === PHILOSOPHER_TASK_ID) return Promise.resolve(philosopherTask);
+        if (id === DREAMER_TASK_ID) return Promise.resolve(dreamerTask);
+        if (id === DIAG_TASK_ID) return Promise.resolve(diagTask);
+        return Promise.resolve(null);
+      }),
+      getRunsByTask: vi.fn().mockResolvedValue([{ runId: 'run-scribe-001', taskId: SCRIBE_TASK_ID, runtimeKind: 'scribe', startedAt: '2026-09-18T00:00:00.000Z' }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-scribe-001', taskId: SCRIBE_TASK_ID, runtimeKind: 'scribe', startedAt: '2026-09-18T00:00:00.000Z' }],
+        degradedRuns: [],
+      }),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    const runHandle: RunHandle = { runId: 'run-scribe-001', runtimeKind: 'test-double', startedAt: '2026-09-18T00:00:00.000Z' };
+    const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-scribe-001' };
+
+    let capturedInput: { inputPayload?: unknown; systemPrompt?: unknown } | undefined;
+    const runtimeAdapter = {
+      startRun: vi.fn().mockImplementation((input: { inputPayload?: unknown; systemPrompt?: unknown }) => {
+        capturedInput = input;
+        return Promise.resolve(runHandle);
+      }),
+      pollRun: vi.fn().mockResolvedValue(succeededStatus),
+      fetchOutput: vi.fn().mockResolvedValue({ payload: makeScribeOutput() }),
+      cancelRun: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PDRuntimeAdapter;
+
+    const emitTelemetry = vi.fn();
+    const deps: ScribeRunnerDeps = {
+      stateManager,
+      runtimeAdapter,
+      eventEmitter: { emitTelemetry } as unknown as StoreEventEmitter,
+      validator: new DefaultScribeValidator(),
+      artifactStore,
+    };
+
+    const runner = new ScribeRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'scribe',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(SCRIBE_TASK_ID);
+    return { result, capturedInput, emitTelemetry };
+  }
+
+  it('Case 1: dreamer + diagnosis both resolvable → payload carries the full formation context', async () => {
+    const { result, capturedInput } = await runScribe({});
+
+    expect(result.status).toBe('succeeded');
+    const payload = JSON.parse(String(capturedInput?.inputPayload)) as {
+      formationContext?: {
+        dreamerProposals: { candidateIndex: number; priorityRank: number }[];
+        sourceDiagnosis?: { rootCause: string };
+        provenance: { sourcePainId: string | null; lineageArtifactIds: string[] };
+      };
+    };
+
+    expect(payload.formationContext).toBeDefined();
+    // DC-1 fix: the dreamer's alternatives are no longer structurally dropped.
+    expect(payload.formationContext?.dreamerProposals).toHaveLength(2);
+    expect(payload.formationContext?.dreamerProposals.map((c) => c.candidateIndex)).toEqual([1, 0]);
+    expect(payload.formationContext?.sourceDiagnosis?.rootCause).toContain('Assumption:');
+    expect(payload.formationContext?.provenance.sourcePainId).toBe('pain-838');
+
+    // The addendum that assigns candidate priority rides the system channel.
+    expect(String(capturedInput?.systemPrompt)).toContain('CANDIDATE PRIORITY (must obey)');
+  });
+
+  it('Case 2: dreamer resolvable, diagnosis missing → payload degrades, run still succeeds', async () => {
+    const { result, capturedInput } = await runScribe({ withDiagnosis: false });
+
+    expect(result.status).toBe('succeeded');
+    const payload = JSON.parse(String(capturedInput?.inputPayload)) as {
+      formationContext?: { dreamerProposals: unknown[]; sourceDiagnosis?: unknown; truncationNotes: string[] };
+    };
+
+    expect(payload.formationContext?.dreamerProposals).toHaveLength(2);
+    expect(payload.formationContext?.sourceDiagnosis).toBeUndefined();
+    expect(payload.formationContext?.truncationNotes.some((note) => note.includes('diagnosis omitted'))).toBe(true);
+  });
+
+  it('Case 2b: dreamer artifact missing → no formationContext, prompt keeps its v3 shape, run succeeds', async () => {
+    const { result, capturedInput, emitTelemetry } = await runScribe({ withDreamer: false, withDiagnosis: false });
+
+    expect(result.status).toBe('succeeded');
+    const payload = JSON.parse(String(capturedInput?.inputPayload)) as Record<string, unknown>;
+    expect(Object.hasOwn(payload, 'formationContext')).toBe(false);
+    expect(String(capturedInput?.systemPrompt)).not.toContain('CANDIDATE PRIORITY');
+
+    // rc-9: the gap is observable.
+    expect(emitTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: expect.stringContaining('formation_dreamer_artifact_missing'),
+        traceId: SCRIBE_TASK_ID,
+      }),
+    );
+  });
+
+  it('Case 3: legacy flow without sourceDreamerArtifactId → no formationContext, run succeeds', async () => {
+    const { result, capturedInput } = await runScribe({ dreamerArtifactId: '' });
+
+    expect(result.status).toBe('succeeded');
+    const payload = JSON.parse(String(capturedInput?.inputPayload)) as Record<string, unknown>;
+    expect(Object.hasOwn(payload, 'formationContext')).toBe(false);
+  });
+
+  it('the scribe still echoes the authoritative dreamer lineage id (PRI-816 preserved)', async () => {
+    const { result, capturedInput } = await runScribe({});
+    expect(result.status).toBe('succeeded');
+    const payload = JSON.parse(String(capturedInput?.inputPayload)) as { sourceDreamerArtifactId?: string };
+    expect(payload.sourceDreamerArtifactId).toBe(DREAMER_ART_ID);
+  });
+});

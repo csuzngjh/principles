@@ -4,17 +4,29 @@ import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { GoldenTraceCaseInput } from './artificer-output.js';
 import type { LastValidatorErrors } from './pitask-metadata.js';
 import type { IntentContractV1 } from './intent-contract.js';
+import type { FormationCandidateProjection } from './formation-context.js';
 import type { ToolSemanticMappingV1, ToolSemanticRegistry } from './tool-semantic-registry.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 
 /**
- * Dreamer candidate 5-dim context (PRI-508).
+ * Dreamer candidate set context (PRI-508 → PRI-839).
  *
- * Carries the dreamer-stage candidate fields that scribe compresses into a
- * single principleDraft.statement. Forwarding them to the artificer prompt
- * prevents intent inconsistency (PoC: deepseek-v4-flash 0.7 needs_revision
- * → 0.85 approved when combined with repair loop).
+ * Carries the dreamer-stage proposals that scribe compresses into a single
+ * principleDraft.statement. Forwarding them to the artificer prompt prevents
+ * intent inconsistency (PoC: deepseek-v4-flash 0.7 needs_revision → 0.85
+ * approved when combined with repair loop).
+ *
+ * PRI-839: this used to carry ONLY `candidates[0]`. Production has 31 of 33
+ * dreamer artifacts carrying ≥2 candidates (PRI-835 §DC-3), so the artificer
+ * could not see the alternatives the Dreamer's exploration had already paid
+ * for, nor explain why one path was chosen over another. The shape is now a
+ * BOUNDED, priority-ranked set plus a factual difference summary.
+ *
+ * The candidate shape is `FormationCandidateProjection` — the same bounded
+ * projection the Scribe's formation context uses (formation-context.ts), so
+ * there is exactly one definition of "a dreamer proposal projected for a
+ * prompt" rather than two divergent ones.
  *
  * All fields are runtime-validated by ArtificerRunner.buildContext via
  * typeof / Object.hasOwn / Array.isArray guards before being placed here
@@ -23,11 +35,12 @@ import { buildLanguageDirective } from '../language-directive.js';
  * cannot be resolved (backward compatible with pre-PRI-508 flows).
  */
 export interface ArtificerDreamerContext {
-  readonly badDecision: string;
-  readonly betterDecision: string;
-  readonly rationale: string;
-  readonly riskLevel?: string;
-  readonly strategicPerspective?: string;
+  /** Bounded, priority-ranked proposals — ALL the Dreamer proposed, not only [0]. */
+  readonly candidates: readonly FormationCandidateProjection[];
+  /** Deterministic, factual statement of how the proposals differ. */
+  readonly differenceSummary: string;
+  /** Proposals dropped by the bound (0 when the whole set fit) — rc-9. */
+  readonly omittedCandidateCount: number;
 }
 
 /**
@@ -62,9 +75,10 @@ export interface ArtificerPromptBuilderInput {
    */
   adversarialFeedback?: string;
   /**
-   * Dreamer candidate 5-dim context (PRI-508). Optional — when present,
-   * serialized into the prompt so the artificer can align its implementation
-   * with the dreamer's original intent. Undefined for backward compatibility.
+   * Bounded dreamer candidate set context (PRI-508 → PRI-839). Optional — when
+   * present, serialized into the prompt so the artificer can align its
+   * implementation with the dreamer's original intent and see the alternatives
+   * it explored. Undefined for backward compatibility.
    */
   dreamerContext?: ArtificerDreamerContext;
   /**
@@ -263,6 +277,28 @@ PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
 // BehaviorExamplePack fails generation loud rather than degrading to an
 // action-only rule.
 
+/**
+ * PRI-839: appended ONLY when `dreamerContext` is present, so a pre-PRI-508 /
+ * degraded prompt is unchanged (the same conditional shape
+ * `hostSemanticContext` already uses).
+ *
+ * This block exists so the model can answer the three questions the single
+ * `candidates[0]` projection made unanswerable: which alternative paths the
+ * Dreamer explored, why one is the primary one, and what risks the others
+ * carry. It is deliberately explicit that `priorityRank` is a reading aid and
+ * NOT an authority — the critique + principle draft own the intent, and the
+ * block must not become a licence to widen the rule's scope.
+ */
+export const DREAMER_CANDIDATE_SET_INSTRUCTION = `
+
+DREAMER CANDIDATE SET (PRI-839, when \`dreamerContext\` is present):
+- \`dreamerContext.candidates\` is a BOUNDED, priority-ranked set of the Dreamer's proposals for this formation — not only the first one.
+- \`priorityRank\` 1 is the Dreamer's highest-confidence, lowest-risk proposal by its own authored signals (\`candidateIndex\` is the order the Dreamer wrote them in). This ranking is a READING AID, not an authority: the scribe principle draft and the philosopher critique decide the intent.
+- \`dreamerContext.differenceSummary\` states factually how the proposals differ.
+- Use the alternatives to bound the rule correctly: a proposal's concrete failure mode and concrete better-decision are EVIDENCE for which concrete patterns your evaluate() must cover.
+- Do NOT widen the rule beyond the intent the scribeArtifact formalised, and do NOT merge mutually exclusive proposals into one matcher.
+- \`dreamerContext.omittedCandidateCount\` > 0 means further proposals existed but were dropped to stay within budget — note that in \`risks\` instead of guessing at them.`;
+
 const V2_CONTEXT_INSTRUCTION = `
 CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - Treat behaviorExamplePack labels as authoritative: sourceNegativeCase MUST remain block and every positiveCounterexample MUST remain allow.
@@ -313,7 +349,14 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * ruleContext object literal, the position reference is corrected, and a
  * NOTE line marks them as REQUIRED.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v7';
+/**
+ * PRI-839: bumped v7 → v8. The prompt INPUT shape changed — `dreamerContext`
+ * went from a single 5-dim candidate object (`candidates[0]`) to a bounded,
+ * priority-ranked candidate SET plus a difference summary — and the system
+ * prompt gained the conditional DREAMER_CANDIDATE_SET_INSTRUCTION block.
+ * The OUTPUT schema is unchanged, so only the `.prompt.vN` segment moves.
+ */
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v8';
 
 // ── EP002-R4: bounded pack projection at the prompt boundary ─────────────────
 //
@@ -447,6 +490,9 @@ export class ArtificerPromptBuilder {
     }
     const artificerInstruction = ARTIFICER_PROTOCOL_INSTRUCTION
       + V2_CONTEXT_INSTRUCTION
+      // PRI-839: candidate-set guidance (absent = no block, prompt unchanged
+      // for formations without resolvable dreamer proposals).
+      + (input.dreamerContext !== undefined ? DREAMER_CANDIDATE_SET_INSTRUCTION : '')
       // PRI-741: host semantic projection (absent = no block, prompt
       // unchanged for workspaces without a host declaration).
       + (input.hostSemanticContext !== undefined ? buildHostSemanticContextBlock(input.hostSemanticContext) : '')

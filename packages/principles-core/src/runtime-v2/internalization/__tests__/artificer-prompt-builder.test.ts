@@ -89,8 +89,10 @@ describe('ArtificerPromptBuilder', () => {
     // the only generation contract; PRI-817 — bumped v6 → v7: the OUTPUT
     // FORMAT example now carries the three v2 obligations with a
     // validator-legal ruleContext object literal, and the CONTEXT MODE
-    // position reference is corrected (below).
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v7');
+    // position reference is corrected (below); PRI-839 — bumped v7 → v8: the
+    // dreamerContext input became a bounded candidate SET and the system
+    // prompt gained the DREAMER_CANDIDATE_SET_INSTRUCTION block.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v8');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -252,8 +254,8 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
     expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → … → v7 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v7');
+  it('declares the contract version bump history v1 → … → v8 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v8');
   });
 
   it('still references input.action', () => {
@@ -287,8 +289,10 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
 });
 
 describe('PRI-508: Artificer dreamer context passthrough', () => {
-  // Vertical slice 1: dreamerContext 5维字段透传到 prompt message
-  it('includes dreamerContext.badDecision/betterDecision/rationale in prompt message when provided', () => {
+  // Vertical slice 1: dreamer candidate set 透传到 prompt message
+  // PRI-839: the shape changed from a single 5-dim object (candidates[0]) to a
+  // bounded, priority-ranked set + difference summary.
+  it('includes the bounded dreamer candidate set in the prompt message when provided', () => {
     const builder = new ArtificerPromptBuilder();
     const { message, promptInput } = builder.buildPrompt({
       behaviorExamplePack: validBehaviorExamplePack,
@@ -297,20 +301,32 @@ describe('PRI-508: Artificer dreamer context passthrough', () => {
       sourceScribeArtifactId: 'scribe-pri-508',
       scribeArtifact: {},
       dreamerContext: {
-        badDecision: 'agent called write_file without checking parent path',
-        betterDecision: 'agent should resolve and validate parent path before write',
-        rationale: 'unchecked parent path leads to path traversal risk',
-        riskLevel: 'medium',
-        strategicPerspective: 'proactive validation over reactive cleanup',
+        candidates: [
+          {
+            candidateIndex: 0,
+            priorityRank: 1,
+            badDecision: 'agent called write_file without checking parent path',
+            betterDecision: 'agent should resolve and validate parent path before write',
+            rationale: 'unchecked parent path leads to path traversal risk',
+            confidence: 0.8,
+            riskLevel: 'medium',
+            strategicPerspective: 'proactive validation over reactive cleanup',
+          },
+        ],
+        differenceSummary: '1 proposal available (candidateIndex 0); no alternatives were proposed.',
+        omittedCandidateCount: 0,
       },
     });
     const parsed = JSON.parse(message);
     expect(parsed.dreamerContext).toBeDefined();
-    expect(parsed.dreamerContext.badDecision).toBe('agent called write_file without checking parent path');
-    expect(parsed.dreamerContext.betterDecision).toBe('agent should resolve and validate parent path before write');
-    expect(parsed.dreamerContext.rationale).toBe('unchecked parent path leads to path traversal risk');
-    expect(parsed.dreamerContext.riskLevel).toBe('medium');
-    expect(parsed.dreamerContext.strategicPerspective).toBe('proactive validation over reactive cleanup');
+    expect(parsed.dreamerContext.candidates).toHaveLength(1);
+    expect(parsed.dreamerContext.candidates[0].badDecision).toBe('agent called write_file without checking parent path');
+    expect(parsed.dreamerContext.candidates[0].betterDecision).toBe('agent should resolve and validate parent path before write');
+    expect(parsed.dreamerContext.candidates[0].rationale).toBe('unchecked parent path leads to path traversal risk');
+    expect(parsed.dreamerContext.candidates[0].riskLevel).toBe('medium');
+    expect(parsed.dreamerContext.candidates[0].strategicPerspective).toBe('proactive validation over reactive cleanup');
+    expect(parsed.dreamerContext.differenceSummary).toContain('1 proposal');
+    expect(parsed.dreamerContext.omittedCandidateCount).toBe(0);
     expect(promptInput.dreamerContext).toBeDefined();
   });
 
@@ -325,7 +341,7 @@ describe('PRI-508: Artificer dreamer context passthrough', () => {
   // Vertical slice 3: backward compatibility — dreamerContext absent → not in prompt
   it('does not include dreamerContext in prompt when not provided (backward compatible)', () => {
     const builder = new ArtificerPromptBuilder();
-    const { message, promptInput } = builder.buildPrompt({
+    const { message, promptInput, systemPrompt } = builder.buildPrompt({
       behaviorExamplePack: validBehaviorExamplePack,
       taskId: 'task-pri-508-no-dreamer',
       contextHash: 'ctx-pri-508',
@@ -335,31 +351,47 @@ describe('PRI-508: Artificer dreamer context passthrough', () => {
     const parsed = JSON.parse(message);
     expect(parsed.dreamerContext).toBeUndefined();
     expect(promptInput.dreamerContext).toBeUndefined();
+    // PRI-839: the candidate-set guidance is conditional — an absent set must
+    // leave the system prompt byte-identical to pre-PRI-839.
+    expect(systemPrompt).not.toContain('DREAMER CANDIDATE SET');
   });
 
-  // Vertical slice 3b: v2 mode also passes dreamerContext through
-  it('v2 mode includes dreamerContext in prompt when provided', () => {
+  // Vertical slice 3b: v2 mode also passes the dreamer candidate set through
+  it('v2 mode includes the dreamer candidate set in prompt when provided', () => {
     const builder = new ArtificerPromptBuilder();
-    const { message } = builder.buildPrompt({
+    const { systemPrompt, message } = builder.buildPrompt({
       taskId: 'task-pri-508-v2',
       contextHash: 'ctx-pri-508-v2',
       sourceScribeArtifactId: 'scribe-pri-508',
       scribeArtifact: {},
       behaviorExamplePack: validBehaviorExamplePack,
       dreamerContext: {
-        badDecision: 'v2 bad decision text',
-        betterDecision: 'v2 better decision text',
-        rationale: 'v2 rationale text',
+        candidates: [
+          {
+            candidateIndex: 0,
+            priorityRank: 1,
+            badDecision: 'v2 bad decision text',
+            betterDecision: 'v2 better decision text',
+            rationale: 'v2 rationale text',
+            confidence: null,
+            riskLevel: null,
+            strategicPerspective: null,
+          },
+        ],
+        differenceSummary: '1 proposal available (candidateIndex 0); no alternatives were proposed.',
+        omittedCandidateCount: 0,
       },
     });
     const parsed = JSON.parse(message);
     expect(parsed.dreamerContext).toBeDefined();
-    expect(parsed.dreamerContext.badDecision).toBe('v2 bad decision text');
-    expect(parsed.dreamerContext.betterDecision).toBe('v2 better decision text');
-    expect(parsed.dreamerContext.rationale).toBe('v2 rationale text');
-    // Optional fields not provided → should be undefined (not serialized as null)
-    expect(parsed.dreamerContext.riskLevel).toBeUndefined();
-    expect(parsed.dreamerContext.strategicPerspective).toBeUndefined();
+    expect(parsed.dreamerContext.candidates[0].badDecision).toBe('v2 bad decision text');
+    expect(parsed.dreamerContext.candidates[0].betterDecision).toBe('v2 better decision text');
+    expect(parsed.dreamerContext.candidates[0].rationale).toBe('v2 rationale text');
+    // Unresolvable optional signals are explicit nulls — never silently absent.
+    expect(parsed.dreamerContext.candidates[0].riskLevel).toBeNull();
+    expect(parsed.dreamerContext.candidates[0].strategicPerspective).toBeNull();
+    // PRI-839: the candidate-set guidance rides the system channel when present.
+    expect(systemPrompt).toContain('DREAMER CANDIDATE SET');
   });
 });
 
