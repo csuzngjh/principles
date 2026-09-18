@@ -81,11 +81,9 @@ for (const [gid, run] of Object.entries(groups)) {
     downstreamA: down[`${gid}#A`]?.evaluation,
     downstreamB: down[`${gid}#B`]?.evaluation,
   };
-  for (const arm of ['A', 'B']) {
-    // per-arm stability/downstream rows only; the ARM-LEVEL COUNTS are
-    // computed cache-wide after the loop (they must cover all 21 groups,
-    // including the 3 incident-quarantined ones whose run files are gone).
-  }
+  // (arm-level stability/downstream COUNTS are computed cache-wide after the
+  // group loop — they must cover all 21 groups, including the 3
+  // incident-quarantined ones whose run files are gone)
   for (const r of run.repeats) {
     if (r.aborted) { report.validity.abortedRepeats += 1; continue; }
     for (const arm of ['A', 'B']) {
