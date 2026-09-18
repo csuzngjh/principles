@@ -851,7 +851,7 @@ Prefer a negative Complexity Delta when safely possible.
 
 ---
 
-# 14. Error Experience Handbook
+# 14. Error Experience Records
 
 Before substantial implementation, read:
 
@@ -859,7 +859,7 @@ Before substantial implementation, read:
 
 Use it as retrieval memory.
 
-Do not load the full handbook by default.
+Do not load the whole records tree by default.
 
 Select only materially relevant ERR patterns.
 
@@ -869,7 +869,7 @@ Zero relevant ERR entries is valid.
 
 Never manufacture relevance to satisfy a process quota.
 
-Read detailed handbook entries only when selected by the index or needed for investigation.
+Read pattern records (`docs/process/error-management/records/patterns/`) only when selected by the index or needed for investigation.
 
 ## Two-Pass Error Context Routing
 
@@ -901,7 +901,7 @@ The router supplements human/agent semantic selection; it does not replace `ERRO
 
 Every real review finding must be classified.
 
-Record/update the Error Experience Handbook when the finding has a reusable engineering root cause, especially:
+Record an ERR record via `npm run error:record` when the finding has a reusable engineering root cause, especially:
 
 * escaped production/CI defect;
 * P0/P1 correctness or safety defect;
@@ -920,9 +920,9 @@ When several review comments share one root cause:
 
 > record one root-cause lesson / recurrence.
 
-Every recurrence recorded from 2026-09-10 (v2 effective date) must carry a `recurrence-meta` structured block adjacent to its narrative (date / pattern / invariant / severity / escaped / caughtBy / guard — see `record-error` skill). Historical recurrences stay as-is. `npm run error:hotspots` aggregates this metadata: the same pattern + invariant recurring ≥2 times in 90 days with no mechanized guard requires an explicit Enforcement Decision (blocking guard / advisory guard / semantic verification obligation / not-mechanizable + recorded reason). A recurrence is a signal to decide enforcement, never automatic license to expand the current PR with a scanner.
+**Authority (PRI-799 Phase C, 2026-09-17):** the structured records tree `docs/process/error-management/records/` is the only ERR write authority. New patterns, recurrences and archives are created exclusively through `npm run error:record create-pattern | add-occurrence | archive` (see the `record-error` skill) — never by hand-editing record files, and never by editing the frozen legacy snapshots `ERROR_EXPERIENCE_HANDBOOK.md` / `ERROR_ARCHIVE.md`. Every recurrence records its structured facts as occurrence fields (`--invariant / --severity / --escaped / --caughtBy / --guard`, supplied together). `npm run error:hotspots` aggregates these facts: the same pattern + invariant recurring ≥2 times in 90 days with no mechanized guard requires an explicit Enforcement Decision (blocking guard / advisory guard / semantic verification obligation / not-mechanizable + recorded reason). A recurrence is a signal to decide enforcement, never automatic license to expand the current PR with a scanner.
 
-If the handbook is changed, run its current validation command.
+After recording, run `npm run check:error-handbook` (validates the records tree + routing integrity) — it is the merge gate; there is no size budget to free first.
 
 ---
 

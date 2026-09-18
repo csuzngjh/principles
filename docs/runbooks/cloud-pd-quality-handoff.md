@@ -75,7 +75,8 @@ gh pr checks 1230
 ```
 
 Run the focused prompt characterization test, changed-file lint, plugin build or
-typecheck, error-handbook checker, and the merge gate where the cloud resources
+typecheck, error-records checker (`check:error-handbook`, records authority), and
+the merge gate where the cloud resources
 allow it. Only report it as Owner-merge-ready after all required checks are
 green and no valid unresolved P0/P1/P2 findings remain. Do not merge it.
 

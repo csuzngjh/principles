@@ -10,47 +10,108 @@ import { parseErrStats, generateReport, readCoverage, readGraphStats } from '../
 import { writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { writePatternRecord, writeOccurrenceRecord } from '../error-records.cjs';
 
 const TMP = mkdtempSync(join(tmpdir(), 'quality-report-test-'));
 
 describe('parseErrStats', () => {
-  it('should count ERR entries and recurrence fields', () => {
-    // Create a temp handbook file
-    mkdirSync(TMP, { recursive: true });
-    const handbookPath = join(TMP, 'handbook.md');
-    const content = `# Handbook
-
-**[ERR-001]** | First error
-- **Recurrence**: Yes (2026-01-01 PRI-100)
-
-**[ERR-002]** | Second error
-
-**[ERR-003]** | Third error
-- **Recurrence**: Yes (2026-02-01 PRI-101)
-
-`;
-    writeFileSync(handbookPath, content, 'utf8');
-    const stats = parseErrStats(handbookPath);
-    expect(stats.total).toBe(3);
-    expect(stats.recurring).toBe(2);
-    expect(stats.recurrenceRate).toBe(66.7);
+  it('counts active pattern records and patterns with at least one recurrence (records authority)', () => {
+    // ERR data comes from the structured records tree since PRI-799 Phase C.
+    const root = mkdtempSync(join(tmpdir(), 'quality-report-records-'));
+    try {
+      writePatternRecord(
+        root,
+        {
+          schemaVersion: 1,
+          recordType: 'pattern',
+          recordId: 'P-ERR-001',
+          displayId: 'ERR-001',
+          title: 'First error',
+          status: 'active',
+          category: 'Process & Workflow',
+          ep: 'EP-02',
+          createdAt: '2026-01-01',
+          source: 'PRI-100',
+        },
+        '**Recurrence**: Yes',
+      );
+      writePatternRecord(
+        root,
+        {
+          schemaVersion: 1,
+          recordType: 'pattern',
+          recordId: 'P-ERR-002',
+          displayId: 'ERR-002',
+          title: 'Second error',
+          status: 'active',
+          category: null,
+          ep: null,
+          createdAt: '2026-01-02',
+          source: 'PRI-101',
+        },
+        '',
+      );
+      writePatternRecord(
+        root,
+        {
+          schemaVersion: 1,
+          recordType: 'pattern',
+          recordId: 'P-ERR-003',
+          displayId: 'ERR-003',
+          title: 'Archived error',
+          status: 'archived',
+          category: null,
+          ep: null,
+          createdAt: '2026-01-03',
+          source: 'PRI-102',
+        },
+        '',
+      );
+      writeOccurrenceRecord(
+        root,
+        {
+          schemaVersion: 1,
+          recordType: 'occurrence',
+          occurrenceId: 'OCC-2026-02-01-err-001-r0',
+          patternRecordId: 'P-ERR-001',
+          displayId: 'ERR-001',
+          observedAt: '2026-02-01',
+          source: 'PRI-101',
+        },
+        'first recorded instance',
+      );
+      writeOccurrenceRecord(
+        root,
+        {
+          schemaVersion: 1,
+          recordType: 'occurrence',
+          occurrenceId: 'OCC-2026-03-01-err-001-r1',
+          patternRecordId: 'P-ERR-001',
+          displayId: 'ERR-001',
+          observedAt: '2026-03-01',
+          source: 'PRI-103',
+        },
+        'recurrence',
+      );
+      const stats = parseErrStats(root);
+      expect(stats.total).toBe(2); // active patterns only
+      expect(stats.recurring).toBe(1); // ERR-001 has a recurrence (2 occurrences)
+      expect(stats.recurrenceRate).toBe(50);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
-  it('should return zero stats when file not found', () => {
-    const stats = parseErrStats(join(TMP, 'nonexistent.md'));
-    expect(stats.total).toBe(0);
-    expect(stats.recurring).toBe(0);
-    expect(stats.warning).toBeDefined();
-  });
-
-  it('should handle empty handbook', () => {
-    mkdirSync(TMP, { recursive: true });
-    const handbookPath = join(TMP, 'empty.md');
-    writeFileSync(handbookPath, '# Empty', 'utf8');
-    const stats = parseErrStats(handbookPath);
-    expect(stats.total).toBe(0);
-    expect(stats.recurring).toBe(0);
-    expect(stats.recurrenceRate).toBe(0);
+  it('returns zero stats with a warning when no valid records exist', () => {
+    const root = mkdtempSync(join(tmpdir(), 'quality-report-empty-'));
+    try {
+      const stats = parseErrStats(root);
+      expect(stats.total).toBe(0);
+      expect(stats.recurring).toBe(0);
+      expect(stats.warning).toBeDefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

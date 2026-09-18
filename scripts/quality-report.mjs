@@ -8,7 +8,7 @@
  * ~/principles-private/docs/quality-reports/YYYY-MM.md).
  *
  * Data sources:
- *   1. ERR data:        docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md
+ *   1. ERR data:        docs/process/error-management/records/ (structured records authority)
  *   2. Test data:        packages/[pkg]/tests/ + src/[pkg]/__tests__ (.test.ts files)
  *   3. Coverage data:    packages/[pkg]/coverage/coverage-final.json
  *   4. Coupling data:    graphify-out/graph.json
@@ -24,10 +24,16 @@
  *   - Graceful degradation with reasons (Rule 9)
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, openSync, fstatSync, closeSync } from 'node:fs';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+// ERR records tooling is CommonJS; load it through createRequire from this ESM
+// script (one authority for record parsing — no markdown re-parse here).
+const requireCjs = createRequire(import.meta.url);
+const { loadRecords } = requireCjs('./error-records.cjs');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -40,25 +46,43 @@ const ROOT = resolve(__dirname, '..');
  */
 function getGraphifyDir(rootDir) {
   const gitPath = join(rootDir, '.git');
-  if (existsSync(gitPath)) {
+  // Classify and read through ONE opened handle: a statSync→readFileSync pair
+  // left a window where .git could be swapped between check and use
+  // (CodeQL js/file-system-race). Directory open fails on Windows, so the
+  // failure branch still needs one statSync to tell directory from missing —
+  // safe because nothing further is read from the path afterwards.
+  let fd;
+  try {
+    fd = openSync(gitPath, 'r');
+  } catch {
+    let stats = null;
     try {
-      const stats = statSync(gitPath);
-      if (stats.isDirectory()) {
-        return join(gitPath, 'graphify');
-      } else if (stats.isFile()) {
-        const content = readFileSync(gitPath, 'utf8').trim();
-        const match = /^gitdir:\s*(.+)$/.exec(content);
-        if (match) {
-          let gitDir = match[1].trim();
-          if (!isAbsolute(gitDir)) {
-            gitDir = resolve(rootDir, gitDir);
-          }
-          return join(gitDir, 'graphify');
-        }
-      }
+      stats = statSync(gitPath);
     } catch {
-      // ignore and fallback
+      // .git not found
     }
+    if (stats !== null && stats.isDirectory()) return join(gitPath, 'graphify');
+    return join(rootDir, '.git-fallback-graphify');
+  }
+  try {
+    const stats = fstatSync(fd);
+    if (stats.isDirectory()) {
+      // POSIX permits opening directories; the cache lives under it
+      return join(gitPath, 'graphify');
+    }
+    const content = readFileSync(fd, 'utf8').trim();
+    const match = /^gitdir:\s*(.+)$/.exec(content);
+    if (match) {
+      let gitDir = match[1].trim();
+      if (!isAbsolute(gitDir)) {
+        gitDir = resolve(rootDir, gitDir);
+      }
+      return join(gitDir, 'graphify');
+    }
+  } catch {
+    // ignore and fallback
+  } finally {
+    closeSync(fd);
   }
   return join(rootDir, '.git-fallback-graphify');
 }
@@ -93,25 +117,28 @@ Options:
 }
 
 // ---------------------------------------------------------------------------
-// ERR data: parse ERROR_EXPERIENCE_HANDBOOK.md
+// ERR data: structured records (docs/process/error-management/records/)
 // ---------------------------------------------------------------------------
 
 /**
- * Parse the error handbook markdown and return ERR statistics.
- * @param {string} handbookPath
+ * Return ERR statistics from the structured records authority.
+ * @param {string} repoRoot
  * @returns {{ total: number, recurring: number, recurrenceRate: number }}
  */
-export function parseErrStats(handbookPath) {
-  if (!existsSync(handbookPath)) {
-    return { total: 0, recurring: 0, recurrenceRate: 0, warning: 'Handbook file not found' };
+export function parseErrStats(repoRoot) {
+  const { patterns, occurrences, errors } = loadRecords(repoRoot);
+  if (errors.length > 0 || patterns.size === 0) {
+    return { total: 0, recurring: 0, recurrenceRate: 0, warning: 'No valid pattern records found' };
   }
-  const content = readFileSync(handbookPath, 'utf8');
-  // Count ERR entries: lines starting with **[ERR-XXX]**
-  const totalMatches = content.match(/\*\*\[ERR-\d+\]\*\*/g) || [];
-  const total = totalMatches.length;
-  // Count recurring entries: only entries with **Recurrence**: Yes (not None/First occurrence)
-  const recurringMatches = content.match(/\*\*Recurrence\*\*:\s*Yes/g) || [];
-  const recurring = recurringMatches.length;
+  // Mirror the legacy semantics: "total" counted active handbook entries,
+  // "recurring" counted entries with at least one recurrence.
+  const active = [...patterns.values()].filter((p) => p.meta.status === 'active');
+  const occurrenceCount = new Map();
+  for (const occ of occurrences) {
+    occurrenceCount.set(occ.meta.patternRecordId, (occurrenceCount.get(occ.meta.patternRecordId) ?? 0) + 1);
+  }
+  const total = active.length;
+  const recurring = active.filter((p) => (occurrenceCount.get(p.meta.recordId) ?? 0) >= 2).length;
   const recurrenceRate = total > 0 ? Math.round((recurring / total) * 1000) / 10 : 0;
   return { total, recurring, recurrenceRate };
 }
@@ -210,7 +237,6 @@ export function readCoverage(coveragePath) {
     let totalStatements = 0, coveredStatements = 0;
     let totalFunctions = 0, coveredFunctions = 0;
     let totalBranches = 0, coveredBranches = 0;
-    let totalLines = 0, coveredLines = 0;
     for (const key of Object.keys(data)) {
       const fileData = data[key];
       if (typeof fileData !== 'object' || fileData === null) continue;
@@ -377,8 +403,7 @@ function main() {
   }
 
   // Collect data
-  const handbookPath = join(ROOT, 'docs', 'process', 'error-management', 'ERROR_EXPERIENCE_HANDBOOK.md');
-  const errStats = parseErrStats(handbookPath);
+  const errStats = parseErrStats(ROOT);
 
   const testStats = countTestFiles();
 

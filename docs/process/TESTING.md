@@ -153,7 +153,7 @@ npm run quality:report
 ```
 
 This creates `docs/quality-reports/YYYY-MM.md` with:
-1. **Error Experience Handbook stats** — ERR total, recurring count, recurrence rate
+1. **ERR structured records stats** — ERR total, recurring count, recurrence rate（数据源=`records/` 权威树）
 2. **Test coverage** — Test file count per package
 3. **Code coverage** — Lines/functions/branches/statements per package
 4. **Module coupling** — Graph nodes, edges, god nodes from `graphify-out/graph.json`
@@ -164,7 +164,7 @@ This creates `docs/quality-reports/YYYY-MM.md` with:
 (17 steps — the historical "9 checks" description had drifted; resynced when
 `check:pipeline-contract` was added, PRI-828):
 1. `check:generated-artifacts` — Generated artifacts consistency
-2. `check:error-handbook` — Error handbook integrity
+2. `check:error-handbook` — ERR structured records integrity (records tree + routing; the Markdown handbook/archive are frozen snapshots)
 3. `check:telemetry-events --strict` — Telemetry event catalog drift
 4. `check:repo-hygiene` — Repository hygiene (no temp files, DB files)
 5. `check:runtime-contract` — Runtime Contract incremental scan

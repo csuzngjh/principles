@@ -23,7 +23,7 @@
 历史 plan 归档(原位保留)
 
 ### process/
-- `error-management/` — 错误三件套:ERROR_PATTERN_INDEX、ERROR_EXPERIENCE_HANDBOOK、ERROR_ARCHIVE
+- `error-management/` — ERR 权威=structured records 树(`records/patterns|occurrences`,经 `npm run error:record` 写入);ERROR_PATTERN_INDEX=路由 SSoT;ERROR_EXPERIENCE_HANDBOOK、ERROR_ARCHIVE=冻结历史快照(PRI-799 Phase C)
 - `release/` — 发布流程:release-go-no-go-checklist、RELEASE_PROCESS(中英)
 - `contributing/` — 贡献规范:CONTRIBUTING(中英)
 - `DEVELOPMENT.md`、`TESTING.md`

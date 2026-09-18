@@ -247,7 +247,7 @@ no-match 时必须粘贴 router 输出并说明人工阅读 Pattern Index 后的
 ### New reusable error lesson discovered?
 
 * [ ] 否
-* [ ] 是，已按 Error Experience policy 记录/更新（新 recurrence 须附 `recurrence-meta` 结构化块，见 record-error skill）
+* [ ] 是，已按 Error Experience policy 记录/更新（经 `npm run error:record create-pattern | add-occurrence` 写入 structured records，recurrence 须带 --invariant/--severity/--escaped/--caughtBy/--guard 结构化字段，见 record-error skill）
 
 说明：
 
