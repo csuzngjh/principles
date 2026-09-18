@@ -504,7 +504,10 @@ export function PrincipleDetailPage() {
                     {ownerDecision.learnedPrinciple.value.text}
                   </p>
                   <p className="mt-1 text-ink-4 text-[12px]">
-                    {t("principles.detail.ownerDecision.sourceTier", { defaultValue: "来源：{{tier}}（未经改写）", tier: ownerDecision.learnedPrinciple.value.sourceTier })}
+                    {t("principles.detail.ownerDecision.sourceTierLabel", {
+                      defaultValue: "来源：{{tier}}（未经改写）",
+                      tier: t(`principles.detail.ownerDecision.tier.${ownerDecision.learnedPrinciple.value.sourceTier}`, { defaultValue: ownerDecision.learnedPrinciple.value.sourceTier }),
+                    })}
                   </p>
                 </>
               ) : (
@@ -535,7 +538,7 @@ export function PrincipleDetailPage() {
             {ownerDecision.currentEnforcement.status === 'known' && (
               <div className="mt-4" data-testid="owner-decision-enforcement">
                 <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                  {t("principles.detail.ownerDecision.enforcement", { defaultValue: "当前实际执行" })}
+                  {t("principles.detail.ownerDecision.enforcementLabel", { defaultValue: "当前实际执行" })}
                 </p>
                 <p className="mt-1 text-ink-2 text-[14px] leading-relaxed">
                   {ownerDecision.currentEnforcement.value?.state === 'active'

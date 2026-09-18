@@ -621,7 +621,16 @@ export function PrinciplesPage() {
                   {ag?.candidateDescription ?? t("principles.blockBasisFallback")}
                 </EvolutionBlock>
                 <EvolutionBlock label={t("principles.blockImpact")}>
-                  {t(BLOCK_IMPACT_KEY[card.status])}
+                  {/* Owner Decision v1 (AI User QA finding): the legacy copy
+                      claimed "正在影响行为" from ledger status alone — which
+                      contradicted the deactivated-enforcement reality on the
+                      same card. When the backend decision projection is
+                      available, the impact line defers to the detail page's
+                      capability-proven enforcement instead of claiming
+                      influence from lifecycle status. */}
+                  {card.decisionState !== undefined
+                    ? t("principles.blockImpactSeeDecisionView", { defaultValue: "以详情页「当前实际执行」为准（本卡片不据此判断影响）。" })
+                    : t(BLOCK_IMPACT_KEY[card.status])}
                 </EvolutionBlock>
                 <EvolutionBlock label={t("principles.blockBehavior")}>
                   {card.action ? card.action : t("principles.blockBehaviorFallback")}

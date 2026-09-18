@@ -1153,13 +1153,13 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerInbox.empty")}</p>
             )}
             {ownerInbox.groups.decision.map((item) => (
-              <InboxItem key={item.principleId} item={item} />
+              <InboxItem key={item.principleId} item={item} t={t} />
             ))}
             {ownerInbox.groups.blocked.filter((item) => item.inbox.attention === 'individual').map((item) => (
-              <InboxItem key={item.principleId} item={item} />
+              <InboxItem key={item.principleId} item={item} t={t} />
             ))}
             {ownerInbox.groups.recovery.map((item) => (
-              <InboxItem key={item.principleId} item={item} />
+              <InboxItem key={item.principleId} item={item} t={t} />
             ))}
             {ownerInbox.historicalUnknown.count > 0 && (
               <p className="text-ink-4 text-[12.5px] leading-relaxed mt-2" data-testid="owner-inbox-aggregate-notice">
@@ -1359,7 +1359,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 }
 
 /** Owner Decision Experience v1 inbox item — display-only (SPEC §11.1). */
-function InboxItem({ item }: { item: OwnerDecisionInboxData['groups']['decision'][number] }) {
+function InboxItem({ item, t }: { item: OwnerDecisionInboxData['groups']['decision'][number]; t: (key: string, opts?: Record<string, unknown>) => string }) {
   return (
     <div className="mb-2 rounded-[var(--radius-md)] border border-line p-3" data-testid="owner-inbox-item">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -1369,7 +1369,7 @@ function InboxItem({ item }: { item: OwnerDecisionInboxData['groups']['decision'
             : item.learnedPrinciple.reasonText}
         </Link>
         <span className="font-mono text-[11px] text-ink-4 border border-line rounded-[2px] px-1.5 py-0.5">
-          {item.inbox.group}
+          {t(`pages.focus.ownerInbox.group.${item.inbox.group}`)}
         </span>
       </div>
       <p className="mt-1 text-ink-3 text-[12.5px] leading-relaxed">{item.nextAction.ownerText}</p>

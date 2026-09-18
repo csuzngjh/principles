@@ -272,6 +272,7 @@
       "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here.",
       "evidenceInProgress": "{{count}} behavior evidence item(s) recorded, being diagnosed and processed.",
       "ownerInbox": {
+        "group": { "decision": "Needs decision", "blocked": "Blocked", "recovery": "Needs recovery" },
         "sectionTitle": "Principle decisions",
         "loadError": "Principle decision updates are temporarily unavailable.",
         "empty": "No confirmed pending, blocked, or recovery-needed principle items right now.",
@@ -552,6 +553,7 @@
       "blockBasis": "Formation Basis",
       "blockBasisFallback": "This principle was distilled from historical behavior calibration. Its detailed source is not yet linked.",
       "blockImpact": "Current Impact",
+      "blockImpactSeeDecisionView": "Whether this currently shapes behavior is shown on the detail page under current enforcement — this card does not assert impact from lifecycle status alone.",
       "blockImpactActive": "This principle is currently shaping the Agent's subsequent behavior.",
       "blockImpactPending": "Not yet active — awaiting Owner confirmation.",
       "blockImpactRejected": "Rejected by Owner — no longer shapes the Agent's behavior.",
@@ -807,6 +809,8 @@
           "rationale": "Why PD judged it this way",
           "applicability": "When it applies",
           "expected": "What changes if approved (proposed, not deployed)",
+          "enforcementLabel": "Current enforcement",
+          "tier": { "scribe": "Formal draft (Scribe)", "distiller": "Abstracted principle (Distiller)", "philosopher": "Candidate principle (Philosopher)", "candidate_principle": "Original recommendation" },
           "enforcement": {
             "active": "An enforcement method is currently active (see details below).",
             "deactivated": "The previous enforcement method is deactivated; nothing is enforcing right now.",

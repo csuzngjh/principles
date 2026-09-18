@@ -24,6 +24,7 @@ import { createLlmClient, resolveLlmConfig } from './llm.js';
 import { startConsoleServer, type ConsoleServerHandle } from './bootstrap.js';
 import { isInfraFailure, runScenario } from './runner.js';
 import { writeReport } from './report.js';
+import { AI_USER_SEEDS } from './seeds.js';
 
 interface CliOptions {
   scenario: string;
@@ -111,7 +112,17 @@ async function main(): Promise<void> {
   let server: ConsoleServerHandle | null = null;
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
   try {
-    const baseUrl = opts.baseUrl ?? (server = await startConsoleServer({ logFile: join(runDir, 'server.log') })).baseUrl;
+    let baseUrl = opts.baseUrl;
+    if (baseUrl === null) {
+      server = await startConsoleServer({ logFile: join(runDir, 'server.log') });
+      // Optional scenario-specific workspace seed (registry by scenario id);
+      // writes only into the bootstrap's fresh mkdtemp workspace.
+      const seed = AI_USER_SEEDS[scenario.id];
+      if (seed !== undefined) {
+        seed(server.workspaceDir);
+      }
+      baseUrl = server.baseUrl;
+    }
     browser = await chromium.launch({ headless: !opts.headed });
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' });
     const page = await context.newPage();

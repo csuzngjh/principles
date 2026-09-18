@@ -250,8 +250,7 @@ describe('GET /api/v1/principles/:id/owner-decision-view', () => {
   });
 });
 
-describe('GET /api/v1/principles/owner-decision-inbox', () => {
-  it('T16 — real current subjects listed; unbound history is one aggregate notice, not cards', async () => {
+describe('GET /api/v1/principles/owner-decision-inbox', () => {  it('T16 — real current subjects listed; unbound history is one aggregate notice, not cards', async () => {
     seedWorkspace();
     const res = response();
     await handleOwnerDecisionInboxRoute({ req: request(), res, workspaceDir, featureFlags: enableFlag(true), now: () => AS_OF });
@@ -293,5 +292,115 @@ describe('GET /api/v1/principles/owner-decision-inbox', () => {
     expect(data.totalPrinciples).toBe(0);
     expect(data.degraded).toBeDefined();
     expect(data.degraded.reason).toContain('unavailable');
+  });
+});
+
+describe('T8 — mutation service is the final authority over a stale GET', () => {
+  it('a GET-advertised approve is refused by the service once the subject is already decided', async () => {
+    seedWorkspace();
+    // GET: prin-d has a pending approval with readable material → approve advertised.
+    const getView = response();
+    await handleOwnerDecisionViewRoute({ req: request(), res: getView, workspaceDir, featureFlags: enableFlag(true), now: () => AS_OF, subPath: '/prin-d/owner-decision-view' });
+    expect(getView.statusCode).toBe(200);
+    const before = JSON.parse(getView.body).data;
+    const approveAdvertised = before.availableActions.some((action: { semantic: string }) => action.semantic === 'approve');
+    expect(approveAdvertised).toBe(true);
+
+    // The environment changes behind the view's back: another actor decides
+    // the approval first (the real writer, not the view).
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    conn.getDb().prepare(`UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = 'someone-else' WHERE approval_id = 'apr-d'`)
+      .run('2026-09-18T09:30:00.000Z');
+    conn.close();
+
+    // The stale GET said approve; the MUTATION authority must refuse.
+    const { ApprovalsConsoleModel } = await import('../../../src/server/models/ApprovalsConsoleModel.js');
+    const model = new ApprovalsConsoleModel(workspaceDir);
+    const result = await model.approve('apr-d', 'test-owner');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('already_decided');
+    }
+
+    // A fresh GET reflects the decided state and no longer advertises approve.
+    const afterView = response();
+    await handleOwnerDecisionViewRoute({ req: request(), res: afterView, workspaceDir, featureFlags: enableFlag(true), now: () => new Date().toISOString(), subPath: '/prin-d/owner-decision-view' });
+    const after = JSON.parse(afterView.body).data;
+    expect(after.decisionState).toBe('decided');
+    expect(after.availableActions.filter((action: { semantic: string }) => action.semantic === 'approve')).toHaveLength(0);
+  });
+});
+
+describe('T12 — multi-channel / multi-revision subject folding', () => {
+  it('approvals fold per artifact+channel: latest record wins, channels stay separate subjects', async () => {
+    seedWorkspace();
+    // Add a SECOND channel approval for prin-d (code_tool_hook, own revision
+    // artifact on its own scribe task — one principle artifact per task) plus
+    // an older superseded record on the same artifact+channel as apr-d.
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    const diagJson = createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] });
+    db.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES ('task-scribe-d2', 'scribe', 'succeeded', '2026-09-17T08:00:00.000Z', '2026-09-17T08:10:00.000Z', 0, 3, ?)`).run(diagJson);
+    db.prepare(`INSERT INTO approvals (approval_id, artifact_id, channel, status, risk_level, requested_at)
+      VALUES ('apr-d-old', 'pi-art-d', 'prompt', 'cancelled', 'low', '2026-09-16T09:00:00.000Z')`).run();
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('pi-art-d2', 'principle', 'task-scribe-d2', 'prin-d', '[]', 'validated', '{}', '2026-09-17T08:10:00.000Z', '2026-09-17T08:10:00.000Z')`).run();
+    db.prepare(`INSERT INTO approvals (approval_id, artifact_id, channel, status, risk_level, requested_at)
+      VALUES ('apr-d-hook', 'pi-art-d2', 'code_tool_hook', 'pending', 'medium', '2026-09-17T10:00:00.000Z')`).run();
+    conn.close();
+
+    const res = response();
+    await handleOwnerDecisionViewRoute({ req: request(), res, workspaceDir, featureFlags: enableFlag(true), now: () => AS_OF, subPath: '/prin-d/owner-decision-view' });
+    expect(res.statusCode).toBe(200);
+    const data = JSON.parse(res.body).data;
+    // Two distinct subjects: (pi-art-d, prompt) and (pi-art-d2, code_tool_hook).
+    expect(data.decisionSubjects).toHaveLength(2);
+    const promptSubject = data.decisionSubjects.find((subject: { channel: string }) => subject.channel === 'prompt');
+    // The cancelled OLD record does not override the latest pending one.
+    expect(promptSubject?.state).toBe('pending');
+    // Per-target actions carry their own approval ids.
+    const approveKeys = data.availableActions.filter((action: { semantic: string }) => action.semantic === 'approve').map((action: { key: string }) => action.key);
+    expect(approveKeys).toContain('approve:apr-d');
+    expect(approveKeys).toContain('approve:apr-d-hook');
+  });
+});
+
+describe('T13/T14 — reject independence and historical observation semantics', () => {
+  it('T13: technical-only subject keeps reject while approve stays gated (source failure does not cascade)', async () => {
+    // prin-c is implementation-kind; strip its distiller abstraction and give
+    // it a pending approval so a subject exists with NO readable material.
+    seedWorkspace();
+    const diagJson = createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] });
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    db.prepare(`UPDATE principle_candidates SET abstracted_principle = NULL WHERE candidate_id = 'cand-c'`).run();
+    db.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES ('task-scribe-c', 'scribe', 'succeeded', '2026-09-17T08:00:00.000Z', '2026-09-17T08:10:00.000Z', 0, 3, ?)`).run(diagJson);
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('pi-art-c', 'principle', 'task-scribe-c', 'prin-c', '[]', 'validated', '{}', '2026-09-17T08:10:00.000Z', '2026-09-17T08:10:00.000Z')`).run();
+    db.prepare(`INSERT INTO approvals (approval_id, artifact_id, channel, status, risk_level, requested_at)
+      VALUES ('apr-c', 'pi-art-c', 'prompt', 'pending', 'low', '2026-09-17T09:00:00.000Z')`).run();
+    conn.close();
+
+    const res = response();
+    await handleOwnerDecisionViewRoute({ req: request(), res, workspaceDir, featureFlags: enableFlag(true), now: () => AS_OF, subPath: '/prin-c/owner-decision-view' });
+    const data = JSON.parse(res.body).data;
+    expect(data.decisionState).toBe('blocked');
+    expect(data.availableActions.filter((action: { semantic: string }) => action.semantic === 'approve')).toHaveLength(0);
+    expect(data.availableActions.filter((action: { semantic: string }) => action.semantic === 'reject')).toHaveLength(1);
+  });
+
+  it('T14: deactivated activation keeps historical effect AND presence records distinct', async () => {
+    seedWorkspace();
+    const res = response();
+    await handleOwnerDecisionViewRoute({ req: request(), res, workspaceDir, featureFlags: enableFlag(true), now: () => AS_OF, subPath: '/prin-b/owner-decision-view' });
+    const data = JSON.parse(res.body).data;
+    expect(data.currentEnforcement.value.state).toBe('deactivated');
+    const observation = data.evidenceSummary.value.observation;
+    expect(observation.deterministicEffects.value).toBe(1);
+    expect(observation.contextPresence.value).toBe(1);
+    // Historical records never claim current causation.
+    expect(data.evidenceSummary.value.ownerExplanation).toContain('不是完整历史');
   });
 });

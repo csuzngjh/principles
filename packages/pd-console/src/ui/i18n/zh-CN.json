@@ -272,6 +272,7 @@
       "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",
       "evidenceInProgress": "{{count}} 条行为证据已记录，正在诊断和处理中。",
       "ownerInbox": {
+        "group": { "decision": "待决定", "blocked": "被阻塞", "recovery": "需要恢复" },
         "sectionTitle": "原则决定动态",
         "loadError": "决定动态暂时不可用。",
         "empty": "当前没有已确认的待决定、被阻塞或需要恢复的原则事项。",
@@ -552,6 +553,7 @@
       "blockBasis": "形成依据",
       "blockBasisFallback": "该原则由历史行为校准沉淀而来，详细来源尚未关联。",
       "blockImpact": "当前影响",
+      "blockImpactSeeDecisionView": "当前是否影响行为，以详情页「当前实际执行」为准（本卡片不据生命周期状态断言影响）。",
       "blockImpactActive": "该原则正在影响智能体后续行为。",
       "blockImpactPending": "尚未生效，等待拥有者确认。",
       "blockImpactRejected": "拥有者已拒绝，不再影响智能体后续行为。",
@@ -807,6 +809,8 @@
           "rationale": "为什么这么判断",
           "applicability": "什么时候适用",
           "expected": "批准后会怎样（拟议行为，未部署）",
+          "enforcementLabel": "当前实际执行",
+          "tier": { "scribe": "正式原则草案（Scribe）", "distiller": "抽象原则（Distiller）", "philosopher": "候选原则（Philosopher）", "candidate_principle": "原始原则建议" },
           "enforcement": {
             "active": "当前有正在执行的生效方式（见下方明细）。",
             "deactivated": "此前的执行方式已停用；当前没有正在执行的生效方式。",

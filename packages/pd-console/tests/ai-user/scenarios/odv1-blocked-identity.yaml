@@ -1,0 +1,11 @@
+# Owner Decision Experience v1 — Scenario 2: blocked identity (SPEC AI QA S2).
+# 正确答案必须能从页面得出："系统暂时无法建立治理判断"，而不是"当前无需决定"。
+id: odv1-blocked-identity
+persona: 第一次使用 PD 的普通用户，不了解 PD 内部机制
+goal: 打开标题含技术文件名（如 source-of-truth.json / mtime）的那条原则详情页，判断：这条原则现在是否需要你批准？你当前是否应该对它做决定？
+success:
+  - 页面明确说明系统暂时无法判断是否需要你决定（或治理关联尚未建立）
+  - 页面没有出现"当前不需要拥有者决策"这类断言
+  - 页面没有把技术配置原文当作人类可读的行为准则标题展示（可读准则缺失有明确说明）
+  - 页面仍展示了发生了什么（诊断概述）与不确定性说明
+maxSteps: 10
