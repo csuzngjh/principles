@@ -366,20 +366,27 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     }
     onProgress('scribe', 'succeeded');
 
-    // EP002-R4 follow-up #2: backfill the LEDGER principle UUID on the scribe
-    // artifact for BOTH paths (rule + text). Downstream identity resolution
-    // (extractPrincipleId's column-first order) then binds the rule artifact,
-    // the approval grouping, and the post-approve ledger upgrade to the
-    // ledger UUID instead of falling back to principleDraft.title — the
-    // title namespace is what left rule-channel approvals stranded as
-    // title-keyed groups the Console detail page cannot reach.
-    const identityNote = await backfillScribeIdentity({
+    // EP002-R4 follow-up #2 + Owner Decision Experience v1 Phase A: backfill
+    // the LEDGER principle UUID on the scribe artifact for BOTH paths (rule +
+    // text). Downstream identity resolution (extractPrincipleId's column-first
+    // order) then binds the rule artifact, the approval grouping, and the
+    // post-approve ledger upgrade to the ledger UUID instead of falling back
+    // to principleDraft.title — the title namespace is what left rule-channel
+    // approvals stranded as title-keyed groups the Console detail page cannot
+    // reach.
+    //
+    // Phase A (SPEC §9.1): the binding outcome is STRUCTURED. An unverified
+    // binding no longer silently continues into Owner approval publication —
+    // the enqueue sites below refuse to create an approval subject for an
+    // artifact whose stable ledger identity is not established, while the
+    // generation chain and its artifacts are preserved for later replay.
+    const identityBinding = await backfillScribeIdentity({
       stateManager, artifactStore, scribeTaskId, dreamerTaskId: dreamerSeedTaskId,
       workspaceDir: opts.workspaceDir, now: new Date().toISOString(),
     });
-    if (identityNote !== '') {
+    if (scribeIdentityNote(identityBinding) !== '') {
       const scribeStage = stages.find((s) => s.name === 'scribe');
-      if (scribeStage) (scribeStage as { reason?: string }).reason = identityNote.replace(/^; /, '');
+      if (scribeStage) (scribeStage as { reason?: string }).reason = scribeIdentityNote(identityBinding).replace(/^; /, '');
     }
 
     // ── Atomic capability branching ──
@@ -396,6 +403,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       return await textPrincipleOnlyResult({
         painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason,
         artifactStore, approvalStore, now: new Date().toISOString(),
+        identityBinding,
       });
     }
 
@@ -501,8 +509,32 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // owner can review it. Without this, the pipeline produces a candidate
     // artifact but it never enters the approval queue — the production chain
     // is broken at step 2→3. Tests manually called enqueue(); production did not.
+    //
+    // Owner Decision Experience v1 Phase A (SPEC §9.1.4/§9.1.6): creating an
+    // Owner approval subject is a governance publication — it requires a
+    // verified stable ledger identity. When the chain's candidate could not be
+    // bound to exactly one existing ledger principle, the rule artifact must
+    // NOT enter the approvable set, even though the artifact itself (and every
+    // intermediate artifact) is preserved. Recovery is replay: after the
+    // ledger/identity repair, re-running the pipeline re-attempts the binding
+    // idempotently and then publishes.
     let approvalId: string | null = null;
     if (pipelineDecision === 'candidate_ready_for_owner_review' && loopResult.ruleArtifactId) {
+      const ruleIdentity = await resolveRuleArtifactIdentity(artifactStore, loopResult.ruleArtifactId, identityBinding);
+      if (ruleIdentity === null) {
+        const reasonCode = scribeIdentityReasonCode(identityBinding);
+        return {
+          decision: pipelineDecision,
+          painId: opts.painId,
+          stages,
+          scribeTaskId,
+          adversarialLoop: loopResult,
+          ruleArtifactId: loopResult.ruleArtifactId,
+          principleArtifactId: loopResult.principleArtifactId,
+          approvalId: null,
+          degradationReason: `identity_binding_unverified: ${reasonCode}. Rule artifact NOT enqueued for Owner approval (governance publication boundary). Artifacts preserved; repair the ledger identity and re-run this pipeline to publish.`,
+        };
+      }
       try {
         const approvalStore = new SqliteApprovalQueueStore(stateManager.connection);
         const riskLevel = getChannelRiskLevel(channel);
@@ -853,24 +885,108 @@ interface TextPrincipleOnlyParams {
   /** PRI-804: approval queue used to enqueue the text principle (prompt channel). */
   readonly approvalStore: SqliteApprovalQueueStore;
   readonly now: string;
+  /** Phase A: structured identity outcome from the shared post-scribe backfill. */
+  readonly identityBinding: ScribeIdentityBinding;
 }
 
 /**
- * PRI-804(a): resolve the LEDGER principle UUID for the chain.
+ * Owner Decision Experience v1 Phase A (SPEC §9.1) — structured ledger
+ * identity binding outcome for the internalization chain.
+ *
+ * `bound`/`already_bound` mean the scribe principle artifact carries a
+ * source_principle_id that was READ BACK from the PI store after the write
+ * and, when the chain candidate resolved, that it equals the unique existing
+ * ledger principle. Every other status is a publication blocker: the reason
+ * codes follow the SPEC's suggested vocabulary
+ * (candidate_unresolved / ledger_missing / ledger_ambiguous /
+ * identity_conflict / binding_write_failed).
+ */
+export type ScribeIdentityBinding =
+  | { status: 'bound'; principleId: string }
+  | { status: 'already_bound'; principleId: string }
+  | { status: 'no_principle_artifact' }
+  | { status: 'candidate_unresolved' }
+  | { status: 'ledger_missing'; candidateId: string }
+  | { status: 'ledger_ambiguous'; candidateId: string; principleIds: string[] }
+  | { status: 'identity_conflict'; existingPrincipleId: string; resolvedPrincipleId: string }
+  | { status: 'bound_target_missing'; principleId: string }
+  | { status: 'binding_write_failed'; errorMessage: string }
+  | { status: 'binding_readback_failed'; expectedPrincipleId: string; errorMessage: string };
+
+/** Only these two statuses authorize governance publication (approval enqueue). */
+export function isIdentityBindingVerified(
+  binding: ScribeIdentityBinding,
+): binding is Extract<ScribeIdentityBinding, { status: 'bound' | 'already_bound' }> {
+  return binding.status === 'bound' || binding.status === 'already_bound';
+}
+
+/** Stable machine reason code for observability/logs (SPEC §9.1 vocabulary). */
+export function scribeIdentityReasonCode(binding: ScribeIdentityBinding): string {
+  switch (binding.status) {
+    case 'bound':
+    case 'already_bound':
+      return 'bound';
+    case 'no_principle_artifact':
+      return 'no_principle_artifact';
+    case 'candidate_unresolved':
+      return 'candidate_unresolved';
+    case 'ledger_missing':
+      return 'ledger_missing';
+    case 'ledger_ambiguous':
+      return 'ledger_ambiguous';
+    case 'identity_conflict':
+      return 'identity_conflict';
+    case 'bound_target_missing':
+      return 'identity_conflict';
+    case 'binding_write_failed':
+      return 'binding_write_failed';
+    case 'binding_readback_failed':
+      return 'binding_write_failed';
+  }
+}
+
+/** Human/telemetry note for the scribe stage; '' on a verified binding. */
+export function scribeIdentityNote(binding: ScribeIdentityBinding): string {
+  switch (binding.status) {
+    case 'bound':
+    case 'already_bound':
+      return '';
+    case 'no_principle_artifact':
+      return '; source_principle_id_backfill_skipped: no principle artifact from scribe';
+    case 'candidate_unresolved':
+      return '; source_principle_id_backfill_skipped: no candidateId on the dreamer seed (candidate_unresolved)';
+    case 'ledger_missing':
+      return `; source_principle_id_backfill_skipped: candidate ${binding.candidateId} matches no ledger principle (ledger_missing)`;
+    case 'ledger_ambiguous':
+      return `; source_principle_id_backfill_skipped: candidate ${binding.candidateId} matches ${binding.principleIds.length} ledger principles (ledger_ambiguous)`;
+    case 'identity_conflict':
+      return `; source_principle_id_backfill_refused: artifact already bound to ${binding.existingPrincipleId}, chain resolves to ${binding.resolvedPrincipleId} (identity_conflict)`;
+    case 'bound_target_missing':
+      return `; source_principle_id_backfill_refused: artifact bound to ${binding.principleId} which is absent from the ledger (identity_conflict)`;
+    case 'binding_write_failed':
+      return `; source_principle_id_backfill_failed: ${binding.errorMessage}`;
+    case 'binding_readback_failed':
+      return `; source_principle_id_backfill_unverified: read-back mismatch for ${binding.expectedPrincipleId}: ${binding.errorMessage}`;
+  }
+}
+
+/**
+ * PRI-804(a) + Phase A: resolve the UNIQUE ledger principle for the chain.
  *
  * The ledger principle is the identity the Console groups approvals by and the
  * one `upgradeLedgerPrinciple` activates after approval. The only durable link
  * from the internalization chain to the ledger is the candidateId carried in
  * the dreamer task's diagnosticJson (set by the intake bridge) — the ledger
- * entry stores it in derivedFromPainIds. Resolving through
- * PrincipleTreeLedgerAdapter.existsForCandidate reuses the SAME lookup the
- * intake bridge uses (one authority, no second truth).
+ * entry stores it in derivedFromPainIds. Phase A hardens the lookup:
+ * `listForCandidate` (plural, same adapter the intake bridge uses — one
+ * authority, no second truth) rejects zero and multi matches instead of
+ * silently taking the first hit.
  */
-async function resolveLedgerPrincipleId(
+async function resolveLedgerIdentity(
   stateManager: RuntimeStateManager,
   dreamerTaskId: string,
   workspaceDir: string,
-): Promise<string | null> {
+): Promise<ScribeIdentityBinding | { status: 'resolved'; principleId: string }> {
   let candidateId: string | undefined;
   try {
     const dreamerTask = await stateManager.getTask(dreamerTaskId);
@@ -883,16 +999,26 @@ async function resolveLedgerPrincipleId(
       }
     }
   } catch {
-    return null; // malformed dreamer diagnosticJson — skip backfill, observable via note
+    return { status: 'candidate_unresolved' }; // malformed dreamer diagnosticJson
   }
-  if (!candidateId) return null;
+  if (!candidateId) return { status: 'candidate_unresolved' };
+  let matches: { id: string }[];
   try {
     const ledger = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-    const entry = ledger.existsForCandidate(candidateId);
-    return entry?.id ?? null;
+    matches = ledger.listForCandidate(candidateId);
   } catch {
-    return null; // ledger unreadable — skip backfill, observable via note
+    // Ledger unreadable cannot be distinguished from "no ledger" here — the
+    // write attempt below will surface the concrete error; treat as missing
+    // with the skip note (same observable class as before Phase A).
+    return { status: 'ledger_missing', candidateId };
   }
+  if (matches.length === 0) return { status: 'ledger_missing', candidateId };
+  if (matches.length > 1) {
+    return { status: 'ledger_ambiguous', candidateId, principleIds: matches.map((m) => m.id) };
+  }
+  const [unique] = matches;
+  if (unique === undefined) return { status: 'ledger_missing', candidateId };
+  return { status: 'resolved', principleId: unique.id };
 }
 
 interface BackfillIdentityParams {
@@ -905,7 +1031,7 @@ interface BackfillIdentityParams {
 }
 
 /**
- * EP002-R4 follow-up #2: backfill the scribe principle artifact's
+ * EP002-R4 follow-up #2 + Phase A: backfill the scribe principle artifact's
  * source_principle_id with the LEDGER principle UUID (shared by the rule and
  * text paths — runs right after the scribe stage succeeds). Every downstream
  * identity resolution reads this column FIRST (extractPrincipleId /
@@ -913,33 +1039,101 @@ interface BackfillIdentityParams {
  * what binds approvals, Console grouping, ledger upgrades, and rule
  * artifacts to the ledger UUID instead of the title namespace.
  *
- * Returns a non-empty observable note (rc-9) when the backfill was skipped
- * or failed; '' on success. Never throws — identity enrichment must not
- * break the generation chain.
+ * Phase A contract changes vs the note-only version:
+ *   - the outcome is structured (ScribeIdentityBinding), not a free string;
+ *   - an existing binding that DISAGREES with the resolved ledger target is an
+ *     identity_conflict — never overwritten;
+ *   - a successful write is verified by reading the artifact back from the
+ *     PI store (log success alone is not binding evidence — SPEC §9.1);
+ *   - a pre-existing binding is only trusted when its target exists in the
+ *     ledger read (listForCandidate is not applicable — we check presence by
+ *     resolving through the same ledger load).
+ *
+ * Still never throws — identity enrichment must not break the generation
+ * chain; it only gates the later governance publication.
  */
-async function backfillScribeIdentity(params: BackfillIdentityParams): Promise<string> {
+export async function backfillScribeIdentity(params: BackfillIdentityParams): Promise<ScribeIdentityBinding> {
   const { stateManager, artifactStore, scribeTaskId, dreamerTaskId, workspaceDir, now } = params;
   try {
     const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
     const principleArt = arts.find((a) => a.artifactKind === 'principle');
-    if (!principleArt) return '';
-    if (principleArt.sourcePrincipleId) return ''; // already bound (rerun) — idempotent
-    const ledgerPrincipleId = await resolveLedgerPrincipleId(stateManager, dreamerTaskId, workspaceDir);
-    if (!ledgerPrincipleId) {
-      return '; source_principle_id_backfill_skipped: no ledger principle resolved for the chain candidate';
+    if (!principleArt) return { status: 'no_principle_artifact' };
+    const resolution = await resolveLedgerIdentity(stateManager, dreamerTaskId, workspaceDir);
+    if (principleArt.sourcePrincipleId) {
+      // Already bound (rerun). Idempotent success only when the binding is
+      // consistent with what the chain resolves to now.
+      if (resolution.status === 'resolved') {
+        if (resolution.principleId === principleArt.sourcePrincipleId) {
+          return { status: 'already_bound', principleId: principleArt.sourcePrincipleId };
+        }
+        return {
+          status: 'identity_conflict',
+          existingPrincipleId: principleArt.sourcePrincipleId,
+          resolvedPrincipleId: resolution.principleId,
+        };
+      }
+      if (resolution.status === 'ledger_ambiguous') return resolution;
+      // Chain candidate unresolved/missing on this replay — the durable
+      // binding still stands only if its target is a real ledger principle.
+      const ledger = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+      if (ledger.hasPrinciple(principleArt.sourcePrincipleId)) {
+        return { status: 'already_bound', principleId: principleArt.sourcePrincipleId };
+      }
+      return { status: 'bound_target_missing', principleId: principleArt.sourcePrincipleId };
     }
+    if (resolution.status !== 'resolved') return resolution;
+    const ledgerPrincipleId = resolution.principleId;
     await artifactStore.upsertArtifact({ ...principleArt, sourcePrincipleId: ledgerPrincipleId, updatedAt: now });
-    return '';
+    // Read-back verification: the PI store must return the bound ID.
+    try {
+      const readBack = await artifactStore.getArtifactById(principleArt.artifactId);
+      if (readBack?.sourcePrincipleId !== ledgerPrincipleId) {
+        return {
+          status: 'binding_readback_failed',
+          expectedPrincipleId: ledgerPrincipleId,
+          errorMessage: `read-back sourcePrincipleId=${readBack?.sourcePrincipleId ?? 'null'}`,
+        };
+      }
+    } catch (readErr: unknown) {
+      const msg = readErr instanceof Error ? readErr.message : String(readErr);
+      return { status: 'binding_readback_failed', expectedPrincipleId: ledgerPrincipleId, errorMessage: msg };
+    }
+    return { status: 'bound', principleId: ledgerPrincipleId };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `; source_principle_id_backfill_failed: ${msg}`;
+    return { status: 'binding_write_failed', errorMessage: msg };
   }
+}
+
+/**
+ * Phase A (SPEC §9.1.6): before the rule artifact enters the approvable set,
+ * verify the chain's ledger identity is VERIFIED and the rule artifact carries
+ * exactly that binding. A chain without a verified unique ledger target must
+ * not publish, even if the artifact itself carries some id (e.g. a legacy
+ * title-namespace value the evaluator would have echoed). Returns the
+ * verified principle id, or null when publication must be refused.
+ */
+async function resolveRuleArtifactIdentity(
+  artifactStore: PIArtifactStore,
+  ruleArtifactId: string,
+  identityBinding: ScribeIdentityBinding,
+): Promise<string | null> {
+  if (!isIdentityBindingVerified(identityBinding)) return null;
+  let artifactSourcePrincipleId: string | undefined;
+  try {
+    const ruleArt = await artifactStore.getArtifactById(ruleArtifactId);
+    artifactSourcePrincipleId = ruleArt?.sourcePrincipleId;
+  } catch {
+    return null;
+  }
+  if (artifactSourcePrincipleId === undefined || artifactSourcePrincipleId !== identityBinding.principleId) return null;
+  return artifactSourcePrincipleId;
 }
 
 async function textPrincipleOnlyResult(
   params: TextPrincipleOnlyParams,
 ): Promise<RuleHostPipelineResult> {
-  const { painId, stages, scribeTaskId, disabledReason, artifactStore, approvalStore, now } = params;
+  const { painId, stages, scribeTaskId, disabledReason, artifactStore, approvalStore, now, identityBinding } = params;
   // Look up the principle artifact produced by the scribe stage.
   try {
     const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
@@ -965,9 +1159,21 @@ async function textPrincipleOnlyResult(
     // Deterministic approval id (apr_prompt_<artifactId>) + INSERT OR IGNORE make
     // replays idempotent. Enqueue failure degrades observably (rc-9), never
     // throwing away the artifact.
+    //
+    // Phase A governance publication boundary: an enqueue is only allowed when
+    // the artifact's ledger identity binding is VERIFIED. Unverified bindings
+    // keep the artifact (and its validation status) but must not create an
+    // Owner approval subject; recovery is a replay after identity repair.
     let approvalId: string | null = null;
     let enqueueNote = '';
-    if (principleArt) {
+    if (!principleArt) {
+      enqueueNote = '; approval_enqueue_skipped: no principle artifact from scribe';
+    } else if (!isIdentityBindingVerified(identityBinding)) {
+      const reasonCode = scribeIdentityReasonCode(identityBinding);
+      enqueueNote = `; approval_enqueue_skipped: identity_binding_unverified (${reasonCode}). Principle artifact preserved; repair the ledger identity and re-run this pipeline to publish.`;
+    } else if (identityBinding.principleId !== principleArt.sourcePrincipleId) {
+      enqueueNote = `; approval_enqueue_skipped: identity_binding_unverified (identity_conflict: chain resolves to ${identityBinding.principleId}, artifact carries ${principleArt.sourcePrincipleId ?? 'no binding'}). Principle artifact preserved; repair the ledger identity and re-run this pipeline to publish.`;
+    } else {
       try {
         const record = await approvalStore.enqueue({
           artifactId: principleArt.artifactId,
@@ -982,8 +1188,6 @@ async function textPrincipleOnlyResult(
         const msg = err instanceof Error ? err.message : String(err);
         enqueueNote = `; approval_enqueue_failed: ${msg}. Manual enqueue required: pd activation dispatch --artifact-id ${principleArt.artifactId} --channel prompt`;
       }
-    } else {
-      enqueueNote = '; approval_enqueue_skipped: no principle artifact from scribe';
     }
     return {
       decision: 'text_principle_only',

@@ -46,14 +46,21 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
     expect(page).not.toContain('governance === null && (\n        <details');
   });
 
-  it('fails closed and hides decision controls when projection authority is unavailable', () => {
-    // PRI-582: the gating expression moved into the exported pure derivation
-    // (deriveGovernanceControlBlock) so the blocked-reason truth table is
-    // testable in node-env. The wiring contract is unchanged: controls render
-    // only when the projection authorizes them.
-    expect(page).toContain('const showDecisionControls = governanceBlock === null');
-    expect(page).toContain('deriveGovernanceControlBlock({ governance, governanceUnavailable })');
-    expect(page).toContain('{showDecisionControls && (');
+  it('fails closed when decision authority is unavailable — Owner Decision Experience v1 contract', () => {
+    // Phase C (SPEC §8/§11.3): the page no longer derives Owner-facing action
+    // eligibility locally (no showDecisionControls / approval-group channel
+    // allowlist). The canonical OwnerDecisionView drives the actions; when the
+    // view is unavailable the page shows the honest unavailable notice and the
+    // legacy pure helper (deriveGovernanceControlBlock) remains exported for
+    // the legacy governance summary card only.
+    expect(page).toContain('fetchOwnerDecisionView');
+    expect(page).toContain('data-testid="owner-decision-view"');
+    expect(page).toContain('data-testid="owner-decision-unavailable"');
+    expect(page).toContain('ownerDecision.availableActions.map');
+    expect(page).not.toContain('showDecisionControls');
+    // The old local qualification derivation must NOT come back:
+    expect(page).not.toContain('isActionable');
+    expect(page).not.toContain('approvalGroup.status !== "pending"');
   });
 
   it('gates existing approval actions on projection Owner authority when projection is present', () => {

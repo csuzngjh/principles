@@ -13,11 +13,14 @@ import {
   fetchPrincipleTrajectory,
   fetchPrincipleGovernance,
   fetchPrincipleReceipts,
+  fetchOwnerDecisionView,
   approveApproval,
   rejectApproval,
   editApproval,
+  disableActivation,
 } from "../../api.js";
 import type { PrincipleReceiptsData } from "../../api.js";
+import type { OwnerDecisionViewCore, Action as OwnerAction } from "@principles/core/runtime-v2";
 import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import { formatDate } from "../../utils/format-date.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
@@ -45,18 +48,11 @@ function safeStringArray(v: unknown): string[] {
   return v.filter(isString);
 }
 
-function safeString(v: unknown, fallback = ""): string {
-  return typeof v === "string" ? v : fallback;
-}
-
 /**
  * Validate and normalize a PrincipleDetail from untrusted network data.
  * Returns a normalized object with safe defaults for all fields the page
  * actually accesses. Never returns null for individual fields — only for
  * completely unparseable top-level structures.
- *
- * Fields the page uses: id, text, status, triggerPattern, action,
- * derivedFromPainIds (length + map), rules (length).
  */
 function validatePrincipleDetail(data: unknown): PrincipleDetailData | null {
   if (!isRecord(data)) return null;
@@ -71,8 +67,8 @@ function validatePrincipleDetail(data: unknown): PrincipleDetailData | null {
   // Normalize fields the page accesses with safe defaults
   const normalized: Record<string, unknown> = {
     ...raw,
-    triggerPattern: safeString(raw.triggerPattern),
-    action: safeString(raw.action),
+    triggerPattern: typeof raw.triggerPattern === "string" ? raw.triggerPattern : "",
+    action: typeof raw.action === "string" ? raw.action : "",
     derivedFromPainIds: safeStringArray(raw.derivedFromPainIds),
     rules: Array.isArray(raw.rules) ? raw.rules : [],
   };
@@ -130,12 +126,10 @@ export function getReceiptPresentation(effectCount: number): {
 }
 
 // ── Governance control gating (PRI-582) ─────────────────────────────────────
-// The governance projection is the authority for rendering Owner decision
-// controls. When it cannot authorize them, the controls must not silently
-// vanish: every blocked path carries a reason and, when known, a next action
-// (ERR-002). The blocked reason is derived here as a pure function so the
-// truth table is testable without mounting the component (UI tests run in
-// node-env, no jsdom).
+// Kept as an exported pure function (tested) describing the LEGACY governance
+// summary card's display state. Since Owner Decision Experience v1
+// (SPEC §8/Phase C) it NO LONGER decides Owner-facing action eligibility —
+// that is the backend OwnerDecisionViewCore's available_actions.
 export type GovernanceControlBlock =
   | { source: 'server'; reason: string; nextAction?: string }
   | { source: 'i18n'; reasonKey: string; nextActionKey?: string };
@@ -179,6 +173,70 @@ export function deriveGovernanceControlBlock(input: {
   return { source: 'i18n', reasonKey: GOVERNANCE_BLOCK_I18N_KEYS.noDecisionReason };
 }
 
+// ── Owner Decision helpers (Owner Decision Experience v1) ───────────────────
+
+/** Narrative fields render as items; unknown carries its owner-facing reason. */
+export type NarrativeRender =
+  | { status: 'known'; texts: string[] }
+  | { status: 'unknown'; reason: string };
+
+export function narrativeTexts(field: { status: string } & Record<string, unknown>): NarrativeRender {
+  if (field.status === 'known' && Array.isArray(field.value)) {
+    const texts: string[] = [];
+    for (const item of field.value) {
+      if (isRecord(item) && isString(item.text)) texts.push(item.text);
+    }
+    return { status: 'known', texts };
+  }
+  const reason = isRecord(field.reason) && isString(field.reason.ownerText) ? field.reason.ownerText : '';
+  return { status: 'unknown', reason };
+}
+
+/** Resolves the concrete mutation target id for an action (never from URL). */
+export function actionTargetId(action: { targetRefs: Array<{ kind: string; id: string }> }, kind: 'approval' | 'activation'): string | null {
+  const ref = action.targetRefs.find((target) => target.kind === kind);
+  return ref?.id ?? null;
+}
+
+// Codex review P2 fix (localization): the decision panel's CHROME (action
+// labels, next action, blocker headline) localizes in the client via stable
+// semantic codes; narrative CONTENT (artifact-derived text) stays in its
+// source language — the model-generated material cannot be translated by a
+// key lookup, so a full locale-carried response remains a follow-up.
+const ACTION_LABEL_KEY: Record<string, string> = {
+  approve: 'principles.detail.ownerDecision.actionLabel.approve',
+  reject: 'principles.detail.ownerDecision.actionLabel.reject',
+  edit_approval: 'principles.detail.ownerDecision.actionLabel.edit_approval',
+  disable: 'principles.detail.ownerDecision.actionLabel.disable',
+};
+
+export function localizeActionLabel(action: { semantic: string; label: string }, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  const key = ACTION_LABEL_KEY[action.semantic];
+  if (key === undefined) return action.label;
+  const localized = t(key, { defaultValue: '' });
+  return localized === '' ? action.label : localized;
+}
+
+export function localizeNextAction(code: string, ownerText: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  const localized = t(`principles.detail.ownerDecision.next.${code}`, { defaultValue: '' });
+  return localized === '' ? ownerText : localized;
+}
+
+export function localizeBlocker(code: string, ownerText: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  const safeKey = code.replace(/[^a-zA-Z0-9_.]/g, '_');
+  const localized = t(`principles.detail.ownerDecision.blocker.${safeKey}`, { defaultValue: '' });
+  return localized === '' ? ownerText : localized;
+}
+
+const DECISION_STATE_LABEL_KEY: Record<OwnerDecisionViewCore['decisionState'], string> = {
+  needs_owner_decision: 'principles.detail.ownerDecision.state.needs_owner_decision',
+  processing: 'principles.detail.ownerDecision.state.processing',
+  blocked: 'principles.detail.ownerDecision.state.blocked',
+  recovery_needed: 'principles.detail.ownerDecision.state.recovery_needed',
+  decided: 'principles.detail.ownerDecision.state.decided',
+  no_action: 'principles.detail.ownerDecision.state.no_action',
+};
+
 export function PrincipleDetailPage() {
   const { t, i18n } = useTranslation("pages");
   const { id } = useParams<{ id: string }>();
@@ -190,16 +248,15 @@ export function PrincipleDetailPage() {
   const [trajectory, setTrajectory] = useState<TrajectoryData | null>(null);
   const [governance, setGovernance] = useState<OwnerGovernanceView | null>(null);
   const [governanceUnavailable, setGovernanceUnavailable] = useState<{ reason: string; nextAction?: string } | null>(null);
+  const [ownerDecision, setOwnerDecision] = useState<OwnerDecisionViewCore | null>(null);
+  const [ownerDecisionUnavailable, setOwnerDecisionUnavailable] = useState<{ reason: string } | null>(null);
   const [receipts, setReceipts] = useState<PrincipleReceiptsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Decision state
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [showRejectInput, setShowRejectInput] = useState(false);
+  // Decision action state — driven by backend available_actions only.
+  const [pendingAction, setPendingAction] = useState<OwnerAction | null>(null);
   const [rejectReason, setRejectReason] = useState("");
-  const [showEditInput, setShowEditInput] = useState(false);
-  const [editReason, setEditReason] = useState("");
   const [newArtifactId, setNewArtifactId] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -215,14 +272,17 @@ export function PrincipleDetailPage() {
     setApprovalGroup(null); // Clear previous approval group to prevent stale actionability (P1)
     setGovernance(null);
     setGovernanceUnavailable(null);
+    setOwnerDecision(null);
+    setOwnerDecisionUnavailable(null);
     setReceipts(null);
     try {
-      const [pResult, aResult, lResult, tResult, gResult, rResult] = await Promise.all([
+      const [pResult, aResult, lResult, tResult, gResult, dResult, rResult] = await Promise.all([
         fetchPrincipleDetail(id),
         fetchApprovalsGrouped(),
         fetchLifecycleMetrics(id),
         fetchPrincipleTrajectory(id),
         fetchPrincipleGovernance(id),
+        fetchOwnerDecisionView(id),
         fetchPrincipleReceipts(id),
       ]);
 
@@ -262,6 +322,14 @@ export function PrincipleDetailPage() {
         setGovernanceUnavailable({ reason: gResult.error, ...(gResult.nextAction === undefined ? {} : { nextAction: gResult.nextAction }) });
       }
 
+      // Owner Decision Experience v1: the canonical first layer. feature_disabled
+      // mirrors the governance flag-off path (no owner-decision data, no error).
+      if (dResult.success && dResult.data) {
+        setOwnerDecision(dResult.data);
+      } else if (!dResult.success && dResult.reason !== 'feature_disabled') {
+        setOwnerDecisionUnavailable({ reason: dResult.error });
+      }
+
       // PRI-533: receipt history (degraded carries reason + nextAction)
       if (rResult.success && rResult.data) {
         setReceipts(rResult.data);
@@ -280,217 +348,72 @@ export function PrincipleDetailPage() {
     loadData();
   }, [loadData]);
 
-  // ── Actions ─────────────────────────────────────────────────────────────
-  // Actionable Approval Check (PRI-387)
-  let isActionable = false;
-  let reasonKey = "";
-  let defaultReason = "";
-
-  if (!approvalGroup) {
-    reasonKey = "principles.detail.reasonDataUnavailable";
-    defaultReason = "数据暂不可用";
-  } else if (approvalGroup.status !== "pending") {
-    reasonKey = "principles.detail.reasonAlreadyHandled";
-    defaultReason = "已处理";
-  } else if (approvalGroup.records.length === 0) {
-    reasonKey = "principles.detail.reasonNoRecords";
-    defaultReason = "暂无待审批记录";
-  } else {
-    const hasMvpChannel = approvalGroup.records.some(
-      (r) => r.channel === "prompt" || r.channel === "defer_archive"
-    );
-    if (!hasMvpChannel) {
-      reasonKey = "principles.detail.reasonUnsupportedChannel";
-      defaultReason = "不是 MVP 支持通道";
-    } else {
-      isActionable = true;
-    }
-  }
-  // PRI-582: the projection authorizes the decision controls. When it cannot,
-  // controls are hidden together with a truthful reason instead of the generic
-  // “no Owner decision is required” copy, which inverted the real cause.
-  const governanceBlock = deriveGovernanceControlBlock({ governance, governanceUnavailable });
-  const showDecisionControls = governanceBlock === null;
-  if (!showDecisionControls) {
-    isActionable = false;
-  }
-  const governanceBlockedNextAction =
-    governanceBlock === null
-      ? undefined
-      : governanceBlock.source === 'server'
-        ? governanceBlock.nextAction
-        : governanceBlock.nextActionKey === undefined
-          ? undefined
-          : t(governanceBlock.nextActionKey);
-
-  const handleApprove = () => {
-    if (!isActionable) return;
-    setShowConfirm(true);
-  };
-  const cancelConfirm = () => setShowConfirm(false);
-
-  // ── Apply decision to all records in the group ──────────────────────────
-  // Constraint: "多通道审批记录在 UI 上收拢成对一条原则的单次治理决策"
-  // When owner approves/rejects a principle, ALL pending records must receive
-  // the same decision. Partial failure is reported loudly (ERR-002 / EP-03).
-  async function applyDecisionToAllRecords(
-    action: "approve" | "reject",
-    reason?: string,
-  ): Promise<{ allSucceeded: boolean; failedCount: number; totalCount: number }> {
-    if (!approvalGroup) return { allSucceeded: false, failedCount: 0, totalCount: 0 };
-
-    const records = approvalGroup.records;
-    let failedCount = 0;
-
-    for (const record of records) {
-      const result =
-        action === "approve"
-          ? await approveApproval(record.id)
-          : await rejectApproval(record.id, reason ?? "");
-
-      if (!result.success) {
-        failedCount++;
-      }
-    }
-
-    return {
-      allSucceeded: failedCount === 0,
-      failedCount,
-      totalCount: records.length,
-    };
-  }
-
-  const confirmApprove = async () => {
-    if (!isActionable || !approvalGroup || actionLoading) return;
+  // ── Owner decision actions (SPEC §8.4: mutation service is the authority) ─
+  // The view's actions are advisory; every submission goes through the real
+  // mutation service. On failure: show the service reason, invalidate stale
+  // actions, re-GET the view. Never auto-retry a mutation.
+  const submitOwnerAction = async (action: OwnerAction, reason?: string): Promise<void> => {
+    if (actionLoading) return;
     setActionLoading(true);
     try {
-      const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("approve");
-      if (allSucceeded) {
-        toast.success(t("principles.detail.approved"));
-        setShowConfirm(false);
-        loadData();
-      } else {
-        // Partial failure — fail loud (EP-03)
-        toast.error(
-          t("principles.detail.partialFailure", {
-            defaultValue: `批准完成，但 ${failedCount}/${totalCount} 条记录失败。请检查后重试。`,
-            failedCount,
-            totalCount,
-          }),
-        );
-        loadData();
-      }
-    } catch {
-      toast.error(t("principles.detail.approveFailed"));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleReject = () => {
-    if (!isActionable) return;
-    setShowRejectInput(true);
-  };
-  const cancelReject = () => {
-    setShowRejectInput(false);
-    setRejectReason("");
-  };
-
-  const confirmReject = async () => {
-    if (!isActionable || !approvalGroup || !rejectReason.trim() || actionLoading) return;
-    setActionLoading(true);
-    try {
-      const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("reject", rejectReason.trim());
-      if (allSucceeded) {
-        toast.success(t("principles.detail.rejected"));
-        setShowRejectInput(false);
-        setRejectReason("");
-        loadData();
-      } else {
-        // Partial failure — fail loud (EP-03)
-        toast.error(
-          t("principles.detail.partialFailure", {
-            defaultValue: `拒绝完成，但 ${failedCount}/${totalCount} 条记录失败。请检查后重试。`,
-            failedCount,
-            totalCount,
-          }),
-        );
-        loadData();
-      }
-    } catch {
-      toast.error(t("principles.detail.rejectFailed"));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handlePark = () => {
-    // No-op: Park is disabled and not available in this version.
-  };
-
-  const handleEdit = () => {
-    if (!isActionable) return;
-    setShowEditInput(true);
-    setShowRejectInput(false);
-    setShowConfirm(false);
-  };
-
-  const cancelEdit = () => {
-    setShowEditInput(false);
-    setEditReason("");
-    setNewArtifactId("");
-  };
-
-  const currentArtifactId = approvalGroup?.records.find((r) => r.status === "pending")?.artifactId ?? "";
-
-  const confirmEdit = async () => {
-    if (!isActionable || !approvalGroup || !editReason.trim() || !newArtifactId.trim() || actionLoading) return;
-    const pendingRecords = approvalGroup.records.filter((r) => r.status === "pending");
-    // P1-5: guard against an empty pending set — without this the loop is a
-    // no-op yet allSucceeded evaluates true, reporting a misleading success.
-    if (pendingRecords.length === 0) {
-      toast.error(t("principles.detail.editFailed", { defaultValue: "没有可编辑的待处理记录。" }));
-      setShowEditInput(false);
-      return;
-    }
-    setActionLoading(true);
-    try {
-      let failedCount = 0;
-      let failureReason: string | undefined;
-      for (const record of pendingRecords) {
-        const result = await editApproval(record.id, newArtifactId.trim(), editReason.trim());
+      let failed = false;
+      let failureDetail = '';
+      const settle = (result: { success: boolean; error?: string; nextAction?: string }): void => {
         if (!result.success) {
-          failedCount++;
-          if (!failureReason) {
-            failureReason = result.nextAction ? `${result.error} ${result.nextAction}` : result.error;
-          }
+          failed = true;
+          failureDetail = `${result.error ?? ''}${result.nextAction ? ` ${result.nextAction}` : ''}`.trim();
         }
-      }
-      const allSucceeded = failedCount === 0;
-      if (allSucceeded) {
-        toast.success(t("principles.detail.editSucceeded", { defaultValue: "已保存修订" }));
-        setShowEditInput(false);
-        setEditReason("");
-        setNewArtifactId("");
-        loadData();
+      };
+      if (action.semantic === 'approve') {
+        const approvalId = actionTargetId(action, 'approval');
+        if (approvalId === null) {
+          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
+          return;
+        }
+        settle(await approveApproval(approvalId));
+      } else if (action.semantic === 'reject') {
+        const approvalId = actionTargetId(action, 'approval');
+        if (approvalId === null) {
+          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
+          return;
+        }
+        settle(await rejectApproval(approvalId, reason ?? ""));
+      } else if (action.semantic === 'edit_approval') {
+        const approvalId = actionTargetId(action, 'approval');
+        if (approvalId === null || reason === undefined || newArtifactId.trim() === '') {
+          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
+          return;
+        }
+        settle(await editApproval(approvalId, newArtifactId.trim(), reason));
+      } else if (action.semantic === 'disable') {
+        const activationId = actionTargetId(action, 'activation');
+        if (activationId === null) {
+          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
+          return;
+        }
+        settle(await disableActivation(activationId));
       } else {
-        // P1-4: thread the backend failureReason into the toast so the owner
-        // sees WHY records failed (matches FocusPage behaviour). Previously
-        // failureReason was computed but never used (dead code).
-        toast.error(
-          t("principles.detail.partialFailure", {
-            defaultValue: `编辑完成，但 ${failedCount}/${pendingRecords.length} 条记录失败：${failureReason ?? t("principles.detail.unknownFailure", { defaultValue: "请检查服务日志。" })}`,
-            failedCount,
-            totalCount: pendingRecords.length,
-            reason: failureReason ?? t("principles.detail.unknownFailure", { defaultValue: "请检查服务日志。" }),
-          }),
-        );
-        loadData();
+        return; // unknown semantics are never rendered; belt-and-suspenders
       }
-    } catch {
-      toast.error(t("principles.detail.editFailed", { defaultValue: "编辑失败，请稍后重试。" }));
+      if (!failed) {
+        toast.success(t("principles.detail.ownerDecision.actionDone", { defaultValue: "操作已提交。" }));
+      } else {
+        // SPEC §8.4: surface the service's real refusal reason and let the
+        // fresh GET decide what is actionable now — never auto-retry.
+        toast.error(t("principles.detail.ownerDecision.actionFailed", {
+          defaultValue: "操作被拒绝：{{detail}} 可用操作已刷新，请基于最新状态重新决定。",
+          detail: failureDetail === '' ? t("principles.detail.unknownFailure", { defaultValue: "请检查服务日志。" }) : failureDetail,
+        }));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setActionLoading(false);
+      setPendingAction(null);
+      setRejectReason("");
+      setNewArtifactId("");
+      // Invalidate the stale action list and re-derive from a fresh GET.
+      await loadData();
     }
   };
 
@@ -519,7 +442,6 @@ export function PrincipleDetailPage() {
     );
   }
 
-  const isPending = approvalGroup?.status === "pending" || principle.status === "candidate" || principle.status === "probation";
   const hasRules = principle.rules.length > 0;
   const receiptPresentation = receipts?.status === 'ok'
     ? getReceiptPresentation(receipts.effectCount)
@@ -537,8 +459,17 @@ export function PrincipleDetailPage() {
       <section className="mb-8">
         <SectionTitle>{t("principles.detail.conclusion")}</SectionTitle>
         <h1 className="text-[22px] font-semibold text-ink leading-snug mb-3">
-          {principle.text}
+          {ownerDecision?.learnedPrinciple.status === 'known'
+            ? ownerDecision.learnedPrinciple.value.text
+            : principle.text}
         </h1>
+        {ownerDecision !== null && ownerDecision.learnedPrinciple.status !== 'known' && (
+          <p className="text-amber text-[13px] leading-relaxed mb-3" data-testid="owner-decision-technical-note">
+            {t("principles.detail.ownerDecision.technicalOriginalNote", {
+              defaultValue: "以上为原始技术建议文本；可读的行为准则暂缺（保留原文以保证可追溯）。",
+            })}
+          </p>
+        )}
         <p className="text-ink-3 text-[14px] leading-relaxed mb-3">
           {t("principles.detail.policyNote")}
         </p>
@@ -564,6 +495,271 @@ export function PrincipleDetailPage() {
           </Button>
         </div>
       </section>
+
+      {/* ── Owner Decision View — the canonical first layer (SPEC §11.3) ── */}
+      {ownerDecision !== null && (
+        <section className="mb-8" aria-labelledby="owner-decision-title" data-testid="owner-decision-view">
+          <SectionTitle>{t("principles.detail.ownerDecision.title", { defaultValue: "这条原则的决策视图" })}</SectionTitle>
+          <div className="rounded-[var(--radius-md)] border border-gov/25 bg-gov/5 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 id="owner-decision-title" className="text-[18px] font-semibold text-ink">
+                  {t(DECISION_STATE_LABEL_KEY[ownerDecision.decisionState])}
+                </h2>
+                <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+                  {localizeNextAction(ownerDecision.nextAction.code, ownerDecision.nextAction.ownerText, t)}
+                </p>
+              </div>
+              <span data-testid="owner-decision-state" className="w-fit rounded-full border border-line px-2 py-1 font-mono text-[11px] text-ink-3">
+                {ownerDecision.sourceReadStatus === 'complete'
+                  ? t("principles.detail.ownerDecision.readsComplete", { defaultValue: "本次所需数据已读取" })
+                  : t("principles.detail.ownerDecision.readsPartial", { defaultValue: "部分数据源读取失败" })}
+              </span>
+            </div>
+
+            {/* 1. 发生了什么 */}
+            <OwnerNarrativeBlock
+              testId="owner-decision-incident"
+              label={t("principles.detail.ownerDecision.incident", { defaultValue: "发生了什么" })}
+              field={ownerDecision.incidentSummary}
+            />
+            {/* 2. 学到了什么 */}
+            <div className="mt-4" data-testid="owner-decision-learned">
+              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                {t("principles.detail.ownerDecision.learned", { defaultValue: "Agent 学到的行为准则" })}
+              </p>
+              {ownerDecision.learnedPrinciple.status === 'known' ? (
+                <>
+                  <p className="mt-1 text-ink-2 text-[14px] leading-relaxed">
+                    {ownerDecision.learnedPrinciple.value.text}
+                  </p>
+                  <p className="mt-1 text-ink-4 text-[12px]">
+                    {t("principles.detail.ownerDecision.sourceTierLabel", {
+                      defaultValue: "来源：{{tier}}（未经改写）",
+                      tier: t(`principles.detail.ownerDecision.tier.${ownerDecision.learnedPrinciple.value.sourceTier}`, { defaultValue: ownerDecision.learnedPrinciple.value.sourceTier }),
+                    })}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-amber text-[13px] leading-relaxed">
+                  {ownerDecision.learnedPrinciple.reason.ownerText}
+                </p>
+              )}
+            </div>
+            {/* 3. 为什么 */}
+            <OwnerNarrativeBlock
+              testId="owner-decision-rationale"
+              label={t("principles.detail.ownerDecision.rationale", { defaultValue: "为什么这么判断" })}
+              field={ownerDecision.rationale}
+            />
+            {/* 4. 什么时候适用 */}
+            <OwnerNarrativeBlock
+              testId="owner-decision-applicability"
+              label={t("principles.detail.ownerDecision.applicability", { defaultValue: "什么时候适用" })}
+              field={ownerDecision.applicability}
+            />
+            {/* 5. 会怎样改变行为 */}
+            <OwnerNarrativeBlock
+              testId="owner-decision-expected"
+              label={t("principles.detail.ownerDecision.expected", { defaultValue: "批准后会怎样（拟议行为，未部署）" })}
+              field={ownerDecision.expectedBehavior}
+            />
+            {/* 5b. 当前实际执行 */}
+            {ownerDecision.currentEnforcement.status === 'known' && (
+              <div className="mt-4" data-testid="owner-decision-enforcement">
+                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                  {t("principles.detail.ownerDecision.enforcementLabel", { defaultValue: "当前实际执行" })}
+                </p>
+                <p className="mt-1 text-ink-2 text-[14px] leading-relaxed">
+                  {ownerDecision.currentEnforcement.value?.state === 'active'
+                    ? t("principles.detail.ownerDecision.enforcement.active", { defaultValue: "当前有正在执行的生效方式（见下方明细）。" })
+                    : ownerDecision.currentEnforcement.value?.state === 'deactivated'
+                      ? t("principles.detail.ownerDecision.enforcement.deactivated", { defaultValue: "此前的执行方式已停用；当前没有正在执行的生效方式。" })
+                      : ownerDecision.currentEnforcement.value?.state === 'partially_active'
+                        ? t("principles.detail.ownerDecision.enforcement.partial", { defaultValue: "部分执行方式仍在运行（见下方明细）。" })
+                        : t("principles.detail.ownerDecision.enforcement.none", { defaultValue: "这条原则当前没有生效中的执行方式。" })}
+                </p>
+                {ownerDecision.currentEnforcement.value?.items.map((item) => (
+                  <p key={item.activationRef.id} className="mt-1 text-ink-3 text-[12px]">
+                    {item.mode.status === 'known' ? item.mode.value : item.channel}
+                    {" · "}
+                    {item.active
+                      ? t("principles.detail.ownerDecision.enforcement.since", { defaultValue: "生效中（自 {{since}}）", since: item.since.status === 'known' ? item.since.value.slice(0, 10) : '?' })
+                      : t("principles.detail.ownerDecision.enforcement.stopped", { defaultValue: "已停用" })}
+                  </p>
+                ))}
+              </div>
+            )}
+            {ownerDecision.currentEnforcement.status === 'unknown' && (
+              <p className="mt-4 text-amber text-[13px]" data-testid="owner-decision-enforcement-unknown">
+                {ownerDecision.currentEnforcement.reason?.ownerText}
+              </p>
+            )}
+            {/* 5c. 证据概览（§12 五维度独立） */}
+            {ownerDecision.evidenceSummary.status === 'known' && (
+              <div className="mt-4" data-testid="owner-decision-evidence">
+                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                  {t("principles.detail.ownerDecision.evidence", { defaultValue: "行为证据" })}
+                </p>
+                <p className="mt-1 text-ink-2 text-[13px] leading-relaxed">
+                  {ownerDecision.evidenceSummary.value?.ownerExplanation}
+                </p>
+              </div>
+            )}
+            {/* 6. 风险与不确定性 */}
+            <div className="mt-4" data-testid="owner-decision-uncertainty">
+              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                {t("principles.detail.ownerDecision.uncertainty", { defaultValue: "风险与不确定性" })}
+              </p>
+              {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) > 0 && (
+                <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
+                  {ownerDecision.risk.value?.items.map((item, index) => (
+                    <li key={`risk-${index}`}>{item.text}</li>
+                  ))}
+                </ul>
+              )}
+              {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) === 0 && (
+                <p className="mt-1 text-ink-3 text-[13px]">
+                  {t("principles.detail.ownerDecision.riskNotAssessed", { defaultValue: "尚未做过风险评估；这不代表没有风险。" })}
+                </p>
+              )}
+              {ownerDecision.risk.status === 'unknown' && (
+                <p className="mt-1 text-ink-3 text-[13px]">{ownerDecision.risk.reason?.ownerText}</p>
+              )}
+              {ownerDecision.uncertainty.status === 'known' && ownerDecision.uncertainty.value.length > 0 && (
+                <ul className="mt-2 space-y-1 text-[12px] text-ink-3">
+                  {ownerDecision.uncertainty.value.map((item, index) => (
+                    <li key={`unc-${index}`}>{item.text}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {/* 7. 如何撤销 */}
+            <div className="mt-4" data-testid="owner-decision-rollback">
+              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                {t("principles.detail.ownerDecision.rollback", { defaultValue: "如何停止影响" })}
+              </p>
+              {ownerDecision.rollback.status === 'known' && (
+                <>
+                  <p className="mt-1 text-ink-2 text-[13px] leading-relaxed">{ownerDecision.rollback.value?.ownerText}</p>
+                  {ownerDecision.rollback.value?.stopFuture.status === 'known' && (
+                    <ul className="mt-1 space-y-1 text-[12px] text-ink-3">
+                      {ownerDecision.rollback.value.stopFuture.value.map((item, index) => (
+                        <li key={`rb-${index}`}>{item.text}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {ownerDecision.rollback.value?.stopFuture.status === 'not_applicable' && (
+                    <p className="mt-1 text-ink-3 text-[12px]">{ownerDecision.rollback.value.stopFuture.reason.ownerText}</p>
+                  )}
+                </>
+              )}
+              {ownerDecision.rollback.status === 'unknown' && (
+                <p className="mt-1 text-amber text-[13px]">{ownerDecision.rollback.reason?.ownerText}</p>
+              )}
+            </div>
+
+            {/* 8. Owner Decision — backend-assessed actions only */}
+              {/* S3 finding (AI User QA): decided subjects were invisible on the
+                  Detail page — the Owner could not see WHEN/HOW this principle
+                  was approved. Render completed decisions as history. */}
+              {ownerDecision.decisionSubjects.some((subject) => subject.state !== 'pending') && (
+                <div className="mt-3" data-testid="owner-decision-history">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                    {t("principles.detail.ownerDecision.history", { defaultValue: "决定历史" })}
+                  </p>
+                  <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
+                    {ownerDecision.decisionSubjects.filter((subject) => subject.state !== 'pending').map((subject) => {
+                      const decidedAt = subject.targetRefs.find((target) => target.kind === 'approval')?.recordedAt;
+                      const stateKey = `principles.detail.ownerDecision.historyState.${subject.state}`;
+                      return (
+                        <li key={`hist-${subject.key}`}>
+                          {t(stateKey, { defaultValue: subject.state })}
+                          {decidedAt !== undefined ? ` · ${decidedAt.slice(0, 10)}` : ''}
+                          {' · '}{t(`principles.detail.ownerDecision.channel.${subject.channel}`, { defaultValue: subject.channel })}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              <div className="mt-5 border-t border-line pt-4" data-testid="owner-decision-actions">
+              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                {t("principles.detail.ownerDecision.decision", { defaultValue: "你的决定" })}
+              </p>
+              {ownerDecision.availableActions.length === 0 && (
+                <p className="mt-1 text-ink-3 text-[13px]">
+                  {t("principles.detail.ownerDecision.noActions", { defaultValue: "当前没有可以执行的操作。" })}
+                </p>
+              )}
+              {/* Fix 1 (review P1): per-subject decision material. Each pending
+                  decision shows ITS OWN revision's material — never another
+                  revision's text. Principle-level learnedPrinciple above stays
+                  the overview summary only. */}
+              {ownerDecision.decisionSubjects.filter((subject) => subject.state === 'pending').length > 0 && (
+                <div className="mt-3 space-y-3" data-testid="owner-decision-subject-materials">
+                  {ownerDecision.decisionSubjects.filter((subject) => subject.state === 'pending').map((subject) => (
+                    <div key={subject.key} className="rounded-[var(--radius-sm)] border border-line p-3" data-subject-key={subject.key}>
+                      <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                        {t("principles.detail.ownerDecision.subjectMaterial", { defaultValue: "这项决定的材料" })}
+                      </p>
+                      {subject.decisionMaterial.learnedPrinciple.status === 'known' ? (
+                        subject.decisionMaterial.learnedPrinciple.value.map((item, index) => (
+                          <p key={`sm-${index}`} className="mt-1 text-ink-2 text-[13px] leading-relaxed">{item.text}</p>
+                        ))
+                      ) : (
+                        <p className="mt-1 text-amber text-[13px]">{subject.decisionMaterial.learnedPrinciple.reason.ownerText}</p>
+                      )}
+                      {subject.decisionMaterial.consequence.status === 'known' && (
+                        <p className="mt-1 text-ink-3 text-[12px] leading-relaxed">
+                          {subject.decisionMaterial.consequence.value.map((item) => item.text).join(' ')}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-2 flex flex-wrap gap-3">
+                {ownerDecision.availableActions.map((action) => (
+                  <Button
+                    key={action.key}
+                    variant={action.semantic === 'reject' ? 'destructive' : action.semantic === 'disable' ? 'outline' : 'default'}
+                    size="sm"
+                    disabled={actionLoading}
+                    data-action-semantic={action.semantic}
+                    onClick={() => {
+                      setRejectReason("");
+                      setPendingAction(action);
+                    }}
+                  >
+                    {localizeActionLabel(action, t)}
+                  </Button>
+                ))}
+              </div>
+              {ownerDecision.blockers.length > 0 && (
+                <ul className="mt-3 space-y-1 text-[12px] text-ink-3">
+                  {ownerDecision.blockers.map((blocker, index) => (
+                    <li key={`blk-${index}`} data-testid="owner-decision-blocker">
+                      {localizeBlocker(blocker.reason.code, blocker.reason.ownerText, t)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+      {ownerDecision === null && ownerDecisionUnavailable !== null && (
+        <section className="mb-8" data-testid="owner-decision-unavailable">
+          <SectionTitle>{t("principles.detail.ownerDecision.title", { defaultValue: "这条原则的决策视图" })}</SectionTitle>
+          <div className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
+            <p className="text-ink-2 text-[13px]">
+              {t("principles.detail.ownerDecision.unavailable", { defaultValue: "决策视图暂时不可用，无法据此做决定。" })}
+            </p>
+            <p className="mt-1 text-ink-4 text-[12px] font-mono">{ownerDecisionUnavailable.reason}</p>
+          </div>
+        </section>
+      )}
 
       {(governance !== null || governanceUnavailable !== null) && (
         <section className="mb-8" aria-labelledby="governance-summary-title">
@@ -686,31 +882,22 @@ export function PrincipleDetailPage() {
         </section>
       )}
 
-      {/* ── Channel info (F.4 — read only, no selector) ─────────────────── */}
-      <section className="mb-8">
-        <SectionTitle>{t("principles.detail.channel")}</SectionTitle>
-        <p className="text-ink-2 text-[14px] leading-relaxed">
-          {t("principles.detail.channelPromptReversible")}
-        </p>
-      </section>
-
-      {/* ── Layer 2: Why ────────────────────────────────────────────────── */}
+      {/* ── Layer 2: Why (technical proposal fields — original texts) ────── */}
       <section className="mb-8">
         <SectionTitle>{t("principles.detail.whyExists")}</SectionTitle>
 
-        {/* Applicable / Expected / Non-applicable / Side effects */}
         <div className="space-y-3 mb-6">
           <div>
             <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
-              {t("principles.detail.applicable", { defaultValue: "适用场景" })}
+              {t("principles.detail.applicable", { defaultValue: "适用场景（原始触发配置）" })}
             </span>
-            <p className="text-ink-2 text-[14px] leading-relaxed">
+            <p className="text-ink-2 text-[14px] leading-relaxed font-mono break-all">
               {principle.triggerPattern || t("principles.detail.notSpecified", { defaultValue: "未指定" })}
             </p>
           </div>
           <div>
             <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
-              {t("principles.detail.expectedBehavior", { defaultValue: "预期行为" })}
+              {t("principles.detail.expectedBehavior", { defaultValue: "预期行为（原始建议）" })}
             </span>
             <p className="text-ink-2 text-[14px] leading-relaxed">
               {principle.action || t("principles.detail.notSpecified", { defaultValue: "未指定" })}
@@ -775,7 +962,7 @@ export function PrincipleDetailPage() {
             </div>
             {evidenceExpanded && (
               <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
-                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
+                <div className="grid grid-cols-[auto 1fr] gap-x-4 gap-y-2 text-[13px]">
                   {principle.derivedFromPainIds.map((painId, idx) => (
                     <div key={`${painId}-${idx}`} className="contents">
                       <span className="font-mono text-ink-4">
@@ -944,171 +1131,95 @@ export function PrincipleDetailPage() {
         </div>
       </details>
 
-      {/* ── Decision section (PRI-387) ────────────────────────────────────── */}
-      {showDecisionControls && (
-        <div className="border-t border-line pt-6 mt-6">
-        <SectionTitle>{t("principles.detail.decisionTitle", { defaultValue: "决策操作" })}</SectionTitle>
-        
-        <div className="flex gap-3 flex-wrap items-center">
-          <Button
-            variant="default"
-            onClick={handleApprove}
-            disabled={!isActionable || actionLoading}
-          >
-            {t("principles.detail.approve")}
-          </Button>
-
-          <Button
-            variant="outline"
-            onClick={handleEdit}
-            disabled={!isActionable || actionLoading}
-          >
-            {t("principles.detail.editAction", { defaultValue: "编辑" })}
-          </Button>
-
-          <Button
-            variant="outline"
-            onClick={handlePark}
-            disabled
-          >
-            {t("principles.detail.park")}
-          </Button>
-
-          <Button
-            variant="destructive"
-            onClick={handleReject}
-            disabled={!isActionable || actionLoading}
-          >
-            {t("principles.detail.reject")}
-          </Button>
-
-          {/* Park unavailable note */}
-          <span className="text-ink-4 text-[13px]">
-            ({t("principles.detail.parkUnavailable", { defaultValue: "暂存尚未可用" })})
-          </span>
-        </div>
-
-        {/* Actionable or non-actionable status messages */}
-        {!isActionable && (
-          <p className="text-danger text-[13px] mt-3 font-mono">
-            {t("principles.detail.unactionableReasonPrefix", { defaultValue: "不可操作原因: " })}
-            {t(reasonKey, { defaultValue: defaultReason })}
-          </p>
-        )}
-
-        {/* Confirmation bar (J.1) */}
-        {isActionable && showConfirm && (
-          <div className="mt-4 p-3 bg-gov/5 border border-gov/20 rounded-[var(--radius-md)]">
-            <p className="text-ink-2 text-[13px] mb-3">
-              {t("principles.detail.confirmApprove")}
-            </p>
-            <div className="flex gap-2">
-              <Button variant="default" size="sm" onClick={confirmApprove} disabled={actionLoading}>
-                {t("principles.detail.confirm")}
-              </Button>
-              <Button variant="outline" size="sm" onClick={cancelConfirm}>
-                {t("principles.detail.cancel")}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Rejection reason input (inline, not dialog) */}
-        {isActionable && showRejectInput && (
-          <div className="mt-4 p-3 border border-danger/20 rounded-[var(--radius-md)]">
-            <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-              {t("principles.detail.rejectReasonLabel", { defaultValue: "拒绝原因" })}
-            </label>
-            <textarea
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder={t("principles.detail.rejectReasonPlaceholder")}
-              className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-              aria-label={t("principles.detail.rejectReasonPlaceholder")}
-            />
-            <div className="flex gap-2 mt-2">
+      {/* ── Action confirmation (SPEC §8.4) ─────────────────────────────── */}
+      {pendingAction !== null && (
+        <div className="border-t border-line pt-6 mt-6" data-testid="owner-decision-confirm">
+          <SectionTitle>{pendingAction.label}</SectionTitle>
+          <div className="mt-2 p-3 bg-gov/5 border border-gov/20 rounded-[var(--radius-md)]">
+            {pendingAction.expectedConsequence.status === 'known' && (
+              <div className="mb-3">
+                {pendingAction.expectedConsequence.value.map((item, index) => (
+                  <p key={`exp-${index}`} className="text-ink-2 text-[13px] leading-relaxed mb-1">{item.text}</p>
+                ))}
+              </div>
+            )}
+            <p className="text-ink-2 text-[13px] mb-3">{pendingAction.confirmation.text}</p>
+            {pendingAction.requirements.some((req) => req.name === 'newArtifactId') && (
+              <>
+                <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                  {t("principles.detail.editNewArtifactLabel", { defaultValue: "新的已验证工件 ID" })}
+                </label>
+                <input
+                  type="text"
+                  value={newArtifactId}
+                  onChange={(e) => setNewArtifactId(e.target.value)}
+                  placeholder={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+                  className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 font-mono focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                  aria-label={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+                />
+              </>
+            )}
+            {pendingAction.requirements.some((req) => req.name === 'reason') && (
+              <>
+                <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                  {t("principles.detail.rejectReasonLabel", { defaultValue: "拒绝原因" })}
+                </label>
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder={t("principles.detail.rejectReasonPlaceholder")}
+                  className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                  aria-label={t("principles.detail.rejectReasonPlaceholder")}
+                />
+              </>
+            )}
+            <div className="flex gap-2 mt-3">
               <Button
-                variant="destructive"
+                variant={pendingAction.semantic === 'reject' ? 'destructive' : 'default'}
                 size="sm"
-                onClick={confirmReject}
-                disabled={!rejectReason.trim() || actionLoading}
+                disabled={actionLoading
+                  || (pendingAction.requirements.some((req) => req.name === 'reason') && !rejectReason.trim())
+                  || (pendingAction.requirements.some((req) => req.name === 'newArtifactId') && !newArtifactId.trim())}
+                onClick={() => {
+                  const action = pendingAction;
+                  void submitOwnerAction(action, rejectReason.trim() === '' ? undefined : rejectReason.trim());
+                }}
               >
-                {t("principles.detail.confirmReject")}
+                {t("principles.detail.confirm", { defaultValue: "确认" })}
               </Button>
-              <Button variant="outline" size="sm" onClick={cancelReject}>
+              <Button variant="outline" size="sm" onClick={() => { setPendingAction(null); setRejectReason(""); setNewArtifactId(""); }}>
                 {t("principles.detail.cancel")}
               </Button>
             </div>
           </div>
-        )}
-
-        {/* Edit revision input (inline, not dialog) */}
-        {isActionable && showEditInput && (
-          <div className="mt-4 p-3 border border-gov/20 rounded-[var(--radius-md)]">
-            <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-              {t("principles.detail.editReasonLabel", { defaultValue: "编辑原因" })}
-            </label>
-            <div className="mb-2 text-ink-4 text-[12px] font-mono">
-              {t("principles.detail.currentArtifactLabel", { defaultValue: "当前工件" })}: {currentArtifactId}
-            </div>
-            <input
-              type="text"
-              value={newArtifactId}
-              onChange={(e) => setNewArtifactId(e.target.value)}
-              placeholder={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
-              className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-              aria-label={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
-            />
-            <textarea
-              value={editReason}
-              onChange={(e) => setEditReason(e.target.value)}
-              placeholder={t("principles.detail.editReasonPlaceholder", { defaultValue: "请说明编辑原因" })}
-              className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-            />
-            <div className="flex gap-2 mt-2">
-              <Button
-                variant="default"
-                size="sm"
-                onClick={confirmEdit}
-                disabled={!editReason.trim() || !newArtifactId.trim() || actionLoading}
-              >
-                {t("principles.detail.confirmEdit", { defaultValue: "确认编辑" })}
-              </Button>
-              <Button variant="outline" size="sm" onClick={cancelEdit}>
-                {t("principles.detail.cancel")}
-              </Button>
-            </div>
-          </div>
-        )}
-        </div>
-      )}
-
-      {/* PRI-582: decision controls are hidden when the governance projection
-          cannot authorize them. Explain why instead of removing the section
-          silently (ERR-002: every degraded path carries reason + nextAction). */}
-      {governanceBlock !== null && (
-        <div className="border-t border-line pt-6 mt-6" data-testid="governance-decision-blocked">
-          <SectionTitle>{t("principles.detail.decisionTitle", { defaultValue: "决策操作" })}</SectionTitle>
-          <p
-            className="text-danger text-[13px] mt-3 font-mono"
-            data-testid="governance-decision-blocked-reason"
-          >
-            {governanceBlock.source === 'server'
-              ? governanceBlock.reason
-              : t(governanceBlock.reasonKey)}
-          </p>
-          {governanceBlockedNextAction !== undefined && (
-            <p
-              className="text-ink-3 text-[13px] mt-1 font-mono"
-              data-testid="governance-decision-blocked-next-action"
-            >
-              <span className="font-medium">{t(GOVERNANCE_BLOCK_I18N_KEYS.nextActionLabel)}</span>{" "}
-              {governanceBlockedNextAction}
-            </p>
-          )}
         </div>
       )}
       </div>
     </PageShell>
+  );
+}
+
+/** Small presentational block: known narrative items or the honest unknown. */
+function OwnerNarrativeBlock({ label, field, testId }: {
+  label: string;
+  field: OwnerDecisionViewCore['incidentSummary'];
+  testId: string;
+}) {
+  const rendered = narrativeTexts(field);
+  return (
+    <div className="mt-4" data-testid={testId}>
+      <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{label}</p>
+      {rendered.status === 'known' ? (
+        rendered.texts.length > 0 ? (
+          rendered.texts.map((text, index) => (
+            <p key={`${testId}-${index}`} className="mt-1 text-ink-2 text-[14px] leading-relaxed">{text}</p>
+          ))
+        ) : (
+          <p className="mt-1 text-ink-4 text-[13px]">—</p>
+        )
+      ) : (
+        <p className="mt-1 text-ink-3 text-[13px] leading-relaxed">{rendered.reason}</p>
+      )}
+    </div>
   );
 }

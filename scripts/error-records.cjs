@@ -619,6 +619,10 @@ function runCli(argv) {
         occurrenceId: readFlag(argv, '--occurrence-id') ?? generateOccurrenceId(),
         patternRecordId: patternRef,
         displayId: pattern.meta.displayId,
+        // check:error-handbook requires runtime-recorded occurrences to carry
+        // the structured recurrence facts including originPattern — derive it
+        // from the owning pattern's ep so the writer and the gate agree.
+        originPattern: pattern.meta.ep ?? null,
         observedAt: readFlag(argv, '--date') ?? todayIso(),
         source: readFlag(argv, '--source'),
       };

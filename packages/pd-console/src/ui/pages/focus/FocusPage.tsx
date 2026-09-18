@@ -26,7 +26,8 @@ import type {
 } from "../../api.js";
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
-import { fetchGovernanceExperience } from "../../api.js";
+import { fetchGovernanceExperience, fetchOwnerDecisionInbox } from "../../api.js";
+import type { OwnerDecisionInboxData } from "../../api.js";
 import type {
   GovernanceExperienceSnapshot,
   GovernanceExperienceReasonCode,
@@ -954,6 +955,10 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // PRI-629: 统一 Owner Inbox — 两种模式都加载 (决策与治理摘要模式正交)
   const [ownerDecisionItems, setOwnerDecisionItems] = useState<OwnerDecisionItemData[]>([]);
   const [ownerDecisionError, setOwnerDecisionError] = useState<string | null>(null);
+  // Owner Decision Experience v1: canonical decision inbox (3 groups + aggregate
+  // historical notice). Display-only; degradation is observable, never silent.
+  const [ownerInbox, setOwnerInbox] = useState<OwnerDecisionInboxData | null>(null);
+  const [ownerInboxError, setOwnerInboxError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -1018,6 +1023,17 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     } else {
       setOwnerDecisionItems([]);
       setOwnerDecisionError(decisionsResult.error ?? "Owner decisions unavailable");
+    }
+
+    // Owner Decision Experience v1 inbox: failure degrades observably (rc-9),
+    // never blocking the rest of the focus page.
+    const ownerInboxResult = await fetchOwnerDecisionInbox();
+    if (ownerInboxResult.success) {
+      setOwnerInbox(ownerInboxResult.data);
+      setOwnerInboxError(null);
+    } else {
+      setOwnerInbox(null);
+      setOwnerInboxError(ownerInboxResult.reason === 'feature_disabled' ? null : (ownerInboxResult.error ?? "Owner decision inbox unavailable"));
     }
 
     setLoadingState("loaded");
@@ -1113,6 +1129,50 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
         {t("pages.focus.subtitle")}
       </p>
+
+      {/* Owner Decision Experience v1 — canonical decision inbox: 待决定 / 被
+          阻塞 / 需要恢复 (SPEC §11.1)。历史未绑定条目只出现为一条聚合说明,
+          不变成待办卡。 */}
+      <section aria-label={t("pages.focus.ownerInbox.sectionTitle")} className="mb-7" data-testid="owner-decision-inbox-section">
+        <div className="flex items-baseline gap-2 mb-3">
+          <SectionTitle>{t("pages.focus.ownerInbox.sectionTitle")}</SectionTitle>
+          {ownerInbox !== null && (
+            <span className="font-mono text-ink-4 text-[12px]">
+              {`· ${ownerInbox.groups.decision.length + ownerInbox.groups.blocked.filter((item) => item.inbox.attention === 'individual').length + ownerInbox.groups.recovery.length}`}
+            </span>
+          )}
+        </div>
+        {ownerInboxError !== null && (
+          <p className="text-ink-4 text-[12.5px]">{t("pages.focus.ownerInbox.loadError")}</p>
+        )}
+        {ownerInbox !== null && ownerInboxError === null && (
+          <>
+            {ownerInbox.groups.decision.length === 0
+              && ownerInbox.groups.blocked.filter((item) => item.inbox.attention === 'individual').length === 0
+              && ownerInbox.groups.recovery.length === 0 && (
+              <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerInbox.empty")}</p>
+            )}
+            {ownerInbox.groups.decision.map((item) => (
+              <InboxItem key={item.principleId} item={item} t={t} />
+            ))}
+            {ownerInbox.groups.blocked.filter((item) => item.inbox.attention === 'individual').map((item) => (
+              <InboxItem key={item.principleId} item={item} t={t} />
+            ))}
+            {ownerInbox.groups.recovery.map((item) => (
+              <InboxItem key={item.principleId} item={item} t={t} />
+            ))}
+            {ownerInbox.historicalUnknown.count > 0 && (
+              <p className="text-ink-4 text-[12.5px] leading-relaxed mt-2" data-testid="owner-inbox-aggregate-notice">
+                {ownerInbox.historicalUnknown.reasonText}
+                {" "}
+                <Link to="/principles" className="text-gov hover:underline">
+                  {t("pages.focus.ownerInbox.viewLibrary")}
+                </Link>
+              </p>
+            )}
+          </>
+        )}
+      </section>
 
       {/* PRI-629: 需要你决定 — 统一 Owner Inbox。两种治理摘要模式下都渲染;
           N = 真实可执行决策数 (INV-01),不是 lifecycle/NHR/failed 计数。 */}
@@ -1295,5 +1355,24 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       </footer>
       </div>
     </PageShell>
+  );
+}
+
+/** Owner Decision Experience v1 inbox item — display-only (SPEC §11.1). */
+function InboxItem({ item, t }: { item: OwnerDecisionInboxData['groups']['decision'][number]; t: (key: string, opts?: Record<string, unknown>) => string }) {
+  return (
+    <div className="mb-2 rounded-[var(--radius-md)] border border-line p-3" data-testid="owner-inbox-item">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <Link to={`/principles/${encodeURIComponent(item.principleId)}`} className="text-ink text-[13.5px] font-medium hover:underline">
+          {item.learnedPrinciple.status === 'known'
+            ? item.learnedPrinciple.text
+            : item.learnedPrinciple.reasonText}
+        </Link>
+        <span className="font-mono text-[11px] text-ink-4 border border-line rounded-[2px] px-1.5 py-0.5">
+          {t(`pages.focus.ownerInbox.group.${item.inbox.group}`)}
+        </span>
+      </div>
+      <p className="mt-1 text-ink-3 text-[12.5px] leading-relaxed">{item.nextAction.ownerText}</p>
+    </div>
   );
 }

@@ -273,7 +273,15 @@ export function createLlmClient(
         model: config.model,
         messages,
         temperature: 0.2,
-        max_tokens: 900,
+        // Fix 4 (review P2): thinking-mode models (e.g. glm-5.3-flash via the
+        // ZAI coding endpoint) emit reasoning_content BEFORE the final content
+        // and share this ONE budget — the original 900 was exhausted by
+        // reasoning alone (finish_reason=length, empty content → "未找到
+        // JSON 对象" every step). 16384 matches the production pi-ai channel
+        // value: complex page snapshots can produce multi-thousand-token
+        // reasoning chains, and the budget must cover reasoning AND the
+        // action JSON.
+        max_tokens: 16384,
       }),
       // 150s：免费/慢端点（如免费网关）单次大提示词调用可达分钟级
       signal: AbortSignal.timeout(150_000),

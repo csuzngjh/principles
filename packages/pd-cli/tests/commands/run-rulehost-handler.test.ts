@@ -711,3 +711,46 @@ describe('handleRunRuleHost — PR #1122 behavior-examples fail-fast (CodeRabbit
     expect(stdout).toMatch(/Next: fix the code-rule capability issue above/);
   });
 });
+
+// ── Owner Decision v1 review fix (Codex P1): identity-gated publication ─────
+
+describe('describePublicationOutcome — identity-gated refusal reporting (Codex P1)', () => {
+  const baseResult = {
+    decision: 'candidate_ready_for_owner_review' as const,
+    painId: 'pain-1',
+    stages: [],
+    scribeTaskId: 'scribe-1',
+    ruleArtifactId: 'pi-rule-1' as string | null,
+    principleArtifactId: null as string | null,
+    approvalId: null as string | null,
+    degradationReason: null as string | null,
+  };
+
+  it('flags the identity-blocked state and provides a repair nextAction', async () => {
+    const { describePublicationOutcome } = await import('../../src/commands/runtime-internalization-run-rulehost.js');
+    const outcome = describePublicationOutcome({
+      ...baseResult,
+      degradationReason: 'identity_binding_unverified: ledger_missing. Rule artifact NOT enqueued for Owner review (governance publication boundary).',
+    });
+    expect(outcome.blocked).toBe(true);
+    expect(outcome.nextAction).toContain('NOT enqueued');
+    expect(outcome.nextAction).toContain('re-run');
+  });
+
+  it('does not flag a healthy ready result with a real approval id', async () => {
+    const { describePublicationOutcome } = await import('../../src/commands/runtime-internalization-run-rulehost.js');
+    const outcome = describePublicationOutcome({ ...baseResult, approvalId: 'apr-1' });
+    expect(outcome.blocked).toBe(false);
+  });
+
+  it('text output for the identity-blocked result never claims WAITING for owner review', async () => {
+    const { formatTextOutput } = await import('../../src/commands/runtime-internalization-run-rulehost.js');
+    const text = formatTextOutput({
+      ...baseResult,
+      degradationReason: 'identity_binding_unverified: ledger_missing. Rule artifact NOT enqueued for Owner review (governance publication boundary).',
+    });
+    expect(text).toContain('PUBLICATION REFUSED');
+    expect(text).not.toContain('WAITING for owner review');
+    expect(text).toContain('NOT enqueued for Owner review');
+  });
+});

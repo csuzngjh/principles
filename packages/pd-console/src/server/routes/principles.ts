@@ -32,6 +32,9 @@ function getModel(workspaceDir: string): PrinciplesConsoleModel {
  * DB read). Dispatched in server/index.ts BEFORE the `/api/principles`
  * catch-all so `core` is never parsed as `/:id`; the `/api/v1/principles`
  * mount intentionally does NOT expose this endpoint.
+ *
+ * Owner Decision Experience v1: the canonical Owner decision read endpoints
+ * live in routes/owner-decision.ts and dispatch from handlePrinciplesRoute.
  */
 export async function handleCorePrinciplesRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== 'GET') {

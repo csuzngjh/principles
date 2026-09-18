@@ -1,5 +1,5 @@
 import type { ApiResponse } from "../types.js";
-import type { OwnerDecisionsData, OwnerResolutionResultData } from "./utils/validators.js";
+import type { OwnerDecisionsData, OwnerResolutionResultData, OwnerDecisionInboxData, OwnerDecisionLibraryData } from "./utils/validators.js";
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import {
   validateErrorResponse,
@@ -49,6 +49,9 @@ import {
   validateIntentRawContent,
   validateIntentVersions,
   validateOwnerGovernanceView,
+  validateOwnerDecisionViewCore,
+  validateOwnerDecisionInbox,
+  validateOwnerDecisionLibrary,
   validateGovernanceExperienceSnapshot,
   validateRuleCodeOwnerReview,
   validateRuleCodeMutation,
@@ -56,7 +59,7 @@ import {
   validateOwnerIdentityRegister,
   validateOwnerIdentityUnregister,
 } from "./utils/validators.js";
-import type { GovernanceExperienceSnapshot, OwnerGovernanceView } from '@principles/core/runtime-v2';
+import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime-v2';
 import type {
   OwnerIdentityViewData,
   OwnerIdentityRegisterData,
@@ -312,6 +315,20 @@ async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<un
 
 async function fetchPrincipleGovernance(principleId: string): Promise<ApiResponse<OwnerGovernanceView>> {
   return request<OwnerGovernanceView>(`/api/v1/principles/${encodeURIComponent(principleId)}/governance`, undefined, validateOwnerGovernanceView);
+}
+
+// Owner Decision Experience v1 (SPEC §15): canonical Owner-facing decision
+// projection for the Detail first layer + compact Inbox. Read-only.
+async function fetchOwnerDecisionView(principleId: string): Promise<ApiResponse<OwnerDecisionViewCore>> {
+  return request<OwnerDecisionViewCore>(`/api/v1/principles/${encodeURIComponent(principleId)}/owner-decision-view`, undefined, validateOwnerDecisionViewCore);
+}
+
+async function fetchOwnerDecisionInbox(): Promise<ApiResponse<OwnerDecisionInboxData>> {
+  return request<OwnerDecisionInboxData>('/api/v1/principles/owner-decision-inbox', undefined, validateOwnerDecisionInbox);
+}
+
+async function fetchOwnerDecisionLibrary(): Promise<ApiResponse<OwnerDecisionLibraryData>> {
+  return request<OwnerDecisionLibraryData>('/api/v1/principles/owner-decision-library', undefined, validateOwnerDecisionLibrary);
 }
 
 async function archivePrinciple(principleId: string): Promise<ApiResponse<unknown>> {
@@ -1060,6 +1077,9 @@ export {
   fetchCorePrinciples,
   fetchPrincipleDetail,
   fetchPrincipleGovernance,
+  fetchOwnerDecisionView,
+  fetchOwnerDecisionInbox,
+  fetchOwnerDecisionLibrary,
   fetchPrincipleTrajectory,
   fetchPrincipleReceipts,
   fetchReceiptCounts,
@@ -1177,6 +1197,7 @@ export type {
 
 // Consumer-facing type aliases (old names that pages import)
 export type { ActivationRecordData as ActivationRecord } from "./utils/validators.js";
+export type { OwnerDecisionInboxData, OwnerDecisionLibraryData } from "./utils/validators.js";
 export type { ApprovalRecordData as ApprovalRecord } from "./utils/validators.js";
 export type { WorkspaceEntryData as WorkspaceEntry } from "./utils/validators.js";
 export type { PrincipleListItemData as PrincipleListItem } from "./utils/validators.js";

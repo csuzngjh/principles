@@ -27,7 +27,7 @@
     "warning": "Warning",
     "info": "Info",
     "total": "Total",
-    "active": "Active",
+    "active": "Approved",
     "inactive": "Inactive",
     "pending": "Pending",
     "completed": "Completed",
@@ -271,6 +271,14 @@
       "zeroStateHealthy": "No items need your judgment right now. PD has checked behavior evidence, principle review queue, and system signals.",
       "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here.",
       "evidenceInProgress": "{{count}} behavior evidence item(s) recorded, being diagnosed and processed.",
+      "ownerInbox": {
+        "group": { "subjectMaterial": "Material for this decision (scoped to its own revision — no text borrowed from other revisions)",
+          "decision": "Needs decision", "blocked": "Blocked", "recovery": "Needs recovery" },
+        "sectionTitle": "Principle decisions",
+        "loadError": "Principle decision updates are temporarily unavailable.",
+        "empty": "No confirmed pending, blocked, or recovery-needed principle items right now.",
+        "viewLibrary": "View the principle library →"
+      },
       "ownerDecision": {
         "evidenceUnavailable": "This decision still needs you, but its evidence chain is incomplete. PD has paused all decision actions so you cannot approve the wrong version.",
         "goRecoverCta": "View recovery details",
@@ -546,6 +554,7 @@
       "blockBasis": "Formation Basis",
       "blockBasisFallback": "This principle was distilled from historical behavior calibration. Its detailed source is not yet linked.",
       "blockImpact": "Current Impact",
+      "blockImpactSeeDecisionView": "Whether this currently shapes behavior is shown on the detail page under current enforcement — this card does not assert impact from lifecycle status alone.",
       "blockImpactActive": "This principle is currently shaping the Agent's subsequent behavior.",
       "blockImpactPending": "Not yet active — awaiting Owner confirmation.",
       "blockImpactRejected": "Rejected by Owner — no longer shapes the Agent's behavior.",
@@ -573,6 +582,17 @@
       "channelDeferArchive": "Defer Archive",
       "channelCodeToolHook": "Code Tool Hook",
       "confidence": "Confidence",
+      "evaluabilityLabel": "Evaluability",
+      "ownerDecision": {
+        "state": {
+          "needs_owner_decision": "Needs your decision",
+          "processing": "Processing",
+          "blocked": "Judgment unavailable",
+          "recovery_needed": "Needs recovery",
+          "decided": "Decided",
+          "no_action": "No action needed"
+        }
+      },
       "languageHintEn": "Generated in English",
       "languageHintZh": "Generated in Chinese",
       "languageHintUnknown": "Language unknown",
@@ -614,7 +634,7 @@
         "reflectionQ3": "If it's wrong, do I know how to roll it back?",
         "receipts": {
           "title": "Receipt History",
-          "headline": "Your principle is influencing agent behavior",
+          "headline": "{{effectCount}} behavior-influence record(s) retained (last {{lastEffectAt}}) — historical observations, not a claim of current enforcement",
           "headlinePresence": "Your principle is part of the agent's decision context — no recorded behavior effect yet",
           "counts": "{{effectCount}} behavior effect(s) · {{presenceCount}} context injection(s)",
           "zeroEffect": "Why 0 effects? Effects need evidence: a block, an auto-correction, or an agent self-report. So far this principle has only entered task context (Presence). Being present in a decision does not mean behavior changed — the first effect record will appear here as runtime evidence accumulates.",
@@ -714,7 +734,7 @@
           "automationState": { "idle": "Idle", "queued": "Queued", "running": "Running", "retry_scheduled": "Retry scheduled", "stalled": "Stalled" },
           "headline": {
             "owner_decision": "Your decision is needed",
-            "recovery": "Runtime recovery is needed",
+            "recovery": "Recovery processing is needed",
             "revision": "PD is revising this principle",
             "processing": "PD is processing this principle",
             "active": "This principle is active",
@@ -732,7 +752,7 @@
           },
           "next": {
             "review": "Review the existing approval actions below.",
-            "inspect_recovery": "Inspect the blocker evidence; do not approve until Runtime recovers.",
+            "inspect_recovery": "A historical processing issue exists; inspect recovery info first — its relation to the current action is unconfirmed, and any decision should rely on the decision view.",
             "wait": "No action is needed now. Wait for PD to finish the current work.",
             "monitor": "No action is needed. Monitor the active behavior channel.",
             "inspect_data": "Inspect the evidence diagnostics and repair the referenced durable record.",
@@ -770,6 +790,52 @@
             "failed": "Runtime task failed",
             "human_review": "Human recovery review requested"
           }
+        },
+        "ownerDecision": {
+          "title": "Decision view for this principle",
+          "technicalOriginalNote": "The text above is the original technical recommendation; no readable principle statement is available yet (kept verbatim for traceability).",
+          "state": {
+            "needs_owner_decision": "A decision is waiting for your review",
+            "processing": "The system is processing this proposal",
+            "blocked": "The system cannot establish a complete governance judgment yet",
+            "recovery_needed": "This processing needs recovery",
+            "decided": "This proposal already has a completed decision",
+            "no_action": "Nothing needs your decision right now"
+          },
+          "readsComplete": "All requested sources were read",
+          "readsPartial": "Some sources failed to read",
+          "incident": "What happened",
+          "learned": "The behavior principle the agent learned",
+          "sourceTier": "Source: {{tier}} (verbatim)",
+          "rationale": "Why PD judged it this way",
+          "applicability": "When it applies",
+          "expected": "What changes if approved (proposed, not deployed)",
+          "enforcementLabel": "Current enforcement",
+          "tier": { "scribe": "Formal draft (Scribe)", "distiller": "Abstracted principle (Distiller)", "philosopher": "Candidate principle (Philosopher)", "candidate_principle": "Original recommendation" },
+          "enforcement": {
+            "active": "An enforcement method is currently active (see details below).",
+            "deactivated": "The previous enforcement method is deactivated; nothing is enforcing right now.",
+            "partial": "Some enforcement methods are still running (see details below).",
+            "none": "No enforcement method is active for this principle.",
+            "since": "Active (since {{since}})",
+            "stopped": "Deactivated"
+          },
+          "evidence": "Behavior evidence",
+          "uncertainty": "Risks and uncertainty",
+          "riskNotAssessed": "No risk assessment has been done; that does not mean there are no risks.",
+          "rollback": "How to stop its influence",
+          "decision": "Your decision",
+          "history": "Decision history",
+          "historyState": { "approved": "Approved", "rejected": "Rejected", "cancelled": "Cancelled", "pending": "Pending" },
+          "channel": { "prompt": "context guidance channel", "code_tool_hook": "RuleCode enforcement channel", "defer_archive": "archive channel" },
+          "actionLabel": { "approve": "Approve", "reject": "Reject", "edit_approval": "Replace approval artifact", "disable": "Stop this enforcement going forward" },
+          "next": { "review": "A decision is waiting for your review: read the material above, then approve or reject.", "wait": "The system is processing this proposal; please wait.", "inspect_data": "The system cannot establish a complete governance judgment yet.", "inspect_recovery": "This processing has a historical issue; recovery info can be inspected.", "monitor": "This proposal already has a completed decision. Review its enforcement and behavior records.", "none": "Nothing needs your decision right now." },
+          "blocker": { "decision_material_missing": "This subject lacks the information needed for a safe approval; rejection can still be evaluated separately.", "lineage_not_available": "Governance identity is not established yet, so the system cannot tell whether your decision is needed.", "historical_processing_issue": "A historical processing issue exists; its relation to the current action is unconfirmed." },
+          "noActions": "No action is currently available.",
+          "unavailable": "The decision view is temporarily unavailable; do not decide based on this page alone.",
+          "invalidTarget": "Action target missing; cannot submit.",
+          "actionDone": "Submitted.",
+          "actionFailed": "Refused: {{detail}} Available actions were refreshed — decide again from the latest state."
         }
       }
     },

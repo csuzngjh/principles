@@ -271,6 +271,14 @@
       "zeroStateHealthy": "当前没有需要你判断的事项。PD 已检查行为证据、原则审查队列和系统信号。",
       "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",
       "evidenceInProgress": "{{count}} 条行为证据已记录，正在诊断和处理中。",
+      "ownerInbox": {
+        "group": { "subjectMaterial": "这项决定的材料（按修订隔离，不含其他修订的文本）",
+          "decision": "待决定", "blocked": "被阻塞", "recovery": "需要恢复" },
+        "sectionTitle": "原则决定动态",
+        "loadError": "决定动态暂时不可用。",
+        "empty": "当前没有已确认的待决定、被阻塞或需要恢复的原则事项。",
+        "viewLibrary": "查看原则库 →"
+      },
       "ownerDecision": {
         "evidenceUnavailable": "这项裁决仍在等待你，但证据链目前不完整。PD 已暂停所有裁决动作，避免你在看不到正确版本时做决定。",
         "goRecoverCta": "查看恢复详情",
@@ -546,6 +554,7 @@
       "blockBasis": "形成依据",
       "blockBasisFallback": "该原则由历史行为校准沉淀而来，详细来源尚未关联。",
       "blockImpact": "当前影响",
+      "blockImpactSeeDecisionView": "当前是否影响行为，以详情页「当前实际执行」为准（本卡片不据生命周期状态断言影响）。",
       "blockImpactActive": "该原则正在影响智能体后续行为。",
       "blockImpactPending": "尚未生效，等待拥有者确认。",
       "blockImpactRejected": "拥有者已拒绝，不再影响智能体后续行为。",
@@ -573,6 +582,17 @@
       "channelDeferArchive": "延迟归档",
       "channelCodeToolHook": "Code Tool Hook",
       "confidence": "置信度",
+      "evaluabilityLabel": "可评价性",
+      "ownerDecision": {
+        "state": {
+          "needs_owner_decision": "待你决定",
+          "processing": "处理中",
+          "blocked": "判断暂不可建立",
+          "recovery_needed": "需要恢复",
+          "decided": "已有决定",
+          "no_action": "无需决定"
+        }
+      },
       "languageHintEn": "以英文生成",
       "languageHintZh": "以中文生成",
       "languageHintUnknown": "语言未知",
@@ -614,7 +634,7 @@
         "reflectionQ3": "如果它错了，我是否知道如何回滚？",
         "receipts": {
           "title": "生效履历",
-          "headline": "你的原则正在影响智能体行为",
+          "headline": "保留记录中有 {{effectCount}} 次行为影响（最近 {{lastEffectAt}}）——记录属历史观察，不代表当前仍在生效",
           "headlinePresence": "原则已进入智能体决策上下文——尚无行为生效记录",
           "counts": "行为生效 {{effectCount}} 次 · 参与上下文 {{presenceCount}} 次",
           "zeroEffect": "为什么「行为生效」是 0？生效需要证据：一次拦截、一次自动纠正，或智能体自述遵循。目前这条原则只进入过任务上下文（Presence）——参与决策 ≠ 已改变行为。随着运行积累出第一条证据，「行为生效」会从这里开始计数。",
@@ -709,12 +729,12 @@
           "derived": "推导",
           "actionsNotAuthorized": "当前不需要拥有者决策。",
           "confidence": { "strong": "有来源支撑", "degraded": "证据不完整" },
-          "state": { "candidate": "候选", "active": "已生效", "archived": "已归档", "deprecated": "已弃用", "probation": "观察中" },
+          "state": { "candidate": "候选", "active": "已批准", "archived": "已归档", "deprecated": "已弃用", "probation": "观察中" },
           "stage": { "generating": "生成中", "reviewing": "审查中", "revising": "修订中", "approval": "待审批", "activation": "激活中" },
           "automationState": { "idle": "空闲", "queued": "已排队", "running": "运行中", "retry_scheduled": "已安排重试", "stalled": "已停滞" },
           "headline": {
             "owner_decision": "需要你的决策",
-            "recovery": "需要恢复 Runtime",
+            "recovery": "存在待恢复的处理",
             "revision": "PD 正在修订这条原则",
             "processing": "PD 正在处理这条原则",
             "active": "这条原则正在生效",
@@ -732,7 +752,7 @@
           },
           "next": {
             "review": "使用下方现有审批操作完成审查。",
-            "inspect_recovery": "先检查阻塞证据；Runtime 恢复前不要批准。",
+            "inspect_recovery": "存在历史处理问题；先查看恢复信息，其与当前操作的关系尚未确认，相关决定以决策视图为准。",
             "wait": "当前无需操作，等待 PD 完成正在进行的工作。",
             "monitor": "当前无需操作，继续观察生效通道。",
             "inspect_data": "检查证据诊断，并修复所引用的持久化记录。",
@@ -770,6 +790,52 @@
             "failed": "Runtime 任务失败",
             "human_review": "已请求人工恢复审查"
           }
+        },
+        "ownerDecision": {
+          "title": "这条原则的决策视图",
+          "technicalOriginalNote": "以上为原始技术建议文本；可读的行为准则暂缺（保留原文以保证可追溯）。",
+          "state": {
+            "needs_owner_decision": "有一项决定需要你审阅",
+            "processing": "系统正在处理这项提案",
+            "blocked": "系统暂时无法建立完整的治理判断",
+            "recovery_needed": "这项处理需要恢复",
+            "decided": "此提案已有完成的决定",
+            "no_action": "目前没有需要你决定的事项"
+          },
+          "readsComplete": "本次所需数据已读取",
+          "readsPartial": "部分数据源读取失败",
+          "incident": "发生了什么",
+          "learned": "智能体学到的行为准则",
+          "sourceTier": "来源：{{tier}}（未经改写）",
+          "rationale": "为什么这么判断",
+          "applicability": "什么时候适用",
+          "expected": "批准后会怎样（拟议行为，未部署）",
+          "enforcementLabel": "当前实际执行",
+          "tier": { "scribe": "正式原则草案（Scribe）", "distiller": "抽象原则（Distiller）", "philosopher": "候选原则（Philosopher）", "candidate_principle": "原始原则建议" },
+          "enforcement": {
+            "active": "当前有正在执行的生效方式（见下方明细）。",
+            "deactivated": "此前的执行方式已停用；当前没有正在执行的生效方式。",
+            "partial": "部分执行方式仍在运行（见下方明细）。",
+            "none": "这条原则当前没有生效中的执行方式。",
+            "since": "生效中（自 {{since}}）",
+            "stopped": "已停用"
+          },
+          "evidence": "行为证据",
+          "uncertainty": "风险与不确定性",
+          "riskNotAssessed": "尚未做过风险评估；这不代表没有风险。",
+          "rollback": "如何停止影响",
+          "decision": "你的决定",
+          "history": "决定历史",
+          "historyState": { "approved": "已批准", "rejected": "已拒绝", "cancelled": "已取消", "pending": "待决定" },
+          "channel": { "prompt": "上下文提示通道", "code_tool_hook": "RuleCode 执行通道", "defer_archive": "归档通道" },
+          "actionLabel": { "approve": "批准", "reject": "拒绝", "edit_approval": "替换审批工件", "disable": "停止此执行方式今后的影响" },
+          "next": { "review": "有一项决定需要你审阅：请阅读上方说明后选择批准或拒绝。", "wait": "系统正在处理这项提案，请等待处理完成。", "inspect_data": "系统暂时无法建立完整的治理判断。", "inspect_recovery": "这项处理存在历史遗留问题；可查看恢复信息。", "monitor": "此提案已有完成的决定。可查看执行状态与行为记录。", "none": "目前没有需要你决定的事项。" },
+          "blocker": { "decision_material_missing": "这个对象缺少足够的信息让你安全地批准；拒绝仍可单独评估。", "lineage_not_available": "治理身份尚未建立，系统暂时无法判断是否需要你决定。", "historical_processing_issue": "存在历史处理问题，其与当前操作的关系尚未确认。" },
+          "noActions": "当前没有可以执行的操作。",
+          "unavailable": "决策视图暂时不可用，无法据此做决定。",
+          "invalidTarget": "动作目标缺失，无法提交。",
+          "actionDone": "操作已提交。",
+          "actionFailed": "操作被拒绝：{{detail}} 可用操作已刷新，请基于最新状态重新决定。"
         }
       }
     },

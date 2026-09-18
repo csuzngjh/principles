@@ -96,6 +96,30 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
   }
 
   /**
+   * Owner Decision Experience v1 Phase A (§9.1): plural ledger lookup for
+   * identity binding. Governance publication requires a UNIQUE ledger target —
+   * `existsForCandidate` intentionally returns the first match (legacy intake
+   * idempotency semantics), which cannot distinguish "exactly one" from
+   * "several". Returns every ledger principle referencing the candidate.
+   */
+  listForCandidate(candidateId: string): { id: string }[] {
+    const ledger = loadLedger(this.#stateDir);
+    return Object.values(ledger.tree.principles)
+      .filter((p) => p.derivedFromPainIds.includes(candidateId))
+      .map((p) => ({ id: p.id }));
+  }
+
+  /**
+   * Owner Decision Experience v1 Phase A (§9.1): presence check by principle
+   * id. A pre-existing artifact binding is only trusted when its target is a
+   * real ledger principle ("验证目标确实存在").
+   */
+  hasPrinciple(principleId: string): boolean {
+    const ledger = loadLedger(this.#stateDir);
+    return Object.hasOwn(ledger.tree.principles, principleId);
+  }
+
+  /**
    * Bug-O L3 fix: upgrade a ledger principle's status to 'active' after the
    * corresponding approval+activation has been dispatched successfully.
    *
