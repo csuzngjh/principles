@@ -72,10 +72,15 @@ on:
           - dry-run
           - publish
       product_version:
-        description: 'Product version to publish ("auto" = latest published create-principles-disciple; must match the ref''s package.json version — mismatch aborts before any metadata is generated)'
+        description: 'Product version to publish ("auto" = latest published create-principles-disciple). Identity = this resolved version + HEAD commit (format-validated, verified against each asset''s embedded stamp at assembly). An EXPLICIT version must match the ref''s create-principles-disciple/package.json unless allow_version_drift is set.'
         required: false
         default: 'auto'
         type: string
+      allow_version_drift:
+        description: 'Explicit product_version that disagrees with the ref''s package.json is refused unless this is true (deliberate re-publication escape hatch).'
+        required: false
+        default: false
+        type: boolean
       expires_at:
         description: 'Metadata expiry, RFC3339 UTC ("auto" = now + 90 days; pass explicitly when re-publishing a release)'
         required: false
@@ -129,8 +134,11 @@ jobs:
 
       - name: Resolve release identity
         id: release
+        env:
+          PRODUCT_VERSION_INPUT: ${{ github.event.inputs.product_version }}
+          ALLOW_VERSION_DRIFT: ${{ github.event.inputs.allow_version_drift }}
         run: |
-          VERSION="${{ github.event.inputs.product_version }}"
+          VERSION="$PRODUCT_VERSION_INPUT"
           if [ "$VERSION" = "auto" ] || [ -z "$VERSION" ]; then
             VERSION=$(npm view create-principles-disciple version 2>/dev/null || echo "")
           fi
@@ -138,22 +146,47 @@ jobs:
             echo "::error::Could not resolve the product version (npm view failed and no explicit product_version was given)."
             exit 1
           fi
-          LOCAL_VERSION=$(node -p "require('./packages/create-principles-disciple/package.json').version")
-          # Fail-closed gate (release identity guard): productVersion is an
-          # input to deriveReleaseId, so publishing version A with an artifact
-          # built from a ref whose package.json declares version B pollutes
-          # the release identity. The ref and the requested version must name
-          # the SAME release — refuse before the asset is built or any
-          # metadata is generated (applies to dry-run too).
-          if [ "$LOCAL_VERSION" != "$VERSION" ]; then
-            echo "::error::Product version mismatch — refusing to publish release metadata."
-            echo "package.json version=$LOCAL_VERSION"
-            echo "requested release version=$VERSION"
-            echo "Build/publish from a ref whose package.json declares the requested version, or pass the version this ref actually declares."
+          COMMIT=$(git rev-parse HEAD)
+          # PRI-832 review re-anchor: an EXPLICIT product_version is refused
+          # when it disagrees with the ref's create-principles-disciple
+          # package.json unless allow_version_drift is set. "auto" is already
+          # registry-anchored (npm view), so no comparison is needed. This
+          # restores the fail-closed guard the format-only validation retired,
+          # without resurrecting the stale-source-label problem: the anchored
+          # file is the REF's manifest, never a cross-run authority.
+          if [ "$PRODUCT_VERSION_INPUT" != "auto" ] && [ -n "$PRODUCT_VERSION_INPUT" ] && [ "$ALLOW_VERSION_DRIFT" != "true" ]; then
+            REF_VERSION=$(node -p "require('./packages/create-principles-disciple/package.json').version")
+            if [ "$VERSION" != "$REF_VERSION" ]; then
+              echo "::error::Explicit product_version ($VERSION) disagrees with the ref's create-principles-disciple/package.json ($REF_VERSION). Pass allow_version_drift=true only for a deliberate re-publication."
+              exit 1
+            fi
+          fi
+          # Consistency gate — validation target: the PUBLISHED-INPUT identity
+          # (SPEC §12 product identity unification). `productVersion` and
+          # `sourceCommit` below are the identity the publisher signs and the
+          # build-asset legs stamp INTO the artifact (verified again at
+          # assemble time against each asset's embedded stamp), so they must
+          # both be well-formed and mutually pinned to THIS run's ref.
+          #
+          # The source tree's package.json version is NO LONGER the release
+          # identity authority: since the product-identity unification it is a
+          # COMPONENT diagnostic (the per-package manifest), and its value may
+          # legitimately drift from the product version between releases. The
+          # old "requested version must equal package.json" comparison was
+          # therefore retired WITH this gate change — not the consistency
+          # semantics itself, which now binds the resolved identity to the
+          # actual artifact bytes (assemble-publish refuses a stamped asset
+          # that disagrees with these inputs; rc-6 lineage consistency).
+          if ! echo "$VERSION" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::Resolved product version is not a strict x.y.z version: $VERSION"
+            exit 1
+          fi
+          if ! echo "$COMMIT" | grep -qE '^[a-f0-9]{40}$'; then
+            echo "::error::Resolved source commit is not a 40-char git sha: $COMMIT"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
           echo "source_epoch=$(git log -1 --format=%ct)" >> "$GITHUB_OUTPUT"
           echo "release identity: version=$VERSION commit=$(git rev-parse --short HEAD)"
 
@@ -283,7 +316,15 @@ jobs:
           # Deterministic archive: fixed mtime from the SHARED source epoch
           # so the same source always yields the same per-platform bytes.
           export SOURCE_DATE_EPOCH="${{ needs.resolve-inputs.outputs.source_epoch }}"
-          npm run build:release-asset --workspace=create-principles-disciple -- --output "$RUNNER_TEMP/release-asset"
+          # Stamp the resolved publication identity INTO the asset (written
+          # BEFORE the archive bytes are hashed): every published artifact
+          # carries its own productVersion + sourceCommit, and assemble-publish
+          # refuses any asset whose embedded stamp disagrees with the inputs
+          # the metadata will sign (rc-6 lineage consistency).
+          npm run build:release-asset --workspace=create-principles-disciple -- \
+            --output "$RUNNER_TEMP/release-asset" \
+            --product-version "${{ needs.resolve-inputs.outputs.version }}" \
+            --source-commit "${{ needs.resolve-inputs.outputs.commit }}"
           ls -la "$RUNNER_TEMP/release-asset"
 
       - name: Stage platform asset for assembly
@@ -352,6 +393,54 @@ jobs:
           pattern: release-asset-*
           path: ${{ runner.temp }}/assets
           merge-multiple: true
+
+      - name: Verify embedded product identity in every platform asset
+        # Consistency gate, applied to the PUBLISHED-INPUT identity: each
+        # asset must carry the productVersion + sourceCommit stamp that
+        # resolve-inputs resolved and the metadata below will sign. A missing
+        # stamp (legacy/pre-unification artifact) or a disagreement means the
+        # bytes and the metadata would name different releases — refuse BEFORE
+        # any signing or publication (rc-3/rc-6; nothing is emitted).
+        run: |
+          EXPECTED_VERSION="${{ needs.resolve-inputs.outputs.version }}"
+          EXPECTED_COMMIT="${{ needs.resolve-inputs.outputs.commit }}"
+          shopt -s nullglob
+          ASSETS=("$RUNNER_TEMP"/assets/*/asset.tar)
+          if [ "${#ASSETS[@]}" -eq 0 ]; then
+            echo "::error::No platform assets were downloaded — refusing to publish."
+            exit 1
+          fi
+          for ASSET in "${ASSETS[@]}"; do
+            LEG=$(basename "$(dirname "$ASSET")")
+            STAMP=$(tar -xOf "$ASSET" _release/product-identity.json 2>/dev/null) || {
+              echo "::error::Asset $LEG has no embedded product identity stamp (_release/product-identity.json missing from asset.tar). Rebuild the asset with --product-version/--source-commit; refusing to publish unidentifiable bytes."
+              exit 1
+            }
+            if ! EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_COMMIT="$EXPECTED_COMMIT" node -e '
+              // PRI-832 review: enforce the FULL strict stamp contract (the
+              // same shape parseEmbeddedProductIdentity enforces at install),
+              // not just the two identity fields — a shape regression that
+              // passed here would ship signed bytes every install refuses.
+              let parsed;
+              try { parsed = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { console.error("stamp is not valid JSON"); process.exit(1); }
+              const problems = [];
+              if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) problems.push("stamp is not a JSON object");
+              if (parsed.schemaVersion !== 1) problems.push(`schemaVersion ${JSON.stringify(parsed.schemaVersion)} != 1`);
+              if (typeof parsed.productVersion !== "string" || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(parsed.productVersion)) problems.push(`productVersion ${JSON.stringify(parsed.productVersion)} is not strict x.y.z`);
+              if (typeof parsed.sourceCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.sourceCommit)) problems.push(`sourceCommit ${JSON.stringify(parsed.sourceCommit)} is not 40-hex`);
+              if (parsed.productVersion !== process.env.EXPECTED_VERSION) problems.push(`productVersion != resolved ${JSON.stringify(process.env.EXPECTED_VERSION)}`);
+              if (parsed.sourceCommit !== process.env.EXPECTED_COMMIT) problems.push(`sourceCommit != resolved ${JSON.stringify(process.env.EXPECTED_COMMIT)}`);
+              if (problems.length > 0) {
+                console.error(problems.join("; "));
+                process.exit(1);
+              }
+            ' <<<"$STAMP"; then
+              echo "::error::Asset $LEG embedded identity disagrees with the resolved publication inputs:"
+              echo "$STAMP"
+              exit 1
+            fi
+            echo "Asset $LEG identity verified: version=$EXPECTED_VERSION commit=${EXPECTED_COMMIT:0:12}"
+          done
 
       - name: Fetch previously published metadata state
         run: |

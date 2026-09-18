@@ -74,6 +74,42 @@ export function isReleaseChannelName(value: unknown): value is ReleaseChannelNam
 }
 
 /**
+ * Product identity stamped INTO a release asset before the asset bytes are
+ * hashed (SPEC §12 "embedded identity"): `_release/product-identity.json`.
+ *
+ * This is the SAME product identity owned by this module — not a second
+ * identity. The stamp deliberately excludes `releaseId`: a releaseId derived
+ * from artifact hashes can never be embedded into the hashed artifact itself
+ * (circular hashing). The canonical releaseId is derived later, downstream,
+ * from the stamped artifact's digest via `deriveReleaseId`.
+ *
+ * Parser contract (rc-2/rc-3): present-but-malformed stamps fail loud — an
+ * installer must never guess which facts of a broken identity to trust.
+ * Absence is the legacy shape and stays readable (provenance-unavailable).
+ */
+export interface EmbeddedProductIdentity {
+  readonly schemaVersion: 1;
+  readonly productVersion: string;
+  readonly sourceCommit: string;
+}
+
+export function parseEmbeddedProductIdentity(value: unknown): EmbeddedProductIdentity {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ProductIdentityError('productIdentity', `embedded product identity must be a JSON object, got: ${JSON.stringify(value)}`);
+  }
+  const record = value as Record<string, unknown>;
+  const schemaVersion = Object.hasOwn(record, 'schemaVersion') ? record.schemaVersion : undefined;
+  if (schemaVersion !== 1) {
+    throw new ProductIdentityError('schemaVersion', `embedded product identity has unsupported schemaVersion: ${JSON.stringify(schemaVersion)}`);
+  }
+  return {
+    schemaVersion: 1,
+    productVersion: parseProductVersion(Object.hasOwn(record, 'productVersion') ? record.productVersion : undefined).productVersion,
+    sourceCommit: assertGitCommit(Object.hasOwn(record, 'sourceCommit') ? record.sourceCommit : undefined, 'sourceCommit'),
+  };
+}
+
+/**
  * `pd version --json` report (SPEC §12). Phase 1 defines the contract; the
  * product surfaces fill it in Phase 6. Every field is required so a missing
  * fact fails loud instead of degrading into a partial lie.
