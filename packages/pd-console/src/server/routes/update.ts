@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { sendSuccess, sendMethodNotAllowed, sendNotFound } from '../utils/response.js';
 import { appendUpdateHistory } from './update-history.js';
+import { readCurrentVersion, resolvePluginDir } from '../utils/installed-layout.js';
 import type * as authorityModule from 'create-principles-disciple/dist/update/release-manager-authority.js';
 
 type AuthorityModule = typeof authorityModule;
@@ -20,10 +21,27 @@ function appendGovernedUpdateHistory(workspaceDir: string, entry: Parameters<typ
 
 async function checkUpdate(authority: Authority, res: ServerResponse): Promise<void> {
   const check = await authority.manager.check(authority.installStatus?.channel ?? 'stable');
+  // PRI-833: derive the active identity from the SAME installStatus snapshot
+  // the readiness gate used — no second inspect, no second identity read.
+  const { installStatus } = authority;
+  const activeIdentity = installStatus !== null
+    && typeof installStatus.productVersion === 'string' && installStatus.productVersion.length > 0
+    && typeof installStatus.releaseId === 'string' && installStatus.releaseId.length > 0
+    && typeof installStatus.generation === 'number' && Number.isSafeInteger(installStatus.generation)
+    ? { productVersion: installStatus.productVersion, releaseId: installStatus.releaseId, generation: installStatus.generation }
+    : undefined;
+  // The plugin-directory copy is read-only (installed-layout P4 authority); a
+  // divergence is surfaced, never silently resolved (PR-C contract).
+  const pluginVersion = readCurrentVersion(resolvePluginDir(''));
+  const identityDivergence = activeIdentity !== undefined && pluginVersion !== undefined && pluginVersion !== activeIdentity.productVersion
+    ? { activeVersion: activeIdentity.productVersion, pluginVersion, releaseId: activeIdentity.releaseId, generation: activeIdentity.generation }
+    : undefined;
   sendSuccess(res, {
     hasUpdate: check.decision.allowed && check.decision.direction !== 'reinstall',
-    currentVersion: authority.installStatus?.productVersion ?? 'unknown',
+    currentVersion: installStatus?.productVersion ?? 'unknown',
     latestVersion: check.candidate?.productVersion ?? '',
+    ...(activeIdentity !== undefined ? { versionSource: 'active-release' as const } : {}),
+    ...(identityDivergence !== undefined ? { identityDivergence } : {}),
     ...(!check.decision.allowed ? { reason: check.decision.reason, message: check.decision.message } : {}),
   });
 }
