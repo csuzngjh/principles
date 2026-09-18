@@ -16,11 +16,11 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { runRuleHostPipeline } from '../../src/services/rulehost-pipeline-runner.js';
+import { runRuleHostPipeline, backfillScribeIdentity } from '../../src/services/rulehost-pipeline-runner.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
 import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore } from '@principles/core/runtime-v2';
-import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
+import { addPrincipleToLedger, updatePrinciple } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
 type StageFactory = (taskId: string, priorArtifactId?: string) => unknown;
@@ -375,8 +375,12 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(artificerPrompts[1]).toContain('Prior adversarial replay failures');
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
-    // P1 #1 fix: candidate should be auto-enqueued into the ApprovalQueue
-    expect(result.approvalId).not.toBeNull();
+    // Owner Decision Experience v1 Phase A: this seed carries no candidateId and
+    // no ledger principle, so identity binding is unverified (candidate_unresolved)
+    // and the governance publication boundary refuses the approval enqueue — the
+    // two-round adversarial loop itself is unaffected.
+    expect(result.approvalId).toBeNull();
+    expect(result.degradationReason ?? '').toContain('identity_binding_unverified');
   }, 60_000);
 
   // ── Test 2: Capability OFF (explicitly disabled) → text_principle_only ──
@@ -682,8 +686,14 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(dreamerCallCount).toBe(2);
     expect(dreamerStage?.status).toBe('succeeded');
     expect(result.decision).toBe('candidate_ready_for_owner_review');
-    // P1 #1 fix: candidate should be auto-enqueued into the ApprovalQueue
-    expect(result.approvalId).not.toBeNull();
+    // Owner Decision Experience v1 Phase A: this seed carries NO candidateId,
+    // so the chain cannot bind a ledger principle (candidate_unresolved). The
+    // rule artifact is produced and preserved, but the governance publication
+    // boundary REFUSES to create an Owner approval subject for it.
+    expect(result.approvalId).toBeNull();
+    expect(result.degradationReason ?? '').toContain('identity_binding_unverified');
+    expect(result.degradationReason ?? '').toContain('candidate_unresolved');
+    expect(result.ruleArtifactId).not.toBeNull();
   }, 60_000);
 
   // ── Test 9 (E fix): retried status exhausted → stage marked 'degraded' ──
@@ -860,5 +870,306 @@ describe('runRuleHostPipeline — outputLanguage reaches adapter.startRun messag
     expect(dreamer?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
     expect(dreamer?.systemPrompt).toContain('Simplified Chinese');
     expect(dreamer?.payload).toContain('dreamer-lang-zh-001');
+  }, 60_000);
+});
+
+// ── Owner Decision Experience v1 Phase A — identity fix-forward (SPEC §9) ────
+//
+// §9.4 deterministic acceptance slice, exercised against the REAL production
+// path (real RuntimeStateManager, real SQLite, real ledger adapter):
+//   success / ledger missing / ambiguous / conflict / write failure / replay.
+// Failure slices must prove: NO approval enqueue, NO activation, NO duplicate
+// ledger — while the generated artifacts stay preserved for later replay.
+
+describe('runRuleHostPipeline — Phase A governance publication boundary (identity fix-forward)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } tmpDir = ''; }
+  });
+
+  function seedLedger(dir: string, id: string, candidateId: string): void {
+    addPrincipleToLedger(path.join(dir, '.state'), {
+      id, version: 1, text: `principle ${id}`, triggerPattern: '', action: '',
+      status: 'candidate', evaluability: 'weak_heuristic', priority: 'P1', scope: 'general',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0, derivedFromPainIds: [candidateId],
+      ruleIds: [], conflictsWithPrincipleIds: [], createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',
+    });
+  }
+
+  async function countApprovalsForArtifact(dir: string, artifactId: string): Promise<number> {
+    const verify = new RuntimeStateManager({ workspaceDir: dir });
+    await verify.initialize();
+    try {
+      const rows = verify.connection.getDb()
+        .prepare('SELECT COUNT(*) AS n FROM approvals WHERE artifact_id = ?').all(artifactId);
+      const first = rows[0] as { n: number } | undefined;
+      return first?.n ?? 0;
+    } finally {
+      await verify.close();
+    }
+  }
+
+  async function countActivations(dir: string): Promise<number> {
+    const verify = new RuntimeStateManager({ workspaceDir: dir });
+    await verify.initialize();
+    try {
+      const rows = verify.connection.getDb().prepare('SELECT COUNT(*) AS n FROM activations').all();
+      const first = rows[0] as { n: number } | undefined;
+      return first?.n ?? 0;
+    } finally {
+      await verify.close();
+    }
+  }
+
+  async function ledgerPrincipleCount(dir: string): Promise<number> {
+    const ledgerPath = path.join(dir, '.state', 'principle_training_state.json');
+    if (!fs.existsSync(ledgerPath)) return 0; // no ledger file yet = zero principles
+    const parsed = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as { _tree?: { principles?: Record<string, unknown> } };
+    return Object.keys(parsed._tree?.principles ?? {}).length;
+  }
+
+  it('ledger_missing: rule artifact preserved, but NO approval subject, NO activation, ledger untouched', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-id-missing', 'pain-id-missing', 'code_tool_hook', 'cand-no-ledger');
+    await sm.close();
+    // Deliberately NO ledger principle for cand-no-ledger.
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-id-missing', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      behaviorExamplePack: PIPE_PACK,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+
+    expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
+    // The generation chain produced and PRESERVED its artifacts…
+    expect(result.ruleArtifactId).not.toBeNull();
+    // …but the publication boundary refused to create an Owner approval subject.
+    expect(result.approvalId).toBeNull();
+    expect(result.degradationReason ?? '').toContain('identity_binding_unverified');
+    expect(result.degradationReason ?? '').toContain('ledger_missing');
+    expect(await countApprovalsForArtifact(tmpDir, result.ruleArtifactId!)).toBe(0);
+    expect(await countActivations(tmpDir)).toBe(0);
+    expect(await ledgerPrincipleCount(tmpDir)).toBe(0);
+  }, 60_000);
+
+  it('ledger_ambiguous: two ledger targets for one candidate refuse publication and refuse a silent first-match binding', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-id-ambiguous', 'pain-id-ambiguous', 'code_tool_hook', 'cand-ambiguous');
+    await sm.close();
+    seedLedger(tmpDir, 'ledger-A', 'cand-ambiguous');
+    seedLedger(tmpDir, 'ledger-B', 'cand-ambiguous');
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-id-ambiguous', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      behaviorExamplePack: PIPE_PACK,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+
+    expect(result.decision).toBe('candidate_ready_for_owner_review');
+    expect(result.approvalId).toBeNull();
+    expect(result.degradationReason ?? '').toContain('ledger_ambiguous');
+    expect(await countApprovalsForArtifact(tmpDir, result.ruleArtifactId!)).toBe(0);
+    // The scribe artifact must NOT be silently bound to the first match.
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const scribeTaskId = result.stages.find((s) => s.name === 'scribe')!.taskId!;
+      const scribeArt = (await verify.piArtifactStore.listBySourceTaskId(scribeTaskId)).find((a) => a.artifactKind === 'principle');
+      expect(scribeArt?.sourcePrincipleId).toBeUndefined();
+    } finally {
+      await verify.close();
+    }
+  }, 60_000);
+
+  it('identity_conflict: an existing binding to a different ledger target is never overwritten (§9.1.7)', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-id-conflict', 'pain-id-conflict', 'code_tool_hook', 'cand-conflict');
+    await sm.close();
+    seedLedger(tmpDir, 'ledger-original', 'cand-conflict');
+
+    const adapter = makeAdapter();
+    const first = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-id-conflict', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      behaviorExamplePack: PIPE_PACK,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+    expect(first.approvalId).not.toBeNull();
+
+    // Repoint the candidate: detach it from the original principle so the
+    // chain now resolves to a DIFFERENT (still unique) target. Otherwise the
+    // plural lookup would correctly report ledger_ambiguous, not a conflict.
+    updatePrinciple(path.join(tmpDir, '.state'), 'ledger-original', { derivedFromPainIds: [] });
+    seedLedger(tmpDir, 'ledger-replacement', 'cand-conflict');
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const scribeTaskId = first.stages.find((s) => s.name === 'scribe')!.taskId!;
+      const binding = await backfillScribeIdentity({
+        stateManager: verify,
+        artifactStore: verify.piArtifactStore,
+        scribeTaskId,
+        dreamerTaskId: 'dreamer-id-conflict',
+        workspaceDir: tmpDir,
+        now: new Date().toISOString(),
+      });
+      expect(binding).toEqual({ status: 'identity_conflict', existingPrincipleId: 'ledger-original', resolvedPrincipleId: 'ledger-replacement' });
+      const scribeArt = (await verify.piArtifactStore.listBySourceTaskId(scribeTaskId)).find((a) => a.artifactKind === 'principle');
+      expect(scribeArt?.sourcePrincipleId).toBe('ledger-original');
+    } finally {
+      await verify.close();
+    }
+  }, 60_000);
+
+  it('binding_write_failed / binding_readback_failed: store failures are structured, never silently accepted', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-id-wf', 'pain-id-wf', 'code_tool_hook', 'cand-wf');
+    await sm.close();
+    seedLedger(tmpDir, 'ledger-wf', 'cand-wf');
+
+    // Run once through the real path so a REAL scribe artifact exists.
+    const adapter = makeAdapter();
+    const run = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-id-wf', runtimeAdapter: adapter,
+      channel: 'prompt', pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+    expect(run.decision).toBe('text_principle_only');
+
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    const scribeTaskId = run.stages.find((s) => s.name === 'scribe')!.taskId!;
+    try {
+      // The real run already bound + verified — replay must be idempotent.
+      const idempotent = await backfillScribeIdentity({
+        stateManager: verify, artifactStore: verify.piArtifactStore, scribeTaskId,
+        dreamerTaskId: 'dreamer-id-wf', workspaceDir: tmpDir, now: new Date().toISOString(),
+      });
+      expect(idempotent).toEqual({ status: 'already_bound', principleId: 'ledger-wf' });
+
+      // Write failure: upsert throws.
+      const throwingStore = new Proxy(verify.piArtifactStore, {
+        get(target, prop, receiver) {
+          if (prop === 'upsertArtifact') {
+            return async () => { throw new Error('sqlite locked (simulated)'); };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      });
+      // For the write-failure slice we need an UNBOUND artifact: use a second,
+      // unbound scribe-shaped artifact created directly in the store.
+      const taskId2 = 'scribe-unbound-task';
+      await verify.createTask({ taskId: taskId2, taskKind: 'scribe', status: 'succeeded', attemptCount: 0, maxAttempts: 3, diagnosticJson: JSON.stringify({ pi_metadata: { channel: 'prompt', dependencyTaskIds: [], timeoutMs: 1000 } }) });
+      await verify.piArtifactStore.createArtifact({
+        artifactId: 'pi-art-unbound-1', artifactKind: 'principle', sourceTaskId: taskId2,
+        lineageArtifactIds: [], validationStatus: 'pending', contentJson: '{}',
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      });
+      const failed = await backfillScribeIdentity({
+        stateManager: verify, artifactStore: throwingStore, scribeTaskId: taskId2,
+        dreamerTaskId: 'dreamer-id-wf', workspaceDir: tmpDir, now: new Date().toISOString(),
+      });
+      expect(failed.status).toBe('binding_write_failed');
+
+      // Read-back failure: upsert "succeeds" but the store returns a row without
+      // the binding (write lost / wrong row).
+      const staleStore = new Proxy(verify.piArtifactStore, {
+        get(target, prop, receiver) {
+          if (prop === 'getArtifactById') {
+            return async () => null;
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      });
+      const stale = await backfillScribeIdentity({
+        stateManager: verify, artifactStore: staleStore, scribeTaskId: taskId2,
+        dreamerTaskId: 'dreamer-id-wf', workspaceDir: tmpDir, now: new Date().toISOString(),
+      });
+      expect(stale.status).toBe('binding_readback_failed');
+    } finally {
+      await verify.close();
+    }
+  }, 60_000);
+
+  it('text path: unverified binding preserves the principle artifact but creates NO approval (candidate_unresolved)', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    // No candidateId on the seed — candidate_unresolved.
+    await seedDreamerWithId(sm, 'dreamer-text-noid', 'pain-text-noid', 'prompt');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-text-noid', runtimeAdapter: adapter,
+      channel: 'prompt', pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+
+    expect(result.decision).toBe('text_principle_only');
+    expect(result.principleArtifactId).not.toBeNull();
+    expect(result.approvalId).toBeNull();
+    expect(result.degradationReason ?? '').toContain('identity_binding_unverified');
+    expect(result.degradationReason ?? '').toContain('candidate_unresolved');
+    expect(await countApprovalsForArtifact(tmpDir, result.principleArtifactId!)).toBe(0);
+    // The artifact is still marked validated — preserved, publishable later.
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    try {
+      const artifact = await verify.piArtifactStore.getArtifactById(result.principleArtifactId!);
+      expect(artifact?.validationStatus).toBe('validated');
+      expect(artifact?.sourcePrincipleId).toBeUndefined();
+    } finally {
+      await verify.close();
+    }
+  }, 60_000);
+
+  it('replay after identity repair publishes: seed ledger mid-flight is unnecessary — repair-then-rerun enqueues (§9.1.8)', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-repair', 'pain-repair', 'prompt', 'cand-repair');
+    await sm.close();
+
+    const adapter1 = makeAdapter();
+    const refused = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-repair', runtimeAdapter: adapter1,
+      channel: 'prompt', pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { adapter1.artifactStore = store; },
+    });
+    expect(refused.approvalId).toBeNull();
+
+    // Identity repair: the ledger entry for the candidate appears (e.g. intake
+    // completed or the ledger was restored). Replay publishes.
+    seedLedger(tmpDir, 'ledger-repaired', 'cand-repair');
+    const adapter2 = makeAdapter();
+    // Run 2 RESUMES run 1's succeeded dreamer seed (no new dreamer startRun) —
+    // pre-register that call so the scripted philosopher can resolve its
+    // sourceDreamerArtifactId lineage from the shared store.
+    adapter2.startRunCalls.push({ taskId: 'dreamer-repair' });
+    const published = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-repair', runtimeAdapter: adapter2,
+      channel: 'prompt', pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { adapter2.artifactStore = store; },
+    });
+    expect(published.approvalId, JSON.stringify(published, null, 1)).not.toBeNull();
+    expect(published.principleArtifactId).not.toBe(refused.principleArtifactId);
+    // Exactly one ledger principle exists — the pipeline never creates one.
+    expect(await ledgerPrincipleCount(tmpDir)).toBe(1);
   }, 60_000);
 });

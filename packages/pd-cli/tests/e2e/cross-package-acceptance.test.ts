@@ -56,6 +56,7 @@ import {
   createPITaskDiagnosticJson,
 } from '@principles/core/runtime-v2';
 import type { PIArtifactSnapshot, RuleHostInput } from '@principles/core/runtime-v2';
+import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 
 // ── Scripted adapter (same pattern as rulehost-pipeline-runner.test.ts) ──────
 
@@ -236,11 +237,11 @@ function makeTmpDir(): string {
   return dir;
 }
 
-async function seedDreamerWithId(sm: RuntimeStateManager, taskId: string, painId: string): Promise<void> {
+async function seedDreamerWithId(sm: RuntimeStateManager, taskId: string, painId: string, candidateId?: string): Promise<void> {
   const baseMetadata = JSON.parse(createPITaskDiagnosticJson({
     dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [],
   })) as Record<string, unknown>;
-  const diagnosticJson = JSON.stringify({ ...baseMetadata, sourcePainId: painId });
+  const diagnosticJson = JSON.stringify({ ...baseMetadata, sourcePainId: painId, ...(candidateId ? { candidateId } : {}) });
   await sm.createTask({ taskId, taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson });
 }
 
@@ -270,8 +271,17 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
     await sm.initialize();
-    await seedDreamerWithId(sm, 'dreamer-xpkg-001', 'pain-xpkg-001');
+    // Owner Decision Experience v1 Phase A: the governance publication boundary
+    // requires a verified chain identity (candidateId → unique ledger entry),
+    // mirroring what the intake bridge creates in production workspaces.
+    await seedDreamerWithId(sm, 'dreamer-xpkg-001', 'pain-xpkg-001', 'cand-xpkg-001');
     await sm.close();
+    addPrincipleToLedger(path.join(tmpDir, '.state'), {
+      id: 'ledger-xpkg-001', version: 1, text: 'cross-package ledger principle', triggerPattern: '', action: '',
+      status: 'candidate', evaluability: 'weak_heuristic', priority: 'P1', scope: 'general',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0, derivedFromPainIds: ['cand-xpkg-001'],
+      ruleIds: [], conflictsWithPrincipleIds: [], createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',
+    });
 
     // ── Step 2: Run RuleHost pipeline → candidate + auto-enqueue (P1 #1) ───
     const adapter = makeAdapter();

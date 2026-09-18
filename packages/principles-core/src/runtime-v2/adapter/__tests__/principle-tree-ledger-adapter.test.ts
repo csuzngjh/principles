@@ -155,3 +155,33 @@ describe('PrincipleTreeLedgerAdapter — activatePrinciple (Bug-O L3a)', () => {
     expect(after.tree.principles.P_bystander?.updatedAt).toBe(entryB.createdAt);
   });
 });
+
+// ── Owner Decision Experience v1 Phase A — plural + presence lookups (§9.1) ─
+
+describe('PrincipleTreeLedgerAdapter — listForCandidate / hasPrinciple (Phase A)', () => {
+  it('listForCandidate returns every principle referencing the candidate (0, 1, and many)', () => {
+    // writeProbationEntry is idempotent per candidateId per adapter instance,
+    // so a genuine two-principles-one-candidate ledger needs two instances
+    // (the pathological state this lookup exists to expose).
+    new PrincipleTreeLedgerAdapter({ stateDir })
+      .writeProbationEntry(makeProbationEntry({ id: 'P_one', sourceRef: 'candidate://candidate-c1' }));
+    new PrincipleTreeLedgerAdapter({ stateDir })
+      .writeProbationEntry(makeProbationEntry({ id: 'P_two', sourceRef: 'candidate://candidate-c1' }));
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    adapter.writeProbationEntry(makeProbationEntry({ id: 'P_three', sourceRef: 'candidate://candidate-c2' }));
+
+    expect(adapter.listForCandidate('candidate-c1').map((m) => m.id).sort()).toEqual(['P_one', 'P_two']);
+    expect(adapter.listForCandidate('candidate-c2')).toEqual([{ id: 'P_three' }]);
+    expect(adapter.listForCandidate('candidate-unknown')).toEqual([]);
+  });
+
+  it('hasPrinciple checks ledger presence by principle id (durable-binding verification)', () => {
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    adapter.writeProbationEntry(makeProbationEntry({ id: 'P_present' }));
+
+    expect(adapter.hasPrinciple('P_present')).toBe(true);
+    expect(adapter.hasPrinciple('P_absent')).toBe(false);
+    // Empty string must not match anything (rc-3 fail-loud adjacent).
+    expect(adapter.hasPrinciple('')).toBe(false);
+  });
+});
