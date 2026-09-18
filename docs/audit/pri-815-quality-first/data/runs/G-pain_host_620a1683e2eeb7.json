@@ -1,0 +1,685 @@
+{
+ "group": "G-pain_host_620a1683e2eeb7",
+ "class": "CLEAN",
+ "pain_id": "pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+ "frozen_at": "2026-09-17T15:59:17.583Z",
+ "repeats": [
+  {
+   "group": "G-pain_host_620a1683e2eeb7",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_620a1683e2eeb7-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在 signal_collector 已明确报告“所有子代理已 settle”之后，仍继续调用 sessions_yield 等待",
+       "betterDecision": "一旦在上下文中观察到“所有子代理已完成/settled”信号，立即停止 sessions_yield 调用并转入结果收集阶段",
+       "rationale": "行动必须以可观察状态为依据；当目标状态已被观察到时，重复的等待调用是纯粹的资源浪费，并必然触发系统纠正",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_based_termination",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "等待循环缺少内部终止逻辑，未在每次调用后观察实际结果并与预期目标比较",
+       "betterDecision": "每次 sessions_yield 返回后检查可观察输出（已 settle 数量、仍在运行的子代理数），满足完成条件即退出循环",
+       "rationale": "执行不等于成功，必须验证；加入“观察-比较-终止”步骤使循环具备内部终止条件，不再依赖外部纠正才停下",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_then_terminate",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "把 sessions_yield 当作默认的“继续等待”习惯行为，进入循环前未定义任何停止条件",
+       "betterDecision": "在进入任何等待循环之前先声明显式退出条件（如“收到全部 settle 信号”或最大等待次数上限），并在每次迭代时检查",
+       "rationale": "将停止条件作为显式护栏前置，能从结构上阻止开放式重复，是最简单、改动最小的干预",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "guardrail_before_loop",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "依赖外部系统消息的严重纠正来打断等待循环，而非自我监控上下文中已有的完成信号",
+       "betterDecision": "在每次重复调用同一工具前执行预检：扫描上下文是否已存在声明任务完成的信号或指令，若存在则立即改变计划",
+       "rationale": "外部纠正是迟到的反馈；调用前的内部自检能在造成浪费之前阻止冗余调用，并将纠正内化为未来的行为习惯",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "self_check_before_repeat",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "忽视系统消息中“不要再等待或调用 sessions_yield”的直接禁止指令，重新发出相同的等待调用",
+       "betterDecision": "收到任何明确禁止性指令时立即停止该调用模式，并重新规划下一步行动（如汇总子代理结果）",
+       "rationale": "显式指令与边界覆盖推断的偏好或习惯模式；将系统指令视为硬性停止条件可避免严重级别的纠正",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "explicit_directive_priority",
+       "sourcePrincipleId": "T-02"
+      }
+     ],
+     "sourcePainId": "pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+     "contextRefs": [
+      "artifact://cd8cdd30-4450-47c6-be0b-3d0cdcf22ed5"
+     ],
+     "generatedAt": "2025-06-27T10:15:42Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_620a1683e2eeb7-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在 signal_collector 已明确报告“所有子代理已 settle”之后，仍继续调用 sessions_yield 等待\",\"betterDecision\":\"一旦在上下文中观察到“所有子代理已完成/settled”信号，立即停止 sessions_yield 调用并转入结果收集阶段\",\"rationale\":\"行动必须以可观察状态为依据；当目标状态已被观察到时，重复的等待调用是纯粹的资源浪费，并必然触发系统纠正\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_based_termination\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"等待循环缺少内部终止逻辑，未在每次调用后观察实际结果并与预期目标比较\",\"betterDecision\":\"每次 sessions_yield 返回后检查可观察输出（已 settle 数量、仍在运行的子代理数），满足完成条件即退出循环\",\"rationale\":\"执行不等于成功，必须验证；加入“观察-比较-终止”步骤使循环具备内部终止条件，不再依赖外部纠正才停下\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_then_terminate\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"把 sessions_yield 当作默认的“继续等待”习惯行为，进入循环前未定义任何停止条件\",\"betterDecision\":\"在进入任何等待循环之前先声明显式退出条件（如“收到全部 settle 信号”或最大等待次数上限），并在每次迭代时检查\",\"rationale\":\"将停止条件作为显式护栏前置，能从结构上阻止开放式重复，是最简单、改动最小的干预\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"guardrail_before_loop\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":3,\"badDecision\":\"依赖外部系统消息的严重纠正来打断等待循环，而非自我监控上下文中已有的完成信号\",\"betterDecision\":\"在每次重复调用同一工具前执行预检：扫描上下文是否已存在声明任务完成的信号或指令，若存在则立即改变计划\",\"rationale\":\"外部纠正是迟到的反馈；调用前的内部自检能在造成浪费之前阻止冗余调用，并将纠正内化为未来的行为习惯\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"self_check_before_repeat\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":4,\"badDecision\":\"忽视系统消息中“不要再等待或调用 sessions_yield”的直接禁止指令，重新发出相同的等待调用\",\"betterDecision\":\"收到任何明确禁止性指令时立即停止该调用模式，并重新规划下一步行动（如汇总子代理结果）\",\"rationale\":\"显式指令与边界覆盖推断的偏好或习惯模式；将系统指令视为硬性停止条件可避免严重级别的纠正\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"explicit_directive_priority\",\"sourcePrincipleId\":\"T-02\"}],\"sourcePainId\":\"pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791\",\"contextRefs\":[\"artifact://cd8cdd30-4450-47c6-be0b-3d0cdcf22ed5\"],\"generatedAt\":\"2025-06-27T10:15:42Z\"}",
+    "usage": {
+     "input": 1746,
+     "output": 3541,
+     "total": 5287
+    },
+    "latencyMs": 40389,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "38f23744ccee69c9"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_620a1683e2eeb7-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r1-run1",
+     "thesis": "无终止逻辑的重复行为是将失败外包给外部纠正：任何迭代或等待动作在开始前必须自带停止条件，在每次迭代中依据可观察状态验证是否满足，且一旦观察到完成信号或收到明确禁止指令，必须立即停止并转变计划，而非等待系统级纠正来打断。",
+     "principleCandidate": {
+      "title": "Termination-Aware Repetition: pre-declare exit conditions and verify observed state each iteration",
+      "rationale": "根因是开放式等待循环缺乏内在终止逻辑：重复调用在目标状态已被观察到之后仍继续，甚至忽视明确的禁止指令，直到外部严重纠正才停下。Dreamer 的五个候选共同指向一个结构性修复——进入循环前声明退出条件（护栏前置）、每次迭代后观察并与目标比较（执行即验证）、以可观察完成信号与显式指令为硬停止条件。将终止逻辑内建于重复动作本身，可从结构上阻止冗余调用，而非依赖迟到的外部反馈。",
+      "scope": "适用于任何随时间重复的行为：等待/轮询循环、重试、重复工具调用、周期性检查。尤其在上下文中已存在完成信号、配额上限或明确停止指令的场合；不限于具体的 sessions_yield 场景。",
+      "confidence": 0.85
+     },
+     "risks": [
+      "与核心公理存在部分重叠：本原则实质上是 T-05（护栏前置）、T-07（行动后观察验证）、T-03（以可观察证据为依据）与 T-02（显式指令优先）在循环控制场景下的合成应用，若被采纳需明确其为场景化细化而非新增基础公理，避免公理体系冗余。",
+      "对完成信号的误读可能导致过早终止：例如将单个子代理的 settle 信号误认为全部完成，从而提前退出等待并收集到不完整的结果。",
+      "预声明的最大迭代/等待上限难以校准：上限过低会截断必要的等待，过高则重新引入资源浪费，需要结合实际任务时延动态调整。",
+      "将任何显式指令一律视为硬停止可能被滥用：若指令来源不可信或与更高优先级目标冲突，机械停止可能中断正当流程，需保留对指令层级与来源的判断。"
+     ],
+     "generatedAt": "2025-06-27T10:18:23Z"
+    },
+    "raw": "{\n  \"taskId\": \"philosopher-pri815-G-pain_host_620a1683e2eeb7-r1\",\n  \"sourceDreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r1-run1\",\n  \"thesis\": \"无终止逻辑的重复行为是将失败外包给外部纠正：任何迭代或等待动作在开始前必须自带停止条件，在每次迭代中依据可观察状态验证是否满足，且一旦观察到完成信号或收到明确禁止指令，必须立即停止并转变计划，而非等待系统级纠正来打断。\",\n  \"principleCandidate\": {\n    \"title\": \"Termination-Aware Repetition: pre-declare exit conditions and verify observed state each iteration\",\n    \"rationale\": \"根因是开放式等待循环缺乏内在终止逻辑：重复调用在目标状态已被观察到之后仍继续，甚至忽视明确的禁止指令，直到外部严重纠正才停下。Dreamer 的五个候选共同指向一个结构性修复——进入循环前声明退出条件（护栏前置）、每次迭代后观察并与目标比较（执行即验证）、以可观察完成信号与显式指令为硬停止条件。将终止逻辑内建于重复动作本身，可从结构上阻止冗余调用，而非依赖迟到的外部反馈。\",\n    \"scope\": \"适用于任何随时间重复的行为：等待/轮询循环、重试、重复工具调用、周期性检查。尤其在上下文中已存在完成信号、配额上限或明确停止指令的场合；不限于具体的 sessions_yield 场景。\",\n    \"confidence\": 0.85\n  },\n  \"risks\": [\n    \"与核心公理存在部分重叠：本原则实质上是 T-05（护栏前置）、T-07（行动后观察验证）、T-03（以可观察证据为依据）与 T-02（显式指令优先）在循环控制场景下的合成应用，若被采纳需明确其为场景化细化而非新增基础公理，避免公理体系冗余。\",\n    \"对完成信号的误读可能导致过早终止：例如将单个子代理的 settle 信号误认为全部完成，从而提前退出等待并收集到不完整的结果。\",\n    \"预声明的最大迭代/等待上限难以校准：上限过低会截断必要的等待，过高则重新引入资源浪费，需要结合实际任务时延动态调整。\",\n    \"将任何显式指令一律视为硬停止可能被滥用：若指令来源不可信或与更高优先级目标冲突，机械停止可能中断正当流程，需保留对指令层级与来源的判断。\"\n  ],\n  \"generatedAt\": \"2025-06-27T10:18:23Z\"\n}",
+    "usage": {
+     "input": 1566,
+     "output": 1457,
+     "total": 3023
+    },
+    "latencyMs": 23742,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "180a2413dee4573f"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_620a1683e2eeb7-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r1-run1",
+     "principleDraft": {
+      "title": "Termination-Aware Repetition: pre-declare exit conditions and verify observed state each iteration",
+      "statement": "任何迭代、等待、轮询或重试动作在开始前必须声明明确的退出条件——以可观察状态表述的完成判据、最大迭代次数或时长上限、以及\"收到显式停止/禁止指令即停\"；每次迭代后必须将观察到的状态与这些退出条件比对，一旦满足完成判据或收到显式停止指令，立即停止重复并转入下一步计划；绝不允许重复行为依赖外部系统纠正（如配额耗尽或强制中断）来充当事实上的终止机制。",
+      "rationale": "根因诊断表明：开放式等待/轮询循环缺乏内建的终止逻辑，重复调用在目标状态已被观察到之后仍然继续，甚至忽视上下文中已存在的显式停止指令，直到外部严重纠正（配额耗尽、系统强制中断）才停止——这等于把\"何时停止\"的判断外包给外部系统。将终止逻辑前置（进入循环前声明退出条件）、每轮执行即验证（迭代后与目标状态比对）、以可观察完成信号与显式指令为硬停止条件，可从结构上阻断冗余重复，而非依赖迟到的外部反馈。",
+      "applicability": [
+       "等待/轮询循环：等待子任务、子代理或外部系统进入目标状态（如 sessions_yield 式的 settle 等待）",
+       "重试逻辑：对可能失败的操作进行有限次重试",
+       "重复工具调用：同一工具或等价操作的连续多次调用",
+       "周期性检查：按时间间隔反复探测系统状态",
+       "上下文中已存在完成信号、配额上限或显式停止指令的任何重复行为场景"
+      ],
+      "antiPatterns": [
+       "无退出条件的开放式循环：进入重复前未声明完成判据或迭代/时长上限",
+       "目标状态已被观察到之后仍继续迭代",
+       "在重复过程中收到显式停止/禁止指令后仍继续调用",
+       "把外部系统纠正（配额耗尽、强制中断、人工打断）当作事实上的终止机制",
+       "每轮迭代后不做状态比对，仅机械重复固定次数",
+       "观察到完成信号后不转变计划，而是反复检查已确认完成的状态"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望代理的任何重复等待/轮询/重试行为都自带终止逻辑——一旦观察到完成状态或收到明确停止指令就立即自行停止并转变计划，而不是耗尽资源直到系统级纠正被迫打断。",
+      "targetBehavior": "代理在进入任何重复动作前，先声明退出条件（可观察的完成判据 + 最大迭代/时长上限 + 显式停止指令即停）；每轮迭代后检查观察到的状态是否满足退出条件；满足或收到停止指令时立即退出循环并转入下一步计划。审查者在工具轨迹中应能看到：循环前的退出条件声明、每轮迭代后的状态检查动作、以及条件满足后的及时退出。",
+      "forbiddenBehavior": "重复调用在目标状态已被观察到之后仍继续；在收到显式停止/禁止指令后仍继续调用；以无退出条件的开放式循环运行，直至配额耗尽或系统强制纠正才终止。",
+      "evidenceSource": "痛点诊断：一个无终止逻辑的等待/轮询循环（sessions_yield 场景）在完成信号已可观察、显式停止指令已存在的情况下仍持续重复调用，最终由外部系统级纠正打断并造成资源浪费。",
+      "validationExpectation": "评估者应要求任何由本原则生成的规则同时具备三个可检验要件： 循环进入前的退出条件声明（完成判据与上限）； 每轮迭代后对可观察状态的比对； 观察到完成信号或收到显式停止指令时立即停止并转变计划。缺少任一要件、或允许在已观察到完成信号后继续迭代的规则，均判定为对意图不忠实。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r1-run1"
+     },
+     "risks": [
+      "与核心公理存在重叠：本原则实质上是 T-05（护栏前置）、T-07（行动后观察验证）、T-03（以可观察证据为依据）与 T-02（显式指令优先）在循环控制场景下的合成细化；若被采纳应标注为场景化细化而非新增基础公理，避免公理体系冗余。",
+      "完成信号误读可能导致过早终止：例如把单个子代理的 settle 信号当作全部完成，提前退出等待并收集到不完整的结果。",
+      "预声明的最大迭代/等待上限难以校准：上限过低会截断必要的等待，过高则重新引入资源浪费，需要结合任务实际时延动态调整。",
+      "将任何显式指令一律视为硬停止可能被滥用：若指令来源不可信或与更高优先级目标冲突，机械停止可能中断正当流程，需保留对指令层级与来源的判断。",
+      "原则可能被过度泛化到非重复的单次动作，导致无谓的前置声明开销；规则生成时应限定于重复性行为。"
+     ],
+     "generatedAt": "2025-06-27T10:21:45Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_620a1683e2eeb7-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Termination-Aware Repetition: pre-declare exit conditions and verify observed state each iteration\",\n    \"statement\": \"任何迭代、等待、轮询或重试动作在开始前必须声明明确的退出条件——以可观察状态表述的完成判据、最大迭代次数或时长上限、以及\\\"收到显式停止/禁止指令即停\\\"；每次迭代后必须将观察到的状态与这些退出条件比对，一旦满足完成判据或收到显式停止指令，立即停止重复并转入下一步计划；绝不允许重复行为依赖外部系统纠正（如配额耗尽或强制中断）来充当事实上的终止机制。\",\n    \"rationale\": \"根因诊断表明：开放式等待/轮询循环缺乏内建的终止逻辑，重复调用在目标状态已被观察到之后仍然继续，甚至忽视上下文中已存在的显式停止指令，直到外部严重纠正（配额耗尽、系统强制中断）才停止——这等于把\\\"何时停止\\\"的判断外包给外部系统。将终止逻辑前置（进入循环前声明退出条件）、每轮执行即验证（迭代后与目标状态比对）、以可观察完成信号与显式指令为硬停止条件，可从结构上阻断冗余重复，而非依赖迟到的外部反馈。\",\n    \"applicability\": [\n      \"等待/轮询循环：等待子任务、子代理或外部系统进入目标状态（如 sessions_yield 式的 settle 等待）\",\n      \"重试逻辑：对可能失败的操作进行有限次重试\",\n      \"重复工具调用：同一工具或等价操作的连续多次调用\",\n      \"周期性检查：按时间间隔反复探测系统状态\",\n      \"上下文中已存在完成信号、配额上限或显式停止指令的任何重复行为场景\"\n    ],\n    \"antiPatterns\": [\n      \"无退出条件的开放式循环：进入重复前未声明完成判据或迭代/时长上限\",\n      \"目标状态已被观察到之后仍继续迭代\",\n      \"在重复过程中收到显式停止/禁止指令后仍继续调用\",\n      \"把外部系统纠正（配额耗尽、强制中断、人工打断）当作事实上的终止机制\",\n      \"每轮迭代后不做状态比对，仅机械重复固定次数\",\n      \"观察到完成信号后不转变计划，而是反复检查已确认完成的状态\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Owner 希望代理的任何重复等待/轮询/重试行为都自带终止逻辑——一旦观察到完成状态或收到明确停止指令就立即自行停止并转变计划，而不是耗尽资源直到系统级纠正被迫打断。\",\n    \"targetBehavior\": \"代理在进入任何重复动作前，先声明退出条件（可观察的完成判据 + 最大迭代/时长上限 + 显式停止指令即停）；每轮迭代后检查观察到的状态是否满足退出条件；满足或收到停止指令时立即退出循环并转入下一步计划。审查者在工具轨迹中应能看到：循环前的退出条件声明、每轮迭代后的状态检查动作、以及条件满足后的及时退出。\",\n    \"forbiddenBehavior\": \"重复调用在目标状态已被观察到之后仍继续；在收到显式停止/禁止指令后仍继续调用；以无退出条件的开放式循环运行，直至配额耗尽或系统强制纠正才终止。\",\n    \"evidenceSource\": \"痛点诊断：一个无终止逻辑的等待/轮询循环（sessions_yield 场景）在完成信号已可观察、显式停止指令已存在的情况下仍持续重复调用，最终由外部系统级纠正打断并造成资源浪费。\",\n    \"validationExpectation\": \"评估者应要求任何由本原则生成的规则同时具备三个可检验要件： 循环进入前的退出条件声明（完成判据与上限）； 每轮迭代后对可观察状态的比对； 观察到完成信号或收到显式停止指令时立即停止并转变计划。缺少任一要件、或允许在已观察到完成信号后继续迭代的规则，均判定为对意图不忠实。\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r1-run1\"\n  },\n  \"risks\": [\n    \"与核心公理存在重叠：本原则实质上是 T-05（护栏前置）、T-07（行动后观察验证）、T-03（以可观察证据为依据）与 T-02（显式指令优先）在循环控制场景下的合成细化；若被采纳应标注为场景化细化而非新增基础公理，避免公理体系冗余。\",\n    \"完成信号误读可能导致过早终止：例如把单个子代理的 settle 信号当作全部完成，提前退出等待并收集到不完整的结果。\",\n    \"预声明的最大迭代/等待上限难以校准：上限过低会截断必要的等待，过高则重新引入资源浪费，需要结合任务实际时延动态调整。\",\n    \"将任何显式指令一律视为硬停止可能被滥用：若指令来源不可信或与更高优先级目标冲突，机械停止可能中断正当流程，需保留对指令层级与来源的判断。\",\n    \"原则可能被过度泛化到非重复的单次动作，导致无谓的前置声明开销；规则生成时应限定于重复性行为。\"\n  ],\n  \"generatedAt\": \"2025-06-27T10:21:45Z\"\n}",
+    "usage": {
+     "input": 1954,
+     "output": 5210,
+     "total": 7164
+    },
+    "latencyMs": 64941,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "b4bd316134486d72"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_620a1683e2eeb7-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r1-run1",
+     "principleDraft": {
+      "title": "Termination-Aware Repetition: pre-declare exit conditions and verify observed state each iteration",
+      "statement": "Any iterative or waiting action must carry its own termination logic: before entering a repetition (wait/poll loop, retry, repeated tool call), declare explicit exit conditions tied to observable state; after each iteration, compare the observed state against those conditions; and stop immediately and switch to the next planned step as soon as the target state is observed in context or an explicit stop/prohibition instruction is received. Repetition must never persist after its completion condition is already observable, and must never depend on external system correction to be interrupted.",
+      "rationale": "The diagnosed root cause is an open-ended wait loop with no internal termination logic: after signal_collector had already reported 'all subagents settled' and explicitly instructed not to call sessions_yield again, the assistant kept issuing the same wait call until a severe external correction interrupted it. Embedding termination into the repetition itself — pre-declared exit conditions before the loop, per-iteration observation compared against the target state, and hard stops on observed completion signals and explicit directives — structurally blocks redundant calls at the source instead of relying on late external feedback.",
+      "applicability": [
+       "Wait/poll loops that yield until a target state is reached (e.g., sessions_yield waiting for subagents to settle)",
+       "Retry loops and repeated identical tool calls",
+       "Periodic checks or monitoring actions repeated over time",
+       "Any repetition performed when the context already contains a completion signal, a quota/limit notice, or an explicit stop or prohibition instruction"
+      ],
+      "antiPatterns": [
+       "Continuing to call a wait/yield tool (e.g., sessions_yield) after an observable completion signal such as 'all subagents settled' is already in context",
+       "Re-issuing a call pattern after receiving an explicit instruction to stop or not to make that call",
+       "Entering a wait/retry loop without declaring any exit condition or bound",
+       "Repeating a call without comparing the latest observable output against the target state between iterations",
+       "Treating system-level severe correction as the normal mechanism that ends a loop"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to stop a wait/repetition pattern on its own as soon as the context shows the awaited state is reached (e.g., 'all subagents settled') or an explicit stop instruction exists — never continuing redundant calls like sessions_yield until a severe external correction fires.",
+      "targetBehavior": "Before each repeated or waiting call, the agent scans context for completion signals and its pre-declared exit condition; upon observing the target state or a stop directive, it terminates the loop immediately and moves to the successor step (e.g., collecting subagent results), so the trajectory shows zero identical wait calls after the completion signal appears.",
+      "forbiddenBehavior": "Open-ended repetition that ignores already-observable completion state or explicit prohibition instructions — continuing or re-issuing the same wait/repeated call and stopping only when an external system correction interrupts.",
+      "evidenceSource": "Pain pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791: after signal_collector reported all subagents settled and instructed 'do not wait or call sessions_yield again', the assistant repeated sessions_yield anyway; the severe user correction was auto-detected by the after_tool_call hook (diagnosis_pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791).",
+      "validationExpectation": "An evaluator should verify that derived rules (a) block or warn on a repeated wait/yield call when a completion signal or explicit stop instruction already exists in context, (b) require the exit condition to be checked against observable state on every iteration rather than relying only on a fixed iteration cap, and (c) direct the agent to the successor step such as result collection; a compliant trajectory terminates the loop on the observed signal with no subsequent identical calls and no system correction."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r1-run1"
+     },
+     "risks": [
+      "Overlaps core axioms: this principle is a loop-control synthesis of T-03 (observable evidence), T-05 (guardrails before execution), T-07 (observe and compare after acting) and T-02 (explicit directives override habits); it should be adopted as a scenario-specific refinement, not a new base axiom, to avoid axiom-set redundancy.",
+      "Misreading a partial completion signal (e.g., a single subagent's settle) as full completion can terminate the loop prematurely and collect incomplete results.",
+      "Pre-declared maximum iteration/wait bounds are hard to calibrate: too low truncates necessary waiting, too high re-introduces wasted calls.",
+      "Treating any explicit instruction as an unconditional hard stop can be abused when the instruction source is untrusted or conflicts with higher-priority owner goals; instruction provenance and hierarchy still require judgment."
+     ],
+     "generatedAt": "2025-06-27T10:27:05Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_620a1683e2eeb7-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r1-run1\",\"principleDraft\":{\"title\":\"Termination-Aware Repetition: pre-declare exit conditions and verify observed state each iteration\",\"statement\":\"Any iterative or waiting action must carry its own termination logic: before entering a repetition (wait/poll loop, retry, repeated tool call), declare explicit exit conditions tied to observable state; after each iteration, compare the observed state against those conditions; and stop immediately and switch to the next planned step as soon as the target state is observed in context or an explicit stop/prohibition instruction is received. Repetition must never persist after its completion condition is already observable, and must never depend on external system correction to be interrupted.\",\"rationale\":\"The diagnosed root cause is an open-ended wait loop with no internal termination logic: after signal_collector had already reported 'all subagents settled' and explicitly instructed not to call sessions_yield again, the assistant kept issuing the same wait call until a severe external correction interrupted it. Embedding termination into the repetition itself — pre-declared exit conditions before the loop, per-iteration observation compared against the target state, and hard stops on observed completion signals and explicit directives — structurally blocks redundant calls at the source instead of relying on late external feedback.\",\"applicability\":[\"Wait/poll loops that yield until a target state is reached (e.g., sessions_yield waiting for subagents to settle)\",\"Retry loops and repeated identical tool calls\",\"Periodic checks or monitoring actions repeated over time\",\"Any repetition performed when the context already contains a completion signal, a quota/limit notice, or an explicit stop or prohibition instruction\"],\"antiPatterns\":[\"Continuing to call a wait/yield tool (e.g., sessions_yield) after an observable completion signal such as 'all subagents settled' is already in context\",\"Re-issuing a call pattern after receiving an explicit instruction to stop or not to make that call\",\"Entering a wait/retry loop without declaring any exit condition or bound\",\"Repeating a call without comparing the latest observable output against the target state between iterations\",\"Treating system-level severe correction as the normal mechanism that ends a loop\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"The Owner wants the agent to stop a wait/repetition pattern on its own as soon as the context shows the awaited state is reached (e.g., 'all subagents settled') or an explicit stop instruction exists — never continuing redundant calls like sessions_yield until a severe external correction fires.\",\"targetBehavior\":\"Before each repeated or waiting call, the agent scans context for completion signals and its pre-declared exit condition; upon observing the target state or a stop directive, it terminates the loop immediately and moves to the successor step (e.g., collecting subagent results), so the trajectory shows zero identical wait calls after the completion signal appears.\",\"forbiddenBehavior\":\"Open-ended repetition that ignores already-observable completion state or explicit prohibition instructions — continuing or re-issuing the same wait/repeated call and stopping only when an external system correction interrupts.\",\"evidenceSource\":\"Pain pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791: after signal_collector reported all subagents settled and instructed 'do not wait or call sessions_yield again', the assistant repeated sessions_yield anyway; the severe user correction was auto-detected by the after_tool_call hook (diagnosis_pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791).\",\"validationExpectation\":\"An evaluator should verify that derived rules (a) block or warn on a repeated wait/yield call when a completion signal or explicit stop instruction already exists in context, (b) require the exit condition to be checked against observable state on every iteration rather than relying only on a fixed iteration cap, and (c) direct the agent to the successor step such as result collection; a compliant trajectory terminates the loop on the observed signal with no subsequent identical calls and no system correction.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r1-run1\"},\"risks\":[\"Overlaps core axioms: this principle is a loop-control synthesis of T-03 (observable evidence), T-05 (guardrails before execution), T-07 (observe and compare after acting) and T-02 (explicit directives override habits); it should be adopted as a scenario-specific refinement, not a new base axiom, to avoid axiom-set redundancy.\",\"Misreading a partial completion signal (e.g., a single subagent's settle) as full completion can terminate the loop prematurely and collect incomplete results.\",\"Pre-declared maximum iteration/wait bounds are hard to calibrate: too low truncates necessary waiting, too high re-introduces wasted calls.\",\"Treating any explicit instruction as an unconditional hard stop can be abused when the instruction source is untrusted or conflicts with higher-priority owner goals; instruction provenance and hierarchy still require judgment.\"],\"generatedAt\":\"2025-06-27T10:27:05Z\"}",
+    "usage": {
+     "input": 3825,
+     "output": 5702,
+     "total": 9527
+    },
+    "latencyMs": 68518,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "66e805f21a8ab890"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_620a1683e2eeb7",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_620a1683e2eeb7-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在 signal_collector 已明确报告所有子代理已 settle 后，仍继续调用 sessions_yield 保持等待循环",
+       "betterDecision": "在每次调用 sessions_yield 前先检查可观察状态：当收到\"所有子代理已 settle\"信号时，立即停止等待调用并转入结果收集阶段",
+       "rationale": "终止条件已被环境明确满足时继续重复等待是纯浪费行为，会触发系统严重纠正；等待循环必须以可观察状态作为内部退出依据",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_based_termination",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "等待循环缺少内部终止逻辑，依赖外部系统纠正才停止重复行为",
+       "betterDecision": "每次重复工具调用前，将最新观察到的结果（无 subagent 在运行）与预期目标（所有子代理完成）比较，条件满足即退出循环",
+       "rationale": "目标达成的验证必须内建于行动循环中，而不是等待外部纠正；行动后不观察比较会导致行为失去自终止能力",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_then_stop",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "把\"等待子代理\"当作固定流程步骤机械执行，而非依赖系统当前状态的条件动作",
+       "betterDecision": "为编排流程建立显式状态模型：若所有子代理已 settle 则进入收集分支，仅在仍有运行中子代理时才调用 sessions_yield",
+       "rationale": "对系统状态转移建立足够模型后，每一步行动由新鲜状态驱动，避免盲目重复已不适用的步骤",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "state_driven_control_flow",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "未将\"目标达成即停止\"的硬约束转化为调用前的显式检查，导致冗余 sessions_yield 调用未被拦截",
+       "betterDecision": "建立守卫规则：若上下文中已存在\"所有 subagent 已 settle/完成，不要再等待\"类信号，则拒绝再次调用 sessions_yield 并提示进入下一阶段",
+       "rationale": "将硬约束翻译为显式守卫和禁止转移，可在执行前拦截多余调用，而非事后被系统纠正",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_before_action",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "忽视系统消息中\"不要再等待或调用 sessions_yield\"的明确指令，延续习惯性等待模式",
+       "betterDecision": "将显式系统/所有者指令视为对推断性行为习惯的覆盖：收到明确停止指令后立即遵从并切换行为",
+       "rationale": "显式指令优先于推断出的流程习惯；对显式停止指令的即时遵从可避免严重纠正并维护信任",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "explicit_signal_overrides_habit",
+       "sourcePrincipleId": "T-02"
+      }
+     ],
+     "sourcePainId": "pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+     "contextRefs": [
+      "artifact://cd8cdd30-4450-47c6-be0b-3d0cdcf22ed5"
+     ],
+     "generatedAt": "2025-06-18T09:42:17Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_620a1683e2eeb7-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在 signal_collector 已明确报告所有子代理已 settle 后，仍继续调用 sessions_yield 保持等待循环\",\"betterDecision\":\"在每次调用 sessions_yield 前先检查可观察状态：当收到\\\"所有子代理已 settle\\\"信号时，立即停止等待调用并转入结果收集阶段\",\"rationale\":\"终止条件已被环境明确满足时继续重复等待是纯浪费行为，会触发系统严重纠正；等待循环必须以可观察状态作为内部退出依据\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_based_termination\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"等待循环缺少内部终止逻辑，依赖外部系统纠正才停止重复行为\",\"betterDecision\":\"每次重复工具调用前，将最新观察到的结果（无 subagent 在运行）与预期目标（所有子代理完成）比较，条件满足即退出循环\",\"rationale\":\"目标达成的验证必须内建于行动循环中，而不是等待外部纠正；行动后不观察比较会导致行为失去自终止能力\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_then_stop\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"把\\\"等待子代理\\\"当作固定流程步骤机械执行，而非依赖系统当前状态的条件动作\",\"betterDecision\":\"为编排流程建立显式状态模型：若所有子代理已 settle 则进入收集分支，仅在仍有运行中子代理时才调用 sessions_yield\",\"rationale\":\"对系统状态转移建立足够模型后，每一步行动由新鲜状态驱动，避免盲目重复已不适用的步骤\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"state_driven_control_flow\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":3,\"badDecision\":\"未将\\\"目标达成即停止\\\"的硬约束转化为调用前的显式检查，导致冗余 sessions_yield 调用未被拦截\",\"betterDecision\":\"建立守卫规则：若上下文中已存在\\\"所有 subagent 已 settle/完成，不要再等待\\\"类信号，则拒绝再次调用 sessions_yield 并提示进入下一阶段\",\"rationale\":\"将硬约束翻译为显式守卫和禁止转移，可在执行前拦截多余调用，而非事后被系统纠正\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_before_action\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"忽视系统消息中\\\"不要再等待或调用 sessions_yield\\\"的明确指令，延续习惯性等待模式\",\"betterDecision\":\"将显式系统/所有者指令视为对推断性行为习惯的覆盖：收到明确停止指令后立即遵从并切换行为\",\"rationale\":\"显式指令优先于推断出的流程习惯；对显式停止指令的即时遵从可避免严重纠正并维护信任\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"explicit_signal_overrides_habit\",\"sourcePrincipleId\":\"T-02\"}],\"sourcePainId\":\"pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791\",\"contextRefs\":[\"artifact://cd8cdd30-4450-47c6-be0b-3d0cdcf22ed5\"],\"generatedAt\":\"2025-06-18T09:42:17Z\"}",
+    "usage": {
+     "input": 1746,
+     "output": 2148,
+     "total": 3894
+    },
+    "latencyMs": 28676,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "de9ed84a3750444c"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_620a1683e2eeb7-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r2-run1",
+     "thesis": "重复性行为的正当性只存在于其前提条件仍然成立之时：任何等待、轮询或重复调用的循环，必须在每一次重复前将最新可观察状态与终止目标比较，并在收到显式停止信号时立即遵从。失去这种内建的自终止能力，行为就退化为机械的习惯执行，只能依靠外部纠正才停止，既浪费资源又侵蚀系统信任。",
+     "principleCandidate": {
+      "title": "Self-terminating repetition: gate every repeated action on fresh state and explicit stop signals",
+      "rationale": "根因在于等待循环缺少内建的退出依据：重复行为由惯性流程驱动，而非由新鲜状态与目标比较驱动。Dreamer 的五个候选共同指向一点——若每次重复前都检查可观察状态（所有子代理已 settle）并尊重显式停止指令，冗余的 sessions_yield 调用会在执行前被拦截，而不会延续到系统被迫纠正。将终止验证内嵌于行动循环，使行为获得自终止能力，是比事后纠偏更根本的解法。",
+      "scope": "适用于任何重复性或轮询式行动：等待子任务完成、轮询外部系统状态、重试循环、编排流程中的固定步骤。尤其适用于上一次决策已成习惯、而环境状态可能已经变化的场景；当即将重复一个先前已执行过的动作时，此原则即触发。",
+      "confidence": 0.83
+     },
+     "risks": [
+      "与核心公理 T-07（行动后观察比较）和 T-03（依据可观察证据）存在部分重叠：本原则是二者在循环控制场景下的特化（重复前的门槛检查），采纳时需避免视为重复建设",
+      "过早退出的风险：若'settled'信号是陈旧的、局部的或来自不可靠来源，将其视为终止条件可能在实际工作未完成时放弃必要等待；应校验信号的完整性与新鲜度",
+      "高频率的状态检查会给快速循环带来开销，在性能敏感场景中需权衡检查粒度",
+      "若把终态判断硬编码为单一信号，可能在状态模型更复杂（部分完成、阶段性结果）的场景中产生误判，需结合足够的系统状态模型（T-01）使用"
+     ],
+     "generatedAt": "2025-06-18T09:43:12Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_620a1683e2eeb7-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r2-run1\",\"thesis\":\"重复性行为的正当性只存在于其前提条件仍然成立之时：任何等待、轮询或重复调用的循环，必须在每一次重复前将最新可观察状态与终止目标比较，并在收到显式停止信号时立即遵从。失去这种内建的自终止能力，行为就退化为机械的习惯执行，只能依靠外部纠正才停止，既浪费资源又侵蚀系统信任。\",\"principleCandidate\":{\"title\":\"Self-terminating repetition: gate every repeated action on fresh state and explicit stop signals\",\"rationale\":\"根因在于等待循环缺少内建的退出依据：重复行为由惯性流程驱动，而非由新鲜状态与目标比较驱动。Dreamer 的五个候选共同指向一点——若每次重复前都检查可观察状态（所有子代理已 settle）并尊重显式停止指令，冗余的 sessions_yield 调用会在执行前被拦截，而不会延续到系统被迫纠正。将终止验证内嵌于行动循环，使行为获得自终止能力，是比事后纠偏更根本的解法。\",\"scope\":\"适用于任何重复性或轮询式行动：等待子任务完成、轮询外部系统状态、重试循环、编排流程中的固定步骤。尤其适用于上一次决策已成习惯、而环境状态可能已经变化的场景；当即将重复一个先前已执行过的动作时，此原则即触发。\",\"confidence\":0.83},\"risks\":[\"与核心公理 T-07（行动后观察比较）和 T-03（依据可观察证据）存在部分重叠：本原则是二者在循环控制场景下的特化（重复前的门槛检查），采纳时需避免视为重复建设\",\"过早退出的风险：若'settled'信号是陈旧的、局部的或来自不可靠来源，将其视为终止条件可能在实际工作未完成时放弃必要等待；应校验信号的完整性与新鲜度\",\"高频率的状态检查会给快速循环带来开销，在性能敏感场景中需权衡检查粒度\",\"若把终态判断硬编码为单一信号，可能在状态模型更复杂（部分完成、阶段性结果）的场景中产生误判，需结合足够的系统状态模型（T-01）使用\"],\"generatedAt\":\"2025-06-18T09:43:12Z\"}",
+    "usage": {
+     "input": 1586,
+     "output": 1406,
+     "total": 2992
+    },
+    "latencyMs": 23137,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "97403697c19cd896"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_620a1683e2eeb7-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r2-run1",
+     "principleDraft": {
+      "title": "Self-terminating repetition: gate every repeated action on fresh state and explicit stop signals",
+      "statement": "Every repetition of a waiting, polling, or retry action must be gated on a fresh check: before each repeat, compare the latest observable state against the loop's termination goal, and if the goal is already met — or an explicit system/owner stop signal is present in context — terminate the loop immediately and proceed to the next phase. A repeated action is justified only while its preconditions still hold.",
+      "rationale": "The diagnosed root cause is a waiting loop with no internal exit basis: repetition was driven by procedural habit (keep calling sessions_yield) rather than by comparing fresh observable state against the termination goal, so the loop stopped only when the system issued a severe external correction. Embedding the termination check as a precondition of each repetition intercepts the redundant call before execution and restores self-termination, which is more fundamental than after-the-fact correction and avoids both wasted calls and eroded system trust.",
+      "applicability": [
+       "Orchestration wait loops for subagent/subtask completion (e.g., sessions_yield while subagents run)",
+       "Polling loops on external system state with a defined success condition",
+       "Retry loops where a prior identical call already succeeded or the blocking condition has disappeared",
+       "Habitual repeated steps about to be re-executed while environment state may have changed since the last decision",
+       "Repetition that is contradicted by an explicit system or owner stop instruction in context"
+      ],
+      "antiPatterns": [
+       "Calling sessions_yield (or an equivalent wait/poll call) after a signal_collector report that all subagents have settled and instructed not to wait further",
+       "Continuing a loop because it is 'the next step in the flow' without re-verifying that the exit condition is still unmet",
+       "Treating an explicit 'stop waiting / do not call this again' message as ignorable background noise while continuing habitual behavior",
+       "Letting external system correction be the only mechanism that ends a repeated action"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants repeated wait/poll calls (like sessions_yield) to stop as soon as observable state shows the awaited condition is satisfied or an explicit stop instruction is given, rather than persisting until the system forcibly corrects the agent.",
+      "targetBehavior": "Before each repeated wait/poll call, the agent's tool trajectory shows it consulted the latest state and signals in context; when a settled/complete signal (e.g., 'all subagents settled') or an explicit stop instruction exists, it issues no further wait call and visibly proceeds to the next phase such as result collection.",
+      "forbiddenBehavior": "Repeating sessions_yield-style wait/poll calls while the context already contains evidence that all awaited subagents have settled or an explicit instruction to stop waiting — a loop that terminates only through external system correction.",
+      "evidenceSource": "Severe user-correction pain (pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791) detected by the after_tool_call hook: the assistant kept calling sessions_yield after signal_collector reported all subagents settled with an explicit 'do not wait or call sessions_yield again' message; the diagnosis cites ignored observable state (T-03) and missing internal loop termination (T-07).",
+      "validationExpectation": "An evaluator should accept a derived rule only if it triggers precisely when a termination signal (e.g., 'all subagents settled') or an explicit stop instruction is already present in context AND the agent is about to repeat the wait call; compliant traces must show a state check before each repetition and immediate exit afterward, and any rule change that permits repeating the wait despite such signals must be flagged as contradicting this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r2-run1"
+     },
+     "risks": [
+      "Overlaps core axioms T-03, T-07 and T-05: this principle is a loop-control specialization (pre-repetition gate plus stop-signal compliance), and downstream adoption must treat it as a specialization rather than duplicate rule construction",
+      "Premature exit: a 'settled' signal that is stale, partial, or from an unreliable source could cause abandoning a still-needed wait; derived rules should require the signal to be explicit and current (e.g., naming the awaited entities)",
+      "Over-triggering: a naively generated rule could block legitimate waits while subagents are still running; trigger conditions must distinguish 'all settled' from 'some still running'",
+      "Per-repetition state checks add overhead in fast polling loops; check granularity may need bounding in performance-sensitive contexts",
+      "Hardcoding termination on a single signal risks misjudgment in more complex state models (partial completion, staged results); the principle should be applied together with a sufficient system state model (T-01)"
+     ],
+     "generatedAt": "2025-06-18T09:47:58Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_620a1683e2eeb7-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r2-run1\",\"principleDraft\":{\"title\":\"Self-terminating repetition: gate every repeated action on fresh state and explicit stop signals\",\"statement\":\"Every repetition of a waiting, polling, or retry action must be gated on a fresh check: before each repeat, compare the latest observable state against the loop's termination goal, and if the goal is already met — or an explicit system/owner stop signal is present in context — terminate the loop immediately and proceed to the next phase. A repeated action is justified only while its preconditions still hold.\",\"rationale\":\"The diagnosed root cause is a waiting loop with no internal exit basis: repetition was driven by procedural habit (keep calling sessions_yield) rather than by comparing fresh observable state against the termination goal, so the loop stopped only when the system issued a severe external correction. Embedding the termination check as a precondition of each repetition intercepts the redundant call before execution and restores self-termination, which is more fundamental than after-the-fact correction and avoids both wasted calls and eroded system trust.\",\"applicability\":[\"Orchestration wait loops for subagent/subtask completion (e.g., sessions_yield while subagents run)\",\"Polling loops on external system state with a defined success condition\",\"Retry loops where a prior identical call already succeeded or the blocking condition has disappeared\",\"Habitual repeated steps about to be re-executed while environment state may have changed since the last decision\",\"Repetition that is contradicted by an explicit system or owner stop instruction in context\"],\"antiPatterns\":[\"Calling sessions_yield (or an equivalent wait/poll call) after a signal_collector report that all subagents have settled and instructed not to wait further\",\"Continuing a loop because it is 'the next step in the flow' without re-verifying that the exit condition is still unmet\",\"Treating an explicit 'stop waiting / do not call this again' message as ignorable background noise while continuing habitual behavior\",\"Letting external system correction be the only mechanism that ends a repeated action\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"The Owner wants repeated wait/poll calls (like sessions_yield) to stop as soon as observable state shows the awaited condition is satisfied or an explicit stop instruction is given, rather than persisting until the system forcibly corrects the agent.\",\"targetBehavior\":\"Before each repeated wait/poll call, the agent's tool trajectory shows it consulted the latest state and signals in context; when a settled/complete signal (e.g., 'all subagents settled') or an explicit stop instruction exists, it issues no further wait call and visibly proceeds to the next phase such as result collection.\",\"forbiddenBehavior\":\"Repeating sessions_yield-style wait/poll calls while the context already contains evidence that all awaited subagents have settled or an explicit instruction to stop waiting — a loop that terminates only through external system correction.\",\"evidenceSource\":\"Severe user-correction pain (pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791) detected by the after_tool_call hook: the assistant kept calling sessions_yield after signal_collector reported all subagents settled with an explicit 'do not wait or call sessions_yield again' message; the diagnosis cites ignored observable state (T-03) and missing internal loop termination (T-07).\",\"validationExpectation\":\"An evaluator should accept a derived rule only if it triggers precisely when a termination signal (e.g., 'all subagents settled') or an explicit stop instruction is already present in context AND the agent is about to repeat the wait call; compliant traces must show a state check before each repetition and immediate exit afterward, and any rule change that permits repeating the wait despite such signals must be flagged as contradicting this intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r2-run1\"},\"risks\":[\"Overlaps core axioms T-03, T-07 and T-05: this principle is a loop-control specialization (pre-repetition gate plus stop-signal compliance), and downstream adoption must treat it as a specialization rather than duplicate rule construction\",\"Premature exit: a 'settled' signal that is stale, partial, or from an unreliable source could cause abandoning a still-needed wait; derived rules should require the signal to be explicit and current (e.g., naming the awaited entities)\",\"Over-triggering: a naively generated rule could block legitimate waits while subagents are still running; trigger conditions must distinguish 'all settled' from 'some still running'\",\"Per-repetition state checks add overhead in fast polling loops; check granularity may need bounding in performance-sensitive contexts\",\"Hardcoding termination on a single signal risks misjudgment in more complex state models (partial completion, staged results); the principle should be applied together with a sufficient system state model (T-01)\"],\"generatedAt\":\"2025-06-18T09:47:58Z\"}",
+    "usage": {
+     "input": 3841,
+     "output": 4211,
+     "total": 8052
+    },
+    "latencyMs": 56291,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "5f4217ca9b18d45b"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_620a1683e2eeb7-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r2-run1",
+     "principleDraft": {
+      "title": "Gate Every Repeated Action on Fresh State and Explicit Stop Signals",
+      "statement": "Before each repetition of any wait, poll, retry, or recurring orchestration step, re-read the latest observable state and compare it against the loop's termination goal; if that goal is already satisfied (e.g., every awaited subagent has settled) or an explicit stop signal has been received, terminate the repetition immediately instead of executing the action again by habit or fixed schedule. Every repetitive behavior must carry its own internal exit criterion and must never depend on external correction to stop.",
+      "rationale": "The root cause of the observed pain is that the wait loop lacked a built-in exit basis: repetition was driven by procedural inertia rather than by a fresh comparison of observable state against the termination goal. Embedding a pre-repetition gate — fresh state check plus obedience to explicit stop signals — intercepts redundant actions (such as repeated sessions_yield after all subagents settled) before execution, giving the behavior self-terminating capacity. This is a more fundamental fix than post-hoc external correction, which both wastes resources and erodes system trust.",
+      "applicability": [
+       "Wait loops checking whether subagents or subtasks have completed within an orchestration flow",
+       "Polling external system state such as APIs, background jobs, or resource availability",
+       "Retry loops whose termination depends on a condition rather than a fixed count",
+       "Fixed recurring steps in an orchestration where the environment state may have changed since the previous decision",
+       "Any moment the agent is about to repeat an action it has already performed, especially when an explicit stop or cancel signal may arrive mid-loop"
+      ],
+      "antiPatterns": [
+       "Repeating a previously executed action (e.g., sessions_yield) on habit or fixed schedule without first checking whether the awaited condition is already satisfied",
+       "Continuing a polling or wait loop after an explicit stop or cancel signal has been received",
+       "Basing loop termination on a stale or cached state snapshot instead of freshly observed state",
+       "Persisting in a loop until the host or system externally corrects it, rather than exiting via an internal state-versus-goal check",
+       "Treating a single possibly stale or partial 'settled' signal as sufficient termination without validating its freshness and completeness"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to stop repeating actions that have already become pointless — such as issuing redundant sessions_yield calls after all awaited subagents have settled — on its own initiative, without the host or system having to externally correct the loop.",
+      "targetBehavior": "In any wait, poll, retry, or repeat loop, the agent's tool trajectory shows a fresh state query or condition check immediately before each repeated action, and the loop exits as soon as the termination goal is verified met or an explicit stop signal arrives.",
+      "forbiddenBehavior": "Repeating a prior action purely by habit or fixed schedule while the latest observable state already satisfies the termination goal, or continuing to repeat after an explicit stop signal, such that only external intervention ends the loop.",
+      "evidenceSource": "The diagnosed pain of the agent continuing to issue redundant sessions_yield calls after all awaited subagents had settled, requiring host-level correction to stop the repetition.",
+      "validationExpectation": "An evaluator should require that any rule derived from this principle mandates a pre-repetition fresh-state check against the termination goal and immediate obedience to explicit stop signals, verifiable in the sessions_yield wait-loop scenario and analogous polling or retry contexts; a rule that permits repeating an action without a fresh state check, or that allows ignoring a stop signal, contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r2-run1"
+     },
+     "risks": [
+      "Partial overlap with core axioms T-07 (observe result after acting and compare with intent) and T-03 (use observable evidence before inferring): this principle is their pre-action specialization for loop control; adoption must frame it as a refinement, not duplicate rule construction",
+      "Early-exit risk: if a 'settled' or terminal signal is stale, partial, or from an unreliable source, treating it as a termination condition may abandon necessary waiting before work is truly complete; rule generation should require validating signal freshness and completeness",
+      "High-frequency state checks can add overhead to fast, tight loops; in performance-sensitive contexts the check granularity must be balanced rather than maximally frequent",
+      "Hardcoding a single terminal signal risks misjudging complex state models (partial completion, staged results); the principle should be applied jointly with sufficient system modeling per T-01",
+      "Scope creep risk: applying the principle to one-shot (non-repeated) actions would dilute its meaning; it must be scoped strictly to repeated, polled, or looped behavior"
+     ],
+     "generatedAt": "2025-06-18T09:45:18Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_620a1683e2eeb7-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r2-run1\",\"principleDraft\":{\"title\":\"Gate Every Repeated Action on Fresh State and Explicit Stop Signals\",\"statement\":\"Before each repetition of any wait, poll, retry, or recurring orchestration step, re-read the latest observable state and compare it against the loop's termination goal; if that goal is already satisfied (e.g., every awaited subagent has settled) or an explicit stop signal has been received, terminate the repetition immediately instead of executing the action again by habit or fixed schedule. Every repetitive behavior must carry its own internal exit criterion and must never depend on external correction to stop.\",\"rationale\":\"The root cause of the observed pain is that the wait loop lacked a built-in exit basis: repetition was driven by procedural inertia rather than by a fresh comparison of observable state against the termination goal. Embedding a pre-repetition gate — fresh state check plus obedience to explicit stop signals — intercepts redundant actions (such as repeated sessions_yield after all subagents settled) before execution, giving the behavior self-terminating capacity. This is a more fundamental fix than post-hoc external correction, which both wastes resources and erodes system trust.\",\"applicability\":[\"Wait loops checking whether subagents or subtasks have completed within an orchestration flow\",\"Polling external system state such as APIs, background jobs, or resource availability\",\"Retry loops whose termination depends on a condition rather than a fixed count\",\"Fixed recurring steps in an orchestration where the environment state may have changed since the previous decision\",\"Any moment the agent is about to repeat an action it has already performed, especially when an explicit stop or cancel signal may arrive mid-loop\"],\"antiPatterns\":[\"Repeating a previously executed action (e.g., sessions_yield) on habit or fixed schedule without first checking whether the awaited condition is already satisfied\",\"Continuing a polling or wait loop after an explicit stop or cancel signal has been received\",\"Basing loop termination on a stale or cached state snapshot instead of freshly observed state\",\"Persisting in a loop until the host or system externally corrects it, rather than exiting via an internal state-versus-goal check\",\"Treating a single possibly stale or partial 'settled' signal as sufficient termination without validating its freshness and completeness\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"The Owner wants the agent to stop repeating actions that have already become pointless — such as issuing redundant sessions_yield calls after all awaited subagents have settled — on its own initiative, without the host or system having to externally correct the loop.\",\"targetBehavior\":\"In any wait, poll, retry, or repeat loop, the agent's tool trajectory shows a fresh state query or condition check immediately before each repeated action, and the loop exits as soon as the termination goal is verified met or an explicit stop signal arrives.\",\"forbiddenBehavior\":\"Repeating a prior action purely by habit or fixed schedule while the latest observable state already satisfies the termination goal, or continuing to repeat after an explicit stop signal, such that only external intervention ends the loop.\",\"evidenceSource\":\"The diagnosed pain of the agent continuing to issue redundant sessions_yield calls after all awaited subagents had settled, requiring host-level correction to stop the repetition.\",\"validationExpectation\":\"An evaluator should require that any rule derived from this principle mandates a pre-repetition fresh-state check against the termination goal and immediate obedience to explicit stop signals, verifiable in the sessions_yield wait-loop scenario and analogous polling or retry contexts; a rule that permits repeating an action without a fresh state check, or that allows ignoring a stop signal, contradicts this intent and must be flagged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r2-run1\"},\"risks\":[\"Partial overlap with core axioms T-07 (observe result after acting and compare with intent) and T-03 (use observable evidence before inferring): this principle is their pre-action specialization for loop control; adoption must frame it as a refinement, not duplicate rule construction\",\"Early-exit risk: if a 'settled' or terminal signal is stale, partial, or from an unreliable source, treating it as a termination condition may abandon necessary waiting before work is truly complete; rule generation should require validating signal freshness and completeness\",\"High-frequency state checks can add overhead to fast, tight loops; in performance-sensitive contexts the check granularity must be balanced rather than maximally frequent\",\"Hardcoding a single terminal signal risks misjudging complex state models (partial completion, staged results); the principle should be applied jointly with sufficient system modeling per T-01\",\"Scope creep risk: applying the principle to one-shot (non-repeated) actions would dilute its meaning; it must be scoped strictly to repeated, polled, or looped behavior\"],\"generatedAt\":\"2025-06-18T09:45:18Z\"}",
+    "usage": {
+     "input": 1950,
+     "output": 2614,
+     "total": 4564
+    },
+    "latencyMs": 34632,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6123ea7c50102abf"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_620a1683e2eeb7",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_620a1683e2eeb7-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在 signal_collector 已明确报告'所有 subagent 已 settle、不要再等待'的可观察信号后，仍继续调用 sessions_yield 执行等待",
+       "betterDecision": "在每次调用 sessions_yield 前先检查上下文中是否已存在完成类信号；一旦观察到'所有子代理已 settle/完成'类证据，立即停止等待并转入结果收集阶段",
+       "rationale": "可观察状态（settle 信号）已证明等待目标达成，继续等待是无意义的重复动作，只会消耗资源并触发外部纠正",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_based_termination",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "等待循环缺少内部终止条件，重复调用 sessions_yield 直至被外部系统消息严重纠正才停止",
+       "betterDecision": "进入轮询前先定义明确的终止谓词（如'观察到所有子代理 settle 信号即停止'），并在每次调用后核对实际状态与预期目标是否一致，达成即收敛",
+       "rationale": "带终止谓词的循环使行为具备自我校验能力，行动后对比结果可在目标达成时立即终止，无需依赖外部干预",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "closed_loop_termination",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "忽视最新的系统/环境信号消息，机械地延续既定的等待计划",
+       "betterDecision": "在每次工具调用返回后重新读取最新的系统与信号采集消息，并基于这些最新可观察输入更新下一步行为决策",
+       "rationale": "环境消息是系统状态的直接证据；忽略它意味着基于过时的心智模型行动，导致行为与实际状态脱节",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "state_reactive_planning",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "将'等待子代理完成'当作固定流程线性执行，即使目标已达成也不切换阶段",
+       "betterDecision": "将子代理协调建模为显式阶段状态机：等待阶段一旦收到完成信号即切换到结果收集/汇总阶段，每一步由当前可观察状态驱动",
+       "rationale": "以状态驱动的阶段转换代替固定流程，可避免在已完成的阶段空转，并使终止条件内建于流程结构中",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "state_driven_phase_transition",
+       "sourcePrincipleId": "T-07"
+      }
+     ],
+     "sourcePainId": "pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+     "contextRefs": [
+      "artifact://cd8cdd30-4450-47c6-be0b-3d0cdcf22ed5"
+     ],
+     "generatedAt": "2025-06-15T12:34:56Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_620a1683e2eeb7-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在 signal_collector 已明确报告'所有 subagent 已 settle、不要再等待'的可观察信号后，仍继续调用 sessions_yield 执行等待\",\"betterDecision\":\"在每次调用 sessions_yield 前先检查上下文中是否已存在完成类信号；一旦观察到'所有子代理已 settle/完成'类证据，立即停止等待并转入结果收集阶段\",\"rationale\":\"可观察状态（settle 信号）已证明等待目标达成，继续等待是无意义的重复动作，只会消耗资源并触发外部纠正\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_based_termination\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"等待循环缺少内部终止条件，重复调用 sessions_yield 直至被外部系统消息严重纠正才停止\",\"betterDecision\":\"进入轮询前先定义明确的终止谓词（如'观察到所有子代理 settle 信号即停止'），并在每次调用后核对实际状态与预期目标是否一致，达成即收敛\",\"rationale\":\"带终止谓词的循环使行为具备自我校验能力，行动后对比结果可在目标达成时立即终止，无需依赖外部干预\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"closed_loop_termination\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"忽视最新的系统/环境信号消息，机械地延续既定的等待计划\",\"betterDecision\":\"在每次工具调用返回后重新读取最新的系统与信号采集消息，并基于这些最新可观察输入更新下一步行为决策\",\"rationale\":\"环境消息是系统状态的直接证据；忽略它意味着基于过时的心智模型行动，导致行为与实际状态脱节\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"state_reactive_planning\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":3,\"badDecision\":\"将'等待子代理完成'当作固定流程线性执行，即使目标已达成也不切换阶段\",\"betterDecision\":\"将子代理协调建模为显式阶段状态机：等待阶段一旦收到完成信号即切换到结果收集/汇总阶段，每一步由当前可观察状态驱动\",\"rationale\":\"以状态驱动的阶段转换代替固定流程，可避免在已完成的阶段空转，并使终止条件内建于流程结构中\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"state_driven_phase_transition\",\"sourcePrincipleId\":\"T-07\"}],\"sourcePainId\":\"pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791\",\"contextRefs\":[\"artifact://cd8cdd30-4450-47c6-be0b-3d0cdcf22ed5\"],\"generatedAt\":\"2025-06-15T12:34:56Z\"}",
+    "usage": {
+     "input": 1746,
+     "output": 2560,
+     "total": 4306
+    },
+    "latencyMs": 31502,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "cffbe8a740215807"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_620a1683e2eeb7-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r3-run1",
+     "thesis": "Repetitive action is not itself progress. The Dreamer's analysis shows that a wait/poll loop without an internal, evidence-based termination predicate degenerates into mechanical repetition that persists past its achieved goal until an external system intervenes. Convergence must be self-detected: declare the observable completion condition before entering a loop, and re-ground each iteration's decision in the latest state signals rather than the originally planned sequence.",
+     "principleCandidate": {
+      "title": "Anchor loops to explicit termination predicates re-checked against latest evidence",
+      "rationale": "The root cause common to all Dreamer candidates is an open-ended loop whose continuation was driven by the original plan rather than by observed goal state. Declaring the completion condition up front and verifying the latest observable signals after each iteration makes success self-detected, eliminating idle repetition, wasted resources, and dependence on external correction.",
+      "scope": "Any repetitive or iterative action—waiting, polling, retrying, monitoring, or coordination loops—where an observable goal condition or completion signal can be checked between iterations; especially multi-agent coordination and resource-consuming waits.",
+      "confidence": 0.85
+     },
+     "risks": [
+      "Closely overlaps with core axioms T-07 (verify outcomes against intent) and T-03 (act on observable evidence); this candidate is largely their specialization to iterative loops and may partially duplicate them",
+      "A loosely defined termination predicate may trigger premature exit on false-positive completion signals, stopping work before the goal is truly achieved",
+      "Requiring explicit predicates for every trivial loop could add unnecessary ceremony and overhead, conflicting with the simplicity intent of T-06",
+      "Re-reading and re-evaluating all signals on every iteration may consume excessive attention or resources in high-frequency loops"
+     ],
+     "generatedAt": "2025-06-15T12:41:30Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_620a1683e2eeb7-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r3-run1\",\"thesis\":\"Repetitive action is not itself progress. The Dreamer's analysis shows that a wait/poll loop without an internal, evidence-based termination predicate degenerates into mechanical repetition that persists past its achieved goal until an external system intervenes. Convergence must be self-detected: declare the observable completion condition before entering a loop, and re-ground each iteration's decision in the latest state signals rather than the originally planned sequence.\",\"principleCandidate\":{\"title\":\"Anchor loops to explicit termination predicates re-checked against latest evidence\",\"rationale\":\"The root cause common to all Dreamer candidates is an open-ended loop whose continuation was driven by the original plan rather than by observed goal state. Declaring the completion condition up front and verifying the latest observable signals after each iteration makes success self-detected, eliminating idle repetition, wasted resources, and dependence on external correction.\",\"scope\":\"Any repetitive or iterative action—waiting, polling, retrying, monitoring, or coordination loops—where an observable goal condition or completion signal can be checked between iterations; especially multi-agent coordination and resource-consuming waits.\",\"confidence\":0.85},\"risks\":[\"Closely overlaps with core axioms T-07 (verify outcomes against intent) and T-03 (act on observable evidence); this candidate is largely their specialization to iterative loops and may partially duplicate them\",\"A loosely defined termination predicate may trigger premature exit on false-positive completion signals, stopping work before the goal is truly achieved\",\"Requiring explicit predicates for every trivial loop could add unnecessary ceremony and overhead, conflicting with the simplicity intent of T-06\",\"Re-reading and re-evaluating all signals on every iteration may consume excessive attention or resources in high-frequency loops\"],\"generatedAt\":\"2025-06-15T12:41:30Z\"}",
+    "usage": {
+     "input": 1473,
+     "output": 1810,
+     "total": 3283
+    },
+    "latencyMs": 25746,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3b0255d3ca443450"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_620a1683e2eeb7-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r3-run1",
+     "principleDraft": {
+      "title": "Anchor iterative loops to explicit termination predicates re-checked against latest evidence",
+      "statement": "Before entering any repetitive or iterative action (wait, poll, retry, monitor, coordinate), declare an explicit termination predicate defining observable success conditions and bounded abort conditions; after every iteration, evaluate that predicate against freshly observed state signals rather than the original plan, and exit the loop immediately when any declared condition holds.",
+      "rationale": "The diagnosed root cause is an open-ended loop whose continuation was driven by the originally planned sequence rather than by observed goal state, causing idle repetition that persisted past the achieved goal until an external system intervened. Pre-declaring observable completion conditions and re-grounding each iteration's continue/exit decision in the latest state makes convergence self-detected, eliminating wasted iterations, resource burn, and dependence on external correction.",
+      "applicability": [
+       "Wait/poll loops checking whether a condition has become true (resource availability, service readiness, job or build completion)",
+       "Retry loops for flaky operations, which require bounded attempts or backoff with a declared give-up condition",
+       "Monitoring and health-check loops that must stop when the monitored state is achieved or declared unrecoverable",
+       "Multi-agent coordination loops where an agent waits on peers, locks, or shared state before proceeding",
+       "Any iterative process that consumes resources (API calls, compute, tokens, attention) between iterations"
+      ],
+      "antiPatterns": [
+       "Continuing a loop solely because the plan scheduled more iterations while the goal condition has already been observed true",
+       "Open-ended polling with no declared success or abort predicate, terminated only by external timeout or intervention",
+       "Deciding each iteration from stale or initially fetched state instead of re-querying the live signal",
+       "Treating repetition count or elapsed effort as evidence of progress toward the goal",
+       "Retrying indefinitely after persistent failure without a bounded abort condition"
+      ],
+      "confidence": 0.83
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent agents from mechanically repeating a wait/poll/retry action after the goal is already achieved (or provably unreachable), burning resources until an external system intervenes.",
+      "targetBehavior": "Before starting a loop, the agent explicitly states the observable completion and abort conditions it will check; in its tool trajectory, each iteration is followed by a fresh observation of the relevant state signal, and the agent exits the loop as soon as a declared condition holds.",
+      "forbiddenBehavior": "Open-ended mechanical repetition — polling, waiting, or retrying driven by the planned iteration sequence or inertia, without re-checking current state, continuing past achieved goals or provably dead ends until an external system stops it.",
+      "evidenceSource": "The diagnosed pain (pain_host_620a1683e2eeb7-r3, dreamer and philosopher analysis) of a wait/poll loop lacking an internal, evidence-based termination predicate that persisted past its achieved goal until external intervention.",
+      "validationExpectation": "An evaluator should accept a rule only if it names (a) a pre-declared observable termination predicate covering both success and abort conditions and (b) per-iteration re-evaluation against fresh state signals before continuing; a rule that generically restates 'verify results' or duplicates T-07/T-03 without loop-specific termination semantics should be rejected, and any repair that removes the pre-declaration or fresh-signal requirement contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r3-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-07 (verify outcomes against intent) and T-08-adjacent feedback use, and T-03 (act on observable evidence); this principle is their specialization to iterative loops, and rule generation must add loop-specific value rather than restating those axioms",
+      "A loosely defined termination predicate can fire on false-positive completion signals, causing premature exit before the goal is truly achieved",
+      "Mandating explicit predicates for every trivial loop adds ceremony and overhead, in tension with the simplicity intent of T-06",
+      "Re-reading and re-evaluating all signals on every iteration may be costly in high-frequency loops; predicate checks should be proportionate to loop cost",
+      "The completion condition may not be directly observable, forcing proxies that can mislead the predicate toward premature or late exit",
+      "Risk of over-generalizing from a single diagnosed pain case; downstream rules must stay anchored to the observed failure family rather than punishing all repetition"
+     ],
+     "generatedAt": "2025-06-15T12:53:41Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_620a1683e2eeb7-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r3-run1\",\"principleDraft\":{\"title\":\"Anchor iterative loops to explicit termination predicates re-checked against latest evidence\",\"statement\":\"Before entering any repetitive or iterative action (wait, poll, retry, monitor, coordinate), declare an explicit termination predicate defining observable success conditions and bounded abort conditions; after every iteration, evaluate that predicate against freshly observed state signals rather than the original plan, and exit the loop immediately when any declared condition holds.\",\"rationale\":\"The diagnosed root cause is an open-ended loop whose continuation was driven by the originally planned sequence rather than by observed goal state, causing idle repetition that persisted past the achieved goal until an external system intervened. Pre-declaring observable completion conditions and re-grounding each iteration's continue/exit decision in the latest state makes convergence self-detected, eliminating wasted iterations, resource burn, and dependence on external correction.\",\"applicability\":[\"Wait/poll loops checking whether a condition has become true (resource availability, service readiness, job or build completion)\",\"Retry loops for flaky operations, which require bounded attempts or backoff with a declared give-up condition\",\"Monitoring and health-check loops that must stop when the monitored state is achieved or declared unrecoverable\",\"Multi-agent coordination loops where an agent waits on peers, locks, or shared state before proceeding\",\"Any iterative process that consumes resources (API calls, compute, tokens, attention) between iterations\"],\"antiPatterns\":[\"Continuing a loop solely because the plan scheduled more iterations while the goal condition has already been observed true\",\"Open-ended polling with no declared success or abort predicate, terminated only by external timeout or intervention\",\"Deciding each iteration from stale or initially fetched state instead of re-querying the live signal\",\"Treating repetition count or elapsed effort as evidence of progress toward the goal\",\"Retrying indefinitely after persistent failure without a bounded abort condition\"],\"confidence\":0.83},\"intentContract\":{\"ownerIntent\":\"The Owner wants to prevent agents from mechanically repeating a wait/poll/retry action after the goal is already achieved (or provably unreachable), burning resources until an external system intervenes.\",\"targetBehavior\":\"Before starting a loop, the agent explicitly states the observable completion and abort conditions it will check; in its tool trajectory, each iteration is followed by a fresh observation of the relevant state signal, and the agent exits the loop as soon as a declared condition holds.\",\"forbiddenBehavior\":\"Open-ended mechanical repetition — polling, waiting, or retrying driven by the planned iteration sequence or inertia, without re-checking current state, continuing past achieved goals or provably dead ends until an external system stops it.\",\"evidenceSource\":\"The diagnosed pain (pain_host_620a1683e2eeb7-r3, dreamer and philosopher analysis) of a wait/poll loop lacking an internal, evidence-based termination predicate that persisted past its achieved goal until external intervention.\",\"validationExpectation\":\"An evaluator should accept a rule only if it names (a) a pre-declared observable termination predicate covering both success and abort conditions and (b) per-iteration re-evaluation against fresh state signals before continuing; a rule that generically restates 'verify results' or duplicates T-07/T-03 without loop-specific termination semantics should be rejected, and any repair that removes the pre-declaration or fresh-signal requirement contradicts this intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r3-run1\"},\"risks\":[\"Substantial overlap with core axioms T-07 (verify outcomes against intent) and T-08-adjacent feedback use, and T-03 (act on observable evidence); this principle is their specialization to iterative loops, and rule generation must add loop-specific value rather than restating those axioms\",\"A loosely defined termination predicate can fire on false-positive completion signals, causing premature exit before the goal is truly achieved\",\"Mandating explicit predicates for every trivial loop adds ceremony and overhead, in tension with the simplicity intent of T-06\",\"Re-reading and re-evaluating all signals on every iteration may be costly in high-frequency loops; predicate checks should be proportionate to loop cost\",\"The completion condition may not be directly observable, forcing proxies that can mislead the predicate toward premature or late exit\",\"Risk of over-generalizing from a single diagnosed pain case; downstream rules must stay anchored to the observed failure family rather than punishing all repetition\"],\"generatedAt\":\"2025-06-15T12:53:41Z\"}",
+    "usage": {
+     "input": 1831,
+     "output": 3273,
+     "total": 5104
+    },
+    "latencyMs": 41788,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "75943ed6a0d0b947"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_620a1683e2eeb7-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r3-run1",
+     "principleDraft": {
+      "title": "Anchor repetitive loops to self-detected termination on observed completion signals",
+      "statement": "Any repetitive or iterative action must carry its own termination: before entering a wait/poll/retry/monitor loop, declare the observable completion condition, and before each subsequent iteration, re-check the latest state signals against it; as soon as the latest observable evidence shows the awaited condition is met (e.g., a signal that all subagents have settled), stop the loop immediately and proceed to the next phase instead of continuing until an external correction intervenes.",
+      "rationale": "The diagnosed root cause is a wait loop whose continuation was driven by the originally planned sequence rather than the observed goal state: the assistant kept calling sessions_yield after signal_collector had already reported all subagents settled, stopping only under a severe external correction. Making continuation contingent on an explicit termination predicate re-checked against the latest evidence makes convergence self-detected, eliminating idle repetition, wasted calls, and dependence on external intervention. This is a specialization of T-03 and T-07 to iterative loops, not a replacement for them.",
+      "applicability": [
+       "Multi-agent coordination waits, e.g., polling/yielding while subagents run before collecting their results",
+       "Polling or monitoring loops that wait for a state change or completion signal observable between iterations",
+       "Retry loops whose success or terminal failure is observable between attempts",
+       "Open-ended waits where a signal collector or system message reports the awaited condition"
+      ],
+      "antiPatterns": [
+       "Issuing the same wait/poll call (e.g., sessions_yield) again after an in-context signal has already reported the awaited condition met, such as 'all subagents settled, do not wait'",
+       "Running a loop with no internal termination predicate, relying on external system correction to stop it",
+       "Deciding each iteration from the originally planned sequence while ignoring newer state messages returned since entering the loop",
+       "Treating a wait-for-completion step as a fixed procedural stage that runs to exhaustion regardless of observed completion"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The owner wants the agent to stop repetitive waiting/polling on its own the moment observable state shows the awaited condition is met (such as 'all subagents settled'), rather than repeating the call until a severe external correction forces it to stop.",
+      "targetBehavior": "In the tool trajectory, no wait/poll call (e.g., sessions_yield) appears after a completion signal for the awaited condition is already present in context; instead the agent visibly checks the latest signal, recognizes the condition as met, and transitions to the next phase (e.g., result collection).",
+      "forbiddenBehavior": "Continuing to issue repeated wait/poll calls after an explicit completion signal ('all subagents settled, stop waiting') has already been observed — a repetition loop with no internal termination that persists until external correction.",
+      "evidenceSource": "Severe user-correction pain pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791: the after_tool_call hook caught the assistant calling sessions_yield after signal_collector reported all subagents settled and instructed it to stop waiting; the diagnosis attributes this to ignoring observable state (T-03) and missing post-action verification (T-07), and all four Dreamer candidates converge on evidence-based, self-detected loop termination.",
+      "validationExpectation": "An evaluator should require that any rule generated from this principle fires on a repeated wait/poll call issued after an in-context completion signal (e.g., sessions_yield following 'all subagents settled'), while permitting waits for which no completion evidence exists yet; rules that block legitimate waiting without a completion signal, or force exit on ambiguous or partial signals, contradict this intent and must be flagged rather than merged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r3-run1"
+     },
+     "risks": [
+      "Closely overlaps core axioms T-03 (act on observable evidence) and T-07 (verify outcomes against intent): this principle is their specialization to repetitive loops, so downstream rules must target loop termination specifically to avoid duplicating existing axiom coverage",
+      "A loosely defined termination predicate can trigger premature exit on false-positive completion signals (misreading partial or stale signals as full completion), stopping work before the goal is truly achieved",
+      "Mandating a declared predicate for every trivial fixed-step loop adds ceremony that conflicts with T-06 (simplest intervention); scope should stay on open-ended or discretionary repetition",
+      "Re-reading and re-evaluating all context signals on every iteration of high-frequency loops may consume excessive attention; the per-iteration check should be limited to completion-relevant signals"
+     ],
+     "generatedAt": "2025-06-15T12:48:05Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_620a1683e2eeb7-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r3-run1\",\"principleDraft\":{\"title\":\"Anchor repetitive loops to self-detected termination on observed completion signals\",\"statement\":\"Any repetitive or iterative action must carry its own termination: before entering a wait/poll/retry/monitor loop, declare the observable completion condition, and before each subsequent iteration, re-check the latest state signals against it; as soon as the latest observable evidence shows the awaited condition is met (e.g., a signal that all subagents have settled), stop the loop immediately and proceed to the next phase instead of continuing until an external correction intervenes.\",\"rationale\":\"The diagnosed root cause is a wait loop whose continuation was driven by the originally planned sequence rather than the observed goal state: the assistant kept calling sessions_yield after signal_collector had already reported all subagents settled, stopping only under a severe external correction. Making continuation contingent on an explicit termination predicate re-checked against the latest evidence makes convergence self-detected, eliminating idle repetition, wasted calls, and dependence on external intervention. This is a specialization of T-03 and T-07 to iterative loops, not a replacement for them.\",\"applicability\":[\"Multi-agent coordination waits, e.g., polling/yielding while subagents run before collecting their results\",\"Polling or monitoring loops that wait for a state change or completion signal observable between iterations\",\"Retry loops whose success or terminal failure is observable between attempts\",\"Open-ended waits where a signal collector or system message reports the awaited condition\"],\"antiPatterns\":[\"Issuing the same wait/poll call (e.g., sessions_yield) again after an in-context signal has already reported the awaited condition met, such as 'all subagents settled, do not wait'\",\"Running a loop with no internal termination predicate, relying on external system correction to stop it\",\"Deciding each iteration from the originally planned sequence while ignoring newer state messages returned since entering the loop\",\"Treating a wait-for-completion step as a fixed procedural stage that runs to exhaustion regardless of observed completion\"],\"confidence\":0.8},\"intentContract\":{\"ownerIntent\":\"The owner wants the agent to stop repetitive waiting/polling on its own the moment observable state shows the awaited condition is met (such as 'all subagents settled'), rather than repeating the call until a severe external correction forces it to stop.\",\"targetBehavior\":\"In the tool trajectory, no wait/poll call (e.g., sessions_yield) appears after a completion signal for the awaited condition is already present in context; instead the agent visibly checks the latest signal, recognizes the condition as met, and transitions to the next phase (e.g., result collection).\",\"forbiddenBehavior\":\"Continuing to issue repeated wait/poll calls after an explicit completion signal ('all subagents settled, stop waiting') has already been observed — a repetition loop with no internal termination that persists until external correction.\",\"evidenceSource\":\"Severe user-correction pain pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791: the after_tool_call hook caught the assistant calling sessions_yield after signal_collector reported all subagents settled and instructed it to stop waiting; the diagnosis attributes this to ignoring observable state (T-03) and missing post-action verification (T-07), and all four Dreamer candidates converge on evidence-based, self-detected loop termination.\",\"validationExpectation\":\"An evaluator should require that any rule generated from this principle fires on a repeated wait/poll call issued after an in-context completion signal (e.g., sessions_yield following 'all subagents settled'), while permitting waits for which no completion evidence exists yet; rules that block legitimate waiting without a completion signal, or force exit on ambiguous or partial signals, contradict this intent and must be flagged rather than merged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_620a1683e2eeb7-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_620a1683e2eeb7-r3-run1\"},\"risks\":[\"Closely overlaps core axioms T-03 (act on observable evidence) and T-07 (verify outcomes against intent): this principle is their specialization to repetitive loops, so downstream rules must target loop termination specifically to avoid duplicating existing axiom coverage\",\"A loosely defined termination predicate can trigger premature exit on false-positive completion signals (misreading partial or stale signals as full completion), stopping work before the goal is truly achieved\",\"Mandating a declared predicate for every trivial fixed-step loop adds ceremony that conflicts with T-06 (simplest intervention); scope should stay on open-ended or discretionary repetition\",\"Re-reading and re-evaluating all context signals on every iteration of high-frequency loops may consume excessive attention; the per-iteration check should be limited to completion-relevant signals\"],\"generatedAt\":\"2025-06-15T12:48:05Z\"}",
+    "usage": {
+     "input": 3609,
+     "output": 5606,
+     "total": 9215
+    },
+    "latencyMs": 71573,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "697edec5ff33041e"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

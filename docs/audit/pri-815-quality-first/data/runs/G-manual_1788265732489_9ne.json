@@ -1,0 +1,696 @@
+{
+ "group": "G-manual_1788265732489_9ne",
+ "class": "DEV",
+ "pain_id": "manual_1788265732489_9nexm9e6",
+ "frozen_at": "2026-09-17T15:09:05.691Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788265732489_9ne",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788265732489_9ne-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Allowed pain reports submitted from the CLI without authenticated session binding or observable trace to enter the diagnosis pipeline as normal-confidence inputs",
+       "betterDecision": "Enforce a trace-availability gate at the pain report submission entry: require binding to an authenticated OpenClaw session with a behavioral trace, otherwise block entry or explicitly mark the report as owner-inferred with downgraded confidence",
+       "rationale": "Diagnosis without observable evidence violates the evidence-first principle; gating at the entry point prevents unverifiable conclusions from propagating downstream",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_gating",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "Proceeded to produce a full diagnosis (at only 0.55 confidence) despite the trace being explicitly unavailable, instead of halting or degrading the output",
+       "betterDecision": "When trace evidence is unavailable, return an explicit insufficient-evidence response requesting resubmission from an authenticated session, or clearly label the output as owner-inference-only with a hard confidence ceiling",
+       "rationale": "Continuing inference without verifiable evidence institutionalizes unverifiable conclusions; explicit refusal or labeled degradation preserves diagnostic integrity",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "fail_fast",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "The CLI submission path did not persist session provenance, trace references, or intermediate context, losing the state continuity diagnosis later needed",
+       "betterDecision": "Persist critical submission state (session provenance, trace reference, intermediate conclusions) outside transient context at submission time so downstream diagnosis can access verifiable evidence",
+       "rationale": "Losing key state breaks continuity and traceability; persisting it at capture time enables evidence-based reasoning downstream and satisfies the state-persistence principle",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "state_persistence",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "Treated the missing host trace as a silent degradation, letting the diagnosis flow to consumers without an explicit evidence-strength or provenance tag and without a blocking rule",
+       "betterDecision": "Attach an explicit evidence-strength/provenance tag (e.g., owner_reported_no_host_trace) to every diagnostic artifact and add a guardrail rule that blocks or downgrades any output whose evidence strength falls below threshold",
+       "rationale": "Translating the evidence requirement into an explicit, machine-checkable guardrail makes the limitation observable to all consumers instead of buried in evidence notes",
+       "confidence": 0.7,
+       "riskLevel": "medium",
+       "strategicPerspective": "explicit_guardrails",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "The system tolerated the tension between its evidence non-negotiables and the CLI submission path without surfacing it to the owner, letting action drift recur",
+       "betterDecision": "Detect the intent tension (design requires trace evidence while CLI path bypasses it) and proactively surface a suggested owner action to revise intent or constrain allowed submission channels before more unverified reports flow through",
+       "rationale": "Unresolved intent tension produces recurring drift; surfacing it early converts friction into corrective feedback and keeps behavior aligned with explicit owner intent",
+       "confidence": 0.65,
+       "riskLevel": "medium",
+       "strategicPerspective": "intent_alignment",
+       "sourcePrincipleId": "T-02"
+      }
+     ],
+     "sourcePainId": "manual_1788265732489_9nexm9e6",
+     "contextRefs": [
+      "artifact://051773d9-a79e-4fee-8570-d611843b2704"
+     ],
+     "generatedAt": "2026-09-01T12:29:30.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788265732489_9ne-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Allowed pain reports submitted from the CLI without authenticated session binding or observable trace to enter the diagnosis pipeline as normal-confidence inputs\",\"betterDecision\":\"Enforce a trace-availability gate at the pain report submission entry: require binding to an authenticated OpenClaw session with a behavioral trace, otherwise block entry or explicitly mark the report as owner-inferred with downgraded confidence\",\"rationale\":\"Diagnosis without observable evidence violates the evidence-first principle; gating at the entry point prevents unverifiable conclusions from propagating downstream\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_gating\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"Proceeded to produce a full diagnosis (at only 0.55 confidence) despite the trace being explicitly unavailable, instead of halting or degrading the output\",\"betterDecision\":\"When trace evidence is unavailable, return an explicit insufficient-evidence response requesting resubmission from an authenticated session, or clearly label the output as owner-inference-only with a hard confidence ceiling\",\"rationale\":\"Continuing inference without verifiable evidence institutionalizes unverifiable conclusions; explicit refusal or labeled degradation preserves diagnostic integrity\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"fail_fast\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":2,\"badDecision\":\"The CLI submission path did not persist session provenance, trace references, or intermediate context, losing the state continuity diagnosis later needed\",\"betterDecision\":\"Persist critical submission state (session provenance, trace reference, intermediate conclusions) outside transient context at submission time so downstream diagnosis can access verifiable evidence\",\"rationale\":\"Losing key state breaks continuity and traceability; persisting it at capture time enables evidence-based reasoning downstream and satisfies the state-persistence principle\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"state_persistence\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":3,\"badDecision\":\"Treated the missing host trace as a silent degradation, letting the diagnosis flow to consumers without an explicit evidence-strength or provenance tag and without a blocking rule\",\"betterDecision\":\"Attach an explicit evidence-strength/provenance tag (e.g., owner_reported_no_host_trace) to every diagnostic artifact and add a guardrail rule that blocks or downgrades any output whose evidence strength falls below threshold\",\"rationale\":\"Translating the evidence requirement into an explicit, machine-checkable guardrail makes the limitation observable to all consumers instead of buried in evidence notes\",\"confidence\":0.7,\"riskLevel\":\"medium\",\"strategicPerspective\":\"explicit_guardrails\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"The system tolerated the tension between its evidence non-negotiables and the CLI submission path without surfacing it to the owner, letting action drift recur\",\"betterDecision\":\"Detect the intent tension (design requires trace evidence while CLI path bypasses it) and proactively surface a suggested owner action to revise intent or constrain allowed submission channels before more unverified reports flow through\",\"rationale\":\"Unresolved intent tension produces recurring drift; surfacing it early converts friction into corrective feedback and keeps behavior aligned with explicit owner intent\",\"confidence\":0.65,\"riskLevel\":\"medium\",\"strategicPerspective\":\"intent_alignment\",\"sourcePrincipleId\":\"T-02\"}],\"sourcePainId\":\"manual_1788265732489_9nexm9e6\",\"contextRefs\":[\"artifact://051773d9-a79e-4fee-8570-d611843b2704\"],\"generatedAt\":\"2026-09-01T12:29:30.000Z\"}",
+    "usage": {
+     "input": 1998,
+     "output": 3409,
+     "total": 5407
+    },
+    "latencyMs": 44902,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "c4a35c58ad426791"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788265732489_9ne-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1",
+     "thesis": "The integrity of a reasoning pipeline depends not merely on using evidence, but on making evidence insufficiency impossible to ignore: inputs without verifiable provenance must be gated at the point of entry, and any degraded output must carry an explicit, enforceable evidence-strength label rather than silently flowing downstream as a normal-confidence conclusion. When multiple submission channels exist with heterogeneous provenance, the weakest channel must not define the epistemic quality of the whole system.",
+     "principleCandidate": {
+      "title": "Gate evidence at entry: never let unverifiable inputs silently propagate as verified conclusions",
+      "rationale": "The root cause was that an input lacking observable provenance was accepted as a normal-confidence input and its weakness was buried in internal notes while the output propagated downstream. Gating at the entry point, persisting provenance at capture time, and attaching machine-checkable evidence-strength labels (with refusal or a hard confidence ceiling when evidence falls below threshold) converts a silent epistemic degradation into an explicit, blocked, or clearly-marked condition that every downstream consumer can see and act on.",
+      "scope": "Applies whenever data, claims, or reports enter a processing or decision pipeline whose outputs will be treated as verified by downstream consumers — e.g., diagnosis, analysis, automated decisioning, reporting — especially when multiple input channels exist with differing provenance guarantees, or when trace evidence may be unavailable at runtime.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Partially overlaps with core axioms T-03 (use observable evidence before claiming results) and T-05 (translate constraints into explicit guardrails); precedence rules may be needed to avoid redundant or conflicting enforcement.",
+      "Fail-closed gating can block legitimate owner-reported inputs when instrumentation or authenticated sessions are unavailable, reducing system availability and frustrating owners.",
+      "Evidence-strength labels can create a false sense of safety if downstream consumers ignore them; labeling without enforcement does not prevent misuse.",
+      "Aggressive refusal thresholds may push users to bypass official channels entirely, degrading overall observability rather than improving it."
+     ],
+     "generatedAt": "2026-09-01T12:31:00.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788265732489_9ne-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1\",\"thesis\":\"The integrity of a reasoning pipeline depends not merely on using evidence, but on making evidence insufficiency impossible to ignore: inputs without verifiable provenance must be gated at the point of entry, and any degraded output must carry an explicit, enforceable evidence-strength label rather than silently flowing downstream as a normal-confidence conclusion. When multiple submission channels exist with heterogeneous provenance, the weakest channel must not define the epistemic quality of the whole system.\",\"principleCandidate\":{\"title\":\"Gate evidence at entry: never let unverifiable inputs silently propagate as verified conclusions\",\"rationale\":\"The root cause was that an input lacking observable provenance was accepted as a normal-confidence input and its weakness was buried in internal notes while the output propagated downstream. Gating at the entry point, persisting provenance at capture time, and attaching machine-checkable evidence-strength labels (with refusal or a hard confidence ceiling when evidence falls below threshold) converts a silent epistemic degradation into an explicit, blocked, or clearly-marked condition that every downstream consumer can see and act on.\",\"scope\":\"Applies whenever data, claims, or reports enter a processing or decision pipeline whose outputs will be treated as verified by downstream consumers — e.g., diagnosis, analysis, automated decisioning, reporting — especially when multiple input channels exist with differing provenance guarantees, or when trace evidence may be unavailable at runtime.\",\"confidence\":0.8},\"risks\":[\"Partially overlaps with core axioms T-03 (use observable evidence before claiming results) and T-05 (translate constraints into explicit guardrails); precedence rules may be needed to avoid redundant or conflicting enforcement.\",\"Fail-closed gating can block legitimate owner-reported inputs when instrumentation or authenticated sessions are unavailable, reducing system availability and frustrating owners.\",\"Evidence-strength labels can create a false sense of safety if downstream consumers ignore them; labeling without enforcement does not prevent misuse.\",\"Aggressive refusal thresholds may push users to bypass official channels entirely, degrading overall observability rather than improving it.\"],\"generatedAt\":\"2026-09-01T12:31:00.000Z\"}",
+    "usage": {
+     "input": 1608,
+     "output": 1528,
+     "total": 3136
+    },
+    "latencyMs": 26345,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "eff6202742881dcf"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788265732489_9ne-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1",
+     "principleDraft": {
+      "title": "Gate Evidence at Entry: Unverifiable Inputs Must Not Propagate as Verified Conclusions",
+      "statement": "Before any input enters a reasoning or decision pipeline, its provenance must be verified or the input must be gated at entry — rejected, quarantined, or processed only under an enforceable hard confidence ceiling — and every output derived from below-threshold evidence must carry a machine-checkable evidence-strength label that downstream consumers can observe and act on. At merge points where multiple submission channels with heterogeneous provenance guarantees converge, the weakest channel must never silently define the confidence of the merged conclusion; provenance must be captured and persisted at input time, not reconstructed after the fact.",
+      "rationale": "The root cause was that an input lacking observable provenance was accepted as a normal-confidence input, its weakness was buried in internal notes, and the derived output propagated downstream as if verified. Gating at the entry point, persisting provenance at capture time, and attaching enforceable evidence-strength labels (with refusal or a hard confidence ceiling when evidence falls below threshold) converts a silent epistemic degradation into an explicit, blocked, or clearly-marked condition that every downstream consumer can see and act on.",
+      "applicability": [
+       "Data, claims, or reports entering a diagnosis, analysis, automated-decisioning, or reporting pipeline whose outputs downstream consumers treat as verified",
+       "Systems with multiple submission channels that have heterogeneous provenance guarantees (e.g., instrumented/authenticated channels vs. manual owner-reported channels)",
+       "Runtime contexts where trace evidence or authenticated sessions may be unavailable at the moment of submission",
+       "Merge points where inputs from different channels combine into a shared conclusion or confidence score"
+      ],
+      "antiPatterns": [
+       "Accepting an unverifiable input at normal confidence and noting its weakness only in internal notes while the output propagates downstream as if verified",
+       "Letting the weakest channel's provenance silently define the confidence of merged conclusions",
+       "Attaching evidence-strength labels that no downstream consumer or automated check enforces (labeling without enforcement)",
+       "Degrading a conclusion mid-pipeline and continuing to propagate it without an explicit confidence ceiling or visible evidence-strength label",
+       "Attempting to reconstruct provenance after processing instead of capturing and persisting it at input entry"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent unverifiable inputs — such as manually submitted reports lacking observable provenance — from being ingested as normal-confidence evidence and flowing downstream as verified conclusions.",
+      "targetBehavior": "Before ingesting any input, the agent verifies or captures and persists its provenance at entry; when provenance is unverifiable, the agent either refuses/quarantines the input or processes it under a machine-checkable reduced-evidence label with a hard confidence ceiling, and records the gating decision and label in persisted state so downstream consumers can observe it.",
+      "forbiddenBehavior": "Accepting an unverifiable input as a normal-confidence input, burying its weakness in internal notes, and letting the derived output propagate downstream as a verified conclusion — including silently allowing the weakest submission channel to set the confidence of merged results.",
+      "evidenceSource": "The diagnosed pain: an owner-submitted manual input without observable provenance was admitted through a weaker channel, treated as normal confidence, its weakness noted only in internal notes, and its conclusion propagated downstream as if verified.",
+      "validationExpectation": "An evaluator should observe, in the tool/executable trajectory, an entry gate that checks provenance before processing, a persisted provenance record or explicit gating decision, and either a refusal or an output carrying a machine-checkable evidence-strength label with a capped confidence — outputs derived from unverifiable input must never appear downstream at normal confidence."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1"
+     },
+     "risks": [
+      "Partially overlaps with core axioms T-03 (use observable evidence before claiming results), T-05 (translate hard constraints into explicit guardrails), and T-10 (persist important state); rule generation must define precedence to avoid redundant or conflicting enforcement.",
+      "Fail-closed gating can block legitimate owner-reported inputs when instrumentation or authenticated sessions are unavailable, reducing availability and frustrating owners.",
+      "Evidence-strength labels can create a false sense of safety if downstream consumers ignore them; labeling without enforcement does not prevent misuse.",
+      "Aggressive refusal thresholds may push users to bypass official channels entirely, degrading overall observability rather than improving it.",
+      "Over-broad application could gate informal collaborative or exploratory inputs where provenance is naturally weak, adding friction without epistemic benefit; applicability should stay scoped to pipelines whose outputs are treated as verified."
+     ],
+     "generatedAt": "2026-09-01T12:42:00.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788265732489_9ne-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1\",\"principleDraft\":{\"title\":\"Gate Evidence at Entry: Unverifiable Inputs Must Not Propagate as Verified Conclusions\",\"statement\":\"Before any input enters a reasoning or decision pipeline, its provenance must be verified or the input must be gated at entry — rejected, quarantined, or processed only under an enforceable hard confidence ceiling — and every output derived from below-threshold evidence must carry a machine-checkable evidence-strength label that downstream consumers can observe and act on. At merge points where multiple submission channels with heterogeneous provenance guarantees converge, the weakest channel must never silently define the confidence of the merged conclusion; provenance must be captured and persisted at input time, not reconstructed after the fact.\",\"rationale\":\"The root cause was that an input lacking observable provenance was accepted as a normal-confidence input, its weakness was buried in internal notes, and the derived output propagated downstream as if verified. Gating at the entry point, persisting provenance at capture time, and attaching enforceable evidence-strength labels (with refusal or a hard confidence ceiling when evidence falls below threshold) converts a silent epistemic degradation into an explicit, blocked, or clearly-marked condition that every downstream consumer can see and act on.\",\"applicability\":[\"Data, claims, or reports entering a diagnosis, analysis, automated-decisioning, or reporting pipeline whose outputs downstream consumers treat as verified\",\"Systems with multiple submission channels that have heterogeneous provenance guarantees (e.g., instrumented/authenticated channels vs. manual owner-reported channels)\",\"Runtime contexts where trace evidence or authenticated sessions may be unavailable at the moment of submission\",\"Merge points where inputs from different channels combine into a shared conclusion or confidence score\"],\"antiPatterns\":[\"Accepting an unverifiable input at normal confidence and noting its weakness only in internal notes while the output propagates downstream as if verified\",\"Letting the weakest channel's provenance silently define the confidence of merged conclusions\",\"Attaching evidence-strength labels that no downstream consumer or automated check enforces (labeling without enforcement)\",\"Degrading a conclusion mid-pipeline and continuing to propagate it without an explicit confidence ceiling or visible evidence-strength label\",\"Attempting to reconstruct provenance after processing instead of capturing and persisting it at input entry\"],\"confidence\":0.8},\"intentContract\":{\"ownerIntent\":\"The Owner wants to prevent unverifiable inputs — such as manually submitted reports lacking observable provenance — from being ingested as normal-confidence evidence and flowing downstream as verified conclusions.\",\"targetBehavior\":\"Before ingesting any input, the agent verifies or captures and persists its provenance at entry; when provenance is unverifiable, the agent either refuses/quarantines the input or processes it under a machine-checkable reduced-evidence label with a hard confidence ceiling, and records the gating decision and label in persisted state so downstream consumers can observe it.\",\"forbiddenBehavior\":\"Accepting an unverifiable input as a normal-confidence input, burying its weakness in internal notes, and letting the derived output propagate downstream as a verified conclusion — including silently allowing the weakest submission channel to set the confidence of merged results.\",\"evidenceSource\":\"The diagnosed pain: an owner-submitted manual input without observable provenance was admitted through a weaker channel, treated as normal confidence, its weakness noted only in internal notes, and its conclusion propagated downstream as if verified.\",\"validationExpectation\":\"An evaluator should observe, in the tool/executable trajectory, an entry gate that checks provenance before processing, a persisted provenance record or explicit gating decision, and either a refusal or an output carrying a machine-checkable evidence-strength label with a capped confidence — outputs derived from unverifiable input must never appear downstream at normal confidence.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1\"},\"risks\":[\"Partially overlaps with core axioms T-03 (use observable evidence before claiming results), T-05 (translate hard constraints into explicit guardrails), and T-10 (persist important state); rule generation must define precedence to avoid redundant or conflicting enforcement.\",\"Fail-closed gating can block legitimate owner-reported inputs when instrumentation or authenticated sessions are unavailable, reducing availability and frustrating owners.\",\"Evidence-strength labels can create a false sense of safety if downstream consumers ignore them; labeling without enforcement does not prevent misuse.\",\"Aggressive refusal thresholds may push users to bypass official channels entirely, degrading overall observability rather than improving it.\",\"Over-broad application could gate informal collaborative or exploratory inputs where provenance is naturally weak, adding friction without epistemic benefit; applicability should stay scoped to pipelines whose outputs are treated as verified.\"],\"generatedAt\":\"2026-09-01T12:42:00.000Z\"}",
+    "usage": {
+     "input": 1898,
+     "output": 3288,
+     "total": 5186
+    },
+    "latencyMs": 40613,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e971ae0412aeaced"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788265732489_9ne-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1",
+     "principleDraft": {
+      "title": "Gate unverifiable inputs at entry; label degraded outputs with enforceable evidence-strength",
+      "statement": "Whenever an input (data, claim, or report) enters a pipeline whose outputs downstream consumers will treat as verified, verify an observable provenance source at the entry point (e.g., authenticated session binding with a behavioral trace) and persist that provenance at capture time; if such evidence is unavailable, refuse the input or request resubmission through a provenance-carrying channel, and if processing nonetheless proceeds on inference alone, emit the output only with a machine-checkable degraded-evidence label and an enforced confidence ceiling — never as a normal-confidence conclusion.",
+      "rationale": "The root cause was a missing trace-availability gate: a CLI-submitted pain report with no authenticated session binding or observable trace entered the diagnosis pipeline as a normal-confidence input, its weakness was buried in internal evidence notes, and a 0.55-confidence diagnosis propagated downstream as if evidence-backed. Verifying provenance at entry, persisting it at capture time, and attaching enforceable evidence-strength labels convert this silent epistemic degradation into an explicit, blocked, or clearly-marked condition that every downstream consumer can observe and act on.",
+      "applicability": [
+       "Diagnosis, analysis, automated decisioning, or reporting pipelines whose outputs downstream consumers treat as verified",
+       "Ingestion entry points accepting multiple submission channels with heterogeneous provenance guarantees (e.g., authenticated session channels vs. CLI/owner-reported channels)",
+       "Runtime conditions where trace evidence may be unavailable (trace unavailable_with_reason) and outputs could otherwise be produced from owner inference alone"
+      ],
+      "antiPatterns": [
+       "Accepting a submission from a channel without observable provenance (e.g., non-authenticated CLI) into the pipeline as a normal-confidence input",
+       "Producing a full diagnosis or conclusion from owner inference alone when trace evidence is explicitly unavailable, instead of refusing or explicitly degrading the output",
+       "Skipping capture-time persistence of session provenance and trace references, leaving downstream stages without verifiable evidence",
+       "Letting an evidence-deficient output flow downstream with its weakness recorded only in internal evidence notes — no machine-checkable evidence-strength tag and no enforcement rule"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants conclusions produced only from observable, verifiable evidence: when a submission lacks an authenticated session trace, the pipeline must block it or explicitly downgrade the output's credibility instead of inferring without evidence.",
+      "targetBehavior": "At every ingestion entry point, the agent verifies an observable evidence source exists (e.g., authenticated session binding with behavioral trace), persists that provenance at capture time, and either refuses the unprovenanced input or attaches a machine-checkable degraded-evidence label with an enforced confidence ceiling to any output produced from inference alone.",
+      "forbiddenBehavior": "Accepting an input that lacks observable provenance as a normal-confidence input and letting its evidence weakness stay buried in internal notes while the resulting conclusion flows downstream unmarked and at full confidence.",
+      "evidenceSource": "Diagnosis manual_1788265732489_9nexm9e6: CLI-submitted pain report with no authenticated host session provenance (owner_reported_no_host_trace), trace unavailable_with_reason, yet a 0.55-confidence diagnosis was produced and propagated; violatedPrinciples T-03 and T-10.",
+      "validationExpectation": "An evaluator should require that any rule derived from this principle names (a) a verifiable provenance check performed at ingestion, (b) a block/resubmission path or an explicit degraded-evidence label with an enforced confidence ceiling on output, and (c) capture-time persistence of provenance; a rule that merely advises 'use evidence' without an entry gate or enforceable labeling does not satisfy this intent, and any change removing the gate or the label contradicts it."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1"
+     },
+     "risks": [
+      "Operationalizes core axioms T-03 (observable evidence), T-05 (explicit guardrails), and T-10 (persist key state); the overlap requires precedence rules so enforcement is complementary rather than redundant or conflicting.",
+      "Fail-closed entry gating can block legitimate owner-reported inputs when instrumentation or authenticated sessions are unavailable, reducing availability and frustrating owners.",
+      "Evidence-strength labels create a false sense of safety if downstream consumers ignore them; labeling without enforcement does not prevent misuse.",
+      "Aggressive refusal thresholds may push users to bypass official channels entirely, degrading overall observability rather than improving it.",
+      "The principle is distilled from a single incident with moderate diagnosis confidence (0.55) and no behavioral trace; the threshold between refusal and labeled degradation needs calibration against broader evidence."
+     ],
+     "generatedAt": "2026-09-01T12:40:00.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788265732489_9ne-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Gate unverifiable inputs at entry; label degraded outputs with enforceable evidence-strength\",\n    \"statement\": \"Whenever an input (data, claim, or report) enters a pipeline whose outputs downstream consumers will treat as verified, verify an observable provenance source at the entry point (e.g., authenticated session binding with a behavioral trace) and persist that provenance at capture time; if such evidence is unavailable, refuse the input or request resubmission through a provenance-carrying channel, and if processing nonetheless proceeds on inference alone, emit the output only with a machine-checkable degraded-evidence label and an enforced confidence ceiling — never as a normal-confidence conclusion.\",\n    \"rationale\": \"The root cause was a missing trace-availability gate: a CLI-submitted pain report with no authenticated session binding or observable trace entered the diagnosis pipeline as a normal-confidence input, its weakness was buried in internal evidence notes, and a 0.55-confidence diagnosis propagated downstream as if evidence-backed. Verifying provenance at entry, persisting it at capture time, and attaching enforceable evidence-strength labels convert this silent epistemic degradation into an explicit, blocked, or clearly-marked condition that every downstream consumer can observe and act on.\",\n    \"applicability\": [\n      \"Diagnosis, analysis, automated decisioning, or reporting pipelines whose outputs downstream consumers treat as verified\",\n      \"Ingestion entry points accepting multiple submission channels with heterogeneous provenance guarantees (e.g., authenticated session channels vs. CLI/owner-reported channels)\",\n      \"Runtime conditions where trace evidence may be unavailable (trace unavailable_with_reason) and outputs could otherwise be produced from owner inference alone\"\n    ],\n    \"antiPatterns\": [\n      \"Accepting a submission from a channel without observable provenance (e.g., non-authenticated CLI) into the pipeline as a normal-confidence input\",\n      \"Producing a full diagnosis or conclusion from owner inference alone when trace evidence is explicitly unavailable, instead of refusing or explicitly degrading the output\",\n      \"Skipping capture-time persistence of session provenance and trace references, leaving downstream stages without verifiable evidence\",\n      \"Letting an evidence-deficient output flow downstream with its weakness recorded only in internal evidence notes — no machine-checkable evidence-strength tag and no enforcement rule\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants conclusions produced only from observable, verifiable evidence: when a submission lacks an authenticated session trace, the pipeline must block it or explicitly downgrade the output's credibility instead of inferring without evidence.\",\n    \"targetBehavior\": \"At every ingestion entry point, the agent verifies an observable evidence source exists (e.g., authenticated session binding with behavioral trace), persists that provenance at capture time, and either refuses the unprovenanced input or attaches a machine-checkable degraded-evidence label with an enforced confidence ceiling to any output produced from inference alone.\",\n    \"forbiddenBehavior\": \"Accepting an input that lacks observable provenance as a normal-confidence input and letting its evidence weakness stay buried in internal notes while the resulting conclusion flows downstream unmarked and at full confidence.\",\n    \"evidenceSource\": \"Diagnosis manual_1788265732489_9nexm9e6: CLI-submitted pain report with no authenticated host session provenance (owner_reported_no_host_trace), trace unavailable_with_reason, yet a 0.55-confidence diagnosis was produced and propagated; violatedPrinciples T-03 and T-10.\",\n    \"validationExpectation\": \"An evaluator should require that any rule derived from this principle names (a) a verifiable provenance check performed at ingestion, (b) a block/resubmission path or an explicit degraded-evidence label with an enforced confidence ceiling on output, and (c) capture-time persistence of provenance; a rule that merely advises 'use evidence' without an entry gate or enforceable labeling does not satisfy this intent, and any change removing the gate or the label contradicts it.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r1-run1\"\n  },\n  \"risks\": [\n    \"Operationalizes core axioms T-03 (observable evidence), T-05 (explicit guardrails), and T-10 (persist key state); the overlap requires precedence rules so enforcement is complementary rather than redundant or conflicting.\",\n    \"Fail-closed entry gating can block legitimate owner-reported inputs when instrumentation or authenticated sessions are unavailable, reducing availability and frustrating owners.\",\n    \"Evidence-strength labels create a false sense of safety if downstream consumers ignore them; labeling without enforcement does not prevent misuse.\",\n    \"Aggressive refusal thresholds may push users to bypass official channels entirely, degrading overall observability rather than improving it.\",\n    \"The principle is distilled from a single incident with moderate diagnosis confidence (0.55) and no behavioral trace; the threshold between refusal and labeled degradation needs calibration against broader evidence.\"\n  ],\n  \"generatedAt\": \"2026-09-01T12:40:00.000Z\"\n}",
+    "usage": {
+     "input": 4033,
+     "output": 5531,
+     "total": 9564
+    },
+    "latencyMs": 73931,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "abe5cf843481b4f1"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788265732489_9ne",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788265732489_9ne-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Allowed pain reports submitted from the CLI to enter the diagnosis pipeline without mandatory authenticated session binding or observable trace evidence",
+       "betterDecision": "Implement a trace-availability gate at the submission entry point that requires an authenticated OpenClaw session context (or equivalent observable trace) before a pain report can proceed to diagnosis; block non-conforming submissions and prompt resubmission from an authenticated session",
+       "rationale": "Enforcing the evidence requirement at ingestion makes it structurally impossible for the diagnosis stage to run on unverifiable owner inference alone, directly satisfying T-03 and preventing the downstream failure from recurring",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "evidence_gating",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "Diagnosis proceeded to full causal inference even though the trace was explicitly unavailable, producing conclusions with unverifiable provenance and only moderate confidence",
+       "betterDecision": "When trace evidence is missing, halt inference and either request resubmission from an authenticated session or explicitly downgrade the output to a hypothesis-level, owner-inferred conclusion with clearly labeled low evidence strength",
+       "rationale": "Refusing to advance conclusions beyond what the evidence supports preserves diagnostic integrity and avoids fabricating causal claims; explicit confidence downgrade keeps downstream consumers honestly informed about evidence limits",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_first",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "The CLI submission path did not persist session binding state or intermediate context, so critical provenance was lost and trace later became unavailable",
+       "betterDecision": "Require every submission path to durably persist a session-binding record and key intermediate state (provenance, context hash, trace reference) to storage outside transient context before entering the diagnosis pipeline; reject submissions that cannot produce this record",
+       "rationale": "Persisting critical state outside transient context guarantees continuity and traceability so that later stages and audits can verify what actually happened, satisfying T-10",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "state_persistence",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "Treated an owner-reported, trace-less CLI pain report as equivalent in evidence grade to a session-bound, trace-backed report, allowing full-depth diagnosis on weak evidence",
+       "betterDecision": "Introduce an explicit evidence-grade taxonomy: owner-reported-no-trace submissions are labeled low-confidence and routed to a reduced-scope diagnostic mode that only emits hypothesis-level output with mandatory provenance labels",
+       "rationale": "Grading evidence explicitly aligns diagnostic depth and confidence with actual evidence strength, retaining limited value from owner reports while preventing overconfident conclusions unsupported by observable traces",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "graded_evidence",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "The system design relied on downstream diagnostic actors to compensate for missing evidence through their own judgment, instead of encoding the evidence requirement as an enforceable mechanism",
+       "betterDecision": "Translate the hard evidence constraint into explicit guardrails and forbidden transitions at the pipeline boundary: a validation check that blocks the submission-to-diagnosis transition whenever session provenance is absent or the trace is unavailable",
+       "rationale": "Hard constraints enforced as explicit checks and forbidden transitions cannot be bypassed by actor discretion or context loss; encoding the guardrail before execution is more robust than hoping each downstream actor notices the missing evidence",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_encoding",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "contextRefs": [
+      "artifact://051773d9-a79e-4fee-8570-d611843b2704"
+     ],
+     "generatedAt": "2026-09-01T12:48:52.489Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788265732489_9ne-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Allowed pain reports submitted from the CLI to enter the diagnosis pipeline without mandatory authenticated session binding or observable trace evidence\",\"betterDecision\":\"Implement a trace-availability gate at the submission entry point that requires an authenticated OpenClaw session context (or equivalent observable trace) before a pain report can proceed to diagnosis; block non-conforming submissions and prompt resubmission from an authenticated session\",\"rationale\":\"Enforcing the evidence requirement at ingestion makes it structurally impossible for the diagnosis stage to run on unverifiable owner inference alone, directly satisfying T-03 and preventing the downstream failure from recurring\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"evidence_gating\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"Diagnosis proceeded to full causal inference even though the trace was explicitly unavailable, producing conclusions with unverifiable provenance and only moderate confidence\",\"betterDecision\":\"When trace evidence is missing, halt inference and either request resubmission from an authenticated session or explicitly downgrade the output to a hypothesis-level, owner-inferred conclusion with clearly labeled low evidence strength\",\"rationale\":\"Refusing to advance conclusions beyond what the evidence supports preserves diagnostic integrity and avoids fabricating causal claims; explicit confidence downgrade keeps downstream consumers honestly informed about evidence limits\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_first\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":2,\"badDecision\":\"The CLI submission path did not persist session binding state or intermediate context, so critical provenance was lost and trace later became unavailable\",\"betterDecision\":\"Require every submission path to durably persist a session-binding record and key intermediate state (provenance, context hash, trace reference) to storage outside transient context before entering the diagnosis pipeline; reject submissions that cannot produce this record\",\"rationale\":\"Persisting critical state outside transient context guarantees continuity and traceability so that later stages and audits can verify what actually happened, satisfying T-10\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"state_persistence\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":3,\"badDecision\":\"Treated an owner-reported, trace-less CLI pain report as equivalent in evidence grade to a session-bound, trace-backed report, allowing full-depth diagnosis on weak evidence\",\"betterDecision\":\"Introduce an explicit evidence-grade taxonomy: owner-reported-no-trace submissions are labeled low-confidence and routed to a reduced-scope diagnostic mode that only emits hypothesis-level output with mandatory provenance labels\",\"rationale\":\"Grading evidence explicitly aligns diagnostic depth and confidence with actual evidence strength, retaining limited value from owner reports while preventing overconfident conclusions unsupported by observable traces\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"graded_evidence\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":4,\"badDecision\":\"The system design relied on downstream diagnostic actors to compensate for missing evidence through their own judgment, instead of encoding the evidence requirement as an enforceable mechanism\",\"betterDecision\":\"Translate the hard evidence constraint into explicit guardrails and forbidden transitions at the pipeline boundary: a validation check that blocks the submission-to-diagnosis transition whenever session provenance is absent or the trace is unavailable\",\"rationale\":\"Hard constraints enforced as explicit checks and forbidden transitions cannot be bypassed by actor discretion or context loss; encoding the guardrail before execution is more robust than hoping each downstream actor notices the missing evidence\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_encoding\",\"sourcePrincipleId\":\"T-05\"}],\"contextRefs\":[\"artifact://051773d9-a79e-4fee-8570-d611843b2704\"],\"generatedAt\":\"2026-09-01T12:48:52.489Z\"}",
+    "usage": {
+     "input": 1998,
+     "output": 3468,
+     "total": 5466
+    },
+    "latencyMs": 50866,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "4471d34f9764090a"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788265732489_9ne-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r2-run1",
+     "thesis": "Conclusions must never outrun their evidence: the depth and confidence of any inference should be structurally bound to the verifiable grade of the evidence available at the point of entry, enforced through gates and persisted provenance rather than delegated to downstream actor discretion. When evidence is absent or unverifiable, the system must halt, request re-evidence, or explicitly downgrade to hypothesis-level output with labeled provenance—never proceed at full depth on unverifiable input.",
+     "principleCandidate": {
+      "title": "Bind Inference Depth and Confidence to Evidence Grade at Pipeline Boundaries",
+      "rationale": "The root failure was structural, not judgmental: unverifiable owner-reported input was treated as full-grade evidence, full-depth causal inference proceeded without traces, and nothing at the pipeline boundary prevented it—the system relied on downstream actors to notice and compensate. Enforcing an evidence gate at ingestion, grading inputs explicitly, persisting provenance before consequential stages, and blocking the submission-to-inference transition when evidence is absent makes it structurally impossible for conclusions to exceed their evidence, regardless of actor judgment or context loss.",
+      "scope": "Applies to any pipeline that consumes inputs of varying evidence quality to produce consequential conclusions or actions—diagnostic, analytical, or decision-making systems—especially multi-actor pipelines where downstream stages cannot recover provenance lost at entry. Also applies when a hard evidence requirement exists but is only implicitly expected of downstream actors rather than encoded as an enforceable check.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Partially overlaps core axiom T-03 (use observable evidence before inferring) and borrows enforcement mechanics from T-05 and T-10; adopting it as a separate principle risks redundancy or diluting the simpler evidence-first rule rather than extending it",
+      "Overly rigid gating could reject legitimately useful owner-reported information outright; the principle must preserve a downgrade path (hypothesis-level output with labeled provenance) rather than mandate pure rejection",
+      "Evidence-grade taxonomies add classification overhead and can misgrade edge cases (e.g., authenticated session with partially unavailable trace), leading to either over-blocking or silent overconfidence",
+      "Requiring durable persistence of session/provenance records at every entry point adds latency and new failure modes at submission boundaries",
+      "If gates verify only the presence of a provenance record rather than its authenticity, actors may fabricate records to pass the gate, converting an evidence check into a checkbox"
+     ],
+     "generatedAt": "2026-09-01T12:51:07.312Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788265732489_9ne-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r2-run1\",\"thesis\":\"Conclusions must never outrun their evidence: the depth and confidence of any inference should be structurally bound to the verifiable grade of the evidence available at the point of entry, enforced through gates and persisted provenance rather than delegated to downstream actor discretion. When evidence is absent or unverifiable, the system must halt, request re-evidence, or explicitly downgrade to hypothesis-level output with labeled provenance—never proceed at full depth on unverifiable input.\",\"principleCandidate\":{\"title\":\"Bind Inference Depth and Confidence to Evidence Grade at Pipeline Boundaries\",\"rationale\":\"The root failure was structural, not judgmental: unverifiable owner-reported input was treated as full-grade evidence, full-depth causal inference proceeded without traces, and nothing at the pipeline boundary prevented it—the system relied on downstream actors to notice and compensate. Enforcing an evidence gate at ingestion, grading inputs explicitly, persisting provenance before consequential stages, and blocking the submission-to-inference transition when evidence is absent makes it structurally impossible for conclusions to exceed their evidence, regardless of actor judgment or context loss.\",\"scope\":\"Applies to any pipeline that consumes inputs of varying evidence quality to produce consequential conclusions or actions—diagnostic, analytical, or decision-making systems—especially multi-actor pipelines where downstream stages cannot recover provenance lost at entry. Also applies when a hard evidence requirement exists but is only implicitly expected of downstream actors rather than encoded as an enforceable check.\",\"confidence\":0.8},\"risks\":[\"Partially overlaps core axiom T-03 (use observable evidence before inferring) and borrows enforcement mechanics from T-05 and T-10; adopting it as a separate principle risks redundancy or diluting the simpler evidence-first rule rather than extending it\",\"Overly rigid gating could reject legitimately useful owner-reported information outright; the principle must preserve a downgrade path (hypothesis-level output with labeled provenance) rather than mandate pure rejection\",\"Evidence-grade taxonomies add classification overhead and can misgrade edge cases (e.g., authenticated session with partially unavailable trace), leading to either over-blocking or silent overconfidence\",\"Requiring durable persistence of session/provenance records at every entry point adds latency and new failure modes at submission boundaries\",\"If gates verify only the presence of a provenance record rather than its authenticity, actors may fabricate records to pass the gate, converting an evidence check into a checkbox\"],\"generatedAt\":\"2026-09-01T12:51:07.312Z\"}",
+    "usage": {
+     "input": 1634,
+     "output": 1428,
+     "total": 3062
+    },
+    "latencyMs": 23957,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "2a2273d0f0934325"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788265732489_9ne-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1",
+     "principleDraft": {
+      "title": "Bind Inference Depth to Verified Evidence Grade at Pipeline Entry",
+      "statement": "At every ingestion boundary of a pipeline that produces consequential conclusions or actions, the system must assign each input an explicit evidence grade derived from verifiable provenance (e.g., an authenticated session with an observable behavioral trace), durably persist that grade and its provenance with the payload, and enforce a gate that permits the transition into full-depth processing only when the required grade is present. When evidence is absent or unverifiable, the gate must halt and request re-submission with verifiable evidence, or route the input to an explicitly downgraded mode that emits hypothesis-level output with labeled provenance and reduced confidence. The system must never continue at full depth on unverifiable input, and must never rely on downstream actor discretion to compensate for missing evidence.",
+      "rationale": "The diagnosed root cause was structural, not a judgment lapse: the CLI submission path allowed a pain report whose trace was 'unavailable_with_reason' and that carried no authenticated session provenance to enter the diagnosis pipeline, where full-depth causal inference proceeded on owner report alone. Because session-binding state was never persisted (T-10 violation), downstream stages could neither verify nor recover provenance, and nothing but actor discretion stood between weak evidence and full-depth conclusions (T-03 violation). Binding inference depth and confidence to a persisted evidence grade via an enforceable entry gate makes it structurally impossible for conclusions to outrun their evidence, regardless of downstream actor judgment or context loss.",
+      "applicability": [
+       "Ingestion boundaries of pipelines that turn submitted reports or inputs into consequential conclusions, diagnoses, or actions (e.g., pain-report diagnosis routers)",
+       "Submission paths that lack authenticated session binding or an observable behavioral trace, such as CLI-originated reports",
+       "Multi-stage or multi-actor pipelines where downstream stages cannot recover provenance lost at entry",
+       "Systems where a hard evidence requirement exists but is only implicitly expected of downstream actors rather than encoded as an enforceable gate"
+      ],
+      "antiPatterns": [
+       "Accepting an owner-reported, trace-less input as full-grade evidence and running full-depth causal inference on it",
+       "Proceeding to full-depth conclusions after evidence is explicitly marked unavailable (e.g., trace 'unavailable_with_reason')",
+       "Delegating evidence verification to downstream actors' discretion instead of an enforceable gate at the pipeline boundary",
+       "Emitting conclusions without a persisted evidence-grade and provenance label, leaving downstream consumers unable to distinguish verified findings from owner inference",
+       "Blocking low-grade inputs outright with no downgrade or resubmission path, discarding legitimate owner-reported information",
+       "Gates that verify only the presence of a provenance record rather than its authenticity, reducing the check to a checkbox"
+      ],
+      "confidence": 0.78
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent the diagnosis pipeline from running full-depth inference on unverifiable, trace-less owner-reported submissions — such inputs must be gated at entry and either re-evidenced via an authenticated session or explicitly downgraded to labeled hypothesis-level output.",
+      "targetBehavior": "At ingestion, the agent records a verifiable evidence grade (e.g., authenticated session plus observable trace reference), persists it and its provenance durably with the payload, and blocks the ingestion-to-full-depth-processing transition when the grade is absent — routing the input to halt/resubmission or to a reduced-scope, provenance-labeled downgraded mode.",
+      "forbiddenBehavior": "Allowing inputs with no observable, verifiable evidence to pass the pipeline boundary and proceed through full-depth inference producing normal-confidence conclusions, with provenance lost or never recorded and evidence adequacy left to downstream actor discretion.",
+      "evidenceSource": "Diagnosis manual_1788265732489_9nexm9e6: a CLI-submitted pain report whose trace was 'unavailable_with_reason' with no authenticated host session provenance still entered and completed diagnosis on owner report alone at moderate confidence (violating T-03 and T-10); the trace detail's own nextAction offered only 'report pain from within an OpenClaw session' or 'rely on owner reason alone'.",
+      "validationExpectation": "An evaluator should observe that a trace-less submission is refused full-depth processing at the boundary — either blocked with a resubmission prompt or emitted as hypothesis-level output carrying an explicit low-evidence provenance label — and that a persisted evidence-grade record accompanies any full-depth conclusion. A rule that permits full-depth output on unverifiable input, or that blocks with no downgrade path, fails this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1"
+     },
+     "risks": [
+      "Overlaps core axiom T-03 (observable evidence before inference) and borrows enforcement mechanics from T-05 and persistence from T-10; adopted as a peer principle it risks redundancy and should instead be treated as an operational boundary mechanism that implements those axioms at pipeline entry",
+      "Rigid gating may reject legitimately useful owner-reported information; the mandatory downgrade path (hypothesis-level output with labeled provenance) must be preserved or the principle degenerates into pure rejection",
+      "Evidence-grade classification can misgrade edge cases (e.g., an authenticated session with partially unavailable trace), causing over-blocking or silent overconfidence",
+      "Requiring durable persistence of provenance records at every entry point adds latency and new failure modes at submission boundaries",
+      "If the gate verifies only the presence of a provenance record rather than its authenticity, actors may fabricate records to pass it, converting an evidence check into a checkbox"
+     ],
+     "generatedAt": "2026-09-05T09:21:33.406Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788265732489_9ne-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Bind Inference Depth to Verified Evidence Grade at Pipeline Entry\",\n    \"statement\": \"At every ingestion boundary of a pipeline that produces consequential conclusions or actions, the system must assign each input an explicit evidence grade derived from verifiable provenance (e.g., an authenticated session with an observable behavioral trace), durably persist that grade and its provenance with the payload, and enforce a gate that permits the transition into full-depth processing only when the required grade is present. When evidence is absent or unverifiable, the gate must halt and request re-submission with verifiable evidence, or route the input to an explicitly downgraded mode that emits hypothesis-level output with labeled provenance and reduced confidence. The system must never continue at full depth on unverifiable input, and must never rely on downstream actor discretion to compensate for missing evidence.\",\n    \"rationale\": \"The diagnosed root cause was structural, not a judgment lapse: the CLI submission path allowed a pain report whose trace was 'unavailable_with_reason' and that carried no authenticated session provenance to enter the diagnosis pipeline, where full-depth causal inference proceeded on owner report alone. Because session-binding state was never persisted (T-10 violation), downstream stages could neither verify nor recover provenance, and nothing but actor discretion stood between weak evidence and full-depth conclusions (T-03 violation). Binding inference depth and confidence to a persisted evidence grade via an enforceable entry gate makes it structurally impossible for conclusions to outrun their evidence, regardless of downstream actor judgment or context loss.\",\n    \"applicability\": [\n      \"Ingestion boundaries of pipelines that turn submitted reports or inputs into consequential conclusions, diagnoses, or actions (e.g., pain-report diagnosis routers)\",\n      \"Submission paths that lack authenticated session binding or an observable behavioral trace, such as CLI-originated reports\",\n      \"Multi-stage or multi-actor pipelines where downstream stages cannot recover provenance lost at entry\",\n      \"Systems where a hard evidence requirement exists but is only implicitly expected of downstream actors rather than encoded as an enforceable gate\"\n    ],\n    \"antiPatterns\": [\n      \"Accepting an owner-reported, trace-less input as full-grade evidence and running full-depth causal inference on it\",\n      \"Proceeding to full-depth conclusions after evidence is explicitly marked unavailable (e.g., trace 'unavailable_with_reason')\",\n      \"Delegating evidence verification to downstream actors' discretion instead of an enforceable gate at the pipeline boundary\",\n      \"Emitting conclusions without a persisted evidence-grade and provenance label, leaving downstream consumers unable to distinguish verified findings from owner inference\",\n      \"Blocking low-grade inputs outright with no downgrade or resubmission path, discarding legitimate owner-reported information\",\n      \"Gates that verify only the presence of a provenance record rather than its authenticity, reducing the check to a checkbox\"\n    ],\n    \"confidence\": 0.78\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Prevent the diagnosis pipeline from running full-depth inference on unverifiable, trace-less owner-reported submissions — such inputs must be gated at entry and either re-evidenced via an authenticated session or explicitly downgraded to labeled hypothesis-level output.\",\n    \"targetBehavior\": \"At ingestion, the agent records a verifiable evidence grade (e.g., authenticated session plus observable trace reference), persists it and its provenance durably with the payload, and blocks the ingestion-to-full-depth-processing transition when the grade is absent — routing the input to halt/resubmission or to a reduced-scope, provenance-labeled downgraded mode.\",\n    \"forbiddenBehavior\": \"Allowing inputs with no observable, verifiable evidence to pass the pipeline boundary and proceed through full-depth inference producing normal-confidence conclusions, with provenance lost or never recorded and evidence adequacy left to downstream actor discretion.\",\n    \"evidenceSource\": \"Diagnosis manual_1788265732489_9nexm9e6: a CLI-submitted pain report whose trace was 'unavailable_with_reason' with no authenticated host session provenance still entered and completed diagnosis on owner report alone at moderate confidence (violating T-03 and T-10); the trace detail's own nextAction offered only 'report pain from within an OpenClaw session' or 'rely on owner reason alone'.\",\n    \"validationExpectation\": \"An evaluator should observe that a trace-less submission is refused full-depth processing at the boundary — either blocked with a resubmission prompt or emitted as hypothesis-level output carrying an explicit low-evidence provenance label — and that a persisted evidence-grade record accompanies any full-depth conclusion. A rule that permits full-depth output on unverifiable input, or that blocks with no downgrade path, fails this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1\"\n  },\n  \"risks\": [\n    \"Overlaps core axiom T-03 (observable evidence before inference) and borrows enforcement mechanics from T-05 and persistence from T-10; adopted as a peer principle it risks redundancy and should instead be treated as an operational boundary mechanism that implements those axioms at pipeline entry\",\n    \"Rigid gating may reject legitimately useful owner-reported information; the mandatory downgrade path (hypothesis-level output with labeled provenance) must be preserved or the principle degenerates into pure rejection\",\n    \"Evidence-grade classification can misgrade edge cases (e.g., an authenticated session with partially unavailable trace), causing over-blocking or silent overconfidence\",\n    \"Requiring durable persistence of provenance records at every entry point adds latency and new failure modes at submission boundaries\",\n    \"If the gate verifies only the presence of a provenance record rather than its authenticity, actors may fabricate records to pass it, converting an evidence check into a checkbox\"\n  ],\n  \"generatedAt\": \"2026-09-05T09:21:33.406Z\"\n}",
+    "usage": {
+     "input": 4156,
+     "output": 5869,
+     "total": 10025
+    },
+    "latencyMs": 79986,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "36c46d6ea8649068"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788265732489_9ne-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1",
+     "principleDraft": {
+      "title": "Bind Inference Depth and Confidence to Evidence Grade at Pipeline Boundaries",
+      "statement": "At every boundary where external or unverifiable input enters a pipeline that produces consequential conclusions or actions, the system must (1) assign the input an explicit evidence grade (e.g., verified-observable, attested-unverified, absent), (2) persist that grade with its provenance to durable state before any consequential stage consumes the input, and (3) enforce a gate on the ingestion-to-inference transition: when required evidence is absent or unverifiable, the pipeline must halt, request re-evidence, or downgrade its output to explicitly labeled hypothesis-level output with provenance attached. Downstream inference depth and stated confidence must never exceed the bound set by the entry-time evidence grade.",
+      "rationale": "The diagnosed failure was structural, not judgmental: unverifiable owner-reported input was ingested as full-grade evidence, full-depth causal inference proceeded without traces, and nothing at the pipeline boundary prevented it — the system relied on downstream actors to notice and compensate, which failed under context loss. Grading evidence at entry, persisting provenance before consequential stages, and blocking the ingestion-to-inference transition when evidence is absent make it structurally impossible for conclusions to outrun their evidence regardless of downstream actor judgment. This operationalizes T-03 at pipeline boundaries using guardrail and persistence mechanics akin to T-05 and T-10 without contradicting any core axiom.",
+      "applicability": [
+       "Pipelines that consume inputs of varying evidence quality to produce consequential conclusions, diagnoses, or actions",
+       "Multi-actor or multi-stage pipelines where downstream stages cannot recover provenance lost at the entry boundary",
+       "Any transition where a hard evidence requirement exists but is only implicitly expected of downstream actors rather than encoded as an enforceable check",
+       "Systems that combine owner-reported or self-attested data with observable evidence such as logs, traces, and state"
+      ],
+      "antiPatterns": [
+       "Accepting unverifiable owner-reported input as full-grade evidence at ingestion and running full-depth inference on it",
+       "Proceeding to consequential stages at full depth and confidence when required evidence is absent, instead of halting, requesting re-evidence, or downgrading",
+       "Delegating evidence-quality enforcement to downstream actor discretion instead of an entry-time gate",
+       "Emitting conclusions without a persisted evidence grade and provenance record available to downstream consumers",
+       "Passing the gate by mere presence of a provenance record without verifying its content or authenticity"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent consequential conclusions and actions whose depth and confidence exceed what the ingested evidence actually supports, starting with unverifiable owner-reported input being consumed as verified evidence.",
+      "targetBehavior": "At input ingestion the agent assigns an explicit evidence grade, persists grade and provenance before any consequential stage runs, and when required evidence is absent or unverifiable it visibly halts, requests re-evidence, or emits hypothesis-level output labeled with its provenance — observable as a gate decision plus persisted provenance records in the tool trajectory.",
+      "forbiddenBehavior": "Full-depth inference or consequential action proceeding on absent, ungraded, or unverifiable evidence, with evidence checks left to downstream actors' discretion and no enforceable entry-time gate.",
+      "evidenceSource": "Diagnosed pain from the philosopher analysis (pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1): unverifiable owner-reported submission treated as full-grade evidence; full-depth causal inference executed without traces; no gate at the submission-to-inference transition; provenance unrecoverable by downstream stages.",
+      "validationExpectation": "An evaluator should demand: every input consumed by a consequential stage carries a persisted evidence grade and provenance record; the ingestion-to-inference transition is blocked or downgraded when evidence is absent or unverifiable; output depth and stated confidence match the entry-time grade; and no repair round weakens the gate into a presence-only provenance check."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axiom T-03 (observable evidence before inference) and borrowed enforcement mechanics from T-05 and T-10; must be adopted as an operational extension (boundary gating and provenance persistence) rather than a restatement, or it risks redundancy and dilution of the simpler evidence-first rule",
+      "Overly rigid gating could reject legitimately useful owner-reported information; the downgrade-to-hypothesis path must be preserved so the gate constrains inference depth rather than mandating pure rejection",
+      "Evidence-grade taxonomies add classification overhead and can misgrade edge cases (e.g., an authenticated session with a partially unavailable trace), leading to over-blocking or silent overconfidence",
+      "Requiring durable persistence of provenance at every entry point adds latency and introduces new failure modes at submission boundaries",
+      "If the gate verifies only the presence of a provenance record rather than its authenticity or content, actors may fabricate records to pass it, converting the evidence check into a checkbox",
+      "Hard blocking can stall pipelines when re-evidence is unavailable; an escalation path to the owner must exist alongside the gate"
+     ],
+     "generatedAt": "2026-09-01T12:52:44.910Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788265732489_9ne-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Bind Inference Depth and Confidence to Evidence Grade at Pipeline Boundaries\",\n    \"statement\": \"At every boundary where external or unverifiable input enters a pipeline that produces consequential conclusions or actions, the system must (1) assign the input an explicit evidence grade (e.g., verified-observable, attested-unverified, absent), (2) persist that grade with its provenance to durable state before any consequential stage consumes the input, and (3) enforce a gate on the ingestion-to-inference transition: when required evidence is absent or unverifiable, the pipeline must halt, request re-evidence, or downgrade its output to explicitly labeled hypothesis-level output with provenance attached. Downstream inference depth and stated confidence must never exceed the bound set by the entry-time evidence grade.\",\n    \"rationale\": \"The diagnosed failure was structural, not judgmental: unverifiable owner-reported input was ingested as full-grade evidence, full-depth causal inference proceeded without traces, and nothing at the pipeline boundary prevented it — the system relied on downstream actors to notice and compensate, which failed under context loss. Grading evidence at entry, persisting provenance before consequential stages, and blocking the ingestion-to-inference transition when evidence is absent make it structurally impossible for conclusions to outrun their evidence regardless of downstream actor judgment. This operationalizes T-03 at pipeline boundaries using guardrail and persistence mechanics akin to T-05 and T-10 without contradicting any core axiom.\",\n    \"applicability\": [\n      \"Pipelines that consume inputs of varying evidence quality to produce consequential conclusions, diagnoses, or actions\",\n      \"Multi-actor or multi-stage pipelines where downstream stages cannot recover provenance lost at the entry boundary\",\n      \"Any transition where a hard evidence requirement exists but is only implicitly expected of downstream actors rather than encoded as an enforceable check\",\n      \"Systems that combine owner-reported or self-attested data with observable evidence such as logs, traces, and state\"\n    ],\n    \"antiPatterns\": [\n      \"Accepting unverifiable owner-reported input as full-grade evidence at ingestion and running full-depth inference on it\",\n      \"Proceeding to consequential stages at full depth and confidence when required evidence is absent, instead of halting, requesting re-evidence, or downgrading\",\n      \"Delegating evidence-quality enforcement to downstream actor discretion instead of an entry-time gate\",\n      \"Emitting conclusions without a persisted evidence grade and provenance record available to downstream consumers\",\n      \"Passing the gate by mere presence of a provenance record without verifying its content or authenticity\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Prevent consequential conclusions and actions whose depth and confidence exceed what the ingested evidence actually supports, starting with unverifiable owner-reported input being consumed as verified evidence.\",\n    \"targetBehavior\": \"At input ingestion the agent assigns an explicit evidence grade, persists grade and provenance before any consequential stage runs, and when required evidence is absent or unverifiable it visibly halts, requests re-evidence, or emits hypothesis-level output labeled with its provenance — observable as a gate decision plus persisted provenance records in the tool trajectory.\",\n    \"forbiddenBehavior\": \"Full-depth inference or consequential action proceeding on absent, ungraded, or unverifiable evidence, with evidence checks left to downstream actors' discretion and no enforceable entry-time gate.\",\n    \"evidenceSource\": \"Diagnosed pain from the philosopher analysis (pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1): unverifiable owner-reported submission treated as full-grade evidence; full-depth causal inference executed without traces; no gate at the submission-to-inference transition; provenance unrecoverable by downstream stages.\",\n    \"validationExpectation\": \"An evaluator should demand: every input consumed by a consequential stage carries a persisted evidence grade and provenance record; the ingestion-to-inference transition is blocked or downgraded when evidence is absent or unverifiable; output depth and stated confidence match the entry-time grade; and no repair round weakens the gate into a presence-only provenance check.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r2-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axiom T-03 (observable evidence before inference) and borrowed enforcement mechanics from T-05 and T-10; must be adopted as an operational extension (boundary gating and provenance persistence) rather than a restatement, or it risks redundancy and dilution of the simpler evidence-first rule\",\n    \"Overly rigid gating could reject legitimately useful owner-reported information; the downgrade-to-hypothesis path must be preserved so the gate constrains inference depth rather than mandating pure rejection\",\n    \"Evidence-grade taxonomies add classification overhead and can misgrade edge cases (e.g., an authenticated session with a partially unavailable trace), leading to over-blocking or silent overconfidence\",\n    \"Requiring durable persistence of provenance at every entry point adds latency and introduces new failure modes at submission boundaries\",\n    \"If the gate verifies only the presence of a provenance record rather than its authenticity or content, actors may fabricate records to pass it, converting the evidence check into a checkbox\",\n    \"Hard blocking can stall pipelines when re-evidence is unavailable; an escalation path to the owner must exist alongside the gate\"\n  ],\n  \"generatedAt\": \"2026-09-01T12:52:44.910Z\"\n}",
+    "usage": {
+     "input": 1973,
+     "output": 4866,
+     "total": 6839
+    },
+    "latencyMs": 60069,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "31770eb04adeaf79"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788265732489_9ne",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788265732489_9ne-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "允许疼痛报告从CLI等非认证会话来源提交，未强制绑定可观察的行为trace，导致诊断在无可验证证据的情况下强行推进",
+       "betterDecision": "在报告提交入口实施跟踪可用性门控：强制绑定经过认证的OpenClaw会话上下文；无法绑定时阻断提交或引导报告方从认证会话内重新提交",
+       "rationale": "证据必须在源头保证，而非在诊断阶段事后发现缺失；入口门控以最小改动满足可观察证据要求，避免下游诊断资源浪费在不可证的报告上",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "gate_at_entry",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "trace不可用时仍以常规置信度完成诊断，未显式降级结论可信度或标注证据来源缺失",
+       "betterDecision": "当无可观察证据时，明确将诊断标记为'仅基于owner推断'的低可信度结论，在输出中标注证据等级，并建议从认证会话重新提交以获取trace",
+       "rationale": "诚实标注证据等级可防止下游流程（如原则内化）把无证据支撑的结论当作可靠输入，是可逆且低成本的补救措施",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "graceful_degradation",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "CLI提交路径未持久化会话绑定状态与关键中间结论，导致trace永久不可用、诊断过程无法追溯",
+       "betterDecision": "在所有提交路径实现关键状态持久化：将trace、提交上下文与中间结论写入持久存储；无法持久化的路径应显式标记为不支持trace并降级其证据等级",
+       "rationale": "当连续性重要时，关键状态必须持久化到瞬时上下文之外；机制层面的保证比依赖流程约定更可靠，且使诊断可追溯",
+       "confidence": 0.75,
+       "riskLevel": "medium",
+       "strategicPerspective": "persist_critical_state",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "将证据可用性检查留给诊断阶段事后发现，未在提交阶段定义显式guardrail与禁止转换，导致无trace报告仍可进入完整诊断流程",
+       "betterDecision": "把'疼痛报告必须附带可观察trace'的硬约束转化为提交入口的显式校验规则与禁止转换：无trace的报告不得进入高可信度诊断路径",
+       "rationale": "硬约束应转化为显式guardrail、检查与禁止转换后再执行；前置校验以最小机制从源头防止违规状态出现，而非事后补救",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "shift_left_guardrails",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "检测到证据要求与CLI提交路径之间的意图张力后未形成反馈闭环，同类无trace报告反复进入诊断流程并重复失败",
+       "betterDecision": "当检测到intentTension（证据门控与提交路径冲突）时，主动向owner暴露张力并建议修订意图或明确CLI路径的证据等级规则，将摩擦转化为设计层改进",
+       "rationale": "失败与摩擦应作为反馈用于改进未来行为；暴露张力可推动在意图与设计层修复根因，而非在每次诊断中重复同样的错误",
+       "confidence": 0.7,
+       "riskLevel": "low",
+       "strategicPerspective": "feedback_driven_design",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "contextRefs": [
+      "artifact://051773d9-a79e-4fee-8570-d611843b2704"
+     ],
+     "generatedAt": "2026-09-01T12:31:00Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788265732489_9ne-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"允许疼痛报告从CLI等非认证会话来源提交，未强制绑定可观察的行为trace，导致诊断在无可验证证据的情况下强行推进\",\"betterDecision\":\"在报告提交入口实施跟踪可用性门控：强制绑定经过认证的OpenClaw会话上下文；无法绑定时阻断提交或引导报告方从认证会话内重新提交\",\"rationale\":\"证据必须在源头保证，而非在诊断阶段事后发现缺失；入口门控以最小改动满足可观察证据要求，避免下游诊断资源浪费在不可证的报告上\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"gate_at_entry\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"trace不可用时仍以常规置信度完成诊断，未显式降级结论可信度或标注证据来源缺失\",\"betterDecision\":\"当无可观察证据时，明确将诊断标记为'仅基于owner推断'的低可信度结论，在输出中标注证据等级，并建议从认证会话重新提交以获取trace\",\"rationale\":\"诚实标注证据等级可防止下游流程（如原则内化）把无证据支撑的结论当作可靠输入，是可逆且低成本的补救措施\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"graceful_degradation\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":2,\"badDecision\":\"CLI提交路径未持久化会话绑定状态与关键中间结论，导致trace永久不可用、诊断过程无法追溯\",\"betterDecision\":\"在所有提交路径实现关键状态持久化：将trace、提交上下文与中间结论写入持久存储；无法持久化的路径应显式标记为不支持trace并降级其证据等级\",\"rationale\":\"当连续性重要时，关键状态必须持久化到瞬时上下文之外；机制层面的保证比依赖流程约定更可靠，且使诊断可追溯\",\"confidence\":0.75,\"riskLevel\":\"medium\",\"strategicPerspective\":\"persist_critical_state\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":3,\"badDecision\":\"将证据可用性检查留给诊断阶段事后发现，未在提交阶段定义显式guardrail与禁止转换，导致无trace报告仍可进入完整诊断流程\",\"betterDecision\":\"把'疼痛报告必须附带可观察trace'的硬约束转化为提交入口的显式校验规则与禁止转换：无trace的报告不得进入高可信度诊断路径\",\"rationale\":\"硬约束应转化为显式guardrail、检查与禁止转换后再执行；前置校验以最小机制从源头防止违规状态出现，而非事后补救\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"shift_left_guardrails\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"检测到证据要求与CLI提交路径之间的意图张力后未形成反馈闭环，同类无trace报告反复进入诊断流程并重复失败\",\"betterDecision\":\"当检测到intentTension（证据门控与提交路径冲突）时，主动向owner暴露张力并建议修订意图或明确CLI路径的证据等级规则，将摩擦转化为设计层改进\",\"rationale\":\"失败与摩擦应作为反馈用于改进未来行为；暴露张力可推动在意图与设计层修复根因，而非在每次诊断中重复同样的错误\",\"confidence\":0.7,\"riskLevel\":\"low\",\"strategicPerspective\":\"feedback_driven_design\",\"sourcePrincipleId\":\"T-08\"}],\"contextRefs\":[\"artifact://051773d9-a79e-4fee-8570-d611843b2704\"],\"generatedAt\":\"2026-09-01T12:31:00Z\"}",
+    "usage": {
+     "input": 1998,
+     "output": 5525,
+     "total": 7523
+    },
+    "latencyMs": 69543,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "a6f13fdc54dfd142"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788265732489_9ne-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r3-run1",
+     "thesis": "Trustworthy conclusions are secured at the point of evidence capture, not recovered at the point of use. When downstream reasoning depends on upstream evidence, systems should bind verifiable evidence to claims at intake, translate evidence requirements into entry-point guardrails, honestly grade confidence when evidence is absent, persist the state needed for later verification, and recycle recurring evidence-related friction into design-level fixes.",
+     "principleCandidate": {
+      "title": "Gate evidence at intake; grade confidence honestly when evidence is absent",
+      "rationale": "The recurring root cause across all Dreamer candidates is that evidence requirements were discovered missing downstream during diagnosis rather than guaranteed upstream at submission. Enforcing evidence binding at the entry point (session/context gating, explicit validation rules, forbidden transitions) prevents unverifiable claims from entering high-confidence workflows, and when evidence genuinely cannot be captured, explicitly labeling conclusions as low-confidence with a labeled evidence tier keeps downstream consumers from mistaking inference for verified fact. Entry gating is also the minimal intervention: it stops the defect at the source rather than spending diagnostic resources discovering it late.",
+      "scope": "Applies wherever a downstream reasoning, diagnostic, or verification step depends on evidence captured at an earlier intake point—report submission, data ingestion, state capture, handoffs between subsystems—especially when multiple ingestion paths exist with differing evidentiary capability (e.g., authenticated vs. unauthenticated, instrumented vs. bare). Also applies when intermediate conclusions and traces must persist for later auditability.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-03 (use observable evidence before inferring causes) and T-05 (translate hard constraints into explicit guardrails before execution); this candidate primarily re-locates their application to the intake point and may be redundant with existing axioms.",
+      "Strict entry gating can reject legitimate reports during transient evidence-capture failures, trading availability and accessibility for verifiability.",
+      "Confidence-grade or evidence-tier labels may be ignored or stripped by downstream consumers, creating false assurance despite honest labeling at the source.",
+      "Persisting traces, submission context, and intermediate conclusions for auditability increases storage, privacy, and retention-management burden.",
+      "Gating design may entrench a single privileged ingestion path, discouraging alternative low-evidence paths instead of formally defining their degraded evidence tier."
+     ],
+     "generatedAt": "2026-09-01T12:36:00Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788265732489_9ne-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r3-run1\",\"thesis\":\"Trustworthy conclusions are secured at the point of evidence capture, not recovered at the point of use. When downstream reasoning depends on upstream evidence, systems should bind verifiable evidence to claims at intake, translate evidence requirements into entry-point guardrails, honestly grade confidence when evidence is absent, persist the state needed for later verification, and recycle recurring evidence-related friction into design-level fixes.\",\"principleCandidate\":{\"title\":\"Gate evidence at intake; grade confidence honestly when evidence is absent\",\"rationale\":\"The recurring root cause across all Dreamer candidates is that evidence requirements were discovered missing downstream during diagnosis rather than guaranteed upstream at submission. Enforcing evidence binding at the entry point (session/context gating, explicit validation rules, forbidden transitions) prevents unverifiable claims from entering high-confidence workflows, and when evidence genuinely cannot be captured, explicitly labeling conclusions as low-confidence with a labeled evidence tier keeps downstream consumers from mistaking inference for verified fact. Entry gating is also the minimal intervention: it stops the defect at the source rather than spending diagnostic resources discovering it late.\",\"scope\":\"Applies wherever a downstream reasoning, diagnostic, or verification step depends on evidence captured at an earlier intake point—report submission, data ingestion, state capture, handoffs between subsystems—especially when multiple ingestion paths exist with differing evidentiary capability (e.g., authenticated vs. unauthenticated, instrumented vs. bare). Also applies when intermediate conclusions and traces must persist for later auditability.\",\"confidence\":0.8},\"risks\":[\"Substantial overlap with core axioms T-03 (use observable evidence before inferring causes) and T-05 (translate hard constraints into explicit guardrails before execution); this candidate primarily re-locates their application to the intake point and may be redundant with existing axioms.\",\"Strict entry gating can reject legitimate reports during transient evidence-capture failures, trading availability and accessibility for verifiability.\",\"Confidence-grade or evidence-tier labels may be ignored or stripped by downstream consumers, creating false assurance despite honest labeling at the source.\",\"Persisting traces, submission context, and intermediate conclusions for auditability increases storage, privacy, and retention-management burden.\",\"Gating design may entrench a single privileged ingestion path, discouraging alternative low-evidence paths instead of formally defining their degraded evidence tier.\"],\"generatedAt\":\"2026-09-01T12:36:00Z\"}",
+    "usage": {
+     "input": 1627,
+     "output": 2166,
+     "total": 3793
+    },
+    "latencyMs": 35148,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "7b2a0b327585010c"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788265732489_9ne-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1",
+     "principleDraft": {
+      "title": "Bind evidence to claims at intake; grade confidence when evidence is absent",
+      "statement": "Whenever a downstream reasoning, diagnostic, or verification step depends on evidence captured at an earlier intake point (submission, ingestion, state capture, subsystem handoff), the intake step must bind verifiable evidence (identity, context, traces) to the incoming claim as an entry-point guardrail, and when evidence genuinely cannot be captured, must attach an explicit evidence-tier/confidence label marking the claim as evidence-absent before it proceeds; unlabeled evidence-free claims must never enter high-confidence workflows.",
+      "rationale": "The recurring root cause across the Dreamer candidates is that evidence requirements were discovered missing downstream during diagnosis rather than guaranteed upstream at submission. Gating at intake stops the defect at the source, which is also the minimal intervention compared to spending diagnostic resources discovering missing evidence late. When evidence cannot be captured, honest confidence grading at intake prevents downstream consumers from mistaking inference for verified fact.",
+      "applicability": [
+       "Report or claim submission and data ingestion where downstream diagnosis or verification depends on captured evidence",
+       "Handoffs between subsystems where upstream-captured state or context is consumed downstream",
+       "Systems with multiple ingestion paths of differing evidentiary capability (authenticated vs. unauthenticated, instrumented vs. bare)",
+       "Pipelines where intermediate conclusions, submission context, or traces must persist for later auditability",
+       "Any workflow where confidence labels propagate into downstream decision-making"
+      ],
+      "antiPatterns": [
+       "Accepting claims into high-confidence workflows without bound evidence or an explicit evidence tier attached at intake",
+       "Discovering evidence requirements only post-hoc during downstream diagnosis instead of enforcing them at the entry point",
+       "Silently promoting inference to verified-fact status by stripping or ignoring confidence/evidence-tier labels",
+       "Designing gated intake as a single privileged path with no formally defined degraded tier for low-evidence submissions",
+       "Discarding submission context and traces that later verification or audit would require"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants claims admitted into downstream reasoning only when verifiable evidence is bound to them at the intake point, or when that is impossible, only with an explicit evidence-absent/low-confidence label so inference is never mistaken for verified fact.",
+      "targetBehavior": "At every intake point (submission, ingestion, handoff), a compliant agent checks that required evidence is attached before passing the claim downstream; if evidence is missing, it captures it, rejects the transition, or attaches an explicit evidence-tier/confidence label, and persists the evidence state needed for later verification.",
+      "forbiddenBehavior": "Allowing evidence-free claims to enter downstream diagnostic or verification workflows unlabeled, such that missing evidence is only discovered during downstream diagnosis and inference is consumed as verified fact.",
+      "evidenceSource": "The philosopher diagnosis (pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1) that the recurring root cause across Dreamer candidates was evidence requirements discovered missing downstream during diagnosis rather than guaranteed upstream at submission, across multi-path ingestion contexts with differing evidentiary capability.",
+      "validationExpectation": "An evaluator should verify that any generated rule enforces an intake-time check — evidence bound or an evidence-absent tier attached — before downstream use, that unlabeled evidence-free claims are rejected or downgraded, and that the rule does not rely on post-hoc downstream detection of missing evidence."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-03 (use observable evidence before inferring causes) and T-05 (translate hard constraints into explicit guardrails before execution): this principle mainly re-locates their application to the intake point; downstream stages must confirm it adds entry-point specificity rather than duplicating existing axiom coverage.",
+      "Strict intake gating may reject legitimate submissions during transient evidence-capture failures, trading availability and accessibility for verifiability.",
+      "Downstream consumers may ignore or strip confidence/evidence-tier labels, creating false assurance despite honest labeling at the source.",
+      "Persisting traces, submission context, and intermediate conclusions for auditability increases storage, privacy, and retention-management burden.",
+      "Gating design may entrench a single privileged ingestion path unless degraded evidence tiers are formally defined for alternative low-evidence paths.",
+      "Rule generation may over-generalize the evidence requirement to trivial, low-stakes claims, adding friction where full evidence binding is disproportionate."
+     ],
+     "generatedAt": "2026-09-01T12:45:00Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788265732489_9ne-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1\",\"principleDraft\":{\"title\":\"Bind evidence to claims at intake; grade confidence when evidence is absent\",\"statement\":\"Whenever a downstream reasoning, diagnostic, or verification step depends on evidence captured at an earlier intake point (submission, ingestion, state capture, subsystem handoff), the intake step must bind verifiable evidence (identity, context, traces) to the incoming claim as an entry-point guardrail, and when evidence genuinely cannot be captured, must attach an explicit evidence-tier/confidence label marking the claim as evidence-absent before it proceeds; unlabeled evidence-free claims must never enter high-confidence workflows.\",\"rationale\":\"The recurring root cause across the Dreamer candidates is that evidence requirements were discovered missing downstream during diagnosis rather than guaranteed upstream at submission. Gating at intake stops the defect at the source, which is also the minimal intervention compared to spending diagnostic resources discovering missing evidence late. When evidence cannot be captured, honest confidence grading at intake prevents downstream consumers from mistaking inference for verified fact.\",\"applicability\":[\"Report or claim submission and data ingestion where downstream diagnosis or verification depends on captured evidence\",\"Handoffs between subsystems where upstream-captured state or context is consumed downstream\",\"Systems with multiple ingestion paths of differing evidentiary capability (authenticated vs. unauthenticated, instrumented vs. bare)\",\"Pipelines where intermediate conclusions, submission context, or traces must persist for later auditability\",\"Any workflow where confidence labels propagate into downstream decision-making\"],\"antiPatterns\":[\"Accepting claims into high-confidence workflows without bound evidence or an explicit evidence tier attached at intake\",\"Discovering evidence requirements only post-hoc during downstream diagnosis instead of enforcing them at the entry point\",\"Silently promoting inference to verified-fact status by stripping or ignoring confidence/evidence-tier labels\",\"Designing gated intake as a single privileged path with no formally defined degraded tier for low-evidence submissions\",\"Discarding submission context and traces that later verification or audit would require\"],\"confidence\":0.8},\"intentContract\":{\"ownerIntent\":\"The Owner wants claims admitted into downstream reasoning only when verifiable evidence is bound to them at the intake point, or when that is impossible, only with an explicit evidence-absent/low-confidence label so inference is never mistaken for verified fact.\",\"targetBehavior\":\"At every intake point (submission, ingestion, handoff), a compliant agent checks that required evidence is attached before passing the claim downstream; if evidence is missing, it captures it, rejects the transition, or attaches an explicit evidence-tier/confidence label, and persists the evidence state needed for later verification.\",\"forbiddenBehavior\":\"Allowing evidence-free claims to enter downstream diagnostic or verification workflows unlabeled, such that missing evidence is only discovered during downstream diagnosis and inference is consumed as verified fact.\",\"evidenceSource\":\"The philosopher diagnosis (pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1) that the recurring root cause across Dreamer candidates was evidence requirements discovered missing downstream during diagnosis rather than guaranteed upstream at submission, across multi-path ingestion contexts with differing evidentiary capability.\",\"validationExpectation\":\"An evaluator should verify that any generated rule enforces an intake-time check — evidence bound or an evidence-absent tier attached — before downstream use, that unlabeled evidence-free claims are rejected or downgraded, and that the rule does not rely on post-hoc downstream detection of missing evidence.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1\"},\"risks\":[\"Substantial overlap with core axioms T-03 (use observable evidence before inferring causes) and T-05 (translate hard constraints into explicit guardrails before execution): this principle mainly re-locates their application to the intake point; downstream stages must confirm it adds entry-point specificity rather than duplicating existing axiom coverage.\",\"Strict intake gating may reject legitimate submissions during transient evidence-capture failures, trading availability and accessibility for verifiability.\",\"Downstream consumers may ignore or strip confidence/evidence-tier labels, creating false assurance despite honest labeling at the source.\",\"Persisting traces, submission context, and intermediate conclusions for auditability increases storage, privacy, and retention-management burden.\",\"Gating design may entrench a single privileged ingestion path unless degraded evidence tiers are formally defined for alternative low-evidence paths.\",\"Rule generation may over-generalize the evidence requirement to trivial, low-stakes claims, adding friction where full evidence binding is disproportionate.\"],\"generatedAt\":\"2026-09-01T12:45:00Z\"}",
+    "usage": {
+     "input": 1948,
+     "output": 2719,
+     "total": 4667
+    },
+    "latencyMs": 36787,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "14c4c3b4caaeb0bf"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788265732489_9ne-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1",
+     "principleDraft": {
+      "title": "Gate evidence at intake; block or explicitly downgrade conclusions lacking evidence",
+      "statement": "Whenever a downstream reasoning, diagnostic, or verification step depends on evidence captured at an earlier intake point, the intake point must enforce an evidence-availability gate: either verifiable evidence (e.g., an authenticated session trace) is bound to the submission at intake, or the submission is barred from high-confidence processing paths and any conclusion drawn from it is explicitly labeled with a downgraded evidence tier (e.g., owner-inference-only).",
+      "rationale": "The diagnosed root cause is a design gap: pain reports could be submitted from a non-authenticated path (CLI) without mandatory session binding or observable trace, so diagnosis proceeded on unverifiable owner-reported inference and the state needed to verify it was never captured (violating T-03 and T-10). Enforcing the evidence requirement as an entry-point gate with a forbidden transition stops unverifiable claims at the source — the minimal intervention — rather than discovering missing evidence downstream, and explicit downgraded evidence labels prevent downstream consumers from mistaking inference for verified fact when evidence genuinely cannot be captured.",
+      "applicability": [
+       "Entry points feeding diagnosis or verification workflows: pain-report submission, data ingestion, state capture, subsystem handoffs",
+       "Systems with multiple ingestion paths of differing evidentiary capability (e.g., authenticated session vs. CLI/non-session submission)",
+       "Any conclusion handed to downstream consumers when observable evidence is genuinely unavailable and only inference remains",
+       "Workflows where traces, submission context, and intermediate conclusions must persist for later auditability"
+      ],
+      "antiPatterns": [
+       "Accepting submissions from any path into full-confidence diagnosis without an intake check for observable evidence",
+       "Proceeding with diagnosis or conclusions at normal confidence when the only evidence is owner-reported inference with no behavioral trace",
+       "Leaving evidence availability to be discovered downstream, after the intake point has already failed to capture or bind the needed state",
+       "Rejecting or downgrading silently: no explicit evidence-tier label on conclusions and no instruction to resubmit from an evidence-capable path",
+       "Relying on process convention instead of an enforced entry-point check or forbidden transition"
+      ],
+      "confidence": 0.75
+     },
+     "intentContract": {
+      "ownerIntent": "Pain reports and other diagnostic inputs must arrive with verifiable session-trace evidence bound at submission, so no diagnosis is presented as verified when it actually rests on unverifiable owner report.",
+      "targetBehavior": "Before a submission enters a diagnostic or reasoning workflow, the agent checks evidence availability at the intake point: with an authenticated trace bound, it proceeds; without one, it either blocks the submission and directs the reporter to resubmit from an authenticated session, or processes it under an explicit low-confidence, owner-inference-only evidence label attached to the conclusion.",
+      "forbiddenBehavior": "Letting unevidenced submissions from non-authenticated paths flow into full-confidence diagnosis, so conclusions are asserted without observable evidence and the evidence gap is only discovered downstream during diagnosis.",
+      "evidenceSource": "Diagnosis manual_1788265732489_9nexm9e6: a CLI-submitted pain report with no authenticated host-session provenance, trace marked unavailable_with_reason, nextAction advising resubmission from an OpenClaw session or owner-reason-only diagnosis, and a strong intentTension between evidence requirements and the CLI path (T-03/T-10 violations).",
+      "validationExpectation": "An evaluator should see the rule act before diagnosis begins: a visible intake check for trace/session binding, followed by either a rejection with resubmission guidance or an explicit downgraded evidence tier carried on the conclusion. A rule that only requests evidence after diagnosis has started, or that lets unbound submissions through at full confidence, is unfaithful to this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-03 (observable evidence before inference), T-05 (hard constraints as explicit guardrails) and T-10 (persist critical state); this principle mainly re-locates them to the intake point and may be redundant with existing axioms.",
+      "Strict entry gating can reject legitimate submissions during transient evidence-capture failures, trading availability and accessibility for verifiability.",
+      "Downgraded evidence-tier labels may be ignored or stripped by downstream consumers, creating false assurance despite honest labeling at the source.",
+      "The diagnosis flagged unresolved intentTension (suggestedOwnerAction: revise_intent): the owner has not yet decided whether to block the CLI path or formally define its degraded evidence tier, so the principle risks entrenching one choice prematurely.",
+      "Binding traces and persisting submission context for auditability increases storage, privacy, and retention-management burden.",
+      "Gating may entrench a single privileged ingestion path and discourage formally defining low-evidence alternative paths."
+     ],
+     "generatedAt": "2026-09-01T12:50:00Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788265732489_9ne-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Gate evidence at intake; block or explicitly downgrade conclusions lacking evidence\",\n    \"statement\": \"Whenever a downstream reasoning, diagnostic, or verification step depends on evidence captured at an earlier intake point, the intake point must enforce an evidence-availability gate: either verifiable evidence (e.g., an authenticated session trace) is bound to the submission at intake, or the submission is barred from high-confidence processing paths and any conclusion drawn from it is explicitly labeled with a downgraded evidence tier (e.g., owner-inference-only).\",\n    \"rationale\": \"The diagnosed root cause is a design gap: pain reports could be submitted from a non-authenticated path (CLI) without mandatory session binding or observable trace, so diagnosis proceeded on unverifiable owner-reported inference and the state needed to verify it was never captured (violating T-03 and T-10). Enforcing the evidence requirement as an entry-point gate with a forbidden transition stops unverifiable claims at the source — the minimal intervention — rather than discovering missing evidence downstream, and explicit downgraded evidence labels prevent downstream consumers from mistaking inference for verified fact when evidence genuinely cannot be captured.\",\n    \"applicability\": [\n      \"Entry points feeding diagnosis or verification workflows: pain-report submission, data ingestion, state capture, subsystem handoffs\",\n      \"Systems with multiple ingestion paths of differing evidentiary capability (e.g., authenticated session vs. CLI/non-session submission)\",\n      \"Any conclusion handed to downstream consumers when observable evidence is genuinely unavailable and only inference remains\",\n      \"Workflows where traces, submission context, and intermediate conclusions must persist for later auditability\"\n    ],\n    \"antiPatterns\": [\n      \"Accepting submissions from any path into full-confidence diagnosis without an intake check for observable evidence\",\n      \"Proceeding with diagnosis or conclusions at normal confidence when the only evidence is owner-reported inference with no behavioral trace\",\n      \"Leaving evidence availability to be discovered downstream, after the intake point has already failed to capture or bind the needed state\",\n      \"Rejecting or downgrading silently: no explicit evidence-tier label on conclusions and no instruction to resubmit from an evidence-capable path\",\n      \"Relying on process convention instead of an enforced entry-point check or forbidden transition\"\n    ],\n    \"confidence\": 0.75\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Pain reports and other diagnostic inputs must arrive with verifiable session-trace evidence bound at submission, so no diagnosis is presented as verified when it actually rests on unverifiable owner report.\",\n    \"targetBehavior\": \"Before a submission enters a diagnostic or reasoning workflow, the agent checks evidence availability at the intake point: with an authenticated trace bound, it proceeds; without one, it either blocks the submission and directs the reporter to resubmit from an authenticated session, or processes it under an explicit low-confidence, owner-inference-only evidence label attached to the conclusion.\",\n    \"forbiddenBehavior\": \"Letting unevidenced submissions from non-authenticated paths flow into full-confidence diagnosis, so conclusions are asserted without observable evidence and the evidence gap is only discovered downstream during diagnosis.\",\n    \"evidenceSource\": \"Diagnosis manual_1788265732489_9nexm9e6: a CLI-submitted pain report with no authenticated host-session provenance, trace marked unavailable_with_reason, nextAction advising resubmission from an OpenClaw session or owner-reason-only diagnosis, and a strong intentTension between evidence requirements and the CLI path (T-03/T-10 violations).\",\n    \"validationExpectation\": \"An evaluator should see the rule act before diagnosis begins: a visible intake check for trace/session binding, followed by either a rejection with resubmission guidance or an explicit downgraded evidence tier carried on the conclusion. A rule that only requests evidence after diagnosis has started, or that lets unbound submissions through at full confidence, is unfaithful to this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788265732489_9ne-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788265732489_9ne-r3-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axioms T-03 (observable evidence before inference), T-05 (hard constraints as explicit guardrails) and T-10 (persist critical state); this principle mainly re-locates them to the intake point and may be redundant with existing axioms.\",\n    \"Strict entry gating can reject legitimate submissions during transient evidence-capture failures, trading availability and accessibility for verifiability.\",\n    \"Downgraded evidence-tier labels may be ignored or stripped by downstream consumers, creating false assurance despite honest labeling at the source.\",\n    \"The diagnosis flagged unresolved intentTension (suggestedOwnerAction: revise_intent): the owner has not yet decided whether to block the CLI path or formally define its degraded evidence tier, so the principle risks entrenching one choice prematurely.\",\n    \"Binding traces and persisting submission context for auditability increases storage, privacy, and retention-management burden.\",\n    \"Gating may entrench a single privileged ingestion path and discourage formally defining low-evidence alternative paths.\"\n  ],\n  \"generatedAt\": \"2026-09-01T12:50:00Z\"\n}",
+    "usage": {
+     "input": 4127,
+     "output": 5159,
+     "total": 9286
+    },
+    "latencyMs": 65223,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "fc69ed7b806f7aa5"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

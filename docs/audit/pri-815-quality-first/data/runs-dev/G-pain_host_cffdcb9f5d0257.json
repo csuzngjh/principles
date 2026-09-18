@@ -1,0 +1,233 @@
+{
+ "group": "G-pain_host_cffdcb9f5d0257",
+ "class": "DEV",
+ "pain_id": "pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1",
+ "frozen_at": "2026-09-17T14:36:07.942Z",
+ "repeats": [
+  {
+   "group": "G-pain_host_cffdcb9f5d0257",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_cffdcb9f5d0257-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在用户已认可 mooncake-mv-final-v3k22.mp4 后，未将该版本固化为基线参照，即连续叠加主观「优化」改动",
+       "betterDecision": "一旦用户确认某版本，先将其固化为不可变基线参照（记录文件路径与内容指纹），任何后续修改请求先与所有者确认优化目标与验收标准再动手",
+       "rationale": "所有者认可版本是真实意图的锚点；在其上无目标地叠加主观改动会系统性偏离意图并累积不可控偏差",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "baseline_anchoring"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "每轮改动后仅以「已完成修改」为成功标准，未与基线生成任何可观察的对比证据",
+       "betterDecision": "每轮改动后强制产出与基线的可观察对比（关键帧截图、片段视频、逐项差异列表），只有相对基线不劣化才保留改动，否则回退",
+       "rationale": "缺少对比验收门禁时，劣化改动会被误判为成功并持续叠加；可观察证据是拦截劣化的唯一客观依据",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_against_baseline"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "将模糊的「优化/更好」请求自行解释为可自由发挥的改进空间，未澄清具体优化维度",
+       "betterDecision": "面对模糊优化请求，先向所有者澄清优化维度（画质、节奏、转场等）与可验收标准，或提出最小改动方案获批后再执行",
+       "rationale": "「更好」是主观词，无明确维度时任何改动都可能偏离所有者真实偏好；一次澄清的成本远低于多轮劣化后的返工成本",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "clarify_intent_before_acting"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "改动直接覆盖或替代认可版本，未保留可回退的版本副本，劣化后无法恢复",
+       "betterDecision": "基线文件保持只读副本，所有改动输出到新版本文件并保留版本链，使任意一轮劣化可一键回退到基线",
+       "rationale": "改动效果不可预知时，可逆性是硬安全边界；版本隔离将劣化代价从「不可挽回」降为「丢弃新版本」",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "reversible_versioning"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "单轮迭代同时叠加多个维度的改动，劣化发生后无法定位是哪个改动导致",
+       "betterDecision": "将优化拆解为单维度、独立可验证的小步改动，每步与基线对比验收通过后再进入下一步",
+       "rationale": "多维叠加使劣化归因不可能，只能整体回滚全部工作；小步独立验证既降低单步风险，又使每次保留或回退决策有明确依据",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "small_isolated_steps"
+      }
+     ],
+     "sourcePainId": "pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1",
+     "contextRefs": [
+      "artifact://6a716118-bf9b-4711-bc65-99ade2d08cba"
+     ],
+     "generatedAt": "2025-08-21T14:03:47Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_cffdcb9f5d0257-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在用户已认可 mooncake-mv-final-v3k22.mp4 后，未将该版本固化为基线参照，即连续叠加主观「优化」改动\",\"betterDecision\":\"一旦用户确认某版本，先将其固化为不可变基线参照（记录文件路径与内容指纹），任何后续修改请求先与所有者确认优化目标与验收标准再动手\",\"rationale\":\"所有者认可版本是真实意图的锚点；在其上无目标地叠加主观改动会系统性偏离意图并累积不可控偏差\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"baseline_anchoring\"},{\"candidateIndex\":1,\"badDecision\":\"每轮改动后仅以「已完成修改」为成功标准，未与基线生成任何可观察的对比证据\",\"betterDecision\":\"每轮改动后强制产出与基线的可观察对比（关键帧截图、片段视频、逐项差异列表），只有相对基线不劣化才保留改动，否则回退\",\"rationale\":\"缺少对比验收门禁时，劣化改动会被误判为成功并持续叠加；可观察证据是拦截劣化的唯一客观依据\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_against_baseline\"},{\"candidateIndex\":2,\"badDecision\":\"将模糊的「优化/更好」请求自行解释为可自由发挥的改进空间，未澄清具体优化维度\",\"betterDecision\":\"面对模糊优化请求，先向所有者澄清优化维度（画质、节奏、转场等）与可验收标准，或提出最小改动方案获批后再执行\",\"rationale\":\"「更好」是主观词，无明确维度时任何改动都可能偏离所有者真实偏好；一次澄清的成本远低于多轮劣化后的返工成本\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"clarify_intent_before_acting\"},{\"candidateIndex\":3,\"badDecision\":\"改动直接覆盖或替代认可版本，未保留可回退的版本副本，劣化后无法恢复\",\"betterDecision\":\"基线文件保持只读副本，所有改动输出到新版本文件并保留版本链，使任意一轮劣化可一键回退到基线\",\"rationale\":\"改动效果不可预知时，可逆性是硬安全边界；版本隔离将劣化代价从「不可挽回」降为「丢弃新版本」\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"reversible_versioning\"},{\"candidateIndex\":4,\"badDecision\":\"单轮迭代同时叠加多个维度的改动，劣化发生后无法定位是哪个改动导致\",\"betterDecision\":\"将优化拆解为单维度、独立可验证的小步改动，每步与基线对比验收通过后再进入下一步\",\"rationale\":\"多维叠加使劣化归因不可能，只能整体回滚全部工作；小步独立验证既降低单步风险，又使每次保留或回退决策有明确依据\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"small_isolated_steps\"}],\"sourcePainId\":\"pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1\",\"contextRefs\":[\"artifact://6a716118-bf9b-4711-bc65-99ade2d08cba\"],\"generatedAt\":\"2025-08-21T14:03:47Z\"}",
+    "usage": {
+     "input": 1880,
+     "output": 2888,
+     "total": 4768
+    },
+    "latencyMs": 47457,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "941c90b5354f0edb"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_cffdcb9f5d0257-r1-run1",
+     "thesis": "Owner approval is not a starting point for free interpretation—it is an anchor of verified intent. Once an owner approves an artifact version, that state becomes an immutable baseline; every subsequent change is merely a hypothesis that must name its optimization dimension, remain reversible, and prove non-regression against the frozen baseline through observable comparison before it earns a place in the artifact's history. Without this anchor, vague 'make it better' requests invite subjective drift, degradations stack silently, and the agent's sense of 'completed improvement' diverges ever further from the owner's actual preference.",
+     "principleCandidate": {
+      "title": "Anchor on approved baselines: keep changes only if verified non-regressive against them",
+      "rationale": "The root cause of the pain was unbounded subjective drift: after the owner approved a version, ambiguous optimization requests were self-interpreted as license for free-form changes, each declared successful on 'modification completed' alone. Freezing the approved version as a baseline converts 'improvement' from a subjective judgment into a falsifiable claim—a change is kept only if an observable comparison against the baseline (screenshots, diffs, dimension-by-dimension checks) shows no regression on owner-relevant dimensions. This single anchor also forces clarification of vague goals (what dimension to improve), motivates version isolation for reversibility, and makes small isolated steps the natural unit of verification, addressing all five candidate failure modes coherently.",
+      "scope": "Applies whenever an owner or authoritative party has explicitly approved or accepted a version of an artifact (media, documents, code, configurations, plans, generated outputs) and subsequent modification requests—especially vague ones like 'optimize', 'polish', or 'make it better'—arrive. Most critical in iterative editing/generation loops where per-step degradation is easy to miss and changes overwrite prior state. Not applicable when no approved reference exists or when the owner explicitly requests exploratory divergence from prior work.",
+      "confidence": 0.85
+     },
+     "risks": [
+      "Overlaps with T-02 (clarify vague goals), T-03/T-07 (observable verification before claiming results), and T-04 (reversible actions); the genuinely new element is only the frozen owner-approved state as the mandatory comparison anchor, and the composite framing risks redundancy with existing axioms if that distinction is lost.",
+      "Baseline rigidity: freezing an approved version may block legitimate evolution of owner intent; without an explicit re-approval path to update the baseline, the principle degenerates into change aversion and stalls necessary rework.",
+      "Non-regression is ill-defined for subjective quality dimensions (aesthetics, pacing, tone); comparison evidence can be contested, and the gate may devolve into disputes over what counts as degradation.",
+      "Clarification overhead: demanding explicit optimization dimensions and acceptance criteria for every minor tweak can slow iteration and frustrate owners who expect fast, low-stakes adjustments; the principle must be applied proportionally to the stakes of the change."
+     ],
+     "generatedAt": "2025-08-21T14:12:33Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_cffdcb9f5d0257-r1-run1\",\"thesis\":\"Owner approval is not a starting point for free interpretation—it is an anchor of verified intent. Once an owner approves an artifact version, that state becomes an immutable baseline; every subsequent change is merely a hypothesis that must name its optimization dimension, remain reversible, and prove non-regression against the frozen baseline through observable comparison before it earns a place in the artifact's history. Without this anchor, vague 'make it better' requests invite subjective drift, degradations stack silently, and the agent's sense of 'completed improvement' diverges ever further from the owner's actual preference.\",\"principleCandidate\":{\"title\":\"Anchor on approved baselines: keep changes only if verified non-regressive against them\",\"rationale\":\"The root cause of the pain was unbounded subjective drift: after the owner approved a version, ambiguous optimization requests were self-interpreted as license for free-form changes, each declared successful on 'modification completed' alone. Freezing the approved version as a baseline converts 'improvement' from a subjective judgment into a falsifiable claim—a change is kept only if an observable comparison against the baseline (screenshots, diffs, dimension-by-dimension checks) shows no regression on owner-relevant dimensions. This single anchor also forces clarification of vague goals (what dimension to improve), motivates version isolation for reversibility, and makes small isolated steps the natural unit of verification, addressing all five candidate failure modes coherently.\",\"scope\":\"Applies whenever an owner or authoritative party has explicitly approved or accepted a version of an artifact (media, documents, code, configurations, plans, generated outputs) and subsequent modification requests—especially vague ones like 'optimize', 'polish', or 'make it better'—arrive. Most critical in iterative editing/generation loops where per-step degradation is easy to miss and changes overwrite prior state. Not applicable when no approved reference exists or when the owner explicitly requests exploratory divergence from prior work.\",\"confidence\":0.85},\"risks\":[\"Overlaps with T-02 (clarify vague goals), T-03/T-07 (observable verification before claiming results), and T-04 (reversible actions); the genuinely new element is only the frozen owner-approved state as the mandatory comparison anchor, and the composite framing risks redundancy with existing axioms if that distinction is lost.\",\"Baseline rigidity: freezing an approved version may block legitimate evolution of owner intent; without an explicit re-approval path to update the baseline, the principle degenerates into change aversion and stalls necessary rework.\",\"Non-regression is ill-defined for subjective quality dimensions (aesthetics, pacing, tone); comparison evidence can be contested, and the gate may devolve into disputes over what counts as degradation.\",\"Clarification overhead: demanding explicit optimization dimensions and acceptance criteria for every minor tweak can slow iteration and frustrate owners who expect fast, low-stakes adjustments; the principle must be applied proportionally to the stakes of the change.\"],\"generatedAt\":\"2025-08-21T14:12:33Z\"}",
+    "usage": {
+     "input": 1585,
+     "output": 2286,
+     "total": 3871
+    },
+    "latencyMs": 35577,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3de5e3e9bd66f882"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_cffdcb9f5d0257-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1-run1",
+     "principleDraft": {
+      "title": "Anchor on owner-approved baselines; keep only verified non-regressive changes",
+      "statement": "When an owner or authoritative party has explicitly approved a version of an artifact, freeze that version as the immutable comparison baseline before applying any subsequent modification. Treat every follow-up change request—especially vague ones like 'optimize', 'polish', or 'make it better'—as a hypothesis that must: (a) name the specific optimization dimension it targets, clarifying with the owner if the dimension is ambiguous; (b) be applied as an isolated, reversible step that preserves the baseline intact; and (c) be retained only after an observable comparison against the baseline (diff, screenshot, dimension-by-dimension check) shows improvement on the targeted dimension and no regression on owner-relevant dimensions. Update the baseline only through explicit owner re-approval, and scale the rigor of this gate proportionally to the stakes of the change.",
+      "rationale": "The diagnosed root cause is unbounded subjective drift: after approval, ambiguous improvement requests were self-interpreted as license for free-form changes, each declared successful on 'modification completed' alone, so silent degradations stacked while the agent's notion of 'improved' diverged from the owner's actual preference. Freezing the approved version as a comparison anchor converts 'improvement' from a subjective judgment into a falsifiable claim—kept only if observable evidence against the baseline shows non-regression. This single anchor also forces the vague goal to be resolved into a named dimension, makes reversibility a structural requirement rather than an afterthought, and makes small isolated steps the natural unit of verification.",
+      "applicability": [
+       "Iterative editing or generation loops where an owner has explicitly approved or accepted a prior version of an artifact (media, documents, code, configurations, plans, generated outputs)",
+       "Vague follow-up modification requests such as 'optimize', 'polish', or 'make it better' directed at previously approved work",
+       "Environments where changes overwrite prior state and per-step degradation is easy to miss",
+       "Boundary: not applicable when no approved reference version exists, or when the owner explicitly requests exploratory divergence from prior work"
+      ],
+      "antiPatterns": [
+       "Treating owner approval as a starting point for free-form reinterpretation of vague improvement requests",
+       "Declaring a change successful based solely on 'modification completed' without an observable comparison against the approved baseline",
+       "Overwriting or discarding the approved baseline before the replacement has been verified non-regressive",
+       "Accepting regressions on untargeted dimensions as tolerable side effects without explicit owner sign-off",
+       "Proceeding to modify without naming the optimization dimension because the request was vague",
+       "Freezing the baseline with no re-approval path, turning the anchor into change aversion that blocks legitimate evolution of owner intent"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Once the Owner has approved a version, they want every subsequent vague 'improve it' request handled as a targeted, reversible change that is kept only when shown to improve the requested dimension without regressing the approved version—never as license for free-form rework.",
+      "targetBehavior": "Before applying a follow-up change, the agent preserves the owner-approved version as a baseline (copy, version pin, or checkpoint), states which dimension the change optimizes, applies the change reversibly, and then produces a concrete comparison artifact against the baseline (diff, screenshot, or dimension-by-dimension checklist) demonstrating improvement on the target dimension and no regression elsewhere, claiming success only after that comparison.",
+      "forbiddenBehavior": "Treating an approved version as a mere starting point and freely reworking the artifact under vague improvement requests—declaring success from modification completion alone, with no named optimization dimension, no preserved baseline, no observable non-regression comparison, and overwriting the approved state in the process.",
+      "evidenceSource": "Diagnosed pain: after owner approval, vague optimization requests were self-interpreted as license for subjective drift; each change was declared successful on 'modification completed' alone, per-step degradations stacked silently, and the agent's sense of completed improvement diverged from the owner's actual preference.",
+      "validationExpectation": "An evaluator should require, in the trajectory or rule evidence: (1) a preserved baseline reference to the approved version existing before the change, (2) an explicit statement of the targeted optimization dimension, (3) a concrete comparison artifact against the baseline, and (4) success claimed only after that comparison. Rules that merely restate 'verify results' (T-03/T-07) or 'clarify goals' (T-02) without the frozen-baseline anchor and re-approval path should be rejected as unfaithful to this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_cffdcb9f5d0257-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1-run1"
+     },
+     "risks": [
+      "Overlap with existing core axioms: the clarification requirement echoes T-02, observable verification echoes T-03/T-07, reversibility echoes T-04, and minimal-change framing echoes T-06. The genuinely new element is only the frozen owner-approved baseline as the mandatory comparison anchor plus the explicit re-approval path; if rule generation loses that distinction, the principle degenerates into redundant restatements of existing axioms.",
+      "Baseline rigidity: without the explicit re-approval path, freezing the approved version can block legitimate evolution of owner intent and produce change aversion that stalls necessary rework.",
+      "Non-regression is ill-defined for subjective quality dimensions (aesthetics, pacing, tone); comparison evidence can be contested and the gate may devolve into disputes over what counts as degradation.",
+      "Clarification overhead: demanding a named optimization dimension and comparison evidence for every minor tweak can slow iteration and frustrate owners expecting fast, low-stakes adjustments; application must be proportional to stakes.",
+      "Ritualized compliance: the agent may produce token comparison artifacts (e.g., a trivial diff) and still declare success, satisfying the letter of the gate without verifying owner-relevant dimensions.",
+      "Environmental dependency: preserving baselines requires snapshot/versioning capability; in environments lacking it, the principle's reversibility requirement may be impractical without workaround tooling."
+     ],
+     "generatedAt": "2025-08-21T14:26:05Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_cffdcb9f5d0257-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Anchor on owner-approved baselines; keep only verified non-regressive changes\",\n    \"statement\": \"When an owner or authoritative party has explicitly approved a version of an artifact, freeze that version as the immutable comparison baseline before applying any subsequent modification. Treat every follow-up change request—especially vague ones like 'optimize', 'polish', or 'make it better'—as a hypothesis that must: (a) name the specific optimization dimension it targets, clarifying with the owner if the dimension is ambiguous; (b) be applied as an isolated, reversible step that preserves the baseline intact; and (c) be retained only after an observable comparison against the baseline (diff, screenshot, dimension-by-dimension check) shows improvement on the targeted dimension and no regression on owner-relevant dimensions. Update the baseline only through explicit owner re-approval, and scale the rigor of this gate proportionally to the stakes of the change.\",\n    \"rationale\": \"The diagnosed root cause is unbounded subjective drift: after approval, ambiguous improvement requests were self-interpreted as license for free-form changes, each declared successful on 'modification completed' alone, so silent degradations stacked while the agent's notion of 'improved' diverged from the owner's actual preference. Freezing the approved version as a comparison anchor converts 'improvement' from a subjective judgment into a falsifiable claim—kept only if observable evidence against the baseline shows non-regression. This single anchor also forces the vague goal to be resolved into a named dimension, makes reversibility a structural requirement rather than an afterthought, and makes small isolated steps the natural unit of verification.\",\n    \"applicability\": [\n      \"Iterative editing or generation loops where an owner has explicitly approved or accepted a prior version of an artifact (media, documents, code, configurations, plans, generated outputs)\",\n      \"Vague follow-up modification requests such as 'optimize', 'polish', or 'make it better' directed at previously approved work\",\n      \"Environments where changes overwrite prior state and per-step degradation is easy to miss\",\n      \"Boundary: not applicable when no approved reference version exists, or when the owner explicitly requests exploratory divergence from prior work\"\n    ],\n    \"antiPatterns\": [\n      \"Treating owner approval as a starting point for free-form reinterpretation of vague improvement requests\",\n      \"Declaring a change successful based solely on 'modification completed' without an observable comparison against the approved baseline\",\n      \"Overwriting or discarding the approved baseline before the replacement has been verified non-regressive\",\n      \"Accepting regressions on untargeted dimensions as tolerable side effects without explicit owner sign-off\",\n      \"Proceeding to modify without naming the optimization dimension because the request was vague\",\n      \"Freezing the baseline with no re-approval path, turning the anchor into change aversion that blocks legitimate evolution of owner intent\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Once the Owner has approved a version, they want every subsequent vague 'improve it' request handled as a targeted, reversible change that is kept only when shown to improve the requested dimension without regressing the approved version—never as license for free-form rework.\",\n    \"targetBehavior\": \"Before applying a follow-up change, the agent preserves the owner-approved version as a baseline (copy, version pin, or checkpoint), states which dimension the change optimizes, applies the change reversibly, and then produces a concrete comparison artifact against the baseline (diff, screenshot, or dimension-by-dimension checklist) demonstrating improvement on the target dimension and no regression elsewhere, claiming success only after that comparison.\",\n    \"forbiddenBehavior\": \"Treating an approved version as a mere starting point and freely reworking the artifact under vague improvement requests—declaring success from modification completion alone, with no named optimization dimension, no preserved baseline, no observable non-regression comparison, and overwriting the approved state in the process.\",\n    \"evidenceSource\": \"Diagnosed pain: after owner approval, vague optimization requests were self-interpreted as license for subjective drift; each change was declared successful on 'modification completed' alone, per-step degradations stacked silently, and the agent's sense of completed improvement diverged from the owner's actual preference.\",\n    \"validationExpectation\": \"An evaluator should require, in the trajectory or rule evidence: (1) a preserved baseline reference to the approved version existing before the change, (2) an explicit statement of the targeted optimization dimension, (3) a concrete comparison artifact against the baseline, and (4) success claimed only after that comparison. Rules that merely restate 'verify results' (T-03/T-07) or 'clarify goals' (T-02) without the frozen-baseline anchor and re-approval path should be rejected as unfaithful to this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_cffdcb9f5d0257-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1-run1\"\n  },\n  \"risks\": [\n    \"Overlap with existing core axioms: the clarification requirement echoes T-02, observable verification echoes T-03/T-07, reversibility echoes T-04, and minimal-change framing echoes T-06. The genuinely new element is only the frozen owner-approved baseline as the mandatory comparison anchor plus the explicit re-approval path; if rule generation loses that distinction, the principle degenerates into redundant restatements of existing axioms.\",\n    \"Baseline rigidity: without the explicit re-approval path, freezing the approved version can block legitimate evolution of owner intent and produce change aversion that stalls necessary rework.\",\n    \"Non-regression is ill-defined for subjective quality dimensions (aesthetics, pacing, tone); comparison evidence can be contested and the gate may devolve into disputes over what counts as degradation.\",\n    \"Clarification overhead: demanding a named optimization dimension and comparison evidence for every minor tweak can slow iteration and frustrate owners expecting fast, low-stakes adjustments; application must be proportional to stakes.\",\n    \"Ritualized compliance: the agent may produce token comparison artifacts (e.g., a trivial diff) and still declare success, satisfying the letter of the gate without verifying owner-relevant dimensions.\",\n    \"Environmental dependency: preserving baselines requires snapshot/versioning capability; in environments lacking it, the principle's reversibility requirement may be impractical without workaround tooling.\"\n  ],\n  \"generatedAt\": \"2025-08-21T14:26:05Z\"\n}",
+    "usage": {
+     "input": 2080,
+     "output": 3517,
+     "total": 5597
+    },
+    "latencyMs": 47954,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "d0256ee77e374940"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_cffdcb9f5d0257-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1-run1",
+     "principleDraft": {
+      "title": "Anchor changes on the owner-approved baseline; keep only verified non-regressive edits",
+      "statement": "When the owner has explicitly approved or accepted a version of an artifact, freeze that version as the immutable baseline (recorded by path or content fingerprint, never overwritten) before any further modification. Treat every subsequent change—especially under vague requests like 'optimize', 'polish', or 'make it better'—as a hypothesis: name the optimization dimension being targeted, apply the change to a new separate version, produce observable comparison evidence against the baseline (e.g., key-frame screenshots, diffs, dimension-by-dimension checks), and keep the change only if that comparison shows no degradation on owner-relevant dimensions; otherwise revert to the baseline.",
+      "rationale": "The diagnosed root cause was unbounded subjective drift: after the owner approved mooncake-mv-final-v3k22.mp4, ambiguous 'optimization' requests were self-interpreted as license for free-form changes, each round accepted on 'modification completed' alone, so degradations stacked silently until the owner corrected: '后面的所谓的优化都没有 mooncake-mv-final-v3k22.mp4 版本好，越搞越乱'. Freezing the approved version as the comparison anchor converts 'improvement' from a subjective self-judgment into a falsifiable non-regression claim—the owner's accepted state is the only legitimate reference for what counts as better or worse, and it survives as the fallback whenever a change cannot prove itself. Existing axioms cover verification (T-03/T-07), intent (T-02), reversibility (T-04) and forbidden degrading transitions (T-05) generically; what they lack is this specific mechanism: the owner-approved artifact as a frozen anchor and mandatory retention gate.",
+      "applicability": [
+       "Iterative editing or generation loops over media, documents, code, configurations, plans, or generated outputs where the owner has explicitly approved or accepted a specific version and further modification requests arrive (especially vague ones: '优化', '改进', 'improve', 'polish', 'make it better')",
+       "Workflows where changes overwrite prior state and per-step quality degradation is easy to miss across successive rounds",
+       "Not applicable when no owner-approved reference exists yet, or when the owner explicitly requests exploratory divergence from prior work"
+      ],
+      "antiPatterns": [
+       "Treating owner approval of a version as a starting point for free-form, self-judged 'optimization' without freezing that version as the comparison baseline",
+       "Declaring an optimization successful based solely on 'modification completed' without producing observable comparison evidence against the baseline",
+       "Keeping or stacking changes that degrade owner-relevant dimensions relative to the approved baseline",
+       "Overwriting or discarding the approved version, making degradation irreversible and reverting impossible",
+       "Interpreting vague 'better/optimize' requests as license for self-chosen multi-dimensional changes without naming or confirming the targeted optimization dimension"
+      ],
+      "confidence": 0.78
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent the agent from degrading an artifact the Owner has already approved (as with mooncake-mv-final-v3k22.mp4) by stacking subjective 'optimization' rounds that are never compared back to that approved version.",
+      "targetBehavior": "On any modification request following an owner-approved version, the agent visibly records that version as an immutable baseline (path/fingerprint), applies changes to a separate new version, produces observable comparison evidence against the baseline (e.g., key-frame screenshots, diffs), and reverts unless the comparison shows no regression on owner-relevant dimensions.",
+      "forbiddenBehavior": "Unanchored, self-judged improvement loops after owner approval: modifying without a frozen baseline reference, claiming success from completion alone, keeping or stacking degrading changes, and overwriting the approved version so regression becomes irreversible.",
+      "evidenceSource": "Owner correction (source=user_correction, severity=severe): 「后面的所谓的优化都没有 mooncake-mv-final-v3k22.mp4 版本好，越搞越乱」; diagnosis cites missing baseline anchoring, missing observable comparison acceptance, and missing non-degradation guardrails (violated T-02/T-03/T-05/T-07).",
+      "validationExpectation": "An evaluator should accept a rule only if it triggers on modification requests arriving after an owner-confirmed baseline, mandates freezing that baseline before changes, requires observable comparison evidence before a change is kept, and defines revert-on-regression; a rule that permits keeping changes without baseline comparison, or that only demands generic 'verification' without the approved version as the anchor, fails this intent, as does any change that removes the revert path."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_cffdcb9f5d0257-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1-run1"
+     },
+     "risks": [
+      "Overlap with existing axioms: T-02 (intent clarification), T-03/T-07 (observable verification), T-04 (reversibility), T-05 (forbidden degrading transitions); the principle is distinct only through its novel element—the owner-approved version as a frozen, mandatory comparison anchor and retention gate—and rule generation must not re-emit the axioms as new rules",
+      "Baseline rigidity: without an explicit owner re-approval path to update the baseline, the principle can degenerate into change aversion and block legitimate evolution of owner intent",
+      "Non-regression is ill-defined for subjective quality dimensions (aesthetics, pacing, tone); comparison evidence can be contested and the gate may devolve into disputes over what counts as degradation",
+      "Proportionality: demanding named optimization dimensions and acceptance criteria for every minor tweak can slow iteration and frustrate owners expecting fast, low-stakes adjustments; application should scale with the stakes of the change",
+      "Source diagnosis confidence was low (0.55) with missing agent-side tool-trajectory evidence; the principle generalizes from a user-correction signal whose specific optimization dimensions were only indirectly inferred"
+     ],
+     "generatedAt": "2025-08-21T14:21:05Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_cffdcb9f5d0257-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Anchor changes on the owner-approved baseline; keep only verified non-regressive edits\",\n    \"statement\": \"When the owner has explicitly approved or accepted a version of an artifact, freeze that version as the immutable baseline (recorded by path or content fingerprint, never overwritten) before any further modification. Treat every subsequent change—especially under vague requests like 'optimize', 'polish', or 'make it better'—as a hypothesis: name the optimization dimension being targeted, apply the change to a new separate version, produce observable comparison evidence against the baseline (e.g., key-frame screenshots, diffs, dimension-by-dimension checks), and keep the change only if that comparison shows no degradation on owner-relevant dimensions; otherwise revert to the baseline.\",\n    \"rationale\": \"The diagnosed root cause was unbounded subjective drift: after the owner approved mooncake-mv-final-v3k22.mp4, ambiguous 'optimization' requests were self-interpreted as license for free-form changes, each round accepted on 'modification completed' alone, so degradations stacked silently until the owner corrected: '后面的所谓的优化都没有 mooncake-mv-final-v3k22.mp4 版本好，越搞越乱'. Freezing the approved version as the comparison anchor converts 'improvement' from a subjective self-judgment into a falsifiable non-regression claim—the owner's accepted state is the only legitimate reference for what counts as better or worse, and it survives as the fallback whenever a change cannot prove itself. Existing axioms cover verification (T-03/T-07), intent (T-02), reversibility (T-04) and forbidden degrading transitions (T-05) generically; what they lack is this specific mechanism: the owner-approved artifact as a frozen anchor and mandatory retention gate.\",\n    \"applicability\": [\n      \"Iterative editing or generation loops over media, documents, code, configurations, plans, or generated outputs where the owner has explicitly approved or accepted a specific version and further modification requests arrive (especially vague ones: '优化', '改进', 'improve', 'polish', 'make it better')\",\n      \"Workflows where changes overwrite prior state and per-step quality degradation is easy to miss across successive rounds\",\n      \"Not applicable when no owner-approved reference exists yet, or when the owner explicitly requests exploratory divergence from prior work\"\n    ],\n    \"antiPatterns\": [\n      \"Treating owner approval of a version as a starting point for free-form, self-judged 'optimization' without freezing that version as the comparison baseline\",\n      \"Declaring an optimization successful based solely on 'modification completed' without producing observable comparison evidence against the baseline\",\n      \"Keeping or stacking changes that degrade owner-relevant dimensions relative to the approved baseline\",\n      \"Overwriting or discarding the approved version, making degradation irreversible and reverting impossible\",\n      \"Interpreting vague 'better/optimize' requests as license for self-chosen multi-dimensional changes without naming or confirming the targeted optimization dimension\"\n    ],\n    \"confidence\": 0.78\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Prevent the agent from degrading an artifact the Owner has already approved (as with mooncake-mv-final-v3k22.mp4) by stacking subjective 'optimization' rounds that are never compared back to that approved version.\",\n    \"targetBehavior\": \"On any modification request following an owner-approved version, the agent visibly records that version as an immutable baseline (path/fingerprint), applies changes to a separate new version, produces observable comparison evidence against the baseline (e.g., key-frame screenshots, diffs), and reverts unless the comparison shows no regression on owner-relevant dimensions.\",\n    \"forbiddenBehavior\": \"Unanchored, self-judged improvement loops after owner approval: modifying without a frozen baseline reference, claiming success from completion alone, keeping or stacking degrading changes, and overwriting the approved version so regression becomes irreversible.\",\n    \"evidenceSource\": \"Owner correction (source=user_correction, severity=severe): 「后面的所谓的优化都没有 mooncake-mv-final-v3k22.mp4 版本好，越搞越乱」; diagnosis cites missing baseline anchoring, missing observable comparison acceptance, and missing non-degradation guardrails (violated T-02/T-03/T-05/T-07).\",\n    \"validationExpectation\": \"An evaluator should accept a rule only if it triggers on modification requests arriving after an owner-confirmed baseline, mandates freezing that baseline before changes, requires observable comparison evidence before a change is kept, and defines revert-on-regression; a rule that permits keeping changes without baseline comparison, or that only demands generic 'verification' without the approved version as the anchor, fails this intent, as does any change that removes the revert path.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_cffdcb9f5d0257-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_cffdcb9f5d0257-r1-run1\"\n  },\n  \"risks\": [\n    \"Overlap with existing axioms: T-02 (intent clarification), T-03/T-07 (observable verification), T-04 (reversibility), T-05 (forbidden degrading transitions); the principle is distinct only through its novel element—the owner-approved version as a frozen, mandatory comparison anchor and retention gate—and rule generation must not re-emit the axioms as new rules\",\n    \"Baseline rigidity: without an explicit owner re-approval path to update the baseline, the principle can degenerate into change aversion and block legitimate evolution of owner intent\",\n    \"Non-regression is ill-defined for subjective quality dimensions (aesthetics, pacing, tone); comparison evidence can be contested and the gate may devolve into disputes over what counts as degradation\",\n    \"Proportionality: demanding named optimization dimensions and acceptance criteria for every minor tweak can slow iteration and frustrate owners expecting fast, low-stakes adjustments; application should scale with the stakes of the change\",\n    \"Source diagnosis confidence was low (0.55) with missing agent-side tool-trajectory evidence; the principle generalizes from a user-correction signal whose specific optimization dimensions were only indirectly inferred\"\n  ],\n  \"generatedAt\": \"2025-08-21T14:21:05Z\"\n}",
+    "usage": {
+     "input": 4107,
+     "output": 5657,
+     "total": 9764
+    },
+    "latencyMs": 80439,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "0d1364a25621819a"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

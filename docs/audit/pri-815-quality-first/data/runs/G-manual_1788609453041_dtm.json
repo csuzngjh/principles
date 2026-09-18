@@ -1,0 +1,695 @@
+{
+ "group": "G-manual_1788609453041_dtm",
+ "class": "DEV",
+ "pain_id": "manual_1788609453041_dtmlftov",
+ "frozen_at": "2026-09-17T15:29:05.408Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788609453041_dtm",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788609453041_dtm-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "12:00 心跳合并时直接将 08:12 旧会话记录（第二集=信任版30clip）当作权威状态合入 CURRENT_FOCUS v48，未读取 narration_lines_ep002.json 的实际内容与 mtime",
+       "betterDecision": "合并前强制读取源文件 mtime 与内容哈希，与待合并记录比对；不一致时以源文件为权威更新状态并记录差异，禁止直接继承先前会话记忆",
+       "rationale": "可观察的源对象真实状态是最终事实权威；仅凭会话记忆或历史记录合并会让过期信息覆盖真实更新（用户 08:24 已将第二集纠正为 10 原则总纲集 15 clip）",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "source_of_truth_verification",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "16:46/17:46/18:46 三轮巡检仅凭 CURRENT_FOCUS 版本号与行数（v48/28行）及会话记忆宣称'无新变化'，未比对源文件 mtime 与实际内容",
+       "betterDecision": "每次巡检必须执行源文件 mtime+内容哈希实际比对，核对可观察状态后方可宣称'无新变化'，禁止以元数据代替内容校验",
+       "rationale": "版本号与行数一致不代表内容一致；未经源文件核实的'无变化'结论会让陈旧主题持续传播数小时，延迟发现用户已在源文件层面完成的纠正",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_based_verification",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "用户 08:24 首次纠正后仅在 _meta.note 中记载，未将'以源文件为准'固化为强制校验流程，导致 19:08 仍播报陈旧主题、19:19 被二次纠正",
+       "betterDecision": "首次纠正立即转化为持久化的强制校验规则：任何主题播报或状态合并前必须核对源文件最新内容，并将该规则写入巡检流程与提示词",
+       "rationale": "纠正与摩擦应转化为流程改进而非仅作记录；未内化的纠正会导致同类错误重复发生，同一失误被用户纠正两次正是流程未吸收反馈的直接证据",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "feedback_driven_process_hardening",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "跨会话状态合并与心跳巡检工具未内置源文件一致性校验门，允许过期会话记录静默覆盖源文件的真实更新",
+       "betterDecision": "在合并/同步工具中实现自动化 mtime+内容哈希校验门：不一致时发出告警并强制以源文件为权威更新状态，禁止仅凭版本号或记忆判断",
+       "rationale": "依赖人工自觉的校验不可靠；将硬约束编码为工具级强制检查与禁止转移，才能系统性防止陈旧数据在任何合并路径中覆盖真实状态",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_automation",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "源文件 08:24 被用户纠正后，陈旧主题仍在 CURRENT_FOCUS 等派生状态中存续数小时并在 19:08 被播报，纠偏信息未传播到下游消费状态",
+       "betterDecision": "用户纠正源文件后立即同步更新所有派生状态（CURRENT_FOCUS 等）并持久化关键中间结论，播报前对主题做最终一致性确认",
+       "rationale": "派生状态滞后传播会让同一错误在多个触点重复暴露；及时传播修正并持久化重要状态可切断陈旧信息向播报环节的扩散链路",
+       "confidence": 0.82,
+       "riskLevel": "medium",
+       "strategicPerspective": "state_propagation_control",
+       "sourcePrincipleId": "T-10"
+      }
+     ],
+     "sourcePainId": "pain-10",
+     "contextRefs": [
+      "artifact://c56fbe1e-f7d5-48ce-a44c-c0cb62a3f81f"
+     ],
+     "generatedAt": "2026-09-05T10:55:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788609453041_dtm-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"12:00 心跳合并时直接将 08:12 旧会话记录（第二集=信任版30clip）当作权威状态合入 CURRENT_FOCUS v48，未读取 narration_lines_ep002.json 的实际内容与 mtime\",\"betterDecision\":\"合并前强制读取源文件 mtime 与内容哈希，与待合并记录比对；不一致时以源文件为权威更新状态并记录差异，禁止直接继承先前会话记忆\",\"rationale\":\"可观察的源对象真实状态是最终事实权威；仅凭会话记忆或历史记录合并会让过期信息覆盖真实更新（用户 08:24 已将第二集纠正为 10 原则总纲集 15 clip）\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"source_of_truth_verification\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"16:46/17:46/18:46 三轮巡检仅凭 CURRENT_FOCUS 版本号与行数（v48/28行）及会话记忆宣称'无新变化'，未比对源文件 mtime 与实际内容\",\"betterDecision\":\"每次巡检必须执行源文件 mtime+内容哈希实际比对，核对可观察状态后方可宣称'无新变化'，禁止以元数据代替内容校验\",\"rationale\":\"版本号与行数一致不代表内容一致；未经源文件核实的'无变化'结论会让陈旧主题持续传播数小时，延迟发现用户已在源文件层面完成的纠正\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_based_verification\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":2,\"badDecision\":\"用户 08:24 首次纠正后仅在 _meta.note 中记载，未将'以源文件为准'固化为强制校验流程，导致 19:08 仍播报陈旧主题、19:19 被二次纠正\",\"betterDecision\":\"首次纠正立即转化为持久化的强制校验规则：任何主题播报或状态合并前必须核对源文件最新内容，并将该规则写入巡检流程与提示词\",\"rationale\":\"纠正与摩擦应转化为流程改进而非仅作记录；未内化的纠正会导致同类错误重复发生，同一失误被用户纠正两次正是流程未吸收反馈的直接证据\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"feedback_driven_process_hardening\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":3,\"badDecision\":\"跨会话状态合并与心跳巡检工具未内置源文件一致性校验门，允许过期会话记录静默覆盖源文件的真实更新\",\"betterDecision\":\"在合并/同步工具中实现自动化 mtime+内容哈希校验门：不一致时发出告警并强制以源文件为权威更新状态，禁止仅凭版本号或记忆判断\",\"rationale\":\"依赖人工自觉的校验不可靠；将硬约束编码为工具级强制检查与禁止转移，才能系统性防止陈旧数据在任何合并路径中覆盖真实状态\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_automation\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"源文件 08:24 被用户纠正后，陈旧主题仍在 CURRENT_FOCUS 等派生状态中存续数小时并在 19:08 被播报，纠偏信息未传播到下游消费状态\",\"betterDecision\":\"用户纠正源文件后立即同步更新所有派生状态（CURRENT_FOCUS 等）并持久化关键中间结论，播报前对主题做最终一致性确认\",\"rationale\":\"派生状态滞后传播会让同一错误在多个触点重复暴露；及时传播修正并持久化重要状态可切断陈旧信息向播报环节的扩散链路\",\"confidence\":0.82,\"riskLevel\":\"medium\",\"strategicPerspective\":\"state_propagation_control\",\"sourcePrincipleId\":\"T-10\"}],\"sourcePainId\":\"pain-10\",\"contextRefs\":[\"artifact://c56fbe1e-f7d5-48ce-a44c-c0cb62a3f81f\"],\"generatedAt\":\"2026-09-05T10:55:00.000Z\"}",
+    "usage": {
+     "input": 2050,
+     "output": 3752,
+     "total": 5802
+    },
+    "latencyMs": 42771,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "e41d5701326b22f4"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788609453041_dtm-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r1-run1",
+     "thesis": "In any system with a persistent authoritative artifact, ground truth resides in the artifact's observable content—not in session memory, version metadata, or derived state. Every merge, monitoring claim (including 'no change'), and downstream broadcast must verify against the source itself; human corrections must be immediately hardened into enforced verification gates and propagated to all derived states, or stale information will silently survive and be re-exposed.",
+     "principleCandidate": {
+      "title": "Source primacy: verify artifact content, not memory or metadata, before merges and claims",
+      "rationale": "The root cause was treating session memory, version numbers, and line counts as proxies for truth: a stale 08:12 session record overwrote the user's 08:24 source-file correction, and three inspection rounds claimed 'no change' without reading the source, letting one error propagate for hours and be re-corrected twice. Mandating actual source verification (mtime plus content comparison) with the source as final authority—and converting first corrections into automated gates that propagate to derived states—cuts every path by which stale data survives: merging, inspection, and broadcast.",
+      "scope": "Applies whenever cached, derived, or session state is merged with, synchronized against, or reported from a persistent authoritative artifact: cross-session state merges, periodic inspections and no-change assertions, pre-broadcast consistency checks, and the aftermath of any human correction to an authoritative source.",
+      "confidence": 0.88
+     },
+     "risks": [
+      "Substantially overlaps existing axiom T-03 (use observable evidence before inferring causes or claiming results) and partially with T-05, T-08, and T-10; adopting it as a new axiom risks redundancy unless framed as an operational extension of those axioms.",
+      "Hashing or fully comparing large files on every heartbeat or inspection adds performance overhead; may require change-detection optimization or sampling, which could reintroduce verification gaps.",
+      "Treating the 'source file' as unconditionally authoritative fails when the source itself is corrupted, ambiguous, or when multiple candidate authorities conflict; a conflict-resolution rule is needed.",
+      "Hard mandatory gates can block or delay urgent workflows when verification tooling is unavailable; fail-safe behavior (halt-and-alert rather than proceed-on-stale) must be defined to avoid deadlocks.",
+      "Alerting on mtime changes alone risks alert fatigue from trivial touches; content-hash comparison mitigates this but increases implementation complexity."
+     ],
+     "generatedAt": "2026-09-05T11:03:00.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788609453041_dtm-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r1-run1\",\"thesis\":\"In any system with a persistent authoritative artifact, ground truth resides in the artifact's observable content—not in session memory, version metadata, or derived state. Every merge, monitoring claim (including 'no change'), and downstream broadcast must verify against the source itself; human corrections must be immediately hardened into enforced verification gates and propagated to all derived states, or stale information will silently survive and be re-exposed.\",\"principleCandidate\":{\"title\":\"Source primacy: verify artifact content, not memory or metadata, before merges and claims\",\"rationale\":\"The root cause was treating session memory, version numbers, and line counts as proxies for truth: a stale 08:12 session record overwrote the user's 08:24 source-file correction, and three inspection rounds claimed 'no change' without reading the source, letting one error propagate for hours and be re-corrected twice. Mandating actual source verification (mtime plus content comparison) with the source as final authority—and converting first corrections into automated gates that propagate to derived states—cuts every path by which stale data survives: merging, inspection, and broadcast.\",\"scope\":\"Applies whenever cached, derived, or session state is merged with, synchronized against, or reported from a persistent authoritative artifact: cross-session state merges, periodic inspections and no-change assertions, pre-broadcast consistency checks, and the aftermath of any human correction to an authoritative source.\",\"confidence\":0.88},\"risks\":[\"Substantially overlaps existing axiom T-03 (use observable evidence before inferring causes or claiming results) and partially with T-05, T-08, and T-10; adopting it as a new axiom risks redundancy unless framed as an operational extension of those axioms.\",\"Hashing or fully comparing large files on every heartbeat or inspection adds performance overhead; may require change-detection optimization or sampling, which could reintroduce verification gaps.\",\"Treating the 'source file' as unconditionally authoritative fails when the source itself is corrupted, ambiguous, or when multiple candidate authorities conflict; a conflict-resolution rule is needed.\",\"Hard mandatory gates can block or delay urgent workflows when verification tooling is unavailable; fail-safe behavior (halt-and-alert rather than proceed-on-stale) must be defined to avoid deadlocks.\",\"Alerting on mtime changes alone risks alert fatigue from trivial touches; content-hash comparison mitigates this but increases implementation complexity.\"],\"generatedAt\":\"2026-09-05T11:03:00.000Z\"}",
+    "usage": {
+     "input": 1751,
+     "output": 2277,
+     "total": 4028
+    },
+    "latencyMs": 35034,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "63d479319b9bbb43"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788609453041_dtm-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r1-run1",
+     "principleDraft": {
+      "title": "Source primacy: verify source content, not memory or metadata, before merges and claims",
+      "statement": "Whenever an agent merges, synchronizes with, inspects, or reports from a persistent authoritative artifact, it must read and compare the artifact's actual content (e.g., mtime plus content or hash comparison) as the final authority, never accepting session memory, version numbers, line counts, or derived state as proof of truth. A 'no change' assertion is a claim and requires the same direct source read as any change claim. When a human corrects the authoritative source, the correction must be immediately hardened into an enforced verification gate (the operation halts on mismatch rather than proceeding on stale data) and propagated to all derived states—caches, copies, and downstream broadcasts—before those states are reused or re-broadcast.",
+      "rationale": "The failure chain was sustained by treating proxies for truth as truth: a stale 08:12 session record overwrote the user's 08:24 source-file correction, and three inspection rounds asserted 'no change' without reading the source, letting one error propagate for hours and be re-corrected twice. Requiring direct source-content verification at every merge, inspection, and broadcast closes every proxy path by which stale data survives; hardening the first correction into an enforced gate and propagating it to derived states prevents the same stale information from being silently re-exposed downstream.",
+      "applicability": [
+       "Cross-session or cross-agent state merges where cached or remembered state is combined with or written to a persistent authoritative artifact",
+       "Periodic inspections, monitoring checks, or heartbeat reviews of an authoritative artifact, including any assertion of 'no change'",
+       "Pre-broadcast or pre-publish consistency checks before propagating artifact content to derived states or downstream consumers",
+       "Immediately after any human correction to an authoritative source, when caches, copies, or downstream consumers of that source exist"
+      ],
+      "antiPatterns": [
+       "Merging or overwriting authoritative source content based on session memory, cached records, or remembered versions without re-reading the source",
+       "Asserting 'no change' from version numbers, line counts, or metadata without comparing actual source content",
+       "Broadcasting or reusing derived state that was not re-verified against the authoritative source after a known human correction",
+       "Re-accepting the same human correction repeatedly instead of converting the first correction into an enforced verification gate",
+       "Treating derived or cached state as authoritative when it conflicts with the source artifact"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent stale session memory or metadata from overwriting or masking corrections made to the authoritative source artifact, and stop 'no change' claims asserted without reading the source itself.",
+      "targetBehavior": "Before every merge, periodic inspection (including no-change assertions), or downstream broadcast involving a persistent authoritative artifact, the agent visibly reads or hashes the artifact's current content, treats it as the final authority on conflict, and upon detecting a human correction refreshes all derived states and installs a verification gate that halts the operation on mismatch.",
+      "forbiddenBehavior": "Overwriting or contradicting the authoritative source using stale session memory, version metadata, or line counts; claiming 'no change' without reading the source; re-broadcasting derived state that was not re-verified after a correction; repeatedly re-accepting the same human correction instead of enforcing a gate.",
+      "evidenceSource": "A stale 08:12 session record overwrote the user's 08:24 source-file correction; three inspection rounds claimed 'no change' without reading the source; the error propagated for hours and was re-corrected twice.",
+      "validationExpectation": "An evaluator should demand tool-trajectory evidence that the source file's content was actually read or hashed before each merge and before each no-change claim, that post-correction derived states were re-verified or refreshed rather than reused, and that a detected mismatch halts the operation with an alert instead of proceeding on stale data."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axiom T-03 (observable evidence before claims) and partial overlap with T-05 (guardrails), T-08 (feedback hardening), and T-10 (persisting state outside transient context); this principle must be framed and adopted as an operational extension of those axioms for artifact merges, no-change claims, and broadcast propagation, or it risks redundancy in the axiom set.",
+      "Hashing or fully comparing large files on every inspection or heartbeat adds performance overhead; optimizations like sampling or change-detection shortcuts could silently reintroduce verification gaps.",
+      "Treating the 'source file' as unconditionally authoritative fails when the source itself is corrupted, ambiguous, or when multiple candidate authorities conflict; a conflict-resolution and escalation rule is needed before the gate can be safely enforced.",
+      "Hard mandatory gates can block or delay urgent workflows when verification tooling is unavailable; fail-safe behavior must be defined as halt-and-alert rather than proceed-on-stale, while avoiding deadlock on repeated tooling failure.",
+      "Alerting on mtime changes alone risks alert fatigue from trivial touches; requiring content-hash comparison to suppress false alerts increases implementation complexity.",
+      "Applying the principle to transient or non-authoritative artifacts (where no persistent source of truth exists) would force pointless verification work; applicability must be scoped to systems with a designated authoritative artifact."
+     ],
+     "generatedAt": "2026-09-05T11:06:30.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788609453041_dtm-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Source primacy: verify source content, not memory or metadata, before merges and claims\",\n    \"statement\": \"Whenever an agent merges, synchronizes with, inspects, or reports from a persistent authoritative artifact, it must read and compare the artifact's actual content (e.g., mtime plus content or hash comparison) as the final authority, never accepting session memory, version numbers, line counts, or derived state as proof of truth. A 'no change' assertion is a claim and requires the same direct source read as any change claim. When a human corrects the authoritative source, the correction must be immediately hardened into an enforced verification gate (the operation halts on mismatch rather than proceeding on stale data) and propagated to all derived states—caches, copies, and downstream broadcasts—before those states are reused or re-broadcast.\",\n    \"rationale\": \"The failure chain was sustained by treating proxies for truth as truth: a stale 08:12 session record overwrote the user's 08:24 source-file correction, and three inspection rounds asserted 'no change' without reading the source, letting one error propagate for hours and be re-corrected twice. Requiring direct source-content verification at every merge, inspection, and broadcast closes every proxy path by which stale data survives; hardening the first correction into an enforced gate and propagating it to derived states prevents the same stale information from being silently re-exposed downstream.\",\n    \"applicability\": [\n      \"Cross-session or cross-agent state merges where cached or remembered state is combined with or written to a persistent authoritative artifact\",\n      \"Periodic inspections, monitoring checks, or heartbeat reviews of an authoritative artifact, including any assertion of 'no change'\",\n      \"Pre-broadcast or pre-publish consistency checks before propagating artifact content to derived states or downstream consumers\",\n      \"Immediately after any human correction to an authoritative source, when caches, copies, or downstream consumers of that source exist\"\n    ],\n    \"antiPatterns\": [\n      \"Merging or overwriting authoritative source content based on session memory, cached records, or remembered versions without re-reading the source\",\n      \"Asserting 'no change' from version numbers, line counts, or metadata without comparing actual source content\",\n      \"Broadcasting or reusing derived state that was not re-verified against the authoritative source after a known human correction\",\n      \"Re-accepting the same human correction repeatedly instead of converting the first correction into an enforced verification gate\",\n      \"Treating derived or cached state as authoritative when it conflicts with the source artifact\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Prevent stale session memory or metadata from overwriting or masking corrections made to the authoritative source artifact, and stop 'no change' claims asserted without reading the source itself.\",\n    \"targetBehavior\": \"Before every merge, periodic inspection (including no-change assertions), or downstream broadcast involving a persistent authoritative artifact, the agent visibly reads or hashes the artifact's current content, treats it as the final authority on conflict, and upon detecting a human correction refreshes all derived states and installs a verification gate that halts the operation on mismatch.\",\n    \"forbiddenBehavior\": \"Overwriting or contradicting the authoritative source using stale session memory, version metadata, or line counts; claiming 'no change' without reading the source; re-broadcasting derived state that was not re-verified after a correction; repeatedly re-accepting the same human correction instead of enforcing a gate.\",\n    \"evidenceSource\": \"A stale 08:12 session record overwrote the user's 08:24 source-file correction; three inspection rounds claimed 'no change' without reading the source; the error propagated for hours and was re-corrected twice.\",\n    \"validationExpectation\": \"An evaluator should demand tool-trajectory evidence that the source file's content was actually read or hashed before each merge and before each no-change claim, that post-correction derived states were re-verified or refreshed rather than reused, and that a detected mismatch halts the operation with an alert instead of proceeding on stale data.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r1-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axiom T-03 (observable evidence before claims) and partial overlap with T-05 (guardrails), T-08 (feedback hardening), and T-10 (persisting state outside transient context); this principle must be framed and adopted as an operational extension of those axioms for artifact merges, no-change claims, and broadcast propagation, or it risks redundancy in the axiom set.\",\n    \"Hashing or fully comparing large files on every inspection or heartbeat adds performance overhead; optimizations like sampling or change-detection shortcuts could silently reintroduce verification gaps.\",\n    \"Treating the 'source file' as unconditionally authoritative fails when the source itself is corrupted, ambiguous, or when multiple candidate authorities conflict; a conflict-resolution and escalation rule is needed before the gate can be safely enforced.\",\n    \"Hard mandatory gates can block or delay urgent workflows when verification tooling is unavailable; fail-safe behavior must be defined as halt-and-alert rather than proceed-on-stale, while avoiding deadlock on repeated tooling failure.\",\n    \"Alerting on mtime changes alone risks alert fatigue from trivial touches; requiring content-hash comparison to suppress false alerts increases implementation complexity.\",\n    \"Applying the principle to transient or non-authoritative artifacts (where no persistent source of truth exists) would force pointless verification work; applicability must be scoped to systems with a designated authoritative artifact.\"\n  ],\n  \"generatedAt\": \"2026-09-05T11:06:30.000Z\"\n}",
+    "usage": {
+     "input": 1959,
+     "output": 3491,
+     "total": 5450
+    },
+    "latencyMs": 42080,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "79de4e6731a15258"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788609453041_dtm-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r1-run1",
+     "principleDraft": {
+      "title": "Source primacy: verify source artifact content before merges, no-change claims, and broadcasts",
+      "statement": "Whenever a merge, synchronization, inspection, or broadcast touches a persistent authoritative artifact, the artifact's actual content — verified by reading it and comparing mtime plus content, never by version number, line count, or session memory — is the final authority. Before merging any cross-session or historical record, before asserting 'no change', and before broadcasting content derived from state, the agent must verify against the current source and resolve any discrepancy in the source's favor. When a human corrects the authoritative source, that correction must immediately propagate to all derived states and be hardened into an enforced verification gate so the same stale content cannot be re-exposed.",
+      "rationale": "The root cause was the absence of a mandatory gate treating the source file's mtime+content as the fact source: a stale 08:12 session record was merged into CURRENT_FOCUS v48 without reading narration_lines_ep002.json, which the user had corrected at 08:24; three inspection rounds (16:46–18:46) claimed 'no change' from version/line metadata and memory alone; the stale theme was broadcast at 19:08 and the user had to correct it a second time at 19:19. Requiring actual source verification at every propagation path — merge, inspection, broadcast — and converting first corrections into enforced gates closes every route by which stale data survives. This operationalizes T-03 (observable evidence) and T-08 (corrections become improvements) for persistent-artifact synchronization rather than contradicting them.",
+      "applicability": [
+       "Cross-session or cross-state merges and synchronizations against a persistent authoritative artifact (e.g., heartbeat merges into a focus/state file)",
+       "Periodic inspections and any 'no change' assertion about an authoritative source artifact",
+       "Pre-broadcast or pre-report consistency checks for content derived from a persistent artifact",
+       "Immediately after any human correction to an authoritative source: propagation to all derived states and hardening into enforced verification gates"
+      ],
+      "antiPatterns": [
+       "Merging prior session memory or historical records into current state without comparing the source artifact's actual mtime and content",
+       "Asserting 'no change' from version numbers, line counts, or session memory without reading the source artifact",
+       "Broadcasting content derived from state (e.g., a theme or topic) without a final consistency check against the current source",
+       "Recording a human correction only as a note (e.g., _meta.note) without enforcing it as a verification gate and propagating it to derived states",
+       "Treating derived or cached state as authoritative when it conflicts with the source artifact"
+      ],
+      "confidence": 0.87
+     },
+     "intentContract": {
+      "ownerIntent": "Ensure the Owner's direct correction to the authoritative source file takes effect everywhere, so stale session records and unverified 'no change' claims can never overwrite it or re-expose superseded content.",
+      "targetBehavior": "In any tool trajectory involving a merge, sync, inspection verdict, or broadcast touching a persistent authoritative artifact, the agent performs an observable read-and-compare of the source artifact (mtime and content) against the state record before acting, resolves discrepancies in favor of the source, and logs the difference.",
+      "forbiddenBehavior": "Inheriting prior session memory or historical state as fact during merges; issuing 'no change' verdicts from version/line metadata or memory without reading the source; broadcasting derived content unverified against the source; leaving a human correction as a mere note instead of an enforced verification gate propagated to all derived states.",
+      "evidenceSource": "Diagnosis manual_1788609453041_dtmlftov: the 12:00 heartbeat merged the stale 08:12 session record into CURRENT_FOCUS v48 despite the user's 08:24 correction of narration_lines_ep002.json (recorded only in _meta.note); inspections at 16:46/17:46/18:46 claimed 'no change' on v48/28-line metadata alone; the stale theme was broadcast at 19:08 and the user corrected it a second time at 19:19.",
+      "validationExpectation": "A faithful rule must require an actual source-artifact read (mtime/content comparison) before merges, 'no change' verdicts, and broadcasts; must designate the source artifact — not memory, version metadata, or derived state — as final authority; and must require human corrections to be hardened into enforced gates and propagated to derived states. A rule that permits metadata-only change detection or memory-based inheritance contradicts this intent and must be rejected."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axiom T-03 and partial overlap with T-05, T-08, and T-10; it must be adopted as an operational extension of those axioms for persistent-artifact synchronization, not as a standalone duplicate, or rule generation will produce redundant or conflicting rules.",
+      "Hashing or fully comparing large artifacts on every heartbeat adds performance overhead; optimization or sampling could silently reintroduce verification gaps.",
+      "Unconditional source primacy fails when the source itself is corrupted, ambiguous, or conflicts with another candidate authority; a conflict-resolution rule is required.",
+      "Hard mandatory gates can stall urgent workflows when verification tooling is unavailable; fail-safe behavior must be halt-and-alert, never proceed-on-stale, to avoid deadlocks.",
+      "Alerting on mtime changes alone risks alert fatigue from trivial touches; content-hash comparison mitigates this but increases implementation complexity.",
+      "Scope creep: applying the principle to ephemeral or non-authoritative state where no persistent source artifact exists would over-constrain routine caching."
+     ],
+     "generatedAt": "2026-09-05T11:12:00.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788609453041_dtm-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r1-run1\",\"principleDraft\":{\"title\":\"Source primacy: verify source artifact content before merges, no-change claims, and broadcasts\",\"statement\":\"Whenever a merge, synchronization, inspection, or broadcast touches a persistent authoritative artifact, the artifact's actual content — verified by reading it and comparing mtime plus content, never by version number, line count, or session memory — is the final authority. Before merging any cross-session or historical record, before asserting 'no change', and before broadcasting content derived from state, the agent must verify against the current source and resolve any discrepancy in the source's favor. When a human corrects the authoritative source, that correction must immediately propagate to all derived states and be hardened into an enforced verification gate so the same stale content cannot be re-exposed.\",\"rationale\":\"The root cause was the absence of a mandatory gate treating the source file's mtime+content as the fact source: a stale 08:12 session record was merged into CURRENT_FOCUS v48 without reading narration_lines_ep002.json, which the user had corrected at 08:24; three inspection rounds (16:46–18:46) claimed 'no change' from version/line metadata and memory alone; the stale theme was broadcast at 19:08 and the user had to correct it a second time at 19:19. Requiring actual source verification at every propagation path — merge, inspection, broadcast — and converting first corrections into enforced gates closes every route by which stale data survives. This operationalizes T-03 (observable evidence) and T-08 (corrections become improvements) for persistent-artifact synchronization rather than contradicting them.\",\"applicability\":[\"Cross-session or cross-state merges and synchronizations against a persistent authoritative artifact (e.g., heartbeat merges into a focus/state file)\",\"Periodic inspections and any 'no change' assertion about an authoritative source artifact\",\"Pre-broadcast or pre-report consistency checks for content derived from a persistent artifact\",\"Immediately after any human correction to an authoritative source: propagation to all derived states and hardening into enforced verification gates\"],\"antiPatterns\":[\"Merging prior session memory or historical records into current state without comparing the source artifact's actual mtime and content\",\"Asserting 'no change' from version numbers, line counts, or session memory without reading the source artifact\",\"Broadcasting content derived from state (e.g., a theme or topic) without a final consistency check against the current source\",\"Recording a human correction only as a note (e.g., _meta.note) without enforcing it as a verification gate and propagating it to derived states\",\"Treating derived or cached state as authoritative when it conflicts with the source artifact\"],\"confidence\":0.87},\"intentContract\":{\"ownerIntent\":\"Ensure the Owner's direct correction to the authoritative source file takes effect everywhere, so stale session records and unverified 'no change' claims can never overwrite it or re-expose superseded content.\",\"targetBehavior\":\"In any tool trajectory involving a merge, sync, inspection verdict, or broadcast touching a persistent authoritative artifact, the agent performs an observable read-and-compare of the source artifact (mtime and content) against the state record before acting, resolves discrepancies in favor of the source, and logs the difference.\",\"forbiddenBehavior\":\"Inheriting prior session memory or historical state as fact during merges; issuing 'no change' verdicts from version/line metadata or memory without reading the source; broadcasting derived content unverified against the source; leaving a human correction as a mere note instead of an enforced verification gate propagated to all derived states.\",\"evidenceSource\":\"Diagnosis manual_1788609453041_dtmlftov: the 12:00 heartbeat merged the stale 08:12 session record into CURRENT_FOCUS v48 despite the user's 08:24 correction of narration_lines_ep002.json (recorded only in _meta.note); inspections at 16:46/17:46/18:46 claimed 'no change' on v48/28-line metadata alone; the stale theme was broadcast at 19:08 and the user corrected it a second time at 19:19.\",\"validationExpectation\":\"A faithful rule must require an actual source-artifact read (mtime/content comparison) before merges, 'no change' verdicts, and broadcasts; must designate the source artifact — not memory, version metadata, or derived state — as final authority; and must require human corrections to be hardened into enforced gates and propagated to derived states. A rule that permits metadata-only change detection or memory-based inheritance contradicts this intent and must be rejected.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r1-run1\"},\"risks\":[\"Substantial overlap with core axiom T-03 and partial overlap with T-05, T-08, and T-10; it must be adopted as an operational extension of those axioms for persistent-artifact synchronization, not as a standalone duplicate, or rule generation will produce redundant or conflicting rules.\",\"Hashing or fully comparing large artifacts on every heartbeat adds performance overhead; optimization or sampling could silently reintroduce verification gaps.\",\"Unconditional source primacy fails when the source itself is corrupted, ambiguous, or conflicts with another candidate authority; a conflict-resolution rule is required.\",\"Hard mandatory gates can stall urgent workflows when verification tooling is unavailable; fail-safe behavior must be halt-and-alert, never proceed-on-stale, to avoid deadlocks.\",\"Alerting on mtime changes alone risks alert fatigue from trivial touches; content-hash comparison mitigates this but increases implementation complexity.\",\"Scope creep: applying the principle to ephemeral or non-authoritative state where no persistent source artifact exists would over-constrain routine caching.\"],\"generatedAt\":\"2026-09-05T11:12:00.000Z\"}",
+    "usage": {
+     "input": 4303,
+     "output": 5481,
+     "total": 9784
+    },
+    "latencyMs": 68140,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "97560ec64c986229"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788609453041_dtm",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788609453041_dtm-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "12:00 心跳合并时直接把 main-agent 08:12 的旧记录（第二集=信任版30clip）并入 CURRENT_FOCUS v48，未核对 narration_lines_ep002.json 的实际 mtime 与内容",
+       "betterDecision": "跨会话/跨状态合并前，强制读取源文件 mtime 与内容哈希并与待合并记录比对；不一致时以源文件为权威更新状态并记录差异，禁止直接继承历史记录或会话记忆作为权威",
+       "rationale": "源文件的可观察状态是最终事实来源；仅凭版本号/行数或会话记忆合并，会让过期记录覆盖用户已纠正的真实更新，导致陈旧主题进入当前焦点",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "source_of_truth_gate",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "16:46/17:46/18:46 三次巡检仅依赖会话内记忆与 CURRENT_FOCUS 版本号/行数（v48/28行），未比对源文件 mtime+内容哈希就宣称'无新变化'",
+       "betterDecision": "每次巡检必须实际执行源文件 mtime+内容哈希比对后才允许输出'无新变化'；在巡检流程中加入强制检查门，禁止基于记忆或版本计数器下结论",
+       "rationale": "宣称任何结果都必须以可观察证据为前提；源文件在 08:24 已被用户纠正，未观察就宣称无变化使陈旧主题持续存活并被 19:08 播报",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_claiming",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "用户 08:24 明确纠正（第二集=10原则总纲集15clip，已写入 _meta.note）后，系统仍把旧的'信任'主题当作权威，19:08 播报陈旧主题，迫使 19:19 二次纠正",
+       "betterDecision": "用户显式纠正一经发生，立即作为最高权威传播到所有依赖状态（CURRENT_FOCUS、巡检基线、待播内容），并回溯清除与纠正冲突的旧记录，而非仅在 _meta.note 留档",
+       "rationale": "显式的用户决策与纠正优先于任何推断或历史记录；纠正只留档不传播等于没有生效，必然导致面向用户的重复错误输出",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "correction_propagation",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "pain #10 第二集旁白失误在 08:24 已被用户纠正一次，系统未将该纠正转化为流程级改进，19:19 再次因信任过期记录输出错误主题",
+       "betterDecision": "把第一次纠正固化为强制流程改进：为心跳巡检与跨会话合并新增'源文件为准'校验步骤并纳入检查清单，使同类错误在结构上不可再次发生",
+       "rationale": "失败与纠正必须转化为流程改进而非仅作记录留存；缺少闭环改进机制使同一错误在同一天内重复出现两次，说明摩擦未被吸收为系统能力",
+       "confidence": 0.87,
+       "riskLevel": "medium",
+       "strategicPerspective": "correction_to_process",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "跨会话状态合并与心跳巡检流程中没有任何显式校验门或禁止转移规则，允许'记录时间戳早于源文件最后修改时间'的过期记录静默覆盖较新的真实状态",
+       "betterDecision": "实现自动化一致性校验工具：每次心跳/合并时自动比对源文件 mtime+内容哈希，不一致即告警并强制以源文件为准更新状态；将'过期记录覆盖新状态'定义为禁止转移",
+       "rationale": "把'源文件是唯一权威'这一硬约束翻译为显式校验门与禁止转移规则，才能不依赖 agent 记忆而可靠、可重复地阻断同类错误",
+       "confidence": 0.82,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_automation",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "sourcePainId": "pain-10",
+     "contextRefs": [
+      "artifact://c56fbe1e-f7d5-48ce-a44c-c0cb62a3f81f"
+     ],
+     "generatedAt": "2026-09-05T10:52:18.412Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788609453041_dtm-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"12:00 心跳合并时直接把 main-agent 08:12 的旧记录（第二集=信任版30clip）并入 CURRENT_FOCUS v48，未核对 narration_lines_ep002.json 的实际 mtime 与内容\",\"betterDecision\":\"跨会话/跨状态合并前，强制读取源文件 mtime 与内容哈希并与待合并记录比对；不一致时以源文件为权威更新状态并记录差异，禁止直接继承历史记录或会话记忆作为权威\",\"rationale\":\"源文件的可观察状态是最终事实来源；仅凭版本号/行数或会话记忆合并，会让过期记录覆盖用户已纠正的真实更新，导致陈旧主题进入当前焦点\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"source_of_truth_gate\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"16:46/17:46/18:46 三次巡检仅依赖会话内记忆与 CURRENT_FOCUS 版本号/行数（v48/28行），未比对源文件 mtime+内容哈希就宣称'无新变化'\",\"betterDecision\":\"每次巡检必须实际执行源文件 mtime+内容哈希比对后才允许输出'无新变化'；在巡检流程中加入强制检查门，禁止基于记忆或版本计数器下结论\",\"rationale\":\"宣称任何结果都必须以可观察证据为前提；源文件在 08:24 已被用户纠正，未观察就宣称无变化使陈旧主题持续存活并被 19:08 播报\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_claiming\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":2,\"badDecision\":\"用户 08:24 明确纠正（第二集=10原则总纲集15clip，已写入 _meta.note）后，系统仍把旧的'信任'主题当作权威，19:08 播报陈旧主题，迫使 19:19 二次纠正\",\"betterDecision\":\"用户显式纠正一经发生，立即作为最高权威传播到所有依赖状态（CURRENT_FOCUS、巡检基线、待播内容），并回溯清除与纠正冲突的旧记录，而非仅在 _meta.note 留档\",\"rationale\":\"显式的用户决策与纠正优先于任何推断或历史记录；纠正只留档不传播等于没有生效，必然导致面向用户的重复错误输出\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"correction_propagation\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":3,\"badDecision\":\"pain #10 第二集旁白失误在 08:24 已被用户纠正一次，系统未将该纠正转化为流程级改进，19:19 再次因信任过期记录输出错误主题\",\"betterDecision\":\"把第一次纠正固化为强制流程改进：为心跳巡检与跨会话合并新增'源文件为准'校验步骤并纳入检查清单，使同类错误在结构上不可再次发生\",\"rationale\":\"失败与纠正必须转化为流程改进而非仅作记录留存；缺少闭环改进机制使同一错误在同一天内重复出现两次，说明摩擦未被吸收为系统能力\",\"confidence\":0.87,\"riskLevel\":\"medium\",\"strategicPerspective\":\"correction_to_process\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":4,\"badDecision\":\"跨会话状态合并与心跳巡检流程中没有任何显式校验门或禁止转移规则，允许'记录时间戳早于源文件最后修改时间'的过期记录静默覆盖较新的真实状态\",\"betterDecision\":\"实现自动化一致性校验工具：每次心跳/合并时自动比对源文件 mtime+内容哈希，不一致即告警并强制以源文件为准更新状态；将'过期记录覆盖新状态'定义为禁止转移\",\"rationale\":\"把'源文件是唯一权威'这一硬约束翻译为显式校验门与禁止转移规则，才能不依赖 agent 记忆而可靠、可重复地阻断同类错误\",\"confidence\":0.82,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_automation\",\"sourcePrincipleId\":\"T-05\"}],\"sourcePainId\":\"pain-10\",\"contextRefs\":[\"artifact://c56fbe1e-f7d5-48ce-a44c-c0cb62a3f81f\"],\"generatedAt\":\"2026-09-05T10:52:18.412Z\"}",
+    "usage": {
+     "input": 2050,
+     "output": 5489,
+     "total": 7539
+    },
+    "latencyMs": 72933,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3af0fea2a2fb2a2a"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788609453041_dtm-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r2-run1",
+     "thesis": "Truth about a system's state lives in the authoritative source's current observable condition, not in memory, version counters, or historical records. Every cross-session merge, periodic inspection conclusion, or user-facing claim must be re-grounded in fresh direct observation of the source at the moment of decision; a record older than the source it describes must never silently overwrite newer truth, and explicit corrections must propagate as highest authority to all dependent state.",
+     "principleCandidate": {
+      "title": "Gate every state merge or no-change claim on direct comparison with the authoritative source's current state",
+      "rationale": "The root cause across all candidates was stale records being treated as authoritative: merges inherited old entries, inspections declared 'no changes' from memory and version counters, and a user correction was archived but not propagated. Forcing an mtime/content comparison against the source before any merge, inspection verdict, or broadcast makes stale-state overwrite structurally impossible rather than dependent on agent diligence, and elevates explicit corrections above all inferred or historical state.",
+      "scope": "Applies whenever cached, derived, or session-held state is merged across sessions, checked during periodic inspections, or used to produce user-facing claims about an authoritative source (files, databases, external systems). Especially relevant where user corrections may have altered the source after the cached state was formed.",
+      "confidence": 0.88
+     },
+     "risks": [
+      "Partially overlaps with T-03 (use observable evidence before claiming results); this principle is a stricter operationalization specific to source-vs-cache authority and merge gating, but adoption should reference T-03 rather than replace it",
+      "Treating a single source file as sole authority can misfire when legitimate authority also lives elsewhere (e.g., user corrections recorded in metadata); an explicit authority hierarchy must be defined or corrections outside the file may be ignored",
+      "Mandating mtime+content-hash comparison on every heartbeat or merge adds latency and I/O cost; on high-frequency loops this may require sampling or change-notification mechanisms that reintroduce staleness windows",
+      "Rigid mechanical comparison (mtime/hash) verifies bytes, not semantics—a reformatted or timestamp-touched file with identical meaning could trigger unnecessary state resets, while meaning-level divergence in unmonitored fields could still pass the gate"
+     ],
+     "generatedAt": "2026-09-05T10:54:03.482Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788609453041_dtm-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r2-run1\",\"thesis\":\"Truth about a system's state lives in the authoritative source's current observable condition, not in memory, version counters, or historical records. Every cross-session merge, periodic inspection conclusion, or user-facing claim must be re-grounded in fresh direct observation of the source at the moment of decision; a record older than the source it describes must never silently overwrite newer truth, and explicit corrections must propagate as highest authority to all dependent state.\",\"principleCandidate\":{\"title\":\"Gate every state merge or no-change claim on direct comparison with the authoritative source's current state\",\"rationale\":\"The root cause across all candidates was stale records being treated as authoritative: merges inherited old entries, inspections declared 'no changes' from memory and version counters, and a user correction was archived but not propagated. Forcing an mtime/content comparison against the source before any merge, inspection verdict, or broadcast makes stale-state overwrite structurally impossible rather than dependent on agent diligence, and elevates explicit corrections above all inferred or historical state.\",\"scope\":\"Applies whenever cached, derived, or session-held state is merged across sessions, checked during periodic inspections, or used to produce user-facing claims about an authoritative source (files, databases, external systems). Especially relevant where user corrections may have altered the source after the cached state was formed.\",\"confidence\":0.88},\"risks\":[\"Partially overlaps with T-03 (use observable evidence before claiming results); this principle is a stricter operationalization specific to source-vs-cache authority and merge gating, but adoption should reference T-03 rather than replace it\",\"Treating a single source file as sole authority can misfire when legitimate authority also lives elsewhere (e.g., user corrections recorded in metadata); an explicit authority hierarchy must be defined or corrections outside the file may be ignored\",\"Mandating mtime+content-hash comparison on every heartbeat or merge adds latency and I/O cost; on high-frequency loops this may require sampling or change-notification mechanisms that reintroduce staleness windows\",\"Rigid mechanical comparison (mtime/hash) verifies bytes, not semantics—a reformatted or timestamp-touched file with identical meaning could trigger unnecessary state resets, while meaning-level divergence in unmonitored fields could still pass the gate\"],\"generatedAt\":\"2026-09-05T10:54:03.482Z\"}",
+    "usage": {
+     "input": 1792,
+     "output": 1449,
+     "total": 3241
+    },
+    "latencyMs": 30171,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "d33d92a13e095bf8"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788609453041_dtm-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r2-run1",
+     "principleDraft": {
+      "title": "Gate every state merge and no-change claim on fresh comparison with the authoritative source",
+      "statement": "Before any cross-session state merge, periodic inspection verdict (e.g., a 'no changes' claim), or user-facing broadcast derived from cached state, the agent must freshly observe the authoritative source itself — at minimum comparing mtime and content against the cached record at the moment of decision — and treat that observation, not memory, version counters, or historical records, as the final authority. A record older than the source it describes must never silently overwrite the source's newer state, and an explicit user correction, once observed in the source, must propagate as the highest authority to all dependent state (focus files, inspection baselines, pending outputs).",
+      "rationale": "The root cause was a missing validation gate, not insufficient diligence: the 12:00 heartbeat merged an 08:12 session record into CURRENT_FOCUS v48 without reading narration_lines_ep002.json, which the user had corrected at 08:24; the 16:46/17:46/18:46 inspections then declared 'no changes' from the v48/28-line counter and session memory alone, so the stale theme survived to the 19:08 broadcast and forced a second user correction at 19:19. Gating merges, inspection verdicts, and broadcasts on a fresh source comparison makes stale-record overwrite structurally impossible rather than dependent on agent recall, which had already failed twice in the same day.",
+      "applicability": [
+       "Cross-session or cross-agent merges/syncs of cached or derived state into current state files (e.g., merging another agent's record into CURRENT_FOCUS)",
+       "Periodic heartbeat or inspection cycles that emit 'no change' / 'no update' verdicts about an authoritative source file, database, or external system",
+       "User-facing broadcasts or summaries whose content is derived from cached state about an authoritative source",
+       "Situations where a user correction may have modified the source after the cached state was formed (including corrections recorded in-file, e.g., _meta.note)"
+      ],
+      "antiPatterns": [
+       "Merging another session's or agent's historical record into current state without first comparing the authoritative source's current mtime/content",
+       "Declaring 'no changes' or 'no updates' from version counters, line counts, or session memory without reading the source",
+       "Broadcasting content derived from cached state that a user correction has since invalidated",
+       "Archiving a user correction (e.g., only in _meta.note) without propagating it to dependent state, inspection baselines, and pending outputs",
+       "Allowing a record older than the source it describes to silently overwrite the source's newer truth"
+      ],
+      "confidence": 0.86
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to never repeat an already-corrected fact: merges, inspection verdicts, and broadcasts must reflect the authoritative source's current content, so a correction given once (08:24) never has to be given again (19:19).",
+      "targetBehavior": "Before each cross-session merge, heartbeat inspection, or user-facing broadcast, the agent performs a fresh direct read of the authoritative source (mtime/content compared against cached state), updates dependent state to match the source on mismatch, and treats any explicit user correction found in the source as top authority for all dependent records.",
+      "forbiddenBehavior": "Concluding 'no changes', merging, or broadcasting based on memory, version counters, line counts, or historical records without directly comparing the authoritative source's current content — the failure family that let a stale episode theme survive a user correction and be re-broadcast the same day.",
+      "evidenceSource": "Diagnosis diagnosis_manual_1788609453041_dtmlftov: the 12:00 heartbeat merged the 08:12 stale record into CURRENT_FOCUS v48 without checking narration_lines_ep002.json (user-corrected at 08:24, noted in _meta.note); the 16:46/17:46/18:46 inspections claimed 'no changes' from the v48/28-line counter and memory; the 19:08 stale broadcast forced a second correction at 19:19.",
+      "validationExpectation": "An evaluator should accept a rule only if it requires an observable source read (mtime/content) before any merge, before any 'no-change' verdict, and before any broadcast; forbids memory/counter-based conclusions; and requires propagation of explicit corrections to dependent state. A rule that lets a stale record survive the comparison, or lets a correction remain archived-only, fails this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r2-run1"
+     },
+     "risks": [
+      "Overlaps with T-03 (and partially T-02/T-05); this principle is a stricter operationalization for source-vs-cache authority and merge gating — downstream rules should reference those axioms rather than replace them",
+      "Byte-level gating (mtime/content hash) verifies bytes, not semantics: reformatting or timestamp touches with identical meaning can trigger unnecessary state resets, while semantic drift in unmonitored fields can pass the gate",
+      "Mandatory mtime+content comparison on every heartbeat adds I/O and latency; high-frequency loops may adopt sampling or change notifications that reopen staleness windows",
+      "Defining a single source file as sole authority can miss legitimate authority elsewhere (e.g., corrections recorded only in metadata like _meta.note); an explicit authority hierarchy must be defined before enforcement",
+      "The correction-propagation mandate can conflict with T-06 (change no more state than necessary) if applied as blanket rewrites; propagation should stay scoped to state that depends on the corrected fact"
+     ],
+     "generatedAt": "2026-09-05T10:55:47.318Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788609453041_dtm-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Gate every state merge and no-change claim on fresh comparison with the authoritative source\",\n    \"statement\": \"Before any cross-session state merge, periodic inspection verdict (e.g., a 'no changes' claim), or user-facing broadcast derived from cached state, the agent must freshly observe the authoritative source itself — at minimum comparing mtime and content against the cached record at the moment of decision — and treat that observation, not memory, version counters, or historical records, as the final authority. A record older than the source it describes must never silently overwrite the source's newer state, and an explicit user correction, once observed in the source, must propagate as the highest authority to all dependent state (focus files, inspection baselines, pending outputs).\",\n    \"rationale\": \"The root cause was a missing validation gate, not insufficient diligence: the 12:00 heartbeat merged an 08:12 session record into CURRENT_FOCUS v48 without reading narration_lines_ep002.json, which the user had corrected at 08:24; the 16:46/17:46/18:46 inspections then declared 'no changes' from the v48/28-line counter and session memory alone, so the stale theme survived to the 19:08 broadcast and forced a second user correction at 19:19. Gating merges, inspection verdicts, and broadcasts on a fresh source comparison makes stale-record overwrite structurally impossible rather than dependent on agent recall, which had already failed twice in the same day.\",\n    \"applicability\": [\n      \"Cross-session or cross-agent merges/syncs of cached or derived state into current state files (e.g., merging another agent's record into CURRENT_FOCUS)\",\n      \"Periodic heartbeat or inspection cycles that emit 'no change' / 'no update' verdicts about an authoritative source file, database, or external system\",\n      \"User-facing broadcasts or summaries whose content is derived from cached state about an authoritative source\",\n      \"Situations where a user correction may have modified the source after the cached state was formed (including corrections recorded in-file, e.g., _meta.note)\"\n    ],\n    \"antiPatterns\": [\n      \"Merging another session's or agent's historical record into current state without first comparing the authoritative source's current mtime/content\",\n      \"Declaring 'no changes' or 'no updates' from version counters, line counts, or session memory without reading the source\",\n      \"Broadcasting content derived from cached state that a user correction has since invalidated\",\n      \"Archiving a user correction (e.g., only in _meta.note) without propagating it to dependent state, inspection baselines, and pending outputs\",\n      \"Allowing a record older than the source it describes to silently overwrite the source's newer truth\"\n    ],\n    \"confidence\": 0.86\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants the agent to never repeat an already-corrected fact: merges, inspection verdicts, and broadcasts must reflect the authoritative source's current content, so a correction given once (08:24) never has to be given again (19:19).\",\n    \"targetBehavior\": \"Before each cross-session merge, heartbeat inspection, or user-facing broadcast, the agent performs a fresh direct read of the authoritative source (mtime/content compared against cached state), updates dependent state to match the source on mismatch, and treats any explicit user correction found in the source as top authority for all dependent records.\",\n    \"forbiddenBehavior\": \"Concluding 'no changes', merging, or broadcasting based on memory, version counters, line counts, or historical records without directly comparing the authoritative source's current content — the failure family that let a stale episode theme survive a user correction and be re-broadcast the same day.\",\n    \"evidenceSource\": \"Diagnosis diagnosis_manual_1788609453041_dtmlftov: the 12:00 heartbeat merged the 08:12 stale record into CURRENT_FOCUS v48 without checking narration_lines_ep002.json (user-corrected at 08:24, noted in _meta.note); the 16:46/17:46/18:46 inspections claimed 'no changes' from the v48/28-line counter and memory; the 19:08 stale broadcast forced a second correction at 19:19.\",\n    \"validationExpectation\": \"An evaluator should accept a rule only if it requires an observable source read (mtime/content) before any merge, before any 'no-change' verdict, and before any broadcast; forbids memory/counter-based conclusions; and requires propagation of explicit corrections to dependent state. A rule that lets a stale record survive the comparison, or lets a correction remain archived-only, fails this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r2-run1\"\n  },\n  \"risks\": [\n    \"Overlaps with T-03 (and partially T-02/T-05); this principle is a stricter operationalization for source-vs-cache authority and merge gating — downstream rules should reference those axioms rather than replace them\",\n    \"Byte-level gating (mtime/content hash) verifies bytes, not semantics: reformatting or timestamp touches with identical meaning can trigger unnecessary state resets, while semantic drift in unmonitored fields can pass the gate\",\n    \"Mandatory mtime+content comparison on every heartbeat adds I/O and latency; high-frequency loops may adopt sampling or change notifications that reopen staleness windows\",\n    \"Defining a single source file as sole authority can miss legitimate authority elsewhere (e.g., corrections recorded only in metadata like _meta.note); an explicit authority hierarchy must be defined before enforcement\",\n    \"The correction-propagation mandate can conflict with T-06 (change no more state than necessary) if applied as blanket rewrites; propagation should stay scoped to state that depends on the corrected fact\"\n  ],\n  \"generatedAt\": \"2026-09-05T10:55:47.318Z\"\n}",
+    "usage": {
+     "input": 4310,
+     "output": 6317,
+     "total": 10627
+    },
+    "latencyMs": 73436,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "cbb92c63f82b2024"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788609453041_dtm-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r2-run1",
+     "principleDraft": {
+      "title": "Ground every state merge and no-change claim in fresh comparison with the authoritative source",
+      "statement": "Before merging cached, derived, or session-held state into authoritative state, before issuing a periodic-inspection verdict such as 'no changes', and before making any user-facing claim about a source's condition, an agent must directly observe the authoritative source's current state (e.g., mtime or content comparison) at the moment of decision. The fresh observation governs the outcome, explicitly recorded corrections rank above all historical or inferred state and must propagate to all dependent state, and a record older than the source it describes must never overwrite newer truth.",
+      "rationale": "The root cause across all diagnosed failures was stale records being treated as authoritative: cross-session merges inherited old entries, periodic inspections declared 'no changes' from memory and version counters without observing the source, and an explicit user correction was archived but never propagated. Gating merges, verdicts, and claims on a direct comparison with the source at decision time makes stale-state overwrite structurally impossible rather than dependent on agent diligence, and elevates explicit corrections so user intent cannot be silently stranded in an archive.",
+      "applicability": [
+       "Merging cached, derived, or session-held state into authoritative state across sessions (files, databases, external systems)",
+       "Periodic inspections or heartbeats that must determine whether an authoritative source has changed",
+       "Producing user-facing claims or broadcasts about the current condition of an authoritative source",
+       "Any workflow where a user correction may have modified the source after the cached state was formed"
+      ],
+      "antiPatterns": [
+       "Declaring 'no changes' from memory, version counters, or historical records without directly reading the source",
+       "Merging cached entries without first comparing them against the source's current content, letting older records overwrite newer source truth",
+       "Archiving an explicit user correction without propagating it as the highest authority to all dependent state",
+       "Treating a cached snapshot as ground truth when the source may have changed since the snapshot was captured"
+      ],
+      "confidence": 0.87
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent stale cached records from being merged or reported as truth: every state merge, 'no change' verdict, and user-facing claim must be grounded in a fresh direct observation of the authoritative source, with explicit user corrections propagated as the highest authority.",
+      "targetBehavior": "Immediately before each state merge, periodic-inspection verdict, or user-facing claim, the agent reads and compares the authoritative source's current state (e.g., mtime/content comparison) and resolves any divergence in favor of the source, treating explicit corrections as outranking all historical or inferred state and propagating them to dependent state.",
+      "forbiddenBehavior": "Asserting system state from memory, version counters, or historical records without observing the source; letting an older cached record overwrite newer source truth during a merge; declaring 'no changes' without direct comparison; archiving an explicit user correction without propagating it.",
+      "evidenceSource": "Diagnosed pain cases: cross-session merges that inherited stale entries, periodic inspections that reported 'no changes' from memory and version counters while the source had actually changed, and an explicit user correction that was archived but never propagated to dependent state.",
+      "validationExpectation": "An evaluator should see, in the tool trajectory, a direct read/comparison of the authoritative source immediately preceding every merge, 'no change' verdict, or broadcast claim, and should confirm divergences are resolved in favor of the source and explicit corrections; a rule that permits verdicts from memory or merges without source comparison must be rejected as unfaithful to this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r2-run1"
+     },
+     "risks": [
+      "Partially overlaps with T-03 (use observable evidence before inferring causes or claiming results); this principle is a stricter operationalization specific to source-vs-cache authority and merge gating, and adoption should reference T-03 rather than replace it",
+      "Treating a single source file as sole authority can misfire when legitimate authority also lives elsewhere (e.g., corrections recorded in metadata); an explicit authority hierarchy must accompany this principle or out-of-file corrections may be ignored",
+      "Mandating mtime/content-hash comparison on every heartbeat or merge adds latency and I/O cost; high-frequency loops may require sampling or change-notification mechanisms that reintroduce staleness windows",
+      "Mechanical mtime/hash comparison verifies bytes, not semantics — a reformatted or timestamp-touched file with identical meaning could trigger unnecessary state resets, while semantic divergence in unmonitored fields could still pass the gate",
+      "Over-application to read-only operations that neither merge state nor emit claims could impose observation overhead with no alignment benefit"
+     ],
+     "generatedAt": "2026-09-05T10:55:41.207Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788609453041_dtm-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Ground every state merge and no-change claim in fresh comparison with the authoritative source\",\n    \"statement\": \"Before merging cached, derived, or session-held state into authoritative state, before issuing a periodic-inspection verdict such as 'no changes', and before making any user-facing claim about a source's condition, an agent must directly observe the authoritative source's current state (e.g., mtime or content comparison) at the moment of decision. The fresh observation governs the outcome, explicitly recorded corrections rank above all historical or inferred state and must propagate to all dependent state, and a record older than the source it describes must never overwrite newer truth.\",\n    \"rationale\": \"The root cause across all diagnosed failures was stale records being treated as authoritative: cross-session merges inherited old entries, periodic inspections declared 'no changes' from memory and version counters without observing the source, and an explicit user correction was archived but never propagated. Gating merges, verdicts, and claims on a direct comparison with the source at decision time makes stale-state overwrite structurally impossible rather than dependent on agent diligence, and elevates explicit corrections so user intent cannot be silently stranded in an archive.\",\n    \"applicability\": [\n      \"Merging cached, derived, or session-held state into authoritative state across sessions (files, databases, external systems)\",\n      \"Periodic inspections or heartbeats that must determine whether an authoritative source has changed\",\n      \"Producing user-facing claims or broadcasts about the current condition of an authoritative source\",\n      \"Any workflow where a user correction may have modified the source after the cached state was formed\"\n    ],\n    \"antiPatterns\": [\n      \"Declaring 'no changes' from memory, version counters, or historical records without directly reading the source\",\n      \"Merging cached entries without first comparing them against the source's current content, letting older records overwrite newer source truth\",\n      \"Archiving an explicit user correction without propagating it as the highest authority to all dependent state\",\n      \"Treating a cached snapshot as ground truth when the source may have changed since the snapshot was captured\"\n    ],\n    \"confidence\": 0.87\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants to prevent stale cached records from being merged or reported as truth: every state merge, 'no change' verdict, and user-facing claim must be grounded in a fresh direct observation of the authoritative source, with explicit user corrections propagated as the highest authority.\",\n    \"targetBehavior\": \"Immediately before each state merge, periodic-inspection verdict, or user-facing claim, the agent reads and compares the authoritative source's current state (e.g., mtime/content comparison) and resolves any divergence in favor of the source, treating explicit corrections as outranking all historical or inferred state and propagating them to dependent state.\",\n    \"forbiddenBehavior\": \"Asserting system state from memory, version counters, or historical records without observing the source; letting an older cached record overwrite newer source truth during a merge; declaring 'no changes' without direct comparison; archiving an explicit user correction without propagating it.\",\n    \"evidenceSource\": \"Diagnosed pain cases: cross-session merges that inherited stale entries, periodic inspections that reported 'no changes' from memory and version counters while the source had actually changed, and an explicit user correction that was archived but never propagated to dependent state.\",\n    \"validationExpectation\": \"An evaluator should see, in the tool trajectory, a direct read/comparison of the authoritative source immediately preceding every merge, 'no change' verdict, or broadcast claim, and should confirm divergences are resolved in favor of the source and explicit corrections; a rule that permits verdicts from memory or merges without source comparison must be rejected as unfaithful to this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r2-run1\"\n  },\n  \"risks\": [\n    \"Partially overlaps with T-03 (use observable evidence before inferring causes or claiming results); this principle is a stricter operationalization specific to source-vs-cache authority and merge gating, and adoption should reference T-03 rather than replace it\",\n    \"Treating a single source file as sole authority can misfire when legitimate authority also lives elsewhere (e.g., corrections recorded in metadata); an explicit authority hierarchy must accompany this principle or out-of-file corrections may be ignored\",\n    \"Mandating mtime/content-hash comparison on every heartbeat or merge adds latency and I/O cost; high-frequency loops may require sampling or change-notification mechanisms that reintroduce staleness windows\",\n    \"Mechanical mtime/hash comparison verifies bytes, not semantics — a reformatted or timestamp-touched file with identical meaning could trigger unnecessary state resets, while semantic divergence in unmonitored fields could still pass the gate\",\n    \"Over-application to read-only operations that neither merge state nor emit claims could impose observation overhead with no alignment benefit\"\n  ],\n  \"generatedAt\": \"2026-09-05T10:55:41.207Z\"\n}",
+    "usage": {
+     "input": 1926,
+     "output": 4233,
+     "total": 6159
+    },
+    "latencyMs": 50404,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "2de1d4ccf2fa0690"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788609453041_dtm",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788609453041_dtm-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "12:00 心跳巡检将 main-agent 08:12 的旧记录（第二集=信任版30clip）直接合并进 CURRENT_FOCUS v48，未核对 narration_lines_ep002.json 的实际内容与 _meta.note 中 08:24 的用户纠正",
+       "betterDecision": "合并前强制读取源文件 narration_lines_ep002.json 的 mtime 与实际内容（含 _meta.note），发现与旧记录不一致时以源文件为准（第二集=10原则总纲集15clip）更新后再合并",
+       "rationale": "跨状态合并必须以可观察的源对象真实状态为最终权威；直接继承历史记录会把已被用户纠正的过期信息重新写入当前状态并持续传播",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "source_of_truth_first",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "16:46、17:46、18:46 三次巡检仅凭会话记忆与版本号/行数（CURRENT_FOCUS v48/28行）即宣称'无新变化'，未对源文件执行 mtime 与内容比对",
+       "betterDecision": "每次巡检必须实际读取源文件 mtime 与内容哈希并与当前状态记录比对，核对完成后才允许输出'无新变化'的结论",
+       "rationale": "'无变化'是需要可观察证据支撑的结论；不核对源文件就无法发现用户在 08:24 已对源内容作出纠正，导致陈旧主题一路传播到 19:08 播报",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_claim",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "用户 08:24 第一次纠正第二集主题后，系统未将该纠正转化为强制校验流程，19:08 仍播报陈旧的'信任'主题，导致用户 19:19 第二次纠正",
+       "betterDecision": "在第一次纠正后立即建立'播报/合并前必须核对源文件最新内容'的强制检查门，并把纠正写入持久化记录，确保同类错误不再重复",
+       "rationale": "失败与纠正是改进流程的反馈；不把用户纠正固化为流程约束，同一类错误就会在不同会话与不同动作中反复发生",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "correction_as_feedback",
+       "sourcePrincipleId": "T-08"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "用户的纠正结论依赖会话内记忆与分散的 _meta.note 传递，未以结构化形式持久化为跨会话可校验的权威状态，合并时被 08:12 旧记录覆盖",
+       "betterDecision": "将用户纠正持久化为显式状态记录：同步更新 CURRENT_FOCUS 与源文件 _meta.note，并记录源文件 mtime/内容哈希基线，使跨会话合并始终有可核对的持久化锚点",
+       "rationale": "重要结论与纠正必须持久化在会话之外，跨会话状态同步才不会丢失或回退到过期版本",
+       "confidence": 0.82,
+       "riskLevel": "medium",
+       "strategicPerspective": "persistent_state_anchor",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "跨会话合并与心跳巡检流程缺少硬性校验门，仅凭版本号与行数即可判定'状态无变化'，使过期记录可作为权威被静默传播",
+       "betterDecision": "实现自动化一致性校验工具：每次心跳巡检或跨会话合并前强制比对源文件 mtime+内容哈希，不一致时告警并以源文件为准更新状态，把'源文件为最终权威'固化为显式 guardrail 与禁止转换",
+       "rationale": "把硬约束翻译为显式检查与自动化 guardrail，能在执行前阻断过期状态传播，消除对会话记忆纪律的依赖",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "automated_guardrail",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "sourcePainId": "pain-10",
+     "contextRefs": [
+      "artifact://c56fbe1e-f7d5-48ce-a44c-c0cb62a3f81f"
+     ],
+     "generatedAt": "2026-09-05T10:48:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788609453041_dtm-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"12:00 心跳巡检将 main-agent 08:12 的旧记录（第二集=信任版30clip）直接合并进 CURRENT_FOCUS v48，未核对 narration_lines_ep002.json 的实际内容与 _meta.note 中 08:24 的用户纠正\",\"betterDecision\":\"合并前强制读取源文件 narration_lines_ep002.json 的 mtime 与实际内容（含 _meta.note），发现与旧记录不一致时以源文件为准（第二集=10原则总纲集15clip）更新后再合并\",\"rationale\":\"跨状态合并必须以可观察的源对象真实状态为最终权威；直接继承历史记录会把已被用户纠正的过期信息重新写入当前状态并持续传播\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"source_of_truth_first\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":1,\"badDecision\":\"16:46、17:46、18:46 三次巡检仅凭会话记忆与版本号/行数（CURRENT_FOCUS v48/28行）即宣称'无新变化'，未对源文件执行 mtime 与内容比对\",\"betterDecision\":\"每次巡检必须实际读取源文件 mtime 与内容哈希并与当前状态记录比对，核对完成后才允许输出'无新变化'的结论\",\"rationale\":\"'无变化'是需要可观察证据支撑的结论；不核对源文件就无法发现用户在 08:24 已对源内容作出纠正，导致陈旧主题一路传播到 19:08 播报\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_claim\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":2,\"badDecision\":\"用户 08:24 第一次纠正第二集主题后，系统未将该纠正转化为强制校验流程，19:08 仍播报陈旧的'信任'主题，导致用户 19:19 第二次纠正\",\"betterDecision\":\"在第一次纠正后立即建立'播报/合并前必须核对源文件最新内容'的强制检查门，并把纠正写入持久化记录，确保同类错误不再重复\",\"rationale\":\"失败与纠正是改进流程的反馈；不把用户纠正固化为流程约束，同一类错误就会在不同会话与不同动作中反复发生\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"correction_as_feedback\",\"sourcePrincipleId\":\"T-08\"},{\"candidateIndex\":3,\"badDecision\":\"用户的纠正结论依赖会话内记忆与分散的 _meta.note 传递，未以结构化形式持久化为跨会话可校验的权威状态，合并时被 08:12 旧记录覆盖\",\"betterDecision\":\"将用户纠正持久化为显式状态记录：同步更新 CURRENT_FOCUS 与源文件 _meta.note，并记录源文件 mtime/内容哈希基线，使跨会话合并始终有可核对的持久化锚点\",\"rationale\":\"重要结论与纠正必须持久化在会话之外，跨会话状态同步才不会丢失或回退到过期版本\",\"confidence\":0.82,\"riskLevel\":\"medium\",\"strategicPerspective\":\"persistent_state_anchor\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":4,\"badDecision\":\"跨会话合并与心跳巡检流程缺少硬性校验门，仅凭版本号与行数即可判定'状态无变化'，使过期记录可作为权威被静默传播\",\"betterDecision\":\"实现自动化一致性校验工具：每次心跳巡检或跨会话合并前强制比对源文件 mtime+内容哈希，不一致时告警并以源文件为准更新状态，把'源文件为最终权威'固化为显式 guardrail 与禁止转换\",\"rationale\":\"把硬约束翻译为显式检查与自动化 guardrail，能在执行前阻断过期状态传播，消除对会话记忆纪律的依赖\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"automated_guardrail\",\"sourcePrincipleId\":\"T-05\"}],\"sourcePainId\":\"pain-10\",\"contextRefs\":[\"artifact://c56fbe1e-f7d5-48ce-a44c-c0cb62a3f81f\"],\"generatedAt\":\"2026-09-05T10:48:00.000Z\"}",
+    "usage": {
+     "input": 2050,
+     "output": 4006,
+     "total": 6056
+    },
+    "latencyMs": 45613,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "bf1bec38366adc76"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788609453041_dtm-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r3-run1",
+     "thesis": "Every claim about state—whether a 'no change' conclusion or a merged result—must be grounded in fresh observation of the authoritative source at the moment of action. Inherited records, session memory, and version/line-count heuristics are merely caches: without re-verification against the source's actual content, corrected errors are silently re-imported and propagate, and user corrections are lost unless they are persisted and converted into mandatory pre-action checks.",
+     "principleCandidate": {
+      "title": "Re-verify the authoritative source before merging or claiming state is unchanged",
+      "rationale": "The root failure was that a heartbeat merged an 08:12 stale record into current state and later claimed 'no new changes' based only on version numbers and line counts, never reading the source file the user had corrected at 08:24. If every merge and every 'no-change' claim requires a fresh read of the source (mtime plus content), with discrepancies resolved in favor of the source and corrections persisted as explicit baselines, stale state cannot be silently re-propagated and repeated user corrections become unnecessary.",
+      "scope": "Applies whenever state is synchronized, merged, summarized, or reported across sessions or components—heartbeat inspections, cross-session state merges, broadcast/report generation—and specifically whenever an agent is about to output a 'nothing changed' conclusion or inherit a prior record without having observed the authoritative source in the current action.",
+      "confidence": 0.88
+     },
+     "risks": [
+      "Partially overlaps with core axiom T-03 (use observable evidence before claiming results); this candidate is a specialization for cross-session state synchronization and may be redundant with existing axioms rather than a genuinely new principle.",
+      "Re-reading and hashing source files on every heartbeat or merge adds I/O and latency; applied indiscriminately to many or large sources it could become wasteful, so freshness checks may need sensible intervals or change-notification support.",
+      "Treating the source as absolute authority can misfire when legitimate corrections exist in memory or queues but have not yet been written to the source, causing oscillation or lost updates; the write-through of corrections must be atomic with the source update.",
+      "Hard mandatory gates before every claim can stall workflows when the source is temporarily unreadable; a defined fail-safe path (block and alert rather than proceed on assumption) is required to avoid deadlock.",
+      "Over-rigid application may reject benign structural changes in the source (e.g., reformatting) as conflicts, generating false alarms and eroding trust in the guardrail."
+     ],
+     "generatedAt": "2026-09-05T10:52:00.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788609453041_dtm-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r3-run1\",\"thesis\":\"Every claim about state—whether a 'no change' conclusion or a merged result—must be grounded in fresh observation of the authoritative source at the moment of action. Inherited records, session memory, and version/line-count heuristics are merely caches: without re-verification against the source's actual content, corrected errors are silently re-imported and propagate, and user corrections are lost unless they are persisted and converted into mandatory pre-action checks.\",\"principleCandidate\":{\"title\":\"Re-verify the authoritative source before merging or claiming state is unchanged\",\"rationale\":\"The root failure was that a heartbeat merged an 08:12 stale record into current state and later claimed 'no new changes' based only on version numbers and line counts, never reading the source file the user had corrected at 08:24. If every merge and every 'no-change' claim requires a fresh read of the source (mtime plus content), with discrepancies resolved in favor of the source and corrections persisted as explicit baselines, stale state cannot be silently re-propagated and repeated user corrections become unnecessary.\",\"scope\":\"Applies whenever state is synchronized, merged, summarized, or reported across sessions or components—heartbeat inspections, cross-session state merges, broadcast/report generation—and specifically whenever an agent is about to output a 'nothing changed' conclusion or inherit a prior record without having observed the authoritative source in the current action.\",\"confidence\":0.88},\"risks\":[\"Partially overlaps with core axiom T-03 (use observable evidence before claiming results); this candidate is a specialization for cross-session state synchronization and may be redundant with existing axioms rather than a genuinely new principle.\",\"Re-reading and hashing source files on every heartbeat or merge adds I/O and latency; applied indiscriminately to many or large sources it could become wasteful, so freshness checks may need sensible intervals or change-notification support.\",\"Treating the source as absolute authority can misfire when legitimate corrections exist in memory or queues but have not yet been written to the source, causing oscillation or lost updates; the write-through of corrections must be atomic with the source update.\",\"Hard mandatory gates before every claim can stall workflows when the source is temporarily unreadable; a defined fail-safe path (block and alert rather than proceed on assumption) is required to avoid deadlock.\",\"Over-rigid application may reject benign structural changes in the source (e.g., reformatting) as conflicts, generating false alarms and eroding trust in the guardrail.\"],\"generatedAt\":\"2026-09-05T10:52:00.000Z\"}",
+    "usage": {
+     "input": 1757,
+     "output": 1804,
+     "total": 3561
+    },
+    "latencyMs": 27695,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "d0cfc2f4d7056f64"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788609453041_dtm-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r3-run1",
+     "principleDraft": {
+      "title": "Re-verify the authoritative source before merging or claiming no change",
+      "statement": "Before merging an inherited record into current state or asserting that state is unchanged, an agent must perform a fresh read of the authoritative source's actual content in the current action—not rely on version numbers, line counts, mtimes, session memory, or cached records. Discrepancies are resolved in favor of the source, accepted user corrections are persisted as explicit baselines, and if the source cannot be read the agent must block and alert rather than proceed on assumption.",
+      "rationale": "The diagnosed failure occurred because a heartbeat merged an 08:12 stale record into current state and later claimed 'no new changes' based solely on version numbers and line counts, never reading the source file the user had corrected at 08:24—silently re-importing the corrected error and forcing repeated user corrections. Requiring a fresh content read at the moment of merge or no-change claim removes the cache-propagation path entirely, and persisting corrections as explicit baselines ensures user fixes survive across sessions instead of being lost.",
+      "applicability": [
+       "Heartbeat or scheduled inspection routines that merge prior-session records into current state",
+       "Cross-session or cross-component state synchronization and merge points",
+       "Any output of a 'no change' or 'nothing new' conclusion about external state",
+       "Broadcast, report, or summary generation over synchronized state",
+       "Inheriting or reusing a prior record without having observed the authoritative source in the current action"
+      ],
+      "antiPatterns": [
+       "Claiming 'no new changes' from version numbers, line counts, or mtimes without reading source content",
+       "Merging an inherited or cached record into current state without a fresh read of the authoritative source",
+       "Silently re-importing previously corrected errors because the correction was never persisted as a baseline",
+       "Proceeding on assumption when the authoritative source is temporarily unreadable instead of blocking and alerting"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to never have to re-apply the same correction twice because the agent merged stale cached state or declared 'no change' without reading the corrected authoritative source.",
+      "targetBehavior": "In the tool trajectory before every merge or 'no change' claim, the agent performs a fresh read of the authoritative source's actual content, compares it against the inherited record, resolves discrepancies in favor of the source, and blocks with an alert if the source is unreadable.",
+      "forbiddenBehavior": "Asserting 'nothing changed' or merging inherited state based solely on version numbers, line counts, mtimes, session memory, or any cached record without having read the authoritative source's current content in that action.",
+      "evidenceSource": "The incident diagnosis: a heartbeat merged an 08:12 stale record into current state and then reported 'no new changes' using version/line-count heuristics, never reading the source file the user had corrected at 08:24, so the user's correction was silently reverted.",
+      "validationExpectation": "An evaluator should accept a rule only if it requires evidence of a fresh content read of the authoritative source immediately preceding each merge or no-change claim, and should reject any behavior where such a claim rests on cached metadata or inherited records alone; any change that weakens this read-before-claim requirement contradicts the intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r3-run1"
+     },
+     "risks": [
+      "Partially duplicates core axiom T-03 (use observable evidence before inferring causes or claiming results); this draft is a specialization for cross-session state synchronization and may be redundant unless scoped strictly to merge and no-change checkpoints.",
+      "Mandating fresh reads on every heartbeat or merge adds I/O and latency; applied to many or large sources it becomes wasteful and may require change-notification support or sensible freshness intervals.",
+      "Treating the source as absolute authority can discard legitimate corrections still held in memory or queues but not yet written to the source, causing oscillation or lost updates; correction write-through must be atomic with the source update.",
+      "A hard gate before every claim can stall workflows when the source is temporarily unreadable; the fail-safe path (block and alert rather than proceed on assumption) must be defined so degradation is visible rather than a silent deadlock.",
+      "Strict content comparison may flag benign structural changes in the source (e.g., reformatting, whitespace) as conflicts, generating false alarms that erode trust in the guardrail."
+     ],
+     "generatedAt": "2026-09-05T10:58:00.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788609453041_dtm-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r3-run1\",\"principleDraft\":{\"title\":\"Re-verify the authoritative source before merging or claiming no change\",\"statement\":\"Before merging an inherited record into current state or asserting that state is unchanged, an agent must perform a fresh read of the authoritative source's actual content in the current action—not rely on version numbers, line counts, mtimes, session memory, or cached records. Discrepancies are resolved in favor of the source, accepted user corrections are persisted as explicit baselines, and if the source cannot be read the agent must block and alert rather than proceed on assumption.\",\"rationale\":\"The diagnosed failure occurred because a heartbeat merged an 08:12 stale record into current state and later claimed 'no new changes' based solely on version numbers and line counts, never reading the source file the user had corrected at 08:24—silently re-importing the corrected error and forcing repeated user corrections. Requiring a fresh content read at the moment of merge or no-change claim removes the cache-propagation path entirely, and persisting corrections as explicit baselines ensures user fixes survive across sessions instead of being lost.\",\"applicability\":[\"Heartbeat or scheduled inspection routines that merge prior-session records into current state\",\"Cross-session or cross-component state synchronization and merge points\",\"Any output of a 'no change' or 'nothing new' conclusion about external state\",\"Broadcast, report, or summary generation over synchronized state\",\"Inheriting or reusing a prior record without having observed the authoritative source in the current action\"],\"antiPatterns\":[\"Claiming 'no new changes' from version numbers, line counts, or mtimes without reading source content\",\"Merging an inherited or cached record into current state without a fresh read of the authoritative source\",\"Silently re-importing previously corrected errors because the correction was never persisted as a baseline\",\"Proceeding on assumption when the authoritative source is temporarily unreadable instead of blocking and alerting\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"The Owner wants to never have to re-apply the same correction twice because the agent merged stale cached state or declared 'no change' without reading the corrected authoritative source.\",\"targetBehavior\":\"In the tool trajectory before every merge or 'no change' claim, the agent performs a fresh read of the authoritative source's actual content, compares it against the inherited record, resolves discrepancies in favor of the source, and blocks with an alert if the source is unreadable.\",\"forbiddenBehavior\":\"Asserting 'nothing changed' or merging inherited state based solely on version numbers, line counts, mtimes, session memory, or any cached record without having read the authoritative source's current content in that action.\",\"evidenceSource\":\"The incident diagnosis: a heartbeat merged an 08:12 stale record into current state and then reported 'no new changes' using version/line-count heuristics, never reading the source file the user had corrected at 08:24, so the user's correction was silently reverted.\",\"validationExpectation\":\"An evaluator should accept a rule only if it requires evidence of a fresh content read of the authoritative source immediately preceding each merge or no-change claim, and should reject any behavior where such a claim rests on cached metadata or inherited records alone; any change that weakens this read-before-claim requirement contradicts the intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r3-run1\"},\"risks\":[\"Partially duplicates core axiom T-03 (use observable evidence before inferring causes or claiming results); this draft is a specialization for cross-session state synchronization and may be redundant unless scoped strictly to merge and no-change checkpoints.\",\"Mandating fresh reads on every heartbeat or merge adds I/O and latency; applied to many or large sources it becomes wasteful and may require change-notification support or sensible freshness intervals.\",\"Treating the source as absolute authority can discard legitimate corrections still held in memory or queues but not yet written to the source, causing oscillation or lost updates; correction write-through must be atomic with the source update.\",\"A hard gate before every claim can stall workflows when the source is temporarily unreadable; the fail-safe path (block and alert rather than proceed on assumption) must be defined so degradation is visible rather than a silent deadlock.\",\"Strict content comparison may flag benign structural changes in the source (e.g., reformatting, whitespace) as conflicts, generating false alarms that erode trust in the guardrail.\"],\"generatedAt\":\"2026-09-05T10:58:00.000Z\"}",
+    "usage": {
+     "input": 1981,
+     "output": 3640,
+     "total": 5621
+    },
+    "latencyMs": 43029,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "32aa2520a10a004e"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788609453041_dtm-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r3-run1",
+     "principleDraft": {
+      "title": "Re-verify the authoritative source before merging or claiming state is unchanged",
+      "statement": "Before performing any cross-session or cross-component state merge, sync, inspection, or report—and specifically before outputting any 'no new changes' conclusion or inheriting a prior record—the agent must observe the authoritative source object directly (mtime plus actual content) within the same action. Inherited records, session memory, and version/line-count heuristics are caches, not evidence: on any discrepancy the source's observed content prevails, the difference is recorded, and user corrections are persisted as explicit baselines so they cannot be silently overwritten or re-corrected.",
+      "rationale": "The root failure was a synchronization flow with no mandatory source-first verification gate: the 12:00 heartbeat merged the stale 08:12 main-agent record (episode 2 = trust version, 30 clips) into CURRENT_FOCUS v48 without reading narration_lines_ep002.json, which the user had already corrected at 08:24 (10-principles overview, 15 clips, recorded in _meta.note). Three subsequent inspections (16:46, 17:46, 18:46) then claimed 'no new changes' based only on session memory and the v48/28-line heuristic, letting the stale theme propagate into the 19:08 broadcast and forcing a second user correction at 19:19. Requiring a fresh read of the source at the moment of action breaks this propagation path: stale records cannot be silently re-imported, no-change claims become evidence-based, and persisted correction baselines make repeated user corrections unnecessary.",
+      "applicability": [
+       "Cross-session or cross-component state merges and syncs (e.g., a heartbeat merging an earlier main-agent record into a CURRENT_FOCUS state file)",
+       "Periodic heartbeat inspections that compare current state against a previous observation and may conclude 'no new changes'",
+       "Broadcast, summary, or report generation whose content derives from an authoritative source file (e.g., narration_lines_ep002.json driving a scheduled broadcast)",
+       "Any action about to inherit a prior record, historical state file, or version/line-count heuristic as authoritative without having observed the source in the current action"
+      ],
+      "antiPatterns": [
+       "Merging a stale or cross-session record into current state without reading the source object's actual content in the same action, silently re-importing corrected errors",
+       "Declaring 'no new changes' from session memory, version numbers, or line counts (e.g., 'CURRENT_FOCUS still v48/28 lines') instead of comparing the source's mtime and content",
+       "Treating an inherited record or cached state as authoritative when it conflicts with the source's observed content",
+       "Leaving a user correction unpersisted so the same error recurs and the user must correct it again (the 08:24 and 19:19 double correction of the episode-2 theme)"
+      ],
+      "confidence": 0.88
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the actual content of the authoritative source file to be the final authority during state sync, so stale records are never merged or broadcast and the Owner never has to make the same correction twice.",
+      "targetBehavior": "In any merge, sync, inspection, or report action, the agent's tool trajectory shows a fresh read of the authoritative source (mtime and content) performed within that same action before state is merged or a 'no new changes' claim is output, with discrepancies resolved in favor of the source and user corrections persisted as explicit baselines.",
+      "forbiddenBehavior": "Asserting that state is unchanged, or merging inherited records into current state, based solely on session memory, version numbers, or line counts without observing the authoritative source's current content in the action being performed.",
+      "evidenceSource": "Diagnosis diagnosis_manual_1788609453041_dtmlftov: the 12:00 heartbeat merged the stale 08:12 record (episode 2 = trust version, 30 clips) into CURRENT_FOCUS v48 without checking narration_lines_ep002.json, which the user had corrected at 08:24 (10-principles overview, 15 clips, noted in _meta.note); the 16:46/17:46/18:46 inspections then claimed 'no new changes' on memory and the v48/28-line heuristic, propagating the stale theme into the 19:08 broadcast and forcing a second user correction at 19:19.",
+      "validationExpectation": "An evaluator should accept only rules that require an observable source read (mtime and content) within the same action as any merge or no-change claim, that make the source prevail on conflict, and that persist corrections as explicit baselines; any rule that permits memory-based or version-heuristic 'no change' claims contradicts this intent and must be flagged rather than merged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r3-run1"
+     },
+     "risks": [
+      "Partially overlaps core axiom T-03 (use observable evidence before claiming results) and touches T-08/T-10; this is a specialization for cross-session state synchronization, so downstream rule generation must scope rules to sync/merge/no-change-claim contexts to avoid duplicating existing axioms.",
+      "Mandatory fresh reads (mtime plus content hash) on every heartbeat or merge add I/O and latency; applied indiscriminately to many or large sources it becomes wasteful, so freshness checks may need sensible intervals or change-notification support without removing the gate.",
+      "Treating the source as absolute authority can lose legitimate corrections still held in memory or queues and not yet written to the source, causing oscillation; correction write-through must be atomic with the source update.",
+      "A hard pre-action gate can stall workflows when the source is temporarily unreadable; the fail-safe path must be block-and-alert, never proceed on assumption.",
+      "Over-rigid content comparison may flag benign structural changes (e.g., reformatting) as conflicts, generating false alarms and eroding trust in the guardrail."
+     ],
+     "generatedAt": "2026-09-05T10:57:00.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788609453041_dtm-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Re-verify the authoritative source before merging or claiming state is unchanged\",\n    \"statement\": \"Before performing any cross-session or cross-component state merge, sync, inspection, or report—and specifically before outputting any 'no new changes' conclusion or inheriting a prior record—the agent must observe the authoritative source object directly (mtime plus actual content) within the same action. Inherited records, session memory, and version/line-count heuristics are caches, not evidence: on any discrepancy the source's observed content prevails, the difference is recorded, and user corrections are persisted as explicit baselines so they cannot be silently overwritten or re-corrected.\",\n    \"rationale\": \"The root failure was a synchronization flow with no mandatory source-first verification gate: the 12:00 heartbeat merged the stale 08:12 main-agent record (episode 2 = trust version, 30 clips) into CURRENT_FOCUS v48 without reading narration_lines_ep002.json, which the user had already corrected at 08:24 (10-principles overview, 15 clips, recorded in _meta.note). Three subsequent inspections (16:46, 17:46, 18:46) then claimed 'no new changes' based only on session memory and the v48/28-line heuristic, letting the stale theme propagate into the 19:08 broadcast and forcing a second user correction at 19:19. Requiring a fresh read of the source at the moment of action breaks this propagation path: stale records cannot be silently re-imported, no-change claims become evidence-based, and persisted correction baselines make repeated user corrections unnecessary.\",\n    \"applicability\": [\n      \"Cross-session or cross-component state merges and syncs (e.g., a heartbeat merging an earlier main-agent record into a CURRENT_FOCUS state file)\",\n      \"Periodic heartbeat inspections that compare current state against a previous observation and may conclude 'no new changes'\",\n      \"Broadcast, summary, or report generation whose content derives from an authoritative source file (e.g., narration_lines_ep002.json driving a scheduled broadcast)\",\n      \"Any action about to inherit a prior record, historical state file, or version/line-count heuristic as authoritative without having observed the source in the current action\"\n    ],\n    \"antiPatterns\": [\n      \"Merging a stale or cross-session record into current state without reading the source object's actual content in the same action, silently re-importing corrected errors\",\n      \"Declaring 'no new changes' from session memory, version numbers, or line counts (e.g., 'CURRENT_FOCUS still v48/28 lines') instead of comparing the source's mtime and content\",\n      \"Treating an inherited record or cached state as authoritative when it conflicts with the source's observed content\",\n      \"Leaving a user correction unpersisted so the same error recurs and the user must correct it again (the 08:24 and 19:19 double correction of the episode-2 theme)\"\n    ],\n    \"confidence\": 0.88\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants the actual content of the authoritative source file to be the final authority during state sync, so stale records are never merged or broadcast and the Owner never has to make the same correction twice.\",\n    \"targetBehavior\": \"In any merge, sync, inspection, or report action, the agent's tool trajectory shows a fresh read of the authoritative source (mtime and content) performed within that same action before state is merged or a 'no new changes' claim is output, with discrepancies resolved in favor of the source and user corrections persisted as explicit baselines.\",\n    \"forbiddenBehavior\": \"Asserting that state is unchanged, or merging inherited records into current state, based solely on session memory, version numbers, or line counts without observing the authoritative source's current content in the action being performed.\",\n    \"evidenceSource\": \"Diagnosis diagnosis_manual_1788609453041_dtmlftov: the 12:00 heartbeat merged the stale 08:12 record (episode 2 = trust version, 30 clips) into CURRENT_FOCUS v48 without checking narration_lines_ep002.json, which the user had corrected at 08:24 (10-principles overview, 15 clips, noted in _meta.note); the 16:46/17:46/18:46 inspections then claimed 'no new changes' on memory and the v48/28-line heuristic, propagating the stale theme into the 19:08 broadcast and forcing a second user correction at 19:19.\",\n    \"validationExpectation\": \"An evaluator should accept only rules that require an observable source read (mtime and content) within the same action as any merge or no-change claim, that make the source prevail on conflict, and that persist corrections as explicit baselines; any rule that permits memory-based or version-heuristic 'no change' claims contradicts this intent and must be flagged rather than merged.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788609453041_dtm-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788609453041_dtm-r3-run1\"\n  },\n  \"risks\": [\n    \"Partially overlaps core axiom T-03 (use observable evidence before claiming results) and touches T-08/T-10; this is a specialization for cross-session state synchronization, so downstream rule generation must scope rules to sync/merge/no-change-claim contexts to avoid duplicating existing axioms.\",\n    \"Mandatory fresh reads (mtime plus content hash) on every heartbeat or merge add I/O and latency; applied indiscriminately to many or large sources it becomes wasteful, so freshness checks may need sensible intervals or change-notification support without removing the gate.\",\n    \"Treating the source as absolute authority can lose legitimate corrections still held in memory or queues and not yet written to the source, causing oscillation; correction write-through must be atomic with the source update.\",\n    \"A hard pre-action gate can stall workflows when the source is temporarily unreadable; the fail-safe path must be block-and-alert, never proceed on assumption.\",\n    \"Over-rigid content comparison may flag benign structural changes (e.g., reformatting) as conflicts, generating false alarms and eroding trust in the guardrail.\"\n  ],\n  \"generatedAt\": \"2026-09-05T10:57:00.000Z\"\n}",
+    "usage": {
+     "input": 4331,
+     "output": 5908,
+     "total": 10239
+    },
+    "latencyMs": 71090,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "65b0da8bb18e00ee"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

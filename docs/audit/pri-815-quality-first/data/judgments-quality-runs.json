@@ -1,0 +1,3132 @@
+{
+ "pairs": {
+  "G-manual_1788265732489_9ne#r1": {
+   "key": "G-manual_1788265732489_9ne#r1",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "A",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     6,
+     8
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     7
+    ],
+    "5": [
+     7,
+     8
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     6
+    ]
+   },
+   "reasons": "Decided by dims 2, 5, 4, 8. X repeatedly cites a '0.55-confidence' diagnosis absent from the source evidence (rationale, risks, evidenceSource) — an invented specific that corrodes the very evidence-traceability the principle demands; Y's claims stay traceable. Y also shows stronger boundary clarity, explicitly scoping against gating informal inputs where provenance is naturally weak. X is tighter on generalization and anti-pattern fidelity: Y's merge-point rule ('weakest channel must not define merged confidence') extends beyond the incident's single-channel bypass pain, and one anti-pattern derives from it. Net: Y's grounding discipline and explicit scope limits outweigh X's marginally better-calibrated overreach, giving Y the win despite near-equal totals.",
+   "usage": {
+    "input": 3030,
+    "output": 4104,
+    "total": 7134
+   }
+  },
+  "G-manual_1788268409354_vau#r1": {
+   "key": "G-manual_1788268409354_vau#r1",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     6
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     9,
+     7
+    ],
+    "5": [
+     9,
+     8
+    ],
+    "6": [
+     9,
+     8
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Both express the core intent (asset check before invention, gate over self-discipline) with similar structure and exception sets, so dims 1/7/10 are near-even. X wins decisively on dim 2: its evidenceSource cites the pain ID, score-75 severity, the agent's self-admission quote, the three concrete tool failures, and diagnostic limits, while Y's evidenceSource is a generic paraphrase with no incident anchors. X also stays tighter on dim 4 (Y's '完全一致' overstates owner intent) and adds the evidence-limitation risk (dim 9). X's antiPatterns anchor the real failure family (whisper->SRT->ASS vs Episode 001; post-correction patching). Y is competent but comparatively ungrounded and slightly overreaching.",
+   "usage": {
+    "input": 3991,
+    "output": 3770,
+    "total": 7761
+   }
+  },
+  "G-manual_1788415743052_os4#r1": {
+   "key": "G-manual_1788415743052_os4#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     8,
+     9
+    ],
+    "3": [
+     7,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     6,
+     7
+    ],
+    "6": [
+     7,
+     9
+    ],
+    "7": [
+     8,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     6,
+     7
+    ]
+   },
+   "reasons": "Y wins on dims 2, 3, 6, and 10. Its claims are traceable to source specifics (line-79 garble, exitCode 1, admission timestamp, pwsh recovery) and it prescribes executable actions today ($PSVersionTable.PSVersion probe, UTF-8 with BOM across 5.1/7, pwsh -File pin). X is faithful and broad but stays abstract ('probe the environment', 'compatibility intersection'), its statement reads as conjunctive multi-step mandates without disambiguation (dims 5, 7), and it carries more ceremonial restatement (dim 10). Both generalize without overreach (dim 4) and share equally thorough risk lists (dim 9 tied).",
+   "usage": {
+    "input": 3642,
+    "output": 2671,
+    "total": 6313
+   }
+  },
+  "G-manual_1788415743052_os4#r2": {
+   "key": "G-manual_1788415743052_os4#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     7,
+     8
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     7,
+     8
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     8,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     8,
+     8
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Y edges X on evidence grounding (timestamped citations: line-79 garble, exit code 1, agent admission, owner correction), boundary clarity (explicitly silent for trivial ASCII ops in verified environments), actionability (concrete $PSVersionTable probe, BOM-or-pure-ASCII alternatives), and internal consistency (X's title limits the trigger to platform change while its statement also covers encoding-sensitive content without change). Both share minor flaws: the pwsh/Linux provenance inference beyond the evidence and dangling axiom-ID references (X's T-08/T-10; Y's slightly mischaracterized T-05 gloss). X's risks are marginally more complete (BOM over-generalization risk), but that does not offset Y's superior traceability, boundary explicitness, and title-statement coherence.",
+   "usage": {
+    "input": 3578,
+    "output": 5650,
+    "total": 9228
+   }
+  },
+  "G-manual_1788265732489_9ne#r2": {
+   "key": "G-manual_1788265732489_9ne#r2",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Both derive the same core principle (evidence-grade gate at ingestion, persist provenance, halt-or-downgrade). X decides it on dims 2, 5, 8: its rationale/evidenceSource trace concrete source facts (CLI origin, trace 'unavailable_with_reason', no authenticated host-session provenance), its anti-patterns explicitly name proceeding after 'unavailable_with_reason' plus the over-blocking failure, and its validationExpectation states explicit fail conditions (blocking with no downgrade path fails intent). Y wins dim 9 with the extra stall/escalation risk, but its grounding is thinner, cites the intermediate philosopher artifact rather than diagnosis evidence, and 'repair round' is untraceable. Both carry padding from restated mechanics across statement/contract/risks.",
+   "usage": {
+    "input": 3299,
+    "output": 3881,
+    "total": 7180
+   }
+  },
+  "G-manual_1788265732489_9ne#r3": {
+   "key": "G-manual_1788265732489_9ne#r3",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     6,
+     7
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     7,
+     8
+    ],
+    "5": [
+     6,
+     7
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     6,
+     7
+    ]
+   },
+   "reasons": "Y wins on intent fidelity (1), grounding (2), specificity (3), and anti-patterns (8). Y's statement mirrors the source's two-branch abstraction (block or explicitly downgrade confidence) and grounds its rationale directly in the CLI/no-trace/T-03/T-10 evidence; its antiPattern 'proceeding at normal confidence when the only evidence is owner-reported inference' names the exact failure family. Y's targetBehavior is decision-complete (block with resubmission guidance vs. owner-inference-only label). X's core rationale rests on an untraceable claim ('recurring root cause across Dreamer candidates') and its applicability stretches wider than the source pain supports (dimension 4), with more restatement padding (10). Both share similar, strong risk lists (9).",
+   "usage": {
+    "input": 3000,
+    "output": 2549,
+    "total": 5549
+   }
+  },
+  "G-manual_1788268409354_vau#r2": {
+   "key": "G-manual_1788268409354_vau#r2",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     6
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     7,
+     7
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     8,
+     7
+    ]
+   },
+   "reasons": "Dim 2 decides: Y claims 'five separate unverified assumptions... each propagated through an entire batch before discovery,' misrepresenting the FileNotFoundError/ParserError/SyntaxError (immediate runtime failures) as batch-propagated deviations and inventing a count; X correctly separates execution failures from format deviations, though X invents a '0.62' confidence figure. Dim 8: X's anti-pattern 'relying on runtime errors to reveal assumptions' uniquely names the evidenced tool-failure family. Dim 9: X includes the trace-unavailability/self-report caveat tied to the source; Y omits it despite citing 'the diagnosed trace.' Dim 10: Y is marginally more restated and slogan-opening. Both are otherwise comparably faithful, specific, actionable, and consistent.",
+   "usage": {
+    "input": 3321,
+    "output": 4628,
+    "total": 7949
+   }
+  },
+  "G-manual_1788268409354_vau#r3": {
+   "key": "G-manual_1788268409354_vau#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     7
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Both drafts are faithful, specific, and internally consistent, but Y slips on evidence grounding: its evidenceSource cites 'Dreamer 五个候选共同指向的痛点,' a detail absent from the source, and its rationale overclaims '必然引发系统性失败' where the source only shows these failures occurred in one case (dim 2). Y also overreaches by extending the mandate to general '方案/流程设计' and folding script-escaping errors into output format specs (dim 4), and its fourth antiPattern (mechanically reusing outdated specs) names an over-application risk rather than the actual failure family (dim 8). X additionally flags the source's low confidence (0.62, unavailable trace) as a named risk, strengthening grounding.",
+   "usage": {
+    "input": 3559,
+    "output": 2299,
+    "total": 5858
+   }
+  },
+  "G-manual_1788415743052_os4#r3": {
+   "key": "G-manual_1788415743052_os4#r3",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     7,
+     9
+    ],
+    "3": [
+     7,
+     9
+    ],
+    "4": [
+     7,
+     9
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     7,
+     9
+    ],
+    "7": [
+     8,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     6,
+     8
+    ]
+   },
+   "reasons": "Y anchors the principle to the source's actual intent — interpreter version and encoding contract verified pre-execution — with incident-traceable specifics ($PSVersionTable, UTF-8 BOM for PS 5.1, pwsh pin, ANSI misparse), scoring higher on intent fidelity (1), evidence grounding (2), specificity (3), and actionability (6). X elevates secondary evidence (MEMORY.md load failure) and parse-level dry-runs into co-equal mandatory checks, diluting the core failure family and adding padding (dims 4, 10) despite good boundaries and risk naming. Both handle scaling, probe-failure handling, and risk completeness comparably (5, 9); Y's tighter scope-creep control and internally consistent depth-scaling (7, 8) decide it.",
+   "usage": {
+    "input": 3415,
+    "output": 2800,
+    "total": 6215
+   }
+  },
+  "G-manual_1788417947835_e99#r1": {
+   "key": "G-manual_1788417947835_e99#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     9
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     9
+    ],
+    "5": [
+     7,
+     9
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     8
+    ]
+   },
+   "reasons": "Y decided it on dims 2, 4, 5, 8, 10. Y grounds claims in cited evidence (diagnosis ID, mojibake string '鐢熸垚鏃堕棿锛', agent_turn/tool_call_failure timestamps), while X's claims are traceable but citation-free. Y states an explicit boundary (no gate for trivial/reversible or session-verified operations) and its validation guards against both over-breadth and incident-hardcoding; X lacks a when-it-does-not-apply clause. Y's antiPatterns map one-to-one to the actual failure (implicit encoding, using the consequential run as the test, post-hoc interpreter switching); X adds an evidence-unsupported caching antiPattern. X is slightly richer on risks (adds rule-overgeneralization meta risk) but longer with more restatement and broader phrasing ('any consequential artifact').",
+   "usage": {
+    "input": 3731,
+    "output": 2637,
+    "total": 6368
+   }
+  },
+  "G-manual_1788417947835_e99#r2": {
+   "key": "G-manual_1788417947835_e99#r2",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     8
+    ],
+    "2": [
+     8,
+     7
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     8,
+     7
+    ],
+    "5": [
+     8,
+     9
+    ],
+    "6": [
+     9,
+     8
+    ],
+    "7": [
+     9,
+     8
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     8,
+     7
+    ]
+   },
+   "reasons": "X 更忠实于源头（确认解释器版本+编码契约的前置门禁），且证据链引用具体（tool_call_failure 乱码串、agent_turn 自认），可操作机制更具体（$PSVersionTable、-Encoding、pwsh 显式调用）。Y 将『可逆探测覆盖控制台代码页/重定向编码』升格为强制核心机制，超出源头痛点（源头修正只需确认版本与编码契约），证据引用也更笼统，且探测清单在声明/反模式/风险中三度重复。Y 在边界清晰度（分级豁免写入声明本体）与风险完备性（探针环境失配风险）略胜，但整体 X 的忠实度、落地性与证据可溯性占优。",
+   "usage": {
+    "input": 4054,
+    "output": 3963,
+    "total": 8017
+   }
+  },
+  "G-manual_1788417947835_e99#r3": {
+   "key": "G-manual_1788417947835_e99#r3",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     6,
+     8
+    ],
+    "3": [
+     8,
+     8
+    ],
+    "4": [
+     7,
+     8
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     8,
+     8
+    ],
+    "8": [
+     7,
+     9
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     6,
+     7
+    ]
+   },
+   "reasons": "Y wins on evidence grounding (dims 2, 8): its claims trace to the actual incident—PowerShell 5.1 ANSI-decoding no-BOM UTF-8, the tool failure timestamp, agent's admission—and its antiPatterns all name the real failure family. X invents specifics absent from the source (BOM breaking Unix tools/YAML/shebang as an antiPattern, mandatory round-trip probe) and cites T-04/T-08 not in violatedPrinciples. Y's 'probe when necessary' better matches source intent than X's unconditional probe mandate (dims 1, 4), and its named commands ($PSVersionTable, which pwsh) aid actionability (dim 6). X leads only on risk completeness (names the probe-result-ignored risk) and is comparable on boundaries, but carries more restatement and padding (dims 9-10 tradeoff insufficient).",
+   "usage": {
+    "input": 3907,
+    "output": 3190,
+    "total": 7097
+   }
+  },
+  "G-manual_1788424714466_wmn#r1": {
+   "key": "G-manual_1788424714466_wmn#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     7,
+     8
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     7,
+     9
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Y wins on intent fidelity (its evidence-matches-intended-outcome clause directly operationalizes T-07, which X underplays), evidence grounding (cites owner_reported:cli, no-host-trace, and PRI-650-A Gate B specifically, vs. X's generic mechanism claims), boundary clarity (explicit out-of-scope carve-outs for human-judgment and low-stakes checks, where X buries these in risks), anti-pattern quality ('deferring detection to downstream pain reports' mirrors the CLI pain path), and risk completeness (uniquely names the upstream reporting-path gap). X is solid and marginally leaner but less traceable and less bounded. Y's one flaw — an invented enumeration of unconfirmed failure mechanisms (dim 2) — is insufficient to overturn its lead.",
+   "usage": {
+    "input": 3319,
+    "output": 3729,
+    "total": 7048
+   }
+  },
+  "G-manual_1788424714466_wmn#r2": {
+   "key": "G-manual_1788424714466_wmn#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     6,
+     8
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     8,
+     9
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     7
+    ]
+   },
+   "reasons": "Y wins on evidence grounding (#2): it cites the actual diagnosis ID, owner_reported:cli provenance, severity, and violated T-03/T-05/T-07, while X paraphrases without source refs. Y also edges boundary clarity (#5) with an explicit out-of-scope line for one-off/judgment checks, and anti-patterns (#8) that directly name completion-without-reconciliation (T-07). X is tighter (#10) and its 'second occurrence' trigger is operationally crisp, but that threshold is invented beyond the single-incident evidence, mildly weakening fidelity. Y's blemishes — an unsupported 'confidence 0.55' detail and restatement in its long statement — are outweighed by stronger grounding and boundaries.",
+   "usage": {
+    "input": 3312,
+    "output": 3337,
+    "total": 6649
+   }
+  },
+  "G-manual_1788424714466_wmn#r3": {
+   "key": "G-manual_1788424714466_wmn#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     8
+    ],
+    "2": [
+     8,
+     6
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     7,
+     7
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "X wins on evidence grounding (dim 2): its evidenceSource cites concrete, verifiable items (sourceRef, owner_reported:cli, 'No session context available', provenance tag, T-03/05/07), while Y's evidenceSource asserts four failure modes (steps omitted, judgment drift, etc.) the source does not document. X also names the meaningful thin-evidence risk (single untraced CLI report) that Y omits (dim 9), and carries an explicit exclusion clause for subjective judgments, giving sharper boundary clarity (dim 5), plus an anti-pattern covering the untraced CLI reporting path (dim 8). Y is slightly stronger on specificity and actionability via its human-judgment marking and recorded-bypass handling, but not enough to offset X's grounding and risk advantages.",
+   "usage": {
+    "input": 3249,
+    "output": 2446,
+    "total": 5695
+   }
+  },
+  "G-manual_1788526359876_r5x#r1": {
+   "key": "G-manual_1788526359876_r5x#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     9
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     9,
+     9
+    ],
+    "5": [
+     8,
+     9
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Both drafts share the same three-gate structure and are faithful, consistent, and equally strong on risks (dim 9) and generalization (dim 4). Y decides it on grounding (dim 2): it cites the hook crash TypeError, the dual config.get-too-large failures, exec exit 1, PRI-646, and the CLI/narrower-subtree fallback paths — all traceable to source evidence — while X leaves the blocked-evidence mode generic. Y is also more specific/actionable (dims 3, 6: concrete evidence types, alternative paths before downgrade), carries an explicit scope-boundary line (dim 5), and its antiPatterns (dim 8) name the mechanism-log-skipping failure more sharply. Minor blemish: Y's dreamer-proposal citation is unverifiable from given evidence, but it does not change the outcome.",
+   "usage": {
+    "input": 4233,
+    "output": 3159,
+    "total": 7392
+   }
+  },
+  "G-manual_1788526359876_r5x#r2": {
+   "key": "G-manual_1788526359876_r5x#r2",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "TIE",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     8
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     9,
+     9
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     9
+    ]
+   },
+   "reasons": "The two drafts are near-equivalent renderings of the same incident, both covering event-evidence gating, measured-data cross-check, blocked-evidence downgrade, and process gates over individual vigilance (dims 1,3,4,6,7,8,9 effectively identical). X edges dims 2 and 5: it cites concrete anchors (TypeError string, PRI-646, config.get/exec failures, CLI alternative) and gives an actionable boundary rule (key on consequential causal assertion, not statistical vocabulary). Y wins dim 10: its three numbered gates convey the same normative content with far less padding than X's 120-word statement and duplicated downgrade-abuse points; Y also flags the undefined 'consequential' threshold. X's grounding/boundary gains offset Y's concision; totals equal.",
+   "usage": {
+    "input": 4074,
+    "output": 4707,
+    "total": 8781
+   }
+  },
+  "G-manual_1788526359876_r5x#r3": {
+   "key": "G-manual_1788526359876_r5x#r3",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     9
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     6,
+     7
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     8,
+     7
+    ]
+   },
+   "reasons": "Both faithfully capture the source intent (event-level verification, pre-submit falsification, gap disclosure) and are internally consistent. Y wins on evidence grounding (2): it ties the evidence-gap duties to actual tool failures from the record — config.get 'use path' narrowing hint, exitCode 1, sessionId+CLI fallback — all traceable to sourceRef notes X leaves generic. Y is also more actionable (6) and specific (3): per-item hypothesis-vs-measured comparison with mandatory rollback on contradiction. Y's conditional scoping ('凡由间接指标形成的') gives clearer boundaries (5) than X's universal '任何…断言'. X leads slightly on padding (10) and risk completeness (9, its compound-obligation split risk is insightful), but not enough to offset.",
+   "usage": {
+    "input": 4119,
+    "output": 3356,
+    "total": 7475
+   }
+  },
+  "G-manual_1788578262338_kmp#r1": {
+   "key": "G-manual_1788578262338_kmp#r1",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     7,
+     6
+    ],
+    "5": [
+     9,
+     9
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     8
+    ]
+   },
+   "reasons": "Both propose nearly identical three-gate principles with faithful intent, specificity, consistency, and strong anti-patterns (dims 1,3,5,6,7,8 near-even). X wins on dim 2: its concrete claims are anchored to source evidence (diagnosis ID, D:\\...\\episodes\\ path, concept-draft-v0.md, the fabricated '信任' narration), whereas Y's account is accurate but anchorless—no sourceRef, file path, or incident specifics. Dim 4: both stretch to code generation, but X explicitly flags the single-instance over-generalization risk; Y broadens further ('任何素材已定稿但agent可能不去查的场景') without flagging. Dim 10 mildly favors Y (leaner rationale); dim 9 is even (X's overreach flag vs Y's confirmation-fatigue risk). Net edge: X.",
+   "usage": {
+    "input": 3763,
+    "output": 3308,
+    "total": 7071
+   }
+  },
+  "G-manual_1788578262338_kmp#r2": {
+   "key": "G-manual_1788578262338_kmp#r2",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     9,
+     9
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Dimension 2 decides. X's evidenceSource traces fully to the source: the diagnosis ID, the concrete file path/concept-draft-v0.md, the fabricated 'trust' theme, Owner correction, and correct T-02/T-05/T-10 mapping. Y's evidenceSource instead cites '五个失败候选共同指向同一根因' — a claim absent from the source evidence — and omits the incident specifics, weakening grounding. Elsewhere the two drafts are near-identical: same three-ring gate/search-then-escalate/cross-check structure, equally explicit boundaries excluding tasks without established authoritative material, comparable anti-patterns and risk sets (Y's tool-call verifiability risk vs X's scope-overreach risk), and similar density. X is marginally better anchored without losing any other dimension.",
+   "usage": {
+    "input": 3786,
+    "output": 2908,
+    "total": 6694
+   }
+  },
+  "G-manual_1788578262338_kmp#r3": {
+   "key": "G-manual_1788578262338_kmp#r3",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     7,
+     9
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     7,
+     8
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     8
+    ]
+   },
+   "reasons": "Both express the core intent (load-before-generate, stop-on-missing, pre-delivery comparison) and are actionable. Y wins on grounding: it cites the diagnosis sourceRef, exact repo path, the fabricated '信任' narration, and pain count 1→2, while X stays abstract and invents T-03/T-07 mappings in validationExpectation that the source's violatedPrinciples (T-02/T-05/T-10 only) do not support. Y's antiPatterns name the real failure family including post-hoc citation evasion; X's are generic. X also overreaches by extending scope to code implementation, beyond the creative-task pain. Otherwise comparable on boundaries, risks, and internal consistency.",
+   "usage": {
+    "input": 3783,
+    "output": 2346,
+    "total": 6129
+   }
+  },
+  "G-manual_1788609453041_dtm#r1": {
+   "key": "G-manual_1788609453041_dtm#r1",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     8
+    ],
+    "3": [
+     8,
+     8
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     7,
+     7
+    ],
+    "6": [
+     8,
+     8
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "The two drafts are near-clones on fidelity, anti-patterns, risks, and boundary handling; both faithfully encode source primacy (mtime+content over memory/metadata), the no-change-verification requirement, and correction hardening per T-03/T-08. The narrow decider is dimension 2: X's rationale and evidenceSource anchor every claim to traceable specifics — narration_lines_ep002.json, CURRENT_FOCUS v48, the 16:46–18:46 inspection rounds, the 19:08 broadcast and 19:19 second correction — whereas Y paraphrases the same incident without artifact names or timestamps, and its 're-corrected twice' phrasing is slightly imprecise. Y's in-statement halt-on-mismatch definition is marginally crisper (dim 3) but does not offset X's superior evidence grounding. Both carry comparable structural repetition (dim 10).",
+   "usage": {
+    "input": 3571,
+    "output": 5136,
+    "total": 8707
+   }
+  },
+  "G-manual_1788609453041_dtm#r2": {
+   "key": "G-manual_1788609453041_dtm#r2",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     8
+    ],
+    "2": [
+     10,
+     6
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     9,
+     8
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     9,
+     8
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     10,
+     8
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Decided by dimensions 2, 3, and 8. X's rationale and evidenceSource trace the actual incident (12:00 heartbeat merging the 08:12 record into CURRENT_FOCUS v48, unchecked narration_lines_ep002.json, 08:24/19:19 corrections, _meta.note, 16:46-18:46 'no change' inspections), while Y's are evidence-free generalities consistent with but not traceable to the source. X is more prescriptive ('at minimum comparing mtime and content' vs Y's weaker 'e.g., mtime or content'), and X's antiPatterns name the concrete failure family (counter/memory-based 'no change' verdicts, archived-only corrections in _meta.note). Both handle boundaries, consistency, and risks comparably; Y's generic phrasing slightly dilutes intent fidelity (dimension 1).",
+   "usage": {
+    "input": 3414,
+    "output": 2879,
+    "total": 6293
+   }
+  },
+  "G-manual_1788609453041_dtm#r3": {
+   "key": "G-manual_1788609453041_dtm#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     8
+    ],
+    "2": [
+     9,
+     8
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     9,
+     8
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     9
+    ]
+   },
+   "reasons": "X wins on intent fidelity (1): it preserves the source's exact mtime+content verification formula, whereas Y demotes mtimes to an unreliable heuristic and adds an unevidenced block-and-alert norm to the core statement. X is stronger on evidence grounding (2) and specificity (3), naming narration_lines_ep002.json, CURRENT_FOCUS v48/28-line heuristic, _meta.note, and the 19:08/19:19 double correction; Y stays accurate but generic. X's anti-patterns (8) all trace to the actual failure family, while Y's unreadable-source anti-pattern is not evidenced. Both are actionable, internally consistent, and equally risk-complete; Y is slightly tighter (10), but that does not offset X's grounding and fidelity advantage.",
+   "usage": {
+    "input": 3439,
+    "output": 4576,
+    "total": 8015
+   }
+  },
+  "G-manual_1788610740431_xo5#r1": {
+   "key": "G-manual_1788610740431_xo5#r1",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "TIE",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     9
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     8,
+     9
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     8,
+     7
+    ]
+   },
+   "reasons": "Both faithfully encode source-wins fingerprint verification (mtime+content) at merge and consumption points plus codified correction gates, matching T-03/T-07/T-08. X wins dim 9 by naming the risk the source explicitly flags — owner-reported reasonSummary with no behavioral raw evidence — and is tighter (dim 10). X loses dim 2 by asserting an invented 'confidence 0.35' figure absent from the evidence. Y has cleaner grounding, embeds the ephemeral-read exemption in the operative statement (dim 5), but omits the weak-evidence risk and its six antiPatterns/contract add more redundant restatement. The one-point gaps offset symmetrically across dims 2, 5, 9, 10; no qualitative separation.",
+   "usage": {
+    "input": 3567,
+    "output": 5678,
+    "total": 9245
+   }
+  },
+  "G-manual_1788610740431_xo5#r2": {
+   "key": "G-manual_1788610740431_xo5#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     7,
+     8
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     8,
+     7
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     8,
+     7
+    ]
+   },
+   "reasons": "Close call. Y wins on grounding (dims 2, 8): it traces the concrete incident (08:24 deprecation, 12:00 heartbeat merge, 19:08 broadcast) and names the exact failure family in antiPatterns; its resync-and-alert on-mismatch behavior and evidence-thinness risk (dim 9) add real value. X is cleaner on boundary clarity (dim 5, explicit not-applicable clause), restraint (dim 4), and padding (dim 10), but stays generic. Y's flaws: unsupported specifics (0.35 confidence, T-05/T-10 overlap) and no explicit non-applicability clause, costing dims 4/5/10. Both slightly overreach with the durable-persistence requirement beyond the source pain, and both are internally consistent (dim 7).",
+   "usage": {
+    "input": 3268,
+    "output": 2823,
+    "total": 6091
+   }
+  },
+  "G-manual_1788610740431_xo5#r3": {
+   "key": "G-manual_1788610740431_xo5#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     7,
+     7
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     8
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "X and Y share the same core rule and are equally specific and actionable (dims 3, 6). X wins on evidence grounding (2): it cites the 09-05 snapshot, 12:00 heartbeat merge, 19:08 broadcast, and flags that evidence is owner-submitted only, while Y restates an inferred 'snapshots carried no fingerprints' mechanism as fact. X's antiPatterns name the actual incident family — unchecked heartbeat merge, unverified success declaration, post-correction re-consumption (8) — where Y adds generic warning/mtime patterns not in evidence. X includes the evidence-limitation risk the source explicitly raises (9), and avoids Y's minor tension between forbidding warning-only propagation and allowing a degrade-with-alert fallback (7). Y's marginally tighter wording (10) does not offset these.",
+   "usage": {
+    "input": 3304,
+    "output": 3590,
+    "total": 6894
+   }
+  },
+  "G-manual_1788612956754_9aa#r1": {
+   "key": "G-manual_1788612956754_9aa#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     7,
+     9
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     7,
+     8
+    ],
+    "5": [
+     6,
+     7
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     7,
+     8
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Y wins on evidence grounding (dim 2): it cites the concrete incidents (CURRENT_FOCUS v48, narration_lines_ep002.json 08:24 update, 12:00/19:08 timeline) and correctly references T-08/T-10; X cites T-03/T-05, which appear nowhere in the source, and never mentions T-08. Y is more specific/actionable (dims 3, 6) via mtime+content checks, trigger keywords, and write-back semantics. X has an internal tension (dim 7): a risk proposes 'broadcast first, verify later,' contradicting its mandatory pre-output check; Y keeps check-first with postpone-only degradation. X edges anti-patterns (dim 8) with fully grounded items; overall Y is tighter and better traced.",
+   "usage": {
+    "input": 3406,
+    "output": 3077,
+    "total": 6483
+   }
+  },
+  "G-manual_1788612956754_9aa#r2": {
+   "key": "G-manual_1788612956754_9aa#r2",
+   "skipped": "validator_failure",
+   "aValid": true,
+   "bValid": false,
+   "verdict": "A",
+   "reasons": "regraded by deterministic §30 hard gate (review fix): arm output failed the production validator; judge-issued verdict superseded",
+   "priorVerdict": "B",
+   "priorSkipped": null
+  },
+  "G-manual_1788612956754_9aa#r3": {
+   "key": "G-manual_1788612956754_9aa#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     8
+    ],
+    "2": [
+     8,
+     4
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     9,
+     9
+    ],
+    "5": [
+     8,
+     9
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     6,
+     7
+    ]
+   },
+   "reasons": "Dimension 2 decides it: X's rationale and evidenceSource carry traceable specifics (09-05, 12:00 heartbeat, 08:12 stale theme, CURRENT_FOCUS v48, 19:08 broadcast, 08:24 narration_lines_ep002.json change), while Y invents 'five staleness failure candidates' (source describes two same-day failures) and its rationale is an evidence-free generality. On dimension 1, X faithfully mandates the mtime+content dual check that lesson T-08 explicitly states; Y reinterprets to content-only. Y edges X on boundary clarity (explicit out-of-scope clause) and padding, and both are comparable on specificity, actionability, and anti-patterns, but Y's fabricated evidence claim and weaker grounding outweigh those minor wins.",
+   "usage": {
+    "input": 3440,
+    "output": 2934,
+    "total": 6374
+   }
+  },
+  "G-manual_1788920022087_pjz#r1": {
+   "key": "G-manual_1788920022087_pjz#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     7,
+     9
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     7,
+     8
+    ],
+    "5": [
+     7,
+     8
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Y wins on evidence grounding (2), specificity (3), boundary clarity (5), and anti-pattern quality (8). Every Y clause maps to a diagnosed EP002 failure (600s exec timeout killing ComfyUI, keyframes vs ComfyUI/input stale reads, gen_prompts.py exact-text edit, head_trim unmeasured claim), with explicit boundaries: bounded retry counts, deterministic-infeasibility escape hatch, proportionality caveats. X reframes the edit failures into generic 'receipt-returning transports / fire-and-forget' language less traceable to the source, and 'every state change' breadth weakens grounding (2) and generalization (4). Both are internally consistent, name axiom-overlap risk, and avoid padding similarly; X's compactness is real but comes at grounding cost, so Y decides it.",
+   "usage": {
+    "input": 3986,
+    "output": 2415,
+    "total": 6401
+   }
+  },
+  "G-manual_1788920022087_pjz#r2": {
+   "key": "G-manual_1788920022087_pjz#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     7,
+     8
+    ],
+    "3": [
+     7,
+     9
+    ],
+    "4": [
+     8,
+     9
+    ],
+    "5": [
+     7,
+     8
+    ],
+    "6": [
+     7,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     7,
+     9
+    ],
+    "9": [
+     8,
+     8
+    ],
+    "10": [
+     7,
+     8
+    ]
+   },
+   "reasons": "Y dominates on evidence grounding (2), specificity (3), actionability (6), and anti-pattern quality (8): its clauses trace directly to source specifics (head_trim claim without duration test, KF14→ComfyUI/input desync, 600s exec-timeout killing ComfyUI, re-roll vs gen_prompts.py deterministic fix) and prescribe observable mechanisms (anchor read, detached service + liveness probe, hash/mtime sync check, explicit retry fallback condition). X is internally consistent (7) with solid risks (9) but stays generic, introduces evidence-free specifics (exit codes, single-line logs), and its broad 'any external persistent system' scope plus restated rationale weaken dimensions 4 and 10. Minor Y flaw: cites a diagnosis ID absent from source; both are otherwise coherent with comparable risk coverage.",
+   "usage": {
+    "input": 4104,
+    "output": 3739,
+    "total": 7843
+   }
+  },
+  "G-manual_1788920022087_pjz#r3": {
+   "key": "G-manual_1788920022087_pjz#r3",
+   "skipped": "generation_failure",
+   "aValid": false,
+   "bValid": false,
+   "verdict": "BOTH_BAD",
+   "reasons": "asymmetric or dual generation failure (SPEC §30)"
+  },
+  "G-manual_1789299059630_zqx#r1": {
+   "key": "G-manual_1789299059630_zqx#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     7,
+     9
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     9,
+     8
+    ],
+    "7": [
+     9,
+     8
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Very close. Y wins on dims 2 and 9: it anchors claims to the source (v3k8–v3k19, 13+ Owner-found defects) and propagates the evidence caveat (owner_reported_no_host_trace, confidence 0.55, recommend trace re-verification), while X asserts the causal chain with certainty ('必然逃逸') and cites no incident specifics or caveats. Y also encodes all three source abstractions verbatim, including executor-owned quality confirmation (dim 1). X is stronger on specificity/actionability (fix-and-regate loop, proportionality embedded in the norm) and slightly cleaner internally; Y's '可行时' hedge and '13+' leakage into an anti-pattern are minor. Dims 2 and 9 decide for Y.",
+   "usage": {
+    "input": 3474,
+    "output": 7974,
+    "total": 11448
+   }
+  },
+  "G-manual_1789299059630_zqx#r2": {
+   "key": "G-manual_1789299059630_zqx#r2",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     9,
+     9
+    ],
+    "5": [
+     8,
+     6
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Both drafts are strong and closely matched on fidelity, specificity, and actionability. X wins on two rubric dimensions. (2) Evidence grounding: X cites v3k8-v3k19, the 13+ defect count, the GPT-顾问 requirement, and flags the owner_reported_no_host_trace provenance weakness in both intentContract and risks; Y's evidenceSource omits the provenance caveat and incident specifics. (5) Boundary clarity: X embeds an explicit exclusion (exploratory work with no expected spec) in applicability; Y relegates it to a risk note. Y is marginally better on the fail-closed-when-unexecutable clause, but not enough to offset.",
+   "usage": {
+    "input": 3630,
+    "output": 2396,
+    "total": 6026
+   }
+  },
+  "G-manual_1789299059630_zqx#r3": {
+   "key": "G-manual_1789299059630_zqx#r3",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     8
+    ],
+    "3": [
+     8,
+     8
+    ],
+    "4": [
+     7,
+     8
+    ],
+    "5": [
+     6,
+     7
+    ],
+    "6": [
+     8,
+     8
+    ],
+    "7": [
+     9,
+     8
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Both are faithful, well-grounded, and actionable with strong anti-patterns. Y wins on boundary clarity: its in-statement 'when such a resource is available' conditional gives an explicit exception X lacks (X mandates independent review unconditionally, only addressing deadlock in risks). Y also wins risk completeness, uniquely flagging the owner-reported/no-trace evidentiary weakness and domain over-fit, and generalizes more carefully (dim 4). X edges dim 7: Y's targetBehavior and validationExpectation drop the availability caveat, creating a mild internal inconsistency; X's unconditional mandate is its main overreach. Y's unverifiable '0.55 confidence' detail is a minor grounding blemish but its evidence honesty outweighs it.",
+   "usage": {
+    "input": 3286,
+    "output": 4408,
+    "total": 7694
+   }
+  },
+  "G-manual_1789317326914_sj6#r1": {
+   "key": "G-manual_1789317326914_sj6#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     6,
+     9
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     7,
+     8
+    ],
+    "5": [
+     5,
+     8
+    ],
+    "6": [
+     8,
+     8
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Y wins on grounding (dim 2): it cites concrete source specifics (15:24/16:34 timestamps, MD5 A0A58FA..., pain manual_1788609453041_dtmlftov, deprecated 30clip spec) while X stays abstract and asserts 'conclusions lost across sessions' — an inference the evidence doesn't state. Y also captures the Owner's explicit boundary that the check itself and post-check merge are unrestricted (dims 1, 5), which X omits entirely, leaving X's scope one-sided. Y's anti-patterns each trace to the incident (read-back substitution, order inversion, reminder-level recurrence); X adds 'opaque rejections' not evidenced (dim 8). Both are actionable and equally complete on risks; Y's applicability anchors breadth to authority-defined writes (dim 4).",
+   "usage": {
+    "input": 4658,
+    "output": 2998,
+    "total": 7656
+   }
+  },
+  "G-manual_1789317326914_sj6#r2": {
+   "key": "G-manual_1789317326914_sj6#r2",
+   "skipped": "generation_failure",
+   "aValid": false,
+   "bValid": false,
+   "verdict": "BOTH_BAD",
+   "reasons": "asymmetric or dual generation failure (SPEC §30)"
+  },
+  "G-manual_1789317326914_sj6#r3": {
+   "key": "G-manual_1789317326914_sj6#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     8
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     7,
+     8
+    ],
+    "5": [
+     9,
+     7
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Both drafts are strong and structurally parallel, but X wins on intent fidelity and boundary clarity: it explicitly preserves the Owner's constraint that verification itself and post-verification normal merges are unrestricted, in both statement and intentContract, and its validationExpectation guards against over-blocking the verification action. X is clearly stronger on evidence grounding, citing diagnosis/pain IDs, LastWriteTime, MD5, file names, and all four violated principles, while Y stays generic and cites no identifiers. X's antiPatterns also capture the evidenced 'self-read-back masquerading as authority check' failure. Y is marginally better on generalization restraint (X's fourth applicability bullet, '任何以关键校验保证正确性的有后果写入', is overbroad), but this does not offset X's advantages.",
+   "usage": {
+    "input": 4361,
+    "output": 3223,
+    "total": 7584
+   }
+  },
+  "G-manual_1789398236238_04i#r1": {
+   "key": "G-manual_1789398236238_04i#r1",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     9,
+     8
+    ],
+    "7": [
+     8,
+     8
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     7
+    ]
+   },
+   "reasons": "X and Y are structurally parallel, but X wins on evidence grounding (2), specificity (3), actionability (6), and anti-pattern quality (8). X retains traceable source specifics — hud_gen.py vs gpt_hud_key.py/hud-gpt-src, the 15:46 rerun and 21:41 recovery, frame/pixel-level reconciliation mirroring the 帧级对账/MAD evidence — so its claims are checkable and its antiPatterns map one-to-one onto the failure chain (blind rerun, wrong-pipeline recovery, assertion-based completion). Y deliberately abstracts these away, reads more like generic wisdom, and slightly misstates the completion failure ('process success/command exit' vs the source's verbal 口述销账 claim). Both share minor issues: an untraceable T-10 reference in risks and mild anchor-clause tension (dim 7). Y's longer risk list is a small plus but not decisive (dim 9 tie).",
+   "usage": {
+    "input": 3815,
+    "output": 4113,
+    "total": 7928
+   }
+  },
+  "G-manual_1789398236238_04i#r2": {
+   "key": "G-manual_1789398236238_04i#r2",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "A",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     7
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     7,
+     8
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     7,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     8,
+     7
+    ]
+   },
+   "reasons": "Y wins on internal consistency (dim 7): its proportional-relaxation clause explicitly preserves a non-zero minimum, resolving the tension X leaves between the absolute 'any missing evidence forbids execution' and its own relaxation applicability. Y is also more specific and actionable (dims 3, 6): content fingerprints, snapshot location/recovery-path recording, auditable pass/block records, blocking-vs-warn semantics. Its anti-patterns (dim 8) name the true failure family better ('warn-and-proceed', 'exit code 0 ≠ success', name-similarity identity assumption), and risks (dim 9) add verification-independence degradation and gate-bypass protection. X edges on evidence grounding (concrete timestamps, script names, MAD) and compactness, but that does not offset Y's structural superiority.",
+   "usage": {
+    "input": 3980,
+    "output": 4033,
+    "total": 8013
+   }
+  },
+  "G-manual_1789398236238_04i#r3": {
+   "key": "G-manual_1789398236238_04i#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     7
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     8
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Both drafts are faithful, well-structured gates covering sync (T-03), state verification (T-01/T-05), and independent completion proof (T-07); both invent T-04/T-10 references and add backup beyond explicit source. X wins on: (2) evidence grounding — cites hud_gen.py, gpt_hud_key.py/hud-gpt-src, 15:46/21:41 timestamps, Owner 22:39 record, frame-level/MAD reconciliation, while Y stays generic; (4)/(5) X scales gate weight to irreplaceability and offers the skip-marked-asset alternative, whereas Y's default-consequential-until-proven-reversible stance extends to trivially reversible regenerations; (7) X's skip option resolves the tension its own sync-mandate risk raises; Y's mandatory reconciliation lacks that out.",
+   "usage": {
+    "input": 3731,
+    "output": 3436,
+    "total": 7167
+   }
+  },
+  "G-pain_host_038c29c53be340#r1": {
+   "key": "G-pain_host_038c29c53be340#r1",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     7
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     8
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     7
+    ]
+   },
+   "reasons": "Both drafts are strong, near-tied on specificity, actionability, anti-patterns, boundaries, and risks. X decides it on dimension 2: it quotes the owner's correction, names cover art and the two video versions, keeping claims traceable; Y stays generic and adds an evidence-free 'trust-bearing resource' philosophical claim. X also edges dimension 4: Y gates every next-step/micro-shift with full consent across 'any multi-step task flow', an overreach Y's own risks concede needs scoping, creating mild statement-vs-application tension (dimension 7). Y carries slight extra ceremonial filler (dimension 10). Y's deadlock/T-10 risk and labeled-interruption detail are merits but insufficient to offset.",
+   "usage": {
+    "input": 3314,
+    "output": 4193,
+    "total": 7507
+   }
+  },
+  "G-pain_host_038c29c53be340#r2": {
+   "key": "G-pain_host_038c29c53be340#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     9
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     9
+    ],
+    "5": [
+     8,
+     9
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     9,
+     9
+    ]
+   },
+   "reasons": "Both drafts are well-grounded, actionable three-gate rules. Y wins on margins: dim 4/5 — Y preserves the source's 'or explicitly set aside (明确放下)' escape condition and states an explicit non-applicability clause, while X omits both, risking over-triggering; dim 8 — Y's antiPatterns also cover the T-06 scope-expansion failure (unrequested deliverables) and the self-claim gate bypass; dim 9 — Y names a real application risk X lacks (no INTENT.md original, long-term-intent clarifications must not be banned), whereas X's fourth risk is procedural. X's evidence citations and intent fidelity are equally strong.",
+   "usage": {
+    "input": 3224,
+    "output": 2963,
+    "total": 6187
+   }
+  },
+  "G-pain_host_038c29c53be340#r3": {
+   "key": "G-pain_host_038c29c53be340#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     6
+    ],
+    "3": [
+     8,
+     8
+    ],
+    "4": [
+     8,
+     6
+    ],
+    "5": [
+     7,
+     9
+    ],
+    "6": [
+     8,
+     8
+    ],
+    "7": [
+     8,
+     9
+    ],
+    "8": [
+     8,
+     7
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     6
+    ]
+   },
+   "reasons": "Decided by dims 2, 4, 8, 10. Y invents a 'five failure modes' count and adds 'lost tracking of open items' and 'task closure moments' that appear nowhere in the source evidence (only drift, unanswered question, unverified completion/scope expansion are supported) — penalized on evidence grounding and overreach. X quotes the owner's correction, names the cover topic, and ties claims to T-02/T-07/T-06, staying traceable. Y is better only on boundary clarity (urgency carve-out inside the statement) and internal consistency, but its fabricated specifics and broader anti-patterns cost more than they gain.",
+   "usage": {
+    "input": 3309,
+    "output": 2530,
+    "total": 5839
+   }
+  },
+  "G-pain_host_198b8c4d901b5b#r1": {
+   "key": "G-pain_host_198b8c4d901b5b#r1",
+   "skipped": "generation_failure",
+   "aValid": false,
+   "bValid": false,
+   "verdict": "BOTH_BAD",
+   "reasons": "asymmetric or dual generation failure (SPEC §30)"
+  },
+  "G-pain_host_198b8c4d901b5b#r2": {
+   "key": "G-pain_host_198b8c4d901b5b#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "A",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     8,
+     7
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     9,
+     9
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     7
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Very close overall. Y is stronger on specificity (3) — baseline record schema, attribute-by-attribute comparison, explicit revert action — and anti-pattern concreteness (8), with incident-anchored examples. But Y loses on evidence grounding (2): it fabricates a 'source diagnosis confidence is only 0.55' claim absent from the source, and cites axioms T-04/T-05 not in violatedPrinciples. Y also leaves the baseline-update path undefined in normative text (5) and its risk set omits false-baseline locking and owner-unavailable handling (9). X is fully traceable, defines the baseline-change boundary (fresh explicit owner decision), and names more application risks; its only deficits are slightly less mechanical detail and minor restatement.",
+   "usage": {
+    "input": 3442,
+    "output": 4915,
+    "total": 8357
+   }
+  },
+  "G-pain_host_198b8c4d901b5b#r3": {
+   "key": "G-pain_host_198b8c4d901b5b#r3",
+   "skipped": "generation_failure",
+   "aValid": false,
+   "bValid": false,
+   "verdict": "BOTH_BAD",
+   "reasons": "asymmetric or dual generation failure (SPEC §30)"
+  },
+  "G-pain_host_432596aee54456#r1": {
+   "key": "G-pain_host_432596aee54456#r1",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "A",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     6,
+     8
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     7,
+     9
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Decided by dimensions 2 and 4. Evidence grounding: X invents specifics absent from the source (empty INTENT.md template with named unfilled fields, diagnosis confidence 0.55, unparseable trace), while Y's claims remain traceable to the correction and root cause. Generalization: Y scopes applicability to high-rework-cost, late-verifiable outputs, matching the source's severe full-article rework pain; X mandates checkpoints for any vague-intent creative task, a mild overreach only partially mitigated by its skip-exception clause. X leads marginally on specificity (concrete filter criteria like 人类主体/大众熟知) and equal-scoring dimensions (actionability, anti-patterns, risks, consistency) do not offset the grounding and scope gaps.",
+   "usage": {
+    "input": 3004,
+    "output": 3930,
+    "total": 6934
+   }
+  },
+  "G-pain_host_432596aee54456#r2": {
+   "key": "G-pain_host_432596aee54456#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "A",
+   "scores": {
+    "1": [
+     8,
+     8
+    ],
+    "2": [
+     6,
+     5
+    ],
+    "3": [
+     8,
+     7
+    ],
+    "4": [
+     8,
+     7
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     8,
+     7
+    ],
+    "7": [
+     9,
+     7
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     8
+    ],
+    "10": [
+     6,
+     7
+    ]
+   },
+   "reasons": "X wins on dims 2, 5, 6, 7. Both extrapolate an 'empty intent document' trigger beyond the source, but Y fabricates concrete specifics (INTENT.md unfilled template, 'diagnosis confidence 0.55', unparsable trace) absent from the evidence, hurting grounding. X embeds the low-stakes/reversibility scaling rule directly in the binding statement with an explicit boundary bullet; Y leaves it only in validationExpectation, creating mild internal inconsistency with its unconditional statement and weakening actionability/boundary clarity. Y is slightly tighter (less padding) and its ownerIntent names the actual correction, but that does not offset the invented incident details and statement-level gaps. Anti-pattern quality and intent fidelity are comparable.",
+   "usage": {
+    "input": 3422,
+    "output": 3235,
+    "total": 6657
+   }
+  },
+  "G-pain_host_432596aee54456#r3": {
+   "key": "G-pain_host_432596aee54456#r3",
+   "skipped": "generation_failure",
+   "aValid": true,
+   "bValid": false,
+   "verdict": "A",
+   "reasons": "asymmetric or dual generation failure (SPEC §30)"
+  },
+  "G-pain_host_620a1683e2eeb7#r1": {
+   "key": "G-pain_host_620a1683e2eeb7#r1",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     8,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Both drafts share the same structure and intent. X wins on evidence grounding (dim 2): its rationale and evidenceSource cite the actual source details (signal_collector's 'all subagents settled', the explicit no-sessions_yield instruction, the after_tool_call hook and pain ID), while Y invents '配额耗尽/强制中断' as the correction mechanism and its evidenceSource is generic without source specifics. X also names the exact failure family more precisely in antiPatterns (dim 8), including re-calling after an explicit stop instruction. Y is slightly better on internal consistency (dim 7, caps coherently integrated) and risk completeness (dim 9, adds single-action overreach), but those gains do not offset the invented specifics.",
+   "usage": {
+    "input": 3148,
+    "output": 2686,
+    "total": 5834
+   }
+  },
+  "G-pain_host_620a1683e2eeb7#r2": {
+   "key": "G-pain_host_620a1683e2eeb7#r2",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     7
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     9,
+     8
+    ],
+    "7": [
+     9,
+     7
+    ],
+    "8": [
+     9,
+     7
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Decided by dims 2, 7, 8. X grounds every claim in the actual incident: antiPatterns name the exact failure family (sessions_yield after signal_collector settle report, ignoring explicit stop message, external correction as sole terminator) and evidenceSource cites the pain ID and after_tool_call hook. Y invents a 'stale signal validation' antiPattern absent from the evidence (dim 2) that directly tensions with its own 'terminate immediately on explicit stop signal' statement (dim 7) — in the real incident, immediate termination was correct, yet Y's rule would counsel hesitation. Y's antiPattern 5 thereby names a failure family the source does not support (dim 8). Both generalize comparably and name equivalent risks (dim 9 tie).",
+   "usage": {
+    "input": 2991,
+    "output": 2857,
+    "total": 5848
+   }
+  },
+  "G-pain_host_620a1683e2eeb7#r3": {
+   "key": "G-pain_host_620a1683e2eeb7#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     8
+    ],
+    "2": [
+     9,
+     6
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     8,
+     6
+    ],
+    "5": [
+     8,
+     6
+    ],
+    "6": [
+     9,
+     8
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     7
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     8,
+     6
+    ]
+   },
+   "reasons": "Dimensions 2, 4, 8, and 10 decided it. X anchors every claim to the actual failure (sessions_yield after the 'all subagents settled' signal, signal_collector, after_tool_call hook, pain ID) and its first anti-pattern names the exact failure family; its scope stays within observable-completion loops and its validation expectation explicitly permits legitimate waits. Y captures the core loop but layers on abort-condition/backoff machinery and invented applicability examples (resource availability, service readiness, locks) unsupported by the source, adding padding and overreach (its own risk 6 concedes this). Y's superior risk list (dim 9) doesn't offset weaker grounding and specificity.",
+   "usage": {
+    "input": 2874,
+    "output": 2549,
+    "total": 5423
+   }
+  },
+  "G-pain_host_6406fbff5ee282#r1": {
+   "key": "G-pain_host_6406fbff5ee282#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     8,
+     9
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     8,
+     9
+    ],
+    "5": [
+     7,
+     9
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     7,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     6
+    ]
+   },
+   "reasons": "Y wins on dims 1, 2, 5, 7. It explicitly instantiates all three diagnosed gaps (background clarity, interaction design, consultant review) that X abstracts into generic '必备要素', quotes the Owner's verbatim correction as an evidence anchor, and uses the concrete '改一个字' example in its antiPatterns. Critically, Y embeds the trigger condition (task novel / standards undocumented) directly in the principle statement, avoiding X's internal tension between an unconditional pre-work confirmation mandate and X's own risk caveats about disturbing the Owner (dims 5, 7). Both share comparable risk coverage; Y is slightly more repetitive (dim 10) but its added length carries content, not filler.",
+   "usage": {
+    "input": 3605,
+    "output": 4145,
+    "total": 7750
+   }
+  },
+  "G-pain_host_6406fbff5ee282#r2": {
+   "key": "G-pain_host_6406fbff5ee282#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     8,
+     9
+    ],
+    "2": [
+     7,
+     8
+    ],
+    "3": [
+     7,
+     9
+    ],
+    "4": [
+     7,
+     9
+    ],
+    "5": [
+     7,
+     8
+    ],
+    "6": [
+     7,
+     9
+    ],
+    "7": [
+     7,
+     8
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     8
+    ]
+   },
+   "reasons": "Y wins on intent fidelity, specificity, and actionability: it explicitly encodes all three evidence-backed criteria (background self-containment, interaction design, advisor review) as concrete, executable checks (first-time-reader self-check, interactive review with confirmation), and its validationExpectation guards against scope expansion beyond source intent. Y also grounds claims in the direct Owner quote with metadata (dim 2). X's DoD framing is faithful but abstracts away the specific checks, and its contract's '显式记录降级决策' option tensions with its own 'must pass every item' statement (dim 7). Both have strong anti-patterns and near-equal risk coverage; X carries slightly more abstraction/padding.",
+   "usage": {
+    "input": 3418,
+    "output": 5543,
+    "total": 8961
+   }
+  },
+  "G-pain_host_6406fbff5ee282#r3": {
+   "key": "G-pain_host_6406fbff5ee282#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     8
+    ],
+    "2": [
+     9,
+     7
+    ],
+    "3": [
+     9,
+     8
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     7,
+     7
+    ],
+    "6": [
+     9,
+     8
+    ],
+    "7": [
+     8,
+     8
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "X wins on evidence grounding: it cites the owner's actual correction, the 'change one word' example, provenance metadata (source=user_correction, severity=severe, automatic_hook) and violated axioms T-07/T-05/T-02, whereas Y paraphrases without concrete anchors. X also maps the source's three evidenced gaps (background comprehension, required elements like interaction design, mandated advisor review) as distinct numbered checks, improving intent fidelity, specificity, actionability, and anti-pattern quality; its anti-pattern anchoring the non-self-contained background is directly traceable. Y is sound but merges element-presence and review-stage checks, slightly blurring the failure triad, and its five anti-patterns include redundancy. Both are comparable on boundary clarity, risks, generalization, and both share the minor 'time pressure' inference.",
+   "usage": {
+    "input": 3394,
+    "output": 3830,
+    "total": 7224
+   }
+  },
+  "G-pain_host_85731899e27e6d#r1": {
+   "key": "G-pain_host_85731899e27e6d#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     7,
+     9
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     8,
+     8
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Both drafts are faithful, actionable, internally consistent, and share strong boundary and risk coverage (dims 1, 4–7, 9, 10). Y wins on evidence grounding (2) and specificity (3): it anchors claims in the actual diagnosis — advisor collaboration, browser-ChatGPT-first image/prompt generation, the '不要又忘记' quote, the after_tool_call hook detection, and the confirmed absence of any persisted conventions document — while X stays at a generic 'conventions' level with no traceable specifics and mild illustrative invention ('format, language, placement, review step'). Y's antiPatterns (8) also name the exact failure family: a severe correction consumed as one-off, and generation/collaboration calls issued without loading the artifact.",
+   "usage": {
+    "input": 3365,
+    "output": 2982,
+    "total": 6347
+   }
+  },
+  "G-pain_host_85731899e27e6d#r2": {
+   "key": "G-pain_host_85731899e27e6d#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     7,
+     9
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     8,
+     9
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     8
+    ]
+   },
+   "reasons": "Both drafts faithfully capture the persist-recall-update lifecycle and are internally consistent with comparable risk coverage. Y decisively wins on grounding (dim 2): it traces claims to the actual evidence — advisor collaboration, browser-ChatGPT image/prompt generation, the after_tool_call hook, the 'did this before, don't forget' wording, and the absent conventions document — while X's rationale and contract remain evidence-free generalities. That grounding also lifts Y's specificity, boundary clarity, and actionability (dims 3, 5, 6): concrete governed work types and bilingual standing-rule markers let an agent decide today. Y's anti-patterns (dim 8) name the real failure family (substituting agent defaults, moment-only compliance); X includes a speculative stale-application pattern and redundant transient-storage items. X also carries more generic abstraction (dim 10).",
+   "usage": {
+    "input": 3490,
+    "output": 2987,
+    "total": 6477
+   }
+  },
+  "G-pain_host_85731899e27e6d#r3": {
+   "key": "G-pain_host_85731899e27e6d#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     9,
+     6
+    ],
+    "3": [
+     9,
+     7
+    ],
+    "4": [
+     9,
+     8
+    ],
+    "5": [
+     8,
+     7
+    ],
+    "6": [
+     9,
+     8
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     8
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "X wins on dimensions 2, 3, and 8: it anchors claims in source specifics (advisor collaboration, browser-ChatGPT covers/keyframes/prompts, after_tool_call hook, 'should not forget again', absent conventions doc), gives concrete trigger phrasings and domain examples, and its antiPatterns name the exact failure family (re-deriving the advisor+browser-ChatGPT workflow, post-hoc tool-call correction). Y is structurally sound with an equal risk set (its diffusion risk is good), but is evidence-light: generic 'generation tasks or tool calls' with no traceable specifics, and its fifth applicability trigger (repeat correction required) slightly muddies boundaries versus capture-at-expression (dim 5). Both tie on intent fidelity, consistency, risks, and padding.",
+   "usage": {
+    "input": 3380,
+    "output": 3052,
+    "total": 6432
+   }
+  },
+  "G-pain_host_cffdcb9f5d0257#r1": {
+   "key": "G-pain_host_cffdcb9f5d0257#r1",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     7,
+     7
+    ],
+    "3": [
+     8,
+     9
+    ],
+    "4": [
+     8,
+     8
+    ],
+    "5": [
+     7,
+     8
+    ],
+    "6": [
+     8,
+     9
+    ],
+    "7": [
+     9,
+     8
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     7,
+     6
+    ]
+   },
+   "reasons": "Y wins on specificity/actionability (recorded path/hash snapshot, per-round keyframe/segment comparisons, explicit revert, re-baseline trigger) and boundary clarity (clarification default and re-baselining sit in the operative statement, not just risks); it also grounds claims in the concrete source (filename, owner quote, pain metadata) and adds the evidentiary-uncertainty risk. X is cleaner internally and less repetitive but stays at the diagnosis's abstract level, omitting explicit revert and re-baseline. Y's deductions: statement requires improvement while the intentContract only requires non-degradation (dim 7), one invented specific (0.55 diagnosis confidence, dim 2), and heavier restatement (dim 10).",
+   "usage": {
+    "input": 3337,
+    "output": 3845,
+    "total": 7182
+   }
+  },
+  "G-pain_host_cffdcb9f5d0257#r2": {
+   "key": "G-pain_host_cffdcb9f5d0257#r2",
+   "bIsX": false,
+   "judgeValid": true,
+   "verdict": "B",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     7,
+     9
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     8,
+     9
+    ],
+    "5": [
+     7,
+     8
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     8,
+     9
+    ],
+    "9": [
+     9,
+     9
+    ],
+    "10": [
+     7,
+     7
+    ]
+   },
+   "reasons": "Both drafts faithfully capture baseline anchoring, comparison acceptance, non-degradation gating, and rollback, and both are actionable and internally consistent. Y wins on grounding and calibration: it cites the actual evidence (user quote, mooncake-mv-final-v3k22.mp4, severe user_correction), while X stays at diagnosis-abstraction level with no concrete trace (dim 2). Y's applicability ties scope to deliverables whose only quality anchor is owner approval, matching the source's subjective-quality pain; X's extension into metric-based config/prompt tuning and generic 'metric' evidence exceeds what the evidence supports (dim 4). Y's final risk explicitly limits scope given single-correction evidence, improving boundary clarity (dim 5), and its antiPatterns name the exact incident failure family (dim 8).",
+   "usage": {
+    "input": 3162,
+    "output": 2806,
+    "total": 5968
+   }
+  },
+  "G-pain_host_cffdcb9f5d0257#r3": {
+   "key": "G-pain_host_cffdcb9f5d0257#r3",
+   "bIsX": true,
+   "judgeValid": true,
+   "verdict": "A",
+   "scores": {
+    "1": [
+     9,
+     9
+    ],
+    "2": [
+     7,
+     8
+    ],
+    "3": [
+     9,
+     9
+    ],
+    "4": [
+     9,
+     8
+    ],
+    "5": [
+     8,
+     9
+    ],
+    "6": [
+     9,
+     9
+    ],
+    "7": [
+     9,
+     9
+    ],
+    "8": [
+     9,
+     9
+    ],
+    "9": [
+     8,
+     9
+    ],
+    "10": [
+     8,
+     8
+    ]
+   },
+   "reasons": "Both drafts faithfully mirror the source (owner-approved baseline anchoring, side-by-side comparison acceptance, non-regression rollback), scoring evenly on fidelity, specificity, actionability, and anti-pattern quality. Y edges ahead on evidence grounding: X fabricates a diagnosis confidence value '(0.55)' absent from the source evidence, while Y stays traceable throughout. Y also shows sharper boundary clarity by embedding re-anchoring-only-on-owner-approval directly in the principle statement, whereas X defers it to risks. Risk completeness slightly favors Y for the same fabrication reason. X's sole win is dimension 4: Y's fourth applicability bullet ('any iteration loop...') loosens scope beyond owner-preference-judged artifacts. Net: Y by a narrow margin on grounding and boundaries.",
+   "usage": {
+    "input": 3357,
+    "output": 3407,
+    "total": 6764
+   }
+  }
+ }
+}
