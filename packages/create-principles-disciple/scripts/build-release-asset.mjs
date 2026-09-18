@@ -42,7 +42,7 @@ function readArguments(argv) {
     const name = argv[index];
     const value = argv[index + 1];
     if (!name?.startsWith('--') || !value || value.startsWith('--')) {
-      throw new Error('Usage: build-release-asset --input <directory> --output <directory> --platform <platform> --arch <arch> --node-abi <abi>');
+      throw new Error('Usage: build-release-asset --input <directory> --output <directory> --platform <platform> --arch <arch> --node-abi <abi> [--product-version x.y.z --source-commit <40-hex>]');
     }
     values.set(name.slice(2), value);
   }
@@ -51,6 +51,35 @@ function readArguments(argv) {
     if (!values.has(name)) throw new Error(`Missing required --${name} argument`);
   }
   return Object.fromEntries(values);
+}
+
+// Embedded product identity (SPEC §12): the ONLY facts an installed payload
+// can carry about the release it came from. They are stamped BEFORE the asset
+// bytes are hashed so the archive digest (and later the releaseId derived
+// from it) covers them; releaseId itself is never embedded (circular
+// hashing). Validation mirrors src/update/product-identity.ts; the installer
+// re-validates with the authoritative strict parser and refuses the payload
+// when the stamp is malformed, so this stamping side must never emit
+// anything that parser would reject.
+const PRODUCT_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const GIT_COMMIT_PATTERN = /^[a-f0-9]{40}$/;
+
+function resolveProductIdentityStamp(args) {
+  const hasVersion = Object.hasOwn(args, 'product-version');
+  const hasCommit = Object.hasOwn(args, 'source-commit');
+  if (hasVersion !== hasCommit) {
+    throw new Error('--product-version and --source-commit must be provided together');
+  }
+  if (!hasVersion) return undefined;
+  const productVersion = args['product-version'];
+  if (typeof productVersion !== 'string' || !PRODUCT_VERSION_PATTERN.test(productVersion)) {
+    throw new Error(`--product-version must be a strict x.y.z version, got: ${JSON.stringify(productVersion)}`);
+  }
+  const sourceCommit = args['source-commit'];
+  if (typeof sourceCommit !== 'string' || !GIT_COMMIT_PATTERN.test(sourceCommit)) {
+    throw new Error(`--source-commit must be a 40-char git commit sha, got: ${JSON.stringify(sourceCommit)}`);
+  }
+  return { schemaVersion: 1, productVersion, sourceCommit };
 }
 
 function isBuildOnlyBinPath(rootDirectory, entryPath) {
@@ -145,6 +174,9 @@ async function listPayloadFiles(assetDirectory) {
 
 async function main() {
   const args = readArguments(process.argv.slice(2));
+  // Validate the product identity stamp BEFORE any staging or output write:
+  // a malformed identity must fail the build, never ship inside an asset.
+  const productIdentityStamp = resolveProductIdentityStamp(args);
   const requestedInputDirectory = resolve(args.input);
   const requestedOutputDirectory = resolve(args.output);
   if (!existsSync(requestedInputDirectory) || !lstatSync(requestedInputDirectory).isDirectory()) {
@@ -216,6 +248,13 @@ async function main() {
   const manifest = { schemaVersion: 1, files: await listPayloadFiles(outputDirectory) };
   const releaseDirectory = join(outputDirectory, '_release');
   mkdirSync(releaseDirectory, { recursive: true });
+  // Stamp the product identity BEFORE the manifest and the deterministic
+  // archive are produced — the archive digest that later feeds deriveReleaseId
+  // must cover the stamp (hash-after-stamp; releaseId itself is never an
+  // input here, so no circular hashing).
+  if (productIdentityStamp !== undefined) {
+    writeFileSync(join(releaseDirectory, 'product-identity.json'), `${JSON.stringify(productIdentityStamp, null, 2)}\n`);
+  }
   writeFileSync(join(releaseDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   writeFileSync(join(releaseDirectory, 'asset.json'), `${JSON.stringify({
     arch: args.arch,
@@ -229,7 +268,7 @@ async function main() {
     digestFile,
     sourceDateEpoch: process.env.SOURCE_DATE_EPOCH,
   }) : undefined;
-  process.stdout.write(`${JSON.stringify({ assetDirectory: outputDirectory, archive, files: manifest.files.length, platform: `${args.platform}-${args.arch}-abi${args['node-abi']}` })}\n`);
+  process.stdout.write(`${JSON.stringify({ assetDirectory: outputDirectory, archive, files: manifest.files.length, platform: `${args.platform}-${args.arch}-abi${args['node-abi']}`, productIdentity: productIdentityStamp ?? null })}\n`);
   } catch (error) {
     if (ownsOutput) rmSync(outputDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     throw error;

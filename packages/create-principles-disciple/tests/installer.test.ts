@@ -350,7 +350,13 @@ describe('install() gateway lock pre-flight', () => {
   it('refuses a missing source dependency before gateway control or filesystem mutation', async () => {
     delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     const actualFs = await vi.importActual<typeof import('fs')>('fs');
-    vi.mocked(fs.existsSync).mockImplementation((value) => !String(value).endsWith(path.join('node_modules', 'missing-runtime')));
+    vi.mocked(fs.existsSync).mockImplementation((value) => {
+      const s = String(value);
+      // The fixture payload carries no embedded product identity stamp —
+      // pretending it exists would trip the fail-closed identity parser.
+      if (s.endsWith(path.join('_release', 'product-identity.json'))) return false;
+      return !s.endsWith(path.join('node_modules', 'missing-runtime'));
+    });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
       if (filePath.endsWith(path.join('_release', 'asset.json'))) {

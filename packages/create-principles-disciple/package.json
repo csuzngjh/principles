@@ -17,6 +17,7 @@
     "install-layout",
     "release-manager",
     "trust/root.json",
+    "_release/product-identity.json",
     "README.md",
     "LICENSE"
   ],
@@ -75,6 +76,6 @@
     "directory": "packages/create-principles-disciple"
   },
   "pd": {
-    "bundledPluginVersion": "1.231.2"
+    "bundledPluginVersion": "1.245.2"
   }
 }
