@@ -56,6 +56,13 @@ export interface JournalTransition {
   readonly transactionId: string;
   readonly releaseId: string;
   readonly productVersion: string;
+  /**
+   * Embedded product identity provenance (SPEC §12): the source commit stamped
+   * into the installed payload. Absent on legacy payloads/journals without an
+   * embedded stamp — absence is the visible provenance-unavailable marker and
+   * must never be replaced by a placeholder value.
+   */
+  readonly sourceCommit?: string;
   readonly releaseMetadataDigest: string;
   /** Optional provenance marker; absent on journals written before PRI-664 review. */
   readonly releaseMetadataDigestSource?: ReleaseMetadataDigestSource;
@@ -71,6 +78,8 @@ export interface ActiveRecord {
   readonly previousReleaseId: string | null;
   readonly transactionId: string;
   readonly productVersion: string;
+  /** Embedded provenance: stamped source commit; absent on legacy records. */
+  readonly sourceCommit?: string;
 }
 
 export class TransactionJournalError extends Error {
@@ -133,6 +142,15 @@ function parseTransition(line: string, lineNumber: number): JournalTransition {
       `Journal line ${lineNumber}: releaseMetadataDigestSource must be one of ${RELEASE_METADATA_DIGEST_SOURCES.join(' | ')}.`,
     );
   }
+  // Optional embedded provenance: validated strictly WHEN present (rc-3/rc-4);
+  // absence is the legacy shape and stays valid.
+  const {sourceCommit} = parsed;
+  if (sourceCommit !== undefined && (typeof sourceCommit !== 'string' || !/^[a-f0-9]{40}$/.test(sourceCommit))) {
+    throw new TransactionJournalError(
+      'journal_field_invalid',
+      `Journal line ${lineNumber}: sourceCommit must be a 40-char git commit sha when present.`,
+    );
+  }
   return {
     at: parsed.at as string,
     from: fromValue as TransactionState | null,
@@ -140,6 +158,7 @@ function parseTransition(line: string, lineNumber: number): JournalTransition {
     transactionId: parsed.transactionId as string,
     releaseId: parsed.releaseId as string,
     productVersion: parsed.productVersion as string,
+    ...(sourceCommit !== undefined ? { sourceCommit: sourceCommit } : {}),
     releaseMetadataDigest: parsed.releaseMetadataDigest,
     ...(digestSource !== undefined ? { releaseMetadataDigestSource: digestSource as ReleaseMetadataDigestSource } : {}),
     generation: parsed.generation as number,
@@ -257,11 +276,19 @@ export interface ActiveRecordWrite {
   readonly previousReleaseId: string | null;
   readonly transactionId: string;
   readonly productVersion: string;
+  /** Embedded provenance: stamped source commit; omit for legacy payloads. */
+  readonly sourceCommit?: string;
 }
 
 /** Serializes + atomically replaces active.json (see atomic-file adapter). */
 export function writeActiveRecord(recordPath: string, write: ActiveRecordWrite): void {
-  const record: ActiveRecord = { schemaVersion: 1, ...write };
+  const record: ActiveRecord = {
+    schemaVersion: 1,
+    ...write,
+    // A null/undefined sourceCommit must stay ABSENT (legacy visibility
+    // contract), never serialized as a placeholder.
+    ...(write.sourceCommit !== undefined && write.sourceCommit !== null ? { sourceCommit: write.sourceCommit } : {}),
+  };
   writeRecordAtomically(recordPath, `${JSON.stringify(record, null, 2)}\n`);
 }
 
@@ -297,6 +324,7 @@ export function readActiveRecord(recordPath: string): ActiveRecord | null {
   const {previousReleaseId} = value;
   const {transactionId} = value;
   const {productVersion} = value;
+  const {sourceCommit} = value;
   if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 1
     || typeof releaseId !== 'string' || releaseId.length === 0
     || typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest)
@@ -304,6 +332,11 @@ export function readActiveRecord(recordPath: string): ActiveRecord | null {
     || typeof transactionId !== 'string' || transactionId.length === 0
     || typeof productVersion !== 'string' || productVersion.length === 0) {
     throw new TransactionJournalError('active_record_corrupt', `active.json has malformed fields: ${recordPath}`);
+  }
+  // Optional embedded provenance: strict when present (rc-3), absent on
+  // legacy records written before SPEC §12 embedding existed.
+  if (sourceCommit !== undefined && (typeof sourceCommit !== 'string' || !/^[a-f0-9]{40}$/.test(sourceCommit))) {
+    throw new TransactionJournalError('active_record_corrupt', `active.json has a malformed sourceCommit (must be a 40-char git commit sha when present): ${recordPath}`);
   }
   return {
     schemaVersion: 1,
@@ -313,6 +346,7 @@ export function readActiveRecord(recordPath: string): ActiveRecord | null {
     previousReleaseId,
     transactionId,
     productVersion,
+    ...(sourceCommit !== undefined ? { sourceCommit: sourceCommit } : {}),
   };
 }
 
