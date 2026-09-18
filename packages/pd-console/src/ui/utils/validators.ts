@@ -191,6 +191,33 @@ export function validateOwnerGovernanceView(value: unknown): OwnerGovernanceView
 // validator above, ERR-100).
 
 const ownerDecisionStates = new Set(['needs_owner_decision', 'processing', 'blocked', 'recovery_needed', 'decided', 'no_action']);
+const ownerInboxGroups = new Set(['decision', 'blocked', 'recovery', 'none']);
+const ownerInboxAttention = new Set(['individual', 'aggregate', 'none']);
+
+function isOwnerInboxItem(value: unknown): boolean {
+  // Codex review P2 fix: the page dereferences item.inbox.attention,
+  // item.principleId and item.nextAction.ownerText on every entry — a
+  // malformed entry (e.g. `[null]` from a version-skewed server) must be
+  // rejected here instead of crashing the render.
+  if (!isObject(value) || !hasOwnFields(value, ['principleId', 'decisionState', 'learnedPrinciple', 'inbox', 'blockerCodes', 'nextAction'])) return false;
+  if (!isString(value.principleId) || value.principleId.length === 0) return false;
+  if (!isString(value.decisionState) || !ownerDecisionStates.has(value.decisionState)) return false;
+  const principle = value.learnedPrinciple;
+  if (!isObject(principle)) return false;
+  if (principle.status === 'known') {
+    if (!hasOwnFields(principle, ['text', 'sourceTier'])
+      || !isString(principle.text) || principle.text.length === 0
+      || !isString(principle.sourceTier)) return false;
+  } else if (principle.status === 'unknown') {
+    if (!hasOwnFields(principle, ['reasonText']) || !isString(principle.reasonText)) return false;
+  } else return false;
+  if (!isObject(value.inbox) || !hasOwnFields(value.inbox, ['group', 'attention'])
+    || !isStringEnum(value.inbox.group, ownerInboxGroups)
+    || !isStringEnum(value.inbox.attention, ownerInboxAttention)) return false;
+  if (!Array.isArray(value.blockerCodes) || !value.blockerCodes.every(isString)) return false;
+  return isObject(value.nextAction) && hasOwnFields(value.nextAction, ['ownerText'])
+    && isString(value.nextAction.ownerText);
+}
 
 function isOwnerReason(value: unknown): boolean {
   return isObject(value) && hasOwnFields(value, ['code', 'ownerText', 'sourceRefs'])
@@ -234,7 +261,10 @@ export function isOwnerDecisionInbox(value: unknown): value is OwnerDecisionInbo
     && isString(value.generatedAt)
     && typeof value.totalPrinciples === 'number'
     && isObject(value.groups) && hasOwnFields(value.groups, ['decision', 'blocked', 'recovery'])
-    && ['decision', 'blocked', 'recovery'].every((key) => Array.isArray((value.groups as Record<string, unknown>)[key]))
+    && ['decision', 'blocked', 'recovery'].every((key) => {
+      const group = (value.groups as Record<string, unknown>)[key];
+      return Array.isArray(group) && group.every(isOwnerInboxItem);
+    })
     && isObject(value.historicalUnknown) && typeof (value.historicalUnknown).count === 'number';
 }
 

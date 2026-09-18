@@ -58,6 +58,7 @@ function baseInputs(overrides: Partial<OwnerDecisionInputs> = {}): OwnerDecision
       { tier: 'candidate_principle', text: '主任务未完成前不得推进次要议题。', sourceVersion: 'cand-1' },
     ],
     technicalRecommendationAvailable: false,
+    readableSubjectArtifacts: [],
     piRootBound: true,
     sourceReads: [{ source: 'ledger', status: 'available', capturedAt: AS_OF, scope: 'ledger entry' }],
     ...overrides,
@@ -164,6 +165,76 @@ describe('Semantic Selector v1 — bounded extraction golden samples', () => {
     // is only a fallback (checked directly; the mixed variant above covers
     // the extraction path).
     if (wholeResult.status === 'known') expect(wholeResult.selectionMode).toBe('whole_field');
+  });
+
+  it('Codex P2: splits English sentences on period+space+capital for extraction', () => {
+    const enText = 'Generated from config.yaml diagnostics. Always ask the owner before deleting data.';
+    const extracted = extractStandaloneBehaviorSentence([{ tier: 'distiller', text: enText, sourceVersion: 'd-en' }]);
+    expect(extracted).not.toBeNull();
+    expect(extracted?.text).toBe('Always ask the owner before deleting data.');
+  });
+
+  it('does not split decimals or lowercase continuations', () => {
+    const text = 'The threshold is 3.5 units and must be respected.';
+    expect(extractStandaloneBehaviorSentence([{ tier: 'distiller', text, sourceVersion: 'd' }])).toBeNull();
+  });
+});
+
+// ── Codex P1: per-subject revision gating (scribe material never borrowed) ──
+
+describe('deriveOwnerDecisionView — per-subject readable-material gate (Codex P1)', () => {
+  const twoPending = facts({
+    approvals: [
+      {
+        schemaVersion: '1', family: 'approval', sourceRef: { type: 'approval', id: 'apr-scribe' }, principleId: 'p1',
+        artifactId: 'art-scribe', approvalId: 'apr-scribe', channel: 'prompt', outcome: 'pending',
+        lineageConfidence: 'strong', recordedAt: '2026-09-18T09:00:00.000Z',
+      },
+      {
+        schemaVersion: '1', family: 'approval', sourceRef: { type: 'approval', id: 'apr-unrelated' }, principleId: 'p1',
+        artifactId: 'art-unrelated', approvalId: 'apr-unrelated', channel: 'prompt', outcome: 'pending',
+        lineageConfidence: 'strong', recordedAt: '2026-09-18T09:30:00.000Z',
+      },
+    ],
+  });
+
+  function scribeInput(readableSubjectArtifacts: string[]) {
+    return baseInputs({
+      governance: twoPending,
+      semanticSources: [
+        { tier: 'scribe', text: '主任务未完成前不得推进次要议题。', sourceVersion: 'art-scribe' },
+      ],
+      readableSubjectArtifacts,
+    });
+  }
+
+  it('a pending subject on an unrelated revision is NOT approvable via another revision scribe text', () => {
+    const view = deriveOwnerDecisionView(scribeInput(['art-scribe']));
+    const approveKeys = view.availableActions.filter((action) => action.semantic === 'approve').map((action) => action.key);
+    expect(approveKeys).toContain('approve:apr-scribe');
+    expect(approveKeys).not.toContain('approve:apr-unrelated');
+    // The unrelated subject still exposes an independently safe reject.
+    expect(view.availableActions.some((action) => action.key === 'reject:apr-unrelated')).toBe(true);
+    // And the gate blocker names the revision-material reason.
+    expect(view.blockers.some((blocker) => blocker.actionSemantic === 'approve' && blocker.subjectKey === 'apr-unrelated')).toBe(true);
+  });
+
+  it('a rule artifact whose lineage carries the scribe artifact stays approvable', () => {
+    const view = deriveOwnerDecisionView(scribeInput(['art-scribe', 'art-unrelated']));
+    const approveKeys = view.availableActions.filter((action) => action.semantic === 'approve').map((action) => action.key);
+    expect(approveKeys).toContain('approve:apr-scribe');
+    expect(approveKeys).toContain('approve:apr-unrelated');
+  });
+
+  it('distiller-tier material is candidate-wide (no per-subject restriction)', () => {
+    const view = deriveOwnerDecisionView(baseInputs({
+      governance: twoPending,
+      semanticSources: [{ tier: 'distiller', text: '修改状态类文件前必须核对真实来源。', sourceVersion: 'cand-1' }],
+      readableSubjectArtifacts: [],
+    }));
+    const approveKeys = view.availableActions.filter((action) => action.semantic === 'approve').map((action) => action.key);
+    expect(approveKeys).toContain('approve:apr-scribe');
+    expect(approveKeys).toContain('approve:apr-unrelated');
   });
 });
 

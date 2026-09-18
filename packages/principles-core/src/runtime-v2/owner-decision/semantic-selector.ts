@@ -61,8 +61,10 @@ const TECHNICAL_MARKERS: RegExp[] = [
   /\.[a-z]{2,4}\b/i,
   /(?:^|[\s（(「'"，,：:])\/[\w.-]+(?:\/[\w.-]+)+/,
   /[a-zA-Z]:\\\\?/,
-  // Regex residue and glob patterns.
-  /[\^$]\s?|\{\\d|\*\*|\\\w{1,3}[^a-z]|\/.*\/[gimsu]*\s*$/,
+  // Regex residue and glob patterns. CodeQL anchor fix: every alternative
+  // here is INTENTIONALLY unanchored (residue may appear anywhere in the
+  // field), so no alternative carries a positional anchor.
+  /[\^$]\s?|\{\\d|\*\*|\\\w{1,3}[^a-z]|\/.*\/[gimsu]*/,
   // Hex hashes (>=16 hex chars in a row) and UUIDs.
   /\b[0-9a-f]{16,}\b/i,
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
@@ -148,8 +150,12 @@ const OBLIGATION_MARKERS = /必须|不得|应当|应该|禁止|需要先|要先|
 
 /** Splits a field into sentence units without dropping any characters. */
 function splitSentences(text: string): string[] {
+  // Codex review P2 fix: en-configured workspaces separate sentences with
+  // ". " (period + space + capital/quote). Chinese terminators split with or
+  // without trailing space; Latin terminators require the following space so
+  // decimals ("3.5") and abbreviations mid-word stay intact.
   return text
-    .split(/(?<=[。！？!?；;])\s*/)
+    .split(/(?<=[。！？!?；;])\s*|(?<=[.!?])\s+(?=[A-Z"“'])/)
     .map((sentence) => sentence.trim())
     .filter((sentence) => sentence !== '');
 }

@@ -359,10 +359,31 @@ describe('T12 — multi-channel / multi-revision subject folding', () => {
     const promptSubject = data.decisionSubjects.find((subject: { channel: string }) => subject.channel === 'prompt');
     // The cancelled OLD record does not override the latest pending one.
     expect(promptSubject?.state).toBe('pending');
-    // Per-target actions carry their own approval ids.
+    // Codex P1 per-subject gating: only the subject whose OWN artifact carries
+    // the scribe material (pi-art-d) is approvable. pi-art-d2 (empty lineage,
+    // no statement of its own) must NOT be approvable via pi-art-d's text —
+    // but keeps an independently safe reject.
     const approveKeys = data.availableActions.filter((action: { semantic: string }) => action.semantic === 'approve').map((action: { key: string }) => action.key);
     expect(approveKeys).toContain('approve:apr-d');
-    expect(approveKeys).toContain('approve:apr-d-hook');
+    expect(approveKeys).not.toContain('approve:apr-d-hook');
+    expect(data.availableActions.some((action: { key: string }) => action.key === 'reject:apr-d-hook')).toBe(true);
+  });
+
+  it('Codex P2 — missing principle_applications table surfaces as an UNAVAILABLE source, not available-zero', async () => {
+    seedWorkspace();
+    // Drop the applications table behind the model's back (damaged workspace).
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    conn.getDb().prepare('DROP TABLE principle_applications').run();
+    conn.close();
+    const res = response();
+    await handleOwnerDecisionViewRoute({ req: request(), res, workspaceDir, featureFlags: enableFlag(true), now: () => AS_OF, subPath: '/prin-b/owner-decision-view' });
+    expect(res.statusCode).toBe(200);
+    const data = JSON.parse(res.body).data;
+    const appsRead = data.sourceReads.find((read: { source: string }) => read.source === 'principle_applications');
+    expect(appsRead?.status).toBe('unavailable');
+    // Counts are unknown, never a confident zero.
+    expect(data.evidenceSummary.value.observation.deterministicEffects.status).toBe('unknown');
+    expect(data.sourceReadStatus).toBe('partial');
   });
 });
 

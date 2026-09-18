@@ -297,13 +297,42 @@ function resolveRunRuleHostRuntime(
   };
 }
 
-function formatTextOutput(result: RuleHostPipelineResult): string {
+/**
+ * Owner Decision Experience v1 review fix (Codex P1): derive the PUBLICATION
+ * outcome from the pipeline result. The generation can fully succeed while the
+ * governance publication (approval enqueue) is REFUSED by the Phase A identity
+ * boundary — that state must never be presented as "waiting for owner review".
+ * Exported pure so the CLI output contract is testable without spawning the
+ * command (cli-7).
+ */
+export function describePublicationOutcome(result: RuleHostPipelineResult): {
+  blocked: boolean;
+  nextAction: string;
+} {
+  const identityBlocked = result.decision === 'candidate_ready_for_owner_review'
+    && result.approvalId === null
+    && (result.degradationReason ?? '').includes('identity_binding_unverified');
+  if (identityBlocked) {
+    return {
+      blocked: true,
+      nextAction: 'Identity binding could not be verified, so the artifact was NOT enqueued for Owner review. Artifacts are preserved; repair the ledger identity for this candidate and re-run this pipeline to publish.',
+    };
+  }
+  return { blocked: false, nextAction: '' };
+}
+
+export function formatTextOutput(result: RuleHostPipelineResult): string {
   const lines: string[] = [];
   const isReady = result.decision === 'candidate_ready_for_owner_review';
-  const icon = isReady ? '✓' : result.decision === 'text_principle_only' ? '⚠' : '✗';
+  // Owner Decision Experience v1 review fix (Codex P1): an identity-gated
+  // refusal keeps the service decision but did NOT enqueue an approval —
+  // reporting it as plain success ("WAITING for owner review") lied to the
+  // operator. The publication outcome is derived explicitly and reported.
+  const publication = describePublicationOutcome(result);
+  const icon = publication.blocked ? '⚠' : isReady ? '✓' : result.decision === 'text_principle_only' ? '⚠' : '✗';
   lines.push('RuleHost Pipeline (PRI-429)');
   lines.push(`pain: ${result.painId}`);
-  lines.push(`OVERALL: ${icon} ${result.decision.toUpperCase()}`);
+  lines.push(`OVERALL: ${icon} ${result.decision.toUpperCase()}${publication.blocked ? ' (PUBLICATION REFUSED)' : ''}`);
   lines.push('');
 
   for (const stage of result.stages) {
@@ -320,7 +349,10 @@ function formatTextOutput(result: RuleHostPipelineResult): string {
   if (result.degradationReason) {
     lines.push(`degradationReason: ${result.degradationReason}`);
   }
-  if (result.decision === 'candidate_ready_for_owner_review') {
+  if (publication.blocked) {
+    lines.push('');
+    lines.push(`Next: ${publication.nextAction}`);
+  } else if (result.decision === 'candidate_ready_for_owner_review') {
     lines.push('');
     lines.push('Next: the rule artifact is validated and WAITING for owner review. This is NOT owner approval.');
   } else if (result.decision === 'text_principle_only') {
@@ -640,11 +672,22 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
   }
 
   // ── Output ──
+  // Owner Decision Experience v1 review fix (Codex P1): an identity-gated
+  // refusal is a degraded outcome — the JSON carries the structured
+  // reason/nextAction (cli-6) and the exit code is non-zero so automation
+  // does not treat an unpublishable artifact as a fully successful run.
+  const publication = describePublicationOutcome(result);
   if (opts.json) {
     // Exactly one parseable JSON object on stdout (CLI gate rule 1).
     // CLI gate rule 6: degraded/refused results include structured reason + nextAction.
     const output = result.decision === 'candidate_ready_for_owner_review'
-      ? { status: 'candidate_ready_for_owner_review', ...result }
+      ? {
+          status: 'candidate_ready_for_owner_review',
+          ...result,
+          ...(publication.blocked
+            ? { publicationRefused: true, nextAction: publication.nextAction }
+            : {}),
+        }
       : {
           status: result.decision,
           ...result,
@@ -659,8 +702,8 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
     process.stdout.write(formatTextOutput(result) + '\n');
   }
 
-  // exit 1 when not candidate_ready_for_owner_review (CLI gate: operator knows it didn't fully succeed)
-  if (result.decision !== 'candidate_ready_for_owner_review') {
+  // exit 1 when the run did not fully succeed (not ready, or publication refused).
+  if (result.decision !== 'candidate_ready_for_owner_review' || publication.blocked) {
     process.exitCode = 1;
   }
 }

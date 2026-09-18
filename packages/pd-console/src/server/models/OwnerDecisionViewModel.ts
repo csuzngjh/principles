@@ -118,6 +118,8 @@ interface BatchSnapshot {
   genericArtifacts: Map<string, { artifactId: string; contentJson?: string; kind: string }>;
   piArtifactTaskKinds: Map<string, string>;
   applicationsByPrinciple: Map<string, { deterministic: number; selfReported: number; presence: number; recent: { text: string; createdAt?: string; level: string }[] }>;
+  /** Codex review P2: false when principle_applications is missing/unreadable — the source must surface unavailable, not "available, zero". */
+  applicationsAvailable: boolean;
   dbAvailable: boolean;
   ledgerUnavailableReason?: string;
 }
@@ -327,11 +329,17 @@ export class OwnerDecisionViewModel {
     }
 
     // Scribe + philosopher materials from PI artifacts (governance axis).
-    const { scribe, philosopher } = this.readSemanticArtifacts(principleId, snapshot, compact);
+    const semantic = this.readSemanticArtifacts(principleId, snapshot, compact);
+    const { scribe, philosopher } = semantic;
 
     // Behavior applications (existing receipt ledger; read-only aggregate).
+    // Codex review P2 fix: a missing/unreadable principle_applications table
+    // must surface as an UNAVAILABLE source — an empty map with dbAvailable
+    // true would present "available, zero retained" on a damaged workspace.
     let applications: OwnerDecisionInputs['applications'] = null;
-    if (!compact && snapshot.dbAvailable) {
+    if (!compact && snapshot.dbAvailable && !snapshot.applicationsAvailable) {
+      sourceReads.push({ source: 'principle_applications', status: 'unavailable', capturedAt: now, scope: 'level+kind aggregates', reason: 'principle_applications table missing or unreadable' });
+    } else if (!compact && snapshot.dbAvailable) {
       const aggregated = snapshot.applicationsByPrinciple.get(principleId);
       if (aggregated !== undefined) {
         applications = {
@@ -432,6 +440,11 @@ export class OwnerDecisionViewModel {
       technicalRecommendationAvailable: candidate !== undefined
         && candidate.recommendationKind !== 'principle'
         && candidate.description.trim() !== '',
+      // Codex review P1 fix: scribe-tier material is only usable by subjects
+      // on the SAME revision (the scribe artifact itself, or a bound artifact
+      // whose lineage closure contains it). Distiller/philosopher material is
+      // candidate-wide, so the gate ignores this list for those tiers.
+      readableSubjectArtifacts: semantic.readableSubjectArtifacts,
       piRootBound,
       sourceReads,
     };
@@ -482,10 +495,13 @@ export class OwnerDecisionViewModel {
   private readSemanticArtifacts(principleId: string, snapshot: BatchSnapshot, compact: boolean): {
     scribe: ScribeMaterial | null;
     philosopher: PhilosopherMaterial | null;
+    readableSubjectArtifacts: string[];
   } {
     let scribe: ScribeMaterial | null = null;
     let philosopher: PhilosopherMaterial | null = null;
-    if (!snapshot.dbAvailable) return { scribe, philosopher };
+    let scribeArtifactId: string | undefined;
+    const readableSubjectArtifacts: string[] = [];
+    if (!snapshot.dbAvailable) return { scribe, philosopher, readableSubjectArtifacts };
     // Content rows are a separate targeted read: the shared governance batch
     // SELECT intentionally omits content_json (heavy) — the semantic read-through
     // needs it only for artifacts bound to THIS principle.
@@ -501,7 +517,25 @@ export class OwnerDecisionViewModel {
       const taskKind = snapshot.piArtifactTaskKinds.get(sourceTaskId);
       if (taskKind === 'scribe') {
         const material = parseScribeContent(artifactId, contentJson, updatedAt);
-        if (material !== null && (scribe === null || material.updatedAt >= scribe.updatedAt)) scribe = material;
+        if (material !== null && (scribe === null || material.updatedAt >= scribe.updatedAt)) {
+          scribe = material;
+          scribeArtifactId = artifactId;
+        }
+      }
+    }
+    // Codex review P1 fix (per-subject revision gating): a bound artifact may
+    // rely on the selected SCRIBE material when it IS that artifact (text
+    // path) or its lineage closure contains it (rule path echoes the scribe
+    // artifact via evaluator lineage). Unrelated revisions must gate.
+    if (scribeArtifactId !== undefined) {
+      const rowsById = this.piContentRowsById(snapshot);
+      for (const row of boundRows) {
+        if (!isRecord(row)) continue;
+        const artifactId = readOwnString(row, 'artifact_id');
+        if (artifactId === undefined) continue;
+        if (artifactId === scribeArtifactId || this.closureOf(artifactId, rowsById).has(scribeArtifactId)) {
+          readableSubjectArtifacts.push(artifactId);
+        }
       }
     }
     if (!compact) {
@@ -517,7 +551,44 @@ export class OwnerDecisionViewModel {
         if (material !== null) philosopher = material;
       }
     }
-    return { scribe, philosopher };
+    return { scribe, philosopher, readableSubjectArtifacts };
+  }
+
+  private piContentRowsById(snapshot: BatchSnapshot): Map<string, unknown> {
+    const rowsById = new Map<string, unknown>();
+    for (const row of snapshot.piArtifactContentRows) {
+      if (isRecord(row)) {
+        const id = readOwnString(row, 'artifact_id');
+        if (id !== undefined) rowsById.set(id, row);
+      }
+    }
+    return rowsById;
+  }
+
+  /** Lineage closure of ONE artifact (BFS over lineage_artifact_ids). */
+  private closureOf(startId: string, rowsById: Map<string, unknown>): Set<string> {
+    const closure = new Set<string>();
+    const queue = [startId];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (current === undefined || closure.has(current)) continue;
+      closure.add(current);
+      const row = rowsById.get(current);
+      if (!isRecord(row)) continue;
+      const lineageJson = readOwnString(row, 'lineage_artifact_ids');
+      if (lineageJson === undefined) continue;
+      try {
+        const parsed: unknown = JSON.parse(lineageJson);
+        if (Array.isArray(parsed)) {
+          for (const id of parsed) {
+            if (typeof id === 'string' && !closure.has(id)) queue.push(id);
+          }
+        }
+      } catch {
+        // malformed lineage on one row — skip its expansion only
+      }
+    }
+    return closure;
   }
 
   private philosopherRowsInBoundClosure(snapshot: BatchSnapshot, boundRows: unknown[]): unknown[] {
@@ -526,13 +597,7 @@ export class OwnerDecisionViewModel {
       .filter(isRecord)
       .map((row) => readOwnString(row, 'artifact_id'))
       .filter((id): id is string => id !== undefined);
-    const rowsById = new Map<string, unknown>();
-    for (const row of snapshot.piArtifactContentRows) {
-      if (isRecord(row)) {
-        const id = readOwnString(row, 'artifact_id');
-        if (id !== undefined) rowsById.set(id, row);
-      }
-    }
+    const rowsById = this.piContentRowsById(snapshot);
     while (queue.length > 0) {
       const current = queue.shift();
       if (current === undefined || closure.has(current)) continue;
@@ -573,6 +638,7 @@ export class OwnerDecisionViewModel {
     const genericArtifacts = new Map<string, { artifactId: string; contentJson?: string; kind: string }>();
     const piArtifactTaskKinds = new Map<string, string>();
     const applicationsByPrinciple = new Map<string, { deterministic: number; selfReported: number; presence: number; recent: { text: string; createdAt?: string; level: string }[] }>();
+    let applicationsAvailable = true;
     if (!dbAvailable) {
       // No state.db: governance tables are unavailable; the view degrades with
       // source_read_status=partial rather than pretending an empty world.
@@ -580,6 +646,7 @@ export class OwnerDecisionViewModel {
         artifactRows: [], taskRows: [], approvalRows: [], activationRows: [],
         piArtifactContentRows: [],
         candidates, genericArtifacts, piArtifactTaskKinds, applicationsByPrinciple,
+        applicationsAvailable: false,
         dbAvailable: false,
         ledgerUnavailableReason: 'state.db not found',
       };
@@ -658,7 +725,9 @@ export class OwnerDecisionViewModel {
           }
         }
       } catch {
-        // principle_applications missing → applications stay null (source unavailable)
+        // Codex review P2: a missing/unreadable ledger table is an UNAVAILABLE
+        // source, not an available-with-zero source (Codex P2 fix).
+        applicationsAvailable = false;
       }
       return {
         ...tables,
@@ -667,6 +736,7 @@ export class OwnerDecisionViewModel {
         genericArtifacts,
         piArtifactTaskKinds,
         applicationsByPrinciple,
+        applicationsAvailable,
         dbAvailable: true,
       };
     } finally {
@@ -687,6 +757,11 @@ function parseScribeContent(artifactId: string, contentJson: string, updatedAt: 
   if (!isRecord(parsed)) return null;
   const draft = parsed.principleDraft;
   const draftRecord = isRecord(draft) ? draft : undefined;
+  // Codex P1 follow-up: a scribe artifact WITHOUT a statement carries no
+  // owner-facing principle material — it must not be selected as "the" scribe
+  // material for the principle (that would shadow a real one and would let
+  // per-subject gating treat its revision as scribe-backed).
+  if (draftRecord === undefined || readOwnString(draftRecord, 'statement') === undefined) return null;
   const risksValue = parsed.risks;
   const risks = Array.isArray(risksValue) ? risksValue.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : [];
   const applicability = draftRecord !== undefined && Array.isArray(draftRecord.applicability)
@@ -699,7 +774,7 @@ function parseScribeContent(artifactId: string, contentJson: string, updatedAt: 
   const targetBehavior = intentContract !== undefined ? readOwnString(intentContract, 'targetBehavior') : undefined;
   return {
     artifactId,
-    ...(draftRecord !== undefined && readOwnString(draftRecord, 'statement') !== undefined ? { statement: readOwnString(draftRecord, 'statement') } : {}),
+    statement: readOwnString(draftRecord, 'statement'),
     ...(draftRecord !== undefined && readOwnString(draftRecord, 'rationale') !== undefined ? { rationale: readOwnString(draftRecord, 'rationale') } : {}),
     applicability,
     antiPatterns,

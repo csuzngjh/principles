@@ -198,6 +198,36 @@ export function actionTargetId(action: { targetRefs: Array<{ kind: string; id: s
   return ref?.id ?? null;
 }
 
+// Codex review P2 fix (localization): the decision panel's CHROME (action
+// labels, next action, blocker headline) localizes in the client via stable
+// semantic codes; narrative CONTENT (artifact-derived text) stays in its
+// source language — the model-generated material cannot be translated by a
+// key lookup, so a full locale-carried response remains a follow-up.
+const ACTION_LABEL_KEY: Record<string, string> = {
+  approve: 'principles.detail.ownerDecision.actionLabel.approve',
+  reject: 'principles.detail.ownerDecision.actionLabel.reject',
+  edit_approval: 'principles.detail.ownerDecision.actionLabel.edit_approval',
+  disable: 'principles.detail.ownerDecision.actionLabel.disable',
+};
+
+export function localizeActionLabel(action: { semantic: string; label: string }, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  const key = ACTION_LABEL_KEY[action.semantic];
+  if (key === undefined) return action.label;
+  const localized = t(key, { defaultValue: '' });
+  return localized === '' ? action.label : localized;
+}
+
+export function localizeNextAction(code: string, ownerText: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  const localized = t(`principles.detail.ownerDecision.next.${code}`, { defaultValue: '' });
+  return localized === '' ? ownerText : localized;
+}
+
+export function localizeBlocker(code: string, ownerText: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  const safeKey = code.replace(/[^a-zA-Z0-9_.]/g, '_');
+  const localized = t(`principles.detail.ownerDecision.blocker.${safeKey}`, { defaultValue: '' });
+  return localized === '' ? ownerText : localized;
+}
+
 const DECISION_STATE_LABEL_KEY: Record<OwnerDecisionViewCore['decisionState'], string> = {
   needs_owner_decision: 'principles.detail.ownerDecision.state.needs_owner_decision',
   processing: 'principles.detail.ownerDecision.state.processing',
@@ -477,7 +507,7 @@ export function PrincipleDetailPage() {
                   {t(DECISION_STATE_LABEL_KEY[ownerDecision.decisionState])}
                 </h2>
                 <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
-                  {ownerDecision.nextAction.ownerText}
+                  {localizeNextAction(ownerDecision.nextAction.code, ownerDecision.nextAction.ownerText, t)}
                 </p>
               </div>
               <span data-testid="owner-decision-state" className="w-fit rounded-full border border-line px-2 py-1 font-mono text-[11px] text-ink-3">
@@ -652,7 +682,7 @@ export function PrincipleDetailPage() {
                       setPendingAction(action);
                     }}
                   >
-                    {action.label}
+                    {localizeActionLabel(action, t)}
                   </Button>
                 ))}
               </div>
@@ -660,7 +690,7 @@ export function PrincipleDetailPage() {
                 <ul className="mt-3 space-y-1 text-[12px] text-ink-3">
                   {ownerDecision.blockers.map((blocker, index) => (
                     <li key={`blk-${index}`} data-testid="owner-decision-blocker">
-                      {blocker.reason.ownerText}
+                      {localizeBlocker(blocker.reason.code, blocker.reason.ownerText, t)}
                     </li>
                   ))}
                 </ul>
