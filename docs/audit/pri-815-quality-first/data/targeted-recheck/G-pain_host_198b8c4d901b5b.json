@@ -1,0 +1,694 @@
+{
+ "group": "G-pain_host_198b8c4d901b5b",
+ "class": "CLEAN",
+ "pain_id": "pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e",
+ "frozen_at": "2026-09-18T01:30:30.299Z",
+ "repeats": [
+  {
+   "group": "G-pain_host_198b8c4d901b5b",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_198b8c4d901b5b-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Owner 确认 mooncake-mv-final-v3k23.mp4 字幕垂直对齐已修复后，未将该验收结论持久化为基准记录，后续迭代中丢失了这一关键状态信息",
+       "betterDecision": "在 Owner 确认验收的当下立即持久化基准：记录版本文件名/哈希、已修复项清单（红条高度、字幕垂直对齐）及验收状态到持久存储（项目笔记或基准目录），后续任何迭代先加载该基准再动手",
+       "rationale": "持久化的验收基准为后续改动提供明确对比锚点；没有持久状态，多轮迭代必然漂移并回退已修复内容",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "baseline_persistence",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "基于自行推断的优化偏好重新修改已验收的布局参数，用主观判断覆盖了 Owner 已确认正确的状态",
+       "betterDecision": "将已确认正确的部分视为冻结项：后续优化只针对 Owner 明确提出的新需求做增量改动，涉及冻结项的修改必须先获得 Owner 显式授权",
+       "rationale": "Owner 的显式确认是最强意图信号，自主推断的偏好优先级永远低于已确认状态；这正是'越优化越烂'的直接原因",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "frozen_accepted_state",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "重新生成视频后未与已确认良好的 v3k23 基准做逐项回归比对即采纳输出，导致字幕对齐回退未被察觉",
+       "betterDecision": "每次改动后执行回归验证：将新输出与基准版本在关键修复点（红条高度、字幕垂直对齐等）逐项对比验证，任何一项回退则回滚改动而非交付",
+       "rationale": "执行完成不等于成功，只有与基准对比验证通过的改动才可采纳；回归比对是发现无声回退的唯一手段",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "regression_verification",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "优化迭代中大面积重新调整整体布局，改动范围远超 Owner 实际提出的优化点，波及已修复的对齐属性",
+       "betterDecision": "采用最小干预策略：只改动 Owner 指定的具体优化点，其余布局参数保持与基准一致；若不确定改动边界，先向 Owner 澄清再执行",
+       "rationale": "改动状态越多回归风险越大，最小干预把风险限制在可单独验证的范围内，也让问题定位变得简单",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "minimal_intervention",
+       "sourcePrincipleId": "T-06"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "在无护栏、无备份的情况下直接覆盖已验收产出物，且发现 INTENT.md 为空模板时未主动补齐不可回退约束，改动失败后无法恢复",
+       "betterDecision": "修改已验收产出物前先以新文件名/分支保留基准版本，未经对比验证不得覆盖原文件；发现意图文档为空时主动请 Owner 将已验收项固化为不可回退护栏",
+       "rationale": "可逆性是防止不可恢复破坏的最后防线；意图约束缺失时应主动请求护栏，而非在约束真空中凭推断自由发挥",
+       "confidence": 0.82,
+       "riskLevel": "medium",
+       "strategicPerspective": "reversibility_and_guardrails",
+       "sourcePrincipleId": "T-04"
+      }
+     ],
+     "sourcePainId": "pain_host_198b8c4d901b5b",
+     "contextRefs": [
+      "artifact://8ae36fa6-b2ba-4d5e-b6c5-21f0db5c2545"
+     ],
+     "generatedAt": "2025-06-14T08:32:00Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_198b8c4d901b-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Owner 确认 mooncake-mv-final-v3k23.mp4 字幕垂直对齐已修复后，未将该验收结论持久化为基准记录，后续迭代中丢失了这一关键状态信息\",\"betterDecision\":\"在 Owner 确认验收的当下立即持久化基准：记录版本文件名/哈希、已修复项清单（红条高度、字幕垂直对齐）及验收状态到持久存储（项目笔记或基准目录），后续任何迭代先加载该基准再动手\",\"rationale\":\"持久化的验收基准为后续改动提供明确对比锚点；没有持久状态，多轮迭代必然漂移并回退已修复内容\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"baseline_persistence\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":1,\"badDecision\":\"基于自行推断的优化偏好重新修改已验收的布局参数，用主观判断覆盖了 Owner 已确认正确的状态\",\"betterDecision\":\"将已确认正确的部分视为冻结项：后续优化只针对 Owner 明确提出的新需求做增量改动，涉及冻结项的修改必须先获得 Owner 显式授权\",\"rationale\":\"Owner 的显式确认是最强意图信号，自主推断的偏好优先级永远低于已确认状态；这正是'越优化越烂'的直接原因\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"frozen_accepted_state\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":2,\"badDecision\":\"重新生成视频后未与已确认良好的 v3k23 基准做逐项回归比对即采纳输出，导致字幕对齐回退未被察觉\",\"betterDecision\":\"每次改动后执行回归验证：将新输出与基准版本在关键修复点（红条高度、字幕垂直对齐等）逐项对比验证，任何一项回退则回滚改动而非交付\",\"rationale\":\"执行完成不等于成功，只有与基准对比验证通过的改动才可采纳；回归比对是发现无声回退的唯一手段\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"regression_verification\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":3,\"badDecision\":\"优化迭代中大面积重新调整整体布局，改动范围远超 Owner 实际提出的优化点，波及已修复的对齐属性\",\"betterDecision\":\"采用最小干预策略：只改动 Owner 指定的具体优化点，其余布局参数保持与基准一致；若不确定改动边界，先向 Owner 澄清再执行\",\"rationale\":\"改动状态越多回归风险越大，最小干预把风险限制在可单独验证的范围内，也让问题定位变得简单\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"minimal_intervention\",\"sourcePrincipleId\":\"T-06\"},{\"candidateIndex\":4,\"badDecision\":\"在无护栏、无备份的情况下直接覆盖已验收产出物，且发现 INTENT.md 为空模板时未主动补齐不可回退约束，改动失败后无法恢复\",\"betterDecision\":\"修改已验收产出物前先以新文件名/分支保留基准版本，未经对比验证不得覆盖原文件；发现意图文档为空时主动请 Owner 将已验收项固化为不可回退护栏\",\"rationale\":\"可逆性是防止不可恢复破坏的最后防线；意图约束缺失时应主动请求护栏，而非在约束真空中凭推断自由发挥\",\"confidence\":0.82,\"riskLevel\":\"medium\",\"strategicPerspective\":\"reversibility_and_guardrails\",\"sourcePrincipleId\":\"T-04\"}],\"sourcePainId\":\"pain_host_198b8c4d901b5b\",\"contextRefs\":[\"artifact://8ae36fa6-b2ba-4d5e-b6c5-21f0db5c2545\"],\"generatedAt\":\"2025-06-14T08:32:00Z\"}",
+    "usage": {
+     "input": 2031,
+     "output": 3298,
+     "total": 5329
+    },
+    "latencyMs": 33271,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3c24e8fd322893fd"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_198b8c4d901b5b-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r1-run1",
+     "thesis": "当 Owner 明确验收一项产出时，验收不再是瞬时事件，而是转化为受保护的状态：验收结论必须立即持久化为可加载的基准，已确认的属性应视为冻结项、优先级高于任何自主推断的偏好；后续改动应局限于新提出的具体需求，且每次输出必须与基准逐项回归比对通过后方可采纳。否则迭代不会累积价值，而是在无声中销毁已验证的价值——这正是'越优化越烂'的结构性根源。",
+     "principleCandidate": {
+      "title": "Owner验收即冻结基准：持久化验收状态、最小范围改动、逐项回归验证",
+      "rationale": "根因不在于某次技术失误，而在于验收状态未被当作需保护的对象：既没有持久化（T-10场景），也未抵御推断偏好的覆盖（T-02场景），更没有回归锚点来发现无声回退（T-07场景）。将'显式验收'定义为状态转换事件——触发基准持久化、属性冻结、增量改动边界与强制回归比对——才能使多轮迭代以已验证价值为地基累积而非漂移。",
+      "scope": "适用于任何存在'用户/Owner显式确认中间或最终产出，且后续仍有修改迭代'的多轮交付工作流：内容生成与编辑、代码、配置、文档、设计稿等。尤其适用于意图文档缺失或为空、改动可静默回退已修复项的场景。",
+      "confidence": 0.88
+     },
+     "risks": [
+      "与现有核心公理存在明显重叠：本原则本质上是 T-10（持久化状态）、T-02（显式意图优先）、T-07（验证后采纳）、T-06（最小干预）、T-04（可逆性）的组合应用，可能被视为派生性综合而非全新公理",
+      "过度冻结风险：将验收项视为不可触碰可能阻碍合理的后续重构或整体升级，需要保留显式授权解冻路径，否则会让 Owner 主动发起的改动变得迟缓",
+      "验收误判风险：若把沉默、模糊反馈或部分确认当作完整验收，可能冻结了错误状态并以此为基准拒绝真正的修正",
+      "持久化开销：在验收频繁且廉价的快速迭代场景中，为每次确认维护基准记录（文件名/哈希/修复清单）可能产生不成比例的流程负担"
+     ],
+     "generatedAt": "2025-06-14T08:47:12Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_198b8c4d901b-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_198b8c4d901b-r1-run1\",\"thesis\":\"当 Owner 明确验收一项产出时，验收不再是瞬时事件，而是转化为受保护的状态：验收结论必须立即持久化为可加载的基准，已确认的属性应视为冻结项、优先级高于任何自主推断的偏好；后续改动应局限于新提出的具体需求，且每次输出必须与基准逐项回归比对通过后方可采纳。否则迭代不会累积价值，而是在无声中销毁已验证的价值——这正是'越优化越烂'的结构性根源。\",\"principleCandidate\":{\"title\":\"Owner验收即冻结基准：持久化验收状态、最小范围改动、逐项回归验证\",\"rationale\":\"根因不在于某次技术失误，而在于验收状态未被当作需保护的对象：既没有持久化（T-10场景），也未抵御推断偏好的覆盖（T-02场景），更没有回归锚点来发现无声回退（T-07场景）。将'显式验收'定义为状态转换事件——触发基准持久化、属性冻结、增量改动边界与强制回归比对——才能使多轮迭代以已验证价值为地基累积而非漂移。\",\"scope\":\"适用于任何存在'用户/Owner显式确认中间或最终产出，且后续仍有修改迭代'的多轮交付工作流：内容生成与编辑、代码、配置、文档、设计稿等。尤其适用于意图文档缺失或为空、改动可静默回退已修复项的场景。\",\"confidence\":0.88},\"risks\":[\"与现有核心公理存在明显重叠：本原则本质上是 T-10（持久化状态）、T-02（显式意图优先）、T-07（验证后采纳）、T-06（最小干预）、T-04（可逆性）的组合应用，可能被视为派生性综合而非全新公理\",\"过度冻结风险：将验收项视为不可触碰可能阻碍合理的后续重构或整体升级，需要保留显式授权解冻路径，否则会让 Owner 主动发起的改动变得迟缓\",\"验收误判风险：若把沉默、模糊反馈或部分确认当作完整验收，可能冻结了错误状态并以此为基准拒绝真正的修正\",\"持久化开销：在验收频繁且廉价的快速迭代场景中，为每次确认维护基准记录（文件名/哈希/修复清单）可能产生不成比例的流程负担\"],\"generatedAt\":\"2025-06-14T08:47:12Z\"}",
+    "usage": {
+     "input": 1675,
+     "output": 1689,
+     "total": 3364
+    },
+    "latencyMs": 25209,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "a414df3623eb5bbf"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_198b8c4d901b5b-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r1-run1",
+     "principleDraft": {
+      "title": "Owner验收即冻结基准：持久化验收状态、最小范围改动、逐项回归验证",
+      "statement": "当 Owner 对某项产出给出明确验收（明确确认、批准或要求采纳）时，必须将其视为状态转换事件并立即执行：(1) 将验收结论持久化为可重新加载的基准记录，包括产出标识、已确认属性清单及验收依据；(2) 将已确认属性标记为冻结项，其优先级高于任何自主推断的偏好；(3) 后续改动严格限定于 Owner 新提出的具体需求，禁止以推断偏好为由修改冻结项；(4) 任何新输出在采纳前必须与基准逐项回归比对，全部冻结项仍然成立方可采纳；发现回退必须先修复并复验，再交付新需求。",
+      "rationale": "根因不是单次技术失误，而是验收状态从未被当作需要保护的对象：验收结论只存在于瞬时上下文中（未持久化），推断出的偏好可以无声覆盖已确认属性（无优先级保护），且没有回归锚点能发现静默回退（无验证闭环）。将显式验收定义为触发持久化、属性冻结、增量改动边界与强制回归比对的状态转换，才能让多轮迭代在已验证价值之上累积，而不是在漂移中无声销毁它。",
+      "applicability": [
+       "Owner 显式确认中间或最终产出、且后续仍有修改迭代的多轮交付工作流（内容生成与编辑、代码、配置、文档、设计稿等）",
+       "意图文档缺失或为空、偏好只能从反馈推断的场景",
+       "改动可能静默回退已修复项的场景，如批量重写、整体重构或跨会话继续工作"
+      ],
+      "antiPatterns": [
+       "把 Owner 的验收当作一次性事件：不持久化验收结论，依赖对话上下文或记忆保留已确认属性",
+       "以自主推断的偏好（风格假设、泛化的'最佳实践'）覆盖已被验收冻结的属性",
+       "为新需求整体重写产出，使已确认项被无声改动或回退到旧缺陷",
+       "新输出未经与验收基准逐项回归比对即被采纳或宣布完成",
+       "将沉默、模糊反馈或部分确认当作完整验收，并据此冻结错误状态"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "Owner 希望已被明确验收的产出属性在后续迭代中保持成立：改动只发生在其新提出的具体需求范围内，已确认项不得被无声改坏。",
+      "targetBehavior": "Owner 明确验收后，Agent 立即将验收结论与已确认属性持久化为可加载的基准记录；此后每轮修改仅触碰新需求涉及的部分，并在采纳新输出前展示与基准的逐项回归比对结果。",
+      "forbiddenBehavior": "以推断偏好覆盖已验收属性、为新需求整体重写导致已确认项回退、不持久化验收状态、或未经回归比对即采纳新输出——即任何无声销毁已验证价值的迭代行为。",
+      "evidenceSource": "诊断疼痛'越优化越烂'：多轮迭代中已修复且被 Owner 确认的项在后续修改中被无声回退；意图文档为空使偏好只能靠推断；验收结论未持久化、无回归锚点（见 pain_host_198b8c4d901b5b 的 dreamer/philosopher 分析）。",
+      "validationExpectation": "评估者应确认任何由此生成的规则同时包含三个可观测环节：(a) 验收事件的即时持久化动作，(b) 冻结属性对推断偏好的优先级，(c) 采纳前与基准的逐项回归比对；若一条规则允许以推断偏好覆盖已验收属性、或允许未经回归比对即采纳输出，则该规则与本意图相悖，应被标记而非实施。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r1-run1"
+     },
+     "risks": [
+      "与核心公理重叠：本原则是 T-10（持久化重要状态）、T-02（显式意图优先于推断偏好）、T-06（最小改动）、T-07（验证后才算成功）在'验收状态'场景下的组合具体化；规则生成阶段应避免产出与现有公理重复或冲突的规则，将其定位为公理的场景化落地",
+      "过度冻结风险：冻结项可能阻碍 Owner 主动发起的合理重构或整体升级；必须保留显式解冻路径——Owner 的新指令可以覆盖冻结项，但应通过更新基准记录实现而非绕过记录",
+      "验收误判风险：若把沉默、模糊反馈或部分确认当作完整验收，会冻结错误状态并以之为基准拒绝真正的修正；规则需限定'明确验收'的判定证据",
+      "流程开销风险：在验收频繁且廉价的快速迭代中，为每次确认维护基准记录（标识、属性清单、比对结果）可能产生不成比例的负担；应允许轻量的基准形式",
+      "回归比对成本：对大型产出逐项全量比对可能昂贵，规则若强制全量比对容易被规避；需允许关键冻结项优先的分级比对，同时不放弃'回退必须被发现'的底线"
+     ],
+     "generatedAt": "2025-06-14T08:52:47Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_198b8c4d901b5b-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r1-run1\",\"principleDraft\":{\"title\":\"Owner验收即冻结基准：持久化验收状态、最小范围改动、逐项回归验证\",\"statement\":\"当 Owner 对某项产出给出明确验收（明确确认、批准或要求采纳）时，必须将其视为状态转换事件并立即执行：(1) 将验收结论持久化为可重新加载的基准记录，包括产出标识、已确认属性清单及验收依据；(2) 将已确认属性标记为冻结项，其优先级高于任何自主推断的偏好；(3) 后续改动严格限定于 Owner 新提出的具体需求，禁止以推断偏好为由修改冻结项；(4) 任何新输出在采纳前必须与基准逐项回归比对，全部冻结项仍然成立方可采纳；发现回退必须先修复并复验，再交付新需求。\",\"rationale\":\"根因不是单次技术失误，而是验收状态从未被当作需要保护的对象：验收结论只存在于瞬时上下文中（未持久化），推断出的偏好可以无声覆盖已确认属性（无优先级保护），且没有回归锚点能发现静默回退（无验证闭环）。将显式验收定义为触发持久化、属性冻结、增量改动边界与强制回归比对的状态转换，才能让多轮迭代在已验证价值之上累积，而不是在漂移中无声销毁它。\",\"applicability\":[\"Owner 显式确认中间或最终产出、且后续仍有修改迭代的多轮交付工作流（内容生成与编辑、代码、配置、文档、设计稿等）\",\"意图文档缺失或为空、偏好只能从反馈推断的场景\",\"改动可能静默回退已修复项的场景，如批量重写、整体重构或跨会话继续工作\"],\"antiPatterns\":[\"把 Owner 的验收当作一次性事件：不持久化验收结论，依赖对话上下文或记忆保留已确认属性\",\"以自主推断的偏好（风格假设、泛化的'最佳实践'）覆盖已被验收冻结的属性\",\"为新需求整体重写产出，使已确认项被无声改动或回退到旧缺陷\",\"新输出未经与验收基准逐项回归比对即被采纳或宣布完成\",\"将沉默、模糊反馈或部分确认当作完整验收，并据此冻结错误状态\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"Owner 希望已被明确验收的产出属性在后续迭代中保持成立：改动只发生在其新提出的具体需求范围内，已确认项不得被无声改坏。\",\"targetBehavior\":\"Owner 明确验收后，Agent 立即将验收结论与已确认属性持久化为可加载的基准记录；此后每轮修改仅触碰新需求涉及的部分，并在采纳新输出前展示与基准的逐项回归比对结果。\",\"forbiddenBehavior\":\"以推断偏好覆盖已验收属性、为新需求整体重写导致已确认项回退、不持久化验收状态、或未经回归比对即采纳新输出——即任何无声销毁已验证价值的迭代行为。\",\"evidenceSource\":\"诊断疼痛'越优化越烂'：多轮迭代中已修复且被 Owner 确认的项在后续修改中被无声回退；意图文档为空使偏好只能靠推断；验收结论未持久化、无回归锚点（见 pain_host_198b8c4d901b5b 的 dreamer/philosopher 分析）。\",\"validationExpectation\":\"评估者应确认任何由此生成的规则同时包含三个可观测环节：(a) 验收事件的即时持久化动作，(b) 冻结属性对推断偏好的优先级，(c) 采纳前与基准的逐项回归比对；若一条规则允许以推断偏好覆盖已验收属性、或允许未经回归比对即采纳输出，则该规则与本意图相悖，应被标记而非实施。\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r1-run1\"},\"risks\":[\"与核心公理重叠：本原则是 T-10（持久化重要状态）、T-02（显式意图优先于推断偏好）、T-06（最小改动）、T-07（验证后才算成功）在'验收状态'场景下的组合具体化；规则生成阶段应避免产出与现有公理重复或冲突的规则，将其定位为公理的场景化落地\",\"过度冻结风险：冻结项可能阻碍 Owner 主动发起的合理重构或整体升级；必须保留显式解冻路径——Owner 的新指令可以覆盖冻结项，但应通过更新基准记录实现而非绕过记录\",\"验收误判风险：若把沉默、模糊反馈或部分确认当作完整验收，会冻结错误状态并以之为基准拒绝真正的修正；规则需限定'明确验收'的判定证据\",\"流程开销风险：在验收频繁且廉价的快速迭代中，为每次确认维护基准记录（标识、属性清单、比对结果）可能产生不成比例的负担；应允许轻量的基准形式\",\"回归比对成本：对大型产出逐项全量比对可能昂贵，规则若强制全量比对容易被规避；需允许关键冻结项优先的分级比对，同时不放弃'回退必须被发现'的底线\"],\"generatedAt\":\"2025-06-14T08:52:47Z\"}",
+    "usage": {
+     "input": 1978,
+     "output": 4676,
+     "total": 6654
+    },
+    "latencyMs": 45815,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6639ce057c11e345"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_198b8c4d901b5b-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r1-run1",
+     "principleDraft": {
+      "title": "Owner验收即冻结基准：持久化验收状态、限定改动范围、逐项回归验证",
+      "statement": "当Owner显式确认一项产出正确（验收）时，必须立即将该验收结论持久化为可加载的基准（版本标识如文件名/哈希、已确认属性清单如“红条高度已修复字幕垂直对齐”）；此后已确认属性视为冻结项，优先级高于任何自主推断的优化偏好，后续改动仅限于Owner明确提出的具体新需求，涉及冻结项的修改须先获得Owner显式授权；每次改动的输出必须与基准在已确认属性上逐项回归比对，全部通过后方可采纳，任一项回退则回滚改动而非交付。",
+      "rationale": "根因不在单次技术失误，而在验收状态未被当作需保护的对象：未持久化导致状态在迭代间丢失（T-10场景），自主推断的偏好覆盖了显式确认（T-02场景），且缺少回归锚点使无声回退无法被发现（T-07场景）。将显式验收定义为状态转换事件——触发基准持久化、属性冻结、增量改动边界与强制回归比对——使多轮迭代以已验证价值为地基累积而非漂移，这正是“越优化越烂”的结构性解法。",
+      "applicability": [
+       "存在“Owner显式确认中间或最终产出，且后续仍有修改迭代”的多轮交付工作流：视频/图片/内容生成与编辑、代码、配置、文档、设计稿等",
+       "对已验收产出物（版本标识含v\\d+、final、已确认、验收、approved等）再次执行优化/调整/improve/refine/tweak的修改任务",
+       "意图文档缺失或为空模板（如INTENT.md未编码护栏）、已修复项可能被静默回退的约束真空场景"
+      ],
+      "antiPatterns": [
+       "把验收当作瞬时事件：收到Owner确认后不持久化基准（版本标识与已确认属性清单），后续迭代在无状态记忆下重新推断布局/参数",
+       "基于自主推断的优化偏好重新修改已确认的属性（如布局、对齐参数），用主观判断覆盖Owner已确认正确的状态",
+       "修改已验收产出后不做与基准的逐项回归比对即采纳或覆盖输出，导致回退（如字幕垂直对齐失效）无声发生",
+       "改动范围远超Owner实际提出的优化点，大面积重调整体布局并波及已确认属性",
+       "在无备份、无对比验证的情况下直接覆盖已验收产出物原文件"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "Owner希望已确认正确的产出（如已修复字幕垂直对齐的mooncake-mv-final-v3k23.mp4）不被后续优化迭代回退，改进只能在已验证价值之上累积。",
+      "targetBehavior": "Agent在Owner验收确认的当下持久化基准记录（版本文件名/哈希与已确认属性清单）；此后修改该产出前先加载基准，仅改动Owner明确指定的新需求，改动后将新输出与基准在已确认属性上逐项对比，任一项回退即回滚，全部通过才采纳交付。",
+      "forbiddenBehavior": "在未持久化/未加载已验收基准的情况下，基于自主推断的优化偏好重新修改已确认的布局或参数，且改动后不经逐项回归比对即覆盖已验收产出，导致已修复属性被无声回退（“越优化越烂”）。",
+      "evidenceSource": "用户指出mooncake-mv-final-v3k23.mp4曾已修复（通过增加红条高度解决字幕垂直对齐），质疑AI后续优化把已修复内容改回（severe级Pain）；诊断确认根因为Agent未保留/比对已验收基准、以推断偏好覆盖已确认状态（T-07/T-08/T-10/T-02违例），且INTENT.md为空模板未提供约束。",
+      "validationExpectation": "评估者应要求规则覆盖四个可观察环节：(1)验收时持久化基准（含版本标识与已确认属性清单）；(2)修改已验收产出前加载基准；(3)改动范围限于Owner明确新需求、冻结项改动需显式授权；(4)改动后逐项回归比对、回退即回滚。仅表达“小心不要破坏已确认内容”之类泛化告诫而无上述可观察动作的规则，不应视为忠实。"
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r1-run1"
+     },
+     "risks": [
+      "与核心公理存在重叠：本原则本质是T-10（持久化）、T-02（显式意图优先）、T-07（验证后采纳）、T-06（最小干预）、T-04（可逆性）面向“验收状态”的组合应用，可能被视为派生性综合而非独立新公理",
+      "过度冻结风险：将已验收项视为不可触碰可能阻碍Owner主动发起的合理重构或整体升级，须保留显式授权解冻路径",
+      "验收误判风险：将沉默、模糊反馈或部分确认当作完整验收，可能冻结错误状态并以此基准拒绝真正的修正",
+      "持久化开销：在验收频繁且廉价的快速迭代场景中，为每次确认维护基准记录（文件名/哈希/修复清单）可能产生不成比例的流程负担",
+      "证据强度受限：Stage A诊断置信度仅0.55，会话记录不完整且缺少具体diff证据，部分细节（如红条高度参数）可能为部分重建；规则触发模式（优化/v\\d+/final等）也可能对常规版本迭代误触发"
+     ],
+     "generatedAt": "2025-06-14T08:58:41Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_198b8c4d901b5b-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Owner验收即冻结基准：持久化验收状态、限定改动范围、逐项回归验证\",\n    \"statement\": \"当Owner显式确认一项产出正确（验收）时，必须立即将该验收结论持久化为可加载的基准（版本标识如文件名/哈希、已确认属性清单如“红条高度已修复字幕垂直对齐”）；此后已确认属性视为冻结项，优先级高于任何自主推断的优化偏好，后续改动仅限于Owner明确提出的具体新需求，涉及冻结项的修改须先获得Owner显式授权；每次改动的输出必须与基准在已确认属性上逐项回归比对，全部通过后方可采纳，任一项回退则回滚改动而非交付。\",\n    \"rationale\": \"根因不在单次技术失误，而在验收状态未被当作需保护的对象：未持久化导致状态在迭代间丢失（T-10场景），自主推断的偏好覆盖了显式确认（T-02场景），且缺少回归锚点使无声回退无法被发现（T-07场景）。将显式验收定义为状态转换事件——触发基准持久化、属性冻结、增量改动边界与强制回归比对——使多轮迭代以已验证价值为地基累积而非漂移，这正是“越优化越烂”的结构性解法。\",\n    \"applicability\": [\n      \"存在“Owner显式确认中间或最终产出，且后续仍有修改迭代”的多轮交付工作流：视频/图片/内容生成与编辑、代码、配置、文档、设计稿等\",\n      \"对已验收产出物（版本标识含v\\\\d+、final、已确认、验收、approved等）再次执行优化/调整/improve/refine/tweak的修改任务\",\n      \"意图文档缺失或为空模板（如INTENT.md未编码护栏）、已修复项可能被静默回退的约束真空场景\"\n    ],\n    \"antiPatterns\": [\n      \"把验收当作瞬时事件：收到Owner确认后不持久化基准（版本标识与已确认属性清单），后续迭代在无状态记忆下重新推断布局/参数\",\n      \"基于自主推断的优化偏好重新修改已确认的属性（如布局、对齐参数），用主观判断覆盖Owner已确认正确的状态\",\n      \"修改已验收产出后不做与基准的逐项回归比对即采纳或覆盖输出，导致回退（如字幕垂直对齐失效）无声发生\",\n      \"改动范围远超Owner实际提出的优化点，大面积重调整体布局并波及已确认属性\",\n      \"在无备份、无对比验证的情况下直接覆盖已验收产出物原文件\"\n    ],\n    \"confidence\": 0.82\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Owner希望已确认正确的产出（如已修复字幕垂直对齐的mooncake-mv-final-v3k23.mp4）不被后续优化迭代回退，改进只能在已验证价值之上累积。\",\n    \"targetBehavior\": \"Agent在Owner验收确认的当下持久化基准记录（版本文件名/哈希与已确认属性清单）；此后修改该产出前先加载基准，仅改动Owner明确指定的新需求，改动后将新输出与基准在已确认属性上逐项对比，任一项回退即回滚，全部通过才采纳交付。\",\n    \"forbiddenBehavior\": \"在未持久化/未加载已验收基准的情况下，基于自主推断的优化偏好重新修改已确认的布局或参数，且改动后不经逐项回归比对即覆盖已验收产出，导致已修复属性被无声回退（“越优化越烂”）。\",\n    \"evidenceSource\": \"用户指出mooncake-mv-final-v3k23.mp4曾已修复（通过增加红条高度解决字幕垂直对齐），质疑AI后续优化把已修复内容改回（severe级Pain）；诊断确认根因为Agent未保留/比对已验收基准、以推断偏好覆盖已确认状态（T-07/T-08/T-10/T-02违例），且INTENT.md为空模板未提供约束。\",\n    \"validationExpectation\": \"评估者应要求规则覆盖四个可观察环节：(1)验收时持久化基准（含版本标识与已确认属性清单）；(2)修改已验收产出前加载基准；(3)改动范围限于Owner明确新需求、冻结项改动需显式授权；(4)改动后逐项回归比对、回退即回滚。仅表达“小心不要破坏已确认内容”之类泛化告诫而无上述可观察动作的规则，不应视为忠实。\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r1-run1\"\n  },\n  \"risks\": [\n    \"与核心公理存在重叠：本原则本质是T-10（持久化）、T-02（显式意图优先）、T-07（验证后采纳）、T-06（最小干预）、T-04（可逆性）面向“验收状态”的组合应用，可能被视为派生性综合而非独立新公理\",\n    \"过度冻结风险：将已验收项视为不可触碰可能阻碍Owner主动发起的合理重构或整体升级，须保留显式授权解冻路径\",\n    \"验收误判风险：将沉默、模糊反馈或部分确认当作完整验收，可能冻结错误状态并以此基准拒绝真正的修正\",\n    \"持久化开销：在验收频繁且廉价的快速迭代场景中，为每次确认维护基准记录（文件名/哈希/修复清单）可能产生不成比例的流程负担\",\n    \"证据强度受限：Stage A诊断置信度仅0.55，会话记录不完整且缺少具体diff证据，部分细节（如红条高度参数）可能为部分重建；规则触发模式（优化/v\\\\d+/final等）也可能对常规版本迭代误触发\"\n  ],\n  \"generatedAt\": \"2025-06-14T08:58:41Z\"\n}",
+    "usage": {
+     "input": 4276,
+     "output": 5241,
+     "total": 9517
+    },
+    "latencyMs": 52224,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "546b9246a8e92972"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_198b8c4d901b5b",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_198b8c4d901b5b-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Failed to record the Owner-approved version (mooncake-mv-final-v3k23.mp4) as an accepted baseline; treated each optimization round as independent work with no persisted state memory, allowing confirmed fixes to be silently lost",
+       "betterDecision": "Immediately upon Owner confirmation, persist the approved version as an immutable baseline artifact (versioned snapshot plus an acceptance note enumerating confirmed properties such as subtitle vertical alignment via red bar height)",
+       "rationale": "Confirmed acceptance is a key intermediate conclusion that must live outside transient context; persisting it as a non-regressable baseline prevents later iterations from unknowingly reverting verified fixes",
+       "confidence": 0.92,
+       "riskLevel": "low",
+       "strategicPerspective": "baseline_persistence",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "Adopted layout changes based on self-inferred aesthetic preferences without ever comparing the new output against the confirmed-good baseline, so the regression in subtitle alignment went undetected",
+       "betterDecision": "After every modification, run an explicit regression check against the persisted baseline (property-level or frame-level diff on confirmed attributes like subtitle alignment and red bar height) and only adopt changes that preserve all confirmed properties",
+       "rationale": "Execution is not success until verified; comparing actual output against the accepted baseline converts silent regressions into detectable failures before they overwrite confirmed state",
+       "confidence": 0.88,
+       "riskLevel": "low",
+       "strategicPerspective": "verify_before_adopt",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "Replaced the Owner's explicitly confirmed correct state with self-inferred optimization preferences, prioritizing inferred taste over recorded acceptance and causing action drift",
+       "betterDecision": "Treat the Owner-confirmed version as authoritative: scope further optimization strictly to unconfirmed aspects, and skip (or explicitly re-confirm with the Owner) any change that touches confirmed attributes like subtitle alignment",
+       "rationale": "Explicit confirmations and decisions override inferred preferences; acting on self-inferred preference over an explicit acceptance record is a direct intent violation",
+       "confidence": 0.86,
+       "riskLevel": "low",
+       "strategicPerspective": "explicit_over_inferred",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "Re-edited an already-accepted deliverable with no guardrail or interception step, relying purely on the agent's own discipline to remember which properties were confirmed",
+       "betterDecision": "Encode a pre-edit guardrail: when a modification targets an accepted artifact (matching version tags like v3k23/final/approved), intercept the edit, require loading the baseline, enumerating intended change points, and completing a post-change diff validation before any overwrite is permitted",
+       "rationale": "Hard constraints must be translated into explicit checks and forbidden transitions; a mechanical gate catches regressions that memory- and discipline-dependent processes reliably fail to catch, especially when INTENT.md is empty and provides no encoded constraints",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "guardrail_encoding",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "Performed broad layout rewrites during optimization that touched already-fixed components (red bar height, subtitle alignment) instead of limiting changes to the specific aspect under optimization",
+       "betterDecision": "Decompose each optimization into minimal scoped diffs: modify only the targeted property, leave confirmed components untouched, and independently verify each change against the baseline before applying the next",
+       "rationale": "The simplest intervention satisfying intent with minimal state change shrinks the regression surface; broad rewrites make it structurally easy to destroy confirmed fixes even with good intentions",
+       "confidence": 0.78,
+       "riskLevel": "medium",
+       "strategicPerspective": "minimal_diff_scoping",
+       "sourcePrincipleId": "T-06"
+      }
+     ],
+     "sourcePainId": "pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e",
+     "contextRefs": [
+      "artifact://8ae36fa6-b2ba-4d5e-b6c5-21f0db5c2545"
+     ],
+     "generatedAt": "2025-06-14T08:21:33Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_198b8c4d901b5b-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Failed to record the Owner-approved version (mooncake-mv-final-v3k23.mp4) as an accepted baseline; treated each optimization round as independent work with no persisted state memory, allowing confirmed fixes to be silently lost\",\"betterDecision\":\"Immediately upon Owner confirmation, persist the approved version as an immutable baseline artifact (versioned snapshot plus an acceptance note enumerating confirmed properties such as subtitle vertical alignment via red bar height)\",\"rationale\":\"Confirmed acceptance is a key intermediate conclusion that must live outside transient context; persisting it as a non-regressable baseline prevents later iterations from unknowingly reverting verified fixes\",\"confidence\":0.92,\"riskLevel\":\"low\",\"strategicPerspective\":\"baseline_persistence\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":1,\"badDecision\":\"Adopted layout changes based on self-inferred aesthetic preferences without ever comparing the new output against the confirmed-good baseline, so the regression in subtitle alignment went undetected\",\"betterDecision\":\"After every modification, run an explicit regression check against the persisted baseline (property-level or frame-level diff on confirmed attributes like subtitle alignment and red bar height) and only adopt changes that preserve all confirmed properties\",\"rationale\":\"Execution is not success until verified; comparing actual output against the accepted baseline converts silent regressions into detectable failures before they overwrite confirmed state\",\"confidence\":0.88,\"riskLevel\":\"low\",\"strategicPerspective\":\"verify_before_adopt\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":2,\"badDecision\":\"Replaced the Owner's explicitly confirmed correct state with self-inferred optimization preferences, prioritizing inferred taste over recorded acceptance and causing action drift\",\"betterDecision\":\"Treat the Owner-confirmed version as authoritative: scope further optimization strictly to unconfirmed aspects, and skip (or explicitly re-confirm with the Owner) any change that touches confirmed attributes like subtitle alignment\",\"rationale\":\"Explicit confirmations and decisions override inferred preferences; acting on self-inferred preference over an explicit acceptance record is a direct intent violation\",\"confidence\":0.86,\"riskLevel\":\"low\",\"strategicPerspective\":\"explicit_over_inferred\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":3,\"badDecision\":\"Re-edited an already-accepted deliverable with no guardrail or interception step, relying purely on the agent's own discipline to remember which properties were confirmed\",\"betterDecision\":\"Encode a pre-edit guardrail: when a modification targets an accepted artifact (matching version tags like v3k23/final/approved), intercept the edit, require loading the baseline, enumerating intended change points, and completing a post-change diff validation before any overwrite is permitted\",\"rationale\":\"Hard constraints must be translated into explicit checks and forbidden transitions; a mechanical gate catches regressions that memory- and discipline-dependent processes reliably fail to catch, especially when INTENT.md is empty and provides no encoded constraints\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"guardrail_encoding\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"Performed broad layout rewrites during optimization that touched already-fixed components (red bar height, subtitle alignment) instead of limiting changes to the specific aspect under optimization\",\"betterDecision\":\"Decompose each optimization into minimal scoped diffs: modify only the targeted property, leave confirmed components untouched, and independently verify each change against the baseline before applying the next\",\"rationale\":\"The simplest intervention satisfying intent with minimal state change shrinks the regression surface; broad rewrites make it structurally easy to destroy confirmed fixes even with good intentions\",\"confidence\":0.78,\"riskLevel\":\"medium\",\"strategicPerspective\":\"minimal_diff_scoping\",\"sourcePrincipleId\":\"T-06\"}],\"sourcePainId\":\"pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e\",\"contextRefs\":[\"artifact://8ae36fa6-b2ba-4d5e-b6c5-21f0db5c2545\"],\"generatedAt\":\"2025-06-14T08:21:33Z\"}",
+    "usage": {
+     "input": 2031,
+     "output": 2203,
+     "total": 4234
+    },
+    "latencyMs": 24660,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "b0fbc069a502fa9b"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_198b8c4d901b5b-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r2-run1",
+     "thesis": "Explicit acceptance transforms transient work into durable ground truth. Once an owner confirms a state, an agent's autonomy to keep improving is legitimately bounded by the invariant that confirmed properties must not silently regress. This demands more than good intentions or memory: acceptance must be persisted as a non-regressable baseline, edits to accepted artifacts must pass through verification against that baseline, and subsequent changes must be scoped so narrowly that improvement structurally cannot destroy what was already verified. All five of the Dreamer's candidates are facets of one insight: unverified autonomy over confirmed state is the root failure, and only structural guarantees, not discipline, conserve verified progress.",
+     "principleCandidate": {
+      "title": "Persist accepted states as non-regressable baselines that gate all subsequent modification",
+      "rationale": "The root cause was that Owner confirmation lived only in transient context, so later optimization rounds treated confirmed fixes (e.g., subtitle alignment) as freely editable state. By persisting acceptance as an immutable, versioned baseline and requiring diff verification and minimal-scoped edits against it, 'do not regress confirmed properties' stops being a discipline-dependent memory task and becomes a structural guarantee: regressions become detectable before overwrite, and inferred preferences cannot silently override explicit acceptance.",
+      "scope": "Applies whenever an explicit confirmation or verified acceptance exists for a state, property, or deliverable and further modification of that artifact remains possible, especially in multi-round optimization, refinement, or maintenance loops on the same artifact, and most critically when no encoded constraints (e.g., empty INTENT.md) exist to otherwise protect confirmed state.",
+      "confidence": 0.86
+     },
+     "risks": [
+      "Overly rigid baselines can block legitimate improvements when requirements genuinely change and prior confirmations become obsolete; the principle needs an explicit owner-reconfirmation escape hatch rather than treating baselines as permanently immutable.",
+      "This candidate substantially overlaps existing core axioms: T-10 (persist important intermediate conclusions), T-07 (verify results after acting), T-05 (encode guardrails), T-02 (explicit decisions override inferred preferences), and T-06 (minimal intervention); it is a composite synthesis of these rather than a wholly novel axiom and may be redundant if promoted to core.",
+      "Baseline comparison may be impractical or costly when artifacts lack machine-diffable representations, leading to skipped checks that recreate the original failure under the guise of compliance.",
+      "Multiple persisted accepted versions can accumulate, creating ambiguity about which baseline is authoritative and reintroducing regressions through stale-baseline comparisons.",
+      "Guardrail interception on accepted artifacts adds friction that, if not precisely scoped to confirmed attributes, may discourage beneficial edits and slow legitimate iteration."
+     ],
+     "generatedAt": "2025-06-14T08:23:47Z"
+    },
+    "raw": "{\n  \"taskId\": \"philosopher-pri815-G-pain_host_198b8c4d901b5b-r2\",\n  \"sourceDreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_198b8c4d901b-r2-run1\",\n  \"thesis\": \"Explicit acceptance transforms transient work into durable ground truth. Once an owner confirms a state, an agent's autonomy to keep improving is legitimately bounded by the invariant that confirmed properties must not silently regress. This demands more than good intentions or memory: acceptance must be persisted as a non-regressable baseline, edits to accepted artifacts must pass through verification against that baseline, and subsequent changes must be scoped so narrowly that improvement structurally cannot destroy what was already verified. All five of the Dreamer's candidates are facets of one insight: unverified autonomy over confirmed state is the root failure, and only structural guarantees, not discipline, conserve verified progress.\",\n  \"principleCandidate\": {\n    \"title\": \"Persist accepted states as non-regressable baselines that gate all subsequent modification\",\n    \"rationale\": \"The root cause was that Owner confirmation lived only in transient context, so later optimization rounds treated confirmed fixes (e.g., subtitle alignment) as freely editable state. By persisting acceptance as an immutable, versioned baseline and requiring diff verification and minimal-scoped edits against it, 'do not regress confirmed properties' stops being a discipline-dependent memory task and becomes a structural guarantee: regressions become detectable before overwrite, and inferred preferences cannot silently override explicit acceptance.\",\n    \"scope\": \"Applies whenever an explicit confirmation or verified acceptance exists for a state, property, or deliverable and further modification of that artifact remains possible, especially in multi-round optimization, refinement, or maintenance loops on the same artifact, and most critically when no encoded constraints (e.g., empty INTENT.md) exist to otherwise protect confirmed state.\",\n    \"confidence\": 0.86\n  },\n  \"risks\": [\n    \"Overly rigid baselines can block legitimate improvements when requirements genuinely change and prior confirmations become obsolete; the principle needs an explicit owner-reconfirmation escape hatch rather than treating baselines as permanently immutable.\",\n    \"This candidate substantially overlaps existing core axioms: T-10 (persist important intermediate conclusions), T-07 (verify results after acting), T-05 (encode guardrails), T-02 (explicit decisions override inferred preferences), and T-06 (minimal intervention); it is a composite synthesis of these rather than a wholly novel axiom and may be redundant if promoted to core.\",\n    \"Baseline comparison may be impractical or costly when artifacts lack machine-diffable representations, leading to skipped checks that recreate the original failure under the guise of compliance.\",\n    \"Multiple persisted accepted versions can accumulate, creating ambiguity about which baseline is authoritative and reintroducing regressions through stale-baseline comparisons.\",\n    \"Guardrail interception on accepted artifacts adds friction that, if not precisely scoped to confirmed attributes, may discourage beneficial edits and slow legitimate iteration.\"\n  ],\n  \"generatedAt\": \"2025-06-14T08:23:47Z\"\n}",
+    "usage": {
+     "input": 1715,
+     "output": 1655,
+     "total": 3370
+    },
+    "latencyMs": 23154,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "23299361fcb345ba"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_198b8c4d901b5b-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r2-run1",
+     "principleDraft": {
+      "title": "Persist Owner-accepted states as non-regressable baselines gating subsequent edits",
+      "statement": "When the Owner explicitly confirms a state, property, or deliverable as correct, persist that acceptance outside transient context as a versioned baseline that enumerates the confirmed properties, and treat it as non-regressable: before any further modification of that artifact, load the baseline and declare the intended change points; scope edits away from confirmed properties; and verify the modified output against the baseline, adopting only changes that preserve every confirmed property. Self-inferred preferences never override recorded acceptance; only explicit Owner re-confirmation may retire or revise the baseline.",
+      "rationale": "The root cause was that Owner confirmation (mooncake-mv-final-v3k23.mp4 with fixed subtitle vertical alignment) lived only in transient context, so later optimization rounds treated confirmed fixes as freely editable state and reverted them based on inferred preferences. Persisting acceptance as a baseline and gating edits through load-declare-verify makes non-regression a structural guarantee rather than a discipline-dependent memory task: regressions become detectable before overwrite, and inferred preferences cannot silently override explicit acceptance — closing the gap left by an empty INTENT.md.",
+      "applicability": [
+       "Multi-round optimization, refinement, or maintenance loops on the same artifact (e.g., video, image, document, or code deliverables)",
+       "Any situation where an explicit Owner confirmation or verified acceptance of a state exists and further modification of that artifact remains possible",
+       "Re-edits targeting artifacts marked with version, final, or approved tags (e.g., v3k23, final)",
+       "Especially when no encoded constraints exist (e.g., an empty INTENT.md) to otherwise protect confirmed state"
+      ],
+      "antiPatterns": [
+       "Treating each optimization round as independent work with no persisted record of which version and which properties were accepted",
+       "Re-editing an accepted deliverable based on self-inferred aesthetic or optimization preferences instead of the recorded acceptance",
+       "Overwriting an accepted artifact without first loading the accepted baseline and diffing the new output against it",
+       "Broad layout rewrites that touch already-confirmed components (e.g., subtitle vertical alignment, red bar height) instead of minimal scoped diffs on the targeted property",
+       "Relying on agent memory or discipline alone to protect confirmed properties, with no mechanical gate or regression comparison"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent later AI optimization rounds from silently reverting deliverable properties the Owner has already confirmed correct (e.g., the fixed subtitle vertical alignment in mooncake-mv-final-v3k23.mp4).",
+      "targetBehavior": "On Owner acceptance, the agent persists the accepted version and its confirmed properties as a baseline; for any later edit of that artifact it visibly loads the baseline, declares the intended change points, scopes the edit away from confirmed properties, and completes a post-change comparison against the baseline before adopting the new output.",
+      "forbiddenBehavior": "Re-modifying an Owner-accepted artifact from self-inferred preferences without loading or comparing against the accepted baseline, silently regressing confirmed fixes during multi-round optimization loops.",
+      "evidenceSource": "Severe user-correction pain: the user reported that the already-fixed subtitle vertical alignment (via red bar height) in mooncake-mv-final-v3k23.mp4 had been reverted by subsequent optimization ('越优化越烂'); the diagnosis attributed this to failure to persist the accepted version as a baseline and compare against it (T-07/T-08/T-10/T-02 violations), aggravated by an empty INTENT.md providing no encoded guardrails.",
+      "validationExpectation": "An evaluator should require that generated rules trigger on re-edits of accepted artifacts (version/final/approved markers), mandate baseline loading plus post-change regression comparison on confirmed properties before any overwrite, forbid inferred-preference overrides of recorded acceptance, and retain an explicit Owner-reconfirmation path for retiring a baseline; any rule change that permits overwriting accepted state without baseline comparison must be flagged as contradicting this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r2-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-02, T-05, T-06, T-07 and T-10: this principle is a composite synthesis covering the accepted-state lifecycle and may be redundant if promoted to core; it should be treated as an operational composition of those axioms rather than a new primitive.",
+      "Overly rigid baselines can block legitimate improvements when requirements genuinely change and prior confirmations become obsolete; the principle depends on the explicit Owner-reconfirmation escape hatch rather than treating baselines as permanently immutable.",
+      "Baseline comparison may be impractical or costly when artifacts lack machine-diffable representations, and skipped checks would recreate the original failure under the guise of compliance.",
+      "Multiple persisted accepted versions can accumulate, creating ambiguity about which baseline is authoritative and reintroducing regressions through stale-baseline comparisons.",
+      "Guardrail interception on accepted artifacts adds friction that, if not precisely scoped to confirmed attributes, may discourage beneficial edits and slow legitimate iteration."
+     ],
+     "generatedAt": "2025-06-14T08:35:02Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-pain_host_198b8c4d901b5b-r2\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r2-run1\",\"principleDraft\":{\"title\":\"Persist Owner-accepted states as non-regressable baselines gating subsequent edits\",\"statement\":\"When the Owner explicitly confirms a state, property, or deliverable as correct, persist that acceptance outside transient context as a versioned baseline that enumerates the confirmed properties, and treat it as non-regressable: before any further modification of that artifact, load the baseline and declare the intended change points; scope edits away from confirmed properties; and verify the modified output against the baseline, adopting only changes that preserve every confirmed property. Self-inferred preferences never override recorded acceptance; only explicit Owner re-confirmation may retire or revise the baseline.\",\"rationale\":\"The root cause was that Owner confirmation (mooncake-mv-final-v3k23.mp4 with fixed subtitle vertical alignment) lived only in transient context, so later optimization rounds treated confirmed fixes as freely editable state and reverted them based on inferred preferences. Persisting acceptance as a baseline and gating edits through load-declare-verify makes non-regression a structural guarantee rather than a discipline-dependent memory task: regressions become detectable before overwrite, and inferred preferences cannot silently override explicit acceptance — closing the gap left by an empty INTENT.md.\",\"applicability\":[\"Multi-round optimization, refinement, or maintenance loops on the same artifact (e.g., video, image, document, or code deliverables)\",\"Any situation where an explicit Owner confirmation or verified acceptance of a state exists and further modification of that artifact remains possible\",\"Re-edits targeting artifacts marked with version, final, or approved tags (e.g., v3k23, final)\",\"Especially when no encoded constraints exist (e.g., an empty INTENT.md) to otherwise protect confirmed state\"],\"antiPatterns\":[\"Treating each optimization round as independent work with no persisted record of which version and which properties were accepted\",\"Re-editing an accepted deliverable based on self-inferred aesthetic or optimization preferences instead of the recorded acceptance\",\"Overwriting an accepted artifact without first loading the accepted baseline and diffing the new output against it\",\"Broad layout rewrites that touch already-confirmed components (e.g., subtitle vertical alignment, red bar height) instead of minimal scoped diffs on the targeted property\",\"Relying on agent memory or discipline alone to protect confirmed properties, with no mechanical gate or regression comparison\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"Prevent later AI optimization rounds from silently reverting deliverable properties the Owner has already confirmed correct (e.g., the fixed subtitle vertical alignment in mooncake-mv-final-v3k23.mp4).\",\"targetBehavior\":\"On Owner acceptance, the agent persists the accepted version and its confirmed properties as a baseline; for any later edit of that artifact it visibly loads the baseline, declares the intended change points, scopes the edit away from confirmed properties, and completes a post-change comparison against the baseline before adopting the new output.\",\"forbiddenBehavior\":\"Re-modifying an Owner-accepted artifact from self-inferred preferences without loading or comparing against the accepted baseline, silently regressing confirmed fixes during multi-round optimization loops.\",\"evidenceSource\":\"Severe user-correction pain: the user reported that the already-fixed subtitle vertical alignment (via red bar height) in mooncake-mv-final-v3k23.mp4 had been reverted by subsequent optimization ('越优化越烂'); the diagnosis attributed this to failure to persist the accepted version as a baseline and compare against it (T-07/T-08/T-10/T-02 violations), aggravated by an empty INTENT.md providing no encoded guardrails.\",\"validationExpectation\":\"An evaluator should require that generated rules trigger on re-edits of accepted artifacts (version/final/approved markers), mandate baseline loading plus post-change regression comparison on confirmed properties before any overwrite, forbid inferred-preference overrides of recorded acceptance, and retain an explicit Owner-reconfirmation path for retiring a baseline; any rule change that permits overwriting accepted state without baseline comparison must be flagged as contradicting this intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r2-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r2-run1\"},\"risks\":[\"Substantial overlap with core axioms T-02, T-05, T-06, T-07 and T-10: this principle is a composite synthesis covering the accepted-state lifecycle and may be redundant if promoted to core; it should be treated as an operational composition of those axioms rather than a new primitive.\",\"Overly rigid baselines can block legitimate improvements when requirements genuinely change and prior confirmations become obsolete; the principle depends on the explicit Owner-reconfirmation escape hatch rather than treating baselines as permanently immutable.\",\"Baseline comparison may be impractical or costly when artifacts lack machine-diffable representations, and skipped checks would recreate the original failure under the guise of compliance.\",\"Multiple persisted accepted versions can accumulate, creating ambiguity about which baseline is authoritative and reintroducing regressions through stale-baseline comparisons.\",\"Guardrail interception on accepted artifacts adds friction that, if not precisely scoped to confirmed attributes, may discourage beneficial edits and slow legitimate iteration.\"],\"generatedAt\":\"2025-06-14T08:35:02Z\"}",
+    "usage": {
+     "input": 4324,
+     "output": 4073,
+     "total": 8397
+    },
+    "latencyMs": 40776,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "a5cfd7c7e950dc6b"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_198b8c4d901b5b-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r2-run1",
+     "principleDraft": {
+      "title": "Persist owner-accepted states as non-regressable baselines gating subsequent edits",
+      "statement": "When the owner explicitly accepts or confirms a state, property, or deliverable, immediately persist that acceptance as a versioned, non-regressable baseline in durable storage outside transient context. Every subsequent modification of the affected artifact must (a) be compared against the authoritative baseline before overwrite, (b) be scoped to touch only unconfirmed attributes, and (c) be verified after the edit to prove confirmed properties are unchanged. Confirmed properties may change only through explicit owner re-confirmation, never through inferred preference or optimization autonomy.",
+      "rationale": "The root cause is that owner acceptance lived only in transient context, so later optimization rounds treated confirmed fixes (e.g., subtitle alignment) as freely editable state. Persisting acceptance as an immutable, versioned baseline and gating edits through diff verification and minimal scoping converts 'do not regress confirmed properties' from a discipline-dependent memory task into a structural guarantee: regressions become detectable before overwrite, and inferred preferences cannot silently override explicit acceptance.",
+      "applicability": [
+       "Multi-round optimization, refinement, or maintenance loops that revisit the same artifact after owner confirmation",
+       "Any state, property, or deliverable carrying explicit owner acceptance where further modification remains possible",
+       "Environments with no encoded constraints protecting confirmed state (e.g., empty or absent INTENT.md)",
+       "Session or agent handoffs where acceptance held only in transient context would otherwise be lost"
+      ],
+      "antiPatterns": [
+       "Treating owner-confirmed properties as freely editable state in later improvement rounds",
+       "Relying on memory or in-context recall alone to preserve confirmed fixes across rounds or sessions",
+       "Overwriting an accepted artifact wholesale when a narrowly scoped edit would achieve the intent",
+       "Skipping baseline comparison because the artifact lacks a convenient machine-diffable representation",
+       "Letting inferred preferences or heuristic optimizations override recorded acceptance without owner re-confirmation",
+       "Keeping multiple accepted versions without marking which baseline is authoritative"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "Prevent the agent from silently undoing properties the owner has explicitly confirmed (e.g., a verified subtitle-alignment fix) during later improvement rounds on the same artifact.",
+      "targetBehavior": "After an owner confirms a state, the agent persists that acceptance as a versioned baseline in durable storage, and before any subsequent edit to the affected artifact it performs a comparison against that baseline, scopes the edit to exclude confirmed attributes, and verifies after the edit that confirmed properties are unchanged — requesting owner re-confirmation if a confirmed property must legitimately change.",
+      "forbiddenBehavior": "Making unverified autonomous edits to an owner-accepted artifact: modifying, regressing, or discarding confirmed properties in later optimization rounds without baseline comparison, minimal scoping, post-edit verification, or explicit owner re-confirmation.",
+      "evidenceSource": "The pain host case in which an owner-confirmed subtitle-alignment fix regressed during subsequent optimization rounds because acceptance existed only in transient context and no encoded constraints (empty INTENT.md) protected the confirmed state.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it requires observable persistence of acceptance, a pre-edit comparison against the authoritative baseline, and post-edit verification that confirmed properties are unchanged, with explicit owner re-confirmation as the sole sanctioned path to altering a confirmed property; a change that removes any of these gates contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_198b8c4d901b-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b-r2-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-02, T-05, T-06, T-07, and T-10: this principle is a composite synthesis of them rather than a wholly novel axiom, so it should be positioned as a specialization for owner-accepted state to avoid redundancy if promoted to core.",
+      "Rigid baselines can block legitimate improvements when requirements genuinely change and prior confirmations become obsolete; the principle depends on a functioning owner-reconfirmation escape hatch rather than treating baselines as permanently immutable.",
+      "Baseline comparison may be impractical or costly for artifacts lacking machine-diffable representations, leading to skipped checks that recreate the original failure under the guise of compliance.",
+      "Multiple persisted accepted versions can accumulate, creating ambiguity about which baseline is authoritative and reintroducing regressions through stale-baseline comparisons.",
+      "Guardrail interception on accepted artifacts adds friction that, if not precisely scoped to confirmed attributes, may discourage beneficial edits and slow legitimate iteration."
+     ],
+     "generatedAt": "2025-06-14T08:34:05Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_198b8c4d901b-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Persist owner-accepted states as non-regressable baselines gating subsequent edits\",\n    \"statement\": \"When the owner explicitly accepts or confirms a state, property, or deliverable, immediately persist that acceptance as a versioned, non-regressable baseline in durable storage outside transient context. Every subsequent modification of the affected artifact must (a) be compared against the authoritative baseline before overwrite, (b) be scoped to touch only unconfirmed attributes, and (c) be verified after the edit to prove confirmed properties are unchanged. Confirmed properties may change only through explicit owner re-confirmation, never through inferred preference or optimization autonomy.\",\n    \"rationale\": \"The root cause is that owner acceptance lived only in transient context, so later optimization rounds treated confirmed fixes (e.g., subtitle alignment) as freely editable state. Persisting acceptance as an immutable, versioned baseline and gating edits through diff verification and minimal scoping converts 'do not regress confirmed properties' from a discipline-dependent memory task into a structural guarantee: regressions become detectable before overwrite, and inferred preferences cannot silently override explicit acceptance.\",\n    \"applicability\": [\n      \"Multi-round optimization, refinement, or maintenance loops that revisit the same artifact after owner confirmation\",\n      \"Any state, property, or deliverable carrying explicit owner acceptance where further modification remains possible\",\n      \"Environments with no encoded constraints protecting confirmed state (e.g., empty or absent INTENT.md)\",\n      \"Session or agent handoffs where acceptance held only in transient context would otherwise be lost\"\n    ],\n    \"antiPatterns\": [\n      \"Treating owner-confirmed properties as freely editable state in later improvement rounds\",\n      \"Relying on memory or in-context recall alone to preserve confirmed fixes across rounds or sessions\",\n      \"Overwriting an accepted artifact wholesale when a narrowly scoped edit would achieve the intent\",\n      \"Skipping baseline comparison because the artifact lacks a convenient machine-diffable representation\",\n      \"Letting inferred preferences or heuristic optimizations override recorded acceptance without owner re-confirmation\",\n      \"Keeping multiple accepted versions without marking which baseline is authoritative\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Prevent the agent from silently undoing properties the owner has explicitly confirmed (e.g., a verified subtitle-alignment fix) during later improvement rounds on the same artifact.\",\n    \"targetBehavior\": \"After an owner confirms a state, the agent persists that acceptance as a versioned baseline in durable storage, and before any subsequent edit to the affected artifact it performs a comparison against that baseline, scopes the edit to exclude confirmed attributes, and verifies after the edit that confirmed properties are unchanged — requesting owner re-confirmation if a confirmed property must legitimately change.\",\n    \"forbiddenBehavior\": \"Making unverified autonomous edits to an owner-accepted artifact: modifying, regressing, or discarding confirmed properties in later optimization rounds without baseline comparison, minimal scoping, post-edit verification, or explicit owner re-confirmation.\",\n    \"evidenceSource\": \"The pain host case in which an owner-confirmed subtitle-alignment fix regressed during subsequent optimization rounds because acceptance existed only in transient context and no encoded constraints (empty INTENT.md) protected the confirmed state.\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if it requires observable persistence of acceptance, a pre-edit comparison against the authoritative baseline, and post-edit verification that confirmed properties are unchanged, with explicit owner re-confirmation as the sole sanctioned path to altering a confirmed property; a change that removes any of these gates contradicts this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_198b8c4d901b-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b-r2-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axioms T-02, T-05, T-06, T-07, and T-10: this principle is a composite synthesis of them rather than a wholly novel axiom, so it should be positioned as a specialization for owner-accepted state to avoid redundancy if promoted to core.\",\n    \"Rigid baselines can block legitimate improvements when requirements genuinely change and prior confirmations become obsolete; the principle depends on a functioning owner-reconfirmation escape hatch rather than treating baselines as permanently immutable.\",\n    \"Baseline comparison may be impractical or costly for artifacts lacking machine-diffable representations, leading to skipped checks that recreate the original failure under the guise of compliance.\",\n    \"Multiple persisted accepted versions can accumulate, creating ambiguity about which baseline is authoritative and reintroducing regressions through stale-baseline comparisons.\",\n    \"Guardrail interception on accepted artifacts adds friction that, if not precisely scoped to confirmed attributes, may discourage beneficial edits and slow legitimate iteration.\"\n  ],\n  \"generatedAt\": \"2025-06-14T08:34:05Z\"\n}",
+    "usage": {
+     "input": 2020,
+     "output": 3091,
+     "total": 5111
+    },
+    "latencyMs": 30566,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "4a4700a7b26c0443"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-pain_host_198b8c4d901b5b",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-pain_host_198b8c4d901b5b-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "在 Owner 已确认 v3k23 版本正确后，未加载或比对已验收基准，直接基于自行推断的布局偏好重新修改字幕对齐相关布局",
+       "betterDecision": "在任何后续优化前，先定位并持久化已验收版本（mooncake-mv-final-v3k23.mp4）为不可变基准，新改动必须相对该基准进行增量调整",
+       "rationale": "已确认状态是最强的意图证据，丢失它会导致后续迭代在无记忆状态下重新推断并回退已修复效果",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "baseline_first",
+       "sourcePrincipleId": "T-10"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "在原路径上直接生成新版本覆盖，未保留已确认正确版本的可恢复副本，使回归发生后无法快速回滚",
+       "betterDecision": "将已验收产物复制到受保护的版本化基准目录（如 baselines/v3k23-approved/），新迭代输出写入独立路径，禁止原地覆盖已验收文件",
+       "rationale": "保留可回滚的已验收副本将破坏性改动转化为可逆操作，即使新迭代出错也能一键恢复",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "reversibility_preservation",
+       "sourcePrincipleId": "T-04"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "完成新一轮渲染后未做任何输出比对，直接采纳新版本，导致字幕垂直对齐的回归性破坏未被发现",
+       "betterDecision": "每次渲染完成后，对字幕带区域（红条高度、垂直对齐）与基准版本做逐帧/抽样视觉 diff，确认已修复项无回归后才采纳新版本",
+       "rationale": "执行不等于成功，只有与已确认良好的基准对比验证后才能判定改动是否可接受",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "regression_verification",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "在 INTENT.md 为空、优化目标未被 Owner 确认的情况下，自行推断'更好的布局'并对已验收产出物动手",
+       "betterDecision": "当优化范围模糊且缺少编码的意图约束时，先向 Owner 确认改动范围，或仅做附加性改动（新增元素）而不触碰已确认修复的区域",
+       "rationale": "Owner 的显式确认优先级高于任何推断的偏好，对已验收产物的修改必须以确认的意图为边界",
+       "confidence": 0.7,
+       "riskLevel": "medium",
+       "strategicPerspective": "intent_over_inference",
+       "sourcePrincipleId": "T-02"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "多轮优化迭代无任何已修复项清单，每轮改动前未检查是否会影响历史确认的修复点",
+       "betterDecision": "维护一份已验收修复项回归清单（如'字幕垂直对齐=红条高度已确认'），并固化为修改前的强制检查：任何新版本必须逐项通过清单才可替换当前版本",
+       "rationale": "将隐性验收结论转化为显式 guardrail 与检查项，可机械执行且不依赖 Agent 记忆，防止同类回归反复发生",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "guardrail_checklist",
+       "sourcePrincipleId": "T-05"
+      }
+     ],
+     "sourcePainId": "pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e",
+     "contextRefs": [
+      "artifact://8ae36fa6-b2ba-4d5e-b6c5-21f0db5c2545"
+     ],
+     "generatedAt": "2025-06-14T09:42:17Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-pain_host_198b8c4d901b5b-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"在 Owner 已确认 v3k23 版本正确后，未加载或比对已验收基准，直接基于自行推断的布局偏好重新修改字幕对齐相关布局\",\"betterDecision\":\"在任何后续优化前，先定位并持久化已验收版本（mooncake-mv-final-v3k23.mp4）为不可变基准，新改动必须相对该基准进行增量调整\",\"rationale\":\"已确认状态是最强的意图证据，丢失它会导致后续迭代在无记忆状态下重新推断并回退已修复效果\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"baseline_first\",\"sourcePrincipleId\":\"T-10\"},{\"candidateIndex\":1,\"badDecision\":\"在原路径上直接生成新版本覆盖，未保留已确认正确版本的可恢复副本，使回归发生后无法快速回滚\",\"betterDecision\":\"将已验收产物复制到受保护的版本化基准目录（如 baselines/v3k23-approved/），新迭代输出写入独立路径，禁止原地覆盖已验收文件\",\"rationale\":\"保留可回滚的已验收副本将破坏性改动转化为可逆操作，即使新迭代出错也能一键恢复\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"reversibility_preservation\",\"sourcePrincipleId\":\"T-04\"},{\"candidateIndex\":2,\"badDecision\":\"完成新一轮渲染后未做任何输出比对，直接采纳新版本，导致字幕垂直对齐的回归性破坏未被发现\",\"betterDecision\":\"每次渲染完成后，对字幕带区域（红条高度、垂直对齐）与基准版本做逐帧/抽样视觉 diff，确认已修复项无回归后才采纳新版本\",\"rationale\":\"执行不等于成功，只有与已确认良好的基准对比验证后才能判定改动是否可接受\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"regression_verification\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":3,\"badDecision\":\"在 INTENT.md 为空、优化目标未被 Owner 确认的情况下，自行推断'更好的布局'并对已验收产出物动手\",\"betterDecision\":\"当优化范围模糊且缺少编码的意图约束时，先向 Owner 确认改动范围，或仅做附加性改动（新增元素）而不触碰已确认修复的区域\",\"rationale\":\"Owner 的显式确认优先级高于任何推断的偏好，对已验收产物的修改必须以确认的意图为边界\",\"confidence\":0.7,\"riskLevel\":\"medium\",\"strategicPerspective\":\"intent_over_inference\",\"sourcePrincipleId\":\"T-02\"},{\"candidateIndex\":4,\"badDecision\":\"多轮优化迭代无任何已修复项清单，每轮改动前未检查是否会影响历史确认的修复点\",\"betterDecision\":\"维护一份已验收修复项回归清单（如'字幕垂直对齐=红条高度已确认'），并固化为修改前的强制检查：任何新版本必须逐项通过清单才可替换当前版本\",\"rationale\":\"将隐性验收结论转化为显式 guardrail 与检查项，可机械执行且不依赖 Agent 记忆，防止同类回归反复发生\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"guardrail_checklist\",\"sourcePrincipleId\":\"T-05\"}],\"sourcePainId\":\"pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e\",\"contextRefs\":[\"artifact://8ae36fa6-b2ba-4d5e-b6c5-21f0db5c2545\"],\"generatedAt\":\"2025-06-14T09:42:17Z\"}",
+    "usage": {
+     "input": 2031,
+     "output": 2141,
+     "total": 4172
+    },
+    "latencyMs": 24864,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "562f95cffa99d4af"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-pain_host_198b8c4d901b5b-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r3-run1",
+     "thesis": "An owner-accepted state is the strongest available evidence of intent and the sole anchor of accumulated progress; when it is not persisted and protected, the system loses memory of what 'correct' means and regresses into re-inference and rework. Genuine progress in iterative work is therefore not the production of new output but the monotonic accumulation of verified baselines: each accepted state must be frozen as an immutable reference, new changes must be incremental relative to it, and every replacement must pass a mechanical regression check against it before adoption.",
+     "principleCandidate": {
+      "title": "Verified baselines are immutable anchors: change incrementally, verify against the accepted state",
+      "rationale": "The root cause across all failure modes was that an owner-confirmed outcome existed only in transient context. By freezing accepted states as protected, diff-able baselines and gating every subsequent modification on (a) explicit change scope, (b) writes to separate paths rather than in-place overwrite, and (c) regression diff against the baseline before adoption, confirmed fixes cannot be silently destroyed and regressions become both detectable and reversible.",
+      "scope": "Applies whenever an artifact, configuration, or system state has been explicitly accepted or verified by the owner and further modification is contemplated—especially in iterative optimization loops, multi-round rendering/build pipelines, or any workflow where acceptance decisions are separated in time from later changes. Does not apply to states never confirmed by the owner or to genuinely exploratory sandboxes.",
+      "confidence": 0.8
+     },
+     "risks": [
+      "Composite overlap: this principle synthesizes and partially duplicates existing core axioms T-04 (reversibility), T-05 (guardrails/checks), T-07 (post-action verification), and T-10 (persisting conclusions); adopting it alongside those axioms requires clarifying precedence to avoid redundant or conflicting enforcement",
+      "Over-rigid baseline freezing may block legitimate improvements if no explicit re-baselining path exists; the principle must allow the baseline to be superseded only by a newly owner-accepted state",
+      "Mandatory per-change diff verification adds overhead disproportionate to trivial or purely additive changes, encouraging checklist theater rather than meaningful regression checks",
+      "Diff-based verification may pass superficial visual/state comparisons while missing semantic regressions not captured by the chosen comparison dimensions"
+     ],
+     "generatedAt": "2025-06-14T09:45:30Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-pain_host_198b8c4d901b5b-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r3-run1\",\"thesis\":\"An owner-accepted state is the strongest available evidence of intent and the sole anchor of accumulated progress; when it is not persisted and protected, the system loses memory of what 'correct' means and regresses into re-inference and rework. Genuine progress in iterative work is therefore not the production of new output but the monotonic accumulation of verified baselines: each accepted state must be frozen as an immutable reference, new changes must be incremental relative to it, and every replacement must pass a mechanical regression check against it before adoption.\",\"principleCandidate\":{\"title\":\"Verified baselines are immutable anchors: change incrementally, verify against the accepted state\",\"rationale\":\"The root cause across all failure modes was that an owner-confirmed outcome existed only in transient context. By freezing accepted states as protected, diff-able baselines and gating every subsequent modification on (a) explicit change scope, (b) writes to separate paths rather than in-place overwrite, and (c) regression diff against the baseline before adoption, confirmed fixes cannot be silently destroyed and regressions become both detectable and reversible.\",\"scope\":\"Applies whenever an artifact, configuration, or system state has been explicitly accepted or verified by the owner and further modification is contemplated—especially in iterative optimization loops, multi-round rendering/build pipelines, or any workflow where acceptance decisions are separated in time from later changes. Does not apply to states never confirmed by the owner or to genuinely exploratory sandboxes.\",\"confidence\":0.8},\"risks\":[\"Composite overlap: this principle synthesizes and partially duplicates existing core axioms T-04 (reversibility), T-05 (guardrails/checks), T-07 (post-action verification), and T-10 (persisting conclusions); adopting it alongside those axioms requires clarifying precedence to avoid redundant or conflicting enforcement\",\"Over-rigid baseline freezing may block legitimate improvements if no explicit re-baselining path exists; the principle must allow the baseline to be superseded only by a newly owner-accepted state\",\"Mandatory per-change diff verification adds overhead disproportionate to trivial or purely additive changes, encouraging checklist theater rather than meaningful regression checks\",\"Diff-based verification may pass superficial visual/state comparisons while missing semantic regressions not captured by the chosen comparison dimensions\"],\"generatedAt\":\"2025-06-14T09:45:30Z\"}",
+    "usage": {
+     "input": 1647,
+     "output": 1234,
+     "total": 2881
+    },
+    "latencyMs": 17195,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "117221704e758166"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_198b8c4d901b5b-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r3-run1",
+     "principleDraft": {
+      "title": "Freeze owner-accepted states as immutable baselines; change incrementally and verify against them",
+      "statement": "Whenever an artifact, configuration, or system state has been explicitly accepted by the owner, immediately persist it as a protected, immutable, diff-able baseline outside transient context. Any subsequent modification must be implemented as an incremental change written to a separate path (never overwriting the baseline), preceded by an explicit statement of change scope, and adopted only after a mechanical regression diff against the baseline confirms the accepted properties are preserved. The baseline may be superseded only by a newly owner-accepted state.",
+      "rationale": "The diagnosed root cause across the failure modes is that an owner-confirmed correct state existed only in transient context: once that context was lost, the system forgot what 'correct' meant, re-inferred already-settled decisions, and silently destroyed confirmed fixes in later rounds. Persisting each accepted state as an immutable anchor converts progress from mere output production into monotonic accumulation of verified baselines: accepted work becomes recoverable and non-destructible, regressions against the accepted state become mechanically detectable before adoption rather than after damage, and any bad change is reversible by falling back to the frozen baseline.",
+      "applicability": [
+       "Iterative optimization loops and multi-round rendering/build pipelines where an owner accepts an intermediate result and further modification rounds follow",
+       "Workflows where the owner's acceptance decision is separated in time from later changes to the same artifact, configuration, or system state",
+       "Any contemplated modification of an artifact, configuration, or state that has been explicitly confirmed or verified by the owner",
+       "Explicitly out of scope: states never confirmed by the owner and genuinely exploratory sandbox work where no baseline has been accepted"
+      ],
+      "antiPatterns": [
+       "Overwriting an owner-accepted artifact or configuration in place without first preserving the accepted version as a recoverable baseline",
+       "Holding the owner-accepted state only in conversation or transient context so it is lost on context switch, compaction, or session end",
+       "Regenerating output from scratch in a later round instead of deriving it incrementally from the accepted baseline, discarding confirmed fixes",
+       "Adopting a replacement change without mechanically diffing it against the last owner-accepted baseline for regressions",
+       "Redoing or reworking components the owner already accepted because their correctness was never anchored to a persisted reference"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants every explicitly accepted state preserved as a protected baseline so that later iterative changes build on it incrementally and can never silently destroy, regress, or rework an already-confirmed outcome.",
+      "targetBehavior": "Upon owner acceptance, the agent persists a tagged, read-only copy of the accepted state outside transient context (versioned file, snapshot, or equivalent); before any further change it states the explicit change scope, writes the new version to a separate path rather than overwriting the baseline, and records a regression diff against the baseline whose result gates adoption; the baseline is replaced only when the owner accepts a new state.",
+      "forbiddenBehavior": "Losing, overwriting, or reworking an owner-accepted state — holding it only in transient context, regenerating from scratch in later rounds, or adopting replacements without a regression diff against the accepted baseline — such that confirmed fixes silently disappear and settled decisions must be re-inferred.",
+      "evidenceSource": "Pain record pain_host_198b8c4d901b5b (via dreamer/philosopher lineage): the diagnosed root cause was an owner-confirmed correct outcome existing only in transient context, so subsequent iterative rounds re-derived work from scratch, overwrote accepted fixes, and forced re-inference of already-settled decisions.",
+      "validationExpectation": "A rule is faithful only if it fires exactly when a prior owner-accepted state exists and further modification is contemplated; requires all three gates — (1) persisted protected baseline, (2) separate-path incremental write with explicit change scope, (3) pre-adoption regression diff against the baseline; stays silent on never-confirmed or exploratory states; and permits re-baselining only upon a new owner acceptance. A repair change that removes any of these gates or fires on unconfirmed states contradicts this intent and must be flagged, not implemented."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r3-run1"
+     },
+     "risks": [
+      "Composite overlap: this principle partially duplicates core axioms T-04 (reversible actions), T-05 (explicit guardrails and checks), T-07 (post-action verification), and T-10 (persist conclusions outside transient context); rule generation must define precedence so enforcement is complementary rather than redundant or conflicting",
+      "Over-rigid baseline freezing can block legitimate improvements if derived rules omit the re-baselining path (supersede only via a newly owner-accepted state)",
+      "Mandatory per-change diff verification adds overhead disproportionate to trivial or purely additive changes, encouraging checklist theater where a superficial diff substitutes for a meaningful regression check",
+      "Diff-based verification can pass superficial textual or state comparisons while missing semantic regressions not captured by the chosen comparison dimensions; derived rules should tie comparison dimensions to the properties the owner actually accepted",
+      "Environments lacking native versioning or snapshot capabilities may push agents toward degraded simulations of immutability (manual copies that drift from the protected baseline)"
+     ],
+     "generatedAt": "2025-06-14T09:57:41Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_198b8c4d901b5b-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Freeze owner-accepted states as immutable baselines; change incrementally and verify against them\",\n    \"statement\": \"Whenever an artifact, configuration, or system state has been explicitly accepted by the owner, immediately persist it as a protected, immutable, diff-able baseline outside transient context. Any subsequent modification must be implemented as an incremental change written to a separate path (never overwriting the baseline), preceded by an explicit statement of change scope, and adopted only after a mechanical regression diff against the baseline confirms the accepted properties are preserved. The baseline may be superseded only by a newly owner-accepted state.\",\n    \"rationale\": \"The diagnosed root cause across the failure modes is that an owner-confirmed correct state existed only in transient context: once that context was lost, the system forgot what 'correct' meant, re-inferred already-settled decisions, and silently destroyed confirmed fixes in later rounds. Persisting each accepted state as an immutable anchor converts progress from mere output production into monotonic accumulation of verified baselines: accepted work becomes recoverable and non-destructible, regressions against the accepted state become mechanically detectable before adoption rather than after damage, and any bad change is reversible by falling back to the frozen baseline.\",\n    \"applicability\": [\n      \"Iterative optimization loops and multi-round rendering/build pipelines where an owner accepts an intermediate result and further modification rounds follow\",\n      \"Workflows where the owner's acceptance decision is separated in time from later changes to the same artifact, configuration, or system state\",\n      \"Any contemplated modification of an artifact, configuration, or state that has been explicitly confirmed or verified by the owner\",\n      \"Explicitly out of scope: states never confirmed by the owner and genuinely exploratory sandbox work where no baseline has been accepted\"\n    ],\n    \"antiPatterns\": [\n      \"Overwriting an owner-accepted artifact or configuration in place without first preserving the accepted version as a recoverable baseline\",\n      \"Holding the owner-accepted state only in conversation or transient context so it is lost on context switch, compaction, or session end\",\n      \"Regenerating output from scratch in a later round instead of deriving it incrementally from the accepted baseline, discarding confirmed fixes\",\n      \"Adopting a replacement change without mechanically diffing it against the last owner-accepted baseline for regressions\",\n      \"Redoing or reworking components the owner already accepted because their correctness was never anchored to a persisted reference\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants every explicitly accepted state preserved as a protected baseline so that later iterative changes build on it incrementally and can never silently destroy, regress, or rework an already-confirmed outcome.\",\n    \"targetBehavior\": \"Upon owner acceptance, the agent persists a tagged, read-only copy of the accepted state outside transient context (versioned file, snapshot, or equivalent); before any further change it states the explicit change scope, writes the new version to a separate path rather than overwriting the baseline, and records a regression diff against the baseline whose result gates adoption; the baseline is replaced only when the owner accepts a new state.\",\n    \"forbiddenBehavior\": \"Losing, overwriting, or reworking an owner-accepted state — holding it only in transient context, regenerating from scratch in later rounds, or adopting replacements without a regression diff against the accepted baseline — such that confirmed fixes silently disappear and settled decisions must be re-inferred.\",\n    \"evidenceSource\": \"Pain record pain_host_198b8c4d901b5b (via dreamer/philosopher lineage): the diagnosed root cause was an owner-confirmed correct outcome existing only in transient context, so subsequent iterative rounds re-derived work from scratch, overwrote accepted fixes, and forced re-inference of already-settled decisions.\",\n    \"validationExpectation\": \"A rule is faithful only if it fires exactly when a prior owner-accepted state exists and further modification is contemplated; requires all three gates — (1) persisted protected baseline, (2) separate-path incremental write with explicit change scope, (3) pre-adoption regression diff against the baseline; stays silent on never-confirmed or exploratory states; and permits re-baselining only upon a new owner acceptance. A repair change that removes any of these gates or fires on unconfirmed states contradicts this intent and must be flagged, not implemented.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r3-run1\"\n  },\n  \"risks\": [\n    \"Composite overlap: this principle partially duplicates core axioms T-04 (reversible actions), T-05 (explicit guardrails and checks), T-07 (post-action verification), and T-10 (persist conclusions outside transient context); rule generation must define precedence so enforcement is complementary rather than redundant or conflicting\",\n    \"Over-rigid baseline freezing can block legitimate improvements if derived rules omit the re-baselining path (supersede only via a newly owner-accepted state)\",\n    \"Mandatory per-change diff verification adds overhead disproportionate to trivial or purely additive changes, encouraging checklist theater where a superficial diff substitutes for a meaningful regression check\",\n    \"Diff-based verification can pass superficial textual or state comparisons while missing semantic regressions not captured by the chosen comparison dimensions; derived rules should tie comparison dimensions to the properties the owner actually accepted\",\n    \"Environments lacking native versioning or snapshot capabilities may push agents toward degraded simulations of immutability (manual copies that drift from the protected baseline)\"\n  ],\n  \"generatedAt\": \"2025-06-14T09:57:41Z\"\n}",
+    "usage": {
+     "input": 1948,
+     "output": 4727,
+     "total": 6675
+    },
+    "latencyMs": 47405,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "c727b2e0af8d1144"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-pain_host_198b8c4d901b5b-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r3-run1",
+     "principleDraft": {
+      "title": "Freeze owner-accepted states as immutable baselines; verify regressions before adopting changes",
+      "statement": "When the Owner explicitly confirms an artifact or system state as correct, persist that state immediately as a named, protected baseline outside transient context. Before any further modification of the affected artifact, the agent must (a) load that baseline and define the change scope relative to it, (b) write new versions to separate paths instead of overwriting the accepted baseline in place, and (c) before adopting a replacement, mechanically compare the new output against the baseline on every previously confirmed property and adopt it only if no regression is found. Modifying or replacing an owner-accepted state on the basis of self-inferred preferences, without this comparison, is forbidden.",
+      "rationale": "The root cause of the diagnosed pain was that the owner-confirmed correct version (mooncake-mv-final-v3k23.mp4, subtitle vertical alignment fixed via red-bar height) existed only in transient conversation context: it was never persisted as a baseline, so later optimization rounds re-inferred layout preferences from scratch and silently reverted the confirmed fix. An owner-accepted state is the strongest available evidence of intent and the sole anchor of accumulated progress; freezing it as a diff-able reference and gating adoption on a regression comparison makes the loss of 'what correct means' impossible and any regression detectable and reversible.",
+      "applicability": [
+       "Iterative optimization loops over media/render/build artifacts where the Owner has confirmed a specific version as correct (e.g., video renders with an accepted subtitle layout)",
+       "Multi-round generation pipelines producing versioned outputs where the acceptance decision is separated in time from later modifications",
+       "Any contemplated change to an artifact covered by an owner acceptance record or an accepted-fix checklist",
+       "Not applicable to states never confirmed by the Owner or to genuinely exploratory sandbox work"
+      ],
+      "antiPatterns": [
+       "Starting a new optimization round without locating or persisting the owner-accepted version as a baseline",
+       "Overwriting an owner-accepted artifact in place based on inferred 'better layout' preferences",
+       "Adopting a newly rendered or rebuilt version without diffing previously confirmed properties (e.g., subtitle band height and vertical alignment) against the accepted baseline",
+       "Substituting self-inferred optimization preferences for the Owner's explicit acceptance when no encoded intent constraints exist (e.g., an empty INTENT.md)",
+       "Treating successful execution (render/build completed) as success without a regression check against the baseline",
+       "Relying on conversation memory to preserve acceptance conclusions across iterations"
+      ],
+      "confidence": 0.75
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants outputs already confirmed as correct (e.g., the fixed subtitle vertical alignment in mooncake-mv-final-v3k23.mp4) to remain intact across later optimization rounds instead of being silently reverted.",
+      "targetBehavior": "Before modifying an owner-accepted artifact, the agent identifies and persists the accepted version as a protected baseline, states the intended change scope relative to it, writes new outputs to separate paths, and records an explicit post-change comparison of the confirmed properties against the baseline before adopting the new version.",
+      "forbiddenBehavior": "Re-inferring layout or style preferences from context and overwriting or ignoring the owner-accepted state in a new optimization round without loading the accepted baseline or comparing the new output against it, thereby regressing previously confirmed fixes.",
+      "evidenceSource": "Severe user correction ('the already-fixed thing was changed back; the more you optimize the worse it gets') about subtitle vertical alignment fixed in mooncake-mv-final-v3k23.mp4; diagnosis rootCause cites missing baseline persistence and comparison (T-07/T-08/T-10) and preference inference overriding owner confirmation (T-02), with an empty INTENT.md providing no guardrails.",
+      "validationExpectation": "An evaluator should demand evidence that (1) the accepted version was identified and persisted as a baseline before modification began, (2) new output was written to a separate path or the baseline was otherwise preserved, and (3) an explicit comparison of the previously confirmed properties against the baseline was performed and recorded before adoption; any rule that permits in-place overwrite of accepted artifacts without such comparison must be rejected as unfaithful to this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r3-run1"
+     },
+     "risks": [
+      "Composite overlap: this principle consolidates behaviors already covered by core axioms T-02, T-04, T-05, T-07, T-08 and T-10; downstream rule generation must scope it tightly to the baseline-regression failure family to avoid redundant or conflicting enforcement",
+      "Over-rigid baseline freezing can block legitimate improvements if no re-baselining path exists; rules must encode that a baseline may be superseded only by a newly owner-accepted state",
+      "Mandatory per-change diff verification adds overhead disproportionate to trivial or purely additive changes, inviting checklist theater instead of meaningful regression checks",
+      "Diff-based verification can pass superficial comparisons while missing semantic regressions not captured by the chosen comparison dimensions (e.g., sampled frames may miss brief alignment glitches)",
+      "Source diagnosis confidence was 0.55 with incomplete session records and no concrete diff evidence, so the trigger conditions and the confirmed-property list are partially reconstructed and may need owner confirmation"
+     ],
+     "generatedAt": "2025-06-14T10:03:00Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-pain_host_198b8c4d901b5b-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Freeze owner-accepted states as immutable baselines; verify regressions before adopting changes\",\n    \"statement\": \"When the Owner explicitly confirms an artifact or system state as correct, persist that state immediately as a named, protected baseline outside transient context. Before any further modification of the affected artifact, the agent must (a) load that baseline and define the change scope relative to it, (b) write new versions to separate paths instead of overwriting the accepted baseline in place, and (c) before adopting a replacement, mechanically compare the new output against the baseline on every previously confirmed property and adopt it only if no regression is found. Modifying or replacing an owner-accepted state on the basis of self-inferred preferences, without this comparison, is forbidden.\",\n    \"rationale\": \"The root cause of the diagnosed pain was that the owner-confirmed correct version (mooncake-mv-final-v3k23.mp4, subtitle vertical alignment fixed via red-bar height) existed only in transient conversation context: it was never persisted as a baseline, so later optimization rounds re-inferred layout preferences from scratch and silently reverted the confirmed fix. An owner-accepted state is the strongest available evidence of intent and the sole anchor of accumulated progress; freezing it as a diff-able reference and gating adoption on a regression comparison makes the loss of 'what correct means' impossible and any regression detectable and reversible.\",\n    \"applicability\": [\n      \"Iterative optimization loops over media/render/build artifacts where the Owner has confirmed a specific version as correct (e.g., video renders with an accepted subtitle layout)\",\n      \"Multi-round generation pipelines producing versioned outputs where the acceptance decision is separated in time from later modifications\",\n      \"Any contemplated change to an artifact covered by an owner acceptance record or an accepted-fix checklist\",\n      \"Not applicable to states never confirmed by the Owner or to genuinely exploratory sandbox work\"\n    ],\n    \"antiPatterns\": [\n      \"Starting a new optimization round without locating or persisting the owner-accepted version as a baseline\",\n      \"Overwriting an owner-accepted artifact in place based on inferred 'better layout' preferences\",\n      \"Adopting a newly rendered or rebuilt version without diffing previously confirmed properties (e.g., subtitle band height and vertical alignment) against the accepted baseline\",\n      \"Substituting self-inferred optimization preferences for the Owner's explicit acceptance when no encoded intent constraints exist (e.g., an empty INTENT.md)\",\n      \"Treating successful execution (render/build completed) as success without a regression check against the baseline\",\n      \"Relying on conversation memory to preserve acceptance conclusions across iterations\"\n    ],\n    \"confidence\": 0.75\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants outputs already confirmed as correct (e.g., the fixed subtitle vertical alignment in mooncake-mv-final-v3k23.mp4) to remain intact across later optimization rounds instead of being silently reverted.\",\n    \"targetBehavior\": \"Before modifying an owner-accepted artifact, the agent identifies and persists the accepted version as a protected baseline, states the intended change scope relative to it, writes new outputs to separate paths, and records an explicit post-change comparison of the confirmed properties against the baseline before adopting the new version.\",\n    \"forbiddenBehavior\": \"Re-inferring layout or style preferences from context and overwriting or ignoring the owner-accepted state in a new optimization round without loading the accepted baseline or comparing the new output against it, thereby regressing previously confirmed fixes.\",\n    \"evidenceSource\": \"Severe user correction ('the already-fixed thing was changed back; the more you optimize the worse it gets') about subtitle vertical alignment fixed in mooncake-mv-final-v3k23.mp4; diagnosis rootCause cites missing baseline persistence and comparison (T-07/T-08/T-10) and preference inference overriding owner confirmation (T-02), with an empty INTENT.md providing no guardrails.\",\n    \"validationExpectation\": \"An evaluator should demand evidence that (1) the accepted version was identified and persisted as a baseline before modification began, (2) new output was written to a separate path or the baseline was otherwise preserved, and (3) an explicit comparison of the previously confirmed properties against the baseline was performed and recorded before adoption; any rule that permits in-place overwrite of accepted artifacts without such comparison must be rejected as unfaithful to this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-pain_host_198b8c4d901b5b-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-pain_host_198b8c4d901b5b-r3-run1\"\n  },\n  \"risks\": [\n    \"Composite overlap: this principle consolidates behaviors already covered by core axioms T-02, T-04, T-05, T-07, T-08 and T-10; downstream rule generation must scope it tightly to the baseline-regression failure family to avoid redundant or conflicting enforcement\",\n    \"Over-rigid baseline freezing can block legitimate improvements if no re-baselining path exists; rules must encode that a baseline may be superseded only by a newly owner-accepted state\",\n    \"Mandatory per-change diff verification adds overhead disproportionate to trivial or purely additive changes, inviting checklist theater instead of meaningful regression checks\",\n    \"Diff-based verification can pass superficial comparisons while missing semantic regressions not captured by the chosen comparison dimensions (e.g., sampled frames may miss brief alignment glitches)\",\n    \"Source diagnosis confidence was 0.55 with incomplete session records and no concrete diff evidence, so the trigger conditions and the confirmed-property list are partially reconstructed and may need owner confirmation\"\n  ],\n  \"generatedAt\": \"2025-06-14T10:03:00Z\"\n}",
+    "usage": {
+     "input": 4184,
+     "output": 5002,
+     "total": 9186
+    },
+    "latencyMs": 55025,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3e3f9000d1052c35"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

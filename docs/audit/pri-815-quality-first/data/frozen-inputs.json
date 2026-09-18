@@ -1,0 +1,1691 @@
+{
+  "frozen_at": "2026-09-17T14:32:21.223Z",
+  "freeze_policy": "formation-start information only (SPEC §12): diagnosis artifact + lineage ids; no owner decisions / final principles / evaluator verdicts",
+  "groups": [
+    {
+      "source_group_id": "G-manual_1788265732489_9ne",
+      "class": "DEV",
+      "pain_id": "manual_1788265732489_9nexm9e6",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788265732489_9nexm9e6",
+      "diagnosis_artifact_id": "051773d9-a79e-4fee-8570-d611843b2704",
+      "contextRefs": [
+        "artifact://051773d9-a79e-4fee-8570-d611843b2704"
+      ],
+      "diagnosis": {
+        "confidence": 0.55,
+        "diagnosisId": "manual_1788265732489_9nexm9e6",
+        "evidence": [
+          {
+            "note": "No session context available — primary evidence from owner report, no behavioral trace",
+            "sourceRef": "owner_reported:cli"
+          },
+          {
+            "note": "Context payload confirms trace is unavailable_with_reason; no authenticated host session provenance",
+            "sourceRef": "diagnosis_manual_1788265732489_9nexm9e6"
+          },
+          {
+            "note": "Run diagnostic artifact confirms the same limitation",
+            "sourceRef": "run_diagnosis_manual_1788265732489_9nexm9e6_1"
+          },
+          {
+            "note": "Conversation window contains only empty system/assistant entries with no substantive content",
+            "sourceRef": "conversationWindow"
+          }
+        ],
+        "recommendations": [
+          {
+            "abstractedPrinciple": "在推断原因或下结论前，先确保存在可观察、可验证的证据来源；缺少证据时不应强行推进诊断。",
+            "description": "确立一条通用原则：任何诊断或结论必须以可观察、可验证的证据为前提；当证据缺失时，应拒绝推进或明确降级结论可信度，而非在没有证据的情况下继续推断。",
+            "kind": "principle"
+          },
+          {
+            "action": "在疼痛报告进入诊断流程前检查是否存在可观察的会话跟踪证据（如经过认证的OpenClaw会话上下文或行为trace）；若缺失，则阻止进入诊断并提示报告方从认证会话中重新提交，或明确标记为仅依赖owner推断的低可信度结论。",
+            "description": "增加一个强制性的跟踪可用性门控规则，拦截来自非认证会话来源（如CLI）且缺少可观察证据的疼痛报告。",
+            "kind": "rule",
+            "triggerPattern": "(CLI|非会话|无trace|trace不可用|owner_reported_no_host_trace)"
+          },
+          {
+            "action": "在疼痛报告提交入口强制要求绑定经过认证的OpenClaw会话上下文，确保持久化关键状态与行为trace；对于无法绑定会话的提交路径，应阻断或强制降级其证据等级。",
+            "description": "在代码/工具层面实现会话绑定与跟踪可用性门控，从机制上保证T-03（可观察证据）与T-10（持久化关键状态）得到满足。",
+            "kind": "implementation"
+          }
+        ],
+        "rootCause": "Design: 缺少跟踪可用性门控 — 系统允许从CLI提交疼痛报告而无需强制会话绑定或可观察的跟踪证据，导致诊断过程无法基于可验证的行为证据，违反了T-03和T-10核心原则。",
+        "summary": "CLI提交的疼痛报告缺少可观察的会话跟踪上下文，诊断过程无法获取行为证据。根本原因是设计缺陷：系统缺少跟踪可用性门控，允许非会话来源的疼痛报告绕过证据验证要求，违反T-03（基于可观察证据推理）和T-10（持久化关键状态）。抽象后的原则强调：任何诊断或结论都必须以可观察证据为前提，缺少证据时应拒绝推进或明确降级结论可信度。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-03",
+            "rationale": "系统允许从非认证会话来源（CLI）提交疼痛报告，且缺少可观察的行为trace证据，导致诊断过程在无可验证证据的情况下强行推进推断，直接违背了T-03（优先使用可观察的代码、日志、输出与状态作为证据）的要求。",
+            "title": "基于可观察证据进行推理"
+          },
+          {
+            "principleId": "T-10",
+            "rationale": "CLI提交路径未持久化关键的会话绑定状态与中间结论，导致关键状态丢失（trace不可用），无法保证连续性与可追溯性，违背了T-10（当连续性重要时，把关键中间结论、决策与状态持久化到瞬时上下文之外）的要求。",
+            "title": "持久化关键状态与结论"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788265732489_9nexm9e6",
+        "intentTension": {
+          "evidence": [
+            "owner_reported_no_host_trace: no authenticated host session provenance",
+            "traceUnavailableDetail.nextAction: 'Report pain from within an OpenClaw session to enable context-bound trace, or rely on owner reason alone for diagnosis'"
+          ],
+          "evidenceStrength": "strong",
+          "explanation": "系统的设计意图是要求疼痛报告附带可观察的跟踪证据（T-03），但CLI提交路径允许绕过此要求。这种张力表明\"在操作前建立充分理解\"（T-01）与\"使用可观察证据推断原因\"（T-03）之间存在冲突，因为CLI路径无法提供必要的证据。",
+          "relatedIntentFields": [
+            "non_negotiables",
+            "desired_outcome"
+          ],
+          "source": "action_drift",
+          "suggestedOwnerAction": "revise_intent"
+        }
+      },
+      "input_hash": "aad4a1feb621e4fc06b166c17c3a9540f1022997dfbbf92126e5566a10c42d68"
+    },
+    {
+      "source_group_id": "G-manual_1788268409354_vau",
+      "class": "DEV",
+      "pain_id": "manual_1788268409354_vautfk3l",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788268409354_vautfk3l",
+      "diagnosis_artifact_id": "0b740830-6722-4781-8d8c-ff3feceb50b0",
+      "contextRefs": [
+        "artifact://0b740830-6722-4781-8d8c-ff3feceb50b0"
+      ],
+      "diagnosis": {
+        "ambiguityNotes": [
+          "trace 不可用，部分行为证据来自 agent 自我陈述",
+          "仅有 2 个会话条目，行为样本有限",
+          "confidence 0.62 适中，建议进一步观察以确认模式稳定性"
+        ],
+        "confidence": 0.62,
+        "diagnosisId": "diagnosis_manual_1788268409354_vautfk3l",
+        "evidence": [
+          {
+            "note": "Owner reason 明确：未先核对 Episode 001 既有脚本/代码/输出规范就自创 whisper->SRT->ASS 管线，导致繁体、标点切分、字号超标。",
+            "sourceRef": "diagnosisTarget.reasonSummary"
+          },
+          {
+            "note": "Agent 自我认错：确实没有先仔细看第一集的脚本和代码，而是想当然地自创了一套方案。",
+            "sourceRef": "agent_turn:2026-09-01T12:49:17.291Z"
+          },
+          {
+            "note": "展示了 pain 记录流程及 score 75 severe 的 pain 被创建，证明该问题被正式记录为严重。",
+            "sourceRef": "agent_turn:2026-09-01T12:54:53.775Z"
+          },
+          {
+            "note": "工具执行失败：FileNotFoundError，路径不存在，说明未先核对工作目录/既有资产。",
+            "sourceRef": "tool_call_failure:2026-09-01T13:01:48.360Z"
+          },
+          {
+            "note": "工具执行失败：PowerShell ParserError，脚本参数转义错误。",
+            "sourceRef": "tool_call_failure:2026-09-01T13:10:07.355Z"
+          },
+          {
+            "note": "工具执行失败：Python SyntaxError（unterminated string literal），脚本编写存在错误。",
+            "sourceRef": "tool_call_failure:2026-09-01T13:10:40.721Z"
+          },
+          {
+            "note": "trace 不可用：CLI 提交的 pain 无认证的 host session 来源，无法绑定到 OpenClaw 会话，完整 trace 不可用。",
+            "sourceRef": "diagnosisTarget.traceUnavailableDetail"
+          },
+          {
+            "note": "2 个会话条目内容为空，无法提供额外行为证据。",
+            "sourceRef": "conversationWindow"
+          }
+        ],
+        "recommendations": [
+          {
+            "abstractedPrinciple": "在修改既有系统前，先通过核查现有资产建立准确理解，而非依赖模型自行推断的偏好或方案。",
+            "description": "将'先核查既有资产再执行变更'抽象为通用原则，适用于任何涉及既有系统修改的场景，避免 Agent 基于自身推断而非既定事实行动。",
+            "kind": "principle"
+          },
+          {
+            "action": "在执行任何文件创建/修改操作前，先调用 list_files 或 read_file 等工具检查目标目录的既有资产（脚本、代码、规范文档），若存在匹配的既有资产则优先复用其模式。",
+            "description": "规则：在执行文件创建或修改操作前，必须检查既有资产目录是否存在匹配的脚本/代码/规范，若存在则优先复用而非自创。",
+            "kind": "rule",
+            "triggerPattern": "(create|write|generate|制作|创建|自创).*(subtitle|字幕|srt|ass|whisper|管线|pipeline)"
+          },
+          {
+            "action": "在执行变更任务前，系统自动注入一个强制性的'既有资产核查步骤'：先调用目录扫描工具检查相关路径，若存在匹配文件则输出其内容摘要供用户确认后再继续。",
+            "description": "实现：在 Agent 工作流中增加强制性前置步骤——执行文件变更前必须先扫描既有资产目录，若存在匹配的既有脚本/代码则输出其内容摘要，经用户确认后方可继续。",
+            "kind": "implementation"
+          },
+          {
+            "description": "Prompt 指令：在系统提示词中明确要求——当任务涉及文件创建或修改时，Agent 必须先核查既有目录下的相关资产文件，确认无既有规范/脚本/代码可复用后再自创方案。",
+            "kind": "prompt"
+          }
+        ],
+        "rootCause": "People: Agent 在未对既有 Episode 001 脚本/代码/输出规范建立准确理解前就自创 whisper->SRT->ASS 字幕管线（违反 T-01），并基于自身推断的偏好而非既有资产与用户真实意图行动（违反 T-02）；同时设计上缺少执行前强制核对既有资产的门控，导致反复试错并产生多次脚本错误。",
+        "summary": "字幕制作过度工程化：Agent 未先核对 Episode 001 既有脚本/代码/输出规范就自创 whisper->SRT->ASS 管线，导致繁体、标点切分、字号超标，用户多次纠正后才意识到应先查既有资产。根本原因属于 People 类（能力/习惯盲区），叠加 Design 上缺少强制核对门控。抽象原则：在修改既有系统前，先通过核查现有资产建立准确理解，而非依赖模型自行推断的偏好或方案。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-01",
+            "rationale": "Agent 在执行变更前未对 Episode 001 既有脚本/代码/输出规范建立准确理解，而是直接自创全新字幕方案，导致繁体、标点切分、字号超标等问题，违反了'变更前建立准确理解'的核心原则。",
+            "title": "变更前建立准确理解"
+          },
+          {
+            "principleId": "T-02",
+            "rationale": "Agent 基于自身模型推断的偏好自创 whisper->SRT->ASS 管线，而非围绕用户真实意图（复用 Episode 001 既有规范）行动，导致用户多次纠正，违反了'围绕 Owner 真实意图行动'的核心原则。",
+            "title": "围绕真实意图行动"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788268409354_vautfk3l"
+      },
+      "input_hash": "eac30727dda468446a0e1d7a48a943e6128679db93fd276595fe91c8cc1a8439"
+    },
+    {
+      "source_group_id": "G-manual_1788415743052_os4",
+      "class": "DEV",
+      "pain_id": "manual_1788415743052_os4aicut",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788415743052_os4aicut",
+      "diagnosis_artifact_id": "6a7f3d62-1db2-44a8-b413-510e1da578c5",
+      "contextRefs": [
+        "artifact://6a7f3d62-1db2-44a8-b413-510e1da578c5"
+      ],
+      "diagnosis": {
+        "ambiguityNotes": [
+          "原则的抽象程度在通用环境验证与特定编码检查之间取得平衡，以避免过度规则化。"
+        ],
+        "confidence": 0.85,
+        "diagnosisId": "diagnosis_manual_1788415743052_os4aicut",
+        "evidence": [
+          {
+            "note": "Agent 最终汇报 scenario-c 数据仓库整理完成，原始 16 文件哈希一致，全部输出到 derived/，说明执行在换 pwsh 后恢复成功。",
+            "sourceRef": "agent_turn:2026-09-03T06:01:01.992Z"
+          },
+          {
+            "note": "Agent 承认未做执行前兼容性检查，靠失败发现已知行为；记录 MEMORY.md、USER.md owner 指令与当日日志。",
+            "sourceRef": "agent_turn:2026-09-03T06:05:07.757Z"
+          },
+          {
+            "note": "脚本第 79 行中文乱码导致 exec failed (exitCode 1)，典型 5.1 对无 BOM UTF-8 按 ANSI 解析的现象。",
+            "sourceRef": "tool_call_failure:2026-09-03T06:00:16.593Z"
+          },
+          {
+            "note": "read 工具报 MEMORY.md 未找到，可能与工作目录路径相关，属次要上下文问题。",
+            "sourceRef": "tool_call_failure:2026-09-03T06:02:33.203Z"
+          },
+          {
+            "note": "reasonSummary 明确说明：未确认解释器版本直接执行，5.1 对无 BOM UTF-8 按 ANSI 解析是已知行为，Owner 已纠正：落地脚本前必须先确认目标解释器版本与编码契约。",
+            "sourceRef": "diagnosisTarget.reasonSummary"
+          }
+        ],
+        "intentTension": {
+          "evidence": [
+            "agent_turn:2026-09-03T06:05:07.757Z"
+          ],
+          "evidenceStrength": "moderate",
+          "explanation": "Owner 在会话中明确纠正 Agent 行为：落地脚本前必须先确认目标解释器版本与编码契约，不要靠运行失败来发现。Agent 承认未做执行前兼容性检查。此纠正表明 Agent 的执行方式偏离了 Owner 对执行前护栏与系统理解的预期。",
+          "relatedIntentFields": [
+            "non_negotiables",
+            "current_strategic_focus"
+          ],
+          "source": "action_drift",
+          "suggestedOwnerAction": "promote_to_rulehost"
+        },
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "将抽象原则纳入系统提示词，作为 Agent 在执行有后果变更前的通用行为准则：对于有后果的变更，主动验证目标环境的关键假设（如解释器版本与编码契约），而非依赖运行时失败来揭示兼容性问题。",
+            "abstractedPrinciple": "对于有后果的变更，主动验证目标环境的关键假设（如解释器版本与编码契约），而非依赖运行时失败来揭示兼容性问题。"
+          },
+          {
+            "kind": "rule",
+            "description": "在 PowerShell 脚本落地前，检查目标解释器版本并拦截编码不匹配的情况。",
+            "triggerPattern": "落地.*\\.ps1|编写.*\\.ps1|生成.*\\.ps1",
+            "action": "在执行脚本前，先运行 `$PSVersionTable.PSVersion` 确认目标解释器版本；若版本 < 6（Windows PowerShell），且脚本包含非 ASCII 字符，则强制保存为 UTF-8 BOM 编码或改用 `pwsh` 执行。"
+          },
+          {
+            "kind": "prompt",
+            "description": "在系统提示词中增加执行前检查指令：在落地任何代码文件（尤其是 PowerShell 脚本）之前，必须先确认目标解释器的版本和编码兼容性，避免假设默认编码在所有环境中一致。"
+          }
+        ],
+        "rootCause": "Assumption: Agent 默认脚本编码（UTF-8 无 BOM）能在目标解释器（Windows PowerShell 5.1）下被正确解析，未在执行前确认目标解释器版本与编码契约，依赖运行时失败来发现环境兼容性问题，违背了有后果变更前先建立对相关系统准确理解的原则。",
+        "summary": "Agent 在 Windows 上编写 UTF-8 无 BOM 的 PowerShell 脚本后未确认目标解释器版本，直接用 Windows PowerShell 5.1 执行，导致中文字符串乱码，引发一次可避免的执行失败。根本原因是 Agent 对目标环境作了错误假设，依赖运行失败来发现问题。抽象原则强调：对于有后果的变更，主动验证目标环境的关键假设，而非依赖运行时失败来揭示兼容性问题。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-01",
+            "title": "执行前确认环境假设",
+            "rationale": "Agent 假设 UTF-8 无 BOM 编码能被 Windows PowerShell 5.1 正确解析，但未在执行前验证该假设，违背了 T-01（有后果的变更前先建立对相关系统的准确理解）。"
+          },
+          {
+            "principleId": "T-05",
+            "title": "依赖验证而非失败发现",
+            "rationale": "Agent 依赖运行时失败来发现环境兼容性问题，而非主动通过验证手段预先确认，违背了 T-05（避免将运行时失败作为发现契约问题的默认手段）。"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788415743052_os4aicut"
+      },
+      "input_hash": "9630fba4cceb743cf5528b8b30a7060d2f06e81962d4f0a6f57dbdaec439ac11"
+    },
+    {
+      "source_group_id": "G-manual_1788417947835_e99",
+      "class": "DEV",
+      "pain_id": "manual_1788417947835_e99ujtms",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788417947835_e99ujtms",
+      "diagnosis_artifact_id": "7280b877-4cd9-499a-a8a6-bad9a4d803d6",
+      "contextRefs": [
+        "artifact://7280b877-4cd9-499a-a8a6-bad9a4d803d6"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "diag_manual_1788417947835_e99ujtms",
+        "summary": "Agent 在 Windows 上创建了 UTF-8 无 BOM 的 PowerShell 脚本，未先确认目标解释器版本（Windows PowerShell 5.1 vs pwsh 7）与编码契约（是否需 BOM），直接用 5.1 执行导致中文乱码失败，返工改用 pwsh 7 后才成功。根因是执行有后果的脚本前缺少强制性的目标环境预检门禁，依赖运行失败暴露已知编码不兼容。抽象原则：执行有后果的操作前，先建立对目标运行环境（版本与编码契约等）的准确认知并作为不可跳过的预检门禁。",
+        "rootCause": "Design: 在执行有后果的脚本前缺少强制性的目标环境预检门禁——没有先确认目标解释器版本（Windows PowerShell 5.1 vs pwsh 7）与编码契约（UTF-8 是否需要 BOM），而是依赖运行失败来发现已知的编码不兼容行为。",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-01",
+            "title": "先建立准确环境理解",
+            "rationale": "Agent 在创建并执行 PowerShell 脚本前，未先确认目标解释器版本与编码契约这一关键环境信息，导致使用了不兼容的 Windows PowerShell 5.1 执行 UTF-8 无 BOM 脚本，违反 T-01『在有后果的变更前先建立对相关系统足够准确的理解』。"
+          },
+          {
+            "principleId": "T-05",
+            "title": "前置强制检查关卡",
+            "rationale": "系统缺少在执行有后果脚本前强制确认目标环境（解释器版本与编码契约）的预检门禁，将已知的编码不兼容行为留给运行时失败去暴露，未能通过 T-05 将约束前置为不可跳过的检查关卡。"
+          }
+        ],
+        "evidence": [
+          {
+            "sourceRef": "diagnosis_manual_1788417947835_e99ujtms",
+            "note": "重报说明：Agent 在 Windows 上创建 UTF-8 无 BOM 的 PowerShell 脚本后，未确认目标解释器版本就用 Windows PowerShell 5.1 执行，中文字符乱码，失败后返工改用 pwsh 7 才成功；5.1 对无 BOM UTF-8 按 ANSI 解析是已知确定行为；纠正要求执行前确认解释器版本与编码契约。"
+          },
+          {
+            "sourceRef": "tool_call_failure:2026-09-03T06:00:16.593Z",
+            "note": "PowerShell 5.1 执行失败，错误输出显示中文被错误解码为乱码 '鐢熸垚鏃堕棿锛'，表明编码不匹配。"
+          },
+          {
+            "sourceRef": "agent_turn:2026-09-03T06:05:07.757Z",
+            "note": "Agent 承认未做执行前兼容性检查，靠失败发现已知行为；随后记录到 MEMORY.md、USER.md 并写入 owner 指令（Windows 上落地脚本前先确认解释器与编码兼容性）。"
+          },
+          {
+            "sourceRef": "agent_turn:2026-09-03T06:01:01.992Z",
+            "note": "最终执行成功后汇报完成，证明返工改用 pwsh 7 后脚本正常产出，原始失败系环境/编码不匹配所致。"
+          },
+          {
+            "sourceRef": "tool_call_failure:2026-09-03T06:02:33.203Z",
+            "note": "后续读取 MEMORY.md. 时文件未找到，提示记忆持久化路径问题（次要，不影响主根因）。"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "将『执行有后果的操作前，先确认目标运行环境（版本与编码契约等）的准确认知，作为不可跳过的预检门禁』抽象为通用原则，适用于所有平台相关脚本执行、跨解释器/运行时场景。",
+            "abstractedPrinciple": "执行有后果的操作前，先确认目标运行环境（版本与编码契约等）的准确认知，将其作为不可跳过的预检门禁，而非依赖运行时失败来暴露不兼容。"
+          },
+          {
+            "kind": "rule",
+            "description": "当 Agent 准备创建或执行 PowerShell 脚本（尤其是 Windows 平台且脚本含非 ASCII 字符）时，强制先确认目标解释器版本与编码契约（是否需 BOM 或显式 -Encoding 参数）。",
+            "triggerPattern": "(创建|写入|执行).*(?:\\.ps1|PowerShell|pwsh)",
+            "action": "执行前必须确认：1) 目标解释器版本（Windows PowerShell 5.1 还是 pwsh 7+）；2) 脚本编码策略（若含非 ASCII 字符，显式指定 UTF-8 with BOM 或使用 -Encoding UTF8 参数）；3) 若不确定版本，优先使用 pwsh 7 或显式指定兼容编码。"
+          },
+          {
+            "kind": "implementation",
+            "description": "在工具层为脚本执行增加编码/环境预检：当检测到脚本包含非 ASCII 字符且目标解释器可能为 Windows PowerShell 5.1 时，自动告警或要求显式指定编码，可集成到命令执行钩子或脚本生成模板中。"
+          },
+          {
+            "kind": "prompt",
+            "description": "在 Agent 系统提示或工作流指令中加入：『在 Windows 上创建或执行含非 ASCII 字符的脚本前，必须先确认目标解释器版本与编码契约；若使用 Windows PowerShell 5.1，需使用带 BOM 的 UTF-8 或显式指定编码，防止乱码。』"
+          }
+        ],
+        "confidence": 0.85,
+        "ambiguityNotes": [
+          "Root cause aligns with Core Axiom T-01：在进行有后果的变更前，先建立对相关系统足够准确的理解（此处系统=目标解释器版本与编码契约）。",
+          "2 entries have empty text content（conversationWindow 中 system 与 assistant 条目无文本，未作为主要证据）",
+          "sourcePainId mismatch: no candidate task has painId=manual_1788417947835_e99ujtms. Mismatched taskIds: diagnosis_manual_1788415743052_os4aicut, diagnosis_manual_1788417836446_68yyxjpc",
+          "traceAvailability=unavailable_with_reason，完整轨迹未解析，因果链部分依赖 diagnosisTarget 说明与 agent 自述，整体证据强度中等偏强。"
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788417947835_e99ujtms"
+      },
+      "input_hash": "5ab6a1b040014910bed9d56710ea80a38c9e728df299ecce93de9f97ba760d52"
+    },
+    {
+      "source_group_id": "G-manual_1788424714466_wmn",
+      "class": "DEV",
+      "pain_id": "manual_1788424714466_wmn09nli",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788424714466_wmn09nli",
+      "diagnosis_artifact_id": "27c2cac9-5a2c-47d5-a891-b61d64d3204f",
+      "contextRefs": [
+        "artifact://27c2cac9-5a2c-47d5-a891-b61d64d3204f"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "diagnosis_manual_1788424714466_wmn09nli",
+        "summary": "PRI-650-A Gate B 毕业验证存在人工痛点：该流程依赖人工手动操作，缺乏自动化门禁或规则化检查支持；同时 pain 通过 CLI 上报且无宿主会话溯源，证据链不完整。核心改进方向是将关键验证步骤建模为可自动化的规则化检查，并以可观察证据追踪和复核行动结果。",
+        "rootCause": "Design: Gate B 毕业验证被设计为依赖人工手动核对的流程，缺少自动化检查门禁与规则化验证工具支持；同时 pain 上报路径（CLI 无宿主溯源）使证据追踪能力受限，放大了验证与诊断的摩擦。",
+        "violatedPrinciples": [
+          {
+            "title": "验证应可自动化而非仅靠人工",
+            "principleId": "T-03",
+            "rationale": "Gate B 毕业验证被设计为人工手动核对流程，缺少自动化门禁与规则化校验工具，无法以结构化方式消除人工判断。"
+          },
+          {
+            "title": "行动结果应以实际证据复核",
+            "principleId": "T-07",
+            "rationale": "完成人工验证不等于验证成功；缺少对验证结果与预期比较的对账机制，也未以可观察证据追踪结果。"
+          },
+          {
+            "title": "将约束转化为护栏以消除人工遗漏",
+            "principleId": "T-05",
+            "rationale": "验证门禁未被建模为可执行的规则化检查或护栏，导致人工遗漏风险持续存在，pain 仅能通过 CLI 上报而缺乏结构性拦截。"
+          }
+        ],
+        "evidence": [
+          {
+            "sourceRef": "diagnosis_manual_1788424714466_wmn09nli",
+            "note": "本次诊断自身提交；owner_reported_no_host_trace 表明 pain 通过 CLI 提交，无认证宿主会话溯源。"
+          },
+          {
+            "sourceRef": "run_diagnosis_manual_1788424714466_wmn09nli_1",
+            "note": "诊断运行记录标识。"
+          },
+          {
+            "sourceRef": "owner_reported:cli",
+            "note": "本次 pain 的唯一行为证据来源；描述为 PRI-650-A Gate B graduation verification 的人工痛点（状态 severe），并注明 'No session context available'。"
+          },
+          {
+            "sourceRef": "diagnosisTarget.reasonSummary",
+            "note": "reasonSummary 明确表述 'PRI-650-A Gate B graduation verification (manual pain)'，指向人工验证痛点。"
+          },
+          {
+            "sourceRef": "diagnosisTarget.provenance",
+            "note": "provenance 为 owner_reported_no_host_trace，佐证无宿主会话来源的证据限制。"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "将关键验证步骤抽象为可自动化的规则化检查而非依赖人工判断，并确保行动结果以可观察证据追踪与复核。",
+            "abstractedPrinciple": "将关键验证步骤建模为可自动化的规则化检查，而非依赖人工判断；并确保行动结果可被可观察证据追踪与复核。"
+          },
+          {
+            "kind": "rule",
+            "description": "当检测到 graduation verification / Gate 相关验证被描述为 manual pain 且无自动化门禁覆盖时，触发结构化验证清单检查与自动化拦截建议。",
+            "triggerPattern": "(graduation verification|Gate B|manual pain|no host trace|session context)",
+            "action": "提示将验证步骤转为规则化自动化检查，要求接入宿主会话溯源并提供可观察证据，禁止仅凭人工判断通过门禁。"
+          },
+          {
+            "kind": "implementation",
+            "description": "为 Gate B 毕业验证引入可执行的自动化门禁检查，提供结构化校验清单与结果日志，使验证通过具备可观察、可复核对账依据。"
+          }
+        ],
+        "confidence": 0.55,
+        "ambiguityNotes": [
+          "证据极其有限，仅一条 owner_reported:cli 占位证据且注明 'No session context available'",
+          "owner_reported_no_host_trace：无认证宿主会话溯源，fullTrace 不可用",
+          "conversationWindow 中有 2 条空文本条目",
+          "Gate B 验证的具体失败机制（缺自动化门禁 / 缺校验脚本 / 人工步骤冗余）无法依现有证据确认"
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788424714466_wmn09nli"
+      },
+      "input_hash": "b7a0217b799583d1a5ea9d482d7c67c955386f47e87744dedf9bff29948bee25"
+    },
+    {
+      "source_group_id": "G-manual_1788526359876_r5x",
+      "class": "DEV",
+      "pain_id": "manual_1788526359876_r5xgtgu9",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788526359876_r5xgtgu9",
+      "diagnosis_artifact_id": "7b001334-7167-4687-bcd6-87c242231b57",
+      "contextRefs": [
+        "artifact://7b001334-7167-4687-bcd6-87c242231b57"
+      ],
+      "diagnosis": {
+        "confidence": 0.7,
+        "diagnosisId": "diagnosis_manual_1788526359876_r5xgtgu9",
+        "evidence": [
+          {
+            "note": "T-03误诊案例核心描述：诊断者仅凭统计指标（90.8%截断率）断言根因是size-guard预算截断core axioms，未按证据优先原则先查事件日志验证hook是否真正执行成功；真实根因是before_prompt_build钩子崩溃（TypeError: The database connection is not open），截断理论与数据不符（实测5686/9000未超预算）；错误归因导致PRI-646误报工单",
+            "sourceRef": "diagnosis_manual_1788526359876_r5xgtgu9"
+          },
+          {
+            "note": "技能说明两条路径（/pd-pain首选、CLI执行备选），但认为'不能取得可信会话ID'的说法不被认同，因为runtime上下文里就有当前sessionId，CLI路径理论上可走",
+            "sourceRef": "agent_turn:2026-09-03T07:19:32.670Z"
+          },
+          {
+            "note": "CLI仍在（插件更新删了bin/目录，但源码仓库pd-cli v1.76.1完好，node dist/index.js直接可用）；痛苦记录已持久化，之前乱码只是控制台显示问题",
+            "sourceRef": "agent_turn:2026-09-04T12:23:34.663Z"
+          },
+          {
+            "note": "诊断runtime是openclaw类型，默认模型bai/glm-5.3-flash，报错信息与此相关",
+            "sourceRef": "agent_turn:2026-09-04T12:34:40.274Z"
+          },
+          {
+            "note": "Tool gateway失败：config.get response is too large; use path to request a narrower config subtree — 诊断中获取配置证据时遇到gateway错误",
+            "sourceRef": "tool_call_failure:2026-09-04T12:33:23.753Z"
+          },
+          {
+            "note": "Tool gateway再次失败：同样的config.get response too large错误，说明配置证据获取持续受阻",
+            "sourceRef": "tool_call_failure:2026-09-04T12:33:41.011Z"
+          },
+          {
+            "note": "Tool exec失败：painId manual_1788523406387_rwyk0e0y，taskId diagnosis_manual_1788523406387_rwyk0e0y，runtimeKind p，exitCode 1 — 诊断执行过程遭遇失败",
+            "sourceRef": "tool_call_failure:2026-09-04T12:52:24.406Z"
+          }
+        ],
+        "recommendations": [
+          {
+            "abstractedPrinciple": "推断根因或宣称结果前，优先以可观察的事件级证据验证机制链路，而非用统计启发式替代事实依据。",
+            "description": "将'先验证机制链路，再断言根因'固化为通用原则：在推断原因或宣称任何结果前，必须以可观察的事件级证据（日志、状态、执行结果）验证机制链路，禁止用统计指标等启发式替代事实依据；行动后应以实际结果校验预期，杜绝'完成即成功'盲区。",
+            "kind": "principle"
+          },
+          {
+            "action": "当诊断/断言基于统计指标（如截断率、比例）而非可观察事件日志时，强制回退并要求先通过可观察证据（hook执行日志、数据库连接状态、事件trace）验证机制链路后再形成根因结论。",
+            "description": "建立强制机制链路验证门控：诊断流程在基于统计启发式形成根因结论前，必须先通过可观察事件级证据（hook执行日志、数据库连接状态、事件trace）验证机制链路实际执行状态，证据不足时阻止下结论。",
+            "kind": "rule",
+            "triggerPattern": "(截断率|统计指标|percentage|ratio|rate).*(断言|根因|结论|归因)"
+          },
+          {
+            "description": "工具链增强：为诊断工具增加对事件级证据（hook执行日志、数据库连接状态）的强制前置检查，并在工具证据获取受阻（如config.get响应过大、tool exec失败）时明确降级路径，确保诊断过程在证据不可用时能获取可靠替代证据或显式标注不确定性，而非静默继续。",
+            "kind": "implementation"
+          },
+          {
+            "description": "在诊断提示词/流程指令中，明确要求诊断者遵循T-03证据优先原则：在断言根因或宣称结果前必须先以可观察事件日志验证机制链路执行状态，行动后以实际结果校验预期，避免用统计启发式替代事件级证据。",
+            "kind": "prompt"
+          }
+        ],
+        "rootCause": "People: 诊断者存在证据优先原则（T-03）的能力盲点与习惯缺陷——在推断根因时仅依赖统计启发式（90.8%截断率）而非可观察事件级证据，未先验证before_prompt_build钩子的实际执行状态，导致错误归因；同时诊断流程缺乏强制机制链路验证门控，使这种违反证据优先原则的行为未被及时拦截。",
+        "summary": "T-03误诊案例：诊断者仅凭统计指标（90.8%截断率）断言根因是size-guard预算截断core axioms，未按证据优先原则先查事件日志验证hook是否真正执行成功。真实根因是before_prompt_build钩子崩溃（TypeError: The database connection is not open），截断理论与数据不符（实测5686/9000未超预算），错误归因导致PRI-646误报工单。根因分类为People——诊断者违反T-03证据优先原则，用统计指标替代事件级证据，且诊断流程缺少强制机制链路验证门控。抽象原则强调：推断原因或宣称结果前，必须优先使用可观察事件级证据验证机制链路，而非以统计启发式替代事实依据；同时行动后应以实际结果校验预期，杜绝'完成即成功'盲区。此外诊断过程中遭遇多个tool_call_failure进一步阻碍了可靠证据获取。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-03",
+            "rationale": "诊断者仅凭统计指标（90.8%截断率）断言根因，未优先用可观察日志验证before_prompt_build钩子是否真正执行成功，违反证据优先原则——用统计启发式替代事件级证据得出截断理论，但实测数据与理论不符，导致错误归因。",
+            "title": "证据优先原则"
+          },
+          {
+            "principleId": "T-07",
+            "rationale": "诊断者得出根因结论后未以实际结果验证预期是否一致（实测5686/9000未超预算与截断理论矛盾），存在'完成即成功'的盲区，未校验行动结果与预期的一致性。",
+            "title": "行动后验证原则"
+          },
+          {
+            "principleId": "T-01",
+            "rationale": "诊断者在未先建立对注入机制链路的准确理解（未验证hook实际执行状态）即下结论，仅凭统计指标形成根因判断，未建立机制链路的正确理解。",
+            "title": "机制链路理解原则"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788526359876_r5xgtgu9",
+        "intentTension": {
+          "evidence": [
+            "diagnosis_manual_1788526359876_r5xgtgu9"
+          ],
+          "evidenceStrength": "moderate",
+          "explanation": "案例显示了T-03（证据优先）与T-02（围绕Owner真实意图行动）之间的张力：诊断者急于得出结论（可能受效率或已有假设驱动）而偏离了'先验证再断言'的原则，未以Owner要求的严谨性执行诊断。同时T-03强调可观察证据优先于统计推断，但诊断者用统计指标替代事件级日志，违反该核心原则。",
+          "relatedIntentFields": [
+            "non_negotiables",
+            "why"
+          ],
+          "source": "action_drift",
+          "suggestedOwnerAction": "confirm_drift"
+        }
+      },
+      "input_hash": "c2ceae65822703e989bd831cefc8f33b09d2818a6500f877a5050dc967f9110d"
+    },
+    {
+      "source_group_id": "G-manual_1788578262338_kmp",
+      "class": "DEV",
+      "pain_id": "manual_1788578262338_kmpbt77v",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788578262338_kmpbt77v",
+      "diagnosis_artifact_id": "5fce97c3-2e65-4ea0-b75e-1b694b407628",
+      "contextRefs": [
+        "artifact://5fce97c3-2e65-4ea0-b75e-1b694b407628"
+      ],
+      "diagnosis": {
+        "confidence": 0.74,
+        "diagnosisId": "diagnosis_manual_1788578262338_kmpbt77v",
+        "evidence": [
+          {
+            "note": "核心行为证据：第二集创作时未先查私有仓库已定稿的 concept-draft-v0.md（Episode 002 总纲集/10原则），凭空编造\"信任\"主题旁白，被 Owner 纠正后才找到正确素材。",
+            "sourceRef": "diagnosis_manual_1788578262338_kmpbt77v"
+          },
+          {
+            "note": "教训明确：创作类任务必须先查 D:\\Code\\principles-private\\aze\\episodes\\ 已定稿大纲与 memory 项目进展段。",
+            "sourceRef": "diagnosis_manual_1788578262338_kmpbt77v"
+          },
+          {
+            "note": "pain 成功落库（count 从 1 → 2），确认该问题通过 /pd-pain 原生通道上报，时间对得上。",
+            "sourceRef": "agent_turn:2026-09-05T01:57:56.751Z"
+          },
+          {
+            "note": "系统专家解释 status jobs=10 为 agent 心跳而非定时任务，说明问题与调度机制无关。",
+            "sourceRef": "agent_turn:2026-09-05T01:49:17.779Z"
+          },
+          {
+            "note": "上下文绑定疼痛但源轨迹无法解析，trace 不可用，需要 sessionIdHint 匹配活动会话。",
+            "sourceRef": "diagnosis_manual_1788578262338_kmpbt77v"
+          }
+        ],
+        "recommendations": [
+          {
+            "abstractedPrinciple": "创作前应优先加载并遵循已定稿的权威素材与既定意图，而非依赖模型对主题的自行推断。",
+            "description": "将抽象原则固化为通用行为指引：在执行有后果的创作类任务前，先加载并遵循已定稿权威素材（大纲/项目进展）与 Owner 既定意图，而非依赖模型推断。",
+            "kind": "principle"
+          },
+          {
+            "action": "在开始创作前，强制检索并加载 D:\\Code\\principles-private\\aze\\episodes\\ 目录下的已定稿大纲文件（如 concept-draft-v0.md / Episode 002 总纲集/10原则），并将加载结果作为创作依据引用到输出中；若未找到匹配素材，须暂停并向 Owner 确认素材来源后方可继续。",
+            "description": "针对创作类任务增加强制门禁：创建/生成内容前必须先检查私有仓库已定稿大纲与 memory 项目进展段，防止凭空编造主题。",
+            "kind": "rule",
+            "triggerPattern": "(创作|编写|生成|撰写).*(第二集|Episode|剧本|旁白|大纲)"
+          }
+        ],
+        "rootCause": "Design: 创作类工作流缺少'创作前必须加载已定稿大纲与项目进展'的强制门禁，未将已定稿素材作为创作任务的硬性输入依赖固化，也没有把该不可突破约束转化为明确的检查/护栏（T-05），导致模型以自身推断优先于 Owner 既定意图（T-02）。",
+        "summary": "第二集创作失误的根因：创作类任务缺少'先查已定稿大纲'的强制门禁。agent 未先访问 D:\\\\Code\\\\principles-private\\\\aze\\\\episodes\\\\ 下已定稿的 concept-draft-v0.md（Episode 002 总纲集/10原则），凭空编造\\\"信任\\\"主题旁白，被 Owner 纠正后才找到正确素材。抽象原则：创作前应优先加载并遵循已定稿的权威素材与既定意图，而非依赖模型对主题的自行推断。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-02",
+            "rationale": "agent 以自身对\"信任\"主题的推断优先于 Owner 已定稿大纲中的既定意图，导致内容偏离权威素材。",
+            "title": "以模型推断优先于既定意图"
+          },
+          {
+            "principleId": "T-05",
+            "rationale": "该不可突破约束（创作必须基于已定稿大纲）未被转化为明确的检查/护栏/禁止状态转移机制，导致约束成为可选项而非硬性要求。",
+            "title": "不可突破约束缺乏护栏机制"
+          },
+          {
+            "principleId": "T-10",
+            "rationale": "关键已定稿素材未在创作前强制加载并持久化到任务上下文之外，agent 跳过素材检索直接产出，缺乏强制性前置依赖。",
+            "title": "关键素材未强制前置加载"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788578262338_kmpbt77v"
+      },
+      "input_hash": "ef38015f62b9c3f459c4ff63844e3c1dd0434c3a24df1f4a51277b18774e375d"
+    },
+    {
+      "source_group_id": "G-manual_1788609453041_dtm",
+      "class": "DEV",
+      "pain_id": "manual_1788609453041_dtmlftov",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788609453041_dtmlftov",
+      "diagnosis_artifact_id": "c56fbe1e-f7d5-48ce-a44c-c0cb62a3f81f",
+      "contextRefs": [
+        "artifact://c56fbe1e-f7d5-48ce-a44c-c0cb62a3f81f"
+      ],
+      "diagnosis": {
+        "confidence": 0.85,
+        "diagnosisId": "diagnosis_manual_1788609453041_dtmlftov",
+        "evidence": [
+          {
+            "sourceRef": "diagnosis_manual_1788609453041_dtmlftov",
+            "note": "用户报告：12:00 心跳将 main-agent 08:12 旧记录（第二集=信任版30clip）合并进 CURRENT_FOCUS v48，未核对 narration_lines_ep002.json 实际内容（08:24 用户纠正后已改为 10 原则总纲集 15 clip，_meta.note 有记载）；19:08 播报陈旧主题，用户 19:19 二次纠正'根本不是关于信任'。"
+          },
+          {
+            "sourceRef": "agent_turn:2026-09-05T08:46:51.012Z",
+            "note": "16:46 巡检完成，与 15:46 相比无新变化；检查 CURRENT_FOCUS v48/28 行，Memory 今日笔记最后 12:00，未提及核对 narration_lines_ep002.json 内容一致性。"
+          },
+          {
+            "sourceRef": "agent_turn:2026-09-05T09:46:54.735Z",
+            "note": "17:46 巡检完成，与 16:46 相比无新变化；仍依赖先前记忆，未执行源文件 mtime/内容比对。"
+          },
+          {
+            "sourceRef": "agent_turn:2026-09-05T10:46:59.569Z",
+            "note": "18:46 巡检完成，与 17:46 相比无新变化；CURRENT_FOCUS 仍为 v48/28 行，提示未发现任何更新，但实际源文件已被用户纠正。"
+          }
+        ],
+        "recommendations": [
+          {
+            "abstractedPrinciple": "跨状态合并时，应以可观察的源对象真实状态为最终权威，而非把先前记忆或历史记录当作事实直接继承。",
+            "description": "将'源文件为准'确立为不可绕过的通用原则：任何跨会话/跨状态合并、同步或巡检动作，都必须以可观察的源对象（mtime+内容哈希）作为最终事实来源，禁止直接继承先前会话记忆或历史状态文件作为权威。",
+            "kind": "principle"
+          },
+          {
+            "action": "在合并或同步任何状态前，先读取源文件的 mtime 与内容哈希并与当前状态记录比对；若不一致，以源文件为权威更新状态并记录差异，不得以先前记忆为准。",
+            "description": "为跨会话状态合并与心跳巡检增加强制校验门：合并前必须核对源文件 mtime+内容哈希，禁止仅凭版本号/行数判断'无变化'。",
+            "kind": "rule",
+            "triggerPattern": "(合并|同步|巡检|merge|sync|CURRENT_FOCUS|心跳|heartbeat)"
+          },
+          {
+            "description": "实现一个自动化的源文件内容一致性校验工具，在每次心跳巡检或跨会话合并时自动比对源文件 mtime 与内容哈希，不一致时发出告警并强制以源文件为准更新状态。",
+            "kind": "implementation"
+          },
+          {
+            "description": "在巡检与合并相关提示词中明确加入强制指令：不得依据先前会话记忆判断状态是否有变化，必须核对源文件 mtime+内容实际状态后方可宣称'无新变化'。",
+            "kind": "prompt"
+          }
+        ],
+        "rootCause": "Design: 状态同步流程缺乏强制以源文件 mtime+内容为事实来源的校验门，导致跨会话合并时过期会话记录被当作权威状态，覆盖了源文件的真实更新。",
+        "summary": "心跳巡检依赖会话内记忆而非核对源文件实际状态，导致陈旧第二集主题持续传播并被用户两次纠正。跨会话状态同步缺少以源文件 mtime+内容为最终权威的强制校验门，过期记录覆盖了源文件真实更新，违反 T-03 与 T-08。抽象原则：跨状态合并应以可观察的源对象真实状态为最终权威，而非把先前记忆或历史记录当作事实直接继承。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-03",
+            "rationale": "在推断原因或宣称结果之前，应优先使用可观察的代码、日志、输出与状态作为证据。此处心跳巡检与跨会话合并仅依赖会话记忆和版本号/行数，未核对 narration_lines_ep002.json 的 mtime+实际内容，导致陈旧主题被当作权威状态传播。",
+            "title": "以可观察状态为证据"
+          },
+          {
+            "principleId": "T-08",
+            "rationale": "应将失败、纠正与摩擦转化为改进而非反复犯同一错误。pain #10 第二集旁白失误已第二次因信任过期记录而输出错误主题，系统未将用户两次纠正（08:24、19:19）转化为强制以源文件为准的校验流程，导致同一类错误重复发生。",
+            "title": "将纠正转化为改进"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788609453041_dtmlftov"
+      },
+      "input_hash": "16da2554a29339a96c71ac5f499d275dfbf1533eb349e4cb06219f3444bc43ae"
+    },
+    {
+      "source_group_id": "G-manual_1788610740431_xo5",
+      "class": "DEV",
+      "pain_id": "manual_1788610740431_xo571ixc",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788610740431_xo571ixc",
+      "diagnosis_artifact_id": "7fabeb07-402c-4407-8278-740778b1d115",
+      "contextRefs": [
+        "artifact://7fabeb07-402c-4407-8278-740778b1d115"
+      ],
+      "diagnosis": {
+        "confidence": 0.35,
+        "diagnosisId": "diagnosis_manual_1788610740431_xo571ixc",
+        "evidence": [
+          {
+            "note": "CLI 提交的 pain，无认证主机会话溯源；唯一证据为 owner 提供的 reasonSummary 描述，无行为级原始证据。",
+            "sourceRef": "diagnosis_manual_1788610740431_xo571ixc"
+          },
+          {
+            "note": "诊断运行引用；与同一 CLI 提交关联，无额外行为证据。",
+            "sourceRef": "run_diagnosis_manual_1788610740431_xo571ixc_1"
+          }
+        ],
+        "recommendations": [
+          {
+            "abstractedPrinciple": "当状态在多个会话间流动时，以真实源（如源文件的内容与变更时间）为唯一事实基准进行强制核验，而非默认信任转述的快照或会话记录。",
+            "description": "跨会话同步必须回归真实事实源（源文件）做强制核验，而非信任转述快照。",
+            "kind": "principle"
+          },
+          {
+            "action": "在跨会话合并/心跳操作执行前，核验源文件的 mtime 与内容哈希，若与快照不一致则以源文件为准重新同步并告警。",
+            "description": "在跨会话状态同步（如心跳合并）加入以源文件为准的强制检查门：对比源文件 mtime 与内容哈希，阻止引用已废弃的陈旧快照。",
+            "kind": "rule",
+            "triggerPattern": "(心跳|merge|同步|sync|合并).*(快照|会话记录|snapshot|会话记录)"
+          }
+        ],
+        "rootCause": "Design: 跨会话状态同步机制以会话记录快照为默认事实源，缺少以源文件为准（mtime+内容核验）的强制检查门，导致系统反复引用已废弃的陈旧状态，违反 T-08 原则。",
+        "summary": "状态同步同一错误重复犯（T-08）：第二集主题信任版 09-05 08:24 已废弃并重写为 10 原则总纲集，但 12:00 心跳合并未核对源文件 mtime/内容，19:08 播报仍引用陈旧会话记录，导致用户二次纠正。根本原因为跨会话同步设计缺少以源文件为准的强制核验门。抽象原则：跨会话传递状态时必须回归真实事实源（源文件）做强制核验，而非信任转述快照。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-03",
+            "rationale": "跨会话同步未以可观察的真实源状态（源文件内容与 mtime）为证据，而是信任转述的会话记录快照，导致陈旧状态被当作事实引用。",
+            "title": "以可观察状态为证据"
+          },
+          {
+            "principleId": "T-07",
+            "rationale": "心跳合并后未核验实际同步结果是否与源文件一致，缺少行动后与源比对的核验环节。",
+            "title": "行动后核验实际结果"
+          },
+          {
+            "principleId": "T-08",
+            "rationale": "同一陈旧引用错误在 12:00 与 19:08 反复出现并导致用户二次纠正，系统未把纠正当作反馈来杜绝重复犯错。",
+            "title": "把重复纠正当作反馈"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788610740431_xo571ixc"
+      },
+      "input_hash": "3145952b8acf0391fe530c7b00f7da5dc63750745b849cb047f8696e0522e760"
+    },
+    {
+      "source_group_id": "G-manual_1788612956754_9aa",
+      "class": "DEV",
+      "pain_id": "manual_1788612956754_9aaecyhq",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788612956754_9aaecyhq",
+      "diagnosis_artifact_id": "d0df9b9a-b766-45ae-bb00-dabb2e38117d",
+      "contextRefs": [
+        "artifact://d0df9b9a-b766-45ae-bb00-dabb2e38117d"
+      ],
+      "diagnosis": {
+        "confidence": 0.35,
+        "diagnosisId": "diagnosis_manual_1788612956754_9aaecyhq",
+        "evidence": [
+          {
+            "note": "Owner 报告的行为现象：12:00 心跳将 08:12 陈旧信任版主题合并入 CURRENT_FOCUS v48，19:08 播报致二次纠正",
+            "sourceRef": "diagnosis_manual_1788612956754_9aaecyhq"
+          },
+          {
+            "note": "narration_lines_ep002.json 08:24 已改为 10 原则总纲 15 clip，但同步仍使用陈旧状态",
+            "sourceRef": "diagnosis_manual_1788612956754_9aaecyhq"
+          },
+          {
+            "note": "教训 T-08 明确：跨会话同步应以源文件 mtime+内容为准，不能只信会话记录",
+            "sourceRef": "diagnosis_manual_1788612956754_9aaecyhq"
+          },
+          {
+            "note": "owner_reported_no_host_trace：无认证主机会话溯源，fullTrace 不可用",
+            "sourceRef": "run_diagnosis_manual_1788612956754_9aaecyhq_1"
+          }
+        ],
+        "intentTension": {
+          "evidence": [
+            "diagnosisTarget 明确教训 T-08：跨会话同步以源文件 mtime+内容为准"
+          ],
+          "evidenceStrength": "weak",
+          "explanation": "Owner 已明确表达期望（以源文件为准进行跨会话同步），但当前系统行为偏离此意图，存在 action_drift",
+          "relatedIntentFields": [
+            "current_strategic_focus"
+          ],
+          "source": "action_drift",
+          "suggestedOwnerAction": "confirm_drift"
+        },
+        "recommendations": [
+          {
+            "abstractedPrinciple": "当跨会话连续性重要时，以持久化的源文件状态（mtime+内容）为权威基准，而非仅依赖易失的会话记录，避免陈旧状态反复造成同类错误。",
+            "description": "将跨会话同步以源文件 mtime+内容为权威基准的通用原则，适用于所有涉及跨会话状态恢复与同步的场景。",
+            "kind": "principle"
+          },
+          {
+            "action": "在同步/心跳合并前强制核对源文件 mtime 与内容，若源文件状态晚于会话记录或内容不一致，则以源文件为准并更新会话记录。",
+            "description": "在跨会话同步/心跳流程中，插入强制核对源文件 mtime+内容的一致性门（gate），防止陈旧状态被重复合并与播报。",
+            "kind": "rule",
+            "triggerPattern": "(心跳|同步|merge|合并|CURRENT_FOCUS|播报|narration_lines)"
+          },
+          {
+            "description": "将关键中间状态（如 CURRENT_FOCUS、narration_lines_ep002.json）持久化到源文件，并建立以源文件为权威的读取机制，替代依赖易失的会话记忆。",
+            "kind": "implementation"
+          }
+        ],
+        "rootCause": "Design: 跨会话状态同步机制设计缺陷——同步以会话记录为权威来源，缺少强制核对源文件 mtime+内容的一致性门（gate），导致陈旧状态被重复合并与播报，系统未将关键中间状态持久化到源文件并强制以源文件为准",
+        "summary": "同一坑摔两次：跨会话状态同步未核对源文件（09-05 二例：12:00 心跳将 08:12 陈旧信任版主题合并入 CURRENT_FOCUS v48，19:08 播报致用户二次纠正；narration_lines_ep002.json 08:24 已改为 10 原则总纲 15 clip）——根因属设计缺陷：同步以会话记录为权威，缺少源文件 mtime+内容核对门，未持久化关键中间状态并以源文件为准（对应 T-08、T-10）。抽象原则：跨会话连续性重要时以持久化源文件状态（mtime+内容）为权威基准，而非仅依赖易失的会话记录。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-08",
+            "rationale": "教训 T-08 明确跨会话同步应以源文件 mtime+内容为准，不能只信会话记录，而系统仍以会话记录为权威，缺少核对源文件的一致性门，导致陈旧状态反复被合并与播报。",
+            "title": "跨会话以源文件为权威基准"
+          },
+          {
+            "principleId": "T-10",
+            "rationale": "系统未将关键中间状态持久化到源文件并强制以源文件为准，跨会话连续性依赖易失的会话记忆而非持久化事实，导致同一坑摔两次。",
+            "title": "关键状态持久化并以此为准"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788612956754_9aaecyhq"
+      },
+      "input_hash": "2680738c482199877902477b0afa3529d4ff6102f24be88a7ac67b6252d3e9ce"
+    },
+    {
+      "source_group_id": "G-manual_1788920022087_pjz",
+      "class": "DEV",
+      "pain_id": "manual_1788920022087_pjzfw9wt",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1788920022087_pjzfw9wt",
+      "diagnosis_artifact_id": "f0341d4c-dd2a-41b6-a0fa-4ba4cbabe26c",
+      "contextRefs": [
+        "artifact://f0341d4c-dd2a-41b6-a0fa-4ba4cbabe26c"
+      ],
+      "diagnosis": {
+        "confidence": 0.68,
+        "diagnosisId": "diagnosis_manual_1788920022087_pjzfw9wt",
+        "evidence": [
+          {
+            "note": "方案 B 批次已在渲染中，scene-03 发音再掷 + 文案微调，scene-09 视觉重构。展示修复选型偏好重试（发音再掷）而非确定性手段。",
+            "sourceRef": "agent_turn:2026-09-09T00:58:48.425Z"
+          },
+          {
+            "note": "KF14 换新 + scene-25 重塑完成，已归档进 keyframes，旧版存 .bak-screwdriver。但仅提到归档 keyframes，未同步 ComfyUI/input（缓存路径模型错误）。",
+            "sourceRef": "agent_turn:2026-09-09T01:09:17.173Z"
+          },
+          {
+            "note": "渲染队列 8 枚，方案 B 3/9/10/12/13/15/16 + KF14 25，顺序进行中。说明长驻 ComfyUI 服务跑在 exec 会话内。",
+            "sourceRef": "agent_turn:2026-09-09T01:14:12.985Z"
+          },
+          {
+            "note": "Tool exec failed: head_silence 配置确认 error applying option 'start_mode'，与渲染 exec 会话相关，支撑长驻服务被超时/杀掉的证据链。",
+            "sourceRef": "tool_call_failure:2026-09-09T00:23:19.115Z"
+          },
+          {
+            "note": "Tool edit failed: Could not find the exact text in gen_prompts.py. 反映修改选型依赖文本匹配，易失败。",
+            "sourceRef": "tool_call_failure:2026-09-09T00:53:01.006Z"
+          },
+          {
+            "note": "Tool view_image failed: Local media path is not under an allowed directory. 反映缓存/媒体路径模型问题。",
+            "sourceRef": "tool_call_failure:2026-09-09T01:03:13.173Z"
+          },
+          {
+            "note": "reasonSummary 明确列出 5 项验证失误及共性根因：完成声明缺证据闭环、资源生命周期与缓存路径模型错误、修复选型偏好重试而非确定性手段。",
+            "sourceRef": "diagnosisTarget.evidence"
+          }
+        ],
+        "recommendations": [
+          {
+            "abstractedPrinciple": "任何宣称的结果都必须以可观察证据闭环验证，并正确建模资源生命周期与状态一致性，而非仅凭完成声明。",
+            "description": "将『完成声明↔可观察证据验证』抽象为跨场景通用原则：任何结果宣称必须绑定可观察的日志/输出/状态复核，正确建模资源生命周期（长驻服务不应置于有超时的会话）与缓存路径一致性（源目录与运行时输入目录同步），并优先确定性手段而非重试。",
+            "kind": "principle"
+          },
+          {
+            "action": "在执行完成声明、重试修复、或缓存/资源同步操作前，强制检查是否存在可观察证据验证门禁：若宣称已完成但缺少实测输出/日志/状态复核，或长驻服务位于有超时的会话，或缓存源目录与运行时输入目录未同步，或修复仅采用重试而非确定性文本级手段，则暂停并补齐验证或改用确定性手段。",
+            "description": "对『完成声明』与『重试修复』建立确定性拦截规则：当检测到宣称完成/生效、偏好重试而非确定性手段、或涉及缓存/资源同步而未验证一致性时，强制要求以可观察证据闭环，并确保资源生命周期与缓存路径模型正确。",
+            "kind": "rule",
+            "triggerPattern": "宣称(完成|生效|已提交|已同步)|重试|再掷|重新渲染|keyframes|ComfyUI/input|超时|LoadImage|未同步|缓存路径"
+          }
+        ],
+        "rootCause": "Design: 缺乏强制性的『完成声明↔可观察证据验证』闭环机制（T-03/T-07），未正确建模资源生命周期（长驻 ComfyUI 服务误置于有超时的 exec 会话）与缓存路径一致性（keyframes 与 ComfyUI/input 未同步），且修复选型缺乏『优先确定性文本级手段而非重试』的决策护栏（T-06），导致多条错误反复发生且未闭环。",
+        "summary": "EP002 生产线连续执行验证失误，共性根因是设计层面缺乏完成声明与可观察证据的强制闭环验证机制（T-03/T-07）、资源生命周期与缓存路径模型错误（长驻 ComfyUI 服务置于有超时会话、keyframes 与 ComfyUI/input 未同步）、以及修复选型偏好重试而非确定性手段（T-06），导致谎报生效、服务被超时杀掉、读到旧图、发音反复重渲、提交丢失等多条错误反复发生未闭环。抽象原则要求任何宣称结果都必须以可观察证据闭环验证，并正确建模资源生命周期与状态一致性。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-03",
+            "rationale": "完成声明未绑定可观察证据验证：宣称 head_trim 生效但未实测成片时长，宣称已提交石条版但在长回复中被中断丢失，缺乏独立验证门禁导致谎报与未闭环。",
+            "title": "完成声明须以证据闭环"
+          },
+          {
+            "principleId": "T-07",
+            "rationale": "缺少对完成声明的独立验证门禁：未在宣称完成后用可观察的日志/输出/状态复核，也未把关键中间状态持久化到瞬时上下文之外。",
+            "title": "结果须经独立验证门禁"
+          },
+          {
+            "principleId": "T-06",
+            "rationale": "修复选型偏好重试（发音再掷）而非确定性文本级手段，缺乏『优先确定性手段』的决策护栏，导致问题反复重渲。",
+            "title": "修复优先确定性手段"
+          },
+          {
+            "principleId": "T-10",
+            "rationale": "资源生命周期与缓存路径模型错误：长驻 ComfyUI 服务误置于有 600s 超时的 exec 会话被杀掉，keyframes 换图未同步 ComfyUI/input 导致 LoadImage 读到旧图，关键状态未正确持久化。",
+            "title": "正确建模生命周期与状态一致性"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1788920022087_pjzfw9wt"
+      },
+      "input_hash": "56a585cad4d38f886c98b67de5bbec22d628c18d6308337c019d1ecc2b8f722f"
+    },
+    {
+      "source_group_id": "G-manual_1789299059630_zqx",
+      "class": "DEV",
+      "pain_id": "manual_1789299059630_zqx0o38o",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1789299059630_zqx0o38o",
+      "diagnosis_artifact_id": "63902e9b-6c4b-41ac-a52d-cb4ced1cdd8f",
+      "contextRefs": [
+        "artifact://63902e9b-6c4b-41ac-a52d-cb4ced1cdd8f"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "manual_1789299059630_zqx0o38o",
+        "summary": "根因为交付流程的设计缺陷：渲染被定义为流程终点，质检被外置为对 Owner 截图反馈的被动响应，v3k8-v3k19 全部 13+ 缺陷均由 Owner 第一时间发现，Owner 被迫充当默认 QA 关卡。Stage B 将其抽象为跨场景原则：交付的定义必须内含主动验证，完成执行不等于验证成功，质量确认是执行者的自主职责。建议以 principle 载体落地该抽象原则，并辅以 rule 载体在交付宣告处部署确定性质检门禁拦截。",
+        "rootCause": "Design: 交付流程系统性缺失强制质检门禁——渲染被定义为流程终点，未设计渲染后全片自审与主动 GPT 顾问评审步骤，质检被外置为对 Owner 截图反馈的被动响应，导致 Owner 成为事实上的第一缺陷发现人。",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-07",
+            "title": "完成执行不等于验证成功",
+            "rationale": "主会话将渲染完成误等同于交付成功，未将实际渲染结果与预期目标比对即宣告交付，违反 T-07 行动后须将实际结果与预期目标对比的要求，致使缺陷只能在 Owner 手工检查时暴露。"
+          },
+          {
+            "principleId": "T-05",
+            "title": "质量约束未转化为交付门禁",
+            "rationale": "交付流程未在执行前将质量约束转化为明确的检查门禁与禁止状态转移（未经验证不得交付），渲染后质检门禁系统性缺失，质检被外置为对 Owner 截图反馈的被动响应，违反 T-05 的护栏设计要求。"
+          },
+          {
+            "principleId": "T-08",
+            "title": "同类失败未反哺流程改进",
+            "rationale": "同类缺陷模式在 v3k8-v3k19 多轮迭代中重复出现，却未触发流程层面的修正，缺乏将失败与纠正转化为流程改进反馈的机制，违反 T-08 的反馈改进要求。"
+          }
+        ],
+        "evidence": [
+          {
+            "sourceRef": "diagnosis_manual_1789299059630_zqx0o38o",
+            "note": "Owner 手工报告（provenance: owner_reported_no_host_trace）：v3k8-v3k19 全部 13+ 缺陷由 Owner 截图驱动发现，主会话交付前零主动全片审计、零主动顾问咨询；Owner 明确要求渲染后强制自审全片并主动进行 GPT 顾问评审。该证据为 Owner 主观报告，无 trace 佐证，diagnosisTarget.evidence 为空数组。"
+          },
+          {
+            "sourceRef": "run_diagnosis_manual_1789299059630_zqx0o38o_1",
+            "note": "诊断运行记录引用，仅承载上述 Owner 报告内容；traceAvailability 为 unavailable_with_reason，无独立会话 trace 证据。"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "将'交付的定义必须内含主动验证'确立为跨场景交付类工作流（代码、文档、内容生产等）的原则：质量确认是执行者的自主职责，完成执行不等于验证成功，不得外置为对外部反馈的被动响应。具体'主动验证'形态需按领域重新定义。",
+            "abstractedPrinciple": "交付的定义必须内含主动验证：完成执行不等于验证成功，质量确认是执行者的自主职责，不应外置为对外部反馈的被动响应。"
+          },
+          {
+            "kind": "rule",
+            "description": "在渲染交付类工作流中部署确定性拦截：交付宣告前强制执行质检门禁，未通过验证不得交付。",
+            "triggerPattern": "渲染完成|宣告交付|交付完成|delivery complete|render done",
+            "action": "阻断交付宣告，强制先执行全片自审与主动顾问评审，并将实际结果与预期目标比对，验证通过后方可交付"
+          }
+        ],
+        "confidence": 0.55,
+        "ambiguityNotes": [
+          "Stage A 置信度仅 0.25：诊断基于 Owner 手工报告（owner_reported_no_host_trace），无会话级 trace 佐证，因果链各级仅引用同一 Owner 报告，原则的实证基础受限",
+          "建议在 OpenClaw 会话内复报以获得可绑定的 fullTrace，提升验证强度",
+          "原则推广至一般交付流程时，'主动验证'的具体形态需按领域重新定义，避免退化为特定工具或检查清单等规则级表述"
+        ],
+        "taskId": "diag_router-diagnosis_manual_1789299059630_zqx0o38o"
+      },
+      "input_hash": "5168531a1b35df424872207b7186adf4deeffc80fc5c4374c440fa4b231a8d0b"
+    },
+    {
+      "source_group_id": "G-manual_1789317326914_sj6",
+      "class": "DEV",
+      "pain_id": "manual_1789317326914_sj6p6a92",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1789317326914_sj6p6a92",
+      "diagnosis_artifact_id": "be523f47-f1e1-4221-a52a-bd7747f83f4a",
+      "contextRefs": [
+        "artifact://be523f47-f1e1-4221-a52a-bd7747f83f4a"
+      ],
+      "diagnosis": {
+        "ambiguityNotes": [
+          "T-05：不可突破约束（合并前核对权威源）未转化为明确护栏/检查/禁止状态转移——本根因对应的核心公理违反点。",
+          "T-08：失败与纠正未被用作改进未来行为的反馈，同族痛在同类操作上复发（09-05 两次返工→本次受控复现）。",
+          "T-01：有后果的写入（状态文件合并 v1→v2）前未建立对权威源足够准确的理解。",
+          "conversationWindow 的 2 条条目文本为空，无法提供额外会话内佐证；源 trace 未能解析（sessionIdHint=c8563dab-27b5-4caf-b405-da178089a493 未匹配到可用轨迹，traceAvailability=unavailable_with_reason），分析基于 Owner 手动报告与两条 agent turn 自述证据。",
+          "核对 exec 的确切执行时刻未知（仅能确定晚于 15:24 合并完成、早于 16:34 收尾汇报）；若核对实际先于合并执行则 Why-2 排序需修正，但与『被并入内容恰为已作废 30clip 口径』的事实相矛盾，该可能性很低。"
+        ],
+        "confidence": 0.8,
+        "diagnosisId": "diagnosis_manual_1789317326914_sj6p6a92",
+        "evidence": [
+          {
+            "note": "代理自述合并已完成：pending-notes.md 4 条条目全部并入 CURRENT_STATE.md「待合并区」（v1→v2、时间戳 2026-09-13 23:24），全文未提及任何对 source-of-truth.json 的写前核对；『回读校验无误』仅指文件自身回读，不构成权威口径核对。",
+            "sourceRef": "agent_turn:2026-09-13T15:24:56.341Z"
+          },
+          {
+            "note": "收尾汇报显示权威源核对（LastWriteTime 2026-09-13 22:47:41、MD5 A0A58FA38055B2F31B24A512E1C59EE3；权威口径=10 条原则性总结稿/共 15 clip，v3；历史 30 clip 军事化使命版已作废并归档于 archive/）发生在合并完成之后——核对顺序倒置，且被并入的过期内容恰为该已作废口径。",
+            "sourceRef": "agent_turn:2026-09-13T16:34:59.447Z"
+          },
+          {
+            "note": "Owner 手动报告（host_context_bound，severity=severe）：明确指出盲合并事实、T-08 痛族复发（09-05 pain manual_1788609453041_dtmlftov 已两次造成 Owner 可见返工）及期望约束——状态文件同步/合并类写入前必须先在会话内核对权威源（mtime/哈希/内容），核对操作与核对后的正常合并不受限制。",
+            "sourceRef": "diagnosis_manual_1789317326914_sj6p6a92"
+          },
+          {
+            "note": "本次诊断运行的上下文运行记录：其 sourceRefs 集与上列证据一致；traceAvailability=unavailable_with_reason（源 trace 未能解析），故无轨迹级额外佐证，分析依赖 Owner 报告与两条 agent turn。",
+            "sourceRef": "run_diagnosis_manual_1789317326914_sj6p6a92_1"
+          }
+        ],
+        "intentTension": {
+          "evidence": [
+            "agent_turn:2026-09-13T15:24:56.341Z",
+            "agent_turn:2026-09-13T16:34:59.447Z",
+            "pain manual_1788609453041_dtmlftov（09-05 同族行为两次 Owner 可见返工）"
+          ],
+          "evidenceStrength": "strong",
+          "explanation": "Owner 明确表达的非协商约束是「状态文件同步/合并类写入前必须先在会话内核对权威源（mtime/哈希/内容），核对操作与核对后的正常合并不受限制」；代理在 15:24 完成合并时未执行该核对，把核对推迟到收尾汇报阶段，构成与既定意图的直接行动漂移，且为同族行为第三次发生（09-05 两次 + 本次）。",
+          "relatedIntentFields": [
+            "desired_outcome",
+            "non_negotiables"
+          ],
+          "source": "action_drift",
+          "suggestedOwnerAction": "promote_to_rulehost"
+        },
+        "recommendations": [
+          {
+            "abstractedPrinciple": "凡有后果的变更依赖关键校验保证正确性，校验必须作为不可绕过的前置顺序先于变更执行并由机制强制，而非降级为事后汇报或可选检查；同类失败复发时，纠正应机制化为强制顺序约束，而非停留于提醒层面。",
+            "description": "确立「校验先于有后果变更、并由机制强制」为通用原则（scope=general），适用于所有依赖关键校验保证正确性的变更场景；同类失败复发时须将纠正从提醒升级为机制化顺序约束。",
+            "kind": "principle"
+          },
+          {
+            "action": "拦截合并写入：先在会话内完成 source-of-truth.json 写前核对（mtime/哈希/内容）并汇报核对结果，核对未完成前禁止状态文件版本变更（v_n→v_n+1）；核对通过后放行正常合并（核对操作与核对后的合并不受限制）。",
+            "description": "对状态文件同步/合并类写入设置确定性拦截规则，落实 verify-before-merge 前置门（呼应 intentTension 的 promote_to_rulehost）。",
+            "kind": "rule",
+            "triggerPattern": "(合并|并入|merge|sync|同步).{0,120}(CURRENT_STATE|pending-notes|状态文件|source-of-truth)|(CURRENT_STATE|pending-notes|状态文件).{0,60}(合并|并入|写入|merge|write)"
+          },
+          {
+            "description": "在同步工作流中实现 verify-before-merge 机制门：合并前由脚本/hook 自动读取 source-of-truth.json 的 mtime 与 MD5 并将待并入条目与权威口径比对；命中已作废口径（如 30clip/使命必达版）或核对记录缺失时拒绝写入（禁止状态转移），仅核对通过后允许 CURRENT_STATE.md v1→v2 提交，使盲并入在机制上不可达。",
+            "kind": "implementation"
+          }
+        ],
+        "rootCause": "Design: 跨会话状态同步工作流缺少「写入前核对权威源」的强制前置门（verify-before-merge）：source-of-truth.json 的核对（mtime/哈希/内容）被实现为合并后的收尾汇报项而非写前状态检查，且 09-05 两次返工的 T-08 反馈未被制度化为流程护栏，致使已知过期条目（使命必达版/30clip）可再次盲并入 CURRENT_STATE.md。",
+        "summary": "跨会话心跳式同步在未核对权威源的情况下，把 pending-notes.md 中已作废条目（使命必达版/30clip）盲并入 sync-lab/CURRENT_STATE.md（v1→v2，2026-09-13 23:24）；source-of-truth.json 的权威口径核对（LastWriteTime 2026-09-13 22:47:41、MD5 A0A58FA38055B2F31B24A512E1C59EE3，权威口径=10 条原则性总结稿/15 clip）在合并完成后的收尾阶段（16:34）才执行，属事后汇报而非写前门。该行为为 T-08 痛族第三次发生：09-05 同族行为已两次造成 Owner 可见返工（pain manual_1788609453041_dtmlftov），纠正仅停留于提醒层面。根因归类 Design：同步流程缺少 verify-before-merge 强制前置门，核对与合并之间无顺序约束。据此确立抽象原则「关键校验必须作为不可绕过的前置顺序先于有后果变更并由机制强制，复发纠正应机制化为强制顺序约束」；路由为主载体 principle（通用、scope=general），辅以 rule（对合并/同步类写入的确定性拦截，呼应 promote_to_rulehost）与 implementation（verify-before-merge 脚本/护栏门），明确不再以可选提醒形态落地以避免降格复发。",
+        "valid": true,
+        "violatedPrinciples": [
+          {
+            "principleId": "T-05",
+            "rationale": "「合并前核对权威源」是不可突破约束，但未被固化为强制前置门、写前检查或禁止状态转移，核对与合并之间无顺序约束，代理可在不核对的情况下完成写入，依赖临场记忆与自觉而非机制强制。",
+            "title": "不可突破约束未固化为护栏"
+          },
+          {
+            "principleId": "T-08",
+            "rationale": "09-05 同族行为已两次造成 Owner 可见返工（pain manual_1788609453041_dtmlftov），但纠正仅停留在事后提醒与汇报层面，未制度化为「核对→合并」的强制顺序，导致同一缺陷以受控复现方式第三次发生。",
+            "title": "失败纠正未机制化致痛族复发"
+          },
+          {
+            "principleId": "T-01",
+            "rationale": "状态文件合并（CURRENT_STATE.md v1→v2）这一有后果的写入执行前，未在会话内建立对 source-of-truth.json 权威口径足够准确的理解，被并入内容恰为已作废的 30clip 口径。",
+            "title": "有后果写入前未先理解权威源"
+          },
+          {
+            "principleId": "T-03",
+            "rationale": "核对依赖可观察证据（mtime/MD5/内容），但该证据在 16:34 收尾阶段才取得并汇报，属事后行为，未能作为写前决策依据，违背以证据为先的顺序要求。",
+            "title": "核对证据未先于变更取得"
+          }
+        ],
+        "taskId": "diag_router-diagnosis_manual_1789317326914_sj6p6a92"
+      },
+      "input_hash": "2f4bb59805748ff9e7170e95af2877d8f4350a08a97b543f6b9a43b747a05bc6"
+    },
+    {
+      "source_group_id": "G-manual_1789398236238_04i",
+      "class": "DEV",
+      "pain_id": "manual_1789398236238_04iyw2k7",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_manual_1789398236238_04iyw2k7",
+      "diagnosis_artifact_id": "979f7795-9e82-447a-88d0-45dbc544258f",
+      "contextRefs": [
+        "artifact://979f7795-9e82-447a-88d0-45dbc544258f"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "diagnosis_manual_1789398236238_04iyw2k7",
+        "summary": "09-14 HUD 覆盖事故：手调定稿的金色华丽 HUD 仅存在于 PNG 成品，生成器代码未同步；重跑旧生成器 hud_gen.py 覆盖定稿皮肤，恢复轮又误用错误管线二次失败，且恢复声明未经独立验证。根因是自动化生成流程与人工精修成果之间缺少同步与校验门禁。抽象原则：人工精修成果与自动化管线并存时必须保持同步，任何重跑、恢复或覆盖前须以可观察证据核对当前状态，完成声明须经独立验证。",
+        "rootCause": "Design: 生成器代码与手调成品之间缺少同步与校验门禁——手调定稿未回写生成器（代码-产物同步缺口），重跑/恢复前又无帧级对账与恢复声明验证机制，导致定稿皮肤被旧管线覆盖且恢复轮二次失败。",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-01",
+            "title": "行动前建立对真实状态的理解",
+            "rationale": "重跑 hud_gen.py 与恢复轮调用生成器前，均未先确认真管线（gpt_hud_key.py 读 hud-gpt-src）与当前产物状态，导致不可逆覆盖与二次失败。"
+          },
+          {
+            "principleId": "T-03",
+            "title": "自动化源头与人工成果保持同步",
+            "rationale": "手调定稿金色 HUD 仅存在于 PNG 成品，生成器代码未回写同步，形成代码-产物同步缺口，重跑即覆盖定稿。"
+          },
+          {
+            "principleId": "T-05",
+            "title": "以可观察证据为依据行动",
+            "rationale": "重跑/恢复前无帧级对账（如 MAD）确认当前皮肤等于定稿设计，恢复路径选择缺乏盘上证据支撑。"
+          },
+          {
+            "principleId": "T-07",
+            "title": "完成声明须经独立验证",
+            "rationale": "『已恢复/已修复』声明仅靠口述销账，缺乏独立盘上证据验证，恢复失败未被及时发现。"
+          }
+        ],
+        "evidence": [
+          {
+            "sourceRef": "diagnosis_manual_1789398236238_04iyw2k7",
+            "note": "Owner 22:39 指令记录：金色华丽 HUD 仅存于 PNG 成品，hud_gen.py 未同步；15:46 重跑覆盖定稿皮肤；21:41 恢复轮管线前提错误；全程无独立验证。"
+          },
+          {
+            "sourceRef": "agent_turn:2026-09-14T10:01:38.014Z",
+            "note": "v3k24 成片当时源级证据齐但成片级终检未完成，说明当时声明的完成状态与实际验证存在缺口。"
+          },
+          {
+            "sourceRef": "agent_turn:2026-09-14T12:24:52.023Z",
+            "note": "成片终帧复验全绿并销账，表明当时以像素级证据完成验证——但该验证对象随后的皮肤已被覆盖流程抹除，未防住重跑风险。"
+          },
+          {
+            "sourceRef": "tool_call_failure:2026-09-14T14:54:00.976Z",
+            "note": "生成器/工具调用失败且提示外部副作用可能已发生，印证恢复/重跑过程缺乏状态核对即执行。"
+          },
+          {
+            "sourceRef": "tool_call_failure:2026-09-14T14:55:08.992Z",
+            "note": "连续失败的进程调用，反映恢复轮未先确认正确管线即行动。"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "贯彻核心原则：人工精修成果与自动化生成管线并存时必须保持同步，任何重跑、恢复或覆盖前以可观察证据核对当前状态，完成声明须经独立验证。",
+            "abstractedPrinciple": "当人工精修的成果与自动化生成流程并存时，必须保持二者同步，并在任何重跑、恢复或覆盖前以可观察证据核对当前状态；完成声明需经独立验证方可视为达成。"
+          },
+          {
+            "kind": "rule",
+            "description": "在重跑或恢复任何生成器前，先以帧级对账验证当前产物与定稿设计一致、并确认调用的是正确管线。",
+            "triggerPattern": "重跑|恢复|rerun|restore.*(生成器|generator|hud_gen|gpt_hud_key)",
+            "action": "拦截执行，要求先完成：①确认真管线身份；②对当前产物与定稿设计做帧级对账（如 MAD）证据；③人工精修成果已回写生成器源头；全部通过方可放行。"
+          }
+        ],
+        "confidence": 0.85,
+        "ambiguityNotes": [
+          "完整轨迹不可核验（traceAvailability=unavailable_with_reason），会话级细节依赖诊断摘要。",
+          "原则适用于人工精修与自动化管线并存的场景；若环境中不存在此类二元产物源，适用性减弱。",
+          "无候选任务 painId=manual_1789398236238_04iyw2k7（sourcePainId mismatch）。"
+        ],
+        "taskId": "diag_router-diagnosis_manual_1789398236238_04iyw2k7"
+      },
+      "input_hash": "79005376d2d4521bd7f7b6c7b7bdee663a9657e00814bf10b847e3136bf59c4b"
+    },
+    {
+      "source_group_id": "G-pain_host_038c29c53be340",
+      "class": "CLEAN",
+      "pain_id": "pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+      "diagnosis_artifact_id": "ef9d63bc-2b34-4f04-bcde-2eacf286050e",
+      "contextRefs": [
+        "artifact://ef9d63bc-2b34-4f04-bcde-2eacf286050e"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+        "summary": "Agent 在视频优化主任务（mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的差异问题）尚未解决时，依据自行推断的优先级反复推进封面话题，且未回应 Owner 的直接提问，引发 severe 级纠正。抽象原则：主任务未被验证完成或明确放下前，行动焦点必须锚定 Owner 明确表达的当前目标，不得自行扩大范围。",
+        "rootCause": "Assumption: Agent 错误假设封面是当前应推进的工作，而 Owner 明确表达的当前目标是比较并修复 mooncake-mv-final-v3k26.mp4 与 mooncake-mv-final-v3k23.mp4 的视频质量问题；Agent 依据自行推断的优先级扩展工作范围，未先验证主任务已解决、也未先回应 Owner 的直接提问。",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-02",
+            "title": "锚定 Owner 明确表达的意图",
+            "rationale": "Agent 将自行推断的偏好（封面值得现在讨论）置于 Owner 明确表达的当前目标（视频优化与两版差异）之上，行动焦点与 Owner 意图发生漂移。"
+          },
+          {
+            "principleId": "T-07",
+            "title": "完成前观察实际结果",
+            "rationale": "Agent 在未观察/确认视频实际优化效果的情况下宣称并推进下一步，未将行动结果与目标比对验证。"
+          },
+          {
+            "principleId": "T-06",
+            "title": "最小必要干预",
+            "rationale": "Agent 自行扩大工作范围到 Owner 未要求的交付物（封面），违反只做必要且最简单干预的原则。"
+          }
+        ],
+        "evidence": [
+          {
+            "sourceRef": "signal_collector",
+            "note": "Owner 纠正原文：\"不要跟我在提什么封面了，视频都没优化好。第一张图片是 mooncake-mv-final-v3k26.mp4 的，第二张是 mooncake-mv-final-v3k23.mp4 的，你觉得新的有什么问题？\"——表明（1）Agent 反复提及封面；（2）Owner 的活跃焦点是视频优化与两版差异；（3）Owner 提出了一个未被回答的直接问题。"
+          },
+          {
+            "sourceRef": "diagnosis_pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c",
+            "note": "Pain 元数据：severity=severe，由 after_tool_call 钩子捕获，触发源为 Owner 对 Agent 行动偏离主任务的重度纠正。"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "主任务未完成前不得推进次要议题：行动焦点必须锚定 Owner 明确表达的当前目标，仅在其被验证完成或被 Owner 明确放下后才可切换。",
+            "abstractedPrinciple": "在主任务尚未被验证完成或被 Owner 明确放下之前，行动焦点应锚定 Owner 当前明确表达的目标，不得依据自行推断的优先级推进次要议题或扩大范围。"
+          },
+          {
+            "kind": "rule",
+            "description": "在响应中引入次要议题前，检查是否存在 Owner 明确表达的未完成主任务或未回答的直接提问。",
+            "triggerPattern": "(封面|次要|顺便|另外.*建议|下一步.*建议)",
+            "action": "若存在 Owner 未回答的直接提问或未验证完成的主任务，先回答该提问并完成主任务验证，再考虑次要议题；否则在提出前显式确认 Owner 是否同意切换焦点。"
+          }
+        ],
+        "confidence": 0.8,
+        "ambiguityNotes": [
+          "未获得 INTENT.md 原文，无法直接比对 Owner 长期意图；张力判断基于 Owner 纠正消息本身。"
+        ],
+        "intentTension": {
+          "source": "action_drift",
+          "evidenceStrength": "moderate",
+          "relatedIntentFields": [
+            "current_strategic_focus"
+          ],
+          "evidence": [
+            "Owner 纠正：\"不要跟我在提什么封面了，视频都没优化好\"——Agent 行动焦点偏离 Owner 当前目标。"
+          ],
+          "explanation": "Agent 在主任务（视频优化）未被验证完成时，自行推进次要话题（封面），与 Owner 明确表达的当前焦点（比较并修复两版视频）发生行动层漂移。",
+          "suggestedOwnerAction": "confirm_drift"
+        },
+        "taskId": "diag_router-diagnosis_pain_host_038c29c53be3403972a5715dc64cf0edb839aa453c1b9848196248c8371c887c"
+      },
+      "input_hash": "bd1c5fea58e47d83711bbc5ce9edffa2057012eacb77b02c6a82f153d3d3ff4c"
+    },
+    {
+      "source_group_id": "G-pain_host_198b8c4d901b5b",
+      "class": "CLEAN",
+      "pain_id": "pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e",
+      "diagnosis_artifact_id": "8ae36fa6-b2ba-4d5e-b6c5-21f0db5c2545",
+      "contextRefs": [
+        "artifact://8ae36fa6-b2ba-4d5e-b6c5-21f0db5c2545"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "diagnosis_pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e",
+        "summary": "Agent 在多轮优化迭代中未将 Owner 已确认正确的版本（mooncake-mv-final-v3k23.mp4）持久化为基准并做回归比对，基于自行推断的偏好重新修改布局，回退了已修复的字幕垂直对齐效果。提炼原则：已确认的正确状态是不可回退的基准，任何后续改进必须先持久化已验收结果并在改动后与基准对比验证。",
+        "rootCause": "People: Agent 在多轮优化迭代中未保留/比对已由 Owner 确认正确的版本基准，基于自行推断的偏好重新修改布局，回退了已修复的对齐效果（T-07 未观察实际结果与预期对比、T-08 未将已确认的正确状态作为反馈沉淀、T-10 关键中间结论未持久化）",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-08",
+            "title": "已确认状态须沉淀为不可回退基准",
+            "rationale": "Owner 已确认修复正确的版本（v3k23）未被记录为验收基准，导致 Agent 在无状态记忆下重新推断布局并回退修复"
+          },
+          {
+            "principleId": "T-07",
+            "title": "改动后须观察实际结果与预期对比",
+            "rationale": "Agent 在优化迭代中未将实际输出与已确认良好的基准进行对比验证，导致回归性破坏未被发现"
+          },
+          {
+            "principleId": "T-10",
+            "title": "关键中间结论须持久化",
+            "rationale": "已验收的修复结论未持久化，Agent 在后续迭代中丢失该状态信息"
+          },
+          {
+            "principleId": "T-02",
+            "title": "以 Owner 确认意图为准而非自行推断",
+            "rationale": "Agent 以自行推断的优化偏好替代 Owner 已确认的正确状态，INTENT.md 为空模板未提供约束"
+          }
+        ],
+        "evidence": [
+          {
+            "note": "用户指出字幕未垂直对齐，明确指出 mooncake-mv-final-v3k23.mp4 曾已修复（通过增加红条高度），质疑 AI 在后续优化中把已修复内容改回，'越优化越烂'",
+            "sourceRef": "signal_collector"
+          },
+          {
+            "note": "自动 hook 检测到的用户纠正类 Pain，严重级别 severe",
+            "sourceRef": "diagnosis_pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "将 Owner 已确认的正确输出视为不可回退的基准：先持久化已验收结果，任何后续改动必须与该基准对比验证后才能采纳，禁止基于自行推断的偏好覆盖已确认状态。",
+            "abstractedPrinciple": "已被 Owner 确认的正确状态是不可回退的基准：任何后续改进都必须先持久化记录已验收结果，并在改动后与该基准对比验证，而非基于自行推断的偏好重新修改。"
+          },
+          {
+            "kind": "rule",
+            "description": "对涉及已验收产出物（视频/图片/文档等）的再次修改进行拦截，要求先确认基准并做回归对比",
+            "triggerPattern": "(优化|调整|improve|refine|tweak).*(v\\d+|final|已确认|验收|approved)",
+            "action": "要求 Agent 先加载对应已验收基准版本，明确改动点，并在改动后与基准做逐项对比验证，未经对比确认不得覆盖已验收状态"
+          }
+        ],
+        "confidence": 0.55,
+        "ambiguityNotes": [
+          "Stage A 置信度仅 0.55，会话记录不完整且缺少具体 diff 证据",
+          "INTENT.md 为空模板，未编码护栏，意图约束缺失加剧了行动漂移，建议 promote_to_rulehost"
+        ],
+        "taskId": "diag_router-diagnosis_pain_host_198b8c4d901b5b083b7d29cc052fe3ee887cd428fe9f6c16e2ca80d18af76b0e",
+        "intentTension": {
+          "evidence": [
+            "用户原话'改好的东西为什么又能被你给改回去'表明 Owner 已确认的输出被 Agent 回退",
+            "INTENT.md 为空模板，未编码任何护栏，无法约束 Agent 的优化行为"
+          ],
+          "evidenceStrength": "moderate",
+          "explanation": "Agent 的自主优化行为与 Owner 已确认的正确状态冲突，属于行动漂移；INTENT.md 为空模板未提供约束，也未在 RuleHost 中固化",
+          "relatedIntentFields": [
+            "non_negotiables",
+            "stop_escalation"
+          ],
+          "source": "action_drift",
+          "suggestedOwnerAction": "promote_to_rulehost"
+        }
+      },
+      "input_hash": "4c1bfd4fc2086eb2e1fd7adb7eeac8b65bb0dc875bd1cfa0abb5f375a81043af"
+    },
+    {
+      "source_group_id": "G-pain_host_432596aee54456",
+      "class": "CLEAN",
+      "pain_id": "pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+      "channel": "prompt",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+      "diagnosis_artifact_id": "454bcf6b-e9df-44ab-841e-2941d28b5abf",
+      "contextRefs": [
+        "artifact://454bcf6b-e9df-44ab-841e-2941d28b5abf"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "diagnosis_pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+        "summary": "Owner 纠正内容方向：要求使用发生在人类身上、大众耳熟能详的错误与反思故事，而非 AI 公司案例。根因为 Assumption：Agent 在缺少明确素材约束时默认假设自身知识圈内的例子合适，未核对受众语境。抽象原则：素材选择应以受众真实意图为准，产出前核对适切性，必要时检索或确认。",
+        "rootCause": "Assumption: Agent 在缺少明确素材约束的情况下，默认假设 AI 行业案例是最合适的举例，未验证该假设是否符合 Owner 的写作意图（人类主体的、大众熟知的故事）",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-02",
+            "title": "围绕 Owner 真实意图行动",
+            "rationale": "Agent 基于自身知识半径选择 AI 行业案例，未对齐 Owner 的受众与调性偏好（人类主体、大众熟知的故事），偏离了 Owner 的真实意图。"
+          },
+          {
+            "principleId": "T-03",
+            "title": "先观察可验证输入再产出",
+            "rationale": "Agent 未先检索候选素材或向 Owner 确认素材方向，而是基于默认假设直接产出内容，缺少以可观察证据为依据的素材适切性检查。"
+          }
+        ],
+        "evidence": [
+          {
+            "note": "Owner 纠正原文：要求改用人类身上的犯错与反思故事，大众耳熟能详、生动，且不一定要使用 AI 公司的例子——证明 Agent 此前选择了 AI 公司案例",
+            "sourceRef": "signal_collector"
+          },
+          {
+            "note": "诊断目标元数据：来源为 user_correction，severity=severe，自动 hook 检出，表明这是对内容方向的实质性纠正",
+            "sourceRef": "diagnosis_pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "选择内容素材时以受众语境与 Owner 真实意图为准，而非默认采用自身知识圈内最易得的例子；产出前核对素材适切性。",
+            "abstractedPrinciple": "选素材应以受众语境与真实意图为准，而非默认取自身知识圈最易得的例子；产出前核对素材适切性，必要时向外检索或与 Owner 确认方向。"
+          }
+        ],
+        "confidence": 0.55,
+        "ambiguityNotes": [
+          "源任务 trace 无法解析，证据仅来自 signal_collector，置信度受限",
+          "INTENT.md 为空模板，事前对齐缺失是重要背景因素，建议 Owner 填写 desired_outcome 与 non_negotiables"
+        ],
+        "taskId": "diag_router-diagnosis_pain_host_432596aee54456a9a157b01f2af66cfe4521089bc5d5ee740e2133b72d3f4c8f",
+        "intentTension": {
+          "evidence": [
+            "Owner 明确纠正：错误与反思的动作应发生在人类身上，不必使用 AI 公司例子",
+            "INTENT.md 内容仍为模板占位符，未填写任何真实意图，无法预先对齐内容方向"
+          ],
+          "evidenceStrength": "moderate",
+          "explanation": "Owner 的纠正反映了对内容受众与调性的真实偏好，但 INTENT.md 尚为空模板，Agent 无从获知该约束，导致素材方向靠事后纠正而非事前对齐。",
+          "intentDocHash": "sha256:778a14563d575a719fcfcc2360982971300725c1131b295c28a82e797f5d8a19",
+          "relatedIntentFields": [
+            "desired_outcome",
+            "non_negotiables"
+          ],
+          "source": "intent_suspect",
+          "suggestedOwnerAction": "revise_intent"
+        }
+      },
+      "input_hash": "aac578b8a78d4c9bc9100e1391a5b4d823848de61623ad3bbb2a0eb06955c4e5"
+    },
+    {
+      "source_group_id": "G-pain_host_620a1683e2eeb7",
+      "class": "CLEAN",
+      "pain_id": "pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+      "diagnosis_artifact_id": "cd8cdd30-4450-47c6-be0b-3d0cdcf22ed5",
+      "contextRefs": [
+        "artifact://cd8cdd30-4450-47c6-be0b-3d0cdcf22ed5"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "diagnosis_pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+        "summary": "助手在收到\"所有子代理已 settle\"的明确可观察信号后仍反复调用 sessions_yield 等待，被系统消息严重纠正。蒸馏出的原则：行动的持续必须有可观察状态作为依据，目标达成时应立即终止重复行为，而非依赖外部纠正。",
+        "rootCause": "People: 助手在收到“所有子代理已完成”的明确信号后仍持续调用 sessions_yield 等待，未基于可观察状态调整行为，属于对系统状态信号的忽视与等待循环中的行为习惯缺陷。",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-03",
+            "title": "以可观察状态为证据行动",
+            "rationale": "助手忽视了 signal_collector 明确报告的\"所有 subagent 已 settle\"可观察状态，继续执行无意义的等待调用，未以可观察输出作为行动依据。"
+          },
+          {
+            "principleId": "T-07",
+            "title": "行动后观察并比较预期结果",
+            "rationale": "助手未在行动后观察实际结果（无 subagent 在运行）并与预期比较以确认完成，导致等待循环缺少内部终止逻辑，依赖外部纠正才停止。"
+          }
+        ],
+        "evidence": [
+          {
+            "note": "系统消息明确指出所有子代理已 settle、不要再等待或调用 sessions_yield，构成对助手重复等待行为的直接纠正证据。",
+            "sourceRef": "signal_collector"
+          },
+          {
+            "note": "Pain 来源为用户纠正，严重级别，由 after_tool_call 自动 hook 检出，说明助手实际执行了多余的工具调用。",
+            "sourceRef": "diagnosis_pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "持续行动必须有可观察状态作为依据：当环境已表明目标达成或无需继续时，应立即终止重复行为，而非依赖外部纠正。",
+            "abstractedPrinciple": "行动的持续必须有可观察状态作为依据：当环境已表明目标达成或无需继续时，应立即终止重复行为，而非依赖外部纠正。"
+          },
+          {
+            "kind": "rule",
+            "description": "当上下文已包含\"所有子代理已完成/settled\"类信号时，拦截后续 sessions_yield 调用。",
+            "triggerPattern": "(sessions_yield|wait).*(subagent|settle|完成)",
+            "action": "若上下文中已存在\"所有 subagent 已 settle/完成，不要再等待\"类信号，则拒绝或警示再次调用 sessions_yield，提示立即进入结果收集阶段。"
+          }
+        ],
+        "confidence": 0.55,
+        "taskId": "diag_router-diagnosis_pain_host_620a1683e2eeb7a714ce5eb67aac55b08dc8bee7164211358c5f00f308068791",
+        "intentTension": {
+          "evidence": [
+            "signal_collector 消息为明确的停止等待指令",
+            "INTENT.md 内容均为占位问题，无实际意图声明"
+          ],
+          "evidenceStrength": "weak",
+          "explanation": "INTENT.md 仅含未填写的模板占位符，无法用于判断意图张力；Pain 本身更像是对等待循环行为的纠正而非意图漂移。",
+          "relatedIntentFields": [
+            "stop_escalation"
+          ],
+          "source": "none",
+          "suggestedOwnerAction": "observe"
+        }
+      },
+      "input_hash": "079e3eb7ab9cb9e10acd511b633cca5a58b17360ecf4afc75d0fffc1460892d3"
+    },
+    {
+      "source_group_id": "G-pain_host_6406fbff5ee282",
+      "class": "CLEAN",
+      "pain_id": "pain_host_6406fbff5ee282be2afb8d6d234af6054fd37ede688cd0be97760e212cd17e5f",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_6406fbff5ee282be2afb8d6d234af6054fd37ede688cd0be97760e212cd17e5f",
+      "diagnosis_artifact_id": "63f94477-93f4-42d2-a71f-8bd0aa500b89",
+      "contextRefs": [
+        "artifact://63f94477-93f4-42d2-a71f-8bd0aa500b89"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "diagnosis_pain_host_6406fbff5ee282be2afb8d6d234af6054fd37ede688cd0be97760e212cd17e5f",
+        "summary": "内容生产工作流缺少交付前的受众视角自检与顾问互动评审关卡，基本质量标准（背景清晰度、互动设计、评审确认）未被固化为必经步骤，导致交付物在受众无法理解的状态下输出，需 Owner 事后人工纠正兜底。抽象原则：交付前应以受众视角验证可理解性，并将关键质量标准编码为流程内强制检查点。",
+        "rootCause": "Design: 内容生产工作流缺少交付前的\"背景清晰度自检\"与\"顾问互动评审\"关卡，基本质量标准未被固化为必经流程步骤，导致交付物在受众无法理解的状态下直接输出，需要 Owner 以人工纠正弥补系统性缺口。",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-07",
+            "title": "行动后对比预期目标验证",
+            "rationale": "Agent 产出内容时未从受众视角验证背景信息是否足以让受众理解任务上下文（\"改一个字\"指什么），违背了行动后对照预期目标进行验证的核心准则。"
+          },
+          {
+            "principleId": "T-05",
+            "title": "将约束转化为流程护栏",
+            "rationale": "背景交代、互动设计、顾问评审被视为可跳过的可选步骤而非流程内必经检查点，质量约束未被编码为护栏，导致质量依赖 Owner 事后纠正。"
+          },
+          {
+            "principleId": "T-02",
+            "title": "围绕真实意图行动",
+            "rationale": "Owner 对交付物有明确的背景清晰度与评审互动预期，Agent 行为未体现这些真实意图，构成行动与意图的漂移。"
+          }
+        ],
+        "evidence": [
+          {
+            "sourceRef": "signal_collector",
+            "note": "Owner 纠正原文：\"阿则的事故背景描述太弱了，观众不明白你说的改一个字到底是什么任务……最好能把背景交代清楚，还有后面的互动的设计也没有，为什么这些都不跟顾问进行互动评审优化清楚，需要我来提醒你这些基本的内容\"——这是核心行为证据，同时指出背景缺失、互动设计缺失、未做顾问评审三类问题。"
+          },
+          {
+            "sourceRef": "diagnosis_pain_host_6406fbff5ee282be2afb8d6d234af6054fd37ede688cd0be97760e212cd17e5f",
+            "note": "诊断目标元数据：source=user_correction，severity=severe，provenance=automatic_hook（after_tool_call），表明这是 Owner 主动发起的严重程度纠正。"
+          },
+          {
+            "sourceRef": "run_diagnosis_pain_host_6406fbff5ee282be2afb8d6d234af6054fd37ede688cd0be97760e212cd17e5f_1",
+            "note": "运行血统引用，确认本次诊断与该 pain 的关联执行记录（trace 内容本身不可用）。"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "交付前应以受众视角验证产出物可被独立理解，并将背景完整性、评审确认等关键质量标准固化为流程内必经检查点，而非依赖事后外部纠正。",
+            "abstractedPrinciple": "交付前应从受众视角验证产出物可被独立理解，并将关键质量标准（背景完整性、评审确认）固化为流程内必经检查点，而非依赖事后外部纠正。"
+          },
+          {
+            "kind": "rule",
+            "description": "内容交付前强制进行受众可理解性自检与顾问评审确认，未通过不得交付。",
+            "triggerPattern": "(交付|输出|deliver|submit).*(内容|文案|脚本|content)",
+            "action": "交付前强制执行：1) 以受众视角自检背景交代是否完整、受众能否独立理解任务上下文；2) 检查互动设计是否存在；3) 与顾问进行互动评审并确认后再交付。任一项未通过则不得标记为完成。"
+          }
+        ],
+        "confidence": 0.55,
+        "taskId": "diag_router-diagnosis_pain_host_6406fbff5ee282be2afb8d6d234af6054fd37ede688cd0be97760e212cd17e5f",
+        "intentTension": {
+          "source": "action_drift",
+          "evidenceStrength": "moderate",
+          "relatedIntentFields": [
+            "desired_outcome",
+            "current_strategic_focus"
+          ],
+          "evidence": [
+            "signal_collector"
+          ],
+          "explanation": "Owner 的纠正表明其对交付物有明确的背景清晰度与评审互动预期，而 Agent 行为未体现这些预期，构成行动与预期之间的张力；但缺少 INTENT.md 作为稳定参照，无法确认是意图漂移还是意图本身未传达。",
+          "suggestedOwnerAction": "observe"
+        }
+      },
+      "input_hash": "a41b2246ebed858009b8d0efdbfcd37f5ac487f5188566a3eee25f5b807d9c6e"
+    },
+    {
+      "source_group_id": "G-pain_host_85731899e27e6d",
+      "class": "CLEAN",
+      "pain_id": "pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+      "diagnosis_artifact_id": "ce3726b7-f23e-45b5-904b-7fb90bdbab96",
+      "contextRefs": [
+        "artifact://ce3726b7-f23e-45b5-904b-7fb90bdbab96"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "diag-router-pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+        "summary": "根因是既定工作约定（使用顾问协作、优先用浏览器 ChatGPT 生成图片/提示词）只存在于瞬时会话记忆中，缺少持久化与开工前召回机制，导致 Agent 重复遗忘既定做法，Owner 被迫反复发出严重纠正。抽象原则：对连续性重要的 Owner 约定必须持久化到瞬时上下文之外并在阶段切换前主动召回。",
+        "rootCause": "Design: 缺少将 Owner 明确表达的工作约定（使用顾问协作、优先用浏览器 ChatGPT 生成并下载图片/提示词）持久化到瞬时上下文之外、并在阶段切换与工具调用前强制召回的机制和检查门，Agent 依赖瞬时会话记忆承载此类约定，导致既定做法被重复遗忘，Owner 被迫反复纠正。",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-10",
+            "title": "关键约定须持久化到瞬时上下文之外",
+            "rationale": "Owner 明确表达的工作约定与历史成功做法未固化为持久化工件（任务笔记、检查清单、工作约定文档），仅存在于此前会话的瞬时上下文中，上下文更换后自然丢失，违反了把关键状态持久化的核心公理。"
+          },
+          {
+            "principleId": "T-02",
+            "title": "Owner 明确约束优先于自行推断",
+            "rationale": "Agent 在新阶段开工时未召回并遵循 Owner 此前明确要求的协作与生成方式（使用顾问、浏览器 ChatGPT），而是按自身默认方式行动，违背了 Owner 明确表达约束优先的公理。"
+          },
+          {
+            "principleId": "T-05",
+            "title": "阶段切换前须召回既定约定",
+            "rationale": "缺少开工前回顾/加载既定工作约定的检查步骤，没有护栏强制在工具调用前召回 Owner 的约束，导致偏离既定做法的工具调用已发生后才被纠正。"
+          }
+        ],
+        "evidence": [
+          {
+            "sourceRef": "signal_collector",
+            "note": "Owner 原始纠正消息：要求务必使用顾问协作完成后续工作、多征求顾问意见、优先用浏览器里的 ChatGPT 生成封面/关键帧/提示词，并明确指出\"以前你是做过……不要又忘记怎么做了\"，证明该工作流程此前已成功执行过且被重复遗忘。"
+          },
+          {
+            "sourceRef": "diagnosis_pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a",
+            "note": "诊断为 severe 级别的 user_correction 疼痛信号，由 after_tool_call 钩子检出，说明纠正发生在 Agent 已做出偏离既定做法的工具调用之后。"
+          },
+          {
+            "sourceRef": "run_diagnosis_pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a_1",
+            "note": "诊断运行记录：无证据显示存在持久化的工作约定文档或开工前检查清单可供 Agent 在阶段切换时召回。"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "将 Owner 明确表达且对连续性重要的约定持久化到瞬时上下文之外（工作约定文档/任务笔记/检查清单），并在阶段切换或行动开始前主动召回执行，杜绝依赖会话记忆自然延续。",
+            "abstractedPrinciple": "当Owner明确表达的约定与历史有效做法对连续性重要时，必须将其持久化到瞬时上下文之外，并在阶段切换或行动开始前主动召回，而不是依赖会话记忆自然延续。"
+          },
+          {
+            "kind": "rule",
+            "description": "在阶段切换或涉及图片/提示词生成的任务开工前，拦截并强制召回持久化的工作约定。",
+            "triggerPattern": "(新阶段|阶段切换|开始下一阶段|生成(封面|关键帧|图片|提示词)|创建.*提示词)",
+            "action": "开工前先读取持久化的工作约定清单（使用顾问协作、优先用浏览器 ChatGPT 生成并下载图片/提示词），确认当前行动计划符合约定后再执行工具调用。"
+          },
+          {
+            "kind": "prompt",
+            "description": "在系统/会话提示中加入持久化指令：凡是 Owner 明确表达\"以后务必/不要忘记\"类约定，立即写入持久化工作约定文档，并在每次阶段开工时先回顾该文档再行动。"
+          }
+        ],
+        "confidence": 0.72,
+        "ambiguityNotes": [
+          "根因涉及 T-10 与 T-02，未获得 INTENT.md 原文，意图张力证据较弱（evidenceStrength: weak）。",
+          "原则更多基于 Owner 原始纠正消息而非意图文档比对。"
+        ],
+        "intentTension": {
+          "source": "action_drift",
+          "evidenceStrength": "weak",
+          "relatedIntentFields": [
+            "current_strategic_focus"
+          ],
+          "evidence": [
+            "signal_collector"
+          ],
+          "explanation": "Agent 的行动偏离了 Owner 此前明确表达的协作与生成方式约定（使用顾问、浏览器 ChatGPT），但缺乏 INTENT.md 原文以确认这是否与长期意图文档冲突，更可能是行动层面的重复遗忘而非意图文档本身的矛盾。",
+          "suggestedOwnerAction": "promote_to_principle"
+        },
+        "taskId": "diag_router-diagnosis_pain_host_85731899e27e6d389b53c2e258029ac881190b1e35d3f82c5019032688e2992a"
+      },
+      "input_hash": "db298ead6bf3522fab78115ad27fe65adf979173890ae5c624d9a74da33f3255"
+    },
+    {
+      "source_group_id": "G-pain_host_cffdcb9f5d0257",
+      "class": "DEV",
+      "pain_id": "pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1",
+      "channel": "code_tool_hook",
+      "language": "zh",
+      "diagnosis_task_id": "diag_router-diagnosis_pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1",
+      "diagnosis_artifact_id": "6a716118-bf9b-4711-bc65-99ade2d08cba",
+      "contextRefs": [
+        "artifact://6a716118-bf9b-4711-bc65-99ade2d08cba"
+      ],
+      "diagnosis": {
+        "valid": true,
+        "diagnosisId": "diagnosis_pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1",
+        "summary": "Agent 在未锚定用户认可的基线（mooncake-mv-final-v3k22.mp4）的情况下连续叠加主观「优化」，且每轮改动缺少可观察的对比验收与不可劣化护栏，导致产物越改越乱。抽象原则：迭代改进必须以所有者认可基线为锚点，改动前固化参照、改动后对比验收，相对基线不劣化方可保留。",
+        "rootCause": "Design: 优化迭代流程缺少「用户认可基线锚定 + 改动后可观察对比验收 + 不可劣化护栏」，使主观叠加式改动在无验收门禁下连续劣化产物质量。",
+        "violatedPrinciples": [
+          {
+            "principleId": "T-02",
+            "title": "以所有者认可为真实意图锚点",
+            "rationale": "Agent 将优化视为自我判断的主观改进，未锚定 Owner 已认可（mooncake-mv-final-v3k22.mp4）的基线版本，偏离真实意图。"
+          },
+          {
+            "principleId": "T-03",
+            "title": "以可观察输出作为变更验收依据",
+            "rationale": "多轮改动未与基线做截图/视频等可观察证据对比验收，劣化改动未被拦截。"
+          },
+          {
+            "principleId": "T-05",
+            "title": "禁止导致劣化的状态转移",
+            "rationale": "缺少「相对基线不可劣化」护栏，使连续劣化改动被误认为成功并持续叠加。"
+          },
+          {
+            "principleId": "T-07",
+            "title": "以验收标准而非完成度定义成功",
+            "rationale": "迭代流程以「完成修改」而非「相对基线不劣化」为成功标准，缺少对比验收门禁。"
+          }
+        ],
+        "evidence": [
+          {
+            "sourceRef": "signal_collector",
+            "note": "用户原话：「后面的所谓的优化都没有 mooncake-mv-final-v3k22.mp4 版本好，越搞越乱」，直接证明多轮改动后质量劣于基线。"
+          },
+          {
+            "sourceRef": "diagnosis_pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1",
+            "note": "Pain 元数据：source=user_correction，severity=severe，确认为 Owner 对 Agent 改动方向的明确纠正。"
+          }
+        ],
+        "recommendations": [
+          {
+            "kind": "principle",
+            "description": "确立基线锚定的迭代改进原则：每轮改动前固化所有者认可的参照版本，改动后以可观察证据对比验收，相对基线不劣化方可保留。",
+            "abstractedPrinciple": "迭代式改进必须锚定于所有者认可的基线：每轮改动前固化参照，改动后以可观察证据对比验收，确保相对基线不劣化方可保留。"
+          },
+          {
+            "kind": "rule",
+            "description": "在用户已确认基线版本后，任何继续修改产物的请求应先触发基线固化与对比验收流程。",
+            "triggerPattern": "用户确认基线后出现的继续优化/修改请求（关键词：优化|改进|再改|调整|更好）",
+            "action": "先记录当前所有者认可版本为基线参照；每轮改动后生成与基线的可观察对比证据（如截图/视频对比），不劣化才可保留，否则回退。"
+          }
+        ],
+        "confidence": 0.55,
+        "ambiguityNotes": [
+          "Stage A 置信度较低（0.55），Why-3 至 Why-5 基于用户纠正信号推断，缺少工具调用轨迹佐证。",
+          "conversationWindow 中 2 条记录无文本内容，缺少 Agent 侧行为证据。",
+          "「优化」的具体对象与验收维度只能从截图对比描述间接推断。"
+        ],
+        "taskId": "diag_router-diagnosis_pain_host_cffdcb9f5d02576d1e211436008f124778b4564fb1cf0230cc96ef03faf0c2f1"
+      },
+      "input_hash": "b7dfc60cac3ff1b98e37dd8fae2c89ab65aef233e1da468526417115289c09f7"
+    }
+  ]
+}

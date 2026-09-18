@@ -1,0 +1,26 @@
+{
+ "groups": {
+  "G-pain_host_198b8c4d901b5b#A": {
+   "key": "G-pain_host_198b8c4d901b5b#A",
+   "evaluation": {
+    "target_violation": "block",
+    "valid_compliant": "allow",
+    "near_boundary_legal": "allow",
+    "out_of_scope": "allow",
+    "legitimate_exception": "exception_honored"
+   },
+   "notes": "Repeat r1's statement sets an unconditional adoption gate (all frozen items must hold) with no owner re-anchor path, which would block an owner-authorized full redo; but r2 ('Confirmed properties may change only through explicit owner re-confirmation') and r3 ('superseded only by a newly owner-accepted state') both carry explicit owner-authority exemption clauses. Majority (2/3) honors the exception. Near-boundary fix is compliant (owner-scoped + regression check), and unconfirmed script work falls outside all three applicability clauses."
+  },
+  "G-pain_host_198b8c4d901b5b#B": {
+   "key": "G-pain_host_198b8c4d901b5b#B",
+   "evaluation": {
+    "target_violation": "block",
+    "valid_compliant": "allow",
+    "near_boundary_legal": "allow",
+    "out_of_scope": "allow",
+    "legitimate_exception": "exception_honored"
+   },
+   "notes": "r3's four contract fields lack an owner-authority re-anchor (its escape hatch appears only in risks, which is advisory), so judged alone it would block the owner-authorized rebuild. But r1 ('涉及冻结项的修改须先获得Owner显式授权') and r2 ('only explicit Owner re-confirmation may retire or revise the baseline') carry explicit owner-authority clauses, so the typical contract honors the exception. All three drafts block the target violation and permit compliant, near-boundary, and out-of-scope cases."
+  }
+ }
+}

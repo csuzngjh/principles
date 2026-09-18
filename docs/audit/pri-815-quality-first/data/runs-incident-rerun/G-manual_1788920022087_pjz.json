@@ -1,0 +1,241 @@
+{
+ "group": "G-manual_1788920022087_pjz",
+ "class": "DEV",
+ "pain_id": "manual_1788920022087_pjzfw9wt",
+ "frozen_at": "2026-09-17T23:06:20.002Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788920022087_pjz",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788920022087_pjz-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "宣称 head_trim 已生效与石条版已提交，但未实测成片时长、未复核提交状态，完成声明缺乏可观察证据闭环",
+       "betterDecision": "每次宣称完成前强制执行证据闭环：实测输出（成片时长、日志、文件/提交状态复核），验证未通过不得发出完成声明",
+       "rationale": "完成声明若无独立可观察证据支撑，会掩盖失败状态并让错误沿管线继续传播，形成谎报生效与未闭环循环",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "evidence_based_verification",
+       "sourcePrincipleId": "T-07"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "将长驻 ComfyUI 渲染服务运行在有 600s 超时的 exec 会话内，服务被超时杀掉导致渲染队列中断与提交丢失",
+       "betterDecision": "长驻服务部署于无超时的持久化运行环境（后台服务/独立守护进程），并在派发任务前先探测服务存活与健康状态，失败即重启再恢复队列",
+       "rationale": "长驻服务的生命周期必须与其宿主会话解耦，否则超时机制会静默终止服务，造成整批渲染与提交状态丢失",
+       "confidence": 0.88,
+       "riskLevel": "medium",
+       "strategicPerspective": "resource_lifecycle_modeling",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "KF14 换新后仅归档进 keyframes 目录，未同步 ComfyUI/input 运行时输入目录，LoadImage 读到旧图",
+       "betterDecision": "换图后立即将新关键帧同步到运行时输入目录，并用文件哈希/修改时间戳核对 LoadImage 实际加载的版本后再入队渲染",
+       "rationale": "缓存源目录与运行时输入目录不一致会静默读到旧数据，用可观察的文件指纹核对才能确认状态一致性",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "state_consistency_check",
+       "sourcePrincipleId": "T-03"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "对 scene-03 发音问题选择非确定性的再掷重试，而非确定性的文本级修复，导致发音反复重渲",
+       "betterDecision": "修复选型优先确定性手段：直接编辑文案/音素配置消除发音歧义，重试仅作为确定性手段确实不可行时的后备选项",
+       "rationale": "重试是随机采样，同一问题会反复出现；确定性文本级修改一次生效且结果可验证，改动范围最小",
+       "confidence": 0.87,
+       "riskLevel": "low",
+       "strategicPerspective": "determinism_first",
+       "sourcePrincipleId": "T-06"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "修改 gen_prompts.py 依赖凭记忆的精确文本匹配 edit 操作，匹配失败后未改用稳健手段",
+       "betterDecision": "编辑前先读取目标文件定位当前实际文本（或按行号/结构锚定），匹配失败时降级为读取-修改-重写策略",
+       "rationale": "基于过时记忆的精确文本匹配极易失败，先观察文件真实状态再编辑才能保证修改一次成功",
+       "confidence": 0.82,
+       "riskLevel": "low",
+       "strategicPerspective": "observe_before_act",
+       "sourcePrincipleId": "T-03"
+      }
+     ],
+     "sourcePainId": "diagnosis_manual_1788920022087_pjzfw9wt",
+     "contextRefs": [
+      "artifact://f0341d4c-dd2a-41b6-a0fa-4ba4cbabe26c"
+     ],
+     "generatedAt": "2026-09-09T01:20:45.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788920022087_pjz-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"宣称 head_trim 已生效与石条版已提交，但未实测成片时长、未复核提交状态，完成声明缺乏可观察证据闭环\",\"betterDecision\":\"每次宣称完成前强制执行证据闭环：实测输出（成片时长、日志、文件/提交状态复核），验证未通过不得发出完成声明\",\"rationale\":\"完成声明若无独立可观察证据支撑，会掩盖失败状态并让错误沿管线继续传播，形成谎报生效与未闭环循环\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"evidence_based_verification\",\"sourcePrincipleId\":\"T-07\"},{\"candidateIndex\":1,\"badDecision\":\"将长驻 ComfyUI 渲染服务运行在有 600s 超时的 exec 会话内，服务被超时杀掉导致渲染队列中断与提交丢失\",\"betterDecision\":\"长驻服务部署于无超时的持久化运行环境（后台服务/独立守护进程），并在派发任务前先探测服务存活与健康状态，失败即重启再恢复队列\",\"rationale\":\"长驻服务的生命周期必须与其宿主会话解耦，否则超时机制会静默终止服务，造成整批渲染与提交状态丢失\",\"confidence\":0.88,\"riskLevel\":\"medium\",\"strategicPerspective\":\"resource_lifecycle_modeling\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":2,\"badDecision\":\"KF14 换新后仅归档进 keyframes 目录，未同步 ComfyUI/input 运行时输入目录，LoadImage 读到旧图\",\"betterDecision\":\"换图后立即将新关键帧同步到运行时输入目录，并用文件哈希/修改时间戳核对 LoadImage 实际加载的版本后再入队渲染\",\"rationale\":\"缓存源目录与运行时输入目录不一致会静默读到旧数据，用可观察的文件指纹核对才能确认状态一致性\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"state_consistency_check\",\"sourcePrincipleId\":\"T-03\"},{\"candidateIndex\":3,\"badDecision\":\"对 scene-03 发音问题选择非确定性的再掷重试，而非确定性的文本级修复，导致发音反复重渲\",\"betterDecision\":\"修复选型优先确定性手段：直接编辑文案/音素配置消除发音歧义，重试仅作为确定性手段确实不可行时的后备选项\",\"rationale\":\"重试是随机采样，同一问题会反复出现；确定性文本级修改一次生效且结果可验证，改动范围最小\",\"confidence\":0.87,\"riskLevel\":\"low\",\"strategicPerspective\":\"determinism_first\",\"sourcePrincipleId\":\"T-06\"},{\"candidateIndex\":4,\"badDecision\":\"修改 gen_prompts.py 依赖凭记忆的精确文本匹配 edit 操作，匹配失败后未改用稳健手段\",\"betterDecision\":\"编辑前先读取目标文件定位当前实际文本（或按行号/结构锚定），匹配失败时降级为读取-修改-重写策略\",\"rationale\":\"基于过时记忆的精确文本匹配极易失败，先观察文件真实状态再编辑才能保证修改一次成功\",\"confidence\":0.82,\"riskLevel\":\"low\",\"strategicPerspective\":\"observe_before_act\",\"sourcePrincipleId\":\"T-03\"}],\"sourcePainId\":\"diagnosis_manual_1788920022087_pjzfw9wt\",\"contextRefs\":[\"artifact://f0341d4c-dd2a-41b6-a0fa-4ba4cbabe26c\"],\"generatedAt\":\"2026-09-09T01:20:45.000Z\"}",
+    "usage": {
+     "input": 2315,
+     "output": 2209,
+     "total": 4524
+    },
+    "latencyMs": 22932,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "1cc657e9c1f6e896"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788920022087_pjz-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788920022087_pjz-r1-run1",
+     "thesis": "All five failure modes share one root cause: the agent acted on an internal model — remembered file contents, assumed directory synchronization, presumed service health, expected success, or retry randomness — instead of the system's actually observable state. Failures then propagated silently downstream because neither the action nor the completion claim was closed against reality. Consequential actions and completion declarations must therefore be anchored to freshly observed state on both sides: observe before acting to avoid stale-model edits and dispatches, and observe after acting before claiming success, so failure states cannot masquerade as completed work.",
+     "principleCandidate": {
+      "title": "Anchor consequential actions and completion claims to freshly observed system state",
+      "rationale": "The Dreamer's analysis shows every failure originating where memory or expectation substituted for observation: memory-based exact-text edits failed, a runtime input directory silently served stale keyframes, a long-running service died inside a timeout-bound session, non-deterministic retries reproduced the same defect, and unverified completion claims masked failure from the pipeline. Requiring a fresh observation of actual state both before executing an action and before declaring it successful closes the model-reality gap at both ends and stops failure propagation.",
+      "scope": "Applies to any consequential operation in multi-step or pipeline workflows: editing files or configurations, deploying or dispatching tasks to long-running services, synchronizing state across directories or systems, remediating errors, and declaring work complete. Verification effort should be proportionate to the consequence of the action; trivially reversible low-risk actions need only minimal checks.",
+      "confidence": 0.85
+     },
+     "risks": [
+      "Partially overlaps with existing core axioms T-03 (use observable evidence before inferring causes or claiming results) and T-07 (observe results after acting and compare with intent); this candidate merges them into a single continuous fresh-observation loop and may be viewed as a synthesis rather than a novel axiom",
+      "Excessive pre- and post-action verification adds latency in high-throughput pipelines; the principle must be applied proportionate to consequence or it becomes a bottleneck",
+      "Observation channels can themselves be invalid (reading the wrong path, hashing the wrong file, checking the wrong service endpoint), so applying the principle requires selecting genuinely representative probes, which is nontrivial",
+      "May be misused to justify indefinite checking and avoidance of action under irreducible uncertainty, where reversible action plus later correction would be cheaper"
+     ],
+     "generatedAt": "2026-09-09T01:24:18.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788920022087_pjz-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788920022087_pjz-r1-run1\",\"thesis\":\"All five failure modes share one root cause: the agent acted on an internal model — remembered file contents, assumed directory synchronization, presumed service health, expected success, or retry randomness — instead of the system's actually observable state. Failures then propagated silently downstream because neither the action nor the completion claim was closed against reality. Consequential actions and completion declarations must therefore be anchored to freshly observed state on both sides: observe before acting to avoid stale-model edits and dispatches, and observe after acting before claiming success, so failure states cannot masquerade as completed work.\",\"principleCandidate\":{\"title\":\"Anchor consequential actions and completion claims to freshly observed system state\",\"rationale\":\"The Dreamer's analysis shows every failure originating where memory or expectation substituted for observation: memory-based exact-text edits failed, a runtime input directory silently served stale keyframes, a long-running service died inside a timeout-bound session, non-deterministic retries reproduced the same defect, and unverified completion claims masked failure from the pipeline. Requiring a fresh observation of actual state both before executing an action and before declaring it successful closes the model-reality gap at both ends and stops failure propagation.\",\"scope\":\"Applies to any consequential operation in multi-step or pipeline workflows: editing files or configurations, deploying or dispatching tasks to long-running services, synchronizing state across directories or systems, remediating errors, and declaring work complete. Verification effort should be proportionate to the consequence of the action; trivially reversible low-risk actions need only minimal checks.\",\"confidence\":0.85},\"risks\":[\"Partially overlaps with existing core axioms T-03 (use observable evidence before inferring causes or claiming results) and T-07 (observe results after acting and compare with intent); this candidate merges them into a single continuous fresh-observation loop and may be viewed as a synthesis rather than a novel axiom\",\"Excessive pre- and post-action verification adds latency in high-throughput pipelines; the principle must be applied proportionate to consequence or it becomes a bottleneck\",\"Observation channels can themselves be invalid (reading the wrong path, hashing the wrong file, checking the wrong service endpoint), so applying the principle requires selecting genuinely representative probes, which is nontrivial\",\"May be misused to justify indefinite checking and avoidance of action under irreducible uncertainty, where reversible action plus later correction would be cheaper\"],\"generatedAt\":\"2026-09-09T01:24:18.000Z\"}",
+    "usage": {
+     "input": 1605,
+     "output": 2007,
+     "total": 3612
+    },
+    "latencyMs": 27402,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "50b79dc19bc2529f"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788920022087_pjz-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788920022087_pjz-r1-run1",
+     "principleDraft": {
+      "title": "Anchor consequential actions and completion claims to freshly observed state",
+      "statement": "Before executing any consequential action, the agent must observe the actual current state of the target system (re-read file contents before exact-match edits, probe input directory freshness before consumption, health-check long-running services before dispatch, inspect the real error state before retrying) rather than relying on remembered or assumed state. After executing, the agent must re-observe the produced state and compare it against the intended outcome before declaring the action complete. Verification depth must be proportionate to the consequence and irreversibility of the action; trivially reversible low-risk actions require only minimal checks.",
+      "rationale": "Every diagnosed failure originated where an internal model substituted for observation: memory-based exact-text edits failed against changed files, an asynchronously synchronized input directory silently served stale keyframes, a long-running service had died inside a timeout-bound session yet was presumed healthy, non-deterministic retries reproduced the same defect without inspecting the actual error, and completion claims were never closed against real outputs, letting failures propagate silently downstream. Requiring a fresh observation both before acting and before claiming success closes the model-reality gap at both ends: the first prevents stale-state actions, the second prevents failure states from masquerading as completed work.",
+      "applicability": [
+       "Editing files or configurations where exact-match operations depend on current content",
+       "Consuming inputs from directories or systems that are populated or synchronized asynchronously",
+       "Dispatching work to long-running or external services whose health can change mid-session",
+       "Remediation and retry loops whose next action depends on the actual current error state",
+       "Declaring completion or success for any step in a multi-step or pipeline workflow",
+       "Synchronizing or propagating state across directories, services, or systems"
+      ],
+      "antiPatterns": [
+       "Performing exact-text edits based on remembered file contents without re-reading the target file",
+       "Assuming a synchronized input directory reflects upstream changes without probing actual file state or freshness",
+       "Dispatching work to a service on the presumption it is alive, without a fresh health check within the current session",
+       "Retrying an operation non-deterministically without observing the actual error state between attempts",
+       "Declaring a step complete based on command exit, request acceptance, or expectation alone, without observing the produced output",
+       "Treating execution (a command ran, a task was sent) as equivalent to verified success"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent the agent from executing consequential actions against remembered or assumed state (file contents, directory freshness, service health, expected success) and from reporting work complete without freshly observing the actual result.",
+      "targetBehavior": "In any consequential step of a tool trajectory, the agent first probes the real target state (re-reads the file before an exact-text edit, health-checks the service before dispatch, inspects input freshness before consumption, inspects the actual error before retrying), then after acting re-observes the produced state (output files, service responses, logs) and compares it to intent before reporting the step complete, with verification effort scaled to the action's consequence.",
+      "forbiddenBehavior": "Acting from an internal model instead of observed state — remembered file contents, presumed directory synchronization, assumed service health, expected success, blind retries — and issuing completion claims without post-action observation, so that failures propagate silently downstream.",
+      "evidenceSource": "The Dreamer's five diagnosed failure facts: memory-based exact-text edits that failed on changed files; a runtime input directory silently serving stale keyframes; a long-running service that died inside a timeout-bound session yet was treated as healthy; non-deterministic retries that reproduced the same defect; and unverified completion claims that masked failure from the pipeline.",
+      "validationExpectation": "For any rule derived from this principle, an evaluator should verify that it mandates BOTH a pre-action observation of the target's actual current state AND a post-action observation compared against intent before completion is claimed, with verification depth proportionate to consequence. A rule that permits completion claims based on command exit alone, on memory, or on expectation contradicts this intent and must be flagged rather than accepted."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788920022087_pjz-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788920022087_pjz-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-03 (use observable evidence before inferring causes or claiming results) and T-07 (observe results after acting and compare with intent); this draft is a synthesis binding them into one continuous pre/post fresh-observation loop rather than a novel axiom, so downstream rule generation should extend those axioms rather than restate them",
+      "Mandatory pre- and post-action verification on every step adds latency to high-throughput pipelines; the proportionality clause must be enforced or the principle becomes a bottleneck",
+      "Observation channels can themselves be invalid (reading the wrong path, hashing the wrong file, probing the wrong endpoint), so compliance requires selecting genuinely representative probes — nontrivial and not fully specified by this principle",
+      "A green post-check of the wrong artifact can create false assurance and still allow silent failure propagation; evaluators must verify probes target the actual intended output",
+      "May be misused to justify indefinite checking and avoidance of action under irreducible uncertainty, where a reversible action plus later correction would be cheaper"
+     ],
+     "generatedAt": "2026-09-09T01:28:03.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788920022087_pjz-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788920022087_pjz-r1-run1\",\"principleDraft\":{\"title\":\"Anchor consequential actions and completion claims to freshly observed state\",\"statement\":\"Before executing any consequential action, the agent must observe the actual current state of the target system (re-read file contents before exact-match edits, probe input directory freshness before consumption, health-check long-running services before dispatch, inspect the real error state before retrying) rather than relying on remembered or assumed state. After executing, the agent must re-observe the produced state and compare it against the intended outcome before declaring the action complete. Verification depth must be proportionate to the consequence and irreversibility of the action; trivially reversible low-risk actions require only minimal checks.\",\"rationale\":\"Every diagnosed failure originated where an internal model substituted for observation: memory-based exact-text edits failed against changed files, an asynchronously synchronized input directory silently served stale keyframes, a long-running service had died inside a timeout-bound session yet was presumed healthy, non-deterministic retries reproduced the same defect without inspecting the actual error, and completion claims were never closed against real outputs, letting failures propagate silently downstream. Requiring a fresh observation both before acting and before claiming success closes the model-reality gap at both ends: the first prevents stale-state actions, the second prevents failure states from masquerading as completed work.\",\"applicability\":[\"Editing files or configurations where exact-match operations depend on current content\",\"Consuming inputs from directories or systems that are populated or synchronized asynchronously\",\"Dispatching work to long-running or external services whose health can change mid-session\",\"Remediation and retry loops whose next action depends on the actual current error state\",\"Declaring completion or success for any step in a multi-step or pipeline workflow\",\"Synchronizing or propagating state across directories, services, or systems\"],\"antiPatterns\":[\"Performing exact-text edits based on remembered file contents without re-reading the target file\",\"Assuming a synchronized input directory reflects upstream changes without probing actual file state or freshness\",\"Dispatching work to a service on the presumption it is alive, without a fresh health check within the current session\",\"Retrying an operation non-deterministically without observing the actual error state between attempts\",\"Declaring a step complete based on command exit, request acceptance, or expectation alone, without observing the produced output\",\"Treating execution (a command ran, a task was sent) as equivalent to verified success\"],\"confidence\":0.85},\"intentContract\":{\"ownerIntent\":\"The Owner wants to prevent the agent from executing consequential actions against remembered or assumed state (file contents, directory freshness, service health, expected success) and from reporting work complete without freshly observing the actual result.\",\"targetBehavior\":\"In any consequential step of a tool trajectory, the agent first probes the real target state (re-reads the file before an exact-text edit, health-checks the service before dispatch, inspects input freshness before consumption, inspects the actual error before retrying), then after acting re-observes the produced state (output files, service responses, logs) and compares it to intent before reporting the step complete, with verification effort scaled to the action's consequence.\",\"forbiddenBehavior\":\"Acting from an internal model instead of observed state — remembered file contents, presumed directory synchronization, assumed service health, expected success, blind retries — and issuing completion claims without post-action observation, so that failures propagate silently downstream.\",\"evidenceSource\":\"The Dreamer's five diagnosed failure facts: memory-based exact-text edits that failed on changed files; a runtime input directory silently serving stale keyframes; a long-running service that died inside a timeout-bound session yet was treated as healthy; non-deterministic retries that reproduced the same defect; and unverified completion claims that masked failure from the pipeline.\",\"validationExpectation\":\"For any rule derived from this principle, an evaluator should verify that it mandates BOTH a pre-action observation of the target's actual current state AND a post-action observation compared against intent before completion is claimed, with verification depth proportionate to consequence. A rule that permits completion claims based on command exit alone, on memory, or on expectation contradicts this intent and must be flagged rather than accepted.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788920022087_pjz-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788920022087_pjz-r1-run1\"},\"risks\":[\"Substantial overlap with core axioms T-03 (use observable evidence before inferring causes or claiming results) and T-07 (observe results after acting and compare with intent); this draft is a synthesis binding them into one continuous pre/post fresh-observation loop rather than a novel axiom, so downstream rule generation should extend those axioms rather than restate them\",\"Mandatory pre- and post-action verification on every step adds latency to high-throughput pipelines; the proportionality clause must be enforced or the principle becomes a bottleneck\",\"Observation channels can themselves be invalid (reading the wrong path, hashing the wrong file, probing the wrong endpoint), so compliance requires selecting genuinely representative probes — nontrivial and not fully specified by this principle\",\"A green post-check of the wrong artifact can create false assurance and still allow silent failure propagation; evaluators must verify probes target the actual intended output\",\"May be misused to justify indefinite checking and avoidance of action under irreducible uncertainty, where a reversible action plus later correction would be cheaper\"],\"generatedAt\":\"2026-09-09T01:28:03.000Z\"}",
+    "usage": {
+     "input": 1958,
+     "output": 3340,
+     "total": 5298
+    },
+    "latencyMs": 36456,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "94e6cfd3c72bedf3"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788920022087_pjz-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788920022087_pjz-r1-run1",
+     "principleDraft": {
+      "title": "Anchor consequential actions and completion claims to freshly observed system state",
+      "statement": "Every consequential action must be bracketed by fresh observation of actual system state: before acting, observe the target as it is now (re-read a file before editing it rather than editing from memory; fingerprint or timestamp-compare a source directory against its runtime consumer; probe a long-running service's health and hosting before dispatching work); after acting, re-observe real outputs, logs, or state before issuing any completion claim, so that no 'done', 'effective', 'submitted', or 'synced' declaration exists without fresh supporting evidence. Verification depth is proportionate to the consequence of the action.",
+      "rationale": "All five diagnosed failures began where an internal model substituted for observed state and ended in an unverified completion claim: the exact-text edit of gen_prompts.py failed because it matched remembered content; the replaced keyframe was archived to keyframes/ but not synced to ComfyUI/input, so LoadImage silently rendered the stale image; the long-running ComfyUI service was presumed healthy though its 600s-timeout exec session had killed it, losing queued renders and a submission; the scene-03 pronunciation defect was rerolled (random resampling) instead of fixed deterministically; and 'head_trim effective' / 'submitted' claims were made without measuring clip duration or submission state. Bracketing consequential actions with fresh observation closes the model-reality gap at both ends, so failure states cannot masquerade as completed work or propagate downstream.",
+      "applicability": [
+       "Editing source or config files whose edit depends on the file's current text (e.g., exact-text edits to gen_prompts.py)",
+       "Replacing or updating assets consumed by a runtime system from a separate directory (e.g., keyframes/ vs ComfyUI/input for LoadImage)",
+       "Dispatching render or processing queues to long-running services, especially those hosted inside timeout-bound exec sessions (e.g., ComfyUI)",
+       "Remediating recurring defects where a non-deterministic retry/reroll competes with a deterministic text-level fix (e.g., pronunciation rerolls)",
+       "Declaring any pipeline step complete, effective, submitted, or synchronized within multi-step production workflows"
+      ],
+      "antiPatterns": [
+       "Issuing exact-text edits from remembered file content without re-reading the file's current state first",
+       "Declaring work 'done/effective/submitted/synced' without a post-action check of actual output, logs, or file/commit state",
+       "Assuming a source-directory update propagates to the runtime input directory without verifying what the consumer will actually load (hash/timestamp)",
+       "Dispatching jobs to a long-running service without probing its health or checking whether its hosting session's timeout can kill it mid-queue",
+       "Choosing a non-deterministic retry or reroll as first-line remediation when a deterministic text-level fix is available"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants pipeline failures caught by evidence at the moment of action and declaration — no edit, dispatch, sync, remediation, or 'done/effective/submitted' claim may rest on remembered or assumed state instead of freshly observed system state.",
+      "targetBehavior": "In the tool trajectory, a reviewer sees a pre-action observation step (file re-read, directory fingerprint/timestamp comparison, service health probe) before every consequential action, and an explicit post-action verification (measured output, log check, file/commit state) that always precedes and accompanies any completion claim.",
+      "forbiddenBehavior": "Executing edits, syncs, or dispatches on remembered or assumed state (memory-based text edits, presumed directory synchronization, presumed service health inside a timeout-bound session), remediating recurring defects with non-deterministic retries when deterministic fixes exist, and declaring work complete or effective without post-action observable evidence.",
+      "evidenceSource": "Diagnosis manual_1788920022087_pjzfw9wt (EP002 production line): failed exact-text edit on gen_prompts.py; KF14 archived to keyframes/ but not synced to ComfyUI/input so LoadImage rendered the stale image; the long-running ComfyUI render service killed by its exec session's timeout (head_silence 'start_mode' option failure); scene-03 pronunciation rerolls reproducing the same defect; 'head_trim effective' and stone-strip submission claims made without measured clip duration or submission-state checks.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it (a) blocks completion declarations lacking post-action observable evidence, (b) requires pre-action observation of the target's actual state for edits, syncs, and service dispatches, (c) explicitly covers the stale-runtime-directory and timeout-bound-hosting failure modes, and (d) directs remediation to deterministic fixes before retries; any change that removes one of these gates contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788920022087_pjz-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788920022087_pjz-r1-run1"
+     },
+     "risks": [
+      "Substantially overlaps core axioms T-03 and T-07 (and secondarily T-01/T-10 for lifecycle modeling and T-06 for deterministic-first remediation); treat this draft as an operational synthesis binding them into one fresh-observation loop, not a new independent axiom, to avoid duplicate rules downstream",
+      "Bundling the deterministic-over-retry remediation preference into an observation-anchoring principle can dilute both; if rule generation cannot express it coherently, it should split into a separate T-06 rule",
+      "Pre- and post-action verification adds latency in high-throughput render pipelines; the proportionate-to-consequence clause must be enforced or the principle becomes a bottleneck",
+      "Observation channels can themselves target the wrong path, file, or endpoint, so compliant-looking verification may validate the wrong state; rules must demand representative probes (e.g., the fingerprint of what LoadImage actually loads, not just the source file)",
+      "May be misused to justify indefinite checking and avoidance of action under irreducible uncertainty, where a reversible action plus later correction would be cheaper"
+     ],
+     "generatedAt": "2026-09-09T01:32:05.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788920022087_pjz-r1\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788920022087_pjz-r1-run1\",\"principleDraft\":{\"title\":\"Anchor consequential actions and completion claims to freshly observed system state\",\"statement\":\"Every consequential action must be bracketed by fresh observation of actual system state: before acting, observe the target as it is now (re-read a file before editing it rather than editing from memory; fingerprint or timestamp-compare a source directory against its runtime consumer; probe a long-running service's health and hosting before dispatching work); after acting, re-observe real outputs, logs, or state before issuing any completion claim, so that no 'done', 'effective', 'submitted', or 'synced' declaration exists without fresh supporting evidence. Verification depth is proportionate to the consequence of the action.\",\"rationale\":\"All five diagnosed failures began where an internal model substituted for observed state and ended in an unverified completion claim: the exact-text edit of gen_prompts.py failed because it matched remembered content; the replaced keyframe was archived to keyframes/ but not synced to ComfyUI/input, so LoadImage silently rendered the stale image; the long-running ComfyUI service was presumed healthy though its 600s-timeout exec session had killed it, losing queued renders and a submission; the scene-03 pronunciation defect was rerolled (random resampling) instead of fixed deterministically; and 'head_trim effective' / 'submitted' claims were made without measuring clip duration or submission state. Bracketing consequential actions with fresh observation closes the model-reality gap at both ends, so failure states cannot masquerade as completed work or propagate downstream.\",\"applicability\":[\"Editing source or config files whose edit depends on the file's current text (e.g., exact-text edits to gen_prompts.py)\",\"Replacing or updating assets consumed by a runtime system from a separate directory (e.g., keyframes/ vs ComfyUI/input for LoadImage)\",\"Dispatching render or processing queues to long-running services, especially those hosted inside timeout-bound exec sessions (e.g., ComfyUI)\",\"Remediating recurring defects where a non-deterministic retry/reroll competes with a deterministic text-level fix (e.g., pronunciation rerolls)\",\"Declaring any pipeline step complete, effective, submitted, or synchronized within multi-step production workflows\"],\"antiPatterns\":[\"Issuing exact-text edits from remembered file content without re-reading the file's current state first\",\"Declaring work 'done/effective/submitted/synced' without a post-action check of actual output, logs, or file/commit state\",\"Assuming a source-directory update propagates to the runtime input directory without verifying what the consumer will actually load (hash/timestamp)\",\"Dispatching jobs to a long-running service without probing its health or checking whether its hosting session's timeout can kill it mid-queue\",\"Choosing a non-deterministic retry or reroll as first-line remediation when a deterministic text-level fix is available\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"The Owner wants pipeline failures caught by evidence at the moment of action and declaration — no edit, dispatch, sync, remediation, or 'done/effective/submitted' claim may rest on remembered or assumed state instead of freshly observed system state.\",\"targetBehavior\":\"In the tool trajectory, a reviewer sees a pre-action observation step (file re-read, directory fingerprint/timestamp comparison, service health probe) before every consequential action, and an explicit post-action verification (measured output, log check, file/commit state) that always precedes and accompanies any completion claim.\",\"forbiddenBehavior\":\"Executing edits, syncs, or dispatches on remembered or assumed state (memory-based text edits, presumed directory synchronization, presumed service health inside a timeout-bound session), remediating recurring defects with non-deterministic retries when deterministic fixes exist, and declaring work complete or effective without post-action observable evidence.\",\"evidenceSource\":\"Diagnosis manual_1788920022087_pjzfw9wt (EP002 production line): failed exact-text edit on gen_prompts.py; KF14 archived to keyframes/ but not synced to ComfyUI/input so LoadImage rendered the stale image; the long-running ComfyUI render service killed by its exec session's timeout (head_silence 'start_mode' option failure); scene-03 pronunciation rerolls reproducing the same defect; 'head_trim effective' and stone-strip submission claims made without measured clip duration or submission-state checks.\",\"validationExpectation\":\"An evaluator should accept a rule as faithful only if it (a) blocks completion declarations lacking post-action observable evidence, (b) requires pre-action observation of the target's actual state for edits, syncs, and service dispatches, (c) explicitly covers the stale-runtime-directory and timeout-bound-hosting failure modes, and (d) directs remediation to deterministic fixes before retries; any change that removes one of these gates contradicts this intent.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788920022087_pjz-r1-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788920022087_pjz-r1-run1\"},\"risks\":[\"Substantially overlaps core axioms T-03 and T-07 (and secondarily T-01/T-10 for lifecycle modeling and T-06 for deterministic-first remediation); treat this draft as an operational synthesis binding them into one fresh-observation loop, not a new independent axiom, to avoid duplicate rules downstream\",\"Bundling the deterministic-over-retry remediation preference into an observation-anchoring principle can dilute both; if rule generation cannot express it coherently, it should split into a separate T-06 rule\",\"Pre- and post-action verification adds latency in high-throughput render pipelines; the proportionate-to-consequence clause must be enforced or the principle becomes a bottleneck\",\"Observation channels can themselves target the wrong path, file, or endpoint, so compliant-looking verification may validate the wrong state; rules must demand representative probes (e.g., the fingerprint of what LoadImage actually loads, not just the source file)\",\"May be misused to justify indefinite checking and avoidance of action under irreducible uncertainty, where a reversible action plus later correction would be cheaper\"],\"generatedAt\":\"2026-09-09T01:32:05.000Z\"}",
+    "usage": {
+     "input": 4407,
+     "output": 7871,
+     "total": 12278
+    },
+    "latencyMs": 76466,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "8797a2e2b68b5710"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}

@@ -1,0 +1,694 @@
+{
+ "group": "G-manual_1788415743052_os4",
+ "class": "DEV",
+ "pain_id": "manual_1788415743052_os4aicut",
+ "frozen_at": "2026-09-17T15:09:07.296Z",
+ "repeats": [
+  {
+   "group": "G-manual_1788415743052_os4",
+   "repeat": 1,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788415743052_os4-r1",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "编写含中文字符的 .ps1 脚本后，未确认目标解释器版本即直接执行，默认落在 Windows PowerShell 5.1 上",
+       "betterDecision": "在执行任何 .ps1 脚本前，先运行 $PSVersionTable.PSVersion 探测目标解释器版本，并据此确定编码策略（5.1 需 UTF-8 BOM，pwsh 可无 BOM）",
+       "rationale": "解释器版本决定其对无 BOM UTF-8 的解析方式（5.1 按 ANSI、7+ 按 UTF-8）；执行前探测可将编码契约从隐式假设变为已验证事实，避免一次本可预防的执行失败",
+       "confidence": 0.95,
+       "riskLevel": "low",
+       "strategicPerspective": "pre_flight_verification",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "将包含非 ASCII（中文）字符的 PowerShell 脚本保存为 UTF-8 无 BOM，隐含假设所有 PowerShell 解释器都按 UTF-8 解析",
+       "betterDecision": "含非 ASCII 字符的 .ps1 落盘时统一保存为 UTF-8 with BOM，这是 Windows PowerShell 5.1 与 PowerShell 7 都能正确解析的编码交集",
+       "rationale": "UTF-8 BOM 是两个解释器版本的唯一共同安全编码；选择兼容性交集而非单侧最优，使编码决策不再依赖对解释器行为的假设",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "compatibility_intersection_encoding",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "未显式指定执行解释器，让系统默认解析到 Windows PowerShell 5.1 去执行按现代编码约定（UTF-8 无 BOM）编写的脚本",
+       "betterDecision": "落地脚本时明确声明执行契约：含非 ASCII 字符的 UTF-8 无 BOM 脚本显式以 pwsh -File 执行，或将 pwsh 声明为该类任务的默认解释器",
+       "rationale": "显式指定解释器比依赖系统默认更可控，把隐式环境假设转变为显式、可审计的执行契约",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "explicit_execution_contract",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "将'编码能否被目标解释器正确解析'留给运行时失败来揭示，用一次 exec failed（exitCode 1）充当兼容性检测手段",
+       "betterDecision": "在脚本落地前建立预检护栏：检测脚本是否含非 ASCII 字符→探测目标解释器版本→校验文件 BOM 存在性，三者不匹配即禁止执行并先行修正",
+       "rationale": "把兼容性约束从运行时错误前移为执行前的显式检查与禁止转换，一次预检成本远低于失败-修复-重试循环，也符合 Owner 对执行前护栏的明确要求",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "shift_left_guardrails",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "环境兼容性知识（5.1 对无 BOM UTF-8 按 ANSI 解析）仅作为失败后的事后认知存在于会话中，未在执行前固化为可复用的检查项",
+       "betterDecision": "将该环境契约持久化到 MEMORY/环境档案，并转化为后续所有 Windows 脚本任务的执行前流程：先探测解释器版本，再决定脚本编码与执行方式",
+       "rationale": "失败揭示的契约若不固化为执行前流程，同类失败会在新会话中重复；持久化使一次性教训成为持续生效的护栏",
+       "confidence": 0.8,
+       "riskLevel": "low",
+       "strategicPerspective": "institutionalize_learning",
+       "sourcePrincipleId": "T-08"
+      }
+     ],
+     "contextRefs": [
+      "artifact://6a7f3d62-1db2-44a8-b413-510e1da578c5"
+     ],
+     "generatedAt": "2026-09-03T06:12:00.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788415743052_os4-r1\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"编写含中文字符的 .ps1 脚本后，未确认目标解释器版本即直接执行，默认落在 Windows PowerShell 5.1 上\",\"betterDecision\":\"在执行任何 .ps1 脚本前，先运行 $PSVersionTable.PSVersion 探测目标解释器版本，并据此确定编码策略（5.1 需 UTF-8 BOM，pwsh 可无 BOM）\",\"rationale\":\"解释器版本决定其对无 BOM UTF-8 的解析方式（5.1 按 ANSI、7+ 按 UTF-8）；执行前探测可将编码契约从隐式假设变为已验证事实，避免一次本可预防的执行失败\",\"confidence\":0.95,\"riskLevel\":\"low\",\"strategicPerspective\":\"pre_flight_verification\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"将包含非 ASCII（中文）字符的 PowerShell 脚本保存为 UTF-8 无 BOM，隐含假设所有 PowerShell 解释器都按 UTF-8 解析\",\"betterDecision\":\"含非 ASCII 字符的 .ps1 落盘时统一保存为 UTF-8 with BOM，这是 Windows PowerShell 5.1 与 PowerShell 7 都能正确解析的编码交集\",\"rationale\":\"UTF-8 BOM 是两个解释器版本的唯一共同安全编码；选择兼容性交集而非单侧最优，使编码决策不再依赖对解释器行为的假设\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"compatibility_intersection_encoding\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"未显式指定执行解释器，让系统默认解析到 Windows PowerShell 5.1 去执行按现代编码约定（UTF-8 无 BOM）编写的脚本\",\"betterDecision\":\"落地脚本时明确声明执行契约：含非 ASCII 字符的 UTF-8 无 BOM 脚本显式以 pwsh -File 执行，或将 pwsh 声明为该类任务的默认解释器\",\"rationale\":\"显式指定解释器比依赖系统默认更可控，把隐式环境假设转变为显式、可审计的执行契约\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"explicit_execution_contract\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":3,\"badDecision\":\"将'编码能否被目标解释器正确解析'留给运行时失败来揭示，用一次 exec failed（exitCode 1）充当兼容性检测手段\",\"betterDecision\":\"在脚本落地前建立预检护栏：检测脚本是否含非 ASCII 字符→探测目标解释器版本→校验文件 BOM 存在性，三者不匹配即禁止执行并先行修正\",\"rationale\":\"把兼容性约束从运行时错误前移为执行前的显式检查与禁止转换，一次预检成本远低于失败-修复-重试循环，也符合 Owner 对执行前护栏的明确要求\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"shift_left_guardrails\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":4,\"badDecision\":\"环境兼容性知识（5.1 对无 BOM UTF-8 按 ANSI 解析）仅作为失败后的事后认知存在于会话中，未在执行前固化为可复用的检查项\",\"betterDecision\":\"将该环境契约持久化到 MEMORY/环境档案，并转化为后续所有 Windows 脚本任务的执行前流程：先探测解释器版本，再决定脚本编码与执行方式\",\"rationale\":\"失败揭示的契约若不固化为执行前流程，同类失败会在新会话中重复；持久化使一次性教训成为持续生效的护栏\",\"confidence\":0.8,\"riskLevel\":\"low\",\"strategicPerspective\":\"institutionalize_learning\",\"sourcePrincipleId\":\"T-08\"}],\"contextRefs\":[\"artifact://6a7f3d62-1db2-44a8-b413-510e1da578c5\"],\"generatedAt\":\"2026-09-03T06:12:00.000Z\"}",
+    "usage": {
+     "input": 2090,
+     "output": 3129,
+     "total": 5219
+    },
+    "latencyMs": 41376,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "da3530fb09100bab"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788415743052_os4-r1",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788415743052_os4-r1-run1",
+     "thesis": "Artifacts carry no meaning by themselves; they are interpreted by an environment whose contract (interpreter version, encoding behavior, defaults) may silently differ from the author's assumptions. The failure was not caused by a wrong technique but by an unverified coupling: a modern encoding convention paired with a legacy interpreter. The corrective philosophy is to make the interpreter's contract explicit before execution—by probing the actual environment, choosing the artifact form that is valid across the plausible environment set (the compatibility intersection), or declaring the execution contract explicitly—and to persist such environment contracts as durable pre-flight checks rather than one-time post-mortem knowledge.",
+     "principleCandidate": {
+      "title": "Bind artifacts to a verified interpreter contract: probe the environment, use the cross-compatible form, and persist the contract as pre-flight checks",
+      "rationale": "The root cause was an implicit assumption that the runtime environment matches the author's conventions. All five candidates attack the same root: convert the encoding/interpreter relationship from assumption to verified fact—version probing (candidate 0), compatibility-intersection encoding (candidate 1), explicit interpreter declaration (candidate 2), shift-left guardrails that forbid execution on mismatch (candidate 3), and persistence of the learned environment contract (candidate 4). Together they eliminate the class of failure, not the instance: the artifact's form is decided by the environment that will parse it, and that decision is checked and institutionalized before execution.",
+      "scope": "Applies whenever creating, persisting, or executing artifacts whose correct interpretation depends on environment state that can vary—script interpreters and their versions, file encodings, locales, toolchains, platforms, or system defaults. Especially relevant when non-standard content (e.g., non-ASCII characters) crosses environment boundaries, or when the executing environment is selected by implicit system default rather than explicit choice.",
+      "confidence": 0.88
+     },
+     "risks": [
+      "This candidate substantially overlaps with core axioms T-01 (model the system before consequential changes), T-05 (translate constraints into explicit guardrails and forbidden transitions), and T-08 (persist corrections as future behavior); it is a domain-specific conjunction of existing axioms rather than a wholly novel principle, and should be evaluated for absorption rather than addition.",
+      "Compatibility-intersection choices (e.g., UTF-8 with BOM) are context-dependent: a form safe across PowerShell 5.1/7 may break other tooling (Unix utilities, some parsers), so 'intersection' must be recomputed per environment set, not treated as universally safe.",
+      "Probing the interpreter on every execution adds overhead; without caching the discovered environment contract, this can become ritual verification rather than meaningful checking.",
+      "Persisted environment contracts can go stale if the environment changes (e.g., interpreter upgraded), causing outdated guardrails to block valid execution or permit invalid forms; persisted contracts need occasional revalidation.",
+      "Over-fitting to the PowerShell encoding instance could narrow the principle's perceived scope; it must be stated in terms of environment-dependent interpretation, not encodings specifically."
+     ],
+     "generatedAt": "2026-09-03T06:14:32.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788415743052_os4-r1\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788415743052_os4-r1-run1\",\"thesis\":\"Artifacts carry no meaning by themselves; they are interpreted by an environment whose contract (interpreter version, encoding behavior, defaults) may silently differ from the author's assumptions. The failure was not caused by a wrong technique but by an unverified coupling: a modern encoding convention paired with a legacy interpreter. The corrective philosophy is to make the interpreter's contract explicit before execution—by probing the actual environment, choosing the artifact form that is valid across the plausible environment set (the compatibility intersection), or declaring the execution contract explicitly—and to persist such environment contracts as durable pre-flight checks rather than one-time post-mortem knowledge.\",\"principleCandidate\":{\"title\":\"Bind artifacts to a verified interpreter contract: probe the environment, use the cross-compatible form, and persist the contract as pre-flight checks\",\"rationale\":\"The root cause was an implicit assumption that the runtime environment matches the author's conventions. All five candidates attack the same root: convert the encoding/interpreter relationship from assumption to verified fact—version probing (candidate 0), compatibility-intersection encoding (candidate 1), explicit interpreter declaration (candidate 2), shift-left guardrails that forbid execution on mismatch (candidate 3), and persistence of the learned environment contract (candidate 4). Together they eliminate the class of failure, not the instance: the artifact's form is decided by the environment that will parse it, and that decision is checked and institutionalized before execution.\",\"scope\":\"Applies whenever creating, persisting, or executing artifacts whose correct interpretation depends on environment state that can vary—script interpreters and their versions, file encodings, locales, toolchains, platforms, or system defaults. Especially relevant when non-standard content (e.g., non-ASCII characters) crosses environment boundaries, or when the executing environment is selected by implicit system default rather than explicit choice.\",\"confidence\":0.88},\"risks\":[\"This candidate substantially overlaps with core axioms T-01 (model the system before consequential changes), T-05 (translate constraints into explicit guardrails and forbidden transitions), and T-08 (persist corrections as future behavior); it is a domain-specific conjunction of existing axioms rather than a wholly novel principle, and should be evaluated for absorption rather than addition.\",\"Compatibility-intersection choices (e.g., UTF-8 with BOM) are context-dependent: a form safe across PowerShell 5.1/7 may break other tooling (Unix utilities, some parsers), so 'intersection' must be recomputed per environment set, not treated as universally safe.\",\"Probing the interpreter on every execution adds overhead; without caching the discovered environment contract, this can become ritual verification rather than meaningful checking.\",\"Persisted environment contracts can go stale if the environment changes (e.g., interpreter upgraded), causing outdated guardrails to block valid execution or permit invalid forms; persisted contracts need occasional revalidation.\",\"Over-fitting to the PowerShell encoding instance could narrow the principle's perceived scope; it must be stated in terms of environment-dependent interpretation, not encodings specifically.\"],\"generatedAt\":\"2026-09-03T06:14:32.000Z\"}",
+    "usage": {
+     "input": 1722,
+     "output": 1722,
+     "total": 3444
+    },
+    "latencyMs": 29202,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "c746863d55ee6b41"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788415743052_os4-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r1-run1",
+     "principleDraft": {
+      "title": "Bind artifacts to a verified interpreter contract via pre-flight environment probing",
+      "statement": "Whenever an artifact's correct interpretation depends on variable environment state (interpreter version, encoding behavior, locale, platform defaults), treat the executing environment's contract as unknown until verified: probe the actual environment or declare the execution contract explicitly before choosing the artifact's form; select the form valid across the entire plausible environment set (the compatibility intersection) rather than the authoring convention; encode the verified contract as a reusable pre-flight check that blocks execution on mismatch; and revalidate persisted contracts when the environment may have changed.",
+      "rationale": "The diagnosed root cause was an unverified coupling, not a wrong technique: a modern encoding convention (UTF-8 without BOM) was paired with a legacy interpreter selected by system default, which silently decoded the artifact under a different contract and corrupted it. Because the artifact's form was derived from the author's environment rather than the parser's, no amount of local correctness could prevent the failure. Deriving the form from a probed or declared environment contract, constraining it to the compatibility intersection, and institutionalizing the result as a pre-flight check converts that assumption into a verified, durable fact—eliminating the failure class rather than the instance.",
+      "applicability": [
+       "Authoring or persisting files whose interpretation depends on encoding, especially non-ASCII content that crosses environment boundaries",
+       "Writing scripts or commands executed by interpreters chosen via system default or subject to version drift (e.g., PowerShell 5.1 vs 7, Python 2 vs 3, shell variants)",
+       "Choosing file formats, syntax features, or encodings when the target interpreter, toolchain, platform, or locale is not explicitly pinned",
+       "Executing previously authored artifacts in environments whose defaults may differ from the authoring environment",
+       "Recurring work in a known environment where a previously verified contract should be applied as a pre-flight check rather than re-derived or forgotten"
+      ],
+      "antiPatterns": [
+       "Choosing an artifact's encoding or syntax from the authoring environment's convention while the parsing environment's contract is unprobed or unpinned",
+       "Allowing the executing interpreter to be selected by implicit system default when interpretation of the artifact depends on its version or defaults",
+       "Assuming a form verified in one environment (e.g., UTF-8 without BOM on PowerShell 7) is safe across all plausible environments without computing the compatibility intersection",
+       "Repairing an environment-mismatch failure once, post-mortem, without persisting the discovered contract as a pre-flight check",
+       "Trusting a persisted environment contract indefinitely without revalidating it when the environment may have changed"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent artifacts from being silently misinterpreted at execution time because their form (encoding, syntax, format) was chosen by author convention while the actual interpreter/encoding contract of the executing environment was never probed, declared, or checked.",
+      "targetBehavior": "In any tool trajectory involving environment-sensitive artifacts, a reviewer can see the agent probe or explicitly declare the execution environment's contract (e.g., check interpreter version, pin the interpreter or invocation, verify encoding behavior), select an artifact form valid across the plausible environment set, and record or apply that verified contract as a pre-flight check before execution.",
+      "forbiddenBehavior": "Producing or executing artifacts whose form rests on unverified environment assumptions—e.g., saving non-ASCII content in an author-conventional encoding and letting a system-default-selected legacy interpreter misparse it, then patching the symptom post-mortem without capturing the environment contract.",
+      "evidenceSource": "The dreamer/philosopher diagnosis of the encoding failure: a modern encoding convention (UTF-8 without BOM) was executed by a system-default-selected legacy interpreter (PowerShell 5.1) that silently decoded it under a different contract and corrupted the artifact—the coupling was never verified before execution.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it demands an observable pre-execution verification step (probe or explicit declaration of the interpreter/encoding contract) plus a form decision derived from the plausible environment set, and only if applying it would have blocked the diagnosed UTF-8/no-BOM-on-legacy-PowerShell failure; rules that hardcode a single 'correct' encoding, run only post-execution, or ignore environment variation fail this test."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788415743052_os4-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms: this principle is a domain-specific conjunction of T-01 (model the relevant system before consequential changes), T-05 (translate hard constraints into explicit guardrails), and T-08 (persist corrections as future behavior); the pipeline should evaluate absorption into those axioms rather than adding a near-duplicate principle.",
+      "Compatibility-intersection choices are context-dependent: UTF-8 with BOM, safe across PowerShell 5.1/7, can break Unix utilities and some parsers, so the intersection must be recomputed per plausible environment set, never treated as universally safe.",
+      "Mandatory probing on every execution adds overhead and can decay into ritual verification unless the discovered contract is cached and reused; this tension with T-06 (simplest intervention) requires a materiality threshold for when verification is required.",
+      "Persisted environment contracts can go stale after interpreter upgrades or environment changes, causing outdated guardrails to block valid execution or permit invalid forms; they need revalidation triggers tied to environment change signals.",
+      "Over-fitting to the PowerShell encoding instance could narrow the principle's perceived scope; it must be stated and evaluated in terms of environment-dependent interpretation generally, not encodings specifically.",
+      "'Declare the execution contract explicitly' could be misread as license to modify or pin system-level interpreters, an unwanted state change in shared environments; declaration should prefer artifact-level or invocation-level pinning."
+     ],
+     "generatedAt": "2026-09-03T06:21:47.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788415743052_os4-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Bind artifacts to a verified interpreter contract via pre-flight environment probing\",\n    \"statement\": \"Whenever an artifact's correct interpretation depends on variable environment state (interpreter version, encoding behavior, locale, platform defaults), treat the executing environment's contract as unknown until verified: probe the actual environment or declare the execution contract explicitly before choosing the artifact's form; select the form valid across the entire plausible environment set (the compatibility intersection) rather than the authoring convention; encode the verified contract as a reusable pre-flight check that blocks execution on mismatch; and revalidate persisted contracts when the environment may have changed.\",\n    \"rationale\": \"The diagnosed root cause was an unverified coupling, not a wrong technique: a modern encoding convention (UTF-8 without BOM) was paired with a legacy interpreter selected by system default, which silently decoded the artifact under a different contract and corrupted it. Because the artifact's form was derived from the author's environment rather than the parser's, no amount of local correctness could prevent the failure. Deriving the form from a probed or declared environment contract, constraining it to the compatibility intersection, and institutionalizing the result as a pre-flight check converts that assumption into a verified, durable fact—eliminating the failure class rather than the instance.\",\n    \"applicability\": [\n      \"Authoring or persisting files whose interpretation depends on encoding, especially non-ASCII content that crosses environment boundaries\",\n      \"Writing scripts or commands executed by interpreters chosen via system default or subject to version drift (e.g., PowerShell 5.1 vs 7, Python 2 vs 3, shell variants)\",\n      \"Choosing file formats, syntax features, or encodings when the target interpreter, toolchain, platform, or locale is not explicitly pinned\",\n      \"Executing previously authored artifacts in environments whose defaults may differ from the authoring environment\",\n      \"Recurring work in a known environment where a previously verified contract should be applied as a pre-flight check rather than re-derived or forgotten\"\n    ],\n    \"antiPatterns\": [\n      \"Choosing an artifact's encoding or syntax from the authoring environment's convention while the parsing environment's contract is unprobed or unpinned\",\n      \"Allowing the executing interpreter to be selected by implicit system default when interpretation of the artifact depends on its version or defaults\",\n      \"Assuming a form verified in one environment (e.g., UTF-8 without BOM on PowerShell 7) is safe across all plausible environments without computing the compatibility intersection\",\n      \"Repairing an environment-mismatch failure once, post-mortem, without persisting the discovered contract as a pre-flight check\",\n      \"Trusting a persisted environment contract indefinitely without revalidating it when the environment may have changed\"\n    ],\n    \"confidence\": 0.82\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants to prevent artifacts from being silently misinterpreted at execution time because their form (encoding, syntax, format) was chosen by author convention while the actual interpreter/encoding contract of the executing environment was never probed, declared, or checked.\",\n    \"targetBehavior\": \"In any tool trajectory involving environment-sensitive artifacts, a reviewer can see the agent probe or explicitly declare the execution environment's contract (e.g., check interpreter version, pin the interpreter or invocation, verify encoding behavior), select an artifact form valid across the plausible environment set, and record or apply that verified contract as a pre-flight check before execution.\",\n    \"forbiddenBehavior\": \"Producing or executing artifacts whose form rests on unverified environment assumptions—e.g., saving non-ASCII content in an author-conventional encoding and letting a system-default-selected legacy interpreter misparse it, then patching the symptom post-mortem without capturing the environment contract.\",\n    \"evidenceSource\": \"The dreamer/philosopher diagnosis of the encoding failure: a modern encoding convention (UTF-8 without BOM) was executed by a system-default-selected legacy interpreter (PowerShell 5.1) that silently decoded it under a different contract and corrupted the artifact—the coupling was never verified before execution.\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if it demands an observable pre-execution verification step (probe or explicit declaration of the interpreter/encoding contract) plus a form decision derived from the plausible environment set, and only if applying it would have blocked the diagnosed UTF-8/no-BOM-on-legacy-PowerShell failure; rules that hardcode a single 'correct' encoding, run only post-execution, or ignore environment variation fail this test.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788415743052_os4-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r1-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axioms: this principle is a domain-specific conjunction of T-01 (model the relevant system before consequential changes), T-05 (translate hard constraints into explicit guardrails), and T-08 (persist corrections as future behavior); the pipeline should evaluate absorption into those axioms rather than adding a near-duplicate principle.\",\n    \"Compatibility-intersection choices are context-dependent: UTF-8 with BOM, safe across PowerShell 5.1/7, can break Unix utilities and some parsers, so the intersection must be recomputed per plausible environment set, never treated as universally safe.\",\n    \"Mandatory probing on every execution adds overhead and can decay into ritual verification unless the discovered contract is cached and reused; this tension with T-06 (simplest intervention) requires a materiality threshold for when verification is required.\",\n    \"Persisted environment contracts can go stale after interpreter upgrades or environment changes, causing outdated guardrails to block valid execution or permit invalid forms; they need revalidation triggers tied to environment change signals.\",\n    \"Over-fitting to the PowerShell encoding instance could narrow the principle's perceived scope; it must be stated and evaluated in terms of environment-dependent interpretation generally, not encodings specifically.\",\n    \"'Declare the execution contract explicitly' could be misread as license to modify or pin system-level interpreters, an unwanted state change in shared environments; declaration should prefer artifact-level or invocation-level pinning.\"\n  ],\n  \"generatedAt\": \"2026-09-03T06:21:47.000Z\"\n}",
+    "usage": {
+     "input": 2088,
+     "output": 5468,
+     "total": 7556
+    },
+    "latencyMs": 70243,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "129e865a029d8d42"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788415743052_os4-r1",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r1-run1",
+     "principleDraft": {
+      "title": "Verify the interpreter and encoding contract before executing environment-sensitive artifacts",
+      "statement": "Before creating, persisting, or executing an artifact whose correct interpretation depends on environment state that can vary (interpreter version, encoding behavior, locale, toolchain defaults), the agent must convert that coupling from an assumption into a verified or explicitly declared fact: probe the actual target environment (e.g., $PSVersionTable.PSVersion before running .ps1 files), or select an artifact form valid across the plausible environment set (e.g., UTF-8 with BOM for non-ASCII .ps1 files across Windows PowerShell 5.1 and 7), or explicitly pin the execution contract (e.g., pwsh -File). Never let system-default interpreter resolution or runtime failure be the first detector of the mismatch, and persist discovered environment contracts as durable pre-flight checks rather than one-time post-mortem knowledge.",
+      "rationale": "The diagnosed root cause was an unverified coupling: a modern encoding convention (UTF-8 without BOM carrying non-ASCII text) paired with a legacy interpreter (Windows PowerShell 5.1 parses BOM-less UTF-8 as ANSI) selected by system default, so a preventable exec failure (exitCode 1, mojibake) was the first and only signal. Verifying or explicitly declaring the environment contract before execution eliminates the class of failure rather than the instance, and persisting the contract as a pre-flight check prevents the same lesson from being re-learned in every new session.",
+      "applicability": [
+       "Landing or executing .ps1 scripts on Windows where the interpreter may resolve to Windows PowerShell 5.1 or PowerShell 7 by implicit system default",
+       "Writing files containing non-ASCII (e.g., Chinese) content whose encoding contract (BOM presence) is interpreted differently across consumers",
+       "Any consequential change whose correct outcome depends on environment state that can vary: interpreter or toolchain versions, locales, platforms, or system defaults"
+      ],
+      "antiPatterns": [
+       "Executing a non-ASCII .ps1 saved as UTF-8 without BOM under an interpreter chosen by system default, with no prior version probe or explicit interpreter declaration",
+       "Using runtime exec failure (exitCode 1, mojibake) as the compatibility test for an environment-dependent artifact",
+       "Treating a discovered environment contract (e.g., 'Windows PowerShell 5.1 parses BOM-less UTF-8 as ANSI') as session-local post-mortem knowledge without persisting it as a pre-flight check"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to confirm the target interpreter version and encoding contract before landing or executing scripts and other environment-sensitive artifacts, instead of discovering incompatibilities through runtime failure.",
+      "targetBehavior": "In the tool trajectory, before executing an environment-sensitive artifact (e.g., a .ps1 containing non-ASCII characters), the agent probes the interpreter version (e.g., $PSVersionTable.PSVersion) or explicitly pins the interpreter (e.g., pwsh -File), matches the artifact's encoding to the result (e.g., UTF-8 with BOM for Windows PowerShell 5.1), and records the established environment contract in persistent memory for reuse in later sessions.",
+      "forbiddenBehavior": "Relying on system-default interpreter resolution and the author's encoding conventions without prior verification, such that an exec failure with mojibake (exitCode 1) becomes the first—and only—detector of the environment mismatch.",
+      "evidenceSource": "Diagnosis manual_1788415743052_os4aicut: line-79 Chinese string garbled when a BOM-less UTF-8 .ps1 ran under Windows PowerShell 5.1 (exec failed, exitCode 1, 2026-09-03T06:00:16.593Z); agent admission at 06:05:07 that no pre-execution compatibility check was performed; Owner correction requiring interpreter-version and encoding-contract confirmation before landing scripts.",
+      "validationExpectation": "An evaluator should accept a rule only if it requires a pre-execution verification step (version probe, explicit interpreter pin, or cross-compatible artifact form) that blocks or corrects execution on unresolved mismatch for environment-sensitive artifacts; a rule that only advises caution after a failure, or reduces to generic 'be careful with encodings' without a pre-flight trigger, does not satisfy this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788415743052_os4-r1-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r1-run1"
+     },
+     "risks": [
+      "Substantial overlap with core axioms T-01 (model the system before consequential changes), T-05 (translate constraints into explicit guardrails), and T-08 (persist corrections as future behavior); this draft is a domain-specific conjunction of existing axioms and should be evaluated for absorption rather than addition as a new axiom.",
+      "The three resolution means (probe-and-adapt, compatibility-intersection form, explicit interpreter pin) are alternatives, not conjunctive requirements; downstream rule generation must not mandate all three on every execution.",
+      "'Compatibility intersection' forms such as UTF-8 with BOM are context-dependent—safe across Windows PowerShell 5.1/7 but potentially harmful to other tooling (Unix utilities, some parsers)—so the intersection must be recomputed per plausible environment set, not treated as universally safe.",
+      "Probing the environment on every execution adds overhead; without persisting and reusing the discovered contract, verification can degenerate into ritual checking.",
+      "Persisted environment contracts can go stale if the environment changes (e.g., interpreter upgraded), causing outdated guardrails to block valid execution or permit invalid forms; they need occasional revalidation.",
+      "Over-fitting to the PowerShell/encoding instance could narrow the principle's perceived scope; it must be stated and consumed in terms of environment-dependent interpretation, not encodings specifically."
+     ],
+     "generatedAt": "2026-09-03T06:19:00.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788415743052_os4-r1\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r1-run1\",\n  \"principleDraft\": {\n    \"title\": \"Verify the interpreter and encoding contract before executing environment-sensitive artifacts\",\n    \"statement\": \"Before creating, persisting, or executing an artifact whose correct interpretation depends on environment state that can vary (interpreter version, encoding behavior, locale, toolchain defaults), the agent must convert that coupling from an assumption into a verified or explicitly declared fact: probe the actual target environment (e.g., $PSVersionTable.PSVersion before running .ps1 files), or select an artifact form valid across the plausible environment set (e.g., UTF-8 with BOM for non-ASCII .ps1 files across Windows PowerShell 5.1 and 7), or explicitly pin the execution contract (e.g., pwsh -File). Never let system-default interpreter resolution or runtime failure be the first detector of the mismatch, and persist discovered environment contracts as durable pre-flight checks rather than one-time post-mortem knowledge.\",\n    \"rationale\": \"The diagnosed root cause was an unverified coupling: a modern encoding convention (UTF-8 without BOM carrying non-ASCII text) paired with a legacy interpreter (Windows PowerShell 5.1 parses BOM-less UTF-8 as ANSI) selected by system default, so a preventable exec failure (exitCode 1, mojibake) was the first and only signal. Verifying or explicitly declaring the environment contract before execution eliminates the class of failure rather than the instance, and persisting the contract as a pre-flight check prevents the same lesson from being re-learned in every new session.\",\n    \"applicability\": [\n      \"Landing or executing .ps1 scripts on Windows where the interpreter may resolve to Windows PowerShell 5.1 or PowerShell 7 by implicit system default\",\n      \"Writing files containing non-ASCII (e.g., Chinese) content whose encoding contract (BOM presence) is interpreted differently across consumers\",\n      \"Any consequential change whose correct outcome depends on environment state that can vary: interpreter or toolchain versions, locales, platforms, or system defaults\"\n    ],\n    \"antiPatterns\": [\n      \"Executing a non-ASCII .ps1 saved as UTF-8 without BOM under an interpreter chosen by system default, with no prior version probe or explicit interpreter declaration\",\n      \"Using runtime exec failure (exitCode 1, mojibake) as the compatibility test for an environment-dependent artifact\",\n      \"Treating a discovered environment contract (e.g., 'Windows PowerShell 5.1 parses BOM-less UTF-8 as ANSI') as session-local post-mortem knowledge without persisting it as a pre-flight check\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants the agent to confirm the target interpreter version and encoding contract before landing or executing scripts and other environment-sensitive artifacts, instead of discovering incompatibilities through runtime failure.\",\n    \"targetBehavior\": \"In the tool trajectory, before executing an environment-sensitive artifact (e.g., a .ps1 containing non-ASCII characters), the agent probes the interpreter version (e.g., $PSVersionTable.PSVersion) or explicitly pins the interpreter (e.g., pwsh -File), matches the artifact's encoding to the result (e.g., UTF-8 with BOM for Windows PowerShell 5.1), and records the established environment contract in persistent memory for reuse in later sessions.\",\n    \"forbiddenBehavior\": \"Relying on system-default interpreter resolution and the author's encoding conventions without prior verification, such that an exec failure with mojibake (exitCode 1) becomes the first—and only—detector of the environment mismatch.\",\n    \"evidenceSource\": \"Diagnosis manual_1788415743052_os4aicut: line-79 Chinese string garbled when a BOM-less UTF-8 .ps1 ran under Windows PowerShell 5.1 (exec failed, exitCode 1, 2026-09-03T06:00:16.593Z); agent admission at 06:05:07 that no pre-execution compatibility check was performed; Owner correction requiring interpreter-version and encoding-contract confirmation before landing scripts.\",\n    \"validationExpectation\": \"An evaluator should accept a rule only if it requires a pre-execution verification step (version probe, explicit interpreter pin, or cross-compatible artifact form) that blocks or corrects execution on unresolved mismatch for environment-sensitive artifacts; a rule that only advises caution after a failure, or reduces to generic 'be careful with encodings' without a pre-flight trigger, does not satisfy this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788415743052_os4-r1-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r1-run1\"\n  },\n  \"risks\": [\n    \"Substantial overlap with core axioms T-01 (model the system before consequential changes), T-05 (translate constraints into explicit guardrails), and T-08 (persist corrections as future behavior); this draft is a domain-specific conjunction of existing axioms and should be evaluated for absorption rather than addition as a new axiom.\",\n    \"The three resolution means (probe-and-adapt, compatibility-intersection form, explicit interpreter pin) are alternatives, not conjunctive requirements; downstream rule generation must not mandate all three on every execution.\",\n    \"'Compatibility intersection' forms such as UTF-8 with BOM are context-dependent—safe across Windows PowerShell 5.1/7 but potentially harmful to other tooling (Unix utilities, some parsers)—so the intersection must be recomputed per plausible environment set, not treated as universally safe.\",\n    \"Probing the environment on every execution adds overhead; without persisting and reusing the discovered contract, verification can degenerate into ritual checking.\",\n    \"Persisted environment contracts can go stale if the environment changes (e.g., interpreter upgraded), causing outdated guardrails to block valid execution or permit invalid forms; they need occasional revalidation.\",\n    \"Over-fitting to the PowerShell/encoding instance could narrow the principle's perceived scope; it must be stated and consumed in terms of environment-dependent interpretation, not encodings specifically.\"\n  ],\n  \"generatedAt\": \"2026-09-03T06:19:00.000Z\"\n}",
+    "usage": {
+     "input": 4444,
+     "output": 5656,
+     "total": 10100
+    },
+    "latencyMs": 72543,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "ff8b069f5a10cbb6"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788415743052_os4",
+   "repeat": 2,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788415743052_os4-r2",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "Wrote a PowerShell script containing non-ASCII (Chinese) strings and executed it directly under Windows PowerShell 5.1 without checking the interpreter version or encoding behavior first",
+       "betterDecision": "Before executing any .ps1 script, run $PSVersionTable.PSVersion to confirm the target interpreter version; if it is Windows PowerShell 5.x, save the script as UTF-8 with BOM (or invoke it with pwsh 7+) before running",
+       "rationale": "Windows PowerShell 5.1 parses no-BOM UTF-8 files as ANSI, which is the exact cause of the garbled strings and exit code 1. A one-line version probe surfaces the encoding contract mismatch proactively instead of discovering it through a runtime failure",
+       "confidence": 0.95,
+       "riskLevel": "low",
+       "strategicPerspective": "pre_execution_environment_probing",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "Saved the script with embedded Chinese characters as UTF-8 without BOM, assuming the default encoding would be interpreted correctly on the target host",
+       "betterDecision": "Whenever a script contains non-ASCII characters, write it as UTF-8 with BOM so both Windows PowerShell 5.1 and PowerShell 7+ parse it identically, or keep the script pure ASCII by escaping/localizing strings",
+       "rationale": "UTF-8 with BOM is the only encoding contract that both PowerShell generations honor for non-ASCII content, making the script portable across interpreter versions without environment-specific surprises",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "encoding_contract_hardening",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "Used runtime failure as the primary mechanism for discovering environment incompatibilities, burning an execution cycle and requiring Owner correction",
+       "betterDecision": "Adopt a pre-flight checklist for consequential file operations: verify interpreter version, expected encoding, working directory, and file paths before the first execution attempt",
+       "rationale": "Translating known hard constraints (interpreter version, encoding contract, cwd) into explicit checks before execution converts an avoidable failure into a cheap verification step, which is exactly what the Owner's correction demanded",
+       "confidence": 0.85,
+       "riskLevel": "medium",
+       "strategicPerspective": "shift_left_guardrails",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "Carried over assumptions from a pwsh/Linux context (UTF-8 no BOM works everywhere) to a Windows PowerShell 5.1 host without treating the new platform as unverified",
+       "betterDecision": "When the platform or interpreter changes, run a minimal reversible smoke test first (e.g., a one-line script echoing a non-ASCII string) to validate parsing behavior before executing the full consequential script",
+       "rationale": "A tiny probe costs seconds and is fully reversible, while the failed full run cost a failed execution and owner-visible friction; probing first preserves safety while validating the key assumption cheaply",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "minimal_reversible_probe",
+       "sourcePrincipleId": "T-04"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "Did not persist the interpreter-version and encoding-contract requirement after encountering it, leaving the correction dependent on the Owner's explicit intervention and transient session context",
+       "betterDecision": "Record the durable rule in MEMORY.md immediately: on Windows, before landing any .ps1 with non-ASCII content, confirm $PSVersionTable.PSVersion and enforce UTF-8 BOM for 5.x targets",
+       "rationale": "Persisting this environmental lesson outside transient context ensures the same encoding mistake is not repeated in future sessions on this host, turning the Owner's correction into standing operational knowledge",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "knowledge_persistence",
+       "sourcePrincipleId": "T-10"
+      }
+     ],
+     "sourcePainId": "diagnosis_manual_1788415743052_os4aicut",
+     "contextRefs": [
+      "artifact://6a7f3d62-1db2-44a8-b413-510e1da578c5"
+     ],
+     "generatedAt": "2026-09-03T06:06:30.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788415743052_os4-r2\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"Wrote a PowerShell script containing non-ASCII (Chinese) strings and executed it directly under Windows PowerShell 5.1 without checking the interpreter version or encoding behavior first\",\"betterDecision\":\"Before executing any .ps1 script, run $PSVersionTable.PSVersion to confirm the target interpreter version; if it is Windows PowerShell 5.x, save the script as UTF-8 with BOM (or invoke it with pwsh 7+) before running\",\"rationale\":\"Windows PowerShell 5.1 parses no-BOM UTF-8 files as ANSI, which is the exact cause of the garbled strings and exit code 1. A one-line version probe surfaces the encoding contract mismatch proactively instead of discovering it through a runtime failure\",\"confidence\":0.95,\"riskLevel\":\"low\",\"strategicPerspective\":\"pre_execution_environment_probing\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"Saved the script with embedded Chinese characters as UTF-8 without BOM, assuming the default encoding would be interpreted correctly on the target host\",\"betterDecision\":\"Whenever a script contains non-ASCII characters, write it as UTF-8 with BOM so both Windows PowerShell 5.1 and PowerShell 7+ parse it identically, or keep the script pure ASCII by escaping/localizing strings\",\"rationale\":\"UTF-8 with BOM is the only encoding contract that both PowerShell generations honor for non-ASCII content, making the script portable across interpreter versions without environment-specific surprises\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"encoding_contract_hardening\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"Used runtime failure as the primary mechanism for discovering environment incompatibilities, burning an execution cycle and requiring Owner correction\",\"betterDecision\":\"Adopt a pre-flight checklist for consequential file operations: verify interpreter version, expected encoding, working directory, and file paths before the first execution attempt\",\"rationale\":\"Translating known hard constraints (interpreter version, encoding contract, cwd) into explicit checks before execution converts an avoidable failure into a cheap verification step, which is exactly what the Owner's correction demanded\",\"confidence\":0.85,\"riskLevel\":\"medium\",\"strategicPerspective\":\"shift_left_guardrails\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":3,\"badDecision\":\"Carried over assumptions from a pwsh/Linux context (UTF-8 no BOM works everywhere) to a Windows PowerShell 5.1 host without treating the new platform as unverified\",\"betterDecision\":\"When the platform or interpreter changes, run a minimal reversible smoke test first (e.g., a one-line script echoing a non-ASCII string) to validate parsing behavior before executing the full consequential script\",\"rationale\":\"A tiny probe costs seconds and is fully reversible, while the failed full run cost a failed execution and owner-visible friction; probing first preserves safety while validating the key assumption cheaply\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"minimal_reversible_probe\",\"sourcePrincipleId\":\"T-04\"},{\"candidateIndex\":4,\"badDecision\":\"Did not persist the interpreter-version and encoding-contract requirement after encountering it, leaving the correction dependent on the Owner's explicit intervention and transient session context\",\"betterDecision\":\"Record the durable rule in MEMORY.md immediately: on Windows, before landing any .ps1 with non-ASCII content, confirm $PSVersionTable.PSVersion and enforce UTF-8 BOM for 5.x targets\",\"rationale\":\"Persisting this environmental lesson outside transient context ensures the same encoding mistake is not repeated in future sessions on this host, turning the Owner's correction into standing operational knowledge\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"knowledge_persistence\",\"sourcePrincipleId\":\"T-10\"}],\"sourcePainId\":\"diagnosis_manual_1788415743052_os4aicut\",\"contextRefs\":[\"artifact://6a7f3d62-1db2-44a8-b413-510e1da578c5\"],\"generatedAt\":\"2026-09-03T06:06:30.000Z\"}",
+    "usage": {
+     "input": 2090,
+     "output": 2119,
+     "total": 4209
+    },
+    "latencyMs": 30909,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "6a6a2df3e86bd151"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788415743052_os4-r2",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788415743052_os4-r2-run1",
+     "thesis": "Implicit environmental contracts—file encoding, interpreter version, working directory—are invisible preconditions whose validity is platform-relative. Changing the execution environment resets them to unverified, and the cheapest point to re-establish them is before the first consequential execution, via version probes, explicit encoding conventions (UTF-8 with BOM for non-ASCII), or minimal reversible smoke tests; the resulting lesson must then be persisted so the reset is never learned twice through runtime failure.",
+     "principleCandidate": {
+      "title": "Environment change resets implicit contracts; verify encoding/interpreter before consequential runs",
+      "rationale": "The root cause was carrying a pwsh/Linux encoding assumption (UTF-8 no-BOM) into a Windows PowerShell 5.1 host, which silently parses such files as ANSI. Encoding and interpreter contracts are not enforced by tooling and only surface as runtime garbling or failure. A pre-flight verification—a one-line version probe, BOM convention for non-ASCII content, or a reversible smoke test—costs seconds and converts a guaranteed owner-visible failure into a cheap check, while persisting the rule turns a one-time correction into standing operational knowledge.",
+      "scope": "Applies whenever executing scripts or performing consequential file operations on a new host, interpreter, OS, or interpreter version; when artifacts contain non-ASCII or otherwise encoding-sensitive content; and at the first consequential execution after any platform or environment transition, before relying on assumptions formed in a prior environment.",
+      "confidence": 0.82
+     },
+     "risks": [
+      "Overlaps with core axioms T-01 (build sufficient model before consequential changes) and T-05 (translate hard constraints into guardrails); this candidate is a specialization adding the platform-change trigger rather than a wholly new principle, so consolidation with T-01/T-05 should be considered",
+      "Over-probing risk: requiring pre-flight checks for every trivial operation adds friction; the principle needs a proportionality threshold tied to consequence level (non-ASCII content, new platform, or consequential writes)",
+      "False confidence risk: a passing smoke test or version probe validates only the tested contract; other environment mismatches (cwd, permissions, locale) may still fail at runtime",
+      "Staleness risk: persisted environment-specific rules (e.g., 'enforce BOM for PowerShell 5.x') can become obsolete after environment upgrades and should be reviewed when the platform changes again",
+      "Shift-left bias: in genuinely time-sensitive situations, mandatory pre-flight verification could delay necessary action, so the probe must remain minimal and reversible rather than exhaustive"
+     ],
+     "generatedAt": "2026-09-03T06:12:47.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788415743052_os4-r2\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788415743052_os4-r2-run1\",\"thesis\":\"Implicit environmental contracts—file encoding, interpreter version, working directory—are invisible preconditions whose validity is platform-relative. Changing the execution environment resets them to unverified, and the cheapest point to re-establish them is before the first consequential execution, via version probes, explicit encoding conventions (UTF-8 with BOM for non-ASCII), or minimal reversible smoke tests; the resulting lesson must then be persisted so the reset is never learned twice through runtime failure.\",\"principleCandidate\":{\"title\":\"Environment change resets implicit contracts; verify encoding/interpreter before consequential runs\",\"rationale\":\"The root cause was carrying a pwsh/Linux encoding assumption (UTF-8 no-BOM) into a Windows PowerShell 5.1 host, which silently parses such files as ANSI. Encoding and interpreter contracts are not enforced by tooling and only surface as runtime garbling or failure. A pre-flight verification—a one-line version probe, BOM convention for non-ASCII content, or a reversible smoke test—costs seconds and converts a guaranteed owner-visible failure into a cheap check, while persisting the rule turns a one-time correction into standing operational knowledge.\",\"scope\":\"Applies whenever executing scripts or performing consequential file operations on a new host, interpreter, OS, or interpreter version; when artifacts contain non-ASCII or otherwise encoding-sensitive content; and at the first consequential execution after any platform or environment transition, before relying on assumptions formed in a prior environment.\",\"confidence\":0.82},\"risks\":[\"Overlaps with core axioms T-01 (build sufficient model before consequential changes) and T-05 (translate hard constraints into guardrails); this candidate is a specialization adding the platform-change trigger rather than a wholly new principle, so consolidation with T-01/T-05 should be considered\",\"Over-probing risk: requiring pre-flight checks for every trivial operation adds friction; the principle needs a proportionality threshold tied to consequence level (non-ASCII content, new platform, or consequential writes)\",\"False confidence risk: a passing smoke test or version probe validates only the tested contract; other environment mismatches (cwd, permissions, locale) may still fail at runtime\",\"Staleness risk: persisted environment-specific rules (e.g., 'enforce BOM for PowerShell 5.x') can become obsolete after environment upgrades and should be reviewed when the platform changes again\",\"Shift-left bias: in genuinely time-sensitive situations, mandatory pre-flight verification could delay necessary action, so the probe must remain minimal and reversible rather than exhaustive\"],\"generatedAt\":\"2026-09-03T06:12:47.000Z\"}",
+    "usage": {
+     "input": 1703,
+     "output": 1750,
+     "total": 3453
+    },
+    "latencyMs": 27843,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "5060e7a23030038a"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788415743052_os4-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r2-run1",
+     "principleDraft": {
+      "title": "Environment change resets implicit contracts; verify encoding/interpreter before consequential runs",
+      "statement": "Whenever the execution environment changes (new host, OS, shell, or interpreter version, e.g., pwsh/Linux to Windows PowerShell 5.1) or an artifact contains encoding-sensitive (non-ASCII) content, treat every implicit environment contract — file encoding, interpreter version, working directory — as unverified, and re-establish it before the first consequential execution using the cheapest sufficient check: an interpreter version probe (e.g., $PSVersionTable.PSVersion), an explicit encoding convention (UTF-8 with BOM for non-ASCII scripts targeting Windows PowerShell 5.x, or pure ASCII), or a minimal reversible smoke test. Once the contract is verified or corrected, persist it to durable memory so the same reset is never relearned through runtime failure.",
+      "rationale": "The diagnosed failure was carrying a pwsh/Linux encoding assumption (UTF-8 without BOM) onto a Windows PowerShell 5.1 host, which silently parses such files as ANSI: the embedded Chinese string at line 79 garbled, the script exited 1, and the mistake cost a failed execution plus an Owner correction. Encoding and interpreter contracts are invisible preconditions — unenforced by tooling and platform-relative — so they surface only as owner-visible runtime failure. A seconds-cheap pre-flight probe converts that guaranteed failure into a cheap check, and persisting the verified contract turns a one-time correction into standing operational knowledge, directly eliminating the root cause of relying on runtime failure to discover environment incompatibilities.",
+      "applicability": [
+       "Landing or first-time executing any script (e.g., .ps1) on a host, OS, interpreter, or interpreter version not yet verified in the current session",
+       "Writing or saving files that contain non-ASCII (e.g., Chinese) strings whose correct parsing depends on an explicit encoding contract",
+       "The first consequential execution after any platform or environment transition, before relying on assumptions formed in the prior environment",
+       "Consequential file operations whose outcome depends on working-directory or locale assumptions carried over from a previous environment",
+       "Recording an environment-contract lesson after a verified correction, when deciding what must be persisted for future sessions"
+      ],
+      "antiPatterns": [
+       "Executing an encoding-sensitive script on an unverified interpreter by assuming the prior environment's default (UTF-8 no-BOM under pwsh/Linux) still holds on the new platform",
+       "Using runtime failure (garbled output, non-zero exit code) as the primary mechanism for discovering environment incompatibilities",
+       "Treating a new host or interpreter version as equivalent to the previous one without any version probe, encoding check, or smoke test",
+       "Landing a corrected script without persisting the interpreter-version/encoding rule, leaving the fix dependent on transient session context"
+      ],
+      "confidence": 0.8
+     },
+     "intentContract": {
+      "ownerIntent": "Before landing or executing scripts in a target environment, the agent must confirm the interpreter version and encoding contract (e.g., $PSVersionTable.PSVersion; UTF-8 BOM for non-ASCII on Windows PowerShell 5.x) instead of relying on runtime failure to reveal the mismatch.",
+      "targetBehavior": "In the tool trajectory before the first consequential execution on a new or unverified host/interpreter, an observable verification action appears — a version probe, writing non-ASCII scripts as UTF-8 with BOM (or pure ASCII / pwsh 7+), or a minimal reversible smoke test — followed, once the contract is learned, by a persisted record of it in durable memory.",
+      "forbiddenBehavior": "Executing an encoding-sensitive script by carrying a prior environment's assumptions (UTF-8 no-BOM from pwsh/Linux) onto an unverified platform such as Windows PowerShell 5.1, and letting runtime failure (garbled Chinese strings, exit code 1) serve as the discovery mechanism for the broken contract.",
+      "evidenceSource": "Tool-call failure at 2026-09-03T06:00:16.593Z: the line-79 Chinese string garbled with exit code 1 because Windows PowerShell 5.1 parsed a no-BOM UTF-8 script as ANSI; the agent's admission at 2026-09-03T06:05:07.757Z that no pre-execution compatibility check was performed; and the Owner's correction (diagnosis reasonSummary) requiring interpreter-version and encoding-contract confirmation before landing scripts.",
+      "validationExpectation": "An evaluator should accept a rule only if it fires on platform/interpreter transitions or non-ASCII script landing, demands a version/encoding verification step before the first consequential run, keeps the probe minimal and reversible, and stays silent for trivial ASCII-only operations in an already-verified environment; any repair that removes the pre-execution timing or the environment-change trigger contradicts this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788415743052_os4-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r2-run1"
+     },
+     "risks": [
+      "Overlaps with core axioms T-01 (build a sufficient model before consequential changes) and T-05 (translate hard constraints into guardrails before execution): this draft is a specialization adding the environment-change reset trigger and concrete encoding probes, so rule generation should consider consolidating under T-01/T-05; the persistence clause additionally overlaps T-10",
+      "Over-probing: read as 'verify before every run', the principle adds friction to trivial ASCII-only operations in already-verified environments; applicability must stay bounded to platform transitions, non-ASCII content, or first consequential executions",
+      "False confidence: a passing version probe or smoke test validates only the probed contract; working-directory, permission, or locale mismatches may still fail at runtime (the diagnosis also noted a working-directory-related MEMORY.md read failure)",
+      "Staleness: persisted environment-specific rules (e.g., 'enforce UTF-8 BOM for PowerShell 5.x') can become obsolete after an environment upgrade and should be re-verified on the next platform change",
+      "Time-pressure tension: in genuinely urgent situations a mandatory verification step could delay necessary action; the probe must remain minimal and reversible rather than exhaustive"
+     ],
+     "generatedAt": "2026-09-03T06:14:02.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788415743052_os4-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Environment change resets implicit contracts; verify encoding/interpreter before consequential runs\",\n    \"statement\": \"Whenever the execution environment changes (new host, OS, shell, or interpreter version, e.g., pwsh/Linux to Windows PowerShell 5.1) or an artifact contains encoding-sensitive (non-ASCII) content, treat every implicit environment contract — file encoding, interpreter version, working directory — as unverified, and re-establish it before the first consequential execution using the cheapest sufficient check: an interpreter version probe (e.g., $PSVersionTable.PSVersion), an explicit encoding convention (UTF-8 with BOM for non-ASCII scripts targeting Windows PowerShell 5.x, or pure ASCII), or a minimal reversible smoke test. Once the contract is verified or corrected, persist it to durable memory so the same reset is never relearned through runtime failure.\",\n    \"rationale\": \"The diagnosed failure was carrying a pwsh/Linux encoding assumption (UTF-8 without BOM) onto a Windows PowerShell 5.1 host, which silently parses such files as ANSI: the embedded Chinese string at line 79 garbled, the script exited 1, and the mistake cost a failed execution plus an Owner correction. Encoding and interpreter contracts are invisible preconditions — unenforced by tooling and platform-relative — so they surface only as owner-visible runtime failure. A seconds-cheap pre-flight probe converts that guaranteed failure into a cheap check, and persisting the verified contract turns a one-time correction into standing operational knowledge, directly eliminating the root cause of relying on runtime failure to discover environment incompatibilities.\",\n    \"applicability\": [\n      \"Landing or first-time executing any script (e.g., .ps1) on a host, OS, interpreter, or interpreter version not yet verified in the current session\",\n      \"Writing or saving files that contain non-ASCII (e.g., Chinese) strings whose correct parsing depends on an explicit encoding contract\",\n      \"The first consequential execution after any platform or environment transition, before relying on assumptions formed in the prior environment\",\n      \"Consequential file operations whose outcome depends on working-directory or locale assumptions carried over from a previous environment\",\n      \"Recording an environment-contract lesson after a verified correction, when deciding what must be persisted for future sessions\"\n    ],\n    \"antiPatterns\": [\n      \"Executing an encoding-sensitive script on an unverified interpreter by assuming the prior environment's default (UTF-8 no-BOM under pwsh/Linux) still holds on the new platform\",\n      \"Using runtime failure (garbled output, non-zero exit code) as the primary mechanism for discovering environment incompatibilities\",\n      \"Treating a new host or interpreter version as equivalent to the previous one without any version probe, encoding check, or smoke test\",\n      \"Landing a corrected script without persisting the interpreter-version/encoding rule, leaving the fix dependent on transient session context\"\n    ],\n    \"confidence\": 0.8\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"Before landing or executing scripts in a target environment, the agent must confirm the interpreter version and encoding contract (e.g., $PSVersionTable.PSVersion; UTF-8 BOM for non-ASCII on Windows PowerShell 5.x) instead of relying on runtime failure to reveal the mismatch.\",\n    \"targetBehavior\": \"In the tool trajectory before the first consequential execution on a new or unverified host/interpreter, an observable verification action appears — a version probe, writing non-ASCII scripts as UTF-8 with BOM (or pure ASCII / pwsh 7+), or a minimal reversible smoke test — followed, once the contract is learned, by a persisted record of it in durable memory.\",\n    \"forbiddenBehavior\": \"Executing an encoding-sensitive script by carrying a prior environment's assumptions (UTF-8 no-BOM from pwsh/Linux) onto an unverified platform such as Windows PowerShell 5.1, and letting runtime failure (garbled Chinese strings, exit code 1) serve as the discovery mechanism for the broken contract.\",\n    \"evidenceSource\": \"Tool-call failure at 2026-09-03T06:00:16.593Z: the line-79 Chinese string garbled with exit code 1 because Windows PowerShell 5.1 parsed a no-BOM UTF-8 script as ANSI; the agent's admission at 2026-09-03T06:05:07.757Z that no pre-execution compatibility check was performed; and the Owner's correction (diagnosis reasonSummary) requiring interpreter-version and encoding-contract confirmation before landing scripts.\",\n    \"validationExpectation\": \"An evaluator should accept a rule only if it fires on platform/interpreter transitions or non-ASCII script landing, demands a version/encoding verification step before the first consequential run, keeps the probe minimal and reversible, and stays silent for trivial ASCII-only operations in an already-verified environment; any repair that removes the pre-execution timing or the environment-change trigger contradicts this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788415743052_os4-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r2-run1\"\n  },\n  \"risks\": [\n    \"Overlaps with core axioms T-01 (build a sufficient model before consequential changes) and T-05 (translate hard constraints into guardrails before execution): this draft is a specialization adding the environment-change reset trigger and concrete encoding probes, so rule generation should consider consolidating under T-01/T-05; the persistence clause additionally overlaps T-10\",\n    \"Over-probing: read as 'verify before every run', the principle adds friction to trivial ASCII-only operations in already-verified environments; applicability must stay bounded to platform transitions, non-ASCII content, or first consequential executions\",\n    \"False confidence: a passing version probe or smoke test validates only the probed contract; working-directory, permission, or locale mismatches may still fail at runtime (the diagnosis also noted a working-directory-related MEMORY.md read failure)\",\n    \"Staleness: persisted environment-specific rules (e.g., 'enforce UTF-8 BOM for PowerShell 5.x') can become obsolete after an environment upgrade and should be re-verified on the next platform change\",\n    \"Time-pressure tension: in genuinely urgent situations a mandatory verification step could delay necessary action; the probe must remain minimal and reversible rather than exhaustive\"\n  ],\n  \"generatedAt\": \"2026-09-03T06:14:02.000Z\"\n}",
+    "usage": {
+     "input": 4300,
+     "output": 6666,
+     "total": 10966
+    },
+    "latencyMs": 80617,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "2dcba8e30736eef4"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788415743052_os4-r2",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r2-run1",
+     "principleDraft": {
+      "title": "Verify Environment Contracts After Platform Change Before Consequential Execution",
+      "statement": "Whenever the execution environment changes (new OS, host, interpreter, or interpreter version) or the content is encoding-sensitive (non-ASCII), treat all implicit environmental contracts—file encoding, interpreter version, working directory—as unverified. Before the first consequential execution, re-establish them with a minimal, reversible check: an interpreter/version probe, an explicit encoding convention (e.g., UTF-8 with BOM for non-ASCII files consumed by Windows PowerShell 5.x), or a smoke test on a sacrificial artifact. When a check reveals a mismatch, persist the corrected convention as a standing rule tied to the platform so the same reset is never re-learned through runtime failure.",
+      "rationale": "The root cause was an encoding assumption (UTF-8 no-BOM, valid under pwsh/Linux) carried into a Windows PowerShell 5.1 host that silently parses such files as ANSI, surfacing only as runtime garbling or failure. Environmental contracts are invisible: no tool enforces them, and their validity is platform-relative, so an environment transition silently invalidates them. A pre-flight probe costs seconds, converts a guaranteed owner-visible failure into a cheap check, and persisting the learned convention turns a one-time correction into standing operational knowledge. This is a platform-transition-triggered specialization of T-01 and T-05, with a T-08/T-10 persistence requirement for the learned rule.",
+      "applicability": [
+       "Executing scripts or performing consequential file operations on a new host, OS, interpreter, or interpreter version",
+       "Writing or modifying files containing non-ASCII or otherwise encoding-sensitive content",
+       "The first consequential execution after any platform or environment transition, before relying on assumptions formed in a prior environment",
+       "Recording environment-specific conventions discovered through verification or failure so they survive context resets"
+      ],
+      "antiPatterns": [
+       "Carrying encoding, interpreter, or working-directory assumptions verified in one environment into a different environment without re-checking",
+       "Writing non-ASCII content to files consumed by a host with unknown encoding behavior (e.g., PowerShell 5.x defaulting to ANSI) without an explicit encoding convention or BOM",
+       "Letting the first evidence of an environment mismatch be a consequential runtime failure visible to the owner, when a version probe or reversible smoke test could have caught it",
+       "Re-learning the same environment lesson after every reset because the corrected convention was never persisted"
+      ],
+      "confidence": 0.78
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants to prevent runtime garbling and failures caused by carrying environment assumptions (file encoding, interpreter version) from one platform into another—such as a UTF-8 no-BOM file written under pwsh/Linux assumptions being silently parsed as ANSI by Windows PowerShell 5.1.",
+      "targetBehavior": "Before the first consequential execution on a new or changed environment, the agent performs a minimal, reversible verification—an interpreter/version probe, an explicit encoding decision (e.g., BOM for non-ASCII on PowerShell 5.x), or a smoke test on a sacrificial artifact—and on discovering a mismatch, adopts and persists the corrected convention before proceeding.",
+      "forbiddenBehavior": "Relying on implicit environment contracts that were only valid in a prior environment and letting the first evidence of the mismatch be a consequential, owner-visible runtime failure, without ever persisting the corrected convention.",
+      "evidenceSource": "The diagnosed pain: a UTF-8 no-BOM artifact produced under pwsh/Linux assumptions was silently parsed as ANSI by Windows PowerShell 5.1, garbling at runtime instead of failing a cheap pre-flight check; and the philosopher's analysis that implicit environmental contracts are platform-relative and reset by environment change.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it (a) triggers on environment/platform change or encoding-sensitive content, (b) requires a pre-flight probe or explicit encoding convention before consequential execution, and (c) requires persisting the corrected convention. A rule that merely restates generic 'verify before acting' without the platform-transition trigger and the persistence requirement fails this intent."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788415743052_os4-r2-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r2-run1"
+     },
+     "risks": [
+      "Overlaps with core axioms T-01, T-05, T-08, and T-10; this draft is a platform-transition specialization with a persistence requirement rather than a wholly new principle, so downstream consolidation or explicit axiom referencing should be considered",
+      "Over-probing risk: requiring pre-flight checks for every trivial operation adds friction; generated rules must scope the trigger to consequential execution, encoding-sensitive content, or environment change",
+      "False confidence risk: a passing version probe or smoke test validates only the tested contract; other mismatches (cwd, permissions, locale) may still fail at runtime",
+      "Staleness risk: persisted platform-specific conventions (e.g., 'BOM for PowerShell 5.x') can become obsolete after environment upgrades and must be re-validated when the platform changes again",
+      "Over-generalization risk: the BOM example is specific to Windows PowerShell 5.x behavior and must not be encoded as a universal UTF-8 rule",
+      "Urgency conflict: in genuinely time-sensitive situations, mandatory pre-flight verification could delay necessary action; probes must remain minimal and reversible, not exhaustive"
+     ],
+     "generatedAt": "2026-09-03T06:13:24.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788415743052_os4-r2\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r2-run1\",\n  \"principleDraft\": {\n    \"title\": \"Verify Environment Contracts After Platform Change Before Consequential Execution\",\n    \"statement\": \"Whenever the execution environment changes (new OS, host, interpreter, or interpreter version) or the content is encoding-sensitive (non-ASCII), treat all implicit environmental contracts—file encoding, interpreter version, working directory—as unverified. Before the first consequential execution, re-establish them with a minimal, reversible check: an interpreter/version probe, an explicit encoding convention (e.g., UTF-8 with BOM for non-ASCII files consumed by Windows PowerShell 5.x), or a smoke test on a sacrificial artifact. When a check reveals a mismatch, persist the corrected convention as a standing rule tied to the platform so the same reset is never re-learned through runtime failure.\",\n    \"rationale\": \"The root cause was an encoding assumption (UTF-8 no-BOM, valid under pwsh/Linux) carried into a Windows PowerShell 5.1 host that silently parses such files as ANSI, surfacing only as runtime garbling or failure. Environmental contracts are invisible: no tool enforces them, and their validity is platform-relative, so an environment transition silently invalidates them. A pre-flight probe costs seconds, converts a guaranteed owner-visible failure into a cheap check, and persisting the learned convention turns a one-time correction into standing operational knowledge. This is a platform-transition-triggered specialization of T-01 and T-05, with a T-08/T-10 persistence requirement for the learned rule.\",\n    \"applicability\": [\n      \"Executing scripts or performing consequential file operations on a new host, OS, interpreter, or interpreter version\",\n      \"Writing or modifying files containing non-ASCII or otherwise encoding-sensitive content\",\n      \"The first consequential execution after any platform or environment transition, before relying on assumptions formed in a prior environment\",\n      \"Recording environment-specific conventions discovered through verification or failure so they survive context resets\"\n    ],\n    \"antiPatterns\": [\n      \"Carrying encoding, interpreter, or working-directory assumptions verified in one environment into a different environment without re-checking\",\n      \"Writing non-ASCII content to files consumed by a host with unknown encoding behavior (e.g., PowerShell 5.x defaulting to ANSI) without an explicit encoding convention or BOM\",\n      \"Letting the first evidence of an environment mismatch be a consequential runtime failure visible to the owner, when a version probe or reversible smoke test could have caught it\",\n      \"Re-learning the same environment lesson after every reset because the corrected convention was never persisted\"\n    ],\n    \"confidence\": 0.78\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants to prevent runtime garbling and failures caused by carrying environment assumptions (file encoding, interpreter version) from one platform into another—such as a UTF-8 no-BOM file written under pwsh/Linux assumptions being silently parsed as ANSI by Windows PowerShell 5.1.\",\n    \"targetBehavior\": \"Before the first consequential execution on a new or changed environment, the agent performs a minimal, reversible verification—an interpreter/version probe, an explicit encoding decision (e.g., BOM for non-ASCII on PowerShell 5.x), or a smoke test on a sacrificial artifact—and on discovering a mismatch, adopts and persists the corrected convention before proceeding.\",\n    \"forbiddenBehavior\": \"Relying on implicit environment contracts that were only valid in a prior environment and letting the first evidence of the mismatch be a consequential, owner-visible runtime failure, without ever persisting the corrected convention.\",\n    \"evidenceSource\": \"The diagnosed pain: a UTF-8 no-BOM artifact produced under pwsh/Linux assumptions was silently parsed as ANSI by Windows PowerShell 5.1, garbling at runtime instead of failing a cheap pre-flight check; and the philosopher's analysis that implicit environmental contracts are platform-relative and reset by environment change.\",\n    \"validationExpectation\": \"An evaluator should accept a rule as faithful only if it (a) triggers on environment/platform change or encoding-sensitive content, (b) requires a pre-flight probe or explicit encoding convention before consequential execution, and (c) requires persisting the corrected convention. A rule that merely restates generic 'verify before acting' without the platform-transition trigger and the persistence requirement fails this intent.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788415743052_os4-r2-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r2-run1\"\n  },\n  \"risks\": [\n    \"Overlaps with core axioms T-01, T-05, T-08, and T-10; this draft is a platform-transition specialization with a persistence requirement rather than a wholly new principle, so downstream consolidation or explicit axiom referencing should be considered\",\n    \"Over-probing risk: requiring pre-flight checks for every trivial operation adds friction; generated rules must scope the trigger to consequential execution, encoding-sensitive content, or environment change\",\n    \"False confidence risk: a passing version probe or smoke test validates only the tested contract; other mismatches (cwd, permissions, locale) may still fail at runtime\",\n    \"Staleness risk: persisted platform-specific conventions (e.g., 'BOM for PowerShell 5.x') can become obsolete after environment upgrades and must be re-validated when the platform changes again\",\n    \"Over-generalization risk: the BOM example is specific to Windows PowerShell 5.x behavior and must not be encoded as a universal UTF-8 rule\",\n    \"Urgency conflict: in genuinely time-sensitive situations, mandatory pre-flight verification could delay necessary action; probes must remain minimal and reversible, not exhaustive\"\n  ],\n  \"generatedAt\": \"2026-09-03T06:13:24.000Z\"\n}",
+    "usage": {
+     "input": 1984,
+     "output": 3334,
+     "total": 5318
+    },
+    "latencyMs": 39653,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "fc418e8c6e9a05a3"
+   },
+   "complete": true
+  },
+  {
+   "group": "G-manual_1788415743052_os4",
+   "repeat": 3,
+   "dreamer": {
+    "stage": "dreamer",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "valid": true,
+     "taskId": "dreamer-pri815-G-manual_1788415743052_os4-r3",
+     "candidates": [
+      {
+       "candidateIndex": 0,
+       "badDecision": "未确认目标解释器版本，直接以默认 Windows PowerShell 5.1 执行含中文字符的 UTF-8 无 BOM 脚本，假设默认编码会被正确解析",
+       "betterDecision": "执行前先运行 $PSVersionTable.PSVersion 探测目标解释器版本；若为 5.1 且脚本含非 ASCII 字符，则改用带 BOM 的 UTF-8 保存或显式切换 pwsh 执行",
+       "rationale": "一次廉价的前置探测即可暴露 PS 5.1 将无 BOM 文件按 ANSI 解析的已知行为，避免一次完全可以避免的执行失败",
+       "confidence": 0.95,
+       "riskLevel": "low",
+       "strategicPerspective": "pre_execution_environment_probing",
+       "sourcePrincipleId": "T-01"
+      },
+      {
+       "candidateIndex": 1,
+       "badDecision": "将包含中文字符串的 PowerShell 脚本保存为 UTF-8 无 BOM 编码，未将编码契约与目标解释器对齐",
+       "betterDecision": "凡脚本含非 ASCII 字符且可能运行于 Windows PowerShell 5.1 时，统一保存为带 BOM 的 UTF-8，使 5.1 与 7+ 均能正确解析",
+       "rationale": "BOM 是 Windows PowerShell 5.1 与 PowerShell 7 共同明确支持的编码标记，一次性消除跨版本编码歧义，把隐式契约显式化",
+       "confidence": 0.9,
+       "riskLevel": "low",
+       "strategicPerspective": "explicit_encoding_contract",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 2,
+       "badDecision": "依赖默认 shell 解析来选择解释器，按现代 UTF-8 默认编码假设编写脚本却交由旧版 5.1 执行",
+       "betterDecision": "显式以 pwsh -File script.ps1 指定 PowerShell 7+ 作为解释器，将隐式环境假设变为显式调用契约",
+       "rationale": "显式指定解释器消除版本漂移风险，且与事后实际成功的恢复路径一致，是满足意图的最小改动",
+       "confidence": 0.85,
+       "riskLevel": "low",
+       "strategicPerspective": "pin_interpreter_explicitly",
+       "sourcePrincipleId": "T-05"
+      },
+      {
+       "candidateIndex": 3,
+       "badDecision": "首次执行即作用于真实数据仓库目录，以 exitCode 1 的运行时失败作为发现编码兼容性问题的默认手段",
+       "betterDecision": "先做解析级冒烟测试（如在隔离副本上仅解析不执行，或以 dry-run 模式验证）确认脚本可被目标解释器正确读取，再执行真实变更",
+       "rationale": "解析级预检成本极低，能在触碰真实数据前暴露乱码与语法问题，把失败发现前移为事前验证并降低不可逆影响",
+       "confidence": 0.8,
+       "riskLevel": "medium",
+       "strategicPerspective": "smoke_test_before_consequential_change",
+       "sourcePrincipleId": "T-04"
+      },
+      {
+       "candidateIndex": 4,
+       "badDecision": "执行前未成功加载 MEMORY.md/USER.md 中的环境约束记录，read 工具因工作目录问题失败后直接跳过并继续执行",
+       "betterDecision": "在主机上执行有后果变更前，先修正工作目录并重试读取持久化环境契约（MEMORY.md/USER.md），据此校准脚本编码与解释器选择",
+       "rationale": "持久化记忆是建立目标系统模型的最廉价信息源；跳过它等于放弃已知约束、在跨会话中重复踩同一类坑",
+       "confidence": 0.75,
+       "riskLevel": "low",
+       "strategicPerspective": "load_persisted_context_first",
+       "sourcePrincipleId": "T-10"
+      }
+     ],
+     "contextRefs": [
+      "artifact://6a7f3d62-1db2-44a8-b413-510e1da578c5"
+     ],
+     "generatedAt": "2026-09-03T06:15:30.000Z"
+    },
+    "raw": "{\"valid\":true,\"taskId\":\"dreamer-pri815-G-manual_1788415743052_os4-r3\",\"candidates\":[{\"candidateIndex\":0,\"badDecision\":\"未确认目标解释器版本，直接以默认 Windows PowerShell 5.1 执行含中文字符的 UTF-8 无 BOM 脚本，假设默认编码会被正确解析\",\"betterDecision\":\"执行前先运行 $PSVersionTable.PSVersion 探测目标解释器版本；若为 5.1 且脚本含非 ASCII 字符，则改用带 BOM 的 UTF-8 保存或显式切换 pwsh 执行\",\"rationale\":\"一次廉价的前置探测即可暴露 PS 5.1 将无 BOM 文件按 ANSI 解析的已知行为，避免一次完全可以避免的执行失败\",\"confidence\":0.95,\"riskLevel\":\"low\",\"strategicPerspective\":\"pre_execution_environment_probing\",\"sourcePrincipleId\":\"T-01\"},{\"candidateIndex\":1,\"badDecision\":\"将包含中文字符串的 PowerShell 脚本保存为 UTF-8 无 BOM 编码，未将编码契约与目标解释器对齐\",\"betterDecision\":\"凡脚本含非 ASCII 字符且可能运行于 Windows PowerShell 5.1 时，统一保存为带 BOM 的 UTF-8，使 5.1 与 7+ 均能正确解析\",\"rationale\":\"BOM 是 Windows PowerShell 5.1 与 PowerShell 7 共同明确支持的编码标记，一次性消除跨版本编码歧义，把隐式契约显式化\",\"confidence\":0.9,\"riskLevel\":\"low\",\"strategicPerspective\":\"explicit_encoding_contract\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":2,\"badDecision\":\"依赖默认 shell 解析来选择解释器，按现代 UTF-8 默认编码假设编写脚本却交由旧版 5.1 执行\",\"betterDecision\":\"显式以 pwsh -File script.ps1 指定 PowerShell 7+ 作为解释器，将隐式环境假设变为显式调用契约\",\"rationale\":\"显式指定解释器消除版本漂移风险，且与事后实际成功的恢复路径一致，是满足意图的最小改动\",\"confidence\":0.85,\"riskLevel\":\"low\",\"strategicPerspective\":\"pin_interpreter_explicitly\",\"sourcePrincipleId\":\"T-05\"},{\"candidateIndex\":3,\"badDecision\":\"首次执行即作用于真实数据仓库目录，以 exitCode 1 的运行时失败作为发现编码兼容性问题的默认手段\",\"betterDecision\":\"先做解析级冒烟测试（如在隔离副本上仅解析不执行，或以 dry-run 模式验证）确认脚本可被目标解释器正确读取，再执行真实变更\",\"rationale\":\"解析级预检成本极低，能在触碰真实数据前暴露乱码与语法问题，把失败发现前移为事前验证并降低不可逆影响\",\"confidence\":0.8,\"riskLevel\":\"medium\",\"strategicPerspective\":\"smoke_test_before_consequential_change\",\"sourcePrincipleId\":\"T-04\"},{\"candidateIndex\":4,\"badDecision\":\"执行前未成功加载 MEMORY.md/USER.md 中的环境约束记录，read 工具因工作目录问题失败后直接跳过并继续执行\",\"betterDecision\":\"在主机上执行有后果变更前，先修正工作目录并重试读取持久化环境契约（MEMORY.md/USER.md），据此校准脚本编码与解释器选择\",\"rationale\":\"持久化记忆是建立目标系统模型的最廉价信息源；跳过它等于放弃已知约束、在跨会话中重复踩同一类坑\",\"confidence\":0.75,\"riskLevel\":\"low\",\"strategicPerspective\":\"load_persisted_context_first\",\"sourcePrincipleId\":\"T-10\"}],\"contextRefs\":[\"artifact://6a7f3d62-1db2-44a8-b413-510e1da578c5\"],\"generatedAt\":\"2026-09-03T06:15:30.000Z\"}",
+    "usage": {
+     "input": 2090,
+     "output": 5965,
+     "total": 8055
+    },
+    "latencyMs": 81095,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "bab30958074f55cb"
+   },
+   "philosopher": {
+    "stage": "philosopher",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "philosopher-pri815-G-manual_1788415743052_os4-r3",
+     "sourceDreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788415743052_os4-r3-run1",
+     "thesis": "Avoidable execution failures are born where implicit environment assumptions—default interpreters, default file encodings, skipped persisted constraints—collide with consequential changes. All five Dreamer candidates share one insight: the plan was not wrong; the environment contract was never made explicit. Cheap pre-flight acts (probe the interpreter version, pin pwsh explicitly, attach a BOM encoding contract, run a parse-level smoke test, load persisted memory) convert hidden runtime assumptions into explicit, verifiable contracts before real state is touched, shifting failure discovery from runtime exitCode 1 to pre-execution verification.",
+     "principleCandidate": {
+      "title": "Probe and pin the execution environment contract before consequential execution",
+      "rationale": "The root cause was reliance on implicit defaults: an assumed interpreter version, an assumed encoding behavior, and an assumed-available memory that silently failed to load. Each was verifiable in seconds before execution, and each verification maps to one of the Dreamer's better decisions. The principle addresses the root cause by requiring that environment assumptions be surfaced as explicit contracts—version probe, encoding marker, pinned interpreter, parse-level dry-run, loaded persisted context—before any consequential change, so the failure mode is eliminated rather than merely recovered from.",
+      "scope": "Applies whenever a script, command, or automation with version-sensitive syntax or non-ASCII content is executed against live state—especially across sessions, hosts, or shells where interpreter version, file encoding defaults, or persisted environment records may diverge from assumed values. Proportionality rule: the depth of pre-flight verification should scale with the consequence and irreversibility of the change.",
+      "confidence": 0.85
+     },
+     "risks": [
+      "Probe overhead becomes waste on trivial, idempotent, or read-only operations; the principle must scale verification effort to consequence severity, not apply uniformly",
+      "Partially overlaps T-01 (sufficient model before consequential changes) and T-05 (explicit guardrails before execution); the principle library should treat it as a sharpened, environment-specific instantiation rather than an independent axiom",
+      "Over-pinning to a specific interpreter (e.g., pwsh 7+) can reduce portability and silently block legitimate environment upgrades; the pin should be a documented contract, not a frozen accident",
+      "Pre-flight probes can themselves fail (as the memory-file read did in the source incident); the principle must mandate retrying or repairing the probe rather than skipping it and proceeding on assumptions"
+     ],
+     "generatedAt": "2026-09-03T06:15:52.000Z"
+    },
+    "raw": "{\"taskId\":\"philosopher-pri815-G-manual_1788415743052_os4-r3\",\"sourceDreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788415743052_os4-r3-run1\",\"thesis\":\"Avoidable execution failures are born where implicit environment assumptions—default interpreters, default file encodings, skipped persisted constraints—collide with consequential changes. All five Dreamer candidates share one insight: the plan was not wrong; the environment contract was never made explicit. Cheap pre-flight acts (probe the interpreter version, pin pwsh explicitly, attach a BOM encoding contract, run a parse-level smoke test, load persisted memory) convert hidden runtime assumptions into explicit, verifiable contracts before real state is touched, shifting failure discovery from runtime exitCode 1 to pre-execution verification.\",\"principleCandidate\":{\"title\":\"Probe and pin the execution environment contract before consequential execution\",\"rationale\":\"The root cause was reliance on implicit defaults: an assumed interpreter version, an assumed encoding behavior, and an assumed-available memory that silently failed to load. Each was verifiable in seconds before execution, and each verification maps to one of the Dreamer's better decisions. The principle addresses the root cause by requiring that environment assumptions be surfaced as explicit contracts—version probe, encoding marker, pinned interpreter, parse-level dry-run, loaded persisted context—before any consequential change, so the failure mode is eliminated rather than merely recovered from.\",\"scope\":\"Applies whenever a script, command, or automation with version-sensitive syntax or non-ASCII content is executed against live state—especially across sessions, hosts, or shells where interpreter version, file encoding defaults, or persisted environment records may diverge from assumed values. Proportionality rule: the depth of pre-flight verification should scale with the consequence and irreversibility of the change.\",\"confidence\":0.85},\"risks\":[\"Probe overhead becomes waste on trivial, idempotent, or read-only operations; the principle must scale verification effort to consequence severity, not apply uniformly\",\"Partially overlaps T-01 (sufficient model before consequential changes) and T-05 (explicit guardrails before execution); the principle library should treat it as a sharpened, environment-specific instantiation rather than an independent axiom\",\"Over-pinning to a specific interpreter (e.g., pwsh 7+) can reduce portability and silently block legitimate environment upgrades; the pin should be a documented contract, not a frozen accident\",\"Pre-flight probes can themselves fail (as the memory-file read did in the source incident); the principle must mandate retrying or repairing the probe rather than skipping it and proceeding on assumptions\"],\"generatedAt\":\"2026-09-03T06:15:52.000Z\"}",
+    "usage": {
+     "input": 1664,
+     "output": 1580,
+     "total": 3244
+    },
+    "latencyMs": 25189,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "f22129402fb88277"
+   },
+   "scribe_A": {
+    "stage": "scribe_A",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788415743052_os4-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r3-run1",
+     "principleDraft": {
+      "title": "Probe and pin the execution environment contract before consequential execution",
+      "statement": "Before executing any consequential script, command, or automation against live state, surface implicit environment assumptions as explicit, verified contracts: probe the interpreter version and invoke the pinned interpreter by name, verify the file encoding contract for non-ASCII content, run a parse-level dry-run of the script, and confirm that persisted context (e.g., memory files) actually loaded. The depth of this pre-flight verification must scale with the consequence and irreversibility of the change. If a pre-flight probe itself fails, retry or repair it or halt — never proceed on the assumption it would have satisfied.",
+      "rationale": "The diagnosed root cause was reliance on implicit defaults: an assumed interpreter version, an assumed encoding behavior, and an assumed-available persisted memory that silently failed to load. Each assumption was verifiable in seconds before execution, and each verification corresponds to a decision that would have prevented the incident. Requiring these assumptions to become observed, explicit contracts before consequential execution moves failure discovery from runtime exitCode 1 to pre-execution verification, eliminating the failure mode rather than recovering from it.",
+      "applicability": [
+       "Executing scripts or commands with version-sensitive syntax against live or hard-to-reverse state",
+       "Handling non-ASCII content where file encoding defaults (e.g., BOM presence/absence) change runtime behavior",
+       "Execution across sessions, hosts, or shells where interpreter version, encoding defaults, or persisted records may diverge from assumed values",
+       "Automation whose correctness depends on persisted memory or context files loading successfully",
+       "Any change where runtime failure would be costly, obscure, or destructive — verification depth scales with consequence severity, and is minimal for trivial, idempotent, read-only operations"
+      ],
+      "antiPatterns": [
+       "Running a version-sensitive script via the default interpreter without probing or explicitly pinning the interpreter version",
+       "Reading or writing non-ASCII-bearing files while relying on implicit platform encoding defaults instead of an explicit, verified encoding contract",
+       "Proceeding with consequential execution after a pre-flight step (e.g., a persisted-memory read) silently failed, treating the assumption as satisfied",
+       "Skipping the parse-level dry-run for scripts whose syntax validity can be checked cheaply before touching live state",
+       "Applying uniform maximal pre-flight overhead to trivial, idempotent, or read-only operations, or conversely rationalizing that a consequential change is 'trivial' to skip verification",
+       "Freezing a version pin as an undocumented accident rather than a documented, reviewable contract"
+      ],
+      "confidence": 0.82
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants consequential script executions to fail or adapt at pre-flight verification when interpreter version, file encoding, or persisted context differs from what was assumed — not to fail at runtime against live state.",
+      "targetBehavior": "In the tool trajectory before a consequential execution, a compliant agent observably performs and reads the results of: an interpreter version probe with the pinned interpreter invoked by name, an encoding verification for any non-ASCII file, a parse-level dry-run of the script, and a confirmed load of persisted memory — each result observed before the real command runs, with verification depth scaled to the change's consequence.",
+      "forbiddenBehavior": "Executing version-sensitive or non-ASCII-bearing scripts against live state on implicit defaults (default interpreter, default encoding, assumed-loaded memory), or continuing with consequential execution after a pre-flight check silently failed or was skipped.",
+      "evidenceSource": "The source incident in which a script reached runtime exitCode 1 because interpreter version, encoding defaults (BOM), and a persisted memory-file load were assumed rather than probed — each verifiable in seconds before execution, and each mapping to a pre-flight check the Dreamer identified as the cheap corrective decision.",
+      "validationExpectation": "An evaluator should accept a rule as faithful only if it requires the probe/pin/load results to be observed as evidence before the consequential command executes, and requires halting or repairing (never silently skipping) when a probe fails; any rule that permits consequential execution on unverified environment defaults contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788415743052_os4-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r3-run1"
+     },
+     "risks": [
+      "Overlaps core axioms T-01 (sufficient model before consequential changes) and T-05 (explicit guardrails before execution); the principle library should treat this as a sharpened, environment-specific instantiation rather than an independent axiom to avoid duplication",
+      "'Consequential' is judged subjectively; downstream rules may drive over-verification of trivial read-only operations or let agents rationalize skipping checks unless the proportionality scaling is preserved explicitly",
+      "Over-pinning to a specific interpreter (e.g., pwsh 7+) can reduce portability and silently block legitimate environment upgrades; the pin must be a documented contract, not a frozen accident",
+      "Pre-flight probes can themselves fail (as the memory-file read did in the source incident); rules derived from this principle must mandate retry, repair, or halt — a repair round that softens this into 'best-effort probing' would gut the principle",
+      "Enumerating specific pre-flight acts (version, encoding, dry-run, memory) risks the list being read as exhaustive for novel environments (credentials, permissions, locale, dependencies), leaving new implicit assumptions unprobed"
+     ],
+     "generatedAt": "2026-09-03T06:17:24.000Z"
+    },
+    "raw": "{\"taskId\":\"scribe-pri815-G-manual_1788415743052_os4-r3\",\"sourcePhilosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r3-run1\",\"principleDraft\":{\"title\":\"Probe and pin the execution environment contract before consequential execution\",\"statement\":\"Before executing any consequential script, command, or automation against live state, surface implicit environment assumptions as explicit, verified contracts: probe the interpreter version and invoke the pinned interpreter by name, verify the file encoding contract for non-ASCII content, run a parse-level dry-run of the script, and confirm that persisted context (e.g., memory files) actually loaded. The depth of this pre-flight verification must scale with the consequence and irreversibility of the change. If a pre-flight probe itself fails, retry or repair it or halt — never proceed on the assumption it would have satisfied.\",\"rationale\":\"The diagnosed root cause was reliance on implicit defaults: an assumed interpreter version, an assumed encoding behavior, and an assumed-available persisted memory that silently failed to load. Each assumption was verifiable in seconds before execution, and each verification corresponds to a decision that would have prevented the incident. Requiring these assumptions to become observed, explicit contracts before consequential execution moves failure discovery from runtime exitCode 1 to pre-execution verification, eliminating the failure mode rather than recovering from it.\",\"applicability\":[\"Executing scripts or commands with version-sensitive syntax against live or hard-to-reverse state\",\"Handling non-ASCII content where file encoding defaults (e.g., BOM presence/absence) change runtime behavior\",\"Execution across sessions, hosts, or shells where interpreter version, encoding defaults, or persisted records may diverge from assumed values\",\"Automation whose correctness depends on persisted memory or context files loading successfully\",\"Any change where runtime failure would be costly, obscure, or destructive — verification depth scales with consequence severity, and is minimal for trivial, idempotent, read-only operations\"],\"antiPatterns\":[\"Running a version-sensitive script via the default interpreter without probing or explicitly pinning the interpreter version\",\"Reading or writing non-ASCII-bearing files while relying on implicit platform encoding defaults instead of an explicit, verified encoding contract\",\"Proceeding with consequential execution after a pre-flight step (e.g., a persisted-memory read) silently failed, treating the assumption as satisfied\",\"Skipping the parse-level dry-run for scripts whose syntax validity can be checked cheaply before touching live state\",\"Applying uniform maximal pre-flight overhead to trivial, idempotent, or read-only operations, or conversely rationalizing that a consequential change is 'trivial' to skip verification\",\"Freezing a version pin as an undocumented accident rather than a documented, reviewable contract\"],\"confidence\":0.82},\"intentContract\":{\"ownerIntent\":\"The Owner wants consequential script executions to fail or adapt at pre-flight verification when interpreter version, file encoding, or persisted context differs from what was assumed — not to fail at runtime against live state.\",\"targetBehavior\":\"In the tool trajectory before a consequential execution, a compliant agent observably performs and reads the results of: an interpreter version probe with the pinned interpreter invoked by name, an encoding verification for any non-ASCII file, a parse-level dry-run of the script, and a confirmed load of persisted memory — each result observed before the real command runs, with verification depth scaled to the change's consequence.\",\"forbiddenBehavior\":\"Executing version-sensitive or non-ASCII-bearing scripts against live state on implicit defaults (default interpreter, default encoding, assumed-loaded memory), or continuing with consequential execution after a pre-flight check silently failed or was skipped.\",\"evidenceSource\":\"The source incident in which a script reached runtime exitCode 1 because interpreter version, encoding defaults (BOM), and a persisted memory-file load were assumed rather than probed — each verifiable in seconds before execution, and each mapping to a pre-flight check the Dreamer identified as the cheap corrective decision.\",\"validationExpectation\":\"An evaluator should accept a rule as faithful only if it requires the probe/pin/load results to be observed as evidence before the consequential command executes, and requires halting or repairing (never silently skipping) when a probe fails; any rule that permits consequential execution on unverified environment defaults contradicts this intent and must be flagged.\"},\"sourceTrace\":{\"dreamerArtifactId\":\"pi-art-dreamer-pri815-G-manual_1788415743052_os4-r3-run1\",\"philosopherArtifactId\":\"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r3-run1\"},\"risks\":[\"Overlaps core axioms T-01 (sufficient model before consequential changes) and T-05 (explicit guardrails before execution); the principle library should treat this as a sharpened, environment-specific instantiation rather than an independent axiom to avoid duplication\",\"'Consequential' is judged subjectively; downstream rules may drive over-verification of trivial read-only operations or let agents rationalize skipping checks unless the proportionality scaling is preserved explicitly\",\"Over-pinning to a specific interpreter (e.g., pwsh 7+) can reduce portability and silently block legitimate environment upgrades; the pin must be a documented contract, not a frozen accident\",\"Pre-flight probes can themselves fail (as the memory-file read did in the source incident); rules derived from this principle must mandate retry, repair, or halt — a repair round that softens this into 'best-effort probing' would gut the principle\",\"Enumerating specific pre-flight acts (version, encoding, dry-run, memory) risks the list being read as exhaustive for novel environments (credentials, permissions, locale, dependencies), leaving new implicit assumptions unprobed\"],\"generatedAt\":\"2026-09-03T06:17:24.000Z\"}",
+    "usage": {
+     "input": 1967,
+     "output": 2811,
+     "total": 4778
+    },
+    "latencyMs": 40328,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "41733c8e56cb5097"
+   },
+   "scribe_B": {
+    "stage": "scribe_B",
+    "ok": true,
+    "errors": [],
+    "parsed": {
+     "taskId": "scribe-pri815-G-manual_1788415743052_os4-r3",
+     "sourcePhilosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r3-run1",
+     "principleDraft": {
+      "title": "Probe and Pin the Execution Environment Contract Before Consequential Execution",
+      "statement": "Before executing any consequential change through a script, command, or automation, convert implicit environment assumptions into explicit, verified contracts: probe the target interpreter version (e.g., $PSVersionTable.PSVersion), align the file's encoding with that interpreter (e.g., save non-ASCII scripts as UTF-8 with BOM for Windows PowerShell 5.1) or pin a compatible interpreter explicitly (e.g., pwsh -File), and if any pre-flight check fails, retry or repair it rather than proceeding on assumptions. Verification depth must scale with the consequence and irreversibility of the change; runtime failure must never be the first mechanism that reveals an environment incompatibility.",
+      "rationale": "The diagnosed root cause was reliance on implicit defaults — an assumed interpreter version and an assumed encoding behavior — each verifiable in seconds before execution, yet discovered only via a runtime exitCode 1 against live state. The principle eliminates this failure family at its origin by requiring that environment-critical assumptions be surfaced as explicit, pre-execution contracts (version probe, encoding contract, pinned interpreter), shifting failure discovery from runtime failure to pre-execution verification, exactly matching the Owner's correction that interpreter version and encoding contract must be confirmed before landing scripts.",
+      "applicability": [
+       "Landing or executing scripts (e.g., .ps1) or automation containing non-ASCII characters on a host whose interpreter version or default encoding is unconfirmed",
+       "Cross-session, cross-host, or cross-shell execution where default interpreter version or encoding defaults may diverge from the authoring environment",
+       "Consequential changes to live state where execution failure is costly or hard to reverse; verification depth scales with consequence and irreversibility (up to parse-level dry-runs and loading persisted environment constraints such as MEMORY.md/USER.md)",
+       "Situations where a pre-flight check itself fails (e.g., a persisted-constraint read failing due to a wrong working directory)"
+      ],
+      "antiPatterns": [
+       "Executing a non-ASCII script under an unconfirmed default interpreter with an unverified encoding contract (e.g., BOM-less UTF-8 parsed as ANSI by Windows PowerShell 5.1)",
+       "Treating runtime failure (exitCode 1) as the default or first mechanism for discovering environment or encoding incompatibility",
+       "Implicitly accepting defaults — shell resolution, interpreter version, file encoding — as if they were explicit contracts",
+       "Skipping a failed pre-flight probe or persisted-constraint read and continuing on unverified assumptions"
+      ],
+      "confidence": 0.85
+     },
+     "intentContract": {
+      "ownerIntent": "The Owner wants the agent to confirm the target interpreter version and encoding contract before landing or executing scripts with consequential effects, instead of discovering incompatibility through runtime failure.",
+      "targetBehavior": "Before consequential execution, the agent's tool trajectory shows an explicit pre-flight verification — an interpreter version probe (e.g., $PSVersionTable.PSVersion) followed by an aligned encoding choice (UTF-8 with BOM for Windows PowerShell 5.1) or an explicit interpreter pin (pwsh) — and any failed pre-flight check is retried or repaired, not skipped.",
+      "forbiddenBehavior": "Executing scripts (especially those containing non-ASCII content) against an unverified interpreter/encoding assumption, and relying on runtime failure — or on skipping failed pre-flight checks — to reveal environment incompatibility.",
+      "evidenceSource": "Diagnosis diagnosis_manual_1788415743052_os4aicut: a BOM-less UTF-8 PowerShell script with Chinese strings was executed under an unconfirmed Windows PowerShell 5.1, which parsed it as ANSI and failed (exitCode 1); the agent admitted doing no pre-execution compatibility check; the Owner corrected that interpreter version and encoding contract must be confirmed before landing scripts.",
+      "validationExpectation": "An evaluator should accept a rule only if it triggers before script execution and requires observable pre-execution verification of interpreter version and encoding (or explicit interpreter pinning); a compliant trajectory shows the probe preceding execution, and any rule change that permits discover-by-failure execution or skipping failed probes contradicts this intent and must be flagged."
+     },
+     "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-pri815-G-manual_1788415743052_os4-r3-run1",
+      "philosopherArtifactId": "pi-art-philosopher-pri815-G-manual_1788415743052_os4-r3-run1"
+     },
+     "risks": [
+      "Overlaps core axioms T-01 (sufficient model before consequential changes) and T-05 (explicit guardrails before execution); it must be registered as a sharpened, environment-specific instantiation of those axioms, not as an independent axiom",
+      "Uniform application wastes effort on trivial, idempotent, or read-only operations; if rules do not encode consequence-based scaling of verification depth, the principle degrades into ritual overhead",
+      "Over-pinning to one interpreter (e.g., pwsh 7+) can reduce portability and silently block legitimate environment upgrades; the pin should be a documented contract, not a frozen accident",
+      "Pre-flight probes can themselves fail (as the MEMORY.md read did in the source incident); rules must mandate retrying or repairing the probe, otherwise agents may skip it and reintroduce the exact failure mode",
+      "Scope creep: making parse-level smoke tests and persisted-context loading mandatory for all cases would widen the principle beyond the source intent (interpreter version and encoding contract verification); they should remain depth-scaled supporting practices for higher-consequence changes"
+     ],
+     "generatedAt": "2026-09-03T06:19:24.000Z"
+    },
+    "raw": "{\n  \"taskId\": \"scribe-pri815-G-manual_1788415743052_os4-r3\",\n  \"sourcePhilosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r3-run1\",\n  \"principleDraft\": {\n    \"title\": \"Probe and Pin the Execution Environment Contract Before Consequential Execution\",\n    \"statement\": \"Before executing any consequential change through a script, command, or automation, convert implicit environment assumptions into explicit, verified contracts: probe the target interpreter version (e.g., $PSVersionTable.PSVersion), align the file's encoding with that interpreter (e.g., save non-ASCII scripts as UTF-8 with BOM for Windows PowerShell 5.1) or pin a compatible interpreter explicitly (e.g., pwsh -File), and if any pre-flight check fails, retry or repair it rather than proceeding on assumptions. Verification depth must scale with the consequence and irreversibility of the change; runtime failure must never be the first mechanism that reveals an environment incompatibility.\",\n    \"rationale\": \"The diagnosed root cause was reliance on implicit defaults — an assumed interpreter version and an assumed encoding behavior — each verifiable in seconds before execution, yet discovered only via a runtime exitCode 1 against live state. The principle eliminates this failure family at its origin by requiring that environment-critical assumptions be surfaced as explicit, pre-execution contracts (version probe, encoding contract, pinned interpreter), shifting failure discovery from runtime failure to pre-execution verification, exactly matching the Owner's correction that interpreter version and encoding contract must be confirmed before landing scripts.\",\n    \"applicability\": [\n      \"Landing or executing scripts (e.g., .ps1) or automation containing non-ASCII characters on a host whose interpreter version or default encoding is unconfirmed\",\n      \"Cross-session, cross-host, or cross-shell execution where default interpreter version or encoding defaults may diverge from the authoring environment\",\n      \"Consequential changes to live state where execution failure is costly or hard to reverse; verification depth scales with consequence and irreversibility (up to parse-level dry-runs and loading persisted environment constraints such as MEMORY.md/USER.md)\",\n      \"Situations where a pre-flight check itself fails (e.g., a persisted-constraint read failing due to a wrong working directory)\"\n    ],\n    \"antiPatterns\": [\n      \"Executing a non-ASCII script under an unconfirmed default interpreter with an unverified encoding contract (e.g., BOM-less UTF-8 parsed as ANSI by Windows PowerShell 5.1)\",\n      \"Treating runtime failure (exitCode 1) as the default or first mechanism for discovering environment or encoding incompatibility\",\n      \"Implicitly accepting defaults — shell resolution, interpreter version, file encoding — as if they were explicit contracts\",\n      \"Skipping a failed pre-flight probe or persisted-constraint read and continuing on unverified assumptions\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"intentContract\": {\n    \"ownerIntent\": \"The Owner wants the agent to confirm the target interpreter version and encoding contract before landing or executing scripts with consequential effects, instead of discovering incompatibility through runtime failure.\",\n    \"targetBehavior\": \"Before consequential execution, the agent's tool trajectory shows an explicit pre-flight verification — an interpreter version probe (e.g., $PSVersionTable.PSVersion) followed by an aligned encoding choice (UTF-8 with BOM for Windows PowerShell 5.1) or an explicit interpreter pin (pwsh) — and any failed pre-flight check is retried or repaired, not skipped.\",\n    \"forbiddenBehavior\": \"Executing scripts (especially those containing non-ASCII content) against an unverified interpreter/encoding assumption, and relying on runtime failure — or on skipping failed pre-flight checks — to reveal environment incompatibility.\",\n    \"evidenceSource\": \"Diagnosis diagnosis_manual_1788415743052_os4aicut: a BOM-less UTF-8 PowerShell script with Chinese strings was executed under an unconfirmed Windows PowerShell 5.1, which parsed it as ANSI and failed (exitCode 1); the agent admitted doing no pre-execution compatibility check; the Owner corrected that interpreter version and encoding contract must be confirmed before landing scripts.\",\n    \"validationExpectation\": \"An evaluator should accept a rule only if it triggers before script execution and requires observable pre-execution verification of interpreter version and encoding (or explicit interpreter pinning); a compliant trajectory shows the probe preceding execution, and any rule change that permits discover-by-failure execution or skipping failed probes contradicts this intent and must be flagged.\"\n  },\n  \"sourceTrace\": {\n    \"dreamerArtifactId\": \"pi-art-dreamer-pri815-G-manual_1788415743052_os4-r3-run1\",\n    \"philosopherArtifactId\": \"pi-art-philosopher-pri815-G-manual_1788415743052_os4-r3-run1\"\n  },\n  \"risks\": [\n    \"Overlaps core axioms T-01 (sufficient model before consequential changes) and T-05 (explicit guardrails before execution); it must be registered as a sharpened, environment-specific instantiation of those axioms, not as an independent axiom\",\n    \"Uniform application wastes effort on trivial, idempotent, or read-only operations; if rules do not encode consequence-based scaling of verification depth, the principle degrades into ritual overhead\",\n    \"Over-pinning to one interpreter (e.g., pwsh 7+) can reduce portability and silently block legitimate environment upgrades; the pin should be a documented contract, not a frozen accident\",\n    \"Pre-flight probes can themselves fail (as the MEMORY.md read did in the source incident); rules must mandate retrying or repairing the probe, otherwise agents may skip it and reintroduce the exact failure mode\",\n    \"Scope creep: making parse-level smoke tests and persisted-context loading mandatory for all cases would widen the principle beyond the source intent (interpreter version and encoding contract verification); they should remain depth-scaled supporting practices for higher-consequence changes\"\n  ],\n  \"generatedAt\": \"2026-09-03T06:19:24.000Z\"\n}",
+    "usage": {
+     "input": 4265,
+     "output": 5459,
+     "total": 9724
+    },
+    "latencyMs": 69952,
+    "attempts": 1,
+    "error": null,
+    "promptHash": "3ef2260e983827cf"
+   },
+   "complete": true
+  }
+ ],
+ "b_addendum_version": "pri815-b-addendum.v1"
+}
