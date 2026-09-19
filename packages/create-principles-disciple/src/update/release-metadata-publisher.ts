@@ -96,6 +96,13 @@ export interface PublicationArchive {
   readonly arch: string;
   readonly nodeAbi: string;
   readonly bytes: Buffer;
+  /**
+   * PRI-854 (option A): the public URL the bytes will be served from (e.g. a
+   * GitHub Release attachment). When set, the metadata carries it and NO asset
+   * bytes are written into the metadata repository — the delivery host is the
+   * Release attachment, the trust stays in the signed sha256.
+   */
+  readonly url?: string;
 }
 
 /** Previously published state of the metadata repository, when one exists. */
@@ -170,6 +177,12 @@ export interface ReleasePublication {
   readonly channelPayload: ChannelMetadata;
   /** The complete served-repository content, ready to publish as-is. */
   readonly files: readonly PublicationFile[];
+  /**
+   * PRI-854 (option A): for archives with a delivery url — the exact gzipped
+   * bytes to upload to the release host under `name` (content-addressed).
+   * Empty for legacy in-repo targets.
+   */
+  readonly assetUploads: readonly { readonly name: string; readonly bytes: Buffer }[];
 }
 
 const RFC3339_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
@@ -481,6 +494,7 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     nodeAbi: archive.nodeAbi,
     bytes: archive.bytes,
     sha256: sha256Hex(archive.bytes),
+    ...(archive.url !== undefined ? { url: archive.url } : {}),
   }));
   const releaseMetadata = buildReleaseMetadata({
     productVersion: input.productVersion,
@@ -494,6 +508,7 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
       nodeAbi: artifact.nodeAbi,
       archiveSha256: artifact.sha256,
       archiveSizeBytes: artifact.bytes.length,
+      ...(artifact.url !== undefined ? { url: artifact.url } : {}),
     })),
     dataSchemaForwardReadableFrom: input.dataSchemaForwardReadableFrom,
   });
@@ -522,9 +537,20 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
   const artifactTargets: Record<string, TargetFile> = {};
   const artifactFiles: PublicationFile[] = [];
   const manifestArtifacts = artifacts.map((artifact) => {
-    // PRI-850/ABI convention: the Node ABI is part of the asset identity, so
-    // two runtimes on one platform publish distinct signed targets instead of
-    // overwriting one file name.
+    // PRI-854 (option A): when the archive carries a delivery url, the bytes
+    // are served from that location (GitHub Release attachment) and are NOT
+    // written into the metadata repository — only their signed digest travels
+    // with the metadata. Without a url, the legacy in-repo target is used.
+    if (artifact.url !== undefined) {
+      return {
+        platform: artifact.platform,
+        arch: artifact.arch,
+        nodeAbi: artifact.nodeAbi,
+        artifactSha256: artifact.sha256,
+        artifactSizeBytes: artifact.bytes.length,
+        artifactTargetPath: artifact.url,
+      };
+    }
     const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${artifact.platform}-${artifact.arch}-abi${artifact.nodeAbi}.tar.gz`;
     artifactTargets[artifactTargetPath] = new TargetFile({
       path: artifactTargetPath,
@@ -616,7 +642,17 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     expiresAt: input.expiresAt,
     files: withFileDigests(files),
   };
-  return { manifest, releaseMetadata, channelPayload, files };
+  // PRI-854 (option A): archives with a delivery url are uploaded to the
+  // release host by the workflow — the publisher hands the exact gzipped
+  // bytes back under their content-addressed names.
+  const assetUploads = artifacts
+    .filter((artifact) => artifact.url !== undefined)
+    .map((artifact) => ({
+      name: `release-asset-${artifact.platform}-${artifact.arch}-abi${artifact.nodeAbi}-${artifact.sha256.slice(0, 12)}.tar.gz`,
+      bytes: artifact.bytes,
+    }));
+
+  return { manifest, releaseMetadata, channelPayload, files, assetUploads };
 }
 
 /** Ephemeral ed25519 key PEM for dry-run pipelines without configured trust material. */

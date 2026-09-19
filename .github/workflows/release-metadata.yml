@@ -503,7 +503,14 @@ jobs:
       - name: Sign and emit release metadata
         env:
           PD_RELEASE_SIGNING_KEY: ${{ secrets.PD_RELEASE_SIGNING_KEY }}
+          ASSET_BASE_URL: ${{ github.event.inputs.metadata_base_url }}
         run: |
+          # PRI-854 (option A): the canonical public base URL — explicit input
+          # wins, otherwise the GitHub Pages URL for this repository.
+          if [ -z "$ASSET_BASE_URL" ]; then
+            ASSET_BASE_URL="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io/$(echo "${{ github.repository }}" | cut -d/ -f2)"
+          fi
+          echo "ASSET_BASE_URL=$ASSET_BASE_URL" >> "$GITHUB_ENV"
           ARGS=(
             --assets-dir "$RUNNER_TEMP/assets"
             --product-version "${{ needs.resolve-inputs.outputs.version }}"
@@ -514,6 +521,8 @@ jobs:
             --expires-at "${{ needs.resolve-inputs.outputs.expires_at }}"
             --min-bootstrap-version 1.0.0
             --data-schema-forward-readable-from "${{ github.event.inputs.data_schema_forward_readable_from }}"
+            --asset-base-url "$ASSET_BASE_URL"
+            --asset-release-dir "$RUNNER_TEMP/asset-release"
             --output-dir "$RUNNER_TEMP/metadata-repo"
           )
           if [ -n "$PD_RELEASE_SIGNING_KEY" ]; then
@@ -529,6 +538,40 @@ jobs:
             ARGS+=(--previous-dir "$RUNNER_TEMP/prev-metadata")
           fi
           node packages/create-principles-disciple/scripts/publish-release-metadata.mjs "${ARGS[@]}"
+
+      - name: Upload asset bytes to the release host (PRI-854, option A)
+        if: env.MODE == 'publish' && success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET_RELEASE_TAG: pd-assets
+        run: |
+          # The asset tarballs are ~250MB each — over every git host's per-file
+          # ceiling, which is why they silently vanished from gh-pages (found
+          # 2026-09-19). GitHub Release attachments allow 2GiB per file; the
+          # signed metadata binds their sha256, so the Release is only the
+          # byte carrier, never a second trust authority. Names are
+          # content-addressed (<...>-abi<abi>-<sha12>.tar.gz) — an existing
+          # asset is therefore immutable and never re-uploaded.
+          TAG="$ASSET_RELEASE_TAG"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "PD release assets" \
+              --notes "Content-addressed release-asset payloads; sha256 digests are pinned in the signed release metadata. Never overwrite an existing asset."
+          fi
+          if [ -d "$RUNNER_TEMP/asset-release" ]; then
+            for file in "$RUNNER_TEMP"/asset-release/*; do
+              NAME=$(basename "$file")
+              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$NAME"; then
+                echo "asset $NAME already uploaded — skipping (immutable)."
+              else
+                gh release upload "$TAG" "$file" --repo "$GITHUB_REPOSITORY"
+                echo "uploaded $NAME"
+              fi
+            done
+          else
+            echo "::error::No asset-release dir was emitted — refusing to publish metadata that promises missing assets."
+            exit 1
+          fi
 
       - name: Upload publication for review
         if: always()
@@ -567,13 +610,12 @@ jobs:
           # publication payload IS the point of this branch: re-include it
           # explicitly after the copy.
           cat >> .gitignore <<'PUBLISH_PATTERNS'
-
-# Release publication payload (PRI-853): the asset tarballs signed by the
-# metadata must never be ignored on this branch.
-!targets/**
-!*.tar
-!*.tar.gz
-PUBLISH_PATTERNS
+          # Release publication payload (PRI-853): the asset tarballs signed by the
+          # metadata must never be ignored on this branch.
+          !targets/**
+          !*.tar
+          !*.tar.gz
+          PUBLISH_PATTERNS
           git add -A
           # PRI-853: fail BEFORE the push when any staged asset exceeds the
           # git host's per-file ceiling (~95MB vs GitHub's 100MB hard limit).
@@ -638,20 +680,27 @@ PUBLISH_PATTERNS
             exit 1
           fi
           curl -s "$META_URL" -o "$RUNNER_TEMP/served-metadata.json"
+          # PRI-854 (option A): assets live at their SIGNED delivery urls
+          # (GitHub Release attachments) — verify each one follows to bytes.
           ASSET_MISS=0
-          for ASSET_PATH in $(node -e "
+          for ASSET_URL in $(node -e "
             const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-            for (const a of j.assets) console.log('targets/releases/' + j.releaseId + '/release-asset-' + a.platform + '-' + a.arch + '-abi' + a.nodeAbi + '.tar.gz');
+            for (const a of j.assets) console.log(a.url || '');
           " "$RUNNER_TEMP/served-metadata.json"); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" -r 0-0 "$BASE_URL/$ASSET_PATH")
-            echo "asset $ASSET_PATH -> $CODE"
+            if [ -z "$ASSET_URL" ]; then
+              echo "::error::A declared asset has no delivery url — publication INCOMPLETE."
+              ASSET_MISS=1
+              continue
+            fi
+            CODE=$(curl -sL -o /dev/null -w "%{http_code}" -r 0-0 "$ASSET_URL")
+            echo "asset $ASSET_URL -> $CODE"
             if [ "$CODE" != "200" ] && [ "$CODE" != "206" ]; then
-              echo "::error::Declared asset missing from the publication: $ASSET_PATH (HTTP $CODE)"
+              echo "::error::Declared asset missing from the publication: $ASSET_URL (HTTP $CODE)"
               ASSET_MISS=1
             fi
           done
           if [ "$ASSET_MISS" = "1" ]; then
-            echo "::error::Publication INCOMPLETE: declared assets are not served at $BASE_URL."
+            echo "::error::Publication INCOMPLETE: declared assets are not served at their delivery urls."
             exit 1
           fi
           echo "Published and reachable: $CHANNEL_URL. Configure PD_RELEASE_METADATA_URL (or install.json releaseMetadataUrl) to $BASE_URL."

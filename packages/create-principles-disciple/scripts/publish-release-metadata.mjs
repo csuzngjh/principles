@@ -239,6 +239,19 @@ async function main() {
   const publisher = await import('../dist/update/release-metadata-publisher.js');
   const archives = readPlatformArchives(values, publisher);
 
+  // PRI-854 (option A): with an asset base URL, every archive gets a
+  // content-addressed delivery URL (`...-abi<abi>-<sha12>.tar.gz`) that is
+  // signed into the metadata; the workflow uploads the bytes under the same
+  // name to the GitHub Release attachments.
+  const assetBaseUrl = values.get('asset-base-url');
+  if (assetBaseUrl) {
+    const base = assetBaseUrl.replace(/\/+$/, '');
+    for (const archive of archives) {
+      const sha = createHash('sha256').update(archive.bytes).digest('hex');
+      archive.url = `${base}/release-asset-${archive.platform}-${archive.arch}-abi${archive.nodeAbi}-${sha.slice(0, 12)}.tar.gz`;
+    }
+  }
+
   const signingKeyEnv = values.get('signing-key-env') ?? 'PD_RELEASE_SIGNING_KEY';
   let signingKeyPem = process.env[signingKeyEnv] ?? '';
   if (signingKeyPem.trim().length === 0 && flags.has('ephemeral-key')) {
@@ -306,9 +319,18 @@ async function main() {
     previous: previous ?? null,
   });
 
-  if (dryRun) {
-    process.stdout.write(`${JSON.stringify({ ...publication.manifest, dryRun: true }, null, 2)}\n`);
-    return;
+  // PRI-854 (option A): write each url-carrying archive's gzipped bytes to a
+  // SEPARATE asset-release directory — the workflow uploads them as GitHub
+  // Release attachments under the exact content-addressed names the signed
+  // metadata references. They must NOT live inside the metadata repository
+  // (git hosts cap file sizes at 100MB; the payloads are larger).
+  const assetReleaseDir = values.get('asset-release-dir');
+  if (assetReleaseDir) {
+    mkdirSync(assetReleaseDir, { recursive: true });
+    for (const upload of publication.assetUploads) {
+      writeFileSync(join(assetReleaseDir, upload.name), upload.bytes);
+    }
+    process.stdout.write(`asset-uploads: ${publication.assetUploads.length} file(s) written to ${assetReleaseDir}\n`);
   }
 
   const outputDir = resolve(requireValue(values, 'output-dir'));
