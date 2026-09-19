@@ -1141,17 +1141,6 @@ function cleanUnactivatedFreshInstall(): { removed: string[]; failed: { dir: str
   return { removed, failed };
 }
 
-function cleanupBackup(backupDir: string | null, runtimeBackupDir: string | null): void {
-  for (const backup of [backupDir, runtimeBackupDir]) {
-    if (!backup || !existsSync(backup)) continue;
-    try {
-      rmSync(backup, { recursive: true, force: true });
-    } catch {
-      // non-fatal
-    }
-  }
-}
-
 /**
  * PRI-853 (SPEC §5 retention: "current + one previous"): after a committed
  * install the just-superseded backup set BECOMES the retained previous
@@ -1160,7 +1149,7 @@ function cleanupBackup(backupDir: string | null, runtimeBackupDir: string | null
  * failed prune is non-fatal residue, never a loss of the retained previous.
  */
 function retainSupersededBackup(extensionBackupDir: string | null, runtimeBackupDir: string | null): void {
-  const retainedSets: Array<{ root: string | null; prefix: string }> = [
+  const retainedSets: { root: string | null; prefix: string }[] = [
     { root: extensionBackupDir ? path.dirname(extensionBackupDir) : null, prefix: 'principles-disciple.backup.' },
     { root: runtimeBackupDir ? path.dirname(runtimeBackupDir) : null, prefix: 'runtime.backup.' },
   ];
