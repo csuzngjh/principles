@@ -449,10 +449,12 @@ export async function deliverBootstrapExecutor(input: {
   const previousDir = path.join(paths.bootstrapDir, 'executor.previous');
 
   // Same-version fast path (PRI-850 review fix): skipping is only safe when
-  // the deployed bytes RE-VERIFY against the registration — the digest is
-  // recomputed from the tree, never trusted from the manifest. Corrupt or
-  // mismatched state falls through to full re-delivery, which is how repair
-  // actually heals a broken executor.
+  // the deployed bytes RE-VERIFY against the registration AND still match
+  // what the CURRENT installer would deploy — the source dist digest is
+  // recomputed and compared against the deployed dist subtree. Version match
+  // alone is not enough: changed bytes under the same version must
+  // re-deliver. Corrupt or mismatched state falls through to full
+  // re-delivery, which is how repair actually heals a broken executor.
   try {
     const existing = readBootstrapManifest(paths);
     const packageManifest = JSON.parse(readFileSync(path.join(input.sourcePackageDir, 'package.json'), 'utf8')) as { version?: unknown };
@@ -460,10 +462,16 @@ export async function deliverBootstrapExecutor(input: {
     if (existing !== null && existing.bootstrapVersion === currentVersion && existing.executorDigest !== undefined && existsSync(paths.bootstrapExecutorDir)) {
       const actualDigest = digestDirectory(paths.bootstrapExecutorDir);
       if (actualDigest === existing.executorDigest) {
-        logger.info(`Bootstrap update executor already at ${currentVersion} — skipping re-delivery.`);
-        return { bootstrapVersion: existing.bootstrapVersion, executorDigest: existing.executorDigest, executorDir: paths.bootstrapExecutorDir };
+        const sourceDistDigest = digestDirectory(path.join(input.sourcePackageDir, 'dist'));
+        const deployedDistDigest = digestDirectory(path.join(paths.bootstrapExecutorDir, 'dist'));
+        if (sourceDistDigest === deployedDistDigest) {
+          logger.info(`Bootstrap update executor already at ${currentVersion} — skipping re-delivery.`);
+          return { bootstrapVersion: existing.bootstrapVersion, executorDigest: existing.executorDigest, executorDir: paths.bootstrapExecutorDir };
+        }
+        logger.warn('Bootstrap executor dist drifted from the current installer build — re-deploying.');
+      } else {
+        logger.warn(`Bootstrap executor digest mismatch (${actualDigest.slice(0, 12)} ≠ ${existing.executorDigest.slice(0, 12)}) — re-deploying.`);
       }
-      logger.warn(`Bootstrap executor digest mismatch (${actualDigest.slice(0, 12)} ≠ ${existing.executorDigest.slice(0, 12)}) — re-deploying.`);
     }
   } catch {
     // Corrupt registration falls through to full re-delivery (which rewrites it).
