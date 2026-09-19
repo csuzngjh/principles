@@ -255,11 +255,13 @@ jobs:
         env:
           MODE: ${{ github.event.inputs.mode || 'dry-run' }}
 
-  # One leg per platform. Each leg builds NATIVELY on its own runner —
-  # assertSupportedLocalReleaseTarget forbids cross-target builds, so the
-  # matrix runner IS the target platform by construction.
+  # One leg per (platform, runtime). Each leg builds NATIVELY on its own
+  # runner — assertSupportedLocalReleaseTarget forbids cross-target builds, so
+  # the matrix runner IS the target platform by construction. PRI-850/ABI:
+  # the Node runtime is part of the asset identity — the matrix grows the ABI
+  # axis only with build-and-test evidence (SPEC v0.3 §7).
   build-asset:
-    name: Build asset (${{ matrix.platform }}/${{ matrix.arch }})
+    name: Build asset (${{ matrix.platform }}/${{ matrix.arch }} / node${{ matrix.node }})
     needs: resolve-inputs
     strategy:
       fail-fast: true
@@ -267,12 +269,23 @@ jobs:
         include:
           - platform: linux
             arch: x64
+            node: '24'
+            runs_on: ubuntu-latest
+          - platform: linux
+            arch: x64
+            node: '26'
             runs_on: ubuntu-latest
           - platform: win32
             arch: x64
+            node: '24'
+            runs_on: windows-latest
+          - platform: win32
+            arch: x64
+            node: '26'
             runs_on: windows-latest
           - platform: darwin
             arch: arm64
+            node: '24'
             runs_on: macos-latest
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 90
@@ -297,7 +310,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node }}
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
@@ -305,7 +318,6 @@ jobs:
         run: npm ci --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
-
       # Same component build order as the create-principles-disciple path in
       # publish-npm.yml (dependency-first; the console and the fresh plugin
       # ship inside the installer payload, so the release asset must be built
@@ -340,17 +352,22 @@ jobs:
 
       - name: Stage platform asset for assembly
         run: |
+          # PRI-850/ABI: the staging subdirectory includes the leg's Node ABI,
+          # so two runtimes on one platform stage side by side and the
+          # publisher signs each as its own target (asset-meta carries the
+          # same triple).
+          ABI=$(node -p "process.versions.modules")
           STAGE="$RUNNER_TEMP/platform-asset"
-          mkdir -p "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}"
-          cp "$RUNNER_TEMP/release-asset/asset.tar" "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}/asset.tar"
-          cp "$RUNNER_TEMP/release-asset/asset.tar.sha256" "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}/asset.tar.sha256"
-          node -p "JSON.stringify({ platform: '${{ matrix.platform }}', arch: '${{ matrix.arch }}', nodeAbi: process.versions.modules })" > "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}/asset-meta.json"
-          cat "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}/asset-meta.json"
+          mkdir -p "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}-abi$ABI"
+          cp "$RUNNER_TEMP/release-asset/asset.tar" "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}-abi$ABI/asset.tar"
+          cp "$RUNNER_TEMP/release-asset/asset.tar.sha256" "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}-abi$ABI/asset.tar.sha256"
+          node -p "JSON.stringify({ platform: '${{ matrix.platform }}', arch: '${{ matrix.arch }}', nodeAbi: process.versions.modules })" > "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}-abi$ABI/asset-meta.json"
+          cat "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}-abi$ABI/asset-meta.json"
 
       - name: Upload platform asset
         uses: actions/upload-artifact@v4
         with:
-          name: release-asset-${{ matrix.platform }}-${{ matrix.arch }}
+          name: release-asset-${{ matrix.platform }}-${{ matrix.arch }}-node${{ matrix.node }}
           path: ${{ runner.temp }}/platform-asset
           if-no-files-found: error
           retention-days: 7

@@ -86,9 +86,20 @@ export function selectReleaseAsset(releaseMetadata: ReleaseMetadata): ReleaseMet
   return asset;
 }
 
-/** TUF target path of the release asset for THIS platform (Phase 1 convention). */
-export function releaseAssetTargetPath(releaseId: string): string {
-  return `releases/${releaseId}/release-asset-${process.platform}-${process.arch}.tar.gz`;
+/**
+ * TUF target path of the release asset for THIS platform (PRI-850/ABI
+ * convention: the Node ABI is part of the asset identity, so two runtimes on
+ * one platform never share a file name). `legacyReleaseAssetTargetPath`
+ * returns the pre-ABI name for releases published before the matrix gained
+ * the ABI axis — both names resolve only through signed targets, so the
+ * fallback is cryptographically safe.
+ */
+export function releaseAssetTargetPath(releaseId: string, asset: { platform: string; arch: string; nodeAbi: string }): string {
+  return `releases/${releaseId}/release-asset-${asset.platform}-${asset.arch}-abi${asset.nodeAbi}.tar.gz`;
+}
+
+export function legacyReleaseAssetTargetPath(releaseId: string, asset: { platform: string; arch: string }): string {
+  return `releases/${releaseId}/release-asset-${asset.platform}-${asset.arch}.tar.gz`;
 }
 
 export interface DownloadReleaseAssetOptions {
@@ -116,24 +127,38 @@ export interface DownloadedReleaseAsset {
 export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions): Promise<DownloadedReleaseAsset> {
   const { paths, metadataBaseUrl, fetcher, releaseMetadata, channel, transactionId } = options;
   const asset = selectReleaseAsset(releaseMetadata);
-  const targetPath = releaseAssetTargetPath(releaseMetadata.releaseId);
 
   let trustedTarget: TrustedReleaseTarget;
   try {
+    // ABI-suffixed name first (PRI-850 convention); the legacy pre-ABI name is
+    // the fallback for releases published before the matrix gained the ABI
+    // axis. Either way the target only resolves through the signed targets
+    // file, so the fallback cannot substitute untrusted bytes.
     trustedTarget = await resolveTrustedReleaseTarget({
       metadataDir: paths.trustDir,
       metadataBaseUrl,
-      targetPath,
+      targetPath: releaseAssetTargetPath(releaseMetadata.releaseId, asset),
       expectedChannel: channel,
       expectedPlatform: process.platform,
       fetcher,
     });
-  } catch (error) {
-    throw new ApplyPayloadError(
-      'metadata_refresh_failed',
-      `The signed artifact target for release ${releaseMetadata.releaseId} could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
-      'Verify that the release pipeline published this release asset to the signed repository, then retry.',
-    );
+  } catch (primaryError) {
+    try {
+      trustedTarget = await resolveTrustedReleaseTarget({
+        metadataDir: paths.trustDir,
+        metadataBaseUrl,
+        targetPath: legacyReleaseAssetTargetPath(releaseMetadata.releaseId, asset),
+        expectedChannel: channel,
+        expectedPlatform: process.platform,
+        fetcher,
+      });
+    } catch {
+      throw new ApplyPayloadError(
+        'metadata_refresh_failed',
+        `The signed artifact target for release ${releaseMetadata.releaseId} could not be resolved: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`,
+        'Verify that the release pipeline published this release asset to the signed repository, then retry.',
+      );
+    }
   }
   // rc-6: the TUF-signed identity and the release metadata must name the same
   // release and the same bytes — a mismatch means the channel points at
@@ -160,7 +185,7 @@ export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions)
     await downloadTrustedReleasePayload({
       metadataDir: paths.trustDir,
       metadataBaseUrl,
-      targetPath,
+      targetPath: trustedTarget.targetPath,
       destinationPath: archivePath,
       fetcher,
     });

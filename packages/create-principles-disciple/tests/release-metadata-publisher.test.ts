@@ -139,7 +139,7 @@ describe('release publication contract', () => {
       'targets.json',
       'targets/channels/stable.json',
       `targets/releases/${publication.releaseMetadata.releaseId}/metadata.json`,
-      `targets/releases/${publication.releaseMetadata.releaseId}/release-asset-win32-x64.tar.gz`,
+      `targets/releases/${publication.releaseMetadata.releaseId}/release-asset-win32-x64-abi147.tar.gz`,
       'timestamp.json',
     ].sort());
 
@@ -155,7 +155,7 @@ describe('release publication contract', () => {
 
     // Artifact digest binding: the served artifact bytes are exactly what the
     // signed metadata declares.
-    const artifactBytes = paths.get(`targets/releases/${publication.releaseMetadata.releaseId}/release-asset-win32-x64.tar.gz`)!;
+    const artifactBytes = paths.get(`targets/releases/${publication.releaseMetadata.releaseId}/release-asset-win32-x64-abi147.tar.gz`)!;
     expect(createHash('sha256').update(artifactBytes).digest('hex')).toBe(metadataPayload.assets[0].archiveSha256);
     expect(artifactBytes.length).toBe(metadataPayload.assets[0].archiveSizeBytes);
     expect(publication.manifest.artifacts).toHaveLength(1);
@@ -173,9 +173,9 @@ describe('release publication contract', () => {
       'targets.json',
       'targets/channels/stable.json',
       `targets/releases/${releaseId}/metadata.json`,
-      `targets/releases/${releaseId}/release-asset-darwin-arm64.tar.gz`,
-      `targets/releases/${releaseId}/release-asset-linux-x64.tar.gz`,
-      `targets/releases/${releaseId}/release-asset-win32-x64.tar.gz`,
+      `targets/releases/${releaseId}/release-asset-darwin-arm64-abi137.tar.gz`,
+      `targets/releases/${releaseId}/release-asset-linux-x64-abi137.tar.gz`,
+      `targets/releases/${releaseId}/release-asset-win32-x64-abi137.tar.gz`,
       'timestamp.json',
     ].sort());
 
@@ -187,14 +187,14 @@ describe('release publication contract', () => {
       'win32/x64/abi137',
     ]);
     for (const asset of metadataPayload.assets) {
-      const served = paths.get(`targets/releases/${releaseId}/release-asset-${asset.platform}-${asset.arch}.tar.gz`)!;
+      const served = paths.get(`targets/releases/${releaseId}/release-asset-${asset.platform}-${asset.arch}-abi${asset.nodeAbi}.tar.gz`)!;
       expect(createHash('sha256').update(served).digest('hex')).toBe(asset.archiveSha256);
       expect(served.length).toBe(asset.archiveSizeBytes);
     }
     expect(publication.manifest.artifacts.map((a) => a.artifactTargetPath).sort()).toEqual([
-      `releases/${releaseId}/release-asset-darwin-arm64.tar.gz`,
-      `releases/${releaseId}/release-asset-linux-x64.tar.gz`,
-      `releases/${releaseId}/release-asset-win32-x64.tar.gz`,
+      `releases/${releaseId}/release-asset-darwin-arm64-abi137.tar.gz`,
+      `releases/${releaseId}/release-asset-linux-x64-abi137.tar.gz`,
+      `releases/${releaseId}/release-asset-win32-x64-abi137.tar.gz`,
     ]);
 
     // Archive input order must not leak into the release identity or file set.
@@ -506,7 +506,7 @@ describe('ReleaseManager integration over a served publication', () => {
     const asset = publication.releaseMetadata.assets.find((a) => a.platform === 'darwin' && a.arch === 'arm64');
     expect(asset?.nodeAbi).toBe('137');
     const files = fileMap(publication);
-    const targetPath = `releases/${publication.releaseMetadata.releaseId}/release-asset-darwin-arm64.tar.gz`;
+    const targetPath = `releases/${publication.releaseMetadata.releaseId}/release-asset-darwin-arm64-abi137.tar.gz`;
     const served = files.get(`targets/${targetPath}`)!;
     expect(createHash('sha256').update(served).digest('hex')).toBe(asset?.archiveSha256);
     expect(served.length).toBe(asset?.archiveSizeBytes);

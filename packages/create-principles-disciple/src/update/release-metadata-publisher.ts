@@ -522,7 +522,10 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
   const artifactTargets: Record<string, TargetFile> = {};
   const artifactFiles: PublicationFile[] = [];
   const manifestArtifacts = artifacts.map((artifact) => {
-    const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${artifact.platform}-${artifact.arch}.tar.gz`;
+    // PRI-850/ABI convention: the Node ABI is part of the asset identity, so
+    // two runtimes on one platform publish distinct signed targets instead of
+    // overwriting one file name.
+    const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${artifact.platform}-${artifact.arch}-abi${artifact.nodeAbi}.tar.gz`;
     artifactTargets[artifactTargetPath] = new TargetFile({
       path: artifactTargetPath,
       length: artifact.bytes.length,
