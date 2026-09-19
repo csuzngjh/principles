@@ -223,3 +223,8 @@ packages/website/.wrangler/
 /.current-code-numbered.txt
 /.playwright-mcp/
 /--full-page
+# Release publication payload (PRI-853): the asset tarballs signed by the
+# metadata must never be ignored on this branch.
+!targets/**
+!*.tar
+!*.tar.gz

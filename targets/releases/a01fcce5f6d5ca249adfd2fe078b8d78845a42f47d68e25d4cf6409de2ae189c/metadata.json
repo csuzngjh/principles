@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "productVersion": "1.76.1",
+  "releaseId": "a01fcce5f6d5ca249adfd2fe078b8d78845a42f47d68e25d4cf6409de2ae189c",
+  "sourceCommit": "ba73d0fda38142213d37ce6b52429b91b70cc31e",
+  "metadataDigest": "80921620e35d939462e20ae4b1515516bc1d681f08b3ee50d2d4d8d9577b4853",
+  "minBootstrapVersion": "1.0.0",
+  "publicationSequence": 3,
+  "expiresAt": "2026-12-18T12:58:59Z",
+  "assets": [
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "nodeAbi": "137",
+      "archiveSha256": "9a01e3311f5935cdcf7426f3dbab66a203787f81991383e3204e2936950dd28d",
+      "archiveSizeBytes": 264803569,
+      "url": "https://csuzngjh.github.io/principles/release-asset-darwin-arm64-abi137-9a01e3311f59.tar.gz"
+    },
+    {
+      "platform": "linux",
+      "arch": "x64",
+      "nodeAbi": "137",
+      "archiveSha256": "e8ee60aaa781975817206a57c67b1d63c105667050f84df06200406bdb6944f9",
+      "archiveSizeBytes": 272524596,
+      "url": "https://csuzngjh.github.io/principles/release-asset-linux-x64-abi137-e8ee60aaa781.tar.gz"
+    },
+    {
+      "platform": "linux",
+      "arch": "x64",
+      "nodeAbi": "147",
+      "archiveSha256": "d03bef2c57c0dfa48fa17c31c6ca663112957cd1ecc563b0d2d4502685b4dd2a",
+      "archiveSizeBytes": 272524596,
+      "url": "https://csuzngjh.github.io/principles/release-asset-linux-x64-abi147-d03bef2c57c0.tar.gz"
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "nodeAbi": "137",
+      "archiveSha256": "27f8cb9f1c6a4f600d8b11fe1d378d74c5d0f5eac615b1d6241e166c44700cf6",
+      "archiveSizeBytes": 267890095,
+      "url": "https://csuzngjh.github.io/principles/release-asset-win32-x64-abi137-27f8cb9f1c6a.tar.gz"
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "nodeAbi": "147",
+      "archiveSha256": "9cb51a99909597010efc2130e3d5f27df138999b1897a6e7ec4b5aa597484498",
+      "archiveSizeBytes": 267890095,
+      "url": "https://csuzngjh.github.io/principles/release-asset-win32-x64-abi147-9cb51a999095.tar.gz"
+    }
+  ],
+  "compatibility": {
+    "dataSchemaForwardReadableFrom": "1.74.0"
+  }
+}
