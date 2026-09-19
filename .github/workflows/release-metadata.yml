@@ -90,8 +90,20 @@ on:
         description: >-
           Oldest release whose data the candidate keeps readable (SPEC §10).
           REQUIRED with a justified value proven by tests against that release —
-          a blind default is not evidence (PRI-853).
+          a blind default is not evidence (PRI-853). Example: the version of the
+          release your current installs run (e.g. "1.100.0") when the candidate
+          keeps that data readable.
         required: true
+        type: string
+      metadata_base_url:
+        description: >-
+          Canonical public base URL serving this publication (PRI-853). Optional
+          — when empty, the workflow derives the GitHub Pages URL for this
+          repository. Set it explicitly when serving from a custom domain or a
+          non-Pages host, so the reachability gate verifies the SAME target
+          users fetch.
+        required: false
+        default: ''
         type: string
       expires_at:
         description: 'Metadata expiry, RFC3339 UTC ("auto" = now + 90 days; pass explicitly when re-publishing a release)'
@@ -150,18 +162,17 @@ jobs:
           PRODUCT_VERSION_INPUT: ${{ github.event.inputs.product_version }}
           ALLOW_VERSION_DRIFT: ${{ github.event.inputs.allow_version_drift }}
         run: |
-          # PRI-849 (SPEC v0.3 §12): a signed release NEVER borrows its product
-          # version from an npm registry `latest` — that authority moves under
-          # the release between runs (1.245.2 → 1.143.2-style stream jumps) and
-          # breaks release identity. "auto" resolves deterministically from the
-          # REF's own installer manifest; an explicit product_version input
-          # wins and must match the ref unless allow_version_drift is set.
+          # PRI-849/853 review fix: the product version comes from the SINGLE
+          # shared resolver (root manifest authority) — never an npm registry
+          # `latest` lookup, never a per-package manifest. An explicit
+          # product_version input still wins and must match the ref's
+          # installer manifest unless allow_version_drift is set.
           VERSION="$PRODUCT_VERSION_INPUT"
           if [ "$VERSION" = "auto" ] || [ -z "$VERSION" ]; then
-            VERSION=$(node -p "require('./packages/create-principles-disciple/package.json').version")
+            VERSION=$(node scripts/resolve-product-version.mjs)
           fi
           if [ -z "$VERSION" ]; then
-            echo "::error::Could not resolve the product version from the ref's installer manifest."
+            echo "::error::Could not resolve the product version from the shared resolver."
             exit 1
           fi
           COMMIT=$(git rev-parse HEAD)
@@ -561,9 +572,16 @@ jobs:
           # serves the new channel pointer (e.g. GitHub Pages must be enabled
           # first — observed 2026-09-19: gh-pages pushed while Pages was
           # disabled, leaving installs with a configured source but no site).
-          PAGE_HOST="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io"
-          REPO_NAME="$(echo "${{ github.repository }}" | cut -d/ -f2)"
-          CHANNEL_URL="$PAGE_HOST/$REPO_NAME/targets/channels/$CHANNEL.json"
+          # Review P1-3 fix: the verified URL must be the CANONICAL endpoint —
+          # an explicit metadata_base_url input wins; only when absent is the
+          # GitHub Pages URL derived as the default host.
+          if [ -n "${{ github.event.inputs.metadata_base_url }}" ]; then
+            BASE_URL="${{ github.event.inputs.metadata_base_url }}"
+          else
+            BASE_URL="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io/$(echo "${{ github.repository }}" | cut -d/ -f2)"
+          fi
+          BASE_URL="${BASE_URL%/}"
+          CHANNEL_URL="$BASE_URL/targets/channels/$CHANNEL.json"
           OK=0
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
             sleep 15
@@ -575,4 +593,4 @@ jobs:
             echo "::error::Published channel pointer is NOT reachable at $CHANNEL_URL — the publication is INCOMPLETE. Configure GitHub Pages (source: gh-pages) and re-verify before telling users an update exists."
             exit 1
           fi
-          echo "Published and reachable: $CHANNEL_URL. Configure PD_RELEASE_METADATA_URL (or install.json releaseMetadataUrl) to $PAGE_HOST/$REPO_NAME."
+          echo "Published and reachable: $CHANNEL_URL. Configure PD_RELEASE_METADATA_URL (or install.json releaseMetadataUrl) to $BASE_URL."

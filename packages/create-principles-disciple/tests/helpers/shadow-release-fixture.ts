@@ -119,10 +119,16 @@ export async function createShadowFixture(overrides: {
    * PRI-698 Phase 1: build the release-asset tarball served as the signed
    * artifact target `releases/<releaseId>/release-asset-<platform>-<arch>.tar.gz`
    * (custom identity {releaseId, channel, platform}). The tarball's REAL
-   * sha256 is bound into the signed release metadata, so the acquisition
+   * sha256 is bound into the signed metadata, so the acquisition
    * digest cross-check passes only for exactly these bytes.
    */
   artifact?: () => Buffer;
+  /**
+   * PRI-852: when true, the signed artifact target uses the ABI-qualified
+   * name (`release-asset-<platform>-<arch>-abi<nodeAbi>.tar.gz`) — exercising
+   * the consumer's PRIMARY resolution path. Default: legacy pre-ABI name.
+   */
+  abiQualifiedArtifactTarget?: boolean;
 } = {}): Promise<Fixture> {
   const signer = makeKeyMaterial();
   const pdHome = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-shadow-home-')));
@@ -223,7 +229,9 @@ export async function createShadowFixture(overrides: {
   const channelTargetPath = 'channels/stable.json';
   // PRI-698 Phase 1: the signed artifact target (Phase 1 path convention,
   // same computation as the acquisition module).
-  const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${overrides.candidateAsset?.platform ?? 'win32'}-${overrides.candidateAsset?.arch ?? 'x64'}.tar.gz`;
+  const artifactTargetPath = overrides.abiQualifiedArtifactTarget === true
+    ? `releases/${releaseMetadata.releaseId}/release-asset-${overrides.candidateAsset?.platform ?? 'win32'}-${overrides.candidateAsset?.arch ?? 'x64'}-abi${overrides.candidateAsset?.nodeAbi ?? '147'}.tar.gz`
+    : `releases/${releaseMetadata.releaseId}/release-asset-${overrides.candidateAsset?.platform ?? 'win32'}-${overrides.candidateAsset?.arch ?? 'x64'}.tar.gz`;
   const targets = new Targets({
     version: 1,
     specVersion: '1.0.31',
