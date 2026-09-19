@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ReleaseManagerError } from 'create-principles-disciple/dist/update/release-manager.js';
+import { ReleaseManagerError } from 'create-principles-disciple/update-console';
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -14,8 +14,8 @@ const mocks = vi.hoisted(() => ({
   // Assigned in beforeEach — vi.hoisted runs before imports initialize.
   fakeHome: '',
 }));
-vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', async (original) => ({
-  ...await original<typeof import('create-principles-disciple/dist/update/release-manager-authority.js')>(),
+vi.mock('create-principles-disciple/update-console', async (original) => ({
+  ...await original<typeof import('create-principles-disciple/update-console')>(),
   createReleaseManagerAuthority: mocks.create,
 }));
 vi.mock('node:os', async (importOriginal) => ({

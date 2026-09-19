@@ -62,8 +62,8 @@ const CODEX_ADAPTER_DEST = join(OUTPUT_ROOT, 'codex-adapter');
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
 const INSTALL_LAYOUT_DEST = join(OUTPUT_ROOT, 'install-layout');
 // PRI-672: the ReleaseManager authority module ships as its own payload
-// component so the installed console can resolve it at runtime
-// (create-principles-disciple/dist/update/release-manager-authority.js).
+// component so the installed console can resolve it at runtime through the
+// registered public seam (create-principles-disciple/update-console).
 // The directory is named `release-manager` (its runtime ROLE); the package.json
 // inside keeps the npm name `create-principles-disciple`, which is what the
 // console's rewritten dependency + resolution link target.
@@ -135,6 +135,9 @@ const INSTALL_LAYOUT_REQUIRED = [
 const CREATE_PRINCIPLES_DISCIPLE_REQUIRED = [
   'dist',
   'dist/update/release-manager-authority.js',
+  // The registered console-facing seam (package.json exports["./update-console"]).
+  // Missing it breaks the installed console's update routes at resolve time.
+  'dist/update/console-surface.js',
   'package.json',
 ];
 

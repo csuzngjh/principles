@@ -11,11 +11,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { sendSuccess, sendMethodNotAllowed, sendNotFound } from '../utils/response.js';
-import type * as journalModule from 'create-principles-disciple/dist/update/transaction-journal.js';
-import type * as layoutModule from 'create-principles-disciple/dist/update/install-layout.js';
+import type * as updateSurfaceModule from 'create-principles-disciple/update-console';
 
-type JournalModule = typeof journalModule;
-type LayoutModule = typeof layoutModule;
+type JournalModule = typeof updateSurfaceModule;
+type LayoutModule = typeof updateSurfaceModule;
 
 /** Transaction ids are installer/console-generated (`<word>-<ts>-<hex>`); this
  * pattern doubles as the path-traversal guard for the journal file name (rc-1). */
@@ -61,8 +60,8 @@ async function transactionStatus(res: ServerResponse, transactionId: string): Pr
     sendSuccess(res, { transactionId, exists: false, reason: 'invalid_transaction_id' });
     return;
   }
-  const journal: JournalModule = await import('create-principles-disciple/dist/update/transaction-journal.js');
-  const layout: LayoutModule = await import('create-principles-disciple/dist/update/install-layout.js');
+  const journal: JournalModule = await import('create-principles-disciple/update-console');
+  const layout: LayoutModule = journal;
   const paths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
   const journalPath = path.join(paths.transactionsDir, `${transactionId}.jsonl`);
   if (!fs.existsSync(journalPath)) {
@@ -90,8 +89,8 @@ async function transactionStatus(res: ServerResponse, transactionId: string): Pr
 }
 
 async function recoveryStatus(res: ServerResponse): Promise<void> {
-  const journal: JournalModule = await import('create-principles-disciple/dist/update/transaction-journal.js');
-  const layout: LayoutModule = await import('create-principles-disciple/dist/update/install-layout.js');
+  const journal: JournalModule = await import('create-principles-disciple/update-console');
+  const layout: LayoutModule = journal;
   const paths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
   const entries = (() => {
     try {
@@ -160,8 +159,8 @@ async function recoveryResolve(res: ServerResponse, req: IncomingMessage): Promi
     sendSuccess(res, { ok: false, reason: 'invalid_transaction_id', message: 'Request body must carry a well-formed transactionId.' });
     return;
   }
-  const journal: JournalModule = await import('create-principles-disciple/dist/update/transaction-journal.js');
-  const layout: LayoutModule = await import('create-principles-disciple/dist/update/install-layout.js');
+  const journal: JournalModule = await import('create-principles-disciple/update-console');
+  const layout: LayoutModule = journal;
   const paths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
   const journalPath = path.join(paths.transactionsDir, `${transactionId}.jsonl`);
   if (!fs.existsSync(journalPath)) {

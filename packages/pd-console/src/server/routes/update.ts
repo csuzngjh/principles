@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { sendSuccess, sendMethodNotAllowed, sendNotFound } from '../utils/response.js';
 import { appendUpdateHistory } from './update-history.js';
 import { readCurrentVersion, resolvePluginDir } from '../utils/installed-layout.js';
-import type * as authorityModule from 'create-principles-disciple/dist/update/release-manager-authority.js';
+import type * as authorityModule from 'create-principles-disciple/update-console';
 
 type AuthorityModule = typeof authorityModule;
 type Authority = ReturnType<AuthorityModule['createReleaseManagerAuthority']>;
@@ -66,7 +66,7 @@ async function checkUpdate(authority: Authority, res: ServerResponse): Promise<v
  * (SPEC §12.1 continuation contract).
  */
 async function applyFullUpdate(authority: Authority, res: ServerResponse, workspaceDir: string): Promise<void> {
-  const layout = await import('create-principles-disciple/dist/update/install-layout.js');
+  const layout = await import('create-principles-disciple/update-console');
   const pdHomePaths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
   const entryPath = path.join(pdHomePaths.bootstrapExecutorDir, 'dist', 'bootstrap-entry.js');
 
@@ -207,7 +207,7 @@ export async function handleUpdateRoute(
   let authority: Authority | undefined;
   let failure = { reason: 'installer_missing', message: 'ReleaseManager is unavailable.', nextAction: REPAIR_ACTION, transactionOpened: false };
   try {
-    mod = await import('create-principles-disciple/dist/update/release-manager-authority.js');
+    mod = await import('create-principles-disciple/update-console');
     authority = mod.createReleaseManagerAuthority({
       pdHome: path.join(os.homedir(), '.pd'),
       metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,

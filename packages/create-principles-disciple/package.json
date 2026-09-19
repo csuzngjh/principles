@@ -6,6 +6,17 @@
   "bin": {
     "create-principles-disciple": "./dist/index.js"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./update-console": {
+      "types": "./dist/update/console-surface.d.ts",
+      "default": "./dist/update/console-surface.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist",
     "plugin",
