@@ -126,12 +126,6 @@ export interface DownloadedReleaseAsset {
 }
 
 /**
- * Resolve the signed artifact target, cross-check the TUF identity and digest
- * against the signed release metadata (rc-6), and download it with in-flight
- * sha256 verification into `~/.pd/staging/<transactionId>/`.
- * Zero writes happen before every identity check has passed.
- */
-/**
  * PRI-854 (option A): fetch the asset from its signed delivery URL and verify
  * the sha256 (and declared size) BEFORE the bytes are considered acquired.
  * Only http(s) URLs are accepted; the URL comes from the signed release
@@ -171,6 +165,15 @@ export async function downloadAndVerifyAssetFile(input: {
   fs.writeFileSync(input.destinationPath, bytes);
 }
 
+/**
+ * Acquires the release asset for THIS runtime (PRI-854, two transports):
+ *  - url branch: the signed metadata names the byte carrier (Release
+ *    attachment) — download once, verify signed sha256+size, done.
+ *  - legacy branch: resolve the signed TUF target (ABI name + pre-ABI
+ *    fallback), cross-check identity/digest against the metadata (rc-6),
+ *    download through the trusted payload path.
+ * Zero deployment writes happen before every identity check has passed.
+ */
 export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions): Promise<DownloadedReleaseAsset> {
   const { paths, metadataBaseUrl, fetcher, releaseMetadata, channel, transactionId } = options;
   const asset = selectReleaseAsset(releaseMetadata);
@@ -181,13 +184,6 @@ export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions)
   if (asset.url !== undefined) {
     const transactionDir = path.join(paths.stagingDir, transactionId);
     const archivePath = path.join(transactionDir, 'release-asset.tar.gz');
-    await downloadAndVerifyAssetFile({
-      url: asset.url,
-      destinationPath: archivePath,
-      expectedSha256: asset.archiveSha256,
-      expectedSizeBytes: asset.archiveSizeBytes,
-      releaseId: releaseMetadata.releaseId,
-    });
     await downloadAndVerifyAssetFile({
       url: asset.url,
       destinationPath: archivePath,
