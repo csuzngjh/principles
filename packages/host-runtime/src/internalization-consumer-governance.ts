@@ -5,9 +5,9 @@
  * (P0-D/E/F 生产接线) so the OpenClaw auto-consumer and the Companion
  * workspace worker share ONE wiring implementation instead of copying it:
  *   - evaluator: isRepairLoopEnabled + seedArtificerRepairTask (bounded repair)
- *   - rollout_reviewer: dispatchActivation (approve_rollout → ActivationDispatcher,
- *     低风险 auto_activate / 高风险 approvals.pending) + reopenRevisionTarget
- *     (needs_revision → reopen scribe/artificer, 禁止入 approval)
+ *   - rollout_reviewer: dispatchActivation (approve_rollout → ActivationDispatcher;
+ *     PRI-811 Phase B: 一律入 approvals.pending，Owner 批准后才激活) +
+ *     reopenRevisionTarget (needs_revision → reopen scribe/artificer, 禁止入 approval)
  *
  * Everything is assembled from @principles/core stores/dispatchers; the only
  * host knowledge is a structural logger. Idempotency (INV-08): dispatcher
@@ -125,6 +125,8 @@ export async function dispatchRolloutActivation(
     const decision: ActivationDecision = await dispatcher.dispatch({
       artifactId: input.artifactId,
       channel: input.channel as never, // InternalizationChannel union; rollout 链的 channel 已由任务元数据校验
+      // 'auto_activate' = rollout reviewer 推荐激活。PRI-811 Phase B 起
+      // dispatcher 对一切推荐只入 approval 队列，不直接激活。
       rolloutDecision: 'auto_activate',
       actor: { kind: 'system', source: 'rollout_reviewer' },
       now: new Date().toISOString(),

@@ -84,16 +84,18 @@ describe('Journey 11 — Restart Safety (独立 Worker 逐阶段推进)', () => 
       const rolloutCount = Object.keys(s3b.tasks).filter((id) => id.startsWith('rollout_reviewer-')).length;
       expect(rolloutCount).toBe(1);
 
-      // ── Worker 4 (重启后): rollout approve_rollout → 自动 dispatch ──
+      // ── Worker 4 (重启后): rollout approve_rollout → 入 approval 队列 ──
+      // PRI-811 Phase B: 低风险自动路径已关闭 — 推荐只入 approval 队列,
+      // activation 等待 Owner 批准,重启不丢不重
       const s4 = await runStage(workspaceDir, 'rollout-approve');
       expect(s4.runStatus).toBe('succeeded');
-      expect(s4.activations.length).toBe(1);
-      expect(s4.activations[0]?.action).toBe('prompt_activate');
-      expect(s4.approvals).toBe(0); // 低风险自动路径零审批打扰
+      expect(s4.activations.length).toBe(0);
+      expect(s4.approvals).toBe(1); // 恰好一条 pending approval (确定性 id 去重)
 
-      // 幂等重放 dispatch: rollout 已 succeeded(lease 拒绝)→ activation 不重复
+      // 幂等重放 dispatch: rollout 已 succeeded(lease 拒绝)→ approval/activation 不重复
       const s4b = await runStage(workspaceDir, 'rollout-approve');
-      expect(s4b.activations.length).toBe(1);
+      expect(s4b.activations.length).toBe(0);
+      expect(s4b.approvals).toBe(1);
     } finally {
       try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* temp */ }
     }

@@ -167,7 +167,7 @@ describe('createEvaluatorRepairDeps', () => {
 });
 
 describe('dispatchRolloutActivation (真实 dispatcher 冒烟)', () => {
-  it('validated principle artifact → 低风险 prompt 渠道自动激活', async () => {
+  it('PRI-811 Phase B: validated principle artifact → prompt 推荐入 approval 队列（不直接激活）', async () => {
     writeConfig();
     // 准备 validated artifact (dispatch 目标)
     const conn = new SqliteConnection(workspaceDir);
@@ -187,14 +187,32 @@ describe('dispatchRolloutActivation (真实 dispatcher 冒烟)', () => {
       artifactId: 'pi-art-wire-1', channel: 'prompt', confidence: 0.9, rolloutTaskId: 'rollout-wire',
     }, logger);
 
-    expect(outcome.decision).toBe('activated');
-    expect(outcome.activationId).toBeTruthy();
+    // Phase B: rollout 推荐只入队,reason = approvalId
+    expect(outcome.decision).toBe('queued_for_approval');
+    expect(String(outcome.reason)).toBeTruthy();
 
-    // 幂等重放 → already_activated
+    // 正向断言: approval 队列恰好一条 pending,activations 零行
+    const probe = new SqliteConnection(workspaceDir);
+    try {
+      const db = probe.getDb();
+      const approvals = db.prepare(
+        "SELECT status, channel FROM approvals WHERE artifact_id = 'pi-art-wire-1'"
+      ).all() as unknown;
+      expect(Array.isArray(approvals) ? approvals.length : 0).toBe(1);
+      const row = Array.isArray(approvals) ? approvals[0] as Record<string, unknown> : undefined;
+      expect(row?.['status']).toBe('pending');
+      expect(row?.['channel']).toBe('prompt');
+      const activations = db.prepare('SELECT activation_id FROM activations').all() as unknown;
+      expect(Array.isArray(activations) ? activations.length : 0).toBe(0);
+    } finally {
+      try { probe.close(); } catch { /* best-effort */ }
+    }
+
+    // 幂等重放 → 审批确定性 id 去重,仍是 queued_for_approval（不产生第二行）
     const replay = await dispatchRolloutActivation(workspaceDir, {
       artifactId: 'pi-art-wire-1', channel: 'prompt', confidence: 0.9, rolloutTaskId: 'rollout-wire',
     }, logger);
-    expect(replay.decision).toBe('already_activated');
+    expect(replay.decision).toBe('queued_for_approval');
   });
 
   it('artifact 不存在 → invalid_artifact 带 reason,不抛', async () => {

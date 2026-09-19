@@ -59,35 +59,99 @@ describe('ActivationDispatcher', () => {
     return { stateStore, artifactStore, dispatcher, promptWriter, archiveWriter };
   }
 
-  it('low-risk prompt artifact dry-run → would_activate', async () => {
-    const { artifactStore, dispatcher } = makeDispatcher();
+  function makeDispatcherWithQueue() {
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const promptWriter = new PromptWriter();
+    const archiveWriter = new DeferArchiveWriter();
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [promptWriter, archiveWriter], approvalQueueStore: approvalStore },
+    );
+    return { stateStore, artifactStore, dispatcher, approvalStore };
+  }
+
+  // ── PRI-811 Phase B: rollout recommendations never self-execute ────────────
+  // Before Phase B, a low-risk prompt artifact dispatched with
+  // 'auto_activate' activated directly (no Owner approval). The Owner closed
+  // that path: every activation fact must trace to a verified 'approved'
+  // approval record.
+
+  it('PRI-811 Phase B: prompt auto_activate dry-run → queued_for_approval preview (nothing persisted)', async () => {
+    const { artifactStore, stateStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact());
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: false }));
-    expect(result.decision).toBe('would_activate');
-    if (result.decision === 'would_activate') {
-      expect(result.activationId).toBe('act_prompt_P_001');
-      expect(result.action).toBe('prompt_activate');
-      expect(result.targetRef).toBe('ledger://P_001');
+    expect(result.decision).toBe('queued_for_approval');
+    if (result.decision === 'queued_for_approval') {
+      expect(result.channel).toBe('prompt');
+      expect(result.riskLevel).toBe('low');
     }
+    // Dry-run preview: no approval row, no activation row.
+    expect(await approvalStore.listPending()).toHaveLength(0);
+    expect(await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'prompt'))).toBeNull();
   });
 
-  it('confirm → activated', async () => {
-    const { artifactStore, dispatcher } = makeDispatcher();
+  it('PRI-811 Phase B: prompt auto_activate + confirm queues for Owner approval — no activation row', async () => {
+    const { artifactStore, stateStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact());
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(result.decision).toBe('queued_for_approval');
+    if (result.decision === 'queued_for_approval') {
+      expect(result.approvalId).toBeTruthy();
+    }
+    // Verification 1: the rollout recommendation alone must NOT create an
+    // activation fact.
+    const pending = await approvalStore.listPending();
+    expect(pending).toHaveLength(1);
+    expect(await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'prompt'))).toBeNull();
+  });
+
+  it('PRI-811 Phase B: Owner approval → activation produced via verified approved dispatch', async () => {
+    const { artifactStore, stateStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const queued = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(queued.decision).toBe('queued_for_approval');
+    if (queued.decision !== 'queued_for_approval') return;
+    const approved = await approvalStore.approve(queued.approvalId, 'owner-test');
+    expect(approved.ok).toBe(true);
+
+    // Verification 2: after Owner approval, the activation is produced through
+    // the independently-verified 'approved' dispatch path.
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      channel: 'prompt',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.approvalId,
+    }));
     expect(result.decision).toBe('activated');
     if (result.decision === 'activated') {
       expect(result.activationId).toBe('act_prompt_P_001');
       expect(result.action).toBe('prompt_activate');
       expect(result.targetRef).toBe('ledger://P_001');
     }
+    const status = await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'prompt'));
+    expect(status?.activationId).toBe('act_prompt_P_001');
   });
 
-  it('repeat confirm → already_activated', async () => {
-    const { artifactStore, dispatcher } = makeDispatcher();
+  it('repeat approved dispatch → already_activated', async () => {
+    const { artifactStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact());
-    await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
-    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    const queued = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(queued.decision).toBe('queued_for_approval');
+    if (queued.decision !== 'queued_for_approval') return;
+    const approved = await approvalStore.approve(queued.approvalId, 'owner-test');
+    expect(approved.ok).toBe(true);
+
+    const input = makeDispatchInput({
+      channel: 'prompt',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.approvalId,
+    });
+    await dispatcher.dispatch(input);
+    const result = await dispatcher.dispatch(input);
     expect(result.decision).toBe('already_activated');
     if (result.decision === 'already_activated') {
       expect(result.activationId).toBe('act_prompt_P_001');
@@ -207,18 +271,28 @@ describe('ActivationDispatcher', () => {
   });
 
   it('dry-run does not write activation record', async () => {
-    const { artifactStore, stateStore, dispatcher } = makeDispatcher();
+    const { artifactStore, stateStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact());
     await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: false }));
     const key = makeIdempotencyKey('art-001', 'prompt');
     const status = await stateStore.getActivationStatus(key);
     expect(status).toBeNull();
+    expect(await approvalStore.listPending()).toHaveLength(0);
   });
 
-  it('confirm writes only expected activation record', async () => {
-    const { artifactStore, stateStore, dispatcher } = makeDispatcher();
+  it('approved dispatch persists the expected activation record fields', async () => {
+    const { artifactStore, stateStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact());
-    await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    const queued = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(queued.decision).toBe('queued_for_approval');
+    if (queued.decision !== 'queued_for_approval') return;
+    await approvalStore.approve(queued.approvalId, 'owner-test');
+    await dispatcher.dispatch(makeDispatchInput({
+      channel: 'prompt',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.approvalId,
+    }));
     const key = makeIdempotencyKey('art-001', 'prompt');
     const status = await stateStore.getActivationStatus(key);
     expect(status).not.toBeNull();
@@ -265,31 +339,38 @@ describe('ActivationDispatcher', () => {
     }
   });
 
-  it('defer_archive channel dry-run → would_activate', async () => {
-    const { artifactStore, dispatcher } = makeDispatcher();
+  it('PRI-811 Phase B: defer_archive auto_activate + confirm queues — activation only after approval', async () => {
+    const { artifactStore, stateStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact());
-    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'defer_archive', confirm: false }));
-    expect(result.decision).toBe('would_activate');
-    if (result.decision === 'would_activate') {
-      expect(result.activationId).toBe('act_archive_P_001');
-      expect(result.action).toBe('defer_archive');
-      expect(result.targetRef).toBe('ledger://P_001#archived');
-    }
-  });
+    const queued = await dispatcher.dispatch(makeDispatchInput({ channel: 'defer_archive', confirm: true }));
+    expect(queued.decision).toBe('queued_for_approval');
+    if (queued.decision !== 'queued_for_approval') return;
+    // Recommendation alone must not produce the archive activation fact.
+    expect(await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'defer_archive'))).toBeNull();
 
-  it('defer_archive confirm → activated', async () => {
-    const { artifactStore, dispatcher } = makeDispatcher();
-    artifactStore.addArtifact(makePrincipleArtifact());
-    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'defer_archive', confirm: true }));
+    const approved = await approvalStore.approve(queued.approvalId, 'owner-test');
+    expect(approved.ok).toBe(true);
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      channel: 'defer_archive',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.approvalId,
+    }));
     expect(result.decision).toBe('activated');
     if (result.decision === 'activated') {
       expect(result.activationId).toBe('act_archive_P_001');
       expect(result.targetRef).toBe('ledger://P_001#archived');
     }
+    const status = await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'defer_archive'));
+    expect(status?.activationId).toBe('act_archive_P_001');
   });
 
+  // PRI-811 Phase B: writer canActivate guards run inside the enqueue path
+  // (queue store present), so invalid artifacts are refused before any
+  // approval row is written.
+
   it('non-principle artifact → refused by writer canActivate', async () => {
-    const { artifactStore, dispatcher } = makeDispatcher();
+    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact({ artifactKind: 'rule' }));
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
     expect(result.decision).toBe('refused');
@@ -298,21 +379,21 @@ describe('ActivationDispatcher', () => {
     }
   });
 
-  it('artifact without principleId → invalid_artifact', async () => {
-    const { artifactStore, dispatcher } = makeDispatcher();
+  it('artifact without principleId → refused by writer canActivate', async () => {
+    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact({
       sourcePrincipleId: undefined,
       contentJson: JSON.stringify({ text: 'No principle ID here' }),
     }));
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
-    expect(result.decision).toBe('invalid_artifact');
-    if (result.decision === 'invalid_artifact') {
-      expect(result.reason).toBe('no_principle_id');
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toBe('no_principle_id_in_artifact');
     }
   });
 
   it('pending validation artifact → refused by writer', async () => {
-    const { artifactStore, dispatcher } = makeDispatcher();
+    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact({ validationStatus: 'pending' }));
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
     expect(result.decision).toBe('refused');
@@ -321,34 +402,43 @@ describe('ActivationDispatcher', () => {
     }
   });
 
-  it('whitespace-only sourcePrincipleId → invalid_artifact', async () => {
-    const { artifactStore, dispatcher } = makeDispatcher();
+  it('whitespace-only sourcePrincipleId → refused by writer canActivate', async () => {
+    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact({
       sourcePrincipleId: '   ',
       contentJson: JSON.stringify({ text: 'No principle ID here' }),
     }));
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
-    expect(result.decision).toBe('invalid_artifact');
-    if (result.decision === 'invalid_artifact') {
-      expect(result.reason).toBe('no_principle_id');
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toBe('no_principle_id_in_artifact');
     }
   });
 
-  it('writer.activate throws → refused', async () => {
-    const { artifactStore } = makeDispatcher();
-    artifactStore.addArtifact(makePrincipleArtifact());
+  it('writer.activate throws on approved dispatch → refused', async () => {
     const throwingWriter: ChannelWriter = {
       channel: 'prompt',
       canActivate: async () => ({ ok: true, riskLevel: 'low' as const }),
       activate: async () => { throw new Error('Writer crashed'); },
     };
     const stateStore = new MemoryActivationStateStore();
+    const approvalStore = new MemoryApprovalQueueStore();
     const throwDispatcher = new ActivationDispatcher(
       { getArtifactById: async (id: string) => id === 'art-001' ? makePrincipleArtifact() : null },
       stateStore,
-      { writers: [throwingWriter] },
+      { writers: [throwingWriter], approvalQueueStore: approvalStore },
     );
-    const result = await throwDispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
+    const queued = await throwDispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(queued.decision).toBe('queued_for_approval');
+    if (queued.decision !== 'queued_for_approval') return;
+    const approved = await approvalStore.approve(queued.approvalId, 'owner-test');
+    expect(approved.ok).toBe(true);
+    const result = await throwDispatcher.dispatch(makeDispatchInput({
+      channel: 'prompt',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.approvalId,
+    }));
     expect(result.decision).toBe('refused');
     if (result.decision === 'refused') {
       expect(result.reason).toBe('activation_write_failed');
@@ -374,7 +464,7 @@ describe('ActivationDispatcher', () => {
     const dispatcher = new ActivationDispatcher(
       artifactStore,
       new MemoryActivationStateStore(),
-      { writers: [throwingCanActivateWriter] },
+      { writers: [throwingCanActivateWriter], approvalQueueStore: new MemoryApprovalQueueStore() },
     );
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
     expect(result.decision).toBe('refused');
@@ -408,7 +498,7 @@ describe('ActivationDispatcher', () => {
     const dispatcher = new ActivationDispatcher(
       artifactStore,
       new MemoryActivationStateStore(),
-      { writers: [throwingWriter] },
+      { writers: [throwingWriter], approvalQueueStore: new MemoryApprovalQueueStore() },
     );
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
     expect(result.decision).toBe('refused');
@@ -437,7 +527,7 @@ describe('ActivationDispatcher', () => {
     const dispatcher = new ActivationDispatcher(
       artifactStore,
       new MemoryActivationStateStore(),
-      { writers: [throwingWriter], eventEmitter },
+      { writers: [throwingWriter], approvalQueueStore: new MemoryApprovalQueueStore(), eventEmitter },
     );
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
     expect(result.decision).toBe('refused');
@@ -474,7 +564,7 @@ describe('ActivationDispatcher', () => {
     const dispatcher = new ActivationDispatcher(
       artifactStore,
       new MemoryActivationStateStore(),
-      { writers: [throwingWriter] },
+      { writers: [throwingWriter], approvalQueueStore: new MemoryApprovalQueueStore() },
     );
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
     expect(result.decision).toBe('refused');
@@ -482,21 +572,8 @@ describe('ActivationDispatcher', () => {
       expect(result.details.originalError).toBe('no emitter');
     }
   });
-  // PRI-145: ApprovalQueue & Auto-Promotion
-
-  function makeDispatcherWithQueue() {
-    const stateStore = new MemoryActivationStateStore();
-    const artifactStore = new MemoryArtifactReadModel();
-    const approvalStore = new MemoryApprovalQueueStore();
-    const promptWriter = new PromptWriter();
-    const archiveWriter = new DeferArchiveWriter();
-    const dispatcher = new ActivationDispatcher(
-      artifactStore,
-      stateStore,
-      { writers: [promptWriter, archiveWriter], approvalQueueStore: approvalStore },
-    );
-    return { stateStore, artifactStore, dispatcher, approvalStore };
-  }
+  // PRI-145: ApprovalQueue & Auto-Promotion (auto-promotion bypass removed in
+  // PRI-811 Phase B — all rollout recommendations enqueue for Owner approval)
 
   it('skill with confidence 0.94 + queue store -> queued_for_approval', async () => {
     const { artifactStore, dispatcher } = makeDispatcherWithQueue();
@@ -546,7 +623,7 @@ describe('ActivationDispatcher', () => {
     expect(result.decision).toBe('queued_for_approval');
   });
 
-  it('skill with confidence 0.95 + queue store + writer -> would_activate (auto-promote dry-run)', async () => {
+  it('PRI-811 Phase B: skill with confidence 0.95 + queue store + writer -> queued_for_approval (auto-promote bypass removed)', async () => {
     const skillWriter: ChannelWriter = {
       channel: 'skill',
       canActivate: async () => ({ ok: true, riskLevel: 'medium' }),
@@ -565,18 +642,16 @@ describe('ActivationDispatcher', () => {
       stateStore,
       { writers: [skillWriter], approvalQueueStore: approvalStore },
     );
-    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.95 }));
-    expect(result.decision).toBe('would_activate');
-    if (result.decision === 'would_activate') {
-      expect(result.activationId).toBe('act_skill_P_001');
-      expect(result.action).toBe('skill_activate');
-    }
-    // Verify nothing was queued
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.95, confirm: true }));
+    expect(result.decision).toBe('queued_for_approval');
+    // Even above the old AUTO_PROMOTION_CONFIDENCE_THRESHOLD, a rollout
+    // recommendation must not self-execute: the approval queue holds the item.
     const pending = await approvalStore.listPending();
-    expect(pending).toHaveLength(0);
+    expect(pending).toHaveLength(1);
+    expect(await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'skill'))).toBeNull();
   });
 
-  it('skill with confidence 0.96 + queue store + writer -> activated (auto-promote confirm)', async () => {
+  it('PRI-811 Phase B: skill with confidence 0.96 + confirm -> queued (no direct activation)', async () => {
     const skillWriter: ChannelWriter = {
       channel: 'skill',
       canActivate: async () => ({ ok: true, riskLevel: 'medium' }),
@@ -596,13 +671,12 @@ describe('ActivationDispatcher', () => {
       { writers: [skillWriter], approvalQueueStore: approvalStore },
     );
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.96, confirm: true }));
-    expect(result.decision).toBe('activated');
-    if (result.decision === 'activated') {
-      expect(result.activationId).toBe('act_skill_P_001');
+    expect(result.decision).toBe('queued_for_approval');
+    if (result.decision === 'queued_for_approval') {
+      expect(result.approvalId).toBeTruthy();
     }
-    // Verify nothing was queued
     const pending = await approvalStore.listPending();
-    expect(pending).toHaveLength(0);
+    expect(pending).toHaveLength(1);
   });
 
   // PRI-185: Context fields in queued approval records

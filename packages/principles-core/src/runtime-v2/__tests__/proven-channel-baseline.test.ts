@@ -90,17 +90,10 @@ describe('Proven Channel Baseline (PRI-240)', () => {
 
       expect(result.channel).toBe('prompt');
       expect(result.status).toBe('passed');
-      expect(['would_activate', 'activated']).toContain(result.activationDecision.decision);
-
-      if (result.activationDecision.decision === 'would_activate' || result.activationDecision.decision === 'activated') {
-        expect(result.activationDecision.activationId).toContain('act_prompt_');
-        expect(result.activationDecision.action).toBe('prompt_activate');
-        expect(result.activationDecision.targetRef).toContain('ledger://');
-      }
-
-      expect(result.evidence).toHaveProperty('activationId');
-      expect(result.evidence).toHaveProperty('evidenceSource');
-      expect(result.evidenceSource).toContain('ActivationDispatcher');
+      // PRI-811 Phase B: the rollout recommendation enqueues for Owner approval.
+      expect(result.activationDecision.decision).toBe('queued_for_approval');
+      expect(result.evidence).toHaveProperty('queueBehavior');
+      expect(result.evidence.queueBehavior).toBe('enqueued');
       expect(result.failureReason).toBeUndefined();
       expect(result.dependsOnLegacy).toBe(false);
     });
@@ -168,18 +161,10 @@ describe('Proven Channel Baseline (PRI-240)', () => {
 
       expect(result.channel).toBe('defer_archive');
       expect(result.status).toBe('passed');
-      expect(['would_activate', 'activated']).toContain(result.activationDecision.decision);
-
-      if (result.activationDecision.decision === 'would_activate' || result.activationDecision.decision === 'activated') {
-        expect(result.activationDecision.activationId).toContain('act_archive_');
-        expect(result.activationDecision.action).toBe('defer_archive');
-        expect(result.activationDecision.targetRef).toContain('ledger://');
-        expect(result.activationDecision.targetRef).toContain('#archived');
-      }
-
-      expect(result.evidence).toHaveProperty('activationId');
-      expect(result.evidence).toHaveProperty('evidenceSource');
-      expect(result.evidenceSource).toContain('ActivationDispatcher');
+      // PRI-811 Phase B: the rollout recommendation enqueues for Owner approval.
+      expect(result.activationDecision.decision).toBe('queued_for_approval');
+      expect(result.evidence).toHaveProperty('queueBehavior');
+      expect(result.evidence.queueBehavior).toBe('enqueued');
       expect(result.failureReason).toBeUndefined();
       expect(result.dependsOnLegacy).toBe(false);
     });
