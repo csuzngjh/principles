@@ -16,13 +16,18 @@ import { safeRmDir } from '../test-utils.js';
  * re-throw.
  */
 
+// vi.mock factories are hoisted above this declaration, but injectedCode is
+// only read when rmSync is *called* (inside a test body), never at import
+// time — so the temporal-dead-zone window never opens.
 let injectedCode: string | null = null;
+let rmSyncCalls = 0;
 
 vi.mock('fs', async (importOriginal) => {
     const orig = await importOriginal<typeof import('fs')>();
     return {
         ...orig,
-        rmSync: ((p: Parameters<typeof orig.rmSync>[0], opts?: { recursive?: boolean; force?: boolean }) => {
+        rmSync: ((p: Parameters<typeof orig.rmSync>[0], opts?: Parameters<typeof orig.rmSync>[1]) => {
+            rmSyncCalls += 1;
             if (injectedCode) {
                 const err: NodeJS.ErrnoException = new Error(`mock ${injectedCode}`);
                 err.code = injectedCode;
@@ -48,8 +53,12 @@ describe('safeRmDir error tolerance (PRI-840)', () => {
         (code) => {
             const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-safermock-'));
             injectedCode = code;
+            rmSyncCalls = 0;
             try {
+                // rmSyncCalls proves the interception fired: without it the
+                // assertion would also pass on a real (throwing-free) rmSync.
                 expect(() => safeRmDir(dir)).not.toThrow();
+                expect(rmSyncCalls).toBe(1);
             } finally {
                 cleanup(dir);
             }
@@ -59,8 +68,10 @@ describe('safeRmDir error tolerance (PRI-840)', () => {
     it('still re-throws errors outside the tolerated race set', () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-safermock-'));
         injectedCode = 'EACCES';
+        rmSyncCalls = 0;
         try {
             expect(() => safeRmDir(dir)).toThrow('mock EACCES');
+            expect(rmSyncCalls).toBe(1);
         } finally {
             cleanup(dir);
         }
