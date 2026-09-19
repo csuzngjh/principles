@@ -267,28 +267,30 @@ describe('release publication contract', () => {
       archives: [{ platform: 'win32', arch: 'x64', nodeAbi: '147', bytes: Buffer.alloc(0) }],
     }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({ archives: [] }))).toThrow(ReleasePublicationError);
-    // The artifact target path is platform/arch-qualified and carries no Node
-    // ABI, so a second archive for one platform/arch would overwrite the first
-    // target. release-identity.ts only rejects the identical triple (its key
-    // includes nodeAbi), so the path collision must fail loud here instead.
+    // The artifact target path carries the Node ABI (PRI-852): a triple
+    // collision still fails loud, but two runtimes on one platform are two
+    // DISTINCT signed targets.
     expect(() => buildReleasePublication(publicationInput({
       archives: [
         makeArchive('win32', 'x64', '147', 'pd-release-payload-bytes'),
         makeArchive('win32', 'x64', '147', 'pd-release-payload-bytes'),
       ],
-    }))).toThrow(/Duplicate platform asset target/);
+    }))).toThrow(/Duplicate asset identity/);
     expect(() => buildReleasePublication(publicationInput({
       archives: [makeArchive('Win32', 'x64', '147', 'pd-release-payload-bytes')],
     }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({
       archives: [makeArchive('win32', 'x64', 'abi137', 'pd-release-payload-bytes')],
     }))).toThrow(ReleasePublicationError);
-    expect(() => buildReleasePublication(publicationInput({
+    // PRI-852: same platform, two runtimes — both publish as separate targets.
+    const dualAbiPublication = buildReleasePublication(publicationInput({
       archives: [
         makeArchive('win32', 'x64', '137', 'pd-release-payload-a'),
         makeArchive('win32', 'x64', '147', 'pd-release-payload-b'),
       ],
-    }))).toThrow(/Duplicate platform asset target/);
+    }));
+    const dualAbiTargets = dualAbiPublication.files.map((f) => f.path).filter((p) => p.includes('release-asset-'));
+    expect(dualAbiTargets).toHaveLength(2);
     expect(() => buildReleasePublication(publicationInput({ signingKeyPem: '' }))).toThrow(ReleasePublicationError);
     expect(() => buildReleasePublication(publicationInput({ signingKeyPem: 'not a key' }))).toThrow(ReleasePublicationError);
   });

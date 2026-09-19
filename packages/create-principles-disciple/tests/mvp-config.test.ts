@@ -1162,24 +1162,24 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
     expect(hostInstallersIndex).toBeGreaterThan(storyALastIndex);
   });
 
-  it('cleanupBackup runs after runHostInstallers', () => {
+  it('retainSupersededBackup runs after runHostInstallers (PRI-853: retention replaces deletion)', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     const hostInstallersIndex = content.indexOf('await runHostInstallers(');
-    const cleanupIndex = content.indexOf('cleanupBackup(backupDir, runtimeBackupDir)');
-    expect(cleanupIndex).toBeGreaterThan(hostInstallersIndex);
+    const retainIndex = content.indexOf('retainSupersededBackup(backupDir, runtimeBackupDir)');
+    expect(retainIndex).toBeGreaterThan(hostInstallersIndex);
   });
 
   // Regression (CodeRabbit #3758794660 + PRI-583 review, rc-9): a host
   // failure must enter the atomic rollback catch before backups are deleted.
-  it('rolls back before cleanup when a host installer fails (rc-9)', () => {
+  it('rolls back before retention/pruning when a host installer fails (rc-9)', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     expect(content).toContain('hostFailures.push');
     const failureThrow = content.indexOf('throw new Error(`Host installation failed:');
-    const cleanup = content.indexOf('cleanupBackup(backupDir, runtimeBackupDir)', failureThrow);
+    const retain = content.indexOf('retainSupersededBackup(backupDir, runtimeBackupDir)', failureThrow);
     expect(failureThrow).toBeGreaterThan(0);
-    expect(cleanup).toBeGreaterThan(failureThrow);
+    expect(retain).toBeGreaterThan(failureThrow);
   });
 
   it('catch block kills console child process', () => {

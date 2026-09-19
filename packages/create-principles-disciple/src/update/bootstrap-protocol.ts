@@ -14,9 +14,10 @@ import { isReleaseChannelName } from './product-identity.js';
 import type { ReleaseManager} from './release-manager.js';
 import { ReleaseManagerError } from './release-manager.js';
 
-export type BootstrapRequestOp = 'inspect' | 'check' | 'apply';
+export type BootstrapRequestOp = 'ping' | 'inspect' | 'check' | 'apply';
 
 export type BootstrapRequest =
+  | { readonly op: 'ping' }
   | { readonly op: 'inspect' }
   | { readonly op: 'check'; readonly channel: ReleaseChannelName }
   | { readonly op: 'apply'; readonly workspaceDir: string; readonly transactionId?: string };
@@ -73,7 +74,7 @@ export function parseBootstrapRequest(raw: string): BootstrapRequest {
     throw new BootstrapProtocolError('protocol_missing_op', 'The bootstrap request is missing the required "op" field.');
   }
   const {op} = record;
-  const knownOps: readonly BootstrapRequestOp[] = ['inspect', 'check', 'apply'];
+  const knownOps: readonly BootstrapRequestOp[] = ['ping', 'inspect', 'check', 'apply'];
   if (typeof op !== 'string' || !knownOps.includes(op as BootstrapRequestOp)) {
     throw new BootstrapProtocolError('protocol_unknown_op', `Unknown bootstrap op: ${JSON.stringify(op)}. Supported: ${knownOps.join(', ')}.`);
   }
@@ -135,6 +136,11 @@ export async function handleBootstrapRequest(
 ): Promise<BootstrapResponse> {
   try {
     switch (request.op) {
+      case 'ping':
+        // PRI-850 review fix: a liveness/program-health op that touches NO
+        // installation state. The installer's delivery probe uses it so a
+        // corrupt pending-repair registration can never fail the probe.
+        return { ok: true, result: { pong: true } };
       case 'inspect':
         return { ok: true, result: await Promise.resolve(manager.inspect()) };
       case 'check':

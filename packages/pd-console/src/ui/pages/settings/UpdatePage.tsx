@@ -18,6 +18,7 @@ import {
   fetchUpdateHistory,
   applyFullUpdate,
   fetchUpdateRecovery,
+  fetchUpdateTransaction,
 } from "../../api.js";
 import type {
   UpdateStatusData,
@@ -25,7 +26,7 @@ import type {
   ApplyUpdateResultData,
   UpdateRecoveryData,
 } from "../../api.js";
-import { validateUpdateStatus, validateUpdateHistory, validateUpdateRecovery } from "../../utils/validators.js";
+import { validateUpdateStatus, validateUpdateHistory, validateUpdateRecovery, validateUpdateTransaction } from "../../utils/validators.js";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -65,6 +66,9 @@ export function UpdatePage() {
   const [showFullUpdateDialog, setShowFullUpdateDialog] = useState(false);
   const [fullUpdating, setFullUpdating] = useState(false);
   const [recoveryData, setRecoveryData] = useState<UpdateRecoveryData | null>(null);
+  // PRI-853 (SPEC §12.1): a running detached update — the page tracks its
+  // transaction instead of treating the accepted request as "success".
+  const [inProgress, setInProgress] = useState<{ transactionId: string; phase: string | null } | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -148,6 +152,13 @@ export function UpdatePage() {
       return;
     }
     const data = result.data as ApplyUpdateResultData;
+    if (data.state === 'update_in_progress' && data.transactionId) {
+      // PRI-853 (SPEC §12.1): an ACCEPTED request is not a completed update.
+      // Track the detached transaction; only its terminal phase ends this flow.
+      setInProgress({ transactionId: data.transactionId, phase: null });
+      toast.info(t('pages.update.inProgressToast'));
+      return;
+    }
     if (data.success) {
       setUpdateResult({
         success: true,
@@ -171,6 +182,40 @@ export function UpdatePage() {
       toast.error(t('pages.update.updateFailed', { message: data.message }));
     }
   }, [t, loadData, statusData?.currentVersion]);
+
+  // PRI-853: poll the detached update's transaction until a terminal phase.
+  useEffect(() => {
+    if (!inProgress) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tick = async () => {
+      if (cancelled) return;
+      attempts += 1;
+      const result = await fetchUpdateTransaction(inProgress.transactionId);
+      if (cancelled) return;
+      const tx = result.success ? validateUpdateTransaction(result.data) : null;
+      if (tx === null || !tx.exists) {
+        if (attempts >= 200) {
+          setInProgress(null);
+          setUpdateResult({ success: false, message: t('pages.update.inProgressTimeout'), reason: 'transaction_unresolved' });
+        }
+        return;
+      }
+      setInProgress({ transactionId: inProgress.transactionId, phase: tx.lastState });
+      if (!tx.terminal) return;
+      setInProgress(null);
+      if (tx.lastState === 'confirmed') {
+        setUpdateResult({ success: true, message: t('pages.update.inProgressConfirmed', { version: tx.productVersion ?? '' }), requiresRestart: true });
+        toast.success(t('pages.update.fullUpdateSuccess'));
+      } else {
+        setUpdateResult({ success: false, message: t('pages.update.inProgressEnded', { state: tx.lastState ?? '' }) });
+      }
+      await loadData();
+    };
+    const timer = setInterval(tick, 3000);
+    void tick();
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [inProgress?.transactionId, t, loadData]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
@@ -334,12 +379,27 @@ export function UpdatePage() {
             </div>
           )}
 
+          {/* PRI-853: in-progress panel — the accepted detached transaction is
+              the live state; phases stream from the transaction endpoint. */}
+          {inProgress && (
+            <div className="mt-4 p-4 rounded-[6px] border border-gov/30 bg-surface text-[13px] leading-relaxed" role="status">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-gov" />
+                <span className="font-medium text-ink">{t("pages.update.inProgressPanel")}</span>
+              </div>
+              <p className="mt-1 font-mono text-[12px] text-ink-3">
+                {t("pages.update.inProgressPhase", { phase: inProgress.phase ?? "…" })}
+              </p>
+              <p className="mt-1 font-mono text-[12px] text-ink-4">{inProgress.transactionId}</p>
+            </div>
+          )}
+
           {/* Buttons — one check + one update */}
           <div className="mt-5 pt-4 border-t border-line flex items-center gap-3 flex-wrap">
             <button
               type="button"
               onClick={handleCheckForUpdates}
-              disabled={checking || fullUpdating}
+              disabled={checking || fullUpdating || inProgress !== null}
               className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {checking ? t("pages.update.checking") : t("pages.update.checkForUpdates")}
@@ -348,7 +408,7 @@ export function UpdatePage() {
               <button
                 type="button"
                 onClick={() => setShowFullUpdateDialog(true)}
-                disabled={checking || fullUpdating}
+                disabled={checking || fullUpdating || inProgress !== null}
                 className="bg-gov text-white rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {fullUpdating ? (

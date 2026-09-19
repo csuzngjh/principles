@@ -506,6 +506,10 @@ program
   .description('Repair the self-update capability (bootstrap executor + update source) without touching the installed product')
   .option('--json', 'Output result as JSON', false)
   .action(async (options) => {
+    // PRI-850 review fix (cli-1): --json stdout must be EXACTLY one parseable
+    // JSON document — the logger (and its ℹ/warn banners) is silenced first,
+    // so delivery progress can never precede the JSON on stdout.
+    if (options.json) setQuietMode(true);
     const { repairUpdateChain } = await import('./installer.js');
     const result = await repairUpdateChain({
       sourcePackageDir: path.resolve(url.fileURLToPath(import.meta.url), '../..'),

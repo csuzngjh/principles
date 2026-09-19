@@ -51,6 +51,7 @@ export type ReleaseManagerReason =
   | 'metadata_refresh_failed'
   | 'release_metadata_unavailable'
   | 'release_metadata_invalid'
+  | 'runtime_not_supported'
   | 'active_record_corrupt'
   | 'legacy_layout_not_supported'
   | 'journal_unavailable'
@@ -295,16 +296,14 @@ export class ReleaseManager {
   }
 
   /**
-   * PRI-853 (SPEC §10): the metadata of the retained previous release, when
-   * one exists and reads cleanly. Anything missing or unreadable degrades to
-   * `null` — the compatibility policy treats that as "no retained previous"
-   * rather than guessing an identity from file names or timestamps.
+   * PRI-853 review fix: the signed metadata of an installed release identity
+   * (`releases/<releaseId>/metadata.json`), or null when the file is absent
+   * or unreadable. Callers decide whether null is acceptable — for the data
+   * compatibility preflight it is NOT (refuse install_identity_unverifiable).
    */
-  private readRetainedPreviousReleaseMetadata(): ReleaseMetadata | null {
+  private readReleaseMetadataByIdentity(releaseId: string): ReleaseMetadata | null {
     try {
-      const previous = readActiveRecord(this.paths.previousRecordPath);
-      if (previous === null) return null;
-      const metadataPath = path.join(this.paths.releasesDir, previous.releaseId, 'metadata.json');
+      const metadataPath = path.join(this.paths.releasesDir, releaseId, 'metadata.json');
       if (!fs.existsSync(metadataPath)) return null;
       return parseReleaseMetadata(JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as unknown);
     } catch {
@@ -383,14 +382,32 @@ export class ReleaseManager {
       return { kind: 'no_update', reason: decision.reason, note: decision.message };
     }
 
-    // PRI-853 (SPEC §10 wired): data compatibility preflight — the retained
-    // previous release must sit inside the candidate's forward-readable
-    // window, otherwise an ordinary update could strand code rollback and is
-    // refused into the separate maintenance workflow. No journal is opened:
-    // this is still a clean, unjournaled refusal.
+    // PRI-853 (SPEC §10 wired, review fix P1): data compatibility preflight
+    // runs against the CURRENTLY ACTIVE release — the release whose data must
+    // remain readable so the pre-update state can be restored. Not
+    // previous.json: a first-ever update has no retained previous, and that
+    // absence must never silently disable the check. If the active identity
+    // or its metadata is missing/unreadable, the update refuses with
+    // install_identity_unverifiable — absence is never treated as "compatible".
+    const activeIdentityForCompat = readActiveRecord(this.paths.activeRecordPath);
+    if (activeIdentityForCompat === null) {
+      return {
+        kind: 'no_update',
+        reason: 'install_identity_unverifiable',
+        note: 'The installation has no readable active release record, so its data compatibility cannot be proven.',
+      };
+    }
+    const activeMetadata = this.readReleaseMetadataByIdentity(activeIdentityForCompat.releaseId);
+    if (activeMetadata === null) {
+      return {
+        kind: 'no_update',
+        reason: 'install_identity_unverifiable',
+        note: `The installed release ${activeIdentityForCompat.releaseId} has no readable signed metadata, so data compatibility cannot be proven.`,
+      };
+    }
     const dataCompatibility = evaluateDataCompatibility({
       candidate: releaseMetadata,
-      previous: this.readRetainedPreviousReleaseMetadata(),
+      previous: activeMetadata,
     });
     if (!dataCompatibility.eligible) {
       return { kind: 'no_update', reason: dataCompatibility.reason, note: dataCompatibility.message };

@@ -426,11 +426,11 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     const keyB = `${b.platform}/${b.arch}/abi${b.nodeAbi}`;
     return keyA < keyB ? -1 : keyA > keyB ? 1 : 0;
   });
-  // Same platform/arch twice would generate the same artifact target path
-  // (the path carries no ABI), with the later entry silently overwriting the
-  // earlier one in `artifactTargets` while `artifactFiles` keeps both — an
-  // inconsistent publication. Reject before any bytes are emitted (rc-3).
-  const seenPlatformTargets = new Set<string>();
+  // PRI-852 review fix: the duplicate key is the FULL asset identity —
+  // platform + arch + Node ABI. Two runtimes on one platform are DISTINCT
+  // assets with distinct target paths; only a true triple collision
+  // (same platform/arch/ABI twice) is a publication error.
+  const seenAssetTargets = new Set<string>();
   for (const [index, archive] of sortedArchives.entries()) {
     for (const [field, value] of [['platform', archive.platform], ['arch', archive.arch]] as const) {
       if (typeof value !== 'string' || value.length === 0 || !PLATFORM_ARCH_PATTERN.test(value)) {
@@ -458,16 +458,16 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
         'Build the self-contained release asset first; nothing is published without the artifact bytes.',
       );
     }
-    const platformTarget = `${archive.platform}/${archive.arch}`;
-    if (seenPlatformTargets.has(platformTarget)) {
+    const assetTarget = `${archive.platform}/${archive.arch}/abi${archive.nodeAbi}`;
+    if (seenAssetTargets.has(assetTarget)) {
       throw new ReleasePublicationError(
         'invalid_input',
         `archives[${index}]`,
-        `Duplicate platform asset target: ${platformTarget} — the artifact target path carries no Node ABI, so a second archive for this platform/arch collides with the first.`,
-        'Pass exactly one archive per platform/arch pair; multi-ABI publishing needs ABI-qualified artifact paths (not supported yet).',
+        `Duplicate asset identity: ${assetTarget} — two archives claim the same platform, architecture and Node ABI.`,
+        'Pass exactly one archive per platform/arch/ABI triple; different runtimes must publish their own ABI-qualified assets.',
       );
     }
-    seenPlatformTargets.add(platformTarget);
+    seenAssetTargets.add(assetTarget);
   }
   const signer = requireSigner(input.signingKeyPem);
 

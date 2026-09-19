@@ -350,21 +350,31 @@ export function commitInstallerActiveRecord(journal: InstallerJournal): ActiveRe
  * strict reader would then fail loud and mark the install corrupt.
  */
 export function persistReleaseMetadataSource(): void {
-  // PRI-853 (SPEC v0.3 §13): an official install registers the MAINTAINED
-  // official update source by default — the pre-850 default (silently
-  // unconfigured) left every fresh install unable to check for updates. An
-  // explicit env value still wins (custom source, staging, air-gapped tests);
-  // the trust root stays a separate anchor, so a changed URL never changes
-  // who is trusted, only where metadata is fetched from.
-  const raw = process.env[RELEASE_METADATA_URL_ENV] ?? DEFAULT_RELEASE_METADATA_URL;
-  const normalized = normalizeReleaseMetadataUrl(raw);
+  // PRI-853 review fix (precedence): explicit env wins → an EXISTING persisted
+  // source (e.g. the Owner's custom source) is preserved → the maintained
+  // official default is written only when neither exists. The trust root
+  // stays a separate anchor: a changed URL never changes who is trusted.
+  const envValue = process.env[RELEASE_METADATA_URL_ENV];
+  const existingPath = getInstallManifestPath();
+  let existing: string | undefined;
+  try {
+    existing = readInstallConfig(resolvePdHomePaths(getPdDir())).releaseMetadataUrl;
+  } catch {
+    existing = undefined;
+  }
+  const candidate = envValue !== undefined && envValue.trim().length > 0
+    ? envValue
+    : existing !== undefined
+      ? existing
+      : DEFAULT_RELEASE_METADATA_URL;
+  const normalized = normalizeReleaseMetadataUrl(candidate);
   if (normalized === null) {
     logger.warn(
-      `${RELEASE_METADATA_URL_ENV} is not a valid http(s) URL and was not persisted to install.json: ${JSON.stringify(raw)}. Release metadata source stays unconfigured.`,
+      `Release metadata source candidate is not a valid http(s) URL and was not persisted to install.json: ${JSON.stringify(candidate)}. Release metadata source stays unconfigured.`,
     );
     return;
   }
-  mergeIntoInstallJson(getInstallManifestPath(), { releaseMetadataUrl: normalized });
+  mergeIntoInstallJson(existingPath, { releaseMetadataUrl: normalized });
 }
 
 /**
@@ -438,17 +448,22 @@ export async function deliverBootstrapExecutor(input: {
   const stagingDir = path.join(paths.bootstrapDir, 'executor.staging');
   const previousDir = path.join(paths.bootstrapDir, 'executor.previous');
 
-  // Same-version fast path: the bootstrap is STABLE by design (SPEC §6.1) —
-  // re-staging the dependency closure on every reinstall would cost seconds
-  // for zero capability change. Only a version change (or missing/corrupt
-  // state) re-runs the full delivery.
+  // Same-version fast path (PRI-850 review fix): skipping is only safe when
+  // the deployed bytes RE-VERIFY against the registration — the digest is
+  // recomputed from the tree, never trusted from the manifest. Corrupt or
+  // mismatched state falls through to full re-delivery, which is how repair
+  // actually heals a broken executor.
   try {
     const existing = readBootstrapManifest(paths);
     const packageManifest = JSON.parse(readFileSync(path.join(input.sourcePackageDir, 'package.json'), 'utf8')) as { version?: unknown };
     const currentVersion = typeof packageManifest.version === 'string' && packageManifest.version.length > 0 ? packageManifest.version : '0.0.0';
     if (existing !== null && existing.bootstrapVersion === currentVersion && existing.executorDigest !== undefined && existsSync(paths.bootstrapExecutorDir)) {
-      logger.info(`Bootstrap update executor already at ${currentVersion} — skipping re-delivery.`);
-      return { bootstrapVersion: existing.bootstrapVersion, executorDigest: existing.executorDigest, executorDir: paths.bootstrapExecutorDir };
+      const actualDigest = digestDirectory(paths.bootstrapExecutorDir);
+      if (actualDigest === existing.executorDigest) {
+        logger.info(`Bootstrap update executor already at ${currentVersion} — skipping re-delivery.`);
+        return { bootstrapVersion: existing.bootstrapVersion, executorDigest: existing.executorDigest, executorDir: paths.bootstrapExecutorDir };
+      }
+      logger.warn(`Bootstrap executor digest mismatch (${actualDigest.slice(0, 12)} ≠ ${existing.executorDigest.slice(0, 12)}) — re-deploying.`);
     }
   } catch {
     // Corrupt registration falls through to full re-delivery (which rewrites it).
@@ -476,7 +491,10 @@ export async function deliverBootstrapExecutor(input: {
     const probeDir = mkdtempSync(path.join(tmpdir(), 'pd-bootstrap-probe-'));
     try {
       const resultFile = path.join(probeDir, 'result.json');
-      const probe = await staged.runBootstrapExecutor({ rawRequest: `${JSON.stringify({ op: 'inspect' })}\n`, resultFile });
+      // Ping, not inspect: the probe verifies the STAGED PROGRAM loads and
+      // answers the protocol — it must stay independent of the installation
+      // state being repaired (review P1-2).
+      const probe = await staged.runBootstrapExecutor({ rawRequest: `${JSON.stringify({ op: 'ping' })}\n`, resultFile });
       if (!probe.response.ok) {
         throw new Error(`probe response not ok: ${readFileSync(resultFile, 'utf8').slice(0, 200)}`, { cause: new Error('bootstrap executor answered ok:false') });
       }

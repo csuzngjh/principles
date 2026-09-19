@@ -86,6 +86,13 @@ on:
         required: false
         default: false
         type: boolean
+      data_schema_forward_readable_from:
+        description: >-
+          Oldest release whose data the candidate keeps readable (SPEC §10).
+          REQUIRED with a justified value proven by tests against that release —
+          a blind default is not evidence (PRI-853).
+        required: true
+        type: string
       expires_at:
         description: 'Metadata expiry, RFC3339 UTC ("auto" = now + 90 days; pass explicitly when re-publishing a release)'
         required: false
@@ -493,7 +500,7 @@ jobs:
             --publication-sequence "${{ needs.resolve-inputs.outputs.publication_sequence }}"
             --expires-at "${{ needs.resolve-inputs.outputs.expires_at }}"
             --min-bootstrap-version 1.0.0
-            --data-schema-forward-readable-from 1.220.0
+            --data-schema-forward-readable-from "${{ github.event.inputs.data_schema_forward_readable_from }}"
             --output-dir "$RUNNER_TEMP/metadata-repo"
           )
           if [ -n "$PD_RELEASE_SIGNING_KEY" ]; then

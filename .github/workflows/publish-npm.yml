@@ -752,7 +752,12 @@ jobs:
       - name: Resolve train product identity
         id: train-identity
         run: |
-          VERSION=$(node -p "require('./packages/principles-disciple/package.json').version")
+          # Review P1-5 fix: the product manifest is the ROOT package.json
+          # (the full-product version carrier). packages/principles-disciple
+          # does not exist — the plugin lives at packages/openclaw-plugin and
+          # its npm version is a component diagnostic, never the product
+          # identity.
+          VERSION=$(node -p "require('./package.json').version")
           if ! echo "$VERSION" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
             echo "::error::Product identity version is not a strict x.y.z version: $VERSION"
             exit 1

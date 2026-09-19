@@ -1373,6 +1373,12 @@
       "reasonLabel": "原因：",
       "recoveryBanner": "检测到未完成的更新事务",
       "recoveryItem": "事务 {{id}} 停留在阶段「{{phase}}」",
+      "inProgressToast": "更新事务已受理，正在后台执行；请勿重复点击。",
+      "inProgressPanel": "更新进行中",
+      "inProgressPhase": "当前阶段：{{phase}}",
+      "inProgressConfirmed": "更新已完成（{{version}}）。请重启控制台加载新版本。",
+      "inProgressEnded": "更新事务已结束：{{state}}",
+      "inProgressTimeout": "更新耗时较长，未能确认结果。请稍后在更新历史中查看该事务。",
       "reason": {
         "bootstrap_too_old": "本机的更新底座组件版本过低，无法安装此版本。请运行官方安装器（npx create-principles-disciple）完成修复后再试。",
         "bootstrap_not_registered": "本机缺少更新底座登记（旧版安装）。请运行官方安装器完成修复后再试。",

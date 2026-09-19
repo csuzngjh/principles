@@ -108,7 +108,7 @@ function confirmThroughInstaller(journal: InstallerJournal | undefined): void {
 }
 
 describe('ReleaseManager.apply — orchestration through installer + journal (PRI-698 Phase 1)', () => {
-  it('refuses the ordinary update when the retained previous release sits outside the candidate data window (PRI-853)', async () => {
+  it('refuses the ordinary update when the ACTIVE release sits outside the candidate data window (PRI-853)', async () => {
     // The candidate's forward-readable window (1.224.0) EXCLUDES the retained
     // previous release (1.222.0): ordinary update must refuse cleanly —
     // no transaction opened, no install invocation — per SPEC §10.

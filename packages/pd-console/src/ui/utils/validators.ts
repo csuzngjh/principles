@@ -2583,8 +2583,10 @@ export interface ApplyUpdateResultData {
   message: string;
   /** PRI-848 (SPEC §12.1): a policy refusal is a structured non-success, never a success-shaped "no update applied". */
   refusal?: boolean;
-  /** PRI-848: explicit result state (`update_blocked`, `awaiting_restart`). */
-  state?: 'update_blocked' | 'awaiting_restart';
+  /** PRI-848: explicit result state. `update_in_progress` = the detached
+   * executor accepted the transaction; poll the transaction endpoint until it
+   * reaches a terminal phase. */
+  state?: 'update_blocked' | 'awaiting_restart' | 'update_in_progress';
   /** PRI-848: queryable transaction id of the confirmed update (SPEC §12.1 continuation contract). */
   transactionId?: string;
   updatedFiles?: string[];
@@ -2613,7 +2615,8 @@ export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | n
   if (Object.hasOwn(v, 'refusal') && typeof v.refusal === 'boolean') {
     result.refusal = v.refusal;
   }
-  if (Object.hasOwn(v, 'state') && isString(v.state) && (v.state === 'update_blocked' || v.state === 'awaiting_restart')) {
+  if (Object.hasOwn(v, 'state') && isString(v.state)
+    && (v.state === 'update_blocked' || v.state === 'awaiting_restart' || v.state === 'update_in_progress')) {
     result.state = v.state;
   }
   if (Object.hasOwn(v, 'transactionId') && isString(v.transactionId)) {
@@ -2689,6 +2692,38 @@ export function validateUpdateRecovery(v: unknown): UpdateRecoveryData | null {
   }
   const result: UpdateRecoveryData = { needsRecovery: v.needsRecovery, unfinished, broken };
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
+  return result;
+}
+
+// ── Update transaction validators (PRI-848/853, SPEC §12.1) ─────────────────
+
+export interface UpdateTransactionData {
+  transactionId: string;
+  exists: boolean;
+  lastState: string | null;
+  terminal: boolean;
+  tornTailDetected?: boolean;
+  startedAt?: string | null;
+  lastAt?: string | null;
+  productVersion?: string | null;
+  reason?: string;
+}
+
+export function validateUpdateTransaction(v: unknown): UpdateTransactionData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'transactionId') || !isString(v.transactionId)) return null;
+  if (!Object.hasOwn(v, 'exists') || typeof v.exists !== 'boolean') return null;
+  const result: UpdateTransactionData = {
+    transactionId: v.transactionId,
+    exists: v.exists,
+    lastState: Object.hasOwn(v, 'lastState') && isString(v.lastState) ? v.lastState : null,
+    terminal: Object.hasOwn(v, 'terminal') && typeof v.terminal === 'boolean' ? v.terminal : false,
+    tornTailDetected: Object.hasOwn(v, 'tornTailDetected') && typeof v.tornTailDetected === 'boolean' ? v.tornTailDetected : false,
+    startedAt: Object.hasOwn(v, 'startedAt') && isString(v.startedAt) ? v.startedAt : null,
+    lastAt: Object.hasOwn(v, 'lastAt') && isString(v.lastAt) ? v.lastAt : null,
+    productVersion: Object.hasOwn(v, 'productVersion') && isString(v.productVersion) ? v.productVersion : null,
+    reason: Object.hasOwn(v, 'reason') && isString(v.reason) ? v.reason : undefined,
+  };
   return result;
 }
 

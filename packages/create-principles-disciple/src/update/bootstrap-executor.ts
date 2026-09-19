@@ -44,27 +44,35 @@ export async function runBootstrapExecutor(options: BootstrapExecutorOptions): P
   let resultFile: string | null = null;
   try {
     const request = parseBootstrapRequest(options.rawRequest);
-    const authority = createReleaseManagerAuthority({
-      pdHome: path.join(os.homedir(), '.pd'),
-      // The executor resolves the metadata source exactly like the Console:
-      // process env first, then the durable install.json tier. No guessing.
-      metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
-    });
-    // Only apply passes the authority readiness gate — read ops (inspect /
-    // check) must answer on ANY installation so the repair flow can see the
-    // actual state; check carries its own policy gating.
-    if (request.op === 'apply' && !authority.kinds['apply-full'].ready) {
-      const readiness = authority.kinds['apply-full'];
-      response = {
-        ok: false,
-        reason: readiness.reasons[0] ?? 'install_state_corrupt',
-        message: 'The installation is not ready for a signed release update.',
-        nextAction: 'Run the official installer (npx create-principles-disciple) to repair the installation, then retry.',
-      };
+    // PRI-850 review fix: `ping` is a program-liveness self-check — it must
+    // answer WITHOUT reading installation state, so a corrupt pending-repair
+    // registration can never fail the delivery probe. Install-state-dependent
+    // ops construct the authority (whose readiness reflects that state).
+    if (request.op === 'ping') {
+      response = { ok: true, result: { pong: true } };
     } else {
-      // handleBootstrapRequest never throws: manager failures come back as
-      // structured protocol refusals.
-      response = await handleBootstrapRequest(request, authority.manager);
+      const authority = createReleaseManagerAuthority({
+        pdHome: path.join(os.homedir(), '.pd'),
+        // The executor resolves the metadata source exactly like the Console:
+        // process env first, then the durable install.json tier. No guessing.
+        metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
+      });
+      // Only apply passes the authority readiness gate — read ops (inspect /
+      // check) must answer on ANY installation so the repair flow can see the
+      // actual state; check carries its own policy gating.
+      if (request.op === 'apply' && !authority.kinds['apply-full'].ready) {
+        const readiness = authority.kinds['apply-full'];
+        response = {
+          ok: false,
+          reason: readiness.reasons[0] ?? 'install_state_corrupt',
+          message: 'The installation is not ready for a signed release update.',
+          nextAction: 'Run the official installer (npx create-principles-disciple) to repair the installation, then retry.',
+        };
+      } else {
+        // handleBootstrapRequest never throws: manager failures come back as
+        // structured protocol refusals.
+        response = await handleBootstrapRequest(request, authority.manager);
+      }
     }
   } catch (error) {
     response = {

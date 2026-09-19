@@ -47,10 +47,10 @@ type TrustFetcher = NonNullable<Parameters<typeof resolveTrustedReleaseTarget>[0
 
 /** Acquisition failure with a stable reason; release-manager.ts maps it onto the ReleaseManagerError contract. */
 export class ApplyPayloadError extends Error {
-  readonly reason: 'metadata_refresh_failed' | 'release_metadata_invalid';
+  readonly reason: 'metadata_refresh_failed' | 'release_metadata_invalid' | 'runtime_not_supported';
   readonly nextAction: string;
 
-  constructor(reason: 'metadata_refresh_failed' | 'release_metadata_invalid', message: string, nextAction: string) {
+  constructor(reason: 'metadata_refresh_failed' | 'release_metadata_invalid' | 'runtime_not_supported', message: string, nextAction: string) {
     super(message);
     this.name = 'ApplyPayloadError';
     this.reason = reason;
@@ -68,19 +68,23 @@ export function selectReleaseAsset(releaseMetadata: ReleaseMetadata): ReleaseMet
   const {platform} = process;
   const {arch} = process;
   const nodeAbi = process.versions.modules;
-  const asset = releaseMetadata.assets.find((a) => a.platform === platform && a.arch === arch);
+  // PRI-852 review fix: select on the FULL triple platform+arch+ABI. A
+  // first-match on platform/arch alone would pick another runtime's asset and
+  // then fail its own ABI check — exactly the multi-ABI gap this closes.
+  const asset = releaseMetadata.assets.find((a) => a.platform === platform && a.arch === arch && a.nodeAbi === nodeAbi);
   if (asset === undefined) {
+    const platformAssets = releaseMetadata.assets.filter((a) => a.platform === platform && a.arch === arch);
+    if (platformAssets.length > 0) {
+      throw new ApplyPayloadError(
+        'runtime_not_supported',
+        `Release ${releaseMetadata.productVersion} has ${platform}/${arch} assets for Node ABI ${platformAssets.map((a) => a.nodeAbi).join(', ')}, but this runtime is ABI ${nodeAbi}.`,
+        'Current runtime is not supported by this release yet. PD has not been updated.',
+      );
+    }
     throw new ApplyPayloadError(
       'release_metadata_invalid',
       `Release ${releaseMetadata.productVersion} declares no asset for this platform (${platform}/${arch}); declared: ${releaseMetadata.assets.map((a) => `${a.platform}/${a.arch}`).join(', ') || 'none'}.`,
       'Wait for a release asset covering this platform, or update from a supported host.',
-    );
-  }
-  if (asset.nodeAbi !== nodeAbi) {
-    throw new ApplyPayloadError(
-      'release_metadata_invalid',
-      `Release ${releaseMetadata.productVersion} asset for ${platform}/${arch} targets node ABI ${asset.nodeAbi}, but this runtime is ABI ${nodeAbi}.`,
-      'Upgrade the bootstrap runtime first, or publish a release asset built for this node ABI.',
     );
   }
   return asset;

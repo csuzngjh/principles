@@ -1373,6 +1373,12 @@
       "reasonLabel": "Reason: ",
       "recoveryBanner": "An unfinished update transaction was found",
       "recoveryItem": "Transaction {{id}} stopped at phase \"{{phase}}\"",
+      "inProgressToast": "Update transaction accepted and running in the background; do not click again.",
+      "inProgressPanel": "Update in progress",
+      "inProgressPhase": "Current phase: {{phase}}",
+      "inProgressConfirmed": "Update finished ({{version}}). Restart the console to load the new version.",
+      "inProgressEnded": "Update transaction ended: {{state}}",
+      "inProgressTimeout": "The update is taking long and its result is unconfirmed. Check the transaction in the update history later.",
       "reason": {
         "bootstrap_too_old": "The update bootstrap component on this machine is too old for this release. Run the official installer (npx create-principles-disciple) to repair, then retry.",
         "bootstrap_not_registered": "The update bootstrap is not registered on this machine (older install). Run the official installer to repair, then retry.",
