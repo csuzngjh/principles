@@ -7,12 +7,21 @@ import {
   type DecisionArtifactRecord,
   type OwnerDecisionFactStore,
 } from './owner-review.js';
-import type { OwnerResolutionAction } from './pitask-metadata.js';
+import { hydratePITaskRecord, type OwnerResolutionAction } from './pitask-metadata.js';
 import { assessArtificerCodeBearing } from './artificer-code-bearing.js';
+import {
+  FORMATION_CONTEXT_VERSION,
+  resolveFormationContext,
+  type FormationArtifactReader,
+  type FormationArtifactView,
+  type FormationDiagnosisProjection,
+} from './formation-context.js';
 
 const MAX_TEXT = 600;
 const MAX_ITEMS = 3;
 const MAX_LINEAGE_ARTIFACTS = 16;
+/** Bound for resolver degradation notes (rc-9: observable, but never a dump). */
+const MAX_FORMATION_NOTES = 8;
 
 export type DeterministicCheckStatus = 'passed' | 'failed' | 'not_run' | 'unavailable';
 export type ReviewEvidenceCompleteness = 'complete' | 'partial' | 'insufficient';
@@ -80,6 +89,13 @@ export interface EvaluatorDecisionBrief {
    * lack the key (forward-compatible read).
    */
   readonly qualityChecklist?: PrincipleQualityChecklist;
+  /**
+   * PRI-858: bounded formation evidence (pain provenance + source diagnosis).
+   * Display-only; never feeds completeness/capability. Absent when the lineage
+   * id is missing (legacy) — present-but-degraded when resolution failed
+   * (see `OwnerFormationEvidence`).
+   */
+  readonly formationEvidence?: OwnerFormationEvidence;
 }
 
 /**
@@ -100,6 +116,31 @@ export interface PrincipleQualityChecklistItem {
   readonly pass: boolean;
   /** Bounded evidence-based explanation (why pass / what is missing). */
   readonly note: string;
+}
+
+/**
+ * PRI-858 (CIL-002): bounded formation evidence — the pain/diagnosis that
+ * PRODUCED this principle — projected onto the Owner decision snapshot via the
+ * existing `resolveFormationContext` contract. OBSERVATION EVIDENCE ONLY:
+ * nothing here feeds `completeness`, `allowedActions` or `acceptRequirement`
+ * (those stay owned by deriveOwnerDecisionCapability + the deterministic
+ * gates). Absent on legacy snapshots and when the scribe artifact carries no
+ * authoritative dreamer lineage id (forward-compatible read, same discipline
+ * as `qualityChecklist`). When the id exists but resolution fails, the field
+ * is present WITHOUT `diagnosis` and the reason is observable in `notes`
+ * (rc-9: degradation is never silent).
+ */
+export interface OwnerFormationEvidence {
+  readonly version: string;
+  readonly sourcePainId: string | null;
+  readonly diagnosis?: FormationDiagnosisProjection;
+  readonly provenance: {
+    readonly sourceDreamerArtifactId: string;
+    readonly sourceDiagnosisArtifactId: string | null;
+    readonly sourceDiagnosisTaskId: string | null;
+  };
+  /** Truncation + resolver degradation notes, bounded (rc-9). */
+  readonly notes: readonly string[];
 }
 
 export interface RolloutDecisionBrief {
@@ -280,6 +321,97 @@ function sourceEntry(
   };
 }
 
+/**
+ * PRI-858: project the formation evidence that PRODUCED this principle, using
+ * the same resolver the four runner stages already use. The only adaptation is
+ * the store view — the review store is read-only and narrower than
+ * `PIArtifactStore`, so it is wrapped rather than widened (AGENTS.md P4: the
+ * durable facts stay in `pi_artifacts`; this is a projection).
+ *
+ * Returns `undefined` only when no authoritative dreamer id exists on the
+ * scribe artifact (legacy lineage — same forward-compatible shape as
+ * `qualityChecklist`). A present id that fails to resolve yields a field
+ * WITHOUT `diagnosis` plus observable notes, never silence (rc-9).
+ */
+async function resolveOwnerFormationEvidence(
+  store: OwnerDecisionReviewStore,
+  scribeContent: Record<string, unknown> | null,
+  taskId: string,
+): Promise<OwnerFormationEvidence | undefined> {
+  const sourceDreamerArtifactId = readString(readRecord(scribeContent, 'sourceTrace'), 'dreamerArtifactId');
+  if (sourceDreamerArtifactId === undefined) return undefined;
+
+  const degradationNotes: string[] = [];
+  const toView = (artifact: DecisionArtifactRecord): FormationArtifactView => ({
+    artifactId: artifact.artifactId,
+    sourceTaskId: artifact.sourceTaskId ?? '',
+    contentJson: artifact.contentJson,
+    lineageArtifactIds: artifact.lineageArtifactIds ?? [],
+  });
+  const artifactStore: FormationArtifactReader = {
+    getArtifactById: async (artifactId) => {
+      const artifact = await store.getArtifactById(artifactId).catch(() => null);
+      return artifact ? toView(artifact) : null;
+    },
+    listBySourceTaskId: async (sourceTaskId) => {
+      const artifacts = await store.listArtifactsBySourceTask(sourceTaskId).catch(() => []);
+      return artifacts.map(toView);
+    },
+  };
+
+  const formationContext = await resolveFormationContext({
+    sourceDreamerArtifactId,
+    artifactStore,
+    lookupTask: async (dependencyTaskId) => {
+      const task = await store.getTask(dependencyTaskId).catch(() => null);
+      if (!task) return null;
+      return {
+        taskKind: task.taskKind,
+        status: task.status,
+        dependencyTaskIds: hydratePITaskRecord(task)?.dependencyTaskIds ?? [],
+      };
+    },
+    emitEvent: (event, _taskId, payload) => {
+      if (event === 'formation_context_resolved') return;
+      const reason = typeof payload.reason === 'string' ? ` (${payload.reason})` : '';
+      degradationNotes.push(`${event}${reason}`);
+    },
+    taskId,
+  });
+
+  const notes = (formationContext
+    ? [...degradationNotes, ...formationContext.truncationNotes]
+    : degradationNotes.length > 0
+      ? degradationNotes
+      : ['formation_context_unavailable']
+  ).slice(0, MAX_FORMATION_NOTES).map(clamp);
+
+  if (!formationContext) {
+    return {
+      version: FORMATION_CONTEXT_VERSION,
+      sourcePainId: null,
+      provenance: {
+        sourceDreamerArtifactId,
+        sourceDiagnosisArtifactId: null,
+        sourceDiagnosisTaskId: null,
+      },
+      notes,
+    };
+  }
+
+  return {
+    version: formationContext.version,
+    sourcePainId: formationContext.provenance.sourcePainId,
+    ...(formationContext.sourceDiagnosis ? { diagnosis: formationContext.sourceDiagnosis } : {}),
+    provenance: {
+      sourceDreamerArtifactId: formationContext.provenance.sourceDreamerArtifactId,
+      sourceDiagnosisArtifactId: formationContext.provenance.sourceDiagnosisArtifactId,
+      sourceDiagnosisTaskId: formationContext.provenance.sourceDiagnosisTaskId,
+    },
+    notes,
+  };
+}
+
 export async function buildOwnerDecisionReview(
   store: OwnerDecisionReviewStore,
   taskId: string,
@@ -431,7 +563,12 @@ export async function buildOwnerDecisionReview(
         },
       ],
     };
-    brief = { ...brief, qualityChecklist };
+    const formationEvidence = await resolveOwnerFormationEvidence(store, scribeContent, taskId);
+    brief = {
+      ...brief,
+      qualityChecklist,
+      ...(formationEvidence !== undefined ? { formationEvidence } : {}),
+    };
   } else {
     const review = readRecord(decisionContent, 'review');
     brief = {

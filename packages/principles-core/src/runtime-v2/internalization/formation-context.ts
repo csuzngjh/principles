@@ -29,14 +29,15 @@
  * removed it for never graduating, and PRI-835 explicitly rules out reviving
  * it. The budget below is a small, local, explicit cap — not a budget manager.
  *
- * Consumers (2, materially different → not a speculative seam):
+ * Consumers (materially different → not a speculative seam):
  *   - Scribe   (PRI-838): dreamer proposals + source diagnosis + provenance;
- *   - Artificer(PRI-839): bounded, priority-ranked candidate set + differences.
+ *   - Artificer(PRI-839): bounded, priority-ranked candidate set + differences;
+ *   - Evaluator(PRI-843/846): pain-faithfulness grounding + mismatch routing;
+ *   - Owner Decision Review (PRI-858): bounded diagnosis + pain provenance
+ *     projected onto the decision snapshot (observation only, read-only store).
  *
  * @see docs/audit/PRI-835-formation-context-connectivity-audit.md (§DC-1, §DC-3, §6.1 C1/C2)
  */
-
-import type { PIArtifactStore } from './pi-artifact.js';
 
 // ── Budget contract ──────────────────────────────────────────────────────────
 
@@ -452,13 +453,33 @@ export interface FormationTaskView {
   readonly dependencyTaskIds: readonly string[];
 }
 
+/**
+ * Minimal artifact view the resolver reads — deliberately NOT `PIArtifactRecord`:
+ * the Owner Decision review store (PRI-858) projects the same durable facts
+ * through the narrower `DecisionArtifactRecord`, and a read-only consumer must
+ * not be forced to fabricate write-surface columns (updatedAt et al.) just to
+ * satisfy the type. `PIArtifactRecord` structurally satisfies this view, so
+ * existing runners keep passing `this.artifactStore` unchanged.
+ */
+export interface FormationArtifactView {
+  readonly artifactId: string;
+  readonly sourceTaskId: string;
+  readonly contentJson: string;
+  readonly lineageArtifactIds: readonly string[];
+}
+
+export interface FormationArtifactReader {
+  getArtifactById(artifactId: string): Promise<FormationArtifactView | null>;
+  listBySourceTaskId(sourceTaskId: string): Promise<readonly FormationArtifactView[]>;
+}
+
 export interface FormationContextResolverParams {
   /**
    * Untrusted. The dreamer artifact id the upstream stage copied out of the
    * philosopher artifact (`philosopher.sourceDreamerArtifactId`).
    */
   readonly sourceDreamerArtifactId: string | undefined;
-  readonly artifactStore: Pick<PIArtifactStore, 'getArtifactById' | 'listBySourceTaskId'>;
+  readonly artifactStore: FormationArtifactReader;
   /**
    * Resolves a task row (with hydrated PI dependency ids).
    *

@@ -156,6 +156,48 @@ export function OwnerDecisionCard({
               </ul>
             </div>
           )}
+          {/* PRI-858: 形成来源（观察证据，不是裁决依据 — 动作与权限只来自
+              allowedActions / acceptRequirement）。 */}
+          {item.review.brief.formationEvidence && (
+            <div className="mt-1 rounded-[3px] border border-line bg-surface-2 p-2" data-testid={`owner-formation-evidence-${item.taskId}`}>
+              <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-ink-3 mb-1">
+                {t("pages.focus.ownerDecision.formationLabel")}
+              </div>
+              {item.review.brief.formationEvidence.sourcePainId ? (
+                <p className="text-ink-2">
+                  <span className="font-medium">{t("pages.focus.ownerDecision.formationPainLabel")}</span>{" "}
+                  <span className="font-mono text-[11.5px]">{item.review.brief.formationEvidence.sourcePainId}</span>
+                </p>
+              ) : null}
+              {item.review.brief.formationEvidence.diagnosis?.summary && (
+                <p className="text-ink-2">
+                  <span className="font-medium">{t("pages.focus.ownerDecision.formationDiagnosisLabel")}</span>{" "}
+                  {item.review.brief.formationEvidence.diagnosis.summary}
+                </p>
+              )}
+              {item.review.brief.formationEvidence.diagnosis?.rootCause && (
+                <p className="text-ink-2">
+                  <span className="font-medium">{t("pages.focus.ownerDecision.formationRootCauseLabel")}</span>{" "}
+                  {item.review.brief.formationEvidence.diagnosis.rootCause}
+                </p>
+              )}
+              {(item.review.brief.formationEvidence.diagnosis?.evidence.length ?? 0) > 0 && (
+                <div>
+                  <span className="font-medium text-ink-2">{t("pages.focus.ownerDecision.formationEvidenceLabel")}</span>
+                  <ul className="mt-0.5 grid gap-0.5 text-[12px] text-ink-3">
+                    {item.review.brief.formationEvidence.diagnosis?.evidence.slice(0, 3).map((row, index) => (
+                      <li key={`${row.sourceRef}-${index}`}>
+                        <span className="font-mono text-[11px]">{row.sourceRef}</span>{" "}{row.note}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {!item.review.brief.formationEvidence.diagnosis && (
+                <p className="text-ink-3">{t("pages.focus.ownerDecision.formationUnavailableNote")}</p>
+              )}
+            </div>
+          )}
         </div>
       )}
       {/* rollout 的 brief.summary 已由上方 item.summary 渲染（模型层 title 也
@@ -307,6 +349,17 @@ export function OwnerDecisionCard({
               {item.review?.evidence.items.map((evidence, index) => (
                 <div key={`${evidence.label}-${index}`}>{evidence.evidenceClass}/{evidence.label}: {evidence.value}</div>
               ))}
+              {item.review?.brief.kind === "evaluator" && item.review.brief.formationEvidence && (
+                <>
+                  <div>dreamerArtifact: {item.review.brief.formationEvidence.provenance.sourceDreamerArtifactId}</div>
+                  {item.review.brief.formationEvidence.provenance.sourceDiagnosisArtifactId && (
+                    <div>diagnosisArtifact: {item.review.brief.formationEvidence.provenance.sourceDiagnosisArtifactId}</div>
+                  )}
+                  {item.review.brief.formationEvidence.notes.map((note, index) => (
+                    <div key={`${note}-${index}`}>formationNote: {note}</div>
+                  ))}
+                </>
+              )}
             </dl>
           )}
         </>
