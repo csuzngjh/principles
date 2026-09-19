@@ -176,6 +176,39 @@ runs:
       shell: bash
       run: |
         cd "packages/${{ inputs.pkg_dir }}"
+
+        # Direct package.json edits — NOT `npm version`. The full-product
+        # train runs all seven packages in ONE checkout, and `npm version`
+        # re-runs npm's workspace resolution over that shared tree: once an
+        # earlier step has bumped a workspace dependency past a range a
+        # sibling declares (host-runtime 0.7.x vs codex-adapter's ^0.1.0),
+        # npm installs a REGISTRY copy nested in that sibling's
+        # node_modules, and every later build in the tree resolves the
+        # ancient nested types instead of the workspace (the 2026-09-19
+        # train died at publish 4/7 exactly this way). A plain file edit
+        # leaves the `npm ci`-installed tree untouched, and has no git
+        # tag/commit side effects — the "Create Git tag and push" step
+        # below owns tag creation.
+        set_version() {
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.version = process.argv[1];
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          ' "$1"
+        }
+        bump_version() {
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const [major, minor, patch] = pkg.version.split("-")[0].split(".").map(Number);
+            pkg.version = process.argv[1] === "major" ? `${major + 1}.0.0`
+              : process.argv[1] === "minor" ? `${major}.${minor + 1}.0`
+              : `${major}.${minor}.${patch + 1}`;
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          ' "$1"
+        }
+
         BUMP="${{ steps.bump.outputs.type }}"
         NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
         LOCAL_VERSION=$(node -p "require('./package.json').version")
@@ -193,19 +226,12 @@ runs:
           if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
             echo "Local version ($LOCAL_VERSION) differs from npm ($NPM_VERSION)"
             echo "Resetting to npm version before bump..."
-            npm version "$NPM_VERSION" --no-git-tag-version
+            set_version "$NPM_VERSION"
           else
             echo "Local version ($LOCAL_VERSION) matches npm ($NPM_VERSION)"
           fi
 
-          # --no-git-tag-version: only update package.json. Do NOT let
-          # `npm version` create a git commit or a v$VERSION tag here —
-          # the "Create Git tag and push" step below owns tag creation
-          # (tag-only release; we no longer push to main). Letting npm
-          # version create the tag would collide with `git tag -a` below
-          # (same name) and would also require git identity on the
-          # runner, which is not reliably set.
-          npm version "$BUMP" --no-git-tag-version
+          bump_version "$BUMP"
 
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
@@ -356,8 +382,7 @@ runs:
         # this job (openclaw.plugin.json, README, root package.json) stay
         # in the runner working tree and are not written back to main;
         # that is acceptable because the next publish run's "Bump version"
-        # step resets the local version to the npm version via
-        # `npm version $NPM_VERSION --no-git-tag-version` before bumping.
+        # step resets the local version to the npm version before bumping.
         git tag -a "v$VERSION" -m "Release v$VERSION"
         git push origin "v$VERSION"
         echo "Created and pushed tag: v$VERSION (from npm v$OLD_VERSION)"
