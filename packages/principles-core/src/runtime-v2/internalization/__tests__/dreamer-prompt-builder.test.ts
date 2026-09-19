@@ -95,6 +95,16 @@ describe('DreamerPromptBuilder', () => {
       expect(result.systemPrompt).toContain('confidence');
     });
 
+    // PRI-862 (CIL-006): the prompt must stop teaching fabricated lineage.
+    it('systemPrompt forbids inventing sourcePainId and contains no invented pain-id example', () => {
+      const builder = new DreamerPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_INPUT);
+
+      expect(result.systemPrompt).toMatch(/Do NOT invent sourcePainId/i);
+      expect(result.systemPrompt).not.toContain('pain-null-crash');
+      expect(result.systemPrompt).not.toContain('"sourcePainId"');
+    });
+
     it('dreamerInstruction contains the output JSON schema format', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);

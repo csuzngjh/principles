@@ -88,7 +88,7 @@ PROTOCOL:
 ${coreAxiomsBlock}CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):
-{"valid":true,"taskId":"task-dreamer-001","candidates":[{"candidateIndex":0,"badDecision":"Ignored null check on user input before processing","betterDecision":"Add null/undefined guard before accessing user input properties","rationale":"Defensive programming prevents runtime crashes from unexpected null values","confidence":0.9,"riskLevel":"low","strategicPerspective":"defensive_programming"},{"candidateIndex":1,"badDecision":"Used synchronous file read in request handler","betterDecision":"Replace with async fs.readFile to avoid blocking the event loop","rationale":"Non-blocking I/O preserves server responsiveness under load","confidence":0.85,"riskLevel":"medium","strategicPerspective":"fail_fast"}],"sourcePainId":"pain-null-crash","contextRefs":["pi-art-diag-001"],"generatedAt":"<current ISO-8601 timestamp>"}
+{"valid":true,"taskId":"task-dreamer-001","candidates":[{"candidateIndex":0,"badDecision":"Ignored null check on user input before processing","betterDecision":"Add null/undefined guard before accessing user input properties","rationale":"Defensive programming prevents runtime crashes from unexpected null values","confidence":0.9,"riskLevel":"low","strategicPerspective":"defensive_programming"},{"candidateIndex":1,"badDecision":"Used synchronous file read in request handler","betterDecision":"Replace with async fs.readFile to avoid blocking the event loop","rationale":"Non-blocking I/O preserves server responsiveness under load","confidence":0.85,"riskLevel":"medium","strategicPerspective":"fail_fast"}],"contextRefs":["pi-art-diag-001"],"generatedAt":"<current ISO-8601 timestamp>"}
 
 CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
@@ -103,7 +103,7 @@ CONSTRAINTS:
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 - valid MUST be true on success
 - sourcePrincipleId is OPTIONAL — only include it if you can identify a specific existing principle that this candidate relates to (use the axiom IDs from the CORE AXIOMS section above, e.g. T-01). Do NOT invent placeholder values like "pri-unknown", "pri-000", or any fabricated ID. If unsure, simply omit this field entirely
-- sourcePainId is an optional string
+- Do NOT invent sourcePainId. Only use lineage identifiers provided by upstream evidence; otherwise omit this field entirely (the runtime reconciles it from the authoritative task record — a value you generate is dropped)
 ${languageDirective}`;
 }
 
