@@ -242,13 +242,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *
  * The event vocabulary below is deliberately UNCHANGED from pre-PRI-839 so the
  * existing observability contract still holds.
+ *
+ * PRI-859: the resolved `dreamerArtifactId` travels out as a sibling of the
+ * projection (never inside it) so buildContext can fold the lineage reference
+ * into the context hash without changing the model-visible prompt.
  */
+interface ResolvedDreamerContext {
+  readonly dreamerContext: ArtificerDreamerContext;
+  /** Provenance of the candidate set — the artifact the projection came from. */
+  readonly sourceDreamerArtifactId: string;
+}
+
 async function resolveDreamerContext(params: {
   scribeContentJson: string;
   artifactStore: Pick<PIArtifactStore, 'getArtifactById'>;
   taskId: string;
   emitEvent: (eventName: string, taskId: string, payload: Record<string, unknown>) => void;
-}): Promise<ArtificerDreamerContext | undefined> {
+}): Promise<ResolvedDreamerContext | undefined> {
   const { scribeContentJson, taskId, emitEvent } = params;
 
   // Parse scribe contentJson as unknown — never trust the shape (rc-1).
@@ -340,9 +350,12 @@ async function resolveDreamerContext(params: {
   }
 
   return {
-    candidates: projection.candidates,
-    differenceSummary: summarizeCandidateDifferences(projection.candidates),
-    omittedCandidateCount: projection.omittedCandidateCount,
+    dreamerContext: {
+      candidates: projection.candidates,
+      differenceSummary: summarizeCandidateDifferences(projection.candidates),
+      omittedCandidateCount: projection.omittedCandidateCount,
+    },
+    sourceDreamerArtifactId: dreamerArtifactId,
   };
 }
 
@@ -740,22 +753,34 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
         // artifact referenced by scribe.sourceTrace.dreamerArtifactId.
         // Best-effort: undefined when absent or invalid (backward compatible).
         // rc-9: emits observable events on resolution failure — no silent fallback.
-        const dreamerContext = await resolveDreamerContext({
+        const resolvedDreamer = await resolveDreamerContext({
           scribeContentJson: firstArtifact.contentJson,
           artifactStore: this.artifactStore,
           taskId,
           emitEvent: (eventName, tId, payload) => this.emitEvent(eventName, tId, payload),
         });
 
+        // PRI-859 (CIL-001): the context hash must cover the evidence the
+        // prompt actually carries (the scribe/evaluator contextRefs rule) —
+        // the dreamer candidate set is model-visible but its provenance id
+        // was dropped here, so a dreamer artifact re-upsert could serve a
+        // cache identity predating the candidate change.
+        const contextRefs = [
+          artifactRef,
+          ...(resolvedDreamer !== undefined
+            ? [resolvedDreamer.sourceDreamerArtifactId]
+            : []),
+        ];
+
         return {
-          contextHash: BasePeerRunner.hashContextRefs([artifactRef]),
+          contextHash: BasePeerRunner.hashContextRefs(contextRefs),
           scribeArtifact: firstArtifact.contentJson,
           sourceScribeArtifactId: firstArtifact.artifactId,
           adversarialFeedback,
           repairFeedback,
           revisionFeedback,
           ...repairEvidenceExtras,
-          ...(dreamerContext !== undefined ? { dreamerContext } : {}),
+          ...(resolvedDreamer !== undefined ? { dreamerContext: resolvedDreamer.dreamerContext } : {}),
         };
       }
     }
