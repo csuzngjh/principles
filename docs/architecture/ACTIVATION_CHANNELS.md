@@ -62,8 +62,8 @@ interface ActivationDispatcher {
 interface DispatchInput {
   artifactId: string;
   channel: InternalizationChannel;
-  /** 来自 RolloutReviewer 的发布建议 */
-  rolloutDecision: 'auto_activate' | 'require_approval' | 'reject';
+  /** 来自 RolloutReviewer 的发布建议；'approved' = Owner 已批准（CompletionService 派发路径） */
+  rolloutDecision: 'auto_activate' | 'require_approval' | 'reject' | 'approved';
   /** 触发方信息 */
   actor: ActivationActor;
   /** 幂等键（默认由 artifactId + channel 组合） */
