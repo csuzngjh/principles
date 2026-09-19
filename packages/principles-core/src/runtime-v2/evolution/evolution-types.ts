@@ -9,6 +9,7 @@
  */
 import { Type, type Static } from '@sinclair/typebox';
 import type { PainEvidenceEntry } from '../pain-signal-bridge.js';
+import type { PainCorrectionEvidence } from '../context-payload.js';
 import type { PrincipleStatus } from '../types/principle-enums.js';
 
 // PRI-612: derived from the canonical PrincipleStatus authority — same 5 states.
@@ -125,6 +126,12 @@ export interface EvolutionPainDetectedData {
   provenance?: 'host_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
   hostKind?: 'openclaw' | 'codex';
   evidence?: PainEvidenceEntry[];
+  /**
+   * PRI-844: the Owner's verbatim correction, when the emitting producer had
+   * correction context. Producers without one leave it absent — never
+   * fabricated (rc-9). Flows into diagnosticJson via buildDiagnosticJson.
+   */
+  correctionEvidence?: PainCorrectionEvidence;
 }
 
 export interface CandidateCreatedData {

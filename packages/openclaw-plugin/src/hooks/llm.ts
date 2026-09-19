@@ -345,6 +345,36 @@ export function handleLlmOutput(
                         score: painScore,
                         sessionId: ctx.sessionId || 'unknown',
                         agentId: ctx.agentId,
+                        // PRI-844: if the session contains a recent
+                        // correction (getLatestCorrectionTurn applies a
+                        // 30-min staleness window), attach the Owner's
+                        // verbatim words as first-class evidence instead of
+                        // letting only the triggering fragment reach the
+                        // diagnosis. Absent when there is none — never
+                        // fabricated (rc-9).
+                        correctionEvidence: (() => {
+                            try {
+                                const turn = wctx.trajectory.getLatestCorrectionTurn(ctx.sessionId || 'unknown');
+                                if (!turn) return undefined;
+                                return {
+                                    text: turn.text,
+                                    sessionId: ctx.sessionId || 'unknown',
+                                    ...(turn.turnIndex !== undefined ? { turnIndex: turn.turnIndex } : {}),
+                                    ...(turn.referencesAssistantTurnId !== null && turn.referencesAssistantTurnId !== undefined
+                                        ? { referencesAssistantTurnId: turn.referencesAssistantTurnId }
+                                        : {}),
+                                    occurredAt: turn.occurredAt,
+                                };
+                            } catch (error) {
+                                // PRI-844 review fix (P2): evidence LOSS must stay
+                                // observable (rc-9) — log a bounded reason and keep
+                                // the hook non-throwing, so a lookup failure is
+                                // distinguishable from a legitimate no-correction
+                                // state instead of silently reading as "no correction".
+                                ctx.logger?.warn?.(`[PD:LLM] correction evidence lookup failed: ${String(error).slice(0, 200)}`);
+                                return undefined;
+                            }
+                        })(),
                     },
                 }, { recordObservability: false });
             } else {

@@ -166,3 +166,102 @@ describe('RootCausePromptBuilder — oversize overflow (PRI-633)', () => {
     expect(parsed.context.conversationWindow).toEqual([]);
   });
 });
+
+// ── PRI-844: PHASE 1.5 — Owner Correction (authoritative evidence) ──────────
+
+describe('RootCausePromptBuilder — PHASE 1.5 Owner Correction (PRI-844)', () => {
+  const correction = {
+    text: '修改配置前应该先搜索所有引用',
+    sessionId: 'sess-pri844',
+    turnIndex: 4,
+    occurredAt: '2026-09-19T00:37:54.000Z',
+  };
+
+  it('correctionEvidence present → verbatim Owner words + owner_correction citation instruction', () => {
+    const instruction = buildRootCauseProtocolInstruction({ coreGrounding: false, correctionEvidence: correction });
+    expect(instruction).toContain('PHASE 1.5');
+    expect(instruction).toContain('Owner Correction (authoritative evidence)');
+    expect(instruction).toContain('修改配置前应该先搜索所有引用');
+    expect(instruction).toContain('owner_correction');
+    expect(instruction).toContain('turnIndex=4');
+    expect(instruction).toContain('sess-pri844');
+  });
+
+  it('instructs exact-quote citation interpreted with previous action and outcome', () => {
+    const instruction = buildRootCauseProtocolInstruction({ coreGrounding: false, correctionEvidence: correction });
+    expect(instruction).toContain('preserve the exact quote');
+    expect(instruction).toContain('sourceRef "owner_correction"');
+    expect(instruction).toContain('previous action');
+  });
+
+  it('correctionEvidence absent → no correction content in the prompt (Case B/D)', () => {
+    const instruction = buildRootCauseProtocolInstruction({ coreGrounding: false });
+    expect(instruction).not.toContain('PHASE 1.5');
+    expect(instruction).not.toContain('Owner Correction');
+    expect(instruction).not.toContain('owner_correction');
+    // fabrication guard: absence must never become an invented "Owner taught X"
+    expect(instruction).not.toContain('Owner taught');
+  });
+
+  it('absent-correction prompt is byte-identical to a plain invocation (EP-03 gate)', () => {
+    const withUndefined = buildRootCauseProtocolInstruction({ coreGrounding: false, correctionEvidence: undefined });
+    const baseline = buildRootCauseProtocolInstruction({ coreGrounding: false });
+    expect(withUndefined).toBe(baseline);
+  });
+
+  it('block renders between PHASE 1 and PHASE 2', () => {
+    const instruction = buildRootCauseProtocolInstruction({ coreGrounding: false, correctionEvidence: correction });
+    const p1 = instruction.indexOf('PHASE 1');
+    const p15 = instruction.indexOf('PHASE 1.5');
+    const p2 = instruction.indexOf('PHASE 2');
+    expect(p1).toBeGreaterThanOrEqual(0);
+    expect(p15).toBeGreaterThan(p1);
+    expect(p2).toBeGreaterThan(p15);
+  });
+});
+
+// ── PRI-844 review fix (P1): the PRODUCTION boundary is buildPrompt(), which
+// routes through the RootCausePromptBuilder wrapper — the wrapper must forward
+// correctionEvidence or PHASE 1.5 silently never renders in production. ────
+
+describe('RootCausePromptBuilder.buildPrompt — correctionEvidence passthrough (PRI-844 review)', () => {
+  function makePayload(correctionEvidence?: DiagnosticianContextPayload['diagnosisTarget']['correctionEvidence']): DiagnosticianContextPayload {
+    return {
+      contextId: 'ctx-ce-1',
+      contextHash: 'hash-ce-1',
+      taskId: 'task-rootcause-ce-1',
+      workspaceDir: '/tmp/ws',
+      sourceRefs: ['ref-1'],
+      diagnosisTarget: {
+        painId: 'pain-ce-1',
+        ...(correctionEvidence ? { correctionEvidence } : {}),
+      },
+      conversationWindow: [],
+    };
+  }
+
+  it('payload with correctionEvidence → systemPrompt carries PHASE 1.5 with the verbatim Owner words', () => {
+    const builder = new RootCausePromptBuilder();
+    const result = builder.buildPrompt(makePayload({
+      text: '修改配置前应该先搜索所有引用',
+      sessionId: 'sess-pri844',
+      turnIndex: 4,
+      occurredAt: '2026-09-19T00:37:54.000Z',
+    }));
+    expect(result.systemPrompt).toContain('PHASE 1.5');
+    expect(result.systemPrompt).toContain('修改配置前应该先搜索所有引用');
+    expect(result.systemPrompt).toContain('owner_correction');
+    // the payload itself carries the verbatim text into the message JSON
+    expect(result.message).toContain('修改配置前应该先搜索所有引用');
+  });
+
+  it('payload without correctionEvidence → systemPrompt has no PHASE 1.5 (byte-identical gate at buildPrompt boundary)', () => {
+    const builder = new RootCausePromptBuilder();
+    const withUndefined = builder.buildPrompt(makePayload(undefined));
+    const baseline = builder.buildPrompt(makePayload(undefined));
+    expect(withUndefined.systemPrompt).not.toContain('PHASE 1.5');
+    expect(withUndefined.systemPrompt).not.toContain('Owner Correction');
+    expect(withUndefined.systemPrompt).not.toContain('Owner taught');
+    expect(withUndefined.systemPrompt).toBe(baseline.systemPrompt);
+  });
+});

@@ -109,6 +109,9 @@ interface PendingSignal {
   traceId: string;
   /** Stage1 扫描时的词库快照(异步路径复用同一份,避免检测期间词库漂移) */
   storeSnapshot: UnifiedKeywordStore;
+  /** PRI-844: 回合锚点,确认后随 correctionEvidence 一起进 Pain 证据。 */
+  turnIndex?: number;
+  referencesAssistantTurnId?: number | null;
   /**
    * PRI-788 G1: Stage1 写入 user_turns 返回的 rowid。Stage2 确认为纠正后据此
    * 回写 correction_detected 标志（recordUserTurn 当时只写了 Stage1 的 0）。
@@ -222,7 +225,10 @@ export class SignalCollectorHost {
       // 推迟到微任务队列执行（与 hooks/trajectory-collector.ts 同一惯例），
       // routeStrong 与 hook 返回不再被磁盘延迟放大。
       this.countStage1Strong();
-      this.routeStrong(output, sessionId, userMessage, this.resolveOccurrenceId(sessionId, userMessage, options));
+      this.routeStrong(output, sessionId, userMessage, this.resolveOccurrenceId(sessionId, userMessage, options), {
+        turnIndex: options?.turnIndex,
+        referencesAssistantTurnId: options?.referencesAssistantTurnId ?? undefined,
+      });
       return;
     }
 
@@ -236,6 +242,8 @@ export class SignalCollectorHost {
         traceId: createTraceId(),
         storeSnapshot: store,
         userTurnRowid,
+        turnIndex: options?.turnIndex,
+        referencesAssistantTurnId: options?.referencesAssistantTurnId ?? undefined,
       };
       // fire-and-forget,失败不影响用户消息处理 (spec §4.2)
       void this.detectAsyncAndRoute(pending);
@@ -423,7 +431,22 @@ export class SignalCollectorHost {
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
       this.emitCueFeedback(item.terms, true);
       this.writeBackConfirmedCorrection(item.userTurnRowid, confirmed);
-      this.routeStrong(confirmed, item.sessionId, item.excerpt, item.occurrenceId);
+      // PRI-844: recover the Owner's VERBATIM turn — the persisted queue only
+      // stores a 400-char excerpt. turnIndex comes from the numeric
+      // occurrenceId; the full text comes from the user_turns row via rowid.
+      // Both degrade gracefully: no row → the excerpt is the honest fallback.
+      const turnIndexFromOccurrence = /^\d+$/.test(item.occurrenceId) ? Number(item.occurrenceId) : undefined;
+      let storedTurn: { turnIndex: number; text: string; referencesAssistantTurnId: number | null; occurredAt: string } | undefined;
+      try {
+        storedTurn = this.wctx.trajectory.getCorrectionTurnByRowid(item.userTurnRowid);
+      } catch {
+        storedTurn = undefined;
+      }
+      this.routeStrong(confirmed, item.sessionId, storedTurn?.text ?? item.excerpt, item.occurrenceId, {
+        turnIndex: storedTurn?.turnIndex ?? turnIndexFromOccurrence,
+        referencesAssistantTurnId: storedTurn?.referencesAssistantTurnId ?? undefined,
+        occurredAt: storedTurn?.occurredAt,
+      });
       return { disposition: 'confirmed', detail: confirmed.llmReason ?? 'confirmed correction' };
     }
     if (confirmed.isSignal && confirmed.strength === 'WEAK') {
@@ -482,7 +505,13 @@ export class SignalCollectorHost {
    * production-pain-evidence 的内容派生 canonicalization(同一 pain identity
    * 权威),不再铸造随机 `correction_<traceId>`;trace id 降级为 correlation 字段。
    */
-  private routeStrong(output: SignalCollectorOutput, sessionId: string, text: string, occurrenceId: string): void {
+  private routeStrong(
+    output: SignalCollectorOutput,
+    sessionId: string,
+    text: string,
+    occurrenceId: string,
+    turnProvenance?: { turnIndex?: number; referencesAssistantTurnId?: number | null; occurredAt?: string },
+  ): void {
     if (!this.tryConsumeRateLimit(sessionId)) {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STRONG_RATE_LIMITED',
         'STRONG signal suppressed by rate limit');  // 不记录 sessionId(隐私,CodeRabbit #2)
@@ -524,6 +553,16 @@ export class SignalCollectorHost {
           evidence: [
             { sourceRef: 'signal_collector', note: output.evidence.excerpt },
           ],
+          // PRI-844: the Owner's verbatim message as FIRST-CLASS evidence —
+          // the 200-char excerpt above stays for compatibility, but the
+          // diagnosis prompt now sees the full original sentence.
+          correctionEvidence: {
+            text,
+            sessionId,
+            turnIndex: turnProvenance?.turnIndex,
+            referencesAssistantTurnId: turnProvenance?.referencesAssistantTurnId ?? undefined,
+            occurredAt: turnProvenance?.occurredAt ?? new Date().toISOString(),
+          },
         },
       },
       { recordObservability: true },

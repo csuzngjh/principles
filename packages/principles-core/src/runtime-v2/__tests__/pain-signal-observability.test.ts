@@ -553,3 +553,61 @@ describe('PRI-640 host attribution (host_kind on canonical pain_events)', () => 
     }
   });
 });
+
+// ── PRI-844: pain_events.text carries the verbatim correction ───────────────
+
+describe('recordPainSignalObservability — correctionEvidence (PRI-844)', () => {
+  it('pain_events.text stores the verbatim correction instead of a reason copy', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    const correctionText = '部署脚本漏改了，别只改眼前这一个文件——以后改配置前先搜引用。';
+    const result = recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: 'ce_test_001',
+        painType: 'user_frustration',
+        source: 'user_correction',
+        reason: 'User correction detected: 漏改',
+        score: 70,
+        sessionId: 'sess-ce',
+        correctionEvidence: {
+          text: correctionText,
+          sessionId: 'sess-ce',
+          turnIndex: 3,
+          occurredAt: '2026-09-19T00:37:54.000Z',
+        },
+      },
+    });
+    expect(result.trajectoryPainEventId).toBeGreaterThan(0);
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT text, reason FROM pain_events WHERE id = ?')
+        .get(result.trajectoryPainEventId) as { text: string; reason: string };
+      expect(row.text).toBe(correctionText);
+      expect(row.reason).toContain('User correction detected');
+    } finally { db.close(); }
+  });
+
+  it('without correctionEvidence, text keeps the legacy reason copy (Case D regression)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    const result = recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: 'ce_test_002',
+        painType: 'tool_failure',
+        source: 'bash',
+        reason: 'Tool bash failed on deploy.sh',
+        score: 55,
+        sessionId: 'sess-ce2',
+      },
+    });
+    expect(result.trajectoryPainEventId).toBeGreaterThan(0);
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT text, reason FROM pain_events WHERE id = ?')
+        .get(result.trajectoryPainEventId) as { text: string; reason: string };
+      expect(row.text).toContain('Tool bash failed on deploy.sh');
+    } finally { db.close(); }
+  });
+});

@@ -1036,3 +1036,35 @@ describe('PRI-687 回归：强烈 Owner 纠正端到端可检出', () => {
     expect(recorder).toHaveBeenCalledWith(expect.arrayContaining(['什么狗屎']), false);
   });
 });
+
+// ── PRI-844: correctionEvidence as first-class pain evidence ────────────────
+
+describe('SignalCollectorHost — correctionEvidence (PRI-844)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('STRONG correction → emits correctionEvidence with the FULL user message (>200 chars, no excerpt cap)', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx);
+    const longMessage = '这是错的，' + '部署脚本漏改了别只改眼前这一个文件'.repeat(15);
+    host.detectSync(longMessage, 'sess-pri844', 'user', { turnIndex: 9, referencesAssistantTurnId: 8 });
+    await flushAsync();
+    expect(emitPainDetectedEvent).toHaveBeenCalled();
+    const call = vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as {
+      data: { correctionEvidence?: { text: string; sessionId?: string; turnIndex?: number; referencesAssistantTurnId?: number; occurredAt?: string } };
+    };
+    expect(call.data.correctionEvidence).toBeDefined();
+    expect(call.data.correctionEvidence?.text).toBe(longMessage);
+    expect((call.data.correctionEvidence?.text ?? '').length).toBeGreaterThan(200);
+    expect(call.data.correctionEvidence?.turnIndex).toBe(9);
+    expect(call.data.correctionEvidence?.referencesAssistantTurnId).toBe(8);
+    expect(call.data.correctionEvidence?.sessionId).toBe('sess-pri844');
+  });
+
+  it('ambiguous empathy (WEAK) path emits no pain and no correctionEvidence (Case B)', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx);
+    host.detectSync('搞什么呀这是', 'sess-pri844-b', 'user');
+    await flushAsync();
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+});

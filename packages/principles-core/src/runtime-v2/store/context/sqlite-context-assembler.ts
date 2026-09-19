@@ -21,6 +21,7 @@ import {
   type DiagnosisTarget,
   type FullTracePayloadV2,
   type PainEvidenceEntry,
+  type PainCorrectionEvidence,
   DiagnosticianContextPayloadSchema,
   validateFullTracePayload,
   sanitizeFullTracePayload,
@@ -114,6 +115,7 @@ export class SqliteContextAssembler implements ContextAssembler {
       hostKind: dt.hostKind,
       provenanceReason: dt.provenanceReason || undefined,
       evidence: dt.evidence,
+      correctionEvidence: dt.correctionEvidence,
     };
 
     const convAmbiguityNotes = SqliteContextAssembler.buildAmbiguityNotes(
@@ -392,6 +394,37 @@ export class SqliteContextAssembler implements ContextAssembler {
   }
 
   /**
+   * PRI-844: extract the Owner's verbatim correction from persisted
+   * diagnosticJson. Pass-through — the 2000-char defensive bound was already
+   * applied by the writer (buildDiagnosticJson); no second truncation here so
+   * there is exactly one storage bound. Undefined for legacy rows that
+   * predate the field (Case D) — callers treat absence as "no correction
+   * evidence available", never as license to fabricate one.
+   */
+  private static extractCorrectionEvidence(parsed: Record<string, unknown>): PainCorrectionEvidence | undefined {
+    if (!Object.hasOwn(parsed, 'correctionEvidence')) return undefined;
+    const raw = parsed.correctionEvidence;
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.text !== 'string' || obj.text.length === 0) return undefined;
+    const num = (v: unknown): number | undefined =>
+      // PRI-844 review fix (P2): the schema declares Type.Integer — accept
+      // only integers here so a fractional persisted identifier is omitted
+      // (graceful degradation) instead of failing the whole payload
+      // validation and aborting the diagnosis.
+      typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined;
+    const str = (v: unknown): string | undefined =>
+      typeof v === 'string' && v.length > 0 ? v : undefined;
+    return {
+      text: obj.text,
+      sessionId: str(obj.sessionId),
+      turnIndex: num(obj.turnIndex),
+      referencesAssistantTurnId: num(obj.referencesAssistantTurnId),
+      occurredAt: str(obj.occurredAt),
+    };
+  }
+
+  /**
    * Reconstruct a DiagnosticianTaskRecord from a base TaskRecord by decoding
    * the diagnostic_json column (if present).
    */
@@ -423,6 +456,7 @@ export class SqliteContextAssembler implements ContextAssembler {
               : undefined,
             provenanceReason: SqliteContextAssembler.extractStringField(parsed, 'provenanceReason'),
             evidence: SqliteContextAssembler.extractEvidence(parsed),
+            correctionEvidence: SqliteContextAssembler.extractCorrectionEvidence(parsed),
           };
         } else {
           ambiguityNotes.push(
@@ -450,6 +484,7 @@ export class SqliteContextAssembler implements ContextAssembler {
       hostKind: extra.hostKind,
       provenanceReason: extra.provenanceReason,
       evidence: extra.evidence,
+      correctionEvidence: extra.correctionEvidence,
     };
   }
 }

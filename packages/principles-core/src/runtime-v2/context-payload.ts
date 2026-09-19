@@ -118,6 +118,34 @@ export const PainEvidenceEntrySchema = Type.Object({
 
 export type PainEvidenceEntry = Static<typeof PainEvidenceEntrySchema>;
 
+/**
+ * PRI-844: the Owner's own correction words as FIRST-CLASS pain evidence.
+ *
+ * Domain language note: named `correctionEvidence` (not `ownerCorrection`)
+ * because a PD pain is not only born from Owner corrections — tool failures
+ * are pains too. This type is attached ONLY when the pain context actually
+ * contains a user correction; producers that have none simply leave it
+ * absent (never fabricated — rc-9).
+ *
+ * `text` carries the Owner's verbatim words, NOT an LLM summary: the chain
+ * Pain → Diagnosis → Candidate must always be able to answer
+ * "why does this principle exist?" with the Owner's original sentence.
+ */
+export const PainCorrectionEvidenceSchema = Type.Object({
+  /** Owner's verbatim correction text (defensively bounded at the writer). */
+  text: Type.String({ minLength: 1 }),
+  /** Session the correction occurred in. */
+  sessionId: Type.Optional(Type.String()),
+  /** user_turns turn index of the correction turn, when known. */
+  turnIndex: Type.Optional(Type.Integer({ minimum: 0 })),
+  /** user_turns id of the assistant turn the correction responded to, when known. */
+  referencesAssistantTurnId: Type.Optional(Type.Integer({ minimum: 0 })),
+  /** When the correction turn happened (ISO). */
+  occurredAt: Type.Optional(Type.String()),
+});
+
+export type PainCorrectionEvidence = Static<typeof PainCorrectionEvidenceSchema>;
+
 export const DiagnosisTargetSchema = Type.Object({
   reasonSummary: Type.Optional(Type.String()),
   source: Type.Optional(Type.String()),
@@ -142,6 +170,12 @@ export const DiagnosisTargetSchema = Type.Object({
     nextAction: Type.String(),
   })),
   evidence: Type.Optional(Type.Array(PainEvidenceEntrySchema)),
+  /**
+   * PRI-844: the Owner's verbatim correction, when this pain's context
+   * contains one. Absent = no correction evidence available — the prompt
+   * renders nothing and nothing may be fabricated (rc-9).
+   */
+  correctionEvidence: Type.Optional(PainCorrectionEvidenceSchema),
 });
 
 export type DiagnosisTarget = Static<typeof DiagnosisTargetSchema>;

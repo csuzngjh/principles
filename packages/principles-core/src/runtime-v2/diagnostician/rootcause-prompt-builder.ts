@@ -24,6 +24,7 @@ import type { SchemaPromptAdapter } from '../adapter/schema-prompt-adapter.js';
 import { DefaultSchemaPromptAdapter } from '../adapter/schema-prompt-adapter.js';
 import { DiagRootCauseOutputV1Schema } from './diag-rootcause-output.js';
 import type { DiagnosticianContextPayload } from '../context-payload.js';
+import type { PainCorrectionEvidence } from '../context-payload.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
@@ -157,9 +158,54 @@ export interface RootCausePromptBuilderOptions {
    * to the pre-feature prompt (EP-03: no silent fallback).
    */
   evidenceFirstAttribution?: boolean;
+  /**
+   * PRI-844: the Owner's verbatim correction, when the diagnosis target
+   * carries one. When present, inserts a PHASE 1.5 block instructing the
+   * model to treat the Owner's own words as authoritative evidence and to
+   * cite them verbatim (sourceRef `owner_correction`). When absent, the
+   * prompt is byte-identical to the pre-PRI-844 prompt (EP-03: no silent
+   * fallback) — no correction, no block, no fabrication.
+   */
+  correctionEvidence?: PainCorrectionEvidence;
 }
 
 // ── Instruction builder ──────────────────────────────────────────────────────
+
+
+/**
+ * PRI-844: build the PHASE 1.5 Owner Correction block.
+ *
+ * When `correctionEvidence` is present, instructs the model to treat the
+ * Owner's verbatim words as authoritative evidence, cite them exactly
+ * (sourceRef `owner_correction`), and interpret them together with the
+ * previous agent action and its outcome — not to copy them blindly.
+ * When absent, returns '' so the prompt stays byte-identical to the
+ * pre-PRI-844 prompt (EP-03: no silent fallback) — and nothing can be
+ * fabricated (rc-9).
+ */
+function buildOwnerCorrectionBlock(correctionEvidence?: PainCorrectionEvidence): string {
+  if (!correctionEvidence) return '';
+  const refs = [
+    correctionEvidence.sessionId ? `sessionId=${correctionEvidence.sessionId}` : undefined,
+    correctionEvidence.turnIndex !== undefined ? `turnIndex=${correctionEvidence.turnIndex}` : undefined,
+    correctionEvidence.referencesAssistantTurnId !== undefined
+      ? `referencesAssistantTurnId=${correctionEvidence.referencesAssistantTurnId}`
+      : undefined,
+    correctionEvidence.occurredAt ? `occurredAt=${correctionEvidence.occurredAt}` : undefined,
+  ].filter((v): v is string => v !== undefined);
+  return `
+PHASE 1.5 — Owner Correction (authoritative evidence):
+The following are the Owner's OWN WORDS, quoted verbatim — this is not a paraphrase:
+"${correctionEvidence.text}"
+${refs.length > 0 ? `Turn provenance: ${refs.join('; ')}` : ''}
+Treat this as authoritative evidence about what the Owner wants changed.
+When you use it as evidence:
+- preserve the exact quote in the note field, and
+- cite it with sourceRef "owner_correction".
+Interpret it together with the agent's previous action and its outcome —
+do not copy it blindly and do not generalize beyond what the Owner said.
+`;
+}
 
 /**
  * Build the Stage A diagnostic protocol instruction (PHASE 1–3 + optional PHASE 3.5).
@@ -179,7 +225,10 @@ export function buildRootCauseProtocolInstruction(
 ): string {
   const adapter = opts.adapter ?? new DefaultSchemaPromptAdapter();
   const schema = opts.schema ?? DiagRootCauseOutputV1Schema;
-  const { outputLanguage, coreGrounding, intentGrounding, evidenceFirstAttribution } = opts;
+  const { outputLanguage, coreGrounding, intentGrounding, evidenceFirstAttribution, correctionEvidence } = opts;
+
+  // PRI-844: Owner correction block — '' (byte-identical) when absent.
+  const ownerCorrectionBlock = buildOwnerCorrectionBlock(correctionEvidence);
 
   const example = adapter.generateExample(schema);
   const constraints = adapter.generateConstraints(schema);
@@ -220,6 +269,7 @@ entries already present in the context. Each evidence item must cite its source.
 Pay special attention to diagnosisTarget.evidence — these are the primary behavioral
 evidence (owner messages and agent actions) that the root cause analysis must address.
 
+${ownerCorrectionBlock}
 PHASE 2 — Causal Chain (5 Whys):
 Build a Why-1 through Why-5 causal chain. Each Why MUST have at least one evidenceRefs entry referencing a sourceRef from Phase 1.
 - If no evidence is available for a Why level, reference the closest available evidence and note the gap in ambiguityNotes.
@@ -296,6 +346,10 @@ export class RootCausePromptBuilder {
       coreGrounding: opts.coreGrounding,
       intentGrounding: opts.intentGrounding,
       evidenceFirstAttribution: opts.evidenceFirstAttribution,
+      // PRI-844 review fix (P1): the wrapper must forward the correction —
+      // dropping it here silently disabled PHASE 1.5 on the production
+      // buildPrompt() path while the standalone-function tests stayed green.
+      correctionEvidence: opts.correctionEvidence,
     });
   }
 
@@ -353,6 +407,9 @@ export class RootCausePromptBuilder {
       coreGrounding,
       intentGrounding,
       evidenceFirstAttribution,
+      // PRI-844: the Owner's verbatim correction rides in the diagnosis
+      // target; when present the instruction gains the PHASE 1.5 block.
+      correctionEvidence: payload.diagnosisTarget?.correctionEvidence,
     });
 
     // DPB-04: Explicit top-level fields at the prompt level

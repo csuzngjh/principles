@@ -18,6 +18,8 @@ import {
   isRecord,
 } from './pain-ingress-payload.js';
 import type { PainIngressV1Payload } from './pain-ingress-payload.js';
+import { sanitizeStringUnbounded } from './evidence-sanitizer.js';
+import type { PainCorrectionEvidence } from './context-payload.js';
 
 export type { PainProvenance };
 
@@ -32,6 +34,32 @@ export interface DiagnosticianRunnerLike {
 /** PRI-359: Increased from 4 to 8 to accommodate failed tool_calls evidence */
 export const MAX_EVIDENCE_ENTRIES = 8;
 export const MAX_EVIDENCE_NOTE_CHARS = 200;
+
+/**
+ * PRI-844: defensive upper bound for persisted Owner correction text.
+ * This is a storage safety limit, NOT semantic truncation — the original
+ * correction should remain complete when under the limit, and the whole
+ * point of the field is that the Owner's own words survive verbatim.
+ */
+export const MAX_CORRECTION_EVIDENCE_TEXT_CHARS = 2000;
+
+/**
+ * PRI-844: sanitize (strip PD tags / redact tokens / redact absolute paths)
+ * without the 200-char generic evidence cap, then apply the defensive
+ * storage bound. Deliberately NOT `sanitizeString` — its MAX_EVIDENCE_VALUE_CHARS
+ * (200) head-truncation would destroy the verbatim correction this field exists
+ * to preserve.
+ */
+export function boundCorrectionEvidenceText(
+  correctionEvidence: PainCorrectionEvidence,
+  workspaceDir?: string,
+): PainCorrectionEvidence {
+  return {
+    ...correctionEvidence,
+    text: sanitizeStringUnbounded(correctionEvidence.text, workspaceDir)
+      .slice(0, MAX_CORRECTION_EVIDENCE_TEXT_CHARS),
+  };
+}
 
 export interface PainEvidenceEntry {
   sourceRef: string;
@@ -60,6 +88,14 @@ export interface PainDetectedData {
   /** Codex Governance Closure SPEC §12: provenance `host_context_bound` names the host. */
   hostKind?: GovernanceHostKind;
   evidence?: PainEvidenceEntry[];
+  /**
+   * PRI-844: the Owner's verbatim correction, when this pain's context
+   * contains one. Producers with no correction context leave it absent —
+   * absence must never be replaced with fabricated correction text (rc-9).
+   * Flows verbatim (defensively bounded) into diagnosticJson so the
+   * diagnosis prompt sees the Owner's own words, not a trigger excerpt.
+   */
+  correctionEvidence?: PainCorrectionEvidence;
   /**
    * PRI-642 SPEC §9: validated rev-2 ingress facts. When present,
    * buildDiagnosticJson writes them under the versioned `painIngress`
@@ -330,6 +366,12 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     ...(data.hostKind ? { hostKind: data.hostKind } : {}),
     evidence: data.evidence ?? [],
     workspaceDir: workspaceDir ?? null,
+    // PRI-844: the Owner's verbatim correction rides as its own top-level
+    // field (NOT inside evidence[], whose notes are capped at 200 chars).
+    // Absent when the producer had no correction context — never fabricated.
+    ...(data.correctionEvidence
+      ? { correctionEvidence: boundCorrectionEvidenceText(data.correctionEvidence, workspaceDir) }
+      : {}),
     // PRI-642 SPEC §9: one builder produces BOTH the legacy top-level fields
     // and the versioned nested namespace; re-entry validates consistency.
     ...(data.painIngress ? { painIngress: data.painIngress } : {}),
