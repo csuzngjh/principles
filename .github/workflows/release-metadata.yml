@@ -72,7 +72,12 @@ on:
           - dry-run
           - publish
       product_version:
-        description: 'Product version to publish ("auto" = latest published create-principles-disciple). Identity = this resolved version + HEAD commit (format-validated, verified against each asset''s embedded stamp at assembly). An EXPLICIT version must match the ref''s create-principles-disciple/package.json unless allow_version_drift is set.'
+        description: >-
+          Product version to publish ("auto" = the ref''s create-principles-disciple/package.json
+          version — NEVER an npm registry lookup, PRI-849/SPEC v0.3 §12). Identity = this
+          resolved version + HEAD commit (format-validated, verified against each asset''s
+          embedded stamp at assembly). An EXPLICIT version must match the ref''s
+          create-principles-disciple/package.json unless allow_version_drift is set.
         required: false
         default: 'auto'
         type: string
@@ -138,12 +143,18 @@ jobs:
           PRODUCT_VERSION_INPUT: ${{ github.event.inputs.product_version }}
           ALLOW_VERSION_DRIFT: ${{ github.event.inputs.allow_version_drift }}
         run: |
+          # PRI-849 (SPEC v0.3 §12): a signed release NEVER borrows its product
+          # version from an npm registry `latest` — that authority moves under
+          # the release between runs (1.245.2 → 1.143.2-style stream jumps) and
+          # breaks release identity. "auto" resolves deterministically from the
+          # REF's own installer manifest; an explicit product_version input
+          # wins and must match the ref unless allow_version_drift is set.
           VERSION="$PRODUCT_VERSION_INPUT"
           if [ "$VERSION" = "auto" ] || [ -z "$VERSION" ]; then
-            VERSION=$(npm view create-principles-disciple version 2>/dev/null || echo "")
+            VERSION=$(node -p "require('./packages/create-principles-disciple/package.json').version")
           fi
           if [ -z "$VERSION" ]; then
-            echo "::error::Could not resolve the product version (npm view failed and no explicit product_version was given)."
+            echo "::error::Could not resolve the product version from the ref's installer manifest."
             exit 1
           fi
           COMMIT=$(git rev-parse HEAD)
