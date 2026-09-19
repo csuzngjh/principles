@@ -29,6 +29,7 @@ import type {
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
+import { parseSeedSourcePainId } from '../internalization/pitask-metadata.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { RunnerPhase } from './runner-phase.js';
@@ -76,49 +77,6 @@ function resolvePeerRunnerOptions(
     outputLanguage: options.outputLanguage,
     coreGrounding: options.coreGrounding ?? true,
   };
-}
-
-/**
- * Type guard: narrow `unknown` to `Record<string, unknown>` for safe property
- * access on parsed JSON. Mirrors the isRecord / isPlainObject helpers in
- * pending-agent-draft-store.ts and sqlite-task-store.ts (rc-1, rc-2: no `as`).
- */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-/**
- * Safely extract `sourcePainId` from a task's `diagnosticJson` column.
- *
- * `diagnosticJson` is an optional JSON string that may carry PI metadata
- * including the originating pain signal ID (for diagnostician tasks). We
- * parse it defensively (rc-1: treat as unknown): malformed JSON or a
- * non-string sourcePainId yield null rather than throwing, so a corrupt
- * payload cannot break the draft-injection path (rc-9: graceful
- * degradation — painId is optional linkage, not a required field).
- *
- * Mirrors the extractPainIdFromDiagnosticJson helper in
- * sqlite-task-store.ts (Task 8). Inlined here because the original is a
- * module-private function and core must not introduce a new shared
- * utility surface for a single-call-site helper (avoid over-engineering).
- *
- * ERR-013 / rc-5: Object.hasOwn (not `in`) checks the sourcePainId key.
- * ERR-001 / rc-2: no `as` casts — uses a type guard (isPlainObject) to
- * narrow the parsed JSON before property access.
- */
-function extractPainIdFromDiagnostic(diagnosticJson: unknown): string | null {
-  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(diagnosticJson);
-  } catch {
-    return null;
-  }
-  if (!isPlainObject(parsed)) return null;
-  if (!Object.hasOwn(parsed, 'sourcePainId')) return null;
-  const { sourcePainId } = parsed;
-  if (typeof sourcePainId !== 'string' || sourcePainId.length === 0) return null;
-  return sourcePainId;
 }
 
 // ── BasePeerRunner ───────────────────────────────────────────────────────────
@@ -1005,7 +963,9 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     // rc-7 / ERR-015: read painId fresh from the current task record's
     // diagnosticJson. ctx.task is the leased task snapshot; diagnosticJson
     // is the canonical source for sourcePainId linkage.
-    const painId = extractPainIdFromDiagnostic(ctx.task.diagnosticJson);
+    // rc-9: parseSeedSourcePainId degrades corrupt payloads to null —
+    // linkage is optional and must not break draft insertion.
+    const painId = parseSeedSourcePainId(ctx.task.diagnosticJson);
 
     try {
       const result = this.pendingAgentDraftStore.insertPendingDraft({
