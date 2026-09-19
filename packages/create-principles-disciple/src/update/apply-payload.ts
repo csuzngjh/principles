@@ -158,15 +158,10 @@ export async function downloadAndVerifyAssetFile(input: {
   if (!response.ok) {
     throw new ApplyPayloadError('metadata_refresh_failed', `Asset download failed: HTTP ${response.status} for ${input.url}`, 'Verify that the release pipeline published this release asset, then retry.');
   }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const size = bytes.length;
   const hash = createHash('sha256');
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of response.body as unknown as AsyncIterable<Buffer>) {
-    chunks.push(Buffer.from(chunk));
-    size += chunk.length;
-    hash.update(chunk);
-  }
-  const bytes = Buffer.concat(chunks);
+  hash.update(bytes);
   if (hash.digest('hex') !== input.expectedSha256) {
     throw new ApplyPayloadError('release_metadata_invalid', `Asset bytes do not match the signed sha256 for release ${input.releaseId}.`, 'Do not install this release. Re-fetch the signed metadata and retry.');
   }
