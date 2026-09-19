@@ -12,6 +12,7 @@ import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-st
 import type { FailedTaskSummary, FailedTaskFilter, FailedTaskDetail } from './task-types.js';
 import type { RunRecord } from '../run/run-store.js';
 import { SqliteRunStore } from '../run/sqlite-run-store.js';
+import { parseSeedSourcePainId } from '../../internalization/pitask-metadata.js';
 
 export interface ArtifactContentPrecondition {
   readonly artifactId: string;
@@ -56,44 +57,6 @@ function readNullableStringField(
     );
   }
   return value;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-/**
- * Safely extract `sourcePainId` from the `diagnostic_json` column.
- *
- * `diagnostic_json` is an optional JSON string that may carry PI metadata
- * including the originating pain signal ID (for diagnostician tasks). We
- * parse it defensively: malformed JSON or non-string sourcePainId yield
- * null rather than throwing, so one bad row does not break the entire
- * failed-task list (rc-9: graceful degradation — painId is an optional
- * summary field; the caller observes null and can surface it in UI).
- */
-function extractPainIdFromDiagnosticJson(
-  diagnosticJson: unknown,
-  taskIdForError: string,
-): string | null {
-  if (diagnosticJson === null || diagnosticJson === undefined) return null;
-  if (typeof diagnosticJson !== 'string') {
-    throw new PDRuntimeError(
-      'storage_unavailable',
-      `Task ${taskIdForError} has invalid schema: /diagnostic_json: expected string|null, got ${typeof diagnosticJson}`,
-    );
-  }
-  if (diagnosticJson.length === 0) return null;
-  try {
-    const parsed: unknown = JSON.parse(diagnosticJson);
-    if (!isPlainObject(parsed)) return null;
-    if (!Object.hasOwn(parsed, 'sourcePainId')) return null;
-    const { sourcePainId } = parsed;
-    if (typeof sourcePainId !== 'string' || sourcePainId.length === 0) return null;
-    return sourcePainId;
-  } catch {
-    return null;
-  }
 }
 
 export class SqliteTaskStore implements TaskStore {
@@ -460,7 +423,13 @@ export class SqliteTaskStore implements TaskStore {
 
     const lastError = readNullableStringField(row.last_error, 'last_error', taskId);
     const lastAttemptAt = readNullableStringField(row.last_attempt_at, 'last_attempt_at', taskId);
-    const painId = extractPainIdFromDiagnosticJson(row.diagnostic_json, taskId);
+    // PRI-863: canonical reader; a non-string column fails loud
+    // (storage_unavailable) via readNullableStringField, while a malformed
+    // payload inside a valid string degrades to null (rc-9 — painId is an
+    // optional summary field).
+    const painId = parseSeedSourcePainId(
+      readNullableStringField(row.diagnostic_json, 'diagnostic_json', taskId),
+    );
 
     return {
       taskId,

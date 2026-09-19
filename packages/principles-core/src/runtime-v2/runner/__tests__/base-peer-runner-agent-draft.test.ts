@@ -559,4 +559,41 @@ describe('Task 12: agentDraft painId linkage from diagnosticJson', () => {
     expect(row).not.toBeNull();
     expect(unwrap(row).painId).toBeNull();
   });
+
+  // PRI-863: the draft path now reads painId through the canonical
+  // parseSeedSourcePainId, which trims and maps blank → null. The inline
+  // copy it replaced returned padded values verbatim, so lock the
+  // intentional tightening here too (the store boundary has its own test).
+  it('padded sourcePainId is trimmed; blank sourcePainId → null (canonical reader)', async () => {
+    const paddedTask = makeTask({
+      diagnosticJson: JSON.stringify({ sourcePainId: '  pain-padded-001  ' }),
+    });
+    await runner.callRetryOrFail({
+      taskId: TASK_ID,
+      task: paddedTask,
+      errorCategory: 'input_invalid',
+      failureReason: 'failure with padded pain linkage',
+    });
+    const paddedRow = store.getUnconsumedByTaskId(TASK_ID);
+    expect(paddedRow).not.toBeNull();
+    expect(unwrap(paddedRow).painId).toBe('pain-padded-001');
+
+    const blankTask = makeTask({
+      diagnosticJson: JSON.stringify({ sourcePainId: '   ' }),
+    });
+    await runner.callRetryOrFail({
+      taskId: TASK_ID,
+      task: blankTask,
+      errorCategory: 'input_invalid',
+      failureReason: 'failure with blank pain linkage',
+    });
+    const blankRow = store.getUnconsumedByTaskId(TASK_ID);
+    expect(blankRow).not.toBeNull();
+    expect(unwrap(blankRow).painId).toBeNull();
+
+    // A blank padded value must not count as linkage in telemetry either.
+    const calls = telemetryCalls(mockDeps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>);
+    const inserted = calls.filter((c) => c.eventType === 'test_agent_draft_inserted');
+    expect(inserted.at(-1)?.payload?.painIdLinked).toBe(false);
+  });
 });
