@@ -339,8 +339,9 @@ describe('SqliteTaskStore failed-task observability', () => {
       expect(results.find((r) => r.taskId === 't-blank-pain')?.painId).toBeNull();
     });
 
-    it('returns null painId when sourcePainId is not a string (graceful degradation)', async () => {      // diagnostic_json is valid JSON (passes the session-id-hint expression
-      // index), but sourcePainId is a number, not a string.
+    // diagnostic_json is valid JSON (passes the session-id-hint expression
+    // index), but sourcePainId is a number, not a string.
+    it('returns null painId when sourcePainId is not a string (graceful degradation)', async () => {
       await store.createTask(
         makeTaskInput({
           taskId: 't-bad-pain-type',
