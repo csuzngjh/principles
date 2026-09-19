@@ -108,6 +108,24 @@ function confirmThroughInstaller(journal: InstallerJournal | undefined): void {
 }
 
 describe('ReleaseManager.apply — orchestration through installer + journal (PRI-698 Phase 1)', () => {
+  it('refuses the ordinary update when the retained previous release sits outside the candidate data window (PRI-853)', async () => {
+    // The candidate's forward-readable window (1.224.0) EXCLUDES the retained
+    // previous release (1.222.0): ordinary update must refuse cleanly —
+    // no transaction opened, no install invocation — per SPEC §10.
+    const fixture = await createShadowFixture({ dataSchemaForwardReadableFrom: '1.224.0' });
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+
+    const outcome: ApplyOutcome = await manager.apply({ workspaceDir: fixture.pdHome });
+    expect(outcome).toMatchObject({
+      kind: 'no_update',
+      reason: 'destructive_migration_requires_maintenance',
+    });
+    if (outcome.kind === 'no_update') {
+      expect(outcome.note).toContain('1.224.0');
+    }
+    expect(installMock).not.toHaveBeenCalled();
+  });
+
   it('happy path: one journal file, signed identity, full chain planned → … → confirmed', async () => {
     const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
     const artifact = buildReleaseAssetPayload(payloadRoot);

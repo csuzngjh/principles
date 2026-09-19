@@ -40,6 +40,7 @@ import {
   type TransactionState,
 } from './transaction-journal.js';
 import { downloadReleaseAsset, extractAndVerifyReleaseAsset, ApplyPayloadError } from './apply-payload.js';
+import { evaluateDataCompatibility } from './data-compatibility.js';
 import type { InstallerJournal } from '../installer.js';
 import type { Language } from '../i18n.js';
 import type { HostTarget } from '../installers/index.js';
@@ -293,6 +294,24 @@ export class ReleaseManager {
     };
   }
 
+  /**
+   * PRI-853 (SPEC §10): the metadata of the retained previous release, when
+   * one exists and reads cleanly. Anything missing or unreadable degrades to
+   * `null` — the compatibility policy treats that as "no retained previous"
+   * rather than guessing an identity from file names or timestamps.
+   */
+  private readRetainedPreviousReleaseMetadata(): ReleaseMetadata | null {
+    try {
+      const previous = readActiveRecord(this.paths.previousRecordPath);
+      if (previous === null) return null;
+      const metadataPath = path.join(this.paths.releasesDir, previous.releaseId, 'metadata.json');
+      if (!fs.existsSync(metadataPath)) return null;
+      return parseReleaseMetadata(JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as unknown);
+    } catch {
+      return null;
+    }
+  }
+
   async check(channel: ReleaseChannelName): Promise<UpdateCheck> {
     const now = this.options.now ?? ((): Date => new Date());
     const status = this.inspect();
@@ -362,6 +381,19 @@ export class ReleaseManager {
       // PRI-848: the reason travels structured — the Console must map refusal
       // states from a reason code, never by parsing the note string.
       return { kind: 'no_update', reason: decision.reason, note: decision.message };
+    }
+
+    // PRI-853 (SPEC §10 wired): data compatibility preflight — the retained
+    // previous release must sit inside the candidate's forward-readable
+    // window, otherwise an ordinary update could strand code rollback and is
+    // refused into the separate maintenance workflow. No journal is opened:
+    // this is still a clean, unjournaled refusal.
+    const dataCompatibility = evaluateDataCompatibility({
+      candidate: releaseMetadata,
+      previous: this.readRetainedPreviousReleaseMetadata(),
+    });
+    if (!dataCompatibility.eligible) {
+      return { kind: 'no_update', reason: dataCompatibility.reason, note: dataCompatibility.message };
     }
 
     // PRI-850: honor a caller-generated transaction id (bootstrap executor

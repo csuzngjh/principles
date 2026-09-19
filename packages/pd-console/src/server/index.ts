@@ -1,6 +1,7 @@
 
 import * as http from 'http';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveApplyFullTimeoutMs } from './update-timeout.js';
@@ -39,7 +40,7 @@ import { handleIntentDecisionsRoute, disposeIntentDecisionModels } from './route
 import { handleOnboardingRoute, disposeOnboardingModels } from './routes/onboarding.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { handleUpdateRoute } from './routes/update.js';
-import { handleUpdateHistoryRoute } from './routes/update-history.js';
+import { handleUpdateHistoryRoute, reconcileUpdateHistoryFromJournals } from './routes/update-history.js';
 import { handleUpdateTransactionRoute } from './routes/update-transaction.js';
 import { handleConfigRoute } from './routes/config.js';
 import { sendJson, sendNotFound, sendUnauthorized } from './utils/response.js';
@@ -297,6 +298,16 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   // that default at the channel-level (not here). Used to build mailto: URLs in
   // feedback reports so the owner can open a pre-filled email directly.
   const maintainerEmail = getFeedbackMaintainerEmail(workspaceDir);
+
+  // PRI-853 (SPEC §12.1): an update carried by the detached bootstrap executor
+  // may reach a terminal state after its initiating Console died — derive the
+  // missing Owner-facing history entries from the transaction journal. Best
+  // effort only: history reconciliation never blocks console startup.
+  try {
+    reconcileUpdateHistoryFromJournals(workspaceDir, path.join(os.homedir(), '.pd'));
+  } catch (error) {
+    console.warn('[pd-console] update history reconciliation skipped:', error instanceof Error ? error.message : error);
+  }
 
   // Read the feedback submit-channel parameters (ingest_url / ingest_token /
   // github_repo / github_proxy). Presence of a key enables its channel.

@@ -71,6 +71,10 @@ import {
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
 
+/** PRI-853: the maintained official signed-release metadata repository.
+ * Served from the repo's GitHub Pages (gh-pages branch, enabled 2026-09-19). */
+export const DEFAULT_RELEASE_METADATA_URL = 'https://csuzngjh.github.io/principles';
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -346,8 +350,13 @@ export function commitInstallerActiveRecord(journal: InstallerJournal): ActiveRe
  * strict reader would then fail loud and mark the install corrupt.
  */
 export function persistReleaseMetadataSource(): void {
-  const raw = process.env[RELEASE_METADATA_URL_ENV];
-  if (raw === undefined || raw.trim().length === 0) return;
+  // PRI-853 (SPEC v0.3 §13): an official install registers the MAINTAINED
+  // official update source by default — the pre-850 default (silently
+  // unconfigured) left every fresh install unable to check for updates. An
+  // explicit env value still wins (custom source, staging, air-gapped tests);
+  // the trust root stays a separate anchor, so a changed URL never changes
+  // who is trusted, only where metadata is fetched from.
+  const raw = process.env[RELEASE_METADATA_URL_ENV] ?? DEFAULT_RELEASE_METADATA_URL;
   const normalized = normalizeReleaseMetadataUrl(raw);
   if (normalized === null) {
     logger.warn(
@@ -563,15 +572,19 @@ export async function repairUpdateChain(input: { sourcePackageDir: string }): Pr
     };
   }
 
-  // Update-source registration: env-gated (absent env stays unconfigured —
-  // never a guessed URL, PRI-709).
+  // Update-source registration: the official default applies when the env is
+  // absent (PRI-853); an explicit env value still wins; a malformed env value
+  // is reported and left unconfigured (never persisted, PRI-709).
+  const envValue = process.env[RELEASE_METADATA_URL_ENV];
   const metadataUrlBefore = readInstallConfigSafeReleaseMetadataUrl(pdHome);
   persistReleaseMetadataSource();
   const metadataSourceRegistered = readInstallConfigSafeReleaseMetadataUrl(pdHome) !== undefined;
   if (metadataSourceRegistered && metadataUrlBefore === undefined) {
-    notes.push('Release metadata source registered into install.json (durable tier).');
+    notes.push(envValue === undefined
+      ? 'Official update source registered into install.json (maintained default).'
+      : 'Update source registered into install.json from the environment.');
   } else if (!metadataSourceRegistered) {
-    notes.push(`No ${RELEASE_METADATA_URL_ENV} in the environment — the release metadata source stays unconfigured. Re-run with the variable set to register it.`);
+    notes.push(`${RELEASE_METADATA_URL_ENV} is not a valid http(s) URL — the release metadata source stays unconfigured. Re-run with a valid URL.`);
   }
 
   // Trust root: report-only in repair mode. First provisioning happens with a

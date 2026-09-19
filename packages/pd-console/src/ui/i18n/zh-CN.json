@@ -1389,7 +1389,8 @@
         "release_metadata_expired": "发布元数据已过期。请等待官方重新发布后再试。",
         "channel_metadata_expired": "频道元数据已过期。请等待官方刷新后再试。",
         "legacy_layout_not_supported": "此安装使用旧版布局，需运行官方安装器迁移到新布局。",
-        "metadata_refresh_failed": "无法获取或验证签名发布元数据。请检查网络后重试。"
+        "metadata_refresh_failed": "无法获取或验证签名发布元数据。请检查网络后重试。",
+        "destructive_migration_requires_maintenance": "此版本包含破坏性数据迁移，无法通过普通更新完成。请使用官方维护流程迁移数据。"
       },
       "applyUpdate": "立即更新",
       "updating": "更新中…",

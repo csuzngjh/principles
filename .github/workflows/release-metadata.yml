@@ -549,4 +549,23 @@ jobs:
           # One push updates the whole tree atomically; consumers never see a
           # channel pointer whose artifact is missing.
           git push origin gh-pages
-          echo "Published to gh-pages. Configure PD_RELEASE_METADATA_URL (or install.json releaseMetadataUrl) to the metadata base URL serving this branch."
+          # PRI-853 (SPEC v0.3 §13): a push is not a publication. The release
+          # only counts as published when the public metadata URL actually
+          # serves the new channel pointer (e.g. GitHub Pages must be enabled
+          # first — observed 2026-09-19: gh-pages pushed while Pages was
+          # disabled, leaving installs with a configured source but no site).
+          PAGE_HOST="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io"
+          REPO_NAME="$(echo "${{ github.repository }}" | cut -d/ -f2)"
+          CHANNEL_URL="$PAGE_HOST/$REPO_NAME/targets/channels/$CHANNEL.json"
+          OK=0
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            sleep 15
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" "$CHANNEL_URL" || echo 000)
+            echo "reachability attempt $attempt: $CHANNEL_URL -> $CODE"
+            if [ "$CODE" = "200" ]; then OK=1; break; fi
+          done
+          if [ "$OK" != "1" ]; then
+            echo "::error::Published channel pointer is NOT reachable at $CHANNEL_URL — the publication is INCOMPLETE. Configure GitHub Pages (source: gh-pages) and re-verify before telling users an update exists."
+            exit 1
+          fi
+          echo "Published and reachable: $CHANNEL_URL. Configure PD_RELEASE_METADATA_URL (or install.json releaseMetadataUrl) to $PAGE_HOST/$REPO_NAME."

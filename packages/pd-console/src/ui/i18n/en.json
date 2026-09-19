@@ -1389,7 +1389,8 @@
         "release_metadata_expired": "The release metadata has expired. Wait for an official re-publication, then retry.",
         "channel_metadata_expired": "The channel metadata has expired. Wait for an official refresh, then retry.",
         "legacy_layout_not_supported": "This installation uses the legacy layout. Run the official installer to migrate to the supported layout.",
-        "metadata_refresh_failed": "Could not fetch or verify the signed release metadata. Check your network and retry."
+        "metadata_refresh_failed": "Could not fetch or verify the signed release metadata. Check your network and retry.",
+        "destructive_migration_requires_maintenance": "This release contains a destructive data migration and cannot ship through an ordinary update. Use the official maintenance workflow to migrate your data."
       },
       "applyUpdate": "Update Now",
       "updating": "Updating…",

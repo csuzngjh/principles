@@ -103,6 +103,12 @@ export async function createShadowFixture(overrides: {
   publicationSequence?: number;
   channelVersion?: number;
   /**
+   * PRI-853: the candidate's data forward-readable window (signed into the
+   * release metadata). Defaults to 1.220.0 (inside the fixture's active
+   * 1.222.0); a later window makes the ordinary update refuse as destructive.
+   */
+  dataSchemaForwardReadableFrom?: string;
+  /**
    * PRI-698 Phase 1: platform descriptor of the CANDIDATE release asset.
    * Defaults keep the historical win32/x64/147 shape (check()-only tests do
    * not select assets); apply()-flow tests pass the CURRENT runtime values so
@@ -160,7 +166,7 @@ export async function createShadowFixture(overrides: {
       archiveSha256: artifactSha256,
       archiveSizeBytes: artifactBytes?.length ?? 1024,
     }],
-    dataSchemaForwardReadableFrom: '1.220.0',
+    dataSchemaForwardReadableFrom: overrides.dataSchemaForwardReadableFrom ?? '1.220.0',
   });
   fs.mkdirSync(path.join(paths.releasesDir, releaseMetadata.releaseId), { recursive: true });
   fs.writeFileSync(path.join(paths.releasesDir, releaseMetadata.releaseId, 'metadata.json'), `${JSON.stringify(releaseMetadata, null, 2)}\n`);
@@ -187,6 +193,16 @@ export async function createShadowFixture(overrides: {
     releaseMetadataDigest: activeRelease.metadataDigest,
     previousReleaseId: null,
     transactionId: 'txn-fixture-active',
+    productVersion: activeRelease.productVersion,
+  });
+  // PRI-853: the retention policy keeps ONE previous confirmed release — the
+  // data-compatibility preflight reads it to decide ordinary-update eligibility.
+  writeActiveRecord(paths.previousRecordPath, {
+    generation: 1,
+    releaseId: activeRelease.releaseId,
+    releaseMetadataDigest: activeRelease.metadataDigest,
+    previousReleaseId: null,
+    transactionId: 'txn-fixture-previous',
     productVersion: activeRelease.productVersion,
   });
 
