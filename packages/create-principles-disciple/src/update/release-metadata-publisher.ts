@@ -96,6 +96,13 @@ export interface PublicationArchive {
   readonly arch: string;
   readonly nodeAbi: string;
   readonly bytes: Buffer;
+  /**
+   * PRI-854 (option A): the public URL the bytes will be served from (e.g. a
+   * GitHub Release attachment). When set, the metadata carries it and NO asset
+   * bytes are written into the metadata repository — the delivery host is the
+   * Release attachment, the trust stays in the signed sha256.
+   */
+  readonly url?: string;
 }
 
 /** Previously published state of the metadata repository, when one exists. */
@@ -146,7 +153,15 @@ export interface ReleasePublicationManifestArtifact {
   readonly nodeAbi: string;
   readonly artifactSha256: string;
   readonly artifactSizeBytes: number;
+  /**
+   * The CONVENTIONAL in-repo target path for this asset identity — always the
+   * relative path shape (`releases/<id>/release-asset-<p>-<a>-abi<abi>.tar.gz`),
+   * even in url mode where the bytes are NOT written there (single semantic,
+   * review P2: never overload this field with an absolute URL).
+   */
   readonly artifactTargetPath: string;
+  /** PRI-854: present only in url mode — where the bytes are actually served. */
+  readonly artifactUrl?: string;
 }
 
 export interface ReleasePublicationManifest {
@@ -170,6 +185,12 @@ export interface ReleasePublication {
   readonly channelPayload: ChannelMetadata;
   /** The complete served-repository content, ready to publish as-is. */
   readonly files: readonly PublicationFile[];
+  /**
+   * PRI-854 (option A): for archives with a delivery url — the exact gzipped
+   * bytes to upload to the release host under `name` (content-addressed).
+   * Empty for legacy in-repo targets.
+   */
+  readonly assetUploads: readonly { readonly name: string; readonly bytes: Buffer }[];
 }
 
 const RFC3339_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
@@ -397,6 +418,19 @@ function resolvePreviousState(input: ReleasePublicationInput, channelPayload: Ch
 }
 
 /**
+ * PRI-854: the content-addressed asset file name shared by the metadata url
+ * stamping and the upload manifest (single naming truth — review P3).
+ */
+export function contentAddressedAssetName(input: {
+  readonly platform: string;
+  readonly arch: string;
+  readonly nodeAbi: string;
+  readonly digestHex: string;
+}): string {
+  return `release-asset-${input.platform}-${input.arch}-abi${input.nodeAbi}-${input.digestHex.slice(0, 12)}.tar.gz`;
+}
+
+/**
  * Builds the complete signed release publication. Pure: no filesystem or
  * network IO — callers (the publish script / CI) own byte transport.
  */
@@ -481,6 +515,7 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     nodeAbi: archive.nodeAbi,
     bytes: archive.bytes,
     sha256: sha256Hex(archive.bytes),
+    ...(archive.url !== undefined ? { url: archive.url } : {}),
   }));
   const releaseMetadata = buildReleaseMetadata({
     productVersion: input.productVersion,
@@ -494,6 +529,7 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
       nodeAbi: artifact.nodeAbi,
       archiveSha256: artifact.sha256,
       archiveSizeBytes: artifact.bytes.length,
+      ...(artifact.url !== undefined ? { url: artifact.url } : {}),
     })),
     dataSchemaForwardReadableFrom: input.dataSchemaForwardReadableFrom,
   });
@@ -522,26 +558,41 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
   const artifactTargets: Record<string, TargetFile> = {};
   const artifactFiles: PublicationFile[] = [];
   const manifestArtifacts = artifacts.map((artifact) => {
-    // PRI-850/ABI convention: the Node ABI is part of the asset identity, so
-    // two runtimes on one platform publish distinct signed targets instead of
-    // overwriting one file name.
-    const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${artifact.platform}-${artifact.arch}-abi${artifact.nodeAbi}.tar.gz`;
-    artifactTargets[artifactTargetPath] = new TargetFile({
-      path: artifactTargetPath,
+    // PRI-854 (option A): when the archive carries a delivery url, the bytes
+    // are served from that location (GitHub Release attachment) and are NOT
+    // written into the metadata repository — only their signed digest travels
+    // with the metadata. artifactTargetPath stays the conventional relative
+    // path shape in BOTH modes (single semantic, review P2); the actual byte
+    // carrier is artifactUrl when present. Without a url, the legacy in-repo
+    // target is used.
+    const conventionalPath = `releases/${releaseMetadata.releaseId}/release-asset-${artifact.platform}-${artifact.arch}-abi${artifact.nodeAbi}.tar.gz`;
+    if (artifact.url !== undefined) {
+      return {
+        platform: artifact.platform,
+        arch: artifact.arch,
+        nodeAbi: artifact.nodeAbi,
+        artifactSha256: artifact.sha256,
+        artifactSizeBytes: artifact.bytes.length,
+        artifactTargetPath: conventionalPath,
+        artifactUrl: artifact.url,
+      };
+    }
+    artifactTargets[conventionalPath] = new TargetFile({
+      path: conventionalPath,
       length: artifact.bytes.length,
       hashes: { sha256: artifact.sha256 },
       unrecognizedFields: {
         custom: { releaseId: releaseMetadata.releaseId, channel: input.channel, platform: artifact.platform },
       },
     });
-    artifactFiles.push({ path: `targets/${artifactTargetPath}`, bytes: artifact.bytes });
+    artifactFiles.push({ path: `targets/${conventionalPath}`, bytes: artifact.bytes });
     return {
       platform: artifact.platform,
       arch: artifact.arch,
       nodeAbi: artifact.nodeAbi,
       artifactSha256: artifact.sha256,
       artifactSizeBytes: artifact.bytes.length,
-      artifactTargetPath,
+      artifactTargetPath: conventionalPath,
     };
   });
 
@@ -616,7 +667,17 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     expiresAt: input.expiresAt,
     files: withFileDigests(files),
   };
-  return { manifest, releaseMetadata, channelPayload, files };
+  // PRI-854 (option A): archives with a delivery url are uploaded to the
+  // release host by the workflow — the publisher hands the exact gzipped
+  // bytes back under their content-addressed names.
+  const assetUploads = artifacts
+    .filter((artifact) => artifact.url !== undefined)
+    .map((artifact) => ({
+      name: contentAddressedAssetName({ platform: artifact.platform, arch: artifact.arch, nodeAbi: artifact.nodeAbi, digestHex: artifact.sha256 }),
+      bytes: artifact.bytes,
+    }));
+
+  return { manifest, releaseMetadata, channelPayload, files, assetUploads };
 }
 
 /** Ephemeral ed25519 key PEM for dry-run pipelines without configured trust material. */
