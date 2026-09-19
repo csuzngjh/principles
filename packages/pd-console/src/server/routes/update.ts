@@ -42,7 +42,7 @@ async function checkUpdate(authority: Authority, res: ServerResponse): Promise<v
   // PRI-848 (SPEC §12.1): one explicit state per check. A policy refusal is
   // `update_blocked` — the candidate EXISTS but a specific problem must be
   // resolved — never "up to date".
-  const decision = check.decision;
+  const { decision } = check;
   const state = !decision.allowed
     ? 'update_blocked' as const
     : decision.direction === 'reinstall' ? 'up_to_date' as const : 'update_available' as const;

@@ -165,9 +165,9 @@ export function reconcileUpdateHistoryFromJournals(workspaceDir: string, pdHome:
       const raw = fs.readFileSync(path.join(transactionsDir, entry), 'utf-8');
       for (const line of raw.split('\n')) {
         if (line.trim().length === 0) continue;
-        const transition = JSON.parse(line) as { to?: unknown; productVersion?: unknown };
-        if (typeof transition.to === 'string') lastState = transition.to;
-        if (typeof transition.productVersion === 'string') productVersion = transition.productVersion;
+        const { to: transitionTo, productVersion: transitionProductVersion } = JSON.parse(line) as { to?: unknown; productVersion?: unknown };
+        if (typeof transitionTo === 'string') lastState = transitionTo;
+        if (typeof transitionProductVersion === 'string') productVersion = transitionProductVersion;
       }
     } catch {
       // unreadable journal — recovery diagnostics own that; skip for history

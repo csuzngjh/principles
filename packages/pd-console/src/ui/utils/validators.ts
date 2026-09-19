@@ -2659,7 +2659,7 @@ export interface UpdateRecoveryItem {
 export interface UpdateRecoveryData {
   needsRecovery: boolean;
   unfinished: UpdateRecoveryItem[];
-  broken: Array<{ transactionId: string; reason: string }>;
+  broken: { transactionId: string; reason: string }[];
   nextAction?: string;
 }
 
@@ -2679,7 +2679,7 @@ export function validateUpdateRecovery(v: unknown): UpdateRecoveryData | null {
       });
     }
   }
-  const broken: Array<{ transactionId: string; reason: string }> = [];
+  const broken: { transactionId: string; reason: string }[] = [];
   if (Object.hasOwn(v, 'broken') && Array.isArray(v.broken)) {
     for (const item of v.broken) {
       if (!isObject(item) || !Object.hasOwn(item, 'transactionId') || !isString(item.transactionId)) continue;

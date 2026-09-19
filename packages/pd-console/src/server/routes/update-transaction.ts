@@ -15,7 +15,6 @@ import type * as layoutModule from 'create-principles-disciple/dist/update/insta
 
 type JournalModule = typeof journalModule;
 type LayoutModule = typeof layoutModule;
-type JournalTransition = journalModule.JournalTransition;
 
 /** Transaction ids are installer/console-generated (`<word>-<ts>-<hex>`); this
  * pattern doubles as the path-traversal guard for the journal file name (rc-1). */
@@ -30,25 +29,24 @@ interface JournalFact {
   readonly startedAt: string | null;
   readonly lastAt: string | null;
   readonly productVersion: string | null;
-  readonly transitions: ReadonlyArray<{ at: string; from: string | null; to: string; detail?: string }>;
+  readonly transitions: readonly { at: string; from: string | null; to: string; detail?: string }[];
   readonly reason?: string;
 }
 
 function readJournalFact(journal: JournalModule, journalPath: string, transactionId: string): JournalFact {
-  const read = journal.readTransactionJournalForRecovery(journalPath);
-  const transitions = read.transitions;
+  const { transitions, tornTailDetected } = journal.readTransactionJournalForRecovery(journalPath);
   const last = transitions[transitions.length - 1];
-  const first = transitions[0];
+  const [first] = transitions;
   return {
     transactionId,
     exists: true,
     lastState: last?.to ?? null,
     terminal: last !== undefined && journal.isTerminalTransactionState(last.to),
-    tornTailDetected: read.tornTailDetected,
+    tornTailDetected,
     startedAt: first?.at ?? null,
     lastAt: last?.at ?? null,
     productVersion: last?.productVersion ?? first?.productVersion ?? null,
-    transitions: transitions.map((transition: JournalTransition) => ({
+    transitions: transitions.map((transition) => ({
       at: transition.at,
       from: transition.from,
       to: transition.to,
@@ -62,8 +60,8 @@ async function transactionStatus(res: ServerResponse, transactionId: string): Pr
     sendSuccess(res, { transactionId, exists: false, reason: 'invalid_transaction_id' });
     return;
   }
-  const journal = await import('create-principles-disciple/dist/update/transaction-journal.js') as JournalModule;
-  const layout = await import('create-principles-disciple/dist/update/install-layout.js') as LayoutModule;
+  const journal: JournalModule = await import('create-principles-disciple/dist/update/transaction-journal.js');
+  const layout: LayoutModule = await import('create-principles-disciple/dist/update/install-layout.js');
   const paths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
   const journalPath = path.join(paths.transactionsDir, `${transactionId}.jsonl`);
   if (!fs.existsSync(journalPath)) {
@@ -91,28 +89,30 @@ async function transactionStatus(res: ServerResponse, transactionId: string): Pr
 }
 
 async function recoveryStatus(res: ServerResponse): Promise<void> {
-  const journal = await import('create-principles-disciple/dist/update/transaction-journal.js') as JournalModule;
-  const layout = await import('create-principles-disciple/dist/update/install-layout.js') as LayoutModule;
+  const journal: JournalModule = await import('create-principles-disciple/dist/update/transaction-journal.js');
+  const layout: LayoutModule = await import('create-principles-disciple/dist/update/install-layout.js');
   const paths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
-  let entries: fs.Dirent[] = [];
-  try {
-    entries = fs.readdirSync(paths.transactionsDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
-      .sort((a, b) => {
-        try {
-          return fs.statSync(path.join(paths.transactionsDir, b.name)).mtimeMs
-            - fs.statSync(path.join(paths.transactionsDir, a.name)).mtimeMs;
-        } catch {
-          return 0;
-        }
-      });
-  } catch {
-    sendSuccess(res, { needsRecovery: false, unfinished: [], broken: [] });
-    return;
-  }
+  const entries = (() => {
+    try {
+      return fs.readdirSync(paths.transactionsDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
+        .sort((a, b) => {
+          try {
+            return fs.statSync(path.join(paths.transactionsDir, b.name)).mtimeMs
+              - fs.statSync(path.join(paths.transactionsDir, a.name)).mtimeMs;
+          } catch {
+            return 0;
+          }
+        });
+    } catch {
+      sendSuccess(res, { needsRecovery: false, unfinished: [], broken: [] });
+      return null;
+    }
+  })();
+  if (entries === null) return;
 
   const unfinished: JournalFact[] = [];
-  const broken: Array<{ transactionId: string; reason: string }> = [];
+  const broken: { transactionId: string; reason: string }[] = [];
   for (const entry of entries) {
     const transactionId = entry.name.slice(0, -'.jsonl'.length);
     if (!TRANSACTION_ID_PATTERN.test(transactionId)) continue;
