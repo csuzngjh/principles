@@ -293,7 +293,7 @@ function meta(o: Record<string, unknown> = {}): string {
   });
 }
 
-async function makeWorld(opts: { withDreamerLineage: boolean; diagArtifactId?: string }): Promise<World> {
+async function makeWorld(opts: { withDreamerLineage: boolean; diagArtifactId?: string; scribeMalformedJson?: boolean; scribeArtifactAbsent?: boolean }): Promise<World> {
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri843-fc-'));
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
@@ -331,7 +331,19 @@ async function makeWorld(opts: { withDreamerLineage: boolean; diagArtifactId?: s
   await mkTask({ id: DREAMER_ID, kind: 'dreamer', deps: [DIAG_ID] });
   await upsert({ artifactId: DREAMER_ART, sourceTaskId: DREAMER_ID, content: DREAMER_CONTENT, lineage: [diagArtId] });
   await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: [DREAMER_ID] });
-  await upsert({ artifactId: SCRIBE_ART, sourceTaskId: SCRIBE_ID, content: scribeContent(opts.withDreamerLineage), lineage: [DREAMER_ART] });
+  if (opts.scribeArtifactAbsent) {
+    // The artificer's sourceTrace still points at SCRIBE_ART — the artifact
+    // itself is missing, exercising the evaluator's unresolvable-scribe path.
+  } else if (opts.scribeMalformedJson) {
+    await store.upsertArtifact({
+      artifactId: SCRIBE_ART, artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
+      lineageArtifactIds: [DREAMER_ART],
+      validationStatus: 'pending', contentJson: '{"principleId": "contract-first", BROKEN',
+      createdAt: now, updatedAt: now,
+    });
+  } else {
+    await upsert({ artifactId: SCRIBE_ART, sourceTaskId: SCRIBE_ID, content: scribeContent(opts.withDreamerLineage), lineage: [DREAMER_ART] });
+  }
   await mkTask({ id: ART_ID, kind: 'artificer', deps: [SCRIBE_ID] });
   await upsert({ artifactId: `pi-art-${ART_ID}-seed`, sourceTaskId: ART_ID, content: artificerOutput(), lineage: [SCRIBE_ART] });
   await stateManager.createTask({
@@ -418,11 +430,9 @@ describe('PRI-843 — evaluator formation context golden replay (production path
     expect(parsed.formationContext?.provenance.sourceDreamerArtifactId).toBe(DREAMER_ART);
     expect(parsed.formationContext?.provenance.sourcePainId).toBe('pain-fc-1');
     expect(prompts[0]?.systemPrompt).toContain('FORMATION EVIDENCE');
-    // Resolver invocation is proven by the prompt content itself. (The
-    // resolver's formation_context_* telemetry flows through the callback →
-    // `evaluator_formation_*`, which is outside the TelemetryEventType union —
-    // the same pre-existing registration gap the scribe consumer has; the
-    // systemic fix is a recorded follow-up, not this PR's surface.)
+    // Resolver observability (rc-9): the resolver's formation_context_resolved
+    // event arrives under the runner-prefixed, union-registered name.
+    expect(world.emitted.some((e) => e.eventType === 'evaluator_formation_context_resolved')).toBe(true);
 
     // Governance unchanged: approved → scribe bearer validated, task succeeded.
     expect(result.status).toBe('succeeded');
@@ -497,17 +507,57 @@ describe('PRI-843 — evaluator formation context golden replay (production path
       }).run(EVAL_ID);
 
       // Degradation is observable in behavior (rc-9): the prompt keeps the
-      // legacy shape — no formation block, no addendum. (The resolver's
-      // formation_context_skipped telemetry shares the scribe consumer's
-      // pre-existing registration gap — follow-up, not this PR.)
+      // legacy shape — no formation block, no addendum — and the resolver's
+      // skip event arrives under its union-registered name.
       expect(JSON.parse(prompts[0]?.message ?? '{}').formationContext).toBeUndefined();
       expect(prompts[0]?.systemPrompt).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
+      expect(legacy.emitted.some((e) => e.eventType === 'evaluator_formation_context_skipped')).toBe(true);
       // The marker cannot route without evidence: normal repair flow, no NHR.
       expect(seeds).toHaveLength(1);
       const task = await legacy.stateManager.getTask(EVAL_ID);
       expect(task?.status).not.toBe('needs_human_review');
     } finally {
       closeWorld(legacy);
+    }
+  });
+
+  it('degraded path: unreadable scribe contentJson (malformed JSON) keeps the legacy prompt shape and skips the resolver observably', async () => {
+    const broken = await makeWorld({ withDreamerLineage: true, scribeMalformedJson: true });
+    try {
+      const prompts: CapturedPrompt[] = [];
+      const seeds: string[] = [];
+      await reviewEvaluator(broken, {
+        payload: evaluatorOutput('needs_revision', ['gate too narrow'], ['Fix the gate']),
+        prompts, seeds,
+      }).run(EVAL_ID);
+
+      expect(JSON.parse(prompts[0]?.message ?? '{}').formationContext).toBeUndefined();
+      expect(prompts[0]?.systemPrompt).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
+      expect(broken.emitted.some((e) => e.eventType === 'evaluator_formation_context_skipped')).toBe(true);
+      // The evaluation itself proceeds on the degraded (no-formation) basis.
+      expect(seeds).toHaveLength(1);
+    } finally {
+      closeWorld(broken);
+    }
+  });
+
+  it('degraded path: unresolvable scribe artifact (lineage points nowhere) keeps the legacy prompt shape and skips the resolver observably', async () => {
+    const broken = await makeWorld({ withDreamerLineage: false, scribeArtifactAbsent: true });
+    try {
+      const prompts: CapturedPrompt[] = [];
+      const seeds: string[] = [];
+      await reviewEvaluator(broken, {
+        payload: evaluatorOutput('needs_revision', ['gate too narrow'], ['Fix the gate']),
+        prompts, seeds,
+      }).run(EVAL_ID);
+
+      expect(JSON.parse(prompts[0]?.message ?? '{}').formationContext).toBeUndefined();
+      expect(prompts[0]?.systemPrompt).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
+      expect(broken.emitted.some((e) => e.eventType === 'evaluator_scribe_artifact_unresolvable')).toBe(true);
+      expect(broken.emitted.some((e) => e.eventType === 'evaluator_formation_context_skipped')).toBe(true);
+      expect(seeds).toHaveLength(1);
+    } finally {
+      closeWorld(broken);
     }
   });
 
