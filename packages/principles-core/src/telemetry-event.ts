@@ -185,6 +185,15 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('scribe_output_extraction_failed'),
   Type.Literal('scribe_mark_failed_error'),
   Type.Literal('scribe_mark_retry_error'),
+  // PRI-846 review round: scribe-side formation resolver vocabulary (the same
+  // consumer-forwarded resolver names as the evaluator_formation_* block —
+  // this closes the pre-existing PRI-838 registration gap for the first
+  // resolver consumer).
+  Type.Literal('scribe_formation_context_failed'),
+  Type.Literal('scribe_formation_context_invalid'),
+  Type.Literal('scribe_formation_context_resolved'),
+  Type.Literal('scribe_formation_context_skipped'),
+  Type.Literal('scribe_formation_dreamer_artifact_missing'),
   // PRI-419: Dreamer L2 multi-turn agent loop telemetry.
   // - dreamer_l2_turn: emitted per tool-execution turn inside the L2 loop
   // - dreamer_l2_complete: emitted when the loop finishes (turnCount, toolsInvoked, usedFallback, retryCount)
@@ -293,7 +302,20 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_completion_mark_applied_failed'),
   Type.Literal('evaluator_completion_record_failed'),
   Type.Literal('evaluator_diag_llm_rate_limit_degraded'),
+  // PRI-846 review round: the formation-context resolver forwards its closed
+  // 5-name vocabulary through the consumer's emitEvent callback, composed as
+  // `${runnerName}_${suffix}` at runtime. Registered so StoreEventEmitter no
+  // longer rewrites them to degradation_triggered (ERR-060); the union guard
+  // sees them via the checker's resolveFormationContext dynamic site.
+  Type.Literal('evaluator_formation_context_failed'),
+  Type.Literal('evaluator_formation_context_invalid'),
+  Type.Literal('evaluator_formation_context_resolved'),
+  Type.Literal('evaluator_formation_context_skipped'),
+  Type.Literal('evaluator_formation_dreamer_artifact_missing'),
   Type.Literal('evaluator_governance_effect_out_of_scope_selected'),
+  // PRI-843: Principle↔Pain mismatch disposition selected (the marker concern
+  // was honored and the completion routes to Owner review).
+  Type.Literal('evaluator_governance_effect_principle_pain_mismatch_selected'),
   Type.Literal('evaluator_intent_contract_absent_on_principle'),
   Type.Literal('evaluator_lineage_echo_corrected'),
   Type.Literal('evaluator_lineage_integrity_violation'),

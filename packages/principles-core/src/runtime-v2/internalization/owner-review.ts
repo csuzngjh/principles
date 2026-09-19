@@ -50,6 +50,16 @@ export const HUMAN_REVIEW_REASON = {
    * decision-capable：Owner 的裁决是唯一有意义的出口。
    */
   evaluatorTestOutOfScope: 'evaluator_test_out_of_scope',
+  /**
+   * PRI-843 (SPEC v1.1): Evaluator 基于 formation evidence 判定 Principle
+   * 不解决源 Pain（concerns 携带 [principle_pain_mismatch] 标记）——原则级
+   * 缺陷。repair pipeline 只能再生成 Rule，结构性不可收敛（同
+   * evaluator_test_out_of_scope 的死锁形状），且 requiredChanges 禁止承载
+   * 原则级诉求。直接进入 Owner 裁决：accept_current（原则其实可用）/
+   * 原则修订（rollout→scribe 窄路）/ reject_current。
+   * decision-capable：Owner 的裁决是唯一有意义的出口。
+   */
+  principlePainMismatch: 'principle_pain_mismatch',
   // ── recovery-only ──
   evaluatorRepairSeedFailed: 'evaluator_repair_seed_failed',
   rolloutDispatchNotWired: 'rollout_dispatch_not_wired',
@@ -70,6 +80,8 @@ export const DECISION_CAPABLE_HUMAN_REVIEW_REASONS: ReadonlySet<string> = new Se
   HUMAN_REVIEW_REASON.rolloutActivationCandidateUnresolved,
   // PRI-703 Phase 2: test-scope 死锁的出口是 Owner 裁决,不是修复轮重试
   HUMAN_REVIEW_REASON.evaluatorTestOutOfScope,
+  // PRI-843: principle-pain 不匹配的出口是 Owner 裁决,不是 Rule 修复轮
+  HUMAN_REVIEW_REASON.principlePainMismatch,
 ]);
 
 /**
