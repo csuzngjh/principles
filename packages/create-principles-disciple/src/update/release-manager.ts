@@ -40,11 +40,10 @@ import {
   type TransactionState,
 } from './transaction-journal.js';
 import { downloadReleaseAsset, extractAndVerifyReleaseAsset, ApplyPayloadError } from './apply-payload.js';
-import { evaluateDataCompatibility } from './data-compatibility.js';
+import { compareProductVersions, parseProductVersion, type ReleaseChannelName } from './product-identity.js';
 import type { InstallerJournal } from '../installer.js';
 import type { Language } from '../i18n.js';
 import type { HostTarget } from '../installers/index.js';
-import { compareProductVersions, parseProductVersion, type ReleaseChannelName } from './product-identity.js';
 
 export type ReleaseManagerReason =
   | 'bootstrap_not_installed'
@@ -295,22 +294,6 @@ export class ReleaseManager {
     };
   }
 
-  /**
-   * PRI-853 review fix: the signed metadata of an installed release identity
-   * (`releases/<releaseId>/metadata.json`), or null when the file is absent
-   * or unreadable. Callers decide whether null is acceptable — for the data
-   * compatibility preflight it is NOT (refuse install_identity_unverifiable).
-   */
-  private readReleaseMetadataByIdentity(releaseId: string): ReleaseMetadata | null {
-    try {
-      const metadataPath = path.join(this.paths.releasesDir, releaseId, 'metadata.json');
-      if (!fs.existsSync(metadataPath)) return null;
-      return parseReleaseMetadata(JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as unknown);
-    } catch {
-      return null;
-    }
-  }
-
   async check(channel: ReleaseChannelName): Promise<UpdateCheck> {
     const now = this.options.now ?? ((): Date => new Date());
     const status = this.inspect();
@@ -382,13 +365,14 @@ export class ReleaseManager {
       return { kind: 'no_update', reason: decision.reason, note: decision.message };
     }
 
-    // PRI-853 (SPEC §10 wired, review fix P1): data compatibility preflight
-    // runs against the CURRENTLY ACTIVE release — the release whose data must
-    // remain readable so the pre-update state can be restored. Not
-    // previous.json: a first-ever update has no retained previous, and that
-    // absence must never silently disable the check. If the active identity
-    // or its metadata is missing/unreadable, the update refuses with
-    // install_identity_unverifiable — absence is never treated as "compatible".
+    // PRI-853 (SPEC §10 wired, live-run fix): data compatibility preflight
+    // runs against the CURRENTLY ACTIVE version — the release whose data must
+    // remain readable so the pre-update state can be restored. The active
+    // identity is the journal-committed fact in active.json. Installer
+    // ("bundled") deployments legitimately have no signed metadata document,
+    // so the comparison uses the active VERSION; absence/corruption of the
+    // active record still refuses explicitly (install_identity_unverifiable) —
+    // absence is never treated as "compatible".
     const activeIdentityForCompat = readActiveRecord(this.paths.activeRecordPath);
     if (activeIdentityForCompat === null) {
       return {
@@ -397,20 +381,17 @@ export class ReleaseManager {
         note: 'The installation has no readable active release record, so its data compatibility cannot be proven.',
       };
     }
-    const activeMetadata = this.readReleaseMetadataByIdentity(activeIdentityForCompat.releaseId);
-    if (activeMetadata === null) {
+    const windowVersion = parseProductVersion(
+      releaseMetadata.compatibility.dataSchemaForwardReadableFrom,
+      'compatibility.dataSchemaForwardReadableFrom',
+    );
+    const activeVersion = parseProductVersion(activeIdentityForCompat.productVersion, 'active.productVersion');
+    if (compareProductVersions(activeVersion, windowVersion) < 0) {
       return {
         kind: 'no_update',
-        reason: 'install_identity_unverifiable',
-        note: `The installed release ${activeIdentityForCompat.releaseId} has no readable signed metadata, so data compatibility cannot be proven.`,
+        reason: 'destructive_migration_requires_maintenance',
+        note: `Release ${releaseMetadata.productVersion} only guarantees data readable back to ${windowVersion.productVersion}, but the installed release is ${activeVersion.productVersion}. An ordinary update could strand code rollback.`,
       };
-    }
-    const dataCompatibility = evaluateDataCompatibility({
-      candidate: releaseMetadata,
-      previous: activeMetadata,
-    });
-    if (!dataCompatibility.eligible) {
-      return { kind: 'no_update', reason: dataCompatibility.reason, note: dataCompatibility.message };
     }
 
     // PRI-850: honor a caller-generated transaction id (bootstrap executor

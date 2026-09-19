@@ -560,7 +560,32 @@ jobs:
           # what installs see) — stale-release pruning is a separate,
           # bounded cleanup decision, never an automatic one.
           cp -a "$RUNNER_TEMP/metadata-repo/." .
+          # PRI-853 review fix: the copied root .gitignore contains *.tar /
+          # *.tar.gz patterns that SILENTLY EXCLUDED every release-asset
+          # tarball from the publication commit (assets 404 while metadata
+          # served — found by the 2026-09-19 live update run). The
+          # publication payload IS the point of this branch: re-include it
+          # explicitly after the copy.
+          cat >> .gitignore <<'PUBLISH_PATTERNS'
+
+# Release publication payload (PRI-853): the asset tarballs signed by the
+# metadata must never be ignored on this branch.
+!targets/**
+!*.tar
+!*.tar.gz
+PUBLISH_PATTERNS
           git add -A
+          # PRI-853: fail BEFORE the push when any staged asset exceeds the
+          # git host's per-file ceiling (~95MB vs GitHub's 100MB hard limit).
+          # A push that silently drops oversized assets produces a publication
+          # whose metadata promises bytes no consumer can download (observed
+          # 2026-09-19: update failed at asset download, all targets 404).
+          OVERSIZE=$(find targets/releases -type f -name '*.tar.gz' -size +95M || true)
+          if [ -n "$OVERSIZE" ]; then
+            echo "::error::Release asset(s) exceed the git host's 100MB per-file limit — the delivery host cannot carry them: $OVERSIZE"
+            echo "::error::Decision required: split assets, use a per-asset CDN (e.g. GitHub Release assets), or shrink the payload. Publication aborted."
+            exit 1
+          fi
           RELEASE_ID=$(node -e "
             const payload = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
             console.log(payload.releaseId.slice(0, 12));
@@ -593,6 +618,40 @@ jobs:
           done
           if [ "$OK" != "1" ]; then
             echo "::error::Published channel pointer is NOT reachable at $CHANNEL_URL — the publication is INCOMPLETE. Configure GitHub Pages (source: gh-pages) and re-verify before telling users an update exists."
+            exit 1
+          fi
+          # PRI-853 review fix: the pointer must be THIS publication, and every
+          # declared asset must actually be served — a stale cached pointer or
+          # a missing asset tarball must fail the run, not just the channel.
+          CHANNEL_JSON=$(curl -s "$CHANNEL_URL")
+          EXPECTED_VERSION="${{ needs.resolve-inputs.outputs.version }}"
+          SERVED_VERSION=$(node -e "console.log(JSON.parse(process.argv[1]).productVersion)" "$CHANNEL_JSON")
+          SERVED_RELEASE_ID=$(node -e "console.log(JSON.parse(process.argv[1]).releaseId)" "$CHANNEL_JSON")
+          if [ "$SERVED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Served channel pointer does not match THIS publication (served $SERVED_VERSION, expected $EXPECTED_VERSION) — publication INCOMPLETE."
+            exit 1
+          fi
+          META_URL="$BASE_URL/targets/releases/$SERVED_RELEASE_ID/metadata.json"
+          META_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$META_URL")
+          if [ "$META_CODE" != "200" ]; then
+            echo "::error::Release metadata not reachable at $META_URL (HTTP $META_CODE) — publication INCOMPLETE."
+            exit 1
+          fi
+          curl -s "$META_URL" -o "$RUNNER_TEMP/served-metadata.json"
+          ASSET_MISS=0
+          for ASSET_PATH in $(node -e "
+            const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+            for (const a of j.assets) console.log('targets/releases/' + j.releaseId + '/release-asset-' + a.platform + '-' + a.arch + '-abi' + a.nodeAbi + '.tar.gz');
+          " "$RUNNER_TEMP/served-metadata.json"); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -r 0-0 "$BASE_URL/$ASSET_PATH")
+            echo "asset $ASSET_PATH -> $CODE"
+            if [ "$CODE" != "200" ] && [ "$CODE" != "206" ]; then
+              echo "::error::Declared asset missing from the publication: $ASSET_PATH (HTTP $CODE)"
+              ASSET_MISS=1
+            fi
+          done
+          if [ "$ASSET_MISS" = "1" ]; then
+            echo "::error::Publication INCOMPLETE: declared assets are not served at $BASE_URL."
             exit 1
           fi
           echo "Published and reachable: $CHANNEL_URL. Configure PD_RELEASE_METADATA_URL (or install.json releaseMetadataUrl) to $BASE_URL."
