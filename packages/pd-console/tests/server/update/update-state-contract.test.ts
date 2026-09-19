@@ -194,6 +194,32 @@ describe('PRI-848 update state contract', () => {
     expect(evil.data).toMatchObject({ exists: false, reason: 'invalid_transaction_id' });
   });
 
+  it('recovery resolve reports the pure journal verdict without mutating state', async () => {
+    writeJournal(mocks.fakeHome, 'update-9-stuck', [
+      { at: '2026-09-19T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-9-stuck', releaseId: 'rel-2', productVersion: '1.2.0', generation: 3 },
+    ]);
+    const before = fs.readFileSync(path.join(mocks.fakeHome, '.pd', 'transactions', 'update-9-stuck.jsonl'), 'utf8');
+
+    const resolved = await fetch(`${transactionBase}/api/update/recovery/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ transactionId: 'update-9-stuck' }),
+    });
+    const body = await resolved.json();
+    expect(body.data.ok).toBe(true);
+    expect(body.data.outcome).toMatchObject({ kind: 'old_confirmed' });
+
+    // Unknown id → structured refusal, not a 500.
+    const unknown = await fetch(`${transactionBase}/api/update/recovery/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ transactionId: 'update-404-deadbeef' }),
+    });
+    expect((await unknown.json()).data).toMatchObject({ ok: false, reason: 'unknown_transaction' });
+
+    // The journal bytes were never touched (pure decision).
+    const after = fs.readFileSync(path.join(mocks.fakeHome, '.pd', 'transactions', 'update-9-stuck.jsonl'), 'utf8');
+    expect(after).toBe(before);
+  });
+
   it('recovery endpoint flags an unfinished transaction and stays quiet when all are terminal', async () => {
     writeJournal(mocks.fakeHome, 'update-1-terminal', [
       { at: '2026-09-19T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-1-terminal', releaseId: 'rel-1', productVersion: '1.1.0', generation: 1 },

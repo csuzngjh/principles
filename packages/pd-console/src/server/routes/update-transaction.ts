@@ -1,9 +1,10 @@
 /** PRI-848: read-only transaction journal and recovery status surfaces (SPEC §12.1).
  *
- * Zero mutation authority: these endpoints only READ `~/.pd/transactions/*.jsonl`
- * so the Console can render `update_in_progress` / `needs_recovery` states and
- * attach to an unfinished operation instead of starting a duplicate one.
- * Executing a recovery remains an explicit operation wired separately (SPEC §8).
+ * These endpoints READ `~/.pd/transactions/*.jsonl` and the installation
+ * records so the Console can render `update_in_progress` / `needs_recovery`
+ * states and attach to an unfinished operation instead of starting a duplicate
+ * one. The recovery RESOLVE op runs the pure journal-vs-active-record decision
+ * and reports the verdict — it performs no mutation itself.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
@@ -135,12 +136,74 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
   });
 }
 
-/** Handles GET /api/update/transaction/:id and GET /api/update/recovery. */
+/**
+ * PRI-853: explicit recovery RESOLUTION for one unfinished transaction —
+ * runs the pure journal-vs-active-record decision (recoverUnfinishedTransaction)
+ * and reports the verdict plus next action. The decision itself writes nothing;
+ * re-pointing installation state stays the installer's authority (SPEC §8/§14.3).
+ */
+async function recoveryResolve(res: ServerResponse, req: IncomingMessage): Promise<void> {
+  let bodyRaw = '';
+  for await (const chunk of req) bodyRaw += chunk;
+  let request: unknown;
+  try {
+    request = JSON.parse(bodyRaw);
+  } catch {
+    sendSuccess(res, { ok: false, reason: 'invalid_json', message: 'Request body must be one JSON object with transactionId.' });
+    return;
+  }
+  const transactionId = typeof request === 'object' && request !== null && !Array.isArray(request)
+    && Object.hasOwn(request, 'transactionId') && typeof (request as Record<string, unknown>).transactionId === 'string'
+    ? (request as Record<string, unknown>).transactionId as string
+    : undefined;
+  if (transactionId === undefined || !TRANSACTION_ID_PATTERN.test(transactionId)) {
+    sendSuccess(res, { ok: false, reason: 'invalid_transaction_id', message: 'Request body must carry a well-formed transactionId.' });
+    return;
+  }
+  const journal: JournalModule = await import('create-principles-disciple/dist/update/transaction-journal.js');
+  const layout: LayoutModule = await import('create-principles-disciple/dist/update/install-layout.js');
+  const paths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
+  const journalPath = path.join(paths.transactionsDir, `${transactionId}.jsonl`);
+  if (!fs.existsSync(journalPath)) {
+    sendSuccess(res, { ok: false, reason: 'unknown_transaction', message: `No journal exists for transaction ${transactionId}.` });
+    return;
+  }
+  try {
+    const read = journal.readTransactionJournalForRecovery(journalPath);
+    const activeRecord = journal.readActiveRecord(paths.activeRecordPath);
+    const previousRecord = journal.readActiveRecord(paths.previousRecordPath);
+    const outcome = journal.recoverUnfinishedTransaction({
+      transitions: read.transitions,
+      activeRecord,
+      previousRecord,
+      transactionId,
+    });
+    sendSuccess(res, { ok: true, transactionId, outcome });
+  } catch (error) {
+    sendSuccess(res, {
+      ok: false,
+      reason: 'journal_unreadable',
+      message: error instanceof Error ? error.message : String(error),
+      nextAction: 'Run the official installer (npx create-principles-disciple repair-update-chain) to inspect and repair the installation.',
+    });
+  }
+}
+
+/** Handles GET /api/update/transaction/:id, GET /api/update/recovery, and
+ * POST /api/update/recovery/resolve. */
 export async function handleUpdateTransactionRoute(
   req: IncomingMessage,
   res: ServerResponse,
   subPath: string,
 ): Promise<void> {
+  if (subPath === '/recovery/resolve') {
+    if (req.method !== 'POST') {
+      sendMethodNotAllowed(res);
+      return;
+    }
+    await recoveryResolve(res, req);
+    return;
+  }
   if (req.method !== 'GET') {
     sendMethodNotAllowed(res);
     return;

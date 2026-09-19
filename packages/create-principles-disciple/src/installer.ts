@@ -1153,6 +1153,39 @@ function cleanupBackup(backupDir: string | null, runtimeBackupDir: string | null
 }
 
 /**
+ * PRI-853 (SPEC §5 retention: "current + one previous"): after a committed
+ * install the just-superseded backup set BECOMES the retained previous
+ * release — it is kept on disk, and only OLDER retained sets are pruned so
+ * the retention policy never grows without bound. Best-effort pruning; a
+ * failed prune is non-fatal residue, never a loss of the retained previous.
+ */
+function retainSupersededBackup(extensionBackupDir: string | null, runtimeBackupDir: string | null): void {
+  const retainedSets: Array<{ root: string | null; prefix: string }> = [
+    { root: extensionBackupDir ? path.dirname(extensionBackupDir) : null, prefix: 'principles-disciple.backup.' },
+    { root: runtimeBackupDir ? path.dirname(runtimeBackupDir) : null, prefix: 'runtime.backup.' },
+  ];
+  for (const set of retainedSets) {
+    if (set.root === null || !existsSync(set.root)) continue;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(set.root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith(set.prefix))
+        .sort((a, b) => b.name.localeCompare(a.name));
+    } catch {
+      continue;
+    }
+    // entries[0] is the newest = the just-superseded previous release. Keep it.
+    for (const stale of entries.slice(1)) {
+      try {
+        rmSync(path.join(set.root, stale.name), { recursive: true, force: true });
+      } catch {
+        // non-fatal residue; reported by the next doctor/audit pass
+      }
+    }
+  }
+}
+
+/**
  * PRI-697 review P1: undo the global `pd` shim side effect when the
  * install transaction fails. Exactly the files THIS run created are
  * removed; PD-owned shims that already existed before the run (a
@@ -3578,9 +3611,14 @@ export async function install(
     // discarded, so a crash here still recovers via the backup).
     journalInstallerTransitionDegrading(journal, journal.lastState, 'activated', 'host installers completed; install manifest written');
 
-    cleanupBackup(backupDir, runtimeBackupDir);
-    // ADR-0024 D-2: backup cleanup is the commit point of the transaction.
-    journalInstallerTransitionDegrading(journal, journal.lastState, 'confirmed', 'backup cleaned up; install complete');
+    // PRI-853 (SPEC §5 retention, §8 cleanup ordering): the just-superseded
+    // runtime set is RETAINED as the supported previous release (rollback /
+    // data-compat window material); only OLDER retained sets beyond the newest
+    // are pruned. Deletion of the freshest backup would strand code rollback.
+    retainSupersededBackup(backupDir, runtimeBackupDir);
+    // ADR-0024 D-2: retention/pruning of OLDER sets is the commit point of the
+    // transaction.
+    journalInstallerTransitionDegrading(journal, journal.lastState, 'confirmed', 'previous release retained; older sets pruned; install complete');
     // PRI-709 P0-2: active.json is the deployment identity source, written
     // journal-first — after `confirmed`, never before it.
     commitInstallerActiveRecord(journal);

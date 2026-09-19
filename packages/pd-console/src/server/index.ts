@@ -480,10 +480,11 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // GET /api/update/recovery, GET /api/update/transaction/:id (MUST be
-      // before the update catch-all; PRI-848 read-only surfaces, no timeout —
-      // journal reads are local file reads).
-      if (urlPath === '/api/update/recovery' || urlPath.startsWith('/api/update/transaction/')) {
+      // GET /api/update/recovery, GET /api/update/transaction/:id,
+      // POST /api/update/recovery/resolve (MUST be before the update
+      // catch-all; PRI-848/853 surfaces — resolve runs the pure journal
+      // decision, it does not re-point installation state itself).
+      if (urlPath === '/api/update/recovery' || urlPath.startsWith('/api/update/recovery/') || urlPath.startsWith('/api/update/transaction/')) {
         const subPath = urlPath.slice('/api/update'.length);
         asyncHandler(() => handleUpdateTransactionRoute(req, res, subPath))(req, res);
         return;
