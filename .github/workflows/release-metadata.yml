@@ -99,11 +99,19 @@ on:
         type: string
       metadata_base_url:
         description: >-
-          Canonical public base URL serving this publication (PRI-853). Optional
-          — when empty, the workflow derives the GitHub Pages URL for this
-          repository. Set it explicitly when serving from a custom domain or a
-          non-Pages host, so the reachability gate verifies the SAME target
-          users fetch.
+          Canonical public base URL serving this publication''s METADATA documents
+          (PRI-853). Optional — when empty, the workflow derives the GitHub Pages
+          URL for this repository. Asset BYTES ride on GitHub Release attachments
+          (PRI-854) regardless of this input; see asset_base_url.
+        required: false
+        default: ''
+        type: string
+      asset_base_url:
+        description: >-
+          Base URL serving asset BYTES (PRI-854). Optional — when empty, the
+          workflow uses this repository''s pd-assets GitHub Release attachments
+          (https://github.com/<repo>/releases/download/pd-assets). Override only
+          for a non-GitHub byte carrier; the signed sha256 still binds the bytes.
         required: false
         default: ''
         type: string
@@ -503,13 +511,19 @@ jobs:
       - name: Sign and emit release metadata
         env:
           PD_RELEASE_SIGNING_KEY: ${{ secrets.PD_RELEASE_SIGNING_KEY }}
-          ASSET_BASE_URL: ${{ github.event.inputs.metadata_base_url }}
+          ASSET_BASE_URL: ${{ github.event.inputs.asset_base_url }}
         run: |
-          # PRI-854 (option A): the canonical public base URL — explicit input
-          # wins, otherwise the GitHub Pages URL for this repository.
+          # PRI-854 (option A): asset bytes ride on GitHub RELEASE ATTACHMENTS
+          # of the dedicated pd-assets release — NOT on Pages (250MB payloads
+          # exceed the git-host ceiling) and NOT on a separate host. The base
+          # is derivable from the repository itself; an explicit
+          # asset_base_url input still wins for non-GitHub byte carriers.
+          # NOTE: metadata (channel/release documents) stays on Pages at
+          # $BASE_URL; only the asset delivery urls point here.
           if [ -z "$ASSET_BASE_URL" ]; then
-            ASSET_BASE_URL="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io/$(echo "${{ github.repository }}" | cut -d/ -f2)"
+            ASSET_BASE_URL="https://github.com/${{ github.repository }}/releases/download/pd-assets"
           fi
+          BASE_URL="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io/$(echo "${{ github.repository }}" | cut -d/ -f2)"
           echo "ASSET_BASE_URL=$ASSET_BASE_URL" >> "$GITHUB_ENV"
           ARGS=(
             --assets-dir "$RUNNER_TEMP/assets"
@@ -665,14 +679,35 @@ jobs:
           # PRI-853 review fix: the pointer must be THIS publication, and every
           # declared asset must actually be served — a stale cached pointer or
           # a missing asset tarball must fail the run, not just the channel.
-          CHANNEL_JSON=$(curl -s "$CHANNEL_URL")
+          # The expected CHANNEL POINTER VERSION (monotonic, from resolve-inputs)
+          # is the discriminator: two publications of the same product version
+          # (e.g. 1.76.1 seq2 → seq3) share the version string but never the
+          # pointer version.
           EXPECTED_VERSION="${{ needs.resolve-inputs.outputs.version }}"
-          SERVED_VERSION=$(node -e "console.log(JSON.parse(process.argv[1]).productVersion)" "$CHANNEL_JSON")
-          SERVED_RELEASE_ID=$(node -e "console.log(JSON.parse(process.argv[1]).releaseId)" "$CHANNEL_JSON")
-          if [ "$SERVED_VERSION" != "$EXPECTED_VERSION" ]; then
-            echo "::error::Served channel pointer does not match THIS publication (served $SERVED_VERSION, expected $EXPECTED_VERSION) — publication INCOMPLETE."
+          EXPECTED_POINTER_VERSION="${{ needs.resolve-inputs.outputs.channel_version }}"
+          SERVED_OK=0
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            sleep 10
+            CHANNEL_JSON=$(curl -s "$CHANNEL_URL")
+            PARSED=$(node -e "
+              try {
+                const j = JSON.parse(process.argv[1]);
+                console.log(j.productVersion + ' ' + j.version);
+              } catch { console.log('unparseable'); }
+            " "$CHANNEL_JSON")
+            SERVED_VERSION=${PARSED% *}
+            SERVED_POINTER_VERSION=${PARSED#* }
+            echo "pointer propagation attempt $attempt: served=$SERVED_VERSION/ptr$SERVED_POINTER_VERSION expected=$EXPECTED_VERSION/ptr$EXPECTED_POINTER_VERSION"
+            if [ "$SERVED_VERSION" = "$EXPECTED_VERSION" ] && [ "$SERVED_POINTER_VERSION" = "$EXPECTED_POINTER_VERSION" ]; then
+              SERVED_OK=1
+              break
+            fi
+          done
+          if [ "$SERVED_OK" != "1" ]; then
+            echo "::error::Served channel pointer never matched THIS publication (expected $EXPECTED_VERSION, pointer version $EXPECTED_POINTER_VERSION) — publication INCOMPLETE (stale CDN or failed push)."
             exit 1
           fi
+          SERVED_RELEASE_ID=$(node -e "console.log(JSON.parse(process.argv[1]).releaseId)" "$CHANNEL_JSON")
           META_URL="$BASE_URL/targets/releases/$SERVED_RELEASE_ID/metadata.json"
           META_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$META_URL")
           if [ "$META_CODE" != "200" ]; then
@@ -682,12 +717,15 @@ jobs:
           curl -s "$META_URL" -o "$RUNNER_TEMP/served-metadata.json"
           # PRI-854 (option A): assets live at their SIGNED delivery urls
           # (GitHub Release attachments) — verify each one follows to bytes.
+          # A MISSING sentinel makes a url-less or empty entry an explicit
+          # failure instead of a word-splitting no-op.
           ASSET_MISS=0
           for ASSET_URL in $(node -e "
             const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-            for (const a of j.assets) console.log(a.url || '');
+            if (!Array.isArray(j.assets) || j.assets.length === 0) { console.log('MISSING'); }
+            else { for (const a of j.assets) console.log(a.url || 'MISSING'); }
           " "$RUNNER_TEMP/served-metadata.json"); do
-            if [ -z "$ASSET_URL" ]; then
+            if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "MISSING" ]; then
               echo "::error::A declared asset has no delivery url — publication INCOMPLETE."
               ASSET_MISS=1
               continue
