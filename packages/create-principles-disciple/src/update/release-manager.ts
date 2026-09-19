@@ -123,7 +123,9 @@ export type ApplyOutcome =
   }
   | {
     readonly kind: 'no_update';
-    /** Why nothing was applied (policy refusal reason or already-current note). */
+    /** Stable machine-readable reason: a release-policy refusal reason code. */
+    readonly reason: string;
+    /** Owner-facing explanation of why nothing was applied. */
     readonly note: string;
   };
 
@@ -350,7 +352,9 @@ export class ReleaseManager {
     const now = this.options.now ?? ((): Date => new Date());
     const decision = this.evaluateCandidateDecision({ channelMetadata, releaseMetadata, status, now: now() });
     if (!decision.allowed) {
-      return { kind: 'no_update', note: `${decision.reason}: ${decision.message}` };
+      // PRI-848: the reason travels structured — the Console must map refusal
+      // states from a reason code, never by parsing the note string.
+      return { kind: 'no_update', reason: decision.reason, note: decision.message };
     }
 
     const transactionId = `update-${Date.now()}-${randomUUID().slice(0, 8)}`;

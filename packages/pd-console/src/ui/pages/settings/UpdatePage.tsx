@@ -17,13 +17,15 @@ import {
   fetchUpdateStatus,
   fetchUpdateHistory,
   applyFullUpdate,
+  fetchUpdateRecovery,
 } from "../../api.js";
 import type {
   UpdateStatusData,
   UpdateHistoryData,
   ApplyUpdateResultData,
+  UpdateRecoveryData,
 } from "../../api.js";
-import { validateUpdateStatus, validateUpdateHistory } from "../../utils/validators.js";
+import { validateUpdateStatus, validateUpdateHistory, validateUpdateRecovery } from "../../utils/validators.js";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -34,7 +36,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "../../components/ui/alert-dialog.js";
-import { Loader2, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, ArrowRight, AlertTriangle } from "lucide-react";
 import { formatDate } from "../../utils/format-date.js";
 
 // ── Main page component ──────────────────────────────────────────────────────
@@ -51,6 +53,7 @@ export function UpdatePage() {
   const [historyErrorReason, setHistoryErrorReason] = useState<string | null>(null);
   const [updateResult, setUpdateResult] = useState<{
     success: boolean;
+    refusal?: boolean;
     message: string;
     newVersion?: string;
     fromVersion?: string;
@@ -61,15 +64,17 @@ export function UpdatePage() {
   } | null>(null);
   const [showFullUpdateDialog, setShowFullUpdateDialog] = useState(false);
   const [fullUpdating, setFullUpdating] = useState(false);
+  const [recoveryData, setRecoveryData] = useState<UpdateRecoveryData | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
     setErrorMessage(null);
     setHistoryErrorReason(null);
 
-    const [statusResult, historyResult] = await Promise.all([
+    const [statusResult, historyResult, recoveryResult] = await Promise.all([
       fetchUpdateStatus(),
       fetchUpdateHistory(),
+      fetchUpdateRecovery(),
     ]);
 
     // Validate status data (H section / ERR-001/005)
@@ -96,6 +101,14 @@ export function UpdatePage() {
       if (validatedHistory === null) {
         setHistoryErrorReason("Update history data has unexpected shape");
       }
+    }
+
+    // PRI-848 (SPEC §12.1): recovery surface — surface an unfinished update
+    // transaction instead of letting the Owner start a duplicate update.
+    if (recoveryResult.success) {
+      setRecoveryData(validateUpdateRecovery(recoveryResult.data));
+    } else {
+      setRecoveryData(null);
     }
 
     setLoadingState("loaded");
@@ -147,7 +160,14 @@ export function UpdatePage() {
       toast.success(t('pages.update.fullUpdateSuccess'));
       await loadData();
     } else {
-      setUpdateResult({ success: false, message: data.message, reason: data.reason, nextAction: data.nextAction, gatewayNotice: data.gatewayNotice });
+      setUpdateResult({
+        success: false,
+        refusal: data.refusal,
+        message: data.message,
+        reason: data.reason,
+        nextAction: data.nextAction,
+        gatewayNotice: data.gatewayNotice,
+      });
       toast.error(t('pages.update.updateFailed', { message: data.message }));
     }
   }, [t, loadData, statusData?.currentVersion]);
@@ -182,11 +202,44 @@ export function UpdatePage() {
   }
 
   // ── Loaded state ─────────────────────────────────────────────────────────
-  const isUpToDate = statusData ? !statusData.hasUpdate : true;
+  // PRI-848 (SPEC §12.1): explicit state contract. Servers predating the
+  // contract fall back to the legacy hasUpdate/error derivation.
+  const updateState: 'up_to_date' | 'update_available' | 'update_blocked' | 'check_failed' =
+    statusData?.state ??
+    (statusData ? (statusData.error ? 'check_failed' : statusData.hasUpdate ? 'update_available' : 'up_to_date') : 'up_to_date');
+  const isUpToDate = updateState === 'up_to_date';
+
+  // SPEC §12.1: reason codes localize; an unmapped code falls back to the raw
+  // value instead of hiding it.
+  const localizedReason = (reason?: string): string | undefined =>
+    reason ? (t(`pages.update.reason.${reason}`, { defaultValue: reason }) as string) : undefined;
+  const blockedReason = updateState === 'update_blocked' || updateState === 'check_failed'
+    ? localizedReason(statusData?.reason)
+    : undefined;
 
   return (
     <PageShell>
       <div className="animate-[pdFadeIn_400ms_ease-out]">
+      {/* PRI-848 (SPEC §12.1): recovery banner — an unfinished update
+          transaction is shown with its phase and next step; the Owner attaches
+          to it instead of silently starting a duplicate update. */}
+      {recoveryData?.needsRecovery && recoveryData.unfinished.length > 0 && (
+        <div className="mb-6 p-4 bg-amber/5 border border-amber/35 rounded-[6px] text-[13px] leading-relaxed text-ink-2" role="alert">
+          <p className="font-medium text-amber">{t("pages.update.recoveryBanner")}</p>
+          {recoveryData.unfinished.slice(0, 3).map((item) => (
+            <p key={item.transactionId} className="mt-1 font-mono text-[12px] text-ink-3">
+              {t("pages.update.recoveryItem", {
+                id: item.transactionId,
+                phase: item.lastState ?? "—",
+              })}
+            </p>
+          ))}
+          {recoveryData.nextAction && (
+            <p className="mt-2 text-[12px] text-ink-3">{recoveryData.nextAction}</p>
+          )}
+        </div>
+      )}
+
       {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
         {t("pages.update.eyebrow")}
@@ -232,15 +285,24 @@ export function UpdatePage() {
               <span className="text-ink-3 text-[13px]">{t("pages.update.latestVersion")}</span>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[13px] text-ink">
-                  {statusData?.latestVersion ?? "—"}
+                  {updateState === 'check_failed' ? "—" : (statusData?.latestVersion || "—")}
                 </span>
-                {statusData?.error ? (
-                  <span className="text-amber text-[12px]">{t("pages.update.checkFailed")}</span>
-                ) : isUpToDate ? (
+                {updateState === 'check_failed' && (
+                  <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+                    {t("pages.update.checkFailed")}
+                  </span>
+                )}
+                {updateState === 'update_blocked' && (
+                  <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+                    {t("pages.update.blockedBadge")}
+                  </span>
+                )}
+                {updateState === 'up_to_date' && (
                   <span className="inline-flex items-center border border-green/35 text-green rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
                     {t("pages.update.upToDate")}
                   </span>
-                ) : (
+                )}
+                {updateState === 'update_available' && (
                   <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
                     {t("pages.update.updateAvailable")}
                   </span>
@@ -248,6 +310,22 @@ export function UpdatePage() {
               </div>
             </div>
           </div>
+
+          {/* PRI-848: blocked/check-failed detail — localized reason code plus
+              the exact next action. Never rendered as "up to date". */}
+          {(updateState === 'update_blocked' || updateState === 'check_failed') && (
+            <div className="mt-4 pt-3 border-t border-line text-[12px] leading-relaxed">
+              {blockedReason && (
+                <p className="text-ink-2">{t("pages.update.reasonLabel")}{blockedReason}</p>
+              )}
+              {statusData?.message && updateState === 'update_blocked' && (
+                <p className="mt-1 text-ink-3">{statusData.message}</p>
+              )}
+              {statusData?.nextAction && (
+                <p className="mt-1 text-ink-3 font-mono">{statusData.nextAction}</p>
+              )}
+            </div>
+          )}
 
           {/* Error notice when registry check failed but version is still shown */}
           {statusData?.error && (
@@ -266,7 +344,7 @@ export function UpdatePage() {
             >
               {checking ? t("pages.update.checking") : t("pages.update.checkForUpdates")}
             </button>
-            {!isUpToDate && !statusData?.error && (
+            {!isUpToDate && updateState === 'update_available' && (
               <button
                 type="button"
                 onClick={() => setShowFullUpdateDialog(true)}
@@ -285,17 +363,24 @@ export function UpdatePage() {
             )}
           </div>
 
-          {/* Update result message — enhanced card */}
+          {/* Update result message — enhanced card. PRI-848: a refusal is
+              "blocked" (amber), not "failed" (red) — the system is untouched. */}
           {updateResult && (
-            <div className={`mt-4 p-4 rounded-[6px] border animate-[pdFadeIn_400ms_ease-out] ${updateResult.success ? 'bg-green/5 border-green/20' : 'bg-red/5 border-red/20'}`}>
+            <div className={`mt-4 p-4 rounded-[6px] border animate-[pdFadeIn_400ms_ease-out] ${updateResult.success ? 'bg-green/5 border-green/20' : updateResult.refusal ? 'bg-amber/5 border-amber/25' : 'bg-red/5 border-red/20'}`}>
               <div className="flex items-start gap-3">
                 {/* Status icon with animation */}
                 {updateResult.success ? (
                   <CheckCircle2 className="h-6 w-6 text-green shrink-0 mt-0.5 animate-[pdFadeIn_600ms_ease-out]" style={{ transform: 'scale(1)', animationFillMode: 'both' }} />
+                ) : updateResult.refusal ? (
+                  <AlertTriangle className="h-6 w-6 text-amber shrink-0 mt-0.5" />
                 ) : (
                   <XCircle className="h-6 w-6 text-red shrink-0 mt-0.5" />
                 )}
                 <div className="flex-1 min-w-0">
+                  {/* Refusal label — the message is a blocked reason, not a crash */}
+                  {updateResult.refusal && (
+                    <p className="text-[12px] font-mono uppercase text-amber mb-1">{t("pages.update.blockedBadge")}</p>
+                  )}
                   {/* Version comparison (success only) */}
                   {updateResult.success && updateResult.fromVersion && updateResult.newVersion && (
                     <div className="flex items-center gap-2 mb-1.5">
@@ -305,7 +390,7 @@ export function UpdatePage() {
                     </div>
                   )}
                   {/* Message */}
-                  <p className={`text-[13px] ${updateResult.success ? 'text-green' : 'text-red'}`}>
+                  <p className={`text-[13px] ${updateResult.success ? 'text-green' : updateResult.refusal ? 'text-ink-2' : 'text-red'}`}>
                     {updateResult.message}
                   </p>
                   {/* Full update restart prompt (requires console restart) */}

@@ -40,6 +40,7 @@ import { handleOnboardingRoute, disposeOnboardingModels } from './routes/onboard
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { handleUpdateRoute } from './routes/update.js';
 import { handleUpdateHistoryRoute } from './routes/update-history.js';
+import { handleUpdateTransactionRoute } from './routes/update-transaction.js';
 import { handleConfigRoute } from './routes/config.js';
 import { sendJson, sendNotFound, sendUnauthorized } from './utils/response.js';
 import { migrateLegacyExtensionBackups, resolvePdBackupsRoot } from './utils/pd-backups.js';
@@ -465,6 +466,15 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // GET /api/update/history (MUST be before update catch-all)
       if (urlPath === '/api/update/history') {
         asyncHandler(() => handleUpdateHistoryRoute(req, res, services.workspaceDir, ''))(req, res);
+        return;
+      }
+
+      // GET /api/update/recovery, GET /api/update/transaction/:id (MUST be
+      // before the update catch-all; PRI-848 read-only surfaces, no timeout —
+      // journal reads are local file reads).
+      if (urlPath === '/api/update/recovery' || urlPath.startsWith('/api/update/transaction/')) {
+        const subPath = urlPath.slice('/api/update'.length);
+        asyncHandler(() => handleUpdateTransactionRoute(req, res, subPath))(req, res);
         return;
       }
 

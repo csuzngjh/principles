@@ -36,13 +36,21 @@ async function checkUpdate(authority: Authority, res: ServerResponse): Promise<v
   const identityDivergence = activeIdentity !== undefined && pluginVersion !== undefined && pluginVersion !== activeIdentity.productVersion
     ? { activeVersion: activeIdentity.productVersion, pluginVersion, releaseId: activeIdentity.releaseId, generation: activeIdentity.generation }
     : undefined;
+  // PRI-848 (SPEC §12.1): one explicit state per check. A policy refusal is
+  // `update_blocked` — the candidate EXISTS but a specific problem must be
+  // resolved — never "up to date".
+  const decision = check.decision;
+  const state = !decision.allowed
+    ? 'update_blocked' as const
+    : decision.direction === 'reinstall' ? 'up_to_date' as const : 'update_available' as const;
   sendSuccess(res, {
-    hasUpdate: check.decision.allowed && check.decision.direction !== 'reinstall',
+    state,
+    hasUpdate: decision.allowed && decision.direction !== 'reinstall',
     currentVersion: installStatus?.productVersion ?? 'unknown',
     latestVersion: check.candidate?.productVersion ?? '',
     ...(activeIdentity !== undefined ? { versionSource: 'active-release' as const } : {}),
     ...(identityDivergence !== undefined ? { identityDivergence } : {}),
-    ...(!check.decision.allowed ? { reason: check.decision.reason, message: check.decision.message } : {}),
+    ...(!decision.allowed ? { reason: decision.reason, message: decision.message } : {}),
   });
 }
 
@@ -56,6 +64,10 @@ async function applyFullUpdate(authority: Authority, res: ServerResponse, worksp
     });
     sendSuccess(res, {
       success: true,
+      // SPEC §12.1: a finished deployment is NOT "the new version is running" —
+      // the serving process is still the old build until the restart verifies it.
+      state: 'awaiting_restart',
+      transactionId: outcome.transactionId,
       message: `Updated to ${outcome.productVersion}. Transaction ${outcome.transactionId} confirmed in the journal.`,
       newVersion: outcome.productVersion,
       requiresRestart: true,
@@ -64,12 +76,23 @@ async function applyFullUpdate(authority: Authority, res: ServerResponse, worksp
     });
     return;
   }
+  // PRI-848 (SPEC §12.1): a refusal is a structured non-success — never
+  // `success:true` dressed up as "no update applied". The reason code travels
+  // structured so the page can localize without parsing the message.
   appendGovernedUpdateHistory(workspaceDir, {
     fromVersion, toVersion: fromVersion, success: false, kind: 'refusal',
-    reason: outcome.note, authority: 'release-manager',
-    nextAction: 'No runtime change was made. Retry when a newer signed release is published.',
+    reason: outcome.reason, authority: 'release-manager',
+    nextAction: 'No runtime change was made. Resolve the reported cause, then retry.',
   });
-  sendSuccess(res, { success: true, message: `No update applied: ${outcome.note}`, requiresRestart: false });
+  sendSuccess(res, {
+    success: false,
+    refusal: true,
+    state: 'update_blocked',
+    reason: outcome.reason,
+    message: outcome.note,
+    requiresRestart: false,
+    nextAction: 'No runtime change was made. Resolve the reported cause, then retry.',
+  });
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params -- Node request/response plus route context
@@ -112,7 +135,10 @@ export async function handleUpdateRoute(
   }
   console.error(`[update] ${subPath} refused (${failure.reason}): ${failure.message}`);
   if (subPath === '/check') {
+    // SPEC §12.1: a check that cannot complete is check_failed — it must never
+    // masquerade as "no new version" (hasUpdate:false alone would do that).
     sendSuccess(res, {
+      state: 'check_failed',
       hasUpdate: false, currentVersion: authority?.installStatus?.productVersion ?? 'unknown', latestVersion: '',
       error: failure.message, reason: failure.reason, nextAction: failure.nextAction,
     });

@@ -1515,7 +1515,11 @@ export interface UpdateStatusData {
   currentVersion: string;
   latestVersion: string;
   hasUpdate: boolean;
+  /** PRI-848 (SPEC §12.1): explicit state; optional while servers older than the state contract are possible. */
+  state?: 'up_to_date' | 'update_available' | 'update_blocked' | 'check_failed';
   error?: string;
+  /** Owner-facing explanation carried by blocked checks (policy refusal message). */
+  message?: string;
   /** PRI-738 legacy-updater retirement: why a check degraded / what to do next. */
   reason?: string;
   nextAction?: string;
@@ -1530,6 +1534,8 @@ export interface UpdateStatusData {
   };
 }
 
+const UPDATE_STATES = ['up_to_date', 'update_available', 'update_blocked', 'check_failed'] as const;
+
 export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'currentVersion') || !isString(v.currentVersion)) return null;
@@ -1540,9 +1546,13 @@ export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
     latestVersion: v.latestVersion,
     hasUpdate: v.hasUpdate,
   };
+  if (Object.hasOwn(v, 'state') && isString(v.state) && (UPDATE_STATES as readonly string[]).includes(v.state)) {
+    result.state = v.state as UpdateStatusData['state'];
+  }
   if (Object.hasOwn(v, 'error') && isString(v.error)) {
     result.error = v.error;
   }
+  if (Object.hasOwn(v, 'message') && isString(v.message)) result.message = v.message;
   if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
   if (Object.hasOwn(v, 'versionSource') && (v.versionSource === 'active-release' || v.versionSource === 'plugin-package')) {
@@ -2571,6 +2581,12 @@ export function validateOutputLanguage(v: unknown): OutputLanguageData | null {
 export interface ApplyUpdateResultData {
   success: boolean;
   message: string;
+  /** PRI-848 (SPEC §12.1): a policy refusal is a structured non-success, never a success-shaped "no update applied". */
+  refusal?: boolean;
+  /** PRI-848: explicit result state (`update_blocked`, `awaiting_restart`). */
+  state?: 'update_blocked' | 'awaiting_restart';
+  /** PRI-848: queryable transaction id of the confirmed update (SPEC §12.1 continuation contract). */
+  transactionId?: string;
   updatedFiles?: string[];
   backupPath?: string;
   newVersion?: string;
@@ -2594,6 +2610,15 @@ export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | n
     success: v.success,
     message: v.message,
   };
+  if (Object.hasOwn(v, 'refusal') && typeof v.refusal === 'boolean') {
+    result.refusal = v.refusal;
+  }
+  if (Object.hasOwn(v, 'state') && isString(v.state) && (v.state === 'update_blocked' || v.state === 'awaiting_restart')) {
+    result.state = v.state;
+  }
+  if (Object.hasOwn(v, 'transactionId') && isString(v.transactionId)) {
+    result.transactionId = v.transactionId;
+  }
   if (Object.hasOwn(v, 'updatedFiles') && Array.isArray(v.updatedFiles)) {
     result.updatedFiles = v.updatedFiles.filter((f: unknown): f is string => typeof f === 'string');
   }
@@ -2618,6 +2643,52 @@ export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | n
   if (Object.hasOwn(v, 'gatewayNotice') && isString(v.gatewayNotice)) {
     result.gatewayNotice = v.gatewayNotice;
   }
+  return result;
+}
+
+// ── Update recovery / transaction validators (PRI-848, SPEC §12.1) ──────────
+
+export interface UpdateRecoveryItem {
+  transactionId: string;
+  lastState: string | null;
+  lastAt: string | null;
+  productVersion: string | null;
+  tornTailDetected: boolean;
+}
+
+export interface UpdateRecoveryData {
+  needsRecovery: boolean;
+  unfinished: UpdateRecoveryItem[];
+  broken: Array<{ transactionId: string; reason: string }>;
+  nextAction?: string;
+}
+
+export function validateUpdateRecovery(v: unknown): UpdateRecoveryData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'needsRecovery') || typeof v.needsRecovery !== 'boolean') return null;
+  const unfinished: UpdateRecoveryItem[] = [];
+  if (Object.hasOwn(v, 'unfinished') && Array.isArray(v.unfinished)) {
+    for (const item of v.unfinished) {
+      if (!isObject(item) || !Object.hasOwn(item, 'transactionId') || !isString(item.transactionId)) continue;
+      unfinished.push({
+        transactionId: item.transactionId,
+        lastState: Object.hasOwn(item, 'lastState') && isString(item.lastState) ? item.lastState : null,
+        lastAt: Object.hasOwn(item, 'lastAt') && isString(item.lastAt) ? item.lastAt : null,
+        productVersion: Object.hasOwn(item, 'productVersion') && isString(item.productVersion) ? item.productVersion : null,
+        tornTailDetected: Object.hasOwn(item, 'tornTailDetected') && typeof item.tornTailDetected === 'boolean' ? item.tornTailDetected : false,
+      });
+    }
+  }
+  const broken: Array<{ transactionId: string; reason: string }> = [];
+  if (Object.hasOwn(v, 'broken') && Array.isArray(v.broken)) {
+    for (const item of v.broken) {
+      if (!isObject(item) || !Object.hasOwn(item, 'transactionId') || !isString(item.transactionId)) continue;
+      if (!Object.hasOwn(item, 'reason') || !isString(item.reason)) continue;
+      broken.push({ transactionId: item.transactionId, reason: item.reason });
+    }
+  }
+  const result: UpdateRecoveryData = { needsRecovery: v.needsRecovery, unfinished, broken };
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
   return result;
 }
 
