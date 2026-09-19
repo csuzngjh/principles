@@ -336,8 +336,8 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
   // ── Optional hooks ─────────────────────────────────────────────────────────
 
   /**
-   * Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
-   * Only fill when absent via Object.hasOwn — present-but-falsy values
+   * taskId: re-inject if stripped by stripLineageFields (PRI-272 / ERR-008).
+   * Only fill when absent via Object.hasOwn — present-but-falsy taskId
    * must reach validation and fail loud (Runtime Contract Rule 3).
    *
    * PRI-862 (CIL-006): sourcePainId follows the same echo gate but with
@@ -346,6 +346,8 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
    * (loss-of-trust arm: provenance degrades to null observably, the model
    * string is never trusted). This holds on every runtime adapter,
    * including the paths that do not strip lineage fields themselves.
+   * The correction event carries `seedPresent` so the two arms stay
+   * separately measurable (rc-9 structured reason).
    *
    * Also strips fabricated sourcePrincipleId values via the shared
    * stripFabricatedCorePrincipleIds utility. The generatedAt override is
@@ -372,7 +374,10 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
       correctedFields.push('sourcePainId');
     }
     if (correctedFields.length > 0) {
-      this.emitEvent('lineage_echo_corrected', taskId, { correctedFields });
+      // seedPresent is the arm discriminator: true ⇒ fabricated echo was
+      // overridden by the canonical seed; false ⇒ unbacked model string was
+      // dropped. Without it the two arms collapse into one unmeasurable rate.
+      this.emitEvent('lineage_echo_corrected', taskId, { correctedFields, seedPresent: seed !== null });
     }
     stripFabricatedCorePrincipleIds(untrustedOutput);
   }

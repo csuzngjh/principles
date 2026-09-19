@@ -21,6 +21,7 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DreamerOutput, DreamerCandidate, DreamerValidator } from '../internalization/dreamer-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { DreamerRunner } from '../internalization/dreamer-runner.js';
+import { computeArtifactContentHash } from '../internalization/owner-review.js';
 import { createMinimalPITaskRecord } from '../internalization/peer-runner-contracts.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
 
@@ -70,7 +71,8 @@ interface Harness {
   artifactStore: MemoryPIArtifactStore;
   persistedRunOutput: () => Record<string, unknown>;
   storedArtifactContent: () => Promise<Record<string, unknown>>;
-  echoCorrectedEvents: () => { correctedFields: unknown }[];
+  storedArtifactContentJson: () => Promise<string>;
+  echoCorrectedEvents: () => { correctedFields: unknown; seedPresent: unknown }[];
 }
 
 function createHarness(opts: {
@@ -150,6 +152,14 @@ function createHarness(opts: {
     { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
   );
 
+  async function storedContentJson(): Promise<string> {
+    const artifacts = await artifactStore.listBySourceTaskId(TASK_ID);
+    expect(artifacts).toHaveLength(1);
+    const [artifact] = artifacts;
+    expect(artifact).toBeDefined();
+    return artifact?.contentJson ?? '{}';
+  }
+
   return {
     runner,
     artifactStore,
@@ -157,16 +167,11 @@ function createHarness(opts: {
       const {calls} = stateManager.updateRunOutput.mock;
       return JSON.parse(String(calls[0]?.[1])) as Record<string, unknown>;
     },
-    storedArtifactContent: async () => {
-      const artifacts = await artifactStore.listBySourceTaskId(TASK_ID);
-      expect(artifacts).toHaveLength(1);
-      const [artifact] = artifacts;
-      expect(artifact).toBeDefined();
-      return JSON.parse(artifact?.contentJson ?? '{}') as Record<string, unknown>;
-    },
+    storedArtifactContent: async () => JSON.parse(await storedContentJson()) as Record<string, unknown>,
+    storedArtifactContentJson: storedContentJson,
     echoCorrectedEvents: () => telemetryCalls
       .filter((evt) => evt.eventType === 'dreamer_lineage_echo_corrected')
-      .map((evt) => evt.payload as { correctedFields: unknown }),
+      .map((evt) => evt.payload as { correctedFields: unknown; seedPresent: unknown }),
   };
 }
 
@@ -189,7 +194,7 @@ describe('PRI-862 dreamer sourcePainId provenance guard', () => {
     const content = await harness.storedArtifactContent();
     expect(content.sourcePainId).toBe('pain-canonical-1');
     expect(harness.echoCorrectedEvents().some(
-      (p) => Array.isArray(p.correctedFields) && p.correctedFields.includes('sourcePainId'),
+      (p) => Array.isArray(p.correctedFields) && p.correctedFields.includes('sourcePainId') && p.seedPresent === true,
     )).toBe(true);
   });
 
@@ -212,7 +217,7 @@ describe('PRI-862 dreamer sourcePainId provenance guard', () => {
     const content = await harness.storedArtifactContent();
     expect(Object.hasOwn(content, 'sourcePainId')).toBe(false);
     expect(harness.echoCorrectedEvents().some(
-      (p) => Array.isArray(p.correctedFields) && p.correctedFields.includes('sourcePainId'),
+      (p) => Array.isArray(p.correctedFields) && p.correctedFields.includes('sourcePainId') && p.seedPresent === false,
     )).toBe(true);
   });
 
@@ -226,17 +231,19 @@ describe('PRI-862 dreamer sourcePainId provenance guard', () => {
     expect(harness.echoCorrectedEvents()).toHaveLength(0);
   });
 
-  it('D: different seeds produce different persisted artifact content (evidence ⇒ identity)', async () => {
+  it('D: different seeds produce different persisted artifact content identity (evidence ⇒ identity)', async () => {
     const first = createHarness({ seed: 'pain-alpha', llmPainEcho: undefined });
     const second = createHarness({ seed: 'pain-beta', llmPainEcho: undefined });
     await first.runner.run(TASK_ID);
     await second.runner.run(TASK_ID);
 
-    const firstContent = await first.storedArtifactContent();
-    const secondContent = await second.storedArtifactContent();
-    expect(firstContent.sourcePainId).toBe('pain-alpha');
-    expect(secondContent.sourcePainId).toBe('pain-beta');
-    expect(JSON.stringify(firstContent)).not.toBe(JSON.stringify(secondContent));
+    const firstRaw = await first.storedArtifactContentJson();
+    const secondRaw = await second.storedArtifactContentJson();
+    expect(JSON.parse(firstRaw).sourcePainId).toBe('pain-alpha');
+    expect(JSON.parse(secondRaw).sourcePainId).toBe('pain-beta');
+    // Real downstream identity function (owner-review replay/stale guard):
+    // sha256 over the persisted contentJson — evidence changed ⇒ hash changed.
+    expect(computeArtifactContentHash(firstRaw)).not.toBe(computeArtifactContentHash(secondRaw));
   });
 
   it('B2: no seed + no echo (legacy shape) succeeds with no event — backward compatible', async () => {
