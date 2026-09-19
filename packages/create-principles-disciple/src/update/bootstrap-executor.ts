@@ -74,9 +74,10 @@ export async function runBootstrapExecutor(options: BootstrapExecutorOptions): P
       nextAction: 'Fix the bootstrap request and retry.',
     };
   }
-  if (options.resultFile !== undefined) {
-    resultFile = options.resultFile;
-    writeFileSync(options.resultFile, `${JSON.stringify(response)}\n`, 'utf8');
+  const { resultFile: targetResultFile } = options;
+  if (targetResultFile !== undefined) {
+    resultFile = targetResultFile;
+    writeFileSync(targetResultFile, `${JSON.stringify(response)}\n`, 'utf8');
   }
   return { response, resultFile };
 }

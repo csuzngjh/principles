@@ -147,10 +147,11 @@ export function readBootstrapManifest(paths: PdHomePaths): BootstrapManifest | n
     }
     let executorDigest: string | undefined;
     if (Object.hasOwn(record, 'executorDigest')) {
-      if (typeof record.executorDigest !== 'string' || !/^[a-f0-9]{64}$/.test(record.executorDigest)) {
+      const { executorDigest: digestValue } = record;
+      if (typeof digestValue !== 'string' || !/^[a-f0-9]{64}$/.test(digestValue)) {
         throw new InstallLayoutError('executorDigest', 'bootstrap manifest executorDigest must be 64-char hex when present');
       }
-      executorDigest = record.executorDigest;
+      executorDigest = digestValue;
     }
     return { bootstrapVersion: bootstrapVersion.productVersion, installedAt, ...(executorDigest !== undefined ? { executorDigest } : {}) };
   } catch (error) {

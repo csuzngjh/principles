@@ -391,28 +391,6 @@ export interface BootstrapDeliveryResult {
  * way Node would from the installer package, and copies the real files into
  * the staged tree's node_modules (dereferencing workspace symlinks).
  */
-function copyExecutorDependencyClosure(sourcePackageDir: string, stagingDir: string): void {
-  const stagedModulesDir = path.join(stagingDir, 'node_modules');
-  const manifest = JSON.parse(readFileSync(path.join(sourcePackageDir, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
-  const seen = new Set<string>();
-  // Each queued dependency resolves from the package that DECLARES it —
-  // nested/deduped layouts mean chownr resolves from tar, not from the
-  // installer package root. The directory walk mirrors Node's own
-  // node_modules resolution, so no exports-map cooperation is required.
-  const queue: Array<{ name: string; fromDir: string }> = Object.keys(manifest.dependencies ?? {}).map((name) => ({ name, fromDir: sourcePackageDir }));
-  while (queue.length > 0) {
-    const item = queue.shift() as { name: string; fromDir: string };
-    if (seen.has(item.name)) continue;
-    seen.add(item.name);
-    const packageRoot = resolvePackageDir(item.name, item.fromDir);
-    cpSync(packageRoot, path.join(stagedModulesDir, item.name), { recursive: true, dereference: true });
-    const dependencyManifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
-    for (const dependencyName of Object.keys(dependencyManifest.dependencies ?? {})) {
-      if (!seen.has(dependencyName)) queue.push({ name: dependencyName, fromDir: packageRoot });
-    }
-  }
-}
-
 /** Walks node_modules directories upward from fromDir, mirroring Node module resolution. */
 function resolvePackageDir(name: string, fromDir: string): string {
   const segments = name.split('/');
@@ -427,6 +405,28 @@ function resolvePackageDir(name: string, fromDir: string): string {
     dir = parent;
   }
   throw new Error(`could not locate the package root of dependency "${name}" for the bootstrap executor bundle`);
+}
+
+function copyExecutorDependencyClosure(sourcePackageDir: string, stagingDir: string): void {
+  const stagedModulesDir = path.join(stagingDir, 'node_modules');
+  const manifest = JSON.parse(readFileSync(path.join(sourcePackageDir, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
+  const seen = new Set<string>();
+  // Each queued dependency resolves from the package that DECLARES it —
+  // nested/deduped layouts mean chownr resolves from tar, not from the
+  // installer package root. The directory walk mirrors Node's own
+  // node_modules resolution, so no exports-map cooperation is required.
+  const queue: { name: string; fromDir: string }[] = Object.keys(manifest.dependencies ?? {}).map((name) => ({ name, fromDir: sourcePackageDir }));
+  while (queue.length > 0) {
+    const item = queue.shift() as { name: string; fromDir: string };
+    if (seen.has(item.name)) continue;
+    seen.add(item.name);
+    const packageRoot = resolvePackageDir(item.name, item.fromDir);
+    cpSync(packageRoot, path.join(stagedModulesDir, item.name), { recursive: true, dereference: true });
+    const dependencyManifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
+    for (const dependencyName of Object.keys(dependencyManifest.dependencies ?? {})) {
+      if (!seen.has(dependencyName)) queue.push({ name: dependencyName, fromDir: packageRoot });
+    }
+  }
 }
 
 export async function deliverBootstrapExecutor(input: {
@@ -478,7 +478,7 @@ export async function deliverBootstrapExecutor(input: {
       const resultFile = path.join(probeDir, 'result.json');
       const probe = await staged.runBootstrapExecutor({ rawRequest: `${JSON.stringify({ op: 'inspect' })}\n`, resultFile });
       if (!probe.response.ok) {
-        throw new Error(`probe response not ok: ${readFileSync(resultFile, 'utf8').slice(0, 200)}`);
+        throw new Error(`probe response not ok: ${readFileSync(resultFile, 'utf8').slice(0, 200)}`, { cause: new Error('bootstrap executor answered ok:false') });
       }
       if (!existsSync(resultFile)) {
         throw new Error('probe produced no result file');
@@ -489,7 +489,7 @@ export async function deliverBootstrapExecutor(input: {
   } catch (probeError) {
     rmSync(stagingDir, { recursive: true, force: true });
     const detail = probeError instanceof Error ? probeError.message : String(probeError);
-    throw new Error(`bootstrap executor probe failed: ${detail}`);
+    throw new Error(`bootstrap executor probe failed: ${detail}`, { cause: probeError });
   }
 
   const executorDigest = digestDirectory(stagingDir);
@@ -529,6 +529,15 @@ export interface RepairUpdateChainResult {
   readonly needsFullInstall: boolean;
   readonly notes: readonly string[];
   readonly error?: string;
+}
+
+/** Reads the persisted release metadata URL, tolerating absent/corrupt state. */
+function readInstallConfigSafeReleaseMetadataUrl(pdHome: string): string | undefined {
+  try {
+    return readInstallConfig(resolvePdHomePaths(pdHome)).releaseMetadataUrl;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function repairUpdateChain(input: { sourcePackageDir: string }): Promise<RepairUpdateChainResult> {
@@ -602,14 +611,6 @@ export async function repairUpdateChain(input: { sourcePackageDir: string }): Pr
     needsFullInstall,
     notes,
   };
-}
-
-function readInstallConfigSafeReleaseMetadataUrl(pdHome: string): string | undefined {
-  try {
-    return readInstallConfig(resolvePdHomePaths(pdHome)).releaseMetadataUrl;
-  } catch {
-    return undefined;
-  }
 }
 
 function installBundledLayoutPackage(pluginDir: string): void {
