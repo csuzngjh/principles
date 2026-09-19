@@ -34,7 +34,10 @@ export interface ReleaseMetadata {
   readonly minBootstrapVersion: string;
   readonly publicationSequence: number;
   readonly expiresAt: string;
-  readonly assets: readonly ReleaseAssetIdentity[];
+  readonly assets: readonly (ReleaseAssetIdentity & {
+    /** PRI-854 (option A): where the bytes are served from (signed). */
+    readonly url?: string;
+  })[];
   readonly compatibility: {
     readonly dataSchemaForwardReadableFrom: string;
   };
@@ -133,11 +136,22 @@ export function parseReleaseMetadata(value: unknown): ReleaseMetadata {
     if (!isPlainObject(asset)) {
       throw new ReleaseMetadataError('release_metadata_invalid', 'assets', `assets[${index}] must be an object`);
     }
-    const assetKeys = new Set(['platform', 'arch', 'nodeAbi', 'archiveSha256', 'archiveSizeBytes']);
+    const assetKeys = new Set(['platform', 'arch', 'nodeAbi', 'archiveSha256', 'archiveSizeBytes', 'url']);
     for (const key of Object.keys(asset)) {
       if (!assetKeys.has(key)) {
         throw new ReleaseMetadataError('release_metadata_invalid', 'assets', `assets[${index}] contains unknown field "${key}"`);
       }
+    }
+    let url: string | undefined;
+    if (Object.hasOwn(asset, 'url')) {
+      // PRI-854 (option A): the byte carrier is a GitHub Release attachment —
+      // the URL is part of the SIGNED document while sha256+size bind the
+      // bytes. Only http(s) is accepted.
+      const rawUrl = asset.url;
+      if (typeof rawUrl !== 'string' || !/^https?:\/\//i.test(rawUrl)) {
+        throw new ReleaseMetadataError('release_metadata_invalid', 'assets', `assets[${index}].url must be an http(s) URL, got: ${JSON.stringify(rawUrl)}`);
+      }
+      url = rawUrl;
     }
     return {
       platform: requireOwn(asset, 'platform') as string,
@@ -145,6 +159,7 @@ export function parseReleaseMetadata(value: unknown): ReleaseMetadata {
       nodeAbi: requireOwn(asset, 'nodeAbi') as string,
       archiveSha256: requireOwn(asset, 'archiveSha256') as string,
       archiveSizeBytes: requireOwn(asset, 'archiveSizeBytes') as number,
+      ...(url !== undefined ? { url } : {}),
     };
   });
 
