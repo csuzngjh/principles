@@ -153,7 +153,15 @@ export interface ReleasePublicationManifestArtifact {
   readonly nodeAbi: string;
   readonly artifactSha256: string;
   readonly artifactSizeBytes: number;
+  /**
+   * The CONVENTIONAL in-repo target path for this asset identity — always the
+   * relative path shape (`releases/<id>/release-asset-<p>-<a>-abi<abi>.tar.gz`),
+   * even in url mode where the bytes are NOT written there (single semantic,
+   * review P2: never overload this field with an absolute URL).
+   */
   readonly artifactTargetPath: string;
+  /** PRI-854: present only in url mode — where the bytes are actually served. */
+  readonly artifactUrl?: string;
 }
 
 export interface ReleasePublicationManifest {
@@ -410,6 +418,19 @@ function resolvePreviousState(input: ReleasePublicationInput, channelPayload: Ch
 }
 
 /**
+ * PRI-854: the content-addressed asset file name shared by the metadata url
+ * stamping and the upload manifest (single naming truth — review P3).
+ */
+export function contentAddressedAssetName(input: {
+  readonly platform: string;
+  readonly arch: string;
+  readonly nodeAbi: string;
+  readonly digestHex: string;
+}): string {
+  return `release-asset-${input.platform}-${input.arch}-abi${input.nodeAbi}-${input.digestHex.slice(0, 12)}.tar.gz`;
+}
+
+/**
  * Builds the complete signed release publication. Pure: no filesystem or
  * network IO — callers (the publish script / CI) own byte transport.
  */
@@ -540,7 +561,11 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
     // PRI-854 (option A): when the archive carries a delivery url, the bytes
     // are served from that location (GitHub Release attachment) and are NOT
     // written into the metadata repository — only their signed digest travels
-    // with the metadata. Without a url, the legacy in-repo target is used.
+    // with the metadata. artifactTargetPath stays the conventional relative
+    // path shape in BOTH modes (single semantic, review P2); the actual byte
+    // carrier is artifactUrl when present. Without a url, the legacy in-repo
+    // target is used.
+    const conventionalPath = `releases/${releaseMetadata.releaseId}/release-asset-${artifact.platform}-${artifact.arch}-abi${artifact.nodeAbi}.tar.gz`;
     if (artifact.url !== undefined) {
       return {
         platform: artifact.platform,
@@ -548,26 +573,26 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
         nodeAbi: artifact.nodeAbi,
         artifactSha256: artifact.sha256,
         artifactSizeBytes: artifact.bytes.length,
-        artifactTargetPath: artifact.url,
+        artifactTargetPath: conventionalPath,
+        artifactUrl: artifact.url,
       };
     }
-    const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${artifact.platform}-${artifact.arch}-abi${artifact.nodeAbi}.tar.gz`;
-    artifactTargets[artifactTargetPath] = new TargetFile({
-      path: artifactTargetPath,
+    artifactTargets[conventionalPath] = new TargetFile({
+      path: conventionalPath,
       length: artifact.bytes.length,
       hashes: { sha256: artifact.sha256 },
       unrecognizedFields: {
         custom: { releaseId: releaseMetadata.releaseId, channel: input.channel, platform: artifact.platform },
       },
     });
-    artifactFiles.push({ path: `targets/${artifactTargetPath}`, bytes: artifact.bytes });
+    artifactFiles.push({ path: `targets/${conventionalPath}`, bytes: artifact.bytes });
     return {
       platform: artifact.platform,
       arch: artifact.arch,
       nodeAbi: artifact.nodeAbi,
       artifactSha256: artifact.sha256,
       artifactSizeBytes: artifact.bytes.length,
-      artifactTargetPath,
+      artifactTargetPath: conventionalPath,
     };
   });
 
@@ -648,7 +673,7 @@ export function buildReleasePublication(input: ReleasePublicationInput): Release
   const assetUploads = artifacts
     .filter((artifact) => artifact.url !== undefined)
     .map((artifact) => ({
-      name: `release-asset-${artifact.platform}-${artifact.arch}-abi${artifact.nodeAbi}-${artifact.sha256.slice(0, 12)}.tar.gz`,
+      name: contentAddressedAssetName({ platform: artifact.platform, arch: artifact.arch, nodeAbi: artifact.nodeAbi, digestHex: artifact.sha256 }),
       bytes: artifact.bytes,
     }));
 

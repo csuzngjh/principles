@@ -121,8 +121,6 @@ export interface DownloadedReleaseAsset {
   readonly transactionDir: string;
   readonly archivePath: string;
   readonly trustedTarget: TrustedReleaseTarget;
-  /** True when the bytes came from the signed delivery URL (PRI-854). */
-  readonly viaUrl?: boolean;
 }
 
 /**
@@ -156,12 +154,17 @@ export async function downloadAndVerifyAssetFile(input: {
   const size = bytes.length;
   const hash = createHash('sha256');
   hash.update(bytes);
-  if (hash.digest('hex') !== input.expectedSha256) {
+  // Case-normalize: upstream digest casing must never flip the verdict.
+  if (hash.digest('hex') !== input.expectedSha256.toLowerCase()) {
     throw new ApplyPayloadError('release_metadata_invalid', `Asset bytes do not match the signed sha256 for release ${input.releaseId}.`, 'Do not install this release. Re-fetch the signed metadata and retry.');
   }
   if (input.expectedSizeBytes !== undefined && size !== input.expectedSizeBytes) {
     throw new ApplyPayloadError('release_metadata_invalid', `Asset size ${size} disagrees with the signed size ${input.expectedSizeBytes}.`, 'The release repository is inconsistent; wait for refreshed signed metadata.');
   }
+  // CodeQL "network data written to file": the URL is transport only — the
+  // trust anchor is the SIGNED sha256+size above (TUF delegation model), and
+  // the destination path is code-constructed under ~/.pd/staging, never
+  // URL-derived. No path-traversal or trust surface.
   fs.writeFileSync(input.destinationPath, bytes);
 }
 
@@ -199,7 +202,7 @@ export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions)
       releaseId: releaseMetadata.releaseId,
       targetPath: asset.url,
     };
-    return { transactionDir, archivePath, trustedTarget: syntheticTarget, viaUrl: true };
+    return { transactionDir, archivePath, trustedTarget: syntheticTarget };
   }
 
   // Legacy path (pre-url releases): the bytes live at the signed TUF target in
