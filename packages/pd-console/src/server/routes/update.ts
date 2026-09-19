@@ -137,9 +137,19 @@ async function applyFullUpdate(authority: Authority, res: ServerResponse, worksp
   // No journal: either the spawn failed, or the executor refused pre-journal
   // (e.g. a policy refusal) and wrote its structured result.
   if (fs.existsSync(resultFile)) {
+    // rc-2: the result file is untrusted runtime data — validate field by
+    // field instead of casting the parsed shape.
     let parsed: { ok?: boolean; reason?: string; message?: string; nextAction?: string } = {};
     try {
-      parsed = JSON.parse(fs.readFileSync(resultFile, 'utf8')) as typeof parsed;
+      const value: unknown = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        for (const [key, val] of Object.entries(value)) {
+          if (key === 'ok' && typeof val === 'boolean') parsed.ok = val;
+          else if (key === 'reason' && typeof val === 'string') parsed.reason = val;
+          else if (key === 'message' && typeof val === 'string') parsed.message = val;
+          else if (key === 'nextAction' && typeof val === 'string') parsed.nextAction = val;
+        }
+      }
     } catch {
       // keep the empty shape; the message below stays generic
     }
