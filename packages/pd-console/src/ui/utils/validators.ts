@@ -3227,6 +3227,12 @@ export interface OwnerDecisionReviewData {
       schemaVersion: number;
       items: { id: string; pass: boolean; note: string }[];
     };
+    /**
+     * PRI-858: bounded formation evidence behind this decision — OBSERVATION
+     * only. Nothing in here may be used to derive an action or a gate: the
+     * authority stays in `capability` / `evidence.deterministicChecks`.
+     */
+    formationEvidence?: OwnerFormationEvidenceData;
   };
   evidence: {
     completeness: 'complete' | 'partial' | 'insufficient';
@@ -3237,6 +3243,83 @@ export interface OwnerDecisionReviewData {
   capability: {
     acceptRequirement: { kind: 'none' | 'acknowledge_partial_evidence' | 'forbidden'; reasonCode?: string };
   };
+}
+
+/** PRI-858: bounded diagnosis projection carried by the formation evidence. */
+export interface OwnerFormationDiagnosisData {
+  rootCause: string | null;
+  summary: string | null;
+  evidence: { sourceRef: string; note: string }[];
+}
+
+/** PRI-858: formation evidence projected onto one Owner decision (display only). */
+export interface OwnerFormationEvidenceData {
+  version: string;
+  sourcePainId: string | null;
+  diagnosis?: OwnerFormationDiagnosisData;
+  provenance: {
+    sourceDreamerArtifactId: string;
+    sourceDiagnosisArtifactId: string | null;
+    sourceDiagnosisTaskId: string | null;
+  };
+  notes: string[];
+}
+
+/**
+ * PRI-858: strict shape check for the formation evidence block. Anything
+ * malformed → the caller omits the whole block (an evidence projection is a
+ * review aid; a partial one would misrepresent what the machine actually
+ * saw). Deliberately does NOT carry raw artifact payloads or full lineage
+ * arrays — only the bounded projection the Owner reads.
+ */
+function validateOwnerFormationEvidence(value: unknown): OwnerFormationEvidenceData | null {
+  if (!isObject(value)) return null;
+  const { provenance } = value;
+  if (!isString(value.version)) return null;
+  const sourcePainId = readNullableString(value, 'sourcePainId');
+  if (!sourcePainId.valid) return null;
+  if (!Array.isArray(value.notes)) return null;
+  const notes: string[] = [];
+  for (const note of value.notes) {
+    if (!isString(note)) return null;
+    notes.push(note);
+  }
+  if (!isObject(provenance)) return null;
+  const dreamerId = readNullableString(provenance, 'sourceDreamerArtifactId');
+  if (!dreamerId.valid || dreamerId.value === null) return null;
+  const diagnosisArtifactId = readNullableString(provenance, 'sourceDiagnosisArtifactId');
+  const diagnosisTaskId = readNullableString(provenance, 'sourceDiagnosisTaskId');
+  if (!diagnosisArtifactId.valid || !diagnosisTaskId.valid) return null;
+
+  const parsed: OwnerFormationEvidenceData = {
+    version: value.version,
+    sourcePainId: sourcePainId.value,
+    provenance: {
+      sourceDreamerArtifactId: dreamerId.value,
+      sourceDiagnosisArtifactId: diagnosisArtifactId.value,
+      sourceDiagnosisTaskId: diagnosisTaskId.value,
+    },
+    notes,
+  };
+
+  if (value.diagnosis !== undefined) {
+    if (!isObject(value.diagnosis)) return null;
+    const { diagnosis } = value;
+    const rootCause = readNullableString(diagnosis, 'rootCause');
+    const summary = readNullableString(diagnosis, 'summary');
+    if (!rootCause.valid || !summary.valid) return null;
+    if (!Array.isArray(diagnosis.evidence)) return null;
+    const evidenceRows: OwnerFormationDiagnosisData['evidence'] = [];
+    for (const entry of diagnosis.evidence) {
+      if (!isObject(entry)) return null;
+      const sourceRef = readNullableString(entry, 'sourceRef');
+      const note = readNullableString(entry, 'note');
+      if (!sourceRef.valid || sourceRef.value === null || !note.valid || note.value === null) return null;
+      evidenceRows.push({ sourceRef: sourceRef.value, note: note.value });
+    }
+    parsed.diagnosis = { rootCause: rootCause.value, summary: summary.value, evidence: evidenceRows };
+  }
+  return parsed;
 }
 
 function readOwnerStringArray(value: unknown): string[] | null {
@@ -3302,6 +3385,12 @@ function validateOwnerDecisionReview(value: unknown): OwnerDecisionReviewData | 
           parsedBrief.qualityChecklist = { schemaVersion: 1, items: validItems };
         }
       }
+    }
+    // PRI-858: formation evidence projection (optional, display-only). Absent
+    // on legacy snapshots; malformed → omitted rather than half-rendered.
+    if (brief.formationEvidence !== undefined) {
+      const formationEvidence = validateOwnerFormationEvidence(brief.formationEvidence);
+      if (formationEvidence !== null) parsedBrief.formationEvidence = formationEvidence;
     }
   } else {
     const risks = readOwnerStringArray(brief.risks);

@@ -335,7 +335,13 @@
           "actionability": "Actionability",
           "generalization": "Generalization",
           "boundary": "Boundary"
-        }
+        },
+        "formationLabel": "Formation source",
+        "formationPainLabel": "Pain",
+        "formationDiagnosisLabel": "Diagnosis",
+        "formationRootCauseLabel": "Root cause",
+        "formationEvidenceLabel": "Supporting evidence",
+        "formationUnavailableNote": "The source diagnosis is currently unreadable; this principle is still decided on the evidence shown."
       }
     },
     "pain": {

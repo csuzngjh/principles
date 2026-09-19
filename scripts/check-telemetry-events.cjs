@@ -149,11 +149,20 @@ function collectEmittedNames(sources, runnerNames) {
   // vocabulary extracted from formation-context.ts itself (same technique as
   // dynamic site 1). The resolver module is excluded (it is the definition,
   // has no runnerName, and would otherwise fan out to every runner).
+  //
+  // PRI-858 narrowing: the fan-out models one specific runtime fact — the
+  // callback reaching `this.emitEvent(`, where base-peer-runner adds the
+  // runner prefix. A consumer that never calls `this.emitEvent(` cannot emit
+  // anything (Owner Decision Review passes a capture-only callback and turns
+  // the degradation vocabulary into snapshot notes), so scanning it would
+  // invent events that no code path can produce. The invariant is unchanged:
+  // every event that CAN be emitted must be registered.
   const formationSrc = fs.readFileSync(path.join(ROOT, FORMATION_CONTEXT_FILE), 'utf-8');
   const formationSuffixes = [...formationSrc.matchAll(/emitEvent\('([a-z0-9_]+)'/g)].map((m) => m[1]);
   for (const { rel, src } of sources) {
     if (rel === FORMATION_CONTEXT_FILE) continue;
     if (!src.includes('resolveFormationContext(')) continue;
+    if (!src.includes('this.emitEvent(')) continue;
     const fileRunnerNames = [...src.matchAll(/runnerName:\s*'([a-z_]+)'/g)].map((m) => m[1]);
     for (const runner of (fileRunnerNames.length > 0 ? fileRunnerNames : runnerNames)) {
       for (const suffix of formationSuffixes) note(`${runner}_${suffix}`, FORMATION_CONTEXT_FILE, 0);

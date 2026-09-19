@@ -162,6 +162,105 @@ describe('PRI-704: qualityChecklist validation (strict five-item contract, 评�
   });
 });
 
+// ── PRI-858: formation evidence reaches the Owner decision card ──────────────
+
+describe('PRI-858: formationEvidence validation + governance neutrality', () => {
+  const validEvidence = {
+    version: 'formation-context.v1',
+    sourcePainId: 'pain-42',
+    diagnosis: {
+      artifactId: 'pi-art-diag-review-1-run-1',
+      taskId: 'diag-review-1',
+      stage: 'diag_router',
+      rootCause: 'Edits destructive targets without confirmation.',
+      summary: 'Repeated ambiguous-target writes.',
+      violatedPrinciples: [{ principleId: 'P-1', title: 'Confirm first', rationale: 'guessed' }],
+      evidence: [{ sourceRef: 'pain-42', note: 'Two unconfirmed overwrites.' }],
+      recommendations: ['[principle] Require explicit confirmation.'],
+      confidence: 0.81,
+      omittedFields: [],
+    },
+    provenance: {
+      sourceDreamerArtifactId: 'pi-art-dreamer-review-1-run-1',
+      sourceDiagnosisArtifactId: 'pi-art-diag-review-1-run-1',
+      sourceDiagnosisTaskId: 'diag-review-1',
+    },
+    notes: [],
+  };
+
+  /** Parse one item whose brief carries `formationEvidence`; return the parsed block. */
+  function parseFormation(formationEvidence: unknown): unknown {
+    const base = makeItem() as { review: { brief: Record<string, unknown> } };
+    base.review.brief.formationEvidence = formationEvidence;
+    const data = validateOwnerDecisionsData({ items: [base], total: 1, generatedAt: 't' });
+    expect(data).not.toBeNull();
+    const brief = (data?.items[0] as { review?: { brief?: { formationEvidence?: unknown } } } | undefined)?.review?.brief;
+    return brief?.formationEvidence;
+  }
+
+  it('keeps the decision actionable and unchanged when evidence is attached', () => {
+    const plain = makeItem() as { review: { brief: Record<string, unknown> } };
+    const withEvidence = makeItem() as { review: { brief: Record<string, unknown> } };
+    withEvidence.review.brief.formationEvidence = validEvidence;
+
+    const plainData = validateOwnerDecisionsData({ items: [plain], total: 1, generatedAt: 't' });
+    const evidenceData = validateOwnerDecisionsData({ items: [withEvidence], total: 1, generatedAt: 't' });
+    expect(evidenceData?.items[0]?.allowedActions).toEqual(plainData?.items[0]?.allowedActions);
+    expect(evidenceData?.items[0]?.review?.capability).toEqual(plainData?.items[0]?.review?.capability);
+    expect(evidenceData?.items[0]?.review?.evidence.completeness).toBe(plainData?.items[0]?.review?.evidence.completeness);
+    expect(evidenceData?.items[0]?.expectedEvidenceDigest).toBe(plainData?.items[0]?.expectedEvidenceDigest);
+  });
+
+  it('projects the bounded diagnosis and drops fields the Owner does not read', () => {
+    const parsed = parseFormation(validEvidence) as Record<string, unknown>;
+    expect(parsed).not.toBeNull();
+    expect(parsed?.sourcePainId).toBe('pain-42');
+    expect(parsed?.diagnosis).toEqual({
+      rootCause: 'Edits destructive targets without confirmation.',
+      summary: 'Repeated ambiguous-target writes.',
+      evidence: [{ sourceRef: 'pain-42', note: 'Two unconfirmed overwrites.' }],
+    });
+    // rc-9 transparency survives; raw dumps and debug identity do not.
+    expect(JSON.stringify(parsed)).not.toContain('omittedFields');
+    expect(JSON.stringify(parsed)).not.toContain('violatedPrinciples');
+    expect(JSON.stringify(parsed)).not.toContain('recommendations');
+    expect(parsed?.provenance).toEqual(validEvidence.provenance);
+  });
+
+  it('accepts a degraded (diagnosis-less) block so the reason stays visible', () => {
+    const degraded = { ...validEvidence, sourcePainId: null, diagnosis: undefined, notes: ['formation_dreamer_artifact_missing'] };
+    const parsed = parseFormation(degraded) as { diagnosis?: unknown; notes: string[] };
+    expect(parsed.diagnosis).toBeUndefined();
+    expect(parsed.notes).toEqual(['formation_dreamer_artifact_missing']);
+  });
+
+  it('omits a malformed block instead of half-rendering it (and keeps the item valid)', () => {
+    expect(parseFormation({ ...validEvidence, notes: 'not-an-array' })).toBeUndefined();
+    expect(parseFormation({ ...validEvidence, provenance: {} })).toBeUndefined();
+    expect(parseFormation({ ...validEvidence, diagnosis: { ...validEvidence.diagnosis, evidence: [{ sourceRef: 'x' }] } })).toBeUndefined();
+    expect(parseFormation('x')).toBeUndefined();
+    const data = validateOwnerDecisionsData({ items: [makeItem()], total: 1, generatedAt: 't' });
+    expect(data?.items).toHaveLength(1);
+  });
+
+  it('card renders the formation section, keeps ids in the advanced fold only, and both locales carry the keys', () => {
+    const cardSrc = fs.readFileSync(
+      path.resolve(__dirname, '../../src/ui/pages/focus/OwnerDecisionCard.tsx'), 'utf-8');
+    expect(cardSrc).toContain('owner-formation-evidence-');
+    expect(cardSrc).toContain('formationRootCauseLabel');
+    // 不在 Owner 面前倾倒原始血缘/调试字段
+    expect(cardSrc).not.toContain('lineageArtifactIds');
+    expect(cardSrc).not.toContain('omittedFields');
+    for (const locale of ['zh-CN', 'en']) {
+      const raw = fs.readFileSync(path.resolve(__dirname, `../../src/ui/i18n/${locale}.json`), 'utf-8');
+      const od = (JSON.parse(raw) as { pages: { focus: { ownerDecision: Record<string, unknown> } } }).pages.focus.ownerDecision;
+      for (const key of ['formationLabel', 'formationPainLabel', 'formationDiagnosisLabel', 'formationRootCauseLabel', 'formationEvidenceLabel', 'formationUnavailableNote']) {
+        expect(typeof od[key], `${locale} ownerDecision.${key}`).toBe('string');
+      }
+    }
+  });
+});
+
 describe('cr10: validateOwnerResolutionResult', () => {
   it('accepts resolved and rejects non-resolved / malformed', () => {
     expect(validateOwnerResolutionResult({
