@@ -233,3 +233,8 @@ packages/website/.wrangler/
 !targets/**
 !*.tar
 !*.tar.gz
+# Release publication payload (PRI-853): the asset tarballs signed by the
+# metadata must never be ignored on this branch.
+!targets/**
+!*.tar
+!*.tar.gz
