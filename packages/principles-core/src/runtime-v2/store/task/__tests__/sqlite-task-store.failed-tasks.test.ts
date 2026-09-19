@@ -315,8 +315,31 @@ describe('SqliteTaskStore failed-task observability', () => {
       expect(found.painId).toBeNull();
     });
 
-    it('returns null painId when sourcePainId is not a string (graceful degradation)', async () => {
-      // diagnostic_json is valid JSON (passes the session-id-hint expression
+    // PRI-863: the consumer path now shares the canonical reader, so the
+    // reader's trim/blank normalization is the store's contract. Lock it at
+    // this boundary — the inline copy it replaced returned padded values
+    // verbatim, so this test pins the intentional tightening.
+    it('normalizes sourcePainId via the canonical reader (trim; blank → null)', async () => {
+      await store.createTask(
+        makeTaskInput({
+          taskId: 't-padded-pain',
+          status: 'failed',
+          diagnosticJson: JSON.stringify({ sourcePainId: '  pain-pad  ' }),
+        }),
+      );
+      await store.createTask(
+        makeTaskInput({
+          taskId: 't-blank-pain',
+          status: 'failed',
+          diagnosticJson: JSON.stringify({ sourcePainId: '   ' }),
+        }),
+      );
+      const results = await store.listFailedTasks();
+      expect(results.find((r) => r.taskId === 't-padded-pain')?.painId).toBe('pain-pad');
+      expect(results.find((r) => r.taskId === 't-blank-pain')?.painId).toBeNull();
+    });
+
+    it('returns null painId when sourcePainId is not a string (graceful degradation)', async () => {      // diagnostic_json is valid JSON (passes the session-id-hint expression
       // index), but sourcePainId is a number, not a string.
       await store.createTask(
         makeTaskInput({
@@ -397,6 +420,15 @@ describe('SqliteTaskStore failed-task observability', () => {
       // a budget that violates the schema — fail loud instead.
       await expect(store.listFailedTasks()).rejects.toThrow(/invalid max_attempts/);
     });
+
+    // PRI-863 note: the diagnostic_json non-string branch of
+    // readNullableStringField (storage_unavailable) cannot be exercised at
+    // this boundary on the current schema — TEXT affinity coerces numbers to
+    // strings and the json_extract session-id-hint expression index rejects
+    // BLOBs at UPDATE time ("malformed JSON"). The branch is reachable only
+    // via a damaged DB file; the pre-convergence inline copy was equally
+    // untestable here, so the refactor preserves it byte-for-byte instead of
+    // pretending the negative path is covered.
   });
 
   // ── getFailedTaskDetail ────────────────────────────────────────────────────
