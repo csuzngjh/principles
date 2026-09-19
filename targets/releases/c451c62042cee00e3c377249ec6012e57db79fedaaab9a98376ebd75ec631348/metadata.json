@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "productVersion": "1.76.1",
+  "releaseId": "c451c62042cee00e3c377249ec6012e57db79fedaaab9a98376ebd75ec631348",
+  "sourceCommit": "e3bbcfb693477ae40577ba20f521b872f2f9797c",
+  "metadataDigest": "647946af411c02b59fa08b2da34836a5d36311e7cb1822b7d0250366753a54cf",
+  "minBootstrapVersion": "1.0.0",
+  "publicationSequence": 2,
+  "expiresAt": "2026-12-18T10:06:52Z",
+  "assets": [
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "nodeAbi": "137",
+      "archiveSha256": "6d217112b6930098d78118e500b23b4cbf4b920d2dc4eff132a4540dc69abea3",
+      "archiveSizeBytes": 264752092
+    },
+    {
+      "platform": "linux",
+      "arch": "x64",
+      "nodeAbi": "137",
+      "archiveSha256": "e8f5a8b0355c83803df882ac9a63e55baa3d41ee7646adb09c12ee192eacc430",
+      "archiveSizeBytes": 272471691
+    },
+    {
+      "platform": "linux",
+      "arch": "x64",
+      "nodeAbi": "147",
+      "archiveSha256": "265f5074cff974931126d5ea56353004aa69deb1c7462e91e14a6b6e23174033",
+      "archiveSizeBytes": 272471691
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "nodeAbi": "137",
+      "archiveSha256": "b89a38aa45508a8d3a90eaeb7bc99a4fcb496e93f0e7012ef6b539b5b398430b",
+      "archiveSizeBytes": 267855259
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "nodeAbi": "147",
+      "archiveSha256": "0a2f2ce11ede4aa7a57c8f32234562d8b63939635e464e1ef414161aa479b301",
+      "archiveSizeBytes": 267855259
+    }
+  ],
+  "compatibility": {
+    "dataSchemaForwardReadableFrom": "1.74.0"
+  }
+}
