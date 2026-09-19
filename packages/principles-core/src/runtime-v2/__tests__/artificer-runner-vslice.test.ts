@@ -1918,3 +1918,234 @@ describe('PRI-509: ArtificerRunner.buildContext reads repairPayload → repairFe
     expect(hydratedOk?.repairPayload?.diagnosticReplay).toEqual({ ran: true, passed: false, failedCaseCount: 2 });
   });
 });
+
+// ── PRI-859 (CIL-001): contextHash covers the dreamer candidate lineage ─────
+
+describe('PRI-859: Artificer contextHash covers the dreamer candidate lineage', () => {
+  const SCRIBE_TASK_859 = 'scribe-pri859';
+  const ARTIFICER_TASK_859 = 'artificer-pri859';
+  const SCRIBE_ART_859 = 'pi-art-scribe-pri859';
+  const DREAMER_ART_A = 'pi-art-dreamer-pri859-A';
+  const DREAMER_ART_B = 'pi-art-dreamer-pri859-B';
+
+  function scribeTask859(): TaskRecord {
+    return {
+      taskId: SCRIBE_TASK_859,
+      taskKind: 'scribe',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'scribe://run-pri859',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_ART_859 }],
+      }),
+    };
+  }
+
+  function artificerTask859(): TaskRecord {
+    return {
+      taskId: ARTIFICER_TASK_859,
+      taskKind: 'artificer',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [SCRIBE_TASK_859],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_ART_859 }],
+        outputArtifactRefs: [],
+      }),
+    };
+  }
+
+  /** Scribe artifact whose sourceTrace optionally points at a dreamer artifact. */
+  function scribeArtifact859(dreamerArtifactId: string | undefined): PIArtifactRecord {
+    return {
+      artifactId: SCRIBE_ART_859,
+      artifactKind: 'principle',
+      sourceTaskId: SCRIBE_TASK_859,
+      lineageArtifactIds: dreamerArtifactId ? [dreamerArtifactId] : [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({
+        taskId: SCRIBE_TASK_859,
+        sourcePhilosopherArtifactId: 'pi-art-philosopher-pri859',
+        principleDraft: { title: 'T', statement: 'S', rationale: 'R', applicability: [], antiPatterns: [], confidence: 0.5 },
+        sourceTrace: {
+          philosopherArtifactId: 'pi-art-philosopher-pri859',
+          ...(dreamerArtifactId !== undefined ? { dreamerArtifactId } : {}),
+        },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function dreamerArtifact859(artifactId: string, marker: string): PIArtifactRecord {
+    return {
+      artifactId,
+      artifactKind: 'principle',
+      sourceTaskId: `dreamer-task-${marker}`,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({
+        valid: true,
+        taskId: `dreamer-task-${marker}`,
+        candidates: [{
+          candidateIndex: 0,
+          badDecision: `bad decision ${marker}`,
+          betterDecision: `better decision ${marker}`,
+          rationale: `rationale ${marker}`,
+          confidence: 0.8,
+          riskLevel: 'medium',
+          strategicPerspective: `strategy ${marker}`,
+        }],
+        contextRefs: [],
+        generatedAt: new Date().toISOString(),
+      }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function runner859(artifactStore: MemoryPIArtifactStore) {
+    const scribeTask = scribeTask859();
+    const artificerTask = artificerTask859();
+    const stateManager = {
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === ARTIFICER_TASK_859) return Promise.resolve(artificerTask);
+        if (id === SCRIBE_TASK_859) return Promise.resolve(scribeTask);
+        return Promise.resolve(null);
+      }),
+    } as unknown as RuntimeStateManager;
+    let capturedInputPayload: string | undefined;
+    const runtimeAdapter = {
+      startRun: vi.fn().mockImplementation((input: { inputPayload: string }) => {
+        capturedInputPayload = input.inputPayload;
+        return Promise.resolve({ runId: 'run-pri859', runtimeKind: 'test-double', startedAt: new Date().toISOString() } as RunHandle);
+      }),
+    } as unknown as PDRuntimeAdapter;
+    const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
+    const runner = new ArtificerRunner({
+      stateManager,
+      runtimeAdapter,
+      eventEmitter,
+      artifactStore,
+      validator: new DefaultArtificerValidator(),
+      behaviorExamplePack: V2_TEST_PACK,
+    }, {
+      owner: 'test',
+      runtimeKind: 'artificer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+    return { runner, captured: () => capturedInputPayload };
+  }
+
+  it('same semantic input ⇒ same contextHash (deterministic identity)', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(scribeArtifact859(DREAMER_ART_A));
+    await store.upsertArtifact(dreamerArtifact859(DREAMER_ART_A, 'A'));
+    const { runner } = runner859(store);
+
+    const first = await runner.buildContext(ARTIFICER_TASK_859);
+    const second = await runner.buildContext(ARTIFICER_TASK_859);
+    expect(first.dreamerContext).toBeDefined();
+    expect(first.contextHash).toMatch(/^ctx-/);
+    expect(second.contextHash).toBe(first.contextHash);
+  });
+
+  it('different candidate context ⇒ different contextHash (CIL-001 core bug; pre-fix both worlds shared one identity)', async () => {
+    const storeA = new MemoryPIArtifactStore();
+    await storeA.upsertArtifact(scribeArtifact859(DREAMER_ART_A));
+    await storeA.upsertArtifact(dreamerArtifact859(DREAMER_ART_A, 'A'));
+    const storeB = new MemoryPIArtifactStore();
+    await storeB.upsertArtifact(scribeArtifact859(DREAMER_ART_B));
+    await storeB.upsertArtifact(dreamerArtifact859(DREAMER_ART_B, 'B'));
+
+    const ctxA = await runner859(storeA).runner.buildContext(ARTIFICER_TASK_859);
+    const ctxB = await runner859(storeB).runner.buildContext(ARTIFICER_TASK_859);
+
+    // Same scribe artifact id in both worlds — the ONLY difference is the
+    // dreamer candidate lineage the prompt visibly carries.
+    expect(ctxA.sourceScribeArtifactId).toBe(ctxB.sourceScribeArtifactId);
+    expect(ctxA.dreamerContext).toBeDefined();
+    expect(ctxB.dreamerContext).toBeDefined();
+    expect(ctxA.contextHash).not.toBe(ctxB.contextHash);
+  });
+
+  it('candidate content change with the SAME ids (dreamer re-upsert) still shifts identity when the lineage id moves', async () => {
+    // The impact scenario from CIL-001: a re-run writes a new dreamer artifact
+    // (fresh artifact id, upsert semantics). The identity that the prompt's
+    // candidate set is derived from must not stay on the stale hash.
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(scribeArtifact859(DREAMER_ART_A));
+    await store.upsertArtifact(dreamerArtifact859(DREAMER_ART_A, 'A'));
+    const before = await runner859(store).runner.buildContext(ARTIFICER_TASK_859);
+
+    // Re-point the scribe lineage at a different dreamer artifact carrying a
+    // different candidate set (as a re-run + upsert produces).
+    await store.upsertArtifact(scribeArtifact859(DREAMER_ART_B));
+    await store.upsertArtifact(dreamerArtifact859(DREAMER_ART_B, 'B'));
+    const after = await runner859(store).runner.buildContext(ARTIFICER_TASK_859);
+
+    expect(after.contextHash).not.toBe(before.contextHash);
+  });
+
+  it('missing optional dreamer context preserves the fallback identity (refs = [scribeArtifactId] only)', async () => {
+    // No sourceTrace.dreamerArtifactId at all...
+    const storeNoRef = new MemoryPIArtifactStore();
+    await storeNoRef.upsertArtifact(scribeArtifact859(undefined));
+    const ctxNoRef = await runner859(storeNoRef).runner.buildContext(ARTIFICER_TASK_859);
+    expect(ctxNoRef.dreamerContext).toBeUndefined();
+
+    // ...and dreamer ref present but unresolvable (degraded, rc-9 observable).
+    const storeMissing = new MemoryPIArtifactStore();
+    await storeMissing.upsertArtifact(scribeArtifact859(DREAMER_ART_A));
+    const ctxMissing = await runner859(storeMissing).runner.buildContext(ARTIFICER_TASK_859);
+    expect(ctxMissing.dreamerContext).toBeUndefined();
+
+    // Both degrade to the pre-PRI-859 identity shape: hash of [artifactRef]
+    // only — backward compatible, and distinct from the dreamer-covered hash.
+    const storeWithDreamer = new MemoryPIArtifactStore();
+    await storeWithDreamer.upsertArtifact(scribeArtifact859(DREAMER_ART_A));
+    await storeWithDreamer.upsertArtifact(dreamerArtifact859(DREAMER_ART_A, 'A'));
+    const ctxWithDreamer = await runner859(storeWithDreamer).runner.buildContext(ARTIFICER_TASK_859);
+
+    expect(ctxNoRef.contextHash).toBe(ctxMissing.contextHash);
+    expect(ctxNoRef.contextHash).not.toBe(ctxWithDreamer.contextHash);
+  });
+
+  it('identity fix does NOT change the model-visible prompt shape (no lineage field leaks into dreamerContext)', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(scribeArtifact859(DREAMER_ART_A));
+    await store.upsertArtifact(dreamerArtifact859(DREAMER_ART_A, 'A'));
+    const { runner, captured } = runner859(store);
+
+    const ctx = await runner.buildContext(ARTIFICER_TASK_859);
+    await runner.invokeRuntime(ARTIFICER_TASK_859, ctx);
+
+    expect(captured()).toBeDefined();
+    const parsed = JSON.parse(captured() as string);
+    expect(parsed.dreamerContext).toBeDefined();
+    // Exactly the pre-PRI-859 three-field projection — sourceDreamerArtifactId
+    // is hash input only and must never reach the model.
+    expect(Object.keys(parsed.dreamerContext).sort()).toEqual(
+      ['candidates', 'differenceSummary', 'omittedCandidateCount'],
+    );
+    expect(parsed.dreamerContext.sourceDreamerArtifactId).toBeUndefined();
+    expect(parsed.dreamerContext.dreamerArtifactId).toBeUndefined();
+    // The contextHash field itself is prompt-visible and carries the new identity.
+    expect(parsed.contextHash).toBe(ctx.contextHash);
+  });
+});
