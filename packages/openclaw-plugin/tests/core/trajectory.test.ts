@@ -1314,4 +1314,33 @@ describe('TrajectoryDatabase — correction turn readers (PRI-844)', () => {
       if (workspaceDir) { fs.rmSync(workspaceDir, { recursive: true, force: true }); workspaceDir = null; }
     }
   });
+
+  // PRI-844 review fix (CodeRabbit Major): raw_text may be offloaded to blob
+  // storage — both readers must restore the FULL verbatim text via
+  // restoreRawText instead of degrading to the ≤200-char excerpt.
+  it('correction readers restore blob-offloaded verbatim text instead of the 200-char excerpt', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-blob-'));
+    const db = new TrajectoryDatabase({ workspaceDir, blobInlineThresholdBytes: 64 });
+    try {
+      const longCorrection = '别只改眼前这一个文件。' + '引用位置必须一起同步修改，'.repeat(20);
+      expect(longCorrection.length).toBeGreaterThan(200);
+      const rowid = db.recordUserTurn({
+        sessionId: 's-blob',
+        turnIndex: 8,
+        rawText: longCorrection,
+        correctionDetected: true,
+      });
+
+      const latest = db.getLatestCorrectionTurn('s-blob');
+      expect(latest).toBeDefined();
+      expect(latest?.text).toBe(longCorrection);
+      expect((latest?.text ?? '').length).toBeGreaterThan(200);
+
+      expect(rowid).toBeDefined();
+      const byRow = db.getCorrectionTurnByRowid(rowid as number);
+      expect(byRow?.text).toBe(longCorrection);
+    } finally {
+      db.dispose();
+    }
+  });
 });

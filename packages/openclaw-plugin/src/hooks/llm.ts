@@ -365,7 +365,13 @@ export function handleLlmOutput(
                                         : {}),
                                     occurredAt: turn.occurredAt,
                                 };
-                            } catch {
+                            } catch (error) {
+                                // PRI-844 review fix (P2): evidence LOSS must stay
+                                // observable (rc-9) — log a bounded reason and keep
+                                // the hook non-throwing, so a lookup failure is
+                                // distinguishable from a legitimate no-correction
+                                // state instead of silently reading as "no correction".
+                                ctx.logger?.warn?.(`[PD:LLM] correction evidence lookup failed: ${String(error).slice(0, 200)}`);
                                 return undefined;
                             }
                         })(),

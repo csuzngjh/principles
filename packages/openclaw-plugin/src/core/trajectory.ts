@@ -1115,9 +1115,13 @@ export class TrajectoryDatabase {
       const nowMs = opts?.nowMs ?? Date.now();
       if (nowMs - occurredMs > maxAgeMs) return undefined;
     }
-    const rawText = typeof row.raw_text === 'string' ? row.raw_text : '';
+    // PRI-844 review fix: raw_text may be offloaded to blob storage — restore
+    // the FULL verbatim text before falling back to the ≤200-char excerpt.
     const excerpt = String(row.raw_excerpt ?? '');
-    const text = rawText.length > 0 ? rawText : excerpt;
+    const text = this.restoreRawText(
+      typeof row.raw_text === 'string' ? row.raw_text : null,
+      row.blob_ref === null || row.blob_ref === undefined ? null : String(row.blob_ref),
+    ) || excerpt;
     if (text.length === 0) return undefined;
     return {
       turnIndex: Number(row.turn_index),
@@ -1144,9 +1148,13 @@ export class TrajectoryDatabase {
       WHERE id = ?
     `).get(rowid) as Record<string, unknown> | undefined;
     if (!row) return undefined;
-    const rawText = typeof row.raw_text === 'string' ? row.raw_text : '';
+    // PRI-844 review fix: same blob-restore semantics as getLatestCorrectionTurn
+    // so the batch-confirmation path recovers the full text identically.
     const excerpt = String(row.raw_excerpt ?? '');
-    const text = rawText.length > 0 ? rawText : excerpt;
+    const text = this.restoreRawText(
+      typeof row.raw_text === 'string' ? row.raw_text : null,
+      row.blob_ref === null || row.blob_ref === undefined ? null : String(row.blob_ref),
+    ) || excerpt;
     if (text.length === 0) return undefined;
     return {
       turnIndex: Number(row.turn_index),

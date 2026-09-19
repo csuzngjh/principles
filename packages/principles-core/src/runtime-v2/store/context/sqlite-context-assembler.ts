@@ -408,7 +408,11 @@ export class SqliteContextAssembler implements ContextAssembler {
     const obj = raw as Record<string, unknown>;
     if (typeof obj.text !== 'string' || obj.text.length === 0) return undefined;
     const num = (v: unknown): number | undefined =>
-      typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
+      // PRI-844 review fix (P2): the schema declares Type.Integer — accept
+      // only integers here so a fractional persisted identifier is omitted
+      // (graceful degradation) instead of failing the whole payload
+      // validation and aborting the diagnosis.
+      typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined;
     const str = (v: unknown): string | undefined =>
       typeof v === 'string' && v.length > 0 ? v : undefined;
     return {

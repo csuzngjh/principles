@@ -219,3 +219,49 @@ describe('RootCausePromptBuilder — PHASE 1.5 Owner Correction (PRI-844)', () =
     expect(p2).toBeGreaterThan(p15);
   });
 });
+
+// ── PRI-844 review fix (P1): the PRODUCTION boundary is buildPrompt(), which
+// routes through the RootCausePromptBuilder wrapper — the wrapper must forward
+// correctionEvidence or PHASE 1.5 silently never renders in production. ────
+
+describe('RootCausePromptBuilder.buildPrompt — correctionEvidence passthrough (PRI-844 review)', () => {
+  function makePayload(correctionEvidence?: DiagnosticianContextPayload['diagnosisTarget']['correctionEvidence']): DiagnosticianContextPayload {
+    return {
+      contextId: 'ctx-ce-1',
+      contextHash: 'hash-ce-1',
+      taskId: 'task-rootcause-ce-1',
+      workspaceDir: '/tmp/ws',
+      sourceRefs: ['ref-1'],
+      diagnosisTarget: {
+        painId: 'pain-ce-1',
+        ...(correctionEvidence ? { correctionEvidence } : {}),
+      },
+      conversationWindow: [],
+    };
+  }
+
+  it('payload with correctionEvidence → systemPrompt carries PHASE 1.5 with the verbatim Owner words', () => {
+    const builder = new RootCausePromptBuilder();
+    const result = builder.buildPrompt(makePayload({
+      text: '修改配置前应该先搜索所有引用',
+      sessionId: 'sess-pri844',
+      turnIndex: 4,
+      occurredAt: '2026-09-19T00:37:54.000Z',
+    }));
+    expect(result.systemPrompt).toContain('PHASE 1.5');
+    expect(result.systemPrompt).toContain('修改配置前应该先搜索所有引用');
+    expect(result.systemPrompt).toContain('owner_correction');
+    // the payload itself carries the verbatim text into the message JSON
+    expect(result.message).toContain('修改配置前应该先搜索所有引用');
+  });
+
+  it('payload without correctionEvidence → systemPrompt has no PHASE 1.5 (byte-identical gate at buildPrompt boundary)', () => {
+    const builder = new RootCausePromptBuilder();
+    const withUndefined = builder.buildPrompt(makePayload(undefined));
+    const baseline = builder.buildPrompt(makePayload(undefined));
+    expect(withUndefined.systemPrompt).not.toContain('PHASE 1.5');
+    expect(withUndefined.systemPrompt).not.toContain('Owner Correction');
+    expect(withUndefined.systemPrompt).not.toContain('Owner taught');
+    expect(withUndefined.systemPrompt).toBe(baseline.systemPrompt);
+  });
+});

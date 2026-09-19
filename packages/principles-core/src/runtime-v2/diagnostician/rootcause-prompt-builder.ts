@@ -346,6 +346,10 @@ export class RootCausePromptBuilder {
       coreGrounding: opts.coreGrounding,
       intentGrounding: opts.intentGrounding,
       evidenceFirstAttribution: opts.evidenceFirstAttribution,
+      // PRI-844 review fix (P1): the wrapper must forward the correction —
+      // dropping it here silently disabled PHASE 1.5 on the production
+      // buildPrompt() path while the standalone-function tests stayed green.
+      correctionEvidence: opts.correctionEvidence,
     });
   }
 

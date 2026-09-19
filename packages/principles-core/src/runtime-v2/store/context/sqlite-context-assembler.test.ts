@@ -1664,4 +1664,38 @@ describe('SqliteContextAssembler — correctionEvidence (PRI-844)', () => {
       expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
     } finally { cleanupFixture(f); }
   });
+
+  it('fractional turn identifiers are omitted (not fatal) — PRI-844 review fix (P2)', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-ce-3',
+      reasonSummary: 'user correction',
+      source: 'user_correction',
+      sessionIdHint: 'sess-ce3',
+      correctionEvidence: {
+        text: '改配置前先搜引用',
+        turnIndex: 1.5,
+        referencesAssistantTurnId: 2.5,
+        occurredAt: '2026-09-19T00:37:54.000Z',
+      },
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_ce_3',
+      sourcePainId: 'pain-ce-3',
+      reasonSummary: 'user correction',
+      sessionIdHint: 'sess-ce3',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const f = createFixture(new Map([[taskWithDj.taskId, taskWithDj]]));
+    try {
+      // Before the review fix this aborted the WHOLE diagnosis with
+      // storage_unavailable (fractional ids passed the guard, then failed
+      // PainCorrectionEvidenceSchema's Type.Integer inside Value.Check).
+      const payload = await f.assembler.assemble(task.taskId);
+      const ce = payload.diagnosisTarget.correctionEvidence;
+      expect(ce?.text).toBe('改配置前先搜引用');
+      expect(ce?.turnIndex).toBeUndefined();
+      expect(ce?.referencesAssistantTurnId).toBeUndefined();
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
 });
