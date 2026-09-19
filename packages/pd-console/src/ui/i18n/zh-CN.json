@@ -335,7 +335,13 @@
           "actionability": "可执行性",
           "generalization": "泛化度",
           "boundary": "适用边界"
-        }
+        },
+        "formationLabel": "形成来源",
+        "formationPainLabel": "痛点",
+        "formationDiagnosisLabel": "诊断",
+        "formationRootCauseLabel": "根因",
+        "formationEvidenceLabel": "支撑证据",
+        "formationUnavailableNote": "来源诊断当前不可读；这条原则仍按现有证据供你裁决。"
       }
     },
     "pain": {
