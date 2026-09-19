@@ -294,6 +294,9 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_completion_record_failed'),
   Type.Literal('evaluator_diag_llm_rate_limit_degraded'),
   Type.Literal('evaluator_governance_effect_out_of_scope_selected'),
+  // PRI-843: Principle↔Pain mismatch disposition selected (the marker concern
+  // was honored and the completion routes to Owner review).
+  Type.Literal('evaluator_governance_effect_principle_pain_mismatch_selected'),
   Type.Literal('evaluator_intent_contract_absent_on_principle'),
   Type.Literal('evaluator_lineage_echo_corrected'),
   Type.Literal('evaluator_lineage_integrity_violation'),

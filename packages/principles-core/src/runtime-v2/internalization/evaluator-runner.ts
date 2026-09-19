@@ -47,7 +47,9 @@ import {
   computeArtifactContentHash,
   type OwnerOverrideResumePlan,
 } from './owner-review.js';
-import { EvaluatorPromptBuilder, deriveRequirementLedger, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
+import { EvaluatorPromptBuilder, deriveRequirementLedger, PRINCIPLE_PAIN_MISMATCH_MARKER, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
+import { resolveFormationContext } from './formation-context.js';
+import type { FormationContext, FormationTaskView } from './formation-context.js';
 import type { ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
 import { reconcileLineageEcho, type InternalizationChannel, type PipelineTopologyMode, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -104,10 +106,63 @@ interface EvaluatorContext {
   readonly dependencyRepairPayload?: RepairPayload;
   /** PRI-630: 由 dependencyRepairPayload 解析的上轮评估上下文 (首轮 undefined) */
   readonly previousEvaluation?: PreviousEvaluationContext;
+  /**
+   * PRI-843 (DC-4a): bounded formation-evidence projection (dreamer proposals +
+   * source diagnosis + provenance) resolved from the scribe artifact's
+   * authoritative `sourceTrace.dreamerArtifactId`. Undefined when the lineage id
+   * is absent or the formation cannot be resolved — the prompt then keeps its
+   * pre-PRI-843 shape exactly (legacy / degraded compatibility).
+   */
+  readonly formationContext?: FormationContext;
 }
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * PRI-843: read the AUTHORITATIVE dreamer artifact id from the scribe principle
+ * artifact's `sourceTrace.dreamerArtifactId`.
+ *
+ * The scribe runner injects that id from its own resolver-verified context
+ * (scribe-runner lineage echo), so it is the only dreamer lineage this layer may
+ * trust; the artificer's echo of the same field is model-authored and never
+ * authoritative (SPEC "Lineage Source"). The scribe artifact here is untrusted
+ * contentJson — guarded reads only, no `as` cast (rc-1 / rc-2 / rc-5). Returns
+ * undefined when absent or malformed; the resolver then emits the observable
+ * skip event (rc-9).
+ */
+function readDreamerArtifactIdFromScribeArtifact(contentJson: string | null): string | undefined {
+  if (contentJson === null) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contentJson);
+  } catch {
+    return undefined;
+  }
+  if (!isRecordValue(parsed) || !Object.hasOwn(parsed, 'sourceTrace')) return undefined;
+  const sourceTrace = Reflect.get(parsed, 'sourceTrace');
+  if (!isRecordValue(sourceTrace) || !Object.hasOwn(sourceTrace, 'dreamerArtifactId')) return undefined;
+  const value = Reflect.get(sourceTrace, 'dreamerArtifactId');
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  return value;
+}
+
+/**
+ * PRI-843: does the validated evaluation flag a Principle↔Pain mismatch?
+ *
+ * The v5 prompt contract requires every such concern to BEGIN with the exported
+ * marker token — the marker prefix is the only machine-readable channel plain
+ * string concerns have (no schema change). The runner scans the already
+ * validated `concerns` array; honoring is additionally gated on formation
+ * context having actually been injected (see deriveGovernanceEffect): without
+ * formation evidence the model has no pain evidence to cite, so a marker there
+ * is hallucination, not signal.
+ */
+function hasPrinciplePainMismatchConcern(output: EvaluatorOutputV1): boolean {
+  const concerns = output.evaluation?.concerns;
+  if (!Array.isArray(concerns)) return false;
+  return concerns.some((concern) => concern.startsWith(PRINCIPLE_PAIN_MISMATCH_MARKER));
 }
 
 /**
@@ -470,9 +525,36 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           }
         }
 
-        const contextRefs: string[] = scribeContent && scribeRef
-          ? [artifactRef, scribeRef]
-          : [artifactRef];
+        // PRI-843 (DC-4a): resolve the formation evidence the scribe artifact's
+        // authoritative dreamer lineage points at. Until now the evaluator held
+        // the Rule and the Principle but never the pain/diagnosis they came
+        // from — its verdict was structurally limited to "is the rule faithful
+        // to the principle text" and could not ask "is the principle faithful
+        // to the pain". Mirrors the scribe wiring (PRI-838): best-effort,
+        // never blocking, degradation observable via resolver events (rc-9).
+        const sourceDreamerArtifactId = readDreamerArtifactIdFromScribeArtifact(scribeContent);
+        const formationContext = await resolveFormationContext({
+          sourceDreamerArtifactId,
+          artifactStore: this.artifactStore,
+          lookupTask: (id) => this.lookupFormationTask(id),
+          emitEvent: (eventName, eventTaskId, payload) => this.emitEvent(eventName, eventTaskId, payload),
+          taskId,
+        });
+
+        // The context hash must cover the evidence the prompt actually carries
+        // (the scribe contextRefs rule): otherwise replay/cache could serve a
+        // prompt that predates the formation evidence.
+        const contextRefs: string[] = [
+          ...(scribeContent && scribeRef ? [artifactRef, scribeRef] : [artifactRef]),
+          ...(formationContext !== undefined
+            ? [
+                formationContext.provenance.sourceDreamerArtifactId,
+                ...(formationContext.provenance.sourceDiagnosisArtifactId !== null
+                  ? [formationContext.provenance.sourceDiagnosisArtifactId]
+                  : []),
+              ]
+            : []),
+        ];
         // PRI-630: 修复轮 (repairPayload 存在) 时解析上轮评估上下文
         let previousEvaluation: PreviousEvaluationContext | undefined;
         if (dependencyRepairPayload) {
@@ -488,6 +570,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           sourceScribeArtifactId: scribeRef,
           ...(dependencyRepairPayload !== undefined ? { dependencyRepairPayload } : {}),
           ...(previousEvaluation !== undefined ? { previousEvaluation } : {}),
+          ...(formationContext !== undefined ? { formationContext } : {}),
         };
       }
     }
@@ -509,6 +592,21 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });
+  }
+
+  /**
+   * PRI-843: narrow task view for formation-context resolution (the scribe
+   * adapter, verbatim): phase identity lives on the task row, never on the
+   * artifact, so the diagnostic predecessor can only be found via task lookup.
+   */
+  private async lookupFormationTask(taskId: string): Promise<FormationTaskView | null> {
+    const task = await this.stateManager.getTask(taskId);
+    if (!task) return null;
+    return {
+      taskKind: task.taskKind,
+      status: task.status,
+      dependencyTaskIds: hydratePITaskRecord(task)?.dependencyTaskIds ?? [],
+    };
   }
 
   /**
@@ -648,6 +746,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // injected as its own block). Absent on pre-contract artifacts →
       // undefined → prompt unchanged (backward compatible).
       intentContract: extractIntentContract(parsedScribeArtifact) ?? undefined,
+      // PRI-843: bounded formation evidence (undefined keeps the prompt payload
+      // byte-identical to its pre-PRI-843 shape).
+      formationContext: context.formationContext,
     });
     return { message, systemPrompt };
   }
@@ -994,6 +1095,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       output: finalOutput,
       sourceArtificerArtifactId: sourceArtificerArtifactIdForGovernance,
       diagnosticReplayEvidence,
+      formationContextPresent: context.formationContext !== undefined,
     });
 
     // ── P0 (verdict drift): verdict + completion intent 原子落库 ──
@@ -1033,6 +1135,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId, ruleAssemblyInput,
       // 执行时权威事实：仅本次 succeedTask 真正运行了诊断重放才存在
       diagnosticReplayEvidence,
+      // PRI-843: mismatch 处置在效果层先于一切 decision 分支执行
+      ...(governanceEffect !== undefined ? { governanceEffect } : {}),
       ...(approvedReplayFailed ? { transitionDecisionOverride: 'needs_revision' as const } : {}),
     });
     if (effectResult.kind === 'human_review') {
@@ -1115,11 +1219,62 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
      * The raw semantic verdict stays preserved on the durable artifact.
      */
     transitionDecisionOverride?: 'needs_revision';
+    /**
+     * PRI-843: the governance effect derived from durable facts (fresh path
+     * only — resume reads it back from the persisted completion intent).
+     * Consumed for principle_pain_mismatch routing, which must preempt EVERY
+     * decision effect: approved validation/assembly and repair seeding are
+     * both wrong exits for a Principle-level finding.
+     */
+    governanceEffect?: { selectedEffect?: 'needs_human_review'; effectReasonCode?: string };
   }): Promise<
     | { kind: 'human_review'; result: PeerRunnerResult<EvaluatorOutputV1> }
     | { kind: 'completed'; ruleArtifactId: string | null }
   > {
     const { taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId, diagnosticReplayEvidence } = args;
+
+    // ── PRI-843: Principle↔Pain mismatch preempts all decision effects ──
+    // Both exits below are wrong for a Principle-level finding: `approved`
+    // would validate the bearer and assemble a rule for a chain whose
+    // principle misses the source pain, and `needs_revision` would seed a
+    // rule repair that can never satisfy a principle-level demand (the SPEC's
+    // death loop). The Owner is the only meaningful exit — the PRI-703
+    // evaluator_test_out_of_scope precedent applied BEFORE the decision
+    // branches. Owner verdict override (decisionOverride path) never passes a
+    // governanceEffect, so an Owner accept/reject after review still works.
+    if (args.governanceEffect?.selectedEffect === 'needs_human_review'
+      && args.governanceEffect.effectReasonCode === HUMAN_REVIEW_REASON.principlePainMismatch) {
+      const resultRef = `${this.config.resultRefPrefix}://${runId}`;
+      // Fail loud (rc-9): NHR is this completion's materialize operation —
+      // same contract as the repair-loop NHR paths below.
+      await this.markNeedsHumanReviewOrThrow(taskId, {
+        runId,
+        reasonCode: HUMAN_REVIEW_REASON.principlePainMismatch,
+        sourceArtifactId: artifactId,
+      });
+      this.emitEvent('task_needs_human_review', taskId, {
+        attemptCount: task.attemptCount,
+        resultRef,
+        evaluationDecision: finalOutput.evaluation.decision,
+        evaluationScore: finalOutput.evaluation.score,
+        ruleArtifactId: null,
+        reason: HUMAN_REVIEW_REASON.principlePainMismatch,
+      });
+      return {
+        kind: 'human_review',
+        result: {
+          status: 'succeeded',
+          taskId,
+          runId,
+          artifactId,
+          resultRef,
+          contextHash,
+          output: finalOutput,
+          attemptCount: task.attemptCount,
+        },
+      };
+    }
+
     // PRI-758: transitionDecisionOverride routes approved+replay-failed into
     // the needs_revision repair branch (see the caller). Owner override
     // (decisionOverride) still takes precedence over both.
@@ -1904,8 +2059,28 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       output: EvaluatorOutputV1;
       sourceArtificerArtifactId: string | null;
       diagnosticReplayEvidence?: { ran: true; passed: boolean; failedCaseCount: number } | undefined;
+      /** PRI-843: whether formation evidence was actually injected into the prompt. */
+      formationContextPresent: boolean;
     },
   ): Promise<{ selectedEffect?: 'needs_human_review'; effectReasonCode?: string } | undefined> {
+    // ── PRI-843: Principle↔Pain mismatch → Owner review ──
+    // A mismatch finding is a PRINCIPLE-level question. The only machine exit
+    // below is the artificer repair loop, which can only regenerate the RULE —
+    // seeding it on a principle-level demand is the structural death loop the
+    // SPEC forbids (same shape as PRI-703's evaluator_test_out_of_scope), and
+    // `requiredChanges` may not carry it either. Route to Owner review
+    // instead, mirroring that precedent. Honored only when formation evidence
+    // was actually injected: without it the model has no pain evidence to
+    // cite, so a marker would be hallucination, not signal.
+    if (ctx.formationContextPresent && hasPrinciplePainMismatchConcern(ctx.output)) {
+      this.emitEvent('governance_effect_principle_pain_mismatch_selected', evaluatorTaskId, {
+        nextAction: 'owner_decision_required_principle_pain_mismatch',
+      });
+      return {
+        selectedEffect: 'needs_human_review',
+        effectReasonCode: HUMAN_REVIEW_REASON.principlePainMismatch,
+      };
+    }
     if (ctx.output.evaluation?.decision !== 'needs_revision') return undefined;
     if (!this.isRepairLoopEnabled()) return undefined;
 
