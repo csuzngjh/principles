@@ -15,6 +15,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 
 import { PDErrorCategorySchema } from './error-categories.js';
+import { PainCorrectionEvidenceSchema } from './context-payload.js';
 
 // ── Task Status ──
 
@@ -107,6 +108,9 @@ export const DiagnosticianTaskRecordSchema = Type.Intersect([
       sourceRef: Type.String({ minLength: 1 }),
       note: Type.String({ minLength: 1, maxLength: 200 }),
     }))),
+    // PRI-844: the Owner's verbatim correction, when the persisted
+    // diagnosticJson carries one. Optional — legacy rows predate the field.
+    correctionEvidence: Type.Optional(PainCorrectionEvidenceSchema),
   }),
 ]);
 export type DiagnosticianTaskRecord = Static<typeof DiagnosticianTaskRecordSchema>;

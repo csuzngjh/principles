@@ -1230,3 +1230,88 @@ describe('TrajectoryDatabase.signal_confirmations (PRI-788 G2)', () => {
     db.dispose();
   });
 });
+
+// ── PRI-844: correction turn readers for first-class pain evidence ──────────
+
+describe('TrajectoryDatabase — correction turn readers (PRI-844)', () => {
+  let workspaceDir: string | null = null;
+
+  afterEach(() => {
+    if (workspaceDir) {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      workspaceDir = null;
+    }
+  });
+
+  function makeDb(): TrajectoryDatabase {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-ce-'));
+    return new TrajectoryDatabase({ workspaceDir });
+  }
+
+  it('getLatestCorrectionTurn returns the latest correction-flagged turn with verbatim text', () => {
+    const db = makeDb();
+    try {
+      db.recordUserTurn({ sessionId: 's-ce', turnIndex: 1, rawText: '普通消息', correctionDetected: false });
+      db.recordUserTurn({
+        sessionId: 's-ce',
+        turnIndex: 2,
+        rawText: '部署脚本漏改了，别只改眼前这一个文件。',
+        correctionDetected: true,
+        referencesAssistantTurnId: 11,
+      });
+      db.recordUserTurn({ sessionId: 's-ce', turnIndex: 3, rawText: '再普通不过的消息', correctionDetected: false });
+
+      const turn = db.getLatestCorrectionTurn('s-ce');
+      expect(turn).toBeDefined();
+      expect(turn?.text).toBe('部署脚本漏改了，别只改眼前这一个文件。');
+      expect(turn?.turnIndex).toBe(2);
+      expect(turn?.referencesAssistantTurnId).toBe(11);
+      expect(turn?.occurredAt).toBeTruthy();
+      db.dispose();
+    } finally {
+      if (workspaceDir) { fs.rmSync(workspaceDir, { recursive: true, force: true }); workspaceDir = null; }
+    }
+  });
+
+  it('getLatestCorrectionTurn returns undefined when no correction was flagged or the only one is stale', () => {
+    const db = makeDb();
+    try {
+      expect(db.getLatestCorrectionTurn('s-none')).toBeUndefined();
+
+      db.recordUserTurn({
+        sessionId: 's-stale',
+        turnIndex: 1,
+        rawText: '很早以前的纠正',
+        correctionDetected: true,
+      });
+      // staleness window applies (default 30 min; use a past occurredAt via maxAgeMs=0)
+      expect(db.getLatestCorrectionTurn('s-stale', { maxAgeMs: 0, nowMs: Date.now() + 1 })).toBeUndefined();
+      // without the window the same turn is returned
+      expect(db.getLatestCorrectionTurn('s-stale', { maxAgeMs: 60_000, nowMs: Date.now() })).toBeDefined();
+      db.dispose();
+    } finally {
+      if (workspaceDir) { fs.rmSync(workspaceDir, { recursive: true, force: true }); workspaceDir = null; }
+    }
+  });
+
+  it('getCorrectionTurnByRowid recovers the verbatim turn and falls back to the excerpt', () => {
+    const db = makeDb();
+    try {
+      const rowid = db.recordUserTurn({
+        sessionId: 's-row',
+        turnIndex: 5,
+        rawText: '你刚才只改了 config.json，别只改眼前这一个文件。',
+        correctionDetected: true,
+      });
+      expect(rowid).toBeDefined();
+      const byRow = db.getCorrectionTurnByRowid(rowid as number);
+      expect(byRow?.text).toContain('别只改眼前这一个文件');
+      expect(byRow?.turnIndex).toBe(5);
+
+      expect(db.getCorrectionTurnByRowid(999_999_999)).toBeUndefined();
+      db.dispose();
+    } finally {
+      if (workspaceDir) { fs.rmSync(workspaceDir, { recursive: true, force: true }); workspaceDir = null; }
+    }
+  });
+});

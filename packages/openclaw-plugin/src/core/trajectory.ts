@@ -1088,6 +1088,77 @@ export class TrajectoryDatabase {
   }
 
   /**
+   * PRI-844: the most recent correction-flagged user turn of a session, with
+   * the Owner's verbatim words (full raw_text when it was persisted inline;
+   * falls back to the ≤200-char excerpt when the text was offloaded to a
+   * blob). Used by pain producers that only hold a session id (e.g. the
+   * llm_output hook) to attach first-class correction evidence instead of a
+   * trigger excerpt. `maxAgeMs` bounds staleness — a correction from long
+   * before the pain must not be attributed to it.
+   */
+  getLatestCorrectionTurn(
+    sessionId: string,
+    opts?: { maxAgeMs?: number; nowMs?: number },
+  ): { turnIndex: number; text: string; referencesAssistantTurnId: number | null; occurredAt: string } | undefined {
+    const row = this.db.prepare(`
+      SELECT turn_index, raw_text, blob_ref, raw_excerpt, references_assistant_turn_id, created_at
+      FROM user_turns
+      WHERE session_id = ? AND correction_detected = 1
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(sessionId) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    const createdAt = String(row.created_at ?? '');
+    const maxAgeMs = opts?.maxAgeMs ?? 30 * 60 * 1000;
+    const occurredMs = Date.parse(createdAt);
+    if (Number.isFinite(occurredMs)) {
+      const nowMs = opts?.nowMs ?? Date.now();
+      if (nowMs - occurredMs > maxAgeMs) return undefined;
+    }
+    const rawText = typeof row.raw_text === 'string' ? row.raw_text : '';
+    const excerpt = String(row.raw_excerpt ?? '');
+    const text = rawText.length > 0 ? rawText : excerpt;
+    if (text.length === 0) return undefined;
+    return {
+      turnIndex: Number(row.turn_index),
+      text,
+      referencesAssistantTurnId: row.references_assistant_turn_id === null || row.references_assistant_turn_id === undefined
+        ? null
+        : Number(row.references_assistant_turn_id),
+      occurredAt: createdAt,
+    };
+  }
+
+  /**
+   * PRI-844: fetch one user turn by rowid for correction-evidence recovery on
+   * the async confirmation path (the persisted queue stores only a 400-char
+   * excerpt; the full text stays here). Returns undefined when the row is
+   * gone or carries no recoverable text.
+   */
+  getCorrectionTurnByRowid(
+    rowid: number,
+  ): { turnIndex: number; text: string; referencesAssistantTurnId: number | null; occurredAt: string } | undefined {
+    const row = this.db.prepare(`
+      SELECT turn_index, raw_text, blob_ref, raw_excerpt, references_assistant_turn_id, created_at
+      FROM user_turns
+      WHERE id = ?
+    `).get(rowid) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    const rawText = typeof row.raw_text === 'string' ? row.raw_text : '';
+    const excerpt = String(row.raw_excerpt ?? '');
+    const text = rawText.length > 0 ? rawText : excerpt;
+    if (text.length === 0) return undefined;
+    return {
+      turnIndex: Number(row.turn_index),
+      text,
+      referencesAssistantTurnId: row.references_assistant_turn_id === null || row.references_assistant_turn_id === undefined
+        ? null
+        : Number(row.references_assistant_turn_id),
+      occurredAt: String(row.created_at ?? ''),
+    };
+  }
+
+  /**
    * List correction samples with optional review status filter.
    *
    * Returns: Analytics data aggregated from trajectory database.

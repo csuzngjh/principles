@@ -166,3 +166,56 @@ describe('RootCausePromptBuilder — oversize overflow (PRI-633)', () => {
     expect(parsed.context.conversationWindow).toEqual([]);
   });
 });
+
+// ── PRI-844: PHASE 1.5 — Owner Correction (authoritative evidence) ──────────
+
+describe('RootCausePromptBuilder — PHASE 1.5 Owner Correction (PRI-844)', () => {
+  const correction = {
+    text: '修改配置前应该先搜索所有引用',
+    sessionId: 'sess-pri844',
+    turnIndex: 4,
+    occurredAt: '2026-09-19T00:37:54.000Z',
+  };
+
+  it('correctionEvidence present → verbatim Owner words + owner_correction citation instruction', () => {
+    const instruction = buildRootCauseProtocolInstruction({ coreGrounding: false, correctionEvidence: correction });
+    expect(instruction).toContain('PHASE 1.5');
+    expect(instruction).toContain('Owner Correction (authoritative evidence)');
+    expect(instruction).toContain('修改配置前应该先搜索所有引用');
+    expect(instruction).toContain('owner_correction');
+    expect(instruction).toContain('turnIndex=4');
+    expect(instruction).toContain('sess-pri844');
+  });
+
+  it('instructs exact-quote citation interpreted with previous action and outcome', () => {
+    const instruction = buildRootCauseProtocolInstruction({ coreGrounding: false, correctionEvidence: correction });
+    expect(instruction).toContain('preserve the exact quote');
+    expect(instruction).toContain('sourceRef "owner_correction"');
+    expect(instruction).toContain('previous action');
+  });
+
+  it('correctionEvidence absent → no correction content in the prompt (Case B/D)', () => {
+    const instruction = buildRootCauseProtocolInstruction({ coreGrounding: false });
+    expect(instruction).not.toContain('PHASE 1.5');
+    expect(instruction).not.toContain('Owner Correction');
+    expect(instruction).not.toContain('owner_correction');
+    // fabrication guard: absence must never become an invented "Owner taught X"
+    expect(instruction).not.toContain('Owner taught');
+  });
+
+  it('absent-correction prompt is byte-identical to a plain invocation (EP-03 gate)', () => {
+    const withUndefined = buildRootCauseProtocolInstruction({ coreGrounding: false, correctionEvidence: undefined });
+    const baseline = buildRootCauseProtocolInstruction({ coreGrounding: false });
+    expect(withUndefined).toBe(baseline);
+  });
+
+  it('block renders between PHASE 1 and PHASE 2', () => {
+    const instruction = buildRootCauseProtocolInstruction({ coreGrounding: false, correctionEvidence: correction });
+    const p1 = instruction.indexOf('PHASE 1');
+    const p15 = instruction.indexOf('PHASE 1.5');
+    const p2 = instruction.indexOf('PHASE 2');
+    expect(p1).toBeGreaterThanOrEqual(0);
+    expect(p15).toBeGreaterThan(p1);
+    expect(p2).toBeGreaterThan(p15);
+  });
+});

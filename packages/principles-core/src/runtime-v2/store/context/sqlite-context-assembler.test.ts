@@ -1605,3 +1605,63 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); locateSpy.mockRestore(); }
   });
 });
+
+// ── PRI-844: correctionEvidence pass-through ────────────────────────────────
+
+describe('SqliteContextAssembler — correctionEvidence (PRI-844)', () => {
+  it('passes the Owner correction verbatim — >200-char text must NOT hit the evidence note cap', async () => {
+    const longCorrection = '修改配置前应该先搜索所有引用并一起修改，别只改眼前这一个文件。' + 'x'.repeat(260);
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-ce-1',
+      reasonSummary: 'user correction',
+      source: 'user_correction',
+      sessionIdHint: 'sess-ce',
+      correctionEvidence: {
+        text: longCorrection,
+        sessionId: 'sess-ce',
+        turnIndex: 7,
+        referencesAssistantTurnId: 6,
+        occurredAt: '2026-09-19T00:37:54.000Z',
+      },
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_ce_1',
+      sourcePainId: 'pain-ce-1',
+      reasonSummary: 'user correction',
+      sessionIdHint: 'sess-ce',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const f = createFixture(new Map([[taskWithDj.taskId, taskWithDj]]));
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+      const ce = payload.diagnosisTarget.correctionEvidence;
+      expect(ce).toBeDefined();
+      expect(ce?.text).toBe(longCorrection);
+      expect(ce?.turnIndex).toBe(7);
+      expect(ce?.referencesAssistantTurnId).toBe(6);
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('legacy diagnosticJson without correctionEvidence → undefined, payload stays valid (Case D)', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-ce-2',
+      reasonSummary: 'tool failure',
+      source: 'tool_failure',
+      sessionIdHint: 'sess-ce2',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_ce_2',
+      sourcePainId: 'pain-ce-2',
+      reasonSummary: 'tool failure',
+      sessionIdHint: 'sess-ce2',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const f = createFixture(new Map([[taskWithDj.taskId, taskWithDj]]));
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+      expect(payload.diagnosisTarget.correctionEvidence).toBeUndefined();
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+});

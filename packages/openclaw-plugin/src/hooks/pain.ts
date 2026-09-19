@@ -599,6 +599,13 @@ function handleManualPain(
         sessionId,
         traceId,
         agentId: ctx.agentId,
+        // PRI-844: a manual pain's `input` IS the Owner's own words — keep
+        // them verbatim as first-class evidence (not just the reason prefix).
+        correctionEvidence: {
+          text: reason,
+          sessionId,
+          occurredAt: new Date().toISOString(),
+        },
       },
     }, { recordObservability: false });
   } else {

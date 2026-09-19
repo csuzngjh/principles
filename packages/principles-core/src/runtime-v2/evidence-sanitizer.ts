@@ -240,7 +240,7 @@ function replacePathsInString(value: string, workspaceDir?: string): string {
  * applying any length bound. Bounds are applied by the callers so each
  * evidence face can pick its own bounded shape (head-only vs head+tail).
  */
-function sanitizeStringUnbounded(value: string, workspaceDir?: string): string {
+export function sanitizeStringUnbounded(value: string, workspaceDir?: string): string {
   let result = value;
 
   // 1. Strip PD tags (empathy tags via the linear scanner — see NOTE above)

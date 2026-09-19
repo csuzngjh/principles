@@ -21,6 +21,7 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as nodePath from 'path';
 import type { PainDetectedData } from './pain-signal-bridge.js';
+import { boundCorrectionEvidenceText } from './pain-signal-bridge.js';
 import { sanitizeString } from './evidence-sanitizer.js';
 import { applyTrajectorySchemaBase } from './trajectory-schema.js';
 
@@ -158,7 +159,13 @@ function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): { id?: number
         severityFromScore(data.score ?? 80),
         data.source === 'manual' ? 'user_manual' : 'system_infer',
         1,
-        sanitizeString(data.reason ?? '', workspaceDir),
+        // PRI-844: when the pain carries the Owner's verbatim correction, the
+        // text column stores THAT (defensively bounded) instead of a copy of
+        // the machine-generated reason — so `pain_events.text` answers
+        // "what did the Owner actually say?", not "what did the detector note?".
+        data.correctionEvidence
+          ? boundCorrectionEvidenceText(data.correctionEvidence, workspaceDir).text
+          : sanitizeString(data.reason ?? '', workspaceDir),
         timestamp,
         canonicalPainId ?? null,
         runtimeTaskId ?? null,
