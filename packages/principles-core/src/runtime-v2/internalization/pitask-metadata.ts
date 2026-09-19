@@ -304,6 +304,36 @@ export function parseLastValidatorErrors(diagnosticJson: string | null | undefin
 }
 
 /**
+ * PRI-862 (CIL-006): canonical pain provenance seed.
+ *
+ * The dreamer seed writer (intake-to-internalization-bridge) stores the
+ * authoritative pain id as a top-level `sourcePainId` key in
+ * diagnosticJson — the same envelope position and trust posture as
+ * lastValidatorErrors. This reader is the ONLY sanctioned way for the
+ * dreamer runner to obtain that authority; the LLM-output
+ * `sourcePainId` must never be trusted as provenance (ERR-004 lineage
+ * discipline: resolved from the canonical chain, never invented).
+ *
+ * Fail-closed (rc-1/rc-5): malformed JSON, non-string, or blank values
+ * return null — absence is a legitimate degraded state.
+ */
+export function parseSeedSourcePainId(diagnosticJson: string | null | undefined): string | null {
+  if (!diagnosticJson || diagnosticJson.trim() === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagnosticJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  // rc-5: hasOwn, not in
+  if (!Object.hasOwn(parsed, 'sourcePainId')) return null;
+  const value = (parsed as Record<string, unknown>).sourcePainId;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  return value.trim();
+}
+
+/**
  * PI-specific metadata stored inside TaskRecord.diagnosticJson.
  * All fields must be present except parentTaskId and correlationId (optional).
  */

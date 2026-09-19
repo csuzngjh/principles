@@ -19,7 +19,7 @@ import type { DreamerOutput, DreamerValidator } from './dreamer-output.js';
 import type { TaskRecord } from '../task-status.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord } from './pitask-metadata.js';
+import { hydratePITaskRecord, parseSeedSourcePainId } from './pitask-metadata.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { stripFabricatedCorePrincipleIds } from '../core-principles/index.js';
@@ -38,6 +38,13 @@ interface DreamerContext {
   readonly contextHash: string;
   readonly contextRefs: string[];
   readonly predecessorOutput: unknown;
+  /**
+   * PRI-862: canonical pain id from the dreamer task seed
+   * (diagnostic_json.sourcePainId, written by the intake bridge).
+   * The only authority the runner accepts for sourcePainId — null means
+   * no provenance is available, and an LLM-supplied value must be dropped.
+   */
+  readonly seedSourcePainId: string | null;
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -183,7 +190,12 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     }
 
     const contextHash = BasePeerRunner.hashContextRefs(contextRefs);
-    return { contextHash, contextRefs, predecessorOutput };
+    return {
+      contextHash,
+      contextRefs,
+      predecessorOutput,
+      seedSourcePainId: parseSeedSourcePainId(task.diagnosticJson),
+    };
   }
 
   async invokeRuntime(taskId: string, context: DreamerContext): Promise<RunHandle> {
@@ -324,24 +336,48 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
   // ── Optional hooks ─────────────────────────────────────────────────────────
 
   /**
-   * Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
-   * Only fill when absent via Object.hasOwn — present-but-falsy values
+   * taskId: re-inject if stripped by stripLineageFields (PRI-272 / ERR-008).
+   * Only fill when absent via Object.hasOwn — present-but-falsy taskId
    * must reach validation and fail loud (Runtime Contract Rule 3).
+   *
+   * PRI-862 (CIL-006): sourcePainId follows the same echo gate but with
+   * the task seed as authority — a seeded value overrides any LLM echo
+   * (fabrication arm), and when NO seed exists the LLM value is dropped
+   * (loss-of-trust arm: provenance degrades to null observably, the model
+   * string is never trusted). This holds on every runtime adapter,
+   * including the paths that do not strip lineage fields themselves.
+   * The correction event carries `seedPresent` so the two arms stay
+   * separately measurable (rc-9 structured reason).
    *
    * Also strips fabricated sourcePrincipleId values via the shared
    * stripFabricatedCorePrincipleIds utility. The generatedAt override is
    * handled by the base class via super.postFetchTransform().
    */
-  protected override postFetchTransform(taskId: string, untrustedOutput: unknown, _context: DreamerContext): void {
-    super.postFetchTransform(taskId, untrustedOutput, _context);
-    // Shared lineage echo gate (PRI-541): dreamer is the chain head, so the
-    // only runner-owned lineage is taskId. Emits telemetry on correction so
+  protected override postFetchTransform(taskId: string, untrustedOutput: unknown, context: DreamerContext): void {
+    super.postFetchTransform(taskId, untrustedOutput, context);
+    // Shared lineage echo gate (PRI-541). Emits telemetry on correction so
     // the LLM echo-corruption rate stays observable (rc-9).
+    const seed = context.seedSourcePainId;
     const correctedFields = reconcileLineageEcho(untrustedOutput, {
-      topFields: [{ field: 'taskId', authoritativeValue: taskId }],
+      topFields: [
+        { field: 'taskId', authoritativeValue: taskId },
+        ...(seed !== null ? [{ field: 'sourcePainId', authoritativeValue: seed }] : []),
+      ],
     });
+    if (seed === null
+      && untrustedOutput !== null && typeof untrustedOutput === 'object' && !Array.isArray(untrustedOutput)
+      && Object.hasOwn(untrustedOutput, 'sourcePainId')) {
+      // rc-5: hasOwn, not in. The LLM invented lineage with no canonical
+      // backing — drop it so formation-context provenance reads null
+      // (legitimate degraded state) instead of a fabricated id.
+      Reflect.deleteProperty(untrustedOutput, 'sourcePainId');
+      correctedFields.push('sourcePainId');
+    }
     if (correctedFields.length > 0) {
-      this.emitEvent('lineage_echo_corrected', taskId, { correctedFields });
+      // seedPresent is the arm discriminator: true ⇒ fabricated echo was
+      // overridden by the canonical seed; false ⇒ unbacked model string was
+      // dropped. Without it the two arms collapse into one unmeasurable rate.
+      this.emitEvent('lineage_echo_corrected', taskId, { correctedFields, seedPresent: seed !== null });
     }
     stripFabricatedCorePrincipleIds(untrustedOutput);
   }

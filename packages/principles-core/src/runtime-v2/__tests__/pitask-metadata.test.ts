@@ -16,6 +16,7 @@ import {
   parsePITaskMetadata,
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
+  parseSeedSourcePainId,
   PI_METADATA_KEY,
 } from '../internalization/pitask-metadata.js';
 import { isValidPITaskRecord } from '../internalization/index.js';
@@ -557,5 +558,35 @@ describe('PRI-509: RepairPayload serialization + parsing', () => {
     meta.repairPayload = { ...makeValidRepairPayload(), requiredChanges: 'not-an-array' as unknown as string[] };
     const json = serializePITaskMetadata(meta);
     expect(parsePITaskMetadata(json)).toBeNull();
+  });
+});
+
+// PRI-862 (CIL-006): canonical pain seed reader for the dreamer provenance guard.
+describe('parseSeedSourcePainId', () => {
+  it('reads the top-level seed key from a bridge-shaped envelope (coexists with pi_metadata)', () => {
+    const json = JSON.stringify({
+      [PI_METADATA_KEY]: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000, inputArtifactRefs: [], outputArtifactRefs: [] },
+      candidateId: 'cand-1',
+      sourcePainId: 'pain-canonical-1',
+    });
+    expect(parseSeedSourcePainId(json)).toBe('pain-canonical-1');
+  });
+
+  it('trims a padded seed value', () => {
+    const json = JSON.stringify({ sourcePainId: '  pain-x  ' });
+    expect(parseSeedSourcePainId(json)).toBe('pain-x');
+  });
+
+  it('fail-closed (rc-1/rc-5): null/undefined/blank/malformed/non-string all return null', () => {
+    expect(parseSeedSourcePainId(null)).toBeNull();
+    expect(parseSeedSourcePainId(undefined)).toBeNull();
+    expect(parseSeedSourcePainId('')).toBeNull();
+    expect(parseSeedSourcePainId('not json')).toBeNull();
+    expect(parseSeedSourcePainId('[]')).toBeNull();
+    expect(parseSeedSourcePainId('42')).toBeNull();
+    expect(parseSeedSourcePainId(JSON.stringify({ other: 1 }))).toBeNull();
+    expect(parseSeedSourcePainId(JSON.stringify({ sourcePainId: 7 }))).toBeNull();
+    expect(parseSeedSourcePainId(JSON.stringify({ sourcePainId: '   ' }))).toBeNull();
+    expect(parseSeedSourcePainId(JSON.stringify({ sourcePainId: null }))).toBeNull();
   });
 });
