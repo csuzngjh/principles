@@ -14,6 +14,11 @@ import {
   AUTO_PROMOTION_CONFIDENCE_THRESHOLD,
 } from './activation-types.js';
 
+/**
+ * PRI-811 Phase B: no longer consulted by ActivationDispatcher — every
+ * rollout recommendation now enqueues for Owner approval. Kept as a pure
+ * policy helper (exported API; retirement is a separate follow-up decision).
+ */
 export function decideAutoPromotion(channel: InternalizationChannel, confidence: number | undefined): boolean {
   if (confidence === undefined || confidence === null) return false;
   if (confidence < 0 || confidence > 1) return false;

@@ -16,6 +16,7 @@ import {
   DeferArchiveWriter,
   MemoryActivationStateStore,
   MemoryArtifactReadModel,
+  MemoryApprovalQueueStore,
 } from '../index.js';
 import type { PIArtifactSnapshot, DispatchInput, ActivationStatusRecord } from '../index.js';
 import { SqliteActivationStateStore } from '../sqlite-activation-state-store.js';
@@ -137,28 +138,42 @@ describe('Bug-Q: re-dispatch after deactivation', () => {
   });
 
   describe('RD-03: dispatcher allows re-dispatch after deactivate', () => {
+    // PRI-811 Phase B: activations are produced only through the verified
+    // 'approved' dispatch path, so this journey enqueues → Owner approves →
+    // dispatches 'approved' — the same chain production uses.
     function makeDispatcher() {
       const stateStore = new MemoryActivationStateStore();
       const artifactStore = new MemoryArtifactReadModel();
       const promptWriter = new PromptWriter();
       const archiveWriter = new DeferArchiveWriter();
+      const approvalStore = new MemoryApprovalQueueStore();
       const dispatcher = new ActivationDispatcher(
         artifactStore,
         stateStore,
-        { writers: [promptWriter, archiveWriter] },
+        { writers: [promptWriter, archiveWriter], approvalQueueStore: approvalStore },
       );
-      return { stateStore, artifactStore, dispatcher };
+      return { stateStore, artifactStore, dispatcher, approvalStore };
     }
 
     it('re-dispatch after deactivate returns "activated" (not "already_activated")', async () => {
-      const { stateStore, artifactStore, dispatcher } = makeDispatcher();
+      const { stateStore, artifactStore, dispatcher, approvalStore } = makeDispatcher();
       artifactStore.addArtifact(makePrincipleArtifact());
 
-      // First dispatch: confirm → activated
-      const first = await dispatcher.dispatch(makeDispatchInput({ confirm: true }));
+      // First chain: enqueue → Owner approves → approved dispatch → activated
+      const queued = await dispatcher.dispatch(makeDispatchInput({ confirm: true }));
+      expect(queued.decision).toBe('queued_for_approval');
+      if (queued.decision !== 'queued_for_approval') return;
+      const approved = await approvalStore.approve(queued.approvalId, 'owner-test');
+      expect(approved.ok).toBe(true);
+      const approvedInput = makeDispatchInput({
+        confirm: true,
+        rolloutDecision: 'approved',
+        approvalId: queued.approvalId,
+      });
+      const first = await dispatcher.dispatch(approvedInput);
       expect(first.decision).toBe('activated');
 
-      // Second dispatch without deactivating: should be already_activated (idempotent)
+      // Second auto dispatch without deactivating: already_activated (idempotent)
       const second = await dispatcher.dispatch(makeDispatchInput({ confirm: true }));
       expect(second.decision).toBe('already_activated');
 
@@ -166,8 +181,9 @@ describe('Bug-Q: re-dispatch after deactivation', () => {
       const deactivated = await stateStore.deactivateActivation('act_prompt_P_001', '2026-06-01T00:00:00.000Z');
       expect(deactivated).toBe(true);
 
-      // Bug-Q fix: third dispatch should succeed (not already_activated)
-      const third = await dispatcher.dispatch(makeDispatchInput({ confirm: true }));
+      // Bug-Q fix: re-dispatching the approved record should succeed (not
+      // already_activated) because the store filters deactivated rows.
+      const third = await dispatcher.dispatch(approvedInput);
       expect(third.decision).toBe('activated');
       if (third.decision === 'activated') {
         // New activation record has a new activatedAt (re-activation timestamp).

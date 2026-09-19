@@ -6,6 +6,7 @@ import {
   RuleHostWriter,
   SqliteActivationStateStore,
   SqliteApprovalQueueStore,
+  ApprovalCompletionService,
   STORY_A_CHANNELS,
   makeRunId,
   makePrincipleArtifactRecord,
@@ -115,21 +116,18 @@ interface ChannelDispatchInput {
   ctx: DispatchContext;
 }
 
-// Post-approval direct activation: the dispatcher routes code_tool_hook through the
-// approval queue every time (isLowRiskChannel is false). No re-dispatch mechanism
-// currently exists for approved items. Production will need an approval-completion
-// orchestrator that re-dispatches or directly activates. This demo uses direct
-// writer.activate() + recordActivation() to complete the flow after real approval.
-// What this proves: SqliteApprovalQueueStore.approve() + RuleHostWriter.activate()
-// + SqliteActivationStateStore.recordActivation() all work with real DB I/O.
-// What this does NOT prove: that a production approval-completion orchestrator exists.
+// Post-approval activation via the production ApprovalCompletionService.
+// PRI-811 Phase B: EVERY channel queues first (a rollout recommendation never
+// self-executes), so the demo completes queued items for all channels through
+// the same verified approve→dispatch('approved') path production uses.
 async function completePostApprovalActivation(
   approvalId: string,
   input: ChannelDispatchInput,
 ): Promise<ActivationDecision> {
   const { channel, artifactRecord, ctx } = input;
   const approvalStore = new SqliteApprovalQueueStore(ctx.stateManager.connection);
-  const approveResult: ApprovalDecisionResult = await approvalStore.approve(approvalId, 'demo-owner', 'Demo: owner approves RuleHost activation');
+  const activationStateStore = new SqliteActivationStateStore(ctx.stateManager.connection);
+  const approveResult: ApprovalDecisionResult = await approvalStore.approve(approvalId, 'demo-owner', 'Demo: owner approves activation');
   if (!approveResult.ok) {
     return { decision: 'refused', reason: `approval_failed: ${approveResult.error}`, channel };
   }
@@ -137,34 +135,26 @@ async function completePostApprovalActivation(
   const snapshot = toSnapshot(artifactRecord);
   ctx.snapshotCache.set(artifactRecord.artifactId, snapshot);
 
-  const writer = new RuleHostWriter({ gateDeps: { evaluateInSandbox: () => ({ success: true, failedCases: [], executionTimeMs: 1, forbiddenPatternViolations: [] }) } });
-  const activationStateStore = new SqliteActivationStateStore(ctx.stateManager.connection);
-  const idempotencyKey = `story-a-${ctx.runId}::${channel}::post-approval`;
-  const now = new Date().toISOString();
-
-  const principleId = artifactRecord.sourcePrincipleId ?? 'unknown';
-  const writerResult = await writer.activate(
-    { artifactId: artifactRecord.artifactId, channel, principleId, idempotencyKey, now },
-    snapshot,
+  const writers = channel === 'code_tool_hook'
+    ? [new RuleHostWriter({ gateDeps: { evaluateInSandbox: () => ({ success: true, failedCases: [], executionTimeMs: 1, forbiddenPatternViolations: [] }) } })]
+    : channel === 'prompt'
+      ? [new PromptWriter()]
+      : [new DeferArchiveWriter()];
+  const dispatcher = new ActivationDispatcher(
+    makeArtifactReadModel(ctx),
+    activationStateStore,
+    { writers, approvalQueueStore: approvalStore },
   );
-
-  await activationStateStore.recordActivation({
-    activationId: writerResult.activationId,
-    idempotencyKey,
-    artifactId: artifactRecord.artifactId,
-    channel,
-    action: writerResult.action,
-    targetRef: writerResult.targetRef,
-    activatedAt: now,
-    deactivatedAt: null,
+  const completionService = new ApprovalCompletionService(approvalStore, dispatcher, activationStateStore);
+  const completion = await completionService.completeApproval({
+    approvalId,
+    actor: { kind: 'human', userId: 'demo-owner' },
+    now: new Date().toISOString(),
   });
-
-  return {
-    decision: 'activated',
-    activationId: writerResult.activationId,
-    action: writerResult.action,
-    targetRef: writerResult.targetRef,
-  };
+  if (!completion.ok) {
+    return { decision: 'refused', reason: completion.reason, channel };
+  }
+  return completion.decision;
 }
 
 function classifyDecision(decision: ActivationDecision): 'activated' | 'queued' | 'refused' | 'already' | 'other' {
@@ -195,9 +185,10 @@ async function runChannelOutcome(
       channel, artifactRecord, ctx,
     );
 
-    // For code_tool_hook: first dispatch queues for approval.
-    // Demo explicitly approves and activates to complete activation.
-    if (channel === 'code_tool_hook' && classifyDecision(firstDecision) === 'queued' && approvalId) {
+    // PRI-811 Phase B: first dispatch queues for EVERY channel (a rollout
+    // recommendation never self-executes). Demo approves and completes the
+    // activation through the production ApprovalCompletionService.
+    if (classifyDecision(firstDecision) === 'queued' && approvalId) {
       const postApprovalDecision = await completePostApprovalActivation(
         approvalId, { channel, artifactRecord, ctx },
       );
@@ -212,10 +203,9 @@ async function runChannelOutcome(
             approvalId,
             approvedBy: 'demo-owner',
             activationId: (postApprovalDecision as { activationId?: string }).activationId,
-            path: 'dispatch→queued → real_approve → direct_activate→record',
-            note: 'Post-approval uses direct writer.activate() (no production orchestrator yet)',
+            path: 'dispatch→queued → real_approve → ApprovalCompletionService(approved dispatch)',
           },
-          evidenceSource: `ActivationDispatcher.dispatch→queued + SqliteApprovalQueueStore.approve + RuleHostWriter.activate + SqliteActivationStateStore.recordActivation`,
+          evidenceSource: `ActivationDispatcher.dispatch→queued + SqliteApprovalQueueStore.approve + ApprovalCompletionService(${channel})`,
           principleId,
         };
       }
@@ -231,10 +221,10 @@ async function runChannelOutcome(
           approvedBy: 'demo-owner',
           activationDecision: postApprovalDecision.decision,
         },
-        evidenceSource: 'ActivationDispatcher.dispatch→queued + SqliteApprovalQueueStore.approve + RuleHostWriter.activate (activation incomplete)',
+        evidenceSource: 'ActivationDispatcher.dispatch→queued + ApprovalCompletionService (activation incomplete)',
         principleId,
-        failureReason: `RuleHost approved but post-activation dispatch returned: ${postApprovalDecision.decision}`,
-        nextAction: 'Check RuleHost writer canActivate and artifact contract',
+        failureReason: `Channel ${channel} approved but post-activation dispatch returned: ${postApprovalDecision.decision}`,
+        nextAction: `Check ${channel} writer canActivate and artifact contract`,
       };
     }
 
@@ -469,7 +459,7 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
       status,
       generatedAt,
       narrative,
-      storyDescription: 'Demo proves: (1) artifact persistence via SqlitePIArtifactStore, (2) activation dispatch via ActivationDispatcher.dispatch() with real gate logic, (3) approval queue via SqliteApprovalQueueStore.approve() + direct writer activation, (4) sandbox enforcement via evaluateInRefinerSandbox against golden trace. Evidence seed and owner review are narrative fixtures (simulated: true).',
+      storyDescription: 'Demo proves: (1) artifact persistence via SqlitePIArtifactStore, (2) activation dispatch via ActivationDispatcher.dispatch() with real gate logic, (3) approval queue via SqliteApprovalQueueStore.approve() + ApprovalCompletionService approved dispatch (PRI-811 Phase B: every channel queues for Owner approval), (4) sandbox enforcement via evaluateInRefinerSandbox against golden trace. Evidence seed and owner review are narrative fixtures (simulated: true).',
       stages,
       channelOutcomes,
       isRuntimeV2Exclusive: true,
