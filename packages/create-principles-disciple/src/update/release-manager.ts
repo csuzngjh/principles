@@ -40,6 +40,7 @@ import {
   type TransactionState,
 } from './transaction-journal.js';
 import { downloadReleaseAsset, extractAndVerifyReleaseAsset, ApplyPayloadError } from './apply-payload.js';
+import { evaluateDataCompatibility } from './data-compatibility.js';
 import type { InstallerJournal } from '../installer.js';
 import type { Language } from '../i18n.js';
 import type { HostTarget } from '../installers/index.js';
@@ -50,6 +51,7 @@ export type ReleaseManagerReason =
   | 'metadata_refresh_failed'
   | 'release_metadata_unavailable'
   | 'release_metadata_invalid'
+  | 'runtime_not_supported'
   | 'active_record_corrupt'
   | 'legacy_layout_not_supported'
   | 'journal_unavailable'
@@ -107,6 +109,13 @@ export interface ApplyOptions {
   readonly language?: Language;
   /** Host installers to run; defaults to 'openclaw' (matches the prior full-update sync). */
   readonly host?: HostTarget;
+  /**
+   * PRI-850 (SPEC §6.1/§12.1): caller-generated transaction id so the bootstrap
+   * executor's initiator can query the journal while the executor keeps running
+   * detached. Must match the journal id shape when present; otherwise the
+   * manager generates one as before.
+   */
+  readonly transactionId?: string;
 }
 
 export type ApplyOutcome =
@@ -123,7 +132,9 @@ export type ApplyOutcome =
   }
   | {
     readonly kind: 'no_update';
-    /** Why nothing was applied (policy refusal reason or already-current note). */
+    /** Stable machine-readable reason: a release-policy refusal reason code. */
+    readonly reason: string;
+    /** Owner-facing explanation of why nothing was applied. */
     readonly note: string;
   };
 
@@ -284,6 +295,22 @@ export class ReleaseManager {
     };
   }
 
+  /**
+   * PRI-853 review fix: the signed metadata of an installed release identity
+   * (`releases/<releaseId>/metadata.json`), or null when the file is absent
+   * or unreadable. Callers decide whether null is acceptable — for the data
+   * compatibility preflight it is NOT (refuse install_identity_unverifiable).
+   */
+  private readReleaseMetadataByIdentity(releaseId: string): ReleaseMetadata | null {
+    try {
+      const metadataPath = path.join(this.paths.releasesDir, releaseId, 'metadata.json');
+      if (!fs.existsSync(metadataPath)) return null;
+      return parseReleaseMetadata(JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as unknown);
+    } catch {
+      return null;
+    }
+  }
+
   async check(channel: ReleaseChannelName): Promise<UpdateCheck> {
     const now = this.options.now ?? ((): Date => new Date());
     const status = this.inspect();
@@ -350,10 +377,51 @@ export class ReleaseManager {
     const now = this.options.now ?? ((): Date => new Date());
     const decision = this.evaluateCandidateDecision({ channelMetadata, releaseMetadata, status, now: now() });
     if (!decision.allowed) {
-      return { kind: 'no_update', note: `${decision.reason}: ${decision.message}` };
+      // PRI-848: the reason travels structured — the Console must map refusal
+      // states from a reason code, never by parsing the note string.
+      return { kind: 'no_update', reason: decision.reason, note: decision.message };
     }
 
-    const transactionId = `update-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    // PRI-853 (SPEC §10 wired, review fix P1): data compatibility preflight
+    // runs against the CURRENTLY ACTIVE release — the release whose data must
+    // remain readable so the pre-update state can be restored. Not
+    // previous.json: a first-ever update has no retained previous, and that
+    // absence must never silently disable the check. If the active identity
+    // or its metadata is missing/unreadable, the update refuses with
+    // install_identity_unverifiable — absence is never treated as "compatible".
+    const activeIdentityForCompat = readActiveRecord(this.paths.activeRecordPath);
+    if (activeIdentityForCompat === null) {
+      return {
+        kind: 'no_update',
+        reason: 'install_identity_unverifiable',
+        note: 'The installation has no readable active release record, so its data compatibility cannot be proven.',
+      };
+    }
+    const activeMetadata = this.readReleaseMetadataByIdentity(activeIdentityForCompat.releaseId);
+    if (activeMetadata === null) {
+      return {
+        kind: 'no_update',
+        reason: 'install_identity_unverifiable',
+        note: `The installed release ${activeIdentityForCompat.releaseId} has no readable signed metadata, so data compatibility cannot be proven.`,
+      };
+    }
+    const dataCompatibility = evaluateDataCompatibility({
+      candidate: releaseMetadata,
+      previous: activeMetadata,
+    });
+    if (!dataCompatibility.eligible) {
+      return { kind: 'no_update', reason: dataCompatibility.reason, note: dataCompatibility.message };
+    }
+
+    // PRI-850: honor a caller-generated transaction id (bootstrap executor
+    // flow — the initiator must be able to query the journal while the
+    // executor keeps running detached). Same strict shape as the generated
+    // ids; anything malformed falls back to a generated id (never a guessed
+    // journal file name).
+    const callerTransactionId = options.transactionId;
+    const transactionId = callerTransactionId !== undefined && /^update-[0-9]+-[a-z0-9]{8}$/.test(callerTransactionId)
+      ? callerTransactionId
+      : `update-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const journalPath = path.join(this.paths.transactionsDir, `${transactionId}.jsonl`);
     const journal: InstallerJournal = {
       transactionId,

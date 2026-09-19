@@ -14,12 +14,13 @@ import { isReleaseChannelName } from './product-identity.js';
 import type { ReleaseManager} from './release-manager.js';
 import { ReleaseManagerError } from './release-manager.js';
 
-export type BootstrapRequestOp = 'inspect' | 'check' | 'apply';
+export type BootstrapRequestOp = 'ping' | 'inspect' | 'check' | 'apply';
 
 export type BootstrapRequest =
+  | { readonly op: 'ping' }
   | { readonly op: 'inspect' }
   | { readonly op: 'check'; readonly channel: ReleaseChannelName }
-  | { readonly op: 'apply'; readonly releaseId: string };
+  | { readonly op: 'apply'; readonly workspaceDir: string; readonly transactionId?: string };
 
 export interface BootstrapOkResponse {
   readonly ok: true;
@@ -73,14 +74,14 @@ export function parseBootstrapRequest(raw: string): BootstrapRequest {
     throw new BootstrapProtocolError('protocol_missing_op', 'The bootstrap request is missing the required "op" field.');
   }
   const {op} = record;
-  const knownOps: readonly BootstrapRequestOp[] = ['inspect', 'check', 'apply'];
+  const knownOps: readonly BootstrapRequestOp[] = ['ping', 'inspect', 'check', 'apply'];
   if (typeof op !== 'string' || !knownOps.includes(op as BootstrapRequestOp)) {
     throw new BootstrapProtocolError('protocol_unknown_op', `Unknown bootstrap op: ${JSON.stringify(op)}. Supported: ${knownOps.join(', ')}.`);
   }
   const allowedFields = op === 'check'
     ? new Set(['op', 'channel'])
     : op === 'apply'
-      ? new Set(['op', 'releaseId'])
+      ? new Set(['op', 'workspaceDir', 'transactionId'])
       : new Set(['op']);
   const extraFields = Object.keys(record).filter((key) => !allowedFields.has(key));
   if (extraFields.length > 0) {
@@ -96,13 +97,25 @@ export function parseBootstrapRequest(raw: string): BootstrapRequest {
     return { op, channel: record.channel };
   }
   if (op === 'apply') {
-    if (!Object.hasOwn(record, 'releaseId')) {
-      throw new BootstrapProtocolError('protocol_missing_release_id', 'An apply request requires the "releaseId" field.');
+    // PRI-850 (ADR-0024 §6): the wire contract now carries the deployment
+    // context — apply over the protocol is the production update path, run by
+    // the short-lived bootstrap executor so the update survives the death of
+    // whichever UI started it.
+    if (!Object.hasOwn(record, 'workspaceDir')) {
+      throw new BootstrapProtocolError('protocol_missing_workspace', 'An apply request requires the "workspaceDir" field.');
     }
-    if (typeof record.releaseId !== 'string' || record.releaseId.length === 0) {
-      throw new BootstrapProtocolError('protocol_invalid_release_id', `releaseId must be a non-empty string, got: ${JSON.stringify(record.releaseId)}`);
+    if (typeof record.workspaceDir !== 'string' || record.workspaceDir.length === 0) {
+      throw new BootstrapProtocolError('protocol_invalid_workspace', `workspaceDir must be a non-empty string, got: ${JSON.stringify(record.workspaceDir)}`);
     }
-    return { op, releaseId: record.releaseId };
+    if (Object.hasOwn(record, 'transactionId')
+      && (typeof record.transactionId !== 'string' || !/^update-[0-9]+-[a-z0-9]{8}$/.test(record.transactionId))) {
+      throw new BootstrapProtocolError('protocol_invalid_transaction_id', `transactionId must match update-<ts>-<8x[a-z0-9]>, got: ${JSON.stringify(record.transactionId)}`);
+    }
+    return {
+      op,
+      workspaceDir: record.workspaceDir,
+      ...(typeof record.transactionId === 'string' ? { transactionId: record.transactionId } : {}),
+    };
   }
   return { op: 'inspect' };
 }
@@ -123,25 +136,22 @@ export async function handleBootstrapRequest(
 ): Promise<BootstrapResponse> {
   try {
     switch (request.op) {
+      case 'ping':
+        // PRI-850 review fix: a liveness/program-health op that touches NO
+        // installation state. The installer's delivery probe uses it so a
+        // corrupt pending-repair registration can never fail the probe.
+        return { ok: true, result: { pong: true } };
       case 'inspect':
         return { ok: true, result: await Promise.resolve(manager.inspect()) };
       case 'check':
         return { ok: true, result: await manager.check(request.channel) };
       case 'apply':
-        // PRI-698 Phase 1: apply() is the real write orchestrator now and
-        // requires a caller deployment context (workspaceDir) the bootstrap
-        // wire contract does not carry. This protocol surface has no
-        // production transport and never served apply (it previously refused
-        // with `shadow_mode_read_only`); returning a structured refusal keeps
-        // that parity without inventing protocol fields for a consumer that
-        // does not exist yet (P7). Extend the wire contract with the real
-        // first consumer.
-        return {
-          ok: false,
-          reason: 'apply_not_supported_over_bootstrap_protocol',
-          message: 'The bootstrap protocol does not carry the deployment context ReleaseManager.apply() requires.',
-          nextAction: 'Trigger updates through the Console update surface, which supplies the deployment context.',
-        };
+        // PRI-850 (ADR-0024 §6): apply over the protocol is the production
+        // update path. The request carries the deployment context
+        // (workspaceDir) and optionally the caller's transaction id; the
+        // executor process keeps running even if its initiator dies, and the
+        // journal is the continuation record (SPEC §12.1).
+        return { ok: true, result: await manager.apply({ workspaceDir: request.workspaceDir, ...(request.transactionId !== undefined ? { transactionId: request.transactionId } : {}) }) };
     }
   } catch (error) {
     if (error instanceof ReleaseManagerError) {

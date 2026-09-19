@@ -35,6 +35,16 @@ inputs:
     required: false
     type: string
     default: ''
+  product_identity_version:
+    description: >-
+      SPEC v0.3 §12: the TRAIN product version to embed in the installer payload
+      identity stamp. Used only by the create-principles-disciple step; empty
+      falls back to this action''s computed package version (single-package
+      publishes). The embedded stamp is what installed product versions derive
+      from — never the installer package''s own npm version.
+    required: false
+    type: string
+    default: ''
 
 runs:
   using: composite
@@ -241,19 +251,23 @@ runs:
         fi
 
     - name: Stamp npm payload product identity
-      # SPEC §12 product-identity unification: the npm-distributed installer
-      # payload carries its OWN identity (_release/product-identity.json,
-      # read by the installer's resolveInstallerPayloadIdentity). The version
-      # is the one this action just computed for the installer package; the
-      # source commit is the exact checkout HEAD this run publishes from.
-      # The SOURCE tree's package.json version is demoted to a COMPONENT
-      # diagnostic from this point on — it may drift from the product version
-      # and is never the installer's identity authority again (the embedded
-      # stamp wins; its absence stays a visible legacy fallback).
+      # SPEC §12 product-identity unification (v0.3 authority): the
+      # npm-distributed installer payload carries its OWN identity
+      # (_release/product-identity.json, read by the installer's
+      # resolveInstallerPayloadIdentity). The product version stamped here is
+      # the TRAIN product version supplied by the caller (product_identity_version)
+      # so the npm installer delivers exactly the product its stamp claims;
+      # without it (single-package publishes) the installer package's own
+      # computed version is the fallback. The source commit is the exact
+      # checkout HEAD this run publishes from. The SOURCE tree's package.json
+      # version is demoted to a COMPONENT diagnostic from this point on — it
+      # may drift from the product version and is never the installer's
+      # identity authority again (the embedded stamp wins; its absence stays a
+      # visible legacy fallback).
       if: ${{ inputs.pkg_dir == 'create-principles-disciple' }}
       shell: bash
       run: |
-        VERSION="${{ steps.version.outputs.version }}"
+        VERSION="${{ inputs.product_identity_version != '' && inputs.product_identity_version || steps.version.outputs.version }}"
         SOURCE_COMMIT="${{ github.sha }}"
         node -e '
           const { writeFileSync, mkdirSync } = require("node:fs");

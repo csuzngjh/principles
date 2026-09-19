@@ -131,6 +131,74 @@ export function appendUpdateHistory(
   fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));
 }
 
+/**
+ * PRI-853 (ADR-0024 D-7, SPEC §12.1): reconcile the Owner-facing history from
+ * the transaction journal. With apply running in the detached bootstrap
+ * executor, the initiating Console may be dead when an update reaches a
+ * terminal state — the journal is the durable fact, and this derives any
+ * missing history entries from it (idempotent by transactionId; append-only).
+ */
+export function reconcileUpdateHistoryFromJournals(workspaceDir: string, pdHome: string): void {
+  const transactionsDir = path.join(pdHome, 'transactions');
+  if (!fs.existsSync(transactionsDir)) return;
+  const historyPath = getHistoryPath(workspaceDir);
+  const history = loadHistory(historyPath);
+  const journaledIds = new Set(
+    history
+      .filter((entry) => typeof entry.transactionId === 'string' && entry.transactionId.length > 0)
+      .map((entry) => entry.transactionId as string),
+  );
+  const terminalKind: Record<string, { kind: UpdateHistoryEntry['kind']; success: boolean; toVersion: string }> = {
+    confirmed: { kind: 'update', success: true, toVersion: '' },
+    rolled_back: { kind: 'rollback', success: true, toVersion: 'previous' },
+    failed: { kind: 'failure', success: false, toVersion: 'failed' },
+    refused: { kind: 'refusal', success: false, toVersion: '' },
+  };
+  let changed = false;
+  for (const entry of fs.readdirSync(transactionsDir)) {
+    if (!entry.endsWith('.jsonl')) continue;
+    const transactionId = entry.slice(0, -'.jsonl'.length);
+    if (journaledIds.has(transactionId)) continue;
+    let lastState: string | null = null;
+    let productVersion: string | null = null;
+    try {
+      const raw = fs.readFileSync(path.join(transactionsDir, entry), 'utf-8');
+      for (const line of raw.split('\n')) {
+        if (line.trim().length === 0) continue;
+        const { to: transitionTo, productVersion: transitionProductVersion } = JSON.parse(line) as { to?: unknown; productVersion?: unknown };
+        if (typeof transitionTo === 'string') lastState = transitionTo;
+        if (typeof transitionProductVersion === 'string') productVersion = transitionProductVersion;
+      }
+    } catch {
+      // unreadable journal — recovery diagnostics own that; skip for history
+      continue;
+    }
+    const mapping = lastState !== null ? terminalKind[lastState] : undefined;
+    if (mapping === undefined) continue;
+    history.push({
+      fromVersion: 'unknown',
+      toVersion: mapping.toVersion === '' ? (productVersion ?? 'unknown') : mapping.toVersion,
+      success: mapping.success,
+      kind: mapping.kind,
+      authority: 'release-manager',
+      transactionId,
+      id: `update-${Date.now()}-${transactionId.slice(-8)}`,
+      timestamp: new Date().toISOString(),
+    });
+    changed = true;
+  }
+  if (changed) {
+    if (history.length > 50) {
+      history.splice(0, history.length - 50);
+    }
+    const dir = path.dirname(historyPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));
+  }
+}
+
 /* eslint-disable @typescript-eslint/max-params */
 export async function handleUpdateHistoryRoute(
   req: IncomingMessage,

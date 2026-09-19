@@ -1,6 +1,7 @@
 
 import * as http from 'http';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveApplyFullTimeoutMs } from './update-timeout.js';
@@ -39,7 +40,8 @@ import { handleIntentDecisionsRoute, disposeIntentDecisionModels } from './route
 import { handleOnboardingRoute, disposeOnboardingModels } from './routes/onboarding.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { handleUpdateRoute } from './routes/update.js';
-import { handleUpdateHistoryRoute } from './routes/update-history.js';
+import { handleUpdateHistoryRoute, reconcileUpdateHistoryFromJournals } from './routes/update-history.js';
+import { handleUpdateTransactionRoute } from './routes/update-transaction.js';
 import { handleConfigRoute } from './routes/config.js';
 import { sendJson, sendNotFound, sendUnauthorized } from './utils/response.js';
 import { migrateLegacyExtensionBackups, resolvePdBackupsRoot } from './utils/pd-backups.js';
@@ -297,6 +299,16 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   // feedback reports so the owner can open a pre-filled email directly.
   const maintainerEmail = getFeedbackMaintainerEmail(workspaceDir);
 
+  // PRI-853 (SPEC §12.1): an update carried by the detached bootstrap executor
+  // may reach a terminal state after its initiating Console died — derive the
+  // missing Owner-facing history entries from the transaction journal. Best
+  // effort only: history reconciliation never blocks console startup.
+  try {
+    reconcileUpdateHistoryFromJournals(workspaceDir, path.join(os.homedir(), '.pd'));
+  } catch (error) {
+    console.warn('[pd-console] update history reconciliation skipped:', error instanceof Error ? error.message : error);
+  }
+
   // Read the feedback submit-channel parameters (ingest_url / ingest_token /
   // github_repo / github_proxy). Presence of a key enables its channel.
   const feedbackChannelConfig = getFeedbackChannelConfig(workspaceDir);
@@ -465,6 +477,16 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // GET /api/update/history (MUST be before update catch-all)
       if (urlPath === '/api/update/history') {
         asyncHandler(() => handleUpdateHistoryRoute(req, res, services.workspaceDir, ''))(req, res);
+        return;
+      }
+
+      // GET /api/update/recovery, GET /api/update/transaction/:id,
+      // POST /api/update/recovery/resolve (MUST be before the update
+      // catch-all; PRI-848/853 surfaces — resolve runs the pure journal
+      // decision, it does not re-point installation state itself).
+      if (urlPath === '/api/update/recovery' || urlPath.startsWith('/api/update/recovery/') || urlPath.startsWith('/api/update/transaction/')) {
+        const subPath = urlPath.slice('/api/update'.length);
+        asyncHandler(() => handleUpdateTransactionRoute(req, res, subPath))(req, res);
         return;
       }
 

@@ -1,11 +1,37 @@
 # Commercial-Grade PD Update System Design
 
-**Version:** 0.2
+**Version:** 0.3
 
-**Date:** 2026-08-25
+**Date:** 2026-09-19 (v0.3 amendments) / 2026-08-25 (v0.2 base)
 
-**Status:** Approved direction; revised after adversarial self-review; awaiting Owner review
-**Supersedes:** v0.1 in commit `fd8f83ec`
+**Status:** Approved direction; v0.3 amendments approved by Owner together with the 2026-09-19 update-chain remediation blueprint (PRI-847/848/849/850/851/852/853/854); integrated text awaiting final Owner review
+**Supersedes:** v0.2 (2026-08-25); v0.1 in commit `fd8f83ec`
+
+### 0. v0.3 amendment summary (2026-09-19)
+
+Field evidence from the first real signed publication (2026-09-19, PRI-847) and the
+update-chain audit (docs/audit/update-chain-expert-brief-20260919.md) resolved five
+open points without changing the trust chain, atomicity, or rollback promises:
+
+1. **§6.1** — bootstrap semantics made concrete: `bootstrapVersion` is the version of
+   the actually deployed update-executor program; the installer delivers, probes, and
+   registers it; registration absence/corruption/identity mismatch are distinct
+   refusal reasons, never collapsed into "too old".
+2. **§7 / §19-3** — supported runtime matrix resolved: assets are keyed by
+   OS + CPU + Node-ABI; the initial matrix is Node 24 (ABI 137) and Node 26 (ABI 147),
+   extended only by build-and-test evidence.
+3. **§12** — version authority table fixed: the product version of a build is a
+   one-time release-flow input; signed metadata, the channel pointer, the confirmed
+   active record, and the running process identity are the only per-stage authorities.
+   Releases never borrow a version from an npm package's `latest` tag.
+4. **§12.1 (new)** — Owner-facing update state contract: ten explicit states with
+   non-negotiable mapping rules (a policy refusal is never "up to date"; `no_update`
+   is never "success"; a network failure is never "no new version"; deployed is not
+   running; an unverifiable recovery is never "old version healthy").
+5. **§10 / §13** — compatibility declarations require evidence (no decorative
+   constants); publication is complete only when the public metadata URL is reachable
+   and Owner-facing release notes bound to the releaseId exist; expiry maintenance is
+   a new monotonic maintenance publication, never an in-place date edit.
 
 ## 1. Outcome
 
@@ -109,9 +135,22 @@ The default retention policy keeps the current confirmed release and one previou
 
 The official installer places a small stable bootstrap at `~/.pd/bootstrap`. Companion, Console, and installer invoke it through one strict JSON process protocol.
 
-Each release declares `minBootstrapVersion`. If the installed bootstrap is too old, update is refused before mutation and the Owner receives an official-installer next action.
+`bootstrapVersion` is the version of the **actually deployed update-executor program** — the short-lived process that hosts ReleaseManager operations (`inspect` / `check` / `apply`) so an update survives the death of whichever UI started it. It is never borrowed from an installer, plugin, or CLI npm version, and never filled with a placeholder value to pass a gate.
 
-Bootstrap replacement is a separate installer transaction. A product release cannot silently self-upgrade the bootstrap or trusted root.
+Delivery and registration are one installer transaction:
+
+1. Verify the candidate bootstrap's identity and integrity.
+2. Stage it with its dependencies under the transaction directory.
+3. Start it with the real runtime and verify entrypoint, protocol round-trip, and required capabilities.
+4. Activate it under the installation lock and transaction journal.
+5. Write `~/.pd/bootstrap/bootstrap.json` describing the deployed executor (`bootstrapVersion`, identity digest, `installedAt`). The registration must be re-verifiable against the deployed bytes.
+6. Retain the previous bootstrap until the new one is confirmed; record the outcome.
+
+Registration failures are distinct observable refusals — `bootstrap_not_registered` (file absent), `bootstrap_manifest_corrupt` (unreadable), `bootstrap_identity_mismatch` (registration disagrees with deployed bytes) — and are never reported as "bootstrap too old".
+
+Each release declares `minBootstrapVersion` from a real requirement: the oldest executor version that provides the capabilities this release's update path actually uses. An installed bootstrap older than that refuses the update before mutation with an official-installer next action.
+
+Bootstrap replacement is a separate installer transaction. A product release cannot silently self-upgrade the bootstrap or trusted root. Ordinary product updates must not overwrite a bootstrap that is currently coordinating their own activation.
 
 ### 6.2 ReleaseManager
 
@@ -138,6 +177,8 @@ The Owner's machine performs no dependency resolution, `npm install`, lifecycle 
 
 The updater only validates, downloads, verifies, extracts, probes, and activates. Unsupported platform or ABI combinations fail before mutation with an installer or compatibility next action.
 
+**Supported runtime matrix (resolved v0.3):** an asset is keyed by the complete triple `platform + arch + nodeAbi`; the published metadata may carry several assets for one platform. The initial supported matrix is Node 24 (ABI 137) and Node 26 (ABI 147) on the platforms the build matrix covers; the matrix grows or shrinks only with build-and-test evidence, never with open-ended range claims. Asset file names embed the ABI so two runtimes on one platform cannot collide. The update path detects the runtimes actually in use by the Console, the bootstrap, and enabled hosts before selecting an asset, and selects per process.
+
 ## 8. Transaction and Atomic Activation
 
 An update follows a persisted state machine:
@@ -157,6 +198,8 @@ The active record contains a monotonically increasing generation, release ID, Re
 Atomicity means readers see either the old or new record. Durability means the selected record survives a crash. Both are tested separately; the design does not claim that rename alone guarantees durable storage.
 
 If `active.json` is corrupt, recovery selects the last journal-confirmed generation and validates its release digest. It never guesses based only on directory names or modification times.
+
+Cleanup ordering (v0.3): superseded runtime material is removed only after the new release is confirmed and the retained previous release is intact. Until confirmation, every backup and staged artifact stays in place — any crash point must leave enough state to continue, roll back, or refuse explicitly, and the journal is the authority on which of the three applies.
 
 ## 9. Preflight, Probes, and Host Coordination
 
@@ -184,6 +227,8 @@ Destructive or contract migrations require a separate explicit maintenance workf
 
 Configuration readers must tolerate fields written by the new and previous release within the supported window. Required incompatible configuration changes refuse activation before host restart.
 
+Compatibility declarations carry evidence (v0.3): a release's compatibility window names the actual previous release(s) the window was proven against by tests that open newly written data with them. A constant that predates every real release, or a value repeated by default, is not evidence and must not appear in signed metadata. Declared destructive migrations refuse ordinary updates and require the separate maintenance workflow to actually exist; a refusal must never point the Owner at an unimplemented procedure.
+
 ## 11. Development Isolation and External Modification
 
 Development commands operate only inside the selected checkout unless an explicit guarded production-install command is used. Repository package versions cannot determine or overwrite the active installed product release.
@@ -198,11 +243,43 @@ Before marking a release unhealthy, diagnostics recalculate the relevant digest.
 
 Console's primary version is always the canonical product version. Component and bootstrap versions appear under diagnostics, not as competing “current versions.”
 
+**Version authority (v0.3):** each stage has exactly one authority, and no stage borrows a version from another:
+
+| Fact | Authority |
+| --- | --- |
+| Product version of a build | One-time input fixed by the release flow before any build; all build legs consume the same value and source commit |
+| What a published release contains | Immutable signed release metadata |
+| Newest stable version | The signed stable channel pointer |
+| Currently installed version | The active release record of the last confirmed transaction |
+| Version actually running in a process | The release identity that process loaded (used for post-restart verification) |
+| Component package versions | Diagnostics in the release manifest |
+
+Constraints: a release never borrows its product version from an npm package's `latest`; npm sub-package publication success does not mean a new PD stable version exists; one formal product version cannot map to two different contents — changed content publishes a new version; repair-only installer deliveries must not change the installed product version, and if a delivery actually replaces the product it is a reinstall/migration carrying the new artifact's real identity. Historical installs whose identity is insufficient are marked "historical install, migration required" instead of guessing a version from a stale manifest.
+
 `pd --version` preserves a short stable text contract. `pd version --json` exposes `productVersion`, `releaseId`, `components`, `bootstrapVersion`, `channel`, `source`, `generation`, `health`, and last transaction.
 
 History events use explicit kinds: `update`, `reinstall`, `channel_promotion`, `legacy_migration`, `rollback`, `refusal`, and `recovery`. Direction is derived from canonical release identity and metadata sequence, not package.json values found in a checkout.
 
 Every failed or refused event states what happened, whether the previous release remains active, and the safest next action. Raw stack traces are available in diagnostics but are not the primary Owner message.
+
+### 12.1 Owner-facing update state contract (v0.3)
+
+The update surface reports one explicit state at all times. At minimum:
+
+| State | Owner-facing meaning |
+| --- | --- |
+| checking | Checking for updates |
+| up_to_date | PD is on the newest stable version |
+| update_available | A new version exists; notes can be shown; update can start |
+| update_blocked | A new version exists but a specific problem must be resolved first |
+| check_failed | Cannot currently tell whether an update exists; retry possible |
+| update_in_progress | The update is running; actual phase shown |
+| awaiting_restart_or_verification | New version deployed; switch/verification pending |
+| update_complete | The target version is confirmed running |
+| failed_and_recovered | Update did not complete; previous version restored and verified |
+| needs_recovery | Automatic recovery could not be proven; exact next step provided |
+
+Non-negotiable mappings: a policy refusal never renders as "up to date"; `no_update` never renders as "update succeeded"; a network or availability failure never renders as "no new version"; a completed deployment is not "the new version is running" until verified; recovery that cannot be verified never renders as "old version healthy". The API carries structured reason codes, target version, transaction id, and next action; the page localizes from reason codes and never parses English error strings. Starting an update returns a queryable transaction id; repeated clicks, refreshes, and disconnects attach to the same unfinished operation instead of starting duplicates. The confirmed target release is pinned at start: if the channel pointer moves during an update, the running update is not silently redirected to different content.
 
 ## 13. Release and Promotion Pipeline
 
@@ -217,6 +294,8 @@ The pipeline performs these gated steps:
 7. Promote by updating signed Channel Metadata only.
 
 The pipeline rejects mismatched component identities, non-reproducible assets, missing compatibility evidence, expired metadata, unsupported bootstrap requirements, and any attempt to replace an immutable release.
+
+Publication gates (v0.3): a publication reports "complete" only after the public metadata URL serves the new channel pointer (an unreachable hosting surface — e.g. GitHub Pages not enabled — fails the run, because a successful push alone is not a publication); Owner-facing release notes exist and are bound to the releaseId as part of the signed publication; a clean-machine install leg passes without test-seeded state; concurrent publications coordinate serially on the channel, and a failed run retries with the same original inputs — never a re-resolved version or a fresh registry lookup.
 
 Release publication and channel promotion are separate permissions. Compromising a promotion credential must not permit rewriting an already published asset.
 
@@ -321,6 +400,6 @@ The architecture is fixed, but the implementation plan must resolve three eviden
 
 1. Select the TUF-compatible metadata library after a maintenance, platform, and auditability spike.
 2. Prove the exact Windows file-replacement and directory-flush adapter on supported filesystems.
-3. Inventory native dependencies and define the supported OS, CPU, and Node-ABI release matrix.
+3. ~~Inventory native dependencies and define the supported OS, CPU, and Node-ABI release matrix.~~ **Resolved v0.3:** see §7 — assets keyed by `platform + arch + nodeAbi`; initial matrix Node 24 (ABI 137) + Node 26 (ABI 147); growth only with build-and-test evidence.
 
 If any spike disproves a contract above, return to Owner review before implementation. Do not silently weaken the trust chain, atomicity guarantee, or rollback promise.

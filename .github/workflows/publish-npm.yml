@@ -743,6 +743,24 @@ jobs:
       - name: Build host runtime
         run: npm run build --workspace=@principles/host-runtime
 
+      # PRI-849 (SPEC v0.3 §12): the train product version is resolved ONCE,
+      # before any publish, from the product package manifest on this exact
+      # ref. It flows into the installer's embedded product-identity stamp so
+      # the npm installer delivers exactly the product version its stamp
+      # claims — the installer package's own npm version is a component
+      # diagnostic, never the product identity.
+      - name: Resolve train product identity
+        id: train-identity
+        run: |
+          # Review P1-5 fix + PRI-853: the shared resolver (root manifest
+          # authority) is the single product version source for every release
+          # entry point. packages/principles-disciple does not exist — the
+          # plugin lives at packages/openclaw-plugin and its npm version is a
+          # component diagnostic, never the product identity.
+          VERSION=$(node scripts/resolve-product-version.mjs)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Train product identity: $VERSION"
+
       - name: Publish 1/7 @principles/core
         uses: ./.github/actions/publish-npm-package
         with:
@@ -809,6 +827,7 @@ jobs:
           pkg_dir: create-principles-disciple
           npm_name: 'create-principles-disciple'
           version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+          product_identity_version: ${{ steps.train-identity.outputs.version }}
           npm_token: ${{ secrets.NPM_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}

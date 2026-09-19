@@ -33,6 +33,8 @@ import {
   validateUpdateStatus,
   validateUpdateHistory,
   validateApplyUpdateResult,
+  validateUpdateRecovery,
+  validateUpdateTransaction,
   validateApprovalRecordDirect,
   validatePrinciplesList,
   validateCorePrinciples,
@@ -92,6 +94,8 @@ import type {
   UpdateStatusData,
   UpdateHistoryData,
   ApplyUpdateResultData,
+  UpdateRecoveryData,
+  UpdateTransactionData,
   ApprovalRecordData,
   PrinciplesListData,
   CorePrinciplesData,
@@ -905,6 +909,16 @@ async function applyFullUpdate(): Promise<ApiResponse<ApplyUpdateResultData>> {
   }, validateApplyUpdateResult);
 }
 
+// PRI-848 (SPEC §12.1): recovery/continuation surface — the page attaches to an
+// unfinished transaction instead of starting a duplicate update.
+async function fetchUpdateRecovery(): Promise<ApiResponse<UpdateRecoveryData>> {
+  return request<UpdateRecoveryData>('/api/update/recovery', undefined, validateUpdateRecovery);
+}
+
+async function fetchUpdateTransaction(transactionId: string): Promise<ApiResponse<UpdateTransactionData>> {
+  return request<UpdateTransactionData>(`/api/update/transaction/${encodeURIComponent(transactionId)}`, undefined, validateUpdateTransaction);
+}
+
 // ── Evidence Chain (PRI-331) ──────────────────────────────────────────────────
 
 async function fetchEvidenceChain(): Promise<ApiResponse<EvidenceChainData>> {
@@ -1125,6 +1139,8 @@ export {
   fetchUpdateStatus,
   fetchUpdateHistory,
   applyFullUpdate,
+  fetchUpdateRecovery,
+  fetchUpdateTransaction,
   fetchEvidenceChain,
   fetchIntentSummary,
   fetchIntentContent,
@@ -1171,6 +1187,7 @@ export type {
   UpdateStatusData,
   UpdateHistoryData,
   ApplyUpdateResultData,
+  UpdateRecoveryData,
   ApprovalRecordData,
   PrinciplesListData,
   CorePrinciplesData,

@@ -20,7 +20,7 @@ import {
   Targets,
   Timestamp,
 } from '@tufjs/models';
-import { ensurePdHomeLayout, resolvePdHomePaths, writeInstallConfig } from '../../src/update/install-layout.js';
+import { digestDirectory, ensurePdHomeLayout, resolvePdHomePaths, writeInstallConfig } from '../../src/update/install-layout.js';
 import { writeActiveRecord } from '../../src/update/transaction-journal.js';
 import { buildReleaseMetadata } from '../../src/update/release-metadata.js';
 import type { ChannelMetadata } from '../../src/update/channel-metadata.js';
@@ -103,6 +103,12 @@ export async function createShadowFixture(overrides: {
   publicationSequence?: number;
   channelVersion?: number;
   /**
+   * PRI-853: the candidate's data forward-readable window (signed into the
+   * release metadata). Defaults to 1.220.0 (inside the fixture's active
+   * 1.222.0); a later window makes the ordinary update refuse as destructive.
+   */
+  dataSchemaForwardReadableFrom?: string;
+  /**
    * PRI-698 Phase 1: platform descriptor of the CANDIDATE release asset.
    * Defaults keep the historical win32/x64/147 shape (check()-only tests do
    * not select assets); apply()-flow tests pass the CURRENT runtime values so
@@ -113,17 +119,36 @@ export async function createShadowFixture(overrides: {
    * PRI-698 Phase 1: build the release-asset tarball served as the signed
    * artifact target `releases/<releaseId>/release-asset-<platform>-<arch>.tar.gz`
    * (custom identity {releaseId, channel, platform}). The tarball's REAL
-   * sha256 is bound into the signed release metadata, so the acquisition
+   * sha256 is bound into the signed metadata, so the acquisition
    * digest cross-check passes only for exactly these bytes.
    */
   artifact?: () => Buffer;
+  /**
+   * PRI-852: when true, the signed artifact target uses the ABI-qualified
+   * name (`release-asset-<platform>-<arch>-abi<nodeAbi>.tar.gz`) — exercising
+   * the consumer's PRIMARY resolution path. Default: legacy pre-ABI name.
+   */
+  abiQualifiedArtifactTarget?: boolean;
 } = {}): Promise<Fixture> {
   const signer = makeKeyMaterial();
   const pdHome = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-shadow-home-')));
   const paths = resolvePdHomePaths(path.join(pdHome, '.pd'));
   ensurePdHomeLayout(paths);
 
-  fs.writeFileSync(paths.bootstrapManifestPath, `${JSON.stringify({ bootstrapVersion: '1.0.0', installedAt: '2026-08-25T00:00:00Z' }, null, 2)}\n`);
+  // PRI-850: a dual-slot fixture carries a REGISTERED bootstrap executor —
+  // a real tree plus a bootstrap.json whose digest re-verifies against it
+  // (the authority readiness gate re-computes the digest).
+  const executorDir = paths.bootstrapExecutorDir;
+  fs.mkdirSync(executorDir, { recursive: true });
+  fs.writeFileSync(path.join(executorDir, 'bootstrap-entry.js'), '// fixture executor entry\n', 'utf8');
+  fs.writeFileSync(
+    paths.bootstrapManifestPath,
+    `${JSON.stringify({
+      bootstrapVersion: '1.0.0',
+      installedAt: '2026-08-25T00:00:00Z',
+      executorDigest: digestDirectory(executorDir),
+    }, null, 2)}\n`,
+  );
   writeInstallConfig(paths, { channel: 'stable', autoCheck: false });
 
   // The artifact bytes must exist BEFORE the release metadata: deriveReleaseId
@@ -147,7 +172,7 @@ export async function createShadowFixture(overrides: {
       archiveSha256: artifactSha256,
       archiveSizeBytes: artifactBytes?.length ?? 1024,
     }],
-    dataSchemaForwardReadableFrom: '1.220.0',
+    dataSchemaForwardReadableFrom: overrides.dataSchemaForwardReadableFrom ?? '1.220.0',
   });
   fs.mkdirSync(path.join(paths.releasesDir, releaseMetadata.releaseId), { recursive: true });
   fs.writeFileSync(path.join(paths.releasesDir, releaseMetadata.releaseId, 'metadata.json'), `${JSON.stringify(releaseMetadata, null, 2)}\n`);
@@ -176,6 +201,16 @@ export async function createShadowFixture(overrides: {
     transactionId: 'txn-fixture-active',
     productVersion: activeRelease.productVersion,
   });
+  // PRI-853: the retention policy keeps ONE previous confirmed release — the
+  // data-compatibility preflight reads it to decide ordinary-update eligibility.
+  writeActiveRecord(paths.previousRecordPath, {
+    generation: 1,
+    releaseId: activeRelease.releaseId,
+    releaseMetadataDigest: activeRelease.metadataDigest,
+    previousReleaseId: null,
+    transactionId: 'txn-fixture-previous',
+    productVersion: activeRelease.productVersion,
+  });
 
   const channelPayload: ChannelMetadata = {
     schemaVersion: 1,
@@ -194,7 +229,9 @@ export async function createShadowFixture(overrides: {
   const channelTargetPath = 'channels/stable.json';
   // PRI-698 Phase 1: the signed artifact target (Phase 1 path convention,
   // same computation as the acquisition module).
-  const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${overrides.candidateAsset?.platform ?? 'win32'}-${overrides.candidateAsset?.arch ?? 'x64'}.tar.gz`;
+  const artifactTargetPath = overrides.abiQualifiedArtifactTarget === true
+    ? `releases/${releaseMetadata.releaseId}/release-asset-${overrides.candidateAsset?.platform ?? 'win32'}-${overrides.candidateAsset?.arch ?? 'x64'}-abi${overrides.candidateAsset?.nodeAbi ?? '147'}.tar.gz`
+    : `releases/${releaseMetadata.releaseId}/release-asset-${overrides.candidateAsset?.platform ?? 'win32'}-${overrides.candidateAsset?.arch ?? 'x64'}.tar.gz`;
   const targets = new Targets({
     version: 1,
     specVersion: '1.0.31',

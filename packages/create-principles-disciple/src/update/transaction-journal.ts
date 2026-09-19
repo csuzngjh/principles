@@ -236,6 +236,11 @@ export function readTransactionJournal(journalPath: string): readonly JournalTra
   return readJournalLines(journalPath, { recoveryAware: false }).transitions;
 }
 
+/** True when the state ends a transaction (no further transition may follow). */
+export function isTerminalTransactionState(state: TransactionState): boolean {
+  return TERMINAL_STATES.has(state);
+}
+
 /**
  * Recovery-aware journal reader (crash contract, SPEC §8).
  *

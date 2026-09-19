@@ -47,10 +47,10 @@ type TrustFetcher = NonNullable<Parameters<typeof resolveTrustedReleaseTarget>[0
 
 /** Acquisition failure with a stable reason; release-manager.ts maps it onto the ReleaseManagerError contract. */
 export class ApplyPayloadError extends Error {
-  readonly reason: 'metadata_refresh_failed' | 'release_metadata_invalid';
+  readonly reason: 'metadata_refresh_failed' | 'release_metadata_invalid' | 'runtime_not_supported';
   readonly nextAction: string;
 
-  constructor(reason: 'metadata_refresh_failed' | 'release_metadata_invalid', message: string, nextAction: string) {
+  constructor(reason: 'metadata_refresh_failed' | 'release_metadata_invalid' | 'runtime_not_supported', message: string, nextAction: string) {
     super(message);
     this.name = 'ApplyPayloadError';
     this.reason = reason;
@@ -68,27 +68,42 @@ export function selectReleaseAsset(releaseMetadata: ReleaseMetadata): ReleaseMet
   const {platform} = process;
   const {arch} = process;
   const nodeAbi = process.versions.modules;
-  const asset = releaseMetadata.assets.find((a) => a.platform === platform && a.arch === arch);
+  // PRI-852 review fix: select on the FULL triple platform+arch+ABI. A
+  // first-match on platform/arch alone would pick another runtime's asset and
+  // then fail its own ABI check — exactly the multi-ABI gap this closes.
+  const asset = releaseMetadata.assets.find((a) => a.platform === platform && a.arch === arch && a.nodeAbi === nodeAbi);
   if (asset === undefined) {
+    const platformAssets = releaseMetadata.assets.filter((a) => a.platform === platform && a.arch === arch);
+    if (platformAssets.length > 0) {
+      throw new ApplyPayloadError(
+        'runtime_not_supported',
+        `Release ${releaseMetadata.productVersion} has ${platform}/${arch} assets for Node ABI ${platformAssets.map((a) => a.nodeAbi).join(', ')}, but this runtime is ABI ${nodeAbi}.`,
+        'Current runtime is not supported by this release yet. PD has not been updated.',
+      );
+    }
     throw new ApplyPayloadError(
       'release_metadata_invalid',
       `Release ${releaseMetadata.productVersion} declares no asset for this platform (${platform}/${arch}); declared: ${releaseMetadata.assets.map((a) => `${a.platform}/${a.arch}`).join(', ') || 'none'}.`,
       'Wait for a release asset covering this platform, or update from a supported host.',
     );
   }
-  if (asset.nodeAbi !== nodeAbi) {
-    throw new ApplyPayloadError(
-      'release_metadata_invalid',
-      `Release ${releaseMetadata.productVersion} asset for ${platform}/${arch} targets node ABI ${asset.nodeAbi}, but this runtime is ABI ${nodeAbi}.`,
-      'Upgrade the bootstrap runtime first, or publish a release asset built for this node ABI.',
-    );
-  }
   return asset;
 }
 
-/** TUF target path of the release asset for THIS platform (Phase 1 convention). */
-export function releaseAssetTargetPath(releaseId: string): string {
-  return `releases/${releaseId}/release-asset-${process.platform}-${process.arch}.tar.gz`;
+/**
+ * TUF target path of the release asset for THIS platform (PRI-850/ABI
+ * convention: the Node ABI is part of the asset identity, so two runtimes on
+ * one platform never share a file name). `legacyReleaseAssetTargetPath`
+ * returns the pre-ABI name for releases published before the matrix gained
+ * the ABI axis — both names resolve only through signed targets, so the
+ * fallback is cryptographically safe.
+ */
+export function releaseAssetTargetPath(releaseId: string, asset: { platform: string; arch: string; nodeAbi: string }): string {
+  return `releases/${releaseId}/release-asset-${asset.platform}-${asset.arch}-abi${asset.nodeAbi}.tar.gz`;
+}
+
+export function legacyReleaseAssetTargetPath(releaseId: string, asset: { platform: string; arch: string }): string {
+  return `releases/${releaseId}/release-asset-${asset.platform}-${asset.arch}.tar.gz`;
 }
 
 export interface DownloadReleaseAssetOptions {
@@ -116,24 +131,38 @@ export interface DownloadedReleaseAsset {
 export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions): Promise<DownloadedReleaseAsset> {
   const { paths, metadataBaseUrl, fetcher, releaseMetadata, channel, transactionId } = options;
   const asset = selectReleaseAsset(releaseMetadata);
-  const targetPath = releaseAssetTargetPath(releaseMetadata.releaseId);
 
   let trustedTarget: TrustedReleaseTarget;
   try {
+    // ABI-suffixed name first (PRI-850 convention); the legacy pre-ABI name is
+    // the fallback for releases published before the matrix gained the ABI
+    // axis. Either way the target only resolves through the signed targets
+    // file, so the fallback cannot substitute untrusted bytes.
     trustedTarget = await resolveTrustedReleaseTarget({
       metadataDir: paths.trustDir,
       metadataBaseUrl,
-      targetPath,
+      targetPath: releaseAssetTargetPath(releaseMetadata.releaseId, asset),
       expectedChannel: channel,
       expectedPlatform: process.platform,
       fetcher,
     });
-  } catch (error) {
-    throw new ApplyPayloadError(
-      'metadata_refresh_failed',
-      `The signed artifact target for release ${releaseMetadata.releaseId} could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
-      'Verify that the release pipeline published this release asset to the signed repository, then retry.',
-    );
+  } catch (primaryError) {
+    try {
+      trustedTarget = await resolveTrustedReleaseTarget({
+        metadataDir: paths.trustDir,
+        metadataBaseUrl,
+        targetPath: legacyReleaseAssetTargetPath(releaseMetadata.releaseId, asset),
+        expectedChannel: channel,
+        expectedPlatform: process.platform,
+        fetcher,
+      });
+    } catch {
+      throw new ApplyPayloadError(
+        'metadata_refresh_failed',
+        `The signed artifact target for release ${releaseMetadata.releaseId} could not be resolved: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`,
+        'Verify that the release pipeline published this release asset to the signed repository, then retry.',
+      );
+    }
   }
   // rc-6: the TUF-signed identity and the release metadata must name the same
   // release and the same bytes — a mismatch means the channel points at
@@ -160,7 +189,7 @@ export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions)
     await downloadTrustedReleasePayload({
       metadataDir: paths.trustDir,
       metadataBaseUrl,
-      targetPath,
+      targetPath: trustedTarget.targetPath,
       destinationPath: archivePath,
       fetcher,
     });

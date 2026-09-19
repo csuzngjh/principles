@@ -1,7 +1,10 @@
 /** Console update presentation: ReleaseManager decides; Installer deploys. */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { sendSuccess, sendMethodNotAllowed, sendNotFound } from '../utils/response.js';
 import { appendUpdateHistory } from './update-history.js';
 import { readCurrentVersion, resolvePluginDir } from '../utils/installed-layout.js';
@@ -36,40 +39,152 @@ async function checkUpdate(authority: Authority, res: ServerResponse): Promise<v
   const identityDivergence = activeIdentity !== undefined && pluginVersion !== undefined && pluginVersion !== activeIdentity.productVersion
     ? { activeVersion: activeIdentity.productVersion, pluginVersion, releaseId: activeIdentity.releaseId, generation: activeIdentity.generation }
     : undefined;
+  // PRI-848 (SPEC §12.1): one explicit state per check. A policy refusal is
+  // `update_blocked` — the candidate EXISTS but a specific problem must be
+  // resolved — never "up to date".
+  const { decision } = check;
+  const state = !decision.allowed
+    ? 'update_blocked' as const
+    : decision.direction === 'reinstall' ? 'up_to_date' as const : 'update_available' as const;
   sendSuccess(res, {
-    hasUpdate: check.decision.allowed && check.decision.direction !== 'reinstall',
+    state,
+    hasUpdate: decision.allowed && decision.direction !== 'reinstall',
     currentVersion: installStatus?.productVersion ?? 'unknown',
     latestVersion: check.candidate?.productVersion ?? '',
     ...(activeIdentity !== undefined ? { versionSource: 'active-release' as const } : {}),
     ...(identityDivergence !== undefined ? { identityDivergence } : {}),
-    ...(!check.decision.allowed ? { reason: check.decision.reason, message: check.decision.message } : {}),
+    ...(!decision.allowed ? { reason: decision.reason, message: decision.message } : {}),
   });
 }
 
+/**
+ * PRI-850 (SPEC v0.3 §6.1, ADR-0024 §6): apply is carried by the deployed
+ * bootstrap EXECUTOR process, not by this Console process. The route spawns
+ * the executor detached, hands it the caller-pinned transaction id, and
+ * responds as soon as the transaction journal appears — the update then
+ * survives Console death and the page tracks it via the transaction endpoint
+ * (SPEC §12.1 continuation contract).
+ */
 async function applyFullUpdate(authority: Authority, res: ServerResponse, workspaceDir: string): Promise<void> {
-  const fromVersion = authority.installStatus?.productVersion ?? 'unknown';
-  const outcome = await authority.manager.apply({ workspaceDir });
-  if (outcome.kind === 'applied') {
+  const layout = await import('create-principles-disciple/dist/update/install-layout.js');
+  const pdHomePaths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
+  const entryPath = path.join(pdHomePaths.bootstrapExecutorDir, 'dist', 'bootstrap-entry.js');
+
+  // Readiness already re-verified the registration digest, but the route owns
+  // the spawn-level guard: no executor file → repair next action (this is the
+  // pre-PRI-850 install shape).
+  if (!fs.existsSync(entryPath)) {
     appendGovernedUpdateHistory(workspaceDir, {
-      fromVersion, toVersion: outcome.productVersion, success: true,
-      kind: 'update', authority: 'release-manager', transactionId: outcome.transactionId,
+      fromVersion: authority.installStatus?.productVersion ?? 'unknown',
+      toVersion: authority.installStatus?.productVersion ?? 'unknown',
+      success: false, kind: 'refusal', authority: 'release-manager',
+      reason: 'bootstrap_not_registered',
+      nextAction: 'Run the official installer (npx create-principles-disciple repair-update-chain) to deploy the update executor, then retry.',
     });
     sendSuccess(res, {
-      success: true,
-      message: `Updated to ${outcome.productVersion}. Transaction ${outcome.transactionId} confirmed in the journal.`,
-      newVersion: outcome.productVersion,
-      requiresRestart: true,
-      nextAction: 'Restart PD Console to run the updated build.',
-      ...(outcome.gatewayNotice ? { gatewayNotice: outcome.gatewayNotice } : {}),
+      success: false,
+      refusal: true,
+      state: 'update_blocked',
+      reason: 'bootstrap_not_registered',
+      message: 'The update executor is not deployed on this installation.',
+      requiresRestart: false,
+      nextAction: 'Run the official installer (npx create-principles-disciple repair-update-chain) to deploy the update executor, then retry.',
     });
     return;
   }
-  appendGovernedUpdateHistory(workspaceDir, {
-    fromVersion, toVersion: fromVersion, success: false, kind: 'refusal',
-    reason: outcome.note, authority: 'release-manager',
-    nextAction: 'No runtime change was made. Retry when a newer signed release is published.',
+
+  const fromVersion = authority.installStatus?.productVersion ?? 'unknown';
+  const transactionId = `update-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-'));
+  const requestFile = path.join(probeDir, 'request.json');
+  const resultFile = path.join(probeDir, 'result.json');
+  fs.writeFileSync(requestFile, `${JSON.stringify({ op: 'apply', workspaceDir, transactionId })}\n`, 'utf8');
+
+  const journalPath = path.join(pdHomePaths.transactionsDir, `${transactionId}.jsonl`);
+  let childError: Error | undefined;
+  // Literal executable + argv array, no shell (PRI-569 hardening style). The
+  // executor entry is a locally resolved file under ~/.pd/bootstrap.
+  const child = spawn('node', [entryPath, '--request-file', requestFile, '--result-file', resultFile], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
   });
-  sendSuccess(res, { success: true, message: `No update applied: ${outcome.note}`, requiresRestart: false });
+  child.on('error', (error) => { childError = error; });
+  child.unref();
+
+  // The journal is the continuation record: as soon as `planned` lands, the
+  // update is officially in flight and this response can return. The window
+  // is env-tunable so tests (and slow disks) can adjust it.
+  const acceptanceWindowRaw = Number.parseInt(process.env.PD_UPDATE_ACCEPTANCE_WINDOW_MS ?? '', 10);
+  const acceptanceWindowMs = Number.isSafeInteger(acceptanceWindowRaw) && acceptanceWindowRaw > 0 ? acceptanceWindowRaw : 20_000;
+  const journalDeadline = Date.now() + acceptanceWindowMs;
+  while (Date.now() < journalDeadline) {
+    if (childError !== undefined) break;
+    if (fs.existsSync(journalPath)) {
+      sendSuccess(res, {
+        success: true,
+        state: 'update_in_progress',
+        transactionId,
+        message: `Update transaction ${transactionId} accepted; the update keeps running even if this console stops.`,
+        requiresRestart: false,
+        nextAction: 'This page tracks the running update. Do not start another update until it finishes.',
+      });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  // No journal: either the spawn failed, or the executor refused pre-journal
+  // (e.g. a policy refusal) and wrote its structured result.
+  if (fs.existsSync(resultFile)) {
+    // rc-2: the result file is untrusted runtime data — validate field by
+    // field instead of casting the parsed shape.
+    let parsed: { ok?: boolean; reason?: string; message?: string; nextAction?: string } = {};
+    try {
+      const value: unknown = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        for (const [key, val] of Object.entries(value)) {
+          if (key === 'ok' && typeof val === 'boolean') parsed.ok = val;
+          else if (key === 'reason' && typeof val === 'string') parsed.reason = val;
+          else if (key === 'message' && typeof val === 'string') parsed.message = val;
+          else if (key === 'nextAction' && typeof val === 'string') parsed.nextAction = val;
+        }
+      }
+    } catch {
+      // keep the empty shape; the message below stays generic
+    }
+    if (parsed.ok === false) {
+      appendGovernedUpdateHistory(workspaceDir, {
+        fromVersion, toVersion: fromVersion, success: false, kind: 'refusal',
+        reason: parsed.reason ?? 'bootstrap_executor_refused', authority: 'release-manager',
+        nextAction: parsed.nextAction ?? 'No runtime change was made. Resolve the reported cause, then retry.',
+      });
+      sendSuccess(res, {
+        success: false,
+        refusal: true,
+        state: 'update_blocked',
+        reason: parsed.reason ?? 'bootstrap_executor_refused',
+        message: parsed.message ?? 'The bootstrap executor refused the update.',
+        requiresRestart: false,
+        nextAction: parsed.nextAction ?? 'No runtime change was made. Resolve the reported cause, then retry.',
+      });
+      return;
+    }
+  }
+  const reason = childError !== undefined ? 'bootstrap_executor_spawn_failed' : 'bootstrap_executor_unresponsive';
+  const detail = childError !== undefined ? childError.message : 'The executor opened no transaction within the acceptance window.';
+  appendGovernedUpdateHistory(workspaceDir, {
+    fromVersion, toVersion: fromVersion, success: false, kind: 'failure', authority: 'release-manager',
+    reason, nextAction: 'No transaction was opened. Inspect ~/.pd/logs and retry.',
+  });
+  sendSuccess(res, {
+    success: false,
+    state: 'check_failed',
+    reason,
+    message: detail,
+    requiresRestart: false,
+    nextAction: 'No transaction was opened. Inspect ~/.pd/logs and retry.',
+  });
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params -- Node request/response plus route context
@@ -112,7 +227,10 @@ export async function handleUpdateRoute(
   }
   console.error(`[update] ${subPath} refused (${failure.reason}): ${failure.message}`);
   if (subPath === '/check') {
+    // SPEC §12.1: a check that cannot complete is check_failed — it must never
+    // masquerade as "no new version" (hasUpdate:false alone would do that).
     sendSuccess(res, {
+      state: 'check_failed',
       hasUpdate: false, currentVersion: authority?.installStatus?.productVersion ?? 'unknown', latestVersion: '',
       error: failure.message, reason: failure.reason, nextAction: failure.nextAction,
     });

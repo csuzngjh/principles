@@ -5,7 +5,7 @@ import {
   ReleaseManagerError,
   type InstallStatus,
 } from './release-manager.js';
-import { InstallLayoutError, readInstallConfig, resolvePdHomePaths, type InstallConfig } from './install-layout.js';
+import { InstallLayoutError, digestDirectory, readBootstrapManifest, readInstallConfig, resolvePdHomePaths, type InstallConfig } from './install-layout.js';
 import { resolveReleaseMetadataSource, type ReleaseMetadataSource } from './release-metadata-source.js';
 
 /** The two Console update operations. */
@@ -15,6 +15,9 @@ export type ReleaseManagerAuthorityKind = (typeof RELEASE_MANAGER_AUTHORITY_KIND
 export type ReleaseManagerAuthorityReason =
   | 'metadata_source_unconfigured'
   | 'bootstrap_not_installed'
+  | 'bootstrap_not_registered'
+  | 'bootstrap_manifest_corrupt'
+  | 'bootstrap_identity_mismatch'
   | 'install_state_corrupt'
   | 'journal_not_supported';
 
@@ -110,6 +113,35 @@ export function createReleaseManagerAuthority(
   }
   if (installStatus !== null && installStatus.layout === 'none') {
     reasons.add('bootstrap_not_installed');
+  }
+  // PRI-850 (SPEC v0.3 §6.1): a served (non-legacy) installation must carry a
+  // bootstrap registration whose digest re-verifies against the deployed
+  // executor bytes. Missing / corrupt / mismatched are DISTINCT observable
+  // reasons — never collapsed into "bootstrap too old" (the policy gate owns
+  // version comparison; this gate owns existence, readability, and identity).
+  if (installStatus !== null && installStatus.layout === 'dual-slot') {
+    const pdHomePaths = resolvePdHomePaths(options.pdHome);
+    let manifest: ReturnType<typeof readBootstrapManifest>;
+    try {
+      manifest = readBootstrapManifest(pdHomePaths);
+    } catch {
+      reasons.add('bootstrap_manifest_corrupt');
+      manifest = null;
+    }
+    if (manifest === null) {
+      reasons.add('bootstrap_not_registered');
+    } else if (manifest.executorDigest === undefined) {
+      reasons.add('bootstrap_not_registered');
+    } else {
+      try {
+        const actual = digestDirectory(pdHomePaths.bootstrapExecutorDir);
+        if (actual !== manifest.executorDigest) {
+          reasons.add('bootstrap_identity_mismatch');
+        }
+      } catch {
+        reasons.add('bootstrap_identity_mismatch');
+      }
+    }
   }
   if (!probeTransactionJournalDir(options.pdHome)) {
     reasons.add('journal_not_supported');

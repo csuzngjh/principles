@@ -146,3 +146,27 @@ ADR-0023（Accepted）Decision 1 规定 `~/.pd/runtime` 是 canonical runtime，
 | D-7 | history 收敛为单一实现 | **接受**：单一 history 实现 | console 需改造（后续任务） |
 
 **措辞澄清（Owner 指示）**：ADR-0023 Decision 1 语境下的"installer 是唯一写入者"在本 ADR 中统一表述为 **"installer is the only direct artifact deployment authority"（installer 是唯一直接产物部署权威）**，为 ReleaseManager adoption 预留概念空间，避免未来冲突（见 §2.1 第 1 条）。
+
+---
+
+## 6. 增补（2026-09-19）：bootstrap 执行器作为生产更新入口
+
+| Field | Value |
+| --- | --- |
+| Status | **Accepted**（Owner 于 2026-09-19 批准更新链整改蓝图，PRI-847/850/851） |
+| Amends | §2.1（Updater 边界细化）、§2.3（与 repair 边界的关系澄清） |
+| 证据 | 2026-09-19 首次真实签名发布 + 更新链审计（docs/audit/update-chain-expert-brief-20260919.md）：bootstrap.json 全仓无写入方（PRI-850），apply 全程在 Console 进程内执行，Console 死亡即更新中断 |
+
+### 6.1 决议
+
+1. **bootstrap 执行器落地**（SPEC v0.3 §6.1）：官方安装器在 `~/.pd/bootstrap` 部署一个小型短生命周期更新执行器，复用 ReleaseManager 与既有严格 JSON 进程协议（`update/bootstrap-protocol.ts`），承载 `inspect` / `check` / `apply`。**不引入常驻更新服务，不复制更新逻辑**（D-2 journal 契约不变）。
+2. **D-1 细化**：Console 更新发起后，更新操作由执行器进程承载——Console 停止或页面断开不影响进行中的更新；重新打开页面按同一事务编号恢复展示。Console 仍是触发器与呈现层，零直接 runtime 写入。
+3. **登记与拒因**：安装器负责暂存→真实运行环境探针→锁与事务下激活→写入 `bootstrap.json`（真实执行器版本+身份摘要）→保留旧底座；登记缺失/损坏/与产物不符是三种独立拒因（`bootstrap_not_registered` / `bootstrap_manifest_corrupt` / `bootstrap_identity_mismatch`），不得折叠为"版本太旧"。
+4. **与 D-5 的边界**：恢复面（事务查询、needs_recovery 呈现）是显式操作呈现，不是自动修复；D-5"自动修复禁用"不变。
+5. **存量迁移**：进入新体系的桥梁是官方**修复安装器**（`--repair-update-chain`）：识别现有安装、保留 workspace/Owner 配置/治理数据、交付底座、补可信更新源、核验安装身份与 Console/宿主可启动；**仅修复更新能力时不得改变已安装产品版本**。Console 只在修复能力真实交付并验收后才可显示"修复更新组件"入口。
+
+### 6.2 影响
+
+- `bootstrap-protocol.ts` 从 shadow 资产转为生产入口（F3 现状更新）；apply over protocol 解除拒绝，仅限本地发起。
+- 安装器新增底座交付/探针/登记与 `--repair-update-chain` 模式（落点包仍为 `create-principles-disciple`，D-4 不变）。
+- Console 新增事务查询与恢复呈现端点；update-history 继续作为 Owner 审计流（D-7 不变）。

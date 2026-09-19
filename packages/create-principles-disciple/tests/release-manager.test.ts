@@ -169,7 +169,10 @@ describe('bootstrap protocol', () => {
   it('accepts exactly one well-formed JSON object per request', () => {
     expect(parseBootstrapRequest('{"op":"inspect"}')).toEqual({ op: 'inspect' });
     expect(parseBootstrapRequest('{"op":"check","channel":"candidate"}')).toEqual({ op: 'check', channel: 'candidate' });
-    expect(parseBootstrapRequest('{"op":"apply","releaseId":"' + 'a'.repeat(64) + '"}')).toMatchObject({ op: 'apply' });
+    // PRI-850: apply carries the deployment context (workspaceDir) and an
+    // optional caller-pinned transaction id over the wire.
+    expect(parseBootstrapRequest('{"op":"apply","workspaceDir":"D:/ws"}')).toEqual({ op: 'apply', workspaceDir: 'D:/ws' });
+    expect(parseBootstrapRequest('{"op":"apply","workspaceDir":"D:/ws","transactionId":"update-1-abcabcab"}')).toMatchObject({ op: 'apply', transactionId: 'update-1-abcabcab' });
     for (const bad of [
       '',
       '{} {}',
@@ -180,10 +183,13 @@ describe('bootstrap protocol', () => {
       '{"op":"restart"}',
       '{"op":"check"}',
       '{"op":"check","channel":"beta"}',
-      '{"op":"apply","releaseId":""}',
+      '{"op":"apply","releaseId":"a"}',
+      '{"op":"apply"}',
+      '{"op":"apply","workspaceDir":""}',
+      '{"op":"apply","workspaceDir":"D:/ws","transactionId":"nope"}',
       '{"op":"inspect","extra":1}',
       '{"op":"check","channel":"stable","extra":1}',
-      '{"op":"apply","releaseId":"abc","extra":1}',
+      '{"op":"apply","workspaceDir":"D:/ws","extra":1}',
     ]) {
       let captured: unknown;
       try {
@@ -214,13 +220,13 @@ describe('bootstrap protocol', () => {
     const inspect = await handleBootstrapRequest({ op: 'inspect' }, manager);
     expect(inspect).toMatchObject({ ok: true, result: { layout: 'none' } });
 
-    const apply = await handleBootstrapRequest({ op: 'apply', releaseId: 'a'.repeat(64) }, manager);
-    // PRI-698 Phase 1: apply() needs a deployment context the bootstrap wire
-    // contract does not carry — a structured protocol refusal, same shape as
-    // any manager refusal (rc-9).
+    // PRI-850: apply over the protocol is now the production path — it calls
+    // ReleaseManager.apply with the carried deployment context. On an empty
+    // layout the manager refuses with its own stable reason (rc-9).
+    const apply = await handleBootstrapRequest({ op: 'apply', workspaceDir: pdHome }, manager);
     expect(apply).toMatchObject({
       ok: false,
-      reason: 'apply_not_supported_over_bootstrap_protocol',
+      reason: 'bootstrap_not_installed',
     });
     if (!apply.ok) {
       expect(apply.nextAction.length).toBeGreaterThan(10);

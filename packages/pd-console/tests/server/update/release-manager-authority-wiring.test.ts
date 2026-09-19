@@ -6,10 +6,25 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ReleaseManagerError } from 'create-principles-disciple/dist/update/release-manager.js';
 
-const mocks = vi.hoisted(() => ({ create: vi.fn(), check: vi.fn(), apply: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  create: vi.fn(),
+  check: vi.fn(),
+  apply: vi.fn(),
+  spawn: vi.fn(),
+  // Assigned in beforeEach — vi.hoisted runs before imports initialize.
+  fakeHome: '',
+}));
 vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', async (original) => ({
   ...await original<typeof import('create-principles-disciple/dist/update/release-manager-authority.js')>(),
   createReleaseManagerAuthority: mocks.create,
+}));
+vi.mock('node:os', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:os')>(),
+  homedir: () => mocks.fakeHome,
+}));
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:child_process')>(),
+  spawn: (...spawnArgs: unknown[]) => mocks.spawn(...spawnArgs),
 }));
 import { handleUpdateRoute } from '../../../src/server/routes/update.js';
 
@@ -20,6 +35,7 @@ describe('sole ReleaseManager production update handler', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retired-update-'));
+    mocks.fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retired-home-'));
     mocks.create.mockReturnValue({
       installStatus: { channel: 'stable', productVersion: '1.2.0' },
       kinds: { check: { ready: true, reasons: [] }, 'apply-full': { ready: true, reasons: [] } },
@@ -49,25 +65,42 @@ describe('sole ReleaseManager production update handler', () => {
     expect((await fetch(base + subPath, { method: 'POST' })).status).toBe(404);
     expect(mocks.create).not.toHaveBeenCalled();
   });
-  it('applies only through ReleaseManager and persists its authority and gateway notice', async () => {
+  it('apply-full delegates to the deployed bootstrap executor and never applies in-process', async () => {
+    // PRI-850: the route spawns the deployed executor entry; the Console
+    // process itself never calls manager.apply (ADR-0024 §6).
+    const executorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-executor-wire-'));
+    fs.mkdirSync(path.join(executorHome, '.pd', 'bootstrap', 'executor', 'dist'), { recursive: true });
+    const entryPath = path.join(executorHome, '.pd', 'bootstrap', 'executor', 'dist', 'bootstrap-entry.js');
+    fs.writeFileSync(entryPath, '// executor entry\n', 'utf8');
+    mocks.fakeHome = executorHome;
+    // The executor mock opens no journal → shorten the route's acceptance
+    // window so the unresponsive path resolves inside the test timeout.
+    process.env.PD_UPDATE_ACCEPTANCE_WINDOW_MS = '400';
+    let spawnArgv: readonly string[] | null = null;
+    mocks.spawn.mockImplementation((_executable: string, argv: string[]) => {
+      spawnArgv = argv;
+      return { on: vi.fn(), unref: vi.fn() };
+    });
     const response = await fetch(`${base}/apply-full`, { method: 'POST' });
-    expect(await response.json()).toMatchObject({ data: { success: true, newVersion: '1.3.0', requiresRestart: true, gatewayNotice: 'Restart gateway manually.' } });
-    expect(mocks.apply).toHaveBeenCalledExactlyOnceWith({ workspaceDir: home });
-    expect(JSON.parse(fs.readFileSync(path.join(home, '.pd', 'update-history.json'), 'utf8'))).toMatchObject([{ authority: 'release-manager', transactionId: 'tx-1', success: true }]);
+    const body = await response.json();
+    // The executor writes no journal in this mock → the route reports the
+    // acceptance timeout, which still proves delegation happened (and that
+    // manager.apply did not).
+    expect(body.data).toMatchObject({ success: false, reason: 'bootstrap_executor_unresponsive' });
+    expect(spawnArgv).not.toBeNull();
+    expect(spawnArgv?.[0]).toBe(entryPath);
+    expect(spawnArgv).toContain('--request-file');
+    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(response.headers.get('x-pd-mutation-authority')).toBe('release-manager');
+    delete process.env.PD_UPDATE_ACCEPTANCE_WINDOW_MS;
   });
-  it('refuses pretransaction failure with nextAction and no history mutation', async () => {
-    mocks.apply.mockRejectedValue(new ReleaseManagerError('metadata_refresh_failed', 'Trust refused', 'Repair trust metadata.'));
+  it('refuses apply with a repair next action when no executor is deployed', async () => {
     const response = await fetch(`${base}/apply-full`, { method: 'POST' });
-    expect(await response.json()).toMatchObject({ data: { success: false, reason: 'metadata_refresh_failed', nextAction: 'Repair trust metadata.', requiresRestart: false } });
-    expect(mocks.apply).toHaveBeenCalledTimes(1);
-    expect(fs.readdirSync(home)).toEqual([]);
-  });
-  it('records terminal failures under ReleaseManager without another apply', async () => {
-    mocks.apply.mockRejectedValue(new ReleaseManagerError('apply_failed', 'Installer restored prior runtime', 'Inspect transaction journal.', true));
-    const response = await fetch(`${base}/apply-full`, { method: 'POST' });
-    expect(await response.json()).toMatchObject({ data: { success: false, reason: 'apply_failed', nextAction: 'Inspect transaction journal.', requiresRestart: false } });
-    expect(mocks.apply).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(fs.readFileSync(path.join(home, '.pd', 'update-history.json'), 'utf8'))).toMatchObject([{ authority: 'release-manager', kind: 'failure', success: false }]);
+    expect(await response.json()).toMatchObject({
+      data: { success: false, refusal: true, state: 'update_blocked', reason: 'bootstrap_not_registered', requiresRestart: false },
+    });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.apply).not.toHaveBeenCalled();
   });
   it('degraded checks preserve the Companion envelope and expose failure', async () => {
     mocks.check.mockRejectedValue(new ReleaseManagerError('metadata_refresh_failed', 'Trust refused', 'Repair trust metadata.'));
