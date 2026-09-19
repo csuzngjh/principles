@@ -73,10 +73,12 @@ on:
           - publish
       product_version:
         description: >-
-          Product version to publish ("auto" = the ref''s create-principles-disciple/package.json
-          version — NEVER an npm registry lookup, PRI-849/SPEC v0.3 §12). Identity = this
-          resolved version + HEAD commit (format-validated, verified against each asset''s
-          embedded stamp at assembly). An EXPLICIT version must match the ref''s
+          Product version to publish ("auto" = the shared product identity
+          resolver scripts/resolve-product-version.mjs over the ref''s ROOT
+          manifest — NEVER an npm registry lookup; PRI-849/853, SPEC v0.3 §12).
+          Identity = this resolved version + HEAD commit (format-validated,
+          verified against each asset''s embedded stamp at assembly). An
+          EXPLICIT version must match the ref''s
           create-principles-disciple/package.json unless allow_version_drift is set.
         required: false
         default: 'auto'
