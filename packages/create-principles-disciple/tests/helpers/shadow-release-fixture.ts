@@ -20,7 +20,7 @@ import {
   Targets,
   Timestamp,
 } from '@tufjs/models';
-import { ensurePdHomeLayout, resolvePdHomePaths, writeInstallConfig } from '../../src/update/install-layout.js';
+import { digestDirectory, ensurePdHomeLayout, resolvePdHomePaths, writeInstallConfig } from '../../src/update/install-layout.js';
 import { writeActiveRecord } from '../../src/update/transaction-journal.js';
 import { buildReleaseMetadata } from '../../src/update/release-metadata.js';
 import type { ChannelMetadata } from '../../src/update/channel-metadata.js';
@@ -123,7 +123,20 @@ export async function createShadowFixture(overrides: {
   const paths = resolvePdHomePaths(path.join(pdHome, '.pd'));
   ensurePdHomeLayout(paths);
 
-  fs.writeFileSync(paths.bootstrapManifestPath, `${JSON.stringify({ bootstrapVersion: '1.0.0', installedAt: '2026-08-25T00:00:00Z' }, null, 2)}\n`);
+  // PRI-850: a dual-slot fixture carries a REGISTERED bootstrap executor —
+  // a real tree plus a bootstrap.json whose digest re-verifies against it
+  // (the authority readiness gate re-computes the digest).
+  const executorDir = paths.bootstrapExecutorDir;
+  fs.mkdirSync(executorDir, { recursive: true });
+  fs.writeFileSync(path.join(executorDir, 'bootstrap-entry.js'), '// fixture executor entry\n', 'utf8');
+  fs.writeFileSync(
+    paths.bootstrapManifestPath,
+    `${JSON.stringify({
+      bootstrapVersion: '1.0.0',
+      installedAt: '2026-08-25T00:00:00Z',
+      executorDigest: digestDirectory(executorDir),
+    }, null, 2)}\n`,
+  );
   writeInstallConfig(paths, { channel: 'stable', autoCheck: false });
 
   // The artifact bytes must exist BEFORE the release metadata: deriveReleaseId

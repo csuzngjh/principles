@@ -107,6 +107,13 @@ export interface ApplyOptions {
   readonly language?: Language;
   /** Host installers to run; defaults to 'openclaw' (matches the prior full-update sync). */
   readonly host?: HostTarget;
+  /**
+   * PRI-850 (SPEC §6.1/§12.1): caller-generated transaction id so the bootstrap
+   * executor's initiator can query the journal while the executor keeps running
+   * detached. Must match the journal id shape when present; otherwise the
+   * manager generates one as before.
+   */
+  readonly transactionId?: string;
 }
 
 export type ApplyOutcome =
@@ -357,7 +364,15 @@ export class ReleaseManager {
       return { kind: 'no_update', reason: decision.reason, note: decision.message };
     }
 
-    const transactionId = `update-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    // PRI-850: honor a caller-generated transaction id (bootstrap executor
+    // flow — the initiator must be able to query the journal while the
+    // executor keeps running detached). Same strict shape as the generated
+    // ids; anything malformed falls back to a generated id (never a guessed
+    // journal file name).
+    const callerTransactionId = options.transactionId;
+    const transactionId = callerTransactionId !== undefined && /^update-[0-9]+-[a-z0-9]{8}$/.test(callerTransactionId)
+      ? callerTransactionId
+      : `update-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const journalPath = path.join(this.paths.transactionsDir, `${transactionId}.jsonl`);
     const journal: InstallerJournal = {
       transactionId,

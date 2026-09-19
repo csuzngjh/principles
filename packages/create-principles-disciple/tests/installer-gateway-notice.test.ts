@@ -180,7 +180,11 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
-      if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
+      // PRI-850: the bootstrap executor probe reads install.json through the
+      // strict reader — a valid record keeps the probe path realistic.
+      if (filePath.endsWith('install.json')) {
+        return JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['openclaw'], workspaces: [], channel: 'stable', autoCheck: false });
+      }
       // The generated config is read back on the success path
       // (readEnabledChannelsFromConfigYaml): a minimal valid sparse config.
       if (filePath.endsWith('config.yaml')) return 'features: {}\n';
@@ -228,6 +232,7 @@ describe('install() — gateway restart failure rides the success result (PRI-72
 
     // §8 critical semantics: the payload committed — a degraded SUCCESS,
     // never a failure, never a rollback trigger.
+    // (60s: PRI-850 bootstrap delivery copies the dependency closure.)
     expect(result.success).toBe(true);
     expect(result.gatewayNotice).toBeDefined();
     // Review round: anchor on the i18n copy itself, not a substring the
@@ -236,7 +241,7 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     expect(result.gatewayNotice!.startsWith(t('gateway_restart_failed'))).toBe(true);
     expect(result.gatewayNotice).toContain('spawn openclaw ENOENT');
     expect(restartOpenClawGateway).toHaveBeenCalledTimes(1);
-  });
+  }, 60_000);
 
   it('update commits, gateway restart succeeds → no gatewayNotice (no fake warning)', { timeout: 60_000 }, async () => {
     vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: true });

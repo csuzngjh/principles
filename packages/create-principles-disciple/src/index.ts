@@ -497,6 +497,33 @@ program
     await showStatus(options);
   });
 
+// PRI-850 (SPEC v0.3 §6.1, ADR-0024 §6): the official repair path for
+// installations whose update chain is broken or pre-bootstrap. Deploys the
+// bootstrap update executor and registers the release metadata source; NEVER
+// deploys a product release or changes the installed product version.
+program
+  .command('repair-update-chain')
+  .description('Repair the self-update capability (bootstrap executor + update source) without touching the installed product')
+  .option('--json', 'Output result as JSON', false)
+  .action(async (options) => {
+    const { repairUpdateChain } = await import('./installer.js');
+    const result = await repairUpdateChain({
+      sourcePackageDir: path.resolve(url.fileURLToPath(import.meta.url), '../..'),
+    });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      for (const note of result.notes) console.log(`- ${note}`);
+      if (result.success) {
+        console.log(`Repair complete: bootstrap ${result.bootstrap?.bootstrapVersion ?? 'n/a'} deployed.`);
+        if (result.needsFullInstall) console.log('This installation still needs one full official install to deploy a product release.');
+      } else {
+        console.error(`Repair failed: ${result.error ?? 'unknown error'}`);
+      }
+    }
+    if (!result.success) process.exitCode = 1;
+  });
+
 // cli-7: only wire the process handler and parse argv when this module is the
 // CLI entry point — NOT when imported by tests (which inspect `program` opts
 // directly). Without this guard, importing index.js would run the installer.

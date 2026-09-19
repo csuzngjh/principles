@@ -1,6 +1,7 @@
-import { existsSync, lstatSync, readdirSync, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent, type Stats } from 'fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent, type Stats } from 'fs';
+import { tmpdir } from 'os';
 import { createHash, randomUUID } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as http from 'http';
@@ -48,7 +49,11 @@ import {
 } from './update/release-asset-manifest.js';
 import { parseEmbeddedProductIdentity, ProductIdentityError } from './update/product-identity.js';
 import {
+  digestDirectory,
+  ensurePdHomeLayout,
   mergeIntoInstallJson,
+  readBootstrapManifest,
+  readInstallConfig,
   readInstallJsonRecord,
   resolvePdHomePaths,
 } from './update/install-layout.js';
@@ -351,6 +356,247 @@ export function persistReleaseMetadataSource(): void {
     return;
   }
   mergeIntoInstallJson(getInstallManifestPath(), { releaseMetadataUrl: normalized });
+}
+
+/**
+ * PRI-850 (SPEC v0.3 §6.1, ADR-0024 §6): stage, probe, and register the
+ * bootstrap update executor under `~/.pd/bootstrap/`.
+ *
+ * The executor is the installer's own compiled package (dist + package.json) —
+ * self-contained ESM, no runtime dependency resolution on the Owner machine.
+ * Delivery order: stage → probe the staged bytes through the strict JSON
+ * protocol → activate by rename-swap → register in bootstrap.json with a
+ * digest of the deployed tree. The previous executor is kept until the new
+ * registration is written, then removed.
+ */
+export interface BootstrapDeliveryResult {
+  readonly bootstrapVersion: string;
+  readonly executorDigest: string;
+  readonly executorDir: string;
+}
+
+/**
+ * PRI-850: the staged executor must be SELF-CONTAINED — the Owner machine
+ * performs no dependency resolution (SPEC §7). This walks the installer
+ * package's declared dependency closure, resolves each package root the same
+ * way Node would from the installer package, and copies the real files into
+ * the staged tree's node_modules (dereferencing workspace symlinks).
+ */
+function copyExecutorDependencyClosure(sourcePackageDir: string, stagingDir: string): void {
+  const stagedModulesDir = path.join(stagingDir, 'node_modules');
+  const manifest = JSON.parse(readFileSync(path.join(sourcePackageDir, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
+  const seen = new Set<string>();
+  // Each queued dependency resolves from the package that DECLARES it —
+  // nested/deduped layouts mean chownr resolves from tar, not from the
+  // installer package root. The directory walk mirrors Node's own
+  // node_modules resolution, so no exports-map cooperation is required.
+  const queue: Array<{ name: string; fromDir: string }> = Object.keys(manifest.dependencies ?? {}).map((name) => ({ name, fromDir: sourcePackageDir }));
+  while (queue.length > 0) {
+    const item = queue.shift() as { name: string; fromDir: string };
+    if (seen.has(item.name)) continue;
+    seen.add(item.name);
+    const packageRoot = resolvePackageDir(item.name, item.fromDir);
+    cpSync(packageRoot, path.join(stagedModulesDir, item.name), { recursive: true, dereference: true });
+    const dependencyManifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
+    for (const dependencyName of Object.keys(dependencyManifest.dependencies ?? {})) {
+      if (!seen.has(dependencyName)) queue.push({ name: dependencyName, fromDir: packageRoot });
+    }
+  }
+}
+
+/** Walks node_modules directories upward from fromDir, mirroring Node module resolution. */
+function resolvePackageDir(name: string, fromDir: string): string {
+  const segments = name.split('/');
+  let dir = fromDir;
+  for (;;) {
+    const candidate = path.join(dir, 'node_modules', ...segments);
+    if (existsSync(path.join(candidate, 'package.json'))) {
+      return candidate;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`could not locate the package root of dependency "${name}" for the bootstrap executor bundle`);
+}
+
+export async function deliverBootstrapExecutor(input: {
+  pdHome: string;
+  /** The installer package's own root (contains dist/ and package.json). */
+  sourcePackageDir: string;
+}): Promise<BootstrapDeliveryResult> {
+  const paths = resolvePdHomePaths(input.pdHome);
+  const stagingDir = path.join(paths.bootstrapDir, 'executor.staging');
+  const previousDir = path.join(paths.bootstrapDir, 'executor.previous');
+
+  // Same-version fast path: the bootstrap is STABLE by design (SPEC §6.1) —
+  // re-staging the dependency closure on every reinstall would cost seconds
+  // for zero capability change. Only a version change (or missing/corrupt
+  // state) re-runs the full delivery.
+  try {
+    const existing = readBootstrapManifest(paths);
+    const packageManifest = JSON.parse(readFileSync(path.join(input.sourcePackageDir, 'package.json'), 'utf8')) as { version?: unknown };
+    const currentVersion = typeof packageManifest.version === 'string' && packageManifest.version.length > 0 ? packageManifest.version : '0.0.0';
+    if (existing !== null && existing.bootstrapVersion === currentVersion && existing.executorDigest !== undefined && existsSync(paths.bootstrapExecutorDir)) {
+      logger.info(`Bootstrap update executor already at ${currentVersion} — skipping re-delivery.`);
+      return { bootstrapVersion: existing.bootstrapVersion, executorDigest: existing.executorDigest, executorDir: paths.bootstrapExecutorDir };
+    }
+  } catch {
+    // Corrupt registration falls through to full re-delivery (which rewrites it).
+  }
+
+  rmSync(stagingDir, { recursive: true, force: true });
+  mkdirSync(stagingDir, { recursive: true });
+  cpSync(path.join(input.sourcePackageDir, 'dist'), path.join(stagingDir, 'dist'), { recursive: true });
+  copyFileSync(path.join(input.sourcePackageDir, 'package.json'), path.join(stagingDir, 'package.json'));
+  copyExecutorDependencyClosure(input.sourcePackageDir, stagingDir);
+
+  const packageManifest = JSON.parse(readFileSync(path.join(input.sourcePackageDir, 'package.json'), 'utf8')) as { version?: unknown };
+  const bootstrapVersion = typeof packageManifest.version === 'string' && packageManifest.version.length > 0 ? packageManifest.version : '0.0.0';
+
+  // Probe: import the STAGED executor module and run one `inspect` round-trip
+  // through the strict JSON protocol. This proves the staged bytes parse, the
+  // module graph resolves from the staged layout, and the protocol answers —
+  // before anything is activated. (The executor's detached process startup
+  // happens on first use; a broken entry there fails loud with spawn detail.)
+  try {
+    const executorModuleUrl = pathToFileURL(path.join(stagingDir, 'dist', 'update', 'bootstrap-executor.js')).href;
+    const staged = await import(executorModuleUrl) as {
+      runBootstrapExecutor: (options: { rawRequest: string; resultFile?: string }) => Promise<{ response: { ok: boolean } }>;
+    };
+    const probeDir = mkdtempSync(path.join(tmpdir(), 'pd-bootstrap-probe-'));
+    try {
+      const resultFile = path.join(probeDir, 'result.json');
+      const probe = await staged.runBootstrapExecutor({ rawRequest: `${JSON.stringify({ op: 'inspect' })}\n`, resultFile });
+      if (!probe.response.ok) {
+        throw new Error(`probe response not ok: ${readFileSync(resultFile, 'utf8').slice(0, 200)}`);
+      }
+      if (!existsSync(resultFile)) {
+        throw new Error('probe produced no result file');
+      }
+    } finally {
+      rmSync(probeDir, { recursive: true, force: true });
+    }
+  } catch (probeError) {
+    rmSync(stagingDir, { recursive: true, force: true });
+    const detail = probeError instanceof Error ? probeError.message : String(probeError);
+    throw new Error(`bootstrap executor probe failed: ${detail}`);
+  }
+
+  const executorDigest = digestDirectory(stagingDir);
+
+  // Activate by rename-swap; the previous executor survives until the new
+  // registration is on disk (a crash between the two steps leaves
+  // executor.previous recoverable by the installer).
+  rmSync(previousDir, { recursive: true, force: true });
+  if (existsSync(paths.bootstrapExecutorDir)) {
+    renameSync(paths.bootstrapExecutorDir, previousDir);
+  }
+  renameSync(stagingDir, paths.bootstrapExecutorDir);
+  const registration = {
+    schemaVersion: 1,
+    bootstrapVersion,
+    executorDigest,
+    installedAt: new Date().toISOString(),
+  };
+  writeFileSync(paths.bootstrapManifestPath, `${JSON.stringify(registration, null, 2)}\n`, 'utf8');
+  rmSync(previousDir, { recursive: true, force: true });
+  logger.info(`Bootstrap update executor deployed: version=${bootstrapVersion} digest=${executorDigest.slice(0, 12)}`);
+  return { bootstrapVersion, executorDigest, executorDir: paths.bootstrapExecutorDir };
+}
+
+/**
+ * PRI-850: the official repair path for installations whose update chain is
+ * broken or pre-bootstrap (ADR-0024 §6.5). It NEVER deploys a product release
+ * and NEVER touches active.json — the installed product version is not this
+ * command's authority. It repairs the update capability itself: bootstrap
+ * delivery + update-source registration + install-state report.
+ */
+export interface RepairUpdateChainResult {
+  readonly success: boolean;
+  readonly installedProductVersion: string | null;
+  readonly bootstrap: BootstrapDeliveryResult | null;
+  readonly metadataSourceRegistered: boolean;
+  readonly needsFullInstall: boolean;
+  readonly notes: readonly string[];
+  readonly error?: string;
+}
+
+export async function repairUpdateChain(input: { sourcePackageDir: string }): Promise<RepairUpdateChainResult> {
+  const notes: string[] = [];
+  const pdHome = getPdDir();
+  ensurePdHomeLayout(resolvePdHomePaths(pdHome));
+
+  // Install identity report: never guessed. A corrupt/absent active.json marks
+  // a historical install that needs the full installer (migration); the
+  // product version stays whatever it verifiably was.
+  let installedProductVersion: string | null = null;
+  let needsFullInstall = false;
+  const activePath = resolvePdHomePaths(pdHome).activeRecordPath;
+  try {
+    const active = readActiveRecord(activePath);
+    if (active === null) {
+      needsFullInstall = true;
+      notes.push('No active release record found — treating this as a historical install that needs the full official installer for product deployment.');
+    } else {
+      installedProductVersion = active.productVersion;
+      notes.push(`Verified active release record: productVersion=${active.productVersion} generation=${String(active.generation)}.`);
+    }
+  } catch (error) {
+    needsFullInstall = true;
+    notes.push(`Active release record unreadable (${error instanceof Error ? error.message : String(error)}) — needs the full official installer.`);
+  }
+
+  // Bootstrap delivery: the core of the repair.
+  let bootstrap: BootstrapDeliveryResult;
+  try {
+    bootstrap = await deliverBootstrapExecutor({ pdHome, sourcePackageDir: input.sourcePackageDir });
+  } catch (error) {
+    return {
+      success: false,
+      installedProductVersion,
+      bootstrap: null,
+      metadataSourceRegistered: false,
+      needsFullInstall,
+      notes,
+      error: `bootstrap delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  // Update-source registration: env-gated (absent env stays unconfigured —
+  // never a guessed URL, PRI-709).
+  const metadataUrlBefore = readInstallConfigSafeReleaseMetadataUrl(pdHome);
+  persistReleaseMetadataSource();
+  const metadataSourceRegistered = readInstallConfigSafeReleaseMetadataUrl(pdHome) !== undefined;
+  if (metadataSourceRegistered && metadataUrlBefore === undefined) {
+    notes.push('Release metadata source registered into install.json (durable tier).');
+  } else if (!metadataSourceRegistered) {
+    notes.push(`No ${RELEASE_METADATA_URL_ENV} in the environment — the release metadata source stays unconfigured. Re-run with the variable set to register it.`);
+  }
+
+  // Trust root: report-only in repair mode. First provisioning happens with a
+  // real payload transaction (the repair deploys no payload).
+  const trustRootPath = path.join(pdHome, 'trust', 'root.json');
+  notes.push(existsSync(trustRootPath)
+    ? 'Release trust root already pinned.'
+    : 'No release trust root pinned — the full official installer will provision it from the payload.');
+
+  return {
+    success: true,
+    installedProductVersion,
+    bootstrap,
+    metadataSourceRegistered,
+    needsFullInstall,
+    notes,
+  };
+}
+
+function readInstallConfigSafeReleaseMetadataUrl(pdHome: string): string | undefined {
+  try {
+    return readInstallConfig(resolvePdHomePaths(pdHome)).releaseMetadataUrl;
+  } catch {
+    return undefined;
+  }
 }
 
 function installBundledLayoutPackage(pluginDir: string): void {
@@ -3291,6 +3537,28 @@ export async function install(
       }
       throw error;
     }
+    // PRI-850 (SPEC v0.3 §6.1, ADR-0024 §6): deliver the bootstrap update
+    // executor in the same installer transaction — stage from this package,
+    // probe the staged bytes through the strict JSON protocol, activate by
+    // rename-swap, and register with a re-verifiable digest. Delivery failure
+    // is a DEGRADED install (the product payload itself is unaffected): it is
+    // logged, journaled, and later surfaces observably as
+    // `bootstrap_not_registered` on update checks, with repair-update-chain
+    // as the recovery path — it never bricks the product install.
+    try {
+      await deliverBootstrapExecutor({
+        pdHome: getPdDir(),
+        // This compiled installer's own package root (dist/installer.js → ..).
+        sourcePackageDir: path.resolve(fileURLToPath(import.meta.url), '../..'),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      logger.warn(`Bootstrap update executor delivery failed — updates will refuse with bootstrap_not_registered until repaired: ${detail}`);
+      if (journal.lastState !== null) {
+        journalInstallerTransitionDegrading(journal, journal.lastState, journal.lastState, `bootstrap executor delivery failed: ${detail}`);
+      }
+    }
+
     // ADR-0024 D-2: host installers completed and the install manifest is
     // written — the new installation is fully activated (backups not yet
     // discarded, so a crash here still recovers via the backup).

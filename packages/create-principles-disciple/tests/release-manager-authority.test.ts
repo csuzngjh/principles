@@ -59,7 +59,9 @@ describe('ReleaseManager authority readiness', () => {
       openclawHome: path.join(home, 'no-openclaw'),
     });
     expect(authority.installStatus).toMatchObject({ layout: 'dual-slot' });
-    expect(authority.kinds.check.reasons).toEqual(['metadata_source_unconfigured']);
+    // PRI-850: a dual-slot skeleton without a bootstrap registration now also
+    // reports bootstrap_not_registered (distinct from "too old" — SPEC v0.3 §6.1).
+    expect(authority.kinds.check.reasons).toEqual(['metadata_source_unconfigured', 'bootstrap_not_registered']);
   });
 
   it('a dual-slot fixture is check- and apply-full-ready once a metadata source exists', async () => {

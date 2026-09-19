@@ -11,12 +11,16 @@ const mocks = vi.hoisted(() => ({
   fakeHome: '',
   create: vi.fn(),
   check: vi.fn(),
-  apply: vi.fn(),
   readCurrentVersion: vi.fn(),
+  spawn: vi.fn(),
 }));
 vi.mock('node:os', async (importOriginal) => ({
   ...await importOriginal<typeof import('node:os')>(),
   homedir: () => mocks.fakeHome,
+}));
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:child_process')>(),
+  spawn: (...spawnArgs: unknown[]) => mocks.spawn(...spawnArgs),
 }));
 vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', async (original) => ({
   ...await original<typeof import('create-principles-disciple/dist/update/release-manager-authority.js')>(),
@@ -54,9 +58,9 @@ describe('PRI-848 update state contract', () => {
     mocks.fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-update-state-home-'));
     mocks.readCurrentVersion.mockReturnValue(undefined);
     mocks.create.mockReturnValue({
-      installStatus: { channel: 'stable', productVersion: '1.2.0', releaseId: 'rel-42', generation: 7 },
+      installStatus: { channel: 'stable', productVersion: '1.2.0', releaseId: 'rel-42', generation: 7, layout: 'dual-slot' },
       kinds: { check: { ready: true, reasons: [] }, 'apply-full': { ready: true, reasons: [] } },
-      manager: { check: mocks.check, apply: mocks.apply },
+      manager: { check: mocks.check },
     });
     mocks.check.mockResolvedValue({
       candidate: { productVersion: '1.3.0' },
@@ -124,40 +128,49 @@ describe('PRI-848 update state contract', () => {
     expect(body.data.nextAction).toBeTruthy();
   });
 
-  it('apply-full policy refusal → structured non-success (refusal), not success-shaped', async () => {
-    mocks.apply.mockResolvedValue({
-      kind: 'no_update',
-      reason: 'bootstrap_too_old',
-      note: 'Release 1.3.0 requires bootstrap >= 1.0.0; installed bootstrap is 0.0.0.',
-    });
+  it('apply-full without a deployed executor → bootstrap_not_registered refusal', async () => {
     const body = await (await fetch(`${base}/apply-full`, { method: 'POST' })).json();
     expect(body.data).toMatchObject({
       success: false,
       refusal: true,
       state: 'update_blocked',
-      reason: 'bootstrap_too_old',
+      reason: 'bootstrap_not_registered',
     });
-    // D-7 audit trail: the refusal records the STRUCTURED reason code.
-    const history = JSON.parse(fs.readFileSync(path.join(home, '.pd', 'update-history.json'), 'utf8')) as Array<{ kind: string; reason: string }>;
-    expect(history.some((entry) => entry.kind === 'refusal' && entry.reason === 'bootstrap_too_old')).toBe(true);
+    expect(body.data.nextAction).toContain('repair-update-chain');
   });
 
-  it('apply-full applied → awaiting_restart with the queryable transaction id', async () => {
-    mocks.apply.mockResolvedValue({
-      kind: 'applied',
-      productVersion: '1.3.0',
-      transactionId: 'update-1789-abcdef01',
-      journalPath: path.join(home, 'transactions', 'update-1789-abcdef01.jsonl'),
-      gatewayNotice: undefined,
+  it('apply-full spawns the executor and returns update_in_progress once the journal opens', async () => {
+    // Deployed executor entry (the only file the route spawn-guards on).
+    const entryDir = path.join(mocks.fakeHome, '.pd', 'bootstrap', 'executor', 'dist');
+    fs.mkdirSync(entryDir, { recursive: true });
+    const entryPath = path.join(entryDir, 'bootstrap-entry.js');
+    fs.writeFileSync(entryPath, '// executor entry\n', 'utf8');
+
+    // The spawn mock reads the request file it was handed, then opens the
+    // journal the route is polling for — simulating the executor reaching its
+    // `planned` state.
+    mocks.spawn.mockImplementation((_executable: string, argv: string[]) => {
+      const requestFile = argv[argv.indexOf('--request-file') + 1] as string;
+      const request = JSON.parse(fs.readFileSync(requestFile, 'utf8')) as { transactionId: string };
+      setTimeout(() => {
+        writeJournal(mocks.fakeHome, request.transactionId, [
+          { at: '2026-09-19T00:00:00.000Z', from: null, to: 'planned', transactionId: request.transactionId, releaseId: 'rel-43', productVersion: '1.3.0', generation: 8 },
+        ]);
+      }, 120);
+      return {
+        on: vi.fn(),
+        unref: vi.fn(),
+      };
     });
+
     const body = await (await fetch(`${base}/apply-full`, { method: 'POST' })).json();
     expect(body.data).toMatchObject({
       success: true,
-      state: 'awaiting_restart',
-      transactionId: 'update-1789-abcdef01',
-      newVersion: '1.3.0',
-      requiresRestart: true,
+      state: 'update_in_progress',
+      requiresRestart: false,
     });
+    expect(body.data.transactionId).toMatch(/^update-\d+-[a-z0-9]{8}$/);
+    expect(mocks.spawn).toHaveBeenCalledTimes(1);
   });
 
   it('transaction endpoint replays journal phases; unknown id reports missing', async () => {

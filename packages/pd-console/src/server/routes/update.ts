@@ -1,7 +1,10 @@
 /** Console update presentation: ReleaseManager decides; Installer deploys. */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { sendSuccess, sendMethodNotAllowed, sendNotFound } from '../utils/response.js';
 import { appendUpdateHistory } from './update-history.js';
 import { readCurrentVersion, resolvePluginDir } from '../utils/installed-layout.js';
@@ -54,44 +57,123 @@ async function checkUpdate(authority: Authority, res: ServerResponse): Promise<v
   });
 }
 
+/**
+ * PRI-850 (SPEC v0.3 §6.1, ADR-0024 §6): apply is carried by the deployed
+ * bootstrap EXECUTOR process, not by this Console process. The route spawns
+ * the executor detached, hands it the caller-pinned transaction id, and
+ * responds as soon as the transaction journal appears — the update then
+ * survives Console death and the page tracks it via the transaction endpoint
+ * (SPEC §12.1 continuation contract).
+ */
 async function applyFullUpdate(authority: Authority, res: ServerResponse, workspaceDir: string): Promise<void> {
-  const fromVersion = authority.installStatus?.productVersion ?? 'unknown';
-  const outcome = await authority.manager.apply({ workspaceDir });
-  if (outcome.kind === 'applied') {
+  const layout = await import('create-principles-disciple/dist/update/install-layout.js');
+  const pdHomePaths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
+  const entryPath = path.join(pdHomePaths.bootstrapExecutorDir, 'dist', 'bootstrap-entry.js');
+
+  // Readiness already re-verified the registration digest, but the route owns
+  // the spawn-level guard: no executor file → repair next action (this is the
+  // pre-PRI-850 install shape).
+  if (!fs.existsSync(entryPath)) {
     appendGovernedUpdateHistory(workspaceDir, {
-      fromVersion, toVersion: outcome.productVersion, success: true,
-      kind: 'update', authority: 'release-manager', transactionId: outcome.transactionId,
+      fromVersion: authority.installStatus?.productVersion ?? 'unknown',
+      toVersion: authority.installStatus?.productVersion ?? 'unknown',
+      success: false, kind: 'refusal', authority: 'release-manager',
+      reason: 'bootstrap_not_registered',
+      nextAction: 'Run the official installer (npx create-principles-disciple repair-update-chain) to deploy the update executor, then retry.',
     });
     sendSuccess(res, {
-      success: true,
-      // SPEC §12.1: a finished deployment is NOT "the new version is running" —
-      // the serving process is still the old build until the restart verifies it.
-      state: 'awaiting_restart',
-      transactionId: outcome.transactionId,
-      message: `Updated to ${outcome.productVersion}. Transaction ${outcome.transactionId} confirmed in the journal.`,
-      newVersion: outcome.productVersion,
-      requiresRestart: true,
-      nextAction: 'Restart PD Console to run the updated build.',
-      ...(outcome.gatewayNotice ? { gatewayNotice: outcome.gatewayNotice } : {}),
+      success: false,
+      refusal: true,
+      state: 'update_blocked',
+      reason: 'bootstrap_not_registered',
+      message: 'The update executor is not deployed on this installation.',
+      requiresRestart: false,
+      nextAction: 'Run the official installer (npx create-principles-disciple repair-update-chain) to deploy the update executor, then retry.',
     });
     return;
   }
-  // PRI-848 (SPEC §12.1): a refusal is a structured non-success — never
-  // `success:true` dressed up as "no update applied". The reason code travels
-  // structured so the page can localize without parsing the message.
+
+  const fromVersion = authority.installStatus?.productVersion ?? 'unknown';
+  const transactionId = `update-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-'));
+  const requestFile = path.join(probeDir, 'request.json');
+  const resultFile = path.join(probeDir, 'result.json');
+  fs.writeFileSync(requestFile, `${JSON.stringify({ op: 'apply', workspaceDir, transactionId })}\n`, 'utf8');
+
+  const journalPath = path.join(pdHomePaths.transactionsDir, `${transactionId}.jsonl`);
+  let childError: Error | undefined;
+  // Literal executable + argv array, no shell (PRI-569 hardening style). The
+  // executor entry is a locally resolved file under ~/.pd/bootstrap.
+  const child = spawn('node', [entryPath, '--request-file', requestFile, '--result-file', resultFile], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.on('error', (error) => { childError = error; });
+  child.unref();
+
+  // The journal is the continuation record: as soon as `planned` lands, the
+  // update is officially in flight and this response can return. The window
+  // is env-tunable so tests (and slow disks) can adjust it.
+  const acceptanceWindowRaw = Number.parseInt(process.env.PD_UPDATE_ACCEPTANCE_WINDOW_MS ?? '', 10);
+  const acceptanceWindowMs = Number.isSafeInteger(acceptanceWindowRaw) && acceptanceWindowRaw > 0 ? acceptanceWindowRaw : 20_000;
+  const journalDeadline = Date.now() + acceptanceWindowMs;
+  while (Date.now() < journalDeadline) {
+    if (childError !== undefined) break;
+    if (fs.existsSync(journalPath)) {
+      sendSuccess(res, {
+        success: true,
+        state: 'update_in_progress',
+        transactionId,
+        message: `Update transaction ${transactionId} accepted; the update keeps running even if this console stops.`,
+        requiresRestart: false,
+        nextAction: 'This page tracks the running update. Do not start another update until it finishes.',
+      });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  // No journal: either the spawn failed, or the executor refused pre-journal
+  // (e.g. a policy refusal) and wrote its structured result.
+  if (fs.existsSync(resultFile)) {
+    let parsed: { ok?: boolean; reason?: string; message?: string; nextAction?: string } = {};
+    try {
+      parsed = JSON.parse(fs.readFileSync(resultFile, 'utf8')) as typeof parsed;
+    } catch {
+      // keep the empty shape; the message below stays generic
+    }
+    if (parsed.ok === false) {
+      appendGovernedUpdateHistory(workspaceDir, {
+        fromVersion, toVersion: fromVersion, success: false, kind: 'refusal',
+        reason: parsed.reason ?? 'bootstrap_executor_refused', authority: 'release-manager',
+        nextAction: parsed.nextAction ?? 'No runtime change was made. Resolve the reported cause, then retry.',
+      });
+      sendSuccess(res, {
+        success: false,
+        refusal: true,
+        state: 'update_blocked',
+        reason: parsed.reason ?? 'bootstrap_executor_refused',
+        message: parsed.message ?? 'The bootstrap executor refused the update.',
+        requiresRestart: false,
+        nextAction: parsed.nextAction ?? 'No runtime change was made. Resolve the reported cause, then retry.',
+      });
+      return;
+    }
+  }
+  const reason = childError !== undefined ? 'bootstrap_executor_spawn_failed' : 'bootstrap_executor_unresponsive';
+  const detail = childError !== undefined ? childError.message : 'The executor opened no transaction within the acceptance window.';
   appendGovernedUpdateHistory(workspaceDir, {
-    fromVersion, toVersion: fromVersion, success: false, kind: 'refusal',
-    reason: outcome.reason, authority: 'release-manager',
-    nextAction: 'No runtime change was made. Resolve the reported cause, then retry.',
+    fromVersion, toVersion: fromVersion, success: false, kind: 'failure', authority: 'release-manager',
+    reason, nextAction: 'No transaction was opened. Inspect ~/.pd/logs and retry.',
   });
   sendSuccess(res, {
     success: false,
-    refusal: true,
-    state: 'update_blocked',
-    reason: outcome.reason,
-    message: outcome.note,
+    state: 'check_failed',
+    reason,
+    message: detail,
     requiresRestart: false,
-    nextAction: 'No runtime change was made. Resolve the reported cause, then retry.',
+    nextAction: 'No transaction was opened. Inspect ~/.pd/logs and retry.',
   });
 }
 

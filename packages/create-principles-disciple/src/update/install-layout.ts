@@ -20,6 +20,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import { parseProductVersion, ProductIdentityError, isReleaseChannelName, type ReleaseChannelName } from './product-identity.js';
 import { normalizeReleaseMetadataUrl } from './release-metadata-source.js';
 
@@ -27,6 +28,8 @@ export interface PdHomePaths {
   readonly home: string;
   readonly bootstrapDir: string;
   readonly bootstrapManifestPath: string;
+  /** PRI-850: the deployed update-executor program tree (installer-owned). */
+  readonly bootstrapExecutorDir: string;
   readonly installConfigPath: string;
   readonly trustDir: string;
   readonly channelsDir: string;
@@ -44,6 +47,7 @@ export function resolvePdHomePaths(pdHome: string): PdHomePaths {
     home,
     bootstrapDir: path.join(home, 'bootstrap'),
     bootstrapManifestPath: path.join(home, 'bootstrap', 'bootstrap.json'),
+    bootstrapExecutorDir: path.join(home, 'bootstrap', 'executor'),
     installConfigPath: path.join(home, 'install.json'),
     trustDir: path.join(home, 'trust'),
     channelsDir: path.join(home, 'channels'),
@@ -79,6 +83,35 @@ export class InstallLayoutError extends Error {
 export interface BootstrapManifest {
   readonly bootstrapVersion: string;
   readonly installedAt: string;
+  /** PRI-850: sha256 over the deployed executor tree — registration must be re-verifiable against the deployed bytes. */
+  readonly executorDigest?: string;
+}
+
+/**
+ * PRI-850: deterministic digest over every file of a directory tree (relative
+ * POSIX-style paths sorted, contents hashed). This is how a bootstrap
+ * registration is re-verified against the deployed executor bytes.
+ */
+export function digestDirectory(directory: string): string {
+  if (!fs.existsSync(directory)) {
+    throw new InstallLayoutError('bootstrap_executor', `executor directory is missing: ${directory}`);
+  }
+  const hash = crypto.createHash('sha256');
+  const walk = (current: string, prefix: string): void => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) {
+        walk(path.join(current, entry.name), relative);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      hash.update(`${relative}:`);
+      hash.update(fs.readFileSync(path.join(current, entry.name)));
+      hash.update('\n');
+    }
+  };
+  walk(directory, '');
+  return hash.digest('hex');
 }
 
 function readJsonFileIfExists(filePath: string, label: string): unknown | undefined {
@@ -112,7 +145,14 @@ export function readBootstrapManifest(paths: PdHomePaths): BootstrapManifest | n
     if (typeof installedAt !== 'string' || installedAt.length === 0) {
       throw new InstallLayoutError('installedAt', 'bootstrap manifest installedAt must be a non-empty timestamp string');
     }
-    return { bootstrapVersion: bootstrapVersion.productVersion, installedAt };
+    let executorDigest: string | undefined;
+    if (Object.hasOwn(record, 'executorDigest')) {
+      if (typeof record.executorDigest !== 'string' || !/^[a-f0-9]{64}$/.test(record.executorDigest)) {
+        throw new InstallLayoutError('executorDigest', 'bootstrap manifest executorDigest must be 64-char hex when present');
+      }
+      executorDigest = record.executorDigest;
+    }
+    return { bootstrapVersion: bootstrapVersion.productVersion, installedAt, ...(executorDigest !== undefined ? { executorDigest } : {}) };
   } catch (error) {
     if (error instanceof ProductIdentityError) {
       throw new InstallLayoutError(error.field, error.message);
