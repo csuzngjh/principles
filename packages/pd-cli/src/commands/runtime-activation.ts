@@ -1589,12 +1589,12 @@ export function registerRuntimeActivationListCommand(parent: Command): Command {
 export function registerRuntimeActivationDispatchCommand(parent: Command): Command {
   return parent
     .command('dispatch')
-    .description('Dispatch an activation for a rollout-reviewed artifact')
+    .description('Dispatch a rollout-reviewed artifact: queues Owner approval (activation requires approval; PRI-811 Phase B)')
     .option('-a, --artifact-id <id>', 'PIArtifact ID to activate')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('-c, --channel <channel>', 'Activation channel (prompt|defer_archive)', 'prompt')
     .option('--dry-run', 'Dry-run mode (default, no writes)')
-    .option('--confirm', 'Confirm and write activation record')
+    .option('--confirm', 'Confirm and write the approval-queue entry')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       await handleRuntimeActivationDispatch({

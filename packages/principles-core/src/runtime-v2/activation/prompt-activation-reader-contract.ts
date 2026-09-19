@@ -10,7 +10,8 @@ export interface ActivatedPrinciple {
   /**
    * 谁授权了这条激活 (INV-05, P0-G):
    * - owner: 经 approvals 队列 approve (derived join on artifact_id+channel)
-   * - system_policy: 低风险渠道经 policy 自动激活 (无 approval 行)
+   * - system_policy: PRI-811 Phase B 前的存量行 — 旧低风险渠道 policy 自动
+   *   激活 (无 approval 行)；Phase B 起不再产生新的 system_policy 激活
    * - undefined: 读取层无法判定 (旧数据/查询失败) — 渲染层不得声称 owner
    */
   authority?: 'owner' | 'system_policy';

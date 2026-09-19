@@ -664,11 +664,12 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           // needs_revision never enters the approval queue).
           // PRI-713: canonical activation dispatch — the SAME
           // dispatchActivation (approve_rollout → ActivationDispatcher:
-          // low-risk auto_activate / high-risk approvals.pending) the
+          // PRI-811 Phase B — every recommendation enqueues approvals.pending;
+          // activation only after Owner approval) the
           // consumer cycle injects from this one factory, so a manual
           // approve_rollout completes governance instead of dead-ending in
           // the recovery-only `rollout_dispatch_not_wired` NHR. The Owner
-          // gate is NOT bypassed: high-risk channels still enqueue
+          // gate is NOT bypassed: all channels enqueue
           // approvals.pending inside the dispatcher. toolSemantics comes
           // from the durable workspace provenance (PRI-661 pattern — same
           // resolver the evaluator context uses); when no declaration is

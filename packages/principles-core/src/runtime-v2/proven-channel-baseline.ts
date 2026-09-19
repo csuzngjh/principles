@@ -313,6 +313,25 @@ export async function runPromptFixture(): Promise<ChannelFixtureResult> {
       };
     }
 
+    if (decision.decision === 'queued_for_approval') {
+      // PRI-811 Phase B: the proven prompt-chain outcome is an Owner approval
+      // queue entry — rollout recommendations no longer self-execute.
+      return {
+        channel: 'prompt',
+        status: 'passed',
+        canActivateResult: { ok: true, riskLevel: 'low' },
+        activationDecision: decision,
+        evidence: boundedEvidence({
+          approvalId: decision.approvalId,
+          queuedAt: decision.queuedAt,
+          evidenceSource: 'ActivationDispatcher.dispatch → approval queue',
+          queueBehavior: 'enqueued',
+        }),
+        dependsOnLegacy: false,
+        evidenceSource: 'ActivationDispatcher.dispatch → approval queue (proven)',
+      };
+    }
+
     if (decision.decision === 'already_activated') {
       return {
         channel: 'prompt',
@@ -464,6 +483,25 @@ export async function runDeferArchiveFixture(): Promise<ChannelFixtureResult> {
       };
     }
 
+    if (decision.decision === 'queued_for_approval') {
+      // PRI-811 Phase B: the proven defer_archive-chain outcome is an Owner
+      // approval queue entry — rollout recommendations no longer self-execute.
+      return {
+        channel: 'defer_archive',
+        status: 'passed',
+        canActivateResult: { ok: true, riskLevel: 'low' },
+        activationDecision: decision,
+        evidence: boundedEvidence({
+          approvalId: decision.approvalId,
+          queuedAt: decision.queuedAt,
+          evidenceSource: 'ActivationDispatcher.dispatch → approval queue',
+          queueBehavior: 'enqueued',
+        }),
+        dependsOnLegacy: false,
+        evidenceSource: 'ActivationDispatcher.dispatch → approval queue (proven)',
+      };
+    }
+
     if (decision.decision === 'already_activated') {
       return {
         channel: 'defer_archive',
@@ -518,12 +556,12 @@ export function generateContinuityMatrix(): ContinuityMatrixEntry[] {
   return [
     {
       channel: 'prompt',
-      entryPoint: 'ActivationDispatcher.dispatch → PromptWriter.canActivate → PromptWriter.activate',
-      expectedObservable: 'decision=would_activate, activationId=act_prompt_{principleId}, action=prompt_activate, targetRef=ledger://{principleId}',
+      entryPoint: 'ActivationDispatcher.dispatch → PromptWriter.canActivate → approval queue (PRI-811 Phase B)',
+      expectedObservable: 'decision=queued_for_approval, approvalId=apr_prompt_{artifactId} — activation requires Owner approval; post-approval shape: activationId=act_prompt_{principleId}, action=prompt_activate, targetRef=ledger://{principleId}',
       testCommand: 'npx vitest run packages/principles-core/src/runtime-v2/__tests__/proven-channel-baseline.test.ts',
       dependsOnPluginDiscovery: false,
       pri119ReuseEvidence: 'ActivationDispatcher.dispatch → PromptWriter contract; activationId/action/targetRef shape',
-      pri230ReuseEvidence: 'prompt channel risk level (low) and auto-activation path via dispatcher',
+      pri230ReuseEvidence: 'prompt channel risk level (low) and owner-approval queue path via dispatcher',
     },
     {
       channel: 'code_tool_hook',
@@ -536,12 +574,12 @@ export function generateContinuityMatrix(): ContinuityMatrixEntry[] {
     },
     {
       channel: 'defer_archive',
-      entryPoint: 'ActivationDispatcher.dispatch → DeferArchiveWriter.canActivate → DeferArchiveWriter.activate',
-      expectedObservable: 'decision=would_activate, activationId=act_archive_{principleId}, action=defer_archive, targetRef=ledger://{principleId}#archived',
+      entryPoint: 'ActivationDispatcher.dispatch → DeferArchiveWriter.canActivate → approval queue (PRI-811 Phase B)',
+      expectedObservable: 'decision=queued_for_approval, approvalId=apr_defer_archive_{artifactId} — activation requires Owner approval; post-approval shape: activationId=act_archive_{principleId}, action=defer_archive, targetRef=ledger://{principleId}#archived',
       testCommand: 'npx vitest run packages/principles-core/src/runtime-v2/__tests__/proven-channel-baseline.test.ts',
       dependsOnPluginDiscovery: false,
       pri119ReuseEvidence: 'ActivationDispatcher.dispatch → DeferArchiveWriter contract; activationId/action/targetRef shape',
-      pri230ReuseEvidence: 'defer_archive channel risk level (low) and auto-activation path via dispatcher',
+      pri230ReuseEvidence: 'defer_archive channel risk level (low) and owner-approval queue path via dispatcher',
     },
   ];
 }

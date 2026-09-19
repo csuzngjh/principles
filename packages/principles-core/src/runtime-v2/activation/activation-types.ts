@@ -23,12 +23,13 @@ export type ActivationActor =
 
 /**
  * Rollout activation decision from the rollout reviewer.
- * - 'auto_activate': low-risk channel, activate directly
+ * - 'auto_activate': reviewer recommends activation; the dispatcher routes it
+ *   to the Owner approval queue — it never self-executes (PRI-811 Phase B)
  * - 'require_approval': enqueue for owner approval
  * - 'reject': refuse activation
  * - 'approved': approval already granted externally (ApprovalCompletionService).
- *   Bypasses the approval queue check and activates directly. This is the
- *   post-approval dispatch path for high-risk channels.
+ *   The dispatcher independently verifies the approval record before
+ *   activating. This is the only decision that can create an activation.
  */
 export type RolloutActivationDecision = 'auto_activate' | 'require_approval' | 'reject' | 'approved';
 

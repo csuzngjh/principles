@@ -137,6 +137,10 @@ function listActivations(): Record<string, unknown>[] {
   return withDb((db) => db.prepare('SELECT * FROM activations').all() as Record<string, unknown>[]);
 }
 
+function listPendingApprovals(): Record<string, unknown>[] {
+  return withDb((db) => db.prepare("SELECT * FROM approvals WHERE status = 'pending'").all() as Record<string, unknown>[]);
+}
+
 // ── Journey 5/6: evaluator revision 状态机 ──────────────────────────────────
 
 describe('Journey 5 — Evaluator needs_revision 无旁路 + repair reopen', () => {
@@ -554,19 +558,21 @@ describe('Journey 8 — 真实 EvaluatorRunner → RolloutReviewerRunner → Act
     const result = await rollout.run(ROLLOUT_TASK_ID);
     expect(result.status).toBe('succeeded');
 
-    // P0-1 核心断言: activation 落在 scribe bearer 上,不是 evaluator 输出
+    // P0-1 核心断言 (PRI-811 Phase B): 推荐只入 approval 队列,目标 = scribe
+    // bearer,绝非 evaluator 输出;activation 事实等待 Owner 批准
     const activations = listActivations();
-    expect(activations.length).toBe(1);
-    expect(activations[0]?.artifact_id).toBe(SCRIBE_ARTIFACT);
-    expect(activations[0]?.artifact_id).not.toBe(evalOwned[0]?.artifactId);
-    expect(activations[0]?.action).toBe('prompt_activate');
-    expect(countApprovals()).toBe(0);
+    expect(activations.length).toBe(0);
+    const pendingApprovals = listPendingApprovals();
+    expect(pendingApprovals.length).toBe(1);
+    expect(pendingApprovals[0]?.artifact_id).toBe(SCRIBE_ARTIFACT);
+    expect(pendingApprovals[0]?.artifact_id).not.toBe(evalOwned[0]?.artifactId);
 
-    // 幂等重放: reopen rollout 重跑 → already_activated,不重复
+    // 幂等重放: reopen rollout 重跑 → 审批队列确定性去重,不产生新行/新激活
     await stateManager.updateTask(ROLLOUT_TASK_ID, { status: 'pending', attemptCount: 0 });
     const rerun = await rollout.run(ROLLOUT_TASK_ID);
     expect(rerun.status).toBe('succeeded');
-    expect(listActivations().length).toBe(1);
+    expect(listActivations().length).toBe(0);
+    expect(listPendingApprovals().length).toBe(1);
   });
 
   it('P0-2: 无 validated 候选 (未跑 evaluator) → 任务 needs_human_review,零 activation', async () => {
