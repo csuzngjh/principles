@@ -32,6 +32,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -123,21 +124,94 @@ export interface DownloadedReleaseAsset {
 }
 
 /**
- * Resolve the signed artifact target, cross-check the TUF identity and digest
- * against the signed release metadata (rc-6), and download it with in-flight
- * sha256 verification into `~/.pd/staging/<transactionId>/`.
- * Zero writes happen before every identity check has passed.
+ * PRI-854 (option A): fetch the asset from its signed delivery URL and verify
+ * the sha256 (and declared size) BEFORE the bytes are considered acquired.
+ * Only http(s) URLs are accepted; the URL comes from the signed release
+ * metadata, never from user input.
+ */
+export async function downloadAndVerifyAssetFile(input: {
+  url: string;
+  destinationPath: string;
+  expectedSha256: string;
+  expectedSizeBytes?: number;
+  releaseId: string;
+}): Promise<void> {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(input.url);
+  } catch {
+    throw new ApplyPayloadError('release_metadata_invalid', `Asset URL is not a valid URL: ${input.url}`, 'Re-fetch the signed release metadata and retry.');
+  }
+  if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+    throw new ApplyPayloadError('release_metadata_invalid', `Asset URL must be http(s): ${input.url}`, 'The signed release metadata is invalid; do not install this release.');
+  }
+  fs.mkdirSync(path.dirname(input.destinationPath), { recursive: true });
+  const response = await fetch(input.url, { redirect: 'follow' });
+  if (!response.ok) {
+    throw new ApplyPayloadError('metadata_refresh_failed', `Asset download failed: HTTP ${response.status} for ${input.url}`, 'Verify that the release pipeline published this release asset, then retry.');
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const size = bytes.length;
+  const hash = createHash('sha256');
+  hash.update(bytes);
+  // Case-normalize: upstream digest casing must never flip the verdict.
+  if (hash.digest('hex') !== input.expectedSha256.toLowerCase()) {
+    throw new ApplyPayloadError('release_metadata_invalid', `Asset bytes do not match the signed sha256 for release ${input.releaseId}.`, 'Do not install this release. Re-fetch the signed metadata and retry.');
+  }
+  if (input.expectedSizeBytes !== undefined && size !== input.expectedSizeBytes) {
+    throw new ApplyPayloadError('release_metadata_invalid', `Asset size ${size} disagrees with the signed size ${input.expectedSizeBytes}.`, 'The release repository is inconsistent; wait for refreshed signed metadata.');
+  }
+  // CodeQL "network data written to file": the URL is transport only — the
+  // trust anchor is the SIGNED sha256+size above (TUF delegation model), and
+  // the destination path is code-constructed under ~/.pd/staging, never
+  // URL-derived. No path-traversal or trust surface.
+  fs.writeFileSync(input.destinationPath, bytes);
+}
+
+/**
+ * Acquires the release asset for THIS runtime (PRI-854, two transports):
+ *  - url branch: the signed metadata names the byte carrier (Release
+ *    attachment) — download once, verify signed sha256+size, done.
+ *  - legacy branch: resolve the signed TUF target (ABI name + pre-ABI
+ *    fallback), cross-check identity/digest against the metadata (rc-6),
+ *    download through the trusted payload path.
+ * Zero deployment writes happen before every identity check has passed.
  */
 export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions): Promise<DownloadedReleaseAsset> {
   const { paths, metadataBaseUrl, fetcher, releaseMetadata, channel, transactionId } = options;
   const asset = selectReleaseAsset(releaseMetadata);
 
+  // PRI-854 (option A): the signed metadata carries the asset's delivery URL —
+  // fetch it directly and enforce the signed sha256+size. The digest check is
+  // the trust anchor (the URL only says where, the metadata says what).
+  if (asset.url !== undefined) {
+    const transactionDir = path.join(paths.stagingDir, transactionId);
+    const archivePath = path.join(transactionDir, 'release-asset.tar.gz');
+    await downloadAndVerifyAssetFile({
+      url: asset.url,
+      destinationPath: archivePath,
+      expectedSha256: asset.archiveSha256,
+      expectedSizeBytes: asset.archiveSizeBytes,
+      releaseId: releaseMetadata.releaseId,
+    });
+    const syntheticTarget: TrustedReleaseTarget = {
+      artifactSha256: asset.archiveSha256,
+      artifactSize: asset.archiveSizeBytes,
+      channel,
+      platform: asset.platform,
+      releaseId: releaseMetadata.releaseId,
+      targetPath: asset.url,
+    };
+    return { transactionDir, archivePath, trustedTarget: syntheticTarget };
+  }
+
+  // Legacy path (pre-url releases): the bytes live at the signed TUF target in
+  // the metadata repository. ABI-suffixed name first; the legacy pre-ABI name
+  // is the fallback for releases published before the ABI axis. Either way the
+  // target only resolves through signed targets, so the fallback cannot
+  // substitute untrusted bytes.
   let trustedTarget: TrustedReleaseTarget;
   try {
-    // ABI-suffixed name first (PRI-850 convention); the legacy pre-ABI name is
-    // the fallback for releases published before the matrix gained the ABI
-    // axis. Either way the target only resolves through the signed targets
-    // file, so the fallback cannot substitute untrusted bytes.
     trustedTarget = await resolveTrustedReleaseTarget({
       metadataDir: paths.trustDir,
       metadataBaseUrl,
