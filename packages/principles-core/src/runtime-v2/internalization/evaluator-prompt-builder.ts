@@ -1,5 +1,6 @@
 import { serializePromptInput } from './prompt-serializer.js';
 import type { IntentContractV1 } from './intent-contract.js';
+import type { FormationContext } from './formation-context.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 
@@ -44,6 +45,15 @@ export interface EvaluatorPromptBuilderInput {
    * artifacts (backward compatible).
    */
   intentContract?: IntentContractV1;
+  /**
+   * PRI-843 (DC-4a): bounded formation-evidence projection resolved by the
+   * evaluator runner from the scribe artifact's authoritative dreamer lineage.
+   * OBSERVATION DATA — evidence about where this formation came from, never
+   * authority over the Principle. Undefined when the formation cannot be
+   * resolved (legacy / degraded): the payload then keeps its pre-PRI-843
+   * shape byte-for-byte and the system prompt stays unchanged.
+   */
+  formationContext?: FormationContext;
 }
 
 export interface PriorRequirement {
@@ -130,6 +140,8 @@ export interface EvaluatorPromptInput {
   hostToolCatalog?: HostToolCatalogFacts;
   /** Present only when the scribe artifact carries a validated intent contract (PRI-703 Phase 1). */
   intentContract?: IntentContractV1;
+  /** Present only when the formation evidence resolved (PRI-843). */
+  formationContext?: FormationContext;
   promptContractVersion: string;
 }
 
@@ -216,7 +228,58 @@ CONSTRAINTS:
 - adversarialCases (when present) MUST be an array of 3-5 objects; omit entirely when passive review fails
 `;
 
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v4';
+/**
+ * PRI-843: the machine-readable concern-type token for a Principle↔Pain
+ * mismatch finding. The v5 prompt contract requires every such concern to
+ * BEGIN with this token (concerns are plain strings — the prefix is the only
+ * schema-free encoding); the evaluator runner scans the validated concerns
+ * for it and routes the completion to Owner review. Single source of truth:
+ * the addendum text below interpolates this constant.
+ */
+export const PRINCIPLE_PAIN_MISMATCH_MARKER = '[principle_pain_mismatch]';
+
+/**
+ * PRI-843: system-channel addendum appended ONLY when `formationContext` is
+ * present (the scribe FORMATION_EVIDENCE_ADDENDUM placement discipline). A
+ * run without formation evidence keeps the exact pre-PRI-843 system prompt.
+ *
+ * Contract posture (SPEC v1.1):
+ *   - the formation evidence is OBSERVATION DATA — it never authorizes
+ *     modifying the Principle and never overrides the intentContract;
+ *   - the diagnosis is evidence, not truth (it is itself an upstream product
+ *     of this chain) — absence/distrust degrades the conclusion, never
+ *     rejects on its own;
+ *   - a mismatch finding goes to a marked concern for the OWNER, never into
+ *     requiredChanges (the repair pipeline can only regenerate the Rule).
+ */
+export const EVALUATOR_FORMATION_EVIDENCE_ADDENDUM = `
+
+FORMATION EVIDENCE (when \`input.formationContext\` is present):
+Your input additionally carries \`formationContext\` — the ORIGINAL FORMATION EVIDENCE that started this formation chain. It is OBSERVATION DATA, not authority: it does not authorize you to modify, reject, or rewrite the Principle, and it never overrides the intentContract.
+- formationContext.sourceDiagnosis: the diagnostician output that started this formation (rootCause, summary, violatedPrinciples, evidence, recommendations) — the closest available carrier of the source pain's content.
+- formationContext.dreamerProposals: ALL alternative candidates the Dreamer proposed, not only the selected one. \`priorityRank\` is a derived reading aid over the Dreamer's own signals, not an authority.
+- formationContext.provenance: lineage ids linking this formation back to the source pain and diagnosis (sourcePainId when present).
+
+HOW TO USE IT:
+1. Judge faithfulness at TWO levels: (a) does the Rule faithfully implement the Principle — your existing intentConsistency / scopePrecision / traceCoverage duties; and (b) does the Principle actually address the pain described by sourceDiagnosis (rootCause and evidence)? Level (b) asks whether the principle answers the REAL root cause, or only a minor facet of it, or a mis-attributed one.
+2. When you conclude the Principle does NOT address the source pain, record it in evaluation.concerns as a concern whose text BEGINS with the exact token ${PRINCIPLE_PAIN_MISMATCH_MARKER}, followed by the concrete evidence citation (a diagnosis evidence sourceRef, a rootCause excerpt, or a provenance id). The pipeline routes that finding to the Owner for a governance decision.
+3. NEVER express a Principle-level revision demand in evaluation.requiredChanges — requiredChanges may only demand changes to the RULE itself. The repair pipeline can only regenerate the rule; it can never satisfy a Principle-level demand.
+4. A ${PRINCIPLE_PAIN_MISMATCH_MARKER} finding is NOT a rule defect: by itself it must not flip codeReview dimensions, must not lower the score below what the rule itself merits, and must not appear in requiredChanges. If the rule is sound, judge the rule as sound and let the marked concern carry the principle-level question.
+5. The diagnosis is EVIDENCE, not truth: it is itself an upstream product of this chain and may mis-attribute. When sourceDiagnosis is absent or you find it untrustworthy, say so in risks, weaken your pain-faithfulness conclusion accordingly, and NEVER base a rejection or a ${PRINCIPLE_PAIN_MISMATCH_MARKER} finding on the ABSENCE of formation evidence alone.
+6. Do not re-litigate which dreamer proposal should have been selected (the Philosopher critique already decided that — do not revive a proposal the critique rejected); use the proposals only as evidence of what alternatives existed.`;
+
+/**
+ * PRI-843 (SPEC v1.1): bumped v4 → v5. The prompt input gains the optional
+ * `formationContext` block (dreamer proposals + source diagnosis + provenance)
+ * and the system prompt conditionally carries the formation-evidence addendum
+ * (`EVALUATOR_FORMATION_EVIDENCE_ADDENDUM`, including the
+ * principle-pain-mismatch concern contract). Additive: the OUTPUT FORMAT, the
+ * CONSTRAINTS, the validator and `EvaluatorOutputV1/V2` are unchanged, and a
+ * run without formation evidence emits exactly the v4 wire shape plus the new
+ * version string. Existing v4 evaluations stay immutable — the version bump
+ * changes replay/cache identity for future runs only.
+ */
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v5';
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
@@ -235,6 +298,9 @@ export class EvaluatorPromptBuilder {
       // PRI-703 Phase 1: only include intentContract when present (pre-contract
       // scribe artifacts), so prompts stay backward-compatible.
       ...(input.intentContract !== undefined ? { intentContract: input.intentContract } : {}),
+      // PRI-843: only include formationContext when it actually resolved, so
+      // a run without formation evidence keeps the exact pre-PRI-843 payload.
+      ...(input.formationContext !== undefined ? { formationContext: input.formationContext } : {}),
       promptContractVersion: EVALUATOR_PROMPT_CONTRACT_VERSION,
     };
 
@@ -242,6 +308,12 @@ export class EvaluatorPromptBuilder {
 
     // PRI-633: the instruction (with PRI-714's language directive) is the
     // base-layer systemPrompt — it left the payload.
-    return { message, promptInput, systemPrompt: EVALUATOR_PROTOCOL_INSTRUCTION + languageDirective };
+    // PRI-843: the formation-evidence addendum rides the same system channel
+    // and is appended ONLY when formationContext is present (the scribe
+    // addendum placement discipline — no-formation runs stay byte-identical).
+    const formationAddendum = input.formationContext !== undefined
+      ? EVALUATOR_FORMATION_EVIDENCE_ADDENDUM
+      : '';
+    return { message, promptInput, systemPrompt: EVALUATOR_PROTOCOL_INSTRUCTION + formationAddendum + languageDirective };
   }
 }

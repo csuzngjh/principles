@@ -31,6 +31,8 @@ const SCAN_ROOTS = ['packages/principles-core/src', 'packages/pd-cli/src'];
 const UNION_FILE = 'packages/principles-core/src/telemetry-event.ts';
 const ARTIFACT_SUMMARY_FILE =
   'packages/principles-core/src/runtime-v2/internalization/artifact-summary.ts';
+const FORMATION_CONTEXT_FILE =
+  'packages/principles-core/src/runtime-v2/internalization/formation-context.ts';
 
 // PainSignalBridge emits ad-hoc names that are deliberately NOT registered:
 // pain-signal-runtime-factory.ts:518-530 keeps them dormant (forwarding them
@@ -140,6 +142,23 @@ function collectEmittedNames(sources, runnerNames) {
   // returns exactly these two literals (:590-610).
   note('runtime_invocation_failed', 'openclaw-cli-runtime-adapter.ts (closed map)', 0);
   note('runtime_invocation_succeeded', 'openclaw-cli-runtime-adapter.ts (closed map)', 0);
+  // Dynamic site 3 (PRI-846 review round): resolveFormationContext forwards
+  // its closed emitEvent vocabulary through the CONSUMER's callback, which
+  // base-peer-runner composes as `${runnerName}_${suffix}` — the literal
+  // patterns above cannot see it. Files that call the resolver carry the
+  // vocabulary extracted from formation-context.ts itself (same technique as
+  // dynamic site 1). The resolver module is excluded (it is the definition,
+  // has no runnerName, and would otherwise fan out to every runner).
+  const formationSrc = fs.readFileSync(path.join(ROOT, FORMATION_CONTEXT_FILE), 'utf-8');
+  const formationSuffixes = [...formationSrc.matchAll(/emitEvent\('([a-z0-9_]+)'/g)].map((m) => m[1]);
+  for (const { rel, src } of sources) {
+    if (rel === FORMATION_CONTEXT_FILE) continue;
+    if (!src.includes('resolveFormationContext(')) continue;
+    const fileRunnerNames = [...src.matchAll(/runnerName:\s*'([a-z_]+)'/g)].map((m) => m[1]);
+    for (const runner of (fileRunnerNames.length > 0 ? fileRunnerNames : runnerNames)) {
+      for (const suffix of formationSuffixes) note(`${runner}_${suffix}`, FORMATION_CONTEXT_FILE, 0);
+    }
+  }
   return emitted;
 }
 
