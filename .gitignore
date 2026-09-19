@@ -1,0 +1,225 @@
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+.venv
+.pylint
+.pytest_cache
+debug_*.txt
+*_debug.txt
+test_log_*.txt
+full_test_report*.txt
+# Windows Git Bash creates actual files instead of redirecting to NUL device
+nul
+NUL
+temp/
+tmp/
+
+# Python ML training environments (separate from project)
+scripts/nocturnal/trainer/.venv/
+scripts/nocturnal/trainer/experiment-*.json
+
+# Graphify local python environment
+.graphify_python
+
+# Graphify temp/intermediate files (root level)
+.graphify_*.json
+.graphify_*.txt
+
+# Graphify output temp files
+graphify-out/.graphify_chunk_*.json
+graphify-out/.graphify_correction.json
+graphify-out/cache/
+.git-fallback-graphify/
+
+
+# Node.js packages
+packages/*/node_modules/
+packages/*/dist/
+packages/*/coverage/
+packages/*/screenshots/
+packages/*/logs/
+logs/
+packages/*/*.tgz
+node_modules/
+dist/
+
+# PD Companion electron-builder output (NSIS installers, win-unpacked).
+# Scoped to pd-companion: create-principles-disciple/release-locks is tracked.
+packages/pd-companion/release*/
+
+# TypeScript build artifacts
+**/tsconfig.tsbuildinfo
+
+# Temp/Scripts
+update_readmes.py
+RERUN-SUMMARY.txt
+check-pd-db.js
+*.bak
+
+
+# OpenClaw Plugin Build & Links
+packages/openclaw-plugin/dist/
+packages/openclaw-plugin/node_modules/
+# Agent definitions should be committed (static files, not generated)
+# packages/openclaw-plugin/agents
+packages/openclaw-plugin/skills
+
+# create-principles-disciple: bundled plugin (build artifact)
+packages/create-principles-disciple/plugin/
+packages/create-principles-disciple/host-runtime/
+# PRI-624: codex-adapter payload component built by bundle-plugin.mjs
+packages/create-principles-disciple/codex-adapter/
+# PRI-672: release-manager payload component built by bundle-plugin.mjs
+packages/create-principles-disciple/release-manager/
+
+# Local environment and state
+# .claude/ is ignored except for skills (shared with team)
+!.claude/
+.claude/*
+!.claude/skills/
+claude/
+.planning/
+plans/
+conductor/
+.principles/
+.state/
+# Test-generated database files (trajectory.db, etc.)
+*.db
+# Prevent test-generated ledger files from being committed outside .state/
+principle_training_state.json
+memory/
+.agent/
+# Exception: .agents/skills/ must be committed (Codex/Gemini shared skills)
+!.agents/
+!.agents/skills/
+spec/
+_scratchpad/
+
+# Private AI agent files (DO NOT COMMIT)
+# NOTE: CLAUDE.md, GEMINI.md, AGENTS.md are project-level AI instructions
+# and MUST be committed so all AI assistants follow the same rules.
+code-concise/
+.trae
+
+# Docs
+# 公开 docs 全部被 git 跟踪;私人 docs 在独立仓库 D:/Code/principles-private/
+# docs/.private/ 已弃用(2026-08):AI 助手直接读 PD_PRIVATE_DOCS_DIR,不再建 junction
+# 保留该忽略规则仅为防止历史残留被误提交
+docs/.private/
+# But not design prototypes (reference only, not committed)
+# Exception: two key prototypes are committed as visual baseline for CR1/CR3/CR4
+!packages/pd-console/design-prototype/governance-focus.html
+!packages/pd-console/design-prototype/principle-review.html
+docs/plans/2026-06-console-rebuild/design-prototype/
+packages/pd-console/design-prototype/
+# Exception: website docs must be committed
+!packages/website/docs/
+!packages/website/zh/docs/
+
+# Interactive Conversation Test Output
+packages/openclaw-plugin/tests/interactive-conversation/output/
+tests/reports/feature-testing/
+tests/archive/reports-2026-03-11/
+
+# Local agent scratch and review memory
+.learnings/
+myagents/
+.kiro
+# AI tool state and temp files
+.tmp-trainer/
+.tmp-linear-comments/
+.bg-shell/
+.greptile/
+
+.qwen/
+gha-creds-*.json
+
+# Vercel CLI state
+.vercel/
+
+# Git worktrees
+.worktrees/
+.pd/
+
+# Workspace write lease (AGENTS.md §23A git-9) — dev-session state, human-deletable
+.workspace-lease.json
+
+# Symphony (external project copy)
+symphony/
+patches/
+
+# Cleanup
+.symphony-*
+feedback-light.png
+overview-light.png
+.full-review/
+.pnpm-store/
+
+graphify-out/
+/ops/
+
+# Large file defense (LFS exemptions in .gitattributes)
+# These binary types should use Git LFS, not direct commits
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.dmg
+*.exe
+*.dll
+*.so
+*.dylib
+
+# E2E harness workspace (isolated, never commit real runs)
+tests/e2e-workspace/*
+!tests/e2e-workspace/.gitkeep
+evidence/*
+!evidence/.gitkeep
+
+# Agent/Codegen tool outputs
+.vscode/
+.codex/
+.opencode/
+.plan/
+
+# Project-specific local tool outputs
+.codex-output/
+.hermes-reports/
+.omo/
+
+# Playwright
+packages/pd-console/playwright-report/
+packages/pd-console/test-results/
+packages/pd-console/playwright/.cache/
+
+# AI User QA run artifacts (PRI-754): reports + screenshots, never commit
+packages/pd-console/ai-user-runs/
+
+# Brainstorming visual companion (mockups, session state)
+.superpowers/
+.mimosa/
+
+# Agent scratch files (repro scripts, bundle test fixtures, debug dumps)
+.tmp/
+
+# Release materialization is hermetic (temp staging only); nothing belongs
+# in-tree anymore. *.stackdump stays ignored as a Windows crash artifact.
+*.stackdump
+# Cloudflare Pages local dev secrets/logs (never commit)
+packages/website/.dev.vars
+packages/website/.wrangler-dev.log
+packages/website/.wrangler/
+
+# Runtime / agent scratch artifacts at the repository root.
+# Produced by local PD runs and browser-automation tooling; no production code
+# reads them. On 2026-09-04 a `git stash -u` swept these into refs/stash and
+# the pre-push gitleaks scan (which walks `git log --all`) failed on the
+# `reviewKey` values inside them, blocking every push in the repository.
+# Patterns are root-anchored so same-named files under subdirectories stay
+# tracked.
+/.decision-card.json
+/.inbox-*.json
+/.current-code-numbered.txt
+/.playwright-mcp/
+/--full-page

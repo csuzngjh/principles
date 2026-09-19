@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "version": 1,
+  "expiresAt": "2026-12-18T04:14:26Z",
+  "releaseMetadataDigest": "751cb9d50dfb06476ea46846df2eeb411cc6637123419018625786b6ae9d4851",
+  "releaseId": "3b4aada3dcdb128a68e78169a424951a81f515e1cb3d48fc18bbcf3907ad36e6",
+  "productVersion": "1.143.2",
+  "publicationSequence": 1
+}
