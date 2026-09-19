@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "productVersion": "1.76.1",
+  "releaseId": "48ef51db99e67df9270a74810e4c16a83ac0cfdd0cb99c6ed886aab35af4ba63",
+  "sourceCommit": "7ab348ea5133cd6e69633aaa35de9fe55388b0d7",
+  "metadataDigest": "f974ce041651a213cd6a78653032d6ba7256e63d44d7727480110c7ea29ba02a",
+  "minBootstrapVersion": "1.0.0",
+  "publicationSequence": 4,
+  "expiresAt": "2026-12-18T13:24:43Z",
+  "assets": [
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "nodeAbi": "137",
+      "archiveSha256": "6b47820907ef33f5293ed10e07e24c146cf0dcc304293441155bd1239c6df9ac",
+      "archiveSizeBytes": 264802872,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-darwin-arm64-abi137-6b47820907ef.tar.gz"
+    },
+    {
+      "platform": "linux",
+      "arch": "x64",
+      "nodeAbi": "137",
+      "archiveSha256": "483e6d790984046274cb658c1e4bf7bdada94ac553f08ee57323198a6ae97ea7",
+      "archiveSizeBytes": 272522393,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-linux-x64-abi137-483e6d790984.tar.gz"
+    },
+    {
+      "platform": "linux",
+      "arch": "x64",
+      "nodeAbi": "147",
+      "archiveSha256": "002642e14bcdc75e1f910ba5247443772a3d55eb8b6feb3f151ef96165bcb510",
+      "archiveSizeBytes": 272522393,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-linux-x64-abi147-002642e14bcd.tar.gz"
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "nodeAbi": "137",
+      "archiveSha256": "4b9b9420187fc1504e27421900293ac77c57a2e5140fc0f2a00d2aadf97b6a02",
+      "archiveSizeBytes": 267888903,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-win32-x64-abi137-4b9b9420187f.tar.gz"
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "nodeAbi": "147",
+      "archiveSha256": "374d813df717a850dd62d0d2a2fc587ce0c6993ece1b6886d8d184dd90b613ea",
+      "archiveSizeBytes": 267888903,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-win32-x64-abi147-374d813df717.tar.gz"
+    }
+  ],
+  "compatibility": {
+    "dataSchemaForwardReadableFrom": "1.74.0"
+  }
+}
