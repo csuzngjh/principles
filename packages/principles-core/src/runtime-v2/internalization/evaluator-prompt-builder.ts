@@ -284,11 +284,13 @@ HOW TO USE IT:
  * PRI-644 (PRI-700 factor B wiring): system-channel addendum appended ONLY
  * when `priorValidatorErrors` is present — the same conditional-placement
  * discipline as the PRI-843 formation addendum, so a first attempt stays
- * byte-identical to the pre-PRI-644 prompt. Mirrors the artificer's
- * "PRIOR OUTPUT-CONTRACT REJECTIONS" block, phrased for the evaluator's
- * failure mode (BUSINESS validator rejections such as a repair round missing
- * `requirementLedger` — output captured but rejected, then retried with the
- * identical prompt until max_attempts_exceeded).
+ * byte-identical to the pre-PRI-644 prompt. Its content is the evaluator
+ * variant of the artificer's "PRIOR OUTPUT-CONTRACT REJECTIONS" block —
+ * deliberately NOT a placement mirror: the artificer bakes that block
+ * unconditionally into its protocol string, this one is conditional. Phrased
+ * for the evaluator's failure mode (BUSINESS validator rejections such as a
+ * repair round missing `requirementLedger` — output captured but rejected,
+ * then retried with the identical prompt until max_attempts_exceeded).
  */
 export const EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM = `
 

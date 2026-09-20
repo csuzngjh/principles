@@ -35,6 +35,7 @@ import {
   EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM,
 } from '../evaluator-prompt-builder.js';
 import type { LastValidatorErrors } from '../pitask-metadata.js';
+import type { FormationContext } from '../formation-context.js';
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { SqlitePIArtifactStore } from '../../store/artifact/sqlite-pi-artifact-store.js';
@@ -64,6 +65,34 @@ function record(sourceAttemptCount: number, errors: readonly string[] = [REJECTI
 
 function unitRecord(): LastValidatorErrors {
   return record(1, [REJECTION_TEXT, "evaluation.decision must be one of 'approved' | 'needs_revision' | 'rejected'"]);
+}
+
+/** Minimal in-budget FormationContext (same shape as evaluator-formation-context.test.ts). */
+function unitFormationContext(): FormationContext {
+  return {
+    version: 'formation-context.v1',
+    dreamerProposals: [
+      {
+        candidateIndex: 1, priorityRank: 1,
+        badDecision: 'kept two sources of truth', betterDecision: 'keep one authoritative contract',
+        rationale: 'duplicate contracts drift', confidence: 0.9, riskLevel: 'low', strategicPerspective: null,
+      },
+    ],
+    dreamerContextRefs: [],
+    sourceDiagnosis: {
+      artifactId: 'diag-art-644', taskId: 'diag-644', stage: 'diag_router',
+      rootCause: 'retry prompts carried no validator feedback', summary: 'deterministic death loop',
+      violatedPrinciples: [],
+      evidence: [{ sourceRef: 'trajectory://session-644/turn-4', note: 'retried identically' }],
+      recommendations: [], confidence: 0.8, omittedFields: [],
+    },
+    provenance: {
+      sourceDreamerArtifactId: 'dreamer-art-644', sourceDreamerTaskId: 'dreamer-644',
+      sourceDiagnosisArtifactId: 'diag-art-644', sourceDiagnosisTaskId: 'diag-644',
+      sourcePainId: 'pain-644', lineageArtifactIds: ['diag-art-644'],
+    },
+    truncationNotes: [],
+  };
 }
 
 function flagsOffConfig(): EffectivePdConfig {
@@ -271,6 +300,10 @@ function makeProbe(w: World): ProbeEvaluatorRunner {
   });
 }
 
+function suppressedEvents(w: World): World['emitted'] {
+  return w.emitted.filter((e) => e.eventType === 'evaluator_prior_validator_errors_suppressed');
+}
+
 // ── Layer 1: prompt contract (builder unit) ──────────────────────────────────
 
 describe('PRI-644 — evaluator prompt contract (conditional validator re-feed)', () => {
@@ -328,39 +361,21 @@ describe('PRI-644 — evaluator prompt contract (conditional validator re-feed)'
 describe('PRI-644 — evaluator buildContext consumes lastValidatorErrors with freshness gating', () => {
   it('fresh record (sourceAttemptCount === leasedAttempt - 1) is carried onto the context, no suppression event', async () => {
     world = await makeWorld(metaWithValidatorErrors(record(2)));
-    const runner = new ProbeEvaluatorRunner({
-      stateManager: world.stateManager,
-      runtimeAdapter: queuedAdapter([], []),
-      eventEmitter: world.emitter,
-      artifactStore: world.store,
-      validator: new DefaultEvaluatorValidator(),
-    }, {
-      owner: 'pri644-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5000,
-      gateDeps: createProductionGateDeps(), effectiveConfig: flagsOffConfig(),
-    });
+    const runner = makeProbe(world);
     runner.setLeasedAttempt(3);
     const context = await runner.buildContext(EVAL_ID);
     expect(context.priorValidatorErrors?.sourceAttemptCount).toBe(2);
     expect(context.priorValidatorErrors?.errors).toEqual([REJECTION_TEXT]);
-    expect(world.emitted.filter((e) => e.eventType === 'evaluator_prior_validator_errors_suppressed')).toHaveLength(0);
+    expect(suppressedEvents(world)).toHaveLength(0);
   });
 
   it('stale record is NOT re-fed and emits an observable suppression event with reason stale_source_attempt', async () => {
     world = await makeWorld(metaWithValidatorErrors(record(1)));
-    const runner = new ProbeEvaluatorRunner({
-      stateManager: world.stateManager,
-      runtimeAdapter: queuedAdapter([], []),
-      eventEmitter: world.emitter,
-      artifactStore: world.store,
-      validator: new DefaultEvaluatorValidator(),
-    }, {
-      owner: 'pri644-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5000,
-      gateDeps: createProductionGateDeps(), effectiveConfig: flagsOffConfig(),
-    });
+    const runner = makeProbe(world);
     runner.setLeasedAttempt(5);
     const context = await runner.buildContext(EVAL_ID);
     expect(context.priorValidatorErrors).toBeUndefined();
-    const suppressed = world.emitted.filter((e) => e.eventType === 'evaluator_prior_validator_errors_suppressed');
+    const suppressed = suppressedEvents(world);
     expect(suppressed).toHaveLength(1);
     expect(suppressed[0]?.payload).toMatchObject({
       sourceAttemptCount: 1,
@@ -372,39 +387,21 @@ describe('PRI-644 — evaluator buildContext consumes lastValidatorErrors with f
 
   it('record present without lease context is suppressed with reason no_lease_context (restart-safe)', async () => {
     world = await makeWorld(metaWithValidatorErrors(record(1)));
-    const runner = new ProbeEvaluatorRunner({
-      stateManager: world.stateManager,
-      runtimeAdapter: queuedAdapter([], []),
-      eventEmitter: world.emitter,
-      artifactStore: world.store,
-      validator: new DefaultEvaluatorValidator(),
-    }, {
-      owner: 'pri644-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5000,
-      gateDeps: createProductionGateDeps(), effectiveConfig: flagsOffConfig(),
-    });
+    const runner = makeProbe(world);
     const context = await runner.buildContext(EVAL_ID);
     expect(context.priorValidatorErrors).toBeUndefined();
-    const suppressed = world.emitted.filter((e) => e.eventType === 'evaluator_prior_validator_errors_suppressed');
+    const suppressed = suppressedEvents(world);
     expect(suppressed).toHaveLength(1);
     expect(suppressed[0]?.payload).toMatchObject({ reason: 'no_lease_context' });
   });
 
   it('no record → no field, no event (first attempt untouched)', async () => {
     world = await makeWorld();
-    const runner = new ProbeEvaluatorRunner({
-      stateManager: world.stateManager,
-      runtimeAdapter: queuedAdapter([], []),
-      eventEmitter: world.emitter,
-      artifactStore: world.store,
-      validator: new DefaultEvaluatorValidator(),
-    }, {
-      owner: 'pri644-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5000,
-      gateDeps: createProductionGateDeps(), effectiveConfig: flagsOffConfig(),
-    });
+    const runner = makeProbe(world);
     runner.setLeasedAttempt(1);
     const context = await runner.buildContext(EVAL_ID);
     expect(context.priorValidatorErrors).toBeUndefined();
-    expect(world.emitted.filter((e) => e.eventType === 'evaluator_prior_validator_errors_suppressed')).toHaveLength(0);
+    expect(suppressedEvents(world)).toHaveLength(0);
   });
 
   it('the re-feed never participates in contextHash (same posture as artificer: identity covers evidence, not feedback)', async () => {
@@ -475,20 +472,25 @@ describe('PRI-644 — golden replay: validator rejection re-feeds attempt N+1 (p
   });
 });
 
-// keep the formation-order test honest if both addenda coexist
+// both addenda coexist: real ordering exercised with a formation context
 describe('PRI-644/PRI-843 addendum coexistence', () => {
-  it('formation + validator addenda both render in protocol → formation → validator order', () => {
+  it('renders protocol → formation → validator in order when both are present', () => {
     const builder = new EvaluatorPromptBuilder();
     const { systemPrompt } = builder.buildPrompt({
       taskId: EVAL_ID,
       contextHash: 'ctx-644',
       sourceArtificerArtifactId: 'pi-art-artificer-644-seed',
       artificerArtifact: { taskId: ART_ID },
-      formationContext: undefined,
+      scribeArtifact: scribeContent(),
+      formationContext: unitFormationContext(),
       priorValidatorErrors: unitRecord(),
     });
-    // without formationContext the formation addendum stays out (PRI-843 discipline)
-    expect(systemPrompt).toBe(EVALUATOR_PROTOCOL_INSTRUCTION + EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM);
-    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).not.toBe(EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM);
+    expect(systemPrompt).toBe(
+      EVALUATOR_PROTOCOL_INSTRUCTION + EVALUATOR_FORMATION_EVIDENCE_ADDENDUM + EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM,
+    );
+    // the validator block must sit AFTER the formation block, not replace it
+    expect(systemPrompt.indexOf(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM)).toBeLessThan(
+      systemPrompt.indexOf(EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM),
+    );
   });
 });
