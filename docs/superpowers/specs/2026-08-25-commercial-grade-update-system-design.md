@@ -18,8 +18,8 @@ open points without changing the trust chain, atomicity, or rollback promises:
    registers it; registration absence/corruption/identity mismatch are distinct
    refusal reasons, never collapsed into "too old".
 2. **§7 / §19-3** — supported runtime matrix resolved: assets are keyed by
-   OS + CPU + Node-ABI; the initial matrix is Node 24 (ABI 137) and Node 26 (ABI 147),
-   extended only by build-and-test evidence.
+   OS + CPU + Node-ABI; the matrix is Node 22 (ABI 127), Node 24 (ABI 137) and
+   Node 26 (ABI 147), extended only by build-and-test evidence.
 3. **§12** — version authority table fixed: the product version of a build is a
    one-time release-flow input; signed metadata, the channel pointer, the confirmed
    active record, and the running process identity are the only per-stage authorities.
@@ -177,7 +177,7 @@ The Owner's machine performs no dependency resolution, `npm install`, lifecycle 
 
 The updater only validates, downloads, verifies, extracts, probes, and activates. Unsupported platform or ABI combinations fail before mutation with an installer or compatibility next action.
 
-**Supported runtime matrix (resolved v0.3):** an asset is keyed by the complete triple `platform + arch + nodeAbi`; the published metadata may carry several assets for one platform. The initial supported matrix is Node 24 (ABI 137) and Node 26 (ABI 147) on the platforms the build matrix covers; the matrix grows or shrinks only with build-and-test evidence, never with open-ended range claims. Asset file names embed the ABI so two runtimes on one platform cannot collide. The update path detects the runtimes actually in use by the Console, the bootstrap, and enabled hosts before selecting an asset, and selects per process.
+**Supported runtime matrix (resolved v0.3):** an asset is keyed by the complete triple `platform + arch + nodeAbi`; the published metadata may carry several assets for one platform. The supported matrix is Node 22 (ABI 127), Node 24 (ABI 137) and Node 26 (ABI 147) on the platforms the build matrix covers. The axis must at minimum cover the declared engine floor — `engines.node` is `>= 22`, the same floor better-sqlite3 declares — because a published platform that omits an ABI leaves every host on that runtime unupdateable: `selectReleaseAsset` refuses with `runtime_not_supported` at apply time while `check()` still reports the update as allowed. The matrix grows or shrinks only with build-and-test evidence, never with open-ended range claims. Asset file names embed the ABI so two runtimes on one platform cannot collide. The update path detects the runtimes actually in use by the Console, the bootstrap, and enabled hosts before selecting an asset, and selects per process.
 
 ## 8. Transaction and Atomic Activation
 
@@ -400,6 +400,6 @@ The architecture is fixed, but the implementation plan must resolve three eviden
 
 1. Select the TUF-compatible metadata library after a maintenance, platform, and auditability spike.
 2. Prove the exact Windows file-replacement and directory-flush adapter on supported filesystems.
-3. ~~Inventory native dependencies and define the supported OS, CPU, and Node-ABI release matrix.~~ **Resolved v0.3:** see §7 — assets keyed by `platform + arch + nodeAbi`; initial matrix Node 24 (ABI 137) + Node 26 (ABI 147); growth only with build-and-test evidence.
+3. ~~Inventory native dependencies and define the supported OS, CPU, and Node-ABI release matrix.~~ **Resolved v0.3:** see §7 — assets keyed by `platform + arch + nodeAbi`; matrix Node 22 (ABI 127) + Node 24 (ABI 137) + Node 26 (ABI 147); growth only with build-and-test evidence.
 
 If any spike disproves a contract above, return to Owner review before implementation. Do not silently weaken the trust chain, atomicity guarantee, or rollback promise.
