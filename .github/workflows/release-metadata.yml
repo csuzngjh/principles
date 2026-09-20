@@ -302,13 +302,25 @@ jobs:
           # Equal is allowed (same-version republish advances the counters).
           # Same base URL derivation as the publish step (:549/:687): the
           # explicit metadata_base_url input wins, else the repo's Pages root.
+          # PRI-874 review — this guard must NOT depend on whether the local
+          # gh-pages snapshot happens to carry a pointer. It previously ran only
+          # when CHANNEL_PRODUCT_VERSION was non-empty, so a stale or absent
+          # local snapshot skipped the check ENTIRELY (publish governance must
+          # never skip silently), and a published-but-404 public endpoint was
+          # read as "first publication". The remote check now ALWAYS runs — it
+          # fails closed on any unreachable or invalid channel — and the locally
+          # observed pointer is passed as an additional FLOOR, so a 404 from the
+          # public endpoint can no longer erase a version we know is live.
+          if [ -n "${{ github.event.inputs.metadata_base_url }}" ]; then
+            CHANNEL_BASE="${{ github.event.inputs.metadata_base_url }}"
+          else
+            CHANNEL_BASE="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io/$(echo "${{ github.repository }}" | cut -d/ -f2)"
+          fi
+          CHANNEL_URL="$CHANNEL_BASE/targets/channels/$CHANNEL.json"
           if [ -n "$CHANNEL_PRODUCT_VERSION" ]; then
-            if [ -n "${{ github.event.inputs.metadata_base_url }}" ]; then
-              CHANNEL_BASE="${{ github.event.inputs.metadata_base_url }}"
-            else
-              CHANNEL_BASE="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io/$(echo "${{ github.repository }}" | cut -d/ -f2)"
-            fi
-            node scripts/check-product-version-channel.mjs --channel-url "$CHANNEL_BASE/targets/channels/$CHANNEL.json"
+            node scripts/check-product-version-channel.mjs --channel-url "$CHANNEL_URL" --channel-product-version "$CHANNEL_PRODUCT_VERSION"
+          else
+            node scripts/check-product-version-channel.mjs --channel-url "$CHANNEL_URL"
           fi
           echo "publication_sequence=$SEQ" >> "$GITHUB_OUTPUT"
           echo "channel_version=$PTR" >> "$GITHUB_OUTPUT"

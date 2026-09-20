@@ -44,6 +44,19 @@ const channelUrl = channelUrlIndex !== -1 && channelUrlIndex + 1 < process.argv.
   ? process.argv[channelUrlIndex + 1]
   : DEFAULT_CHANNEL_URL;
 
+// PRI-874 review: an ADDITIONAL low-water mark supplied by the caller from a
+// locally observed pointer (release-metadata.yml reads the published gh-pages
+// snapshot). The remote pointer stays the authority, but this floor means a
+// transient 404 from the public endpoint cannot erase a version we already know
+// is live. Optional; when absent the guard behaves exactly as before.
+const floorIndex = process.argv.indexOf('--channel-product-version');
+const requestedFloor = floorIndex !== -1 && floorIndex + 1 < process.argv.length
+  ? process.argv[floorIndex + 1]
+  : null;
+if (requestedFloor !== null && !STRICT_SEMVER.test(requestedFloor)) {
+  fail(`--channel-product-version is not a strict x.y.z version: ${JSON.stringify(requestedFloor)}`);
+}
+
 // URL safety: https + public host only (no loopback / private / reserved).
 const parsedUrl = new URL(channelUrl);
 if (parsedUrl.protocol !== 'https:') fail(`channel URL must be https: ${channelUrl}`);
@@ -66,13 +79,32 @@ try {
 if (!STRICT_SEMVER.test(resolvedVersion)) fail(`Resolved product version is not strict x.y.z: ${JSON.stringify(resolvedVersion)}`);
 
 let channelProductVersion = null;
-const response = await fetch(channelUrl, { signal: AbortSignal.timeout(30_000) });
+// PRI-874 review: a channel the guard cannot READ is a refusal, and it has to
+// SAY so. `fetch` rejects on DNS/connect/TLS/timeout failures and
+// `response.json()` rejects on a truncated or non-JSON body; both previously
+// escaped as an uncaught stack trace. The exit code was already 1, but the
+// operator got a crash dump instead of the reason — so the documented rule
+// "a broken channel read is never treated as first publish" was only half
+// implemented. Both are structured failures now.
+let response;
+try {
+  response = await fetch(channelUrl, { signal: AbortSignal.timeout(30_000) });
+} catch (error) {
+  fail(`Channel read failed for ${channelUrl} (${error instanceof Error ? error.message : String(error)}) — `
+    + 'a broken channel read is never treated as "first publish".');
+}
 if (response.status === 404) {
   console.log(`No channel pointer at ${channelUrl} — treating as the first publication.`);
 } else if (!response.ok) {
   fail(`Channel read failed (HTTP ${response.status}) for ${channelUrl} — a broken channel read is never treated as "first publish".`);
 } else {
-  const payload = await response.json();
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    fail(`Channel pointer ${channelUrl} is not valid JSON (${error instanceof Error ? error.message : String(error)}) — `
+      + 'a broken channel read is never treated as "first publish".');
+  }
   if (typeof payload !== 'object' || payload === null || !Object.hasOwn(payload, 'productVersion')) {
     fail(`Channel pointer ${channelUrl} carries no productVersion field: ${JSON.stringify(payload).slice(0, 400)}`);
   }
@@ -83,20 +115,32 @@ if (response.status === 404) {
   channelProductVersion = value;
 }
 
-if (channelProductVersion === null) {
+// Every live version the guard can observe is a FLOOR. `channelProductVersion`
+// is the remote pointer (the authority); `requestedFloor` is the caller's
+// locally observed pointer, kept so a 404 from the public endpoint cannot erase
+// a version we already know is live. Refusing on ANY floor is the same refusal
+// as before — when only the remote pointer is in play the messages are
+// unchanged.
+const liveFloors = [];
+if (channelProductVersion !== null) liveFloors.push({ label: 'live channel pointer', version: channelProductVersion });
+if (requestedFloor !== null) liveFloors.push({ label: 'published pointer snapshot', version: requestedFloor });
+
+if (liveFloors.length === 0) {
   console.log(`ok: resolved product version ${resolvedVersion}; no live channel to compare against.`);
   process.exit(0);
 }
 
-const order = compareProductVersions(resolvedVersion, channelProductVersion);
-
-if (order < 0) {
-  fail(`Resolved product version (${resolvedVersion}) is LOWER than the live channel pointer (${channelProductVersion}). `
-    + 'Publishing would downgrade every installed runtime. Advance the ROOT package.json version on main instead '
-    + '(explicit version-advancement commit), then re-run.');
+for (const floor of liveFloors) {
+  if (compareProductVersions(resolvedVersion, floor.version) < 0) {
+    fail(`Resolved product version (${resolvedVersion}) is LOWER than the ${floor.label} (${floor.version}). `
+      + 'Publishing would downgrade every installed runtime. Advance the ROOT package.json version on main instead '
+      + '(explicit version-advancement commit), then re-run.');
+  }
 }
-if (order > 0) {
-  const message = `Pending publication: main product version ${resolvedVersion} is AHEAD of the live channel (${channelProductVersion}).`;
+
+const aheadOf = liveFloors.filter((floor) => compareProductVersions(resolvedVersion, floor.version) > 0);
+if (aheadOf.length > 0) {
+  const message = `Pending publication: main product version ${resolvedVersion} is AHEAD of the ${aheadOf.map((floor) => `${floor.label} (${floor.version})`).join(', ')}.`;
   if (reportMode) {
     console.log(message);
     console.log('ok: ahead-of-channel is the legitimate state between a version-advancement commit and its release.');
