@@ -56,16 +56,28 @@ installed runtimes report exactly that identity
 - **Manual**: Actions → Publish to npm → Run (`package` input), or the
   signed release workflow (`release-metadata.yml`, `product_version: auto`).
 
-### Hard Gates (all three must pass before any publish side effect)
+### Hard Gates (timing differs per entry point)
 
-1. **Stamp**: the installer payload is stamped with the resolved identity
-   (`_release/product-identity.json`) — the packed TARBALL is verified, not
-   the working directory.
-2. **Monotonic**: the resolved product version must be `>=` the live
-   channel's `productVersion` (equal = same-version republish, counters
-   advance). Lower refuses — publishing a downgrade is never allowed.
-3. **Install-time**: the installer refuses any payload WITHOUT the embedded
-   stamp (`resolveInstallerPayloadIdentity` fail-closed).
+These three are **not** one checkpoint that completes before any publish side
+effect. Each runs where its entry point can actually enforce it:
+
+1. **Monotonic** — *before that entry point's first publish*. The signed-release
+   workflow runs it while resolving publication inputs, before any byte is
+   emitted; the npm train runs it as a step before `Publish 1/7`. It always
+   consults the **remote** channel pointer — never only the local snapshot, and
+   a channel it cannot read is a refusal rather than a skip — and refuses when
+   the resolved version is below any live pointer. Equal is allowed (a
+   same-version republish advances the counters).
+2. **Stamp** — *at the installer package's own publish*. The payload is stamped
+   with the resolved identity (`_release/product-identity.json`) and the **packed
+   TARBALL** is verified, not the working directory. In the full train this
+   happens after the earlier packages have been published, and the job matrix
+   does not order the installer against the plugin — so a stamp failure can be
+   observed after some packages are already out.
+3. **Install-time** — *on the Owner's machine; not a publish gate at all*. The
+   installer resolves and validates the payload identity **before** it stops the
+   gateway or creates the workspace, and refuses an unstamped payload
+   (`install_failed_before_mutation`) without entering the install flow.
 
 ### Version Sync Scope (release CI, runner-local only — never pushed to main)
 

@@ -46,14 +46,22 @@ npm 火车 / 签名发布工作流读根 manifest
 - **手动**：Actions → Publish to npm → Run（`package` 输入），或签名发布工作流
   （`release-metadata.yml`，`product_version: auto`）。
 
-### 三道硬门（都在任何发布副作用之前）
+### 三道硬门（时序按发布入口不同，不在任何副作用之前一次性完成）
 
-1. **盖章**：安装器 payload 打上解析出的身份（`_release/product-identity.json`）；
-   校验对象是**打出来的 tarball**，不是工作目录。
-2. **单调**：解析出的产品版本必须 `>=` 线频道的 `productVersion`
-   （相等 = 同版本重发布，计数器递增）。更低即拒绝——永不发布降级。
-3. **安装时**：安装器拒绝任何没有内嵌身份戳的 payload
-   （`resolveInstallerPayloadIdentity` fail-closed）。
+这三道**不是**「任何发布副作用发生前全部跑完」的单一检查点；各自在自己能真正
+生效的入口处执行：
+
+1. **单调**——*在该入口的首次发布之前*。签名发布工作流在解析发布输入时就跑
+   （任何字节发出之前）；npm 火车在 `Publish 1/7` 之前作为一步执行。它**始终**
+   查询**远程**频道指针——绝不只看本地快照，且「读不到频道」是拒绝而不是跳过——
+   解析出的版本低于任何线上指针即拒绝。相等允许（同版本重发布只递增计数器）。
+2. **盖章**——*在安装器包自己发布的那一刻*。payload 打上解析出的身份
+   （`_release/product-identity.json`），校验对象是**打出来的 tarball**，不是工作
+   目录。在完整火车里，这一步晚于前面几个包已经发布；且 job matrix 不保证安装器
+   与插件的先后——所以盖章失败可能发生在部分包已发布之后。
+3. **安装时**——*在 Owner 机器上，根本不是发布门*。安装器在**停止 gateway 或创建
+   workspace 之前**就解析并校验 payload 身份，无身份戳即拒绝
+   （`install_failed_before_mutation`），不进入安装流程。
 
 ### 版本同步范围（发布 CI 内、仅 runner 本地——不回写 main）
 
