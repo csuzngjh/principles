@@ -462,6 +462,12 @@ jobs:
       - name: Test scripts
         run: npm run test:scripts
 
+      # PRI-868: the legacy-installer deactivation contract lives in the root
+      # tests/ directory, which no other CI job collects. Run it from the repo
+      # root here so a future guard deletion fails CI instead of staying green.
+      - name: Test root guard contracts
+        run: npm run test:guard-contracts
+
   test-host-runtime:
     name: Test host-runtime
     runs-on: ubuntu-latest
