@@ -8,9 +8,12 @@
  * never fire on a real Codex event.
  *
  * EVIDENCE BOUND: this declaration contains only names with in-repo
- * evidence — the installer's hook matcher `Bash|apply_patch`
- * (create-principles-disciple/src/installers/codex-host-installer.ts:203,
- * locked by codex-plugin-bundle.test.ts). Extending it with the remaining
+ * evidence — the shipped hook matcher `Bash|apply_patch`
+ * (plugins/principles-disciple/hooks/hooks.json:5, locked by
+ * packages/codex-adapter/tests/codex-plugin-bundle.test.ts:183 and used as
+ * the installed-hook fixture in
+ * packages/create-principles-disciple/tests/codex-host-installer.test.ts
+ * lines 122/162/170). Extending it with the remaining
  * Codex tool surface is tracked as PRI-657 — a wrong guess would be worse
  * than a gap (the reliability check rejects undeclared names, forcing
  * correct names).
