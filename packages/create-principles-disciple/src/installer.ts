@@ -3045,13 +3045,15 @@ function sha256File(filePath: string): string {
  */
 export type InstallerProductVersionSource = 'embedded' | 'signed_channel';
 
-function resolveInstallerPayloadIdentity(pluginDir: string): {
-  productVersion: string;
-  sourceCommit: string | null;
-  productVersionSource: InstallerProductVersionSource;
-  releaseMetadataDigest: string;
-  releaseMetadataDigestSource: ReleaseMetadataDigestSource;
-} {
+export interface InstallerPayloadIdentity {
+  readonly productVersion: string;
+  readonly sourceCommit: string | null;
+  readonly productVersionSource: InstallerProductVersionSource;
+  readonly releaseMetadataDigest: string;
+  readonly releaseMetadataDigestSource: ReleaseMetadataDigestSource;
+}
+
+function resolveInstallerPayloadIdentity(pluginDir: string): InstallerPayloadIdentity {
   const pdCliPkgPath = path.join(pluginDir, 'pd-cli', 'package.json');
   const assetManifestPath = path.join(pluginDir, '_release', 'manifest.json');
   const embeddedIdentityPath = path.join(pluginDir, '_release', 'product-identity.json');
@@ -3103,8 +3105,14 @@ function resolveInstallerPayloadIdentity(pluginDir: string): {
 }
 
 /** Opens one installer transaction: `~/.pd/transactions/<transactionId>.jsonl`. */
-export function beginInstallerJournal(pluginDir: string): InstallerJournal {
-  const { productVersion, sourceCommit, productVersionSource, releaseMetadataDigest, releaseMetadataDigestSource } = resolveInstallerPayloadIdentity(pluginDir);
+export function beginInstallerJournal(pluginDir: string, preResolvedIdentity?: InstallerPayloadIdentity): InstallerJournal {
+  // PRI-874 review: `install()` resolves the identity as a PRE-FLIGHT (before
+  // the gateway is stopped or the workspace is created) and hands the result
+  // here, so the identity is computed exactly once and the journal cannot
+  // disagree with what the pre-flight validated. Callers that open a journal
+  // directly (tests, ReleaseManager adoption) keep the old single-argument
+  // behavior and resolve inside this function.
+  const { productVersion, sourceCommit, productVersionSource, releaseMetadataDigest, releaseMetadataDigestSource } = preResolvedIdentity ?? resolveInstallerPayloadIdentity(pluginDir);
   const transactionId = `install-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const journalPath = path.join(getPdDir(), 'transactions', `${transactionId}.jsonl`);
   const releaseId = `bundled-${productVersion}-${releaseMetadataDigest.slice(0, 12)}`;
@@ -3242,6 +3250,42 @@ export async function install(
       };
     }
   }
+  // PRI-874 review: fail-closed has to mean "does not ENTER the install flow",
+  // not merely "does not install". Resolving the payload identity only inside
+  // beginInstallerJournal() (below) refused an unstamped payload AFTER the
+  // gateway had been stopped and the workspace directory created — a failed
+  // install that still left the Owner with a downed gateway and a stray
+  // directory, i.e. a recovery problem. Resolve and validate it HERE, before
+  // any side effect, and hand the same value to beginInstallerJournal() so the
+  // identity is computed exactly once.
+  //
+  // Only when this run opens its own transaction: an externally adopted
+  // transaction (ReleaseManager apply orchestration) supplies its identity
+  // verbatim and was never resolved from the payload, so the pre-flight must
+  // not invent a stricter rule for it.
+  let preResolvedIdentity: InstallerPayloadIdentity | undefined;
+  if (transaction === undefined) {
+    try {
+      preResolvedIdentity = resolveInstallerPayloadIdentity(pluginDir);
+    } catch (error) {
+      if (!(error instanceof ProductIdentityError)) throw error;
+      // Same structured refusal the post-mutation catch would have produced at
+      // this point (no backup yet, no cleanup performed): identical `reason`
+      // prefix, `next_no_changes_other` next action and rollback suffix.
+      return {
+        success: false,
+        workspaceDir: options.workspaceDir,
+        configYamlPath: getConfigYamlPath(options.workspaceDir),
+        templatesCount: 0,
+        components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
+        verification: { features: 'skipped', storyA: 'skipped' },
+        enabledChannels: options.channels,
+        nextAction: t('next_no_changes_other'),
+        reason: `install_failed_before_mutation: ${error.message}`,
+        error: `${error.message} — ${t('rollback_no_changes')}`,
+      };
+    }
+  }
   // Gateway lock pre-flight: a running gateway holds native-module file handles
   // that make the backup rename fail with EPERM. Decide stop/abort/proceed
   // BEFORE mutating anything (cli-5: abort/stop-failed paths must not mutate).
@@ -3348,7 +3392,7 @@ export async function install(
     // journal cannot be written at all, refuse before mutating (fail loud,
     // zero side effects) rather than performing an unjournaled mutation
     // (refusal over silent degradation, ADR-0024 §2.4 rule 4).
-    journal = transaction ?? beginInstallerJournal(pluginDir);
+    journal = transaction ?? beginInstallerJournal(pluginDir, preResolvedIdentity);
     if (transaction === undefined) {
       try {
         journalInstallerTransition(journal, null, 'planned', `host=${options.host} mode=${options.mode}`);
