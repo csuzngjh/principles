@@ -431,7 +431,6 @@ GitHub PR 合并后重做 ③ 对齐。
 | Linear context 不可用 | 本阶段不引用任何密钥；CNB 侧无 Linear 集成 |
 | 未执行全量 `verify:merge` | 首次 `npm install` 约 25 分钟，不纳入第一阶段流水线 |
 | `@NPC` 评论触发不可用 | 单向镜像下 CNB 侧无 PR/Issue |
-| GitHub 既有红灯会同样出现 | workflow `E2E Regression Test` / job `Nocturnal Pipeline Regression Test` 在 main 上自 ≥#1605 起连续失败，根因在 `packages/pd-cli/src/update/**`。**这是预先存在的红灯，不得归因于 CNB 接入** |
 | **P0-01：交付容器同时持有两平台写权限** | T6/T7 容器内 `CNB_TOKEN`（CNB 写）与 `GITHUB_SYNC_TOKEN`（GitHub Contents RW + PR RW）并存。属**平台注入边界**问题，配置不可消除（ADR-0026）。**已接受为残余风险**，不是待修复的配置缺陷 |
 
 ### 5.1 P0-01 残余风险登记（显式接受，非沉默）
