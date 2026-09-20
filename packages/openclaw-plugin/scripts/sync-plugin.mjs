@@ -93,6 +93,7 @@ function parseArgs() {
         dev: false,
         bump: false,
         help: false,
+        invalid: false,
     };
 
     const argv = process.argv.slice(2);
@@ -134,7 +135,7 @@ function parseArgs() {
             default:
                 if (arg.startsWith('--')) {
                     console.error(`Unknown option: ${arg}`);
-                    args.help = true;
+                    args.invalid = true;
                 }
         }
     }
@@ -1299,7 +1300,9 @@ function refuseDeactivatedInstaller(helpRequested) {
 function main() {
     // Unconditional refusal; the legacy body below is kept verbatim but is
     // unreachable. Do not remove the guard without a new governance decision.
-    refuseDeactivatedInstaller(parseArgs().help);
+    // Only an explicit --help/-h exits 0; unknown options (invalid) exit 1.
+    const guardArgs = parseArgs();
+    refuseDeactivatedInstaller(guardArgs.help && !guardArgs.invalid);
 
     const args = parseArgs();
     if (args.help) {

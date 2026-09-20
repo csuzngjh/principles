@@ -3,6 +3,8 @@
 日期：2026-09-19 ｜ 分析人：ZCode 会话 ｜ 性质：只读分析，未修改任何代码
 关联：AGENTS.md §1.1（2026-09-03 占位符事故同族）、PRI-849（版本权威）、PR #1768/#1771/#1773（更新链整改）
 
+> ⚠️ **2026-09-20 更正**：本文"`install.mjs` 完全不写 `~/.pd`"的边界结论已被复核**推翻**（install.mjs 经 sync-plugin.mjs 间接处理 junction，可写穿 `~/.pd/runtime`，证据见 **[install-mjs-dev-prod-isolation-review-20260920.md](./install-mjs-dev-prod-isolation-review-20260920.md)**）；其余"目录损坏"机制分析经复核仍然成立。
+
 ---
 
 ## 0. 一页摘要
@@ -25,7 +27,7 @@
 ② Windows 文件锁下"原位覆盖"产生半新半旧 dist；
 ③ 造出第二个 Console 入口（extensions 路径 + 3100 端口）与生产 Console（~/.pd/runtime/console）抢端口/抢身份。
 
-**关键边界澄清**：`install.mjs` **不写 `~/.pd` 任何内容**（grep 实证 0 处）——更新链的权威状态（active.json/releases/bootstrap/journal）没有被它污染；它污染的是 `~/.openclaw/extensions` 安装面与版本观感。
+**关键边界澄清（⚠️ 2026-09-20 已更正）**：~~`install.mjs` 不写 `~/.pd` 任何内容~~——此结论**只对 install.mjs 单文件成立，整体不成立**：它无条件调用 `sync-plugin.mjs`，而后者会解析插件内 junction 并改写**真实目标**（本机 `core`、`node_modules/@principles/core`、`node_modules/@principles/host-runtime` 三个链接均指向 `~/.pd/runtime`），因此旧链**可以**污染更新链权威状态。完整证据与修正见 **[install-mjs-dev-prod-isolation-review-20260920.md](./install-mjs-dev-prod-isolation-review-20260920.md)**。
 
 ---
 
@@ -37,7 +39,7 @@
 
 ## 2. 脚本行为逐段分析（行号对应当前 main 的 scripts/install.mjs）
 
-- L23-50：导入与路径常量——目标锁定 `~/.openclaw/extensions/principles-disciple/{plugin,console,bin}`。**全文件 0 处引用 `~/.pd`**（grep 实证），因此不触碰 active.json/bootstrap/releases/journal。
+- L23-50：导入与路径常量——目标锁定 `~/.openclaw/extensions/principles-disciple/{plugin,console,bin}`。**全文件 0 处引用 `~/.pd`**（grep 实证）。（⚠️ 2026-09-20 更正：由此推出"不触碰 active.json/bootstrap/releases/journal"不成立——间接调用链 `sync-plugin.mjs` 会经 junction 写穿 `~/.pd/runtime`，见 §0 更正与[复核报告](./install-mjs-dev-prod-isolation-review-20260920.md)。）
 - L56-90：`copyDir` 递归拷贝（无锁检测）；`injectCorePackage`：把 monorepo `node_modules/@principles/core`（开发版）覆盖注入目标 `node_modules`——生产目录从此混入开发依赖树。
 - L94-140：参数解析；`--force` 跳过确认；`--skip-build` 用现有 dist（可能是陈旧/半成品构建）。
 - L168+：`getVersion(dir)` 读目标 package.json 的 version——dev 树版本，非产品身份。

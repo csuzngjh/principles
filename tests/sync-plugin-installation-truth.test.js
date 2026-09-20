@@ -9,12 +9,11 @@ const repoRoot = process.cwd();
 const legacyInstallers = [
   {
     script: join(repoRoot, 'scripts', 'install.mjs'),
-    // Only flags this script's parseArgs knows: unknown --flags flip help=true.
-    refusalArgs: [[], ['--force'], ['-f'], ['--skip-build'], ['--skip-deps'], ['--skip-console'], ['--skip-plugin'], ['--lang', 'zh']],
+    refusalArgs: [[], ['--force'], ['-f'], ['--skip-build'], ['--skip-deps'], ['--skip-console'], ['--skip-plugin'], ['--lang', 'zh'], ['--unknown-flag']],
   },
   {
     script: join(repoRoot, 'packages', 'openclaw-plugin', 'scripts', 'sync-plugin.mjs'),
-    refusalArgs: [[], ['--force'], ['-f'], ['--dev'], ['-d'], ['--skip-build'], ['--skip-deps'], ['--no-restart'], ['--bump']],
+    refusalArgs: [[], ['--force'], ['-f'], ['--dev'], ['-d'], ['--skip-build'], ['--skip-deps'], ['--no-restart'], ['--bump'], ['--unknown-flag']],
   },
 ];
 
