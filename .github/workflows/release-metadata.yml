@@ -335,11 +335,23 @@ jobs:
           echo "expires_at=$EXPIRES" >> "$GITHUB_OUTPUT"
           echo "publication inputs: sequence=$SEQ pointer=$PTR expires=$EXPIRES resolved_version=$RESOLVED_VERSION"
 
-  # One leg per (platform, runtime). Each leg builds NATIVELY on its own
+  # One leg per (platform, arch, Node ABI). Each leg builds NATIVELY on its own
   # runner — assertSupportedLocalReleaseTarget forbids cross-target builds, so
-  # the matrix runner IS the target platform by construction. PRI-850/ABI:
-  # the Node runtime is part of the asset identity — the matrix grows the ABI
-  # axis only with build-and-test evidence (SPEC v0.3 §7).
+  # the matrix runner IS the target platform by construction, and the leg's
+  # `node` major is what stamps the asset's ABI (process.versions.modules).
+  #
+  # PRI-850/ABI: the Node runtime is part of the asset identity, so a runtime is
+  # updateable ONLY when its exact (platform, arch, nodeAbi) triple is published
+  # — selectReleaseAsset refuses with `runtime_not_supported` otherwise. The axis
+  # must therefore cover every ABI in SUPPORTED_NATIVE_TARGETS.nodeAbis, on every
+  # platform this job publishes: `engines.node` is `>= 22` (better-sqlite3's own
+  # floor), so a Node 22 host (ABI 127) is supported by declaration and must not
+  # be the one runtime that cannot install. PRI-852 added Node 26 this way; Node
+  # 22 was left behind and Node 22 hosts were unupdateable. The axis grows or
+  # shrinks only with build-and-test evidence (SPEC v0.3 §7) — the full matrix in
+  # release-reproducibility-full.yml is that evidence, and
+  # tests/release-target-matrix.test.ts pins this coverage so the declared axis
+  # and the published set cannot drift apart again.
   build-asset:
     name: Build asset (${{ matrix.platform }}/${{ matrix.arch }} / node${{ matrix.node }})
     needs: resolve-inputs
@@ -349,12 +361,20 @@ jobs:
         include:
           - platform: linux
             arch: x64
+            node: '22'
+            runs_on: ubuntu-latest
+          - platform: linux
+            arch: x64
             node: '24'
             runs_on: ubuntu-latest
           - platform: linux
             arch: x64
             node: '26'
             runs_on: ubuntu-latest
+          - platform: win32
+            arch: x64
+            node: '22'
+            runs_on: windows-latest
           - platform: win32
             arch: x64
             node: '24'
@@ -365,7 +385,15 @@ jobs:
             runs_on: windows-latest
           - platform: darwin
             arch: arm64
+            node: '22'
+            runs_on: macos-latest
+          - platform: darwin
+            arch: arm64
             node: '24'
+            runs_on: macos-latest
+          - platform: darwin
+            arch: arm64
+            node: '26'
             runs_on: macos-latest
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 90

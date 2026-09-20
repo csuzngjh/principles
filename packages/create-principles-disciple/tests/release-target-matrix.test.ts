@@ -123,6 +123,46 @@ describe('native release target matrix', () => {
     expect(metadataWorkflow).not.toContain('pull_request:');
   });
 
+  it('publishes every declared Node ABI on every platform the asset matrix covers', () => {
+    const metadataWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'release-metadata.yml'), 'utf8');
+    const buildAssetJob = metadataWorkflow.slice(
+      metadataWorkflow.indexOf('build-asset:'),
+      metadataWorkflow.indexOf('assemble-publish:'),
+    );
+
+    // Read the declaration (three fields per leg, in the order the workflow
+    // writes them), not the rendered matrix.
+    const legs = [...buildAssetJob.matchAll(/- platform: (\S+)\n\s+arch: (\S+)\n\s+node: '(\d+)'/g)]
+      .map((match) => ({ platform: match[1] ?? '', arch: match[2] ?? '', nodeMajor: Number(match[3]) }));
+    expect(legs.length).toBeGreaterThan(0);
+
+    const declaredMajors = Object.keys(SUPPORTED_NATIVE_TARGETS.nodeAbis).map(Number).sort((a, b) => a - b);
+
+    const byTarget = new Map<string, number[]>();
+    for (const leg of legs) {
+      const key = `${leg.platform}/${leg.arch}`;
+      byTarget.set(key, [...(byTarget.get(key) ?? []), leg.nodeMajor]);
+    }
+    expect(byTarget.size).toBeGreaterThan(0);
+
+    for (const [target, majors] of byTarget) {
+      // A runtime is updateable ONLY when its exact (platform, arch, nodeAbi)
+      // triple is published — selectReleaseAsset refuses with
+      // `runtime_not_supported` otherwise. `engines.node` is `>= 22`
+      // (better-sqlite3's own floor), so a Node 22 host (ABI 127) is
+      // declared-supported and must not be the one runtime with no asset.
+      // PRI-852 added Node 26 for exactly this reason and left Node 22 behind;
+      // Node 22 hosts then had no updateable release at all. A published
+      // platform therefore carries the FULL declared ABI axis.
+      expect([...majors].sort((a, b) => a - b), `${target} ABI coverage`).toEqual(declaredMajors);
+    }
+
+    // One build per asset identity: a duplicated (platform, arch, node) leg
+    // would stage two uploads with the same artifact name.
+    const identities = legs.map((leg) => `${leg.platform}/${leg.arch}/node${leg.nodeMajor}`);
+    expect(new Set(identities).size).toBe(identities.length);
+  });
+
   it('keeps the PR quick-check bounded and materializes each release lock once', () => {
     const quickWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'release-reproducibility.yml'), 'utf8');
     const builderScript = fs.readFileSync(path.join(repoRoot, 'packages', 'create-principles-disciple', 'scripts', 'bundle-plugin.mjs'), 'utf8');
