@@ -8,7 +8,19 @@ name: Release Reproducibility (Full Matrix)
 # SPEC §18-3 before release publication.
 on:
   workflow_call:
+    inputs:
+      ref:
+        description: 'Commit to verify — the release cohort SHA when called from the publish train (SPEC v1.2 G5); empty = the triggering SHA.'
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit to verify (defaults to the triggering SHA).'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -35,6 +47,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: ${{ matrix.node }}
@@ -129,6 +142,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: '22.22.2'

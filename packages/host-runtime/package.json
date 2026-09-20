@@ -1,6 +1,6 @@
 {
   "name": "@principles/host-runtime",
-  "version": "0.1.0",
+  "version": "0.7.7",
   "description": "Shared host-neutral orchestration for Principles Disciple MVP-Core hook paths.",
   "type": "module",
   "main": "./dist/index.js",

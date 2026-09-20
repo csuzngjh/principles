@@ -619,9 +619,17 @@ if (BUILD_SELF_CONTAINED_ASSET) {
 // permanently stale (CI bumps versions at publish time but never writes back
 // to main). Without this sync, the bundled plugin carries a stale version,
 // causing a permanent false "update available" after install.
+//
+// SPEC v1.2 §21 (bundle/assembly reproducibility): when the bundle is built
+// from a RELEASE COHORT SHA, the working-tree versions are the committed,
+// planned versions — reading the movable registry `latest` here would stamp
+// components that a LATER cohort published, breaking the
+// commit-version <-> artifact-content correspondence. The publish train
+// therefore sets PD_BUNDLE_PRESERVE_SOURCE_VERSIONS=1 and the bundled
+// payloads carry exactly the versions committed at the cohort SHA.
 // ---------------------------------------------------------------------------
-if (BUILD_SELF_CONTAINED_ASSET || PREPARE_RELEASE_LOCKS) {
-  log('\n🔢 Preserving source component versions for the immutable release asset.');
+if (BUILD_SELF_CONTAINED_ASSET || PREPARE_RELEASE_LOCKS || process.env.PD_BUNDLE_PRESERVE_SOURCE_VERSIONS === '1') {
+  log('\n🔢 Preserving source component versions (release cohort / immutable asset mode).');
 } else {
 log('\n🔢 Syncing bundled plugin version to latest npm principles-disciple...');
 

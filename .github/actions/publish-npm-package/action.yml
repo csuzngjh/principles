@@ -1,13 +1,16 @@
-name: Publish one npm package
+name: Publish one npm package (exact committed version)
 description: >-
-  Shared per-package publish logic for the full-product release train in
-  publish-npm.yml. One job calls this action SEVEN times as sequential
-  steps in dependency order — the step order IS the execution order, and a
-  failed step stops the job, so an upstream publish failure blocks every
-  downstream package (no matrix scheduling involved). The caller job MUST
-  grant permissions contents:write and id-token:write, and MUST have run
-  checkout (fetch-depth: 0), setup-node (registry-url), npm ci, and the
-  common core/host-runtime/install-layout builds before invoking.
+  Shared per-package publish logic for the release train in publish-npm.yml.
+  EXACT-VERSION CONTRACT (SPEC v1.2 §19): this action has NO authority to
+  invent, bump, reset or compute a version. It reads the version committed
+  in package.json at the release cohort SHA, checks the registry for that
+  exact name@version, and publishes it only when absent. An existing exact
+  version with matching provenance SKIPS the npm upload while the caller's
+  closing-step reconciliation continues (SPEC §24). One job calls this
+  action as sequential steps in dependency order; the caller MUST grant
+  permissions contents:write and id-token:write, and MUST have run checkout
+  of the cohort SHA, setup-node (registry-url), npm ci, and the common
+  core/install-layout/host-runtime builds before invoking.
 inputs:
   pkg_dir:
     description: 'Workspace directory under packages/ (e.g. principles-core)'
@@ -17,8 +20,8 @@ inputs:
     description: 'npm package name (e.g. @principles/core)'
     required: true
     type: string
-  version_bump:
-    description: 'auto | patch | minor | major'
+  cohort_sha:
+    description: 'Release cohort SHA (the Version Packages PR merge commit) — provenance expectation for the exact-version check'
     required: true
     type: string
   npm_token:
@@ -26,7 +29,7 @@ inputs:
     required: true
     type: string
   github_token:
-    description: 'GitHub token for the plugin release step (passed in by the caller)'
+    description: 'GitHub token for the plugin release closing steps (passed in by the caller)'
     required: false
     type: string
     default: ''
@@ -37,11 +40,9 @@ inputs:
     default: ''
   product_identity_version:
     description: >-
-      SPEC v0.3 §12: the TRAIN product version to embed in the installer payload
-      identity stamp. Used only by the create-principles-disciple step; empty
-      falls back to this action''s computed package version (single-package
-      publishes). The embedded stamp is what installed product versions derive
-      from — never the installer package''s own npm version.
+      The TRAIN product version to embed in the installer payload identity
+      stamp (SPEC v0.3 §12 authority, unchanged). Used only by the
+      create-principles-disciple step.
     required: false
     type: string
     default: ''
@@ -49,107 +50,78 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Get npm latest version
-      id: npm-version
+    - name: Read committed version + exact registry state
+      id: exact
       shell: bash
       run: |
-        NPM_VERSION=$(npm view "${{ inputs.npm_name }}" version 2>/dev/null || echo "0.0.0")
-        echo "npm_version=$NPM_VERSION" >> "$GITHUB_OUTPUT"
-        echo "Latest npm version of ${{ inputs.npm_name }}: $NPM_VERSION"
+        set -euo pipefail
+        LOCAL_VERSION=$(node -p "require('./packages/${{ inputs.pkg_dir }}/package.json').version")
+        echo "version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
+        echo "Committed version at cohort SHA: ${{ inputs.npm_name }}@$LOCAL_VERSION"
 
-    - name: Analyze commits for version bump
-      id: analyze
-      if: ${{ github.event_name == 'push' || inputs.version_bump == 'auto' }}
-      shell: bash
-      run: |
-        NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
-        LAST_TAG="v$NPM_VERSION"
-
-        if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
-          COMMITS=$(git log "$LAST_TAG..HEAD" --oneline)
-        else
-          COMMITS=$(git log -10 --oneline)
+        node scripts/release/registry-exact.mjs "${{ inputs.npm_name }}" "$LOCAL_VERSION" \
+          --expect-git-head "${{ inputs.cohort_sha }}" --json > exact.json
+        cat exact.json
+        STATUS=$(node -p "require('./exact.json').status")
+        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+        if [ "$STATUS" = "REGISTRY_ERROR" ] || [ "$STATUS" = "PRESENT_CONFLICT" ] \
+          || [ "$STATUS" = "PRESENT_UNVERIFIED" ] || [ "$STATUS" = "LOCAL_BEHIND_REGISTRY" ]; then
+          echo "::error::Registry contract violation for ${{ inputs.npm_name }}@$LOCAL_VERSION: $STATUS (see exact.json above)."
+          exit 1
         fi
-
-        echo "Commits since npm v$NPM_VERSION:"
-        echo "$COMMITS"
-
-        BUMP="patch"
-
-        if echo "$COMMITS" | grep -qE "^[a-f0-9]+ (feat|feature)(\(.+\))?!:"; then
-          BUMP="major"
-        elif echo "$COMMITS" | grep -qE "^[a-f0-9]+ .+!:"; then
-          BUMP="major"
-        elif echo "$COMMITS" | grep -qE "^[a-f0-9]+ (feat|feature)(\(.+\))?:"; then
-          BUMP="minor"
-        fi
-
-        echo "Detected version bump: $BUMP"
-        echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
 
     - name: Verify registry dependencies are published
-      # Publish-order safety net: a package whose runtime dependency is
-      # absent from the registry breaks `npm install` for every consumer.
-      # The retry loop tolerates registry propagation lag from a package
-      # published moments earlier in the release train.
+      # Publish-order safety net, preserved (SPEC §20): a package whose
+      # runtime dependency range resolves to nothing breaks `npm install`
+      # for every consumer. The retry loop tolerates registry propagation
+      # lag from a package published moments earlier in the release train.
+      # The ranges checked are THIS package's own committed declarations.
+      if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
       run: |
-        check_published() {
+        check_resolvable() {
           local PKG="$1"
+          local RANGE="$2"
           for attempt in 1 2 3 4 5; do
-            if npm view "$PKG" version >/dev/null 2>&1; then
-              echo "$PKG is published on the registry (lookup attempt $attempt)."
+            if npm view "$PKG@$RANGE" version >/dev/null 2>&1; then
+              echo "$PKG@$RANGE resolves on the registry (attempt $attempt)."
               return 0
             fi
-            echo "Attempt $attempt/5: $PKG not yet visible on the registry; waiting 15s..."
+            echo "Attempt $attempt/5: $PKG@$RANGE not resolvable yet; waiting 15s..."
             sleep 15
           done
-          echo "::error::$PKG is not published. ${{ inputs.npm_name }} depends on it — publishing now would make 'npm install ${{ inputs.npm_name }}' fail dependency resolution. Publish $PKG first, then retry this package."
+          echo "::error::$PKG@$RANGE (declared by ${{ inputs.npm_name }}) does not resolve on the registry — publishing now would break 'npm install ${{ inputs.npm_name }}'. The dependency's cohort version publishes earlier in the train; a persistent failure means the committed range excludes it."
           exit 1
         }
-        case "${{ inputs.pkg_dir }}" in
-          host-runtime)
-            # host-runtime declares an EXACT runtime dependency on
-            # @principles/install-layout@0.1.0 — it must exist on the
-            # registry BEFORE host-runtime publishes (review P1 fix,
-            # 2026-08-28).
-            check_published "@principles/install-layout"
-            ;;
-          codex-adapter)
-            check_published "@principles/host-runtime"
-            ;;
-          pd-cli)
-            check_published "@principles/host-runtime"
-            check_published "@principles/codex-adapter"
-            check_published "@principles/install-layout"
-            ;;
-          create-principles-disciple)
-            check_published "@principles/host-runtime"
-            check_published "@principles/install-layout"
-            ;;
-        esac
+        node -e '
+          const deps = require("./packages/${{ inputs.pkg_dir }}/package.json").dependencies ?? {};
+          for (const [k, v] of Object.entries(deps)) {
+            if (k.startsWith("@principles/") || k === "principles-disciple") console.log(`${k}\t${v}`);
+          }
+        ' | while IFS=$'\t' read -r PKG RANGE; do
+          check_resolvable "$PKG" "$RANGE"
+        done
 
     - name: Build target package
+      if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
       run: |
         PKG_DIR="${{ inputs.pkg_dir }}"
         if [ "$PKG_DIR" = "openclaw-plugin" ]; then
           npm run build --workspace=principles-disciple
         elif [ "$PKG_DIR" = "pd-cli" ]; then
-          # pd-cli imports types from principles-disciple — build it first
-          # (same ordering the create-principles-disciple branch uses).
+          # pd-cli imports types from principles-disciple — build it first.
           npm run build --workspace=principles-disciple
           npm run build --workspace=@principles/pd-cli
         elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
-          # esbuild first (cleans dist, produces bundle.js), then tsc --emitDeclarationOnly
-          # (adds .d.ts without overwriting esbuild's .js output). Both needed: pd-cli
-          # imports types from principles-disciple, bundle-plugin.mjs needs bundle.js.
-          # codex-adapter must be built before the installer: bundle-plugin.mjs
-          # bundles it (pd-cli's runtime dep) and pd-cli's tsc needs its dist.
-          # The installer MUST be built before pd-console: since PRI-672 the
-          # console typechecks against create-principles-disciple's dist types
-          # (release-manager-authority), which do not exist after a clean
-          # `npm ci` — console-first ordering fails tsc with TS2307.
+          # esbuild first (cleans dist, produces bundle.js), then tsc
+          # --emitDeclarationOnly. codex-adapter must be built before the
+          # installer (bundle-plugin.mjs bundles it); the installer before
+          # pd_console (console typechecks against its dist types).
+          # PD_BUNDLE_PRESERVE_SOURCE_VERSIONS: the bundle is built at the
+          # release cohort SHA — bundled payloads must carry the committed
+          # versions, NOT the movable registry latest (SPEC v1.2 §21).
+          export PD_BUNDLE_PRESERVE_SOURCE_VERSIONS=1
           npm run build:production --workspace=principles-disciple
           npm run build:types --workspace=principles-disciple
           npm run build --workspace=@principles/codex-adapter
@@ -165,119 +137,27 @@ runs:
         fi
 
     - name: Verify package dry-run
+      if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
       run: |
         set -o pipefail
         cd "packages/${{ inputs.pkg_dir }}"
         npm pack --dry-run 2>&1 | head -50
 
-    - name: Determine version bump type
-      id: bump
-      shell: bash
-      run: |
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.version_bump }}" != "auto" ]; then
-          echo "type=${{ inputs.version_bump }}" >> "$GITHUB_OUTPUT"
-        else
-          echo "type=${{ steps.analyze.outputs.bump || 'patch' }}" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Bump version
-      id: version
-      shell: bash
-      run: |
-        cd "packages/${{ inputs.pkg_dir }}"
-
-        # Direct package.json edits — NOT `npm version`. The full-product
-        # train runs all seven packages in ONE checkout, and `npm version`
-        # re-runs npm's workspace resolution over that shared tree: once an
-        # earlier step has bumped a workspace dependency past a range a
-        # sibling declares (host-runtime 0.7.x vs codex-adapter's ^0.1.0),
-        # npm installs a REGISTRY copy nested in that sibling's
-        # node_modules, and every later build in the tree resolves the
-        # ancient nested types instead of the workspace (the 2026-09-19
-        # train died at publish 4/7 exactly this way). A plain file edit
-        # leaves the `npm ci`-installed tree untouched, and has no git
-        # tag/commit side effects — the "Create Git tag and push" step
-        # below owns tag creation.
-        set_version() {
-          node -e '
-            const fs = require("node:fs");
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.version = process.argv[1];
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-          ' "$1"
-        }
-        bump_version() {
-          node -e '
-            const fs = require("node:fs");
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            const [major, minor, patch] = pkg.version.split("-")[0].split(".").map(Number);
-            pkg.version = process.argv[1] === "major" ? `${major + 1}.0.0`
-              : process.argv[1] === "minor" ? `${major}.${minor + 1}.0`
-              : `${major}.${minor}.${patch + 1}`;
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-          ' "$1"
-        }
-
-        BUMP="${{ steps.bump.outputs.type }}"
-        NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
-        LOCAL_VERSION=$(node -p "require('./package.json').version")
-
-        echo "Version check:"
-        echo "  - npm latest: $NPM_VERSION"
-        echo "  - local: $LOCAL_VERSION"
-
-        if [ "$NPM_VERSION" = "0.0.0" ]; then
-          echo "Package not yet published on npm — using local version $LOCAL_VERSION"
-          echo "version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
-          echo "old_version=$NPM_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Bumped: new package at $LOCAL_VERSION"
-        else
-          if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
-            echo "Local version ($LOCAL_VERSION) differs from npm ($NPM_VERSION)"
-            echo "Resetting to npm version before bump..."
-            set_version "$NPM_VERSION"
-          else
-            echo "Local version ($LOCAL_VERSION) matches npm ($NPM_VERSION)"
-          fi
-
-          bump_version "$BUMP"
-
-          NEW_VERSION=$(node -p "require('./package.json').version")
-          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-          echo "old_version=$NPM_VERSION" >> "$GITHUB_OUTPUT"
-
-          echo "Bumped: $NPM_VERSION -> $NEW_VERSION"
-        fi
-
     - name: Stamp npm payload product identity
-      # SPEC §12 product-identity unification (v0.3 authority): the
-      # npm-distributed installer payload carries its OWN identity
-      # (_release/product-identity.json, read by the installer's
-      # resolveInstallerPayloadIdentity). The product version stamped here is
-      # the TRAIN product version supplied by the caller (product_identity_version),
-      # resolved by the caller from the ROOT manifest — the single product
-      # version authority. PRI-874: there is NO fallback. An empty input fails
-      # this step, because the installer refuses unstamped payloads and the
-      # npm package version is a component diagnostic, never a product
-      # authority. The source commit is the exact checkout HEAD this run
-      # publishes from.
-      if: ${{ inputs.pkg_dir == 'create-principles-disciple' }}
+      # Unchanged authority (SPEC v0.3 §12): the installer payload carries
+      # its own identity stamp; the product version comes from the TRAIN
+      # resolver (root manifest at the cohort SHA), never from a package
+      # version. The source commit is the cohort SHA this train publishes.
+      if: ${{ steps.exact.outputs.status == 'ABSENT' && inputs.pkg_dir == 'create-principles-disciple' }}
       shell: bash
       run: |
         VERSION="${{ inputs.product_identity_version }}"
-        if [ -z "$VERSION" ]; then
-          echo "::error::Refusing to stamp: product_identity_version is empty. Every installer publish must carry the product identity resolved from the ROOT manifest (scripts/resolve-product-version.mjs) — the npm package version is a component diagnostic and is never a product authority (PRI-874)."
-          exit 1
-        fi
-        SOURCE_COMMIT="${{ github.sha }}"
+        SOURCE_COMMIT="${{ inputs.cohort_sha }}"
         node -e '
           const { writeFileSync, mkdirSync } = require("node:fs");
           const { join } = require("node:path");
           const [version, sourceCommit] = process.argv.slice(1);
-          // Same strict shape the installer re-validates at install time
-          // (parseEmbeddedProductIdentity) — a malformed stamp must fail the
-          // release here, never ship.
           if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
             throw new Error(`Refusing to stamp: version is not a strict x.y.z product version: ${JSON.stringify(version)}`);
           }
@@ -291,183 +171,100 @@ runs:
           console.log(`Stamped npm payload product identity: version=${version} commit=${sourceCommit.slice(0, 12)}`);
         ' "$VERSION" "$SOURCE_COMMIT"
 
-    - name: Verify the packed installer tarball carries the product identity
-      # PRI-874: the stamp must survive into the ACTUAL npm tarball (files[]
-      # inclusion, prepack effects) — checking the working directory is not
-      # evidence. This is the final pre-publish identity gate for both the
-      # train leg and the single-package publish that uses this action.
-      if: ${{ inputs.pkg_dir == 'create-principles-disciple' }}
-      shell: bash
-      run: |
-        VERSION="${{ inputs.product_identity_version }}"
-        node -e '
-          const { execFileSync } = require("node:child_process");
-          const { readFileSync, mkdtempSync, rmSync } = require("node:fs");
-          const { join } = require("node:path");
-          const { tmpdir } = require("node:os");
-          const expected = process.argv[1];
-          const pack = JSON.parse(execFileSync("npm", ["pack", "--json"], { encoding: "utf8", cwd: "packages/create-principles-disciple" }));
-          const filename = pack[0].filename;
-          const work = mkdtempSync(join(tmpdir(), "pd-tarball-identity-"));
-          try {
-            execFileSync("tar", ["-xzf", join("packages", "create-principles-disciple", filename), "-C", work, "package/_release/product-identity.json"]);
-            const identity = JSON.parse(readFileSync(join(work, "package", "_release", "product-identity.json"), "utf8"));
-            if (identity.productVersion !== expected) {
-              throw new Error(`Packed tarball identity ${JSON.stringify(identity.productVersion)} != resolved product identity ${JSON.stringify(expected)}`);
-            }
-            console.log(`Tarball identity verified: version=${identity.productVersion} commit=${String(identity.sourceCommit).slice(0, 12)}`);
-          } finally {
-            rmSync(work, { recursive: true, force: true });
-          }
-        ' "$VERSION"
-
-    - name: Sync version to all files
-      if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
-      shell: bash
-      run: |
-        VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
-        echo "Syncing version $VERSION to component files..."
-
-        PLUGIN_JSON="packages/openclaw-plugin/openclaw.plugin.json"
-        if [ -f "$PLUGIN_JSON" ]; then
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$PLUGIN_JSON"
-          echo "Synced: $PLUGIN_JSON"
-        fi
-
-        DIST_PLUGIN_JSON="packages/openclaw-plugin/dist/openclaw.plugin.json"
-        if [ -f "$DIST_PLUGIN_JSON" ]; then
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$DIST_PLUGIN_JSON"
-          echo "Synced: $DIST_PLUGIN_JSON"
-        fi
-
-        # PRI-874: the ROOT package.json is NOT synced here anymore — it is
-        # the product version authority (single resolver source) and only
-        # advances through explicit version-advancement commits on main.
-        # Overwriting it with a component version inside a release run made
-        # the authority file meaningless for any step reading it afterwards.
-
-        README="README.md"
-        if [ -f "$README" ]; then
-          sed -i "s/(v[0-9]\+\.[0-9]\+\.[0-9]\+)/(v$VERSION)/g" "$README"
-          echo "Synced: $README"
-        fi
-
-        README_ZH="README_ZH.md"
-        if [ -f "$README_ZH" ]; then
-          sed -i "s/(v[0-9]\+\.[0-9]\+\.[0-9]\+)/(v$VERSION)/g" "$README_ZH"
-          echo "Synced: $README_ZH"
-        fi
-
-        echo "Component files synced to version $VERSION"
-
-    - name: Generate changelog
-      id: changelog
-      shell: bash
-      run: |
-        NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
-        LAST_TAG="v$NPM_VERSION"
-
-        if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
-          COMMITS=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s (%h)" --no-merges)
-        else
-          COMMITS=$(git log -20 --pretty=format:"- %s (%h)" --no-merges)
-        fi
-
-        FEATURES=$(echo "$COMMITS" | grep -E "^- feat" || true)
-        FIXES=$(echo "$COMMITS" | grep -E "^- fix" || true)
-        OTHER=$(echo "$COMMITS" | grep -vE "^- (feat|fix)" || true)
-
-        CHANGELOG="## What's Changed\n\n"
-
-        if [ -n "$FEATURES" ]; then
-          CHANGELOG+="### Features\n$FEATURES\n\n"
-        fi
-
-        if [ -n "$FIXES" ]; then
-          CHANGELOG+="### Bug Fixes\n$FIXES\n\n"
-        fi
-
-        if [ -n "$OTHER" ]; then
-          CHANGELOG+="### Other Changes\n$OTHER\n\n"
-        fi
-
-        CHANGELOG+="\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LAST_TAG}...v${{ steps.version.outputs.version }}"
-
-        echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
-        echo -e "$CHANGELOG" >> "$GITHUB_OUTPUT"
-        echo "EOF" >> "$GITHUB_OUTPUT"
-
-    - name: Publish to npm
+    - name: Publish exact committed version
+      if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
       run: |
         cd "packages/${{ inputs.pkg_dir }}"
+        echo "Publishing exact committed version ${{ inputs.npm_name }}@${{ steps.exact.outputs.version }} (no bump, no reset)."
         npm publish --provenance --access public
       env:
         NODE_AUTH_TOKEN: ${{ inputs.npm_token }}
 
-    - name: Create Git tag and push
+    - name: Reconcile Git tag (idempotent)
+      # The vX.Y.Z tag keeps its real semantics: it marks the PLUGIN
+      # release (SPEC §25) — it has never represented the other packages'
+      # independent versions and must not start now. Idempotent per SPEC
+      # §24.2: absent -> create; present at the cohort commit -> skip;
+      # present elsewhere -> FAIL loud.
       if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
       shell: bash
       run: |
-        VERSION="${{ steps.version.outputs.version }}"
-        OLD_VERSION="${{ steps.version.outputs.old_version }}"
+        set -euo pipefail
+        VERSION="${{ steps.exact.outputs.version }}"
+        TAG="v$VERSION"
+        EXISTING=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
+        if [ -z "$EXISTING" ]; then
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG (plugin; bound to cohort ${{ inputs.cohort_sha }})"
+          git push origin "$TAG"
+          echo "Created and pushed tag: $TAG"
+        else
+          git fetch origin "refs/tags/$TAG" --quiet
+          TAGGED_COMMIT=$(git rev-parse "$TAG^{commit}" 2>/dev/null || echo "")
+          if [ "$TAGGED_COMMIT" = "${{ inputs.cohort_sha }}" ]; then
+            echo "Tag $TAG already exists at the cohort commit — skip (idempotent)."
+          else
+            echo "::error::Tag $TAG exists at $TAGGED_COMMIT but this release cohort is ${{ inputs.cohort_sha }}. Refusing to move an existing tag."
+            exit 1
+          fi
+        fi
 
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        # Tag the release on the current HEAD (the commit that triggered
-        # this workflow run). We intentionally do NOT `git commit --amend`
-        # the trigger commit nor `git push origin HEAD:main --force-with-lease`:
-        # main is branch-protected (no force-push, requires PR + "Verify
-        # Merge Gate" status check), so any direct push to refs/heads/main
-        # is rejected with GH006, which has made this job fail on every
-        # main push since the branch protection was enabled.
-        #
-        # Tag refs (refs/tags/*) are NOT covered by branch protection, and
-        # this job already has `permissions: contents: write`, so pushing
-        # the tag succeeds. The version-sync file edits made earlier in
-        # this job (openclaw.plugin.json, README, root package.json) stay
-        # in the runner working tree and are not written back to main;
-        # that is acceptable because the next publish run's "Bump version"
-        # step resets the local version to the npm version before bumping.
-        git tag -a "v$VERSION" -m "Release v$VERSION"
-        git push origin "v$VERSION"
-        echo "Created and pushed tag: v$VERSION (from npm v$OLD_VERSION)"
-
-    - name: Create GitHub Release
+    - name: Generate release notes
       if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
-      uses: softprops/action-gh-release@v3
-      with:
-        tag_name: v${{ steps.version.outputs.version }}
-        name: Release v${{ steps.version.outputs.version }}
-        body: ${{ steps.changelog.outputs.changelog }}
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ inputs.github_token }}
+      id: changelog
+      shell: bash
+      run: |
+        # "What's Changed" model retained for this round (SPEC §27.2).
+        LAST_TAG=$(git tag --list 'v*' | sort -V | tail -1 || true)
+        if [ -n "$LAST_TAG" ] && [ "$LAST_TAG" != "v${{ steps.exact.outputs.version }}" ]; then
+          COMMITS=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s (%h)" --no-merges | head -80)
+        else
+          COMMITS=$(git log -20 --pretty=format:"- %s (%h)" --no-merges)
+        fi
+        FEATURES=$(echo "$COMMITS" | grep -E "^- feat" || true)
+        FIXES=$(echo "$COMMITS" | grep -E "^- fix" || true)
+        OTHER=$(echo "$COMMITS" | grep -vE "^- (feat|fix)" || true)
+        CHANGELOG="## What's Changed\n\n"
+        if [ -n "$FEATURES" ]; then CHANGELOG+="### Features\n$FEATURES\n\n"; fi
+        if [ -n "$FIXES" ]; then CHANGELOG+="### Bug Fixes\n$FIXES\n\n"; fi
+        if [ -n "$OTHER" ]; then CHANGELOG+="### Other Changes\n$OTHER\n\n"; fi
+        CHANGELOG+="\n**Release cohort**: ${{ inputs.cohort_sha }}"
+        {
+          echo "changelog<<EOF"
+          echo -e "$CHANGELOG"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
 
-    - name: Sync to ClawHub marketplace
-      # The ClawHub marketplace does NOT auto-sync from npm (no trusted
-      # publisher configured), so without this step the marketplace stays
-      # stale after every release. Runs after npm publish + release so a
-      # marketplace failure never blocks the primary npm channel.
-      #
-      # Timeout fallback (known issue: server-side inspection of this
-      # ~470-file package exceeds the CLI's 120s upload timeout, and the
-      # CLI's built-in 5x-retry then races and hangs):
-      #   1. best-effort patch the freshly installed CLI's upload timeout
-      #      up to 600s (same patch we verified locally);
-      #   2. bound every attempt with an outer `timeout` guard +
-      #      --wait-timeout, and retry once;
-      #   3. success is judged by `clawhub package inspect` seeing the
-      #      version, not by the publish command's exit code alone;
-      #   4. if both attempts fail, degrade to a warning + manual
-      #      fallback instructions instead of failing the release.
+    - name: Reconcile GitHub Release (idempotent)
+      if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="${{ steps.exact.outputs.version }}"
+        if gh release view "v$VERSION" >/dev/null 2>&1; then
+          echo "GitHub Release v$VERSION already exists — skip (idempotent)."
+          exit 0
+        fi
+        echo "Creating GitHub Release v$VERSION."
+        echo -e "${{ steps.changelog.outputs.changelog }}" > release-notes.md
+        gh release create "v$VERSION" \
+          --title "Release v$VERSION" \
+          --notes-file release-notes.md \
+          --target "${{ inputs.cohort_sha }}"
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Reconcile ClawHub marketplace (idempotent)
+      # The marketplace does not auto-sync from npm. Idempotency: if the
+      # version is already visible on ClawHub, skip the upload entirely
+      # (SPEC §24.2). Judge success by `clawhub package inspect` seeing the
+      # version, never by the publish exit code alone. A failure degrades
+      # to a warning + manual fallback — it must not block npm/tag/release
+      # that already succeeded.
       if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
       continue-on-error: true
-      # NOTE: composite action steps do NOT support step-level
-      # timeout-minutes (workflow-only key — first full-product run failed
-      # manifest load here). The script bounds itself instead: each clawhub
-      # attempt is wrapped in `timeout 480` with --wait-timeout 240.
       env:
         CLAWHUB_TOKEN: ${{ inputs.clawhub_token }}
       shell: bash
@@ -475,41 +272,39 @@ runs:
         set -u
 
         if [ -z "${CLAWHUB_TOKEN:-}" ]; then
-          echo "::warning::CLAWHUB_TOKEN secret is not set — skipping ClawHub marketplace sync. Add the secret (ClawHub API token) to enable it."
+          echo "::warning::CLAWHUB_TOKEN secret is not set — skipping ClawHub marketplace sync."
           exit 0
         fi
 
-        # CI auth: the CLI reads its token from a global config file,
-        # overridable via CLAWHUB_CONFIG_PATH.
         CFG_DIR="$(mktemp -d)"
         printf '{\n  "registry": "https://clawhub.ai",\n  "token": "%s"\n}\n' "$CLAWHUB_TOKEN" > "$CFG_DIR/config.json"
         chmod 600 "$CFG_DIR/config.json"
         export CLAWHUB_CONFIG_PATH="$CFG_DIR/config.json"
 
         npm install -g clawhub@latest
-        clawhub -V  # note: this CLI exposes -V/--cli-version, not --version
-
-        # Best-effort: raise the CLI's upload timeout (120s in published
-        # builds) to 600s. Non-fatal — the outer timeout guard below
-        # covers the case where the patch pattern does not match.
-        GLOBAL_HTTP_JS="$(npm root -g)/clawhub/dist/http.js"
-        if [ -f "$GLOBAL_HTTP_JS" ] && grep -q "UPLOAD_TIMEOUT_MS" "$GLOBAL_HTTP_JS"; then
-          sed -i -E 's/(UPLOAD_TIMEOUT_MS = )[0-9_]+/\1600_000/' "$GLOBAL_HTTP_JS" || true
-          grep -n "UPLOAD_TIMEOUT_MS =" "$GLOBAL_HTTP_JS" | head -1
-        fi
+        clawhub -V  # this CLI exposes -V/--cli-version, not --version
 
         VERSION="$(node -p "require('./packages/openclaw-plugin/package.json').version")"
         SRC="packages/openclaw-plugin"
+
+        if clawhub package inspect "principles-disciple" --version "$VERSION" >/dev/null 2>&1; then
+          echo "::notice::ClawHub marketplace already shows v$VERSION — skip upload (idempotent)."
+          exit 0
+        fi
         echo "Publishing ClawHub marketplace version: $VERSION"
+
+        # Best-effort: raise the CLI's upload timeout (120s in published
+        # builds) to 600s. Non-fatal — the outer timeout guard below
+        # covers a non-matching patch.
+        GLOBAL_HTTP_JS="$(npm root -g)/clawhub/dist/http.js"
+        if [ -f "$GLOBAL_HTTP_JS" ] && grep -q "UPLOAD_TIMEOUT_MS" "$GLOBAL_HTTP_JS"; then
+          sed -i -E 's/(UPLOAD_TIMEOUT_MS = )[0-9_]+/\1600_000/' "$GLOBAL_HTTP_JS" || true
+        fi
 
         attempt() {
           local N="$1"
           echo "--- ClawHub publish attempt $N ---"
-          # Outer hard bound: upload (<=600s patched) + wait for scan.
           timeout 480 clawhub package publish "$SRC" --version "$VERSION" --wait --wait-timeout 240 || true
-          # Judge success by the version being visible on the marketplace,
-          # not by the publish exit code (a --wait-timeout expiry can
-          # outlive a successful upload while the scan is still pending).
           if clawhub package inspect "principles-disciple" --version "$VERSION" >/dev/null 2>&1; then
             echo "::notice::ClawHub marketplace shows v$VERSION (attempt $N)."
             return 0
@@ -518,17 +313,10 @@ runs:
           return 1
         }
 
-        if attempt 1; then
-          echo "ClawHub marketplace sync succeeded."
-          exit 0
-        fi
-
+        if attempt 1; then exit 0; fi
         echo "Attempt 1 failed — waiting 30s before retry..."
         sleep 30
-        if attempt 2; then
-          echo "ClawHub marketplace sync succeeded on retry."
-          exit 0
-        fi
+        if attempt 2; then exit 0; fi
 
         {
           echo "## ⚠️ ClawHub marketplace sync failed"
@@ -542,21 +330,23 @@ runs:
           echo "clawhub package publish . --version ${VERSION} --wait"
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
-
         echo "::warning::ClawHub marketplace sync failed for v${VERSION} — npm publish succeeded. See step summary for the manual fallback command."
         exit 1
 
     - name: Summary
       shell: bash
       run: |
-        echo "## Release Summary" >> "$GITHUB_STEP_SUMMARY"
+        echo "## Release Step Summary" >> "$GITHUB_STEP_SUMMARY"
         echo "" >> "$GITHUB_STEP_SUMMARY"
         echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
         echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
         echo "| Package | \`${{ inputs.npm_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Directory | \`packages/${{ inputs.pkg_dir }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Version | \`v${{ steps.version.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Bump Type | \`${{ steps.bump.outputs.type }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Trigger | \`${{ github.event_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Version | \`${{ steps.exact.outputs.version }}\` (committed at cohort SHA) |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Registry state | \`${{ steps.exact.outputs.status }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Cohort | \`${{ inputs.cohort_sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
         echo "" >> "$GITHUB_STEP_SUMMARY"
-        echo "Published to npm and GitHub" >> "$GITHUB_STEP_SUMMARY"
+        if [ "${{ steps.exact.outputs.status }}" = "ABSENT" ]; then
+          echo "Published exact committed version to npm." >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "npm upload skipped (${{ steps.exact.outputs.status }}) — closing steps reconciled." >> "$GITHUB_STEP_SUMMARY"
+        fi
