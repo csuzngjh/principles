@@ -546,6 +546,32 @@ unfixable, whereas these are constraints.
     human/ReleaseManager-only** — unchanged from PRI-877 rules; this experiment
     confirms Changesets neither knows nor reaches them.
 
+### Is ten constraints too many to still be worth adopting?
+
+Ten constraints is a lot, so they were split by what they actually cost, because
+a long list is not automatically a heavy list:
+
+| Kind | Constraints | Ongoing cost |
+| --- | --- | --- |
+| **Already PD policy** — true whether or not Changesets is adopted; the tool simply never violates them | 1, 2, 3, 10 | zero — PD's train already owns publish, tags and pins. Changesets is asked to do *less* than PD's current CI does today. |
+| **A config value, set once** | 4, 5, 6 | one-time — three fields in `.changeset/config.json`, then never revisited. |
+| **Requires deleting an existing mechanism, not adding one** | 7 | negative — the whole point. |
+| **Genuinely new code** | 8 (private-only guard), 9 (status path scoping) | ~10 lines of CI + one path-filter decision |
+
+Judged on that split, the list is not what makes adoption expensive: **four of the
+ten restate rules PD already enforces by other means, three are a config value, and
+only two need new code.** The genuinely heavy part is constraint 7's *sequencing* —
+adoption is worth nothing unless the commit-regex inference is deleted in the same
+change, and deleting it is a release-behaviour change that deserves its own SPEC and
+its own verification, which this experiment explicitly does not perform.
+
+So the honest reading is: **the tool clears every safety bar, and what remains is
+a migration decision, not a suitability question.** If the Owner is unwilling to
+give up "every push to main auto-publishes with an inferred bump", the answer
+becomes **DO NOT ADOPT** — not because Changesets is unsafe (it measured safe on
+all four questions) but because both mechanisms together are strictly worse than
+either alone.
+
 ---
 
 ## Unknowns
