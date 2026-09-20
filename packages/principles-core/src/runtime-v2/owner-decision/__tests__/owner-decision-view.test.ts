@@ -514,6 +514,69 @@ describe('deriveOwnerDecisionView — T3 (CASE-B composite)', () => {
   });
 });
 
+// ── PRI-875: historical processing issues aggregate to ONE notice per view ──
+
+describe('deriveOwnerDecisionView — PRI-875 (aggregated recovery notice)', () => {
+  const recoveryFacts = (taskIds: string[]) => facts({
+    tasks: taskIds.map((id) => task(id, 'failed')),
+  });
+
+  it('multiple stalled tasks → ONE uncertainty notice and ONE runtime blocker, count-bearing, per-task lineage kept', () => {
+    const view = deriveOwnerDecisionView(baseInputs({ governance: recoveryFacts(['task-f1', 'task-f2', 'task-f3']) }));
+
+    expect(view.decisionState).toBe('recovery_needed');
+    expect(view.uncertainty.status).toBe('known');
+    if (view.uncertainty.status === 'known') {
+      const notices = view.uncertainty.value.filter((item) => item.text.includes('历史处理问题'));
+      expect(notices).toHaveLength(1);
+      expect(notices[0]?.text).toBe('存在 3 个历史处理问题（如失败或等待重试的任务），其与当前操作的关系尚未确认。');
+      expect(notices[0]?.sourceRefs).toHaveLength(3);
+      expect(new Set(notices[0]?.sourceRefs.map((sourceRef) => sourceRef.id))).toEqual(new Set(['task-f1', 'task-f2', 'task-f3']));
+    }
+    const runtimeBlockers = view.blockers.filter((blocker) => blocker.kind === 'runtime');
+    expect(runtimeBlockers).toHaveLength(1);
+    expect(runtimeBlockers[0]?.reason.code).toBe('historical_processing_issue');
+    expect(runtimeBlockers[0]?.reason.count).toBe(3);
+    expect(runtimeBlockers[0]?.reason.ownerText).toContain('3 个历史处理问题');
+    expect(runtimeBlockers[0]?.reason.sourceRefs).toHaveLength(3);
+  });
+
+  it('a single stalled task keeps the same count-bearing wording (count=1)', () => {
+    const view = deriveOwnerDecisionView(baseInputs({ governance: recoveryFacts(['task-f1']) }));
+    expect(view.uncertainty.status).toBe('known');
+    if (view.uncertainty.status === 'known') {
+      const notice = view.uncertainty.value.find((item) => item.text.includes('历史处理问题'));
+      expect(notice?.text).toContain('存在 1 个历史处理问题');
+    }
+    const runtimeBlocker = view.blockers.find((blocker) => blocker.kind === 'runtime');
+    expect(runtimeBlocker?.reason.count).toBe(1);
+    expect(runtimeBlocker?.reason.ownerText).toContain('存在 1 个历史处理问题');
+  });
+
+  it('no stalled tasks → no recovery notice and no runtime blocker', () => {
+    const view = deriveOwnerDecisionView(baseInputs());
+    expect(view.uncertainty.status).toBe('known');
+    if (view.uncertainty.status === 'known') {
+      expect(view.uncertainty.value.some((item) => item.text.includes('历史处理问题'))).toBe(false);
+    }
+    expect(view.blockers.some((blocker) => blocker.kind === 'runtime')).toBe(false);
+  });
+
+  it('other uncertainty dimensions survive next to the aggregated notice', () => {
+    const view = deriveOwnerDecisionView(baseInputs({
+      governance: recoveryFacts(['task-f1']),
+      diagnosis: { artifactId: 'art-1', summary: '（部分）……', rootCause: 'x', evidenceItems: [], truncated: true },
+    }));
+    expect(view.uncertainty.status).toBe('known');
+    if (view.uncertainty.status === 'known') {
+      const texts = view.uncertainty.value.map((item) => item.text);
+      expect(texts.some((text) => text.includes('截断'))).toBe(true);
+      expect(texts.some((text) => text.includes('弱启发式'))).toBe(true);
+      expect(texts.filter((text) => text.includes('历史处理问题'))).toHaveLength(1);
+    }
+  });
+});
+
 // ── T4 / CASE-C: coverage available + zero records + one reference ──────────
 
 describe('deriveOwnerDecisionView — T4 (evidence dimensions stay separate)', () => {

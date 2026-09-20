@@ -23,6 +23,7 @@ import type { PrincipleReceiptsData } from "../../api.js";
 import type { OwnerDecisionViewCore, Action as OwnerAction } from "@principles/core/runtime-v2";
 import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import { formatDate } from "../../utils/format-date.js";
+import { localizeAggregatedBlocker } from "../../utils/blocker-localization.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   PrincipleDetail,
@@ -219,12 +220,6 @@ export function localizeActionLabel(action: { semantic: string; label: string },
 
 export function localizeNextAction(code: string, ownerText: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const localized = t(`principles.detail.ownerDecision.next.${code}`, { defaultValue: '' });
-  return localized === '' ? ownerText : localized;
-}
-
-export function localizeBlocker(code: string, ownerText: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
-  const safeKey = code.replace(/[^a-zA-Z0-9_.]/g, '_');
-  const localized = t(`principles.detail.ownerDecision.blocker.${safeKey}`, { defaultValue: '' });
   return localized === '' ? ownerText : localized;
 }
 
@@ -740,7 +735,7 @@ export function PrincipleDetailPage() {
                 <ul className="mt-3 space-y-1 text-[12px] text-ink-3">
                   {ownerDecision.blockers.map((blocker, index) => (
                     <li key={`blk-${index}`} data-testid="owner-decision-blocker">
-                      {localizeBlocker(blocker.reason.code, blocker.reason.ownerText, t)}
+                      {localizeAggregatedBlocker(blocker.reason, t)}
                     </li>
                   ))}
                 </ul>

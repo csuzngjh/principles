@@ -220,10 +220,15 @@ function isOwnerInboxItem(value: unknown): boolean {
 }
 
 function isOwnerReason(value: unknown): boolean {
-  return isObject(value) && hasOwnFields(value, ['code', 'ownerText', 'sourceRefs'])
-    && isString(value.code) && value.code.length > 0
-    && isString(value.ownerText) && value.ownerText.length > 0
-    && Array.isArray(value.sourceRefs);
+  if (!isObject(value) || !hasOwnFields(value, ['code', 'ownerText', 'sourceRefs'])) return false;
+  if (!isString(value.code) || value.code.length === 0) return false;
+  if (!isString(value.ownerText) || value.ownerText.length === 0) return false;
+  if (!Array.isArray(value.sourceRefs)) return false;
+  // PRI-875 (CodeRabbit P2): `count` is optional, but when present it must be
+  // an integer ≥ 1 — a malformed value from a version-skewed server would
+  // otherwise reach the UI and be interpolated into the `{{n}}` template.
+  if (!hasOwnFields(value, ['count'])) return true;
+  return typeof value.count === 'number' && Number.isInteger(value.count) && value.count >= 1;
 }
 
 function isOwnerAction(value: unknown): boolean {

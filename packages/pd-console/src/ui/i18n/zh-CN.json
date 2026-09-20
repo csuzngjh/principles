@@ -836,7 +836,7 @@
           "channel": { "prompt": "上下文提示通道", "code_tool_hook": "RuleCode 执行通道", "defer_archive": "归档通道" },
           "actionLabel": { "approve": "批准", "reject": "拒绝", "edit_approval": "替换审批工件", "disable": "停止此执行方式今后的影响" },
           "next": { "review": "有一项决定需要你审阅：请阅读上方说明后选择批准或拒绝。", "wait": "系统正在处理这项提案，请等待处理完成。", "inspect_data": "系统暂时无法建立完整的治理判断。", "inspect_recovery": "这项处理存在历史遗留问题；可查看恢复信息。", "monitor": "此提案已有完成的决定。可查看执行状态与行为记录。", "none": "目前没有需要你决定的事项。" },
-          "blocker": { "decision_material_missing": "这个对象缺少足够的信息让你安全地批准；拒绝仍可单独评估。", "lineage_not_available": "治理身份尚未建立，系统暂时无法判断是否需要你决定。", "historical_processing_issue": "存在历史处理问题，其与当前操作的关系尚未确认。" },
+          "blocker": { "decision_material_missing": "这个对象缺少足够的信息让你安全地批准；拒绝仍可单独评估。", "lineage_not_available": "治理身份尚未建立，系统暂时无法判断是否需要你决定。", "historical_processing_issue": "存在 {{n}} 个历史处理问题（如失败或等待重试的任务），其与当前操作的关系尚未确认。" },
           "noActions": "当前没有可以执行的操作。",
           "unavailable": "决策视图暂时不可用，无法据此做决定。",
           "invalidTarget": "动作目标缺失，无法提交。",
