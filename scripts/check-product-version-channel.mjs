@@ -4,9 +4,13 @@
  * callers: release-metadata.yml, publish-npm.yml train + single-package
  * publish, and the version-drift monitor).
  *
- * Compares the RESOLVED product version (root manifest authority via
- * scripts/resolve-product-version.mjs) against the LIVE channel pointer's
- * productVersion:
+ * Compares the SELECTED product version against the LIVE channel pointer's
+ * productVersion. The selected version is `--resolved-version <x.y.z>` when the
+ * caller supplies it (release-metadata.yml passes the release identity it
+ * resolved, which an explicit `product_version` input can legitimately set
+ * apart from the ref's root manifest); otherwise it is the ROOT manifest
+ * authority via scripts/resolve-product-version.mjs. Callers that ARE the
+ * manifest authority (publish-npm.yml, the drift monitor) omit the flag.
  *
  *   gate mode (default)     — resolved <  channel → exit 1: publishing would
  *                             downgrade every installed runtime. resolved >=
@@ -25,7 +29,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { compareProductVersions, STRICT_SEMVER } from './lib/product-version-order.mjs';
+import { decideProductVersionPublish, STRICT_SEMVER } from './lib/product-version-order.mjs';
 
 const DEFAULT_CHANNEL_URL = 'https://csuzngjh.github.io/principles/targets/channels/stable.json';
 
@@ -57,6 +61,23 @@ if (requestedFloor !== null && !STRICT_SEMVER.test(requestedFloor)) {
   fail(`--channel-product-version is not a strict x.y.z version: ${JSON.stringify(requestedFloor)}`);
 }
 
+// PRI-874 review (P1): the version this guard judges is the FINAL SELECTED
+// release version, which is NOT always what the ref's root manifest says.
+// release-metadata.yml accepts an explicit `product_version` input and, with
+// `allow_version_drift=true`, that value deliberately disagrees with the
+// manifest. Re-deriving the version here silently guarded the WRONG value:
+// root=2.1.0, channel=2.1.0 and an explicit 2.0.0 compared 2.1.0 >= 2.1.0 and
+// passed while a downgrade shipped — and nothing downstream catches it, because
+// the publisher's monotonicity checks cover the publication sequence and the
+// pointer version, never productVersion.
+const resolvedIndex = process.argv.indexOf('--resolved-version');
+const requestedResolved = resolvedIndex !== -1 && resolvedIndex + 1 < process.argv.length
+  ? process.argv[resolvedIndex + 1]
+  : null;
+if (requestedResolved !== null && !STRICT_SEMVER.test(requestedResolved)) {
+  fail(`--resolved-version is not a strict x.y.z version: ${JSON.stringify(requestedResolved)}`);
+}
+
 // URL safety: https + public host only (no loopback / private / reserved).
 const parsedUrl = new URL(channelUrl);
 if (parsedUrl.protocol !== 'https:') fail(`channel URL must be https: ${channelUrl}`);
@@ -68,15 +89,22 @@ const hostIsPrivate = host === 'localhost' || host.endsWith('.localhost') || hos
   || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
 if (hostIsPrivate) fail(`channel URL host must be public: ${channelUrl}`);
 
+// Version under test: the caller's selected release version when supplied,
+// otherwise the ROOT manifest resolver (SPEC v0.3 §12). The origin is carried
+// into the messages so a reader can always tell which authority was judged.
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const resolverEntry = path.join(repoRoot, 'scripts', 'resolve-product-version.mjs');
 let resolvedVersion;
-try {
-  resolvedVersion = execFileSync(process.execPath, [resolverEntry], { encoding: 'utf8', timeout: 60_000 }).trim();
-} catch (error) {
-  fail(`The product resolver failed: ${error instanceof Error ? error.message : String(error)}`);
+if (requestedResolved !== null) {
+  resolvedVersion = requestedResolved;
+} else {
+  const resolverEntry = path.join(repoRoot, 'scripts', 'resolve-product-version.mjs');
+  try {
+    resolvedVersion = execFileSync(process.execPath, [resolverEntry], { encoding: 'utf8', timeout: 60_000 }).trim();
+  } catch (error) {
+    fail(`The product resolver failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!STRICT_SEMVER.test(resolvedVersion)) fail(`Resolved product version is not strict x.y.z: ${JSON.stringify(resolvedVersion)}`);
 }
-if (!STRICT_SEMVER.test(resolvedVersion)) fail(`Resolved product version is not strict x.y.z: ${JSON.stringify(resolvedVersion)}`);
 
 let channelProductVersion = null;
 // PRI-874 review: a channel the guard cannot READ is a refusal, and it has to
@@ -118,35 +146,14 @@ if (response.status === 404) {
 // Every live version the guard can observe is a FLOOR. `channelProductVersion`
 // is the remote pointer (the authority); `requestedFloor` is the caller's
 // locally observed pointer, kept so a 404 from the public endpoint cannot erase
-// a version we already know is live. Refusing on ANY floor is the same refusal
-// as before — when only the remote pointer is in play the messages are
-// unchanged.
+// a version we already know is live — refusing on ANY floor is the same refusal
+// as before. The policy itself lives in ./lib/product-version-order.mjs so the
+// exact scenario it exists to stop is pinned by a test.
 const liveFloors = [];
 if (channelProductVersion !== null) liveFloors.push({ label: 'live channel pointer', version: channelProductVersion });
 if (requestedFloor !== null) liveFloors.push({ label: 'published pointer snapshot', version: requestedFloor });
 
-if (liveFloors.length === 0) {
-  console.log(`ok: resolved product version ${resolvedVersion}; no live channel to compare against.`);
-  process.exit(0);
-}
-
-for (const floor of liveFloors) {
-  if (compareProductVersions(resolvedVersion, floor.version) < 0) {
-    fail(`Resolved product version (${resolvedVersion}) is LOWER than the ${floor.label} (${floor.version}). `
-      + 'Publishing would downgrade every installed runtime. Advance the ROOT package.json version on main instead '
-      + '(explicit version-advancement commit), then re-run.');
-  }
-}
-
-const aheadOf = liveFloors.filter((floor) => compareProductVersions(resolvedVersion, floor.version) > 0);
-if (aheadOf.length > 0) {
-  const message = `Pending publication: main product version ${resolvedVersion} is AHEAD of the ${aheadOf.map((floor) => `${floor.label} (${floor.version})`).join(', ')}.`;
-  if (reportMode) {
-    console.log(message);
-    console.log('ok: ahead-of-channel is the legitimate state between a version-advancement commit and its release.');
-    process.exit(0);
-  }
-  console.log(`${message} Proceeding is correct for a release run.`);
-  process.exit(0);
-}
-console.log(`ok: resolved product version ${resolvedVersion} equals the live channel pointer (same-version republish advances the counters).`);
+const decision = decideProductVersionPublish({ resolvedVersion, floors: liveFloors, reportMode });
+if (!decision.ok) fail(decision.message);
+console.log(decision.message);
+process.exit(0);

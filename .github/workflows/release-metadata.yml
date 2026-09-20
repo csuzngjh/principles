@@ -317,11 +317,19 @@ jobs:
             CHANNEL_BASE="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io/$(echo "${{ github.repository }}" | cut -d/ -f2)"
           fi
           CHANNEL_URL="$CHANNEL_BASE/targets/channels/$CHANNEL.json"
+          # PRI-874 review (P1): guard the version that is actually about to be
+          # published, not the one this ref's root manifest happens to declare.
+          # An explicit product_version input (allow_version_drift=true) is a
+          # deliberate escape hatch that disagrees with the manifest, so a guard
+          # which re-derived the version would compare the manifest and let a
+          # downgrade through: root=2.1.0, channel=2.1.0, explicit 2.0.0 passed.
+          # GUARD_ARGS is an array so the optional floor is appended without a
+          # repeated invocation to keep in sync.
+          GUARD_ARGS=(--channel-url "$CHANNEL_URL" --resolved-version "$RESOLVED_VERSION")
           if [ -n "$CHANNEL_PRODUCT_VERSION" ]; then
-            node scripts/check-product-version-channel.mjs --channel-url "$CHANNEL_URL" --channel-product-version "$CHANNEL_PRODUCT_VERSION"
-          else
-            node scripts/check-product-version-channel.mjs --channel-url "$CHANNEL_URL"
+            GUARD_ARGS+=(--channel-product-version "$CHANNEL_PRODUCT_VERSION")
           fi
+          node scripts/check-product-version-channel.mjs "${GUARD_ARGS[@]}"
           echo "publication_sequence=$SEQ" >> "$GITHUB_OUTPUT"
           echo "channel_version=$PTR" >> "$GITHUB_OUTPUT"
           echo "expires_at=$EXPIRES" >> "$GITHUB_OUTPUT"
