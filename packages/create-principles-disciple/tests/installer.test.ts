@@ -271,10 +271,11 @@ describe('install() gateway lock pre-flight', () => {
   let savedLang: 'zh' | 'en';
   let savedLegacyNpmInstall: string | undefined;
 
-  // Real on-disk fixture shaped like the npm-distributed package (no
-  // _release/, all component directories present with package.json + dist),
-  // so the form-gate passes and the install flow reaches the step under
-  // test. Replaces the old '/nonexistent/plugin' fixture, which the
+  // Real on-disk fixture shaped like the npm-distributed package (all
+  // component directories present with package.json + dist, plus the
+  // `_release/` product-identity stamp the npm publish train writes), so the
+  // form-gate passes and the install flow reaches the step under test.
+  // Replaces the old '/nonexistent/plugin' fixture, which the
   // npm_bundle_incomplete form-gate now (correctly) refuses before the
   // gateway step. 'fs' is auto-mocked at module scope, so the fixture
   // resolves the REAL fs via importActual inside beforeEach.
@@ -303,12 +304,29 @@ describe('install() gateway lock pre-flight', () => {
     actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, 'console', 'dist', 'web'), { recursive: true });
     actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'console', 'dist', 'server.js'), 'export {};');
     actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
-    // The fixture is REAL on disk, but 'fs' is auto-mocked (every function
-    // returns undefined), so delegate the existsSync the form-gate consults
-    // to the real fs. Later steps (checkBuiltPlugin) still see the mocked
-    // fs and fail on the missing plugin manifest — which is what the
-    // failure-path tests below assert against.
+    // PRI-874: a real npm-distributed payload is stamped at publish time
+    // (`Stamp npm payload product identity` + the packed-tarball verification in
+    // publish-npm.yml). The fixture has to model that, or the installer's
+    // fail-closed identity pre-flight refuses the payload before the gateway step
+    // these tests are about.
+    actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, '_release'), { recursive: true });
+    actualFs.writeFileSync(
+      realPath.join(npmBundleFixtureDir, '_release', 'product-identity.json'),
+      productIdentityStampJson('1.74.1'),
+    );
+    // The fixture is REAL on disk, but 'fs' is auto-mocked, so delegate the reads
+    // the install flow performs to the real fs as well. Delegating ONLY
+    // existsSync (as this harness used to) left readFileSync answering `undefined`
+    // for every path it does not model, which turned real payload reads — the
+    // identity stamp and the component manifest among them — into TypeErrors
+    // instead of exercising the flow. Tests that need different bytes (the two
+    // self-contained-payload refusals below) still override this per-case.
     vi.mocked(fs.existsSync).mockImplementation((value) => actualFs.existsSync(String(value)));
+    vi.mocked(fs.readFileSync).mockImplementation((value) => (
+      actualFs.existsSync(String(value))
+        ? actualFs.readFileSync(String(value), 'utf8')
+        : JSON.stringify({ name: '@principles/plugin', version: '0.0.0' })
+    ));
   });
 
   afterEach(async () => {
