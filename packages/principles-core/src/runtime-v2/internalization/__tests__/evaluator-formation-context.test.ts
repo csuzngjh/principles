@@ -213,8 +213,8 @@ describe('PRI-843 — evaluator prompt contract (conditional formation injection
     scribeArtifact: scribeContent(true),
   };
 
-  it('prompt contract version is v5', () => {
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v5');
+  it('prompt contract version is v6', () => {
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v6');
   });
 
   it('without formationContext the payload keeps the pre-PRI-843 shape (byte-identical) and the system prompt is unchanged', () => {

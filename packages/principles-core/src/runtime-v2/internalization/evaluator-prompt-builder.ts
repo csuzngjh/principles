@@ -1,6 +1,7 @@
 import { serializePromptInput } from './prompt-serializer.js';
 import type { IntentContractV1 } from './intent-contract.js';
 import type { FormationContext } from './formation-context.js';
+import type { LastValidatorErrors } from './pitask-metadata.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 
@@ -54,6 +55,15 @@ export interface EvaluatorPromptBuilderInput {
    * shape byte-for-byte and the system prompt stays unchanged.
    */
   formationContext?: FormationContext;
+  /**
+   * PRI-644 (PRI-700 factor B wiring): verbatim validator rejection reasons
+   * from the immediately-preceding attempt, freshness-gated by the runner.
+   * Presence = the previous output was rejected by the business validator
+   * (e.g. a repair round missing requirementLedger) — attempt N+1 must not be
+   * a zero-information retry of the same prompt. Undefined on first attempt /
+   * when suppressed (payload and system prompt stay byte-identical).
+   */
+  priorValidatorErrors?: LastValidatorErrors;
 }
 
 export interface PriorRequirement {
@@ -142,6 +152,8 @@ export interface EvaluatorPromptInput {
   intentContract?: IntentContractV1;
   /** Present only when the formation evidence resolved (PRI-843). */
   formationContext?: FormationContext;
+  /** Present only when the prior attempt was rejected by the validator (PRI-644). */
+  priorValidatorErrors?: LastValidatorErrors;
   promptContractVersion: string;
 }
 
@@ -269,6 +281,26 @@ HOW TO USE IT:
 6. Do not re-litigate which dreamer proposal should have been selected (the Philosopher critique already decided that — do not revive a proposal the critique rejected); use the proposals only as evidence of what alternatives existed.`;
 
 /**
+ * PRI-644 (PRI-700 factor B wiring): system-channel addendum appended ONLY
+ * when `priorValidatorErrors` is present — the same conditional-placement
+ * discipline as the PRI-843 formation addendum, so a first attempt stays
+ * byte-identical to the pre-PRI-644 prompt. Mirrors the artificer's
+ * "PRIOR OUTPUT-CONTRACT REJECTIONS" block, phrased for the evaluator's
+ * failure mode (BUSINESS validator rejections such as a repair round missing
+ * `requirementLedger` — output captured but rejected, then retried with the
+ * identical prompt until max_attempts_exceeded).
+ */
+export const EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM = `
+
+PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
+- Your previous attempt was REJECTED BY THE OUTPUT VALIDATOR before its evaluation was ever recorded — the pipeline never advanced. The \`priorValidatorErrors.errors\` list contains the exact, verbatim rejection reasons.
+- The highest-priority fix is to make your JSON satisfy EVERY listed rejection reason. Re-read each error, map it to the OUTPUT FORMAT and CONSTRAINTS blocks above, and correct the exact fields it names.
+- These errors describe YOUR output's shape and completeness, NOT the implementation plan you are evaluating. Fix the contract violation and do NOT re-judge or change the substance (decision, score, findings) of your previous evaluation unless a listed rejection reason explicitly forces it.
+- When a rejection names a missing field — e.g. \`evaluation.requirementLedger\` or \`evaluation.priorRequirementStatuses\` in a repair round — that field is REQUIRED by the CONVERGENCE CONTRACT: echo EVERY input requirement with its exact id and statement-as-given, plus the status you assigned. Omitting, renumbering, or restating ids is the most common rejection cause.
+- After addressing every listed error, re-check the full OUTPUT FORMAT and CONSTRAINTS blocks once more before emitting.
+`;
+
+/**
  * PRI-843 (SPEC v1.1): bumped v4 → v5. The prompt input gains the optional
  * `formationContext` block (dreamer proposals + source diagnosis + provenance)
  * and the system prompt conditionally carries the formation-evidence addendum
@@ -278,8 +310,15 @@ HOW TO USE IT:
  * run without formation evidence emits exactly the v4 wire shape plus the new
  * version string. Existing v4 evaluations stay immutable — the version bump
  * changes replay/cache identity for future runs only.
+ *
+ * PRI-644: bumped v5 → v6. The prompt input gains the optional
+ * `priorValidatorErrors` block (verbatim validator rejection reasons from the
+ * immediately-preceding attempt, PRI-700 factor B) and the system prompt
+ * conditionally carries `EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM`. Additive:
+ * same discipline as v5 — a run without validator feedback emits exactly the
+ * v5 wire shape plus the new version string.
  */
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v5';
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v6';
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
@@ -301,6 +340,9 @@ export class EvaluatorPromptBuilder {
       // PRI-843: only include formationContext when it actually resolved, so
       // a run without formation evidence keeps the exact pre-PRI-843 payload.
       ...(input.formationContext !== undefined ? { formationContext: input.formationContext } : {}),
+      // PRI-644: only include priorValidatorErrors when the runner carried a
+      // fresh record, so first-attempt prompts stay byte-identical.
+      ...(input.priorValidatorErrors !== undefined ? { priorValidatorErrors: input.priorValidatorErrors } : {}),
       promptContractVersion: EVALUATOR_PROMPT_CONTRACT_VERSION,
     };
 
@@ -311,9 +353,18 @@ export class EvaluatorPromptBuilder {
     // PRI-843: the formation-evidence addendum rides the same system channel
     // and is appended ONLY when formationContext is present (the scribe
     // addendum placement discipline — no-formation runs stay byte-identical).
+    // PRI-644: the validator-feedback addendum follows the same discipline —
+    // appended ONLY when a fresh priorValidatorErrors record was carried.
     const formationAddendum = input.formationContext !== undefined
       ? EVALUATOR_FORMATION_EVIDENCE_ADDENDUM
       : '';
-    return { message, promptInput, systemPrompt: EVALUATOR_PROTOCOL_INSTRUCTION + formationAddendum + languageDirective };
+    const validatorFeedbackAddendum = input.priorValidatorErrors !== undefined
+      ? EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM
+      : '';
+    return {
+      message,
+      promptInput,
+      systemPrompt: EVALUATOR_PROTOCOL_INSTRUCTION + formationAddendum + validatorFeedbackAddendum + languageDirective,
+    };
   }
 }
