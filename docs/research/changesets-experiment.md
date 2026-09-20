@@ -473,7 +473,7 @@ more.
 | `.changeset/config.json` | existing, needs 4 corrections | `access` → `public`; keep `fixed/linked` empty; add explicit `privatePackages` (or rely on default `false`); pin `baseBranch` |
 | Version step in CI | replaces 84 lines of CI bash (`publish-npm.yml:267-301` npm-view + commit-regex, `:413-461` bump + reset-to-npm dance) with `changeset version` | Net **negative** complexity if rows 1–3 above are deleted |
 | A "version PR" concept | needs a decision | `commit: false` means Changesets writes files and stops; PD's push-to-main-then-publish flow needs an explicit commit+push owner, or `commit: true`. Not evaluated here (out of the C3 write sandbox) |
-| Guard: reject private-only changesets | ~10 lines | Exp D silent no-op |
+| Guard: reject private-only changesets | estimate, not written | Exp D silent no-op |
 | Guard: keep ghost-path commits from being forced into changesets | CI path-filter scoping | §Ghost Package Test |
 | New failure modes | 4 | (a) private-only changeset silently consumed; (b) `ignore` accepts **non-existent package names and arbitrary paths** without a word (Exp AC/AD: `ignore: ["packages/create-principles-disciple/core", "@principles/ghost-not-real"]` → clean status, no error, while `ignore: ["@principles/core"]` *does* error with a precise "depends on the skipped package" message) — so config typos are silently inert; (c) `version` exits **1** when there is nothing to do (Exp H) — must not be treated as failure in CI; (d) prerelease/snapshot modes mutate private manifests |
 | New dependency | 0 | `@changesets/cli` already in `package.json:68` |
@@ -556,7 +556,7 @@ a long list is not automatically a heavy list:
 | **Already PD policy** — true whether or not Changesets is adopted; the tool simply never violates them | 1, 2, 3, 10 | zero — PD's train already owns publish, tags and pins. Changesets is asked to do *less* than PD's current CI does today. |
 | **A config value, set once** | 4, 5, 6 | one-time — three fields in `.changeset/config.json`, then never revisited. |
 | **Requires deleting an existing mechanism, not adding one** | 7 | negative — the whole point. |
-| **Genuinely new code** | 8 (private-only guard), 9 (status path scoping) | ~10 lines of CI + one path-filter decision |
+| **Genuinely new code** | 8 (private-only guard), 9 (status path scoping) | small, and an *estimate* — neither guard was written. Each is a CI shell check plus one path-filter decision; nothing measured here. |
 
 Judged on that split, the list is not what makes adoption expensive: **four of the
 ten restate rules PD already enforces by other means, three are a config value, and
