@@ -239,6 +239,11 @@ export async function emitPainDetectedEvent(
         hostKind: decision.legacy.hostKind,
         evidence: decision.legacy.evidence,
         painIngress: decision.legacy.painIngress,
+        // PRI-844: forward the producer's verbatim Owner correction so the
+        // pain bridge can ride it as first-class evidence (PHASE 1.5). The
+        // signal collector sets it on the emitted event; dropping it here
+        // silently downgraded the diagnosis to the 200-char excerpt channel.
+        ...(painData.correctionEvidence ? { correctionEvidence: painData.correctionEvidence } : {}),
         recordObservability: effectiveRecordObservability,
       });
       if (result.status === 'failed' && result.failureCategory) {

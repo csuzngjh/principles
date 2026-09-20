@@ -1,5 +1,5 @@
 import type { PluginHookLlmOutputEvent, PluginHookAgentContext, TokenUsage } from '../openclaw-sdk.js';
-import { trackLlmOutput, resetFriction } from '../core/session-tracker.js';
+import { trackLlmOutput, resetFriction, getInjectedPrincipleIds } from '../core/session-tracker.js';
 import { normalizeSeverity } from '../core/empathy-types.js';
 import { DetectionService } from '../core/detection-service.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -221,6 +221,26 @@ export function handleLlmOutput(
         });
     } catch (error) {
         ctx.logger?.warn?.(`[PD:LLM] Failed to persist assistant turn to trajectory: ${String(error)}`);
+    }
+
+    // PRI-768 v5 follow-up: task_outcomes had schema + writer API but ZERO
+    // production callers, so the terminal node of the evidence chain
+    // (user_turn → … → effect receipt → outcome) was never recorded. Write
+    // one bounded outcome row per turn that produced assistant output:
+    // ids come from the shared injection container the prompt hook populates
+    // (same source as presence receipts), taskId is the host run id so the
+    // row joins assistant_turns.run_id. Observability only — never throws.
+    try {
+        const injectedIds = getInjectedPrincipleIds(sessionId);
+        wctx.trajectory?.recordTaskOutcome?.({
+            sessionId,
+            taskId: event.runId ?? null,
+            outcome: 'completed',
+            summary: text.slice(0, 400),
+            principleIdsJson: injectedIds ?? [],
+        });
+    } catch (error) {
+        ctx.logger?.warn?.(`[PD:LLM] Failed to record task outcome: ${String(error)}`);
     }
 
     // ── Track B: Semantic Pain Detection (V1.3.0 Funnel) ──

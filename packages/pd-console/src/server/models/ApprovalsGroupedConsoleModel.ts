@@ -3,9 +3,11 @@ import {
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
   ApprovalQueue,
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
+import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -146,13 +148,36 @@ export class ApprovalsGroupedConsoleModel {
       // Build artifactId → sourcePrincipleId map AND artifactId → candidateDescription map.
       // Wave 7: candidateDescription lets FocusPage show human-readable content
       // instead of a fabricated principleId.
+      //
+      // PRI-768 v5 follow-up (F3): sourcePrincipleId is null for most scribe
+      // artifacts, which used to collapse every group to `unlinked:<id>` and
+      // dead-end the owner decision UI. When the column is missing, fall back
+      // to the shared lineage resolver (scribe → dreamer seed → candidateId →
+      // ledger derivedFromPainIds) so groups bind to the REAL ledger id.
       const artifactPrincipleMap = new Map<string, string | null>();
       const artifactDescriptionMap = new Map<string, string | null>();
+      const stateDir = path.join(this.workspaceDir, '.state');
+      const resolutionLedger = new PrincipleTreeLedgerAdapter({ stateDir });
       for (const approval of allApprovals) {
         if (!artifactPrincipleMap.has(approval.artifactId)) {
           try {
             const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(approval.artifactId);
-            artifactPrincipleMap.set(approval.artifactId, artifact?.sourcePrincipleId ?? null);
+            let mappedId: string | null = artifact?.sourcePrincipleId ?? null;
+            if (artifact && !mappedId) {
+              const resolution = await resolveLedgerPrincipleId(artifact, {
+                ledger: resolutionLedger,
+                getArtifactById: (id) => artifactStore.getArtifactById(id),
+                getTaskDiagnosticJson: (taskId) => {
+                  const row = conn
+                    .getDb()
+                    .prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?')
+                    .get(taskId) as { diagnostic_json: string | null } | undefined;
+                  return row?.diagnostic_json ?? null;
+                },
+              });
+              if (resolution.status === 'resolved') mappedId = resolution.principleId;
+            }
+            artifactPrincipleMap.set(approval.artifactId, mappedId);
             if (artifact?.contentJson) {
               artifactDescriptionMap.set(approval.artifactId, extractCandidateDescription(artifact.contentJson));
             } else {
@@ -170,7 +195,6 @@ export class ApprovalsGroupedConsoleModel {
       }
 
       // Load ledger for principle titles
-      const stateDir = path.join(this.workspaceDir, '.state');
       let principleTitles = new Map<string, string>();
       try {
         const ledger = loadLedger(stateDir);
