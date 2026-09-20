@@ -307,9 +307,10 @@ async function main(): Promise<void> {
     },
   };
 
-  // PRI-657: the dogfood tool declaration + registry were persisted at SETUP,
-  // so the activation path below reuses the same registry the Step-2
-  // self-validation resolved against.
+  // PRI-657: the dogfood tool declaration was persisted at SETUP; Step 2
+  // re-reads it through the durable resolver, and the activation writer below
+  // builds its registry from the same dogfoodMappings constant — one source,
+  // no drift between the two paths.
   const dispatcher = new ActivationDispatcher(
     artifactReadModel,
     stateStore,

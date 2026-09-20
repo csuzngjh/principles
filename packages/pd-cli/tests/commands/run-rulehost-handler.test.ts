@@ -724,6 +724,10 @@ describe('handleRunRuleHost — PR #1122 behavior-examples fail-fast (CodeRabbit
 // options the command actually passes (EP-02/EP-04). On resolver failure the
 // command degrades observably to the baseline gate (rc-9: structured reason +
 // nextAction on stderr) while stdout keeps exactly one JSON object (cli-1).
+// NOTE: vitest hoists the vi.mock calls file-wide, so the stubs below also
+// apply to the other describes in this file — safe today because none of them
+// reach the adapter/pipeline paths; a future test needing the real
+// ArtificerL2Adapter or runRuleHostPipeline must live in its own file.
 
 const hoisted657 = vi.hoisted(() => {
   const artificerL2Calls: unknown[] = [];
