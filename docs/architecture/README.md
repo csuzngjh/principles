@@ -23,6 +23,7 @@
 | 安全 / 沙箱 / 审批问题 | [`SECURITY_ARCHITECTURE.md`](./SECURITY_ARCHITECTURE.md) |
 | 配置 / 环境变量 | [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) |
 | Schema 演化 / API 兼容 | [`VERSIONING_AND_COMPATIBILITY.md`](./VERSIONING_AND_COMPATIBILITY.md) |
+| 版本字段含义 / 哪些版本该一致、哪些允许不同 | [`version-model.md`](./version-model.md) |
 | 性能 / SLA | [`PERFORMANCE_BUDGETS.md`](./PERFORMANCE_BUDGETS.md) |
 | **新建内置代理 / 切换 CLI 后端** | [`COMPONENTS.md`](./COMPONENTS.md) §3.8（BALM）+ ADR-0008 |
 | **代理长程任务 / 自校验工具** | [`COMPONENTS.md`](./COMPONENTS.md) §3.9（LRAS）+ ADR-0009 |
@@ -94,6 +95,7 @@
 | [`SECURITY_ARCHITECTURE.md`](./SECURITY_ARCHITECTURE.md) | Active | 安全 |
 | [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) | Active | 配置管理 |
 | [`VERSIONING_AND_COMPATIBILITY.md`](./VERSIONING_AND_COMPATIBILITY.md) | Active | 版本与兼容 |
+| [`version-model.md`](./version-model.md) | Active | 产品/组件/能力/分发四类版本语义模型（PRI-877） |
 | [`PERFORMANCE_BUDGETS.md`](./PERFORMANCE_BUDGETS.md) | Active | 性能预算 |
 | [`WORKTREE_GOVERNANCE.md`](./WORKTREE_GOVERNANCE.md) | Active | 多 AI 工作树治理（`AGENTS.md` §23A 的解释性文档）|
 
@@ -121,6 +123,7 @@
 | **Sandbox / 工作区隔离** | `SECURITY_ARCHITECTURE.md` |
 | **配置文件怎么写** | `CONFIGURATION_ARCHITECTURE.md` |
 | **Schema 升级怎么做** | `VERSIONING_AND_COMPATIBILITY.md` |
+| **"这个版本号是什么意思、能不能改"** | `version-model.md` |
 | **性能预算多少** | `PERFORMANCE_BUDGETS.md` |
 | **决策为什么这么定** | `docs/adr/` |
 
