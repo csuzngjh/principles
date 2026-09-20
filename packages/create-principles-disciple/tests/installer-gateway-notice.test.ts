@@ -147,6 +147,7 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     // package.json + dist (mirror of installBundledReleaseManagerPackage).
     realFs.mkdirSync(path.join(payloadDir, 'release-manager', 'dist', 'update'), { recursive: true });
     realFs.writeFileSync(path.join(payloadDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};\n');
+    realFs.writeFileSync(path.join(payloadDir, 'release-manager', 'dist', 'update', 'console-surface.js'), 'export {};\n');
 
     // The installed authority stub: verifyReleaseManagerAuthorityImports does
     // a REAL dynamic import of the INSTALLED path, so the file must really
@@ -155,6 +156,11 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     realFs.mkdirSync(installedAuthorityDir, { recursive: true });
     realFs.writeFileSync(path.join(pdHome, '.pd', 'runtime', 'release-manager', 'package.json'), JSON.stringify({ name: 'create-principles-disciple', type: 'module' }));
     realFs.writeFileSync(path.join(installedAuthorityDir, 'release-manager-authority.js'), 'export {};\n');
+    // The seam entry the probe prefers when the installed tree carries it
+    // (the real installer copies it with the component) — this test's
+    // existsSync mock answers `true` for every non-payload path, so the
+    // planted file must really exist and really parse as ESM.
+    realFs.writeFileSync(path.join(installedAuthorityDir, 'console-surface.js'), 'export {};\n');
     // The installed pd-cli entry: the demo verification stats it (real
     // statSync below) and really executes `node <entry> demo story-a --json`.
     // An empty entry exits 0 — the CLI-chain integrity itself is covered by

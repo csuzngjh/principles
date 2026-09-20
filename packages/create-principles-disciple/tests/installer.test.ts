@@ -298,6 +298,7 @@ describe('install() gateway lock pre-flight', () => {
     // (mirror of installBundledReleaseManagerPackage / installConsole demands).
     actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
     actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
+    actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'release-manager', 'dist', 'update', 'console-surface.js'), 'export {};');
     actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, 'console', 'dist', 'web'), { recursive: true });
     actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'console', 'dist', 'server.js'), 'export {};');
     actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
@@ -495,6 +496,7 @@ describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', 
     actualFs.writeFileSync(realPath.join(fixtureDir, 'plugin', 'openclaw.plugin.json'), JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } }));
     actualFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
     actualFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'console-surface.js'), 'export {};');
     actualFs.mkdirSync(realPath.join(fixtureDir, 'console', 'dist', 'web'), { recursive: true });
     actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'server.js'), 'export {};');
     actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');

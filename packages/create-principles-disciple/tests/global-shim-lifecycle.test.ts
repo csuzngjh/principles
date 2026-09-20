@@ -124,6 +124,7 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     realFs.writeFileSync(realPath.join(fixtureDir, 'pd-cli', 'dist', 'index.js'), 'module.exports = {};\n');
     realFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
     realFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'module.exports = {};\n');
+    realFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'console-surface.js'), 'module.exports = {};\n');
     realFs.mkdirSync(realPath.join(fixtureDir, 'console', 'dist', 'web'), { recursive: true });
     realFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'server.js'), 'module.exports = {};\n');
     realFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');

@@ -177,14 +177,27 @@ describe('install() release-manager dependency install + authority import smoke 
     for (const originalDir of [runtimeDir, getPluginExtDir()]) {
       expect(realFs.readFileSync(path.join(originalDir, 'previous-install.txt'), 'utf8')).toBe(originalDir);
     }
-    expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(authorityPath);
-    const authorityProbes = vi.mocked(fs.existsSync).mock.calls
+    // Entry-path probes, split by gate:
+    //  - the pre-mutation form gate inspects the PAYLOAD's exact-shape files
+    //    (package.json + authority + the registered seam entry);
+    //  - the post-install probe loads the INSTALLED seam entry (the Console's
+    //    runtime import target) when the component carries it, and only falls
+    //    back to the authority entry for a pre-seam asset. This fixture's
+    //    existsSync mock answers true, so the seam is the entry probed.
+    const seamProbes = vi.mocked(fs.existsSync).mock.calls
       .map(([value]) => String(value))
-      .filter((value) => value.endsWith('release-manager-authority.js'));
-    expect([...new Set(authorityProbes)]).toEqual([
-      path.join(tempHome, 'asset', 'release-manager', 'dist', 'update', 'release-manager-authority.js'),
-      authorityPath,
+      .filter((value) => value.endsWith('console-surface.js'));
+    const installedSeamPath = path.join(runtimeDir, 'release-manager', 'dist', 'update', 'console-surface.js');
+    expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(installedSeamPath);
+    expect([...new Set(seamProbes)]).toEqual([
+      path.join(tempHome, 'asset', 'release-manager', 'dist', 'update', 'console-surface.js'),
+      installedSeamPath,
     ]);
+    // The authority file itself stays a demanded payload entry (form gate +
+    // component guard) — the seam is additive, not a replacement.
+    expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(
+      path.join(tempHome, 'asset', 'release-manager', 'dist', 'update', 'release-manager-authority.js'),
+    );
     expect(vi.mocked(fs.renameSync).mock.calls.length).toBeGreaterThan(0);
     for (const [source, destination] of vi.mocked(fs.renameSync).mock.calls) {
       expect(path.relative(tempHome, String(source))).not.toMatch(/^(\.\.|[A-Za-z]:)/);
@@ -214,6 +227,13 @@ describe('install() release-manager dependency install + authority import smoke 
     realFs.mkdirSync(path.dirname(authorityPath), { recursive: true });
     realFs.writeFileSync(path.join(componentDir, 'package.json'), JSON.stringify({ type: 'module' }));
     realFs.writeFileSync(authorityPath, "import './fixture-missing-dependency.js';\n");
+    // The installed component carries the real seam shape: console-surface
+    // re-exports the authority, so the probe's import chain reaches the
+    // broken dependency through the SAME entry the Console imports.
+    realFs.writeFileSync(
+      path.join(componentDir, 'dist', 'update', 'console-surface.js'),
+      "export * from './release-manager-authority.js';\n",
+    );
 
     const result = await install(
       { ...baseInstallOptions, workspaceDir: path.join(tempHome, 'workspace') },
@@ -226,6 +246,6 @@ describe('install() release-manager dependency install + authority import smoke 
     expect(result.error).toContain('fixture-missing-dependency.js');
     expect(result.error).toContain('Previous install has been restored');
     expectPreviousInstallRestored();
-    expect(fs.existsSync).toHaveBeenCalledWith(authorityPath);
+    expect(fs.existsSync).toHaveBeenCalledWith(path.join(componentDir, 'dist', 'update', 'console-surface.js'));
   });
 });
