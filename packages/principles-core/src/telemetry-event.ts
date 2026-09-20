@@ -324,6 +324,10 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_no_principle_bearer_found'),
   Type.Literal('evaluator_owner_resolution_applying'),
   Type.Literal('evaluator_owner_resolution_rejected_by_policy'),
+  // PRI-861: the painReasonSummary echo degrades observably at rule assembly
+  // (no dreamer lineage / no resolvable diagnosis summary) — the approval card
+  // keeps its generic trigger reason (rc-9, never silent).
+  Type.Literal('evaluator_pain_reason_summary_skipped'),
   Type.Literal('evaluator_previous_evaluation_context_degraded'),
   Type.Literal('evaluator_principle_bearer_ambiguous'),
   Type.Literal('evaluator_repair_loop_idempotent_reuse'),

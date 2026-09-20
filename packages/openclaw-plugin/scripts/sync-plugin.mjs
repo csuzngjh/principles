@@ -93,6 +93,7 @@ function parseArgs() {
         dev: false,
         bump: false,
         help: false,
+        invalid: false,
     };
 
     const argv = process.argv.slice(2);
@@ -134,7 +135,7 @@ function parseArgs() {
             default:
                 if (arg.startsWith('--')) {
                     console.error(`Unknown option: ${arg}`);
-                    args.help = true;
+                    args.invalid = true;
                 }
         }
     }
@@ -1268,9 +1269,42 @@ function restartGatewayLinux() {
 }
 
 /**
+ * PRI-868 (2026-09-20): this legacy dev installer is DEACTIVATED by governance.
+ * cleanTargetDir falls back to in-place overwrite on EPERM (mixed trees), and
+ * injectLocalWorkspacePackages resolves junctions via realpathSync and rewrites
+ * their REAL targets — on the live layout those are ~/.pd/runtime/core and
+ * ~/.pd/runtime/host-runtime. Evidence and the isolation plan:
+ * docs/audit/install-mjs-dev-prod-isolation-review-20260920.md
+ * No flag bypasses this refusal. Emergency recovery: git revert of the guard commit.
+ */
+function refuseDeactivatedInstaller(helpRequested) {
+    console.error([
+        '',
+        '❌ 此开发安装入口已停用（PRI-868，2026-09-20 治理决定）。',
+        '原因：旧开发安装链会把开发构建写进正式安装面（EPERM 原位覆盖；junction 解析后写穿 ~/.pd/runtime）。',
+        '',
+        '正确入口：',
+        '  • 首次安装：npx create-principles-disciple（仅限首次安装；已有安装重跑会以捆绑版本覆盖现版本）',
+        '  • 已有环境的更新：PD Console 更新页（不要把安装器当更新用）',
+        '  • 已有环境的修复/恢复：先核验 active.json 活动版本与目标产物，再按受控恢复流程执行（勿用安装器/旧脚本）',
+        '  • 开发验证：独立 worktree 源码运行（不要安装进 ~/.openclaw 或 ~/.pd）',
+        '',
+        '证据与隔离方案：docs/audit/install-mjs-dev-prod-isolation-review-20260920.md',
+        '',
+    ].join('\n'));
+    process.exit(helpRequested ? 0 : 1);
+}
+
+/**
  * Main function
  */
 function main() {
+    // Unconditional refusal; the legacy body below is kept verbatim but is
+    // unreachable. Do not remove the guard without a new governance decision.
+    // Only an explicit --help/-h exits 0; unknown options (invalid) exit 1.
+    const guardArgs = parseArgs();
+    refuseDeactivatedInstaller(guardArgs.help && !guardArgs.invalid);
+
     const args = parseArgs();
     if (args.help) {
         showHelp();

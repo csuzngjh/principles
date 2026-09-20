@@ -73,6 +73,13 @@ export interface PainToPrincipleInput {
   provenance?: PainProvenance;
   hostKind?: PainDetectedData['hostKind'];
   evidence?: PainEvidenceEntry[];
+  /**
+   * PRI-844: the Owner's verbatim correction, forwarded by hook emitters when
+   * the pain carries correction context. Rides into the diagnostic task's
+   * diagnosticJson via PainDetectedData — absent means no correction context,
+   * never fabricated (rc-9).
+   */
+  correctionEvidence?: PainDetectedData['correctionEvidence'];
   recordObservability?: boolean;
   /** PRI-642 SPEC §9: validated rev-2 ingress facts persisted under painIngress.v1. */
   painIngress?: PainIngressV1Payload;
@@ -166,6 +173,7 @@ export class PainToPrincipleService {
       provenance: input.provenance,
       hostKind: input.hostKind,
       evidence: input.evidence,
+      ...(input.correctionEvidence ? { correctionEvidence: input.correctionEvidence } : {}),
       painIngress: input.painIngress,
     };
 

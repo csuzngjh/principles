@@ -3147,11 +3147,13 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // ruleContent build so the contract rides in the same contentJson write.
     let resolvedSourcePrincipleId: string | undefined;
     let forwardedIntentContract: IntentContractV1 | undefined;
+    let bearerPrincipleContentJson: string | undefined;
     try {
       const principleBearerId = await this.resolvePrincipleBearerArtifact(output, taskId);
       if (principleBearerId) {
         const principleArtifact = await this.artifactStore.getArtifactById(principleBearerId);
         if (principleArtifact) {
+          bearerPrincipleContentJson = principleArtifact.contentJson;
           resolvedSourcePrincipleId = EvaluatorRunner.extractPrincipleIdFromArtifact(principleArtifact);
           let parsedPrincipleContent: unknown;
           try {
@@ -3189,6 +3191,39 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return null;
     }
 
+    // PRI-861 (CIL-003 option B): echo the bounded pain-source summary onto the
+    // rule artifact so the RuleHostWriter approval card can show WHY this rule
+    // exists. Connection, not creation: the value is the SAME
+    // resolveFormationContext().sourceDiagnosis.summary projection the PRI-843
+    // prompt path uses (clamp included) — the diagnosis artifact remains the
+    // single source of truth (P4); this layer never re-summarizes and never
+    // fabricates. Resolution is durable (bearer contentJson captured above,
+    // store-backed walk), so fresh/resume/override assemblies are identical.
+    // The resolver's NEVER-throws contract (PRI-838: store failures become
+    // observable events + undefined) is trusted exactly like the prompt-path
+    // caller — a defensive try here would be unreachable dead code. Absence is
+    // design-legal (PRI-530 receipt contract): readers keep their tested
+    // fallback — but it must be observable (rc-9).
+    let painReasonSummary: string | undefined;
+    const dreamerRef = readDreamerArtifactIdFromScribeArtifact(bearerPrincipleContentJson ?? null);
+    const formationContext = await resolveFormationContext({
+      sourceDreamerArtifactId: dreamerRef,
+      artifactStore: this.artifactStore,
+      lookupTask: (id) => this.lookupFormationTask(id),
+      emitEvent: (eventName, eventTaskId, payload) => this.emitEvent(eventName, eventTaskId, payload),
+      taskId,
+    });
+    const projected = formationContext?.sourceDiagnosis?.summary;
+    if (typeof projected === 'string' && projected.trim() !== '') {
+      painReasonSummary = projected.trim();
+    } else {
+      this.emitEvent('pain_reason_summary_skipped', taskId, {
+        runId,
+        reason: dreamerRef === undefined ? 'no_dreamer_lineage_on_scribe' : 'diagnosis_summary_unavailable',
+        nextAction: 'approval_card_keeps_generic_trigger_reason',
+      });
+    }
+
     const ruleContent = {
       implementationCode,
       goldenTrace: traceBuild.trace,
@@ -3209,6 +3244,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // the rule artifact self-carries the intent anchor it was validated
       // against (echo of the scribe single source, never a re-derivation).
       ...(forwardedIntentContract !== undefined ? { intentContract: forwardedIntentContract } : {}),
+      // PRI-861: bounded echo of the formation diagnosis summary (presentation
+      // evidence only — no governance authority reads it). Absent when the
+      // chain carries no resolvable diagnosis; readers then keep their
+      // tested fallback wording.
+      ...(painReasonSummary !== undefined ? { painReasonSummary } : {}),
     };
 
     const ruleArtifactId = `pi-rule-${taskId}-${runId}`;
