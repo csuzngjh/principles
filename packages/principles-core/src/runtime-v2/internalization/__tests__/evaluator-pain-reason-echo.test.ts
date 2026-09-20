@@ -182,7 +182,7 @@ function meta(o: Record<string, unknown> = {}): string {
   });
 }
 
-async function makeWorld(opts: { lineage: 'full' | 'none'; summary?: string }): Promise<World> {
+async function makeWorld(opts: { lineage: 'full' | 'none' | 'broken-diag'; summary?: string }): Promise<World> {
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri861-echo-'));
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
@@ -193,7 +193,8 @@ async function makeWorld(opts: { lineage: 'full' | 'none'; summary?: string }): 
   });
   const store = new SqlitePIArtifactStore(new SqliteConnection(workspaceDir));
 
-  const withLineage = opts.lineage === 'full';
+  const withDiag = opts.lineage === 'full';
+  const withDreamer = opts.lineage !== 'none';
   const now = '2026-09-20T00:00:00.000Z';
   const mkTask = async (spec: { id: string; kind: string; deps: readonly string[] }): Promise<void> => {
     await stateManager.createTask({
@@ -210,14 +211,16 @@ async function makeWorld(opts: { lineage: 'full' | 'none'; summary?: string }): 
       validationStatus: 'pending', contentJson: JSON.stringify(spec.content), createdAt: now, updatedAt: now,
     });
 
-  if (withLineage) {
-    await mkTask({ id: DIAG_ID, kind: 'diag_router', deps: [] });
-    await upsert({ artifactId: DIAG_ART, sourceTaskId: DIAG_ID, content: diagnosisContent(opts.summary ?? SHORT_SUMMARY), lineage: [] });
-    await mkTask({ id: DREAMER_ID, kind: 'dreamer', deps: [DIAG_ID] });
-    await upsert({ artifactId: DREAMER_ART, sourceTaskId: DREAMER_ID, content: DREAMER_CONTENT, lineage: [DIAG_ART] });
+  if (withDreamer) {
+    if (withDiag) {
+      await mkTask({ id: DIAG_ID, kind: 'diag_router', deps: [] });
+      await upsert({ artifactId: DIAG_ART, sourceTaskId: DIAG_ID, content: diagnosisContent(opts.summary ?? SHORT_SUMMARY), lineage: [] });
+    }
+    await mkTask({ id: DREAMER_ID, kind: 'dreamer', deps: withDiag ? [DIAG_ID] : [] });
+    await upsert({ artifactId: DREAMER_ART, sourceTaskId: DREAMER_ID, content: DREAMER_CONTENT, lineage: withDiag ? [DIAG_ART] : [] });
   }
-  await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: withLineage ? [DREAMER_ID] : [] });
-  await upsert({ artifactId: SCRIBE_ART, sourceTaskId: SCRIBE_ID, content: scribeContent(withLineage), lineage: withLineage ? [DREAMER_ART] : [] });
+  await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: withDreamer ? [DREAMER_ID] : [] });
+  await upsert({ artifactId: SCRIBE_ART, sourceTaskId: SCRIBE_ID, content: scribeContent(withDreamer), lineage: withDreamer ? [DREAMER_ART] : [] });
   await mkTask({ id: ART_ID, kind: 'artificer', deps: [SCRIBE_ID] });
   await upsert({ artifactId: ART_ART, sourceTaskId: ART_ID, content: artificerV2Content(), lineage: [SCRIBE_ART] });
   await stateManager.createTask({
@@ -352,5 +355,25 @@ describe('PRI-861 — painReasonSummary echo into the production rule artifact',
       createdAt: ruleArtifact.createdAt,
       updatedAt: ruleArtifact.updatedAt,
     })).toBe('RuleHost candidate requires human approval before activation.');
+  }, 60_000);
+
+  it('dreamer lineage present but diagnosis unresolvable: field absent, skip event names the diagnosis gap, assembly succeeds', async () => {
+    // The PRI-838 degradation the echo must survive: the resolver finds the
+    // dreamer but the dreamer task has no diagnostic-stage dependency, so it
+    // returns a context WITHOUT sourceDiagnosis (never throws).
+    world = await makeWorld({ lineage: 'broken-diag' });
+    const result = await world.evaluator.run(EVAL_ID);
+    expect(result.status).toBe('succeeded');
+
+    const ruleArtifact = (await world.store.listBySourceTaskId(EVAL_ID)).find((a) => a.artifactKind === 'rule');
+    expect(ruleArtifact).toBeDefined();
+    if (!ruleArtifact) return;
+    const ruleContent = JSON.parse(ruleArtifact.contentJson) as Record<string, unknown>;
+    expect(Object.hasOwn(ruleContent, 'painReasonSummary')).toBe(false);
+
+    const skipped = world.emitted.filter((e) => e.eventType === 'evaluator_pain_reason_summary_skipped');
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]?.payload.reason).toBe('diagnosis_summary_unavailable');
+    expect(typeof skipped[0]?.payload.nextAction).toBe('string');
   }, 60_000);
 });

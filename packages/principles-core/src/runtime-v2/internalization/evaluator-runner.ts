@@ -3199,33 +3199,27 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // single source of truth (P4); this layer never re-summarizes and never
     // fabricates. Resolution is durable (bearer contentJson captured above,
     // store-backed walk), so fresh/resume/override assemblies are identical.
-    // Absence is design-legal (PRI-530 receipt contract): the readers keep
-    // their tested fallback — but it must be observable (rc-9), and it must
-    // never turn a passing assembly into a failure (EP-03).
+    // The resolver's NEVER-throws contract (PRI-838: store failures become
+    // observable events + undefined) is trusted exactly like the prompt-path
+    // caller — a defensive try here would be unreachable dead code. Absence is
+    // design-legal (PRI-530 receipt contract): readers keep their tested
+    // fallback — but it must be observable (rc-9).
     let painReasonSummary: string | undefined;
-    try {
-      const dreamerRef = readDreamerArtifactIdFromScribeArtifact(bearerPrincipleContentJson ?? null);
-      const formationContext = await resolveFormationContext({
-        sourceDreamerArtifactId: dreamerRef,
-        artifactStore: this.artifactStore,
-        lookupTask: (id) => this.lookupFormationTask(id),
-        emitEvent: (eventName, eventTaskId, payload) => this.emitEvent(eventName, eventTaskId, payload),
-        taskId,
-      });
-      const projected = formationContext?.sourceDiagnosis?.summary;
-      if (typeof projected === 'string' && projected.trim() !== '') {
-        painReasonSummary = projected.trim();
-      } else {
-        this.emitEvent('pain_reason_summary_skipped', taskId, {
-          runId,
-          reason: dreamerRef === undefined ? 'no_dreamer_lineage_on_scribe' : 'diagnosis_summary_unavailable',
-          nextAction: 'approval_card_keeps_generic_trigger_reason',
-        });
-      }
-    } catch (echoErr) {
+    const dreamerRef = readDreamerArtifactIdFromScribeArtifact(bearerPrincipleContentJson ?? null);
+    const formationContext = await resolveFormationContext({
+      sourceDreamerArtifactId: dreamerRef,
+      artifactStore: this.artifactStore,
+      lookupTask: (id) => this.lookupFormationTask(id),
+      emitEvent: (eventName, eventTaskId, payload) => this.emitEvent(eventName, eventTaskId, payload),
+      taskId,
+    });
+    const projected = formationContext?.sourceDiagnosis?.summary;
+    if (typeof projected === 'string' && projected.trim() !== '') {
+      painReasonSummary = projected.trim();
+    } else {
       this.emitEvent('pain_reason_summary_skipped', taskId, {
         runId,
-        reason: `formation_resolution_failed: ${echoErr instanceof Error ? echoErr.message : String(echoErr)}`,
+        reason: dreamerRef === undefined ? 'no_dreamer_lineage_on_scribe' : 'diagnosis_summary_unavailable',
         nextAction: 'approval_card_keeps_generic_trigger_reason',
       });
     }
