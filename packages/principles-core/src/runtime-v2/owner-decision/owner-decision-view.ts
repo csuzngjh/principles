@@ -202,6 +202,14 @@ function narrativeItem(text: string, claimClass: NarrativeItem['claimClass'], so
   return { text, claimClass, sourceRefs };
 }
 
+// PRI-875: the single Owner-facing wording for aggregated historical
+// processing issues — shared by the uncertainty notice and the runtime
+// blocker so the two sections cannot drift apart. Console i18n carries the
+// same sentence for localization (zh-CN/en), keyed on `count`.
+function recoveryNoticeText(count: number): string {
+  return `存在 ${count} 个历史处理问题（如失败或等待重试的任务），其与当前操作的关系尚未确认。`;
+}
+
 // ── enforcement folding (mirrors governance-projection foldActivations) ─────
 
 function foldGovernanceActivations(facts: GovernanceFacts) {
@@ -514,11 +522,16 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
     uncertaintyItems.push(narrativeItem('这条准则目前主要依赖行为观察来评估（可评价性：弱启发式）。', 'system_state', [ledgerRef]));
   }
   const recoveryAttention = ownerGovernanceView.attention.items.filter((item) => item.kind === 'recovery');
-  for (const item of recoveryAttention) {
+  if (recoveryAttention.length > 0) {
     // §13: relevance to current actions is NOT confirmed — honest copy only.
-    uncertaintyItems.push(narrativeItem('存在历史处理问题（如失败或等待重试的任务），其与当前操作的关系尚未确认。', 'system_state', [
-      ref({ kind: 'task', id: item.sourceRef.id, fieldPath: 'tasks.status', relation: 'exact_id', claimClass: 'system_state', producer: { status: 'known', value: 'runtime-task-store' }, capturedAt }),
-    ]));
+    // PRI-875: one aggregated notice per view, not one line per stalled task —
+    // the Owner must not have to read the task graph (§13); per-task lineage
+    // stays in the sourceRefs.
+    const recoveryRefs = recoveryAttention.map((item) => ref({
+      kind: 'task', id: item.sourceRef.id, fieldPath: 'tasks.status', relation: 'exact_id',
+      claimClass: 'system_state', producer: { status: 'known', value: 'runtime-task-store' }, capturedAt,
+    }));
+    uncertaintyItems.push(narrativeItem(recoveryNoticeText(recoveryAttention.length), 'system_state', recoveryRefs));
   }
   const uncertainty: NarrativeListField = knownNarrative(uncertaintyItems, [ledgerRef]);
 
@@ -825,14 +838,20 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
       });
     }
   }
-  for (const item of recoveryAttention) {
+  if (recoveryAttention.length > 0) {
+    // PRI-875: aggregated into one blocker for the same reason as the
+    // uncertainty notice above; `count` lets UI localize the number.
     blockers.push({
       subjectKey: principleId,
       actionSemantic: 'judgment',
       kind: 'runtime',
-      reason: reason('historical_processing_issue', '存在历史处理问题，其与当前操作的关系尚未确认。', [
-        ref({ kind: 'task', id: item.sourceRef.id, fieldPath: 'tasks.status', relation: 'exact_id', claimClass: 'system_state', producer: { status: 'known', value: 'runtime-task-store' }, capturedAt }),
-      ]),
+      reason: {
+        ...reason('historical_processing_issue', recoveryNoticeText(recoveryAttention.length), recoveryAttention.map((item) => ref({
+          kind: 'task', id: item.sourceRef.id, fieldPath: 'tasks.status', relation: 'exact_id',
+          claimClass: 'system_state', producer: { status: 'known', value: 'runtime-task-store' }, capturedAt,
+        }))),
+        count: recoveryAttention.length,
+      },
       requiredAudience: 'system',
     });
   }

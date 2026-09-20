@@ -92,6 +92,12 @@ function seedWorkspace(): void {
     VALUES ('task-eval-b', 'evaluator', 'failed', ?, ?, 1, 3, ?)`)
     .run('2026-09-15T08:00:00.000Z', '2026-09-15T16:44:31.802Z',
       createPITaskDiagnosticJson({ dependencyTaskIds: ['task-scribe-b'], channel: 'code_tool_hook', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] }));
+  // Second stalled task in the same lineage (PRI-875: the decision view must
+  // aggregate both into ONE count-bearing notice, not repeat the line).
+  db.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+    VALUES ('task-eval-b2', 'evaluator', 'failed', ?, ?, 1, 3, ?)`)
+    .run('2026-09-15T09:00:00.000Z', '2026-09-15T17:44:31.802Z',
+      createPITaskDiagnosticJson({ dependencyTaskIds: ['task-scribe-b'], channel: 'code_tool_hook', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] }));
   db.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
     VALUES ('task-scribe-d', 'scribe', 'succeeded', ?, ?, 0, 3, ?)`).run('2026-09-17T08:00:00.000Z', '2026-09-17T08:10:00.000Z', diagJson);
 
@@ -224,12 +230,21 @@ describe('GET /api/v1/principles/:id/owner-decision-view', () => {
     await handleOwnerDecisionViewRoute({ req: request(), res, workspaceDir, featureFlags: enableFlag(true), now: () => AS_OF, subPath: '/prin-b/owner-decision-view' });
     expect(res.statusCode, res.body).toBe(200);
     const data = JSON.parse(res.body).data;
-    expect(data.decisionState).toBe('recovery_needed'); // old failed evaluator task is still in the frontier
+    expect(data.decisionState).toBe('recovery_needed'); // old failed evaluator tasks are still in the frontier
     expect(data.decisionSubjects.some((subject: { state: string }) => subject.state === 'approved')).toBe(true);
     expect(data.currentEnforcement.value.state).toBe('deactivated');
     expect(data.evidenceSummary.value.observation.deterministicEffects.value).toBe(1);
-    const runtime = data.blockers.find((blocker: { kind: string }) => blocker.kind === 'runtime');
-    expect(runtime.reason.ownerText).toContain('尚未确认');
+    // PRI-875: both stalled tasks aggregate into ONE runtime blocker with a count.
+    const runtimeBlockers = data.blockers.filter((blocker: { kind: string }) => blocker.kind === 'runtime');
+    expect(runtimeBlockers).toHaveLength(1);
+    expect(runtimeBlockers[0].reason.code).toBe('historical_processing_issue');
+    expect(runtimeBlockers[0].reason.count).toBe(2);
+    expect(runtimeBlockers[0].reason.ownerText).toContain('2 个历史处理问题');
+    expect(runtimeBlockers[0].reason.sourceRefs).toHaveLength(2);
+    // The uncertainty narrative carries the same single aggregated notice.
+    const recoveryNotices = data.uncertainty.value.filter((item: { text: string }) => item.text.includes('历史处理问题'));
+    expect(recoveryNotices).toHaveLength(1);
+    expect(recoveryNotices[0].text).toContain('存在 2 个历史处理问题');
     expect(JSON.stringify(data)).not.toContain('不要批准');
     // disable is NOT offered for a deactivated activation.
     expect(data.availableActions.filter((action: { semantic: string }) => action.semantic === 'disable')).toHaveLength(0);
