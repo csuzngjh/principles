@@ -190,6 +190,54 @@ describe('trajectory writer→reader path alignment (PRI-753)', () => {
     );
   });
 
+  it('task_outcomes rows written through recordTaskOutcome read back (PRI-768 v5 outcome wiring)', () => {
+    const workspaceDir = makeWorkspace();
+    const sessionId = 'session-outcome';
+
+    TrajectoryRegistry.use(workspaceDir, (db: TrajectoryDatabase) => {
+      db.recordTaskOutcome({
+        sessionId,
+        taskId: 'run-outcome-001',
+        outcome: 'completed',
+        summary: 'turn summary within the bounded length',
+        principleIdsJson: ['原则 A', '原则 B'],
+      });
+      // A turn with no injected principles still records — with an empty list
+      // (the llm-hook wiring always passes an array, never undefined).
+      db.recordTaskOutcome({
+        sessionId,
+        taskId: 'run-outcome-002',
+        outcome: 'completed',
+        principleIdsJson: [],
+      });
+    });
+
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const rows = db
+        .prepare('SELECT session_id, task_id, outcome, summary, principle_ids_json FROM task_outcomes ORDER BY task_id')
+        .all() as {
+        session_id: string;
+        task_id: string;
+        outcome: string;
+        summary: string | null;
+        principle_ids_json: string | null;
+      }[];
+      expect(rows).toHaveLength(2);
+      const first = rows.find((r) => r.task_id === 'run-outcome-001');
+      expect(first).toMatchObject({
+        session_id: sessionId,
+        outcome: 'completed',
+        summary: 'turn summary within the bounded length',
+      });
+      expect(JSON.parse(first!.principle_ids_json ?? 'null')).toEqual(['原则 A', '原则 B']);
+      const second = rows.find((r) => r.task_id === 'run-outcome-002');
+      expect(JSON.parse(second!.principle_ids_json ?? 'null')).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it('a present-but-empty database is empty, not unavailable', () => {
     const workspaceDir = makeWorkspace();
 

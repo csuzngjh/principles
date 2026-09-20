@@ -566,10 +566,14 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     }
 
     // Warning must be present + structured + actionable (cli-6-output-next-action).
+    // PRI-768 v5 follow-up (F4): an unresolvable id is now an OBSERVABLE SKIP
+    // instead of a doomed ledger update — the resolver refuses to flow an id
+    // the ledger does not contain into activatePrinciple, and states exactly
+    // why (no ledger principle for "<id>" and no dreamer lineage to recover).
     const warning = getStringField(approveData, 'warning');
     expect(warning).withContext('Missing ledger upgrade must surface a warning').toBeDefined();
-    expect(warning).toContain('ledger_activate_failed');
-    expect(warning).toContain('Cannot update missing principle');
+    expect(warning).toContain('ledger_activate_skipped');
+    expect(warning).toContain('no ledger principle');
     expect(warning).toContain(principleId);
   });
 });

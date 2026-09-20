@@ -6,7 +6,6 @@ import type {
   ApprovalDecisionResult,
   ApprovalRecord,
   ApprovalStatus,
-  PIArtifactRecord,
 } from '@principles/core/runtime-v2';
 import {
   SqliteConnection,
@@ -22,11 +21,11 @@ import {
   ApprovalQueue,
   mapConfidenceToLabel,
   isArtifactRevisionOf,
-  extractPrincipleId,
   PrincipleTreeLedgerAdapter,
   MVP_CHANNELS,
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
+import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 
@@ -41,27 +40,6 @@ function isMissingTableError(err: unknown): boolean {
 
 function isActivationSuccess(activation: ActivationDecision): boolean {
   return activation.decision === 'activated' || activation.decision === 'already_activated';
-}
-
-/**
- * Bug-O L3b fix: adapt a PIArtifactRecord (DB row) to a PIArtifactSnapshot
- * (activation contract type). The two interfaces have identical fields but
- * different names — explicit field copy surfaces future field drift as a
- * compile error and complies with rc-2-no-as-bypass.
- */
-function toArtifactSnapshot(record: PIArtifactRecord): PIArtifactSnapshot {
-  return {
-    artifactId: record.artifactId,
-    artifactKind: record.artifactKind,
-    sourceTaskId: record.sourceTaskId,
-    sourcePrincipleId: record.sourcePrincipleId,
-    sourceRuleId: record.sourceRuleId,
-    lineageArtifactIds: record.lineageArtifactIds,
-    validationStatus: record.validationStatus,
-    contentJson: record.contentJson,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-  };
 }
 
 type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; channel: string };
@@ -227,11 +205,11 @@ export class ApprovalsConsoleModel {
    * activation. Non-fatal on failure — the activation is already committed;
    * ledger failure is surfaced as a warning string (rc-9).
    *
-   * The principleId is resolved via {@link extractPrincipleId}'s 4-step
-   * fallback (column → parsed.principleId → parsed.sourcePrincipleId →
-   * parsed.principleDraft.title) so dreamer artifacts whose
-   * sourcePrincipleId column was stripped by stripFabricatedCorePrincipleIds
-   * can still be linked via contentJson.
+   * PRI-768 v5 follow-up (F4): the id is resolved through
+   * {@link resolveLedgerPrincipleId} — direct ids are validated against the
+   * ledger before use, and title-only artifacts are resolved through the
+   * candidate lineage instead of flowing an unvalidated draft title into
+   * `ledger.activatePrinciple` (which cannot succeed for non-UUID keys).
    */
   private async upgradeLedgerPrinciple(artifactId: string): Promise<string | undefined> {
     const stateDir = path.join(this.workspaceDir, '.state');
@@ -243,15 +221,28 @@ export class ApprovalsConsoleModel {
         // rc-9: surface the reason instead of silently returning.
         return `ledger_activate_skipped: artifact ${artifactId} not found in artifact store`;
       }
-      const principleId = extractPrincipleId(toArtifactSnapshot(artifact));
-      if (!principleId) {
-        // No principleId resolvable from any source — this is a legitimate
-        // skip (e.g. rule-only artifact), not an error. Surface it so the
-        // owner can verify whether the link was supposed to exist.
-        return `ledger_activate_skipped: artifact ${artifactId} has no resolvable principleId`;
-      }
+      // PRI-768 v5 follow-up (F4): extractPrincipleId's title fallback used to
+      // flow straight into ledger.activatePrinciple, which always failed
+      // ("Cannot update missing principle <title>") because ledger keys are
+      // UUIDs. Resolve through the shared resolver, which validates direct
+      // ids against the ledger and otherwise walks the candidate lineage
+      // (scribe → dreamer seed → candidateId → derivedFromPainIds).
       const ledger = new PrincipleTreeLedgerAdapter({ stateDir });
-      const result = ledger.activatePrinciple(principleId);
+      const resolution = await resolveLedgerPrincipleId(artifact, {
+        ledger,
+        getArtifactById: (id) => piArtifactStore.getArtifactById(id),
+        getTaskDiagnosticJson: (taskId) => {
+          const row = connection
+            .getDb()
+            .prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?')
+            .get(taskId) as { diagnostic_json: string | null } | undefined;
+          return row?.diagnostic_json ?? null;
+        },
+      });
+      if (resolution.status === 'unresolved') {
+        return `ledger_activate_skipped: artifact ${artifactId} — ${resolution.reason}`;
+      }
+      const result = ledger.activatePrinciple(resolution.principleId);
       if (!result.ok) {
         // Reason is already prefixed with `ledger_activate_failed:`.
         return result.reason;
