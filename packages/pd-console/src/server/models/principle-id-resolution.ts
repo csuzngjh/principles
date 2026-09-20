@@ -69,15 +69,17 @@ export function candidateIdFromDreamerTaskId(taskId: string | null | undefined):
     : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function readDreamerArtifactId(artifact: PIArtifactRecord): string | null {
   try {
     const parsed: unknown = JSON.parse(artifact.contentJson);
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-        && Object.hasOwn(parsed, 'sourceTrace')) {
-      const trace = (parsed as Record<string, unknown>).sourceTrace;
-      if (trace !== null && typeof trace === 'object' && !Array.isArray(trace)
-          && Object.hasOwn(trace, 'dreamerArtifactId')) {
-        const id = (trace as Record<string, unknown>).dreamerArtifactId;
+    if (isRecord(parsed) && Object.hasOwn(parsed, 'sourceTrace')) {
+      const trace = parsed.sourceTrace;
+      if (isRecord(trace) && Object.hasOwn(trace, 'dreamerArtifactId')) {
+        const id = trace.dreamerArtifactId;
         if (typeof id === 'string' && id.trim() !== '') return id;
       }
     }
@@ -126,9 +128,8 @@ export async function resolveLedgerPrincipleId(
     if (diagnosticJson) {
       try {
         const parsed: unknown = JSON.parse(diagnosticJson);
-        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-            && Object.hasOwn(parsed, 'candidateId')) {
-          const value = (parsed as Record<string, unknown>).candidateId;
+        if (isRecord(parsed) && Object.hasOwn(parsed, 'candidateId')) {
+          const value = parsed.candidateId;
           if (typeof value === 'string' && value.trim() !== '') candidateId = value.trim();
         }
       } catch {
