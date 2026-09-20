@@ -31,6 +31,7 @@ import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } fro
 import { setLanguage } from '../src/i18n.js';
 import { logger } from '../src/utils/logger.js';
 import type { InstallOptions } from '../src/prompts.js';
+import { stampPayloadIdentity } from './helpers/payload-identity.js';
 
 vi.mock('fs');
 vi.mock('child_process', () => ({
@@ -158,6 +159,12 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
         mock.mockImplementation(((...args: unknown[]) => (value as (...a: unknown[]) => unknown)(...args)) as never);
       }
     }
+
+    // PRI-874: the npm-distributed fixture must carry the embedded product
+    // identity stamp a real train payload has, or install() refuses it at the
+    // identity gate before the shim steps under test ever run. Placed AFTER
+    // the fs delegation loop above so the write really lands on disk.
+    stampPayloadIdentity(fixtureDir, '0.0.0');
   });
 
   afterEach(() => {

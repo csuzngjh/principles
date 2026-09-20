@@ -7,10 +7,12 @@
  * exercises the production-supported path end to end:
  *
  *   1. build (or receive via PD_RELEASE_SMOKE_PUBLICATION) the candidate N
- *      self-contained release asset;
- *   2. derive a REAL N-1 payload (same asset, decremented product versions,
- *      re-stamped with the production build-release-asset tool) carrying the
- *      gate's trust root;
+ *      self-contained release asset — carrying its EMBEDDED product identity
+ *      (PRI-874: the installer refuses unstamped payloads; candidateVersion
+ *      is read from that stamp, never from a component manifest);
+ *   2. derive a REAL N-1 payload (same asset, an explicit synthetic baseline
+ *      product identity, re-stamped with the production build-release-asset
+ *      tool) carrying the gate's trust root;
  *   3. install N-1 with the REAL installer transaction into an isolated home
  *      (provisions ~/.pd/trust/root.json + install.json releaseMetadataUrl —
  *      the PRI-732 machinery);
@@ -19,12 +21,16 @@
  *   5. serve the signed candidate N publication from a local TUF metadata
  *      repository (pre-publish validation — nothing is published to npm);
  *   6. drive the REAL installed Console's POST /api/update/apply-full and
- *      require the ReleaseManager-served outcome;
+ *      observe the ASYNC acceptance (PRI-854: {success, update_in_progress,
+ *      transactionId}), then poll the production transaction resource
+ *      (GET /api/update/transaction/:id) until the terminal state;
  *   7. verify the upgraded runtime: version N, pd CLI, /api/health after a
  *      console restart, canonical @principles/* link layout (the injected
  *      physical duplicate must be reconciled), trust root, no npm use;
  *   8. failure injection: a corrupted candidate artifact must fail the update
- *      WITHOUT leaving a half-updated runtime (N stays healthy and serving).
+ *      WITHOUT leaving a half-updated runtime (N stays healthy and serving);
+ *      the journal must reach terminal 'failed' with the download/digest
+ *      evidence in its detail — never a premature 'refused'.
  *
  * All child processes live in tests/helpers/gate-processes.mjs (+ the
  * committed upgrade-gate-runner.mjs); this file orchestrates and asserts.
@@ -54,21 +60,43 @@ import { cleanupReleaseSmokeRoot } from './release-smoke-cleanup';
 const INSTALLER_DIR = path.resolve(__dirname, '..');
 
 /**
- * Timeout contract for the Console /api/update/apply-full transaction.
- *
- * The endpoint writes response headers only AFTER the ReleaseManager
- * completes the whole update server-side (download → sync tar extraction →
- * installer deploy → gateway probe), so the gate client must budget for the
- * real Windows duration rather than undici's default 300s headersTimeout.
- * Windows 2025 + Defender measured ~17-23 min (sync extraction 600-950s +
- * deploy ~400s; 09-17/09-18 full-matrix evidence); the 30 min floor keeps
- * headroom above the server-side budget (PD_UPDATE_APPLY_FULL_TIMEOUT_MS)
- * and above the vitest scenario deadline that hosts it.
+ * PRI-874: total-duration budget for one Console /api/update/apply-full HTTP
+ * call. PRI-854 made the endpoint an ASYNC acceptance — it responds as soon
+ * as the transaction journal's 'planned' entry exists (normally seconds)
+ * while a detached bootstrap executor performs the update. The 30-minute
+ * budget is retained as the outer bound (well above the 60s acceptance
+ * window and any slow-disk stall) and must stay above the server-side budget
+ * (PD_UPDATE_APPLY_FULL_TIMEOUT_MS) and the vitest scenario deadline that
+ * hosts it.
  */
 const APPLY_FULL_CLIENT_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** After apply-full returns, the runtime version must converge within this budget. */
 const UPGRADE_RESULT_CONVERGE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * PRI-874: the N-1 side of the gate is stamped with this EXPLICIT synthetic
+ * baseline — a test identity, not a real historical release. The candidate's
+ * product version comes from the single resolver (root manifest authority)
+ * and can legitimately end in .0, from which a "decremented previous" cannot
+ * be derived; the baseline only has to be a valid strict x.y.z BELOW the
+ * candidate so the N-1 → N step is a forward upgrade.
+ */
+const N1_BASELINE_VERSION = '2.0.9';
+
+/**
+ * PRI-874: /apply-full is an ASYNC acceptance (PRI-854) — the route returns
+ * {success, state:'update_in_progress', transactionId} as soon as the
+ * transaction journal's 'planned' entry exists, and the detached bootstrap
+ * executor performs the actual update. Completion is observed by polling the
+ * production transaction resource (GET /api/update/transaction/:id — the
+ * same continuation contract the Console UI uses) until it reports a
+ * terminal state. The budget keeps the measured real-Windows apply duration
+ * (17-23 min, see APPLY_FULL_CLIENT_TIMEOUT_MS) as its floor with headroom:
+ * the fixture download is in-memory, but extraction/deploy/AV costs stay
+ * real.
+ */
+const TRANSACTION_TERMINAL_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Whole scenario budget (install N-1 → boot console → apply-full → restart verify). */
 const SCENARIO_UPGRADE_TIMEOUT_MS = 40 * 60 * 1000;
@@ -120,7 +148,9 @@ let repositoryBaseUrl = '';
 let bootedConsole: Awaited<ReturnType<typeof gateStartConsole>> | null = null;
 let consolePort = 0;
 let candidateVersion = '';
-let previousVersion = '';
+let candidateSourceCommit = '';
+let baselineVersion = '';
+let upgradeConfirmedTransactionId: string | null = null;
 
 function phase<T>(phaseName: string, run: () => T): T {
   const started = Date.now();
@@ -175,6 +205,39 @@ function bumpPatch(version: string): string {
   if (parts.length !== 3 || Number.isNaN(Number(parts[2]))) throw new Error(`Cannot bump patch of version ${version}`);
   parts[2] = String(Number(parts[2]) + 1);
   return parts.join('.');
+}
+
+/** Numeric strict-x.y.z comparison (no prerelease semantics in this gate). */
+function compareSemverNumeric(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const left = pa[index] ?? 0;
+    const right = pb[index] ?? 0;
+    if (left !== right) return left - right;
+  }
+  return 0;
+}
+
+/**
+ * PRI-874: read the payload's embedded product identity (SPEC §12,
+ * `_release/product-identity.json`). The gate derives the candidate version
+ * from THIS stamp — never from a component manifest — because the installer
+ * refuses unstamped payloads and component package versions are diagnostics,
+ * not product authority.
+ */
+function readEmbeddedIdentity(payloadDir: string): { productVersion: string; sourceCommit: string } {
+  const stampPath = path.join(payloadDir, '_release', 'product-identity.json');
+  const stamp = JSON.parse(fs.readFileSync(stampPath, 'utf8')) as Record<string, unknown>;
+  const productVersion = Reflect.get(stamp, 'productVersion');
+  const sourceCommit = Reflect.get(stamp, 'sourceCommit');
+  if (typeof productVersion !== 'string' || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(productVersion)) {
+    throw new Error(`Payload identity ${stampPath} has no strict x.y.z productVersion: ${JSON.stringify(productVersion)}`);
+  }
+  if (typeof sourceCommit !== 'string' || !/^[a-f0-9]{40}$/.test(sourceCommit)) {
+    throw new Error(`Payload identity ${stampPath} has no 40-char sourceCommit: ${JSON.stringify(sourceCommit)}`);
+  }
+  return { productVersion, sourceCommit };
 }
 
 function extractAsset(archivePath: string, destination: string): void {
@@ -244,17 +307,16 @@ async function stopConsole(): Promise<void> {
 }
 
 async function postApplyFull(): Promise<{ status: number; authority: string | null; fallbackReason: string | null; body: Record<string, unknown> }> {
-  // node:http, not global fetch: undici aborts a response whose headers have
-  // not arrived within its 300s default, but /apply-full legitimately blocks
-  // on the whole installer transaction (download + sync extraction + deploy +
-  // gateway restart), which exceeds 300s on a loaded machine (observed
-  // 2026-09-17).
+  // node:http, not global fetch: the endpoint is an async acceptance
+  // (PRI-854) that normally answers in seconds, but a cold/loaded machine
+  // can stall the acceptance itself; undici would abort such a response at
+  // its 300s default.
   //
   // The response is awaited under an explicit TOTAL-duration budget
   // (APPLY_FULL_CLIENT_TIMEOUT_MS). node:http has no implicit client
   // deadline, so the explicit bound keeps the contract visible and prevents
-  // an infinite hang; it must stay above the measured Windows apply-full
-  // duration and the vitest scenario deadline that hosts it.
+  // an infinite hang. Completion is NOT observed here — the transaction
+  // resource is polled separately (waitForTransactionTerminal).
   return await new Promise((resolvePromise, reject) => {
     const controller = new AbortController();
     const deadlineTimer = setTimeout(() => controller.abort(), APPLY_FULL_CLIENT_TIMEOUT_MS);
@@ -318,6 +380,84 @@ async function waitForRuntimeVersion(expectedVersion: string, timeoutMs: number,
   throw new Error(`${label} did not reach version ${expectedVersion} within ${timeoutMs}ms (last observed: ${lastObserved})`);
 }
 
+interface JournalTransition {
+  at?: string;
+  from?: string | null;
+  to?: string;
+  detail?: string;
+}
+
+interface TransactionSnapshot {
+  transactionId?: string;
+  exists?: boolean;
+  lastState?: string;
+  terminal?: boolean;
+  productVersion?: string;
+  transitions?: JournalTransition[];
+}
+
+/**
+ * PRI-874: fetch the production transaction resource (GET
+ * /api/update/transaction/:id) — the same continuation contract the Console
+ * UI uses after an async acceptance (SPEC §12.1).
+ */
+async function fetchTransactionStatus(transactionId: string): Promise<TransactionSnapshot> {
+  const response = await fetch(`http://127.0.0.1:${consolePort}/api/update/transaction/${encodeURIComponent(transactionId)}`, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  const envelope = await response.json() as Record<string, unknown>;
+  const data = (typeof envelope.data === 'object' && envelope.data !== null ? envelope.data : envelope) as TransactionSnapshot;
+  if (data.exists !== true) throw new Error(`transaction ${transactionId} does not exist on the console`);
+  return data;
+}
+
+/**
+ * Poll the transaction until it reports a TERMINAL state, then require the
+ * exact terminal semantics: 'confirmed' for the happy upgrade (identity N);
+ * 'failed' for the corruption injection — a 'refused' terminal would mean
+ * the transaction never reached the digest verification this gate exists to
+ * exercise.
+ */
+async function waitForTransactionTerminal(
+  transactionId: string,
+  expectedState: 'confirmed' | 'failed',
+  expectedProductVersion: string,
+): Promise<TransactionSnapshot> {
+  const deadline = Date.now() + TRANSACTION_TERMINAL_TIMEOUT_MS;
+  let lastSnapshot = 'no response yet';
+  while (Date.now() < deadline) {
+    let snapshot: TransactionSnapshot;
+    try {
+      snapshot = await fetchTransactionStatus(transactionId);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('does not exist')) throw error;
+      // Transient poll failures (console busy / mid-restart) — keep polling.
+      lastSnapshot = error instanceof Error ? error.message : String(error);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
+      continue;
+    }
+    lastSnapshot = JSON.stringify({ lastState: snapshot.lastState, productVersion: snapshot.productVersion, transitions: snapshot.transitions });
+    if (snapshot.terminal === true) {
+      // Assertions here are OUTSIDE the transient-error catch: a terminal
+      // state mismatch is a real failure, never a reason to keep polling.
+      expect(snapshot.lastState, `transaction ${transactionId} terminal state`).toBe(expectedState);
+      expect(snapshot.productVersion, `transaction ${transactionId} identity`).toBe(expectedProductVersion);
+      return snapshot;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
+  }
+  throw new Error(`transaction ${transactionId} did not reach terminal '${expectedState}' within ${TRANSACTION_TERMINAL_TIMEOUT_MS}ms; last snapshot: ${lastSnapshot}`);
+}
+
+function lastTransitionTo(snapshot: TransactionSnapshot, state: string): JournalTransition {
+  const transitions = Array.isArray(snapshot.transitions) ? snapshot.transitions : [];
+  const match = transitions.filter((entry) => entry !== null && typeof entry === 'object' && entry.to === state).pop();
+  if (match === undefined) {
+    throw new Error(`transaction journal has no '${state}' transition: ${JSON.stringify(snapshot.transitions)}`);
+  }
+  return match;
+}
+
 /**
  * The real post-upgrade invariant (PRI-665): every runtime dependency slot
  * serves the DEPLOYED payload's content — no stale physical duplicates, no
@@ -362,18 +502,28 @@ beforeAll(async () => {
   expect(await sha256File(archivePath)).toBe(expectedDigest);
 
   phase('extract-n', () => extractAsset(archivePath, payloadNDir));
-  candidateVersion = readPackageVersion(path.join(payloadNDir, 'pd-cli', 'package.json'));
-  previousVersion = decrementPatch(candidateVersion);
+  // PRI-874: candidateVersion comes from the payload's EMBEDDED identity —
+  // never from a component manifest (unstamped payloads are refused by the
+  // installer, and component package versions are diagnostics).
+  const candidateIdentity = readEmbeddedIdentity(payloadNDir);
+  candidateVersion = candidateIdentity.productVersion;
+  candidateSourceCommit = candidateIdentity.sourceCommit;
+  if (compareSemverNumeric(N1_BASELINE_VERSION, candidateVersion) >= 0) {
+    throw new Error(`Synthetic N-1 baseline ${N1_BASELINE_VERSION} must be below the resolved candidate ${candidateVersion} — pick a new baseline constant`);
+  }
+  baselineVersion = N1_BASELINE_VERSION;
 
-  // N-1 payload: same real asset, decremented product versions, gate trust
-  // root, re-stamped by the production asset builder so every digest in
-  // _release/manifest.json matches the mutated tree.
+  // N-1 payload: same real asset, the explicit synthetic baseline product
+  // identity, gate trust root, re-stamped by the production asset builder so
+  // every digest in _release/manifest.json matches the mutated tree AND the
+  // payload carries its own identity (unstamped payloads are refused).
   phase('extract-n1', () => extractAsset(archivePath, payloadN1Dir));
-  writePackageVersion(path.join(payloadN1Dir, 'pd-cli', 'package.json'), previousVersion);
+  writePackageVersion(path.join(payloadN1Dir, 'pd-cli', 'package.json'), baselineVersion);
   writePackageVersion(path.join(payloadN1Dir, 'plugin', 'package.json'), decrementPatch(readPackageVersion(path.join(payloadN1Dir, 'plugin', 'package.json'))));
   fs.mkdirSync(path.join(payloadN1Dir, 'trust'), { recursive: true });
   fs.writeFileSync(path.join(payloadN1Dir, 'trust', 'root.json'), buildSignedRoot(candidateTrust, FAR_EXPIRY));
-  await phaseAsync('restamp-n1', () => gateRestampPayload(gateContext, payloadN1Dir));
+  await phaseAsync('restamp-n1', () => gateRestampPayload(gateContext, payloadN1Dir, baselineVersion, candidateSourceCommit));
+  expect(readEmbeddedIdentity(payloadN1Dir).productVersion).toBe(baselineVersion);
 
   // Candidate N publication served locally: pre-publish validation — the
   // candidate is NOT on any registry, the ReleaseManager consumes it through
@@ -381,7 +531,7 @@ beforeAll(async () => {
   const archiveBytes = fs.readFileSync(archivePath);
   const publicationN = buildReleasePublication({
     productVersion: candidateVersion,
-    sourceCommit: 'f'.repeat(40),
+    sourceCommit: candidateSourceCommit,
     channel: 'stable',
     channelVersion: 1,
     publicationSequence: 1,
@@ -422,6 +572,35 @@ afterAll(async () => {
   for (const server of openServers) {
     await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
   }
+  // PRI-874: collect failure forensics BEFORE the temp root is deleted — the
+  // workflow artifact step cannot reach the (already removed, hidden-dot)
+  // gate home after cleanup, and cleanup is skipped only on Windows CI. The
+  // transaction journals carry every transition with its detail; the state
+  // summary pins the identities the gate ran with. (A result file from the
+  // detached executor is not reachable here — the route's probe directory is
+  // ephemeral — so the journals are the durable evidence.)
+  phase('collect-diagnostics', () => {
+    const diagnosticsDir = process.env.PD_UPGRADE_GATE_DIAG_DIR;
+    if (diagnosticsDir === undefined || diagnosticsDir.length === 0) return;
+    if (!path.isAbsolute(diagnosticsDir)) throw new Error(`PD_UPGRADE_GATE_DIAG_DIR must be an absolute path: ${diagnosticsDir}`);
+    fs.mkdirSync(diagnosticsDir, { recursive: true });
+    const transactionsDir = path.join(homeDir, '.pd', 'transactions');
+    if (fs.existsSync(transactionsDir)) {
+      fs.cpSync(transactionsDir, path.join(diagnosticsDir, 'transactions'), { recursive: true, force: true });
+    }
+    fs.writeFileSync(
+      path.join(diagnosticsDir, 'gate-state.json'),
+      `${JSON.stringify({
+        platform: process.platform,
+        node: process.versions.node,
+        candidateVersion,
+        candidateSourceCommit,
+        baselineVersion,
+        consolePort,
+        upgradeConfirmedTransactionId,
+      }, null, 2)}\n`,
+    );
+  });
   phase('cleanup', () => {
     cleanupReleaseSmokeRoot(root, {
       log: (message) => console.warn(message),
@@ -448,7 +627,7 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       expect(installJson.releaseMetadataUrl).toBe(repositoryBaseUrl);
 
       const active = readActiveRecord();
-      expect(active.productVersion).toBe(previousVersion);
+      expect(active.productVersion).toBe(baselineVersion);
       expect(fs.existsSync(npmMarker)).toBe(false);
     },
     900_000,
@@ -471,8 +650,19 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       const outcome = await phaseAsync('apply-full', () => postApplyFull());
       expect(outcome.status).toBe(200);
       expect(outcome.body.success).toBe(true);
-      expect(outcome.body.newVersion).toBe(candidateVersion);
+      // PRI-874 async acceptance contract (PRI-854): the route accepts the
+      // transaction and returns immediately — completion is observed on the
+      // transaction resource below, never on this response body.
+      expect(outcome.body.state).toBe('update_in_progress');
+      expect(typeof outcome.body.transactionId).toBe('string');
+      const transactionId = String(outcome.body.transactionId);
       expect(String(outcome.authority)).toContain('release-manager');
+
+      // Wait for the REAL terminal state through the production continuation
+      // contract (the exact poll the Console UI performs) before any
+      // follow-up probe.
+      await waitForTransactionTerminal(transactionId, 'confirmed', candidateVersion);
+      upgradeConfirmedTransactionId = transactionId;
 
       // The response arrives as soon as the transaction commits, but the
       // observable runtime state lands on the same slow Windows filesystem
@@ -521,6 +711,11 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
   it(
     'a corrupted candidate artifact fails the update loudly and leaves the N runtime healthy (no half-updated state)',
     async () => {
+      // PRI-874 race guard: NEVER swap the served repository while a detached
+      // executor may still be in flight. Test 2 must have CONFIRMED the
+      // upgrade first — a failed test 2 aborts here instead of racing the
+      // executor and masking the real failure (the 09-20 CI failure shape).
+      expect(upgradeConfirmedTransactionId, 'the happy upgrade (test 2) must confirm before corruption injection').not.toBeNull();
       // Corrupt-in-transit injection: the publication is signed correctly,
       // but the SERVED artifact bytes differ from the signed digest — the
       // exact corruption class the TUF download verification exists for.
@@ -568,8 +763,21 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
 
       const outcome = await phaseAsync('apply-full-corrupt', () => postApplyFull());
       expect(outcome.status).toBe(200);
-      expect(outcome.body.success).toBe(false);
-      expect(typeof outcome.body.reason).toBe('string');
+      // The transaction is ACCEPTED — 'planned' is journaled before the
+      // download, so the corruption surfaces on the transaction resource, not
+      // as an apply-full refusal.
+      expect(outcome.body.success).toBe(true);
+      expect(outcome.body.state).toBe('update_in_progress');
+      const corruptTransactionId = String(outcome.body.transactionId);
+      expect(corruptTransactionId).not.toBe(upgradeConfirmedTransactionId);
+
+      // The terminal state must be 'failed' (never a premature 'refused' —
+      // that would mean the transaction never reached the digest
+      // verification this injection exists to exercise), and the journal
+      // detail must prove the download/digest failure.
+      const failed = await waitForTransactionTerminal(corruptTransactionId, 'failed', corruptVersion);
+      const failedDetail = lastTransitionTo(failed, 'failed').detail ?? '';
+      expect(failedDetail).toMatch(/sha256|digest|artifact|download|mismatch|corrupt/i);
 
       // The runtime is NOT half-updated: identity, CLI, console health all
       // still serve the previous good release N.

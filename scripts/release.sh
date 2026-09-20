@@ -1,5 +1,18 @@
 #!/bin/bash
 
+# PRI-874 (2026-09-20): DEACTIVATED — do not remove this guard without a new
+# governance decision. This manual release path derives the release identity
+# from COMPONENT package versions and bypasses the release train entirely;
+# component versions are diagnostics and are never the product version (SPEC
+# §12 / root-manifest authority). Emergency recovery: git revert of the guard
+# commit.
+echo -e "\033[0;31m❌ 此手动发布脚本已停用（PRI-874，2026-09-20 治理决定）。\033[0m"
+echo -e "\033[0;31m原因：它把组件包版本当作产品版本发布，绕过根 manifest 这一版本唯一权威。\033[0m"
+echo "正确入口："
+echo "  • npm 发布火车：.github/workflows/publish-npm.yml（push/tag/dispatch）"
+echo "  • 签名频道发布：.github/workflows/release-metadata.yml"
+exit 1
+
 # 颜色定义
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

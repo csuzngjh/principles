@@ -4,60 +4,57 @@
 
 ---
 
-## 🌟 普通用户看这里
+## 🌟 最重要的段话（PRI-874）
 
-### 一句话发版
+产品只有**一个版本**：根目录 `package.json` 的 `version` 字段。它是唯一权威，
+`scripts/resolve-product-version.mjs` 为所有发布入口（npm 火车、签名频道、
+安装器身份戳）读取它。各组件包版本（`@principles/*`、`principles-disciple`、
+`create-principles-disciple`）是**诊断号**——永远不是产品版本，PRI-874 之后
+所有可能把组件号当产品号的路径已全部移除或加守卫。
+
+### 产品版本如何推进
 
 ```
-PR 合并到 main → 自动发布 ✅
+main 上的显式版本推进提交（根 package.json + lockfile）
+        ↓  （守卫：发布运行若低于线上频道版本即拒绝）
+npm 火车 / 签名发布工作流读根 manifest
+        ↓
+安装器 payload 携带身份戳（_release/product-identity.json）
+        ↓
+安装后的运行时如实上报该身份
 ```
 
-### Commit 格式速查
-
-| 你写的 | 版本变化 |
-|--------|---------|
-| `feat: 新功能` | +0.1.0 |
-| `fix: 修 bug` | +0.0.1 |
-| `feat!: 大改动` | +1.0.0 |
-
-### 怎么发版？
-
-1. 创建 PR，commit 格式写对
-2. 合并到 main
-3. 等 2 分钟，自动发布到 npm
+- **推进产品版本** = 一个改根 `package.json` 的显式 PR（如 `79226910`）。
+  根版本没有自动 bump——产品版本是 Owner 决策；
+  [product-version-drift](../../.github/workflows/product-version-drift.yml)
+  监视器会在"已发布版本从未落回 main"时报红。
+- **组件版本**只在发布 CI 内推进（仅推 tag；不回写 main）。
 
 ---
 
 ## 🤖 为 AI 准备的发布摘要
 
-### 自动化流程
+### 发布触发
 
-```
-PR → main → Actions → npm → 5文件同步 → tag
-```
+- **自动**：push/合并到 `main` 触发 npm 火车（`.github/workflows/publish-npm.yml`）。
+  火车从根 manifest 解析产品身份；**若低于线上频道指针的版本会直接拒绝发布**。
+- **手动**：Actions → Publish to npm → Run（`package` 输入），或签名发布工作流
+  （`release-metadata.yml`，`product_version: auto`）。
 
-### 触发条件
+### 三道硬门（都在任何发布副作用之前）
 
-- **自动**: PR 合并到 main，修改了 `packages/openclaw-plugin/**`、`packages/principles-core/**`、`packages/pd-cli/**` 或 `packages/create-principles-disciple/**`
-- **手动**: Actions → Publish to npm → Run
-- **Tag**: `git push origin v1.8.2`
+1. **盖章**：安装器 payload 打上解析出的身份（`_release/product-identity.json`）；
+   校验对象是**打出来的 tarball**，不是工作目录。
+2. **单调**：解析出的产品版本必须 `>=` 线频道的 `productVersion`
+   （相等 = 同版本重发布，计数器递增）。更低即拒绝——永不发布降级。
+3. **安装时**：安装器拒绝任何没有内嵌身份戳的 payload
+   （`resolveInstallerPayloadIdentity` fail-closed）。
 
-### 智能版本判断
+### 版本同步范围（发布 CI 内、仅 runner 本地——不回写 main）
 
-分析 PR commits 自动决定：
-
-| Commit | Bump |
-|--------|------|
-| `feat!:` / `feat(...)!:` | MAJOR |
-| `feat:` / `feature:` | MINOR |
-| 其他 | PATCH |
-
-### 版本同步范围
-
-- `packages/openclaw-plugin/package.json`
-- `packages/openclaw-plugin/openclaw.plugin.json`
-- `package.json` (根目录)
-- `README.md` / `README_ZH.md`
+- `packages/openclaw-plugin/openclaw.plugin.json`（组件面）
+- `README.md` / `README_ZH.md` 徽章
+- **不含**根目录 `package.json`——产品权威只经显式提交推进。
 
 ---
 
@@ -66,26 +63,26 @@ PR → main → Actions → npm → 5文件同步 → tag
 ### 本地操作
 
 ```bash
-# 同步版本号
+# 查看三个版本面（产品 = 根 manifest）
+node scripts/resolve-product-version.mjs          # 产品版本
+npm view principles-disciple version              # 产品/插件流（诊断）
+npm view create-principles-disciple version       # 安装器流（诊断）
+
+# 组件版本同步（不触碰根 manifest）
 ./scripts/sync-version.sh           # 从 tag
-./scripts/sync-version.sh 1.5.6    # 指定
-
-# 手动发布
-cd packages/openclaw-plugin
-npm run build:production
-npm publish --access public
-
-# 检查
-npm view principles-disciple version
+./scripts/sync-version.sh 1.5.6     # 指定
 ```
+
+> `scripts/release.sh` 已停用（PRI-874）：它从组件版本推导发布、绕过上述全部守卫。
 
 ### 故障排除
 
 | 问题 | 解决 |
 |------|------|
-| 版本不同步 | `./scripts/sync-version.sh` |
-| 发布失败 | 检查 `NPM_TOKEN` |
-| 构建失败 | `npm run build`（查看日志错误） |
+| 发布拒绝："LOWER than the live channel pointer" | 先在 main 上推进根 `package.json`（显式提交） |
+| 安装器拒绝："no embedded product identity" | 该 payload 不是火车/资产构建产物——安装带戳的 payload |
+| 漂移监视器报红：main < 频道 | 已发布版本没落回 main——落实版本推进提交 |
+| 漂移监视器提示：main > 频道 | 正常的待发布状态（版本已推进、发布未发出） |
 
 ### 必要配置
 

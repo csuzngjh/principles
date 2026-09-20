@@ -2997,17 +2997,6 @@ function sha256File(filePath: string): string {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
 
-function readPackageVersion(pkgPath: string): string | null {
-  if (!existsSync(pkgPath)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: unknown };
-    return typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : null;
-  } catch {
-    // Identity falls back; journaling must not brick install.
-    return null;
-  }
-}
-
 /**
  * Identity of the payload being installed. Prefers the EMBEDDED product
  * identity stamp (`_release/product-identity.json`, written by the asset
@@ -3018,19 +3007,19 @@ function readPackageVersion(pkgPath: string): string | null {
  * string only to satisfy the journal's 64-hex format requirement; it is not
  * part of any release-metadata identity chain.
  *
- * PRI-709 P0-2 (PRI-698 audit F-1): without an embedded stamp `productVersion`
- * is the PRODUCT version — the plugin package manifest. It previously read
- * `pd-cli/package.json`, but the two packages version independently (on the
- * Owner machine: plugin 1.230.2 vs pd-cli 1.147.5), so every confirmed journal
- * recorded a version that no runtime state could ever match. That is why
- * active.json could not serve as the deployment identity source.
+ * PRI-709 P0-2 (PRI-698 audit F-1): without an embedded stamp the installer
+ * once derived `productVersion` from a component package manifest — the
+ * exact promotion of a diagnostic to product authority that stamped every
+ * legacy-installer machine with `bundled-1.74.1-*` (PRI-874).
  *
- * Embedded-stamp contract (fail-closed, rc-2/rc-3): a PRESENT but malformed
- * stamp throws BEFORE any install mutation (the caller journals `planned`
- * before the first filesystem mutation, so a throw here leaves the runtime
- * untouched). A MISSING stamp is the legacy shape: provenance stays visibly
- * unavailable via `productVersionSource: 'package_manifest' | 'unavailable'`
- * and a null `sourceCommit` — never silently faked.
+ * Embedded-stamp contract (fail-closed, rc-2/rc-3): the payload MUST carry
+ * `_release/product-identity.json`. A PRESENT but malformed stamp throws
+ * BEFORE any install mutation (the caller journals `planned` before the
+ * first filesystem mutation, so a throw here leaves the runtime untouched).
+ * A MISSING stamp now throws too — component manifest versions are
+ * diagnostics and are never promoted to the product version. Only
+ * train/asset builds stamp their payloads (PRI-874 publish guards); a tree
+ * without a stamp is not an installable release.
  */
 export type InstallerProductVersionSource = 'embedded' | 'package_manifest' | 'signed_channel' | 'unavailable';
 
@@ -3078,16 +3067,17 @@ function resolveInstallerPayloadIdentity(pluginDir: string): {
       releaseMetadataDigestSource,
     };
   }
-  const productVersion = readPackageVersion(path.join(pluginDir, 'package.json'))
-    ?? readPackageVersion(pdCliPkgPath)
-    ?? 'unknown';
-  return {
-    productVersion,
-    sourceCommit: null,
-    productVersionSource: productVersion === 'unknown' ? 'unavailable' : 'package_manifest',
-    releaseMetadataDigest,
-    releaseMetadataDigestSource,
-  };
+  // PRI-874: no embedded identity → refuse the install. A component manifest
+  // version is a diagnostic and is never promoted to the product version
+  // (rc-3 fail-loud; this legacy fallback is what produced the
+  // `bundled-1.74.1-*` downgrades). The digest computed above keeps its
+  // provenance label for journals of refused attempts.
+  throw new ProductIdentityError(
+    'productIdentity',
+    `The release payload has no embedded product identity (missing: ${embeddedIdentityPath}). `
+    + 'Component manifest versions are diagnostics and are never the product version, so the install is refused. '
+    + 'Next action: install a payload produced by the release train or build-release-asset (both stamp _release/product-identity.json).',
+  );
 }
 
 /** Opens one installer transaction: `~/.pd/transactions/<transactionId>.jsonl`. */

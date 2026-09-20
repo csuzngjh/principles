@@ -15,6 +15,7 @@ import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } fro
 import { setLanguage } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
 import { appendJournalTransition, type JournalTransition } from '../src/update/transaction-journal.js';
+import { productIdentityStampJson } from './helpers/payload-identity.js';
 
 vi.mock('fs');
 vi.mock('child_process', () => ({
@@ -53,6 +54,11 @@ const PLUGIN_MANIFEST = JSON.stringify({
   name: 'principles-disciple',
   activation: { onCapabilities: ['hook'] },
 });
+
+// PRI-874: a real train payload carries the embedded product identity stamp
+// (strict-parser content), so the mocked fixture answers the stamp probe with
+// a VALID stamp whose productVersion matches the component manifests below.
+const STAMP_CONTENT = productIdentityStampJson('1.74.1');
 
 function capturedTransitions(): JournalTransition[] {
   return vi.mocked(appendJournalTransition).mock.calls.map((call) => call[1] as JournalTransition);
@@ -96,14 +102,12 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       // No existing install manifest → resolveInstallManifestHosts treats
       // current as undefined (fresh install) instead of re-reading it.
       if (s.endsWith('install.json')) return false;
-      // The fixture payload carries no embedded product identity stamp —
-      // pretending it exists would trip the fail-closed identity parser.
-      if (s.endsWith(path.join('_release', 'product-identity.json'))) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
+      if (filePath.endsWith(path.join('_release', 'product-identity.json'))) return STAMP_CONTENT;
       if (filePath.endsWith('install.json')) {
         throw new Error(`ENOENT: ${filePath}`);
       }
@@ -160,13 +164,12 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       const s = String(value);
       if (s.endsWith('install.json')) return false;
       if (s.endsWith(path.join('.pd', 'state.db'))) return false;
-      // No embedded product identity stamp in this fixture (fail-closed parser).
-      if (s.endsWith(path.join('_release', 'product-identity.json'))) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
+      if (filePath.endsWith(path.join('_release', 'product-identity.json'))) return STAMP_CONTENT;
       if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
       return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
     });

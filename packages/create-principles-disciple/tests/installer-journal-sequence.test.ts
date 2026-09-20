@@ -31,12 +31,20 @@ vi.mock('../src/update/transaction-journal.js', async (importOriginal) => {
   };
 });
 
-// Payload fixture: pd-cli/package.json provides productVersion + digest source.
+// Payload fixture: an EMBEDDED identity stamp provides the product version
+// (PRI-874 — unstamped payloads are refused); the digest provenance over the
+// component manifest (no asset manifest) is a separate, retained semantic.
 function makeFixtureBundle(root: string): string {
   const pluginDir = path.join(root, 'bundle');
   const pdCliDir = path.join(pluginDir, 'pd-cli');
   fs.mkdirSync(pdCliDir, { recursive: true });
   fs.writeFileSync(path.join(pdCliDir, 'package.json'), JSON.stringify({ name: '@principles/pd-cli', version: '9.9.9' }));
+  const releaseDir = path.join(pluginDir, '_release');
+  fs.mkdirSync(releaseDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(releaseDir, 'product-identity.json'),
+    JSON.stringify({ schemaVersion: 1, productVersion: '9.9.9', sourceCommit: 'a'.repeat(40) }),
+  );
   return pluginDir;
 }
 
@@ -80,9 +88,12 @@ describe('installer journal sequence (real journal reader)', () => {
       expect(t.transactionId).toBe(journal.transactionId);
       expect(t.releaseId).toBe(journal.releaseId);
       expect(t.productVersion).toBe('9.9.9');
+      expect(t.sourceCommit).toBe('a'.repeat(40));
       expect(t.releaseMetadataDigest).toBe(journal.releaseMetadataDigest);
       expect(t.releaseMetadataDigest).toMatch(/^[a-f0-9]{64}$/);
-      // Fixture bundles pd-cli/package.json without an asset manifest.
+      // No asset manifest in the fixture: the digest provenance stays
+      // 'package_manifest' (integrity semantics — PRI-874 kept this and
+      // only removed the component-version FALLBACK for productVersion).
       expect(t.releaseMetadataDigestSource).toBe('package_manifest');
       expect(t.generation).toBe(1);
     }

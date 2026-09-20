@@ -6,6 +6,7 @@ import { validateWorkspacePath, verifyNativeModules, checkBuiltPlugin, ensureCon
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
 import { setLanguage } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
+import { productIdentityStampJson } from './helpers/payload-identity.js';
 
 vi.mock('fs');
 vi.mock('child_process', () => ({
@@ -500,6 +501,12 @@ describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', 
     actualFs.mkdirSync(realPath.join(fixtureDir, 'console', 'dist', 'web'), { recursive: true });
     actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'server.js'), 'export {};');
     actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
+    // PRI-874: the fixture must carry the embedded product identity stamp a
+    // real train payload has, or install() refuses it at the identity gate
+    // before the deployment steps under test. Written through the REAL fs
+    // handle ('fs' is auto-mocked here; writes through it are no-ops).
+    actualFs.mkdirSync(realPath.join(fixtureDir, '_release'), { recursive: true });
+    actualFs.writeFileSync(realPath.join(fixtureDir, '_release', 'product-identity.json'), productIdentityStampJson('1.74.1'));
     // Form gate + deployment source probes resolve against the REAL fixture.
     vi.mocked(fs.existsSync).mockImplementation((value) => actualFs.existsSync(String(value)));
     vi.mocked(fs.readdirSync).mockReturnValue([]);
@@ -544,6 +551,11 @@ describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', 
       const filePath = String(value);
       if (filePath.endsWith('openclaw.plugin.json')) {
         return JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } });
+      }
+      // PRI-874: the identity gate parses this stamp strictly — answer with
+      // the same content the fixture carries on real disk above.
+      if (filePath.endsWith(path.join('_release', 'product-identity.json'))) {
+        return productIdentityStampJson('1.74.1');
       }
       if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
       return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });

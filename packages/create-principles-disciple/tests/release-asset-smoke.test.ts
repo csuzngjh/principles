@@ -82,7 +82,14 @@ beforeAll(async () => {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const execFileAsync = promisify(execFile);
-    await timePhaseAsync('internal-build', () => execFileAsync(process.execPath, [builderEntry, '--output', internalPublicationDir], {
+    // PRI-874: the installer refuses unstamped payloads, so the internal
+    // publication must be built exactly like release CI builds it — product
+    // version from the root-manifest resolver, source commit from the real
+    // checkout HEAD — both stamped into _release/product-identity.json.
+    const repoRoot = path.resolve(INSTALLER_DIR, '..', '..');
+    const { stdout: resolvedVersion } = await execFileAsync(process.execPath, [path.join(repoRoot, 'scripts', 'resolve-product-version.mjs')], { cwd: repoRoot, timeout: 60_000, encoding: 'utf8' });
+    const { stdout: headCommit } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, timeout: 60_000, encoding: 'utf8' });
+    await timePhaseAsync('internal-build', () => execFileAsync(process.execPath, [builderEntry, '--output', internalPublicationDir, '--product-version', resolvedVersion.trim(), '--source-commit', headCommit.trim()], {
       cwd: INSTALLER_DIR,
       env: { ...process.env, SOURCE_DATE_EPOCH: '1700000000' },
       // Registry-latency headroom (PRI-634-F CI): the builder serially runs

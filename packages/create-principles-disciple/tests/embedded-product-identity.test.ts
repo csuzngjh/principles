@@ -185,10 +185,15 @@ describe('embedded product identity adoption (install side)', () => {
     temporaryDirectories.push(workDir);
     const pluginDir = createLegacyPayload(workDir, { plugin: '1.230.2', pdCli: '1.147.5' });
 
-    const journal = beginInstallerJournal(pluginDir);
-    expect(journal.productVersion).toBe('1.230.2');
-    expect(journal.sourceCommit).toBeNull();
-    expect(journal.productVersionSource).toBe('package_manifest');
+    // PRI-874: a legacy unstamped payload is REFUSED — component manifest
+    // versions are diagnostics and are never promoted to the product version.
+    const transactionsDir = path.join(process.env.HOME as string, '.pd', 'transactions');
+    expect(() => beginInstallerJournal(pluginDir)).toThrow(ProductIdentityError);
+    // beginInstallerJournal only computes the path; the file appears on the
+    // first append. No append may have happened for a refused payload.
+    if (fs.existsSync(transactionsDir)) {
+      expect(fs.readdirSync(transactionsDir)).toEqual([]);
+    }
   });
 });
 
@@ -220,22 +225,34 @@ describe('journal + active.json round trip with embedded provenance', () => {
     expect(rawRecord.sourceCommit).toBe(SOURCE_COMMIT);
   });
 
-  it('writes NO sourceCommit field for legacy payloads and still reads legacy records and journals', () => {
+  it('refuses legacy payload WRITES (PRI-874) but still reads legacy records and journals', () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-embedded-legacyrt-'));
     temporaryDirectories.push(workDir);
     const pluginDir = createLegacyPayload(workDir, { plugin: '1.230.2', pdCli: '1.147.5' });
 
-    const journal = beginInstallerJournal(pluginDir);
-    journalInstallerTransition(journal, null, 'planned', 'legacy');
-    const transitions = readTransactionJournal(journal.journalPath);
-    expect(transitions[0]?.sourceCommit).toBeUndefined();
+    // The legacy WRITE side is dead: an unstamped payload is refused at the
+    // identity gate before any journal exists.
+    expect(() => beginInstallerJournal(pluginDir)).toThrow(ProductIdentityError);
 
-    const result = commitInstallerActiveRecord(journal);
-    expect(result.written).toBe(true);
-    const recordPath = path.join(process.env.HOME as string, '.pd', 'active.json');
-    const rawRecord = JSON.parse(fs.readFileSync(recordPath, 'utf8')) as Record<string, unknown>;
-    expect(Object.hasOwn(rawRecord, 'sourceCommit')).toBe(false);
-    expect(readActiveRecord(recordPath)?.sourceCommit).toBeUndefined();
+    // Legacy JOURNALS (pre-embedding records, no sourceCommit) still read —
+    // recovery/reconciliation must parse what old installs left behind. The
+    // journal is hand-written into the isolated work dir (no HOME writes).
+    const legacyJournalPath = path.join(workDir, 'legacy-journal.jsonl');
+    const legacyLine = (to: string): string => `${JSON.stringify({
+      at: '2026-01-01T00:00:00.000Z',
+      from: to === 'planned' ? null : 'planned',
+      to,
+      transactionId: 'install-legacy',
+      releaseId: 'bundled-1.74.1-abcdef012345',
+      productVersion: '1.74.1',
+      releaseMetadataDigest: 'c'.repeat(64),
+      releaseMetadataDigestSource: 'package_manifest',
+      generation: 1,
+    })}\n`;
+    fs.writeFileSync(legacyJournalPath, legacyLine('planned') + legacyLine('confirmed'));
+    const transitions = readTransactionJournal(legacyJournalPath);
+    expect(transitions.map((t) => t.to)).toEqual(['planned', 'confirmed']);
+    expect(transitions[0]?.sourceCommit).toBeUndefined();
 
     // A hand-written legacy active record (pre-embedding) still reads.
     const legacyPath = path.join(workDir, 'legacy-active.json');

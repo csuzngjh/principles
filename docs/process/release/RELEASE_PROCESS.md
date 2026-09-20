@@ -4,60 +4,66 @@
 
 ---
 
-## 🌟 For Everyday Users
+## 🌟 The One Paragraph That Matters (PRI-874)
 
-### One-Line Release
+The product has **ONE version**: the ROOT `package.json` (`version` field).
+It is the single authority read by `scripts/resolve-product-version.mjs` for
+every release entry point (npm train, signed channel, installer identity
+stamp). Component package versions (`@principles/*`, `principles-disciple`,
+`create-principles-disciple`) are **diagnostics** — they are never the
+product version, and since PRI-874 every path that could promote them has
+been removed or guarded.
+
+### How the Product Version Advances
 
 ```
-PR merged to main → Auto publish ✅
+Explicit version-advancement commit on main (root package.json, + lockfile)
+        ↓  (guards: publish runs refuse a version BELOW the live channel)
+npm train / signed release workflow read the root manifest
+        ↓
+installer payloads carry the identity stamp (_release/product-identity.json)
+        ↓
+installed runtimes report exactly that identity
 ```
 
-### Commit Format Cheat Sheet
-
-| You Write | Version Change |
-|-----------|---------------|
-| `feat: new feature` | +0.1.0 |
-| `fix: bug fix` | +0.0.1 |
-| `feat!: breaking change` | +1.0.0 |
-
-### How to Release?
-
-1. Create PR with correct commit format
-2. Merge to main
-3. Wait 2 min, auto-published to npm
+- **Bump the product version** = a deliberate PR changing root
+  `package.json` (e.g. `79226910`). There is no auto-bump of the root — a
+  product version is an Owner decision, and the
+  [product-version-drift](../../.github/workflows/product-version-drift.yml)
+  monitor fails when a published version never lands on main.
+- **Component versions** advance inside release CI only (tag-only; never
+  written back to main).
 
 ---
 
 ## 🤖 For AI Agents
 
-### Auto Flow
+### Release Triggers
 
-```
-PR → main → Actions → npm → 5-file sync → tag
-```
+- **Auto**: pushes/merges to `main` touching release-relevant paths trigger
+  the npm train (`.github/workflows/publish-npm.yml`). The train resolves
+  the product identity from the root manifest and REFUSES to publish if it
+  is lower than the live channel pointer.
+- **Manual**: Actions → Publish to npm → Run (`package` input), or the
+  signed release workflow (`release-metadata.yml`, `product_version: auto`).
 
-### Triggers
+### Hard Gates (all three must pass before any publish side effect)
 
-- **Auto**: PR merged to main with changes in `packages/openclaw-plugin/**`, `packages/principles-core/**`, `packages/pd-cli/**`, or `packages/create-principles-disciple/**`
-- **Manual**: Actions → Publish to npm → Run
-- **Tag**: `git push origin v1.8.2`
+1. **Stamp**: the installer payload is stamped with the resolved identity
+   (`_release/product-identity.json`) — the packed TARBALL is verified, not
+   the working directory.
+2. **Monotonic**: the resolved product version must be `>=` the live
+   channel's `productVersion` (equal = same-version republish, counters
+   advance). Lower refuses — publishing a downgrade is never allowed.
+3. **Install-time**: the installer refuses any payload WITHOUT the embedded
+   stamp (`resolveInstallerPayloadIdentity` fail-closed).
 
-### Smart Version Bump
+### Version Sync Scope (release CI, runner-local only — never pushed to main)
 
-Analyzes PR commits:
-
-| Commit | Bump |
-|--------|------|
-| `feat!:` / `feat(...)!:` | MAJOR |
-| `feat:` / `feature:` | MINOR |
-| Others | PATCH |
-
-### Version Sync Scope
-
-- `packages/openclaw-plugin/package.json`
-- `packages/openclaw-plugin/openclaw.plugin.json`
-- `package.json` (root)
-- `README.md` / `README_ZH.md`
+- `packages/openclaw-plugin/openclaw.plugin.json` (component)
+- `README.md` / `README_ZH.md` badges
+- **NOT** the root `package.json` — the product authority advances only via
+  explicit commits.
 
 ---
 
@@ -66,26 +72,27 @@ Analyzes PR commits:
 ### Local Operations
 
 ```bash
-# Sync version
+# Check the three version planes (product = root manifest)
+node scripts/resolve-product-version.mjs          # product version
+npm view principles-disciple version              # product/plugin stream (diagnostic)
+npm view create-principles-disciple version       # installer stream (diagnostic)
+
+# Component version sync (never touches the root manifest)
 ./scripts/sync-version.sh           # From tag
-./scripts/sync-version.sh 1.5.6    # Specify
-
-# Manual publish
-cd packages/openclaw-plugin
-npm run build:production
-npm publish --access public
-
-# Check
-npm view principles-disciple version
+./scripts/sync-version.sh 1.5.6     # Specify
 ```
+
+> `scripts/release.sh` is DEACTIVATED (PRI-874): it derived a release from a
+> component version and bypassed every guard above.
 
 ### Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| Version mismatch | `./scripts/sync-version.sh` |
-| Publish failed | Check `NPM_TOKEN` |
-| Build failed | `npm run build` (check logs for errors) |
+| Publish refuses: "LOWER than the live channel pointer" | Advance root `package.json` on main first (explicit commit) |
+| Installer refuses: "no embedded product identity" | The payload is not a train/asset build — install a stamped payload |
+| Drift monitor red: main < channel | The published version never landed on main — land the version-advancement commit |
+| Drift monitor notice: main > channel | Normal pending-publish state (version advanced, release not out yet) |
 
 ### Required Setup
 
