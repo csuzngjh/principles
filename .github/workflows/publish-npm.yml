@@ -589,7 +589,7 @@ jobs:
             }
           ' "$VERSION"
 
-      - name: Guard: resolved product version must not regress below the live channel
+      - name: "Guard: resolved product version must not regress below the live channel"
         # PRI-874: the same productVersion-vs-channel check covers EVERY
         # installer-publishing entry (train leg gets it via
         # release-metadata.yml; this covers the single-package npm path). A
@@ -824,7 +824,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Train product identity: $VERSION"
 
-      - name: Guard: resolved product version must not regress below the live channel
+      - name: "Guard: resolved product version must not regress below the live channel"
         # PRI-874: the train publishes the installer, so the same
         # productVersion-vs-channel check that gates the signed release
         # applies here — BEFORE the first publish side effect. A regressed

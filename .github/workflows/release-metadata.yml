@@ -273,6 +273,12 @@ jobs:
         env:
           RESOLVED_VERSION: ${{ steps.release.outputs.version }}
           CHANNEL_PRODUCT_VERSION: ${{ steps.prev.outputs.prev_product_version }}
+          # PRI-874 fix: a step mapping may not repeat the `env:` key. MODE and
+          # CHANNEL belong to THIS block — the trailing duplicate made the file
+          # invalid YAML, so GitHub rejected the workflow outright (0 jobs) and
+          # reported "workflow file issue" instead of any step failure.
+          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+          CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
         run: |
           SEQ="${{ github.event.inputs.publication_sequence }}"
           if [ "$SEQ" = "auto" ] || [ -z "$SEQ" ]; then
@@ -308,9 +314,6 @@ jobs:
           echo "channel_version=$PTR" >> "$GITHUB_OUTPUT"
           echo "expires_at=$EXPIRES" >> "$GITHUB_OUTPUT"
           echo "publication inputs: sequence=$SEQ pointer=$PTR expires=$EXPIRES resolved_version=$RESOLVED_VERSION"
-        env:
-          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
-          CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
 
   # One leg per (platform, runtime). Each leg builds NATIVELY on its own
   # runner — assertSupportedLocalReleaseTarget forbids cross-target builds, so
