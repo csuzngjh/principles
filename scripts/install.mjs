@@ -472,9 +472,40 @@ function verifyPdConsole() {
   console.log('✅ pd-console verification passed');
 }
 
+// ── Deactivation guard (PRI-868) ────────────────────────────────────────────────────────
+
+/**
+ * PRI-868 (2026-09-20): this legacy dev installer is DEACTIVATED by governance.
+ * It wrote development builds into the canonical installation: an EPERM during
+ * cleanup fell back to in-place overwrite (mixed trees), and the child sync
+ * script resolves junctions and rewrites ~/.pd/runtime targets. Evidence and
+ * the isolation plan: docs/audit/install-mjs-dev-prod-isolation-review-20260920.md
+ * No flag bypasses this refusal. Emergency recovery: git revert of the guard commit.
+ */
+function refuseDeactivatedInstaller(helpRequested) {
+  console.error([
+    '',
+    '❌ 此开发安装入口已停用（PRI-868，2026-09-20 治理决定）。',
+    '原因：旧开发安装链会把开发构建写进正式安装面（EPERM 原位覆盖；junction 解析后写穿 ~/.pd/runtime）。',
+    '',
+    '正确入口：',
+    '  • 安装/修复正式环境：npx create-principles-disciple',
+    '  • 更新已安装版本：PD Console 更新页（不要把安装器当更新用）',
+    '  • 开发验证：独立 worktree 源码运行（不要安装进 ~/.openclaw 或 ~/.pd）',
+    '',
+    '证据与隔离方案：docs/audit/install-mjs-dev-prod-isolation-review-20260920.md',
+    '',
+  ].join('\n'));
+  process.exit(helpRequested ? 0 : 1);
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────────────
 
 function main() {
+  // Unconditional refusal; the legacy body below is kept verbatim but is
+  // unreachable. Do not remove the guard without a new governance decision.
+  refuseDeactivatedInstaller(parseArgs().help);
+
   const args = parseArgs();
   if (args.help) {
     showHelp();
