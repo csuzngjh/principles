@@ -471,7 +471,7 @@ more.
 | --- | --- | --- |
 | `.changeset/*.md` files | 1 per release-affecting change | **New mandatory AI/developer ritual** — the largest real cost |
 | `.changeset/config.json` | existing, needs 4 corrections | `access` → `public`; keep `fixed/linked` empty; add explicit `privatePackages` (or rely on default `false`); pin `baseBranch` |
-| Version step in CI | replaces ~40 lines of bash (`npm view` + `npm version` + reset) with `changeset version` | Net **negative** complexity if rows 1–3 above are deleted |
+| Version step in CI | replaces 84 lines of CI bash (`publish-npm.yml:267-301` npm-view + commit-regex, `:413-461` bump + reset-to-npm dance) with `changeset version` | Net **negative** complexity if rows 1–3 above are deleted |
 | A "version PR" concept | needs a decision | `commit: false` means Changesets writes files and stops; PD's push-to-main-then-publish flow needs an explicit commit+push owner, or `commit: true`. Not evaluated here (out of the C3 write sandbox) |
 | Guard: reject private-only changesets | ~10 lines | Exp D silent no-op |
 | Guard: keep ghost-path commits from being forced into changesets | CI path-filter scoping | §Ghost Package Test |
@@ -505,7 +505,7 @@ Against the task's own gates:
   **PASS**;
 * the tool is not required to understand C4–C7, and demonstrably does not —
   **PASS**;
-* complexity: reduces the version-planning layer (deletes ~40 lines of bash plus
+* complexity: reduces the version-planning layer (deletes 84 lines of CI bash plus
   the four stale/absent per-package changelogs) at the price of one new file per
   change — **net negative, but only if the old inference is deleted**.
 
