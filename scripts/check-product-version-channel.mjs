@@ -90,13 +90,14 @@ const hostIsPrivate = host === 'localhost' || host.endsWith('.localhost') || hos
 if (hostIsPrivate) fail(`channel URL host must be public: ${channelUrl}`);
 
 // Version under test: the caller's selected release version when supplied,
-// otherwise the ROOT manifest resolver (SPEC v0.3 §12). The origin is carried
-// into the messages so a reader can always tell which authority was judged.
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// otherwise the ROOT manifest resolver (SPEC v0.3 §12). Callers that ARE the
+// manifest authority themselves (publish-npm.yml, the drift monitor) omit the
+// flag; release-metadata.yml passes the release identity it resolved.
 let resolvedVersion;
 if (requestedResolved !== null) {
   resolvedVersion = requestedResolved;
 } else {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const resolverEntry = path.join(repoRoot, 'scripts', 'resolve-product-version.mjs');
   try {
     resolvedVersion = execFileSync(process.execPath, [resolverEntry], { encoding: 'utf8', timeout: 60_000 }).trim();
