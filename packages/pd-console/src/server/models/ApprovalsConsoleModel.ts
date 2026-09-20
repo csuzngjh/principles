@@ -6,7 +6,6 @@ import type {
   ApprovalDecisionResult,
   ApprovalRecord,
   ApprovalStatus,
-  PIArtifactRecord,
 } from '@principles/core/runtime-v2';
 import {
   SqliteConnection,

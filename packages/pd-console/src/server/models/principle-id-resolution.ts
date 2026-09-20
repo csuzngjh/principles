@@ -143,7 +143,7 @@ export async function resolveLedgerPrincipleId(
 
   const matches = deps.ledger.listForCandidate(candidateId);
   if (matches.length === 1) {
-    const entry = matches[0];
+    const [entry] = matches;
     if (entry) return { status: 'resolved', principleId: entry.id, how: 'candidate_lineage' };
   }
   if (matches.length === 0) {
