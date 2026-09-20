@@ -25,6 +25,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { compareProductVersions, STRICT_SEMVER } from './lib/product-version-order.mjs';
 
 const DEFAULT_CHANNEL_URL = 'https://csuzngjh.github.io/principles/targets/channels/stable.json';
 
@@ -33,13 +34,9 @@ function fail(message) {
   process.exit(1);
 }
 
-const strictSemver = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
-
-function semverWeight(version) {
-  const match = strictSemver.exec(String(version));
-  if (match === null) throw new Error(`not a strict x.y.z version: ${JSON.stringify(String(version))}`);
-  return Number(match[1]) * 1_000_000 + Number(match[2]) * 1_000 + Number(match[3]);
-}
+// Version parsing and ordering live in ./lib/product-version-order.mjs: the
+// comparison must be exact (a mis-order here accepts a downgrade), and keeping
+// it out of this file makes it unit-testable without executing the guard.
 
 const reportMode = process.argv.includes('--report');
 const channelUrlIndex = process.argv.indexOf('--channel-url');
@@ -66,7 +63,7 @@ try {
 } catch (error) {
   fail(`The product resolver failed: ${error instanceof Error ? error.message : String(error)}`);
 }
-if (!strictSemver.test(resolvedVersion)) fail(`Resolved product version is not strict x.y.z: ${JSON.stringify(resolvedVersion)}`);
+if (!STRICT_SEMVER.test(resolvedVersion)) fail(`Resolved product version is not strict x.y.z: ${JSON.stringify(resolvedVersion)}`);
 
 let channelProductVersion = null;
 const response = await fetch(channelUrl, { signal: AbortSignal.timeout(30_000) });
@@ -80,7 +77,7 @@ if (response.status === 404) {
     fail(`Channel pointer ${channelUrl} carries no productVersion field: ${JSON.stringify(payload).slice(0, 400)}`);
   }
   const value = payload.productVersion;
-  if (typeof value !== 'string' || !strictSemver.test(value)) {
+  if (typeof value !== 'string' || !STRICT_SEMVER.test(value)) {
     fail(`Channel pointer ${channelUrl} productVersion is not strict x.y.z: ${JSON.stringify(value)}`);
   }
   channelProductVersion = value;
@@ -91,15 +88,14 @@ if (channelProductVersion === null) {
   process.exit(0);
 }
 
-const resolvedWeight = semverWeight(resolvedVersion);
-const channelWeight = semverWeight(channelProductVersion);
+const order = compareProductVersions(resolvedVersion, channelProductVersion);
 
-if (resolvedWeight < channelWeight) {
+if (order < 0) {
   fail(`Resolved product version (${resolvedVersion}) is LOWER than the live channel pointer (${channelProductVersion}). `
     + 'Publishing would downgrade every installed runtime. Advance the ROOT package.json version on main instead '
     + '(explicit version-advancement commit), then re-run.');
 }
-if (resolvedWeight > channelWeight) {
+if (order > 0) {
   const message = `Pending publication: main product version ${resolvedVersion} is AHEAD of the live channel (${channelProductVersion}).`;
   if (reportMode) {
     console.log(message);
