@@ -27,10 +27,19 @@ installed runtimes report exactly that identity
 ```
 
 - **Bump the product version** = a deliberate PR changing root
-  `package.json` (e.g. `79226910`). There is no auto-bump of the root — a
-  product version is an Owner decision, and the
+  `package.json` **and** the root lockfile entry. There is no auto-bump of the
+  root — a product version is an Owner decision, and the
   [product-version-drift](../../.github/workflows/product-version-drift.yml)
   monitor fails when a published version never lands on main.
+- **Land that commit on main.** An advancement that only ever exists on a
+  feature branch does not count — and nothing used to notice. `79226910`
+  (`align product version to 2.1.0`, PRI-849) was committed to
+  `ai/PRI-854-option-a` **after** that branch's PR had already merged, so it
+  never reached main: the authority stayed at `1.76.1` while the live channel
+  advanced to `2.1.0`, and the released channel was ahead of the repository
+  for a day. The same one-line change then had to be re-landed as the explicit
+  version-advancement commit of the version-governance work. That is precisely
+  the drift class this monitor now fails on.
 - **Component versions** advance inside release CI only (tag-only; never
   written back to main).
 

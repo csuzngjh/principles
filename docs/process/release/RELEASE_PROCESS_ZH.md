@@ -24,10 +24,15 @@ npm 火车 / 签名发布工作流读根 manifest
 安装后的运行时如实上报该身份
 ```
 
-- **推进产品版本** = 一个改根 `package.json` 的显式 PR（如 `79226910`）。
+- **推进产品版本** = 一个改根 `package.json` **与根 lockfile** 的显式 PR。
   根版本没有自动 bump——产品版本是 Owner 决策；
   [product-version-drift](../../.github/workflows/product-version-drift.yml)
   监视器会在"已发布版本从未落回 main"时报红。
+- **该提交必须落到 main 上**。只存在于特性分支的版本推进不算数——而且此前没有
+  任何机制会发现：`79226910`（`align product version to 2.1.0`，PRI-849）是在该
+  分支的 PR **已经合并之后**才提交到 `ai/PRI-854-option-a` 的，因此从未进入 main：
+  仓库权威停在 `1.76.1`，而线上频道已推进到 `2.1.0`。同一个单行改动只能作为版本
+  治理工作的显式推进提交重新落地。这正是本监视器现在会报红的那类漂移。
 - **组件版本**只在发布 CI 内推进（仅推 tag；不回写 main）。
 
 ---
