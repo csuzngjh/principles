@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -34,7 +34,8 @@ describe('legacy dev installers are deactivated (PRI-868)', () => {
     for (const argv of refusalArgs) {
       it(`refuses ${argv.join(' ') || '(no args)'} with exit 1 and zero writes: ${script}`, () => {
         const fakeHome = mkdtempSync(join(tmpdir(), 'pri868-home-'));
-        writeFileSync(join(fakeHome, 'sentinel.txt'), 'do-not-touch');
+        const sentinelPath = join(fakeHome, 'sentinel.txt');
+        writeFileSync(sentinelPath, 'do-not-touch');
 
         const result = spawnInstaller(script, argv, fakeHome);
 
@@ -43,8 +44,10 @@ describe('legacy dev installers are deactivated (PRI-868)', () => {
         expect(output).toContain('已停用');
         expect(output).toContain('create-principles-disciple');
 
-        // Zero side effects: the redirected home must still hold ONLY the sentinel.
+        // Zero side effects: the redirected home must still hold ONLY the
+        // sentinel, byte-for-byte unchanged.
         expect(readdirSync(fakeHome)).toEqual(['sentinel.txt']);
+        expect(readFileSync(sentinelPath, 'utf8')).toBe('do-not-touch');
       });
     }
 
