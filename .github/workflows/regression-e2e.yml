@@ -7,7 +7,7 @@ on:
 
 jobs:
   regression-test:
-    name: Nocturnal Pipeline Regression Test
+    name: OpenClaw Plugin Regression Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -18,9 +18,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install dependencies
-        working-directory: packages/openclaw-plugin
-        run: npm install
+      # The root build graph compiles every workspace (incl. create-principles-disciple),
+      # so dependencies must be installed at the workspace root, not per-package.
+      - name: Install dependencies (workspace root)
+        run: npm ci --ignore-scripts
 
       - name: Build repository (authoritative build graph)
         run: npm run build
