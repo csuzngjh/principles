@@ -222,9 +222,9 @@ export function localizeNextAction(code: string, ownerText: string, t: (key: str
   return localized === '' ? ownerText : localized;
 }
 
-export function localizeBlocker(code: string, ownerText: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
+export function localizeBlocker(code: string, ownerText: string, t: (key: string, opts?: Record<string, unknown>) => string, values?: Record<string, unknown>): string {
   const safeKey = code.replace(/[^a-zA-Z0-9_.]/g, '_');
-  const localized = t(`principles.detail.ownerDecision.blocker.${safeKey}`, { defaultValue: '' });
+  const localized = t(`principles.detail.ownerDecision.blocker.${safeKey}`, { defaultValue: '', ...values });
   return localized === '' ? ownerText : localized;
 }
 
@@ -740,7 +740,12 @@ export function PrincipleDetailPage() {
                 <ul className="mt-3 space-y-1 text-[12px] text-ink-3">
                   {ownerDecision.blockers.map((blocker, index) => (
                     <li key={`blk-${index}`} data-testid="owner-decision-blocker">
-                      {localizeBlocker(blocker.reason.code, blocker.reason.ownerText, t)}
+                      {localizeBlocker(
+                        blocker.reason.code,
+                        blocker.reason.ownerText,
+                        t,
+                        blocker.reason.count !== undefined ? { n: blocker.reason.count } : undefined,
+                      )}
                     </li>
                   ))}
                 </ul>

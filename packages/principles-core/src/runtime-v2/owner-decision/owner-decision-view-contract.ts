@@ -67,6 +67,10 @@ export const ReasonSchema = Type.Object({
   code: NonEmptyString,
   ownerText: NonEmptyString,
   sourceRefs: Type.Array(OwnerSourceRefSchema),
+  // PRI-875: set when one reason aggregates several homogenous source items
+  // (e.g. historical processing issues, one per stalled task) so UI layers can
+  // localize a count without parsing ownerText.
+  count: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 export type Reason = Static<typeof ReasonSchema>;
 
