@@ -3268,22 +3268,32 @@ export async function install(
     try {
       preResolvedIdentity = resolveInstallerPayloadIdentity(pluginDir);
     } catch (error) {
-      if (!(error instanceof ProductIdentityError)) throw error;
-      // Same structured refusal the post-mutation catch would have produced at
-      // this point (no backup yet, no cleanup performed): identical `reason`
-      // prefix, `next_no_changes_other` next action and rollback suffix.
-      return {
-        success: false,
-        workspaceDir: options.workspaceDir,
-        configYamlPath: getConfigYamlPath(options.workspaceDir),
-        templatesCount: 0,
-        components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
-        verification: { features: 'skipped', storyA: 'skipped' },
-        enabledChannels: options.channels,
-        nextAction: t('next_no_changes_other'),
-        reason: `install_failed_before_mutation: ${error.message}`,
-        error: `${error.message} — ${t('rollback_no_changes')}`,
-      };
+      if (!(error instanceof ProductIdentityError)) {
+        // The pre-flight exists ONLY to move the refusal forward — it must never
+        // turn a previously-working install into a failure. Anything that is not
+        // the identity contract itself (an unexpected I/O error, or a test double
+        // answering `undefined` for a path it does not model) is left to the
+        // authoritative resolution in beginInstallerJournal() below, which
+        // reports it exactly as it always did. Nothing is swallowed from the
+        // caller's perspective: the same throw surfaces one step later.
+        preResolvedIdentity = undefined;
+      } else {
+        // Same structured refusal the post-mutation catch would have produced at
+        // this point (no backup yet, no cleanup performed): identical `reason`
+        // prefix, `next_no_changes_other` next action and rollback suffix.
+        return {
+          success: false,
+          workspaceDir: options.workspaceDir,
+          configYamlPath: getConfigYamlPath(options.workspaceDir),
+          templatesCount: 0,
+          components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
+          verification: { features: 'skipped', storyA: 'skipped' },
+          enabledChannels: options.channels,
+          nextAction: t('next_no_changes_other'),
+          reason: `install_failed_before_mutation: ${error.message}`,
+          error: `${error.message} — ${t('rollback_no_changes')}`,
+        };
+      }
     }
   }
   // Gateway lock pre-flight: a running gateway holds native-module file handles
