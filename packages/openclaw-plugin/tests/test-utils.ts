@@ -29,9 +29,10 @@ export function createTestContext(overrides: { workspaceDir?: string, stateDir?:
 }
 
 /**
- * Safely removes a directory, ignoring Windows EPERM/ENOTEMPTY errors.
- * Windows file locks can cause these errors when file handles are still held.
- * The OS will eventually clean up temp directories, so it's safe to ignore.
+ * Safely removes a directory, ignoring transient lock races (EPERM /
+ * ENOTEMPTY / EBUSY). File locks can cause these errors when handles are
+ * still held. The OS will eventually clean up temp directories, so it's
+ * safe to ignore.
  */
 export function safeRmDir(dir: string): void {
     try {
@@ -45,7 +46,11 @@ export function safeRmDir(dir: string): void {
         // mid-rmdir, producing ENOTEMPTY on Linux CI too. The OS cleans up
         // tmp dirs eventually; re-throwing only causes false CI failures.
         // Previously this guard was Windows-only, which left Linux CI exposed.
-        if (err?.code !== 'EPERM' && err?.code !== 'ENOTEMPTY') {
+        // EBUSY (libuv errno -4082) is the third face of the same race: on
+        // Windows, rmSync throws it while any file inside the tree still has
+        // an open handle (e.g. a SQLite connection not yet released by the
+        // test body) — PRI-840 false-red in pain-id-chain-e2e cleanup.
+        if (err?.code !== 'EPERM' && err?.code !== 'ENOTEMPTY' && err?.code !== 'EBUSY') {
             throw err;
         }
     }
