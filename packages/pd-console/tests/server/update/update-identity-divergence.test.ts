@@ -6,8 +6,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 const mocks = vi.hoisted(() => ({ create: vi.fn(), check: vi.fn(), readCurrentVersion: vi.fn() }));
-vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', async (original) => ({
-  ...await original<typeof import('create-principles-disciple/dist/update/release-manager-authority.js')>(),
+vi.mock('create-principles-disciple/update-console', async (original) => ({
+  ...await original<typeof import('create-principles-disciple/update-console')>(),
   createReleaseManagerAuthority: mocks.create,
 }));
 vi.mock('../../../src/server/utils/installed-layout.js', () => ({

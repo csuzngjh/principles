@@ -784,7 +784,15 @@ const NPM_DISTRIBUTED_COMPONENTS = [
 // must fail BEFORE any mutation, matching the per-component install
 // requirements instead of discovering them mid-deployment).
 const NPM_DISTRIBUTED_REQUIRED_FILES: Record<string, string[]> = {
-  'release-manager': ['package.json', path.join('dist', 'update', 'release-manager-authority.js')],
+  // console-surface.js is the registered public seam the Console update
+  // routes import at runtime (package.json exports["./update-console"]) —
+  // a payload without it installs cleanly and only fails when the Owner
+  // opens the update page, so it is required HERE (pre-mutation).
+  'release-manager': [
+    'package.json',
+    path.join('dist', 'update', 'release-manager-authority.js'),
+    path.join('dist', 'update', 'console-surface.js'),
+  ],
   console: ['package.json', path.join('dist', 'server.js'), path.join('dist', 'web', 'index.html')],
 };
 
@@ -2180,12 +2188,24 @@ async function installReleaseManagerDependencies(): Promise<void> {
  * proven the same way.
  */
 async function verifyReleaseManagerAuthorityImports(): Promise<void> {
-  const authorityPath = path.join(getInstalledReleaseManagerDir(), 'dist', 'update', 'release-manager-authority.js');
-  if (!existsSync(authorityPath)) {
+  const installedDir = getInstalledReleaseManagerDir();
+  // The Console reaches the authority through the registered public seam
+  // (`create-principles-disciple/update-console` → dist/update/console-surface.js),
+  // so that entry is what this probe loads when present: it proves the seam
+  // file deployed AND that its sibling re-exports (authority / journal /
+  // layout / manager) resolve with the installed dependencies. Self-contained
+  // assets published BEFORE the seam shipped carry no console-surface.js and
+  // are still installable — their co-installed Console imports the authority
+  // entry, so that stays the fallback rather than turning an older asset into
+  // an install failure.
+  const seamPath = path.join(installedDir, 'dist', 'update', 'console-surface.js');
+  const authorityPath = path.join(installedDir, 'dist', 'update', 'release-manager-authority.js');
+  const entryPath = existsSync(seamPath) ? seamPath : authorityPath;
+  if (!existsSync(entryPath)) {
     throw new Error('Installed release-manager authority module not found — installation is incomplete.');
   }
   try {
-    await import(pathToFileURL(authorityPath).href);
+    await import(pathToFileURL(entryPath).href);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(

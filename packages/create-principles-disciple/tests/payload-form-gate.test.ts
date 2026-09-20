@@ -60,6 +60,7 @@ describe('install payload form-gate (npm-distributed shape)', () => {
     // Components whose install steps demand more than package.json+dist.
     actualFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
     actualFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'console-surface.js'), 'export {};');
     actualFs.mkdirSync(realPath.join(fixtureDir, 'console', 'dist', 'web'), { recursive: true });
     actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'server.js'), 'export {};');
     actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
@@ -128,6 +129,26 @@ describe('install payload form-gate (npm-distributed shape)', () => {
     expect(result.success).toBe(false);
     expect(result.reason).toMatch(/^npm_bundle_incomplete: missing console[/\\]dist[/\\]server\.js/);
   });
+
+  it('refuses a package missing the update-console seam BEFORE any mutation (negative control)', async () => {
+    // The Console update routes import `create-principles-disciple/update-console`
+    // at runtime (package.json exports → dist/update/console-surface.js). A
+    // payload truncated of just that file used to install cleanly and only
+    // fail when the Owner opened the update page; the form gate must refuse
+    // it pre-mutation like every other exact-shape demand. This is the
+    // negative control for that requirement: without the gate entry the
+    // install would proceed (the assertions on zero mutation fail).
+    actualFs.rmSync(path.join(fixtureDir, 'release-manager', 'dist', 'update', 'console-surface.js'));
+
+    const result = await install(baseInstallOptions, fixtureDir, { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^npm_bundle_incomplete: missing release-manager[/\\]dist[/\\]update[/\\]console-surface\.js/);
+    expect(result.error).toMatch(/No changes were made/);
+    expect(fs.renameSync).not.toHaveBeenCalled();
+    expect(fs.cpSync).not.toHaveBeenCalled();
+    expect(fs.rmSync).not.toHaveBeenCalled();
+  });
 });
 
 // PRI-697: the two "Skipping …" gates used to key on the legacy env var
@@ -181,6 +202,7 @@ describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', ()
     }
     actualFs.mkdirSync(realPath.join(dir, 'release-manager', 'dist', 'update'), { recursive: true });
     actualFs.writeFileSync(realPath.join(dir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
+    actualFs.writeFileSync(realPath.join(dir, 'release-manager', 'dist', 'update', 'console-surface.js'), 'export {};');
     actualFs.mkdirSync(realPath.join(dir, 'console', 'dist', 'web'), { recursive: true });
     actualFs.writeFileSync(realPath.join(dir, 'console', 'dist', 'server.js'), 'export {};');
     actualFs.writeFileSync(realPath.join(dir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
