@@ -2977,7 +2977,11 @@ export interface InstallerJournal {
    * is then visibly unavailable in journal/active.json, never faked.
    */
   readonly sourceCommit: string | null;
-  /** Provenance of `productVersion`: 'embedded' | 'package_manifest' | 'unavailable'. */
+  /**
+   * Provenance of `productVersion`: `embedded` (installer read the payload's
+   * stamp) or `signed_channel` (ReleaseManager adopted a signed release).
+   * These are the only two producible values — see `InstallerProductVersionSource`.
+   */
   readonly productVersionSource: InstallerProductVersionSource;
   readonly releaseMetadataDigest: string;
   /** PRI-664 review: provenance of releaseMetadataDigest ('manifest' | 'package_manifest' | 'fallback' | 'signed_channel'). */
@@ -2998,14 +3002,19 @@ function sha256File(filePath: string): string {
 }
 
 /**
- * Identity of the payload being installed. Prefers the EMBEDDED product
- * identity stamp (`_release/product-identity.json`, written by the asset
- * build BEFORE the artifact bytes were hashed — SPEC §12); falls back to the
- * bundled plugin package manifest. Both are REAL facts — the journal never
- * stores a placeholder where a verifiable value is available (same discipline
- * as legacy-migration.ts). The last-resort fallback hashes the literal reason
- * string only to satisfy the journal's 64-hex format requirement; it is not
- * part of any release-metadata identity chain.
+ * Identity of the payload being installed (SPEC §12). The PRODUCT VERSION comes
+ * only from the EMBEDDED identity stamp (`_release/product-identity.json`,
+ * written by the asset build BEFORE the artifact bytes were hashed) — there is
+ * no manifest fallback for it any more, and a payload without a stamp is
+ * refused rather than guessed (contract below).
+ *
+ * `releaseMetadataDigest` keeps its own, unrelated provenance ladder
+ * (`manifest` → `package_manifest` → `fallback`): that digest is an integrity
+ * marker whose source is a REAL fact, so the journal never stores a placeholder
+ * where a verifiable value is available (same discipline as
+ * legacy-migration.ts), and the last-resort `fallback` hashes the literal
+ * reason string only to satisfy the journal's 64-hex format requirement.
+ * Nothing in that ladder may be promoted to the product version.
  *
  * PRI-709 P0-2 (PRI-698 audit F-1): without an embedded stamp the installer
  * once derived `productVersion` from a component package manifest — the
@@ -3021,7 +3030,20 @@ function sha256File(filePath: string): string {
  * train/asset builds stamp their payloads (PRI-874 publish guards); a tree
  * without a stamp is not an installable release.
  */
-export type InstallerProductVersionSource = 'embedded' | 'package_manifest' | 'signed_channel' | 'unavailable';
+/**
+ * The ONLY producible product-version provenances:
+ * - `embedded`       — the installer read the payload's `_release/product-identity.json`;
+ * - `signed_channel` — ReleaseManager adopted a signed release document.
+ *
+ * PRI-874 review: `package_manifest` and `unavailable` were dropped. Once the
+ * component-manifest fallback was deleted, no production seam could return
+ * either value, so advertising them described a branch no seam can reach (the
+ * ERR-099 class this repository's error index forbids). This is a compile-time
+ * narrowing only: the value lives in the in-memory installer transaction and is
+ * NOT part of the persisted journal/active.json schema, so no stored row is
+ * reinterpreted.
+ */
+export type InstallerProductVersionSource = 'embedded' | 'signed_channel';
 
 function resolveInstallerPayloadIdentity(pluginDir: string): {
   productVersion: string;

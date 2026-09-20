@@ -23,6 +23,7 @@ import {
   writeActiveRecord,
 } from '../src/update/transaction-journal.js';
 import { beginInstallerJournal, commitInstallerActiveRecord, journalInstallerTransition } from '../src/installer.js';
+import type { InstallerProductVersionSource } from '../src/installer.js';
 
 const SOURCE_COMMIT = 'a'.repeat(40);
 const OTHER_SOURCE_COMMIT = 'b'.repeat(40);
@@ -143,7 +144,7 @@ describe('embedded product identity stamp (build side)', () => {
 });
 
 describe('embedded product identity adoption (install side)', () => {
-  it('beginInstallerJournal prefers the embedded stamp over the package-manifest fallback', () => {
+  it('beginInstallerJournal takes the product version from the embedded stamp, never a component manifest', () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-embedded-adopt-'));
     temporaryDirectories.push(workDir);
     const assetDir = buildStampedAsset(workDir);
@@ -156,6 +157,23 @@ describe('embedded product identity adoption (install side)', () => {
     expect(journal.productVersionSource).toBe('embedded');
     expect(journal.releaseId).toBe(`bundled-${PRODUCT_VERSION}-${journal.releaseMetadataDigest.slice(0, 12)}`);
     expect(journal.releaseMetadataDigestSource).toBe('manifest');
+  });
+
+  it('admits only the reachable product-version provenances (compile-time closure)', () => {
+    // PRI-874: with the component-manifest fallback deleted, the only producers
+    // are the installer's embedded stamp and ReleaseManager's signed channel.
+    // The two `@ts-expect-error` directives are the gate — re-admitting either
+    // dead member makes tsc fail HERE as an unused suppression, so the type can
+    // never drift back into advertising a branch no production seam can reach.
+    const reachable: readonly InstallerProductVersionSource[] = ['embedded', 'signed_channel'];
+    expect(reachable).toEqual(['embedded', 'signed_channel']);
+
+    // @ts-expect-error 'package_manifest' is no longer a producible source
+    const deadComponentSource: InstallerProductVersionSource = 'package_manifest';
+    // @ts-expect-error 'unavailable' is no longer a producible source
+    const deadUnavailableSource: InstallerProductVersionSource = 'unavailable';
+    expect(deadComponentSource).toBe('package_manifest');
+    expect(deadUnavailableSource).toBe('unavailable');
   });
 
   it('fails closed on a present-but-malformed stamp BEFORE any journal or install mutation', () => {
