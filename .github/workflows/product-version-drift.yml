@@ -1,0 +1,38 @@
+name: Product Version Drift Monitor
+
+# PRI-874: main's ROOT package.json is the single product version authority;
+# the live signed channel pointer is the version every installed runtime
+# actually consumes. This monitor keeps the two honest:
+#   main < channel  → FAIL: a published product version never landed on main
+#                     (the 2.1.0-vs-1.76.1 drift class).
+#   main > channel  → green notice: the legitimate pending-publish state
+#                     between a version-advancement commit and its release.
+#   main == channel → ok.
+on:
+  schedule:
+    # Daily 21:00 UTC = Beijing 05:00 (off-peak).
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-version-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: main product version vs live channel
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+          ref: main
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '22'
+      - name: Compare main root manifest with the live channel pointer
+        run: node scripts/check-product-version-channel.mjs --report

@@ -98,6 +98,17 @@ function runPdVersion() {
 
 function runRestamp() {
   const payloadDir = gateDirectoryInsideRoot('PD_GATE_PAYLOAD_DIR');
+  // PRI-874: the mutated payload is re-stamped with an EXPLICIT product
+  // identity — unstamped payloads are refused by the installer, and the
+  // identity must never be derived from a component manifest.
+  const productVersion = process.env.PD_GATE_PRODUCT_VERSION;
+  const sourceCommit = process.env.PD_GATE_SOURCE_COMMIT;
+  if (typeof productVersion !== 'string' || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(productVersion)) {
+    throw new Error(`PD_GATE_PRODUCT_VERSION must be a strict x.y.z version, got: ${JSON.stringify(productVersion)}`);
+  }
+  if (typeof sourceCommit !== 'string' || !/^[a-f0-9]{40}$/.test(sourceCommit)) {
+    throw new Error(`PD_GATE_SOURCE_COMMIT must be a 40-char git sha, got: ${JSON.stringify(sourceCommit)}`);
+  }
   const builderEntry = resolve(__dirname, '..', '..', 'scripts', 'build-release-asset.mjs');
   if (!existsSync(builderEntry)) {
     throw new Error(`asset builder entry is missing: ${builderEntry}`);
@@ -110,11 +121,13 @@ function runRestamp() {
     '--platform', process.platform,
     '--arch', process.arch,
     '--node-abi', process.versions.modules,
+    '--product-version', productVersion,
+    '--source-commit', sourceCommit,
   ], { cwd: resolve(__dirname, '..', '..'), timeout: 600_000, encoding: 'utf8' });
   if (outcome.status !== 0) {
     throw new Error(`asset re-stamp failed (${outcome.status}): ${String(outcome.stderr ?? '').slice(0, 2000)}`);
   }
-  process.stdout.write(`${RESULT_MARKER}${JSON.stringify({ restamped: payloadDir })}`);
+  process.stdout.write(`${RESULT_MARKER}${JSON.stringify({ restamped: payloadDir, productVersion, sourceCommit })}`);
 }
 
 async function runConsole() {  const homeRoot = gateDirectoryInsideRoot('PD_GATE_HOME');

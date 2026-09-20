@@ -186,17 +186,17 @@ jobs:
             exit 1
           fi
           COMMIT=$(git rev-parse HEAD)
-          # PRI-832 review re-anchor: an EXPLICIT product_version is refused
-          # when it disagrees with the ref's create-principles-disciple
-          # package.json unless allow_version_drift is set. "auto" is already
-          # registry-anchored (npm view), so no comparison is needed. This
-          # restores the fail-closed guard the format-only validation retired,
-          # without resurrecting the stale-source-label problem: the anchored
-          # file is the REF's manifest, never a cross-run authority.
+          # PRI-874 re-anchor (was: compared against the ref's installer
+          # COMPONENT manifest — the wrong plane, and it refused a correctly
+          # advanced root manifest): an EXPLICIT product_version must agree
+          # with the single resolver's reading of THIS ref's ROOT manifest.
+          # allow_version_drift stays the deliberate-override door. "auto"
+          # already resolves from the root manifest, so no comparison is
+          # needed for it.
           if [ "$PRODUCT_VERSION_INPUT" != "auto" ] && [ -n "$PRODUCT_VERSION_INPUT" ] && [ "$ALLOW_VERSION_DRIFT" != "true" ]; then
-            REF_VERSION=$(node -p "require('./packages/create-principles-disciple/package.json').version")
-            if [ "$VERSION" != "$REF_VERSION" ]; then
-              echo "::error::Explicit product_version ($VERSION) disagrees with the ref's create-principles-disciple/package.json ($REF_VERSION). Pass allow_version_drift=true only for a deliberate re-publication."
+            ROOT_VERSION=$(node scripts/resolve-product-version.mjs)
+            if [ "$VERSION" != "$ROOT_VERSION" ]; then
+              echo "::error::Explicit product_version ($VERSION) disagrees with the root manifest resolver ($ROOT_VERSION). Pass allow_version_drift=true only for a deliberate exception."
               exit 1
             fi
           fi
@@ -245,21 +245,40 @@ jobs:
           if [ -f "$POINTER" ]; then
             # The channel pointer payload is a plain JSON document (the TUF
             # envelope lives in targets.json, not in the target file).
+            # PRI-874: productVersion is extracted alongside the counters —
+            # the monotonicity guard compares product VERSIONS, not just
+            # sequence numbers. A pointer without a valid productVersion is
+            # invalid content, never "first publish".
             SEQ=$(node -e "
               const payload = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-              console.log(payload.publicationSequence + ':' + payload.version);
-            " "$POINTER")
+              if (typeof payload.productVersion !== 'string' || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\$/.test(payload.productVersion)) {
+                console.error('::error::Channel pointer carries no valid productVersion: ' + JSON.stringify(payload).slice(0, 400));
+                process.exit(1);
+              }
+              console.log(payload.publicationSequence + ':' + payload.version + ':' + payload.productVersion);
+            " "$POINTER") || exit 1
             echo "published pointer: $SEQ"
-            echo "prev_sequence=${SEQ%%:*}" >> "$GITHUB_OUTPUT"
-            echo "prev_version=${SEQ##*:}" >> "$GITHUB_OUTPUT"
+            echo "prev_sequence=$(echo "$SEQ" | cut -d: -f1)" >> "$GITHUB_OUTPUT"
+            echo "prev_version=$(echo "$SEQ" | cut -d: -f2)" >> "$GITHUB_OUTPUT"
+            echo "prev_product_version=$(echo "$SEQ" | cut -d: -f3-)" >> "$GITHUB_OUTPUT"
           else
             echo "no published pointer for channel $CHANNEL"
             echo "prev_sequence=" >> "$GITHUB_OUTPUT"
             echo "prev_version=" >> "$GITHUB_OUTPUT"
+            echo "prev_product_version=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Resolve publication inputs
         id: inputs
+        env:
+          RESOLVED_VERSION: ${{ steps.release.outputs.version }}
+          CHANNEL_PRODUCT_VERSION: ${{ steps.prev.outputs.prev_product_version }}
+          # PRI-874 fix: a step mapping may not repeat the `env:` key. MODE and
+          # CHANNEL belong to THIS block — the trailing duplicate made the file
+          # invalid YAML, so GitHub rejected the workflow outright (0 jobs) and
+          # reported "workflow file issue" instead of any step failure.
+          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+          CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
         run: |
           SEQ="${{ github.event.inputs.publication_sequence }}"
           if [ "$SEQ" = "auto" ] || [ -z "$SEQ" ]; then
@@ -276,12 +295,45 @@ jobs:
               echo "::warning::expires-at was derived from the clock (now + 90d). Re-publishing the same release reproducibly requires passing the SAME explicit expires-at."
             fi
           fi
+          # PRI-874 product-version monotonicity: the pointer COUNTER was
+          # already monotonic; the product VERSION string was not. A main
+          # root manifest regressed below the live channel would otherwise
+          # publish a downgrade silently (every sequence-only guard passes).
+          # Equal is allowed (same-version republish advances the counters).
+          # Same base URL derivation as the publish step (:549/:687): the
+          # explicit metadata_base_url input wins, else the repo's Pages root.
+          # PRI-874 review — this guard must NOT depend on whether the local
+          # gh-pages snapshot happens to carry a pointer. It previously ran only
+          # when CHANNEL_PRODUCT_VERSION was non-empty, so a stale or absent
+          # local snapshot skipped the check ENTIRELY (publish governance must
+          # never skip silently), and a published-but-404 public endpoint was
+          # read as "first publication". The remote check now ALWAYS runs — it
+          # fails closed on any unreachable or invalid channel — and the locally
+          # observed pointer is passed as an additional FLOOR, so a 404 from the
+          # public endpoint can no longer erase a version we know is live.
+          if [ -n "${{ github.event.inputs.metadata_base_url }}" ]; then
+            CHANNEL_BASE="${{ github.event.inputs.metadata_base_url }}"
+          else
+            CHANNEL_BASE="https://$(echo "${{ github.repository }}" | cut -d/ -f1).github.io/$(echo "${{ github.repository }}" | cut -d/ -f2)"
+          fi
+          CHANNEL_URL="$CHANNEL_BASE/targets/channels/$CHANNEL.json"
+          # PRI-874 review (P1): guard the version that is actually about to be
+          # published, not the one this ref's root manifest happens to declare.
+          # An explicit product_version input (allow_version_drift=true) is a
+          # deliberate escape hatch that disagrees with the manifest, so a guard
+          # which re-derived the version would compare the manifest and let a
+          # downgrade through: root=2.1.0, channel=2.1.0, explicit 2.0.0 passed.
+          # GUARD_ARGS is an array so the optional floor is appended without a
+          # repeated invocation to keep in sync.
+          GUARD_ARGS=(--channel-url "$CHANNEL_URL" --resolved-version "$RESOLVED_VERSION")
+          if [ -n "$CHANNEL_PRODUCT_VERSION" ]; then
+            GUARD_ARGS+=(--channel-product-version "$CHANNEL_PRODUCT_VERSION")
+          fi
+          node scripts/check-product-version-channel.mjs "${GUARD_ARGS[@]}"
           echo "publication_sequence=$SEQ" >> "$GITHUB_OUTPUT"
           echo "channel_version=$PTR" >> "$GITHUB_OUTPUT"
           echo "expires_at=$EXPIRES" >> "$GITHUB_OUTPUT"
-          echo "publication inputs: sequence=$SEQ pointer=$PTR expires=$EXPIRES"
-        env:
-          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+          echo "publication inputs: sequence=$SEQ pointer=$PTR expires=$EXPIRES resolved_version=$RESOLVED_VERSION"
 
   # One leg per (platform, runtime). Each leg builds NATIVELY on its own
   # runner — assertSupportedLocalReleaseTarget forbids cross-target builds, so

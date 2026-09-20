@@ -87,8 +87,18 @@ jobs:
           BUILD_IDENTITY_FILE: ${{ runner.temp }}/build-identity.json
       - name: Build once and record the digest
         run: |
+          # PRI-874: this archive is what the install smoke below installs
+          # (PD_RELEASE_SMOKE_PUBLICATION points at $PUBLICATION), and the
+          # installer now REFUSES an unstamped payload — so building here
+          # without the embedded identity is an install failure by
+          # construction, not a weaker check. Same identity source as the
+          # release train: the root-manifest resolver plus the checkout HEAD.
+          PRODUCT_VERSION="$(node scripts/resolve-product-version.mjs)"
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
           node packages/create-principles-disciple/scripts/build-self-contained-release.mjs \
-            --output "$PUBLICATION"
+            --output "$PUBLICATION" \
+            --product-version "$PRODUCT_VERSION" \
+            --source-commit "$SOURCE_COMMIT"
           sha256sum "$PUBLICATION/asset.tar" | cut -d' ' -f1 > "$DIGEST_FILE"
           echo "asset digest: $(cat "$DIGEST_FILE")"
         env:

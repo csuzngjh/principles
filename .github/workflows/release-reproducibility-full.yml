@@ -51,8 +51,14 @@ jobs:
       - name: Build the real production asset twice and compare bytes
         shell: bash
         run: |
-          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_ONE"
-          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_TWO"
+          # PRI-874: the asset carries its EMBEDDED product identity (SPEC
+          # §12) — the installer refuses unstamped payloads and the upgrade
+          # gate derives candidateVersion from this stamp. Both builds use
+          # the same resolved identity so the byte comparison stays valid.
+          PRODUCT_VERSION="$(node scripts/resolve-product-version.mjs)"
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_ONE" --product-version "$PRODUCT_VERSION" --source-commit "$SOURCE_COMMIT"
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_TWO" --product-version "$PRODUCT_VERSION" --source-commit "$SOURCE_COMMIT"
           if node packages/create-principles-disciple/scripts/compare-release-archives.mjs \
             "$PUBLICATION_ONE/asset.tar" \
             "$PUBLICATION_TWO/asset.tar"; then
@@ -79,6 +85,17 @@ jobs:
         run: npm test --workspace=create-principles-disciple -- --run tests/release-upgrade-gate.test.ts
         env:
           PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
+          # PRI-874: the test copies transaction journals + a state summary
+          # here BEFORE its temp-root cleanup, so failures stay diagnosable.
+          PD_UPGRADE_GATE_DIAG_DIR: ${{ github.workspace }}/upgrade-gate-diagnostics
+      - name: Upload upgrade-gate diagnostics on failure
+        if: matrix.runner == 'ubuntu-24.04' && matrix.node == '22.22.2' && failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: upgrade-gate-diagnostics-linux
+          path: upgrade-gate-diagnostics
+          if-no-files-found: ignore
+          retention-days: 7
       # Hand the double-build-verified WINDOWS asset to the standalone
       # upgrade-gate-windows job (incident platform only — the gate derives
       # its N-1 payload from THIS exact asset).
@@ -137,3 +154,13 @@ jobs:
         run: npm test --workspace=create-principles-disciple -- --run tests/release-upgrade-gate.test.ts
         env:
           PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
+          # PRI-874: journals + state summary land here before temp cleanup.
+          PD_UPGRADE_GATE_DIAG_DIR: ${{ github.workspace }}/upgrade-gate-diagnostics
+      - name: Upload upgrade-gate diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: upgrade-gate-diagnostics-windows
+          path: upgrade-gate-diagnostics
+          if-no-files-found: ignore
+          retention-days: 7

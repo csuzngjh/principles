@@ -465,7 +465,7 @@ jobs:
         if: matrix.pkg_dir == 'openclaw-plugin'
         run: |
           VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
-          echo "Syncing version $VERSION to all files..."
+          echo "Syncing version $VERSION to component files..."
 
           PLUGIN_JSON="packages/openclaw-plugin/openclaw.plugin.json"
           if [ -f "$PLUGIN_JSON" ]; then
@@ -479,11 +479,11 @@ jobs:
             echo "Synced: $DIST_PLUGIN_JSON"
           fi
 
-          ROOT_PKG="package.json"
-          if [ -f "$ROOT_PKG" ]; then
-            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$ROOT_PKG"
-            echo "Synced: $ROOT_PKG"
-          fi
+          # PRI-874: the ROOT package.json is NOT synced here anymore — it is
+          # the product version authority (single resolver source) and only
+          # advances through explicit version-advancement commits on main.
+          # Overwriting it with a component version inside a release run made
+          # the authority file meaningless for any step reading it afterwards.
 
           README="README.md"
           if [ -f "$README" ]; then
@@ -497,7 +497,7 @@ jobs:
             echo "Synced: $README_ZH"
           fi
 
-          echo "All files synced to version $VERSION"
+          echo "Component files synced to version $VERSION"
 
       - name: Generate changelog
         id: changelog
@@ -534,6 +534,69 @@ jobs:
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           echo -e "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Stamp npm payload product identity
+        # PRI-874: the single-package publish previously shipped the
+        # installer with NO embedded identity, so every install fell into
+        # the component-manifest fallback that stamped machines
+        # `bundled-1.74.1-*`. The stamp source is the ROOT manifest resolver
+        # — the npm package version is a component diagnostic and is never a
+        # product authority; the step refuses rather than falls back.
+        if: matrix.pkg_dir == 'create-principles-disciple'
+        run: |
+          VERSION="$(node scripts/resolve-product-version.mjs)"
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          node -e '
+            const { writeFileSync, mkdirSync } = require("node:fs");
+            const { join } = require("node:path");
+            const [version, sourceCommit] = process.argv.slice(1);
+            if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
+              throw new Error(`Refusing to stamp: version is not a strict x.y.z product version: ${JSON.stringify(version)}`);
+            }
+            if (!/^[a-f0-9]{40}$/.test(sourceCommit)) {
+              throw new Error(`Refusing to stamp: source commit is not a 40-char git sha: ${JSON.stringify(sourceCommit)}`);
+            }
+            const releaseDir = join("packages", "create-principles-disciple", "_release");
+            mkdirSync(releaseDir, { recursive: true });
+            writeFileSync(join(releaseDir, "product-identity.json"), `${JSON.stringify({ schemaVersion: 1, productVersion: version, sourceCommit }, null, 2)}\n`);
+            console.log(`Stamped npm payload product identity: version=${version} commit=${sourceCommit.slice(0, 12)}`);
+          ' "$VERSION" "$SOURCE_COMMIT"
+
+      - name: Verify the packed installer tarball carries the product identity
+        # PRI-874: the stamp must survive into the ACTUAL npm tarball — the
+        # final pre-publish identity gate on the single-package path.
+        if: matrix.pkg_dir == 'create-principles-disciple'
+        run: |
+          VERSION="$(node scripts/resolve-product-version.mjs)"
+          node -e '
+            const { execFileSync } = require("node:child_process");
+            const { readFileSync, mkdtempSync, rmSync } = require("node:fs");
+            const { join } = require("node:path");
+            const { tmpdir } = require("node:os");
+            const expected = process.argv[1];
+            const pack = JSON.parse(execFileSync("npm", ["pack", "--json"], { encoding: "utf8", cwd: "packages/create-principles-disciple" }));
+            const filename = pack[0].filename;
+            const work = mkdtempSync(join(tmpdir(), "pd-tarball-identity-"));
+            try {
+              execFileSync("tar", ["-xzf", join("packages", "create-principles-disciple", filename), "-C", work, "package/_release/product-identity.json"]);
+              const identity = JSON.parse(readFileSync(join(work, "package", "_release", "product-identity.json"), "utf8"));
+              if (identity.productVersion !== expected) {
+                throw new Error(`Packed tarball identity ${JSON.stringify(identity.productVersion)} != resolved product identity ${JSON.stringify(expected)}`);
+              }
+              console.log(`Tarball identity verified: version=${identity.productVersion} commit=${String(identity.sourceCommit).slice(0, 12)}`);
+            } finally {
+              rmSync(work, { recursive: true, force: true });
+            }
+          ' "$VERSION"
+
+      - name: "Guard: resolved product version must not regress below the live channel"
+        # PRI-874: the same productVersion-vs-channel check covers EVERY
+        # installer-publishing entry (train leg gets it via
+        # release-metadata.yml; this covers the single-package npm path). A
+        # regressed root manifest must fail the publish, never silently
+        # downgrade installed runtimes.
+        if: matrix.pkg_dir == 'create-principles-disciple'
+        run: node scripts/check-product-version-channel.mjs
 
       - name: Publish to npm
         working-directory: packages/${{ matrix.pkg_dir }}
@@ -760,6 +823,14 @@ jobs:
           VERSION=$(node scripts/resolve-product-version.mjs)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Train product identity: $VERSION"
+
+      - name: "Guard: resolved product version must not regress below the live channel"
+        # PRI-874: the train publishes the installer, so the same
+        # productVersion-vs-channel check that gates the signed release
+        # applies here — BEFORE the first publish side effect. A regressed
+        # root manifest fails the train instead of silently downgrading
+        # every installed runtime.
+        run: node scripts/check-product-version-channel.mjs
 
       - name: Publish 1/7 @principles/core
         uses: ./.github/actions/publish-npm-package

@@ -24,6 +24,7 @@ import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } fro
 import { setLanguage } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
 import { appendJournalTransition } from '../src/update/transaction-journal.js';
+import { productIdentityStampJson } from './helpers/payload-identity.js';
 
 vi.mock('fs');
 vi.mock('child_process', () => ({
@@ -62,6 +63,11 @@ const PLUGIN_MANIFEST = JSON.stringify({
   activation: { onCapabilities: ['hook'] },
 });
 
+// PRI-874: a real train payload carries the embedded product identity stamp,
+// so the mocked fixture answers the identity gate's strict read with a VALID
+// stamp (unstamped payloads are refused before the steps under test).
+const STAMP_CONTENT = productIdentityStampJson('1.74.1');
+
 describe('install() release-manager dependency install + authority import smoke (PR #1525 review)', () => {
   let savedLegacyNpmInstall: string | undefined;
   let savedHome: string | undefined;
@@ -93,14 +99,12 @@ describe('install() release-manager dependency install + authority import smoke 
       const s = String(value);
       if (s.endsWith('install.json')) return false;
       if (s.endsWith(path.join('.pd', 'state.db'))) return false;
-      // The fixture payload carries no embedded product identity stamp —
-      // pretending it exists would trip the fail-closed identity parser.
-      if (s.endsWith(path.join('_release', 'product-identity.json'))) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
+      if (filePath.endsWith(path.join('_release', 'product-identity.json'))) return STAMP_CONTENT;
       if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
       return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
     });

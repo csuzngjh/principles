@@ -30,6 +30,7 @@ import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } fro
 import { setLanguage, t } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
 import { appendJournalTransition } from '../src/update/transaction-journal.js';
+import { productIdentityStampJson } from './helpers/payload-identity.js';
 
 vi.mock('fs');
 vi.mock('child_process', async (importOriginal) => {
@@ -148,6 +149,12 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     realFs.mkdirSync(path.join(payloadDir, 'release-manager', 'dist', 'update'), { recursive: true });
     realFs.writeFileSync(path.join(payloadDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};\n');
     realFs.writeFileSync(path.join(payloadDir, 'release-manager', 'dist', 'update', 'console-surface.js'), 'export {};\n');
+    // PRI-874: a real train payload carries the embedded product identity
+    // stamp; without it install() refuses at the identity gate before the
+    // gateway steps under test. Written through the REAL fs handle ('fs' is
+    // mocked in this suite and there is no delegation loop).
+    realFs.mkdirSync(path.join(payloadDir, '_release'), { recursive: true });
+    realFs.writeFileSync(path.join(payloadDir, '_release', 'product-identity.json'), productIdentityStampJson('1.74.1'));
 
     // The installed authority stub: verifyReleaseManagerAuthorityImports does
     // a REAL dynamic import of the INSTALLED path, so the file must really
@@ -186,6 +193,12 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
+      // PRI-874: the embedded product identity stamp is read through the
+      // strict parser — answer with the fixture's REAL stamp file (written
+      // above through realFs) so the two never drift.
+      if (filePath.endsWith(path.join('_release', 'product-identity.json'))) {
+        return realFs.readFileSync(filePath, 'utf8');
+      }
       // PRI-850: the bootstrap executor probe reads install.json through the
       // strict reader — a valid record keeps the probe path realistic.
       if (filePath.endsWith('install.json')) {

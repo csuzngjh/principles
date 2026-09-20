@@ -24,6 +24,8 @@ import {
   type InstallerJournal,
 } from '../src/installer.js';
 import { readActiveRecord, type ActiveRecord } from '../src/update/transaction-journal.js';
+import { ProductIdentityError } from '../src/update/product-identity.js';
+import { DEFAULT_STAMP_SOURCE_COMMIT, stampPayloadIdentity } from './helpers/payload-identity.js';
 
 describe('installer active record commit point (PRI-709 P0-2)', () => {
   let tmpHome: string;
@@ -42,8 +44,18 @@ describe('installer active record commit point (PRI-709 P0-2)', () => {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  /** Payload with BOTH manifests present — the case that was mis-identified. */
-  function makePayload(versions: { plugin?: string; pdCli?: string } = {}): string {
+  /**
+   * Payload with BOTH manifests present — the case that was mis-identified.
+   * PRI-874: a real train payload also carries the embedded product identity
+   * stamp, so the fixture stamps `productVersion` the way build-release-asset
+   * does; the component manifests stay diagnostics that must never win.
+   * `omitStamp` rebuilds the legacy unstamped shape (pre-existing fixtures)
+   * for the refuse-behavior test.
+   */
+  function makePayload(
+    versions: { plugin?: string; pdCli?: string } = {},
+    options: { omitStamp?: boolean } = {},
+  ): string {
     const pluginDir = path.join(tmpHome, 'bundle');
     fs.rmSync(pluginDir, { recursive: true, force: true });
     fs.mkdirSync(path.join(pluginDir, 'pd-cli'), { recursive: true });
@@ -53,20 +65,35 @@ describe('installer active record commit point (PRI-709 P0-2)', () => {
     if (versions.pdCli !== undefined) {
       fs.writeFileSync(path.join(pluginDir, 'pd-cli', 'package.json'), JSON.stringify({ name: '@principles/pd-cli', version: versions.pdCli }));
     }
+    if (!options.omitStamp) {
+      stampPayloadIdentity(pluginDir, versions.plugin ?? versions.pdCli ?? '9.9.9');
+    }
     return pluginDir;
   }
 
   describe('payload identity (F-1)', () => {
-    it('takes productVersion from the product manifest, not the independently versioned pd-cli', () => {
-      // The exact shape of the Owner-machine bug: plugin 1.230.2 vs pd-cli 1.147.5.
+    it('takes productVersion from the embedded stamp, never from the independently versioned component manifests', () => {
+      // The exact shape of the Owner-machine bug: plugin 1.230.2 vs pd-cli
+      // 1.147.5. PRI-874: neither component manifest is promoted — the
+      // stamp is the only product-version authority.
       const journal = beginInstallerJournal(makePayload({ plugin: '1.230.2', pdCli: '1.147.5' }));
       expect(journal.productVersion).toBe('1.230.2');
+      expect(journal.productVersionSource).toBe('embedded');
+      expect(journal.sourceCommit).toBe(DEFAULT_STAMP_SOURCE_COMMIT);
       expect(journal.releaseId).toBe(`bundled-1.230.2-${journal.releaseMetadataDigest.slice(0, 12)}`);
     });
 
-    it('falls back to pd-cli when the product manifest is absent (pre-existing fixtures)', () => {
-      const journal = beginInstallerJournal(makePayload({ pdCli: '9.9.9' }));
-      expect(journal.productVersion).toBe('9.9.9');
+    it('refuses an unstamped payload (component versions are never promoted) before any journal exists', () => {
+      // PRI-874: the legacy shape — component manifests only, no embedded
+      // stamp — is refused outright instead of falling back to pd-cli's
+      // version (the fallback that produced the `bundled-1.74.1-*`
+      // downgrades). No journal file may appear for a refused payload.
+      const pluginDir = makePayload({ pdCli: '9.9.9' }, { omitStamp: true });
+      const transactionsDir = path.join(tmpHome, '.pd', 'transactions');
+      expect(() => beginInstallerJournal(pluginDir)).toThrow(ProductIdentityError);
+      if (fs.existsSync(transactionsDir)) {
+        expect(fs.readdirSync(transactionsDir)).toEqual([]);
+      }
     });
 
     it('prefers the self-contained asset manifest for the digest when present', () => {
@@ -74,10 +101,12 @@ describe('installer active record commit point (PRI-709 P0-2)', () => {
       fs.mkdirSync(path.join(pluginDir, '_release'), { recursive: true });
       fs.writeFileSync(path.join(pluginDir, '_release', 'manifest.json'), JSON.stringify({ schemaVersion: 1, files: [] }));
       const journal = beginInstallerJournal(pluginDir);
-      // Digest source is not surfaced on the journal handle, but the releaseId
-      // embeds it; assert the version half stays the product version.
-      expect(journal.productVersion).toBe('1.230.2');
+      // Retained PRI-664 semantics: the digest is the asset manifest's
+      // integrity hash, while productVersion stays the stamp's product
+      // version — the two provenances are independent.
+      expect(journal.releaseMetadataDigestSource).toBe('manifest');
       expect(journal.releaseMetadataDigest).toMatch(/^[a-f0-9]{64}$/);
+      expect(journal.productVersion).toBe('1.230.2');
     });
   });
 
@@ -99,6 +128,8 @@ describe('installer active record commit point (PRI-709 P0-2)', () => {
         previousReleaseId: null,
         transactionId: journal.transactionId,
         productVersion: '1.230.2',
+        // PRI-874: the stamped commit rides the journal into the record.
+        sourceCommit: DEFAULT_STAMP_SOURCE_COMMIT,
       });
     });
 

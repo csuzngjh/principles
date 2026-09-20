@@ -38,6 +38,12 @@ packages/*/node_modules/
 packages/*/dist/
 packages/*/coverage/
 packages/*/screenshots/
+
+# PRI-874: npm payload product-identity stamps are generated at publish
+# time — a stale committed copy would silently ship in a later publish.
+_release/
+# PRI-874: upgrade-gate failure forensics (transaction journals + summary)
+upgrade-gate-diagnostics/
 packages/*/logs/
 logs/
 packages/*/*.tgz

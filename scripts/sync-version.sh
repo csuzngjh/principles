@@ -61,12 +61,9 @@ if [ -f "$PLUGIN_JSON" ]; then
     echo "✅ packages/openclaw-plugin/openclaw.plugin.json → $VERSION"
 fi
 
-# 3. 更新根目录 package.json (monorepo 版本)
-ROOT_PACKAGE_JSON="$ROOT_DIR/package.json"
-if [ -f "$ROOT_PACKAGE_JSON" ]; then
-    $SED_INPLACE "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$ROOT_PACKAGE_JSON"
-    echo "✅ package.json (monorepo) → $VERSION"
-fi
+# 3. 根目录 package.json 不同步（PRI-874）：根 manifest 是产品版本唯一
+#    权威，只能通过显式的产品版本推进提交修改；组件同步脚本不得触碰。
+echo "ℹ️  跳过根目录 package.json（产品版本权威，PRI-874 起仅经显式提交推进）"
 
 # 4. 更新 README.md
 README_MD="$ROOT_DIR/README.md"
@@ -87,7 +84,7 @@ echo "🎉 版本号同步完成！"
 echo ""
 echo "📊 同步摘要:"
 echo "  • 版本号: $VERSION"
-echo "  • 已同步 6 个文件"
+echo "  • 已同步 5 个文件（根 manifest 除外 — 产品版本权威，见 PRI-874）"
 echo ""
 echo "💡 下一步:"
 echo "   git add -A && git commit -m 'chore: sync version to $VERSION'"

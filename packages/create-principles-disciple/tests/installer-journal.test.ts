@@ -15,6 +15,7 @@ import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } fro
 import { setLanguage } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
 import { appendJournalTransition, type JournalTransition } from '../src/update/transaction-journal.js';
+import { productIdentityStampJson } from './helpers/payload-identity.js';
 
 vi.mock('fs');
 vi.mock('child_process', () => ({
@@ -53,6 +54,11 @@ const PLUGIN_MANIFEST = JSON.stringify({
   name: 'principles-disciple',
   activation: { onCapabilities: ['hook'] },
 });
+
+// PRI-874: a real train payload carries the embedded product identity stamp
+// (strict-parser content), so the mocked fixture answers the stamp probe with
+// a VALID stamp whose productVersion matches the component manifests below.
+const STAMP_CONTENT = productIdentityStampJson('1.74.1');
 
 function capturedTransitions(): JournalTransition[] {
   return vi.mocked(appendJournalTransition).mock.calls.map((call) => call[1] as JournalTransition);
@@ -96,14 +102,12 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       // No existing install manifest → resolveInstallManifestHosts treats
       // current as undefined (fresh install) instead of re-reading it.
       if (s.endsWith('install.json')) return false;
-      // The fixture payload carries no embedded product identity stamp —
-      // pretending it exists would trip the fail-closed identity parser.
-      if (s.endsWith(path.join('_release', 'product-identity.json'))) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
+      if (filePath.endsWith(path.join('_release', 'product-identity.json'))) return STAMP_CONTENT;
       if (filePath.endsWith('install.json')) {
         throw new Error(`ENOENT: ${filePath}`);
       }
@@ -160,13 +164,12 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       const s = String(value);
       if (s.endsWith('install.json')) return false;
       if (s.endsWith(path.join('.pd', 'state.db'))) return false;
-      // No embedded product identity stamp in this fixture (fail-closed parser).
-      if (s.endsWith(path.join('_release', 'product-identity.json'))) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
+      if (filePath.endsWith(path.join('_release', 'product-identity.json'))) return STAMP_CONTENT;
       if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
       return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
     });
@@ -212,5 +215,54 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
     for (const p of paths) {
       expect(p).toMatch(/[\\/]\.pd[\\/]transactions[\\/]install-\d+-[0-9a-f]{8}\.jsonl$/);
     }
+  });
+
+  /**
+   * PRI-874 review (P2): the pre-flight must refuse on EVERY identity-resolution
+   * failure, not only the identity-CONTRACT class.
+   *
+   * Resolving the payload identity READS the payload, so an EACCES/EPERM/EBUSY
+   * there is a real defect in the payload being installed — the same kind of
+   * refusal the identity contract produces. Previously a non-`ProductIdentityError`
+   * fell through the pre-flight, so the install flow continued: the gateway was
+   * stopped and the workspace directory created, and only then did
+   * beginInstallerJournal() fail. Same `reason` string, but the Owner was left
+   * with a downed gateway and a stray directory — a recovery problem.
+   *
+   * The `reason` prefix is identical either way (the outer catch uses it too), so
+   * this test pins the part that actually differs: the side effects. A gateway
+   * that was RUNNING is configured here precisely so a fall-through would be
+   * observable as a stop.
+   */
+  it('an I/O failure while resolving the payload identity refuses with zero side effects', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
+    vi.mocked(fs.existsSync).mockImplementation((value) => {
+      const s = String(value);
+      if (s.endsWith(path.join('.pd', 'state.db'))) return false;
+      if (s.endsWith('install.json')) return false;
+      return true;
+    });
+    vi.mocked(fs.readFileSync).mockImplementation((value) => {
+      const filePath = String(value);
+      // `_release/manifest.json` is what the resolver hashes first when present.
+      if (filePath.endsWith(path.join('_release', 'manifest.json'))) {
+        throw new Error(`EACCES: permission denied, open '${filePath}'`);
+      }
+      return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
+    });
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const result = await install(baseInstallOptions, '/asset', { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^install_failed_before_mutation: EACCES/);
+    expect(typeof result.nextAction).toBe('string');
+    // Zero side effects — the refusal happens BEFORE the install flow starts.
+    expect(checkOpenClawGateway).not.toHaveBeenCalled();
+    expect(stopOpenClawGateway).not.toHaveBeenCalled();
+    expect(restartOpenClawGateway).not.toHaveBeenCalled();
+    expect(fs.renameSync).not.toHaveBeenCalled();
+    expect(fs.cpSync).not.toHaveBeenCalled();
+    expect(fs.rmSync).not.toHaveBeenCalled();
   });
 });

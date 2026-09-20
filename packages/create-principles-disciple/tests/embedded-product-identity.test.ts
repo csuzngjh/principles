@@ -23,6 +23,7 @@ import {
   writeActiveRecord,
 } from '../src/update/transaction-journal.js';
 import { beginInstallerJournal, commitInstallerActiveRecord, journalInstallerTransition } from '../src/installer.js';
+import type { InstallerProductVersionSource } from '../src/installer.js';
 
 const SOURCE_COMMIT = 'a'.repeat(40);
 const OTHER_SOURCE_COMMIT = 'b'.repeat(40);
@@ -143,7 +144,7 @@ describe('embedded product identity stamp (build side)', () => {
 });
 
 describe('embedded product identity adoption (install side)', () => {
-  it('beginInstallerJournal prefers the embedded stamp over the package-manifest fallback', () => {
+  it('beginInstallerJournal takes the product version from the embedded stamp, never a component manifest', () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-embedded-adopt-'));
     temporaryDirectories.push(workDir);
     const assetDir = buildStampedAsset(workDir);
@@ -156,6 +157,23 @@ describe('embedded product identity adoption (install side)', () => {
     expect(journal.productVersionSource).toBe('embedded');
     expect(journal.releaseId).toBe(`bundled-${PRODUCT_VERSION}-${journal.releaseMetadataDigest.slice(0, 12)}`);
     expect(journal.releaseMetadataDigestSource).toBe('manifest');
+  });
+
+  it('admits only the reachable product-version provenances (compile-time closure)', () => {
+    // PRI-874: with the component-manifest fallback deleted, the only producers
+    // are the installer's embedded stamp and ReleaseManager's signed channel.
+    // The two `@ts-expect-error` directives are the gate — re-admitting either
+    // dead member makes tsc fail HERE as an unused suppression, so the type can
+    // never drift back into advertising a branch no production seam can reach.
+    const reachable: readonly InstallerProductVersionSource[] = ['embedded', 'signed_channel'];
+    expect(reachable).toEqual(['embedded', 'signed_channel']);
+
+    // @ts-expect-error 'package_manifest' is no longer a producible source
+    const deadComponentSource: InstallerProductVersionSource = 'package_manifest';
+    // @ts-expect-error 'unavailable' is no longer a producible source
+    const deadUnavailableSource: InstallerProductVersionSource = 'unavailable';
+    expect(deadComponentSource).toBe('package_manifest');
+    expect(deadUnavailableSource).toBe('unavailable');
   });
 
   it('fails closed on a present-but-malformed stamp BEFORE any journal or install mutation', () => {
@@ -185,10 +203,15 @@ describe('embedded product identity adoption (install side)', () => {
     temporaryDirectories.push(workDir);
     const pluginDir = createLegacyPayload(workDir, { plugin: '1.230.2', pdCli: '1.147.5' });
 
-    const journal = beginInstallerJournal(pluginDir);
-    expect(journal.productVersion).toBe('1.230.2');
-    expect(journal.sourceCommit).toBeNull();
-    expect(journal.productVersionSource).toBe('package_manifest');
+    // PRI-874: a legacy unstamped payload is REFUSED — component manifest
+    // versions are diagnostics and are never promoted to the product version.
+    const transactionsDir = path.join(process.env.HOME as string, '.pd', 'transactions');
+    expect(() => beginInstallerJournal(pluginDir)).toThrow(ProductIdentityError);
+    // beginInstallerJournal only computes the path; the file appears on the
+    // first append. No append may have happened for a refused payload.
+    if (fs.existsSync(transactionsDir)) {
+      expect(fs.readdirSync(transactionsDir)).toEqual([]);
+    }
   });
 });
 
@@ -220,22 +243,34 @@ describe('journal + active.json round trip with embedded provenance', () => {
     expect(rawRecord.sourceCommit).toBe(SOURCE_COMMIT);
   });
 
-  it('writes NO sourceCommit field for legacy payloads and still reads legacy records and journals', () => {
+  it('refuses legacy payload WRITES (PRI-874) but still reads legacy records and journals', () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-embedded-legacyrt-'));
     temporaryDirectories.push(workDir);
     const pluginDir = createLegacyPayload(workDir, { plugin: '1.230.2', pdCli: '1.147.5' });
 
-    const journal = beginInstallerJournal(pluginDir);
-    journalInstallerTransition(journal, null, 'planned', 'legacy');
-    const transitions = readTransactionJournal(journal.journalPath);
-    expect(transitions[0]?.sourceCommit).toBeUndefined();
+    // The legacy WRITE side is dead: an unstamped payload is refused at the
+    // identity gate before any journal exists.
+    expect(() => beginInstallerJournal(pluginDir)).toThrow(ProductIdentityError);
 
-    const result = commitInstallerActiveRecord(journal);
-    expect(result.written).toBe(true);
-    const recordPath = path.join(process.env.HOME as string, '.pd', 'active.json');
-    const rawRecord = JSON.parse(fs.readFileSync(recordPath, 'utf8')) as Record<string, unknown>;
-    expect(Object.hasOwn(rawRecord, 'sourceCommit')).toBe(false);
-    expect(readActiveRecord(recordPath)?.sourceCommit).toBeUndefined();
+    // Legacy JOURNALS (pre-embedding records, no sourceCommit) still read —
+    // recovery/reconciliation must parse what old installs left behind. The
+    // journal is hand-written into the isolated work dir (no HOME writes).
+    const legacyJournalPath = path.join(workDir, 'legacy-journal.jsonl');
+    const legacyLine = (to: string): string => `${JSON.stringify({
+      at: '2026-01-01T00:00:00.000Z',
+      from: to === 'planned' ? null : 'planned',
+      to,
+      transactionId: 'install-legacy',
+      releaseId: 'bundled-1.74.1-abcdef012345',
+      productVersion: '1.74.1',
+      releaseMetadataDigest: 'c'.repeat(64),
+      releaseMetadataDigestSource: 'package_manifest',
+      generation: 1,
+    })}\n`;
+    fs.writeFileSync(legacyJournalPath, legacyLine('planned') + legacyLine('confirmed'));
+    const transitions = readTransactionJournal(legacyJournalPath);
+    expect(transitions.map((t) => t.to)).toEqual(['planned', 'confirmed']);
+    expect(transitions[0]?.sourceCommit).toBeUndefined();
 
     // A hand-written legacy active record (pre-embedding) still reads.
     const legacyPath = path.join(workDir, 'legacy-active.json');

@@ -58,6 +58,13 @@ function gateEnv(context, mode, extra) {
     // otherwise the console 504s at 15 min while the update is still
     // applying (the worst possible signal).
     PD_UPDATE_APPLY_FULL_TIMEOUT_MS: '1800000',
+    // PRI-874: /apply-full is an ASYNC acceptance (PRI-854) — it returns
+    // {success, state:'update_in_progress', transactionId} as soon as the
+    // journal's 'planned' entry exists. The default 20s acceptance window
+    // assumes a warm filesystem; a cold CI runner can legitimately exceed
+    // it before the executor writes 'planned', which would surface as a
+    // misleading bootstrap_executor_unresponsive refusal.
+    PD_UPDATE_ACCEPTANCE_WINDOW_MS: '60000',
     PD_GATE_MODE: mode,
     PD_GATE_ROOT: context.root,
     ...extra,
@@ -76,32 +83,77 @@ export function parseGateResult(stdout) {
  * Build the candidate publication with the production builder (used when the
  * gate runs without a CI-provided publication).
  *
+ * PRI-874: the candidate payload MUST carry its own embedded product identity
+ * (SPEC §12 `_release/product-identity.json`) — the installer refuses
+ * unstamped payloads, and the gate derives candidateVersion from that stamp,
+ * never from a component manifest. The version comes from the single product
+ * resolver (root manifest authority); the commit is the real checkout HEAD.
+ *
  * @param {string} installerDir the create-principles-disciple package root
  * @param {string} outputDir    gate-isolated output directory
+ * @returns {Promise<{productVersion: string, sourceCommit: string}>} the identity embedded in the built payload
  */
 export async function gateBuildPublicationInternal(installerDir, outputDir) {
   const builderEntry = path.resolve(installerDir, 'scripts', 'build-self-contained-release.mjs');
   if (!builderEntry.startsWith(installerDir + path.sep) || !existsSync(builderEntry)) {
     throw new Error(`builder entry must be the committed script inside ${installerDir}: ${builderEntry}`);
   }
-  await execFileAsync(process.execPath, [builderEntry, '--output', outputDir], {
+  const repoRoot = path.resolve(installerDir, '..', '..');
+  const resolverEntry = path.join(repoRoot, 'scripts', 'resolve-product-version.mjs');
+  if (!resolverEntry.startsWith(repoRoot + path.sep) || !existsSync(resolverEntry)) {
+    throw new Error(`product resolver must be the committed script inside ${repoRoot}: ${resolverEntry}`);
+  }
+  const { stdout: resolvedVersion } = await execFileAsync(process.execPath, [resolverEntry], {
+    cwd: repoRoot,
+    timeout: 60_000,
+    encoding: 'utf8',
+  });
+  const { stdout: headCommit } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+    cwd: repoRoot,
+    timeout: 60_000,
+    encoding: 'utf8',
+  });
+  const productVersion = resolvedVersion.trim();
+  const sourceCommit = headCommit.trim();
+  await execFileAsync(process.execPath, [
+    builderEntry,
+    '--output', outputDir,
+    '--product-version', productVersion,
+    '--source-commit', sourceCommit,
+  ], {
     cwd: installerDir,
     env: { ...process.env, SOURCE_DATE_EPOCH: '1700000000' },
     timeout: 1_800_000,
   });
+  return { productVersion, sourceCommit };
 }
 
 /**
  * Re-stamp a mutated payload tree with the production asset builder
- * (regenerates _release/manifest.json digests for the mutated content).
+ * (regenerates _release/manifest.json digests for the mutated content) and
+ * embed an EXPLICIT product identity (PRI-874: the installer refuses
+ * unstamped payloads, so the mutated N-1 tree must be re-stamped with its
+ * own test identity, not silently fall back to a component manifest).
  * Delegates to the committed runner's restamp mode.
  *
  * @param {GateProcessContext} context
  * @param {string} payloadDir
+ * @param {string} productVersion strict x.y.z — the payload's identity version
+ * @param {string} sourceCommit   40-char git sha — the payload's identity commit
  */
-export async function gateRestampPayload(context, payloadDir) {
+export async function gateRestampPayload(context, payloadDir, productVersion, sourceCommit) {
+  if (typeof productVersion !== 'string' || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(productVersion)) {
+    throw new Error(`gateRestampPayload requires a strict x.y.z productVersion, got: ${JSON.stringify(productVersion)}`);
+  }
+  if (typeof sourceCommit !== 'string' || !/^[a-f0-9]{40}$/.test(sourceCommit)) {
+    throw new Error(`gateRestampPayload requires a 40-char sourceCommit, got: ${JSON.stringify(sourceCommit)}`);
+  }
   await execFileAsync(process.execPath, [GATE_RUNNER], {
-    env: gateEnv(context, 'restamp', { PD_GATE_PAYLOAD_DIR: payloadDir }),
+    env: gateEnv(context, 'restamp', {
+      PD_GATE_PAYLOAD_DIR: payloadDir,
+      PD_GATE_PRODUCT_VERSION: productVersion,
+      PD_GATE_SOURCE_COMMIT: sourceCommit,
+    }),
     timeout: 600_000,
     maxBuffer: 8 * 1024 * 1024,
   });
