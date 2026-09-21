@@ -528,7 +528,7 @@ function legJobs(overrides: { skip?: string; fail?: string; attempt?: number } =
     name: `Verify Full Release Matrix (cohort SHA) / native-release-matrix (${runner}, ${node})`,
     conclusion: fail === `${runner}|${node}` ? 'failure' : 'success',
     run_attempt: attempt,
-  })).filter((j) => !skip || !j.name.includes(`(${skip.replace('|', ', ')})`));
+  })).filter((j) => !skip || !j.name.includes(`(${skip.split('|').join(', ')})`));
   jobs.push({
     id: 2000,
     name: 'Verify Full Release Matrix (cohort SHA) / N-1 to N real upgrade gate (windows-2025, 22.22.2)',

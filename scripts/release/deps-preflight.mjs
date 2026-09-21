@@ -255,7 +255,7 @@ async function waitOneDependency({
 }) {
   let waitedMs = 0;
   let attempt = 0;
-  let lastAnswer = { kind: 'NOT_YET_VISIBLE', detail: 'no successful registry answer yet' };
+  let lastAnswer;
   while (true) {
     attempt += 1;
     try {

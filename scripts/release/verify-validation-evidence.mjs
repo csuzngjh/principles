@@ -46,7 +46,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const TRUSTED_WORKFLOW_PATHS = new Set([
@@ -207,12 +207,12 @@ export async function verifyValidationEvidence({
   }
   for (const expected of expectedPairs) {
     if (!seenPairs.has(expected)) {
-      reasons.push(`required matrix leg missing from run ${runId} attempt ${facts.attempt}: ${expected.replace('|', ' / ')}`);
+      reasons.push(`required matrix leg missing from run ${runId} attempt ${facts.attempt}: ${expected.split('|').join(' / ')}`);
     }
   }
   for (const seen of seenPairs) {
     if (!expectedPairs.has(seen)) {
-      reasons.push(`run ${runId} carries a matrix leg the current baseline does not define: ${seen.replace('|', ' / ')} (incompatible validation definition)`);
+      reasons.push(`run ${runId} carries a matrix leg the current baseline does not define: ${seen.split('|').join(' / ')} (incompatible validation definition)`);
     }
   }
   for (const job of legJobs.filter((j) => j.conclusion !== 'success')) {
@@ -236,12 +236,23 @@ export async function verifyValidationEvidence({
         reasons.push(`cannot download logs of matrix leg "${probe.name}" (HTTP ${res.status}) — the validated ref is unverifiable, refusing to reuse`);
       } else {
         const text = await res.text();
-        const refEcho = new RegExp(`ref:\\s*${expectCohort}\\s*$`, 'm');
-        const fetchCmd = new RegExp(`git\\s+.*fetch.*${expectCohort}`);
-        if (!refEcho.test(text) || !fetchCmd.test(text)) {
+        // Pure string matching — no RegExp is constructed from the input
+        // (CodeQL regex-injection surface). The input echo is a line of the
+        // exact form `ref: <cohort>`; the checkout proof is a git fetch
+        // COMMAND line containing the cohort SHA.
+        const lines = text.split('\n');
+        const refEcho = lines.some((line) => {
+          const t = line.trim();
+          return t.startsWith('ref:') && t.slice(4).trim() === expectCohort;
+        });
+        const fetchCmd = lines.some((line) => {
+          const t = line.trim();
+          return t.includes('git') && t.includes('fetch') && t.includes(expectCohort);
+        });
+        if (!refEcho || !fetchCmd) {
           reasons.push(
             `matrix leg "${probe.name}" logs do not prove the validated ref is ${expectCohort} ` +
-              `(input echo ${refEcho.test(text) ? 'found' : 'MISSING'}, fetch command ${fetchCmd.test(text) ? 'found' : 'MISSING'})`,
+              `(input echo ${refEcho ? 'found' : 'MISSING'}, fetch command ${fetchCmd ? 'found' : 'MISSING'})`,
           );
         } else {
           facts.validatedRef = expectCohort;
