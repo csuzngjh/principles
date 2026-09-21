@@ -21,7 +21,11 @@ import {
   SqliteDiagnosticianCommitter,
   type DiagnosticianOutputV1,
 } from '@principles/core/runtime-v2';
-import { handleCandidateInternalize, handleCandidateInternalizationBackfill, resolveSourcePainIdFromDiagnostician } from '../../src/commands/candidate.js';
+import {
+  handleCandidateInternalize,
+  handleCandidateInternalizationBackfill,
+  resolveSourcePainIdFromDiagnostician,
+} from '../../src/commands/candidate.js';
 
 let tmpDir = '';
 

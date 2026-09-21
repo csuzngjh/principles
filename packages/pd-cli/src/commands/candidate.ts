@@ -135,9 +135,9 @@ interface ResolvedRecommendation {
  * `PainSignalBridge.buildDiagnosticJson`).
  *
  * Runtime Contract:
- *   - Rule 1: parsed JSON treated as `unknown`
- *   - Rule 2: no `as` bypass; type narrowing via `typeof` + `Object.hasOwn`
- *   - Rule 5: `Object.hasOwn` for untrusted key checks
+ *   - Rules 1/2/5 (unknown JSON, no `as` bypass, `Object.hasOwn` key checks)
+ *     are enforced inside the canonical reader (`parseSeedSourcePainId`)
+ *     that this function delegates to since PRI-866
  *
  * ERR-004: `sourcePainId` resolved from canonical chain, never invented.
  *
