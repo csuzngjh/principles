@@ -8,9 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RELEASE_DIR = path.resolve(HERE, '..', 'release');
 

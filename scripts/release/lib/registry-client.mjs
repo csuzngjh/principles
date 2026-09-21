@@ -17,6 +17,18 @@
 
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 
+// Strict npm package name grammar (scoped or unscoped). Callers pass names
+// read from manifest FILES — validating at this trust boundary guarantees a
+// poisoned manifest value can never steer the request path or host (SSRF /
+// taint containment for CodeQL js/file-access-to-http).
+const NPM_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i;
+
+function assertValidNpmName(npmName) {
+  if (typeof npmName !== 'string' || !NPM_NAME_RE.test(npmName) || npmName.length > 214) {
+    throw new RegistryError(`invalid npm package name: ${JSON.stringify(npmName)}`);
+  }
+}
+
 export class RegistryError extends Error {
   constructor(message, { status, cause } = {}) {
     super(message);
@@ -94,6 +106,7 @@ async function withRetries(fn, { attempts = 3, delayMs, onRetry } = {}) {
  * Returns null when the package itself is not on the registry (404).
  */
 export async function fetchPackument(npmName, opts = {}) {
+  assertValidNpmName(npmName);
   const url = `${registryBase()}/${npmName}`;
   try {
     return await withRetries(
@@ -112,6 +125,7 @@ export async function fetchPackument(npmName, opts = {}) {
  * exact version does not exist).
  */
 export async function fetchExactManifest(npmName, version, opts = {}) {
+  assertValidNpmName(npmName);
   const url = `${registryBase()}/${npmName}/${version}`;
   try {
     return await withRetries(

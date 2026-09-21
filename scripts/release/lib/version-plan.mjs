@@ -116,8 +116,10 @@ export function syncPluginVersionMirror(cwd) {
 
 function extractArchive(repoRoot, sha, dest) {
   fs.mkdirSync(dest, { recursive: true });
-  // Keep the tar INSIDE dest and extract with relative paths: an absolute
-  // Windows path (C:\...) makes MSYS tar treat it as a remote host spec.
+  // Feed git archive straight into tar's stdin (cwd-relative, no absolute
+  // paths — an absolute Windows path (C:\...) makes MSYS tar treat it as a
+  // remote host spec) — no intermediate file, so there is no write/read
+  // window to race on (CodeQL TOCTOU).
   // -c core.autocrlf=false pins the archive to the stored (LF) blobs: on a
   // Windows dev machine with autocrlf=true, git archive would otherwise
   // export CRLF and break byte-comparison with the materialization output.
@@ -126,9 +128,7 @@ function extractArchive(repoRoot, sha, dest) {
     ['-c', 'core.autocrlf=false', 'archive', '--format=tar', sha],
     { cwd: repoRoot, maxBuffer: 512 * 1024 * 1024 },
   );
-  fs.writeFileSync(path.join(dest, 'archive.tar'), buf);
-  execFileSync('tar', ['-xf', 'archive.tar'], { cwd: dest, maxBuffer: 512 * 1024 * 1024 });
-  fs.rmSync(path.join(dest, 'archive.tar'), { force: true });
+  execFileSync('tar', ['-x'], { cwd: dest, input: buf, maxBuffer: 512 * 1024 * 1024 });
 }
 
 function showFile(repoRoot, sha, relPath) {
