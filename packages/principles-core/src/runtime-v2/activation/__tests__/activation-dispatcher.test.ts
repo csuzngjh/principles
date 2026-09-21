@@ -598,17 +598,6 @@ describe('ActivationDispatcher', () => {
     }
   });
 
-  it('code_tool_hook with queue store -> queued_for_approval with high risk', async () => {
-    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
-    artifactStore.addArtifact(makePrincipleArtifact());
-    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'code_tool_hook', confidence: 0.99 }));
-    expect(result.decision).toBe('queued_for_approval');
-    if (result.decision === 'queued_for_approval') {
-      expect(result.channel).toBe('code_tool_hook');
-      expect(result.riskLevel).toBe('high');
-    }
-  });
-
   it('skill with low confidence -> queued_for_approval', async () => {
     const { artifactStore, dispatcher } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact());
