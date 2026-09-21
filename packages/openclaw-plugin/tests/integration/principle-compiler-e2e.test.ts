@@ -49,8 +49,9 @@ function createTestWorkspace(): TestWorkspace {
 function disposeTestWorkspace(ws: TestWorkspace): void {
   ws.trajectory.dispose();
   // RuleHost created inside test bodies opens a SQLite connection to ws.stateDir
-  // which locks files on Windows. safeRmDir ignores EPERM/ENOTEMPTY so cleanup
-  // does not crash teardown (OS reclaims temp dir eventually).
+  // which locks files on Windows. safeRmDir ignores EPERM/ENOTEMPTY/EBUSY (its
+  // full tolerated set) so cleanup does not crash teardown (OS reclaims temp dir
+  // eventually).
   safeRmDir(ws.workspaceDir);
 }
 
