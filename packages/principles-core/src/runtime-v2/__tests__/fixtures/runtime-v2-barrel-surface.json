@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1768,
+ "count": 1769,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -1664,6 +1664,7 @@
   "parsePITaskMetadata",
   "parsePainIngressReport",
   "parsePainIngressV1Payload",
+  "parseSeedSourcePainId",
   "planOwnerVerdictOverrideResume",
   "probeRuntime",
   "readOwnerIdentityFile",

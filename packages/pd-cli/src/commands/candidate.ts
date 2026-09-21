@@ -21,6 +21,7 @@ import {
   decideInternalizationRoute,
   buildDreamerSeedFromCandidate,
   findExistingDreamerTask,
+  parseSeedSourcePainId,
   PrincipleTreeLedgerAdapter,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
@@ -134,9 +135,9 @@ interface ResolvedRecommendation {
  * `PainSignalBridge.buildDiagnosticJson`).
  *
  * Runtime Contract:
- *   - Rule 1: parsed JSON treated as `unknown`
- *   - Rule 2: no `as` bypass; type narrowing via `typeof` + `Object.hasOwn`
- *   - Rule 5: `Object.hasOwn` for untrusted key checks
+ *   - Rules 1/2/5 (unknown JSON, no `as` bypass, `Object.hasOwn` key checks)
+ *     are enforced inside the canonical reader (`parseSeedSourcePainId`)
+ *     that this function delegates to since PRI-866
  *
  * ERR-004: `sourcePainId` resolved from canonical chain, never invented.
  *
@@ -179,22 +180,11 @@ export async function resolveSourcePainIdFromDiagnostician(
   // contamination from arbitrary candidate.taskId values.
   if (!diagTask || diagTask.taskKind !== 'diagnostician') return null;
 
-  if (typeof diagTask.diagnosticJson !== 'string') return null;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(diagTask.diagnosticJson);
-  } catch {
-    return null;
-  }
-
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-  if (!Object.hasOwn(parsed, 'sourcePainId')) return null;
-
-  const sourcePainId = Reflect.get(parsed, 'sourcePainId');
-  if (typeof sourcePainId !== 'string' || sourcePainId.trim() === '') return null;
-
-  return sourcePainId.trim();
+  // PRI-866: field parse delegates to the core canonical reader
+  // (parseSeedSourcePainId) — same value semantics as the previous inline
+  // parse (trim, blank→null, malformed→null), one source of truth for
+  // how sourcePainId is read from diagnosticJson.
+  return parseSeedSourcePainId(diagTask.diagnosticJson);
 }
 
 function resolveCandidateRecommendation(

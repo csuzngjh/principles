@@ -921,6 +921,7 @@ export {
   createPITaskDiagnosticJson,
   mergePITaskMetadata,
   artificerRepairTaskId,
+  parseSeedSourcePainId,
 } from './internalization/pitask-metadata.js';
 
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
