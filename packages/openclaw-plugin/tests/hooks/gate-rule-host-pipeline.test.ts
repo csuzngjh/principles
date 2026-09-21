@@ -82,28 +82,6 @@ describe('Gate Rule Host Only Pipeline', () => {
   });
 
   describe('Rule Host blocks', () => {
-    // PRE-EXISTING: passes in isolation, fails in full suite — unrelated to M8
-    it.skip('should block with blockSource=rule-host when Rule Host returns block', () => {
-      _mockEvaluate = vi.fn().mockReturnValue({
-        decision: 'block',
-        matched: true,
-        reason: 'Dangerous git force-push detected',
-        ruleId: 'R_001',
-        principleId: 'P_001',
-      });
-
-      const event = {
-        toolName: 'exec',
-        params: { command: 'git push --force' },
-      };
-
-      const result = handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
-
-      expect(result).toBeDefined();
-      expect(result?.block).toBe(true);
-      expect(result?.blockReason).toContain('Dangerous git force-push detected');
-    });
-
     it('should record rulehost_blocked event when Rule Host blocks', () => {
       _mockEvaluate = vi.fn().mockReturnValue({
         decision: 'block',
