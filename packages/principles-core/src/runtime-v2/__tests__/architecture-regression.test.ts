@@ -4042,10 +4042,20 @@ describe('SEC-BASE-1: supply chain provenance guards', () => {
     }
   }
 
-  it('publish-npm.yml uses --provenance', () => {
-    const content = readWorkflow('publish-npm.yml');
-    expect(content, 'publish-npm.yml should exist').not.toBeNull();
-    expect(content).toMatch(/npm\s+publish\s+--provenance/);
+  it('publish surface uses --provenance', () => {
+    // Changesets cutover (SPEC v1.2): the per-package npm publish command
+    // moved from publish-npm.yml into the shared action the train calls —
+    // the invariant spans the whole publish surface.
+    const workflow = readWorkflow('publish-npm.yml');
+    expect(workflow, 'publish-npm.yml should exist').not.toBeNull();
+    const actionPath = pathSync.join(REPO_ROOT, '.github', 'actions', 'publish-npm-package', 'action.yml');
+    let action = '';
+    try {
+      action = fsSync.readFileSync(actionPath, 'utf8');
+    } catch {
+      action = '';
+    }
+    expect(`${workflow}\n${action}`).toMatch(/npm\s+publish\s+--provenance/);
   });
 
   it('publish-npm.yml uses npm ci --ignore-scripts', () => {
