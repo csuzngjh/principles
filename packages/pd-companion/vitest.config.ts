@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts', 'tests/bdd/**/*.steps.ts'],
     environment: 'node',
+    globalSetup: ['../../scripts/test/temp-lifecycle.mjs'],
   },
 });
