@@ -727,9 +727,29 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npm run build:production
 
+      - name: Detect Version PR pending-publish window
+        # Changesets cutover (SPEC v1.2): between "the Version PR
+        # materialized new component versions" and "the release train
+        # published them", the published-bundle suite's registry install
+        # would ETARGET by design. The probe (in-process, audited
+        # registry client) is semantic — it covers Version PR branches AND
+        # the post-cohort-merge main window, and self-heals once the train
+        # finishes. A genuinely unresolvable range fails the probe loudly.
+        id: pending
+        working-directory: packages/openclaw-plugin
+        run: |
+          set -euo pipefail
+          OUT=$(node ../../scripts/release/is-pending-publish-window.mjs --dir packages/openclaw-plugin)
+          echo "window=$OUT" >> "$GITHUB_OUTPUT"
+
       - name: Run tests with coverage
         working-directory: packages/openclaw-plugin
-        run: npm run test:coverage
+        run: |
+          EXTRA=""
+          if [ "${{ steps.pending.outputs.window }}" = "true" ]; then
+            EXTRA="--exclude tests/package/published-host-runtime-bundle.test.ts"
+          fi
+          npx vitest run --coverage $EXTRA
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7

@@ -90,6 +90,23 @@ describe('registry client: exact-version semantics', () => {
   });
 });
 
+describe('pending-window: registry range matching (caret/tilde/exact)', () => {
+  it('matches across minors for caret, within minor for tilde, exact otherwise', async () => {
+    const lib = (await import(
+      pathToFileURL(path.join(RELEASE_DIR, 'lib', 'pending-window.mjs')).href
+    )) as { rangeHasRegistryMatch: (r: string, v: string[]) => boolean };
+    // The registry never published 1.74.1 — caret still matches later minors.
+    expect(lib.rangeHasRegistryMatch('^1.74.1', ['1.74.0', '1.152.10', '1.286.0'])).toBe(true);
+    expect(lib.rangeHasRegistryMatch('^1.74.1', ['1.74.0'])).toBe(false);
+    expect(lib.rangeHasRegistryMatch('~1.74.1', ['1.74.0'])).toBe(false);
+    expect(lib.rangeHasRegistryMatch('~1.74.1', ['1.74.2', '1.75.0'])).toBe(true);
+    expect(lib.rangeHasRegistryMatch('1.74.1', ['1.74.1'])).toBe(true);
+    expect(lib.rangeHasRegistryMatch('1.74.1', ['1.74.2'])).toBe(false);
+    expect(lib.rangeHasRegistryMatch('^0.2.0', ['0.2.6'])).toBe(true);
+    expect(lib.rangeHasRegistryMatch('^1.74.1', ['2.0.0'])).toBe(false);
+  });
+});
+
 describe('registry-exact CLI: LOCAL_BEHIND_REGISTRY (T1 baseline gate)', () => {
   it('committed version behind the registry latest exits 6, not 0', async () => {
     const CLI = path.join(RELEASE_DIR, 'registry-exact.mjs');
