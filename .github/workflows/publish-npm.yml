@@ -229,21 +229,28 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
-      - name: Publish 5/7 @principles/pd-cli
+      # Publish order is a DEPENDENCY topological order (SPEC §20): a package
+      # is published only after every internal dependency it declares, so the
+      # dependent's "Verify registry dependencies are published" gate sees a
+      # resolvable range. @principles/pd-cli depends on principles-disciple
+      # (^2.0.2), so the plugin publishes BEFORE pd-cli. The prior ordering
+      # (pd-cli at 5/7, plugin at 6/7) made pd-cli's gate fail against the
+      # not-yet-published plugin version.
+      - name: Publish 5/7 principles-disciple (plugin)
         uses: ./.github/actions/publish-npm-package
         with:
-          pkg_dir: pd-cli
-          npm_name: '@principles/pd-cli'
+          pkg_dir: openclaw-plugin
+          npm_name: 'principles-disciple'
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
           npm_token: ${{ secrets.NPM_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
-      - name: Publish 6/7 principles-disciple (plugin)
+      - name: Publish 6/7 @principles/pd-cli
         uses: ./.github/actions/publish-npm-package
         with:
-          pkg_dir: openclaw-plugin
-          npm_name: 'principles-disciple'
+          pkg_dir: pd-cli
+          npm_name: '@principles/pd-cli'
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
           npm_token: ${{ secrets.NPM_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
