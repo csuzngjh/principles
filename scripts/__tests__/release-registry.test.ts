@@ -16,6 +16,19 @@ async function loadClient() {
   return await import(pathToFileURL(path.join(RELEASE_DIR, 'lib', 'registry-client.mjs')).href);
 }
 
+async function loadPendingWindow() {
+  return await import(pathToFileURL(path.join(RELEASE_DIR, 'lib', 'pending-window.mjs')).href) as {
+    rangeHasRegistryMatch: (r: string, v: string[]) => boolean;
+    changelogHasVersion: (text: string | null, version?: string) => boolean;
+    decidePending: (a: {
+      range: string;
+      registryVersions?: string[];
+      workspaceVersion?: string;
+      changelogText?: string | null;
+    }) => 'published' | 'pending' | 'broken';
+  };
+}
+
 function jsonResponse(status: number, body: unknown) {
   return {
     ok: status >= 200 && status < 300,
@@ -92,9 +105,7 @@ describe('registry client: exact-version semantics', () => {
 
 describe('pending-window: registry range matching (caret/tilde/exact)', () => {
   it('matches across minors for caret, within minor for tilde, exact otherwise', async () => {
-    const lib = (await import(
-      pathToFileURL(path.join(RELEASE_DIR, 'lib', 'pending-window.mjs')).href
-    )) as { rangeHasRegistryMatch: (r: string, v: string[]) => boolean };
+    const lib = await loadPendingWindow();
     // The registry never published 1.74.1 — caret still matches later minors.
     expect(lib.rangeHasRegistryMatch('^1.74.1', ['1.74.0', '1.152.10', '1.286.0'])).toBe(true);
     expect(lib.rangeHasRegistryMatch('^1.74.1', ['1.74.0'])).toBe(false);
@@ -104,6 +115,66 @@ describe('pending-window: registry range matching (caret/tilde/exact)', () => {
     expect(lib.rangeHasRegistryMatch('1.74.1', ['1.74.2'])).toBe(false);
     expect(lib.rangeHasRegistryMatch('^0.2.0', ['0.2.6'])).toBe(true);
     expect(lib.rangeHasRegistryMatch('^1.74.1', ['2.0.0'])).toBe(false);
+  });
+});
+
+describe('pending-window: changelogHasVersion (Version PR materialization proof)', () => {
+  it('matches only the changesets `## <version>` heading form, not brackets/prefixes', async () => {
+    const { changelogHasVersion } = await loadPendingWindow();
+    const log = ['# Changelog', '', '## 1.287.0', '', '### Patch Changes', '', '- fix', '', '## [0.1.0] - 2026-04-17', ''].join('\n');
+    expect(changelogHasVersion(log, '1.287.0')).toBe(true);
+    // Legacy/manual bracket headings are never treated as materialization proof.
+    expect(changelogHasVersion(log, '0.1.0')).toBe(false);
+    // A substring of a larger version is not a match (1.287.0 must not match 1.287.0.1-style text).
+    expect(changelogHasVersion('## 1.287.10\n', '1.287.1')).toBe(false);
+    expect(changelogHasVersion(null, '1.287.0')).toBe(false);
+    expect(changelogHasVersion('# Changelog', undefined)).toBe(false);
+  });
+});
+
+describe('pending-window: decidePending (published / pending / broken)', () => {
+  it('classifies a range that resolves on the registry as published', async () => {
+    const { decidePending } = await loadPendingWindow();
+    expect(
+      decidePending({ range: '^1.74.1', registryVersions: ['1.74.1', '1.286.0'], workspaceVersion: '1.286.0', changelogText: '## 1.286.0' }),
+    ).toBe('published');
+  });
+
+  it('registry-absent + workspace version + changelog materialization => pending', async () => {
+    const { decidePending } = await loadPendingWindow();
+    expect(
+      decidePending({ range: '^1.287.0', registryVersions: ['1.286.0'], workspaceVersion: '1.287.0', changelogText: '## 1.287.0\n\n### Patch Changes' }),
+    ).toBe('pending');
+  });
+
+  it('a mistyped version equal to the workspace value but NOT materialized fails loud (broken)', async () => {
+    const { decidePending } = await loadPendingWindow();
+    // The old bug this guards: 9.9.9 with workspace version 9.9.9 but no
+    // Version PR changelog entry must NOT be read as a future publish window.
+    expect(
+      decidePending({ range: '^9.9.9', registryVersions: ['1.286.0'], workspaceVersion: '9.9.9', changelogText: '# Changelog\n\n## 1.286.0' }),
+    ).toBe('broken');
+  });
+
+  it('registry-absent + workspace version present but no changelog heading => broken', async () => {
+    const { decidePending } = await loadPendingWindow();
+    expect(
+      decidePending({ range: '^1.287.0', registryVersions: [], workspaceVersion: '1.287.0', changelogText: '# Changelog\n\n## [0.1.0] - date' }),
+    ).toBe('broken');
+  });
+
+  it('registry-absent + range does not equal the workspace version => broken', async () => {
+    const { decidePending } = await loadPendingWindow();
+    expect(
+      decidePending({ range: '^2.0.0', registryVersions: ['1.286.0'], workspaceVersion: '1.287.0', changelogText: '## 1.287.0' }),
+    ).toBe('broken');
+  });
+
+  it('registry-absent + unknown workspace package => broken', async () => {
+    const { decidePending } = await loadPendingWindow();
+    expect(
+      decidePending({ range: '^1.287.0', registryVersions: [], workspaceVersion: undefined, changelogText: null }),
+    ).toBe('broken');
   });
 });
 

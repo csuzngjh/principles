@@ -540,20 +540,11 @@ jobs:
           npm run build --workspace=principles-disciple
 
       - name: Verify real OpenClaw host parity and published bundle
-        # The published-bundle suite packs the working tree and installs its
-        # internal deps FROM THE REGISTRY. On a changesets Version PR
-        # (changeset-release/* branches — the official bot convention) those
-        # versions are materialized but NOT yet published, so the install
-        # would ETARGET by design. The publish-ordering guarantee it usually
-        # approximates is owned by the release train's dependency-ordered
-        # preflight (core publishes before the plugin). On such PRs run only
-        # the host-parity suite; every other branch keeps the full check.
-        run: |
-          if [[ "${{ github.head_ref }}" == changeset-release/* ]]; then
-            npx vitest run --config vitest.parity.config.ts tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts
-          else
-            npm run test:host-runtime-parity --workspace=principles-disciple
-          fi
+        # The published-bundle suite decides its own skip during the changesets
+        # pending-publish window (see
+        # tests/package/published-host-runtime-bundle.test.ts), so the workflow
+        # runs the full parity command unconditionally on every branch.
+        run: npm run test:host-runtime-parity --workspace=principles-disciple
         working-directory: packages/openclaw-plugin
 
   test-codex-adapter:
@@ -727,29 +718,9 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npm run build:production
 
-      - name: Detect Version PR pending-publish window
-        # Changesets cutover (SPEC v1.2): between "the Version PR
-        # materialized new component versions" and "the release train
-        # published them", the published-bundle suite's registry install
-        # would ETARGET by design. The probe (in-process, audited
-        # registry client) is semantic — it covers Version PR branches AND
-        # the post-cohort-merge main window, and self-heals once the train
-        # finishes. A genuinely unresolvable range fails the probe loudly.
-        id: pending
-        working-directory: packages/openclaw-plugin
-        run: |
-          set -euo pipefail
-          OUT=$(node ../../scripts/release/is-pending-publish-window.mjs --dir packages/openclaw-plugin)
-          echo "window=$OUT" >> "$GITHUB_OUTPUT"
-
       - name: Run tests with coverage
         working-directory: packages/openclaw-plugin
-        run: |
-          EXTRA=""
-          if [ "${{ steps.pending.outputs.window }}" = "true" ]; then
-            EXTRA="--exclude tests/package/published-host-runtime-bundle.test.ts"
-          fi
-          npx vitest run --coverage $EXTRA
+        run: npx vitest run --coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7

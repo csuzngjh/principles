@@ -1,5 +1,6 @@
 ---
 ---
 
-Explicitly no release needed: release-governance script fixes, a vitest
-config exclusion (not shipped in the package tarball), and tests.
+Explicitly no release needed: release-governance script fixes, the published-
+bundle contract test deciding its own pending-publish-window skip in-process,
+and tests. None of this ships in the package tarball.

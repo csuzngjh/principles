@@ -1,19 +1,22 @@
 /**
- * Pending-publish-window probe (changesets cutover, SPEC v1.2) — shared
- * logic for the CLI (scripts/release/is-pending-publish-window.mjs) and
- * the openclaw-plugin vitest config (which needs a sync-decided exclusion
- * at config-load time and runs this in-process via async config).
+ * Pending-publish-window probe (changesets cutover, SPEC v1.2) — shared logic
+ * for the published-bundle contract test
+ * (packages/openclaw-plugin/tests/package/published-host-runtime-bundle.test.ts),
+ * which decides its own skip in-process instead of being told by the workflow.
  *
- * "true" when the package's INTERNAL runtime dependencies include a range
- * that resolves to nothing on the registry BUT is satisfied by the same
- * workspace's own (not-yet-published) version — the window between "the
- * Version PR materialized new versions" and "the release train published
- * them". Consumers skip checks that install the packed artifact from the
- * registry (they would ETARGET by design); the publish-ordering guarantee
+ * "true" during the window between "a changesets Version PR materialized new
+ * component versions" and "the release train published them": a package's
+ * INTERNAL runtime dependency range resolves to nothing on the registry, yet
+ * the Version PR has already written that exact version into the dependency's
+ * own CHANGELOG. Consumers that install the packed artifact FROM the registry
+ * skip that probe (it would ETARGET by design); the publish-ordering guarantee
  * itself is owned by the train's dependency-ordered preflight.
  *
- * A range with no registry match that is NOT satisfied by the workspace is
- * a genuinely broken publish range: this throws (fail loud).
+ * Requiring the CHANGELOG materialization proof — not just "the range equals
+ * this workspace's version" — keeps an ordinary broken version (e.g. a mistyped
+ * 9.9.9 no Version PR produced) from being silently read as a future publish
+ * window: registry-absent AND not changesets-materialized is a genuinely
+ * unresolvable publish range and this throws (fail loud).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,13 +49,49 @@ export function rangeHasRegistryMatch(range, versions) {
   });
 }
 
-function workspaceVersionMap(repoRoot) {
+/**
+ * True when `version` was materialized by a changesets Version PR, which writes
+ * exactly one `## <version>` heading per release into the package CHANGELOG.
+ * Legacy/manual bracket headings (`## [0.1.0] - date`) never match — fine,
+ * because a publish window only ever exists for a version a Version PR just
+ * wrote, and that write always uses the `## <version>` form.
+ */
+export function changelogHasVersion(changelogText, version) {
+  if (!changelogText || !version) return false;
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^## ${escaped}$`, 'm').test(changelogText);
+}
+
+/**
+ * Pure, network-free decision for one internal dependency range — the
+ * fail-loud contract the probe enforces:
+ *
+ *   'published' — the range matches a version already on the registry; a
+ *                 consumer install resolves normally, there is no window.
+ *   'pending'   — registry-absent, the range's base equals the workspace
+ *                 version, AND that version is proven materialized by the
+ *                 Version PR (changelogHasVersion): the publish window.
+ *   'broken'    — registry-absent and NOT a materialized version: a genuinely
+ *                 unresolvable publish range (a mistyped/abandoned version),
+ *                 which callers must surface rather than skip around.
+ */
+export function decidePending({ range, registryVersions, workspaceVersion, changelogText }) {
+  if (rangeHasRegistryMatch(range, registryVersions ?? [])) return 'published';
+  const base = range.replace(/^[~^]/, '');
+  const materialized =
+    workspaceVersion !== undefined &&
+    base === workspaceVersion &&
+    changelogHasVersion(changelogText, workspaceVersion);
+  return materialized ? 'pending' : 'broken';
+}
+
+function workspacePackageMap(repoRoot) {
   const map = new Map();
   for (const entry of fs.readdirSync(path.join(repoRoot, 'packages'), { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     try {
       const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'packages', entry.name, 'package.json'), 'utf8'));
-      if (pkg.name && pkg.version && !pkg.private) map.set(pkg.name, pkg.version);
+      if (pkg.name && pkg.version && !pkg.private) map.set(pkg.name, { version: pkg.version, dir: `packages/${entry.name}` });
     } catch {
       // not a package directory
     }
@@ -60,24 +99,38 @@ function workspaceVersionMap(repoRoot) {
   return map;
 }
 
+function readChangelog(changelogPath) {
+  try {
+    return fs.readFileSync(changelogPath, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 export async function isPendingPublishWindow(repoRoot, pkgDirRel) {
   const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, pkgDirRel, 'package.json'), 'utf8'));
   const internalDeps = Object.entries(manifest.dependencies ?? {}).filter(
     ([name]) => name.startsWith('@principles/') || name === 'principles-disciple',
   );
-  const workspaceVersions = workspaceVersionMap(repoRoot);
+  const workspacePackages = workspacePackageMap(repoRoot);
   for (const [name, range] of internalDeps) {
     const packument = await fetchPackument(name); // throws on registry errors (never read as absent)
-    if (rangeHasRegistryMatch(range, Object.keys(packument?.versions ?? {}))) continue;
-    const pending = workspaceVersions.get(name);
-    if (pending !== undefined && range.replace(/^[~^]/, '') === pending) {
+    const pkg = workspacePackages.get(name);
+    const decision = decidePending({
+      range,
+      registryVersions: Object.keys(packument?.versions ?? {}),
+      workspaceVersion: pkg?.version,
+      changelogText: pkg ? readChangelog(path.join(repoRoot, pkg.dir, 'CHANGELOG.md')) : null,
+    });
+    if (decision === 'published') continue;
+    if (decision === 'pending') {
       console.warn(
-        `${name}@${range} is pending publication (workspace has ${pending}); the release train's dependency-ordered preflight owns the post-publish guarantee.`,
+        `${name}@${range} is pending publication (a Version PR materialized ${pkg.version} but the registry has no match); the release train's dependency-ordered preflight owns the post-publish guarantee.`,
       );
       return true;
     }
     throw new Error(
-      `${name}@${range} resolves to nothing on the registry and does not match this workspace's own version (${pending ?? 'absent'}) — a genuinely unresolvable publish range.`,
+      `${name}@${range} resolves to nothing on the registry and is not a changesets-materialized version of this workspace (${pkg?.version ?? 'absent'}) — a genuinely unresolvable publish range.`,
     );
   }
   return false;
