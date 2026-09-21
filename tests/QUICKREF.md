@@ -3,14 +3,14 @@
 ## 🚀 快速开始
 
 ```bash
-# 运行OKR测试
-./tests/run-okr-test.sh
+# 运行OKR测试（已归档至 docs/archive/tests-2026-03/，仅历史参考：依赖的 2026-03 trust-engine/Linux 环境已不存在，不可再运行）
+./docs/archive/tests-2026-03/scripts/run-okr-test.sh
 
 # 评分报告
 ./tests/score-report.sh ~/clawd/okr-diagnostic/phase1-structure-report.md
 
 # 对比两份报告
-./tests/compare-reports.sh report1.md report2.md
+./docs/archive/tests-2026-03/scripts/compare-reports.sh report1.md report2.md
 ```
 
 ---
@@ -60,10 +60,10 @@ CHECK_INTERVAL=20 # 每20秒检查
 
 ```bash
 # 测试脚本
-tests/run-okr-test.sh          # 主测试脚本
+docs/archive/tests-2026-03/scripts/run-okr-test.sh          # 主测试脚本
 tests/config/test-env.sh       # 配置文件
 tests/score-report.sh          # 评分脚本
-tests/compare-reports.sh       # 对比脚本
+docs/archive/tests-2026-03/scripts/compare-reports.sh       # 对比脚本
 
 # 输出文件
 ~/clawd/okr-diagnostic/        # OKR任务输出
