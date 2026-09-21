@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
+    globalSetup: ['../../scripts/test/temp-lifecycle.mjs'],
     include: ['tests/**/*.test.ts'],
     // better-sqlite3 native handles don't clean up properly when a fork
     // subprocess exits, causing "Worker exited unexpectedly" on Linux CI.
