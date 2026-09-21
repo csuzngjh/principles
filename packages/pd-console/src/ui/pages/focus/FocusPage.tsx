@@ -38,22 +38,27 @@ import type {
 } from "@principles/core/runtime-v2";
 
 type DecisionResult =
-  | { success: true }
+  | { success: true; warning?: string }
   | { success: false; error: string; nextAction?: string };
 
 export function summarizeDecisionResults(results: readonly DecisionResult[]): {
   allSucceeded: boolean;
   failedCount: number;
   failureReason?: string;
+  successWarnings: string[];
 } {
   const failures = results.filter((result): result is Extract<DecisionResult, { success: false }> => !result.success);
   const first = failures[0];
+  const successWarnings = results
+    .filter((result): result is Extract<DecisionResult, { success: true }> => result.success && result.warning !== undefined)
+    .map((result) => result.warning as string);
   return {
     allSucceeded: failures.length === 0,
     failedCount: failures.length,
     ...(first
       ? { failureReason: first.nextAction ? `${first.error} ${first.nextAction}` : first.error }
       : {}),
+    successWarnings,
   };
 }
 
@@ -386,7 +391,7 @@ function PendingReviewCard({
   async function applyDecisionToAllRecords(
     action: "approve" | "reject",
     reason?: string,
-  ): Promise<{ allSucceeded: boolean; failedCount: number; totalCount: number; failureReason?: string }> {
+  ): Promise<{ allSucceeded: boolean; failedCount: number; totalCount: number; failureReason?: string; successWarnings: string[] }> {
     // Only process pending records — skip already-approved/rejected to avoid
     // stable partial failures on mixed-status groups.
     const pendingRecords = group.records.filter((r) => r.status === "pending");
@@ -396,7 +401,13 @@ function PendingReviewCard({
         action === "approve"
           ? await approveApproval(record.id)
           : await rejectApproval(record.id, reason ?? "");
-      results.push(result);
+      // PRI-890: preserve non-fatal server warnings (e.g. prompt injection
+      // budget exclusion) on successful decisions.
+      results.push(
+        result.success
+          ? { success: true, warning: result.data?.warning }
+          : { success: false, error: result.error ?? "unknown error", nextAction: result.nextAction },
+      );
     }
     return { ...summarizeDecisionResults(results), totalCount: pendingRecords.length };
   }
@@ -405,9 +416,15 @@ function PendingReviewCard({
     if (!isActionable || actionLoading) return;
     setActionLoading(true);
     try {
-      const { allSucceeded, failedCount, totalCount, failureReason } = await applyDecisionToAllRecords("approve");
+      const { allSucceeded, failedCount, totalCount, failureReason, successWarnings } = await applyDecisionToAllRecords("approve");
       if (allSucceeded) {
         toast.success(t("pages.focus.approveSucceeded", { defaultValue: "已批准" }));
+        // PRI-890: a committed activation can still be excluded from agent
+        // behavior (prompt injection budget saturated) — the server warning
+        // must reach the Owner, not vanish behind the success toast (rc-9).
+        if (successWarnings.length > 0) {
+          toast.warning(successWarnings.join("\n"), { duration: 15000 });
+        }
         onDecisionApplied();
       } else {
         toast.error(

@@ -1679,6 +1679,9 @@ export interface ApprovalRecordData {
   effectDescription: string | undefined;
   rejectionEffect: string | undefined;
   isMvpProven?: boolean;
+  /** PRI-890: non-fatal server warnings on the approve response (e.g. prompt
+   * injection budget exclusion). Absent means no warning. */
+  warning?: string;
 }
 
 function validateApprovalRecord(v: unknown): ApprovalRecordData | null {
@@ -1708,6 +1711,7 @@ function validateApprovalRecord(v: unknown): ApprovalRecordData | null {
     rejectionEffect: Object.hasOwn(v, 'rejectionEffect') && isString(v.rejectionEffect) ? v.rejectionEffect : undefined,
   };
   if (Object.hasOwn(v, 'isMvpProven') && isBoolean(v.isMvpProven)) result.isMvpProven = v.isMvpProven;
+  if (Object.hasOwn(v, 'warning') && isString(v.warning)) result.warning = v.warning;
   return result;
 }
 
