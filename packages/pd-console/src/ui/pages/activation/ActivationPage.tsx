@@ -487,11 +487,13 @@ export function ActivationPage() {
   // Deep link (?activationId=): scroll the linked activation card into view
   // and pulse a theme-token ring for a few seconds. Runs once the list has
   // actually rendered; a card that is not on the page degrades to a plain
-  // landing (rc-9 — no fabricated focus).
+  // landing (rc-9 — no fabricated focus). The URL param is untrusted (rc-1):
+  // CSS.escape (unquoted attribute selector) keeps a crafted id from breaking
+  // the selector.
   useEffect(() => {
     if (deepLinkActivationId === null || loadingState !== "loaded") return;
     const card = document.querySelector(
-      `[data-testid="activation-card-${deepLinkActivationId}"]`,
+      `[data-testid=${CSS.escape(`activation-card-${deepLinkActivationId}`)}]`,
     );
     if (card === null) return;
     card.scrollIntoView({ block: "center" });

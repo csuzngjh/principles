@@ -50,18 +50,21 @@ export function createArtifactPrincipleResolutionDeps(
 }
 
 /**
- * Resolve the ledger principle id behind one approval artifact: a direct
- * sourcePrincipleId column hit is trusted as-is (structured column, not a
- * draft title), otherwise the candidate lineage is walked. Returns null when
- * unresolvable — the caller degrades to unlinked / bare-link and never
- * guesses.
+ * Resolve the ledger principle id behind one approval artifact — ALWAYS via
+ * resolveLedgerPrincipleId, so a direct `sourcePrincipleId` column hit is
+ * validated against the ledger (`hasPrinciple`) before it is trusted and the
+ * candidate lineage is walked otherwise. Returns null when unresolvable —
+ * the caller degrades to unlinked / bare-link and never guesses.
+ *
+ * Contract note (PR #1789 review): this deliberately tightens the previous
+ * grouped-view behavior, which trusted an unvalidated column hit. A stale
+ * column id must not surface as a deep-link target — /principles/<stale-id>
+ * would dead-end the Owner on a not-found page.
  */
 export async function resolveArtifactPrincipleId(
   artifact: PIArtifactRecord,
   deps: ArtifactPrincipleResolutionDeps,
 ): Promise<string | null> {
-  const direct = artifact.sourcePrincipleId ?? null;
-  if (direct) return direct;
   const resolution = await resolveLedgerPrincipleId(artifact, deps);
   return resolution.status === 'resolved' ? resolution.principleId : null;
 }

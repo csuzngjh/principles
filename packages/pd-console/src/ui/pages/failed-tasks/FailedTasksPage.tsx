@@ -578,12 +578,16 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
 
   // Deep link (?taskId=): fetch the linked task's detail and scroll its row
   // into view once. The table mounts only after the task list has loaded, so
-  // the row is present at first effect run.
+  // the row is present at first effect run. The URL param is untrusted
+  // (rc-1): CSS.escape (unquoted attribute selector) keeps a crafted id from
+  // breaking the selector.
   useEffect(() => {
     if (deepLinkTask === undefined || deepLinkFetchedRef.current) return;
     deepLinkFetchedRef.current = true;
     void requestDetail(deepLinkTask.taskId);
-    const row = document.querySelector(`[data-testid="detail-toggle-${deepLinkTask.taskId}"]`);
+    const row = document.querySelector(
+      `[data-testid=${CSS.escape(`detail-toggle-${deepLinkTask.taskId}`)}]`,
+    );
     row?.scrollIntoView({ block: "center" });
   }, [deepLinkTask, requestDetail]);
 

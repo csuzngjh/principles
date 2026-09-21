@@ -33,16 +33,20 @@ test.describe('PRI-629: Focus routes Owner decisions to their existing authoriti
   test('pending deployment approval is visible and deep-links to its principle detail page', async ({ page }) => {
     const decisions = await apiGet('/api/v1/governance/owner-decisions');
     expect(decisions.status).toBe(200);
-    const approvalItem = decisions.body.data.items.find((entry: any) => entry.kind === 'activation_approval');
+    // Ledger-validated contract: only approvals whose principle resolves in
+    // the ledger carry principleId (stale column ids degrade to the bare
+    // list link). Pick a resolvable one for the deep-link assertion.
+    const approvalItem = decisions.body.data.items.find(
+      (entry: any) => entry.kind === 'activation_approval'
+        && typeof entry.principleId === 'string' && entry.principleId.length > 0,
+    );
     expect(approvalItem).toBeTruthy();
 
     await gotoFocus(page);
     const cta = page.getByTestId(`go-approvals-${approvalItem.taskId}`);
     await expect(cta).toBeVisible();
-    // Seeded approval artifacts carry source_principle_id, so the server
-    // resolves the ledger id and the CTA must target the principle DETAIL
-    // page (which owns the approve/reject actions) — not the bare review list.
-    expect(approvalItem.principleId).toBeTruthy();
+    // The CTA must target the principle DETAIL page (which owns the
+    // approve/reject actions) — not the bare review list.
     const expectedHash = `#/principles/${encodeURIComponent(approvalItem.principleId)}`;
     await expect(cta).toHaveAttribute('href', expectedHash);
     await cta.click();

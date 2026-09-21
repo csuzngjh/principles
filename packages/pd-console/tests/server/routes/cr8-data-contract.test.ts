@@ -400,6 +400,46 @@ describe('CR8 Backend Data Contract Routes', () => {
       const artifactId1 = `artifact-grouped-1-${Date.now()}`;
       const artifactId2 = `artifact-grouped-2-${Date.now()}`;
 
+      // The grouped resolver now ledger-validates direct hits (PR #1789
+      // review contract): register the seeded principle so the group keeps
+      // its principleId instead of degrading to `unlinked:<artifactId>`.
+      const groupedStateDir = path.join(tmpDir, '.state');
+      fs.mkdirSync(groupedStateDir, { recursive: true });
+      const groupedLedger = {
+        _tree: {
+          principles: {
+            [principleId]: {
+              id: principleId,
+              version: 1,
+              text: 'CR8 grouped principle',
+              triggerPattern: 'test-trigger',
+              action: 'test-action',
+              status: 'active',
+              evaluability: 'deterministic',
+              priority: 'P1',
+              scope: 'general',
+              valueScore: 0,
+              adherenceRate: 0,
+              painPreventedCount: 0,
+              derivedFromPainIds: [],
+              ruleIds: [],
+              conflictsWithPrincipleIds: [],
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          },
+          rules: {},
+          implementations: {},
+          metrics: {},
+          lastUpdated: new Date().toISOString(),
+        },
+      };
+      fs.writeFileSync(
+        path.join(groupedStateDir, 'principle_training_state.json'),
+        JSON.stringify(groupedLedger, null, 2),
+        'utf-8',
+      );
+
       // Seed artifacts with same sourcePrincipleId
       seedArtifact(artifactId1, principleId);
       seedArtifact(artifactId2, principleId);
