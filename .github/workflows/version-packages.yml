@@ -1,0 +1,82 @@
+name: Version Packages
+
+# SPEC v1.2 §16 — the rolling Version Packages PR automation. The changesets
+# action ONLY creates/updates the Version PR; it never publishes, never tags,
+# never creates GitHub releases (create-github-releases/push-git-tags are
+# explicitly off — those are PD publish-train closing steps).
+#
+# The same workflow closes the release-cohort loop: when a push to main is a
+# Version PR MERGE commit (proven by reproduction, not by message/actor), it
+# dispatches the publish train bound to that exact SHA (SPEC §17).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  # gh workflow run in the cohort-dispatch step below.
+  actions: write
+
+concurrency:
+  group: version-packages-main
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Version Packages PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410b181273ba90b1 # v6
+        with:
+          # The action pushes via its own token through the GitHub API;
+          # the checkout credential is not needed and stays out of scope.
+          persist-credentials: false
+          # Cohort detection may need first-parent history.
+          fetch-depth: 100
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe502a # v6
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Materialize version plan (changeset version + mirror + lockfile)
+        id: changesets
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          # PD's materialization pipeline: changeset version, the approved
+          # component mirror, and lockfile materialization (SPEC §13).
+          # npm ci above already installed the workspace the CLI needs.
+          version-script: node scripts/release/materialize-version-plan.mjs
+          commit-message: 'chore: version packages [version-packages]'
+          pr-title: 'Version Packages'
+          # PD owns tags/releases in the publish train (SPEC §16/§25/§26).
+          create-github-releases: false
+          push-git-tags: false
+          # GITHUB_TOKEN works but its PRs do not trigger `on: pull_request`
+          # workflows, so the required "Verify Merge Gate" check never runs
+          # and branch protection blocks the merge. PD_VERSION_PR_TOKEN (a
+          # fine-grained PAT with contents:write + pull-requests:write)
+          # restores the full check/merge path; until it exists the bot PR
+          # is created but not mergeable — add the secret to enable.
+          github-token: ${{ secrets.PD_VERSION_PR_TOKEN || github.token }}
+
+      - name: Dispatch publish train on cohort merge
+        # A push that leaves NO pending changesets and IS a Version PR merge
+        # commit = a release cohort. Dispatch the publish train bound to
+        # this exact SHA; feature pushes are ignored.
+        if: steps.changesets.outputs.has-changesets == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if node scripts/release/resolve-release-cohort.mjs --is-cohort "$GITHUB_SHA"; then
+            echo "Release cohort detected at $GITHUB_SHA — dispatching publish train."
+            gh workflow run publish-npm.yml --ref main -f cohort_sha="$GITHUB_SHA"
+          else
+            echo "Not a release cohort — no publish dispatch."
+          fi

@@ -70,9 +70,13 @@ function readText(relPath) {
   }
 }
 
-// 3. publish-npm.yml uses --provenance and --ignore-scripts
+// 3. publish path uses --provenance and --ignore-scripts. Since the
+// changesets cutover the per-package publish command lives in the shared
+// action the publish train calls; the invariant spans both files.
 {
   const content = readText('.github/workflows/publish-npm.yml');
+  const action = readText('.github/actions/publish-npm-package/action.yml') ?? '';
+  const publishSurface = `${content ?? ''}\n${action}`;
   check(
     'publish-npm.yml exists',
     content !== null,
@@ -82,14 +86,14 @@ function readText(relPath) {
   if (content !== null) {
     check(
       'npm publish uses --provenance',
-      /npm\s+publish\s+--provenance/.test(content),
-      'publish-npm.yml missing `npm publish --provenance`',
+      /npm\s+publish\s+--provenance/.test(publishSurface),
+      'publish surface (publish-npm.yml + publish-npm-package action) missing `npm publish --provenance`',
       'Add --provenance flag to npm publish step',
     );
     check(
       'npm ci uses --ignore-scripts',
-      /npm\s+ci\s+--ignore-scripts/.test(content),
-      'publish-npm.yml missing `npm ci --ignore-scripts`',
+      /npm\s+ci\s+--ignore-scripts/.test(publishSurface),
+      'publish surface missing `npm ci --ignore-scripts`',
       'Add --ignore-scripts flag to npm ci step to block install scripts',
     );
   }

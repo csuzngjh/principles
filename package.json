@@ -66,6 +66,8 @@
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.2",
+    "@changesets/get-release-plan": "^5.0.2",
+    "@changesets/parse": "^1.0.0",
     "@cucumber/gherkin": "^42.0.1",
     "@cucumber/messages": "^34.2.1",
     "@eslint/js": "^10.0.1",
