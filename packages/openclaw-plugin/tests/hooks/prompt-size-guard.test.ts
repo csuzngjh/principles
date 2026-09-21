@@ -1,11 +1,12 @@
 /**
- * Tests for prompt.ts diagnostician fixes (Phase A: Immediate Hemorrhage Control)
+ * Tests for prompt.ts injection size guard (fail-closed)
+ *
+ * M8 (PRI-410) removed legacy diagnostician task injection; the skipped
+ * regression blocks for that retired behavior were deleted in PRI-887.
  *
  * Covers:
- * 1. Compact diagnostician task injection block format
- * 2. Size guard: injection stays under MAX_INJECTION_SIZE (9000)
- * 3. Diagnostician priority mode: low-priority blocks stripped when tasks pending
- * 4. Fail-closed: never returns injection over limit
+ * 1. Size guard: injection stays under MAX_INJECTION_SIZE (9000)
+ * 2. Fail-closed: never returns injection over limit
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -142,77 +143,6 @@ function makeMinimalEvent(): Parameters<typeof import('../../src/hooks/prompt.js
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-// M8: Legacy diagnostician task block injection removed — single-path pain→ledger pipeline
-// no longer injects diagnostician tasks into prompts. These tests verify the old behavior
-// and are kept as regression guards (skipped), not as M8 requirements.
-describe.skip('Diagnostician compact task injection', () => {
-  it('injects a compact block containing task_id, reason, marker and report paths', async () => {
-    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-
-    mockGetPendingDiagnosticianTasks.mockReturnValueOnce([fakeTask({
-      id: 'task-abc',
-      prompt:
-        'Pain signal: source=tool_failure\nscore=75\nreason=Command npm test failed with exit code 1\nsession_id=sess-123',
-    })]);
-
-    const ctx = {
-      workspaceDir: '/fake/workspace',
-      trigger: 'heartbeat',
-      sessionId: 'test-session-123',
-      api: {
-        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-        runtime: {},
-        config: {},
-      },
-    } as unknown as Parameters<typeof handleBeforePromptBuild>[1];
-
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
-
-    const combined = (result?.prependContext ?? '') + (result?.appendSystemContext ?? '');
-
-    // Must contain structural fields
-    expect(combined).toContain('task_id: task-abc');
-    expect(combined).toContain('.evolution_complete_task-abc');
-    expect(combined).toContain('.diagnostician_report_task-abc.json');
-
-    // Must NOT contain the full raw prompt (which could be 2-4 KB)
-    // The compact diagnostician block is small; the heartbeat checklist adds to total
-    expect(combined.length).toBeLessThan(2000);
-  });
-
-  it('injects exactly one task per heartbeat regardless of queue depth', async () => {
-    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-
-    const tasks = [
-      fakeTask({ id: 'task-1' }),
-      fakeTask({ id: 'task-2' }),
-      fakeTask({ id: 'task-3' }),
-    ];
-    mockGetPendingDiagnosticianTasks.mockReturnValueOnce(tasks);
-
-    const ctx = {
-      workspaceDir: '/fake/workspace',
-      trigger: 'heartbeat',
-      sessionId: 'test-session-123',
-      api: {
-        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-        runtime: {},
-        config: {},
-      },
-    } as unknown as Parameters<typeof handleBeforePromptBuild>[1];
-
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
-    const combined = (result?.prependContext ?? '') + (result?.appendSystemContext ?? '');
-
-    // Only the first task ID appears in the block
-    expect(combined).toContain('task-1');
-    expect(combined).not.toContain('task-2');
-    expect(combined).not.toContain('task-3');
-    // Note mentions remaining count
-    expect(combined).toContain('2 more task(s) are queued');
-  });
-});
-
 describe('Size guard: fail-closed', () => {
   it('never returns a combined injection that exceeds MAX_INJECTION_SIZE (9000)', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
@@ -276,33 +206,3 @@ describe('Size guard: fail-closed', () => {
   });
 });
 
-// M8: Legacy diagnostician prompt injection removed — single-path pain→ledger pipeline
-describe.skip('Diagnostician priority mode', () => {
-  it('sets pendingDiagTaskCount > 0 so size guard knows to strip low-priority blocks', async () => {
-    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-
-    mockGetPendingDiagnosticianTasks.mockReturnValueOnce([fakeTask()]);
-
-    const infoLogger = vi.fn();
-    const ctx = {
-      workspaceDir: '/fake/workspace',
-      trigger: 'heartbeat',
-      sessionId: 'test-session-123',
-      api: {
-        logger: { info: infoLogger, warn: vi.fn(), error: vi.fn() },
-        runtime: {},
-        config: {},
-      },
-    } as unknown as Parameters<typeof handleBeforePromptBuild>[1];
-
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
-
-    // Should have logged task injection
-    expect(infoLogger).toHaveBeenCalledWith(
-      expect.stringContaining('Injected compact diagnostician task block')
-    );
-
-    // Result must be valid
-    expect(result?.prependContext).toBeDefined();
-  });
-});
