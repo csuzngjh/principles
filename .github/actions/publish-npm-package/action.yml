@@ -55,20 +55,61 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        LOCAL_VERSION=$(node -p "require('./packages/${{ inputs.pkg_dir }}/package.json').version")
+        COHORT="${{ inputs.cohort_sha }}"
+        PKG_REL="packages/${{ inputs.pkg_dir }}/package.json"
+        NAME="${{ inputs.npm_name }}"
+        LOCAL_VERSION=$(node -p "require('./$PKG_REL').version")
         echo "version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
-        echo "Committed version at cohort SHA: ${{ inputs.npm_name }}@$LOCAL_VERSION"
+        echo "Committed version at cohort SHA: $NAME@$LOCAL_VERSION"
 
-        node scripts/release/registry-exact.mjs "${{ inputs.npm_name }}" "$LOCAL_VERSION" \
-          --expect-git-head "${{ inputs.cohort_sha }}" --json > exact.json
+        # Did THIS cohort introduce $LOCAL_VERSION, or is it unchanged across
+        # the cohort? A Version PR merge's first parent is main before it
+        # landed. A cohort bumps only SOME packages; an UNCHANGED package's
+        # version was legitimately published by an EARLIER cohort commit, so
+        # its registry gitHead can never equal this cohort SHA. Provenance
+        # equality against the cohort is therefore only required for versions
+        # this cohort actually introduces (SPEC §17).
+        PREV_VERSION=$(git show "$COHORT^:$PKG_REL" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+        if [ "$PREV_VERSION" = "$LOCAL_VERSION" ]; then INTRODUCED=false; else INTRODUCED=true; fi
+        echo "introduced_by_cohort=$INTRODUCED" >> "$GITHUB_OUTPUT"
+
+        # registry-exact exits non-zero for CONFLICT/UNVERIFIED/ERROR/BEHIND;
+        # its JSON payload is written regardless. Neutralize the exit and read
+        # the status so the provenance decision below is explicit rather than
+        # an abrupt `set -e` abort that hides the real reason.
+        node scripts/release/registry-exact.mjs "$NAME" "$LOCAL_VERSION" \
+          --expect-git-head "$COHORT" --json > exact.json || true
         cat exact.json
         STATUS=$(node -p "require('./exact.json').status")
-        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-        if [ "$STATUS" = "REGISTRY_ERROR" ] || [ "$STATUS" = "PRESENT_CONFLICT" ] \
-          || [ "$STATUS" = "PRESENT_UNVERIFIED" ] || [ "$STATUS" = "LOCAL_BEHIND_REGISTRY" ]; then
-          echo "::error::Registry contract violation for ${{ inputs.npm_name }}@$LOCAL_VERSION: $STATUS (see exact.json above)."
+        GIT_HEAD=$(node -p "require('./exact.json').gitHead || ''")
+
+        # A registry failure is never "absent", and publishing a version the
+        # registry has already moved past forks the line — both always fatal
+        # regardless of whether the cohort introduced the version (SPEC §18.3/§19).
+        if [ "$STATUS" = "REGISTRY_ERROR" ] || [ "$STATUS" = "LOCAL_BEHIND_REGISTRY" ]; then
+          echo "::error::Registry contract violation for $NAME@$LOCAL_VERSION: $STATUS (see exact.json above)."
           exit 1
         fi
+
+        if [ "$STATUS" = "PRESENT_CONFLICT" ] || [ "$STATUS" = "PRESENT_UNVERIFIED" ]; then
+          # A version THIS cohort introduces must match the cohort provenance;
+          # a foreign gitHead (or an unverifiable tarball) is a real integrity
+          # conflict and fails loud — this is the check that catches a version
+          # already burned on npm from a different tree.
+          # Only an UNCHANGED package may reuse a prior publish, and only when
+          # that publish commit is provably an ancestor of this cohort (a
+          # foreign commit is never an ancestor, so it still fails loud).
+          if [ "$INTRODUCED" = "false" ] && [ -n "$GIT_HEAD" ] \
+            && git cat-file -e "${GIT_HEAD}^{commit}" 2>/dev/null \
+            && git merge-base --is-ancestor "$GIT_HEAD" "$COHORT"; then
+            echo "npm upload skipped: $NAME@$LOCAL_VERSION is unchanged by this cohort and was published from ${GIT_HEAD:0:12}, an ancestor of $COHORT (a prior release)."
+            STATUS="PRESENT_PRIOR"
+          else
+            echo "::error::Provenance conflict for $NAME@$LOCAL_VERSION ($STATUS, gitHead=${GIT_HEAD:-none}, introduced_by_cohort=$INTRODUCED): a version this cohort introduces is already on npm from a different or unverifiable commit. Refusing to assume it belongs to this release (SPEC §17/§19)."
+            exit 1
+          fi
+        fi
+        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
 
     - name: Verify registry dependencies are published
       # Publish-order safety net, preserved (SPEC §20): a package whose
