@@ -141,6 +141,22 @@ describe('version-packages.yml — rolling Version PR automation', () => {
     expect(t).toContain('push-git-tags: false');
   });
 
+  it('pins checkout/setup-node to the EXACT SHAs ci.yml uses', () => {
+    // The workflow only fires on main pushes, so PR CI never exercises its
+    // action resolution — a one-character transcription error in a pin
+    // surfaces only AFTER merge (2026-09-21 incident: version-packages
+    // failed on unresolvable SHAs at its first run). Pin parity with
+    // ci.yml — which every PR run does resolve — is the mechanized guard.
+    const ci = fs.readFileSync(path.join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8');
+    for (const action of ['actions/checkout', 'actions/setup-node']) {
+      const ciPin = ci.match(new RegExp(`${action.replace('/', '\\/')}@([0-9a-f]{40})`));
+      const vpPin = text().match(new RegExp(`${action.replace('/', '\\/')}@([0-9a-f]{40})`));
+      expect(ciPin, `${action} pin missing in ci.yml`).not.toBeNull();
+      expect(vpPin, `${action} pin missing in version-packages.yml`).not.toBeNull();
+      expect(vpPin?.[1], `${action} pin in version-packages.yml must equal ci.yml's`).toBe(ciPin?.[1]);
+    }
+  });
+
   it('never publishes and never auto-merges', () => {
     const t = text();
     expect(t).not.toContain('changeset publish');
