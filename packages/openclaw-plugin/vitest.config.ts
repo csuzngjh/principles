@@ -37,6 +37,7 @@ export const integrationTests = [
 export default defineConfig({
   test: {
     environment: 'node',
+    globalSetup: ['../../scripts/test/temp-lifecycle.mjs'],
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     // Use forks pool to avoid threads pool issues
     pool: 'forks',
