@@ -29,6 +29,16 @@ function assertValidNpmName(npmName) {
   }
 }
 
+/**
+ * Path-segment encoding for registry URLs: scoped names keep their one
+ * separator slash, every other character is percent-encoded. Combined with
+ * the name grammar above this is the SSRF containment for names that
+ * originate from manifest files.
+ */
+function registryPath(npmName, ...suffix) {
+  return [npmName.split('/').map(encodeURIComponent).join('/'), ...suffix].join('/');
+}
+
 export class RegistryError extends Error {
   constructor(message, { status, cause } = {}) {
     super(message);
@@ -107,7 +117,7 @@ async function withRetries(fn, { attempts = 3, delayMs, onRetry } = {}) {
  */
 export async function fetchPackument(npmName, opts = {}) {
   assertValidNpmName(npmName);
-  const url = `${registryBase()}/${npmName}`;
+  const url = `${registryBase()}/${registryPath(npmName)}`;
   try {
     return await withRetries(
       (attempt) => fetchJson(url, opts),
@@ -126,7 +136,10 @@ export async function fetchPackument(npmName, opts = {}) {
  */
 export async function fetchExactManifest(npmName, version, opts = {}) {
   assertValidNpmName(npmName);
-  const url = `${registryBase()}/${npmName}/${version}`;
+  if (typeof version !== 'string' || !/^[\w.+-]+$/.test(version)) {
+    throw new RegistryError(`invalid version for registry query: ${JSON.stringify(version)}`);
+  }
+  const url = `${registryBase()}/${registryPath(npmName, version)}`;
   try {
     return await withRetries(
       (attempt) => fetchJson(url, opts),

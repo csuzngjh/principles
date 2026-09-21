@@ -105,9 +105,17 @@ export async function computeFinalPlan(cwd) {
 export function syncPluginVersionMirror(cwd) {
   const pkgPath = path.join(cwd, 'packages', 'openclaw-plugin', 'package.json');
   const mirrorPath = path.join(cwd, 'packages', 'openclaw-plugin', 'openclaw.plugin.json');
-  if (!fs.existsSync(pkgPath) || !fs.existsSync(mirrorPath)) return false;
-  const version = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version;
-  const mirror = JSON.parse(fs.readFileSync(mirrorPath, 'utf8'));
+  // Direct reads with E-loop recovery instead of existsSync-then-read —
+  // the check-then-read window is a TOCTOU the CodeQL gate flags, and a
+  // try/catch handles the same absence cases without the race.
+  let version;
+  let mirror;
+  try {
+    version = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version;
+    mirror = JSON.parse(fs.readFileSync(mirrorPath, 'utf8'));
+  } catch {
+    return false;
+  }
   if (mirror.version === version) return false;
   mirror.version = version;
   fs.writeFileSync(mirrorPath, JSON.stringify(mirror, null, 2) + '\n');
