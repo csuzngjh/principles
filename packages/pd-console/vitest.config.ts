@@ -12,6 +12,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    globalSetup: ['../../scripts/test/temp-lifecycle.mjs'],
     include: ['tests/**/*.test.ts', 'src/ui/utils/__tests__/**/*.test.ts'],
     pool: 'forks',
     teardownTimeout: 30000,

@@ -21,10 +21,10 @@
 // after the full workspace build, so the prerequisite holds on the merge path.
 
 import { spawnSync } from 'node:child_process';
-import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRunDir } from './test/temp-lifecycle.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -191,7 +191,7 @@ for (const group of GROUPS) {
   }
   process.stdout.write(`[check:pipeline-contract] ${group.id} — running ${group.filters.length} test file(s)...\n`);
   const startedAt = Date.now();
-  const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pipeline-contract-'));
+  const reportDir = createRunDir({ label: 'pipeline-contract' });
   try {
     const reportFile = path.join(reportDir, 'vitest.json');
     const child = spawnSync(
