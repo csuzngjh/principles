@@ -171,6 +171,45 @@ runs:
           console.log(`Stamped npm payload product identity: version=${version} commit=${sourceCommit.slice(0, 12)}`);
         ' "$VERSION" "$SOURCE_COMMIT"
 
+    - name: Verify the packed installer tarball carries the product identity
+      # PRI-874: the stamp must survive into the ACTUAL npm tarball (files[]
+      # inclusion, prepack effects) — checking the working directory is not
+      # evidence. Final pre-publish identity gate for the installer leg.
+      # PRI-881: pack into an isolated directory and verify the single
+      # tarball it produces — `npm pack --json` stdout is polluted by the
+      # prepack (build + bundle) progress lines. Restored into the exact-
+      # version train by the changesets cutover merge (SPEC v1.2 §20
+      # preserves this gate; tarball identity verification is unchanged
+      # authority). Runs only when this leg will actually publish (ABSENT);
+      # the already-published skip path has a verified registry tarball.
+      if: ${{ steps.exact.outputs.status == 'ABSENT' && inputs.pkg_dir == 'create-principles-disciple' }}
+      shell: bash
+      run: |
+        VERSION="${{ inputs.product_identity_version }}"
+        node -e '
+          const { execFileSync } = require("node:child_process");
+          const { readFileSync, mkdtempSync, readdirSync, rmSync } = require("node:fs");
+          const { join } = require("node:path");
+          const { tmpdir } = require("node:os");
+          const expected = process.argv[1];
+          const work = mkdtempSync(join(tmpdir(), "pd-tarball-identity-"));
+          try {
+            execFileSync("npm", ["pack", "--pack-destination", work], { encoding: "utf8", cwd: "packages/create-principles-disciple" });
+            const artifacts = readdirSync(work).filter((f) => f.endsWith(".tgz"));
+            if (artifacts.length !== 1) {
+              throw new Error(`expected exactly one packed tarball, got: ${JSON.stringify(artifacts)}`);
+            }
+            execFileSync("tar", ["-xzf", join(work, artifacts[0]), "-C", work, "package/_release/product-identity.json"]);
+            const identity = JSON.parse(readFileSync(join(work, "package", "_release", "product-identity.json"), "utf8"));
+            if (identity.productVersion !== expected) {
+              throw new Error(`Packed tarball identity ${JSON.stringify(identity.productVersion)} != resolved product identity ${JSON.stringify(expected)}`);
+            }
+            console.log(`Tarball identity verified: version=${identity.productVersion} commit=${String(identity.sourceCommit).slice(0, 12)}`);
+          } finally {
+            rmSync(work, { recursive: true, force: true });
+          }
+        ' "$VERSION"
+
     - name: Publish exact committed version
       if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash

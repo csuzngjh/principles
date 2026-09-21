@@ -106,7 +106,7 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
   it('gates every version-producing step on ABSENT (idempotent skip, T22)', () => {
     const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ if?: string; name?: string }> } };
     const steps = doc.runs?.steps ?? [];
-    const gatedNames = ['Verify registry dependencies are published', 'Build target package', 'Publish exact committed version'];
+    const gatedNames = ['Verify registry dependencies are published', 'Build target package', 'Publish exact committed version', 'Verify the packed installer tarball carries the product identity'];
     for (const name of gatedNames) {
       const step = steps.find((s) => s.name === name);
       expect(step, `step ${name}`).toBeDefined();
