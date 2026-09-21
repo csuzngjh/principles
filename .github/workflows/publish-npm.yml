@@ -93,8 +93,14 @@ jobs:
           cat cohort.json
 
           SHA=$(node -p "require('./cohort.json').sha")
-          PENDING=$(node -p "JSON.stringify(require('./cohort.json').packages.filter(p => !p.published).map(p => p.name + '@' + p.version))")
-          COMPLETE=$(node -p "require('./cohort.json').publishComplete")
+          # The resolver emits different shapes per mode: --explicit returns
+          # {releases, versions} without touching the registry, the default
+          # scan adds {packages, publishComplete}. Both are read defensively
+          # because only cohort_sha/has_cohort are load-bearing; pending_json
+          # and the complete-vs-pending line are informational (each publish
+          # step re-checks the registry idempotently).
+          PENDING=$(node -p "const c=require('./cohort.json'); JSON.stringify(c.packages ? c.packages.filter(p => !p.published).map(p => p.name + '@' + p.version) : (c.releases || []).map(r => r.name + '@' + r.newVersion))")
+          COMPLETE=$(node -p "require('./cohort.json').publishComplete === true")
 
           echo "cohort_sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "has_cohort=true" >> "$GITHUB_OUTPUT"
