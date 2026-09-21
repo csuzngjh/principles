@@ -26,49 +26,15 @@ describe('EvaluatorPromptBuilder', () => {
     },
   };
 
-  it('includes sourceArtificerArtifactId at top level in prompt input', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.sourceArtificerArtifactId).toBe('pi-art-artificer-001');
-  });
-
-  it('includes taskId in prompt input', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.taskId).toBe('evaluator-task-001');
-  });
-
-  it('includes contextHash in prompt input', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.contextHash).toBe('ctx-abc123');
-  });
-
-  it('includes artificerArtifact in prompt input', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.artificerArtifact).toEqual(input.artificerArtifact);
-  });
-
-  it('instruction says copy sourceArtificerArtifactId exactly', () => {
-    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('sourceArtificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId');
-  });
+  // Shared-contract note (PRI-888): passthrough fields (taskId/contextHash/
+  // sourceArtificerArtifactId/artificerArtifact), JSON-only directive strings,
+  // promptContractVersion presence and the PRI-633 payload/systemPrompt split
+  // for this builder now run in peer-prompt-builder-contract.test.ts.
+  // The exact systemPrompt === EVALUATOR_PROTOCOL_INSTRUCTION comparator pin
+  // and all PRI/sourceTrace pins stay here.
 
   it('instruction says copy sourceTrace.artificerArtifactId exactly', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('sourceTrace.artificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId');
-  });
-
-  it('instruction includes JSON-only constraint', () => {
-    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('ONLY valid JSON');
-  });
-
-  it('instruction includes no markdown constraint', () => {
-    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('no markdown');
-  });
-
-  it('instruction includes no code fences constraint', () => {
-    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('no code fences');
-  });
-
-  it('promptContractVersion is present in prompt input', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.promptContractVersion).toBe(EVALUATOR_PROMPT_CONTRACT_VERSION);
   });
 
   it('promptContractVersion value is evaluator-output-v1.prompt.v6 (PRI-644 validator re-feed anchor)', () => {
@@ -77,18 +43,6 @@ describe('EvaluatorPromptBuilder', () => {
 
   it('score instruction says number not string/percentage', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('NOT a string, NOT a percentage');
-  });
-
-  it('message is valid JSON containing promptInput', () => {
-    const { message, systemPrompt } = builder.buildPrompt(input);
-    const parsed = JSON.parse(message);
-    expect(parsed.taskId).toBe(input.taskId);
-    expect(parsed.contextHash).toBe(input.contextHash);
-    expect(parsed.sourceArtificerArtifactId).toBe(input.sourceArtificerArtifactId);
-    // PRI-633: the instruction left the payload for the system channel.
-    expect(parsed).not.toHaveProperty('evaluatorInstruction');
-    expect(parsed.promptContractVersion).toBe(EVALUATOR_PROMPT_CONTRACT_VERSION);
-    expect(systemPrompt).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
   });
 
   it('systemPrompt carries the evaluator instruction (PRI-633)', () => {

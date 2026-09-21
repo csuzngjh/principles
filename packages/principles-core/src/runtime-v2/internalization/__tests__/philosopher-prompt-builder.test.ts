@@ -1,9 +1,10 @@
 /**
  * PhilosopherPromptBuilder unit tests (PRI-107).
  *
- * Tests that the prompt builder produces a valid JSON message containing
- * both context data (including dreamer artifact) and an instruction telling
- * the LLM to produce PhilosopherOutputV1 JSON.
+ * Philosopher-specific prompt contracts. The mechanical template shared by
+ * all six peer prompt builders (result shape, taskId/contextHash passthrough,
+ * artifact/source-id passthrough, JSON-only directives, PRI-633 payload split,
+ * purity) lives in peer-prompt-builder-contract.test.ts (PRI-888).
  */
 import { describe, it, expect } from 'vitest';
 import { PhilosopherPromptBuilder } from '../philosopher-prompt-builder.js';
@@ -33,57 +34,10 @@ const MINIMAL_INPUT = {
 
 describe('PhilosopherPromptBuilder', () => {
   describe('buildPrompt()', () => {
-    it('returns PromptBuildResult with message and promptInput fields', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result).toHaveProperty('message');
-      expect(result).toHaveProperty('promptInput');
-      expect(typeof result.message).toBe('string');
-    });
-
-    it('maps taskId from input to top-level promptInput.taskId', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result.promptInput.taskId).toBe('task-philosopher-001');
-    });
-
-    it('maps contextHash from input to top-level promptInput.contextHash', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result.promptInput.contextHash).toBe('ctx-def456');
-    });
-
-    it('maps dreamerArtifact from input to top-level promptInput.dreamerArtifact', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result.promptInput.dreamerArtifact).toEqual(MINIMAL_INPUT.dreamerArtifact);
-    });
-
-    it('maps sourceDreamerArtifactId from input to top-level promptInput.sourceDreamerArtifactId', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result.promptInput.sourceDreamerArtifactId).toBe('pi-art-dreamer-001-run-001');
-    });
-
-    it('message field is valid JSON (JSON.parse succeeds)', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(() => JSON.parse(result.message)).not.toThrow();
-    });
-
-    it('taskId appears at top level of serialized JSON message', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      const parsed = JSON.parse(result.message);
-      expect(parsed.taskId).toBe('task-philosopher-001');
-    });
+    // Shared-contract note (PRI-888): result shape, taskId/contextHash and
+    // dreamerArtifact/sourceDreamerArtifactId passthrough, valid-JSON/parsed
+    // fields, confidence-range, JSON-only directives, copy-directive and
+    // purity for this builder now run in peer-prompt-builder-contract.test.ts.
 
     it('systemPrompt (PRI-633: ex-philosopherInstruction) is present and contains key protocol keywords', () => {
       const builder = new PhilosopherPromptBuilder();
@@ -111,49 +65,6 @@ describe('PhilosopherPromptBuilder', () => {
       expect(instruction).toContain('"confidence"');
       expect(instruction).toContain('"risks"');
       expect(instruction).toContain('"generatedAt"');
-    });
-
-    it('philosopherInstruction specifies confidence must be a number between 0 and 1', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      const instruction = result.systemPrompt;
-      expect(instruction).toMatch(/confidence.*number/i);
-      expect(instruction).toMatch(/0.*1/);
-    });
-
-    it('philosopherInstruction specifies output must be pure JSON only', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      const instruction = result.systemPrompt;
-      expect(instruction).toMatch(/only.*JSON|JSON.*only|pure JSON/i);
-      expect(instruction).toMatch(/no markdown/i);
-    });
-
-    it('philosopherInstruction tells LLM to copy sourceDreamerArtifactId from input', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      const instruction = result.systemPrompt;
-      expect(instruction).toContain('input.sourceDreamerArtifactId');
-    });
-
-    it('sourceDreamerArtifactId appears at top level of serialized JSON message', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      const parsed = JSON.parse(result.message);
-      expect(parsed.sourceDreamerArtifactId).toBe('pi-art-dreamer-001-run-001');
-    });
-
-    it('buildPrompt() is a pure function — same input produces same output', () => {
-      const builder = new PhilosopherPromptBuilder();
-      const result1 = builder.buildPrompt(MINIMAL_INPUT);
-      const result2 = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result1.message).toBe(result2.message);
-      expect(result1.promptInput).toEqual(result2.promptInput);
     });
 
     it('handles null dreamerArtifact gracefully', () => {

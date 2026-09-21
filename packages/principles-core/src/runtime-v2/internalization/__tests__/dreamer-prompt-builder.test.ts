@@ -1,9 +1,10 @@
 /**
  * DreamerPromptBuilder unit tests (PRI-107).
  *
- * Tests that the prompt builder produces a valid JSON message containing
- * both context data and an instruction telling the LLM to produce
- * DreamerOutputV1 JSON.
+ * Dreamer-specific prompt contracts. The mechanical template shared by all
+ * six peer prompt builders (result shape, taskId/contextHash passthrough,
+ * JSON-only directives, PRI-633 payload split, purity) lives in
+ * peer-prompt-builder-contract.test.ts (PRI-888).
  */
 import { describe, it, expect } from 'vitest';
 import { DreamerPromptBuilder } from '../dreamer-prompt-builder.js';
@@ -30,29 +31,6 @@ const MINIMAL_INPUT = {
 
 describe('DreamerPromptBuilder', () => {
   describe('buildPrompt()', () => {
-    it('returns PromptBuildResult with message and promptInput fields', () => {
-      const builder = new DreamerPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result).toHaveProperty('message');
-      expect(result).toHaveProperty('promptInput');
-      expect(typeof result.message).toBe('string');
-    });
-
-    it('maps taskId from input to top-level promptInput.taskId', () => {
-      const builder = new DreamerPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result.promptInput.taskId).toBe('task-dreamer-001');
-    });
-
-    it('maps contextHash from input to top-level promptInput.contextHash', () => {
-      const builder = new DreamerPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result.promptInput.contextHash).toBe('ctx-abc123');
-    });
-
     it('maps contextRefs from input to top-level promptInput.contextRefs', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
@@ -60,27 +38,10 @@ describe('DreamerPromptBuilder', () => {
       expect(result.promptInput.contextRefs).toEqual(['ref-diag-001', 'ref-artifact-001']);
     });
 
-    it('maps predecessorOutput from input to top-level promptInput.predecessorOutput', () => {
-      const builder = new DreamerPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result.promptInput.predecessorOutput).toEqual(MINIMAL_INPUT.predecessorOutput);
-    });
-
-    it('message field is valid JSON (JSON.parse succeeds)', () => {
-      const builder = new DreamerPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(() => JSON.parse(result.message)).not.toThrow();
-    });
-
-    it('taskId appears at top level of serialized JSON message', () => {
-      const builder = new DreamerPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      const parsed = JSON.parse(result.message);
-      expect(parsed.taskId).toBe('task-dreamer-001');
-    });
+    // Shared-contract note (PRI-888): result shape, taskId/contextHash and
+    // predecessorOutput passthrough, valid-JSON/parsed-taskId, confidence-range,
+    // JSON-only directives and purity for this builder now run in
+    // peer-prompt-builder-contract.test.ts.
 
     it('systemPrompt (PRI-633: ex-dreamerInstruction) is present and contains key protocol keywords', () => {
       const builder = new DreamerPromptBuilder();
@@ -126,35 +87,6 @@ describe('DreamerPromptBuilder', () => {
       expect(instruction).toMatch(/low.*medium.*high|riskLevel.*low.*medium.*high/s);
     });
 
-    it('dreamerInstruction specifies confidence must be a number between 0 and 1', () => {
-      const builder = new DreamerPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      const instruction = result.systemPrompt;
-      expect(instruction).toMatch(/confidence.*number/i);
-      expect(instruction).toMatch(/0.*1/);
-    });
-
-    it('dreamerInstruction specifies output must be pure JSON only', () => {
-      const builder = new DreamerPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      const instruction = result.systemPrompt;
-      expect(instruction).toMatch(/only.*JSON|JSON.*only|pure JSON/i);
-      expect(instruction).toMatch(/no markdown/i);
-    });
-
-    it('dreamerInstruction contains CRITICAL JSON-only directive', () => {
-      const builder = new DreamerPromptBuilder();
-      const result = builder.buildPrompt(MINIMAL_INPUT);
-
-      const instruction = result.systemPrompt;
-      expect(instruction).toContain('CRITICAL');
-      expect(instruction).toContain('ONLY valid JSON');
-      expect(instruction).toContain('no code fences');
-      expect(instruction).toContain('no prose');
-    });
-
     it('dreamerInstruction contains COMPLETE EXAMPLE OUTPUT with concrete values', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
@@ -187,15 +119,6 @@ describe('DreamerPromptBuilder', () => {
 
       const instruction = result.systemPrompt;
       expect(instruction).toMatch(/Do NOT wrap.*code fence/);
-    });
-
-    it('buildPrompt() is a pure function — same input produces same output', () => {
-      const builder = new DreamerPromptBuilder();
-      const result1 = builder.buildPrompt(MINIMAL_INPUT);
-      const result2 = builder.buildPrompt(MINIMAL_INPUT);
-
-      expect(result1.message).toBe(result2.message);
-      expect(result1.promptInput).toEqual(result2.promptInput);
     });
 
     it('handles null predecessorOutput gracefully', () => {

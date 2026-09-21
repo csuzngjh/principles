@@ -48,34 +48,13 @@ describe('ArtificerPromptBuilder', () => {
     },
   };
 
-  it('includes sourceScribeArtifactId at top level in prompt input', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.sourceScribeArtifactId).toBe('pi-art-scribe-001');
-  });
-
-  it('instruction says copy sourceScribeArtifactId exactly', () => {
-    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('sourceScribeArtifactId MUST be copied exactly from input.sourceScribeArtifactId');
-  });
+  // Shared-contract note (PRI-888): sourceScribeArtifactId passthrough, the
+  // copy-source-id directive and the JSON-only directive strings for this
+  // builder now run in peer-prompt-builder-contract.test.ts. All PRI pins and
+  // composed-prompt (v2 context block) probes stay in this file.
 
   it('instruction says copy sourceTrace.scribeArtifactId exactly', () => {
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('sourceTrace.scribeArtifactId MUST be copied exactly from input.sourceScribeArtifactId');
-  });
-
-  it('instruction includes JSON-only constraint', () => {
-    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('ONLY valid JSON');
-  });
-
-  it('instruction includes no markdown constraint', () => {
-    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('no markdown');
-  });
-
-  it('instruction includes no code fences constraint', () => {
-    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('no code fences');
-  });
-
-  it('promptContractVersion is present in prompt input', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.promptContractVersion).toBe(ARTIFICER_PROMPT_CONTRACT_VERSION);
   });
 
   it('promptContractVersion identifies the executable V2 contract', () => {
