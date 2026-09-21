@@ -540,13 +540,16 @@ function legJobs(overrides: { skip?: string; fail?: string; attempt?: number } =
 }
 
 function legLogText(cohort: string) {
+  // Mirrors REAL GitHub job-log shape: every line carries a timestamp
+  // prefix (which is why the echo proof matches on line ENDING, and the
+  // fetch proof on substring containment).
   return [
     '2026-09-21T11:56:22.1655285Z Uses: csuzngjh/principles/.github/workflows/release-reproducibility-full.yml@refs/heads/main',
-    `  ref: ${cohort}`,
-    '##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
-    `  ref: ${cohort}`,
-    `[command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin ${cohort}`,
-    ` * branch            ${cohort} -> FETCH_HEAD`,
+    `2026-09-21T11:56:22.1661343Z   ref: ${cohort}`,
+    '2026-09-21T11:56:22.1662154Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+    `2026-09-21T11:56:22.2493524Z   ref: ${cohort}`,
+    `2026-09-21T11:56:22.5189567Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin ${cohort}`,
+    `2026-09-21T11:56:23.5620745Z  * branch            ${cohort} -> FETCH_HEAD`,
   ].join('\n');
 }
 
