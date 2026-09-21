@@ -543,6 +543,73 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(result.degradationReason).toContain('no_dreamer_task_seeded');
   }, 60_000);
 
+  // ── PRI-866: comparison boundary normalizes BOTH sides via the canonical reader ──
+  it('matches a historical row whose stored sourcePainId carries surrounding whitespace', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    // Pre-existing rows may carry untrimmed sourcePainId (writer-side drift).
+    await seedDreamerWithId(sm, 'dreamer-padded-stored', ' pain-whitespace-1 ');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-whitespace-1', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+
+    expect(result.stages[0]).toMatchObject({
+      name: 'pain_lookup',
+      status: 'succeeded',
+      taskId: 'dreamer-padded-stored',
+    });
+  }, 60_000);
+
+  it('matches when the queried painId itself carries surrounding whitespace', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-padded-query', 'pain-whitespace-2');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: ' pain-whitespace-2 ', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+
+    expect(result.stages[0]).toMatchObject({
+      name: 'pain_lookup',
+      status: 'succeeded',
+      taskId: 'dreamer-padded-query',
+    });
+  }, 60_000);
+
+  it('blank query never matches and unresolvable rows are skipped, not crashed', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    // Rows the canonical reader resolves to null (absent / wrong-type key) —
+    // malformed JSON itself cannot be inserted (the store validates it).
+    await seedDreamerRaw(sm, 'dreamer-no-key-866', JSON.stringify({ pi_metadata: { channel: 'code_tool_hook' } }));
+    await seedDreamerRaw(sm, 'dreamer-wrong-type-866', JSON.stringify({ pi_metadata: { channel: 'code_tool_hook' }, sourcePainId: 12345 }));
+    await seedDreamerWithId(sm, 'dreamer-normal-866', 'pain-not-blank');
+    await sm.close();
+
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: '   ', runtimeAdapter: makeAdapter(),
+      pollIntervalMs: 5, timeoutMs: 1000,
+    });
+
+    // A blank query normalizes to '' — it must not match any stored pain id,
+    // and unresolvable rows are skipped via the canonical reader (rc-9: the
+    // caller still reports the loud no-match reason).
+    expect(result.decision).toBe('generation_rejected');
+    expect(result.degradationReason).toContain('no_dreamer_task_seeded');
+  }, 60_000);
+
   it('rejects ambiguous lineage when multiple runnable Dreamer tasks have the same sourcePainId', async () => {
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });

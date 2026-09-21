@@ -39,6 +39,7 @@ import {
   DefaultEvaluatorValidator,
   createPITaskDiagnosticJson,
   parsePITaskMetadata,
+  parseSeedSourcePainId,
   artificerRepairTaskId,
   runAdversarialLoop,
   evaluateInRefinerSandbox,
@@ -588,18 +589,25 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
 /**
  * Find the dreamer task seeded for a given pain ID.
  *
- * D fix (PRI-429): exact sourcePainId match via Object.hasOwn on parsed
- * diagnosticJson. No substring matching — 'pain-1' must NOT match 'pain-10'.
+ * D fix (PRI-429): exact sourcePainId match — no substring matching,
+ * 'pain-1' must NOT match 'pain-10'.
+ *
+ * PRI-866 convergence: the stored side is read through the core canonical
+ * reader (parseSeedSourcePainId) and the query side is trimmed at this
+ * comparison boundary, so both directions of historical whitespace
+ * (' pain-123 ' stored / pain-123 queried, and vice versa) match.
+ * parseSeedSourcePainId returns null for malformed JSON — those rows keep
+ * the PRI-429 skip behavior (no crash, no match; the caller reports
+ * no_dreamer_task_seeded_for_pain, rc-9).
  *
  * The sourcePainId is stored as a top-level key in diagnosticJson (outside the
  * pi_metadata envelope), mirroring the pattern in source-trace-locator.test.ts
- * and PainSignalBridge. Malformed JSON is skipped (not crashed). Missing
- * sourcePainId is skipped (no match).
+ * and PainSignalBridge.
  *
  * ERR refs:
- *   - ERR-001: parsed JSON treated as unknown
- *   - ERR-005/007: no `as` bypass; type narrowing via typeof + Object.hasOwn
- *   - ERR-013: Object.hasOwn for untrusted key checks
+ *   - ERR-001: parsed JSON treated as unknown (inside the canonical reader)
+ *   - ERR-005/007: no `as` bypass; type narrowing lives in the canonical reader
+ *   - ERR-013: Object.hasOwn for untrusted key checks (canonical reader)
  *   - ERR-009: missing sourcePainId = no match (fail loud, not silent skip)
  */
 type DreamerTaskLookup =
@@ -616,25 +624,15 @@ async function findDreamerTaskForPain(
   const dreamerTasks = tasks.filter((t) =>
     t.taskKind === 'dreamer' && (t.status === 'pending' || t.status === 'retry_wait' || t.status === 'succeeded'),
   );
+  const normalizedPainId = painId.trim();
   const allMatches: typeof dreamerTasks = [];
   const channelMatches: typeof dreamerTasks = [];
   for (const t of dreamerTasks) {
     if (typeof t.diagnosticJson !== 'string') continue;
     const metadata = parsePITaskMetadata(t.diagnosticJson);
     if (!metadata) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(t.diagnosticJson);
-    } catch {
-      // Malformed JSON — skip this task, don't crash (Runtime Contract Rule 9:
-      // graceful degradation with observable behavior — the task is simply not
-      // a match, and the caller will report no_dreamer_task_seeded_for_pain).
-      continue;
-    }
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
-    if (!Object.hasOwn(parsed, 'sourcePainId')) continue;
-    const stored = Reflect.get(parsed, 'sourcePainId');
-    if (typeof stored === 'string' && stored === painId) {
+    const sourcePainId = parseSeedSourcePainId(t.diagnosticJson);
+    if (sourcePainId !== null && sourcePainId === normalizedPainId) {
       allMatches.push(t);
       if (metadata.channel === channel) channelMatches.push(t);
     }
