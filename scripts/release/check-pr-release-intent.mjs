@@ -22,7 +22,8 @@
  *      versions materialize only through the Version Packages PR.
  *
  * The official empty changeset is the explicit no-release declaration for
- * conservative path-rule hits (SPEC §10.2). No waiver database.
+ * conservative path-rule hits (SPEC §10.2) — it waives N-3 and C4-direct,
+ * never a plan-triggered edge. No waiver database.
  *
  * Usage (CI verify-merge step / local):
  *   node scripts/release/check-pr-release-intent.mjs
@@ -285,11 +286,19 @@ for (const rule of PRODUCT_ASSEMBLY_RULES) {
     );
   }
 }
-for (const src of ASSEMBLY_PAYLOAD_SOURCES) {
-  if (changedPaths.some((p) => p.startsWith(src.path)) && !inPlan.has(src.requires)) {
-    failures.push(
-      `N-5/C4: this PR changes ${src.path} (ships inside ${src.requires}) but the final plan has no ${src.requires} release. Declare it (typically patch).`,
-    );
+// C4-direct: conservative path-prefix rule (PRI-819). Like N-3 above, it is
+// waived by the official empty-changeset no-release declaration (SPEC §10.2 /
+// RELEASE_PROCESS "empty changeset is the declaration, not a waiver") — a
+// dev-only change under a payload-source path ships nothing new. C4-transitive
+// (PRODUCT_ASSEMBLY_RULES, triggered by an actual plan release) stays
+// unconditional: once a package IS in the plan, its assembly edges must hold.
+if (!emptyDeclaration) {
+  for (const src of ASSEMBLY_PAYLOAD_SOURCES) {
+    if (changedPaths.some((p) => p.startsWith(src.path)) && !inPlan.has(src.requires)) {
+      failures.push(
+        `N-5/C4: this PR changes ${src.path} (ships inside ${src.requires}) but the final plan has no ${src.requires} release. Declare it (typically patch), or — if the change is genuinely non-release-affecting (dev-config/tests only) — add an empty changeset to declare that explicitly.`,
+      );
+    }
   }
 }
 
