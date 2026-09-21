@@ -303,6 +303,15 @@ export interface GatewayControlResult {
  * Run `openclaw gateway <subcommand>` (service-level: launchd/systemd/schtasks).
  * rc-9: never throws — returns {ok:false, error} so callers can degrade with a
  * structured reason + nextAction instead of crashing mid-install.
+ *
+ * ERR-141: `stop` always sends `--force`. OpenClaw CLIs with the operator
+ * gateway guard (v2026.6.8+) refuse a bare `gateway stop` with
+ * "re-run with --force", and this helper only runs AFTER the installer has
+ * already decided to stop the gateway (the `--stop-gateway` flag or an
+ * explicit interactive choice) — the decision IS the Owner's intent, so the
+ * confirmation the guard waits for has effectively been given. Without the
+ * flag every console-driven update failed at `gateway_stop_failed` on hosts
+ * running the operator gateway.
  */
 function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlResult {
   const failedOperation = `openclaw gateway ${subcommand}`;
@@ -312,9 +321,9 @@ function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlR
     // is ever interpolated into a command line.
     if (subcommand === 'stop') {
       if (IS_WIN32) {
-        execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', 'stop'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
+        execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', 'stop', '--force'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
       } else {
-        execFileSync('openclaw', ['gateway', 'stop'], { encoding: 'utf-8', timeout: 15000 });
+        execFileSync('openclaw', ['gateway', 'stop', '--force'], { encoding: 'utf-8', timeout: 15000 });
       }
     } else {
       if (IS_WIN32) {

@@ -256,12 +256,16 @@ describe('environment detection utilities', () => {
   });
 
   describe('gateway service control (stopOpenClawGateway / restartOpenClawGateway)', () => {
-    it('stopOpenClawGateway returns ok:true and invokes "openclaw gateway stop"', async () => {
+    it('stopOpenClawGateway returns ok:true and invokes "openclaw gateway stop --force"', async () => {
       mockExecFileSync.mockImplementation(() => '');
       const res = await stopOpenClawGateway();
       expect(res.ok).toBe(true);
       expect(mockExecFileSync).toHaveBeenCalledTimes(1);
       expect(joinedCall(mockExecFileSync.mock.calls[0])).toContain('openclaw gateway stop');
+      // ERR-141: the operator-gateway guard in OpenClaw CLI v2026.6.8+ refuses
+      // a bare `gateway stop`; the installer only stops AFTER deciding to, so
+      // the flag is always part of the literal argv.
+      expect(joinedCall(mockExecFileSync.mock.calls[0])).toContain('--force');
       expect(mockExecFileSync.mock.calls[0][2]).toMatchObject({ timeout: 15000 });
     });
 
@@ -416,6 +420,7 @@ describe('environment detection utilities', () => {
       expect(res.ok).toBe(true);
       expect(win32ExecFileSync).toHaveBeenCalledTimes(1);
       expect(joinedCall(win32ExecFileSync.mock.calls[0])).toContain('cmd.exe /c openclaw gateway stop');
+      expect(joinedCall(win32ExecFileSync.mock.calls[0])).toContain('--force');
     });
 
     it('resolves gateway PID via netstat on win32', async () => {
