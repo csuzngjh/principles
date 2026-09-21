@@ -712,6 +712,158 @@ describe('handleRunRuleHost — PR #1122 behavior-examples fail-fast (CodeRabbit
   });
 });
 
+// ── PRI-657: production-identical gateDeps wiring (cli-7 real wiring) ──────
+//
+// The ArtificerL2Adapter's self-validation replay must use the SAME gate
+// semantics as the activation gate: createProductionGateDeps({toolSemantics,
+// projectDir}) resolved from the workspace host declaration (mirrors
+// internalization-consumer-cycle.ts). Previously it used createSandboxGateDeps()
+// with no workspace semantics — rules validated against a different tool
+// vocabulary than the one they will be activated under.
+// These tests drive the REAL handler (confirm path) and assert the constructor
+// options the command actually passes (EP-02/EP-04). On resolver failure the
+// command degrades observably to the baseline gate (rc-9: structured reason +
+// nextAction on stderr) while stdout keeps exactly one JSON object (cli-1).
+// NOTE: vitest hoists the vi.mock calls file-wide, so the stubs below also
+// apply to the other describes in this file — safe today because none of them
+// reach the adapter/pipeline paths; a future test needing the real
+// ArtificerL2Adapter or runRuleHostPipeline must live in its own file.
+
+const hoisted657 = vi.hoisted(() => {
+  const artificerL2Calls: unknown[] = [];
+  const gateDepsSentinel = { kind: 'production-gate-deps-stub' };
+  return {
+    artificerL2Calls,
+    gateDepsSentinel,
+    mockResolveWorkspaceHostToolSemantics: vi.fn(() => ({
+      ok: false,
+      reason: 'no_host_declaration: test default (no persisted declaration)',
+      nextAction: 'test default — assert the baseline-gate degradation path',
+    })),
+    mockCreateProductionGateDeps: vi.fn(() => gateDepsSentinel),
+    mockCreateSandboxGateDeps: vi.fn(() => ({ kind: 'sandbox-gate-deps-stub' })),
+    mockRunRuleHostPipeline: vi.fn(),
+  };
+});
+
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+  class MockArtificerL2Adapter {
+    constructor(options: unknown) {
+      hoisted657.artificerL2Calls.push(options);
+    }
+  }
+  return {
+    ...original,
+    ArtificerL2Adapter: MockArtificerL2Adapter,
+    createProductionGateDeps: hoisted657.mockCreateProductionGateDeps,
+  };
+});
+
+vi.mock('@principles/host-runtime', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@principles/host-runtime')>();
+  return {
+    ...original,
+    resolveWorkspaceHostToolSemantics: hoisted657.mockResolveWorkspaceHostToolSemantics,
+    WorkspaceTelemetryEmitter: class MockWorkspaceTelemetryEmitter {
+      constructor(_emitter: unknown, _workspaceDir: unknown, _onError: unknown) { /* no-op */ }
+    },
+  };
+});
+
+vi.mock('../../src/services/rulehost-pipeline-runner.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/services/rulehost-pipeline-runner.js')>();
+  return {
+    ...original,
+    runRuleHostPipeline: hoisted657.mockRunRuleHostPipeline,
+    createSandboxGateDeps: hoisted657.mockCreateSandboxGateDeps,
+  };
+});
+
+describe('handleRunRuleHost — PRI-657 production-identical gateDeps wiring', () => {
+  let workspaceDir: string;
+  let savedEnv: NodeJS.ProcessEnv;
+
+  const fakeRegistry = { resolve: vi.fn(), hostMappings: vi.fn().mockReturnValue([]) };
+  const pipelineReadyResult = {
+    decision: 'candidate_ready_for_owner_review',
+    painId: 'pain-1',
+    stages: [],
+    scribeTaskId: 'scribe-1',
+    ruleArtifactId: 'pi-rule-1' as string | null,
+    principleArtifactId: null as string | null,
+    approvalId: 'apr-1' as string | null,
+    degradationReason: null as string | null,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hoisted657.artificerL2Calls.length = 0;
+    workspaceDir = mkTmpDir();
+    writeFullReadyConfig(workspaceDir);
+    savedEnv = { ...process.env };
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key';
+    hoisted657.mockRunRuleHostPipeline.mockResolvedValue(pipelineReadyResult);
+  });
+
+  afterEach(() => {
+    process.env = savedEnv;
+    try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  function firstArtificerL2Options(): Record<string, unknown> {
+    expect(hoisted657.artificerL2Calls).toHaveLength(1);
+    const options = hoisted657.artificerL2Calls[0];
+    if (!isRecord(options)) throw new Error('ArtificerL2Adapter options are not a record');
+    return options;
+  }
+
+  it('wires the workspace host-tool-semantics registry + projectDir into ArtificerL2 gateDeps (production parity)', async () => {
+    hoisted657.mockResolveWorkspaceHostToolSemantics.mockReturnValue({ ok: true, registry: fakeRegistry, hostKinds: ['codex'] });
+
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', confirm: true, json: true, workspace: workspaceDir }),
+    );
+
+    expect(hoisted657.mockResolveWorkspaceHostToolSemantics).toHaveBeenCalledWith(workspaceDir);
+    expect(hoisted657.mockCreateProductionGateDeps).toHaveBeenCalledWith({ toolSemantics: fakeRegistry, projectDir: workspaceDir });
+    expect(hoisted657.mockCreateSandboxGateDeps).not.toHaveBeenCalled();
+    expect(firstArtificerL2Options().gateDeps).toBe(hoisted657.gateDepsSentinel);
+
+    // cli-1: stdout stays exactly one parseable JSON result.
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('candidate_ready_for_owner_review');
+    expect(exitCode).toBeUndefined();
+  });
+
+  it('degrades observably to the baseline gate when workspace host semantics are unresolvable (rc-9 + cli-1)', async () => {
+    hoisted657.mockResolveWorkspaceHostToolSemantics.mockReturnValue({
+      ok: false,
+      reason: 'no_host_declaration: no persisted host tool declaration for this workspace',
+      nextAction: 'run `pd runtime host-declare` (or activate via a host) then re-run',
+    });
+
+    const { stdout, stderr, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', confirm: true, json: true, workspace: workspaceDir }),
+    );
+
+    // Baseline gate: createProductionGateDeps with NO options (the registry is
+    // absent, so a wrong-host vocabulary must not be guessed).
+    expect(hoisted657.mockCreateProductionGateDeps).toHaveBeenCalledWith();
+    expect(hoisted657.mockCreateSandboxGateDeps).not.toHaveBeenCalled();
+    expect(firstArtificerL2Options().gateDeps).toBe(hoisted657.gateDepsSentinel);
+
+    // rc-9: the degradation carries reason + nextAction on stderr.
+    expect(stderr).toContain('no_host_declaration');
+    expect(stderr).toContain('host-declare');
+
+    // cli-1: stderr noise must not leak into the machine-readable stdout.
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('candidate_ready_for_owner_review');
+    expect(exitCode).toBeUndefined();
+  });
+});
+
 // ── Owner Decision v1 review fix (Codex P1): identity-gated publication ─────
 
 describe('describePublicationOutcome — identity-gated refusal reporting (Codex P1)', () => {

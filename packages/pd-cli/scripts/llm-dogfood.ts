@@ -42,8 +42,9 @@ import {
   buildToolSemanticRegistry,
 } from '@principles/core/runtime-v2';
 import type { PIArtifactSnapshot, PIArtifactRecord } from '@principles/core/runtime-v2';
-import { runRuleHostPipeline, createSandboxGateDeps } from '../src/services/rulehost-pipeline-runner.js';
+import { runRuleHostPipeline } from '../src/services/rulehost-pipeline-runner.js';
 import { compileDemoRule } from '../src/services/demo-rule-compiler.js';
+import { resolveWorkspaceHostToolSemantics, saveHostToolDeclaration } from '@principles/host-runtime';
 import type { CodeRuleCapability } from '../src/services/rulehost-pipeline-runner.js';
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -131,6 +132,26 @@ async function main(): Promise<void> {
   log('SETUP', `Workspace: ${tmpDir}`);
   log('SETUP', `LLM: ${MODEL_ID} @ ${LM_STUDIO_BASE_URL}`);
 
+  // PRI-657: persist the dogfood tool declaration UP FRONT (it used to be
+  // written only at Step 5, so the Step-2 L2 self-validation replay resolved
+  // no host semantics) — both the artificer gate and the activation writer
+  // then cross the same durable provenance path as a real workspace.
+  const dogfoodMappings = [
+      { rawToolName: 'write_file', canonicalKind: 'write' },
+      { rawToolName: 'edit_file', canonicalKind: 'write' },
+      { rawToolName: 'bash', canonicalKind: 'execute' },
+      { rawToolName: 'shell', canonicalKind: 'execute' },
+    ];
+  const dogfoodRegistry = buildToolSemanticRegistry(dogfoodMappings);
+  if (!dogfoodRegistry.ok) throw new Error(dogfoodRegistry.errors.join('; '));
+  const declarationSave = saveHostToolDeclaration(tmpDir, {
+    version: 1,
+    hostKind: 'llm-dogfood',
+    mappings: dogfoodMappings,
+    declaredAt: new Date().toISOString(),
+  });
+  if (!declarationSave.ok) throw new Error(`saveHostToolDeclaration failed: ${declarationSave.reason}`);
+
   // ── Step 1: Seed pain signal ──────────────────────────────────────────────
   log('STEP-1', `Seeding pain: ${DOGFOOD_PAIN.scenario}`);
   const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
@@ -157,12 +178,21 @@ async function main(): Promise<void> {
   // This adapter uses runAgentLoop with 4 tools (read_rulecode_spec,
   // validate_rulecode, replay_rulecode, submit_rulecode) to generate and
   // verify RuleCode inside a multi-turn agent loop.
+  // PRI-657: production-identical gate deps — resolve the workspace host
+  // declaration through the same durable resolver run-rulehost uses, so the
+  // self-validation replay crosses the same tool semantics as activation.
+  const hostSemantics = resolveWorkspaceHostToolSemantics(tmpDir);
+  if (!hostSemantics.ok) {
+    log('STEP-2', `Artificer self-validation without host tool semantics (baseline gate): ${hostSemantics.reason} — ${hostSemantics.nextAction}`);
+  }
   const artificerAdapter = new ArtificerL2Adapter({
     provider: PROVIDER,
     model: MODEL_ID,
     apiKeyEnv: API_KEY_ENV,
     baseUrl: LM_STUDIO_BASE_URL,
-    gateDeps: createSandboxGateDeps(),
+    gateDeps: hostSemantics.ok
+      ? createProductionGateDeps({ toolSemantics: hostSemantics.registry, projectDir: tmpDir })
+      : createProductionGateDeps(),
     validator: new DefaultArtificerValidator(),
     totalBudgetMs: 600_000,
     maxTokens: 8192,
@@ -277,22 +307,10 @@ async function main(): Promise<void> {
     },
   };
 
-  // PRI-634-F R2: persist a dogfood tool declaration + registry so the
-  // activation path resolves host provenance exactly like a real workspace.
-  const dogfoodMappings = [
-      { rawToolName: 'write_file', canonicalKind: 'write' },
-      { rawToolName: 'edit_file', canonicalKind: 'write' },
-      { rawToolName: 'bash', canonicalKind: 'execute' },
-      { rawToolName: 'shell', canonicalKind: 'execute' },
-    ];
-  const dogfoodRegistry = buildToolSemanticRegistry(dogfoodMappings);
-  if (!dogfoodRegistry.ok) throw new Error(dogfoodRegistry.errors.join('; '));
-  saveHostToolDeclaration(tmpDir, {
-    version: 1,
-    hostKind: 'llm-dogfood',
-    mappings: dogfoodMappings,
-    declaredAt: new Date().toISOString(),
-  });
+  // PRI-657: the dogfood tool declaration was persisted at SETUP; Step 2
+  // re-reads it through the durable resolver, and the activation writer below
+  // builds its registry from the same dogfoodMappings constant — one source,
+  // no drift between the two paths.
   const dispatcher = new ActivationDispatcher(
     artifactReadModel,
     stateStore,

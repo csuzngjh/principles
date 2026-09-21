@@ -71,8 +71,8 @@ describe('EvaluatorPromptBuilder', () => {
     expect(promptInput.promptContractVersion).toBe(EVALUATOR_PROMPT_CONTRACT_VERSION);
   });
 
-  it('promptContractVersion value is evaluator-output-v1.prompt.v5 (PRI-843 formation-context anchor)', () => {
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v5');
+  it('promptContractVersion value is evaluator-output-v1.prompt.v6 (PRI-644 validator re-feed anchor)', () => {
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v6');
   });
 
   it('score instruction says number not string/percentage', () => {
