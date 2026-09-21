@@ -330,6 +330,10 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_pain_reason_summary_skipped'),
   Type.Literal('evaluator_previous_evaluation_context_degraded'),
   Type.Literal('evaluator_principle_bearer_ambiguous'),
+  // PRI-644: a prior-attempt validator rejection record existed but failed
+  // the freshness gate (stale attempt / no lease) — re-feed suppression stays
+  // observable, never silent (rc-9).
+  Type.Literal('evaluator_prior_validator_errors_suppressed'),
   Type.Literal('evaluator_repair_loop_idempotent_reuse'),
   Type.Literal('evaluator_repair_loop_lineage_missing'),
   Type.Literal('evaluator_repair_loop_mark_review_failed'),
