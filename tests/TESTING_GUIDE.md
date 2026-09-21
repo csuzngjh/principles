@@ -34,7 +34,7 @@
 | 测试类型 | 目的 | 频率 | 脚本 |
 |---------|------|------|------|
 | **健康检查** | 系统状态监控 | 30分钟 | `health-check-loop.sh` |
-| **OKR任务测试** | 验证Agent实际工作能力 | 按需 | `final-okr-test.sh` |
+| **OKR任务测试** | 验证Agent实际工作能力 | 按需 | `final-okr-test.sh`（已归档） |
 | **手动交互测试** | 调试和探索 | 开发时 | CLI直接调用 |
 
 ---
@@ -158,7 +158,7 @@ ps aux | grep openclaw-gateway
 ./tests/health-check-loop.sh
 
 # OKR任务测试（手动）
-./tests/final-okr-test.sh
+./docs/archive/tests-2026-03/scripts/final-okr-test.sh
 
 # 查看实时日志
 tail -f /tmp/openclaw/openclaw-$(date +%Y-%m-%d).log
@@ -288,7 +288,7 @@ System Metrics:
 - Gateway Errors: 2
 ```
 
-### 2. final-okr-test.sh
+### 2. final-okr-test.sh（已归档至 docs/archive/tests-2026-03/scripts/）
 
 **用途**: 完整OKR任务测试（推荐使用）
 
@@ -301,7 +301,7 @@ System Metrics:
 
 **运行方式**:
 ```bash
-./tests/final-okr-test.sh
+./docs/archive/tests-2026-03/scripts/final-okr-test.sh
 ```
 
 **成功标志**:
@@ -486,7 +486,7 @@ echo "Quality Score: $SCORE/100"
 #### 3. 自动化测试对比脚本
 
 ```bash
-# tests/compare-reports.sh
+# docs/archive/tests-2026-03/scripts/compare-reports.sh
 REPORT1="$1"
 REPORT2="$2"
 
