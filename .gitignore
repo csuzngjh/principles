@@ -208,6 +208,9 @@ packages/pd-console/ai-user-runs/
 
 # Agent scratch files (repro scripts, bundle test fixtures, debug dumps)
 .tmp/
+# Defensive: the managed test temp root lives OUTSIDE the repo tree
+# (.pd-test-temp, sibling of the checkout); in-tree copies are stale leftovers.
+.tmp-tests/
 
 # Release materialization is hermetic (temp staging only); nothing belongs
 # in-tree anymore. *.stackdump stays ignored as a Windows crash artifact.
