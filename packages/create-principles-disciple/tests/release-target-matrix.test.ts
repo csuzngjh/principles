@@ -235,8 +235,8 @@ describe('native release target matrix', () => {
       'install-layout',
       'host-runtime',
       'codex-adapter',
-      'pd-cli',
       'openclaw-plugin',
+      'pd-cli',
       'create-principles-disciple',
     ]);
     const at = (name: string): number => order.indexOf(name);
@@ -247,7 +247,13 @@ describe('native release target matrix', () => {
     expect(at('install-layout')).toBeLessThan(at('host-runtime'));
     expect(at('host-runtime')).toBeLessThan(at('codex-adapter'));
     expect(at('codex-adapter')).toBeLessThan(at('pd-cli'));
-    expect(at('pd-cli')).toBeLessThan(at('openclaw-plugin'));
+    // openclaw-plugin precedes pd-cli: @principles/pd-cli declares a runtime
+    // dependency on principles-disciple (the plugin, ^2.0.2 at the cohort).
+    // Publishing pd-cli first makes its `check_resolvable` preflight fail
+    // against a not-yet-published plugin version, aborting the train. The
+    // reversed edge (pd-cli before plugin) contradicts this test's own
+    // "dependency order" contract and the real package graph (2026-09-21).
+    expect(at('openclaw-plugin')).toBeLessThan(at('pd-cli'));
     // The installer re-bundles the freshly published plugin (lockstep), so
     // it must publish last.
     expect(at('openclaw-plugin')).toBeLessThan(at('create-principles-disciple'));
