@@ -51,14 +51,14 @@ jobs:
       has_cohort: ${{ steps.cohort.outputs.has_cohort }}
       pending_json: ${{ steps.cohort.outputs.pending_json }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410b181273ba90b1 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
           # Cohort detection walks recent merge commits (bounded scan).
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe502a # v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: '24'
 
@@ -139,7 +139,7 @@ jobs:
       # publishes its package's EXACT COMMITTED VERSION or skips it
       # (already present with matching provenance) — the train is safe to
       # re-run after partial failure (SPEC §24).
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410b181273ba90b1 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           # THE cohort SHA — not main HEAD. Retries and the weekly window
           # build the same immutable source (SPEC §17.1).
@@ -147,7 +147,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe502a # v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
