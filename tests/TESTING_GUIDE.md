@@ -314,7 +314,7 @@ System Metrics:
    ✅ Has required sections
 ```
 
-### 3. real-okr-test-v2.sh
+### 3. real-okr-test-v2.sh（已归档至 docs/archive/tests-2026-03/scripts/）
 
 **用途**: OKR测试v2版本（简化版）
 

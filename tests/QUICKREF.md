@@ -3,7 +3,7 @@
 ## 🚀 快速开始
 
 ```bash
-# 运行OKR测试
+# 运行OKR测试（已归档至 docs/archive/tests-2026-03/，仅历史参考：依赖的 2026-03 trust-engine/Linux 环境已不存在，不可再运行）
 ./docs/archive/tests-2026-03/scripts/run-okr-test.sh
 
 # 评分报告

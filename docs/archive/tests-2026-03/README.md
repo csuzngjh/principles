@@ -1,6 +1,6 @@
 # 2026-03 手工测试体系归档（Test Diet Phase 1B）
 
-> 归档日期：2026-09-21 · 依据：`docs/testing/test-archaeology-report.md` §3.1/§10 项 3-4 · 工单：PRI-885
+> 归档日期：2026-09-21 · 依据：PR #1817 Evidence 表（E3）· 工单：Linear PRI-885（判定源自测试考古报告 `docs/testing/test-archaeology-report.md` §3.1/§10 项 3-4）
 
 本目录归档 2026-03-11 一次性 OKR/信任引擎手工验证体系，自 2026-03-19 后无任何改动：
 
