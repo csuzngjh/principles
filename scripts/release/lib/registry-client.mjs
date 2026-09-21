@@ -31,12 +31,20 @@ function assertValidNpmName(npmName) {
 
 /**
  * Path-segment encoding for registry URLs: scoped names keep their one
- * separator slash, every other character is percent-encoded. Combined with
- * the name grammar above this is the SSRF containment for names that
- * originate from manifest files.
+ * separator slash and the scope's leading '@' — percent-encoding '@'
+ * produces /%40scope/... which the registry 404s (every @principles/*
+ * query silently read as "absent" before this was understood, 2026-09-21).
+ * All other characters are percent-encoded. Combined with the name grammar
+ * above this is the SSRF containment for names that originate from
+ * manifest files.
  */
 function registryPath(npmName, ...suffix) {
-  return [npmName.split('/').map(encodeURIComponent).join('/'), ...suffix].join('/');
+  const encodeSegment = (segment) =>
+    segment
+      .split('')
+      .map((ch) => (ch === '@' || /[\w.~_-]/.test(ch) ? ch : encodeURIComponent(ch)))
+      .join('');
+  return [npmName.split('/').map(encodeSegment).join('/'), ...suffix].join('/');
 }
 
 export class RegistryError extends Error {
