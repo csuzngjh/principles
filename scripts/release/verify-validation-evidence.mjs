@@ -241,10 +241,9 @@ export async function verifyValidationEvidence({
         // exact form `ref: <cohort>`; the checkout proof is a git fetch
         // COMMAND line containing the cohort SHA.
         const lines = text.split('\n');
-        const refEcho = lines.some((line) => {
-          const t = line.trim();
-          return t.startsWith('ref:') && t.slice(4).trim() === expectCohort;
-        });
+        // GitHub job-log lines carry a timestamp prefix (`2026-…Z   ref: <sha>`),
+        // so the echo is proven by the line ENDING in `ref: <cohort>`.
+        const refEcho = lines.some((line) => line.replace(/\r$/, '').trim().endsWith(`ref: ${expectCohort}`));
         const fetchCmd = lines.some((line) => {
           const t = line.trim();
           return t.includes('git') && t.includes('fetch') && t.includes(expectCohort);
