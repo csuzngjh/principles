@@ -28,11 +28,11 @@ import * as fs from 'node:fs';
 import type { Command } from 'commander';
 import { runRuleHostPipeline } from '../services/rulehost-pipeline-runner.js';
 import type { RuleHostPipelineResult, CodeRuleCapability, RuleHostAgentAdapters } from '../services/rulehost-pipeline-runner.js';
-import { createSandboxGateDeps } from '../services/rulehost-pipeline-runner.js';
 import {
   PiAiRuntimeAdapter,
   ArtificerL2Adapter,
   DefaultArtificerValidator,
+  createProductionGateDeps,
   resolveAgentRuntimeBinding,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
@@ -40,7 +40,7 @@ import {
 import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import type { BehaviorExamplePack } from '@principles/core/runtime-v2';
 import { storeEmitter } from '@principles/core/runtime-v2';
-import { WorkspaceTelemetryEmitter } from '@principles/host-runtime';
+import { WorkspaceTelemetryEmitter, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { resolveRuleHostReadiness } from '../services/rulehost-readiness.js';
 import type { RuleHostReadinessResult } from '../services/rulehost-readiness.js';
@@ -266,12 +266,27 @@ function resolveRunRuleHostRuntime(
     console.error(`[run-rulehost] workspace telemetry persist failed: ${detail}`);
   });
 
+  // PRI-657: production-identical gate deps — the L2 self-validation replay
+  // must cross the same tool semantics as the activation gate (mirrors
+  // internalization-consumer-cycle.ts). An unresolvable workspace host
+  // declaration degrades OBSERVABLY to the baseline gate with reason +
+  // nextAction on stderr (rc-9; stdout stays pure JSON — cli-1). Acceptable
+  // here because this is generation-time self-validation; the activation
+  // gate remains fail-loud downstream.
+  const hostSemantics = resolveWorkspaceHostToolSemantics(workspaceDir);
+  if (!hostSemantics.ok) {
+    console.error(`[run-rulehost] artificer self-validation without host tool semantics: ${hostSemantics.reason} — ${hostSemantics.nextAction}`);
+  }
+  const artificerGateDeps = hostSemantics.ok
+    ? createProductionGateDeps({ toolSemantics: hostSemantics.registry, projectDir: workspaceDir })
+    : createProductionGateDeps();
+
   const artificerAdapter = new ArtificerL2Adapter({
     provider: artificerProfile.provider,
     model: artificerProfile.model,
     apiKeyEnv: artificerProfile.apiKeyEnv,
     baseUrl: artificerProfile.baseUrl,
-    gateDeps: createSandboxGateDeps(),
+    gateDeps: artificerGateDeps,
     validator: new DefaultArtificerValidator(),
     // PRI-795: fall back to the profile's timeoutMs when --timeout-ms is not
     // given — parity with resolvePiAiAgentAdapter above. Previously the raw

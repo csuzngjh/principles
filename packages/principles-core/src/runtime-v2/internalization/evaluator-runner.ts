@@ -39,7 +39,7 @@ import { isEvaluatorOutputV2 } from './evaluator-output.js';
 import { assessArtificerCodeBearing } from './artificer-code-bearing.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, artificerRepairTaskId, type RepairPayload, type PITaskMetadata, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, artificerRepairTaskId, parseLastValidatorErrors, isFreshForNextAttempt, type RepairPayload, type PITaskMetadata, type RunnerDecision, type HumanReviewContext, type LastValidatorErrors } from './pitask-metadata.js';
 import {
   HUMAN_REVIEW_REASON,
   planOwnerVerdictOverrideResume,
@@ -114,6 +114,15 @@ interface EvaluatorContext {
    * pre-PRI-843 shape exactly (legacy / degraded compatibility).
    */
   readonly formationContext?: FormationContext;
+  /**
+   * PRI-644 (PRI-700 factor B wiring): verbatim validator rejection reasons
+   * from the immediately-preceding attempt, re-fed only when fresh
+   * (sourceAttemptCount === leased attempt - 1). Undefined on first attempt
+   * and when suppressed — the prompt then keeps its pre-PRI-644 shape exactly.
+   * Ephemeral prompt context: NEVER part of contextHash (same posture as the
+   * artificer — cache identity covers evidence, not feedback).
+   */
+  readonly priorValidatorErrors?: LastValidatorErrors;
 }
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
@@ -477,6 +486,27 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const piTask = hydratePITaskRecord(task);
     const deps = piTask?.dependencyTaskIds ?? [];
 
+    // PRI-644 (PRI-700 factor B wiring, mirrors artificer-runner): the
+    // previous attempt's verbatim validator rejections are re-fed so attempt
+    // N+1 is not a zero-information retry of the same prompt (the repair-
+    // round requirementLedger death loop). Freshness comes from the
+    // persisted sourceAttemptCount, not runtime state — restart-safe, and
+    // suppression stays observable (rc-9).
+    const priorValidatorErrors = parseLastValidatorErrors(task.diagnosticJson);
+    const attemptIsFresh = priorValidatorErrors !== null
+      && isFreshForNextAttempt(priorValidatorErrors, this.currentLeasedAttempt);
+    if (priorValidatorErrors !== null && !attemptIsFresh) {
+      this.emitEvent('prior_validator_errors_suppressed', taskId, {
+        recordedAt: priorValidatorErrors.recordedAt,
+        errorCount: priorValidatorErrors.errors.length,
+        sourceAttemptCount: priorValidatorErrors.sourceAttemptCount,
+        currentAttempt: this.currentLeasedAttempt,
+        reason: this.currentLeasedAttempt === undefined
+          ? 'no_lease_context'
+          : 'stale_source_attempt',
+      });
+    }
+
     if (deps.length === 0) {
       this.emitEvent('no_dependencies', taskId, {});
       throw new PDRuntimeError('input_invalid', 'Artificer dependency artifact ID not resolved');
@@ -571,6 +601,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           ...(dependencyRepairPayload !== undefined ? { dependencyRepairPayload } : {}),
           ...(previousEvaluation !== undefined ? { previousEvaluation } : {}),
           ...(formationContext !== undefined ? { formationContext } : {}),
+          ...(priorValidatorErrors !== null && attemptIsFresh ? { priorValidatorErrors } : {}),
         };
       }
     }
@@ -749,6 +780,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // PRI-843: bounded formation evidence (undefined keeps the prompt payload
       // byte-identical to its pre-PRI-843 shape).
       formationContext: context.formationContext,
+      // PRI-644: fresh validator rejections from the previous attempt
+      // (undefined = first attempt / suppressed → prompt unchanged).
+      priorValidatorErrors: context.priorValidatorErrors,
     });
     return { message, systemPrompt };
   }
