@@ -17,6 +17,7 @@ import * as os from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   SqliteConnection,
+  SqliteApprovalQueueStore,
   createRuntimeStateHandle,
   createPITaskDiagnosticJson,
   hydratePITaskRecord,
@@ -576,5 +577,117 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
     const res = makeRes();
     await handleOwnerDecisionsRoute(makeReq('POST', { action: 'accept_current' }), res, ctxBase(`/${EVAL_ID}/resolve`));
     expect(res.statusCode).toBe(400);
+  });
+});
+
+// ── activation_approval principleId 深链（adhoc-20260921）────────────────────
+// 「前往部署审批」CTA 依据条目上的 principleId 直达 /principles/:id。服务端
+// 必须把 approval.artifactId 解析为 LEDGER-VALIDATED principle id（直接命中
+// 也要过 hasPrinciple 校验，PR #1789 评审契约）填入既有 principleId 字段；
+// 校验失败时不带该字段（UI 回退审查列表链接）。
+
+const LINKED_ARTIFACT_ID = 'pi-art-approval-linked';
+const LINKED_PRINCIPLE_ID = 'p-linked-1';
+const UNLINKED_ARTIFACT_ID = 'pi-art-approval-unlinked';
+
+function setupApprovalDb(): SqliteConnection {
+  const conn = setupDb();
+  const db = conn.getDb();
+  const now = '2026-08-30T00:00:00.000Z';
+  db.prepare(
+    `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(LINKED_ARTIFACT_ID, 'principle', 'task-approval-linked', LINKED_PRINCIPLE_ID, '[]', 'validated',
+    JSON.stringify({ principleId: LINKED_PRINCIPLE_ID, title: '深链解析测试' }), now, now);
+  // 无 source_principle_id、无 dreamer 血缘 → lineage 解析必然 unresolved
+  db.prepare(
+    `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(UNLINKED_ARTIFACT_ID, 'principle', 'task-approval-unlinked', null, '[]', 'validated', '{}', now, now);
+
+  // 直接命中也必须经过 ledger 校验（评审契约）— 为 linked 用例注册真实原则，
+  // 使该用例验证"真实可解析"而不是固定直通契约。结构镜像 e2e-seed 的 ledger。
+  const stateDir = path.join(workspaceDir, '.state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const ledger = {
+    _tree: {
+      principles: {
+        [LINKED_PRINCIPLE_ID]: {
+          id: LINKED_PRINCIPLE_ID,
+          status: 'active',
+          text: '深链解析测试原则',
+          triggerPattern: 'on-deep-link',
+          action: '测试动作',
+          evaluability: 'deterministic',
+          priority: 'P1',
+          scope: 'general',
+          domain: '',
+          valueScore: 0,
+          adherenceRate: 0,
+          painPreventedCount: 0,
+          ruleIds: [],
+          conflictsWithPrincipleIds: [],
+          derivedFromPainIds: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      rules: {},
+    },
+  };
+  fs.writeFileSync(path.join(stateDir, 'principle_training_state.json'), JSON.stringify(ledger), 'utf8');
+  return conn;
+}
+
+describe('GET owner-decisions: activation_approval principleId deep link', () => {
+  it('pending approval whose direct hit is a real ledger principle carries its principleId', async () => {
+    const conn = setupApprovalDb();
+    await new SqliteApprovalQueueStore(conn).enqueue(
+      { artifactId: LINKED_ARTIFACT_ID, channel: 'prompt', riskLevel: 'low', confidence: 0.9 },
+      '2026-08-30T00:00:00.000Z',
+    );
+    conn.close();
+
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+    const data = parse(res).data as { items: Array<{ kind: string; taskId: string; principleId?: string }> };
+    const item = data.items.find((entry) => entry.kind === 'activation_approval' && entry.taskId === LINKED_ARTIFACT_ID);
+    expect(item).toBeDefined();
+    expect(item?.principleId).toBe(LINKED_PRINCIPLE_ID);
+  });
+
+  it('pending approval whose direct hit is NOT in the ledger omits principleId (no dead-end deep link)', async () => {
+    // 直通契约负向对照：列上有 id 但 ledger 无此原则 → 不得作为深链目标输出
+    // （pre-fix 状态下该断言失败——那时直接透传列值）。
+    const conn = setupApprovalDb();
+    // unlinked 工件：列值为 null → 唯一可解析路径是血缘，必然 unresolved
+    await new SqliteApprovalQueueStore(conn).enqueue(
+      { artifactId: UNLINKED_ARTIFACT_ID, channel: 'code_tool_hook', riskLevel: 'high', confidence: 0.9 },
+      '2026-08-30T00:00:00.000Z',
+    );
+    // stale-hit 工件：列上有 id，但 ledger 只注册了 LINKED_PRINCIPLE_ID
+    const db = conn.getDb();
+    const now = '2026-08-30T00:00:00.000Z';
+    const STALE_ARTIFACT_ID = 'pi-art-approval-stale';
+    db.prepare(
+      `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(STALE_ARTIFACT_ID, 'principle', 'task-approval-stale', 'p-stale-not-in-ledger', '[]', 'validated',
+      JSON.stringify({ principleId: 'p-stale-not-in-ledger', title: '陈旧绑定' }), now, now);
+    await new SqliteApprovalQueueStore(conn).enqueue(
+      { artifactId: STALE_ARTIFACT_ID, channel: 'prompt', riskLevel: 'low', confidence: 0.9 },
+      '2026-08-30T00:00:00.000Z',
+    );
+    conn.close();
+
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+    const data = parse(res).data as { items: Array<{ kind: string; taskId: string; principleId?: string }> };
+    const unlinked = data.items.find((entry) => entry.kind === 'activation_approval' && entry.taskId === UNLINKED_ARTIFACT_ID);
+    expect(unlinked).toBeDefined();
+    expect(unlinked?.principleId).toBeUndefined();
+    const stale = data.items.find((entry) => entry.kind === 'activation_approval' && entry.taskId === STALE_ARTIFACT_ID);
+    expect(stale).toBeDefined();
+    expect(stale?.principleId).toBeUndefined();
   });
 });
