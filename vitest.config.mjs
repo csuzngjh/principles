@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 /**
  * Root-level vitest config — exists ONLY so root-level vitest invocations
@@ -12,16 +12,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     // tests/e2e-fixtures/** are trap fixtures consumed BY tests, not test files.
-    // exclude REPLACES vitest's defaults, so they are restated here verbatim
-    // (https://vitest.dev/config/#exclude) plus our own entry.
-    exclude: [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/cypress/**',
-      '**/.{idea,git,cache,output,temp}/**',
-      '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,eslint,prettier}.config.*',
-      'tests/e2e-fixtures/**',
-    ],
+    // exclude REPLACES vitest's defaults, so configDefaults is spread in
+    // rather than hand-restated (https://vitest.dev/config/#exclude).
+    exclude: [...configDefaults.exclude, 'tests/e2e-fixtures/**'],
     globalSetup: ['scripts/test/temp-lifecycle.mjs'],
   },
 });

@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -64,21 +64,51 @@ test('sweepStale refuses the system temp root and tolerates a missing base', () 
   expect(refused.removed).toEqual([]);
   expect(refused.refused).toBe('system-temp-root');
 
-  const missing = sweepStale({ base: path.join(makeBase(), 'not-created') });
-  expect(missing.removed).toEqual([]);
-  expect(missing.error).toBeUndefined(); // ENOENT is legitimately "nothing to sweep"
+  const parent = makeBase();
+  try {
+    const missing = sweepStale({ base: path.join(parent, 'not-created') });
+    expect(missing.removed).toEqual([]);
+    expect(missing.error).toBeUndefined(); // ENOENT is legitimately "nothing to sweep"
 
-  const notADir = path.join(makeBase(), 'a-file');
-  fs.writeFileSync(notADir, 'x');
-  const blocked = sweepStale({ base: notADir });
-  expect(blocked.removed).toEqual([]);
-  expect(blocked.error).toBe('ENOTDIR'); // rc-9: other errors stay observable, not "nothing to sweep"
+    const notADir = path.join(parent, 'a-file');
+    fs.writeFileSync(notADir, 'x');
+    const blocked = sweepStale({ base: notADir });
+    expect(blocked.removed).toEqual([]);
+    expect(blocked.error).toBe('ENOTDIR'); // rc-9: other errors stay observable, not "nothing to sweep"
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test('sweepStale refuses a symlinked base and compares system temp by realpath', () => {
+  const dir = makeBase();
+  const link = path.join(makeBase(), 'base-link'); // parent dir for the link
+  try {
+    try {
+      fs.symlinkSync(dir, link, 'junction');
+    } catch {
+      return; // symlink privilege unavailable on this machine — skip
+    }
+    // CWE-59: base itself being a symlink must be refused outright.
+    const viaLink = sweepStale({ base: link });
+    expect(viaLink.removed).toEqual([]);
+    expect(viaLink.refused).toBe('base-symlink');
+
+    // The refusal must not be escapable by passing the system temp through a
+    // symlink: realpath comparison resolves link -> dir on the systemTemp side.
+    const byRealpath = sweepStale({ base: dir, systemTemp: link });
+    expect(byRealpath.removed).toEqual([]);
+    expect(byRealpath.refused).toBe('system-temp-root');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(path.dirname(link), { recursive: true, force: true });
+  }
 });
 
 test('sweepStale never traverses symlinks/junctions', () => {
   const base = makeBase();
+  const target = makeBase();
   try {
-    const target = makeBase();
     const link = path.join(base, 'vitest-linked-01');
     try {
       fs.symlinkSync(target, link, 'junction');
@@ -91,6 +121,7 @@ test('sweepStale never traverses symlinks/junctions', () => {
     expect(fs.existsSync(target)).toBe(true);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
+    fs.rmSync(target, { recursive: true, force: true });
   }
 });
 
@@ -104,17 +135,23 @@ test('sweepE2eWorkspace matches timestamped residue only, never fixtures', () =>
       'acceptance-l3e-1786418574',
       'verify-fix-1786423073',
       'trap-03-missing-dep',
+      'e2e-fixture-flow-data', // prefix-collides with residue but has no epoch suffix
+      'e2e-helpers',
     ];
     for (const n of names) fs.mkdirSync(path.join(ws, n));
     ageDir(path.join(ws, 'e2e-1780049707469-b07bb3b5'), 8);
     ageDir(path.join(ws, 'acceptance-l3e-1786418574'), 8);
     ageDir(path.join(ws, 'verify-fix-1786423073'), 1); // fresh → kept
     ageDir(path.join(ws, 'trap-03-missing-dep'), 30); // fixture → never matched
+    ageDir(path.join(ws, 'e2e-fixture-flow-data'), 30); // fixture → never matched
+    ageDir(path.join(ws, 'e2e-helpers'), 30); // fixture → never matched
 
     const r = sweepE2eWorkspace({ repoRoot });
     expect(r.removed.sort()).toEqual(['acceptance-l3e-1786418574', 'e2e-1780049707469-b07bb3b5']);
     expect(fs.existsSync(path.join(ws, 'verify-fix-1786423073'))).toBe(true);
     expect(fs.existsSync(path.join(ws, 'trap-03-missing-dep'))).toBe(true);
+    expect(fs.existsSync(path.join(ws, 'e2e-fixture-flow-data'))).toBe(true);
+    expect(fs.existsSync(path.join(ws, 'e2e-helpers'))).toBe(true);
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -162,6 +199,44 @@ test('globalSetup redirects TMPDIR/TEMP/TMP, teardown removes run dir and restor
       else process.env[k] = v;
     }
     fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('globalSetup refuses to sweep when PD_TEST_TEMP_ROOT IS the system temp (sweep-before-redirect ordering)', async () => {
+  const saved = {
+    root: process.env.PD_TEST_TEMP_ROOT,
+    TMPDIR: process.env.TMPDIR,
+    TEMP: process.env.TEMP,
+    TMP: process.env.TMP,
+  };
+  // Whatever os.tmpdir() currently resolves to is what a sweep must refuse —
+  // the ordering bug was sweeping AFTER the redirect, when os.tmpdir() had
+  // become our run dir and the comparison could never match the real root.
+  const systemTemp = path.resolve(os.tmpdir());
+  const logs = [];
+  const spy = vi.spyOn(console, 'log').mockImplementation((msg) => logs.push(String(msg)));
+  try {
+    process.env.PD_TEST_TEMP_ROOT = systemTemp;
+    const teardown = await tempLifecycleGlobalSetup({ name: 'ordering-test' });
+    expect(typeof teardown).toBe('function');
+    // Redirection itself still happens (into a run dir), only the sweep is refused.
+    const redirected = path.resolve(process.env.TEMP);
+    teardown(); // always tear down before any later assertion can fail and skip it
+    spy.mockRestore();
+    expect(logs.some((l) => l.includes('refused system-temp-root'))).toBe(true);
+    expect(redirected).not.toBe(systemTemp);
+    expect(path.resolve(os.tmpdir())).toBe(systemTemp); // env fully restored
+  } finally {
+    spy.mockRestore();
+    for (const [k, v] of Object.entries({
+      PD_TEST_TEMP_ROOT: saved.root,
+      TMPDIR: saved.TMPDIR,
+      TEMP: saved.TEMP,
+      TMP: saved.TMP,
+    })) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   }
 });
 

@@ -70,19 +70,45 @@ export function createRunDir({ base = resolveTempRoot(), label = 'run' } = {}) {
   return dir;
 }
 
+function safeRealpath(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Remove entries in `base` older than `maxAgeMs`. Never traverses symlinks /
- * junctions and refuses to sweep the system temp root — this function must
- * only ever operate inside our own `.pd-test-temp` managed directories.
+ * junctions, refuses a `base` that is itself a symlink, and refuses the system
+ * temp root — this function must only ever operate inside our own
+ * `.pd-test-temp` managed directories. `systemTemp` must be captured BEFORE
+ * any TMPDIR/TEMP/TMP redirection (see globalSetup below): os.tmpdir()
+ * derives from those env vars, so calling it after the redirect makes the
+ * refusal compare against our own run dir and silently never fire.
  */
 export function sweepStale({
   base = resolveTempRoot(),
   maxAgeMs = DEFAULT_MAX_AGE_MS,
   now = Date.now(),
+  systemTemp = os.tmpdir(),
 } = {}) {
   const result = { removed: [], kept: 0, failed: [] };
   if (!base) return result;
-  if (path.resolve(base) === path.resolve(os.tmpdir())) {
+  // CWE-59: path.resolve() does not resolve symlinks or 8.3 short paths, and
+  // the per-entry lstat guard below only protects children — a symlinked base
+  // would otherwise escape the system-temp check entirely.
+  try {
+    if (fs.lstatSync(base).isSymbolicLink()) {
+      result.refused = 'base-symlink';
+      return result;
+    }
+  } catch {
+    // Absent/unreadable base: readdir below records ENOENT/errno as before.
+  }
+  const baseReal = safeRealpath(base) ?? path.resolve(base);
+  const systemReal = safeRealpath(systemTemp) ?? path.resolve(systemTemp);
+  if (baseReal === systemReal) {
     result.refused = 'system-temp-root';
     return result;
   }
@@ -120,7 +146,9 @@ export function sweepStale({
 
 // Timestamped run residue written inside the repo by e2e scripts, e.g.
 // e2e-1780049707469-b07bb3b5 / acceptance-l3e-1786418574 / verify-fix-1786423073.
-const E2E_RESIDUE_RE = /^(e2e|acceptance|verify-fix)-/;
+// The trailing 10-13 digit epoch anchor is what keeps durable fixtures
+// (e2e-fixture-*, e2e-helpers, ...) out of the recursive-delete path.
+const E2E_RESIDUE_RE = /^(e2e|acceptance|verify-fix)(-[A-Za-z0-9]+)*-\d{10,13}(-[0-9a-f]{6,8})?$/;
 
 /** Sweep stale timestamped workspaces under tests/e2e-workspace (fixtures untouched). */
 export function sweepE2eWorkspace({
@@ -166,6 +194,7 @@ function describeSweep(name, r) {
   if (r.removed.length) parts.push(`removed ${r.removed.length}`);
   if (r.failed.length) parts.push(`failed ${r.failed.length}`);
   if (r.kept) parts.push(`kept ${r.kept}`);
+  if (r.refused) parts.push(`refused ${r.refused}`);
   if (r.error) parts.push(`error ${r.error}`);
   return `[temp-lifecycle] ${name}: ${parts.join(', ') || 'nothing to do'}`;
 }
@@ -177,11 +206,19 @@ function describeSweep(name, r) {
  * spawn-sites using `{ ...process.env }` propagate further to CLI children.
  */
 export default async function tempLifecycleGlobalSetup(ctx) {
+  // Capture the real system temp BEFORE writing any env var: os.tmpdir()
+  // derives from TMPDIR/TEMP/TMP on Windows, so a sweep that ran after the
+  // redirect (or read os.tmpdir() late) would compare our run dir against
+  // itself and the system-temp refusal would silently never fire — even when
+  // PD_TEST_TEMP_ROOT points AT the system temp.
+  const systemTemp = os.tmpdir();
   const base = resolveTempRoot();
   if (!base) {
     console.log('[temp-lifecycle] PD_TEST_TEMP_ROOT=system — redirection disabled');
     return;
   }
+  const swept = sweepStale({ base, systemTemp });
+  const e2e = sweepE2eWorkspace();
   const label = sanitizeLabel(`vitest-${ctx?.name ?? ''}`);
   const runDir = createRunDir({ base, label });
   const previous = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP };
@@ -189,9 +226,7 @@ export default async function tempLifecycleGlobalSetup(ctx) {
   process.env.TEMP = runDir;
   process.env.TMP = runDir;
 
-  const swept = sweepStale({ base });
   console.log(describeSweep(path.basename(base), swept));
-  const e2e = sweepE2eWorkspace();
   if (e2e.removed.length || e2e.failed.length || e2e.error) console.log(describeSweep('tests/e2e-workspace', e2e));
   console.log(`[temp-lifecycle] TMPDIR -> ${runDir}`);
 
