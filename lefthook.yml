@@ -15,6 +15,13 @@ pre-commit:
       stage_fixed: true
     repo-hygiene:
       run: node scripts/check-repo-hygiene.js staged
+    commit-identity:
+      # Reject commits attributed to a Git email GitHub maps to a foreign
+      # account (2026-09-21 incident: pd@users.noreply.github.com →
+      # github.com/pd instead of the repository owner). `git var` sees
+      # -c and env overrides, so inline injection fails closed too.
+      # Judge-only — never mutates anything.
+      run: node scripts/dev/check-commit-identity.mjs
 
 pre-push:
   parallel: false
