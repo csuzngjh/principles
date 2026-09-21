@@ -570,15 +570,22 @@ jobs:
           VERSION="$(node scripts/resolve-product-version.mjs)"
           node -e '
             const { execFileSync } = require("node:child_process");
-            const { readFileSync, mkdtempSync, rmSync } = require("node:fs");
+            const { readFileSync, mkdtempSync, readdirSync, rmSync } = require("node:fs");
             const { join } = require("node:path");
             const { tmpdir } = require("node:os");
             const expected = process.argv[1];
-            const pack = JSON.parse(execFileSync("npm", ["pack", "--json"], { encoding: "utf8", cwd: "packages/create-principles-disciple" }));
-            const filename = pack[0].filename;
             const work = mkdtempSync(join(tmpdir(), "pd-tarball-identity-"));
             try {
-              execFileSync("tar", ["-xzf", join("packages", "create-principles-disciple", filename), "-C", work, "package/_release/product-identity.json"]);
+              // PRI-881: `npm pack --json` is unusable here — the package
+              // prepack (build + bundle) prints non-JSON progress lines into
+              // the same stdout. Pack into an ISOLATED directory instead and
+              // verify the single tarball it produces.
+              execFileSync("npm", ["pack", "--pack-destination", work], { encoding: "utf8", cwd: "packages/create-principles-disciple" });
+              const artifacts = readdirSync(work).filter((f) => f.endsWith(".tgz"));
+              if (artifacts.length !== 1) {
+                throw new Error(`expected exactly one packed tarball, got: ${JSON.stringify(artifacts)}`);
+              }
+              execFileSync("tar", ["-xzf", join(work, artifacts[0]), "-C", work, "package/_release/product-identity.json"]);
               const identity = JSON.parse(readFileSync(join(work, "package", "_release", "product-identity.json"), "utf8"));
               if (identity.productVersion !== expected) {
                 throw new Error(`Packed tarball identity ${JSON.stringify(identity.productVersion)} != resolved product identity ${JSON.stringify(expected)}`);
