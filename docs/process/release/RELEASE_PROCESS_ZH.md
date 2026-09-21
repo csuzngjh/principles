@@ -45,7 +45,9 @@ tag vX.Y.Z（插件语义）/ GitHub Release / ClawHub
   存在且来源匹配（gitHead = cohort SHA）→ 跳过上传并补齐收尾；冲突 /
   落后 registry / registry 故障 → 大声失败。
 - **C4 产品组装** = 插件进入最终发布计划（直接或随 core 变更）就必须有安装器
-  发布；pd-console 变更必须有安装器发布。守卫只报错，从不替你发明缺失版本。
+  发布；pd-console 变更必须有安装器发布——除非该 PR 带官方空 changeset 显式
+  声明不发布（保守路径命中，与 N-3 同一豁免语义；由计划触发的边永不豁免）。
+  守卫只报错，从不替你发明缺失版本。
 
 ### 产品版本如何推进（不变，PRI-874）
 
@@ -146,7 +148,7 @@ node scripts/release/snapshot-registry-baseline.mjs --out docs/release/<日期>.
 | 问题 | 解决 |
 |------|------|
 | CI：`N-3 ... without a changeset` | 添加声明该包的 `.changeset/*.md`（确实无需发布则加空 changeset） |
-| CI：`C4 ... requires create-principles-disciple` | 补安装器 changeset——守卫不会替你发明 |
+| CI：`C4 ... requires create-principles-disciple` | 补安装器 changeset——守卫不会替你发明；确属非发布内容（dev-config/测试）则改用官方空 changeset 显式声明不发布 |
 | CI：`N-version ... version field in a normal PR` | 撤掉手改；版本只经 Version Packages PR 落地 |
 | 发布：`LOCAL_BEHIND_REGISTRY` | main 落后于 registry（上面有计划外版本）——先对齐基线再发布 |
 | 发布：`PRESENT_CONFLICT` | 同名同版本已存在但来源不同——先调查，绝不覆盖 |

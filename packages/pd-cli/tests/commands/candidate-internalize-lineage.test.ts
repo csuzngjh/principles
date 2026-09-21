@@ -21,7 +21,11 @@ import {
   SqliteDiagnosticianCommitter,
   type DiagnosticianOutputV1,
 } from '@principles/core/runtime-v2';
-import { handleCandidateInternalize, handleCandidateInternalizationBackfill } from '../../src/commands/candidate.js';
+import {
+  handleCandidateInternalize,
+  handleCandidateInternalizationBackfill,
+  resolveSourcePainIdFromDiagnostician,
+} from '../../src/commands/candidate.js';
 
 let tmpDir = '';
 
@@ -561,5 +565,64 @@ describe('candidate internalize resolves the production diag_router candidate ch
     }
     expect(Reflect.get(diagnostic, 'sourcePainId')).toBe(painId);
     await verify.close();
+  });
+});
+
+// ── PRI-866: reader convergence characterization ─────────────────────────────
+// resolveSourcePainIdFromDiagnostician now delegates the field parse to the
+// core canonical reader (parseSeedSourcePainId). Value semantics were already
+// identical; this pins the contract at the pd-cli public boundary so the
+// convergence cannot silently regress.
+describe('PRI-866: resolveSourcePainIdFromDiagnostician canonical value semantics', () => {
+  it('returns the trimmed sourcePainId for a historical row with surrounding whitespace', async () => {
+    const dir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: dir });
+    await sm.initialize();
+    try {
+      await sm.createTask({
+        taskId: 'diagnostician-p866-ws',
+        taskKind: 'diagnostician',
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        diagnosticJson: diagnosticianDiagnosticJson(' pain-p866-ws '),
+      });
+      expect(await resolveSourcePainIdFromDiagnostician(sm, { taskId: 'diagnostician-p866-ws' }))
+        .toBe('pain-p866-ws');
+    } finally {
+      await sm.close();
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  it('returns null for blank or absent sourcePainId (fail-loud contract, no invention)', async () => {
+    const dir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: dir });
+    await sm.initialize();
+    try {
+      await sm.createTask({
+        taskId: 'diagnostician-p866-blank',
+        taskKind: 'diagnostician',
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        diagnosticJson: diagnosticianDiagnosticJson('   '),
+      });
+      await sm.createTask({
+        taskId: 'diagnostician-p866-none',
+        taskKind: 'diagnostician',
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        diagnosticJson: JSON.stringify({ reasonSummary: 'no lineage key here' }),
+      });
+      expect(await resolveSourcePainIdFromDiagnostician(sm, { taskId: 'diagnostician-p866-blank' }))
+        .toBeNull();
+      expect(await resolveSourcePainIdFromDiagnostician(sm, { taskId: 'diagnostician-p866-none' }))
+        .toBeNull();
+    } finally {
+      await sm.close();
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
   });
 });
