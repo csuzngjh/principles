@@ -52,7 +52,9 @@ Key contracts (enforced by `scripts/release/*` guards + tests):
   conflict / behind-registry / registry-error → FAIL LOUD.
 - **C4 product assembly** = a plugin release (direct or alongside a core
   change) requires an installer release in the final plan; a pd-console
-  change requires an installer release. The guard fails, it never invents
+  change requires an installer release — unless the PR carries the official
+  empty changeset (conservative path-rule hit waived exactly like N-3; a
+  plan-triggered edge is never waived). The guard fails, it never invents
   the missing version.
 
 ### How the Product Version Advances (unchanged, PRI-874)
@@ -166,7 +168,7 @@ node scripts/release/snapshot-registry-baseline.mjs --out docs/release/<date>.js
 | Issue | Fix |
 |-------|-----|
 | CI: `N-3 ... without a changeset` | Add `.changeset/*.md` declaring the package (or an empty changeset if genuinely non-release) |
-| CI: `C4 ... requires create-principles-disciple` | Add an installer changeset — the guard never invents it |
+| CI: `C4 ... requires create-principles-disciple` | Add an installer changeset — the guard never invents it; for a genuinely non-release-affecting console dev-config/test change, the official empty changeset declares "no release" instead |
 | CI: `N-version ... version field in a normal PR` | Revert the hand edit; versions only land via the Version Packages PR |
 | Publish: `LOCAL_BEHIND_REGISTRY` | main is behind the registry (unplanned versions above yours) — reconcile the baseline before releasing |
 | Publish: `PRESENT_CONFLICT` | The exact version exists with different provenance — investigate before anything else; never overwrite |
