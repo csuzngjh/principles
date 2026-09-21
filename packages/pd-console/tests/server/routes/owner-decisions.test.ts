@@ -17,6 +17,7 @@ import * as os from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   SqliteConnection,
+  SqliteApprovalQueueStore,
   createRuntimeStateHandle,
   createPITaskDiagnosticJson,
   hydratePITaskRecord,
@@ -576,5 +577,64 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
     const res = makeRes();
     await handleOwnerDecisionsRoute(makeReq('POST', { action: 'accept_current' }), res, ctxBase(`/${EVAL_ID}/resolve`));
     expect(res.statusCode).toBe(400);
+  });
+});
+
+// ── activation_approval principleId 深链（adhoc-20260921）────────────────────
+// 「前往部署审批」CTA 依据条目上的 principleId 直达 /principles/:id。服务端
+// 必须把 approval.artifactId 解析为 ledger principle id 填入既有 principleId
+// 字段；解析失败时不带该字段（UI 回退审查列表链接）。
+
+const LINKED_ARTIFACT_ID = 'pi-art-approval-linked';
+const UNLINKED_ARTIFACT_ID = 'pi-art-approval-unlinked';
+
+function setupApprovalDb(): SqliteConnection {
+  const conn = setupDb();
+  const db = conn.getDb();
+  const now = '2026-08-30T00:00:00.000Z';
+  db.prepare(
+    `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(LINKED_ARTIFACT_ID, 'principle', 'task-approval-linked', 'p-linked-1', '[]', 'validated',
+    JSON.stringify({ principleId: 'p-linked-1', title: '深链解析测试' }), now, now);
+  // 无 source_principle_id、无 dreamer 血缘 → lineage 解析必然 unresolved
+  db.prepare(
+    `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(UNLINKED_ARTIFACT_ID, 'principle', 'task-approval-unlinked', null, '[]', 'validated', '{}', now, now);
+  return conn;
+}
+
+describe('GET owner-decisions: activation_approval principleId deep link', () => {
+  it('pending approval with a resolvable ledger principle carries its principleId', async () => {
+    const conn = setupApprovalDb();
+    await new SqliteApprovalQueueStore(conn).enqueue(
+      { artifactId: LINKED_ARTIFACT_ID, channel: 'prompt', riskLevel: 'low', confidence: 0.9 },
+      '2026-08-30T00:00:00.000Z',
+    );
+    conn.close();
+
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+    const data = parse(res).data as { items: Array<{ kind: string; taskId: string; principleId?: string }> };
+    const item = data.items.find((entry) => entry.kind === 'activation_approval' && entry.taskId === LINKED_ARTIFACT_ID);
+    expect(item).toBeDefined();
+    expect(item?.principleId).toBe('p-linked-1');
+  });
+
+  it('pending approval that cannot be resolved omits principleId (UI falls back to the list link)', async () => {
+    const conn = setupApprovalDb();
+    await new SqliteApprovalQueueStore(conn).enqueue(
+      { artifactId: UNLINKED_ARTIFACT_ID, channel: 'code_tool_hook', riskLevel: 'high', confidence: 0.9 },
+      '2026-08-30T00:00:00.000Z',
+    );
+    conn.close();
+
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+    const data = parse(res).data as { items: Array<{ kind: string; taskId: string; principleId?: string }> };
+    const item = data.items.find((entry) => entry.kind === 'activation_approval' && entry.taskId === UNLINKED_ARTIFACT_ID);
+    expect(item).toBeDefined();
+    expect(item?.principleId).toBeUndefined();
   });
 });

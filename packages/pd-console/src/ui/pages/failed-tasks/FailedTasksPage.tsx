@@ -30,7 +30,7 @@
  * - rc-9: every error/disabled path surfaces a reason + next action
  */
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -220,6 +220,10 @@ function groupTasksByKind(tasks: FailedTask[]): Map<string, FailedTask[]> {
 export function FailedTasksPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // ?taskId= deep link (治理焦点「查看恢复详情」直达): initial value only —
+  // the row auto-expands once; the Owner can still collapse/switch freely.
+  const deepLinkTaskId = searchParams.get("taskId") ?? undefined;
   const [state, setState] = useState<PageState>({ status: "loading" });
 
   // Governance Recovery Actions v1 — flag-gated recovery UI (fail-closed:
@@ -373,6 +377,7 @@ export function FailedTasksPage() {
             data={state.data}
             onCreateDraft={handleCreateDraft}
             onRecover={recoveryEnabled ? (task) => setRecoverTarget(task) : undefined}
+            initialExpandedTaskId={deepLinkTaskId}
             t={t}
           />
         </div>
@@ -455,10 +460,12 @@ interface LoadedContentProps {
   onCreateDraft: (task: FailedTask) => void;
   /** Present only when failed_task_recovery_console is enabled (undefined = hidden) */
   onRecover?: (task: FailedTask) => void;
+  /** ?taskId= deep link: auto-expand this task's row once data is loaded. */
+  initialExpandedTaskId?: string;
   t: (key: string) => string;
 }
 
-function LoadedContent({ data, onCreateDraft, onRecover, t }: LoadedContentProps) {
+function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, t }: LoadedContentProps) {
   const hasTasks = data.tasks.length > 0;
 
   // Empty state — surface nextAction from the API (rc-9: no silent fallback)
@@ -497,7 +504,13 @@ function LoadedContent({ data, onCreateDraft, onRecover, t }: LoadedContentProps
                 </div>
               </CardHeader>
               <CardContent>
-                <TaskTable tasks={tasks} onCreateDraft={onCreateDraft} onRecover={onRecover} t={t} />
+                <TaskTable
+                  tasks={tasks}
+                  onCreateDraft={onCreateDraft}
+                  onRecover={onRecover}
+                  initialExpandedTaskId={initialExpandedTaskId}
+                  t={t}
+                />
               </CardContent>
             </Card>
           );
@@ -526,16 +539,24 @@ interface TaskTableProps {
   onCreateDraft: (task: FailedTask) => void;
   /** Present only when failed_task_recovery_console is enabled (undefined = hidden) */
   onRecover?: (task: FailedTask) => void;
+  /** ?taskId= deep link — only honoured by the table that holds the task. */
+  initialExpandedTaskId?: string;
   t: (key: string) => string;
 }
 
-function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
+function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }: TaskTableProps) {
   // PRI-747 F22: one row at a time is expanded into its detail panel.
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  // ?taskId= deep link seeds the initial expansion (only when this table
+  // actually contains the task); after mount it behaves like a normal toggle.
+  const deepLinkTask = initialExpandedTaskId !== undefined
+    ? tasks.find((task) => task.taskId === initialExpandedTaskId)
+    : undefined;
+  const [expandedId, setExpandedId] = useState<string | null>(deepLinkTask?.taskId ?? null);
   const [detail, setDetail] = useState<TaskDetailState>({ status: "idle" });
   // Drop responses from a superseded expand/collapse (rc-7: only the newest
   // request's result may become current state).
   const detailRequestIdRef = useRef(0);
+  const deepLinkFetchedRef = useRef(false);
 
   // Fetch (or refetch) one task's detail; a stale response from a superseded
   // request is dropped (rc-7: only the newest request's result may land).
@@ -554,6 +575,17 @@ function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
       setDetail({ status: "error", taskId, message: result.error, nextAction: result.nextAction });
     }
   }, []);
+
+  // Deep link (?taskId=): fetch the linked task's detail and scroll its row
+  // into view once. The table mounts only after the task list has loaded, so
+  // the row is present at first effect run.
+  useEffect(() => {
+    if (deepLinkTask === undefined || deepLinkFetchedRef.current) return;
+    deepLinkFetchedRef.current = true;
+    void requestDetail(deepLinkTask.taskId);
+    const row = document.querySelector(`[data-testid="detail-toggle-${deepLinkTask.taskId}"]`);
+    row?.scrollIntoView({ block: "center" });
+  }, [deepLinkTask, requestDetail]);
 
   const toggleDetail = useCallback((taskId: string) => {
     if (expandedId === taskId) {

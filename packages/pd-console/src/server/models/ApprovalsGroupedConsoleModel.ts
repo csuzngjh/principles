@@ -3,11 +3,13 @@ import {
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
   ApprovalQueue,
-  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
-import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
+import {
+  createArtifactPrincipleResolutionDeps,
+  resolveArtifactPrincipleId,
+} from './artifact-principle-resolver.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -157,26 +159,12 @@ export class ApprovalsGroupedConsoleModel {
       const artifactPrincipleMap = new Map<string, string | null>();
       const artifactDescriptionMap = new Map<string, string | null>();
       const stateDir = path.join(this.workspaceDir, '.state');
-      const resolutionLedger = new PrincipleTreeLedgerAdapter({ stateDir });
+      const resolutionDeps = createArtifactPrincipleResolutionDeps(conn, artifactStore, this.workspaceDir);
       for (const approval of allApprovals) {
         if (!artifactPrincipleMap.has(approval.artifactId)) {
           try {
             const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(approval.artifactId);
-            let mappedId: string | null = artifact?.sourcePrincipleId ?? null;
-            if (artifact && !mappedId) {
-              const resolution = await resolveLedgerPrincipleId(artifact, {
-                ledger: resolutionLedger,
-                getArtifactById: (id) => artifactStore.getArtifactById(id),
-                getTaskDiagnosticJson: (taskId) => {
-                  const row = conn
-                    .getDb()
-                    .prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?')
-                    .get(taskId) as { diagnostic_json: string | null } | undefined;
-                  return row?.diagnostic_json ?? null;
-                },
-              });
-              if (resolution.status === 'resolved') mappedId = resolution.principleId;
-            }
+            const mappedId = artifact ? await resolveArtifactPrincipleId(artifact, resolutionDeps) : null;
             artifactPrincipleMap.set(approval.artifactId, mappedId);
             if (artifact?.contentJson) {
               artifactDescriptionMap.set(approval.artifactId, extractCandidateDescription(artifact.contentJson));
