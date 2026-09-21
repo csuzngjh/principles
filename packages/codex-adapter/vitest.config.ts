@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
+    globalSetup: ['../../scripts/test/temp-lifecycle.mjs'],
     // pd-hook.production.test.ts drives real hook processes via spawnSync
     // (~2.5s locally, >5s vitest default on shared CI runners now that the
     // bundle includes host-runtime). Give process-spawning suites an explicit

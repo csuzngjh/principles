@@ -286,6 +286,27 @@ describe('guard: normal PR release-intent contract', () => {
     await git(['reset', '--hard', base]);
   });
 
+  it('C4-direct: console dev-config change + official empty changeset passes; undeclared still fails (PRI-884)', async () => {
+    // PR #1813 shape: a non-release-affecting change under a payload-source
+    // path. The empty changeset is the official explicit no-release
+    // declaration (mirrors N-3/T9) — but only when actually present.
+    const base = await git(['rev-parse', 'HEAD']);
+    write('packages/pd-console/vitest.config.ts', 'export default { test: {} };\n');
+    write('.changeset/no-release.md', '---\n---\n\nExplicitly no release needed: dev-only test config.\n');
+    await commitAll('test(console): dev config only');
+    const pass = await runGuard(base);
+    expect(pass.code).toBe(0);
+    expect(pass.stdout).toContain('explicit-no-release');
+    await git(['reset', '--hard', base]);
+
+    write('packages/pd-console/vitest.config.ts', 'export default { test: {} };\n');
+    await commitAll('test(console): undeclared');
+    const fail = await runGuard(base);
+    expect(fail.code).toBe(1);
+    expect(fail.stderr).toContain('C4');
+    await git(['reset', '--hard', base]);
+  });
+
   it('N-version: hand-edited package version field in a normal PR fails', async () => {
     const base = await git(['rev-parse', 'HEAD']);
     write(
