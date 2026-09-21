@@ -111,6 +111,18 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      # SPEC v1.2 §11 — normal PR release-intent guard (changesets). Runs
+      # inside the required Verify Merge Gate job so a red guard blocks the
+      # merge under branch protection. Dual-mode by proof (SPEC §12.1): a
+      # reproducible Version Packages PR passes the version contract; a
+      # normal PR must declare its own release intent. Push events (main)
+      # have no PR diff context — the guard no-ops there.
+      - name: Release intent guard (changesets)
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/release/check-pr-release-intent.mjs
+
       - name: Run canonical merge gate
         run: npm run verify:merge
 
