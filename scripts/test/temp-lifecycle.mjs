@@ -73,7 +73,7 @@ export function createRunDir({ base = resolveTempRoot(), label = 'run' } = {}) {
 /**
  * Remove entries in `base` older than `maxAgeMs`. Never traverses symlinks /
  * junctions and refuses to sweep the system temp root — this function must
- * only ever operate inside our own `.tmp-tests`-style directories.
+ * only ever operate inside our own `.pd-test-temp` managed directories.
  */
 export function sweepStale({
   base = resolveTempRoot(),
@@ -89,8 +89,11 @@ export function sweepStale({
   let entries;
   try {
     entries = fs.readdirSync(base);
-  } catch {
-    return result; // no directory yet — nothing to sweep
+  } catch (err) {
+    // rc-9: only a genuinely absent base is "nothing to sweep"; any other
+    // error stays observable instead of masquerading as an empty result.
+    if (err?.code !== 'ENOENT') result.error = err?.code ?? String(err);
+    return result;
   }
   for (const name of entries) {
     const full = path.join(base, name);
@@ -130,7 +133,8 @@ export function sweepE2eWorkspace({
   let entries;
   try {
     entries = fs.readdirSync(base);
-  } catch {
+  } catch (err) {
+    if (err?.code !== 'ENOENT') result.error = err?.code ?? String(err);
     return result;
   }
   for (const name of entries) {
@@ -162,6 +166,7 @@ function describeSweep(name, r) {
   if (r.removed.length) parts.push(`removed ${r.removed.length}`);
   if (r.failed.length) parts.push(`failed ${r.failed.length}`);
   if (r.kept) parts.push(`kept ${r.kept}`);
+  if (r.error) parts.push(`error ${r.error}`);
   return `[temp-lifecycle] ${name}: ${parts.join(', ') || 'nothing to do'}`;
 }
 
@@ -187,7 +192,7 @@ export default async function tempLifecycleGlobalSetup(ctx) {
   const swept = sweepStale({ base });
   console.log(describeSweep(path.basename(base), swept));
   const e2e = sweepE2eWorkspace();
-  if (e2e.removed.length || e2e.failed.length) console.log(describeSweep('tests/e2e-workspace', e2e));
+  if (e2e.removed.length || e2e.failed.length || e2e.error) console.log(describeSweep('tests/e2e-workspace', e2e));
   console.log(`[temp-lifecycle] TMPDIR -> ${runDir}`);
 
   return () => {

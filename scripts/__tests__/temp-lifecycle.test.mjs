@@ -66,6 +66,13 @@ test('sweepStale refuses the system temp root and tolerates a missing base', () 
 
   const missing = sweepStale({ base: path.join(makeBase(), 'not-created') });
   expect(missing.removed).toEqual([]);
+  expect(missing.error).toBeUndefined(); // ENOENT is legitimately "nothing to sweep"
+
+  const notADir = path.join(makeBase(), 'a-file');
+  fs.writeFileSync(notADir, 'x');
+  const blocked = sweepStale({ base: notADir });
+  expect(blocked.removed).toEqual([]);
+  expect(blocked.error).toBe('ENOTDIR'); // rc-9: other errors stay observable, not "nothing to sweep"
 });
 
 test('sweepStale never traverses symlinks/junctions', () => {
@@ -121,12 +128,18 @@ test('globalSetup redirects TMPDIR/TEMP/TMP, teardown removes run dir and restor
     TMP: process.env.TMP,
   };
   const base = makeBase();
+  // os.tmpdir() on Windows DERIVES from TMP/TEMP, so it must be captured
+  // before setup overwrites the env — comparing against it afterwards is a
+  // tautology, not an assertion.
+  const systemTmp = path.resolve(os.tmpdir());
   try {
     process.env.PD_TEST_TEMP_ROOT = base;
     const teardown = await tempLifecycleGlobalSetup({ name: 'unit-test' });
     expect(typeof teardown).toBe('function');
+    const baseResolved = path.resolve(base);
     for (const key of ['TMPDIR', 'TEMP', 'TMP']) {
-      expect(path.resolve(process.env[key])).toBe(path.resolve(os.tmpdir()));
+      expect(path.resolve(process.env[key])).not.toBe(systemTmp);
+      expect(path.resolve(process.env[key]).startsWith(baseResolved)).toBe(true);
       expect(process.env[key]).toContain('vitest-unit-test');
     }
     // mkdtemp through the redirected os.tmpdir() lands inside our run dir
