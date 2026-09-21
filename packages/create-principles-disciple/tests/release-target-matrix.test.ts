@@ -54,7 +54,9 @@ describe('native release target matrix', () => {
     // verifies the cohort SHA via the reusable workflow's ref input.
     expect(publishWorkflow).toMatch(/release-reproducibility:\s+[\s\S]*needs: resolve-cohort\s+[\s\S]*if: needs\.resolve-cohort\.outputs\.has_cohort == 'true'/);
     expect(publishWorkflow).toMatch(/release-reproducibility:\s+[\s\S]*ref: \$\{\{ needs\.resolve-cohort\.outputs\.cohort_sha \}\}/);
-    expect(publishWorkflow).toContain('needs: [resolve-cohort, release-reproducibility]');
+    // PRI-886: the train needs either the full matrix OR the programmatically
+    // verified reused validation evidence (exactly one of them runs).
+    expect(publishWorkflow).toContain('needs: [resolve-cohort, release-reproducibility, verify-reused-validation]');
     for (const payloadPath of [
       'packages/create-principles-disciple/src/**',
       'packages/openclaw-plugin/**',
@@ -226,7 +228,10 @@ describe('native release target matrix', () => {
     // error tolerance and no always/failure overrides.
     expect(serialJob).not.toContain('continue-on-error');
     expect(serialJob).not.toMatch(/if:\s*(always|failure)\(\)/);
-    const serialUsages = serialJob.match(/uses: \.\/\.github\/actions\/publish-npm-package/g) ?? [];
+    // PRI-886: the publish action is loaded FROM the tools checkout, not
+    // the cohort workspace — tooling fixes must never require a new cohort.
+    const serialUsages =
+      serialJob.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g) ?? [];
     expect(serialUsages).toHaveLength(7);
 
     const order = [...serialJob.matchAll(/pkg_dir: ([a-z-]+)\n/g)].map((match) => match[1] ?? '');
@@ -266,11 +271,10 @@ describe('native release target matrix', () => {
     expect(publishWorkflow).not.toContain('is_full_product=');
     expect(publishWorkflow).not.toMatch(/check_and_add/);
 
-    // The shared publish action preflights every INTERNAL dependency range
-    // the package itself declares (fail loud with a next action instead of
-    // publishing an uninstallable package); host-runtime's install-layout
-    // case is covered by that generic preflight.
-    expect(actionYml).toMatch(/check_resolvable/);
+    // PRI-886: the dependency preflight is the tools-checkout
+    // deps-preflight script (classified bounded wait; the legacy
+    // check_resolvable bash gate is deleted).
+    expect(actionYml).toMatch(/deps-preflight\.mjs/);
     expect(actionYml).toMatch(/registry-exact\.mjs/);
 
     // Credentials boundary: composite actions cannot read the secrets
@@ -278,15 +282,21 @@ describe('native release target matrix', () => {
     // must pass them explicitly on every step (review P1 round 3).
     expect(actionYml).not.toContain('secrets.');
     expect(actionYml).toMatch(/NODE_AUTH_TOKEN: \$\{\{ inputs\.npm_token \}\}/);
-    // The cutover replaced softprops/action-gh-release with the gh CLI
-    // (idempotent create), whose token env is GH_TOKEN.
-    expect(actionYml).toMatch(/GH_TOKEN: \$\{\{ inputs\.github_token \}\}/);
-    expect(actionYml).toMatch(/CLAWHUB_TOKEN: \$\{\{ inputs\.clawhub_token \}\}/);
-    const tokenProps = ['npm_token', 'github_token', 'clawhub_token'];
-    for (const prop of tokenProps) {
-      const usages = serialJob.match(new RegExp(`${prop}: \\$\\{\\{ secrets\\.[A-Z_]+ \\}\\}`, 'g')) ?? [];
-      expect(usages).toHaveLength(7);
-    }
+    // Closing steps (gh CLI release creation via GH_TOKEN, ClawHub sync)
+    // moved to the isolated finalize action + job (PRI-886).
+    const finalizeYml = fs.readFileSync(
+      path.join(repoRoot, '.github', 'actions', 'finalize-npm-release', 'action.yml'),
+      'utf8',
+    );
+    expect(finalizeYml).toMatch(/GH_TOKEN: \$\{\{ inputs\.github_token \}\}/);
+    expect(finalizeYml).toMatch(/CLAWHUB_TOKEN: \$\{\{ inputs\.clawhub_token \}\}/);
+    const npmTokenUsages = serialJob.match(/npm_token: \$\{\{ secrets\.NPM_TOKEN \}\}/g) ?? [];
+    expect(npmTokenUsages).toHaveLength(7);
+    const finalizeJobStart = publishWorkflow.indexOf('publish-finalize:');
+    expect(finalizeJobStart).toBeGreaterThan(0);
+    const finalizeJob = publishWorkflow.slice(finalizeJobStart);
+    expect(finalizeJob).toMatch(/github_token: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+    expect(finalizeJob).toMatch(/clawhub_token: \$\{\{ secrets\.CLAWHUB_TOKEN \}\}/);
 
     // Common build order must build install-layout before host-runtime: a
     // clean `npm ci` leaves install-layout/dist absent, and host-runtime's
