@@ -12,23 +12,53 @@ name: Publish to npm
 #     -> present + identity match: skip npm upload, reconcile closing steps
 #     -> conflict / behind registry / registry error: FAIL LOUD
 #
+# PRODUCT vs TOOLS separation (PRI-886): the PRODUCT (manifests, lockfile,
+# build/prepack scripts, payloads) is always checked out at the COHORT SHA;
+# the publish CONTROL plane (this workflow, .github/actions/*, and every
+# scripts/release/* script it invokes) is checked out separately at a
+# TRUSTED, REVIEWED SHA (tools_ref, defaulting to the dispatched main
+# commit). Publishing fixes therefore take effect on a fresh dispatch
+# without burning a new product version — the old single-checkout design
+# froze the tooling inside the cohort it was publishing.
+#
+# VALIDATION EVIDENCE REUSE (PRI-886): dispatching with validation_run_id
+# set to a prior run that already validated the SAME cohort skips the ~1h
+# full matrix. The reuse is earned programmatically (verify-validation-
+# evidence.mjs): same repo, trusted workflow ancestry, per-leg success of
+# ALL 15 matrix legs + the Windows upgrade gate, attempt recorded, and the
+# cohort proven from the leg's actual checkout logs. No boolean bypass
+# exists; invalid/missing evidence falls back to FULL validation. NOTE: a
+# rerun of an OLD failed run keeps the OLD workflow revision — adopting
+# fixed tools requires THIS dispatch entry, not a rerun.
+#
 # Triggers:
 #   workflow_dispatch  — Owner/recovery entry point. cohort_sha pins the
 #                        release; empty auto-detects the latest cohort.
+#                        tools_ref pins the control plane (empty = the
+#                        dispatched commit). validation_run_id reuses
+#                        prior matrix evidence for the same cohort.
 #   schedule (Fri)     — weekly RECONCILIATION window only (SPEC §23): it
 #                        never creates versions, never merges the Version
 #                        PR; with nothing pending it succeeds as a no-op.
 #
 # The old push-trigger auto-publish, commit-message bump inference,
 # registry-reset-then-bump, the manual dispatch bump input and the
-# single-package matrix path were deleted with this rewrite (SPEC §33
-# Phase 4) — no legacy fallback remains.
+# single-package matrix path were deleted with the changesets cutover
+# (SPEC §33 Phase 4) — no legacy fallback remains.
 
 on:
   workflow_dispatch:
     inputs:
       cohort_sha:
         description: 'Version Packages PR merge SHA to publish (empty = auto-detect the latest cohort)'
+        required: false
+        default: ''
+      tools_ref:
+        description: 'Trusted reviewed SHA for the publish CONTROL plane (empty = the dispatched commit). Product payloads always come from the cohort SHA.'
+        required: false
+        default: ''
+      validation_run_id:
+        description: 'Prior run ID whose full matrix validated the SAME cohort — programmatically verified before reuse; empty = run the full matrix.'
         required: false
         default: ''
   schedule:
@@ -51,9 +81,12 @@ jobs:
       has_cohort: ${{ steps.cohort.outputs.has_cohort }}
       pending_json: ${{ steps.cohort.outputs.pending_json }}
     steps:
+      # TOOLS checkout: the resolver itself is control tooling and must
+      # come from the trusted reviewed SHA, never from the cohort.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+          ref: ${{ inputs.tools_ref || github.sha }}
           # Cohort detection walks recent merge commits (bounded scan).
           fetch-depth: 0
 
@@ -108,7 +141,7 @@ jobs:
 
           if [ "$COMPLETE" = "true" ]; then
             # npm side fully published. Closing steps (tag / GitHub Release /
-            # ClawHub) may still be missing — the train's idempotent
+            # ClawHub) may still be missing — the finalize job's idempotent
             # reconciliation verifies or completes them; every npm upload
             # skips (SPEC §24).
             echo "Cohort $SHA is fully published on npm — train will only reconcile closing steps."
@@ -119,7 +152,9 @@ jobs:
   release-reproducibility:
     name: Verify Full Release Matrix (cohort SHA)
     needs: resolve-cohort
-    if: needs.resolve-cohort.outputs.has_cohort == 'true'
+    # Full matrix by default; SKIPPED only when a validation_run_id was
+    # supplied — in which case verify-reused-validation earns the reuse.
+    if: needs.resolve-cohort.outputs.has_cohort == 'true' && inputs.validation_run_id == ''
     uses: ./.github/workflows/release-reproducibility-full.yml
     with:
       # G5 (SPEC §17.1): the gate verifies the COHORT SHA, not the main
@@ -129,28 +164,93 @@ jobs:
     permissions:
       contents: read
 
+  verify-reused-validation:
+    name: Verify reused validation evidence
+    needs: resolve-cohort
+    if: needs.resolve-cohort.outputs.has_cohort == 'true' && inputs.validation_run_id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Reading run/job metadata + job logs of the evidence run.
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+          # TOOLS checkout: the verifier is control tooling. fetch-depth 0
+          # so workflow-revision ancestry against the trust SHA is provable.
+          ref: ${{ inputs.tools_ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Verify validation evidence for the cohort
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/release/verify-validation-evidence.mjs \
+            --run-id "${{ inputs.validation_run_id }}" \
+            --expect-cohort "${{ needs.resolve-cohort.outputs.cohort_sha }}" \
+            --trust-sha "$(git rev-parse HEAD)" \
+            --matrix-file .github/workflows/release-reproducibility-full.yml \
+            --repo "${{ github.repository }}"
+
   publish-full-product:
     name: Publish release cohort (release train)
-    needs: [resolve-cohort, release-reproducibility]
-    if: needs.resolve-cohort.outputs.has_cohort == 'true'
+    needs: [resolve-cohort, release-reproducibility, verify-reused-validation]
+    # Runs when EITHER validation path succeeded: the full matrix (fresh
+    # validation) or the programmatically verified reused evidence. A
+    # failed or skipped evidence job with no matrix run blocks the train.
+    if: >-
+      !cancelled() &&
+      needs.resolve-cohort.outputs.has_cohort == 'true' &&
+      (needs.release-reproducibility.result == 'success' || needs.verify-reused-validation.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
       contents: write
       id-token: write
+    env:
+      # THE publish order (dependency topological): the single source lives
+      # here and is passed explicitly to every control script that needs it.
+      TRAIN_ORDER: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
     steps:
-      # ONE job, SEVEN sequential steps: the step order below IS the
+      # ONE job, SEVEN sequential npm legs: the step order below IS the
       # dependency order. A failed step stops the job, so an upstream
       # publish failure blocks every downstream package. Every step
       # publishes its package's EXACT COMMITTED VERSION or skips it
       # (already present with matching provenance) — the train is safe to
-      # re-run after partial failure (SPEC §24).
+      # re-run after partial failure (SPEC §24). Closing steps live in the
+      # separate publish-finalize job AFTER this one, so a tag/release/
+      # marketplace failure can never block an unuploaded npm package.
+
+      # PRODUCT checkout at the workspace root — the cohort SHA, not main
+      # HEAD. Retries and the weekly window build the same immutable
+      # source (SPEC §17.1). No persisted credentials: this job never
+      # pushes (the finalize job owns tag pushes).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          # THE cohort SHA — not main HEAD. Retries and the weekly window
-          # build the same immutable source (SPEC §17.1).
           ref: ${{ needs.resolve-cohort.outputs.cohort_sha }}
           fetch-depth: 0
+          persist-credentials: false
+
+      # TOOLS checkout: the publish CONTROL plane (the composite action
+      # invoked below and every scripts/release/* script it calls) comes
+      # from this trusted reviewed SHA, fixed at dispatch time — never a
+      # floating main and never the cohort itself (PRI-886).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ inputs.tools_ref || github.sha }}
+          path: release-tools
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
@@ -163,6 +263,37 @@ jobs:
         run: npm ci --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
+
+      - name: Record release identities (cohort + tools)
+        id: identities
+        run: |
+          set -euo pipefail
+          COHORT_SHA="${{ needs.resolve-cohort.outputs.cohort_sha }}"
+          TOOLS_SHA=$(git -C release-tools rev-parse HEAD)
+          echo "tools_sha=$TOOLS_SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Release identities"
+            echo ""
+            echo "| Identity | Value |"
+            echo "|----------|-------|"
+            echo "| Product cohort (payloads, manifests, builds) | \`$COHORT_SHA\` |"
+            echo "| Publish tools (workflow, action, control scripts) | \`$TOOLS_SHA\` |"
+            echo "| Validation | ${{ inputs.validation_run_id != '' && format('reused run {0}', inputs.validation_run_id) || 'full matrix (cohort SHA)' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Product cohort: $COHORT_SHA"
+          echo "Publish tools:  $TOOLS_SHA"
+
+      - name: Verify dependency plan (static, before any upload)
+        # Deterministic range/order errors fail HERE, before the first
+        # upload — never masquerading as a registry wait later (PRI-886).
+        env:
+          TOOLS_DIR: release-tools
+        run: |
+          set -euo pipefail
+          node "$TOOLS_DIR/scripts/release/deps-preflight.mjs" \
+            --workspace-root . \
+            --order "$TRAIN_ORDER" \
+            --static-only
 
       # Common builds in dependency order: install-layout BEFORE host-runtime
       # — host-runtime's TypeScript build imports @principles/install-layout,
@@ -190,79 +321,121 @@ jobs:
           echo "Train product identity (at cohort SHA): $VERSION"
 
       - name: Publish 1/7 @principles/core
-        uses: ./.github/actions/publish-npm-package
+        uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: principles-core
           npm_name: '@principles/core'
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 2/7 @principles/install-layout
-        uses: ./.github/actions/publish-npm-package
+        uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: install-layout
           npm_name: '@principles/install-layout'
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 3/7 @principles/host-runtime
-        uses: ./.github/actions/publish-npm-package
+        uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: host-runtime
           npm_name: '@principles/host-runtime'
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 4/7 @principles/codex-adapter
-        uses: ./.github/actions/publish-npm-package
+        uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: codex-adapter
           npm_name: '@principles/codex-adapter'
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       # Publish order is a DEPENDENCY topological order (SPEC §20): a package
       # is published only after every internal dependency it declares, so the
-      # dependent's "Verify registry dependencies are published" gate sees a
-      # resolvable range. @principles/pd-cli depends on principles-disciple
-      # (^2.0.2), so the plugin publishes BEFORE pd-cli. The prior ordering
-      # (pd-cli at 5/7, plugin at 6/7) made pd-cli's gate fail against the
-      # not-yet-published plugin version.
+      # dependent's dependency preflight sees a resolvable range.
+      # @principles/pd-cli depends on principles-disciple (^2.0.2), so the
+      # plugin publishes BEFORE pd-cli.
       - name: Publish 5/7 principles-disciple (plugin)
-        uses: ./.github/actions/publish-npm-package
+        uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: openclaw-plugin
           npm_name: 'principles-disciple'
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 6/7 @principles/pd-cli
-        uses: ./.github/actions/publish-npm-package
+        uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: pd-cli
           npm_name: '@principles/pd-cli'
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 7/7 create-principles-disciple (installer)
-        uses: ./.github/actions/publish-npm-package
+        uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: create-principles-disciple
           npm_name: 'create-principles-disciple'
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: ${{ env.TRAIN_ORDER }}
           product_identity_version: ${{ steps.train-identity.outputs.version }}
           npm_token: ${{ secrets.NPM_TOKEN }}
+
+  publish-finalize:
+    name: Finalize release (tag, GitHub Release, ClawHub)
+    needs: [resolve-cohort, publish-full-product]
+    # Runs only after ALL SEVEN npm legs uploaded or verified-skip. Its own
+    # failures are visible (red job) and independently retriable by
+    # re-dispatching the train (uploads skip; closing steps reconcile) —
+    # but they can no longer block an npm package that never uploaded.
+    if: >-
+      !cancelled() &&
+      needs.resolve-cohort.outputs.has_cohort == 'true' &&
+      needs.publish-full-product.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      # PRODUCT checkout at the workspace root (cohort SHA): the closing
+      # steps read the plugin's committed version and its changelog.
+      # persist-credentials defaults to true here — the tag step pushes.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+          fetch-depth: 0
+
+      # TOOLS checkout: the finalize action comes from the trusted tools
+      # SHA, exactly like the publish action (PRI-886).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ inputs.tools_ref || github.sha }}
+          path: release-tools
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '24'
+
+      - name: Finalize plugin release (closing steps)
+        uses: ./release-tools/.github/actions/finalize-npm-release
+        with:
+          cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}

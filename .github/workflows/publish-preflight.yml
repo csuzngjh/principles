@@ -1,0 +1,321 @@
+name: Publish Preflight (no writes)
+
+# NO-WRITE RELEASE PREFLIGHT (PRI-886). Cheap checks BEFORE the expensive
+# full matrix: on the same runner / setup-node / registry authentication
+# posture as the real train, verify — without ever running npm publish,
+# creating a tag, or cutting a GitHub Release —
+#
+#   1. the cohort resolves (or the explicit SHA is a real cohort);
+#   2. registry connectivity and the exact name@version state of all seven
+#      packages against the cohort manifests (ABSENT / prior-publish
+#      ancestry tolerated like the train, conflicts fail loud);
+#   3. the static dependency plan (ranges + topological order);
+#   4. the publish TOOLS checkout resolves to the trusted reviewed SHA and
+#      actually contains the action + control scripts it must provide;
+#   5. optional validation-evidence reuse (validation_run_id) verifies;
+#   6. (rehearsal job) every pending package leg runs the REAL control
+#      path from the publish action in dry_run mode: exact-state check,
+#      bounded dependency wait, cohort builds, npm pack dry-run, installer
+#      identity stamp + tarball verification — everything except the
+#      upload. A rehearsal is never evidence of a published version.
+#
+# This workflow holds NO write permissions and must never gain any.
+
+on:
+  workflow_dispatch:
+    inputs:
+      cohort_sha:
+        description: 'Version Packages PR merge SHA to preflight (required — every manifest/exact check reads THIS SHA)'
+        required: true
+        type: string
+      tools_ref:
+        description: 'Trusted reviewed SHA for the publish control plane (empty = the dispatched commit)'
+        required: false
+        default: ''
+      validation_run_id:
+        description: 'Prior run ID whose full matrix validated the SAME cohort — verified programmatically; empty = skipped here'
+        required: false
+        default: ''
+      rehearsal:
+        description: 'Run the publish legs in dry_run rehearsal (cohort builds + real npm pack, no upload)'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: publish-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight-checks:
+    name: Cheap preflight (registry, plan, tools, evidence)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      cohort_sha: ${{ steps.cohort.outputs.cohort_sha }}
+      pending_json: ${{ steps.registry.outputs.pending_json }}
+    steps:
+      # PRODUCT checkout at the cohort SHA (required input) — every
+      # manifest/exact check below reads THIS SHA, never the dispatch SHA.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ inputs.cohort_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # TOOLS checkout (control scripts) at the trusted reviewed SHA.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ inputs.tools_ref || github.sha }}
+          path: release-tools
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install tools dependencies
+        # The control scripts (resolver needs @changesets/parse, the
+        # evidence verifier needs js-yaml) resolve from the TOOLS
+        # checkout's node_modules — never the product's.
+        run: npm ci --ignore-scripts
+        working-directory: release-tools
+
+      - name: Resolve / validate the cohort
+        id: cohort
+        run: |
+          set -euo pipefail
+          node release-tools/scripts/release/resolve-release-cohort.mjs --explicit "${{ inputs.cohort_sha }}" --repo-root release-tools > cohort.json
+          cat cohort.json
+          SHA=$(node -p "require('./cohort.json').sha")
+          echo "cohort_sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Preflighting cohort: $SHA"
+
+      - name: Verify publish tools resolve (paths + scripts)
+        run: |
+          set -euo pipefail
+          TOOLS_SHA=$(git -C release-tools rev-parse HEAD)
+          echo "Tools SHA: $TOOLS_SHA"
+          for f in \
+            .github/actions/publish-npm-package/action.yml \
+            .github/actions/finalize-npm-release/action.yml \
+            scripts/release/registry-exact.mjs \
+            scripts/release/deps-preflight.mjs \
+            scripts/release/verify-validation-evidence.mjs \
+            scripts/release/verify-publish-outcome.mjs \
+            scripts/release/resolve-release-cohort.mjs; do
+            test -f "release-tools/$f" || { echo "::error::tools checkout is missing $f — the trusted tools SHA cannot drive the train."; exit 1; }
+          done
+          echo "Tools checkout verified: action + all control scripts present."
+
+      - name: Verify static dependency plan (ranges + order, no registry)
+        env:
+          TRAIN_ORDER: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+        run: |
+          set -euo pipefail
+          node release-tools/scripts/release/deps-preflight.mjs \
+            --workspace-root . --order "$TRAIN_ORDER" --static-only
+
+      - name: Registry connectivity + exact version state (all seven)
+        id: registry
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
+          COHORT: ${{ steps.cohort.outputs.cohort_sha }}
+        run: |
+          set -euo pipefail
+          PENDING="[]"
+          for DIR in principles-core install-layout host-runtime codex-adapter openclaw-plugin pd-cli create-principles-disciple; do
+            NAME=$(node -p "require('./packages/'+'$DIR'+'/package.json').name")
+            VERSION=$(node -p "require('./packages/'+'$DIR'+'/package.json').version")
+            node release-tools/scripts/release/registry-exact.mjs "$NAME" "$VERSION" \
+              --expect-git-head "$COHORT" --json > "exact-$DIR.json" || true
+            STATUS=$(node -p "require('./exact-$DIR.json').status")
+            GIT_HEAD=$(node -p "require('./exact-$DIR.json').gitHead || ''")
+            echo "$NAME@$VERSION -> $STATUS (gitHead=${GIT_HEAD:-none})"
+            case "$STATUS" in
+              ABSENT|PRESENT_MATCH)
+                ;;
+              PRESENT_CONFLICT|PRESENT_UNVERIFIED)
+                # Same tolerance rule as the train: an UNCHANGED package may
+                # reuse a publish from a provable ancestor of the cohort.
+                PREV=$(git show "$COHORT^:packages/$DIR/package.json" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+                if [ "$PREV" = "$VERSION" ] && [ -n "$GIT_HEAD" ] \
+                  && git cat-file -e "${GIT_HEAD}^{commit}" 2>/dev/null \
+                  && git merge-base --is-ancestor "$GIT_HEAD" "$COHORT"; then
+                  echo "  -> tolerated: unchanged package published by ancestor ${GIT_HEAD:0:12}"
+                else
+                  echo "::error::$NAME@$VERSION is $STATUS — the train will refuse this leg. Resolve the provenance conflict before dispatching."
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "::error::$NAME@$VERSION registry state $STATUS — see exact-$DIR.json above."
+                exit 1
+                ;;
+            esac
+            if [ "$STATUS" = "ABSENT" ]; then
+              PENDING=$(node -e "const a=JSON.parse(process.argv[1]); a.push(process.argv[2]+'@'+process.argv[3]); console.log(JSON.stringify(a))" "$PENDING" "$NAME" "$VERSION")
+            fi
+          done
+          echo "pending_json=$PENDING" >> "$GITHUB_OUTPUT"
+          echo "Registry preflight OK. Pending (would upload): $PENDING"
+
+      - name: Verify validation evidence (when a run id is supplied)
+        if: ${{ inputs.validation_run_id != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node release-tools/scripts/release/verify-validation-evidence.mjs \
+            --run-id "${{ inputs.validation_run_id }}" \
+            --expect-cohort "${{ steps.cohort.outputs.cohort_sha }}" \
+            --trust-sha "$(git -C release-tools rev-parse HEAD)" \
+            --matrix-file release-tools/.github/workflows/release-reproducibility-full.yml \
+            --repo "${{ github.repository }}"
+
+  rehearsal:
+    name: Rehearse publish legs (cohort build + real npm pack, NO upload)
+    needs: preflight-checks
+    if: inputs.rehearsal == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ needs.preflight-checks.outputs.cohort_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ inputs.tools_ref || github.sha }}
+          path: release-tools
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
+
+      - name: Build core
+        run: npm run build --workspace=@principles/core
+
+      - name: Build install layout
+        run: npm run build --workspace=@principles/install-layout
+
+      - name: Build host runtime
+        run: npm run build --workspace=@principles/host-runtime
+
+      - name: Resolve train product identity
+        id: train-identity
+        run: |
+          VERSION=$(node scripts/resolve-product-version.mjs)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Train product identity (at cohort SHA): $VERSION"
+
+      # The REAL publish action in dry_run mode: identical control path
+      # (exact-state check, bounded dependency wait, builds, dry-run pack,
+      # installer identity stamp + tarball verification) minus the upload.
+      # The placeholder token is never used — no step that could spend it
+      # runs in this mode, and this job holds no id-token permission.
+      - name: Rehearse 1/7 @principles/core
+        uses: ./release-tools/.github/actions/publish-npm-package
+        with:
+          pkg_dir: principles-core
+          npm_name: '@principles/core'
+          cohort_sha: ${{ needs.preflight-checks.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+          npm_token: preflight-rehearsal-no-upload
+          dry_run: true
+
+      - name: Rehearse 2/7 @principles/install-layout
+        uses: ./release-tools/.github/actions/publish-npm-package
+        with:
+          pkg_dir: install-layout
+          npm_name: '@principles/install-layout'
+          cohort_sha: ${{ needs.preflight-checks.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+          npm_token: preflight-rehearsal-no-upload
+          dry_run: true
+
+      - name: Rehearse 3/7 @principles/host-runtime
+        uses: ./release-tools/.github/actions/publish-npm-package
+        with:
+          pkg_dir: host-runtime
+          npm_name: '@principles/host-runtime'
+          cohort_sha: ${{ needs.preflight-checks.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+          npm_token: preflight-rehearsal-no-upload
+          dry_run: true
+
+      - name: Rehearse 4/7 @principles/codex-adapter
+        uses: ./release-tools/.github/actions/publish-npm-package
+        with:
+          pkg_dir: codex-adapter
+          npm_name: '@principles/codex-adapter'
+          cohort_sha: ${{ needs.preflight-checks.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+          npm_token: preflight-rehearsal-no-upload
+          dry_run: true
+
+      - name: Rehearse 5/7 principles-disciple (plugin)
+        uses: ./release-tools/.github/actions/publish-npm-package
+        with:
+          pkg_dir: openclaw-plugin
+          npm_name: 'principles-disciple'
+          cohort_sha: ${{ needs.preflight-checks.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+          npm_token: preflight-rehearsal-no-upload
+          dry_run: true
+
+      - name: Rehearse 6/7 @principles/pd-cli
+        uses: ./release-tools/.github/actions/publish-npm-package
+        with:
+          pkg_dir: pd-cli
+          npm_name: '@principles/pd-cli'
+          cohort_sha: ${{ needs.preflight-checks.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+          npm_token: preflight-rehearsal-no-upload
+          dry_run: true
+
+      - name: Rehearse 7/7 create-principles-disciple (installer)
+        uses: ./release-tools/.github/actions/publish-npm-package
+        with:
+          pkg_dir: create-principles-disciple
+          npm_name: 'create-principles-disciple'
+          cohort_sha: ${{ needs.preflight-checks.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+          product_identity_version: ${{ steps.train-identity.outputs.version }}
+          npm_token: preflight-rehearsal-no-upload
+          dry_run: true
+
+      - name: Rehearsal summary (explicitly NOT a publish)
+        run: |
+          {
+            echo "## Preflight rehearsal complete"
+            echo ""
+            echo "All seven legs ran the real publish control path in dry_run mode and packed real artifacts from the cohort build."
+            echo "NO npm upload, tag, or GitHub Release happened. This is NOT evidence of a published version."
+          } >> "$GITHUB_STEP_SUMMARY"

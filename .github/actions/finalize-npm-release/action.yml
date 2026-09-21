@@ -1,0 +1,182 @@
+name: Finalize npm release (closing steps)
+description: >-
+  Closing steps for the release train, run AFTER all seven npm legs have
+  uploaded or verified-skip (PRI-886 isolation): the vX.Y.Z plugin tag,
+  the GitHub Release, and the ClawHub marketplace sync. Every step is an
+  idempotent reconciliation (SPEC §24.2) — a re-dispatched train skips
+  completed uploads and retries only what is missing. A closing-step
+  failure is visible (red job) but can never block an npm upload that
+  has not happened yet, because the npm phase has already finished. The
+  tag keeps its real semantics: it marks the PLUGIN release (SPEC §25).
+inputs:
+  cohort_sha:
+    description: 'Release cohort SHA (the Version Packages PR merge commit)'
+    required: true
+    type: string
+  github_token:
+    description: 'GitHub token for tag push and GitHub Release creation'
+    required: true
+    type: string
+  clawhub_token:
+    description: 'ClawHub marketplace token; empty skips the sync with a warning'
+    required: false
+    type: string
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Reconcile Git tag (idempotent)
+      # The vX.Y.Z tag keeps its real semantics: it marks the PLUGIN
+      # release (SPEC §25) — it has never represented the other packages'
+      # independent versions and must not start now. Idempotent per SPEC
+      # §24.2: absent -> create; present at the cohort commit -> skip;
+      # present elsewhere -> FAIL loud.
+      shell: bash
+      env:
+        COHORT: ${{ inputs.cohort_sha }}
+      run: |
+        set -euo pipefail
+        # cwd = PRODUCT checkout at the cohort SHA (workspace root).
+        VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
+        TAG="v$VERSION"
+        EXISTING=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
+        if [ -z "$EXISTING" ]; then
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG (plugin; bound to cohort $COHORT)"
+          git push origin "$TAG"
+          echo "Created and pushed tag: $TAG"
+        else
+          git fetch origin "refs/tags/$TAG" --quiet
+          TAGGED_COMMIT=$(git rev-parse "$TAG^{commit}" 2>/dev/null || echo "")
+          if [ "$TAGGED_COMMIT" = "$COHORT" ]; then
+            echo "Tag $TAG already exists at the cohort commit — skip (idempotent)."
+          else
+            echo "::error::Tag $TAG exists at $TAGGED_COMMIT but this release cohort is $COHORT. Refusing to move an existing tag."
+            exit 1
+          fi
+        fi
+
+    - name: Generate release notes
+      id: changelog
+      shell: bash
+      env:
+        COHORT: ${{ inputs.cohort_sha }}
+      run: |
+        # "What's Changed" model retained for this round (SPEC §27.2).
+        VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
+        LAST_TAG=$(git tag --list 'v*' | sort -V | tail -1 || true)
+        if [ -n "$LAST_TAG" ] && [ "$LAST_TAG" != "v$VERSION" ]; then
+          COMMITS=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s (%h)" --no-merges | head -80)
+        else
+          COMMITS=$(git log -20 --pretty=format:"- %s (%h)" --no-merges)
+        fi
+        FEATURES=$(echo "$COMMITS" | grep -E "^- feat" || true)
+        FIXES=$(echo "$COMMITS" | grep -E "^- fix" || true)
+        OTHER=$(echo "$COMMITS" | grep -vE "^- (feat|fix)" || true)
+        CHANGELOG="## What's Changed\n\n"
+        if [ -n "$FEATURES" ]; then CHANGELOG+="### Features\n$FEATURES\n\n"; fi
+        if [ -n "$FIXES" ]; then CHANGELOG+="### Bug Fixes\n$FIXES\n\n"; fi
+        if [ -n "$OTHER" ]; then CHANGELOG+="### Other Changes\n$OTHER\n\n"; fi
+        CHANGELOG+="\n**Release cohort**: $COHORT"
+        {
+          echo "changelog<<EOF"
+          echo -e "$CHANGELOG"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Reconcile GitHub Release (idempotent)
+      shell: bash
+      env:
+        COHORT: ${{ inputs.cohort_sha }}
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        set -euo pipefail
+        VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
+        if gh release view "v$VERSION" >/dev/null 2>&1; then
+          echo "GitHub Release v$VERSION already exists — skip (idempotent)."
+          exit 0
+        fi
+        echo "Creating GitHub Release v$VERSION."
+        echo -e "${{ steps.changelog.outputs.changelog }}" > release-notes.md
+        gh release create "v$VERSION" \
+          --title "Release v$VERSION" \
+          --notes-file release-notes.md \
+          --target "$COHORT"
+
+    - name: Reconcile ClawHub marketplace (idempotent)
+      # The marketplace does not auto-sync from npm. Idempotency: if the
+      # version is already visible on ClawHub, skip the upload entirely
+      # (SPEC §24.2). Judge success by `clawhub package inspect` seeing the
+      # version, never by the publish exit code alone. A failure degrades
+      # to a warning + manual fallback — it must not block npm/tag/release
+      # that already succeeded.
+      continue-on-error: true
+      env:
+        CLAWHUB_TOKEN: ${{ inputs.clawhub_token }}
+      shell: bash
+      run: |
+        set -u
+
+        if [ -z "${CLAWHUB_TOKEN:-}" ]; then
+          echo "::warning::CLAWHUB_TOKEN secret is not set — skipping ClawHub marketplace sync."
+          exit 0
+        fi
+
+        CFG_DIR="$(mktemp -d)"
+        printf '{\n  "registry": "https://clawhub.ai",\n  "token": "%s"\n}\n' "$CLAWHUB_TOKEN" > "$CFG_DIR/config.json"
+        chmod 600 "$CFG_DIR/config.json"
+        export CLAWHUB_CONFIG_PATH="$CFG_DIR/config.json"
+
+        npm install -g clawhub@latest
+        clawhub -V  # this CLI exposes -V/--cli-version, not --version
+
+        VERSION="$(node -p "require('./packages/openclaw-plugin/package.json').version")"
+        SRC="packages/openclaw-plugin"
+
+        if clawhub package inspect "principles-disciple" --version "$VERSION" >/dev/null 2>&1; then
+          echo "::notice::ClawHub marketplace already shows v$VERSION — skip upload (idempotent)."
+          exit 0
+        fi
+        echo "Publishing ClawHub marketplace version: $VERSION"
+
+        # Best-effort: raise the CLI's upload timeout (120s in published
+        # builds) to 600s. Non-fatal — the outer timeout guard below
+        # covers a non-matching patch.
+        GLOBAL_HTTP_JS="$(npm root -g)/clawhub/dist/http.js"
+        if [ -f "$GLOBAL_HTTP_JS" ] && grep -q "UPLOAD_TIMEOUT_MS" "$GLOBAL_HTTP_JS"; then
+          sed -i -E 's/(UPLOAD_TIMEOUT_MS = )[0-9_]+/\1600_000/' "$GLOBAL_HTTP_JS" || true
+        fi
+
+        attempt() {
+          local N="$1"
+          echo "--- ClawHub publish attempt $N ---"
+          timeout 480 clawhub package publish "$SRC" --version "$VERSION" --wait --wait-timeout 240 || true
+          if clawhub package inspect "principles-disciple" --version "$VERSION" >/dev/null 2>&1; then
+            echo "::notice::ClawHub marketplace shows v$VERSION (attempt $N)."
+            return 0
+          fi
+          echo "v$VERSION not visible on ClawHub yet (attempt $N)."
+          return 1
+        }
+
+        if attempt 1; then exit 0; fi
+        echo "Attempt 1 failed — waiting 30s before retry..."
+        sleep 30
+        if attempt 2; then exit 0; fi
+
+        {
+          echo "## ⚠️ ClawHub marketplace sync failed"
+          echo ""
+          echo "npm \`${VERSION}\` published successfully; the ClawHub upload timed out twice."
+          echo "The package may still appear later (server-side scan can be slow)."
+          echo ""
+          echo "Manual fallback (on a machine with ClawHub CLI login):"
+          echo '```bash'
+          echo "cd packages/openclaw-plugin"
+          echo "clawhub package publish . --version ${VERSION} --wait"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        echo "::warning::ClawHub marketplace sync failed for v${VERSION} — npm publish succeeded. See step summary for the manual fallback command."
+        exit 1
