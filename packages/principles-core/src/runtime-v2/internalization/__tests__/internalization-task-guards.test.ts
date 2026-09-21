@@ -71,37 +71,24 @@ function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
 
 describe('Internalization Task Guards (PRI-62)', () => {
   describe('canRetryNow', () => {
-    it('returns true for non-retry_wait status', () => {
-      expect(canRetryNow(makePITask({ status: 'pending' }))).toBe(true);
+    // Boundary matrix (PRI-62): identical predicate, only the timestamp/now
+    // pair varies. Parameterized in place — the exact-boundary case is a
+    // deliberate semantics pin and stays an explicit labeled case.
+    it.each([
+      { name: 'retry_wait with no leaseExpiresAt', status: 'retry_wait' as const, leaseExpiresAt: undefined, nowMs: undefined, expected: true },
+      { name: 'retry_wait with expired leaseExpiresAt', status: 'retry_wait' as const, leaseExpiresAt: new Date(940_000).toISOString(), nowMs: 1_000_000, expected: true },
+      { name: 'retry_wait with future leaseExpiresAt', status: 'retry_wait' as const, leaseExpiresAt: new Date(1_060_000).toISOString(), nowMs: 1_000_000, expected: false },
+      { name: 'retry_wait with invalid leaseExpiresAt', status: 'retry_wait' as const, leaseExpiresAt: 'invalid-date', nowMs: undefined, expected: true },
+      { name: 'retry_wait at exact boundary (leaseExpiresAt === nowMs)', status: 'retry_wait' as const, leaseExpiresAt: new Date(1_000_000).toISOString(), nowMs: 1_000_000, expected: true },
+      { name: 'non-retry_wait status (pending)', status: 'pending' as const, leaseExpiresAt: undefined, nowMs: undefined, expected: true },
+    ])('returns $expected for $name', ({ status, leaseExpiresAt, nowMs, expected }) => {
+      expect(canRetryNow(makePITask({ status, leaseExpiresAt }), nowMs)).toBe(expected);
+    });
+
+    it('returns true for other non-retry_wait statuses', () => {
       expect(canRetryNow(makePITask({ status: 'leased' }))).toBe(true);
       expect(canRetryNow(makePITask({ status: 'succeeded' }))).toBe(true);
       expect(canRetryNow(makePITask({ status: 'failed' }))).toBe(true);
-    });
-
-    it('returns true for retry_wait with no leaseExpiresAt', () => {
-      expect(canRetryNow(makePITask({ status: 'retry_wait', leaseExpiresAt: undefined }))).toBe(true);
-    });
-
-    it('returns true for retry_wait with expired leaseExpiresAt', () => {
-      const nowMs = 1000000;
-      const expiredTime = new Date(nowMs - 60000).toISOString();
-      expect(canRetryNow(makePITask({ status: 'retry_wait', leaseExpiresAt: expiredTime }), nowMs)).toBe(true);
-    });
-
-    it('returns false for retry_wait with future leaseExpiresAt', () => {
-      const nowMs = 1000000;
-      const futureTime = new Date(nowMs + 60000).toISOString();
-      expect(canRetryNow(makePITask({ status: 'retry_wait', leaseExpiresAt: futureTime }), nowMs)).toBe(false);
-    });
-
-    it('returns true for retry_wait with invalid leaseExpiresAt', () => {
-      expect(canRetryNow(makePITask({ status: 'retry_wait', leaseExpiresAt: 'invalid-date' }))).toBe(true);
-    });
-
-    it('returns true for retry_wait at exact boundary (leaseExpiresAt === nowMs)', () => {
-      const nowMs = 1000000;
-      const exactTime = new Date(nowMs).toISOString();
-      expect(canRetryNow(makePITask({ status: 'retry_wait', leaseExpiresAt: exactTime }), nowMs)).toBe(true);
     });
   });
 
