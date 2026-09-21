@@ -94,11 +94,12 @@ runtime pin、或"因为一起发布就让版本相同"。
 - **每周窗口**（周五 04:00 UTC）：只做对账——补齐待发布 cohort 与未完成收尾；
   永不制造版本；无 cohort → 成功空跑。
 
-Version PR 机器人（`changesets/action`，已锁版本）使用
-`PD_VERSION_PR_TOKEN || github.token`。默认 GITHUB_TOKEN 建的 PR 不会触发
-`pull_request` 检查（GitHub 抑制递归触发），必需检查 "Verify Merge Gate"
-不会出现——创建细粒度 PAT secret（contents:write + pull-requests:write）
-即可启用完整检查与合并路径。
+Version PR 机器人（`changesets/action`，已锁版本）**必须**配置
+`PD_VERSION_PR_TOKEN` secret（细粒度 PAT：contents:write +
+pull-requests:write）。未配置时工作流会**跳过 Version PR 创建**并输出
+配置指引警告——本仓库根本不允许 GITHUB_TOKEN 创建 PR（切换后首跑实测），
+即便允许，其 PR 也不会触发必需检查 "Verify Merge Gate"（GitHub 抑制
+递归触发）。
 
 ### 三道硬门（时序按发布入口不同——切换未改变）
 

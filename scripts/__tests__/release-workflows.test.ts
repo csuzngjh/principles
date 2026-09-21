@@ -169,6 +169,22 @@ describe('version-packages.yml — rolling Version PR automation', () => {
     expect(t).toContain('Verify Merge Gate');
   });
 
+  it('skips Version PR creation with instructions when the token secret is absent', () => {
+    // First post-cutover run (2026-09-21): without the secret the action
+    // falls back to GITHUB_TOKEN, which the repository does not permit to
+    // create pull requests — the job failed red on every main push. The
+    // token-check step turns that into a green skip with setup guidance.
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Array<{ name?: string; if?: string }> }> };
+    const steps = doc.jobs?.version?.steps ?? [];
+    const check = steps.find((s) => s.name === 'Check Version PR token');
+    expect(check).toBeDefined();
+    const gate = steps.find((s) => s.name === 'Materialize version plan (changeset version + mirror + lockfile)');
+    expect(gate?.if).toContain("steps.token-check.outputs.armed == 'true'");
+    const t = text();
+    expect(t).toContain('PD_VERSION_PR_TOKEN is not configured');
+    expect(t).toContain('contents:write + pull-requests:write');
+  });
+
   it('dispatches the publish train only for proven cohort merges (T25 wiring)', () => {
     const t = text();
     expect(t).toContain('resolve-release-cohort.mjs --is-cohort');

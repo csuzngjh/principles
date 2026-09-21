@@ -45,8 +45,21 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Check Version PR token
+        id: token-check
+        env:
+          PD_VERSION_PR_TOKEN: ${{ secrets.PD_VERSION_PR_TOKEN }}
+        run: |
+          if [ -z "$PD_VERSION_PR_TOKEN" ]; then
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::PD_VERSION_PR_TOKEN is not configured — skipping Version Packages PR creation. Without the secret the action falls back to GITHUB_TOKEN, which this repository does not permit to create pull requests (and whose PRs would not trigger required checks anyway). Pending changesets stay pending until the secret exists. Setup: GitHub → Settings → Secrets and variables → Actions → New repository secret PD_VERSION_PR_TOKEN = a fine-grained PAT with contents:write + pull-requests:write."
+          else
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Materialize version plan (changeset version + mirror + lockfile)
         id: changesets
+        if: steps.token-check.outputs.armed == 'true'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           # PD's materialization pipeline: changeset version, the approved
@@ -58,12 +71,14 @@ jobs:
           # PD owns tags/releases in the publish train (SPEC §16/§25/§26).
           create-github-releases: false
           push-git-tags: false
-          # GITHUB_TOKEN works but its PRs do not trigger `on: pull_request`
-          # workflows, so the required "Verify Merge Gate" check never runs
-          # and branch protection blocks the merge. PD_VERSION_PR_TOKEN (a
-          # fine-grained PAT with contents:write + pull-requests:write)
-          # restores the full check/merge path; until it exists the bot PR
-          # is created but not mergeable — add the secret to enable.
+          # PD_VERSION_PR_TOKEN (a fine-grained PAT with contents:write +
+          # pull-requests:write) is REQUIRED on this repository: the repo
+          # setting does not permit GITHUB_TOKEN to create pull requests
+          # (observed at the first post-cutover run, 2026-09-21), and a
+          # GITHUB_TOKEN PR would not trigger the required
+          # "Verify Merge Gate" check anyway. The token-check step above
+          # skips this action with setup instructions until the secret
+          # exists.
           github-token: ${{ secrets.PD_VERSION_PR_TOKEN || github.token }}
 
       - name: Dispatch publish train on cohort merge
