@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -370,6 +370,11 @@ type LoadingState = "loading" | "loaded" | "error";
 
 export function ActivationPage() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  // ?activationId= deep link (治理焦点 RuleCode 决策卡直达): once the list has
+  // loaded, scroll the linked card into view and pulse a theme-token ring
+  // around it. Unknown id → plain landing (the list itself stays the truth).
+  const deepLinkActivationId = searchParams.get("activationId");
   const [activationsData, setActivationsData] = useState<ActivationsData | null>(null);
   const [lifecycleCache, setLifecycleCache] = useState<Record<string, LifecycleMetricsData | null>>({});
   const [receiptCounts, setReceiptCounts] = useState<Record<string, ReceiptCountEntryData> | null>(null);
@@ -478,6 +483,28 @@ export function ActivationPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Deep link (?activationId=): scroll the linked activation card into view
+  // and pulse a theme-token ring for a few seconds. Runs once the list has
+  // actually rendered; a card that is not on the page degrades to a plain
+  // landing (rc-9 — no fabricated focus). The URL param is untrusted (rc-1):
+  // CSS.escape (unquoted attribute selector) keeps a crafted id from breaking
+  // the selector.
+  useEffect(() => {
+    if (deepLinkActivationId === null || loadingState !== "loaded") return;
+    const card = document.querySelector(
+      `[data-testid=${CSS.escape(`activation-card-${deepLinkActivationId}`)}]`,
+    );
+    if (card === null) return;
+    card.scrollIntoView({ block: "center" });
+    const HIGHLIGHT_CLASSES = ["ring-2", "ring-gov", "ring-offset-2", "ring-offset-paper"];
+    card.classList.add(...HIGHLIGHT_CLASSES);
+    const timer = window.setTimeout(() => card.classList.remove(...HIGHLIGHT_CLASSES), 3000);
+    return () => {
+      window.clearTimeout(timer);
+      card.classList.remove(...HIGHLIGHT_CLASSES);
+    };
+  }, [deepLinkActivationId, loadingState]);
 
   const handleDisable = useCallback(async (record: ActivationRecord) => {
     setDisablingIds((prev) => new Set(prev).add(record.activationId));

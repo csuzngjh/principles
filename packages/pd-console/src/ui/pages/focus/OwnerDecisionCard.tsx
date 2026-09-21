@@ -233,7 +233,7 @@ export function OwnerDecisionCard({
             {t("pages.focus.ownerDecision.evidenceUnavailable")}
           </p>
           <Link
-            to="/failed"
+            to={`/failed-tasks?taskId=${encodeURIComponent(item.taskId)}`}
             data-testid={`owner-evidence-recover-${item.taskId}`}
             className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
           >
@@ -370,10 +370,14 @@ export function OwnerDecisionCard({
               ? t("pages.focus.ownerDecision.approvalHint")
               : t("pages.focus.ownerDecision.rulecodeHint")}
           </p>
-          {/* P1 评审修复: 真实 CTA — 不再只渲染提示 (否则出现"有决策但不能处理") */}
+          {/* P1 评审修复: 真实 CTA — 不再只渲染提示 (否则出现"有决策但不能处理")
+              深链: 服务端解析出的 principleId / activationId 直达具体记录,
+              解析失败时回退到页面级链接(无深链的既有行为)。 */}
           {item.kind === "activation_approval" ? (
             <Link
-              to="/principles"
+              to={item.principleId !== undefined
+                ? `/principles/${encodeURIComponent(item.principleId)}`
+                : "/principles"}
               data-testid={`go-approvals-${item.taskId}`}
               className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors"
             >
@@ -381,7 +385,7 @@ export function OwnerDecisionCard({
             </Link>
           ) : (
             <Link
-              to="/activation"
+              to={`/activation?activationId=${encodeURIComponent(item.taskId)}`}
               data-testid={`go-activation-${item.taskId}`}
               className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors"
             >

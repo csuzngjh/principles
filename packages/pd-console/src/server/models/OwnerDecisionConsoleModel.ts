@@ -22,6 +22,10 @@ import {
 import type { OwnerDecisionReviewSnapshot, TaskRecord } from '@principles/core/runtime-v2';
 import type { PIArtifactStore } from '@principles/core/runtime-v2';
 import { ActivationsConsoleModel } from './ActivationsConsoleModel.js';
+import {
+  createArtifactPrincipleResolutionDeps,
+  resolveArtifactPrincipleId,
+} from './artifact-principle-resolver.js';
 
 export type OwnerDecisionItemKind =
   | 'evaluator_review'
@@ -279,11 +283,26 @@ export class OwnerDecisionConsoleModel {
       // ── 2. 既有 approvals pending（高风险部署审批 — 独立门，动作走既有 API）──
       try {
         const approvals = await new SqliteApprovalQueueStore(conn).listPending();
+        // principleId 深链定位：approval.artifactId → ledger principle id，
+        // 与 approvals/grouped 视图共用同一套解析装配。解析失败时该条目不带
+        // principleId → UI 回退到审查列表链接（即无深链的既有行为），不阻断
+        // 收件箱其余条目。
+        const resolutionDeps = createArtifactPrincipleResolutionDeps(conn, artifactStore, this.workspaceDir);
         for (const approval of approvals) {
+          let principleId: string | undefined;
+          try {
+            const artifact = await artifactStore.getArtifactById(approval.artifactId);
+            if (artifact) {
+              principleId = (await resolveArtifactPrincipleId(artifact, resolutionDeps)) ?? undefined;
+            }
+          } catch {
+            // 解析失败 → 不带 principleId（rc-9：回退目标=现状基线，非静默行为变更）
+          }
           items.push({
             reviewKey: `apr:${approval.approvalId}`,
             kind: 'activation_approval',
             taskId: approval.artifactId,
+            ...(principleId !== undefined ? { principleId } : {}),
             title: `部署审批 · ${approval.channel}`,
             summary: `${approval.riskLevel} 风险通道 ${approval.channel} 的原则部署等待批准。`,
             reasonCode: 'activation_approval_pending',

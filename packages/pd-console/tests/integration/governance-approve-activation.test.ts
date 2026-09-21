@@ -265,6 +265,21 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const principleId = `P_GROUPED_${Date.now()}`;
     const artifactId = `art-grouped-${Date.now()}`;
     const approvalId = `apr-grouped-${Date.now()}`;
+    // The grouped resolver now ledger-validates direct hits (PR #1789 review
+    // contract) — register the principle so the group keeps its principleId
+    // instead of degrading to `unlinked:<artifactId>`.
+    const groupedStateDir = path.join(tmpDir, '.state');
+    new PrincipleTreeLedgerAdapter({ stateDir: groupedStateDir }).writeProbationEntry({
+      id: principleId,
+      title: `Grouped endpoint test principle ${principleId}`,
+      text: 'Grouped endpoint test principle',
+      triggerPattern: 'before_tool_call',
+      action: 'inject review note',
+      status: 'probation',
+      evaluability: 'weak_heuristic',
+      sourceRef: `candidate://candidate-${principleId}`,
+      createdAt: new Date().toISOString(),
+    });
     await seedPrincipleArtifact(artifactId, {
       sourcePrincipleId: principleId,
       contentJson: { principleId, text: 'Grouped endpoint test principle' },

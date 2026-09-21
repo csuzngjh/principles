@@ -23,7 +23,10 @@ test.describe('RuleCode Owner live-decision safety journey', () => {
     const activationCta = page.getByTestId(`go-activation-${shadowDecision.taskId}`);
     await expect(activationCta).toBeVisible();
     await activationCta.click();
-    await expect(page).toHaveURL(/#\/activation$/);
+    // Deep link (adhoc-20260921): the CTA lands on the linked activation card
+    // instead of the top of the activation list.
+    const expectedActivationHash = `#/activation?activationId=${encodeURIComponent(shadowDecision.taskId)}`;
+    await expect(page).toHaveURL(new RegExp(`${expectedActivationHash.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
 
     const shadowCard = page.getByTestId('activation-card-act-rule-shadow-e2e');
     const liveCard = page.getByTestId('activation-card-act-rule-live-e2e');

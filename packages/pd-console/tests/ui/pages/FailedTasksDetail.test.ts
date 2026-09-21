@@ -288,6 +288,17 @@ describe('FailedTasksPage detail wiring (PRI-747 F22)', () => {
     expect(apiSource).toContain('fetchFailedTaskDetail,');
   });
 
+  it('Given FailedTasksPage, When opened with ?taskId=, Then the linked task auto-expands (adhoc-20260921 deep link)', () => {
+    // 治理焦点「查看恢复详情」→ /failed-tasks?taskId=<id>: the page reads the
+    // param, seeds the expansion, and fetches that task's detail once.
+    expect(pageSource).toContain('useSearchParams');
+    expect(pageSource).toContain('searchParams.get("taskId")');
+    expect(pageSource).toContain('initialExpandedTaskId');
+    expect(pageSource).toContain('deepLinkFetchedRef.current');
+    // The deep-linked row scrolls into view instead of leaving the Owner to hunt.
+    expect(pageSource).toContain('scrollIntoView');
+  });
+
   it('Given i18n keys, When checked, Then detail keys exist in en + zh with parity (EP-11)', () => {
     const enFailed = getNestedRecord(enJson, ['pages', 'failedTasks']);
     const zhFailed = getNestedRecord(zhJson, ['pages', 'failedTasks']);
