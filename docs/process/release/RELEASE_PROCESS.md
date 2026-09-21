@@ -109,12 +109,13 @@ versions equal "because they ship together".
   publishes, incomplete closing steps; no versions are ever created; no
   cohort → success no-op.
 
-The Version PR bot (`changesets/action`, pinned) uses
-`PD_VERSION_PR_TOKEN || github.token`. With the default GITHUB_TOKEN the PR
-is created but its `pull_request` checks do not run (GitHub suppresses
-recursive workflow triggers), so the required "Verify Merge Gate" never
-appears — create the fine-grained PAT secret (contents:write,
-pull-requests:write) to enable the full check + merge path.
+The Version PR bot (`changesets/action`, pinned) requires the
+`PD_VERSION_PR_TOKEN` secret (a fine-grained PAT with contents:write +
+pull-requests:write). Without it the workflow SKIPS Version PR creation
+with a setup warning — this repository does not permit GITHUB_TOKEN to
+create pull requests at all (observed at the first post-cutover run),
+and even where permitted its PRs would not trigger the required
+"Verify Merge Gate" check (GitHub suppresses recursive triggers).
 
 ### Hard Gates (timing differs per entry point — unchanged by the cutover)
 
