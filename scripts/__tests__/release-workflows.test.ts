@@ -114,6 +114,27 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
     }
   });
 
+  it('publish legs carry no closing steps — they live in finalize-npm-release (PRI-886)', () => {
+    const t = text();
+    // Closing steps moved to the separate finalize action that runs AFTER
+    // all seven npm legs: a tag/release/marketplace failure must never
+    // block an unuploaded npm package.
+    expect(t).not.toContain('Reconcile Git tag');
+    expect(t).not.toContain('gh release create');
+    expect(t).not.toContain('clawhub package publish');
+    // The publish leg never pushes (no persisted credentials needed).
+    expect(t).not.toContain('git push origin "$TAG"');
+  });
+});
+
+describe('finalize-npm-release action — isolated closing steps (PRI-886)', () => {
+  const rel = '.github/actions/finalize-npm-release/action.yml';
+  const text = () => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+
+  it('parses as YAML', () => {
+    expect(() => loadWorkflow(rel)).not.toThrow();
+  });
+
   it('closing steps are idempotent reconciliation (tag/GitHub Release/ClawHub)', () => {
     const t = text();
     expect(t).toContain('Reconcile Git tag (idempotent)');
@@ -121,6 +142,8 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
     expect(t).toContain('Reconcile ClawHub marketplace (idempotent)');
     // Tag conflict is a hard failure, never a silent move.
     expect(t).toContain('Refusing to move an existing tag');
+    // The marketplace sync degrades to a warning, never blocks npm.
+    expect(t).toContain('continue-on-error: true');
   });
 });
 
