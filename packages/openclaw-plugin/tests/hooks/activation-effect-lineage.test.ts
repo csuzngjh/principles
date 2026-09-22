@@ -339,18 +339,20 @@ describe('PRI-899 — code_tool_hook effect receipts carry the winning activatio
 
   it('the tracked activation pairing is index-aligned, tri-state, and never handed out by reference', () => {
     const sessionId = 'sess-pri899-pairing';
+    const pairedPrincipleId = 'principle-a';
     seedSession(sessionId);
+    insertActivation(SELF_REPORT_ACTIVATION_ID, pairedPrincipleId, 'prompt');
 
     setInjectedPrincipleIds(
       sessionId,
-      ['principle-a', 'principle-b'],
+      [pairedPrincipleId, 'principle-b'],
       workspaceDir,
       [SELF_REPORT_ACTIVATION_ID, ''],
     );
 
     const ids = getInjectedPrincipleIds(sessionId);
     const pairing = getInjectedActivationIds(sessionId);
-    expect(ids).toEqual(['principle-a', 'principle-b']);
+    expect(ids).toEqual([pairedPrincipleId, 'principle-b']);
     // Same index order, so a consumer can resolve a reported principle to its
     // own activation — and an empty entry stays empty rather than shifting.
     expect(pairing).toEqual([SELF_REPORT_ACTIVATION_ID, '']);
@@ -363,9 +365,32 @@ describe('PRI-899 — code_tool_hook effect receipts carry the winning activatio
     (listed?.injectedActivationIds as string[] | undefined)?.push('act-injected-by-listener');
     expect(getInjectedActivationIds(sessionId)).toEqual([SELF_REPORT_ACTIVATION_ID, '']);
 
+    // PRI-899 review fix: the TWO paired arrays must be handed out on the SAME
+    // terms. If listSessions() aliased the principle ids while cloning the
+    // activations, a consumer that reordered what it received would make the
+    // next self-report resolve principle-b's index against an activation array
+    // that was never reordered — i.e. it would write the row against the WRONG
+    // activation. Observing it at the DB row is the point: index pairing is
+    // load-bearing for PRI-899, not incidental.
+    const listedAgain = listSessions(workspaceDir).find((s) => s.sessionId === sessionId);
+    expect(listedAgain?.injectedPrincipleIds).toEqual([pairedPrincipleId, 'principle-b']);
+    (listedAgain?.injectedPrincipleIds as string[]).reverse();
+    (listedAgain?.injectedActivationIds as string[]).reverse();
+    expect(getInjectedPrincipleIds(sessionId)).toEqual([pairedPrincipleId, 'principle-b']);
+    expect(getInjectedActivationIds(sessionId)).toEqual([SELF_REPORT_ACTIVATION_ID, '']);
+
+    const written = recordSelfReportFromText(
+      workspaceDir,
+      `📌 应用了你的原则「${pairedPrincipleId}」：先取证再下结论`,
+      sessionId,
+    );
+    expect(written).toBe(1);
+    expect(effectRow('self_reported')?.activation_id).toBe(SELF_REPORT_ACTIVATION_ID);
+    expect(joinedActivationCount()).toBe(1);
+
     // Known session with a known, empty pairing ⇒ [] (NOT undefined): an
     // unknown session is the only thing that may report undefined.
-    setInjectedPrincipleIds(sessionId, ['principle-a'], workspaceDir);
+    setInjectedPrincipleIds(sessionId, [pairedPrincipleId], workspaceDir);
     expect(getInjectedActivationIds(sessionId)).toEqual([]);
     expect(getInjectedActivationIds('sess-never-seen')).toBeUndefined();
   });

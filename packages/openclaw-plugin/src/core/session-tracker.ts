@@ -519,7 +519,11 @@ export function listSessions(workspaceDir?: string): SessionState[] {
             toolReadsByFile: { ...state.toolReadsByFile },
             gfiBySource: state.gfiBySource ? { ...state.gfiBySource } : undefined,
             injectedProbationIds: state.injectedProbationIds ? [...state.injectedProbationIds] : undefined,
-            // PRI-899: don't hand out the live session's pairing array.
+            // PRI-899: the two paired arrays are cloned TOGETHER or not at all.
+            // Pairing is by index, so handing out a live alias of one while
+            // cloning the other lets a caller reorder the principle ids and
+            // silently point every activation at the wrong principle.
+            injectedPrincipleIds: state.injectedPrincipleIds ? [...state.injectedPrincipleIds] : undefined,
             injectedActivationIds: state.injectedActivationIds ? [...state.injectedActivationIds] : undefined,
         }));
 }

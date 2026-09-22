@@ -45,9 +45,17 @@ docs/experiments/<experiment-slug>/
 每个 `*/behavior-signature.json` 并校验其形状：
 
 - `intentContract` 通过仓库**真实**的 `isValidIntentContractV1` 守卫（不是测试内的副本）；
-- 必填字段非空、`observationWindows` 至少含 1 个 baseline + 2 个 after 窗口；
-- 窗口切分轴不得使用 `session`（长生命周期主会话会让 before/after 混在一起）；
-- `channel` 属于 `prompt` / `code_tool_hook`。
+- `behaviorSignature` **不得**另立 `ownerIntent` / `targetBehavior` / `forbiddenBehavior` /
+  `evidenceSource` / `validationExpectation` 的副本 —— 同一事实只能有一个 owner（P4）；
+- 必填字段非空；`channel` 属于 `prompt` / `code_tool_hook`；
+- **时间戳必须是严格的 ISO-8601 UTC（`…Z`）且日历上真实存在**：
+  `Date.parse` 单独不足以判定——它会把 `2026-02-30T00:00:00.000Z` 静默滚成 3 月 2 日，
+  也接受 `March 1, 2026` / `03/01/2026` 这类非 ISO 写法。故校验同时匹配格式与回环校验日历。
+- **窗口契约**：`observationWindows` 至少 1 个 baseline + 2 个 after；baseline 必须有结束时间
+  （after 允许 `to: null` 表示尚未收口）；闭合窗口必须 `from < to`；
+  `baseline.to` 不得晚于 `activatedAt`，`after.from` 不得早于 `activatedAt`
+  （`previousBehavior.baselineWindow` 受同一条上界约束——「Previous Behavior」按定义在激活之前）；
+- 窗口切分轴不得使用 `session`（长生命周期主会话会让 before/after 混在一起）。
 
 该校验目前是**测试**，不是 `verify:merge` 的独立门禁。若将来需要成为硬门禁，把校验函数
 从测试中提到 `scripts/check-*.cjs` 并接进 `verify:merge` —— 那是独立决策，本 PR 不做。
