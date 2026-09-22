@@ -610,6 +610,11 @@ export function getNpmGlobalBinDir(): string | null {
  * into a DANGLING shim after uninstall — the user's `pd` then fails with a
  * shell error instead of command-not-found. Include ~/bin in the scan set;
  * isPdOwnedShim's content check keeps non-PD files untouched.
+ *
+ * PRI-898 SP1: win32 scan set now mirrors the installer's write set —
+ * pd.cmd, pd.ps1 AND the extensionless pd (the Git Bash / MSYS-resolved
+ * shim). Leaving `pd` out would strand a dangling extensionless command
+ * after uninstall, exactly the failure class this scan exists to prevent.
  */
 export function getGlobalShimPaths(): string[] {
   const globalBin = getNpmGlobalBinDir();
@@ -617,7 +622,7 @@ export function getGlobalShimPaths(): string[] {
 
   if (globalBin) {
     if (isWindows()) {
-      paths.push(path.join(globalBin, 'pd.cmd'), path.join(globalBin, 'pd.ps1'));
+      paths.push(path.join(globalBin, 'pd.cmd'), path.join(globalBin, 'pd.ps1'), path.join(globalBin, 'pd'));
     } else {
       paths.push(path.join(globalBin, 'pd'));
     }
@@ -625,7 +630,7 @@ export function getGlobalShimPaths(): string[] {
 
   const homeBin = path.join(os.homedir(), 'bin');
   if (isWindows()) {
-    paths.push(path.join(homeBin, 'pd.cmd'), path.join(homeBin, 'pd.ps1'));
+    paths.push(path.join(homeBin, 'pd.cmd'), path.join(homeBin, 'pd.ps1'), path.join(homeBin, 'pd'));
   } else {
     paths.push(path.join(homeBin, 'pd'));
   }

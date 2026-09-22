@@ -63,6 +63,11 @@ describe('getGlobalShimPaths scan set (PRI-696)', () => {
       expect(paths).toContain(path.join(homeBin, 'pd.cmd'));
       expect(paths).toContain(path.join(homeBin, 'pd.ps1'));
       expect(paths).toContain(path.join(MOCK_NPM_PREFIX, 'pd.ps1'));
+      // PRI-898 SP1: the extensionless Git Bash shim the installer now
+      // writes on win32 must be in the uninstall scan set too — otherwise it
+      // dangles after uninstall (shell error, not command-not-found).
+      expect(paths).toContain(path.join(MOCK_NPM_PREFIX, 'pd'));
+      expect(paths).toContain(path.join(homeBin, 'pd'));
     } else {
       expect(paths).toContain(path.join(homeBin, 'pd'));
       expect(paths).toContain(path.join(MOCK_NPM_PREFIX, 'bin', 'pd'));
