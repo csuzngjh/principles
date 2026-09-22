@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import * as path from 'path';
 import * as url from 'url';
 import { createRequire } from 'module';
+import { realpathSync } from 'node:fs';
 import { banner, logger, setQuietMode } from './utils/logger.js';
 import { runPrompts, type InstallOptions } from './prompts.js';
 import { install } from './installer.js';
@@ -531,7 +532,47 @@ program
 // cli-7: only wire the process handler and parse argv when this module is the
 // CLI entry point — NOT when imported by tests (which inspect `program` opts
 // directly). Without this guard, importing index.js would run the installer.
-if (url.pathToFileURL(process.argv[1] ?? '').href === import.meta.url) {
+//
+// PRI-892: Node resolves the main module through symlinks/junctions, so
+// `import.meta.url` is the realpath while `process.argv[1]` is the unresolved
+// link path that npm/npx `.bin` shims hand to node on Windows. The old raw
+// `pathToFileURL(argv[1])` comparison never matched through the shim, so the
+// CLI silently exited 0 doing nothing. Canonicalize argv[1] with realpathSync
+// before comparing, and keep the import-time (argv[1] is a test runner) path
+// returning false so cli-7 stays intact.
+function isMainModuleEntry(): boolean {
+  const [, entry] = process.argv;
+  if (!entry) return false;
+  try {
+    return url.pathToFileURL(realpathSync(entry)).href === import.meta.url;
+  } catch {
+    return false;
+  }
+}
+
+// rc-9: realpath canonicalization should close the gap, but if some future
+// link topology still slips past it while argv[1] unambiguously names *this*
+// package's `dist/index.js`, fail loud and run rather than repeat the silent
+// no-op. Import-time callers never satisfy this (argv[1] is the test runner).
+function looksLikeOwnDistEntry(): boolean {
+  const [, entry] = process.argv;
+  if (!entry) return false;
+  const resolved = path.resolve(entry);
+  return (
+    path.basename(resolved) === 'index.js'
+    && path.basename(path.dirname(resolved)) === 'dist'
+    && path.basename(path.dirname(path.dirname(resolved))) === path.basename(PLUGIN_DIR)
+  );
+}
+
+const mainModuleEntry = isMainModuleEntry();
+if (mainModuleEntry || looksLikeOwnDistEntry()) {
+  if (!mainModuleEntry) {
+    process.stderr.write(
+      'warning: create-principles-disciple CLI started via fallback entry detection (PRI-892); please report this line.\n',
+    );
+  }
+
   process.on('uncaughtException', (error) => {
     if (error instanceof Error && error.name === 'ExitPromptError') {
       logger.info('Goodbye!');

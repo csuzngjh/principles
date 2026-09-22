@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -296,5 +296,19 @@ async function main(): Promise<void> {
   process.exitCode = result.exitCode;
 }
 
-const [, entry] = process.argv;
-if (entry && import.meta.url === pathToFileURL(entry).href) void main();
+// PRI-892: canonicalize the entry through realpath before comparing. Node
+// resolves the main module through symlinks/junctions while argv[1] keeps the
+// unresolved link path (npm/npx `.bin` shims, or a junctioned extensions dir),
+// so the old raw comparison silently skipped main() on Windows. A missing
+// argv[1] target is never the entry, so the realpath throw is a plain false.
+function isMainModuleEntry(): boolean {
+  const [, entry] = process.argv;
+  if (!entry) return false;
+  try {
+    return pathToFileURL(realpathSync(entry)).href === import.meta.url;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModuleEntry()) void main();
