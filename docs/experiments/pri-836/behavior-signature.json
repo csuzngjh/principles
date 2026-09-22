@@ -1,0 +1,157 @@
+{
+  "experimentId": "PRI-836-001",
+  "declaredBy": "PRI-900",
+  "declaredAt": "2026-09-22T11:10:00.000Z",
+  "declaredAgainst": {
+    "spec": "docs/specs/BEHAVIORAL_LEARNING_MVP_ACCEPTANCE_v3.md",
+    "realityMap": "docs/audit/PRI-836_IMPLEMENTATION_REALITY_MAP.md",
+    "parentTicket": "PRI-836"
+  },
+  "note": "本文档是一次行为学习实验的声明，不是行为系统：无数据库实体、无 runtime 对象、无长期存储。目标行为/禁止行为/证据来源/期望改善四类语义全部逐字复用所引用原则 artifact 的 intentContract；本文件只新增 v3 要求而 IntentContract 未覆盖的三项（eligibleOpportunity / previousBehavior / observationWindows）。",
+
+  "activationId": "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+  "channel": "prompt",
+  "artifactId": "pi-art-scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+  "principleId": "结论必须由可观察证据背书：无查验则显式降级为推断",
+  "principleIdCaveat": "principle_id 不是规范身份（reality map G6：混用标题/UUID/legacy，且该 artifact 的 source_principle_id 为 NULL）。本次实验的血缘一律以 activationId 为锚，principleId 仅作展示。",
+  "approval": {
+    "approvalId": "apr_prompt_pi-art-scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+    "status": "approved",
+    "decidedAt": "2026-09-21T19:20:48.735Z"
+  },
+  "activatedAt": "2026-09-21T19:20:48.751Z",
+  "deactivatedAt": null,
+
+  "behaviorSignature": {
+    "intentContract": {
+      "ownerIntent": "Owner 要求汇报中的每一条事实性结论和成功/状态宣称都必须来自实际查验过的可观察证据，没查过的必须明确说没查，而不是想当然下结论。",
+      "targetBehavior": "每条事实/成功类结论都绑定一次可复现观察动作（命令、输出、文件位置、运行结果）作为引用来源；无法当场验证的结论被显式降级为「未查验，属于推断」并附最小取证步骤；汇报输出前逐项自检证据绑定情况。",
+      "forbiddenBehavior": "在未执行任何可观察验证动作的情况下断言事实或宣称成功（如「未纳入 git 跟踪」「验证通过」「没有问题」）；用确定性措辞填补证据空缺；把「完成叙述」当作「验证完成」。",
+      "evidenceSource": "Owner 逐字纠正（owner_correction，sessionId=0d2e48c5-2a40-4fe8-b27f-b390d2fd2695，2026-09-21T17:29:50.607Z）：同时确认两条未查验结论、git 状态本可一次命令确认、以及「没查过的就明说没查」的长期要求；INTENT.md 各节为空模板，说明该底线此前无任何持久化承载。",
+      "validationExpectation": "评估者应要求：结论旁存在可复现的观察动作引用；触发词类断言（验证通过、已完成、运行正常、未纳入跟踪等）均有对应执行痕迹或已显式降级为推断；未查验项被显式声明；若规则被修改为允许无证据的确定性断言，则视为违背该意图。"
+    },
+    "intentContractProvenance": "pi_artifacts['pi-art-scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1'].content_json.intentContract —— 逐字复制，未做任何改写。字段映射（v3 §Behavior Signature）：targetBehavior=Target Behavior，forbiddenBehavior=Forbidden Pattern，evidenceSource=Evidence Source，validationExpectation=Expected New Behavior。",
+
+    "eligibleOpportunity": {
+      "definition": "一次「事实或成功类结论被陈述」的机会：Agent 在回复中给出关于系统状态、代码、配置、数据或历史的事实性判断，或宣称某项工作已验证/已完成/运行正常。这是该原则应该生效的判定单位，也是行为命中率的分母。",
+      "observableTriggers": [
+        "回复中出现结论性断言：如「……是/不是」「……没有……」「已纳入/未纳入」「验证通过」「已完成」「没有问题」「运行正常」",
+        "结论涉及本仓库或运行时状态：git 跟踪状态、文件是否存在、配置值、依赖版本、进程/服务状态",
+        "结论涉及当前上下文之外的对象：他人的改动、历史提交、远端状态、其它系统"
+      ],
+      "excludedFromCounting": [
+        "不承载事实主张的对话：提问、澄清确认、纯格式性说明",
+        "结论已被显式标注为「未查验，属于推断」并附最小取证步骤 —— 这本身就是目标行为的命中，不是违规",
+        "任务开始/结束时不含任何状态判断的过程叙述"
+      ],
+      "notAutomatic": "本字段只声明机会的判定规则。MVP 不实现自动机会计数（reality map 已证明可选机会分母的读模型范式存在于 ActivationsConsoleModel.readRuleCodeTelemetry，prompt 通道的泛化属 PRI-901，不在本次范围）。"
+    },
+
+    "previousBehavior": {
+      "description": "在未执行任何可观察验证动作的情况下，直接给出确定性的事实/成功类结论；用「完成叙述」代替「验证完成」。",
+      "failurePattern": "assertion_without_observation",
+      "baselineWindow": {
+        "from": "2026-09-21T00:00:00.000Z",
+        "to": "2026-09-21T19:20:48.751Z",
+        "splitAxis": "created_at",
+        "exclusiveEnd": true
+      },
+      "observedEvidence": [
+        {
+          "kind": "owner_correction",
+          "source": "trajectory.db user_turns.id=939",
+          "sessionId": "0d2e48c5-2a40-4fe8-b27f-b390d2fd2695",
+          "observedAt": "2026-09-21T17:29:43.283Z",
+          "quote": "等一下，你这份汇报里有两个问题。第一，你说这个目录「未纳入 git 跟踪」——它明明是个 git 仓库，初始提交都在，你没查过就下结论。第二，你说「验证通过」——你到底验证了什么？你跑过服务吗？以后汇报里的每一个事实结论，都必须是你实际查验过的；没查过的就明说没查，不要想当然。"
+        },
+        {
+          "kind": "pain",
+          "source": "trajectory.db pain_events.id=44",
+          "canonicalPainId": "pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+          "origin": "system_infer",
+          "sourceKind": "user_correction",
+          "score": 70,
+          "severity": "severe",
+          "recordedAt": "2026-09-21T17:35:28.608Z"
+        }
+      ],
+      "frequency": {
+        "observedCorrectionTurns": 1,
+        "observedUserCorrectionPains": 8,
+        "windowCorrectionTurnsTotal": 23,
+        "unit": "occurrences",
+        "note": "observedCorrectionTurns 是该失败模式本人（本原则 evidenceSource 逐字引用的那次纠正）在 B0 窗口内的出现次数；observedUserCorrectionPains 是同一窗口内全部 user_correction 类 pain 数（8），另有 23 次被检测到的纠正回合（含其它失败模式，如 pain #45 的「汇报太啰嗦」），仅作为 B0 摩擦水平的参照，不属于本原则的违规计数。"
+      }
+    },
+
+    "observationWindows": [
+      {
+        "id": "B0",
+        "kind": "baseline",
+        "from": "2026-09-21T00:00:00.000Z",
+        "to": "2026-09-21T19:20:48.751Z",
+        "exclusiveEnd": true,
+        "splitAxis": "created_at",
+        "status": "observed",
+        "purpose": "建立激活前的行为基线（Previous Behavior / Failure Pattern / Frequency）。"
+      },
+      {
+        "id": "A1",
+        "kind": "after",
+        "from": "2026-09-21T19:20:48.751Z",
+        "to": "2026-09-22T00:00:00.000Z",
+        "exclusiveEnd": true,
+        "splitAxis": "created_at",
+        "status": "declared_pending_adjudication",
+        "purpose": "激活后的第一个独立机会窗口（同日）。"
+      },
+      {
+        "id": "A2",
+        "kind": "after",
+        "from": "2026-09-22T00:00:00.000Z",
+        "to": null,
+        "splitAxis": "created_at",
+        "status": "declared_open",
+        "purpose": "激活后的第二个独立机会窗口（跨日），用于满足 v3 §Before/After Observation 「至少两个独立任务机会」。窗口在证据收集时收口。"
+      }
+    ],
+
+    "splitConstraints": {
+      "axis": "created_at 时间窗（必要时以 runId 收窄到单次运行）",
+      "forbiddenAxis": "session —— 被暴露的会话是长生命周期主会话（reality map G4：974cb8b3 从 09-04 跨到 09-22、1243 次调用），按 session 切会让 before/after 混在同一会话内。",
+      "consequence": "A1/A2 的机会计数必须按窗口内实际发生的事实/成功类结论计，而不是按会话数计。"
+    }
+  },
+
+  "evidenceSources": {
+    "note": "只声明读什么，不声明结论。行为裁定与结果判定属于实验执行阶段与 Owner 决策，均不在本 PR 范围。",
+    "processEvidence": "state.db: pain_diagnoses / principle_candidates / pi_artifacts / approvals / activations（Layer 0）",
+    "exposureEvidence": ".state/logs/events_*.jsonl 的 runtime_v2_prompt_activations_injected 事件（含 sessionId/runId/principleIds/activationIds/budget/v2Truncated）；state.db principle_applications 的 presence 行（本原则 11 行，2026-09-21T19:33:58.837Z → 2026-09-21T23:20:43.004Z，11 个 session）",
+    "behaviorEvidence": {
+      "level1_trajectory": "trajectory.db assistant_turns / tool_calls（按 session_id + created_at 重建有序动作序列）",
+      "level2_toolArtifact": "trajectory.db tool_calls.params_json（edit/write 的逐字 diff 与 path）+ .state/logs tool_call.filePath / result_preview / exit_code",
+      "level0_selfReport": "state.db principle_applications kind='self_reported'（声明证据，按 v3 §Behavior Evidence Strength 不算行为证据）",
+      "level3_runtimeEnforcement": "不适用：本 activation 为 prompt 通道，production-rulehost-gate 只强制 channel='code_tool_hook'（reality map G5），故本实验的行为证据来源只能到 Level 1–2 + 人工裁定。"
+    },
+    "outcomeEvidence": {
+      "allowed": "trajectory.db v_daily_metrics（failures / user_corrections 趋势，按窗口对标）+ 同类 pain 是否复现 + Owner correction 次数变化",
+      "denominatorOnly": "task_outcomes —— 其真实语义是 Completion Record（outcome 恒为 'completed'，写入者 openclaw-plugin/src/hooks/llm.ts），v3 明确禁止用作 Outcome Evidence，本次仅作机会分母。",
+      "forbidden": "v_principle_effectiveness 与 ledger 的 totalOpportunities/valueScore/adherenceRate（reality map G7：命名幻觉 / 全 0），禁止消费，否则会主动制造假证据。"
+    }
+  },
+
+  "adjudication": {
+    "status": "not_evaluated",
+    "owner": null,
+    "note": "行为是否改变、结果是否改善，须由 Owner/evaluator 显式裁定并记为证据（reality map Gap 2：prompt 通道无法机器验证散文式遵守，不得伪装成自动测量）。实验执行与裁定不在本 PR 范围。"
+  },
+
+  "notInScope": [
+    "自动判断行为是否改变",
+    "自动评分 / 自动学习 / 自动归因",
+    "新建数据库表、principle schema、event system 或 telemetry framework",
+    "Behavior Engine / Learning Framework / Outcome Platform / Evaluation Platform / Memory System / 新 Runtime / 新 Control Plane",
+    "Evidence Bundle 自动装配（后续阶段）",
+    "Behavioral Evidence 只读读模型的 prompt 通道泛化"
+  ]
+}

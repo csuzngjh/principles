@@ -9,11 +9,15 @@
  * DO NOT edit these by hand. To regenerate, run:
  *   npx tsx spike/split-e2e-lmstudio.ts --core-grounding
  * Then re-export from spike/split-e2e-results.json
+ *
+ * Not under __tests__ on purpose: test-double-runtime-adapter.ts (production)
+ * imports this same copy, so the file is a shared data authority, not test
+ * scaffolding. Do not move it back into a test directory (PRI-902).
  */
 
-import type { DiagRootCauseOutputV1 } from '../../../diagnostician/diag-rootcause-output.js';
-import type { DiagDistillerOutputV1 } from '../../../diagnostician/diag-distiller-output.js';
-import type { DiagnosticianOutputV1 } from '../../../diagnostician-output.js';
+import type { DiagRootCauseOutputV1 } from '../diagnostician/diag-rootcause-output.js';
+import type { DiagDistillerOutputV1 } from '../diagnostician/diag-distiller-output.js';
+import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
 
 // ── R6: refactor_regression, T-01/T-03 ──────────────────────────────────────
 // PRI-363 refactor behavior regression (stage enum change broke tests)

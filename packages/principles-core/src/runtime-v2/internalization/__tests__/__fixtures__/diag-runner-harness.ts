@@ -52,7 +52,7 @@ import {
   MOCK_ROOT_CAUSE_OUTPUTS,
   MOCK_DISTILLER_OUTPUTS,
   MOCK_ROUTER_OUTPUTS,
-} from './split-pipeline-mock-outputs.js';
+} from '../../../adapter/split-pipeline-fixtures.js';
 
 export type DiagRunnerRole = 'router' | 'rootcause' | 'distiller';
 

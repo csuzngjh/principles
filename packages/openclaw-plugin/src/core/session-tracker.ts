@@ -84,6 +84,10 @@ export interface SessionState {
 
     // PRI-534: per-session receipt summary surfaced by /pd-context status.
     injectedPrincipleIds?: string[];
+    // PRI-899: activation id per entry of injectedPrincipleIds (same index).
+    // Index-aligned with the array above, exactly like the presence-receipt
+    // pairing at prompt build (alignActivationIds / recordInjectionPresence).
+    injectedActivationIds?: string[];
     receiptAutoCorrects?: number;
 }
 
@@ -439,10 +443,22 @@ export function setInjectedProbationIds(sessionId: string, ids: string[], worksp
  * against this set, so keeping a stale set would re-admit markers for
  * principles no longer injected.
  */
-export function setInjectedPrincipleIds(sessionId: string | undefined, ids: readonly string[], workspaceDir?: string): void {
+export function setInjectedPrincipleIds(
+    sessionId: string | undefined,
+    ids: readonly string[],
+    workspaceDir?: string,
+    /**
+     * PRI-899: the activation id paired with each entry of `ids` (same index,
+     * the array the presence-receipt writer already consumed). Optional and
+     * append-only so every existing caller keeps working unchanged — a caller
+     * that omits it stores an empty pairing rather than a stale one.
+     */
+    activationIds?: readonly string[],
+): void {
     if (!sessionId) return;
     const state = getOrCreateSession(sessionId, workspaceDir);
     state.injectedPrincipleIds = [...ids];
+    state.injectedActivationIds = activationIds ? [...activationIds] : [];
     touchActivity(state, 'control');
     schedulePersistence(state);
 }
@@ -473,6 +489,20 @@ export function getInjectedPrincipleIds(sessionId: string): readonly string[] | 
     return state?.injectedPrincipleIds ? [...state.injectedPrincipleIds] : undefined;
 }
 
+/**
+ * PRI-899: the activation id paired with each entry of the injected set, in
+ * the SAME index order. Tri-state, mirroring getInjectedPrincipleIds:
+ *   - undefined → the injection set is UNKNOWN for this session;
+ *   - []        → the set is known but carries no activation pairing (legacy
+ *                 caller, or the injection carried no activation id);
+ *   - [a, b]    → index-aligned with getInjectedPrincipleIds(sessionId).
+ * A consumer must never treat "no pairing" as "some other activation".
+ */
+export function getInjectedActivationIds(sessionId: string): readonly string[] | undefined {
+    const state = getSession(sessionId);
+    return state?.injectedActivationIds ? [...state.injectedActivationIds] : undefined;
+}
+
 export function clearInjectedProbationIds(sessionId: string, workspaceDir?: string): SessionState {
     return setInjectedProbationIds(sessionId, [], workspaceDir);
 }
@@ -489,6 +519,12 @@ export function listSessions(workspaceDir?: string): SessionState[] {
             toolReadsByFile: { ...state.toolReadsByFile },
             gfiBySource: state.gfiBySource ? { ...state.gfiBySource } : undefined,
             injectedProbationIds: state.injectedProbationIds ? [...state.injectedProbationIds] : undefined,
+            // PRI-899: the two paired arrays are cloned TOGETHER or not at all.
+            // Pairing is by index, so handing out a live alias of one while
+            // cloning the other lets a caller reorder the principle ids and
+            // silently point every activation at the wrong principle.
+            injectedPrincipleIds: state.injectedPrincipleIds ? [...state.injectedPrincipleIds] : undefined,
+            injectedActivationIds: state.injectedActivationIds ? [...state.injectedActivationIds] : undefined,
         }));
 }
 
