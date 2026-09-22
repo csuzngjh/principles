@@ -11,7 +11,8 @@
  * Then re-export from spike/split-e2e-results.json
  *
  * Not under __tests__ on purpose: test-double-runtime-adapter.ts (production)
- * consumes this same copy — see Test Diet 2.2-B4 audit / PRI-902.
+ * imports this same copy, so the file is a shared data authority, not test
+ * scaffolding. Do not move it back into a test directory (PRI-902).
  */
 
 import type { DiagRootCauseOutputV1 } from '../diagnostician/diag-rootcause-output.js';
