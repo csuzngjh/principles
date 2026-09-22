@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const page = fs.readFileSync(path.resolve('src/ui/pages/principles/PrincipleDetailPage.tsx'), 'utf8');
+const attentionPresentation = fs.readFileSync(path.resolve('src/ui/utils/attention-presentation.ts'), 'utf8');
 const playwrightConfig = fs.readFileSync(path.resolve('playwright.config.ts'), 'utf8');
 const e2eStart = fs.readFileSync(path.resolve('scripts/e2e-start.mjs'), 'utf8');
 const en = JSON.parse(fs.readFileSync(path.resolve('src/ui/i18n/en.json'), 'utf8')) as unknown;
@@ -44,7 +45,8 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
   it('groups per-task attention and uncertainty entries instead of flooding the card (PRI-903)', () => {
     expect(page).toContain('groupByReasonCode(governance.attention.items)');
     expect(page).toContain('groupByReasonCode(governance.dataQuality.issues)');
-    expect(page).toContain('principles.detail.governance.sameReasonCount');
+    expect(page).toContain('formatGroupedReasonLine(t, ');
+    expect(attentionPresentation).toContain('principles.detail.governance.sameReasonCount');
   });
 
   it('enhances the existing trajectory instead of adding or replacing its durable history', () => {
