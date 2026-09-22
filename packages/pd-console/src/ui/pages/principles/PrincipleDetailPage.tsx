@@ -365,7 +365,13 @@ export function PrincipleDetailPage() {
           toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
           return;
         }
-        settle(await approveApproval(approvalId));
+        const approveResult = await approveApproval(approvalId);
+        settle(approveResult);
+        // PRI-890: non-fatal server warnings (e.g. prompt injection budget
+        // exclusion) must reach the Owner on this path too, not vanish.
+        if (approveResult.success && typeof approveResult.data?.warning === 'string') {
+          toast.warning(approveResult.data.warning, { duration: 15000 });
+        }
       } else if (action.semantic === 'reject') {
         const approvalId = actionTargetId(action, 'approval');
         if (approvalId === null) {

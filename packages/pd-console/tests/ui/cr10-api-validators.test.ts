@@ -1422,6 +1422,32 @@ describe('validateApprovalRecordDirect', () => {
     expect(result!.confidence).toBeUndefined();
   });
 
+  it('PRI-890: passes through a string warning and drops non-string warnings', () => {
+    const withWarning = validateApprovalRecordDirect({
+      approvalId: 'apr_123',
+      artifactId: 'art_456',
+      channel: 'prompt',
+      riskLevel: 'low',
+      status: 'approved',
+      requestedAt: '2026-06-01T00:00:00Z',
+      warning: 'injection_budget_excluded: budget saturated; nextAction=deactivate older activations',
+    });
+    expect(withWarning).not.toBeNull();
+    expect(withWarning!.warning).toBe('injection_budget_excluded: budget saturated; nextAction=deactivate older activations');
+
+    const badWarning = validateApprovalRecordDirect({
+      approvalId: 'apr_123',
+      artifactId: 'art_456',
+      channel: 'prompt',
+      riskLevel: 'low',
+      status: 'approved',
+      requestedAt: '2026-06-01T00:00:00Z',
+      warning: { code: 'not-a-string' },
+    });
+    expect(badWarning).not.toBeNull();
+    expect(badWarning!.warning).toBeUndefined();
+  });
+
   it('rejects null', () => {
     expect(validateApprovalRecordDirect(null)).toBeNull();
   });

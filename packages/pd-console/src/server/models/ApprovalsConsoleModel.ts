@@ -27,7 +27,7 @@ import {
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
 import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
-import { resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
+import { resolveWorkspaceHostToolSemantics, buildActivePrinciplePromptContext } from '@principles/host-runtime';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
@@ -196,7 +196,52 @@ export class ApprovalsConsoleModel {
       ledgerWarning = await this.upgradeLedgerPrinciple(approvalResult.record.artifactId);
     }
 
-    return { ok: true, record: approvalResult.record, activation, warning: ledgerWarning };
+    // PRI-890 (PRI-768 v6-02): after a successful prompt-channel activation,
+    // verify the new activation actually fits the prompt injection budget.
+    // The prompt surface renders active activations FIFO (activated_at ASC)
+    // under a hard char cap; when the budget is saturated the newest Owner
+    // approval silently never reaches agent behavior. Surface it as a
+    // non-fatal warning (rc-9) instead — the activation stays committed.
+    let injectionWarning: string | undefined;
+    if (isActivationSuccess(activation) && existing.channel === 'prompt') {
+      // isActivationSuccess is not a type predicate; the success variants all
+      // carry activationId (activation-types.ts) — narrow with `in` (rc-2).
+      if ('activationId' in activation) {
+        injectionWarning = await this.checkPromptInjectionBudget(activation.activationId);
+      }
+    }
+
+    const warnings = [ledgerWarning, injectionWarning].filter((w): w is string => w !== undefined);
+    return { ok: true, record: approvalResult.record, activation, warning: warnings.length > 0 ? warnings.join('; ') : undefined };
+  }
+
+  /**
+   * PRI-890 (PRI-768 v6-02): recompute the production prompt injection
+   * projection (same FIFO + budget logic the prompt hook uses, readonly) and
+   * report whether `activationId` made it into the injected set. Budget
+   * exclusion is a warning, never a failure — the activation is committed and
+   * the Owner decides whether to retire older principles. A projection error
+   * is also surfaced (never silent) but must not fail the approve.
+   */
+  private async checkPromptInjectionBudget(activationId: string): Promise<string | undefined> {
+    let context;
+    try {
+      context = await buildActivePrinciplePromptContext({ workspaceDir: this.workspaceDir });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return `injection_budget_check_failed: could not recompute the prompt injection projection (${message}); the activation is committed but its injection status is unverified. nextAction=check .pd/state.db readability and re-run pd runtime activation list`;
+    }
+    if (context.activationIds.includes(activationId)) {
+      return undefined;
+    }
+    const projectionDetail = context.warnings.length > 0 ? ` projection warnings: ${context.warnings.join(' | ')}` : '';
+    if (!context.truncated) {
+      // Not included and the budget did NOT truncate — the projection skipped
+      // this activation for another reason (e.g. artifact resolution). Report
+      // that instead of blaming the budget.
+      return `injection_excluded_non_budget: the activation is committed but excluded from the prompt injection projection for a non-budget reason.${projectionDetail} nextAction=inspect the artifact/activation pair via pd runtime activation list`;
+    }
+    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${context.budget}c, FIFO by activated_at) is already filled by ${context.activationIds.length} earlier activation(s) — this principle will NOT enter agent behavior until older ones are deactivated. nextAction=review the activations page and deactivate superseded principles`;
   }
 
   /**

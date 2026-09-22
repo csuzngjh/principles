@@ -452,7 +452,18 @@ describe("FocusPage: approval failures remain actionable", () => {
       allSucceeded: false,
       failedCount: 1,
       failureReason: "Approval was rolled back. Reason: rejected_validation_failed",
+      successWarnings: [],
     });
+  });
+
+  it("PRI-890: collects non-fatal server warnings from successful decisions", async () => {
+    const { summarizeDecisionResults } = await import("../../src/ui/pages/focus/FocusPage.js");
+    expect(summarizeDecisionResults([
+      { success: true, warning: "injection_budget_excluded: the activation is committed but the prompt injection budget (2000c, FIFO by activated_at) is already filled" },
+      { success: true },
+    ]).successWarnings).toEqual([
+      "injection_budget_excluded: the activation is committed but the prompt injection budget (2000c, FIFO by activated_at) is already filled",
+    ]);
   });
 });
 
