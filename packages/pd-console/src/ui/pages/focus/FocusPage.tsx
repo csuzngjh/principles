@@ -41,6 +41,21 @@ type DecisionResult =
   | { success: true }
   | { success: false; error: string; nextAction?: string };
 
+/**
+ * PRI-889: 「需要你决定」区的决策卡来源选择。
+ * 分组审批数据可用时，activation_approval 决策由 PendingReviewCard（带
+ * 批准/拒绝/修订按钮）承载，同名的 OwnerDecisionCard（只剩死链 CTA）不再
+ * 重复渲染；分组数据不可用时全部保留 —— 决策不静默消失（rc-9）。
+ */
+export function selectDecisionSurfaceItems<T extends { kind: string }>(
+  ownerDecisionItems: readonly T[],
+  groupedAvailable: boolean,
+): T[] {
+  return groupedAvailable
+    ? ownerDecisionItems.filter((item) => item.kind !== "activation_approval")
+    : [...ownerDecisionItems];
+}
+
 export function summarizeDecisionResults(results: readonly DecisionResult[]): {
   allSucceeded: boolean;
   failedCount: number;
@@ -357,15 +372,19 @@ function FeedbackStratification({
 
 function PendingReviewCard({
   group,
+  actionsLockedReason,
   onDecisionApplied,
 }: {
   group: ApprovalGroup;
+  /** PRI-889: 与 OwnerDecisionCard 同一治理就绪门（PRI-787）——锁定时禁用动作并给出可见原因。 */
+  actionsLockedReason?: string;
   onDecisionApplied: () => void;
 }) {
   const { t } = useTranslation();
   const primaryChannel = group.records[0]?.channel ?? "prompt";
   const channelLabel = getChannelLabel(primaryChannel, t);
   const isReversible = primaryChannel === "prompt" || primaryChannel === "defer_archive";
+  const actionsLocked = actionsLockedReason !== undefined;
 
   // Inline review state (Wave 7: no more 404 jump to /principles/<fake-id>)
   const [actionLoading, setActionLoading] = useState(false);
@@ -524,12 +543,29 @@ function PendingReviewCard({
         {t("pages.focus.evidenceSummary", { count: group.records.length })}
       </div>
 
+      {/* PRI-889: 治理就绪门锁定时给出可见原因（rc-9 — 禁用不允许是无声的）。 */}
+      {actionsLocked && (
+        <div
+          className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 p-3"
+          data-testid={`pending-actions-locked-${group.principleId}`}
+        >
+          <p className="text-ink-2 text-[12.5px] leading-relaxed">{actionsLockedReason}</p>
+          <Link
+            to="/settings"
+            data-testid={`pending-actions-locked-settings-${group.principleId}`}
+            className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
+          >
+            {t("pages.focus.ownerDecision.goSettingsCta")}
+          </Link>
+        </div>
+      )}
+
       {/* Inline review actions (Wave 7: no more 404 jump) */}
       <div className="flex gap-2 mt-4 flex-wrap items-center">
         <button
           type="button"
           onClick={handleApprove}
-          disabled={!isActionable || actionLoading}
+          disabled={!isActionable || actionLoading || actionsLocked}
           data-testid={`approve-btn-${group.principleId}`}
           className="inline-flex items-center border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
@@ -538,7 +574,7 @@ function PendingReviewCard({
         <button
           type="button"
           onClick={() => { setShowEditInput((v) => !v); setShowRejectInput(false); }}
-          disabled={!isActionable || actionLoading}
+          disabled={!isActionable || actionLoading || actionsLocked}
           data-testid={`edit-btn-${group.principleId}`}
           className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
@@ -547,7 +583,7 @@ function PendingReviewCard({
         <button
           type="button"
           onClick={() => { setShowRejectInput((v) => !v); setShowEditInput(false); }}
-          disabled={!isActionable || actionLoading}
+          disabled={!isActionable || actionLoading || actionsLocked}
           data-testid={`reject-btn-${group.principleId}`}
           className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
@@ -1075,6 +1111,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 
   // ── Loaded state ─────────────────────────────────────────────────────────
   const pendingGroups = groupedData?.groups.filter((g) => g.status === "pending") ?? [];
+  const groupedAvailable = groupedData !== null;
+  const decisionItems = selectDecisionSurfaceItems(ownerDecisionItems, groupedAvailable);
+  // Single source for "the inline approval cards are on screen" — the section
+  // count and the empty state must agree on it.
+  const showApprovalCards = groupedAvailable && pendingGroups.length > 0;
   const pendingCount = queueData?.pendingReviewCount ?? 0;
   const deviationCount = queueData?.behaviorDeviationCount ?? 0;
   const stagnationSignals = queueData?.stagnationSignals ?? [];
@@ -1182,16 +1223,16 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           <span className="font-mono text-ink-4 text-[12px]">
             {ownerDecisionError !== null
               ? t("pages.focus.ownerDecision.unavailable")
-              : `· ${ownerDecisionItems.length}`}
+              : `· ${decisionItems.length + (showApprovalCards ? pendingGroups.length : 0)}`}
           </span>
         </div>
         {ownerDecisionError !== null && (
           <p className="text-ink-4 text-[12.5px]">{t("pages.focus.ownerDecision.loadError")}</p>
         )}
-        {ownerDecisionError === null && ownerDecisionItems.length === 0 && (
+        {ownerDecisionError === null && decisionItems.length === 0 && !showApprovalCards && (
           <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerDecision.empty")}</p>
         )}
-        {ownerDecisionItems.map((item) => (
+        {decisionItems.map((item) => (
           <OwnerDecisionCard
             key={item.reviewKey}
             item={item}
@@ -1201,6 +1242,15 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             )}
             actionsLockedReason={ownerActionsLockedReason ?? undefined}
             onResolved={() => { void loadData(); }}
+          />
+        ))}
+        {/* 分组数据不可用时 OwnerDecisionCard 保持原渲染（含降级 CTA），决策不静默消失（rc-9）——见 selectDecisionSurfaceItems。 */}
+        {groupedAvailable && pendingGroups.map((group) => (
+          <PendingReviewCard
+            key={group.principleId}
+            group={group}
+            actionsLockedReason={ownerActionsLockedReason ?? undefined}
+            onDecisionApplied={() => { void loadData(); }}
           />
         ))}
       </section>
