@@ -701,9 +701,20 @@ export async function handleBeforePromptBuild(
     // included — the self-report capture validates against this set, so a
     // stale non-empty set from an earlier turn would re-admit markers for
     // principles no longer injected this turn.
+    // Review fix (rc-6-adjacent pairing): activation ids must align with the
+    // INJECTED subset — the full dedupedV2 list mispairs when budget
+    // truncation drops principles. The shared-runtime path keeps its own
+    // parallel arrays.
+    // PRI-899: the SAME aligned array now feeds BOTH the session tracker (the
+    // pairing the self_report effect row is written from) and the presence
+    // writer below, so the two receipt levels pair principles to activations
+    // identically — one pairing derivation, not two.
+    const alignedActivationIds = sharedActivePrinciplePrompt
+      ? sharedActivePrinciplePrompt.activationIds
+      : alignActivationIds(dedupedV2, runtimeV2PrincipleIds);
     try {
       if (sessionId) {
-        setInjectedPrincipleIds(sessionId, [...runtimeV2PrincipleIds], workspaceDir);
+        setInjectedPrincipleIds(sessionId, [...runtimeV2PrincipleIds], workspaceDir, alignedActivationIds);
       }
     } catch (sessionErr) {
       logger?.warn?.(`[PD:RuntimeV2] Session receipt tracking failed: ${String(sessionErr)}`);
@@ -715,13 +726,6 @@ export async function handleBeforePromptBuild(
     try {
       if (runtimeV2PrincipleIds.size > 0
           && loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_ledger', logger).enabled) {
-        // Review fix (rc-6-adjacent pairing): activation ids must align with
-        // the INJECTED subset — the full dedupedV2 list mispairs when budget
-        // truncation drops principles. The shared-runtime path keeps its own
-        // parallel arrays.
-        const alignedActivationIds = sharedActivePrinciplePrompt
-          ? sharedActivePrinciplePrompt.activationIds
-          : alignActivationIds(dedupedV2, runtimeV2PrincipleIds);
         const written = recordInjectionPresence(
           workspaceDir,
           [...runtimeV2PrincipleIds],

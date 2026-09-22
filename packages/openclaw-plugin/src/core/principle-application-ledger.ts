@@ -16,7 +16,7 @@ import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS, safeStringifyPreview }
 import Database from 'better-sqlite3';
 import * as nodePath from 'node:path';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
-import { getInjectedPrincipleIds } from './session-tracker.js';
+import { getInjectedPrincipleIds, getInjectedActivationIds } from './session-tracker.js';
 
 export type PrincipleApplicationLevel = 'effect' | 'presence';
 export type PrincipleApplicationKind =
@@ -241,6 +241,11 @@ export function recordSelfReportFromText(
     return 0;
   }
   const injected = new Set(injectedIds);
+  // PRI-899: the activation that carried this principle into the prompt. The
+  // pairing array is index-aligned with `injectedIds` (same arrays the presence
+  // writer consumed), so the reported principle resolves to its own activation.
+  // Absence (undefined/[]) records the row unlinked — never a guess.
+  const injectedActivationIds = sessionId ? getInjectedActivationIds(sessionId) : undefined;
 
   let written = 0;
   for (const match of matches) {
@@ -252,15 +257,19 @@ export function recordSelfReportFromText(
       );
       continue;
     }
+    const pairedActivationId = injectedActivationIds?.[injectedIds.indexOf(principleId)];
+    const activationId = typeof pairedActivationId === 'string' && pairedActivationId.length > 0
+      ? pairedActivationId
+      : null;
     const digest = (match[2] ?? '').trim().slice(0, 200);
     try {
       const db = getConnection(workspaceDir).getDb();
       sweepRetention(db);
       const result = db.prepare(`
         INSERT OR IGNORE INTO principle_applications
-          (principle_id, channel, level, kind, session_id, digest, created_at)
-        VALUES (?, 'prompt', 'effect', 'self_reported', ?, ?, ?)
-      `).run(principleId, sessionId ?? null, digest, new Date().toISOString());
+          (principle_id, activation_id, channel, level, kind, session_id, digest, created_at)
+        VALUES (?, ?, 'prompt', 'effect', 'self_reported', ?, ?, ?)
+      `).run(principleId, activationId, sessionId ?? null, digest, new Date().toISOString());
       const changes = typeof result === 'object' && result !== null
         ? ((result as { changes?: number }).changes ?? 0)
         : 0;
