@@ -22,8 +22,7 @@
  * only; the router's write failure lives at the committer layer and remains
  * in the router stage file.
  */
-import type { vi } from 'vitest';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { RunnerPhase } from '../../runner/runner-phase.js';
 import {
   createDiagRunnerHarness,
@@ -191,7 +190,17 @@ describe.each(TASK_ID_CASES)('Diag $role taskId integrity', (c) => {
 
 const STORAGE_WRITE_FAIL_CASES = [
   { role: 'rootcause', create: () => createDiagRunnerHarness('rootcause', { artifactStore: makeFailingArtifactStore() }) },
-  { role: 'distiller', create: () => createDiagRunnerHarness('distiller', { artifactStore: makeFailingArtifactStore() }) },
+  {
+    role: 'distiller',
+    // Reads must still resolve the rootcause predecessor, otherwise the run
+    // fails early with input_invalid and never reaches the failing write.
+    create: () => createDiagRunnerHarness('distiller', {
+      artifactStore: makeFailingArtifactStore(
+        { rootcause: 'valid' },
+        { rootCauseArtifactId: DISTILLER_ROOTCAUSE_ARTIFACT_ID },
+      ),
+    }),
+  },
 ] satisfies { role: 'rootcause' | 'distiller'; create: () => AnyDiagRunnerHarness }[];
 
 describe.each(STORAGE_WRITE_FAIL_CASES)('Diag $role artifact persistence', (c) => {
@@ -200,6 +209,8 @@ describe.each(STORAGE_WRITE_FAIL_CASES)('Diag $role artifact persistence', (c) =
     const result = await h.runner.run(h.taskId);
 
     expect(result.status).toBe('failed');
+    // Prove the run reached the storage-layer write (not an earlier failure).
+    expect(vi.mocked(h.deps.artifactStore.upsertArtifact)).toHaveBeenCalled();
     expect((h.deps._stateManager.markTaskSucceeded as MockFn)).not.toHaveBeenCalled();
   });
 });

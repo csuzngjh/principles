@@ -42,7 +42,7 @@ import type { TaskRecord } from '../../../task-status.js';
 import type { PeerRunnerOptions, PeerRunnerResult } from '../../../runner/peer-runner-types.js';
 import type { RunnerPhase } from '../../../runner/runner-phase.js';
 import { MemoryPIArtifactStore } from '../../pi-artifact-store.js';
-import type { PIArtifactStore, PIArtifactRecord } from '../../pi-artifact.js';
+import type { PIArtifactRecord } from '../../pi-artifact.js';
 import { createPITaskDiagnosticJson } from '../../pitask-metadata.js';
 import {
   MOCK_ROOT_CAUSE_OUTPUTS,
@@ -264,16 +264,19 @@ export function makePredecessorStore(
 }
 
 /**
- * Store whose writes always reject — injects a storage-layer failure for the
- * A/B runners (the router's write failure lives at the committer layer and is
- * NOT modeled here).
+ * Store whose artifact *writes* always reject while reads stay real —
+ * injects a storage-layer failure for the A/B runners (the router's write
+ * failure lives at the committer layer and is NOT modeled here). Pass a
+ * `reads` scenario so predecessor resolution still succeeds and the run
+ * actually reaches the failing write.
  */
-export function makeFailingArtifactStore(): PIArtifactStore {
-  return {
-    listBySourceTaskId: vi.fn().mockResolvedValue([]),
-    upsertArtifact: vi.fn().mockRejectedValue(new Error('Disk full')),
-    // runtime-contract-exempt: ERR-001 test-double DI wiring of a partial store mock, not untrusted runtime data; LLM payloads still pass real schema/validator paths
-  } as unknown as PIArtifactStore;
+export function makeFailingArtifactStore(
+  reads: PredecessorStoreScenario = {},
+  ids: { rootCauseArtifactId?: string; distillerArtifactId?: string } = {},
+): MemoryPIArtifactStore {
+  const store = makePredecessorStore(reads, ids);
+  store.upsertArtifact = vi.fn().mockRejectedValue(new Error('Disk full'));
+  return store;
 }
 
 // ── Shared mock scaffold ──────────────────────────────────────────────────────
