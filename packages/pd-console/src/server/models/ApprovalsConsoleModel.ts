@@ -241,7 +241,7 @@ export class ApprovalsConsoleModel {
       // that instead of blaming the budget.
       return `injection_excluded_non_budget: the activation is committed but excluded from the prompt injection projection for a non-budget reason.${projectionDetail} nextAction=inspect the artifact/activation pair via pd runtime activation list`;
     }
-    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${context.budget}c, FIFO by activated_at) is already filled by ${context.activationIds.length} earlier activation(s) — this principle will NOT enter agent behavior until older ones are deactivated. nextAction=review 生效情况 (activations) and deactivate superseded principles`;
+    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${context.budget}c, FIFO by activated_at) is already filled by ${context.activationIds.length} earlier activation(s) — this principle will NOT enter agent behavior until older ones are deactivated. nextAction=review the activations page and deactivate superseded principles`;
   }
 
   /**

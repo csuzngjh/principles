@@ -50,8 +50,7 @@ export function summarizeDecisionResults(results: readonly DecisionResult[]): {
   const failures = results.filter((result): result is Extract<DecisionResult, { success: false }> => !result.success);
   const first = failures[0];
   const successWarnings = results
-    .filter((result): result is Extract<DecisionResult, { success: true }> => result.success && result.warning !== undefined)
-    .map((result) => result.warning as string);
+    .flatMap((result) => (result.success && typeof result.warning === "string" ? [result.warning] : []));
   return {
     allSucceeded: failures.length === 0,
     failedCount: failures.length,

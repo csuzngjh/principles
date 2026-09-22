@@ -652,24 +652,26 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(warning).toContain('nextAction=');
   });
 
-  it('approve stays warning-free on the prompt budget path when there is headroom (PRI-890)', async () => {
-    // Fresh artifact + approval in a workspace whose budget still has room
-    // (this test file runs sequentially; earlier tests added a handful of
-    // activations but far below the 2000c cap excluding the fillers above is
-    // not possible here — so use a defer_archive channel, which does not ride
-    // the prompt injection surface and thus must never trigger the check).
+  it('approve stays warning-free for a prompt activation when the budget has room (PRI-890 positive path)', async () => {
+    // Fixture reset: earlier tests in this file (notably the saturation test)
+    // left prompt activations behind. Deactivate them all so this test
+    // deterministically starts with a budget that has room, then assert the
+    // spec's positive path: 预算有位 → included (no warning).
+    sqliteConn.getDb()
+      .prepare("UPDATE activations SET deactivated_at = ? WHERE channel = 'prompt' AND deactivated_at IS NULL")
+      .run(new Date().toISOString());
     const base = Date.now();
     const artifactId = `art-budget-headroom-${base}`;
     const approvalId = `apr-budget-headroom-${base}`;
     await seedPrincipleArtifact(artifactId, {
-      contentJson: { principleId: `P_HEADROOM_${base}`, text: 'Headroom control principle' },
+      contentJson: { principleId: `P_HEADROOM_${base}`, text: 'Headroom positive-path principle' },
     });
-    await seedPendingApproval(approvalId, artifactId, 'defer_archive');
+    await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ note: 'PRI-890 headroom control' }),
+      body: JSON.stringify({ note: 'PRI-890 headroom positive path' }),
     });
     expect(approveRes.status).toBe(200);
     const approveData = getDataObject(approveRes.body);
@@ -678,7 +680,40 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     if (isRecord(activation)) {
       expect(getStringField(activation, 'decision')).toBe('activated');
     }
-    // defer_archive does not ride the prompt budget — no injection warning.
+    // The INJECTION warning must be absent on the positive path. Other
+    // non-fatal warnings (e.g. ledger_activate_skipped for a seed artifact
+    // with no ledger entry) are orthogonal to PRI-890 and may legitimately
+    // appear.
+    const warning = getStringField(approveData, 'warning') ?? '';
+    expect(warning).not.toContain('injection_budget_excluded');
+    expect(warning).not.toContain('injection_excluded_non_budget');
+    expect(warning).not.toContain('injection_budget_check_failed');
+  });
+
+  it('defer_archive approvals never ride the prompt budget check (PRI-890 channel guard)', async () => {
+    // Channel-guard control: defer_archive does not ride the prompt injection
+    // surface, so the injection-specific codes must never appear regardless
+    // of budget state.
+    const base = Date.now();
+    const artifactId = `art-budget-defer-${base}`;
+    const approvalId = `apr-budget-defer-${base}`;
+    await seedPrincipleArtifact(artifactId, {
+      contentJson: { principleId: `P_DEFER_${base}`, text: 'Defer archive control principle' },
+    });
+    await seedPendingApproval(approvalId, artifactId, 'defer_archive');
+
+    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'PRI-890 defer control' }),
+    });
+    expect(approveRes.status).toBe(200);
+    const approveData = getDataObject(approveRes.body);
+    const activation = approveData?.activation;
+    expect(isRecord(activation)).toBe(true);
+    if (isRecord(activation)) {
+      expect(getStringField(activation, 'decision')).toBe('activated');
+    }
     // (ledger warnings may still appear; assert the injection-specific codes
     // are absent rather than asserting warning === undefined.)
     const warning = getStringField(approveData, 'warning') ?? '';
