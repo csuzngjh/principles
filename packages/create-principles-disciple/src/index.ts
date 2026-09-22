@@ -554,22 +554,20 @@ function isMainModuleEntry(): boolean {
 // link topology still slips past it while argv[1] unambiguously names *this*
 // package's `dist/index.js`, fail loud and run rather than repeat the silent
 // no-op. Import-time callers never satisfy this (argv[1] is the test runner).
+// path.relative absorbs mixed / and \ separators (win32); deliberately no
+// link resolution here — this check exists exactly for when it diverges.
 function looksLikeOwnDistEntry(): boolean {
   const [, entry] = process.argv;
   if (!entry) return false;
-  const resolved = path.resolve(entry);
-  return (
-    path.basename(resolved) === 'index.js'
-    && path.basename(path.dirname(resolved)) === 'dist'
-    && path.basename(path.dirname(path.dirname(resolved))) === path.basename(PLUGIN_DIR)
-  );
+  const relative = path.relative(path.dirname(PLUGIN_DIR), path.resolve(entry));
+  return relative === path.join(path.basename(PLUGIN_DIR), 'dist', 'index.js');
 }
 
 const mainModuleEntry = isMainModuleEntry();
 if (mainModuleEntry || looksLikeOwnDistEntry()) {
   if (!mainModuleEntry) {
     process.stderr.write(
-      'warning: create-principles-disciple CLI started via fallback entry detection (PRI-892); please report this line.\n',
+      'warning: CLI entry started via fallback detection: reason=entry_identity_mismatch nextAction=report-this-line-with-your-invocation-command\n',
     );
   }
 
