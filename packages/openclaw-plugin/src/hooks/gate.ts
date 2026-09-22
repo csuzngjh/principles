@@ -37,6 +37,33 @@ function isSharedRuleEvaluationEntry(value: unknown): value is RuleHostEvaluated
     && (value.activationMode !== 'shadow' || (typeof value.activationId === 'string' && value.activationId.trim().length > 0));
 }
 
+/**
+ * PRI-899: recover the winning LIVE activation id from a shared-gate result.
+ *
+ * The legacy hook path reads this fact from `report.liveDecisionActivationId`
+ * (rule-host.ts resolves it from the winning decision's ruleId). The shared
+ * gate carries the SAME fact through `metadata.evaluations`, whose live
+ * aggregate entry is written first and tagged `activationMode: 'live'`
+ * (host-runtime production-rulehost-gate.ts). Without recovering it here the
+ * shared deny path wrote effect receipts with `activation_id = NULL`, so
+ * behavior evidence could never be JOINed to the activation that produced it.
+ *
+ * Returns undefined when the metadata carries no attributable live activation
+ * (e.g. an aggregate decision with no winner) — the receipt is then written
+ * unlinked, exactly as before, and the absence stays observable.
+ */
+function extractLiveActivationId(metadata: HostEventResult['metadata']): string | undefined {
+  const evaluations = metadata?.['evaluations'];
+  if (!Array.isArray(evaluations)) return undefined;
+  for (const evaluation of evaluations) {
+    if (!isSharedRuleEvaluationEntry(evaluation)) continue;
+    if (evaluation.activationMode !== 'live') continue;
+    const activationId = evaluation.activationId;
+    if (typeof activationId === 'string' && activationId.trim().length > 0) return activationId;
+  }
+  return undefined;
+}
+
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown>; logger?: Partial<PluginLogger> }
@@ -186,6 +213,10 @@ export function handleBeforeToolCall(
           if (ledgerPrincipleId) {
             const written = recordPrincipleApplication(wctx.workspaceDir, {
               principleId: ledgerPrincipleId,
+              // PRI-899: effect receipts must carry the activation that produced
+              // the enforcement, otherwise behavior evidence cannot be JOINed
+              // back to its activation (the presence path already does this).
+              activationId: report.liveDecisionActivationId,
               ruleId: hostResult.ruleId,
               channel: 'code_tool_hook',
               level: 'effect',
@@ -356,6 +387,10 @@ export function handleBeforeToolCall(
                   : String(proposal.ruleId ?? 'unknown');
                 const written = recordPrincipleApplication(wctx.workspaceDir, {
                   principleId: ledgerPrincipleId,
+                  // PRI-899: same activation lineage as the block path — the
+                  // winning live decision's activation is already resolved in
+                  // this scope (report.liveDecisionActivationId).
+                  activationId: report.liveDecisionActivationId,
                   ruleId: String(proposal.ruleId ?? 'unknown'),
                   channel: 'code_tool_hook',
                   level: 'effect',
@@ -575,6 +610,9 @@ export function handleSharedRuleHostResult(
   });
   const ruleId = typeof metadata?.['ruleId'] === 'string' ? metadata['ruleId'] : undefined;
   const principleId = typeof metadata?.['principleId'] === 'string' ? metadata['principleId'] : undefined;
+  // PRI-899: shared-path activation lineage — resolve once, use for every deny
+  // accounting branch below (resolvable and unresolved target path).
+  const liveActivationId = extractLiveActivationId(metadata);
   const denyReason = result.reason ?? 'RuleHost denied the tool call';
   if (action.normalizedPath === null) {
     if (result.decision === 'deny') {
@@ -587,6 +625,7 @@ export function handleSharedRuleHostResult(
         reason: denyReason,
         ruleId,
         principleId,
+        activationId: liveActivationId,
       }, logger);
     }
     return;
@@ -648,6 +687,7 @@ export function handleSharedRuleHostResult(
       reason: denyReason,
       ruleId,
       principleId,
+      activationId: liveActivationId,
     }, logger);
   }
 }
@@ -672,6 +712,13 @@ export function accountSharedDeny(
     reason: string;
     ruleId?: string;
     principleId?: string;
+    /**
+     * PRI-899: the live activation whose decision produced this deny, when the
+     * shared gate metadata attributed one. Optional — an unattributable deny
+     * still writes its receipt, unlinked, exactly as before (rc-9: the skip is
+     * never silent, the reason code is logged by the caller).
+     */
+    activationId?: string;
   },
   logger: { warn?: (_message: string) => void; error?: (_message: string) => void },
 ): void {
@@ -684,6 +731,8 @@ export function accountSharedDeny(
       if (ledgerPrincipleId) {
         const written = recordPrincipleApplication(wctx.workspaceDir, {
           principleId: ledgerPrincipleId,
+          // PRI-899: activation lineage for the shared deny path.
+          activationId: accounting.activationId,
           ruleId: accounting.ruleId,
           channel: 'code_tool_hook',
           level: 'effect',
