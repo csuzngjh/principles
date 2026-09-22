@@ -269,15 +269,33 @@ runs:
         ' "$VERSION"
 
     - name: Publish exact committed version
-      if: ${{ steps.exact.outputs.status == 'ABSENT' && inputs.dry_run != true }}
+      if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
       env:
         TOOLS_DIR: ${{ inputs.tools_dir }}
         COHORT: ${{ inputs.cohort_sha }}
         NAME: ${{ inputs.npm_name }}
         VERSION: ${{ steps.exact.outputs.version }}
+        DRY_RUN: ${{ inputs.dry_run }}
         NODE_AUTH_TOKEN: ${{ inputs.npm_token }}
       run: |
+        # Rehearsal gate decided in BASH, not in a step-level `if`
+        # expression: GitHub expressions coerce across boolean/string in
+        # ways that are not reliable for input gating — the preflight
+        # rehearsal (run 35666369142) proved a boolean-inequality gate on
+        # this input OPENED for a boolean true and attempted a real
+        # upload (blocked only by the job's missing id-token). Env values
+        # are always strings; this comparison is exact.
+        if [ "$DRY_RUN" = "true" ]; then
+          echo "DRY RUN (rehearsal): the real npm upload is SKIPPED; the packed artifact and control-path checks above are the rehearsal evidence."
+          exit 0
+        fi
+        # Resolve the tools checkout to an ABSOLUTE path BEFORE cd-ing into
+        # the package directory — the failure fallback below must stay
+        # valid from inside packages/<dir> (rehearsal run 35666369142:
+        # relative release-tools/ resolved to packages/<dir>/release-tools
+        # and crashed with MODULE_NOT_FOUND instead of deciding).
+        TOOLS_ABS="$(cd "$TOOLS_DIR" && pwd)"
         cd "packages/${{ inputs.pkg_dir }}"
         echo "Publishing exact committed version $NAME@$VERSION (no bump, no reset)."
         # An npm exit code is not always the truth: the upload can land and
@@ -290,7 +308,7 @@ runs:
         set -e
         if [ "$CODE" -ne 0 ]; then
           echo "::warning::npm publish exited $CODE for $NAME@$VERSION — re-verifying the registry exact state before deciding."
-          node "$TOOLS_DIR/scripts/release/verify-publish-outcome.mjs" "$NAME" "$VERSION" --expect-git-head "$COHORT"
+          node "$TOOLS_ABS/scripts/release/verify-publish-outcome.mjs" "$NAME" "$VERSION" --expect-git-head "$COHORT"
         fi
 
     - name: Summary
