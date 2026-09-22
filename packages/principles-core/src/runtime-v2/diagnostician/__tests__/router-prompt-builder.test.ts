@@ -46,19 +46,10 @@ describe('RouterPromptBuilder', () => {
     expect(instruction).toContain('recommendations');
   });
 
-  it('prompt instructs filling violatedPrinciples from A + B', () => {
-    const builder = new RouterPromptBuilder();
-    const instruction = builder.buildRouterInstruction();
-    expect(instruction).toContain('violatedPrinciples');
-  });
-
-  it('prompt instructs filling recommendations from taxonomy decision', () => {
-    const builder = new RouterPromptBuilder();
-    const instruction = builder.buildRouterInstruction();
-    expect(instruction).toContain('principle');
-    expect(instruction).toContain('rule');
-    expect(instruction).toContain('implementation');
-    expect(instruction).toContain('prompt');
-    expect(instruction).toContain('defer');
-  });
+  // PRI-891: the "instructs filling violatedPrinciples from A + B" it was a
+  // duplicate assertion of the schema-key check above, and the generic-word
+  // presence it (contains "principle"/"rule"/"prompt"/...) was removed — the
+  // recommendation taxonomy exact contract is pinned by the DiagnosticianOutput
+  // schema five-kind union (diagnostician-output-schema.test.ts) and
+  // recommendation-kind-resolver.test.ts, not by prose word presence.
 });

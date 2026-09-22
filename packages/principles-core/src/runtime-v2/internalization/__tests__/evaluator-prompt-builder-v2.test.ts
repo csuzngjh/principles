@@ -53,9 +53,15 @@ const SCRIBE_PRINCIPLE = {
 describe('EvaluatorPromptBuilder — V2 code review (PRI-425)', () => {
   const builder = new EvaluatorPromptBuilder();
 
-  // ── V2 input triggers code review instruction ──────────────────────────────
+  // ── V2 code-review instruction contract ──────────────────────────────────
+  // PRI-891: five per-keyword its that ignored the buildPrompt output and
+  // asserted the static constant were consolidated into this single pin.
+  // The three-dimension OUTPUT schema itself is pinned behaviorally by
+  // evaluator-output-v2.test.ts.
 
-  it('V2 artificer input → instruction mentions intentConsistency', () => {
+  it('instruction carries the PRI-425 code-review contract (dimensions, verdicts, example, short-circuit)', () => {
+    // The instruction is input-independent (static constant); V2 inputs only
+    // change what the model produces, not the instruction text.
     builder.buildPrompt({
       taskId: 'eval-task-001',
       contextHash: 'ctx-abc',
@@ -64,32 +70,17 @@ describe('EvaluatorPromptBuilder — V2 code review (PRI-425)', () => {
       scribeArtifact: SCRIBE_PRINCIPLE,
     });
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('intentConsistency');
-  });
-
-  it('V2 artificer input → instruction mentions scopePrecision', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('scopePrecision');
-  });
-
-  it('V2 artificer input → instruction mentions traceCoverage', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('traceCoverage');
-  });
-
-  it('V2 instruction includes the three scopePrecision verdicts', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('precise');
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('too_broad');
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('too_narrow');
-  });
-
-  it('V2 example includes codeReview and adversarialCases so the model cannot copy a V1 response', () => {
+    // The example must include codeReview and adversarialCases so the model
+    // cannot copy a V1 response.
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toMatch(/COMPLETE EXAMPLE OUTPUT[\s\S]*"codeReview"/);
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toMatch(/COMPLETE EXAMPLE OUTPUT[\s\S]*"adversarialCases"/);
-  });
-
-  // ── short-circuit: skip adversarial when passive review fails ──────────────
-
-  it('instruction tells LLM to skip adversarial cases when passive review fails', () => {
+    // Short-circuit: skip adversarial cases when passive review fails.
     expect(EVALUATOR_PROTOCOL_INSTRUCTION.toLowerCase()).toContain('adversarial');
-    // The instruction must communicate the short-circuit rule.
     expect(EVALUATOR_PROTOCOL_INSTRUCTION.toLowerCase()).toMatch(/skip|only.*pass|do not.*generat.*adversarial.*fail/);
   });
 
@@ -128,18 +119,5 @@ describe('EvaluatorPromptBuilder — V2 code review (PRI-425)', () => {
     });
     expect(promptInput.artificerArtifact).toEqual(V1_ARTIFICER);
     expect(promptInput.scribeArtifact).toBeUndefined();
-  });
-
-  it('V1 input → instruction still works (code review section is conditional on V2 fields)', () => {
-    // The instruction can mention code review unconditionally; the LLM only
-    // produces codeReview when the artificer artifact carries implementationCode.
-    // This test just ensures V1 path doesn't crash.
-    const result = builder.buildPrompt({
-      taskId: 'eval-task-001',
-      contextHash: 'ctx-abc',
-      sourceArtificerArtifactId: 'pi-art-artificer-001',
-      artificerArtifact: V1_ARTIFICER,
-    });
-    expect(result.message).toContain('eval-task-001');
   });
 });
