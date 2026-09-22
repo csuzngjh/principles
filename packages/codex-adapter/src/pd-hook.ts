@@ -2,7 +2,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
@@ -296,18 +296,29 @@ async function main(): Promise<void> {
   process.exitCode = result.exitCode;
 }
 
-// PRI-892: canonicalize the entry through realpath before comparing. Node
-// resolves the main module through symlinks/junctions while argv[1] keeps the
-// unresolved link path (npm/npx `.bin` shims, or a junctioned extensions dir),
-// so the old raw comparison silently skipped main() on Windows. A missing
-// argv[1] target is never the entry, so the realpath throw is a plain false.
+// PRI-892: Node resolves the main module through symlinks/junctions while
+// argv[1] keeps the unresolved link path (npm/npx `.bin` shims, or a
+// junctioned extensions dir), so the old raw comparison silently skipped
+// main() on Windows. Try the raw URL first so an ordinary direct invocation
+// never depends on a filesystem lookup succeeding, then canonicalize through
+// realpath for the linked-path case.
 function isMainModuleEntry(): boolean {
   const [, entry] = process.argv;
   if (!entry) return false;
+  if (pathToFileURL(entry).href === import.meta.url) return true;
   try {
     return pathToFileURL(realpathSync(entry)).href === import.meta.url;
-  } catch {
-    return false;
+  } catch (error) {
+    // rc-9: realpath is unavailable or failed, so the link cannot be verified.
+    // If argv[1] still names this exact file, that is the entry — run main()
+    // and leave a bounded diagnostic instead of the silent no-op this ticket
+    // exists to remove. A test runner that merely imports this module never
+    // satisfies it, because its argv[1] is the runner, not pd-hook.
+    if (path.basename(entry) !== path.basename(fileURLToPath(import.meta.url))) return false;
+    process.stderr.write(
+      `${diagnostic(`entry_identity_unverified:${errorMessage(error)}`, 'Reinstall the Codex adapter; if it repeats, report this line together with the command that invoked the hook.')}\n`,
+    );
+    return true;
   }
 }
 
