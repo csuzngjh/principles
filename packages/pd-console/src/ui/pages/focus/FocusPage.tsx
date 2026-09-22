@@ -1111,11 +1111,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 
   // ── Loaded state ─────────────────────────────────────────────────────────
   const pendingGroups = groupedData?.groups.filter((g) => g.status === "pending") ?? [];
-  // PRI-889: 分组审批数据可用时，activation_approval 类决策由 PendingReviewCard
-  // （带批准/拒绝/修订按钮）承载；同名 OwnerDecisionCard（只剩死链 CTA）不再
-  // 重复渲染。分组数据不可用时保留全部 OwnerDecisionCard ——决策不静默消失（rc-9）。
   const groupedAvailable = groupedData !== null;
   const decisionItems = selectDecisionSurfaceItems(ownerDecisionItems, groupedAvailable);
+  // Single source for "the inline approval cards are on screen" — the section
+  // count and the empty state must agree on it.
+  const showApprovalCards = groupedAvailable && pendingGroups.length > 0;
   const pendingCount = queueData?.pendingReviewCount ?? 0;
   const deviationCount = queueData?.behaviorDeviationCount ?? 0;
   const stagnationSignals = queueData?.stagnationSignals ?? [];
@@ -1223,13 +1223,13 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           <span className="font-mono text-ink-4 text-[12px]">
             {ownerDecisionError !== null
               ? t("pages.focus.ownerDecision.unavailable")
-              : `· ${decisionItems.length + (groupedAvailable ? pendingGroups.length : 0)}`}
+              : `· ${decisionItems.length + (showApprovalCards ? pendingGroups.length : 0)}`}
           </span>
         </div>
         {ownerDecisionError !== null && (
           <p className="text-ink-4 text-[12.5px]">{t("pages.focus.ownerDecision.loadError")}</p>
         )}
-        {ownerDecisionError === null && decisionItems.length === 0 && (!groupedAvailable || pendingGroups.length === 0) && (
+        {ownerDecisionError === null && decisionItems.length === 0 && !showApprovalCards && (
           <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerDecision.empty")}</p>
         )}
         {decisionItems.map((item) => (
@@ -1244,10 +1244,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             onResolved={() => { void loadData(); }}
           />
         ))}
-        {/* PRI-889: 部署审批（activation_approval）由分组的 PendingReviewCard
-            直接承载批准/拒绝/修订动作——此前该组件已实现（Wave 7）但无渲染点，
-            Owner 在浏览器内没有任何可点击的批准路径（PRI-768 v6-01）。分组数据
-            不可用时 OwnerDecisionCard 保持原渲染（含降级 CTA），决策不静默消失。 */}
+        {/* 分组数据不可用时 OwnerDecisionCard 保持原渲染（含降级 CTA），决策不静默消失（rc-9）——见 selectDecisionSurfaceItems。 */}
         {groupedAvailable && pendingGroups.map((group) => (
           <PendingReviewCard
             key={group.principleId}
