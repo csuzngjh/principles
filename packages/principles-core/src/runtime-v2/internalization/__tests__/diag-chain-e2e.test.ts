@@ -39,7 +39,7 @@ import { computeEffectivePdConfig, resolveProfile } from '../../config/index.js'
 import type { EffectivePdConfig, PdConfig } from '../../config/pd-config-types.js';
 import { createPainSignalBridge } from '../../pain-signal-runtime-factory.js';
 import type { LedgerAdapter } from '../../candidate-intake.js';
-import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from './__fixtures__/split-pipeline-mock-outputs.js';
+import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from '../../adapter/split-pipeline-fixtures.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 

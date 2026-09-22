@@ -7,7 +7,7 @@
  *
  * BUG-008: Default fetchOutput dispatches stage-aware mock outputs based on
  * taskId prefix (diag_rootcause/diag_distiller/diag_router), reusing fixtures
- * from split-pipeline-mock-outputs.ts. Non-split taskIds fall back to the
+ * from split-pipeline-fixtures.ts. Non-split taskIds fall back to the
  * original monolithic DiagnosticianOutputV1 shape (backward-compatible).
  */
 import type {
@@ -22,7 +22,7 @@ import type {
   RuntimeArtifactRef,
   ContextItem,
 } from '../runtime-protocol.js';
-import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from '../internalization/__tests__/__fixtures__/split-pipeline-mock-outputs.js';
+import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from './split-pipeline-fixtures.js';
 
 /** Optional callbacks to override default TestDoubleRuntimeAdapter behavior. */
 export interface TestDoubleBehaviorOverrides {
@@ -120,7 +120,7 @@ export class TestDoubleRuntimeAdapter implements PDRuntimeAdapter {
     }
 
     // BUG-008: Dispatch stage-aware mock outputs based on taskId prefix.
-    // Reuse fixtures from split-pipeline-mock-outputs.ts (R6).
+    // Reuse fixtures from split-pipeline-fixtures.ts (R6).
     const taskId = this.runIdToTaskId.get(runId) ?? this.defaultTaskId;
 
     if (taskId.includes('diag_rootcause')) {

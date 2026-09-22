@@ -25,7 +25,7 @@ import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
-import { MOCK_ROOT_CAUSE_OUTPUTS } from './__fixtures__/split-pipeline-mock-outputs.js';
+import { MOCK_ROOT_CAUSE_OUTPUTS } from '../../adapter/split-pipeline-fixtures.js';
 import type { EffectivePdConfig } from '../../config/pd-config-types.js';
 import { getDefaultPdConfig } from '../../config/pd-config-defaults.js';
 import { resolveProfile } from '../../config/pd-profile-constants.js';
