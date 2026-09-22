@@ -13,8 +13,9 @@
  * integrity pair, storage-layer artifact write failure, EP-01 corrupted
  * predecessor) were consolidated into diag-runner-contract.test.ts
  * (Test Diet Phase 2.2-B2); scaffold comes from
- * __fixtures__/diag-runner-harness.ts. The mock validator stub stays a mock
- * here — validator realism is Phase 2.2-B3.
+ * __fixtures__/diag-runner-harness.ts. Since Phase 2.2-B3-A the default
+ * validator is the real TypeBox validator behind a spy; mock overrides here
+ * remain only for failure injection.
  *
  * ERR entries considered:
  *   - ERR-001: Treat parsed JSON / LLM output as unknown — validator receives unknown

@@ -8,9 +8,12 @@
  *
  * What is deliberately NOT flattened (per
  * docs/testing/internalization-test-value-audit.md §Diag Runner Recommendation):
- *   - validation-failure LAYER: router fails through the real TypeBox pipeline
- *     (invalid fetchOutput payload), rootcause/distiller fail through the mock
- *     validator seam. Encoded per-case as `injectValidationFailure`.
+ *   - validation-failure LAYER: all three roles now run the real schema on the
+ *     default path (router: TypeBox pipeline baked into the class; A/B since
+ *     B3-A: spy-backed Default validators in the harness). Failure injection
+ *     differs per role — router sends a malformed fetchOutput payload through
+ *     its real pipeline, A/B override the validator seam result. Encoded
+ *     per-case as `injectValidationFailure`.
  *   - error-category asymmetry: the EP-01 cases assert `input_invalid`
  *     (permanent category, fail-fast); the distiller EP-07 lineage case
  *     (max_attempts_exceeded) stays pinned in the distiller stage file.
@@ -123,35 +126,53 @@ describe.each(LIFECYCLE_CASES)('Diag $role runner lifecycle [$validationLayer]',
   });
 });
 
+// ── Real schema rejection contract (rootcause + distiller, B3-A) ──────────────
+//
+// Proves the RUNNER wiring: a malformed fetchOutput payload on the DEFAULT
+// (unmodified validator) path must be rejected by the real Default validator
+// and must not produce a committed artifact. The validator's own rules are
+// tested in diagnostician/__tests__/diag-*-output.test.ts — not re-tested here.
+
+const REAL_SCHEMA_REJECT_CASES = [
+  { role: 'rootcause', create: () => createDiagRunnerHarness('rootcause') },
+  { role: 'distiller', create: () => createDiagRunnerHarness('distiller') },
+] satisfies { role: 'rootcause' | 'distiller'; create: () => AnyDiagRunnerHarness }[];
+
+describe.each(REAL_SCHEMA_REJECT_CASES)('Diag $role real schema rejection [default validator]', (c) => {
+  it('malformed output → real validator rejects → failed, no artifact committed', async () => {
+    const h = c.create();
+    (h.deps._runtimeAdapter.fetchOutput as MockFn).mockResolvedValue({ payload: { invalid: true } });
+
+    const result = await h.runner.run(h.taskId);
+
+    // Validation really ran through the seam on the DEFAULT (un-overridden)
+    // validator, and the real schema rejected the payload — the always-valid
+    // pre-B3-A stub would have committed it. output_invalid is retryable, so
+    // the runner fails after exhausting its repair attempts.
+    expect(h.deps._validator.validate).toHaveBeenCalled();
+    expect(result.status).toBe('failed');
+    expect(h.runner.currentPhase).toBe(RunnerPhase.Failed);
+    const artifacts = await h.deps.artifactStore.listBySourceTaskId(h.taskId);
+    expect(artifacts).toHaveLength(0);
+  });
+});
+
 // ── taskId integrity contract (rootcause + distiller × 2 templates) ───────────
 
 interface TaskIdCase {
   role: 'rootcause' | 'distiller';
-  /** Default harness: mock validator (always-valid), as pre-B2. */
+  /** Default harness: spy-backed real validator since B3-A — taskId IS checked. */
   create: () => AnyDiagRunnerHarness;
-  /**
-   * Harness wired to the real Default validator — the empty-taskId probe
-   * needs a validator that actually checks taskId (the mock accepts anything).
-   */
-  createWithRealValidator: () => Promise<AnyDiagRunnerHarness>;
 }
 
 const TASK_ID_CASES: TaskIdCase[] = [
   {
     role: 'rootcause',
     create: () => createDiagRunnerHarness('rootcause'),
-    createWithRealValidator: async () => {
-      const { DefaultDiagRootCauseValidator } = await import('../../diagnostician/diag-rootcause-output.js');
-      return createDiagRunnerHarness('rootcause', { validator: new DefaultDiagRootCauseValidator() });
-    },
   },
   {
     role: 'distiller',
     create: () => createDiagRunnerHarness('distiller'),
-    createWithRealValidator: async () => {
-      const { DefaultDiagDistillerValidator } = await import('../../diagnostician/diag-distiller-output.js');
-      return createDiagRunnerHarness('distiller', { validator: new DefaultDiagDistillerValidator() });
-    },
   },
 ];
 
@@ -168,9 +189,10 @@ describe.each(TASK_ID_CASES)('Diag $role taskId integrity', (c) => {
     // taskId is re-injected, so validation should pass
     expect(result.status).toBe('succeeded');
     expect(result.artifactId).toBeDefined();
-    // Pin the injected VALUE, not just the survived flow: the always-valid
-    // mock validator would also pass a payload whose taskId stayed absent,
-    // so assert the persisted artifact carries the leased taskId.
+    // Pin the injected VALUE, not just the survived flow: the real schema
+    // validator rejects a payload whose taskId stayed absent, so "succeeded"
+    // alone proves re-injection happened but not what was injected — assert
+    // the persisted artifact carries the leased taskId.
     const artifacts = await h.deps.artifactStore.listBySourceTaskId(h.taskId);
     expect(artifacts).toHaveLength(1);
     const contentJson = artifacts[0]?.contentJson;
@@ -182,7 +204,7 @@ describe.each(TASK_ID_CASES)('Diag $role taskId integrity', (c) => {
   });
 
   it('present-but-empty taskId NOT overwritten by postFetchTransform', async () => {
-    const h = await c.createWithRealValidator();
+    const h = c.create();
     const emptyTaskIdOutput = h.makeOutput();
     emptyTaskIdOutput.taskId = '';
 

@@ -10,10 +10,12 @@
  *                   in buildContext). Lowering it to a mock validator would
  *                   delete the only runner-level real-schema evidence in the
  *                   region.
- *   - 'rootcause' → mock validator (always-valid stub, exactly as the pre-B2
- *                   suite had it) + contextAssembler mock. Upgrading A/B to the
- *                   real Default validator is Phase 2.2-B3, not here.
- *   - 'distiller' → mock validator (same rationale as rootcause).
+ *   - 'rootcause' → real DefaultDiagRootCauseValidator (TypeBox schema) wired
+ *                   through a vi.fn() spy, plus contextAssembler mock. The spy
+ *                   keeps the validator seam observable so tests can still
+ *                   inject failure results; the default success path now flows
+ *                   through the real schema (Phase 2.2-B3-A).
+ *   - 'distiller' → real DefaultDiagDistillerValidator, same spy-backed design.
  *
  * The harness owns the ~90% identical scaffold: 10-fn stateManager mocks,
  * 8-fn runtimeAdapter mocks, event emitter, predecessor artifact seeding
@@ -32,7 +34,9 @@ import type { DiagRootCauseRunnerDeps } from '../../diag-rootcause-runner.js';
 import { DiagDistillerRunner } from '../../diag-distiller-runner.js';
 import type { DiagDistillerRunnerDeps } from '../../diag-distiller-runner.js';
 import type { DiagnosticianOutputV1 } from '../../../diagnostician-output.js';
+import { DefaultDiagRootCauseValidator } from '../../../diagnostician/diag-rootcause-output.js';
 import type { DiagRootCauseOutputV1 } from '../../../diagnostician/diag-rootcause-output.js';
+import { DefaultDiagDistillerValidator } from '../../../diagnostician/diag-distiller-output.js';
 import type { DiagDistillerOutputV1 } from '../../../diagnostician/diag-distiller-output.js';
 import type { CommitResult } from '../../../store/commit/diagnostician-committer.js';
 import type { RuntimeStateManager } from '../../../store/runtime-state-manager.js';
@@ -451,9 +455,11 @@ function createRootCauseHarness(overrides: Record<string, unknown> = {}): DiagRo
   const _runtimeAdapter = makeRuntimeAdapterMock(ROOTCAUSE_RUN_ID, output);
   const _eventEmitter = makeEventEmitterMock();
 
-  // Mock validator — always-valid stub (pre-B2 semantics; realism upgrade is B3).
+  // Spy-backed real validator (B3-A): default path runs the real TypeBox
+  // schema; tests may still inject results via mockResolvedValue for failure modes.
+  const realValidator = new DefaultDiagRootCauseValidator();
   const _validator = {
-    validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }),
+    validate: vi.fn((payload: unknown, leasedTaskId: string) => realValidator.validate(payload, leasedTaskId)),
   };
   const _contextAssembler = {
     assemble: vi.fn().mockResolvedValue({
@@ -503,9 +509,11 @@ function createDistillerHarness(overrides: Record<string, unknown> = {}): DiagDi
   const _runtimeAdapter = makeRuntimeAdapterMock(DISTILLER_RUN_ID, output);
   const _eventEmitter = makeEventEmitterMock();
 
-  // Mock validator — always-valid stub (pre-B2 semantics; realism upgrade is B3).
+  // Spy-backed real validator (B3-A): default path runs the real TypeBox
+  // schema; tests may still inject results via mockResolvedValue for failure modes.
+  const realValidator = new DefaultDiagDistillerValidator();
   const _validator = {
-    validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }),
+    validate: vi.fn((payload: unknown, leasedTaskId: string) => realValidator.validate(payload, leasedTaskId)),
   };
 
   const artifactStore = makePredecessorStore(
