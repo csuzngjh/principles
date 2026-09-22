@@ -724,6 +724,7 @@
           "nextActionLabel": "建议操作：",
           "blockers": "需要关注",
           "uncertainty": "证据不确定性",
+          "sameReasonCount": "（共 {{n}} 条）",
           "provenance": "规范证据引用",
           "timeline": "治理时间线",
           "timelineEmpty": "暂时没有可用的治理事件。",

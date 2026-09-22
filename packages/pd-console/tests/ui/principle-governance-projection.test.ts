@@ -41,6 +41,12 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
     expect(page).not.toContain('{event.sourceRef.type}: {event.sourceRef.id}');
   });
 
+  it('groups per-task attention and uncertainty entries instead of flooding the card (PRI-903)', () => {
+    expect(page).toContain('groupByReasonCode(governance.attention.items)');
+    expect(page).toContain('groupByReasonCode(governance.dataQuality.issues)');
+    expect(page).toContain('principles.detail.governance.sameReasonCount');
+  });
+
   it('enhances the existing trajectory instead of adding or replacing its durable history', () => {
     expect(page.indexOf('<details className="mb-8 border border-line')).toBeLessThan(page.indexOf('data-testid="governance-timeline"'));
     expect(page).not.toContain('governance === null && (\n        <details');
@@ -82,6 +88,7 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
       expect(Object.keys(governance.stage).sort()).toEqual(['activation', 'approval', 'generating', 'reviewing', 'revising']);
       expect(Object.keys(governance.automationState).sort()).toEqual(['idle', 'queued', 'retry_scheduled', 'running', 'stalled']);
       expect(governance.attention.verdict_missing).toEqual(expect.any(String));
+      expect(governance.sameReasonCount).toEqual(expect.any(String));
       expect(governance.unavailableReason).toEqual(expect.any(String));
       expect(governance.unavailableNextAction).toEqual(expect.any(String));
       expectRecord(governance.issue);
