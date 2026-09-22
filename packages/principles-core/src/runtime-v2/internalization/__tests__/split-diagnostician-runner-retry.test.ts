@@ -9,7 +9,7 @@
  *   - ERR-009: Required fields must fail loud
  *   - ERR-015: Retry/repair loops must distinguish current/next/recorded state
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import type { PeerRunnerResult } from '../../runner/peer-runner-types.js';
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
@@ -107,6 +107,13 @@ function makeMockRunner<T>() {
   };
 }
 
+/** Per-stage runner mocks, keyed the way SplitDiagnosticianRunner consumes them. */
+interface StageRunners {
+  rootCauseRunner: { run: Mock };
+  distillerRunner: { run: Mock };
+  routerRunner: { run: Mock };
+}
+
 function makeMockCommitter() {
   return {
     commit: vi.fn().mockResolvedValue({ commitId: 'commit-1', artifactId: 'art-1' } as const),
@@ -116,22 +123,59 @@ function makeMockCommitter() {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
-  it('should retry Stage A when sub-runner returns retried, then succeed', async () => {
+  // ERR-067 regression (PRI-888 parameterized): one scenario per stage — the
+  // target stage returns `retried` once, then succeeds; the orchestrator must
+  // re-run it (run called twice) instead of treating `retried` as failure.
+  it.each([
+    {
+      stage: 'A',
+      stageRunnerKey: 'rootCauseRunner',
+      taskId: STAGE_A_TASK_ID,
+      seed: (runners: StageRunners) => {
+        // Stage A is first: nothing precedes it.
+        runners.rootCauseRunner.run
+          .mockResolvedValueOnce(makeRetriedResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID, 'Schema validation failed'))
+          .mockResolvedValueOnce(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
+      },
+    },
+    {
+      stage: 'B',
+      stageRunnerKey: 'distillerRunner',
+      taskId: STAGE_B_TASK_ID,
+      seed: (runners: StageRunners) => {
+        runners.rootCauseRunner.run.mockResolvedValue(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
+        runners.distillerRunner.run
+          .mockResolvedValueOnce(makeRetriedResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID, 'Schema validation failed'))
+          .mockResolvedValueOnce(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID));
+      },
+    },
+    {
+      stage: 'C',
+      stageRunnerKey: 'routerRunner',
+      taskId: STAGE_C_TASK_ID,
+      seed: (runners: StageRunners) => {
+        runners.rootCauseRunner.run.mockResolvedValue(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
+        runners.distillerRunner.run.mockResolvedValue(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID));
+        runners.routerRunner.run
+          .mockResolvedValueOnce(makeRetriedResult<DiagnosticianOutputV1>(STAGE_C_TASK_ID, 'Schema validation failed'))
+          .mockResolvedValueOnce(makeSucceededResult<DiagnosticianOutputV1>(STAGE_C_TASK_ID));
+      },
+    },
+  ] as const)('should retry Stage $stage when sub-runner returns retried, then succeed', async ({ stageRunnerKey, seed }) => {
     const tasks: Record<string, TaskRecord> = {};
     const stateManager = makeMockStateManager(tasks);
-    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
-    const distillerRunner = makeMockRunner<DiagDistillerOutputV1>();
-    const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+    const runners: StageRunners = {
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>(),
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>(),
+      routerRunner: makeMockRunner<DiagnosticianOutputV1>(),
+    };
 
-    // Stage A: first call returns retried, second call succeeds
-    rootCauseRunner.run
-      .mockResolvedValueOnce(makeRetriedResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID, 'Schema validation failed'))
-      .mockResolvedValueOnce(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
+    seed(runners);
 
     const runner = new SplitDiagnosticianRunner({
-      rootCauseRunner: rootCauseRunner as never,
-      distillerRunner: distillerRunner as never,
-      routerRunner: routerRunner as never,
+      rootCauseRunner: runners.rootCauseRunner as never,
+      distillerRunner: runners.distillerRunner as never,
+      routerRunner: runners.routerRunner as never,
       stateManager: stateManager as never,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
@@ -140,7 +184,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
     const result = await runner.run(PARENT_TASK_ID);
 
     expect(result.status).toBe('succeeded');
-    expect(rootCauseRunner.run).toHaveBeenCalledTimes(2);
+    expect(runners[stageRunnerKey].run).toHaveBeenCalledTimes(2);
   });
 
   it('should retry Stage A multiple times, then fail after max attempts', async () => {
@@ -199,67 +243,6 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
       const patch = stageAUpdate[1] as Partial<TaskRecord>;
       expect(patch).not.toHaveProperty('attemptCount', 0);
     }
-  });
-
-  it('should retry Stage B when sub-runner returns retried', async () => {
-    const tasks: Record<string, TaskRecord> = {};
-    const stateManager = makeMockStateManager(tasks);
-    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
-    const distillerRunner = makeMockRunner<DiagDistillerOutputV1>();
-    const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
-
-    // Stage A: succeeds immediately
-    rootCauseRunner.run.mockResolvedValue(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
-
-    // Stage B: first call retried, second call succeeds
-    distillerRunner.run
-      .mockResolvedValueOnce(makeRetriedResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID, 'Schema validation failed'))
-      .mockResolvedValueOnce(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID));
-
-    const runner = new SplitDiagnosticianRunner({
-      rootCauseRunner: rootCauseRunner as never,
-      distillerRunner: distillerRunner as never,
-      routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
-      committer: makeMockCommitter(),
-      perStageTimeoutMs: 30_000,
-    });
-
-    const result = await runner.run(PARENT_TASK_ID);
-
-    expect(result.status).toBe('succeeded');
-    expect(distillerRunner.run).toHaveBeenCalledTimes(2);
-  });
-
-  it('should retry Stage C when sub-runner returns retried', async () => {
-    const tasks: Record<string, TaskRecord> = {};
-    const stateManager = makeMockStateManager(tasks);
-    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
-    const distillerRunner = makeMockRunner<DiagDistillerOutputV1>();
-    const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
-
-    // Stages A and B: succeed immediately
-    rootCauseRunner.run.mockResolvedValue(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
-    distillerRunner.run.mockResolvedValue(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID));
-
-    // Stage C: first call retried, second call succeeds
-    routerRunner.run
-      .mockResolvedValueOnce(makeRetriedResult<DiagnosticianOutputV1>(STAGE_C_TASK_ID, 'Schema validation failed'))
-      .mockResolvedValueOnce(makeSucceededResult<DiagnosticianOutputV1>(STAGE_C_TASK_ID));
-
-    const runner = new SplitDiagnosticianRunner({
-      rootCauseRunner: rootCauseRunner as never,
-      distillerRunner: distillerRunner as never,
-      routerRunner: routerRunner as never,
-      stateManager: stateManager as never,
-      committer: makeMockCommitter(),
-      perStageTimeoutMs: 30_000,
-    });
-
-    const result = await runner.run(PARENT_TASK_ID);
-
-    expect(result.status).toBe('succeeded');
-    expect(routerRunner.run).toHaveBeenCalledTimes(2);
   });
 
   it('should return failed when sub-runner returns failed (not retried)', async () => {

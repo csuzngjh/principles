@@ -101,30 +101,39 @@ describe('PRI-104 task lease and readiness semantics', () => {
     expect(snapshot.readyTasks.map((ready) => ready.taskId)).toEqual(['expired-lease-pending']);
   });
 
-  it('retry_wait before backoff deadline is not ready', () => {
+  // PRI-888: one boundary pair, two cases — the observable flip across the
+  // backoff deadline. (retry_wait budget/lease semantics: PRI-104.)
+  it.each([
+    {
+      name: 'retry_wait before backoff deadline is not ready',
+      leaseExpiresAt: '2026-05-11T12:05:00.000Z',
+      canRetryNow: false,
+      decision: 'retry_wait_pending',
+      ready: false,
+      retryAfter: '2026-05-11T12:05:00.000Z',
+    },
+    {
+      name: 'retry_wait after backoff deadline can become ready',
+      leaseExpiresAt: '2026-05-11T11:59:00.000Z',
+      canRetryNow: true,
+      decision: 'proceed',
+      ready: true,
+      retryAfter: undefined,
+    },
+  ] as const)('$name', ({ leaseExpiresAt, canRetryNow: expectCanRetryNow, decision, ready, retryAfter }) => {
     const task = makePITask({
       status: 'retry_wait',
-      leaseExpiresAt: '2026-05-11T12:05:00.000Z',
+      leaseExpiresAt,
     });
     const result = validateInternalizationTaskReady(task, [], NOW_MS);
 
     expect(canAcquireLease(task)).toBe(true);
-    expect(canRetryNow(task, NOW_MS)).toBe(false);
-    expect(result.decision).toBe('retry_wait_pending');
-    expect(result.ready).toBe(false);
-    expect(result.retryAfter).toBe('2026-05-11T12:05:00.000Z');
-  });
-
-  it('retry_wait after backoff deadline can become ready', () => {
-    const task = makePITask({
-      status: 'retry_wait',
-      leaseExpiresAt: '2026-05-11T11:59:00.000Z',
-    });
-    const result = validateInternalizationTaskReady(task, [], NOW_MS);
-
-    expect(canRetryNow(task, NOW_MS)).toBe(true);
-    expect(result.decision).toBe('proceed');
-    expect(result.ready).toBe(true);
+    expect(canRetryNow(task, NOW_MS)).toBe(expectCanRetryNow);
+    expect(result.decision).toBe(decision);
+    expect(result.ready).toBe(ready);
+    if (retryAfter !== undefined) {
+      expect(result.retryAfter).toBe(retryAfter);
+    }
   });
 
   it.each(['succeeded', 'failed'] as const)('%s terminal task is never ready', (status) => {

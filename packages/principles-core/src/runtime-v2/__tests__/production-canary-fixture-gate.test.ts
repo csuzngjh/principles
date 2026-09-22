@@ -287,17 +287,32 @@ describe('PRI-102: Production canary fixture gate', () => {
   });
 
   describe('retry_wait不应提前ready', () => {
-    it('retry_wait task with future leaseExpiresAt is NOT ready', async () => {
+    // PRI-888: the future/past deadline pair shares one scenario body per
+    // layer (queue snapshot vs ready-gate hydration); only the timestamp and
+    // the expected outcome differ. Same layer, same assertions per case.
+    it.each([
+      {
+        name: 'retry_wait task with future leaseExpiresAt is NOT ready',
+        offsetMs: 60_000,
+        taskId: 'dreamer-retry-001',
+        expectReady: false,
+      },
+      {
+        name: 'retry_wait task with expired leaseExpiresAt IS ready',
+        offsetMs: -60_000,
+        taskId: 'dreamer-retry-ready-001',
+        expectReady: true,
+      },
+    ])('$name', async ({ offsetMs, taskId, expectReady }) => {
       const mgr = await fixture.init();
-      const futureTime = new Date(Date.now() + 60_000).toISOString();
       await fixture.seedTasks([
         {
-          taskId: 'dreamer-retry-001',
+          taskId,
           taskKind: 'dreamer',
           status: 'retry_wait',
           attemptCount: 1,
           maxAttempts: 3,
-          leaseExpiresAt: futureTime,
+          leaseExpiresAt: new Date(Date.now() + offsetMs).toISOString(),
           diagnosticJson: makePITaskDiagnosticJson({ dependencyTaskIds: [] }),
         },
       ]);
@@ -305,64 +320,37 @@ describe('PRI-102: Production canary fixture gate', () => {
       const queueModel = new InternalizationQueueReadModel(mgr);
       const snapshot = await queueModel.getSnapshot();
 
-      expect(snapshot.readyTasks.length).toBe(0);
-      expect(snapshot.retryWaitPendingSummary.count).toBe(1);
+      expect(snapshot.readyTasks.length).toBe(expectReady ? 1 : 0);
+      if (expectReady) {
+        expect(snapshot.readyTasks[0]?.taskId).toBe(taskId);
+      } else {
+        expect(snapshot.retryWaitPendingSummary.count).toBe(1);
+      }
     });
 
-    it('retry_wait task with expired leaseExpiresAt IS ready', async () => {
-      const mgr = await fixture.init();
-      const pastTime = new Date(Date.now() - 60_000).toISOString();
-      await fixture.seedTasks([
-        {
-          taskId: 'dreamer-retry-ready-001',
-          taskKind: 'dreamer',
-          status: 'retry_wait',
-          attemptCount: 1,
-          maxAttempts: 3,
-          leaseExpiresAt: pastTime,
-          diagnosticJson: makePITaskDiagnosticJson({ dependencyTaskIds: [] }),
-        },
-      ]);
-
-      const queueModel = new InternalizationQueueReadModel(mgr);
-      const snapshot = await queueModel.getSnapshot();
-
-      expect(snapshot.readyTasks.length).toBe(1);
-      expect(snapshot.readyTasks[0]?.taskId).toBe('dreamer-retry-ready-001');
-    });
-
-    it('validateInternalizationTaskReady rejects retry_wait with future backoff', () => {
-      const futureTime = new Date(Date.now() + 120_000).toISOString();
-      const rawTask: TaskRecord = {
+    it.each([
+      {
+        name: 'validateInternalizationTaskReady rejects retry_wait with future backoff',
+        offsetMs: 120_000,
         taskId: 'retry-gate-001',
-        taskKind: 'dreamer',
-        status: 'retry_wait',
-        attemptCount: 1,
-        maxAttempts: 3,
-        leaseExpiresAt: futureTime,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        diagnosticJson: makePITaskDiagnosticJson({ dependencyTaskIds: [] }),
-      };
-
-      const piTask = hydratePITaskRecord(rawTask);
-      expect(piTask).not.toBeNull();
-      if (!piTask) return;
-
-      const result = validateInternalizationTaskReady(piTask, [], Date.now());
-      expect(result.decision).toBe('retry_wait_pending');
-      expect(result.ready).toBe(false);
-    });
-
-    it('validateInternalizationTaskReady allows retry_wait with expired backoff', () => {
-      const pastTime = new Date(Date.now() - 120_000).toISOString();
-      const rawTask: TaskRecord = {
+        expectedDecision: 'retry_wait_pending',
+        expectReady: false,
+      },
+      {
+        name: 'validateInternalizationTaskReady allows retry_wait with expired backoff',
+        offsetMs: -120_000,
         taskId: 'retry-gate-002',
+        expectedDecision: 'proceed',
+        expectReady: true,
+      },
+    ])('$name', ({ offsetMs, taskId, expectedDecision, expectReady }) => {
+      const rawTask: TaskRecord = {
+        taskId,
         taskKind: 'dreamer',
         status: 'retry_wait',
         attemptCount: 1,
         maxAttempts: 3,
-        leaseExpiresAt: pastTime,
+        leaseExpiresAt: new Date(Date.now() + offsetMs).toISOString(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         diagnosticJson: makePITaskDiagnosticJson({ dependencyTaskIds: [] }),
@@ -373,8 +361,8 @@ describe('PRI-102: Production canary fixture gate', () => {
       if (!piTask) return;
 
       const result = validateInternalizationTaskReady(piTask, [], Date.now());
-      expect(result.decision).toBe('proceed');
-      expect(result.ready).toBe(true);
+      expect(result.decision).toBe(expectedDecision);
+      expect(result.ready).toBe(expectReady);
     });
 
     it('queue snapshot correctly diagnoses all_retry_wait_pending', async () => {
