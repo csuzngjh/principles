@@ -151,13 +151,17 @@ describe('install payload form-gate (npm-distributed shape)', () => {
   });
 });
 
-// PRI-697: the two "Skipping …" gates used to key on the legacy env var
+// PRI-697: the "Skipping …" gates used to key on the legacy env var
 // (PD_ALLOW_LEGACY_NPM_INSTALL) while their messages blamed the payload
 // shape — a standard npm-channel install (npm-distributed shape, no env)
 // logged "npm-distributed package detected …" followed by "Skipping … for
 // the self-contained release asset". The matrix below pins each gate to its
 // intended predicate and pins the message text to the ACTUAL mode.
-describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', () => {
+// PRI-898 then REMOVED the payload-mode gate from the shim discovery side
+// entirely (PATH exposure is independent of the dependency channel): the
+// shim helper is now pinned as mode-agnostic, while the pd-cli upgrade gate
+// stays payload-mode-keyed.
+describe('gate matrix: PRI-697 message/mode pairing + PRI-898 shim-gate decoupling (pd-cli upgrade still mode-gated)', () => {
   let savedLegacyNpmInstall: string | undefined;
   let savedSkipShim: string | undefined;
   let savedSkipUpgrade: string | undefined;
@@ -223,13 +227,14 @@ describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', ()
     expect(result.success).toBe(false);
     // The old bug: with the env off the shim gate fired and blamed the
     // self-contained release asset even though this run is npm-distributed.
-    // The gate now keys on the payload mode, so in the npm-distributed shape
-    // the self-contained message must NOT appear.
+    // PRI-697 re-keyed the gate on payload mode; PRI-898 removed the shim
+    // side's payload gate outright — either way, in the npm-distributed
+    // shape the self-contained message must NOT appear.
     const shape = infoLines.filter((line) => line.includes('self-contained release asset'));
     expect(shape).toEqual([]);
   });
 
-  it('self-contained shape: shim gate still skips and names the self-contained release asset', async () => {
+  it('self-contained shape: the shim gate no longer skips on payload mode (PRI-898); only the smoke gate and the pd-cli upgrade gate remain', async () => {
     delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     const { dir, actualFs } = await completeNpmBundle();
     actualFs.mkdirSync(path.join(dir, '_release'), { recursive: true });
@@ -242,12 +247,16 @@ describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', ()
     // that follow.
     expect(result.success).toBe(false);
     expect(result.reason).toBe('self_contained_asset_identity_invalid');
-    // Direct helper assertion under the self-contained mode this run set:
-    // skip fires (no npm discovery for the release-asset shape). The helper
-    // returns plain false for the skip gates (no global write attempted).
+    // PRI-898: the payload-mode skip is GONE from the shim gate. With
+    // PD_SKIP_GLOBAL_SHIM set (beforeEach), the dedicated smoke gate is what
+    // returns false — and it never blames the self-contained release asset.
     infoLines.length = 0;
     expect(installGlobalPdShim()).toBe(false);
-    expect(infoLines.some((line) => line.includes('Skipping npm global shim discovery for the self-contained release asset.'))).toBe(true);
+    expect(infoLines.some((line) => line.includes('self-contained release asset'))).toBe(false);
+    expect(infoLines.some((line) => line.includes('PD_SKIP_GLOBAL_SHIM'))).toBe(true);
+    // The pd-cli upgrade gate STILL keys on the payload mode: a registry
+    // upgrade would break the bundled-dependency contract of the release
+    // asset, so this skip is a real dependency-resolution concern.
     tryUpgradePdCliFromNpm('/nonexistent-pd-697');
     expect(infoLines.some((line) => line.includes('Skipping npm pd-cli upgrade for the self-contained release asset.'))).toBe(true);
   });

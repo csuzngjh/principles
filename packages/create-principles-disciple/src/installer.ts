@@ -1704,7 +1704,14 @@ export interface GlobalPdShimResult {
 }
 
 /** Fixed filename whitelist for global-shim targets (no caller input). */
-const GLOBAL_PD_SHIM_BASENAMES: readonly string[] = isWindows() ? ['pd.cmd', 'pd.ps1'] : ['pd'];
+// PRI-898 SP1: win32 also carries an extensionless `pd`. cmd.exe/PowerShell
+// resolve bare `pd` via PATHEXT to pd.cmd / pd.ps1, but Git Bash (MSYS sh)
+// does NOT append PATHEXT — it only finds an exact-named executable. Without
+// the extensionless shim, a Git Bash host agent gets command-not-found even
+// though the .cmd shim is on PATH (empirically probed: `zzpd.cmd` present,
+// bare `zzpd` -> not found). The three files are the full coverage set:
+// pd.cmd (cmd), pd.ps1 (PowerShell), pd (Git Bash / MSYS).
+const GLOBAL_PD_SHIM_BASENAMES: readonly string[] = isWindows() ? ['pd.cmd', 'pd.ps1', 'pd'] : ['pd'];
 
 /** Resolve a whitelisted shim basename under the npm global bin dir. */
 function globalShimPath(globalBin: string, basename: string): string {
@@ -1776,15 +1783,17 @@ function classifyGlobalPdShim(globalBin: string, installedBinDir: string): { for
 }
 
 export function installGlobalPdShim(): GlobalPdShimResult | boolean {
-  // Global-shim discovery consults the npm global root, so it belongs to
-  // the npm-distributed payload shape (isNpmDependencyResolutionEnabled
-  // documents "global root discovery" as its concern). Gating on the
-  // legacy env var instead fired this skip — with a self-contained-mode
-  // message — inside standard npm-channel installs (PRI-697).
-  if (!isNpmDependencyResolutionEnabled()) {
-    logger.info('Skipping npm global shim discovery for the self-contained release asset.');
-    return false;
-  }
+  // PRI-898: global-`pd` exposure is decoupled from the payload/dependency
+  // mode. The shim is a forwarding script written into the npm global bin —
+  // a PATH-managed directory that exists independently of how PD resolves
+  // its own dependencies — so it does not belong to the npm-distributed
+  // shape only. Gating this on the payload mode skipped it for the
+  // self-contained release asset, which is the recommended channel, leaving
+  // every self-contained install without a `pd` command (verifyPdCliShim
+  // only downgraded to verified_local_only + a stderr warn afterward). The
+  // dependency-resolution gate stays where it
+  // belongs: installReleaseManagerDependencies / codex-host-installer.
+  //
   // Allow skipping global shim installation in smoke tests to avoid
   // polluting the host's npm global bin dir. The bundled pd-cli is
   // still installed locally (getInstalledBinDir); only the global
@@ -1835,6 +1844,13 @@ export function installGlobalPdShim(): GlobalPdShimResult | boolean {
         `$shim = "${pluginPs.replace(/`/g, '``').replace(/"/g, '`"')}"\r\n& $shim @args\r\nexit $LASTEXITCODE\r\n`,
         'utf-8',
       );
+      // PRI-898 SP1: extensionless POSIX-sh shim forwarding to pd.cmd — the
+      // only form Git Bash resolves for a bare `pd`. LF newlines (an MSYS sh
+      // rejects CRLF shebang lines); same quote-escaping shape as the POSIX
+      // branch below, whose byte output the probe verified end-to-end.
+      const globalSh = globalShimPath(globalBin, 'pd');
+      writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginCmd.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
+      chmodSync(globalSh, 0o755);
     } else {
       const pluginSh = path.join(installedBinDir, 'pd');
       const globalSh = globalShimPath(globalBin, 'pd');
@@ -2099,7 +2115,8 @@ function syncPdCli(pluginDir: string): { ok: boolean; globalShim: GlobalPdShimRe
 
   // PRI-697 review P1: propagate the structured global-shim outcome so the
   // install transaction can roll the global side effect back on failure.
-  // Plain false (skip gates: payload mode / smoke env) carries no residue.
+  // Plain false (smoke-env skip gate, or an unresolvable npm global bin)
+  // carries no residue.
   const shimResult = installGlobalPdShim();
   if (typeof shimResult === 'boolean') return { ok: shimResult, globalShim: null };
   return { ok: shimResult.installed, globalShim: shimResult };

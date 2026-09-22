@@ -40,7 +40,7 @@
 3. **`core` 链接**：插件副本内 `core` 目录以 junction/symlink 指向 `~/.pd/runtime/core`（`if (!existsSync)` 守卫）。
 4. **依赖准备**：`prepareBundledComponentDependencies()` —— 注释明确："Supported release assets are self-contained: installation **validates** the copied component and never resolves dependencies or runs lifecycle scripts. The old npm path remains opt-in"（开关 `PD_ALLOW_LEGACY_NPM_INSTALL`）。
 5. **node_modules 链接（关键）**：`syncPdCli()` 会为 `@principles/core`、`host-runtime`、`codex-adapter`、`principles-disciple` 创建 junction，但**全部带 `if (!existsSync(...))` 守卫**；`installConsole()` 同理为 `principles-disciple` 建链接。
-6. **PATH shim**：`installGlobalPdShim()` 向 npm 全局 bin 写 `pd.cmd` / `pd.ps1`；`uninstaller.ts` 负责移除。
+6. **PATH shim**：`installGlobalPdShim()` 向 npm 全局 bin 写 `pd.cmd` / `pd.ps1`，Windows 另写无扩展名 `pd`（Git Bash/MSYS 不按 PATHEXT 解析，裸 `pd` 只命中同名可执行文件）；`uninstaller.ts` 负责移除全部三者。
 7. **清单**：`writeInstallManifest()` 写 `~/.pd/install.json`（layoutVersion / mode / hosts / workspaces）。**installer.ts 全文件不引用 ReleaseManager、不写 `active.json`。**
 
 ### 1.2 加载时模型（谁真正加载谁）

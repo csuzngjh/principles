@@ -59,7 +59,9 @@ const baseInstallOptions: InstallOptions = {
   stopGateway: false,
 };
 
-const SHIM_BASENAMES = process.platform === 'win32' ? ['pd.cmd', 'pd.ps1'] : ['pd'];
+// PRI-898 SP1: win32 also carries the extensionless `pd` — Git Bash does not
+// apply PATHEXT, so a bare `pd` only resolves to this exact-named sh shim.
+const SHIM_BASENAMES = process.platform === 'win32' ? ['pd.cmd', 'pd.ps1', 'pd'] : ['pd'];
 
 describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
   let savedEnv: Record<string, string | undefined>;
@@ -197,6 +199,39 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     expect(result.reason).toMatch(/^install_failed_unactivated_cleaned:/);
   });
 
+  it('PRI-898: self-contained payload shape writes the global shim too (exposure decoupled from payload mode)', async () => {
+    // Turn the sandbox bundle into a self-contained release asset. Its stub
+    // body fails identity preflight AFTER activePayloadMode is decided —
+    // module state the helper under test used to consult and skip on.
+    realFs.mkdirSync(realPath.join(fixtureDir, '_release'), { recursive: true });
+    realFs.writeFileSync(realPath.join(fixtureDir, '_release', 'asset.json'), '{}');
+    const firstRun = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
+    expect(firstRun.reason).toBe('self_contained_asset_identity_invalid');
+
+    // Pre-PRI-898: installGlobalPdShim early-returned in self-contained
+    // mode — nothing landed in the PATH-managed npm global bin dir and
+    // `pd` was command-not-found for every host. Now the write happens
+    // exactly as in the npm-distributed shape.
+    const shimResult = installGlobalPdShim();
+    const expected = SHIM_BASENAMES.map((name) => realPath.resolve(realPath.join(globalBinDir, name))).sort();
+    expect(shimResult).toMatchObject({ installed: true, replacedPaths: [], skippedForeignPaths: [] });
+    expect(shimFilesInGlobalBin().map((p) => realPath.resolve(p)).sort()).toEqual(expected);
+    expect((shimResult as { createdPaths: string[] }).createdPaths.map((p) => realPath.resolve(p)).sort()).toEqual(expected);
+    // The written shim forwards to the sandboxed local bin — the marker the
+    // uninstaller's ownership check relies on (symmetric cleanup).
+    expect(realFs.readFileSync(realPath.join(globalBinDir, SHIM_BASENAMES[0]), 'utf-8')).toContain(getInstalledBinDir());
+    if (process.platform === 'win32') {
+      // PRI-898 SP1: the extensionless Git Bash shim is an sh script (LF
+      // newlines — CRLF breaks the shebang line under MSYS) forwarding to
+      // the LOCAL pd.cmd; this exact byte shape was probed end-to-end in
+      // Git Bash (bare `pd` exec'd with quoted-spaced args, exit 0).
+      const gitBashShim = realFs.readFileSync(realPath.join(globalBinDir, 'pd'), 'utf-8');
+      expect(gitBashShim.startsWith('#!/usr/bin/env sh\n')).toBe(true);
+      expect(gitBashShim).not.toContain('\r');
+      expect(gitBashShim).toContain(realPath.join(getInstalledBinDir(), 'pd.cmd'));
+    }
+  });
+
   it('never overwrites a foreign (non-PD) pd command in the npm global bin dir', async () => {
     const foreignPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]);
     realFs.writeFileSync(foreignPath, '#!/bin/sh\nexec some-other-tool\n', 'utf-8');
@@ -276,7 +311,7 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     expect(record.createdPaths.map((p) => realPath.resolve(p))).not.toContain(realPath.resolve(shimPath));
     // Every shim target is accounted for exactly once. (On POSIX there is a
     // single basename — the replaced one — so createdPaths is legitimately
-    // empty there; Windows has the pd.ps1 sibling in createdPaths.)
+    // empty there; Windows has the pd.ps1 + extensionless pd siblings.)
     const allTargets = SHIM_BASENAMES.map((name) => realPath.resolve(realPath.join(globalBinDir, name))).sort();
     const recorded = [...record.createdPaths, ...record.replacedPaths].map((p) => realPath.resolve(p)).sort();
     expect(recorded).toEqual(allTargets);
