@@ -37,7 +37,14 @@ import {
   clearPrincipleApplicationLedgerCache,
   recordSelfReportFromText,
 } from '../../src/core/principle-application-ledger.js';
-import { setInjectedPrincipleIds, clearSession, seedSessionForTest } from '../../src/core/session-tracker.js';
+import {
+  setInjectedPrincipleIds,
+  getInjectedPrincipleIds,
+  getInjectedActivationIds,
+  listSessions,
+  clearSession,
+  seedSessionForTest,
+} from '../../src/core/session-tracker.js';
 import { resetRuleCodeSafetyCircuitsForTests } from '../../src/core/rulecode-safety-circuit.js';
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -328,6 +335,39 @@ describe('PRI-899 — code_tool_hook effect receipts carry the winning activatio
     expect(written).toBe(1);
     expect(effectRow('self_reported')?.activation_id).toBeNull();
     expect(joinedActivationCount()).toBe(0);
+  });
+
+  it('the tracked activation pairing is index-aligned, tri-state, and never handed out by reference', () => {
+    const sessionId = 'sess-pri899-pairing';
+    seedSession(sessionId);
+
+    setInjectedPrincipleIds(
+      sessionId,
+      ['principle-a', 'principle-b'],
+      workspaceDir,
+      [SELF_REPORT_ACTIVATION_ID, ''],
+    );
+
+    const ids = getInjectedPrincipleIds(sessionId);
+    const pairing = getInjectedActivationIds(sessionId);
+    expect(ids).toEqual(['principle-a', 'principle-b']);
+    // Same index order, so a consumer can resolve a reported principle to its
+    // own activation — and an empty entry stays empty rather than shifting.
+    expect(pairing).toEqual([SELF_REPORT_ACTIVATION_ID, '']);
+
+    // Callers get copies: mutating what they were handed must not corrupt the
+    // session's recorded pairing.
+    (pairing as string[]).push('act-injected-by-caller');
+    expect(getInjectedActivationIds(sessionId)).toEqual([SELF_REPORT_ACTIVATION_ID, '']);
+    const listed = listSessions(workspaceDir).find((s) => s.sessionId === sessionId);
+    (listed?.injectedActivationIds as string[] | undefined)?.push('act-injected-by-listener');
+    expect(getInjectedActivationIds(sessionId)).toEqual([SELF_REPORT_ACTIVATION_ID, '']);
+
+    // Known session with a known, empty pairing ⇒ [] (NOT undefined): an
+    // unknown session is the only thing that may report undefined.
+    setInjectedPrincipleIds(sessionId, ['principle-a'], workspaceDir);
+    expect(getInjectedActivationIds(sessionId)).toEqual([]);
+    expect(getInjectedActivationIds('sess-never-seen')).toBeUndefined();
   });
 });
 
