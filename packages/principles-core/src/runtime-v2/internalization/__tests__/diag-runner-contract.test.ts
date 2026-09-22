@@ -79,7 +79,7 @@ const LIFECYCLE_CASES: LifecycleCase[] = [
         errorCategory: 'output_invalid',
       });
     },
-    validationLayer: 'validator seam mock',
+    validationLayer: 'validator seam failure injection',
   },
   {
     role: 'distiller',
@@ -92,7 +92,7 @@ const LIFECYCLE_CASES: LifecycleCase[] = [
         errorCategory: 'output_invalid',
       });
     },
-    validationLayer: 'validator seam mock',
+    validationLayer: 'validator seam failure injection',
   },
 ];
 
