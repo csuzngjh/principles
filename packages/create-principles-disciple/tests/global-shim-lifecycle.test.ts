@@ -25,7 +25,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as childProcess from 'child_process';
-import { install, installGlobalPdShim, tryUpgradePdCliFromNpm } from '../src/installer.js';
+import { install, installGlobalPdShim, renderShForwardingShim, tryUpgradePdCliFromNpm } from '../src/installer.js';
 import { getInstalledBinDir } from '../src/mvp-config.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
 import { setLanguage } from '../src/i18n.js';
@@ -228,7 +228,7 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
       const gitBashShim = realFs.readFileSync(realPath.join(globalBinDir, 'pd'), 'utf-8');
       expect(gitBashShim.startsWith('#!/usr/bin/env sh\n')).toBe(true);
       expect(gitBashShim).not.toContain('\r');
-      expect(gitBashShim).toContain(realPath.join(getInstalledBinDir(), 'pd.cmd'));
+      expect(gitBashShim).toBe(renderShForwardingShim(realPath.join(getInstalledBinDir(), 'pd.cmd')));
     }
   });
 

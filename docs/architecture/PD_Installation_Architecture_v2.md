@@ -118,7 +118,7 @@ active = ~/.pd/active.json
    └── ~/.codex/...                                       ← Codex 宿主（codex-adapter）
 
    PATH 契约（安装器唯一拥有）
-   └── npm global bin: pd.cmd / pd.ps1  →  ~/.pd/runtime/bin/pd.*
+   └── npm global bin: pd.cmd / pd.ps1 / pd(sh)  →  ~/.pd/runtime/bin/pd.*
 
    外壳（不含业务逻辑、不携带 runtime）
    └── PD Companion（Electron）→ install-layout 解析 → 校验 → 拉起 console(:3100) → 打开浏览器

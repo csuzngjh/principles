@@ -1713,6 +1713,21 @@ export interface GlobalPdShimResult {
 // pd.cmd (cmd), pd.ps1 (PowerShell), pd (Git Bash / MSYS).
 const GLOBAL_PD_SHIM_BASENAMES: readonly string[] = isWindows() ? ['pd.cmd', 'pd.ps1', 'pd'] : ['pd'];
 
+/**
+ * Render the POSIX-sh forwarding script that exposes a global `pd`.
+ *
+ * The target goes in SINGLE quotes. Inside `"…"` the shell still expands `$`
+ * and backticks and treats `\` as an escape character — and a Windows path is
+ * nothing but backslashes — so no complete escape set exists there short of
+ * quoting per-character. Single quotes are literal except for `'` itself,
+ * which is emitted as the close-escape-reopen idiom. Exported because the
+ * win32 write branch is platform-gated while this escaping contract has to be
+ * assertable on every runner.
+ */
+export function renderShForwardingShim(targetPath: string): string {
+  return `#!/usr/bin/env sh\nexec '${targetPath.split("'").join("'\\''")}' "$@"\n`;
+}
+
 /** Resolve a whitelisted shim basename under the npm global bin dir. */
 function globalShimPath(globalBin: string, basename: string): string {
   if (!GLOBAL_PD_SHIM_BASENAMES.includes(basename)) {
@@ -1846,15 +1861,14 @@ export function installGlobalPdShim(): GlobalPdShimResult | boolean {
       );
       // PRI-898 SP1: extensionless POSIX-sh shim forwarding to pd.cmd — the
       // only form Git Bash resolves for a bare `pd`. LF newlines (an MSYS sh
-      // rejects CRLF shebang lines); same quote-escaping shape as the POSIX
-      // branch below, whose byte output the probe verified end-to-end.
+      // rejects CRLF shebang lines), so it shares the POSIX branch's renderer.
       const globalSh = globalShimPath(globalBin, 'pd');
-      writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginCmd.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
+      writeFileSync(globalSh, renderShForwardingShim(pluginCmd), 'utf-8');
       chmodSync(globalSh, 0o755);
     } else {
       const pluginSh = path.join(installedBinDir, 'pd');
       const globalSh = globalShimPath(globalBin, 'pd');
-      writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginSh.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
+      writeFileSync(globalSh, renderShForwardingShim(pluginSh), 'utf-8');
       chmodSync(globalSh, 0o755);
     }
     // PRI-697 review P1: the success path MUST record which targets are new
