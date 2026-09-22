@@ -24,6 +24,7 @@ import type { OwnerDecisionViewCore, Action as OwnerAction } from "@principles/c
 import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import { formatDate } from "../../utils/format-date.js";
 import { localizeAggregatedBlocker } from "../../utils/blocker-localization.js";
+import { groupByReasonCode, formatGroupedReasonLine } from "../../utils/attention-presentation.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   PrincipleDetail,
@@ -799,7 +800,7 @@ export function PrincipleDetailPage() {
                 <div className="mt-4">
                   <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{t('principles.detail.governance.blockers')}</p>
                   <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
-                    {governance.attention.items.map(item => <li key={`${item.kind}-${item.sourceRef.type}-${item.sourceRef.id}`}>{t(`principles.detail.governance.attention.${item.reasonCode}`, { defaultValue: item.reasonCode })}</li>)}
+                    {groupByReasonCode(governance.attention.items).map(group => <li key={group.reasonCode}>{formatGroupedReasonLine(t, 'principles.detail.governance.attention', group)}</li>)}
                   </ul>
                 </div>
               )}
@@ -808,7 +809,7 @@ export function PrincipleDetailPage() {
                 <div data-testid="governance-data-quality" className="mt-4 rounded-[var(--radius-sm)] border border-amber/20 p-3">
                   <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-amber">{t('principles.detail.governance.uncertainty')}</p>
                   <ul className="mt-1 space-y-1 text-[12px] text-ink-3">
-                    {governance.dataQuality.issues.map((item, index) => <li key={`${item.source}-${item.reasonCode}-${index}`}>{t(`principles.detail.governance.issue.${item.reasonCode}`, { defaultValue: item.reasonCode })}</li>)}
+                    {groupByReasonCode(governance.dataQuality.issues).map(group => <li key={group.reasonCode}>{formatGroupedReasonLine(t, 'principles.detail.governance.issue', group)}</li>)}
                   </ul>
                 </div>
               )}
