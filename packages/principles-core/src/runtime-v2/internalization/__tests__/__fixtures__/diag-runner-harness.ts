@@ -272,6 +272,7 @@ export function makeFailingArtifactStore(): PIArtifactStore {
   return {
     listBySourceTaskId: vi.fn().mockResolvedValue([]),
     upsertArtifact: vi.fn().mockRejectedValue(new Error('Disk full')),
+    // runtime-contract-exempt: ERR-001 test-double DI wiring of a partial store mock, not untrusted runtime data; LLM payloads still pass real schema/validator paths
   } as unknown as PIArtifactStore;
 }
 
@@ -331,10 +332,12 @@ function makeOptions(owner: string): PeerRunnerOptions {
 }
 
 function castStateManager(_sm: Record<string, MockFn>): RuntimeStateManager {
+  // runtime-contract-exempt: ERR-001 test-double DI wiring of a partial mock, not untrusted runtime data
   return _sm as unknown as RuntimeStateManager;
 }
 
 function castEventEmitter(_ee: Record<string, MockFn>): StoreEventEmitter {
+  // runtime-contract-exempt: ERR-001 test-double DI wiring of a partial mock, not untrusted runtime data
   return _ee as unknown as StoreEventEmitter;
 }
 
