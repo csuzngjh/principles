@@ -16,8 +16,8 @@ import { describe, it, expect, vi } from 'vitest';
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
 import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
-import { DiagRootCauseOutputV1Schema } from '../../diagnostician/diag-rootcause-output.js';
-import { DiagDistillerOutputV1Schema } from '../../diagnostician/diag-distiller-output.js';
+import { DiagRootCauseOutputV1Schema, DefaultDiagRootCauseValidator } from '../../diagnostician/diag-rootcause-output.js';
+import { DiagDistillerOutputV1Schema, DefaultDiagDistillerValidator } from '../../diagnostician/diag-distiller-output.js';
 import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { DiagRootCauseRunner } from '../diag-rootcause-runner.js';
@@ -52,11 +52,12 @@ const OWNER = 'test-e2e-owner';
 const RUNTIME_KIND = 'test-double';
 
 /** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
-function makeRootCauseOutput(): DiagRootCauseOutputV1 {
+function makeRootCauseOutput(overrides: Partial<DiagRootCauseOutputV1> = {}): DiagRootCauseOutputV1 {
   return {
     ...MOCK_ROOT_CAUSE_OUTPUTS.R6,
     diagnosisId: 'diag-e2e-001',
     taskId: ROOTCAUSE_TASK_ID,
+    ...overrides,
   };
 }
 
@@ -287,7 +288,7 @@ describe('Diag chain e2e', () => {
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
-      validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+      validator: new DefaultDiagRootCauseValidator(),
       contextAssembler: contextAssembler,
     };
 
@@ -320,7 +321,7 @@ describe('Diag chain e2e', () => {
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
-      validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+      validator: new DefaultDiagDistillerValidator(),
     };
 
     const distillerRunner = new DiagDistillerRunner(distillerDeps, {
@@ -682,11 +683,11 @@ describe('Diag chain e2e', () => {
     runtimeAdapter.fetchOutput.mockImplementation(async () => {
       fetchCallCount++;
       if (fetchCallCount === 1) {
-        return { payload: makeRootCauseOutput() };
+        return { payload: makeRootCauseOutput({ taskId: STAGE_A_TASK_ID }) };
       }
       if (fetchCallCount === 2) {
         // Stage B: use the artifact ID that Stage A wrote (based on store run ID)
-        return { payload: makeDistillerOutput({ sourceRootCauseArtifactId: expectedStageAArtifactId }) };
+        return { payload: makeDistillerOutput({ taskId: STAGE_B_TASK_ID, sourceRootCauseArtifactId: expectedStageAArtifactId }) };
       }
       return { payload: makeRouterOutput() };
     });
@@ -696,7 +697,7 @@ describe('Diag chain e2e', () => {
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
-      validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+      validator: new DefaultDiagRootCauseValidator(),
       contextAssembler: contextAssembler,
     };
 
@@ -713,7 +714,7 @@ describe('Diag chain e2e', () => {
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
-      validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+      validator: new DefaultDiagDistillerValidator(),
     };
 
     const distillerRunner = new DiagDistillerRunner(distillerDeps, {
@@ -811,7 +812,7 @@ describe('Diag chain e2e', () => {
       runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
-      validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+      validator: new DefaultDiagRootCauseValidator(),
       contextAssembler: contextAssembler,
     };
 
@@ -823,7 +824,7 @@ describe('Diag chain e2e', () => {
     });
 
     const distillerRunner = new DiagDistillerRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) } },
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, validator: new DefaultDiagDistillerValidator() },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
@@ -903,12 +904,12 @@ describe('Diag chain e2e', () => {
       runtimeAdapter.fetchOutput.mockImplementation(async () => {
         fetchCallCount++;
         if (fetchCallCount === 1) {
-          return { payload: makeRootCauseOutput() };
+          return { payload: makeRootCauseOutput({ taskId: 'diag_rootcause-diagnosis_pain-e2e-boundary' }) };
         }
         if (fetchCallCount === 2) {
           const artifactsA = await stateManager.piArtifactStore.listBySourceTaskId(`diag_rootcause-diagnosis_pain-e2e-boundary`);
           const stageAArtifactId = artifactsA[0]?.artifactId ?? ROOTCAUSE_ARTIFACT_ID;
-          return { payload: makeDistillerOutput({ sourceRootCauseArtifactId: stageAArtifactId }) };
+          return { payload: makeDistillerOutput({ taskId: 'diag_distiller-diagnosis_pain-e2e-boundary', sourceRootCauseArtifactId: stageAArtifactId }) };
         }
         return { payload: makeRouterOutput() };
       });
@@ -919,7 +920,7 @@ describe('Diag chain e2e', () => {
           runtimeAdapter: runtimeAdapter,
           eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
           artifactStore: stateManager.piArtifactStore,
-          validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+          validator: new DefaultDiagRootCauseValidator(),
           contextAssembler,
         },
         { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
@@ -930,7 +931,7 @@ describe('Diag chain e2e', () => {
           runtimeAdapter: runtimeAdapter,
           eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
           artifactStore: stateManager.piArtifactStore,
-          validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+          validator: new DefaultDiagDistillerValidator(),
         },
         { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
       );

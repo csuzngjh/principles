@@ -6,6 +6,7 @@ import type {
   RunHandle,
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
+import { DefaultDreamerValidator } from '../internalization/dreamer-output.js';
 import type { DreamerValidator } from '../internalization/dreamer-output.js';
 import { InternalizationOrchestrator } from '../internalization/internalization-orchestrator.js';
 import { DreamerRunner } from '../internalization/dreamer-runner.js';
@@ -156,13 +157,10 @@ function createMockEventEmitter(): StoreEventEmitter {
   } as unknown as StoreEventEmitter;
 }
 
-function createMockValidator(): DreamerValidator {
-  return {
-    validate: vi.fn().mockResolvedValue({
-      valid: true,
-      errors: [] as readonly string[],
-    }),
-  };
+function createValidator(): DreamerValidator {
+  // B3-A: real schema validator — the product path must not train itself on an
+  // always-valid stub. No test here injects validator failures.
+  return new DefaultDreamerValidator();
 }
 
 describe('PRI-381: Consumer product-path — full cycle integration', () => {
@@ -197,7 +195,7 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
         runtimeAdapter: adapter,
         eventEmitter: createMockEventEmitter(),
         artifactStore: new MemoryPIArtifactStore(),
-        validator: createMockValidator(),
+        validator: createValidator(),
       },
       { owner: OWNER, runtimeKind: RUNTIME_KIND },
     );
@@ -265,7 +263,7 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
         runtimeAdapter: adapter,
         eventEmitter: createMockEventEmitter(),
         artifactStore: new MemoryPIArtifactStore(),
-        validator: createMockValidator(),
+        validator: createValidator(),
       },
       { owner: OWNER, runtimeKind: RUNTIME_KIND },
     );
@@ -314,7 +312,7 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
         runtimeAdapter: adapter,
         eventEmitter: createMockEventEmitter(),
         artifactStore: new MemoryPIArtifactStore(),
-        validator: createMockValidator(),
+        validator: createValidator(),
       },
       { owner: OWNER, runtimeKind: RUNTIME_KIND },
     );

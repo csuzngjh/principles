@@ -8,7 +8,7 @@ import {
   assertMainlineContract,
   buildDreamerSeedFromCandidate,
   DreamerRunner,
-  PassThroughDreamerValidator,
+  DefaultDreamerValidator,
   parsePITaskMetadata,
   serializePITaskMetadata,
   EMPTY_CONTEXT_SENTINEL,
@@ -269,7 +269,9 @@ describe('mainline product-path (load-bearing wall)', () => {
         runtimeAdapter: mockRuntimeAdapter as unknown as PDRuntimeAdapter,
         eventEmitter: mockEventEmitter,
         artifactStore: mockArtifactStore,
-        validator: new PassThroughDreamerValidator(),
+        // B3-A: validateOutput is never reached in this suite (adapter mocks
+        // reject), so this swap from the always-valid stub is inert by design.
+        validator: new DefaultDreamerValidator(),
       },
       { owner: 'test', runtimeKind: 'test-double' },
     );
@@ -332,7 +334,7 @@ describe('mainline product-path (load-bearing wall)', () => {
         runtimeAdapter: mockRuntimeAdapter as unknown as PDRuntimeAdapter,
         eventEmitter: mockEventEmitter,
         artifactStore: mockArtifactStore,
-        validator: new PassThroughDreamerValidator(),
+        validator: new DefaultDreamerValidator(),
       },
       { owner: 'test', runtimeKind: 'test-double' },
     );

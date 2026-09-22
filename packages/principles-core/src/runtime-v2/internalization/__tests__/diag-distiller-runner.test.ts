@@ -13,8 +13,9 @@
  * integrity pair, storage-layer artifact write failure, EP-01 corrupted
  * predecessor) were consolidated into diag-runner-contract.test.ts
  * (Test Diet Phase 2.2-B2); scaffold comes from
- * __fixtures__/diag-runner-harness.ts. The mock validator stub stays a mock
- * here — validator realism is Phase 2.2-B3.
+ * __fixtures__/diag-runner-harness.ts. Since Phase 2.2-B3-A the default
+ * validator is the real TypeBox validator behind a spy; no mock validator
+ * override is used in this file.
  *
  * ERR entries considered:
  *   - ERR-001: Treat parsed JSON / LLM output as unknown — validator receives unknown
@@ -68,9 +69,9 @@ describe('DiagDistillerRunner V-slice', () => {
   });
 
   it('fabricated axiom ID (T-99) rejected by validator → task fails', async () => {
-    // Use the real DefaultDiagDistillerValidator which checks isCorePrincipleId
-    const { DefaultDiagDistillerValidator } = await import('../../diagnostician/diag-distiller-output.js');
-    const h = createDiagRunnerHarness('distiller', { validator: new DefaultDiagDistillerValidator() });
+    // B3-A: the harness default already is the real DefaultDiagDistillerValidator
+    // (which checks isCorePrincipleId) behind a spy — no explicit override needed.
+    const h = createDiagRunnerHarness('distiller');
 
     // Output with fabricated T-99 axiom ID
     const fabricatedOutput = makeDistillerOutput({ groundedOnCorePrincipleIds: ['T-99'] });
