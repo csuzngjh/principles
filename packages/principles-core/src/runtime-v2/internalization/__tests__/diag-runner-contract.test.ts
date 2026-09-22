@@ -168,6 +168,17 @@ describe.each(TASK_ID_CASES)('Diag $role taskId integrity', (c) => {
     // taskId is re-injected, so validation should pass
     expect(result.status).toBe('succeeded');
     expect(result.artifactId).toBeDefined();
+    // Pin the injected VALUE, not just the survived flow: the always-valid
+    // mock validator would also pass a payload whose taskId stayed absent,
+    // so assert the persisted artifact carries the leased taskId.
+    const artifacts = await h.deps.artifactStore.listBySourceTaskId(h.taskId);
+    expect(artifacts).toHaveLength(1);
+    const contentJson = artifacts[0]?.contentJson;
+    if (contentJson) {
+      expect((JSON.parse(contentJson) as Record<string, unknown>).taskId).toBe(h.taskId);
+    } else {
+      throw new Error('artifact content missing');
+    }
   });
 
   it('present-but-empty taskId NOT overwritten by postFetchTransform', async () => {
