@@ -5,6 +5,9 @@ import { join, dirname, sep, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { execFile, execFileSync, execSync } from 'child_process';
 import { promisify } from 'util';
+// PRI-907 (RAH-3): shared release-hygiene contract (same artifact classes as
+// check-dist-hygiene.mjs / check-workspace-artifacts.mjs — ERR-149 / EP-14).
+import { skipTestArtifacts, collectTestArtifacts } from '../../../scripts/build/test-artifacts.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -152,6 +155,41 @@ const CREATE_PRINCIPLES_DISCIPLE_REQUIRED = [
   'package.json',
 ];
 
+// PRI-907 (RAH-3): every recursive payload copy skips compiled test artifacts
+// (same contract as the per-package build gates — ERR-149 / EP-14).
+function copyPayloadTree(src, dest) {
+  try {
+    cpSync(src, dest, { recursive: true, filter: skipTestArtifacts });
+  } catch {
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(src, dest);
+  }
+}
+
+// PRI-907 (RAH-3): last-line defense before the payload leaves the machine —
+// no compiled test artifact may survive in any payload component.
+function assertPayloadHygiene(payloadDirs) {
+  const offenders = [];
+  for (const dir of payloadDirs) {
+    if (!existsSync(dir)) continue;
+    for (const hit of collectTestArtifacts(dir)) {
+      offenders.push(`${relative(OUTPUT_ROOT, dir).split(sep).join('/')}: ${hit}`);
+    }
+  }
+  if (offenders.length > 0) {
+    console.error(`❌ [payload-hygiene] ${offenders.length} compiled test artifact(s) reached the installer payload:`);
+    for (const offender of offenders.slice(0, 20)) {
+      console.error(`  - ${offender}`);
+    }
+    if (offenders.length > 20) {
+      console.error(`  ... and ${offenders.length - 20} more`);
+    }
+    console.error('   Test code must never ship to user machines. Fix the source build boundary (tsconfig.build.json), not this assertion.');
+    process.exit(1);
+  }
+  log('  ✅ payload hygiene: no compiled test artifacts in any payload component');
+}
+
 log('📦 Bundling plugin + pd-cli for npm publish...\n');
 
 for (const item of PLUGIN_REQUIRED) {
@@ -229,11 +267,7 @@ mkdirSync(PLUGIN_DEST, { recursive: true });
 for (const item of PLUGIN_REQUIRED) {
   const src = join(PLUGIN_SRC, item);
   log(`  Copying plugin/${item}...`);
-  try {
-    cpSync(src, join(PLUGIN_DEST, item), { recursive: true });
-  } catch {
-    cpSync(src, join(PLUGIN_DEST, item));
-  }
+  copyPayloadTree(src, join(PLUGIN_DEST, item));
 }
 
 for (const item of PLUGIN_OPTIONAL) {
@@ -243,11 +277,7 @@ for (const item of PLUGIN_OPTIONAL) {
     continue;
   }
   log(`  Copying plugin/${item}...`);
-  try {
-    cpSync(src, join(PLUGIN_DEST, item), { recursive: true });
-  } catch {
-    cpSync(src, join(PLUGIN_DEST, item));
-  }
+  copyPayloadTree(src, join(PLUGIN_DEST, item));
 }
 
 if (existsSync(PD_CLI_DEST)) {
@@ -259,11 +289,7 @@ mkdirSync(PD_CLI_DEST, { recursive: true });
 for (const item of PD_CLI_REQUIRED) {
   const src = join(PD_CLI_SRC, item);
   log(`  Copying pd-cli/${item}...`);
-  try {
-    cpSync(src, join(PD_CLI_DEST, item), { recursive: true });
-  } catch {
-    cpSync(src, join(PD_CLI_DEST, item));
-  }
+  copyPayloadTree(src, join(PD_CLI_DEST, item));
 }
 
 if (existsSync(CONSOLE_DEST)) {
@@ -276,12 +302,7 @@ for (const item of CONSOLE_REQUIRED) {
   const src = join(CONSOLE_SRC, item);
   const dest = join(CONSOLE_DEST, item);
   log(`  Copying console/${item}...`);
-  try {
-    cpSync(src, dest, { recursive: true });
-  } catch {
-    mkdirSync(dirname(dest), { recursive: true });
-    copyFileSync(src, dest);
-  }
+  copyPayloadTree(src, dest);
 }
 
 log('\n✅ Plugin + pd-cli + pd-console bundled successfully!');
@@ -299,12 +320,7 @@ for (const item of CORE_REQUIRED) {
   const src = join(CORE_SRC, item);
   const dest = join(CORE_DEST, item);
   log(`  Copying core/${item}...`);
-  try {
-    cpSync(src, dest, { recursive: true });
-  } catch {
-    mkdirSync(dirname(dest), { recursive: true });
-    copyFileSync(src, dest);
-  }
+  copyPayloadTree(src, dest);
 }
 
 log(`   Core: ${CORE_DEST}`);
@@ -319,12 +335,7 @@ for (const item of HOST_RUNTIME_REQUIRED) {
   const src = join(HOST_RUNTIME_SRC, item);
   const dest = join(HOST_RUNTIME_DEST, item);
   log(`  Copying host-runtime/${item}...`);
-  try {
-    cpSync(src, dest, { recursive: true });
-  } catch {
-    mkdirSync(dirname(dest), { recursive: true });
-    copyFileSync(src, dest);
-  }
+  copyPayloadTree(src, dest);
 }
 
 log(`   Host Runtime: ${HOST_RUNTIME_DEST}`);
@@ -339,12 +350,7 @@ for (const item of CODEX_ADAPTER_REQUIRED) {
   const src = join(CODEX_ADAPTER_SRC, item);
   const dest = join(CODEX_ADAPTER_DEST, item);
   log(`  Copying codex-adapter/${item}...`);
-  try {
-    cpSync(src, dest, { recursive: true });
-  } catch {
-    mkdirSync(dirname(dest), { recursive: true });
-    copyFileSync(src, dest);
-  }
+  copyPayloadTree(src, dest);
 }
 
 log(`   Codex Adapter: ${CODEX_ADAPTER_DEST}`);
@@ -358,7 +364,7 @@ for (const item of INSTALL_LAYOUT_REQUIRED) {
   const src = join(INSTALL_LAYOUT_SRC, item);
   const dest = join(INSTALL_LAYOUT_DEST, item);
   log(`  Copying install-layout/${item}...`);
-  cpSync(src, dest, { recursive: true });
+  copyPayloadTree(src, dest);
 }
 log(`   Install Layout: ${INSTALL_LAYOUT_DEST}`);
 
@@ -397,7 +403,7 @@ for (const item of CREATE_PRINCIPLES_DISCIPLE_REQUIRED) {
   const src = join(RELEASE_MANAGER_SRC, item);
   const dest = join(RELEASE_MANAGER_DEST, item);
   log(`  Copying release-manager/${item}...`);
-  cpSync(src, dest, { recursive: true });
+  copyPayloadTree(src, dest);
 }
 log(`   Release Manager: ${RELEASE_MANAGER_DEST}`);
 
@@ -797,3 +803,17 @@ if (!existsSync(consoleWebIndex)) {
 log('  ✅ console dist/web/index.html present');
 
 log('\n✅ Console bundle verified!');
+
+// PRI-907 (RAH-3): runs AFTER every payload component is materialized and
+// AFTER the self-contained dependency installation, so vendored node_modules
+// trees are excluded but nothing of PD's own build output escapes the gate.
+assertPayloadHygiene([
+  PLUGIN_DEST,
+  PD_CLI_DEST,
+  CONSOLE_DEST,
+  CORE_DEST,
+  HOST_RUNTIME_DEST,
+  CODEX_ADAPTER_DEST,
+  INSTALL_LAYOUT_DEST,
+  RELEASE_MANAGER_DEST,
+]);
