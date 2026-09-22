@@ -82,9 +82,9 @@ describe('PRI-480 canonicalizeToolKind — static alias table', () => {
     ['some_unknown_tool_xyz', 'other'],
   ];
 
-  it('covers the 20 required alias/unknown cases', () => {
-    expect(cases).toHaveLength(20);
-  });
+  // PRI-891: the self-referential `expect(cases).toHaveLength(20)` it was
+  // removed — it asserted the test's own fixture array, not the SUT. The
+  // per-case mappings below execute the real canonicalizeToolKind contract.
 
   for (const [input, expected] of cases) {
     it(`canonicalizeToolKind(${JSON.stringify(input)}) → '${expected}'`, () => {

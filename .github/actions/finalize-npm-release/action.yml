@@ -65,10 +65,15 @@ runs:
         COHORT: ${{ inputs.cohort_sha }}
       run: |
         # "What's Changed" model retained for this round (SPEC §27.2).
+        # The commit cap is git's own -80 (NOT `| head -80`): the runner
+        # shell always adds -o pipefail, and once a tag gap exceeds 80
+        # commits git log dies of SIGPIPE (exit 141) when head closes the
+        # pipe — the v2.0.2 finalize (train 35666942938) failed exactly
+        # this way. `git log -80` bounds inside git; no truncation kill.
         VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
         LAST_TAG=$(git tag --list 'v*' | sort -V | tail -1 || true)
         if [ -n "$LAST_TAG" ] && [ "$LAST_TAG" != "v$VERSION" ]; then
-          COMMITS=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s (%h)" --no-merges | head -80)
+          COMMITS=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s (%h)" --no-merges -80)
         else
           COMMITS=$(git log -20 --pretty=format:"- %s (%h)" --no-merges)
         fi

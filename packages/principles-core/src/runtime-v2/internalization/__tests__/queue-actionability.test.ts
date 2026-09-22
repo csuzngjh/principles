@@ -29,21 +29,10 @@ describe('classifyTaskActionability', () => {
     expect(result.actionable).toBe(true);
   });
 
-  it('classifies enabled-channel MVP-Core scribe as actionable', () => {
-    const result = classifyTaskActionability(
-      { taskId: 'scribe-abc-cth', taskKind: 'scribe', channel: 'code_tool_hook' },
-      defaultPolicy,
-    );
-    expect(result.actionable).toBe(true);
-  });
-
-  it('classifies enabled-channel MVP-Core artificer as actionable', () => {
-    const result = classifyTaskActionability(
-      { taskId: 'artificer-abc-prompt', taskKind: 'artificer', channel: 'prompt' },
-      defaultPolicy,
-    );
-    expect(result.actionable).toBe(true);
-  });
+  // PRI-891: the per-kind actionable-true its for scribe/artificer/evaluator
+  // were the same SOT-membership echo as the dreamer/philosopher cases and
+  // were removed; two distinct kinds are kept so a hardcoded-kind regression
+  // in the SUT would still be caught.
 
   it('suppresses disabled-channel skill task with channel_disabled reason', () => {
     const result = classifyTaskActionability(
@@ -78,14 +67,6 @@ describe('classifyTaskActionability', () => {
     expect(result.actionable).toBe(true);
   });
 
-  it('classifies enabled-channel MVP-Core evaluator as actionable', () => {
-    const result = classifyTaskActionability(
-      { taskId: 'eval-abc-prompt', taskKind: 'evaluator', channel: 'prompt' },
-      defaultPolicy,
-    );
-    expect(result.actionable).toBe(true);
-  });
-
   it('double-suppression: disabled channel AND non-MVP kind reports channel_disabled', () => {
     const result = classifyTaskActionability(
       { taskId: 'rollout-abc-skill', taskKind: 'rollout_reviewer', channel: 'skill' },
@@ -111,14 +92,9 @@ describe('classifyTaskActionability', () => {
 });
 
 describe('MVP_CORE_TASK_KINDS constant', () => {
-  it('includes dreamer, philosopher, scribe, artificer, evaluator', () => {
-    expect(MVP_CORE_TASK_KINDS).toContain('dreamer');
-    expect(MVP_CORE_TASK_KINDS).toContain('philosopher');
-    expect(MVP_CORE_TASK_KINDS).toContain('scribe');
-    expect(MVP_CORE_TASK_KINDS).toContain('artificer');
-    expect(MVP_CORE_TASK_KINDS).toContain('evaluator');
-  });
-
+  // PRI-891: the five-kind membership echo was removed (same source of truth
+  // as the policy input above). The rollout_reviewer pin stays because it
+  // documents the manual-gate decision, not mere membership.
   it('includes rollout_reviewer (manual-gate kind — visible in queue, not auto-consumed)', () => {
     expect(MVP_CORE_TASK_KINDS).toContain('rollout_reviewer');
   });

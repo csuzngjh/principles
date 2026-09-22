@@ -476,7 +476,11 @@ describe('drill 8: product (cohort) vs tools checkout separation', () => {
     const a = actionText();
     expect(a).toContain('node "$TOOLS_DIR/scripts/release/registry-exact.mjs"');
     expect(a).toContain('node "$TOOLS_DIR/scripts/release/deps-preflight.mjs"');
-    expect(a).toContain('node "$TOOLS_DIR/scripts/release/verify-publish-outcome.mjs"');
+    // The publish-failure fallback absolutizes the tools path BEFORE cd —
+    // a relative tools_dir must stay valid from inside packages/<dir>
+    // (rehearsal run 35666369142 regression).
+    expect(a).toContain('TOOLS_ABS="$(cd "$TOOLS_DIR" && pwd)"');
+    expect(a).toContain('node "$TOOLS_ABS/scripts/release/verify-publish-outcome.mjs"');
     // No script invocation straight from the workspace (cohort) scripts tree.
     expect(a).not.toMatch(/node scripts\/release\//);
   });
@@ -719,6 +723,16 @@ describe('drill 10: closing-step isolation (workflow structure)', () => {
     expect(f).toContain('continue-on-error: true'); // ClawHub degrades, never blocks
   });
 
+  it('release-notes commit capping is bounded INSIDE git, never via a head pipe (SIGPIPE pin)', () => {
+    // Production evidence: train 35666942938 finalize died with exit 141 —
+    // `git log | head -80` under the runner's -o pipefail SIGPIPEs once the
+    // tag gap exceeds 80 commits. The runner shell ALWAYS adds pipefail,
+    // so any `| head` truncation of a chatty git command is a latent kill.
+    const f = finalizeText();
+    expect(f).toContain('--no-merges -80');
+    expect(f).not.toMatch(/git log[^|]*\| head/);
+  });
+
   it('the rehearsal/preflight workflow never uploads (dry_run legs, no write permissions)', () => {
     const p = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'publish-preflight.yml'), 'utf8');
     expect(p.match(/dry_run: true/g)?.length).toBe(7);
@@ -729,8 +743,17 @@ describe('drill 10: closing-step isolation (workflow structure)', () => {
     expect(p).toContain('NOT evidence of a published version');
   });
 
-  it('the publish step stays gated on ABSENT so a recovery re-dispatch skips published legs', () => {
+  it('the publish step stays gated on ABSENT, and the rehearsal skip is decided in bash (exact env comparison)', () => {
     const a = actionText();
-    expect(a).toContain("steps.exact.outputs.status == 'ABSENT' && inputs.dry_run != true");
+    // ABSENT gate keeps recovery re-dispatches skipping published legs.
+    const publishStep = a.slice(a.indexOf('name: Publish exact committed version'));
+    expect(publishStep).toContain("if: ${{ steps.exact.outputs.status == 'ABSENT' }}");
+    // The rehearsal skip must NOT be an `if`-expression boolean comparison:
+    // GitHub expression coercion opened this gate for a boolean true in
+    // rehearsal run 35666369142. Env + exact bash comparison is the pin.
+    expect(publishStep).toContain('DRY_RUN: ${{ inputs.dry_run }}');
+    expect(publishStep).toContain('[ "$DRY_RUN" = "true" ]');
+    expect(publishStep).not.toMatch(/inputs\.dry_run != true/);
+    expect(publishStep).toContain('the real npm upload is SKIPPED');
   });
 });
