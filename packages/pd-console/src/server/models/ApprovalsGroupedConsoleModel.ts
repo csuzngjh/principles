@@ -4,6 +4,7 @@ import {
   SqlitePIArtifactStore,
   ApprovalQueue,
 } from '@principles/core/runtime-v2';
+import { buildActivePrinciplePromptContext } from '@principles/host-runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
 import {
@@ -34,11 +35,22 @@ export interface ApprovalGroup {
   }[];
 }
 
+export interface PromptInjectionBudgetStatus {
+  /** Hard char cap of the prompt injection surface (e.g. 2000). */
+  budget: number;
+  /** Chars currently injected into the agent prompt. */
+  usedChars: number;
+  /** True when the FIFO projection already truncated — new approvals will queue. */
+  truncated: boolean;
+}
+
 export interface ApprovalsGroupedResponse {
   groups: ApprovalGroup[];
   generatedAt: string;
   /** Present when data is degraded/missing rather than genuinely empty */
   note?: string;
+  /** PRI-908: prompt-channel injection budget status for the pre-approval forecast. */
+  promptInjection?: PromptInjectionBudgetStatus;
 }
 
 function isMissingTableError(err: unknown): boolean {
@@ -253,9 +265,37 @@ export class ApprovalsGroupedConsoleModel {
       return {
         groups,
         generatedAt: new Date().toISOString(),
+        ...(await this.readPromptInjectionBudgetStatus()),
       };
     } finally {
       try { conn.close(); } catch { /* best-effort */ }
+    }
+  }
+
+  /**
+   * PRI-908: recompute the production prompt injection projection (same
+   * readonly FIFO + budget logic the prompt hook and the PRI-890 approve-time
+   * check use) so the focus page can forecast "approved ≠ effective" BEFORE
+   * the Owner decides. Advisory only: a projection failure omits the field —
+   * the approve-time warning remains the fail-loud exclusion report (rc-9),
+   * so this must never fail the grouped read.
+   */
+  private async readPromptInjectionBudgetStatus(): Promise<{ promptInjection?: PromptInjectionBudgetStatus }> {
+    try {
+      const context = await buildActivePrinciplePromptContext({ workspaceDir: this.workspaceDir });
+      return {
+        promptInjection: {
+          budget: context.budget,
+          usedChars: context.additionalContext.length,
+          truncated: context.truncated,
+        },
+      };
+    } catch (err: unknown) {
+      // rc-9: degradation is observable to operators even though it stays
+      // invisible in the UI payload (the badge is advisory only).
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[pd-console] prompt injection forecast unavailable, omitting promptInjection: ${message}`);
+      return {};
     }
   }
 

@@ -513,8 +513,13 @@ describe("FocusPage: PRI-889 PendingReviewCard wiring contract", () => {
 
   it("PendingReviewCard respects the PRI-787 governance lock with a visible reason (rc-9)", () => {
     expect(focusSrc).toContain("pending-actions-locked-");
-    // All three action buttons are gated by the lock
-    const gated = focusSrc.match(/disabled=\{!isActionable \|\| actionLoading \|\| actionsLocked\}/g) ?? [];
+    // All three action buttons are gated by the lock. PRI-908 folded the
+    // expression into `decisionDisabled` (adds the decided-state guard), so
+    // the guard checks the derivation includes the original three conditions.
+    expect(focusSrc).toContain(
+      "const decisionDisabled = !isActionable || actionLoading || actionsLocked || decidedOutcome !== null;",
+    );
+    const gated = focusSrc.match(/disabled=\{decisionDisabled\}/g) ?? [];
     expect(gated.length).toBe(3);
   });
 });

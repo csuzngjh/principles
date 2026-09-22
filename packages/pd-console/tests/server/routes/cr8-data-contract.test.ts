@@ -478,6 +478,27 @@ describe('CR8 Backend Data Contract Routes', () => {
       expect(getStringField(firstRecord, 'channel')).toBeDefined();
       expect(getStringField(firstRecord, 'createdAt')).toBeDefined();
     });
+
+    it('PRI-908: carries the prompt injection budget status for the pre-approval forecast', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+
+      // The forecast is advisory: the projection recompute is wrapped so it
+      // either reports a well-formed status or omits itself — never fails the
+      // grouped read, and never reports a malformed half-status.
+      const promptInjection = data!['promptInjection'];
+      if (promptInjection === undefined) return;
+      expect(isRecord(promptInjection)).toBe(true);
+      const budget = promptInjection!['budget'];
+      const usedChars = promptInjection!['usedChars'];
+      expect(typeof budget).toBe('number');
+      expect(budget as number).toBeGreaterThanOrEqual(1);
+      expect(Number.isInteger(usedChars)).toBe(true);
+      expect(usedChars as number).toBeGreaterThanOrEqual(0);
+      expect(typeof promptInjection!['truncated']).toBe('boolean');
+    });
   });
 
   // ── 6. Governance queue returns required fields ───────────────────────────

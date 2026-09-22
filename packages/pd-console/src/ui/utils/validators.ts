@@ -1957,6 +1957,31 @@ export interface ApprovalsGroupedData {
   groups: ApprovalGroupData[];
   generatedAt: string;
   note?: string;
+  /** PRI-908: prompt-channel injection budget status for the pre-approval forecast. */
+  promptInjection?: PromptInjectionBudgetStatus;
+}
+
+export interface PromptInjectionBudgetStatus {
+  /** Hard char cap of the prompt injection surface (e.g. 2000). */
+  budget: number;
+  /** Chars currently injected into the agent prompt. */
+  usedChars: number;
+  /** True when the FIFO projection already truncated — new approvals will queue. */
+  truncated: boolean;
+}
+
+export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjectionBudgetStatus | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'budget') || !Object.hasOwn(v, 'usedChars') || !Object.hasOwn(v, 'truncated')) return null;
+  const { budget, usedChars, truncated } = v;
+  if (
+    typeof budget !== 'number' || !Number.isInteger(budget) || budget <= 0 ||
+    typeof usedChars !== 'number' || !Number.isInteger(usedChars) || usedChars < 0 ||
+    typeof truncated !== 'boolean'
+  ) {
+    return null;
+  }
+  return { budget, usedChars, truncated };
 }
 
 export function validateApprovalsGrouped(v: unknown): ApprovalsGroupedData | null {
@@ -1967,6 +1992,13 @@ export function validateApprovalsGrouped(v: unknown): ApprovalsGroupedData | nul
   if (groups === null) return null;
   const result: ApprovalsGroupedData = { groups, generatedAt: v.generatedAt };
   if (Object.hasOwn(v, 'note') && isString(v.note)) result.note = v.note;
+  // PRI-908: additive optional field — malformed/absent forecast degrades to
+  // "no badge" (the approve-time warning from PRI-890 remains the fail-loud
+  // exclusion report), never to a rejected payload.
+  if (Object.hasOwn(v, 'promptInjection')) {
+    const promptInjection = validatePromptInjectionBudgetStatus(v.promptInjection);
+    if (promptInjection !== null) result.promptInjection = promptInjection;
+  }
   return result;
 }
 
