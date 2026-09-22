@@ -452,7 +452,70 @@ describe("FocusPage: approval failures remain actionable", () => {
       allSucceeded: false,
       failedCount: 1,
       failureReason: "Approval was rolled back. Reason: rejected_validation_failed",
+      successWarnings: [],
     });
+  });
+
+  it("PRI-890: collects non-fatal server warnings from successful decisions", async () => {
+    const { summarizeDecisionResults } = await import("../../src/ui/pages/focus/FocusPage.js");
+    expect(summarizeDecisionResults([
+      { success: true, warning: "injection_budget_excluded: the activation is committed but the prompt injection budget (2000c, FIFO by activated_at) is already filled" },
+      { success: true },
+    ]).successWarnings).toEqual([
+      "injection_budget_excluded: the activation is committed but the prompt injection budget (2000c, FIFO by activated_at) is already filled",
+    ]);
+  });
+});
+
+// ── PRI-889: 部署审批决策路径（PendingReviewCard 接线）─────────────────────
+
+describe("FocusPage: PRI-889 decision surface selection", () => {
+  it("drops activation_approval items from OwnerDecisionCard list when grouped data is available (PendingReviewCard takes over)", async () => {
+    const { selectDecisionSurfaceItems } = await import("../../src/ui/pages/focus/FocusPage.js");
+    const items = [
+      { kind: "rollout_review", reviewKey: "a" },
+      { kind: "activation_approval", reviewKey: "b" },
+      { kind: "activation_approval", reviewKey: "c" },
+      { kind: "evaluator_review", reviewKey: "d" },
+    ];
+    const selected = selectDecisionSurfaceItems(items, true);
+    expect(selected.map((item) => item.reviewKey)).toEqual(["a", "d"]);
+  });
+
+  it("keeps activation_approval items when grouped data is unavailable — decisions never silently disappear (rc-9)", async () => {
+    const { selectDecisionSurfaceItems } = await import("../../src/ui/pages/focus/FocusPage.js");
+    const items = [
+      { kind: "rollout_review", reviewKey: "a" },
+      { kind: "activation_approval", reviewKey: "b" },
+    ];
+    const selected = selectDecisionSurfaceItems(items, false);
+    expect(selected.map((item) => item.reviewKey)).toEqual(["a", "b"]);
+  });
+
+  it("does not mutate the input list", async () => {
+    const { selectDecisionSurfaceItems } = await import("../../src/ui/pages/focus/FocusPage.js");
+    const items = [{ kind: "activation_approval", reviewKey: "b" }];
+    selectDecisionSurfaceItems(items, true);
+    expect(items).toHaveLength(1);
+  });
+});
+
+describe("FocusPage: PRI-889 PendingReviewCard wiring contract", () => {
+  const focusSrc = fs.readFileSync(
+    nodePath.resolve(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"), "utf-8");
+
+  it("renders PendingReviewCard for pending approval groups in the decisions section", () => {
+    // PRI-768 v6-01: the Wave-7 component previously had no render site —
+    // Owners had no clickable approve path in the browser.
+    expect(focusSrc).toContain("pendingGroups.map((group) => (");
+    expect(focusSrc).toContain("<PendingReviewCard");
+  });
+
+  it("PendingReviewCard respects the PRI-787 governance lock with a visible reason (rc-9)", () => {
+    expect(focusSrc).toContain("pending-actions-locked-");
+    // All three action buttons are gated by the lock
+    const gated = focusSrc.match(/disabled=\{!isActionable \|\| actionLoading \|\| actionsLocked\}/g) ?? [];
+    expect(gated.length).toBe(3);
   });
 });
 
