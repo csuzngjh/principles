@@ -723,6 +723,16 @@ describe('drill 10: closing-step isolation (workflow structure)', () => {
     expect(f).toContain('continue-on-error: true'); // ClawHub degrades, never blocks
   });
 
+  it('release-notes commit capping is bounded INSIDE git, never via a head pipe (SIGPIPE pin)', () => {
+    // Production evidence: train 35666942938 finalize died with exit 141 —
+    // `git log | head -80` under the runner's -o pipefail SIGPIPEs once the
+    // tag gap exceeds 80 commits. The runner shell ALWAYS adds pipefail,
+    // so any `| head` truncation of a chatty git command is a latent kill.
+    const f = finalizeText();
+    expect(f).toContain('--no-merges -80');
+    expect(f).not.toMatch(/git log[^|]*\| head/);
+  });
+
   it('the rehearsal/preflight workflow never uploads (dry_run legs, no write permissions)', () => {
     const p = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'publish-preflight.yml'), 'utf8');
     expect(p.match(/dry_run: true/g)?.length).toBe(7);
