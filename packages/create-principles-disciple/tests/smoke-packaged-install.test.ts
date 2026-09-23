@@ -4,6 +4,10 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFileSync, spawn } from 'child_process';
 import * as http from 'http';
+import {
+  INSTALL_LAYOUT_PACKAGE,
+  classifyPrePublishCohort,
+} from './helpers/prepublish-cohort.js';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
 const TMPDIR = fs.realpathSync(os.tmpdir());
@@ -647,17 +651,82 @@ describe('Real packaged install smoke test', () => {
 // user's install does, then exercises the exact failure shape: loading
 // dist/index.js (whose top-level import chain reaches installer.js →
 // @principles/install-layout) must succeed.
+//
+// One admitted exception (structural, not a weakening): an OPEN Version
+// Packages PR rewrites the internal range to `^<cohortVersion>` while the
+// release train only publishes that version after the PR merges — the gate
+// cannot be green there by construction. The skip is reachable only when the
+// range floor equals the version committed in this workspace's
+// install-layout/package.json, which the normal-PR version-field freeze
+// (check-pr-release-intent) confines to Version Packages branches. Any other
+// resolution failure — including the 2026-09-04 shape above — still fails
+// loudly. See helpers/prepublish-cohort.ts.
 // ---------------------------------------------------------------------------
+
+function readJsonFile(filePath: string): unknown {
+  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+}
+
+function stringField(value: unknown, key: string): string | undefined {
+  if (typeof value !== 'object' || value === null || !Object.hasOwn(value, key)) return undefined;
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === 'string' ? field : undefined;
+}
+
+// Registry-visible versions for one package; null when the query itself
+// could not be trusted — a broken probe must never mint a skip.
+async function registryVersionsFor(packageName: string): Promise<string[] | null> {
+  try {
+    const out = await npmRun(['view', packageName, 'versions', '--json'], { timeout: 60_000 });
+    const parsed: unknown = JSON.parse(out);
+    return Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')
+      ? (parsed as string[])
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 describe('Registry-resolved dependency install (npx parity)', () => {
-  it('resolves @principles/install-layout from the registry and loads the installer entry', async () => {
+  it('resolves @principles/install-layout from the registry and loads the installer entry', async (ctx) => {
     const cleanDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-registry-install-'));
     try {
       // Install ONLY the installer tarball — dependencies come from the
       // real registry (npx parity), not from the locally packed tarball.
-      await npmRun(['install', tarballPath], {
-        cwd: cleanDir,
-        timeout: 300_000,
-      });
+      try {
+        await npmRun(['install', tarballPath], {
+          cwd: cleanDir,
+          timeout: 300_000,
+        });
+      } catch (installErr) {
+        const errorText = [
+          (installErr as { message?: unknown }).message,
+          (installErr as { stderr?: unknown }).stderr,
+          (installErr as { stdout?: unknown }).stdout,
+        ]
+          .map((part) => (typeof part === 'string' ? part : ''))
+          .join('\n');
+        const registryVersions = await registryVersionsFor(INSTALL_LAYOUT_PACKAGE);
+        const cohortNote =
+          registryVersions === null
+            ? null
+            : classifyPrePublishCohort({
+                npmErrorText: errorText,
+                range: stringField(
+                  (readJsonFile(path.join(INSTALLER_DIR, 'package.json')) as { dependencies?: unknown }).dependencies,
+                  INSTALL_LAYOUT_PACKAGE,
+                ),
+                localVersion: stringField(
+                  readJsonFile(path.resolve(INSTALLER_DIR, '..', 'install-layout', 'package.json')),
+                  'version',
+                ),
+                registryVersions,
+              });
+        if (cohortNote === null) throw installErr;
+        console.warn(`[pri-669] pre-publish cohort window — skipping registry resolution: ${cohortNote}`);
+        ctx.skip();
+        return;
+      }
 
       // 1. The registry-resolved install-layout must satisfy the declared
       //    range and carry the interface the installer dist imports.
