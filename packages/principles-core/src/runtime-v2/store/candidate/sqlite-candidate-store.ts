@@ -27,6 +27,10 @@ function mapRow(r: CandidateRow): CandidateRecord {
     confidence: r.confidence,
     sourceRecommendationJson: r.source_recommendation_json,
     recommendationKind: resolveRecommendationKind(r.recommendation_kind),
+    // Phase 1 / PR1: preserve the persisted column value verbatim so the
+    // Principle Ledger write boundary can validate provenance instead of the
+    // fail-open normalized view above.
+    rawRecommendationKind: r.recommendation_kind,
     status: r.status as CandidateRecord['status'],
     createdAt: r.created_at,
   };

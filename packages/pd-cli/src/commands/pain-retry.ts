@@ -751,7 +751,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
     // Step 6: Intake candidates
     const candidates = await stateManager.getCandidatesByTaskId(taskId);
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string }[] = [];
     let intakeFailed = false;
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
@@ -776,15 +776,26 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         continue;
       }
       try {
-        const entry = await intakeService.intake(candidate.candidateId);
+        const intakeResult = await intakeService.intake(candidate.candidateId);
+        // Phase 1 / PR1: candidate status handling is deliberately unchanged
+        // (SPEC v2.1 Step 2 "保持现有 candidate persistence 行为"). Only the
+        // Principle Ledger write is gated on a validated recommendation_kind.
         if (candidate.status !== 'consumed') {
           await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
-        intakeResults.push({
-          candidateId: candidate.candidateId,
-          ledgerEntryId: entry.id,
-          status: 'consumed',
-        });
+        if (intakeResult.outcome === 'ledger_entry') {
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            ledgerEntryId: intakeResult.entry.id,
+            status: 'consumed',
+          });
+        } else {
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'consumed',
+            ledgerWriteRefused: intakeResult.reason,
+          });
+        }
       } catch (intakeErr: unknown) {
         intakeFailed = true;
         const intakeErrorMessage = intakeErr instanceof Error ? intakeErr.message : String(intakeErr);
@@ -846,7 +857,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       console.log(`\n  Candidate Intake:`);
       for (const ir of intakeResults) {
         if (ir.status === 'consumed') {
-          console.log(`    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`);
+          console.log(ir.ledgerEntryId
+            ? `    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`
+            : `    ${ir.candidateId}: consumed (Principle Ledger write refused: ${ir.ledgerWriteRefused})`);
         } else if (ir.status === 'intake_failed') {
           console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);
           console.log(`      Next action: ${ir.nextAction}`);

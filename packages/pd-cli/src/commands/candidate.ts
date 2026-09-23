@@ -18,6 +18,7 @@ import {
   candidateShow,
   CandidateIntakeService,
   CandidateIntakeError,
+  INTAKE_ERROR_CODES,
   decideInternalizationRoute,
   buildDreamerSeedFromCandidate,
   findExistingDreamerTask,
@@ -590,8 +591,19 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       return;
     }
 
-    // Normal intake: ledger write first
-    const entry = await service.intake(opts.candidateId);
+    // Normal intake: ledger write first.
+    // Phase 1 / PR1: the manual intake command operates on an EXPLICIT
+    // candidate id, so a Principle Ledger write boundary refusal is surfaced
+    // loudly (never silently swallowed) instead of being treated as success.
+    const intakeResult = await service.intake(opts.candidateId);
+    if (intakeResult.outcome === 'refused') {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Principle Ledger write refused: ${intakeResult.message}`,
+        { candidateId: opts.candidateId, reason: intakeResult.reason },
+      );
+    }
+    const { entry } = intakeResult;
 
     // Check if already consumed before this call
     if (candidate?.status === 'consumed') {
@@ -800,8 +812,19 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
       return;
     }
 
-    // Re-intake to restore ledger entry
-    const entry = await service.intake(opts.candidateId);
+    // Re-intake to restore ledger entry.
+    // Phase 1 / PR1: repair exists solely to restore a missing ledger entry, so
+    // a write-boundary refusal means the candidate is not principle-eligible —
+    // fail loud rather than reporting a "repaired" entry that does not exist.
+    const intakeResult = await service.intake(opts.candidateId);
+    if (intakeResult.outcome === 'refused') {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Ledger repair refused: ${intakeResult.message}`,
+        { candidateId: opts.candidateId, reason: intakeResult.reason },
+      );
+    }
+    const { entry } = intakeResult;
     const consumedAt = await ensureConsumedAt(stateManager, opts.candidateId);
 
     const result = {
@@ -1097,7 +1120,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         continue;
       }
 
-      const intakeEntry = await intakeService.intake(candidateId).catch((intakeErr: unknown) => {
+      const intakeResult = await intakeService.intake(candidateId).catch((intakeErr: unknown) => {
         output.intakeFailed++;
         const intakeReason = intakeErr instanceof CandidateIntakeError
           ? `Intake failed [${(intakeErr as { code?: string }).code ?? 'unknown'}]: ${intakeErr.message}`
@@ -1106,9 +1129,24 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         return null;
       });
 
-      if (!intakeEntry) {
+      if (!intakeResult) {
         continue;
       }
+
+      // Phase 1 / PR1: a Principle Ledger write boundary refusal is NOT a
+      // failure — the candidate's kind simply does not target the ledger, so
+      // having no ledger entry is the expected state. Report it and continue
+      // without mutating candidate status or creating a dreamer task.
+      //
+      // Statuses are deliberately reused from the existing model (SPEC v2.1 §7
+      // "禁止执行者自行创造新状态"): 'deferred' + 'skipped' rather than a new
+      // status value.
+      if (intakeResult.outcome === 'refused') {
+        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason: intakeResult.message, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: 'No action required: this candidate kind does not target the Principle Ledger.' });
+        continue;
+      }
+
+      const intakeEntry = intakeResult.entry;
 
       try {
         await updateCandidateStatus({ stateManager, candidateId, targetStatus: 'consumed', expectedCurrentStatus: 'pending' });

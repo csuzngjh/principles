@@ -48,6 +48,9 @@ function makeCandidate(
     status: 'pending',
     createdAt: '2026-06-24T00:00:00.000Z',
     ...overrides,
+    // Phase 1 / PR1: the raw persisted kind is what the ledger write boundary
+    // validates, so fixtures default it to the declared kind unless overridden.
+    rawRecommendationKind: overrides.rawRecommendationKind ?? kind,
   };
 }
 
@@ -133,7 +136,7 @@ function makeMockDeps(overrides: {
   } as unknown as RuntimeStateManager;
 
   const intakeService = {
-    intake: async (candidateId: string) => ({ id: `ledger-${candidateId}` }),
+    intake: async (candidateId: string) => ({ outcome: 'ledger_entry', written: true, entry: { id: `ledger-${candidateId}` } }),
   } as unknown as CandidateIntakeService;
 
   const ledgerEntries = overrides.ledgerEntries ?? new Map<string, LedgerPrincipleEntry>();

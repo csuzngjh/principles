@@ -618,8 +618,8 @@ describe('pd diagnose run — auto-intake after success', () => {
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake
-      .mockResolvedValueOnce({ id: 'ledger-1', title: 'Principle 1', status: 'probation' })
-      .mockResolvedValueOnce({ id: 'ledger-2', title: 'Principle 2', status: 'probation' });
+      .mockResolvedValueOnce({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } })
+      .mockResolvedValueOnce({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-2', title: 'Principle 2', status: 'probation' } });
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -667,7 +667,7 @@ describe('pd diagnose run — auto-intake after success', () => {
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake
-      .mockResolvedValueOnce({ id: 'ledger-ok', title: 'OK', status: 'probation' })
+      .mockResolvedValueOnce({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-ok', title: 'OK', status: 'probation' } })
       .mockImplementationOnce(() => { throw new Error('Ledger write failed'); });
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -818,7 +818,7 @@ describe('pd diagnose run — auto-intake after success', () => {
       { candidateId: 'cand-consumed', artifactId: 'art-1', taskId: 'test-task-1', status: 'consumed' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
-    mockIntake.mockResolvedValue({ id: 'ledger-existing', title: 'Existing', status: 'probation' });
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: false, entry: { id: 'ledger-existing', title: 'Existing', status: 'probation' } });
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -883,7 +883,7 @@ describe('pd diagnose run — auto-intake after success', () => {
       { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
-    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'Principle 1', status: 'probation' });
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -1269,7 +1269,7 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
     // so createTask gets called. Individual tests can override this if needed.
     mockGetTask.mockResolvedValue(null);
     mockIntake.mockReset();
-    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'P1', status: 'probation' });
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
   });
 
   it('DREAMER-01: principle candidate — dreamer task created via createTask', async () => {
@@ -1424,7 +1424,7 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
     mockCreateTask.mockResolvedValue(undefined);
     mockGetTask.mockResolvedValue(null);
     mockIntake.mockReset();
-    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'P1', status: 'probation' });
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
     // Default: admit all candidates. Individual tests override for defer.
     vi.mocked(evaluateCandidateAdmissionFromRecord).mockReturnValue({
       decision: 'admitted',
@@ -1691,7 +1691,7 @@ describe('BUG-2 (PRI-442): sourcePainId resolution for dreamer seed', () => {
     mockCreateTask.mockResolvedValue(undefined);
     mockGetTask.mockResolvedValue(null);
     mockIntake.mockReset();
-    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'P1', status: 'probation' });
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
     mockResolveSourcePainId.mockResolvedValue('pain_test-source-1');
   });
 

@@ -299,10 +299,14 @@ describe('pd candidate repair', () => {
 
     // intake returns new entry
     mockService.intake.mockResolvedValue({
-      id: 'new-ledger-entry',
-      title: 'Test 2',
-      text: 'text',
-      status: 'probation',
+      outcome: 'ledger_entry',
+      written: true,
+      entry: {
+        id: 'new-ledger-entry',
+        title: 'Test 2',
+        text: 'text',
+        status: 'probation',
+      },
     });
 
     // consumed_at is null
@@ -411,7 +415,7 @@ describe('pd candidate repair', () => {
         confidence: 0.8,
       });
       mockAdapter.existsForCandidate.mockReturnValue(null);
-      mockService.intake.mockResolvedValue({ id: 'entry-1', title: 'OK', text: 'text', status: 'probation' });
+      mockService.intake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'entry-1', title: 'OK', text: 'text', status: 'probation' } });
 
       await handleCandidateRepair({ candidateId: 'c-ok', workspace: '/tmp/test-workspace', json: true });
 

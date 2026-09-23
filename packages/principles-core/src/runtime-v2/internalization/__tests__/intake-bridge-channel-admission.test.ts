@@ -35,6 +35,7 @@ function candidate(sourceRecommendationJson: string): CandidateRecord {
     confidence: 0.9,
     sourceRecommendationJson,
     recommendationKind: 'rule',
+    rawRecommendationKind: 'rule',
     status: 'pending',
     createdAt: '2026-09-15T00:00:00.000Z',
   };

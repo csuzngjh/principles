@@ -11,6 +11,7 @@ import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-st
 import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
+import { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
 import {
   parsePainIngressV1Payload,
   checkIngressTopLevelConsistency,
@@ -806,8 +807,17 @@ export class PainSignalBridge {
         }
 
         const intakeResult = await this.intakeService.intake(candidate.candidateId);
-        ledgerEntryIds.push(intakeResult.id);
-        ledgerEntryByCandidate.set(candidate.candidateId, intakeResult.id);
+        // Phase 1 / PR1 (Principle Ledger write boundary): the intake service only
+        // writes the ledger when the candidate's persisted recommendation_kind is
+        // a validated 'principle'. A refusal is an explicit disposition, not a
+        // drop — the kind-aware routing below still runs, so rule/prompt
+        // candidates keep their existing channel handling and
+        // implementation/defer candidates keep their existing
+        // not_internalizable reporting.
+        if (intakeResult.outcome === 'ledger_entry') {
+          ledgerEntryIds.push(intakeResult.entry.id);
+          ledgerEntryByCandidate.set(candidate.candidateId, intakeResult.entry.id);
+        }
 
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
@@ -944,6 +954,15 @@ export class PainSignalBridge {
       taskId,
       candidateIds,
       ledgerEntryIds,
+      // Phase 1 / PR1: a ledger entry is only EXPECTED for admitted candidates
+      // whose validated recommendation_kind targets the Principle Ledger.
+      // Without this, a batch of non-principle candidates that the write
+      // boundary correctly refused would be misreported as an intake FAILURE
+      // instead of their real disposition (routed / not_internalizable).
+      ledgerEligibleCandidateCount: candidates.filter((candidate, i) =>
+        admissionResults[i]?.admission.decision === 'admitted'
+        && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind),
+      ).length,
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       autoIntakeEnabled: this.autoIntakeEnabled,
@@ -986,6 +1005,11 @@ export class PainSignalBridge {
       taskId: input.taskId,
       candidateIds,
       ledgerEntryIds,
+      // Phase 1 / PR1: only ledger-eligible candidates can be "missing" an
+      // entry here — see the fresh path for the rationale.
+      ledgerEligibleCandidateCount: candidates.filter((candidate) =>
+        isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind),
+      ).length,
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       autoIntakeEnabled: this.autoIntakeEnabled,

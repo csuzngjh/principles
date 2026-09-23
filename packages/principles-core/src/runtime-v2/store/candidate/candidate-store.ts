@@ -12,7 +12,26 @@ export interface CandidateRecord {
   description: string;
   confidence: number | null;
   sourceRecommendationJson: string;
+  /**
+   * FAIL-OPEN normalized view of {@link rawRecommendationKind}, retained for
+   * read / display compatibility (unknown → 'principle').
+   *
+   * DO NOT use this field for write-boundary decisions: it cannot distinguish a
+   * genuine `'principle'` from an unrecognized or malformed kind. Use
+   * `isPrincipleLedgerEligibleKind(rawRecommendationKind)` instead.
+   */
   recommendationKind: RecommendationKind;
+  /**
+   * The persisted `principle_candidates.recommendation_kind` value with NO
+   * normalization applied — the provenance anchor for the Principle Ledger
+   * write boundary (Phase 1 / PR1).
+   *
+   * `CandidateIntakeService.intake()` refuses to write the ledger unless this
+   * value passes `isPrincipleLedgerEligibleKind()` (i.e. is exactly
+   * `'principle'`), which is what makes unknown / missing kinds FAIL CLOSED
+   * instead of collapsing to a principle.
+   */
+  rawRecommendationKind: string;
   status: 'pending' | 'consumed' | 'expired';
   createdAt: string;
 }
