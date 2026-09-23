@@ -6,7 +6,9 @@
 
 ## The boundary
 
-The OpenClaw plugin package emits three esbuild outputs:
+The OpenClaw plugin package's official esbuild build emits these three bundle
+outputs (dev builds additionally emit maintainer-only `dist/core/*` CLI tools,
+which are outside this boundary):
 
 | Artifact | Role | LLM runtime graph |
 | --- | --- | --- |
