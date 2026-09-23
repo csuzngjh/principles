@@ -718,6 +718,25 @@ describe('PRI-492: RuleHost seed-MVP production E2E chain', () => {
 
     const ruleArtifactId = loopResult.ruleArtifactId!;
 
+    // I3 fail-closed: activation requires a ledger-shaped principle identity on
+    // the artifact. Chain stamping at write time lands separately (Phase 3
+    // Option A′); this E2E stamps the artifact the way post-stamping production
+    // will, so the dispatch under test exercises the real completion service.
+    const piArtifactStore = stateManager.piArtifactStore;
+    const ruleArtifactForStamp = await piArtifactStore.getArtifactById(ruleArtifactId);
+    if (!ruleArtifactForStamp) throw new Error('unreachable: rule artifact exists after adversarial loop');
+    await piArtifactStore.upsertArtifact({
+      artifactId: ruleArtifactForStamp.artifactId,
+      artifactKind: ruleArtifactForStamp.artifactKind,
+      sourceTaskId: ruleArtifactForStamp.sourceTaskId,
+      lineageArtifactIds: ruleArtifactForStamp.lineageArtifactIds,
+      validationStatus: ruleArtifactForStamp.validationStatus,
+      sourcePrincipleId: 'e4920000-0000-4000-8000-000000000492',
+      contentJson: ruleArtifactForStamp.contentJson,
+      createdAt: ruleArtifactForStamp.createdAt,
+      updatedAt: new Date().toISOString(),
+    });
+
     // ═══════════════════════════════════════════════════════════════════════════
     // ACCEPTANCE CRITERION 1: v2 rule artifact with requiresContextVersion,
     // ruleContext cases, and evidenceRefs

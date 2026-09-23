@@ -18,15 +18,18 @@ import { StoreEventEmitter } from '../../index.js';
 import type { TelemetryEvent } from '../../index.js';
 import type { PIArtifactSnapshot, DispatchInput, ChannelWriter } from '../index.js';
 
+// I3 identity boundary: an activation identity must be a ledger-shaped UUID.
+const PID_A = 'a0000000-0000-4000-8000-000000000001';
+
 function makePrincipleArtifact(overrides: Partial<PIArtifactSnapshot> = {}): PIArtifactSnapshot {
   return {
     artifactId: 'art-001',
     artifactKind: 'principle',
     sourceTaskId: 'task-001',
-    sourcePrincipleId: 'P_001',
+    sourcePrincipleId: PID_A,
     lineageArtifactIds: [],
     validationStatus: 'validated',
-    contentJson: JSON.stringify({ principleId: 'P_001', text: 'Test principle' }),
+    contentJson: JSON.stringify({ principleId: PID_A, text: 'Test principle' }),
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -127,12 +130,12 @@ describe('ActivationDispatcher', () => {
     }));
     expect(result.decision).toBe('activated');
     if (result.decision === 'activated') {
-      expect(result.activationId).toBe('act_prompt_P_001');
+      expect(result.activationId).toBe(`act_prompt_${PID_A}`);
       expect(result.action).toBe('prompt_activate');
-      expect(result.targetRef).toBe('ledger://P_001');
+      expect(result.targetRef).toBe(`ledger://${PID_A}`);
     }
     const status = await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'prompt'));
-    expect(status?.activationId).toBe('act_prompt_P_001');
+    expect(status?.activationId).toBe(`act_prompt_${PID_A}`);
   });
 
   it('repeat approved dispatch → already_activated', async () => {
@@ -154,7 +157,7 @@ describe('ActivationDispatcher', () => {
     const result = await dispatcher.dispatch(input);
     expect(result.decision).toBe('already_activated');
     if (result.decision === 'already_activated') {
-      expect(result.activationId).toBe('act_prompt_P_001');
+      expect(result.activationId).toBe(`act_prompt_${PID_A}`);
     }
   });
 
@@ -175,7 +178,7 @@ describe('ActivationDispatcher', () => {
       artifactId: 'corrupted-art-id', // ← corrupted/different artifactId
       channel: 'prompt',
       action: 'prompt_activate',
-      targetRef: 'ledger://P_001',
+      targetRef: `ledger://${PID_A}`,
       activatedAt: '2026-01-01T00:00:00.000Z',
       promotedAt: null,
       deactivatedAt: null,
@@ -204,7 +207,7 @@ describe('ActivationDispatcher', () => {
       artifactId: 'art-001', // ← matches input artifactId
       channel: 'prompt',
       action: 'prompt_activate',
-      targetRef: 'ledger://P_001',
+      targetRef: `ledger://${PID_A}`,
       activatedAt: '2026-01-01T00:00:00.000Z',
       promotedAt: null,
       deactivatedAt: null,
@@ -297,9 +300,9 @@ describe('ActivationDispatcher', () => {
     const status = await stateStore.getActivationStatus(key);
     expect(status).not.toBeNull();
     if (status) {
-      expect(status.activationId).toBe('act_prompt_P_001');
+      expect(status.activationId).toBe(`act_prompt_${PID_A}`);
       expect(status.action).toBe('prompt_activate');
-      expect(status.targetRef).toBe('ledger://P_001');
+      expect(status.targetRef).toBe(`ledger://${PID_A}`);
     }
   });
 
@@ -358,11 +361,11 @@ describe('ActivationDispatcher', () => {
     }));
     expect(result.decision).toBe('activated');
     if (result.decision === 'activated') {
-      expect(result.activationId).toBe('act_archive_P_001');
-      expect(result.targetRef).toBe('ledger://P_001#archived');
+      expect(result.activationId).toBe(`act_archive_${PID_A}`);
+      expect(result.targetRef).toBe(`ledger://${PID_A}#archived`);
     }
     const status = await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'defer_archive'));
-    expect(status?.activationId).toBe('act_archive_P_001');
+    expect(status?.activationId).toBe(`act_archive_${PID_A}`);
   });
 
   // PRI-811 Phase B: writer canActivate guards run inside the enqueue path
@@ -672,7 +675,7 @@ describe('ActivationDispatcher', () => {
   it('queued approval record contains context fields', async () => {
     const { artifactStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact({
-      contentJson: JSON.stringify({ principleId: 'P_001', text: 'Always validate user input before processing' }),
+      contentJson: JSON.stringify({ principleId: PID_A, text: 'Always validate user input before processing' }),
     }));
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.85, confirm: true }));
     expect(result.decision).toBe('queued_for_approval');
@@ -758,13 +761,13 @@ describe('PromptWriter', () => {
     const result = await writer.activate({
       artifactId: 'art-001',
       channel: 'prompt',
-      principleId: 'P_001',
+      principleId: PID_A,
       idempotencyKey: 'art-001::prompt',
       now: '2026-05-17T00:00:00.000Z',
     }, makePrincipleArtifact());
-    expect(result.activationId).toBe('act_prompt_P_001');
+    expect(result.activationId).toBe(`act_prompt_${PID_A}`);
     expect(result.action).toBe('prompt_activate');
-    expect(result.targetRef).toBe('ledger://P_001');
+    expect(result.targetRef).toBe(`ledger://${PID_A}`);
   });
 });
 
@@ -780,20 +783,20 @@ describe('DeferArchiveWriter', () => {
     const result = await writer.activate({
       artifactId: 'art-001',
       channel: 'defer_archive',
-      principleId: 'P_001',
+      principleId: PID_A,
       idempotencyKey: 'art-001::defer_archive',
       now: '2026-05-17T00:00:00.000Z',
     }, makePrincipleArtifact());
-    expect(result.activationId).toBe('act_archive_P_001');
+    expect(result.activationId).toBe(`act_archive_${PID_A}`);
     expect(result.action).toBe('defer_archive');
-    expect(result.targetRef).toBe('ledger://P_001#archived');
+    expect(result.targetRef).toBe(`ledger://${PID_A}#archived`);
   });
 });
 
-describe('extractPrincipleId', () => {
-  it('trims whitespace from sourcePrincipleId', async () => {
+describe('I3 activation identity boundary (writer-level)', () => {
+  it('accepts a whitespace-padded ledger-shaped UUID sourcePrincipleId', async () => {
     const writer = new PromptWriter();
-    const artifact = makePrincipleArtifact({ sourcePrincipleId: '  P_001  ' });
+    const artifact = makePrincipleArtifact({ sourcePrincipleId: `  ${PID_A}  ` });
     const result = await writer.canActivate(artifact);
     expect(result.ok).toBe(true);
   });
@@ -809,14 +812,94 @@ describe('extractPrincipleId', () => {
     expect(result.reason).toBe('no_principle_id_in_artifact');
   });
 
-  it('trims whitespace from contentJson principleId', async () => {
+  it('I3: rejects a content-level principleId — content is never an identity source', async () => {
     const writer = new PromptWriter();
     const artifact = makePrincipleArtifact({
       sourcePrincipleId: undefined,
       contentJson: JSON.stringify({ principleId: '  P_002  ' }),
     });
     const result = await writer.canActivate(artifact);
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('no_principle_id_in_artifact');
+  });
+
+  it('I3: dispatcher refuses with no_principle_id_in_artifact when no validated identity exists', async () => {
+    const artifactStore = new MemoryArtifactReadModel();
+    const stateStore = new MemoryActivationStateStore();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [new PromptWriter()], approvalQueueStore: approvalStore },
+    );
+    artifactStore.addArtifact(makePrincipleArtifact({
+      artifactId: 'art-title-only',
+      // non-UUID column → not a ledger identity; content only has a draft title
+      sourcePrincipleId: 'PRI-001',
+      contentJson: JSON.stringify({ principleDraft: { title: 'Some principle title' } }),
+    }));
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-title-only',
+      channel: 'prompt',
+      confirm: true,
+    }));
+    // The writer's canActivate gate surfaces as a refused decision; nothing is
+    // queued and nothing is activated.
+    expect(result).toMatchObject({ decision: 'refused', reason: 'no_principle_id_in_artifact' });
+    expect(await stateStore.listAllActivations()).toHaveLength(0);
+    expect(await approvalStore.listPending()).toHaveLength(0);
+  });
+
+  it('I3: dispatcher activates when a ledger-shaped UUID identity is present', async () => {
+    const artifactStore = new MemoryArtifactReadModel();
+    const stateStore = new MemoryActivationStateStore();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [new PromptWriter()], approvalQueueStore: approvalStore },
+    );
+    artifactStore.addArtifact(makePrincipleArtifact({ artifactId: 'art-uuid-ok' }));
+    const queued = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-uuid-ok',
+      channel: 'prompt',
+      confirm: true,
+    }));
+    expect(queued.decision).toBe('queued_for_approval');
+    if (queued.decision !== 'queued_for_approval') return;
+    const approved = await approvalStore.approve(queued.approvalId, 'owner-test');
+    expect(approved.ok).toBe(true);
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-uuid-ok',
+      channel: 'prompt',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.approvalId,
+    }));
+    expect(result).toMatchObject({ decision: 'activated', targetRef: `ledger://${PID_A}` });
+  });
+
+  it('legacy compatibility: an already-recorded activation is returned unchanged by the state store', async () => {
+    // Fail-closed applies to NEW activations only; existing rows (including
+    // legacy title-shaped target_refs) are historical records and are never
+    // rewritten or hidden by the boundary.
+    const store = new MemoryActivationStateStore();
+    await store.recordActivation({
+      activationId: 'act_prompt_legacy-title',
+      idempotencyKey: 'legacy::prompt',
+      artifactId: 'art-legacy',
+      channel: 'prompt',
+      action: 'prompt_activate',
+      targetRef: 'ledger://some legacy title identity',
+      activatedAt: '2026-01-01T00:00:00.000Z',
+      deactivatedAt: null,
+    });
+    const rows = await store.listPromptActivations(true);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      activationId: 'act_prompt_legacy-title',
+      targetRef: 'ledger://some legacy title identity',
+    });
   });
 });
 

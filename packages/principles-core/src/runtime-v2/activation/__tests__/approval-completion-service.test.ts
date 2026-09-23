@@ -37,7 +37,7 @@ function createTestArtifact(overrides: Partial<PIArtifactSnapshot> = {}): PIArti
     artifactId: 'art-test-001',
     artifactKind: 'principle',
     sourceTaskId: 'task-001',
-    sourcePrincipleId: 'principle-001',
+    sourcePrincipleId: 'a0000000-0000-4000-8000-000000000001',
     lineageArtifactIds: [],
     validationStatus: 'validated',
     contentJson: JSON.stringify({ text: 'Test principle' }),
@@ -224,7 +224,7 @@ describe('ApprovalCompletionService', () => {
     // would normally re-enqueue. The 'approved' rolloutDecision bypasses this.
     const artifact = createTestArtifact({
       artifactKind: 'principle',
-      sourcePrincipleId: 'principle-001',
+      sourcePrincipleId: 'a0000000-0000-4000-8000-000000000001',
     });
     const approvalStore = new MemoryApprovalQueueStore();
     const { dispatcher, stateStore } = createTestDispatcher(artifact, [

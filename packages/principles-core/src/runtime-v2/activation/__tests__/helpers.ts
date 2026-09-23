@@ -74,7 +74,7 @@ export function createPrincipleArtifact(overrides: Partial<PIArtifactSnapshot> =
     artifactId: 'art-principle-001',
     artifactKind: 'principle',
     sourceTaskId: 'task-pain-001',
-    sourcePrincipleId: 'principle-001',
+    sourcePrincipleId: 'a0000000-0000-4000-8000-000000000001',
     lineageArtifactIds: [],
     validationStatus: 'validated',
     contentJson: JSON.stringify({
@@ -92,7 +92,7 @@ export function createRuleArtifact(overrides: Partial<PIArtifactSnapshot> = {}):
     artifactId: 'art-rule-001',
     artifactKind: 'rule',
     sourceTaskId: 'task-pain-001',
-    sourcePrincipleId: 'principle-001',
+    sourcePrincipleId: 'a0000000-0000-4000-8000-000000000001',
     sourceRuleId: 'rule-001',
     lineageArtifactIds: ['art-principle-001'],
     validationStatus: 'validated',

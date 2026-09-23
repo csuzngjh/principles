@@ -374,6 +374,9 @@ function makeDispatcherDeps(): { dispatchActivation: NonNullable<RolloutReviewer
             return rec ? {
               artifactId: rec.artifactId, artifactKind: rec.artifactKind,
               sourceTaskId: rec.sourceTaskId, lineageArtifactIds: rec.lineageArtifactIds,
+              // I3 fail-closed: the dispatcher resolves the activation identity
+              // from this column — the read model must carry it through.
+              sourcePrincipleId: rec.sourcePrincipleId,
               validationStatus: rec.validationStatus, contentJson: rec.contentJson,
               createdAt: rec.createdAt, updatedAt: rec.updatedAt,
             } : null;
@@ -469,6 +472,9 @@ describe('Journey 8 — 真实 EvaluatorRunner → RolloutReviewerRunner → Act
       await store.upsertArtifact({
         artifactId: SCRIBE_ARTIFACT, artifactKind: 'principle', sourceTaskId: SCRIBE_TASK_ID,
         lineageArtifactIds: [], validationStatus: 'pending',
+        // I3 fail-closed: activation identity must be a ledger UUID — a content
+        // id / draft title is no longer accepted by the dispatcher.
+        sourcePrincipleId: 'c8000000-0000-4000-8000-000000000008',
         contentJson: JSON.stringify({
           principleId: 'principle-j8-real', text: '遇到歧义先确认 Owner 意图',
           principleDraft: { title: 'principle-j8-real', statement: '遇到歧义先确认 Owner 意图' },

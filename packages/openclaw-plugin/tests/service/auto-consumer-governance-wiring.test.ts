@@ -176,6 +176,8 @@ describe('dispatchRolloutActivation (真实 dispatcher 冒烟)', () => {
       await store.upsertArtifact({
         artifactId: 'pi-art-wire-1', artifactKind: 'principle', sourceTaskId: 'eval-wire',
         lineageArtifactIds: [], validationStatus: 'validated',
+        // I3 fail-closed: activation identity must be a ledger-shaped UUID.
+        sourcePrincipleId: 'd1a50000-0000-4000-8000-000000000011',
         contentJson: JSON.stringify({ principleId: 'wire-p1', text: 'wiring smoke principle' }),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       });

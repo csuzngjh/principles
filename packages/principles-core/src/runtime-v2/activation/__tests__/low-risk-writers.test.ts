@@ -21,10 +21,17 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractPrincipleId,
+  resolveActivationPrincipleId,
   PromptWriter,
   DeferArchiveWriter,
 } from '../low-risk-writers';
 import type { PIArtifactSnapshot, PIArtifactValidationStatus, WriterInput } from '../activation-types';
+
+// ── Valid ledger-shaped principle UUIDs (I3 identity boundary fixtures) ──────
+// Ledger `_tree.principles` is keyed by randomUUID(), so an activation identity
+// must be UUID-shaped. Non-UUID ids (PRI-001 style, titles) are refused.
+const PID_A = 'a0000000-0000-4000-8000-000000000001';
+const PID_B = 'b0000000-0000-4000-8000-000000000002';
 
 // ── extractPrincipleId Tests ──────────────────────────────────────────────────
 
@@ -230,6 +237,72 @@ describe('extractPrincipleId', () => {
   });
 });
 
+// ── resolveActivationPrincipleId — I3 activation identity boundary ───────────
+//
+// Phase 3 (Principle Identity Reconciliation): the ONLY identity an activation
+// may carry is a ledger-shaped principle UUID from the source_principle_id
+// column. The lenient extractPrincipleId() above stays for DISPLAY surfaces;
+// the identity path must never fall back to content ids or draft titles.
+
+describe('resolveActivationPrincipleId (I3 fail-closed identity boundary)', () => {
+  it('case 1: accepts a ledger-shaped UUID from source_principle_id', () => {
+    expect(resolveActivationPrincipleId(createArtifact({
+      contentJson: '{}',
+      sourcePrincipleId: PID_A,
+    }))).toBe(PID_A);
+  });
+
+  it('trims whitespace around a valid UUID', () => {
+    expect(resolveActivationPrincipleId(createArtifact({
+      contentJson: '{}',
+      sourcePrincipleId: `  ${PID_A}  `,
+    }))).toBe(PID_A);
+  });
+
+  it('case 2: REJECTS missing source_principle_id even when principleDraft.title exists', () => {
+    const artifact = createArtifact({
+      contentJson: JSON.stringify({
+        principleDraft: { title: 'A perfectly good principle title', statement: 'stmt' },
+      }),
+    });
+    expect(resolveActivationPrincipleId(artifact)).toBeNull();
+  });
+
+  it('case 3: REJECTS non-UUID source_principle_id values', () => {
+    for (const bad of ['PRI-001', 'P_001', 'a title that is not a uuid', '12345']) {
+      expect(resolveActivationPrincipleId(createArtifact({
+        contentJson: '{}',
+        sourcePrincipleId: bad,
+      }))).toBeNull();
+    }
+  });
+
+  it('REJECTS content-level ids — content is never an identity source', () => {
+    for (const content of [
+      { principleId: PID_A },                // even a VALID UUID in content is not the column
+      { sourcePrincipleId: PID_A },
+      { principleDraft: { title: PID_A } },  // not even a UUID-shaped title
+    ]) {
+      expect(resolveActivationPrincipleId(createArtifact({
+        contentJson: JSON.stringify(content),
+      }))).toBeNull();
+    }
+  });
+
+  it('returns null for missing / empty / whitespace-only / non-string column', () => {
+    for (const bad of [undefined, '', '   ', null, 42]) {
+      expect(resolveActivationPrincipleId(createArtifact({
+        contentJson: '{}',
+        sourcePrincipleId: bad as unknown as string,
+      }))).toBeNull();
+    }
+  });
+
+  it('returns null for malformed JSON content (no crash, no guess)', () => {
+    expect(resolveActivationPrincipleId(createArtifact({ contentJson: 'not json' }))).toBeNull();
+  });
+});
+
 // ── PromptWriter Tests ────────────────────────────────────────────────────────
 
 describe('PromptWriter', () => {
@@ -240,8 +313,8 @@ describe('PromptWriter', () => {
   });
 
   describe('canActivate', () => {
-    it('returns ok:true for validated principle artifact with principle ID', async () => {
-      const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) });
+    it('returns ok:true for validated principle artifact with a ledger-shaped source_principle_id (I3)', async () => {
+      const artifact = createArtifact({ contentJson: '{}', sourcePrincipleId: PID_A });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(true);
       expect(result.riskLevel).toBe('low');
@@ -296,10 +369,21 @@ describe('PromptWriter', () => {
       expect(result.riskLevel).toBe('low');
     });
 
-    it('returns ok:true when sourcePrincipleId property is present', async () => {
-      const artifact = createArtifact({ contentJson: '{}', sourcePrincipleId: 'PRI-005' });
+    it('returns ok:true when sourcePrincipleId is a ledger-shaped UUID', async () => {
+      const artifact = createArtifact({ contentJson: '{}', sourcePrincipleId: PID_B });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(true);
+      expect(result.riskLevel).toBe('low');
+    });
+
+    it('I3: returns ok:false when sourcePrincipleId is not a UUID (title-form ids are not identities)', async () => {
+      const artifact = createArtifact({
+        contentJson: JSON.stringify({ principleDraft: { title: 'Some title' } }),
+        sourcePrincipleId: 'PRI-005',
+      });
+      const result = await writer.canActivate(artifact);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe('no_principle_id_in_artifact');
       expect(result.riskLevel).toBe('low');
     });
   });
@@ -366,8 +450,8 @@ describe('DeferArchiveWriter', () => {
   });
 
   describe('canActivate', () => {
-    it('returns ok:true for validated principle artifact with principle ID', async () => {
-      const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) });
+    it('returns ok:true for validated principle artifact with a ledger-shaped source_principle_id (I3)', async () => {
+      const artifact = createArtifact({ contentJson: '{}', sourcePrincipleId: PID_A });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(true);
       expect(result.riskLevel).toBe('low');
@@ -503,7 +587,7 @@ describe('integration: PromptWriter + DeferArchiveWriter', () => {
     const promptWriter = new PromptWriter();
     const archiveWriter = new DeferArchiveWriter();
 
-    const validArtifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) });
+    const validArtifact = createArtifact({ contentJson: '{}', sourcePrincipleId: PID_A });
 
     const promptResult = await promptWriter.canActivate(validArtifact);
     const archiveResult = await archiveWriter.canActivate(validArtifact);

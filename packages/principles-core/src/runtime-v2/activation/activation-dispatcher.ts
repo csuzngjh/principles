@@ -19,7 +19,7 @@ import {
   getChannelRiskLevel,
   makeIdempotencyKey,
 } from './activation-types.js';
-import { extractPrincipleId } from './low-risk-writers.js';
+import { resolveActivationPrincipleId } from './low-risk-writers.js';
 
 /**
  * rc-2 type guard: narrow unknown to Record<string, unknown> without `as`.
@@ -302,7 +302,7 @@ export class ActivationDispatcher {
         {
           artifactId: input.artifactId,
           channel: input.channel,
-          principleId: extractPrincipleId(artifact) ?? '',
+          principleId: resolveActivationPrincipleId(artifact) ?? '',
           idempotencyKey: idempotencyKey,
           now: input.now,
         },
@@ -338,9 +338,16 @@ export class ActivationDispatcher {
     // the activated rule cannot be traced back to the owner-approved principle,
     // producing an untraceable behavior change (P1 #3 fix: removed the
     // sourceRuleId/artifactId fallback that allowed untraceable activation).
-    const principleId = extractPrincipleId(artifact);
+    //
+    // I3 — ACTIVATION IDENTITY BOUNDARY (Phase 3, fail-closed): the identity is
+    // the source_principle_id column when it is a ledger-shaped principle UUID.
+    // The lenient extractPrincipleId() fallbacks (content ids / draft title) are
+    // NOT used here — a title must never become a durable activation identity
+    // (see resolveActivationPrincipleId and
+    // docs/architecture/principle-identity-reconciliation.md).
+    const principleId = resolveActivationPrincipleId(artifact);
     if (!principleId) {
-      return { decision: 'invalid_artifact', reason: 'no_principle_id' };
+      return { decision: 'invalid_artifact', reason: 'no_principle_id_in_artifact' };
     }
 
     const writer = this.writers.get(input.channel);
