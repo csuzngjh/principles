@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDeterministicReleaseArchive, parseSourceDateEpoch } from './deterministic-release-archive.mjs';
+import { detectLocalMusl, pruneForeignSqlitePrebuilds, resolveKeepPrebuildName } from './sqlite-prebuild-pruning.mjs';
 
 // PRI-672: release-manager joins the shipped components. PRI-711:
 // codex-adapter joins too (its node_modules is now materialized into the
@@ -245,6 +246,18 @@ async function main() {
     removeBuildOnlyBinTrees(outputComponent);
     assertSafeSourceTree(outputComponent);
   }
+  // SPEC-P0: prune foreign-platform better-sqlite3 prebuilds from the staged
+  // tree BEFORE the manifest is computed, so the signed per-file manifest and
+  // the deterministic archive always describe the pruned payload (never edit
+  // a manifest after the fact). keepName follows node-gyp-build's own naming;
+  // a site missing its keep binary throws (the installer's require probe is
+  // the deploy-time half of the same guarantee).
+  const keepPrebuildName = resolveKeepPrebuildName({
+    platform: args.platform,
+    arch: args.arch,
+    musl: args.platform === 'linux' ? detectLocalMusl() : false,
+  });
+  const sqlitePrebuildPruning = pruneForeignSqlitePrebuilds(outputDirectory, keepPrebuildName);
   const manifest = { schemaVersion: 1, files: await listPayloadFiles(outputDirectory) };
   const releaseDirectory = join(outputDirectory, '_release');
   mkdirSync(releaseDirectory, { recursive: true });
@@ -268,7 +281,7 @@ async function main() {
     digestFile,
     sourceDateEpoch: process.env.SOURCE_DATE_EPOCH,
   }) : undefined;
-  process.stdout.write(`${JSON.stringify({ assetDirectory: outputDirectory, archive, files: manifest.files.length, platform: `${args.platform}-${args.arch}-abi${args['node-abi']}`, productIdentity: productIdentityStamp ?? null })}\n`);
+  process.stdout.write(`${JSON.stringify({ assetDirectory: outputDirectory, archive, files: manifest.files.length, platform: `${args.platform}-${args.arch}-abi${args['node-abi']}`, productIdentity: productIdentityStamp ?? null, sqlitePrebuildPruning: { keep: keepPrebuildName, ...sqlitePrebuildPruning } })}\n`);
   } catch (error) {
     if (ownsOutput) rmSync(outputDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     throw error;
