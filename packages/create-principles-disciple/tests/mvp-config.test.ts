@@ -755,6 +755,36 @@ describe('Bundle script required vs optional artifacts (Fix A)', () => {
     expect(optionalSection).toContain('Skipping');
     expect(optionalSection).not.toContain('process.exit');
   });
+
+  // PRI-907 round 2 (Codex P2): source-order contract. The console prebuild must
+  // sit below the other components' gates (console's tsc resolves their
+  // dist/*.d.ts) and above the console gate — otherwise a missing dist exits
+  // before the build can produce it. The script has no injectable source roots,
+  // so the missing-dist case is not reproducible in CI without renaming the
+  // repository's own build output; it was verified by hand once (A/B run).
+  it('console is built after the other components\' gates and before the console gate', () => {
+    const buildMarker = "'run', 'build', '--workspace=@principles/pd-console'";
+    const buildStart = content.indexOf(buildMarker);
+    expect(buildStart, 'console prebuild invocation missing').toBeGreaterThan(-1);
+    expect(content.indexOf(buildMarker, buildStart + 1), 'console prebuild must appear exactly once').toBe(-1);
+
+    const consoleGateStarts = [
+      content.indexOf('for (const item of CONSOLE_REQUIRED)'),
+      content.indexOf('for (const item of CONSOLE_REQUIRED)', content.indexOf('for (const item of CONSOLE_REQUIRED)') + 1),
+    ];
+    expect(consoleGateStarts[0], 'console gate loop missing').toBeGreaterThan(-1);
+    expect(consoleGateStarts[1], 'expected exactly two CONSOLE_REQUIRED loops (gate + copy)').toBeGreaterThan(-1);
+    expect(content.indexOf('for (const item of CONSOLE_REQUIRED)', consoleGateStarts[1] + 1)).toBe(-1);
+
+    expect(buildStart, 'console gate exits before the build can produce dist').toBeLessThan(consoleGateStarts[0]);
+    expect(consoleGateStarts[0]).toBeLessThan(consoleGateStarts[1]);
+
+    for (const dep of ['PLUGIN_REQUIRED', 'PD_CLI_REQUIRED', 'CORE_REQUIRED', 'HOST_RUNTIME_REQUIRED', 'CODEX_ADAPTER_REQUIRED']) {
+      const depGateStart = content.indexOf(`for (const item of ${dep})`);
+      expect(depGateStart, `${dep} gate loop missing`).toBeGreaterThan(-1);
+      expect(depGateStart, `console built before ${dep} gate would mask its failure message`).toBeLessThan(buildStart);
+    }
+  });
 });
 
 describe('Bundle integration test (requires sibling build)', () => {
