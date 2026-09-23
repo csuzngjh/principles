@@ -149,7 +149,7 @@ describe('pd candidate intake', () => {
     };
 
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
-    mockService.intake.mockResolvedValue(mockEntry);
+    mockService.intake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: mockEntry });
 
     await handleCandidateIntake({
       candidateId: 'valid-id',
@@ -198,7 +198,7 @@ describe('pd candidate intake', () => {
     };
 
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
-    mockService.intake.mockResolvedValue(mockEntry);
+    mockService.intake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: mockEntry });
 
     await handleCandidateIntake({
       candidateId: 'valid-id',
@@ -431,7 +431,7 @@ describe('pd candidate intake', () => {
     };
 
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
-    mockService.intake.mockResolvedValue(mockEntry);
+    mockService.intake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: mockEntry });
 
     await handleCandidateIntake({
       candidateId: 'valid-id',
@@ -467,7 +467,7 @@ describe('pd candidate intake', () => {
     };
 
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
-    mockService.intake.mockResolvedValue(mockEntry);
+    mockService.intake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: mockEntry });
 
     await handleCandidateIntake({
       candidateId: 'valid-id',
@@ -544,7 +544,7 @@ describe('pd candidate intake', () => {
     };
 
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
-    mockService.intake.mockResolvedValue(mockEntry);
+    mockService.intake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: mockEntry });
 
     const capturedPrepareCalls: { sql: string; runArgs: unknown[] }[] = [];
     const originalConnection = mockStateManager.connection;
@@ -593,7 +593,7 @@ describe('pd candidate intake', () => {
     };
 
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
-    mockService.intake.mockResolvedValue(mockEntry);
+    mockService.intake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: mockEntry });
 
     const originalConnection = mockStateManager.connection;
     mockStateManager.connection = {
@@ -718,7 +718,7 @@ describe('pd candidate intake', () => {
         confidence: 0.8,
       };
       mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
-      mockService.intake.mockResolvedValue({ id: 'entry-1', title: 'Test', text: 'Test', status: 'probation' });
+      mockService.intake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'entry-1', title: 'Test', text: 'Test', status: 'probation' } });
 
       await handleCandidateIntake({
         candidateId: 'admitted-cand',

@@ -395,6 +395,8 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
         status: 'pending',
         createdAt: new Date().toISOString(),
         ...overrides,
+        // Phase 1 / PR1: raw persisted kind is what the ledger write boundary reads.
+        rawRecommendationKind: overrides.rawRecommendationKind ?? 'principle',
       };
     }
 

@@ -21,6 +21,8 @@ function makeCandidate(id: string, kind: CandidateRecord['recommendationKind']):
     confidence: 0.35,
     sourceRecommendationJson: '{}',
     recommendationKind: kind,
+    // Phase 1 / PR1: raw persisted kind is what the ledger write boundary reads.
+    rawRecommendationKind: kind,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };
@@ -102,10 +104,10 @@ function makeBridgeDeps(overrides: {
   const intakeService: CandidateIntakeService = {
     intake: async (candidateId: string) => {
       const result = intakeResults.get(candidateId);
-      if (result) return result;
+      if (result) return { outcome: 'ledger_entry' as const, written: false, entry: result };
       const entry = { id: `ledger-${candidateId}` };
       intakeResults.set(candidateId, entry);
-      return entry;
+      return { outcome: 'ledger_entry' as const, written: true, entry };
     },
   } as unknown as CandidateIntakeService;
 
@@ -365,6 +367,8 @@ describe('PainSignalBridge dreamer task seeding', () => {
       confidence: 0.85,
       sourceRecommendationJson: '{}',
       recommendationKind: kind,
+      // Phase 1 / PR1: raw persisted kind is what the ledger write boundary reads.
+      rawRecommendationKind: kind,
       status: 'pending',
       createdAt: new Date().toISOString(),
     };
@@ -407,7 +411,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
     };
 
     const intakeService: CandidateIntakeService = {
-      intake: async (candidateId: string) => ({ id: `ledger-${candidateId}` }),
+      intake: async (candidateId: string) => ({ outcome: 'ledger_entry', written: true, entry: { id: `ledger-${candidateId}` } }),
     } as unknown as CandidateIntakeService;
 
     const ledgerAdapter: LedgerAdapter = {

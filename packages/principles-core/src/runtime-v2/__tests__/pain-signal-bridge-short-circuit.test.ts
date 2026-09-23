@@ -53,7 +53,7 @@ function createMocks() {
   };
 
   const intakeService = {
-    intake: vi.fn().mockResolvedValue({ id: 'ledger-sc-1' }),
+    intake: vi.fn().mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-sc-1' } }),
   } as unknown as CandidateIntakeService;
 
   const ledgerAdapter: LedgerAdapter = {

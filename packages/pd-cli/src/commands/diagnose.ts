@@ -527,7 +527,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
 
     const candidates = await stateManager.getCandidatesByTaskId(opts.taskId);
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string }[] = [];
     let intakeFailed = false;
 
     if (opts.intake === false) {
@@ -560,15 +560,28 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           continue;
         }
         try {
-          const entry = await intakeService.intake(candidate.candidateId);
+          const intakeResult = await intakeService.intake(candidate.candidateId);
+          // Phase 1 / PR1: candidate status handling is deliberately UNCHANGED
+          // (SPEC v2.1 Step 2 "保持现有 candidate persistence / routing / defer
+          // 行为"). Only the Principle Ledger write is gated, so a refused
+          // candidate is still consumed and remains eligible for the kind-aware
+          // dreamer seed loop below.
           if (candidate.status !== 'consumed') {
             await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
           }
-          intakeResults.push({
-            candidateId: candidate.candidateId,
-            ledgerEntryId: entry.id,
-            status: 'consumed',
-          });
+          if (intakeResult.outcome === 'ledger_entry') {
+            intakeResults.push({
+              candidateId: candidate.candidateId,
+              ledgerEntryId: intakeResult.entry.id,
+              status: 'consumed',
+            });
+          } else {
+            intakeResults.push({
+              candidateId: candidate.candidateId,
+              status: 'consumed',
+              ledgerWriteRefused: intakeResult.reason,
+            });
+          }
         } catch (intakeErr: unknown) {
           intakeFailed = true;
           const intakeErrorMessage = intakeErr instanceof Error ? intakeErr.message : String(intakeErr);
@@ -694,7 +707,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       console.log(`\n  Candidate Intake:`);
       for (const ir of intakeResults) {
         if (ir.status === 'consumed') {
-          console.log(`    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`);
+          console.log(ir.ledgerEntryId
+            ? `    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`
+            : `    ${ir.candidateId}: consumed (Principle Ledger write refused: ${ir.ledgerWriteRefused})`);
         } else if (ir.status === 'skipped') {
           console.log(`    ${ir.candidateId}: skipped (--no-intake)`);
         } else if (ir.status === 'intake_failed') {

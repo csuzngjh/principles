@@ -46,6 +46,10 @@ export class SqliteArtifactStore implements ArtifactStore {
       confidence: r.confidence,
       sourceRecommendationJson: r.source_recommendation_json,
       recommendationKind: resolveRecommendationKind(r.recommendation_kind),
+      // Phase 1 / PR1: mirror SqliteCandidateStore — carry the persisted column
+      // value verbatim so the Principle Ledger write boundary can validate
+      // provenance rather than the fail-open normalized view.
+      rawRecommendationKind: r.recommendation_kind,
       status: r.status as CandidateRecord['status'],
       createdAt: r.created_at,
     }));
