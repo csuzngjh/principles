@@ -13,6 +13,7 @@ import { createProductionPainEvidenceHandler, type PainDatabaseFactory, type Pai
 import type { GovernanceHostKind, ToolSemanticRegistry } from '@principles/core/runtime-v2';
 
 export * from './active-principle-prompt.js';
+export * from './prompt-injection-projection.js';
 export * from './pd-config.js';
 export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';

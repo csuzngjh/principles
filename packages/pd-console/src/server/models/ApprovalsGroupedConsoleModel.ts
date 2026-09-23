@@ -4,7 +4,7 @@ import {
   SqlitePIArtifactStore,
   ApprovalQueue,
 } from '@principles/core/runtime-v2';
-import { buildActivePrinciplePromptContext } from '@principles/host-runtime';
+import { buildLivePromptInjectionProjection } from '@principles/host-runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
 import {
@@ -265,21 +265,23 @@ export class ApprovalsGroupedConsoleModel {
   }
 
   /**
-   * PRI-908: recompute the production prompt injection projection (same
-   * readonly FIFO + budget logic the prompt hook and the PRI-890 approve-time
-   * check use) so the focus page can forecast "approved ≠ effective" BEFORE
-   * the Owner decides. Advisory only: a projection failure omits the field —
-   * the approve-time warning remains the fail-loud exclusion report (rc-9),
-   * so this must never fail the grouped read.
+   * PRI-908: recompute the production prompt injection projection so the
+   * focus page can forecast "approved ≠ effective" BEFORE the Owner decides.
+   * PR #1844 follow-up: the forecast follows the workspace's REAL injection
+   * route (`buildLivePromptInjectionProjection` — legacy trimToBudget vs
+   * shared render via abstraction_layer_v1), matching the PRI-890 approve-time
+   * check. Advisory only: a projection failure omits the field — the
+   * approve-time warning remains the fail-loud exclusion report (rc-9), so
+   * this must never fail the grouped read.
    */
   private async readPromptInjectionBudgetStatus(): Promise<{ promptInjection?: PromptInjectionBudgetStatus }> {
     try {
-      const context = await buildActivePrinciplePromptContext({ workspaceDir: this.workspaceDir });
+      const projection = await buildLivePromptInjectionProjection({ workspaceDir: this.workspaceDir });
       return {
         promptInjection: {
-          budget: context.budget,
-          usedChars: context.additionalContext.length,
-          truncated: context.truncated,
+          budget: projection.budget,
+          usedChars: projection.usedChars,
+          truncated: projection.truncated,
         },
       };
     } catch (err: unknown) {
