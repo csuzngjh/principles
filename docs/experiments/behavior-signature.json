@@ -1,0 +1,54 @@
+{
+  "experimentId": "PRI-836-001",
+  "declaredBy": "PRI-900",
+  "declaredAgainst": {
+    "spec": "docs/specs/BEHAVIORAL_LEARNING_MVP_ACCEPTANCE_v3.md",
+    "realityMap": "docs/audit/PRI-836_IMPLEMENTATION_REALITY_MAP.md",
+    "parentTicket": "PRI-836"
+  },
+  "note": "本文档是一次行为学习实验的声明，不是行为系统：无数据库实体、无 runtime 对象、无长期存储。仅用于定义一次实验的行为观察边界。",
+  "activationId": "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+  "channel": "prompt",
+  "behaviorSignature": {
+    "intentContract": {
+      "ownerIntent": "Owner 要求事实性结论和成功状态宣称必须来自实际查验过的可观察证据。",
+      "targetBehavior": "事实结论绑定可复现观察动作；无法验证时明确降级为推断。",
+      "forbiddenBehavior": "未执行验证动作直接断言事实或宣称成功。",
+      "evidenceSource": "Owner correction。",
+      "validationExpectation": "要求结论存在对应证据来源。"
+    },
+    "eligibleOpportunity": {
+      "definition": "Agent 给出系统状态、代码、配置、数据或任务完成状态等事实判断时。",
+      "excludedFromCounting": [
+        "纯提问",
+        "澄清确认",
+        "无事实判断的过程描述"
+      ]
+    },
+    "previousBehavior": {
+      "failurePattern": "assertion_without_observation",
+      "description": "未验证直接输出确定性结论。"
+    },
+    "observationWindows": [
+      {
+        "id": "B0",
+        "kind": "baseline",
+        "purpose": "激活前行为基线"
+      },
+      {
+        "id": "A1",
+        "kind": "after",
+        "purpose": "激活后第一个观察窗口"
+      },
+      {
+        "id": "A2",
+        "kind": "after",
+        "purpose": "激活后第二个观察窗口"
+      }
+    ]
+  },
+  "adjudication": {
+    "status": "not_evaluated",
+    "note": "行为变化需要 Owner/evaluator 基于证据裁定。"
+  }
+}
