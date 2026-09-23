@@ -1,5 +1,26 @@
 # @principles/pd-cli
 
+## 1.152.13
+
+### Patch Changes
+
+- 99e6a8c: RAH-1 (PRI-905): production builds now exclude test code (tsconfig.build.json: *.test.*, __tests__/, __fixtures__/, *.spec.*), clean dist before building, and fail the build if compiled test artifacts appear in dist. Published dist shrinks accordingly (@principles/core tarball was ~57% test artifacts by size); runtime API, source layout and vitest behavior are unchanged. Test files are still type-checked via the new `typecheck` (tsc --noEmit) scripts, wired into verify:merge.
+- 454eccf: RAH-2 (PRI-906): add a `files` publish whitelist (`dist`, `README.md`) to @principles/pd-cli. The package previously had no whitelist, so npm shipped the entire working tree: 111 uncompiled source files, the full 111-file test suite, and 2 development scripts alongside dist (~450 published files). Runtime surface (bin/exports/main → dist) is unchanged.
+- Updated dependencies [c7453ea]
+- Updated dependencies [84c7074]
+- Updated dependencies [1ac725c]
+- Updated dependencies [df43600]
+- Updated dependencies [99e6a8c]
+- Updated dependencies [edbbcd9]
+- Updated dependencies [8b7b775]
+- Updated dependencies [9d98f89]
+- Updated dependencies [92074a0]
+  - @principles/host-runtime@0.7.8
+  - @principles/codex-adapter@0.4.7
+  - principles-disciple@2.0.3
+  - @principles/core@1.287.2
+  - @principles/install-layout@0.2.7
+
 ## 1.152.12
 
 ### Patch Changes
