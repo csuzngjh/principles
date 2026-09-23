@@ -724,6 +724,7 @@
           "nextActionLabel": "Next action:",
           "blockers": "Needs attention",
           "uncertainty": "Evidence uncertainty",
+          "sameReasonCount": "({{n}} in total)",
           "provenance": "Canonical evidence references",
           "timeline": "Governance timeline",
           "timelineEmpty": "No governance events are available yet.",
