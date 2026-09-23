@@ -33,6 +33,16 @@ function splitWarningCode(warning: string): { code: string; message: string } {
   return { code: head, message: trimmed.slice(separator + 1).trim() };
 }
 
+/**
+ * The server joins per-record warnings with "; " (ApprovalsConsoleModel.approve),
+ * so one successWarnings entry can carry several codes. Split only where a
+ * segment STARTS with a new "code:" pattern — "; the activation is committed"
+ * inside a message body must not split. Unrecognized text stays one segment.
+ */
+export function splitApprovalWarnings(joined: string): string[] {
+  return joined.split(/;\s*(?=[a-z][a-z0-9_]*:\s)/).map((segment) => segment.trim()).filter((segment) => segment.length > 0);
+}
+
 /** Digits immediately after `prefix`, ended by any non-digit — else null. */
 function intAfterPrefix(message: string, prefix: string): number | null {
   const start = message.indexOf(prefix);

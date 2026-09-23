@@ -25,8 +25,15 @@ import type {
   ActivationRecord,
 } from "../../api.js";
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
+import { validatePromptInjectionBudgetStatus } from "../../utils/validators.js";
+import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
-import { localizeApprovalWarning } from "../../utils/approval-warning-localization.js";
+import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
+
+/** PRI-908: how long the decided card stays visible before the pending list refresh removes it. */
+const DECIDED_REFRESH_DELAY_MS = 1600;
+/** PRI-908: per decision, at most this many warning toasts render individually; the rest aggregate into one (rc-9: nothing dropped). */
+const MAX_WARNING_TOASTS = 3;
 import { fetchGovernanceExperience, fetchOwnerDecisionInbox } from "../../api.js";
 import type { OwnerDecisionInboxData } from "../../api.js";
 import type {
@@ -149,8 +156,9 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
   };
 }
 
-function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData | null {
-  if (!isRecord(raw)) return null;
+// Exported for the focus-page contract tests (same precedent as
+// summarizeDecisionResults / selectDecisionSurfaceItems).
+export function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData | null {  if (!isRecord(raw)) return null;
   if (
     !Object.hasOwn(raw, "groups") ||
     !Object.hasOwn(raw, "generatedAt")
@@ -172,6 +180,10 @@ function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData | null
     groups: validatedGroups,
     generatedAt,
     note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined,
+    // PRI-908: the pre-approval injection-budget forecast must survive page-local
+    // validation, or the queue badge can never render; malformed status degrades
+    // to undefined (badge absent) rather than rejecting the payload.
+    promptInjection: validatePromptInjectionBudgetStatus(raw.promptInjection) ?? undefined,
   };
 }
 
@@ -386,7 +398,7 @@ function PendingReviewCard({
   actionsLockedReason?: string;
   onDecisionApplied: () => void;
   /** PRI-908: 提示词注入预算现状（批准前预告"批了是否会生效"）。 */
-  promptInjection?: { budget: number; usedChars: number; truncated: boolean };
+  promptInjection?: PromptInjectionBudgetStatus;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -415,21 +427,29 @@ function PendingReviewCard({
 
   function scheduleDecisionRefresh() {
     if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
-    refreshTimerRef.current = window.setTimeout(() => onDecisionApplied(), 1600);
+    refreshTimerRef.current = window.setTimeout(() => onDecisionApplied(), DECIDED_REFRESH_DELAY_MS);
   }
 
   /** PRI-890/908: 非致命服务端警告必须抵达 Owner（rc-9），且必须说人话。 */
   function notifySuccessWarnings(successWarnings: readonly string[]) {
-    for (const warning of successWarnings.slice(0, 3)) {
-      const localized = localizeApprovalWarning(warning, t);
-      toast.warning(localized.title, {
-        description: localized.body
-          ? `${localized.body}\n${t("pages.focus.approveWarningDetail", { defaultValue: "原始信息" })}: ${localized.detail}`
-          : localized.detail,
+    const segments = successWarnings.flatMap((warning) => splitApprovalWarnings(warning));
+    const localized = segments.map((warning) => localizeApprovalWarning(warning, t));
+    const renderDetail = (detail: string) =>
+      `${t("pages.focus.approveWarningDetail", { defaultValue: "原始信息" })}: ${detail}`;
+    for (const item of localized.slice(0, MAX_WARNING_TOASTS)) {
+      toast.warning(item.title, {
+        description: item.body ? `${item.body}\n${renderDetail(item.detail)}` : item.detail,
         duration: 15000,
-        action: localized.activationAction
+        action: item.activationAction
           ? { label: t("pages.focus.goActivationCta", { defaultValue: "前往生效情况" }), onClick: () => navigate("/activation") }
           : undefined,
+      });
+    }
+    const overflow = localized.slice(MAX_WARNING_TOASTS);
+    if (overflow.length > 0) {
+      toast.warning(t("pages.focus.approveWarning.overflowTitle", { defaultValue: "还有 {{count}} 条警告", count: overflow.length }), {
+        description: overflow.map((item) => renderDetail(item.detail)).join("\n"),
+        duration: 15000,
       });
     }
   }

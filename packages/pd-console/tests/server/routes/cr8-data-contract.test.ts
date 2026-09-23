@@ -485,11 +485,12 @@ describe('CR8 Backend Data Contract Routes', () => {
       const data = getDataObject(body);
       expect(data).toBeDefined();
 
-      // The forecast is advisory: the projection recompute is wrapped so it
-      // either reports a well-formed status or omits itself — never fails the
-      // grouped read, and never reports a malformed half-status.
+      // The forecast is advisory in production (projection failure omits the
+      // field), but THIS fixture is deterministic: state.db exists with the
+      // full runtime DDL and no config.yaml, so the projection recomputes and
+      // the field is always present. Assert presence, not absence-by-skip
+      // (a test that can return early proves nothing).
       const promptInjection = data!['promptInjection'];
-      if (promptInjection === undefined) return;
       expect(isRecord(promptInjection)).toBe(true);
       const budget = promptInjection!['budget'];
       const usedChars = promptInjection!['usedChars'];

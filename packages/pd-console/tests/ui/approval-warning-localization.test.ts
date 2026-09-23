@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { localizeApprovalWarning, type TranslateFn } from '../../src/ui/utils/approval-warning-localization.js';
+import { localizeApprovalWarning, splitApprovalWarnings, type TranslateFn } from '../../src/ui/utils/approval-warning-localization.js';
 import { validateApprovalsGrouped } from '../../src/ui/utils/validators.js';
+import { validateApprovalsGroupedData } from '../../src/ui/pages/focus/FocusPage.js';
 
 // The exact live server text (ApprovalsConsoleModel.ts:244, PRI-890).
 const BUDGET_WARNING =
@@ -79,5 +80,41 @@ describe('validateApprovalsGrouped promptInjection (PRI-908)', () => {
     expect(validateApprovalsGrouped({ ...base, promptInjection: { budget: 2000, usedChars: 'many', truncated: false } })?.promptInjection).toBeUndefined();
     expect(validateApprovalsGrouped({ ...base, promptInjection: 'saturated' })?.promptInjection).toBeUndefined();
     expect(validateApprovalsGrouped(base)?.promptInjection).toBeUndefined();
+  });
+});
+
+describe('splitApprovalWarnings (PRI-908 review fix)', () => {
+  it('splits server-joined warnings at each "code:" boundary', () => {
+    const joined = 'ledger_activate_skipped: artifact x not found in artifact store; injection_budget_excluded: the activation is committed but the prompt injection budget (2000c, FIFO by activated_at) is already filled by 3 earlier activation(s)';
+    const segments = splitApprovalWarnings(joined);
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toMatch(/^ledger_activate_skipped:/);
+    expect(segments[1]).toMatch(/^injection_budget_excluded:/);
+  });
+
+  it('does NOT split inside a message body that contains "; the activation ..." prose', () => {
+    const checkFailed = 'injection_budget_check_failed: could not recompute the prompt injection projection (boom); the activation is committed but its injection status is unverified. nextAction=check .pd/state.db readability';
+    expect(splitApprovalWarnings(checkFailed)).toHaveLength(1);
+  });
+
+  it('keeps free text without any code boundary as one segment', () => {
+    expect(splitApprovalWarnings('something went wrong; badly')).toEqual(['something went wrong; badly']);
+  });
+});
+
+describe('FocusPage page-local validateApprovalsGroupedData (PRI-908 review fix)', () => {
+  const base = { groups: [], generatedAt: '2026-09-23T00:00:00.000Z' };
+
+  it('carries the forecast through to the page state — without this the queue badge can never render', () => {
+    const result = validateApprovalsGroupedData({ ...base, promptInjection: { budget: 2000, usedChars: 1940, truncated: true } });
+    expect(result).not.toBeNull();
+    expect(result?.promptInjection).toEqual({ budget: 2000, usedChars: 1940, truncated: true });
+  });
+
+  it('degrades a malformed forecast to absent instead of rejecting the payload', () => {
+    const malformed = validateApprovalsGroupedData({ ...base, promptInjection: { budget: 0 } });
+    expect(malformed).not.toBeNull();
+    expect(malformed?.promptInjection).toBeUndefined();
+    expect(validateApprovalsGroupedData(base)?.promptInjection).toBeUndefined();
   });
 });
