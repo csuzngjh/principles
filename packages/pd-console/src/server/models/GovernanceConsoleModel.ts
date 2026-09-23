@@ -192,6 +192,14 @@ export class GovernanceConsoleModel {
   async getGovernanceQueue(): Promise<GovernanceQueueResponse> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
+      // Security audit run-1 (gate-failopen-allow-on-state-corruption): the
+      // governed agent can delete state.db, and the gate then fails open —
+      // the Owner must be able to distinguish "deleted/lost after
+      // initialization" (workspace config present, enforcement silently off)
+      // from an ordinary never-initialized workspace. Same machine-readable
+      // state code (no UI i18n surface change); the distinction lives in the
+      // human-readable reason/note.
+      const workspaceInitialized = fs.existsSync(path.join(this.workspaceDir, '.pd', 'config.yaml'));
       return {
         pendingReviewCount: 0,
         behaviorDeviationCount: 0,
@@ -199,10 +207,16 @@ export class GovernanceConsoleModel {
         governanceState: 'none',
         stateReasonCode: 'state_db_missing',
         nextActionCode: 'run_config_doctor',
-        stateReason: 'State database not initialized. PD has not run in this workspace.',
-        nextAction: 'Ensure the OpenClaw plugin is enabled, or run pd config doctor.',
+        stateReason: workspaceInitialized
+          ? 'State database is MISSING, but this workspace was initialized before (.pd/config.yaml present). state.db was deleted or lost — Owner-approved RuleCode is NOT being enforced.'
+          : 'State database not initialized. PD has not run in this workspace.',
+        nextAction: workspaceInitialized
+          ? 'Owner-approved rules are not enforced while state.db is missing. Restore state.db from backup or re-initialize the workspace runtime state, then re-approve rules; run pd config doctor to inspect the workspace.'
+          : 'Ensure the OpenClaw plugin is enabled, or run pd config doctor.',
         generatedAt: new Date().toISOString(),
-        note: 'state.db not found — workspace may not be initialized',
+        note: workspaceInitialized
+          ? 'state.db not found although .pd/config.yaml exists — possible deletion of the governance store (rule enforcement is degraded, fail-open)'
+          : 'state.db not found — workspace may not be initialized',
       };
     }
 
@@ -524,6 +538,24 @@ export class GovernanceConsoleModel {
       }
 
       return response;
+    } catch (err) {
+      // Security audit run-1 (gate-failopen-allow-on-state-corruption): a
+      // state.db that EXISTS but is corrupt must surface as a degraded state
+      // (the RuleHost gate fails open against the same file) instead of an
+      // unhandled 500. Same machine-readable family as the missing leg; the
+      // reason carries the distinction.
+      return {
+        pendingReviewCount: 0,
+        behaviorDeviationCount: 0,
+        stagnationSignals: [],
+        governanceState: 'degraded',
+        stateReasonCode: 'degraded_state',
+        nextActionCode: 'run_config_doctor',
+        stateReason: 'State database is present but UNREADABLE (corrupt or not a valid database) — Owner-approved RuleCode is NOT being enforced while the governance store is damaged.',
+        nextAction: 'Restore state.db from backup or re-initialize the workspace runtime state, then re-approve rules; run pd config doctor to inspect the workspace.',
+        generatedAt: new Date().toISOString(),
+        note: `state.db unreadable: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+      };
     } finally {
       try { conn.close(); } catch { /* best-effort */ }
     }

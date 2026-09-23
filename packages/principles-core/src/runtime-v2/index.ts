@@ -1183,7 +1183,8 @@ export type {
 
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
 export { MemoryPIArtifactStore } from './internalization/pi-artifact-store.js';
-export { SqlitePIArtifactStore } from './store/artifact/sqlite-pi-artifact-store.js';
+export { SqlitePIArtifactStore, mapPiArtifactRow } from './store/artifact/sqlite-pi-artifact-store.js';
+export type { PiArtifactRow } from './store/artifact/sqlite-pi-artifact-store.js';
 
 // ── L2 Agent Loop Adapter (PRI-419) ──────────────────────────────────────────
 
@@ -1464,6 +1465,7 @@ export {
   buildPromotionEvidenceSnapshot,
   computeArtifactDigest,
   normalizeOwnerIdentity,
+  verifyPiArtifactRowDigest,
 } from './activation/index.js';
 
 export type {
@@ -1471,6 +1473,7 @@ export type {
   PromptActivationReaderResult,
   ApprovalCompletionInput,
   ApprovalCompletionResult,
+  ArtifactDigestCheck,
 } from './activation/index.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import {
   checkConversationAccessConfig,
   getPluginEntry,
   ensureConversationAccessInConfig,
+  isExplicitConversationAccessOptOut,
 } from '../../src/core/config-health.js';
 
 vi.mock('os', async () => {
@@ -77,6 +78,19 @@ describe('config-health', () => {
       expect(getPluginEntry({ plugins: { entries: {} } }, 'test')).toBeUndefined();
     });
   });
+
+  describe('isExplicitConversationAccessOptOut', () => {
+    it('returns true only for an explicit hooks.allowConversationAccess === false', () => {
+      expect(isExplicitConversationAccessOptOut({ hooks: { allowConversationAccess: false } })).toBe(true);
+      expect(isExplicitConversationAccessOptOut({ hooks: { allowConversationAccess: true } })).toBe(false);
+      expect(isExplicitConversationAccessOptOut({ hooks: {} })).toBe(false);
+      expect(isExplicitConversationAccessOptOut({ enabled: true })).toBe(false);
+      expect(isExplicitConversationAccessOptOut({ hooks: 'garbage' })).toBe(false);
+      expect(isExplicitConversationAccessOptOut(null)).toBe(false);
+      expect(isExplicitConversationAccessOptOut('string')).toBe(false);
+      expect(isExplicitConversationAccessOptOut([])).toBe(false);
+    });
+  });
 });
 
 describe('ensureConversationAccessInConfig', () => {
@@ -119,6 +133,54 @@ describe('ensureConversationAccessInConfig', () => {
     writeFileSync(configPath, JSON.stringify(cfg), 'utf8');
     const result = ensureConversationAccessInConfig();
     expect(result).toBe(false);
+  });
+
+  // Audit finding openclaw-plugin:conversation-access-autofix-overrides-explicit-owner-opt-out:
+  // an explicit `false` is the Owner's documented turn-off
+  // (`openclaw config set ... hooks.allowConversationAccess false`). The
+  // auto-fix repairs only an ABSENT flag — it must never rewrite an explicit
+  // deny, and the deny must survive gateway restarts.
+  it('preserves an explicit allowConversationAccess=false opt-out untouched', () => {
+    const cfg = {
+      someTopLevelSetting: 'value',
+      plugins: {
+        entries: {
+          'principles-disciple': {
+            enabled: true,
+            hooks: { allowConversationAccess: false },
+          },
+        },
+      },
+    };
+    writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf8');
+    const before = readFileSync(configPath, 'utf8');
+
+    const result = ensureConversationAccessInConfig();
+
+    expect(result).toBe(false);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
+    const updated = JSON.parse(readFileSync(configPath, 'utf8'));
+    expect(updated.plugins.entries['principles-disciple'].hooks.allowConversationAccess).toBe(false);
+    expect(updated.someTopLevelSetting).toBe('value');
+  });
+
+  it('sets the flag to true when the hooks object exists but the key is absent', () => {
+    const cfg = {
+      plugins: {
+        entries: {
+          'principles-disciple': {
+            enabled: true,
+            hooks: { somethingElse: true },
+          },
+        },
+      },
+    };
+    writeFileSync(configPath, JSON.stringify(cfg), 'utf8');
+    const result = ensureConversationAccessInConfig();
+    expect(result).toBe(true);
+    const updated = JSON.parse(readFileSync(configPath, 'utf8'));
+    expect(updated.plugins.entries['principles-disciple'].hooks.allowConversationAccess).toBe(true);
+    expect(updated.plugins.entries['principles-disciple'].hooks.somethingElse).toBe(true);
   });
 
   it('sets allowConversationAccess to true when missing', () => {

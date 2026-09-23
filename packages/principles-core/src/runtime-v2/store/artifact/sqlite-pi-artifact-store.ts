@@ -1,7 +1,7 @@
 import type { SqliteConnection } from '../sqlite-connection.js';
 import type { PIArtifactRecord, PIArtifactStore } from '../../internalization/pi-artifact.js';
 
-interface PiArtifactRow {
+export interface PiArtifactRow {
   artifact_id: string;
   artifact_kind: string;
   source_task_id: string;
@@ -14,7 +14,16 @@ interface PiArtifactRow {
   updated_at: string;
 }
 
-function rowToRecord(row: PiArtifactRow): PIArtifactRecord {
+/**
+ * The ONE pi_artifacts row -> PIArtifactRecord mapping. Exported so
+ * enforcement-time consumers (host-runtime production gate, OpenClaw plugin
+ * RuleHost) can rebuild the exact snapshot object the promotion chain hashed:
+ * `computeArtifactDigest(mapPiArtifactRow(row))` reproduces the
+ * `activation_decisions.artifact_digest` byte-for-byte, because JSON.stringify
+ * preserves this function's key order. Do not hand-roll a second mapping — a
+ * divergent key order would silently break digest verification.
+ */
+export function mapPiArtifactRow(row: PiArtifactRow): PIArtifactRecord {
   return {
     artifactId: row.artifact_id,
     artifactKind: row.artifact_kind as PIArtifactRecord['artifactKind'],
@@ -108,7 +117,7 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
       FROM pi_artifacts WHERE artifact_id = ?
     `).get(artifactId) as PiArtifactRow | undefined;
     if (!row) return null;
-    return rowToRecord(row);
+    return mapPiArtifactRow(row);
   }
 
   async listBySourceTaskId(sourceTaskId: string): Promise<PIArtifactRecord[]> {
@@ -118,7 +127,7 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
       FROM pi_artifacts WHERE source_task_id = ?
       ORDER BY created_at ASC
     `).all(sourceTaskId) as PiArtifactRow[];
-    return rows.map(rowToRecord);
+    return rows.map(mapPiArtifactRow);
   }
 
   async listLineage(artifactId: string): Promise<PIArtifactRecord[]> {
@@ -133,7 +142,7 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
       SELECT artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at
       FROM pi_artifacts WHERE artifact_id IN (${placeholders})
     `).all(...artifact.lineageArtifactIds) as PiArtifactRow[];
-    return rows.map(rowToRecord);
+    return rows.map(mapPiArtifactRow);
   }
 
   async updateValidationStatus(artifactId: string, validationStatus: PIArtifactRecord['validationStatus']): Promise<boolean> {

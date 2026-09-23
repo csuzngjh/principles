@@ -10,6 +10,7 @@ import {
   UNAVAILABLE_RULE_CONTEXT,
   validateRuleContextV2,
   validateRuleHostResult,
+  verifyPiArtifactRowDigest,
   type LoadedImplementation,
   type RuleContextV2,
   type RuleHostEvaluatedEventData,
@@ -19,6 +20,7 @@ import {
   type ToolSemanticRegistry,
 } from '@principles/core/runtime-v2';
 import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
+import { recordDegradedEnforcement } from './degraded-enforcement-marker.js';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 import {
   createNodeRuleImplementationRuntime,
@@ -189,6 +191,12 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'inspect host context providers and active RuleCode resource use')] };
     }
     if (!fs.existsSync(dbPath)) {
+      // Security audit run-1 (gate-failopen-allow-on-state-corruption):
+      // fail-open stays the availability contract, but a missing governance
+      // store is agent-choosable state — record a durable marker OUTSIDE the
+      // agent-writable workspace so the degradation is Owner-visible and
+      // distinguishable from a never-initialized workspace.
+      recordDegradedEnforcement(event.context.workspaceDir, 'activation_db_not_found');
       return { decision: 'allow', source: event.source, warnings: [boundedWarning('activation_db_not_found', 'initialize_workspace_runtime_state')] };
     }
 
@@ -210,7 +218,10 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
                c.enforcement, c.isolation_decision_id,
                p.source_rule_id, p.source_principle_id,
-               length(CAST(p.content_json AS BLOB)) AS content_bytes
+               length(CAST(p.content_json AS BLOB)) AS content_bytes,
+               (SELECT d.artifact_digest FROM activation_decisions d
+                WHERE d.subject_kind = 'activation' AND d.activation_id = a.activation_id
+                ORDER BY d.decided_at DESC, d.rowid DESC LIMIT 1) AS approved_artifact_digest
         FROM activations a
         JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
         LEFT JOIN activation_control_states c ON a.activation_id = c.activation_id
@@ -276,7 +287,10 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             continue;
           }
           const contentRow: unknown = connection.getDb().prepare(`
-            SELECT content_json, length(CAST(content_json AS BLOB)) AS content_bytes
+            SELECT artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id,
+                   lineage_artifact_ids, validation_status, content_json,
+                   created_at, updated_at,
+                   length(CAST(content_json AS BLOB)) AS content_bytes
             FROM pi_artifacts WHERE artifact_id = ?
           `).get(artifactId);
           if (!isRecord(contentRow) || typeof contentRow.content_json !== 'string'
@@ -303,6 +317,34 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               continue;
             }
             return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_size_changed: activation=${activationId}`, 'retry after the active artifact update completes')], metadata: { evaluatedLiveRules: 0 } };
+          }
+          // Enforcement-time content binding (security audit run-1,
+          // rulecode-approval-content-unbound): the Owner decision recorded
+          // activation_decisions.artifact_digest over the promotion-time
+          // artifact snapshot. Re-verify the CURRENT row against that digest
+          // before compiling — a workspace-local writer can UPDATE
+          // content_json, and executing content the Owner never approved
+          // silently defeats enforcement. A digest mismatch is an integrity
+          // failure, not an availability failure: skip this activation with a
+          // structured warning instead of failing open. Rows without a
+          // recorded activation-scoped decision (legacy activations from
+          // before the owner-decision lifecycle) keep their prior behavior.
+          // The check itself is core-owned (verifyPiArtifactRowDigest) so the
+          // gate and the plugin RuleHost cannot drift.
+          const approvedArtifactDigest = typeof row.approved_artifact_digest === 'string' ? row.approved_artifact_digest : null;
+          const digestCheck = verifyPiArtifactRowDigest(contentRow, contentJson, approvedArtifactDigest);
+          if (digestCheck.outcome === 'unverifiable') {
+            addWarning(warnings, `activation_artifact_invalid: ${activationId} (${digestCheck.error})`, 'inspect state.db artifact row integrity; the approved digest could not be re-verified');
+            continue;
+          }
+          if (digestCheck.outcome === 'tampered') {
+            const digestNextAction = 'the artifact content no longer matches the Owner-approved digest — deactivate and re-approve the rule; execution was skipped';
+            if (activationMode === 'shadow') {
+              addWarning(warnings, `artifact_digest_mismatch (shadow): activation=${activationId}`, `${digestNextAction}; live enforcement is unaffected`);
+              continue;
+            }
+            addWarning(warnings, `artifact_content_tampered: activation=${activationId} approved=${approvedArtifactDigest} actual=${digestCheck.actualDigest}`, digestNextAction);
+            continue;
           }
           try {
             const content: unknown = JSON.parse(contentJson);
@@ -514,6 +556,13 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       return { decision: 'allow', source: event.source, ...(warnings.length ? { warnings } : {}), metadata: { evaluatedLiveRules: implementations.length, ruleDecision: result?.decision ?? 'allow', evaluations } };
     } catch (error: unknown) {
       addWarning(warnings, `activation_read_failed: ${error instanceof Error ? error.message : String(error)}`, 'inspect state.db schema and integrity');
+      // Same durable-marker contract as the missing-DB branch: a corrupt or
+      // unreadable governance store degrades enforcement to allow, so the
+      // degradation must leave a durable, Owner-visible trace outside the
+      // agent-writable workspace. Best-effort; never replaces the decision.
+      try {
+        recordDegradedEnforcement(event.context.workspaceDir, `activation_read_failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
+      } catch { /* observability only */ }
       return { decision: 'allow', source: event.source, warnings, metadata: { evaluatedLiveRules: 0 } };
     } finally {
       connection.close();

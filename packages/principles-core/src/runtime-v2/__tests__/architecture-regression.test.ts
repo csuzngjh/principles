@@ -283,6 +283,12 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'workspace-dir-validation.ts',
   'pain-signal-adapter.ts',
   'rule-implementation-runtime.ts',
+  // Security audit run-1 (gate-failopen-allow-on-state-corruption): plugin
+  // I/O adapter — writes the durable degraded-enforcement marker under
+  // ~/.pd/enforcement-health/ when the governance store is unavailable.
+  // LOCKSTEP twin of packages/host-runtime/src/degraded-enforcement-marker.ts
+  // (the plugin cannot import @principles/host-runtime).
+  'degraded-enforcement-marker.ts',
   'detection-service.ts',
   'schema/migrations/index.ts',
   'dictionary-service.ts',
@@ -486,7 +492,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-776: Removed workspace-guidance-migrator.ts (97 → 96) — PLAN.md-era
     // guidance migration retired (ran at every startup for months; current
     // templates cannot produce matching text).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
+    // Security audit run-1: Added degraded-enforcement-marker.ts (96 → 97) —
+    // plugin I/O boundary for ~/.pd/enforcement-health/ degraded-enforcement
+    // markers (LOCKSTEP twin of the host-runtime gate's marker module).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
   });
 });
 
@@ -4049,7 +4058,7 @@ describe('SEC-BASE-1: supply chain provenance guards', () => {
     const workflow = readWorkflow('publish-npm.yml');
     expect(workflow, 'publish-npm.yml should exist').not.toBeNull();
     const actionPath = pathSync.join(REPO_ROOT, '.github', 'actions', 'publish-npm-package', 'action.yml');
-    let action = '';
+    let action: string;
     try {
       action = fsSync.readFileSync(actionPath, 'utf8');
     } catch {

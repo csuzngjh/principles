@@ -15,6 +15,7 @@ import {
 import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime-v2';
 import { createProductTelemetryService, scheduleProductTelemetryExport } from '@principles/host-runtime';
 import { AuthConfig } from './config/AuthConfig.js';
+import { assertLoopbackBindForUnauthenticatedServer } from './bind-guard.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
 import { WorkspaceService } from './models/WorkspaceService.js';
 import {
@@ -638,6 +639,12 @@ export async function main(): Promise<void> {
   if (!authConfig.isEnabled() && !noAuth) {
     console.warn('[pd-console] No auth token configured. Running without authentication. Use --token or PD_CONSOLE_TOKEN to enable.');
   }
+
+  // Authentication disabled (explicit --no-auth or the token-less default)
+  // must never bind a non-loopback interface: every /api/* route would be
+  // reachable by unauthenticated network peers. parseArgs already restricts
+  // the explicit --no-auth flag; this is the effective-auth-state guard.
+  assertLoopbackBindForUnauthenticatedServer(authConfig.isEnabled(), host);
 
   const services = await initServices(workspace, authConfig);
 

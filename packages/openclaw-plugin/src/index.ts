@@ -16,8 +16,8 @@ import type {
 import * as path from 'path';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
 import { scheduleTelemetryExportForWorkspace } from './core/product-telemetry-trigger.js';
-import { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig } from './core/config-health.js';
-export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig } from './core/config-health.js';
+import { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig, isExplicitConversationAccessOptOut } from './core/config-health.js';
+export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig, isExplicitConversationAccessOptOut } from './core/config-health.js';
 export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
@@ -178,8 +178,18 @@ const plugin = {
 
       // PRI-343: Check allowConversationAccess — auto-fix if missing/false, warn if fix fails.
       // Uses file locking to prevent race conditions with concurrent writers.
-      const accessCheck = checkConversationAccessConfig(getPluginEntry(api.config, api.id));
-      if (!accessCheck.authorized) {
+      const pluginEntry = getPluginEntry(api.config, api.id);
+      const accessCheck = checkConversationAccessConfig(pluginEntry);
+      if (!accessCheck.authorized && isExplicitConversationAccessOptOut(pluginEntry)) {
+        // Explicit `allowConversationAccess=false` is the Owner's documented
+        // turn-off — honor it with a structured rc-9 record instead of the
+        // absent-flag auto-fix (which must never rewrite an explicit deny).
+        api.logger.info(
+          `[PD:health] conversation hooks (llm_output / trajectory) disabled by explicit configuration — ` +
+          `honoring Owner opt-out (allowConversationAccess=false). ` +
+          `nextAction: set the flag to true or remove it to re-enable conversation capture.`,
+        );
+      } else if (!accessCheck.authorized) {
         let fixed = false;
         try {
           fixed = ensureConversationAccessInConfig();
