@@ -533,3 +533,42 @@ For a task, pick the matching pattern cards, read the listed ERR records, and st
 ## Routing Metadata
 
 Each pattern card carries an `error-pattern-routing` HTML-comment JSON block. This metadata lives in this file (the pattern semantic SSoT) — there is no separate patterns database. `npm run error:context` consumes it deterministically to surface relevant patterns before/during a task; it supplements agent judgment and never replaces reading this index. Schema: `id`, `risk` (high|medium|low), `pathSignals[]`, `diffSignals[]`, `requiredEvidence[]`, `enforcement` (blocking|advisory|semantic|mixed). `npm run check:error-handbook` validates the block's syntax, enum values, and heading/ID consistency.
+
+### EP-14 Release Artifact Content Boundary
+
+<!-- error-pattern-routing
+{
+  "id": "EP-14",
+  "risk": "high",
+  "pathSignals": [
+    "package.json",
+    "tsconfig",
+    "scripts/build",
+    "bundle-plugin",
+    "create-principles-disciple",
+    "electron-builder",
+    "changeset"
+  ],
+  "diffSignals": [
+    "cpSync",
+    "files",
+    "outDir",
+    "include",
+    "exclude",
+    "__tests__",
+    ".test."
+  ],
+  "requiredEvidence": [
+    "Compiled/published/installed output (dist, npm tarball, installer payload) is asserted free of non-production content (compiled tests, snapshots, fixtures, stale orphan outputs) by a mechanized check that fails the build - not by inspection or audit.",
+    "When the production build excludes tests from compilation, test-file typechecking is carried by an explicit gate (e.g. tsc --noEmit wired into verify:merge) so gate strength does not silently drop.",
+    "Production-owned modules whose names resemble test assets (e.g. golden-dogfood-fixtures.ts imported by a production barrel) are explicitly distinguished from test artifacts in the assertion patterns."
+  ],
+  "enforcement": "mixed"
+}
+-->
+
+- **Use when**: changing what gets compiled, published, bundled or installed — tsconfig build configs, package `files` whitelists, bundler/installer copy logic (bundle-plugin.mjs, electron-builder), packaging scripts, release trains.
+- **Failure mode**: build scope defined by directory shape (`include: ["src/**/*"]`) instead of production semantics compiles colocated tests into dist; nothing asserts artifact content, so pollution ships silently through npm packages and the installer into user runtimes and compounds on every release (measured 2026-09: core npm tarball 57.1% test bytes, live `~/.pd/runtime` carried 1576 compiled test files; uncleaned tsc output also accumulated 73 orphan files whose source had been deleted, so dist no longer mirrored src).
+- **Must check**: production build either excludes tests at compile time or the published surface filters them; build is clean-then-compile so dist is a pure function of current src; a fail-loud content assertion runs at the build/packaging boundary; excluding tests from build does not drop their typechecking (explicit typecheck gate); assertion patterns do not false-positive on production-owned fixture modules imported by barrels.
+- **Representative ERRs**: ERR-149.
+- **Automation target**: per-package build-time dist hygiene assertion (`scripts/build/check-dist-hygiene.mjs`, shipped with PR #1841 for principles-core/pd-cli/pd-console); repo-level scan of all workspace dists plus installer payload zero-test assertion (RAH-3, pending).

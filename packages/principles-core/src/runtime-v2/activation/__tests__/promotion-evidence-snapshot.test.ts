@@ -3,7 +3,9 @@ import {
   buildPromotionEvidenceSnapshot,
   computeArtifactDigest,
   normalizeOwnerIdentity,
+  verifyPiArtifactRowDigest,
 } from '../promotion-evidence-snapshot.js';
+import { mapPiArtifactRow } from '../../store/artifact/sqlite-pi-artifact-store.js';
 import type { PIArtifactSnapshot } from '../activation-types.js';
 
 const sampleArtifact: PIArtifactSnapshot = {
@@ -118,5 +120,40 @@ describe('promotion-evidence-snapshot factory', () => {
       authenticationMethod: 'console_token',
       credentialId: 'tok-abc',
     });
+  });
+});
+
+describe('verifyPiArtifactRowDigest (enforcement-time content binding)', () => {
+  const row = {
+    artifact_id: 'art-1',
+    artifact_kind: 'rule',
+    source_task_id: 'task-1',
+    source_principle_id: 'P1',
+    source_rule_id: 'R1',
+    lineage_artifact_ids: '[]',
+    validation_status: 'validated',
+    content_json: '{"ok":true}',
+    created_at: '2026-09-22T00:00:00.000Z',
+    updated_at: '2026-09-22T00:00:00.000Z',
+  };
+  const approved = computeArtifactDigest(mapPiArtifactRow(row));
+
+  it('verifies when the recomputed digest matches the approved one', () => {
+    expect(verifyPiArtifactRowDigest(row, row.content_json, approved)).toEqual({ outcome: 'verified' });
+  });
+
+  it('reports tampered when any field diverges (negative control: fails pre-fix)', () => {
+    const tampered = verifyPiArtifactRowDigest(row, '{"ok":false}', approved);
+    expect(tampered.outcome).toBe('tampered');
+    if (tampered.outcome === 'tampered') expect(tampered.actualDigest).not.toBe(approved);
+  });
+
+  it('reports unverifiable for malformed rows instead of throwing', () => {
+    expect(verifyPiArtifactRowDigest({ artifact_id: 42 }, '{}', approved).outcome).toBe('unverifiable');
+    expect(verifyPiArtifactRowDigest({ ...row, lineage_artifact_ids: 'not-json' }, row.content_json, approved).outcome).toBe('unverifiable');
+  });
+
+  it('reports no_binding when no approved digest exists (legacy row)', () => {
+    expect(verifyPiArtifactRowDigest(row, row.content_json, null)).toEqual({ outcome: 'no_binding' });
   });
 });
