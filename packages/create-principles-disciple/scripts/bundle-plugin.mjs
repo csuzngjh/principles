@@ -236,15 +236,6 @@ for (const item of PD_CLI_REQUIRED) {
   }
 }
 
-for (const item of CONSOLE_REQUIRED) {
-  const src = join(CONSOLE_SRC, item);
-  if (!existsSync(src)) {
-    console.error(`❌ Required console item not found: ${src}`);
-    console.error(`   Run: cd packages/pd-console && npm run build`);
-    process.exit(1);
-  }
-}
-
 for (const item of CORE_REQUIRED) {
   const src = join(CORE_SRC, item);
   if (!existsSync(src)) {
@@ -306,12 +297,22 @@ for (const item of PD_CLI_REQUIRED) {
   copyPayloadTree(src, join(PD_CLI_DEST, item));
 }
 
-// Review fix (PRI-907 round 1): console dist has NO upstream producer in any
-// build chain — root `build` skips pd-console, verify:merge only typechecks
-// it, and this script used to copy whatever dist happened to exist (a missing
-// copy failed loud, but a stale or polluted one shipped silently). Build it
-// here, right before the copy, on every invocation path. Console's build is
-// the RAH-1 release chain: clean + filtered tsc + dist hygiene assertion.
+// Review fix (PRI-907 round 1/2): console dist has NO producer in the root
+// `build` aggregate (it is the one RAH package that chain skips), and this
+// script used to copy whatever dist happened to exist — a missing copy failed
+// loud, but a stale or polluted one shipped silently. The official release
+// paths build console explicitly (release-metadata.yml:443,
+// publish-npm-package/action.yml:188); building it here covers the remaining
+// manual / local `npm pack` invocations.
+//
+// Ordering is part of the contract (round 2, Codex P2): the build runs AFTER
+// every other component's preflight gate and BEFORE the console gate. Console's
+// tsc resolves its workspace dependencies' types from their dist/*.d.ts, so
+// building earlier would replace those components' clear
+// "Required <pkg> item not found / Run: …" messages with raw type errors; and
+// if the console gate stayed above the build, a missing dist would exit first
+// and the build would never run.
+// Console's build is the RAH-1 release chain: clean + filtered tsc + dist hygiene assertion.
 {
   const npmCliJs = findNpmCliJs();
   if (!npmCliJs) {
@@ -326,6 +327,15 @@ for (const item of PD_CLI_REQUIRED) {
     cwd: ROOT_DIR,
     stdio: ['ignore', 'pipe', 'inherit'],
   });
+}
+
+for (const item of CONSOLE_REQUIRED) {
+  const src = join(CONSOLE_SRC, item);
+  if (!existsSync(src)) {
+    console.error(`❌ Required console item not found after console build: ${src}`);
+    console.error('   The console release chain ran but did not emit this artifact — check pd-console build/tsconfig.');
+    process.exit(1);
+  }
 }
 
 if (existsSync(CONSOLE_DEST)) {
