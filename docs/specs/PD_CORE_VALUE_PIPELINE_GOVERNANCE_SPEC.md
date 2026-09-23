@@ -1,13 +1,27 @@
-# PD Core Value Pipeline Contract & Governance SPEC v0.3
+# PD Core Value Pipeline Contract & Governance SPEC v0.4
 ## Owner-Governed Intervention Lifecycle × Core Value Pipeline × Causal Evidence
 
 > **Status**: Owner-aligned architecture SPEC  
-> **Version**: v0.3  
-> **Date**: 2026-09-15  
+> **Version**: v0.4  
+> **Date**: 2026-09-24  
 > **Primary long-term purpose**: 定义 PD 核心价值系统未来 12–24 个月应长期保护的稳定契约  
-> **Primary current use**: 为 PRI-803 RuleCode Runtime Closure 提供不误导的执行地图与验收边界  
-> **Evidence basis**: PR #1707 / #1710 / #1717 + GPT-6 independent architecture review  
+> **Primary current use**: 为 Principle Identity 治理与后续历史 reconciliation 提供稳定标准（v0.3 时代 PRI-803 用法已移至 audit snapshot）  
+> **Evidence basis**: PR #1707 / #1710 / #1717 + GPT-6 independent architecture review；v0.4 增补：PR #1851 / #1856 已验证的实现事实 + Phase 3 Principle Identity design audit  
 > **Core principle**: **先看清，再动手。先证明真实行为改变，再固化治理。**
+
+---
+
+# v0.4 变更摘要（2026-09-24）
+
+v0.4 将 **Principle Identity** 正式收编为长期治理对象。触发证据：PR #1851（Candidate → Principle Ledger 类型写入边界）与 PR #1856（激活身份 UUID-only fail-closed）已把实现真理推进到规范之前，本次为漂移收编，不改变任何运行时行为。
+
+1. **INV-03 升级**：拆分 **Entity Identity**（账本 UUID，回答“这是哪一条 Principle”）与 **Content Revision Identity**（revision / digest / hash，回答“这是哪一版内容”）；明确 **Entity Identity ≠ Content Identity**；
+2. **新增 INV-11**：Principle identity 由 Ledger 唯一铸造、生产链必须携带、激活边界 fail-closed；
+3. **新增 §4A Principle Identity Contract**：I1 Identity Minting / I2 Identity Carry / I3 Activation Fail Closed，以及 Identity Flow Model 与 lineage join key 义务；
+4. **§15 Lineage Model** 扩展身份链；**§16 Exact Execution Identity** 补 principle identity 字段；**§22 G1** 增加 identity checks；
+5. **内容边界清理**：PRI-803 冲刺契约与当前工程快照（§12 / §13 / §14 / §23 / §24 / §25 / §26 / §35）移至 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`，原编号位置保留指针、不复用、不重排。
+
+编号规则：本 SPEC 的章节编号是稳定引用 ID。新增章节使用新稳定编号（如 §4A）；移出章节的编号不复用、不重排，避免破坏外部引用。
 
 ---
 
@@ -285,7 +299,7 @@ do nothing
 
 ## INV-03 — Exact Intervention Identity
 
-以下必须可验证为同一内容身份：
+以下必须可验证为同一 intervention：
 
 ```text
 reviewed
@@ -297,19 +311,37 @@ activated
 executed
 ```
 
+该同一性由两个不同层面共同构成，二者不可互相替代：
+
+### Entity Identity —「这是哪一条 Principle？」
+
+* 唯一合法来源：**Principle Ledger 在 intake 时刻铸造的 UUID**；
+* UUID 是治理实体主键（governance entity primary key）；
+* Entity Identity 只能在 Ledger intake 阶段创建，此外不存在任何铸造点；
+* 下游（Artifact / Activation / Execution / Evidence）禁止使用 `title` / `text` / `content` 等自然语言片段或派生值充当实体身份。
+
+### Content Revision Identity —「这是当前 Principle 内容的哪一个版本？」
+
+* 来源：`revision` / `content digest` / `hash`；
+* 回答同一实体之下“内容是哪一版”，用于检测同一身份下的内容漂移；
+* **内容版本不能替代实体身份**：LLM 生成文本改一字即产生新 digest，digest 的不稳定性决定了它不能充当实体主键。
+
+### 明确关系
+
+> **Entity Identity ≠ Content Identity。**
+>
+> Entity Identity 是基础约束——没有它，四段同一性没有主语；
+> Content Revision Identity 是补充约束——它检测同一实体下的内容版本漂移。
+
 不能仅依赖：
 
 ```text
 logical artifact id
 ```
 
-应至少绑定不可歧义：
+也不能仅依赖 content digest / hash——两者都不是身份的铸造权威。
 
-```text
-revision
-或
-content digest/hash
-```
+四段同一性成立的前提：身份在铸造点（Ledger intake）就被正确创建，并在每一段被正确携带与验证（见 §4A Principle Identity Contract）。
 
 ---
 
@@ -466,6 +498,112 @@ Rule caused improvement
 ```
 
 结论强度必须匹配证据强度。
+
+---
+
+## INV-11 — Principle Identity Is Ledger-Minted
+
+Principle 的实体身份由 Principle Ledger 唯一铸造，并且必须在生产链中被携带、在激活边界被验证：
+
+```text
+身份铸造权威唯一：Ledger intake（§4A I1）
+生产链前向携带身份：携带失败必须可观察（§4A I2）
+激活边界 fail-closed：无已验证身份 ⇒ reject / defer（§4A I3）
+```
+
+宽松的文本解析（title → principle）只允许存在于 display / resolution 展示面，永远不得作为写入或闸门边界的身份来源。
+
+---
+
+# 4A. Principle Identity Contract
+
+> 长期治理章节（v0.4 新增）。
+> 触发实现事实：PR #1851（Candidate → Principle Ledger 类型写入边界）+ PR #1856（激活身份 UUID-only fail-closed）。
+> 核心原则：**Identity must be minted by governance ledger, not inferred from content.**
+> 类型边界对应原则（PR #1851）：**Type boundary before persistence.** —— 只有明确 Principle Ledger eligible 的 candidate 才能进入 Principle Ledger、才可能获得身份。
+
+## 4A.1 I1 — Identity Minting
+
+Principle identity only exists after Ledger intake.
+
+* 唯一铸造点：Candidate 通过 Ledger intake（写入 Principle Ledger）的时刻，由账本铸造 Principle UUID；
+* Candidate 是 Principle 的出生证明，不是 Principle 本身——intake 之前不存在 Principle identity；
+* 禁止：
+
+```text
+以 title 生成 identity
+以 LLM 输出生成 identity
+以 content hash 作为 identity
+```
+
+## 4A.2 I2 — Identity Carry
+
+生产链必须前向携带身份：
+
+```text
+Candidate
+→ Principle UUID
+→ Artifact
+→ Activation
+→ Execution
+→ Evidence
+```
+
+* Artifact 必须回指 Principle UUID（identity stamp，如 `source_principle_id` 类字段）；
+* Activation 必须以 Principle UUID 作为 target；
+* 任何一跳丢失身份，必须：
+
+```text
+可观察（结构化 telemetry / 记录）
+可审计
+不允许静默猜测
+```
+
+* 允许 fail-soft 推迟解析（推迟不等于猜测），但下游硬闸门必须最终裁决；两层都必须落在 reject / defer，不允许 guess。
+
+## 4A.3 I3 — Activation Fail Closed
+
+Activation 边界必须在授权提交**之前**验证：
+
+1. UUID 格式正确；
+2. Ledger membership 存在——**UUID 形态正确不等于成员资格成立**，必须对账本验证该身份真实存在；
+3. identity 无歧义——经 lineage 解析身份时必须恰好一条，0 条或多条都视为歧义。
+
+失败 ⇒ `reject` / `defer`。禁止 fallback 到：
+
+```text
+title
+text
+lineage 猜测
+```
+
+两条必须区分的边界语义：
+
+```text
+携带了账本中不存在的 UUID   ⇒ 数据漂移，显式上浮（structured reason + nextAction），不得静默转 lineage 解析
+lineage 解析非恰好一条      ⇒ 歧义，拒绝，不得猜测
+```
+
+> 已知边界（v0.4 如实记录）：membership 证明“存在”，不证明“派生”。上游直接断言 UUID（而非链路推导盖章）的携带方式，存在把 artifact 误归因到一条**已存在**原则的理论面。身份的盖章/推导者清单应保持受控；该收紧属于后续演进，不改变 I3 的 fail-closed 判据。
+
+## 4A.4 Identity Flow Model
+
+身份在链路上的产生位置是固定的——**Principle Identity 在 intake 时刻产生**：
+
+```text
+Pain Signal
+→ Candidate
+→ Diagnosis
+→ Principle Identity Minting   ← 唯一铸造点（Ledger intake）
+→ Artifact Formation           ← 携带 source_principle_id
+→ Activation                   ← target = Ledger UUID
+→ Runtime Execution
+→ Outcome Evidence
+```
+
+## 4A.5 对存量数据与历史 reconciliation 的适用
+
+本契约同样是历史身份对账（reconciliation）的稳定标准：任何存量身份回填/归因修复，必须以账本 UUID 为目标身份、以已存在的 lineage 为推导依据、以“恰好一条”为通过判据；推导失败显式记为 unresolved 并上浮，禁止以文本猜测兜底。本 SPEC 不定义 reconciliation 的实现。
 
 ---
 
@@ -871,102 +1009,29 @@ Owner attention
 
 # 12. Core Value Pipeline — Current Engineering Map
 
-> 本节是 **Current Snapshot / Engineering Map**，不是长期宪法。
-
-当前工程地图：
-
-```text
-Observe
-→ Pain Admission
-→ Diagnosis
-→ Principle Formation
-→ Channel Decision
-→ Internalization
-→ Evaluation / Rollout
-→ Owner Governance
-→ Activation
-→ Runtime Exposure / Enforcement
-→ Agent Adaptation
-→ Outcome Evidence
-```
+> Current Snapshot（v0.4 起移出长期 SPEC）：完整 stage 清单见 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`。长期 Pipeline 模型见 §3.3 Layer C。
 
 ---
 
 # 13. Effective Topology
 
-当前工程理解：
-
-```text
-Effective Runtime Topology
-=
-Declared DAG
-+
-Transition Authority
-+
-Bypass / Ingress Paths
-```
-
-### Declared DAG
-
-代表：
-
-```text
-legal edge declaration
-```
-
-不代表完整生产拓扑。
-
-### Transition Authority
-
-决定：
-
-```text
-verdict
-→ next legal state/task
-```
-
-### Bypass / Ingress
-
-包括：
-
-- manual ingress；
-- special runner；
-- recovery；
-- synthetic baseline；
-- adversarial loop；
-- direct production entry。
+> Current Snapshot（v0.4 起移出长期 SPEC）：Declared DAG / Transition Authority / Bypass 模型见 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`。
 
 ---
 
 # 14. Current Five-Layer Contract Model
 
-对于当前结构化 LLM Stage：
-
-```text
-Prompt Contract
-↓
-Tool / Provider Schema
-↓
-Canonical Output Schema
-↓
-Normalizer / Adapter
-↓
-Semantic Validator
-```
-
-这是当前实现的重要审查框架。
-
-但长期 Contract 不应要求永远“恰好五层”。
-
-长期真正不变量是：
-
+> Current Snapshot（v0.4 起移出长期 SPEC）：五层模型细节见 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`。其中长期不变量保留于此：
+>
 > **模型被要求产生的内容、系统允许的内容、系统解释的内容与系统最终判定的内容必须语义一致。**
 
 ---
 
 # 15. Current Lineage Model
 
-当前执行时必须能回答：
+当前执行时必须能回答两条链。
+
+执行血缘链（v0.3 起保留）：
 
 ```text
 Pain
@@ -982,13 +1047,29 @@ Pain
 → Outcome
 ```
 
+身份链（v0.4 扩展）：
+
+```text
+Pain
+→ Candidate
+→ Principle Entity (UUID，Ledger intake 铸造)
+→ Artifact (source_principle_id 回指)
+→ Activation (principle_id / target_ref = Ledger UUID)
+→ Execution Evidence
+```
+
+要求：
+
+> **identity 是 lineage 的 join key。**
+> 执行血缘的每一跳都必须能以同一 Principle UUID 回链；无法回链的段落在归因时必须显式标记，不得静默拼接。
+
 关键：
 
 ```text
 executed
 ```
 
-必须进入 identity chain。
+必须进入 identity chain（v0.3 要求保留），且携带的必须是 Ledger 铸造的 Principle UUID（v0.4 要求，见 §4A）。
 
 ---
 
@@ -997,7 +1078,8 @@ executed
 每次行为闭环至少记录：
 
 ```text
-intervention content hash / revision
+principle_id（Ledger UUID —— Entity Identity）
+intervention content hash / revision（Content Revision Identity）
 approval id
 activation id
 host
@@ -1008,6 +1090,18 @@ tool call / hook invocation
 receipt/evidence id
 control state
 ```
+
+执行身份至少由以下三项构成，缺一不可：
+
+```text
+principle_id
++
+content revision/digest
++
+activation id
+```
+
+其中 `principle_id` 是**实体身份**（INV-03 Entity Identity / §4A），content revision/digest 是内容版本身份，activation id 把二者绑定到一次授权执行。
 
 目的不是增加数据库，而是：
 
@@ -1155,7 +1249,7 @@ Codex 一定不完整
 
 > **每个 host 的 capability 必须被明确、可验证、不可假设。**
 
-当前 PRI-803 执行时，应进一步区分：
+当前验证 host capability 时，应进一步区分：
 
 ```text
 OpenClaw legacy
@@ -1206,7 +1300,7 @@ activated
 executed
 ```
 
-同一 revision/hash。
+同一 intervention 身份——既同一 Entity Identity（Ledger UUID），也同一 Content Revision Identity（revision/hash）。
 
 覆盖：
 
@@ -1215,6 +1309,15 @@ executed
 - concurrent revision；
 - old activation；
 - old receipt。
+
+Identity checks（v0.4）：
+
+- **identity minting authority**：身份只能来自 Ledger intake 铸造，任何其他铸造点都是违规；
+- **ledger membership validation**：UUID 形态正确 ≠ 成员资格，使用前必须对账本验证存在；
+- **activation fail-closed**：授权与激活的预提交点都必须验证身份，无已验证身份 ⇒ reject / defer；
+- **no title fallback**：任何写入或闸门边界禁止以 title / text / 派生值兜底身份；宽松解析仅限展示面。
+
+PR #1856 的激活身份闸门是 G1 在 identity 维度的首个真实实现实例。
 
 ---
 
@@ -1283,150 +1386,25 @@ consumer
 
 # 23. PRI-803 Current Sprint Contract
 
-当前主目标：
-
-```text
-J2 RuleCode Runtime Closure
-```
-
-不是：
-
-```text
-架构治理改造
-```
-
----
-
-## 23.1 PRI-803 必须证明
-
-```text
-真实 Pain
-→ Rule generated
-→ Evaluated
-→ Owner decision
-→ Console Approval
-→ Exact activation
-→ Exact execution
-→ Real host hook
-→ block/correct
-→ feedback reaches Agent
-→ Agent next action changes
-→ task completes
-→ positive control
-→ runtime revocation
-```
-
----
-
-## 23.2 PRI-803 必须记录
-
-至少：
-
-```text
-Pain identity
-Rule revision/hash
-Approval id
-Activation id
-Executed revision/hash
-host
-host mode
-runtime/package version
-run/session
-hook invocation
-receipt
-before evidence
-after evidence
-positive control
-revocation evidence
-```
-
----
-
-## 23.3 PRI-803 不得用作成功证据
-
-以下均不能单独判成功：
-
-- Linear Done；
-- PR merged；
-- activation row；
-- helper blocked=true；
-- replay test；
-- Agent 自述；
-- receipt；
-- test green；
-- schema valid。
+> PRI-803 冲刺专属契约（v0.4 起移出长期 SPEC，PRI-803 已收官）：完整内容见 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`。
 
 ---
 
 # 24. PRI-803 Sprint Guardrails
 
-1. **MUST** 用运行证据判断闭环，不用任务状态判断。
-2. **MUST** 证明 reviewed/approved/activated/executed 是同一内容身份。
-3. **MUST** 记录实际 host mode，不只写 OpenClaw。
-4. **MUST** 记录实际 loaded runtime capability。
-5. **MUST** 在真实 hook 上做 sentinel。
-6. **MUST** 证明 block/correction feedback 进入 Agent。
-7. **MUST** 明确指出 Agent 哪个下一动作改变。
-8. **MUST** 检查污染：人工提示、其他 Rule、旧上下文、旧 receipt。
-9. **MUST** 做 positive control。
-10. **MUST** 做 runtime revocation test。
-11. **MUST NOT** 用 helper / DB 直改 / test-only writer 替代 production path。
-12. **MUST NOT** 为未命中的架构债暂停主冲刺。
+> PRI-803 冲刺专属 guardrails（v0.4 起移出长期 SPEC）：完整内容见 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`。
 
 ---
 
 # 25. R-19 Sprint Policy
 
-R-19 属于当前实现安全 finding，不属于长期 Contract 细节。
-
-当前规则：
-
-```text
-如果 PRI-803 即将让不可信生成代码
-进入已确认缺乏有效隔离的 pre-activation execution path
-→ 在执行前 STOP
-→ 最小修复或重新选择安全路径
-```
-
-不是：
-
-```text
-等发生逃逸以后再处理
-```
-
-也不是：
-
-```text
-先重构整个 sandbox 再冲刺
-```
+> PRI-803 冲刺专属政策（v0.4 起移出长期 SPEC）：完整内容见 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`。R-19 作为当前实现 finding 的长期处理原则见 §8 Trust Boundary。
 
 ---
 
 # 26. Current Host Choice for PRI-803
 
-基于当前审计：
-
-```text
-优先 OpenClaw
-```
-
-但必须具体到：
-
-```text
-OpenClaw legacy/shared mode
-```
-
-当前目标不是：
-
-```text
-证明跨宿主 parity
-```
-
-而是：
-
-```text
-先证明一个真实宿主上的 J2
-```
+> PRI-803 冲刺专属宿主选择（v0.4 起移出长期 SPEC）：完整内容见 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`。长期只要求 §20 Host Reality 的原则：每个 host 的 capability 必须明确、可验证、不可假设。
 
 ---
 
@@ -1637,14 +1615,14 @@ PD_CORE_VALUE_PIPELINE_CONTRACT.md
 
 1. Owner-Governed Intervention Lifecycle；
 2. Four Flows；
-3. 10 Long-term Invariants；
+3. Long-term Invariants（v0.4 起 INV-01…INV-11）；
 4. 4 Golden Journeys；
 5. Causal Evidence Standard；
 6. Mutation Authority；
 7. Revocation Contract；
 8. Trust Boundary；
 9. Deployment Projection；
-10. 5 Mechanical Guards；
+10. 5 Mechanical Guards（G1 含 Identity checks）；
 11. Change Classification；
 12. Owner Governance Boundary。
 
@@ -1674,36 +1652,7 @@ docs/audit/
 
 # 35. Done Definition — PRI-803
 
-PRI-803 Done 不是：
-
-```text
-文档完成
-工单完成
-PR merged
-```
-
-而是存在真实证据证明：
-
-- [ ] exact Pain 已确认；
-- [ ] exact Rule revision 已生成；
-- [ ] evaluation 未弱化；
-- [ ] Owner decision 有证据；
-- [ ] Console 批准真实发生；
-- [ ] approved revision = activated revision；
-- [ ] activated revision = executed revision；
-- [ ] actual host hook 执行；
-- [ ] block/correct feedback 送达 Agent；
-- [ ] Agent 下一动作可指出；
-- [ ] 原任务完成；
-- [ ] positive control pass；
-- [ ] runtime revocation 后 intervention effect 消失；
-- [ ] pollution check 完成；
-- [ ] outcome 标记为：
-  - IMPROVED
-  - NO_IMPROVEMENT
-  - REGRESSION
-  - INCONCLUSIVE
-  - NOT_REACHED。
+> PRI-803 Done 定义（v0.4 起移出长期 SPEC，PRI-803 已收官）：完整清单见 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`。长期治理 Done 定义见 §36。
 
 ---
 
