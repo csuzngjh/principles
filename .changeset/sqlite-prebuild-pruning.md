@@ -9,6 +9,6 @@ the asset's own platform+arch (linux: musl detected from the build machine,
 which is also the target since cross-builds are refused). Foreign-platform
 `.node` files are removed from every materialized copy after staging and
 before `_release/manifest.json` is generated, so the signed manifest always
-describes the pruned tree. Saves ~125 MiB unpacked per platform asset;
-installer dependency resolution, package topology and runtime behavior are
-unchanged.
+describes the pruned tree. Measured saving on a real win32-x64 build:
+104,349,056 B (99.5 MiB) across 7 copies per platform asset; installer
+dependency resolution, package topology and runtime behavior are unchanged.

@@ -83,9 +83,11 @@ describe('detectLocalMusl', () => {
   it('linux reports musl only when the runtime report has no glibc version', () => {
     const withGlibc = { platform: 'linux', report: { getReport: () => ({ header: { glibcVersionRuntime: '2.39' } }) } } as unknown as NodeJS.Process;
     const withoutGlibc = { platform: 'linux', report: { getReport: () => ({ header: {} }) } } as unknown as NodeJS.Process;
+    const undefinedStringGlibc = { platform: 'linux', report: { getReport: () => ({ header: { glibcVersionRuntime: 'undefined' } }) } } as unknown as NodeJS.Process;
     const noReport = { platform: 'linux' } as unknown as NodeJS.Process;
     expect(detectLocalMusl(withGlibc)).toBe(false);
     expect(detectLocalMusl(withoutGlibc)).toBe(true);
+    expect(detectLocalMusl(undefinedStringGlibc)).toBe(true);
     expect(detectLocalMusl(noReport)).toBe(false);
   });
 });
@@ -113,7 +115,7 @@ describe('pruneForeignSqlitePrebuilds', () => {
 
     expect(summary.sites).toBe(2);
     expect(summary.removedFiles).toBe(14);
-    expect(summary.keptFiles).toBe(2);
+    expect(summary.keptSites).toBe(2);
     expect(listFiles(topDir)).toEqual(['win32-x64.node']);
     expect(listFiles(nestedDir)).toEqual(['win32-x64.node']);
     const pkgDir = path.join(root, 'core', 'node_modules', 'better-sqlite3');
@@ -135,10 +137,20 @@ describe('pruneForeignSqlitePrebuilds', () => {
     expect(listFiles(siteDir).length).toBe(ALL_PLATFORM_PREBUILDS.length - 1);
   });
 
+  it('validates every site before deleting anywhere: a bad site two levels deep leaves the good site intact', () => {
+    const root = makeTempRoot('missing-keep-multi-site');
+    const goodSite = createPrebuildSite(root, path.join('core', 'node_modules'));
+    createPrebuildSite(root, path.join('plugin', 'node_modules', '@principles', 'core', 'node_modules'), { omit: ['win32-x64.node'] });
+    expect(() => pruneForeignSqlitePrebuilds(root, 'win32-x64.node'))
+      .toThrow(/has no win32-x64\.node/);
+    // The two-pass contract: the complete site keeps all 8 binaries.
+    expect(listFiles(goodSite).length).toBe(ALL_PLATFORM_PREBUILDS.length);
+  });
+
   it('returns a zero summary when no better-sqlite3 tree exists (npm-distributed shape)', () => {
     const root = makeTempRoot('no-site');
     fs.mkdirSync(path.join(root, 'install-layout'), { recursive: true });
-    expect(pruneForeignSqlitePrebuilds(root, 'win32-x64.node')).toEqual({ sites: 0, removedFiles: 0, removedBytes: 0, keptFiles: 0 });
+    expect(pruneForeignSqlitePrebuilds(root, 'win32-x64.node')).toEqual({ sites: 0, removedFiles: 0, removedBytes: 0, keptSites: 0 });
   });
 
   it('rejects a malformed keep name before touching the tree', () => {

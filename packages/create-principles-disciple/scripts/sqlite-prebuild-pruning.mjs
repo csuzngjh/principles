@@ -1,8 +1,9 @@
 // SPEC-P0: self-contained release assets must carry only the better-sqlite3
 // prebuild binary for the asset's own platform+arch (audit
-// docs/release/asset-deduplication-feasibility-audit.md §5: each of the ~6
-// materialized copies ships all 8 platform prebuilds; 7/8 are unreachable
-// code on any single platform, ~125 MiB dead weight per platform asset).
+// docs/release/asset-deduplication-feasibility-audit.md §5, measured on a real
+// win32-x64 build: 7 materialized copies ship all 8 platform prebuilds each;
+// 7/8 are unreachable code on any single platform — 104,349,056 B ≈ 99.5 MiB
+// of dead weight per platform asset).
 //
 // This module is a pure filesystem filter used by build-release-asset.mjs
 // AFTER component staging and BEFORE the per-file _release/manifest.json is
@@ -53,9 +54,10 @@ export function detectLocalMusl(proc = process) {
     const header = proc.report?.getReport?.().header;
     // An unreadable report must not be guessed as musl: fail safe to glibc.
     if (header === undefined || header === null) return false;
-    // glibcVersionRuntime is absent on musl builds (and set to 'undefined'
-    // string in some report implementations - treat non-string as absent).
-    return typeof header.glibcVersionRuntime === 'string' ? false : true;
+    // glibcVersionRuntime is absent on musl builds; some report
+    // implementations spell the absence as the literal string 'undefined'.
+    const glibc = header.glibcVersionRuntime;
+    return typeof glibc === 'string' && glibc !== 'undefined' ? false : true;
   } catch {
     return false;
   }
@@ -75,9 +77,10 @@ export function findSqlitePrebuildDirs(root) {
   const found = [];
   const walk = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      // Dirents are lstat-based: a symlinked directory fails isDirectory() and
+      // is never followed (the asset tree rejects symlinks anyway).
       if (!entry.isDirectory()) continue;
       const entryPath = join(directory, entry.name);
-      if (entry.isSymbolicLink()) continue;
       if (entry.name === 'prebuilds' && basename(directory) === PRUNED_NATIVE_PACKAGE) {
         found.push(entryPath);
         continue;
@@ -91,38 +94,45 @@ export function findSqlitePrebuildDirs(root) {
 
 /**
  * Delete every `*.node` file in every better-sqlite3/prebuilds tree under
- * `rootDirectory` except `keepFileName`. Throws (rc-3, fail loud) if a site
- * exists but does not carry the keep file — pruning must never produce an
- * asset whose native loader has nothing to require.
+ * `rootDirectory` except `keepFileName`. The keep file of EVERY site is
+ * validated before ANY deletion happens (rc-3, cli-5-style no-mutation-on-
+ * failure): a site missing its keep binary throws with the whole tree
+ * untouched — pruning must never produce an asset whose native loader has
+ * nothing to require, not even partially.
  * @param {string} rootDirectory asset payload root (post-staging)
  * @param {string} keepFileName e.g. 'win32-x64.node'
- * @returns {{ sites: number, removedFiles: number, removedBytes: number, keptFiles: number }}
+ * @returns {{ sites: number, removedFiles: number, removedBytes: number, keptSites: number }}
  */
 export function pruneForeignSqlitePrebuilds(rootDirectory, keepFileName) {
   if (typeof keepFileName !== 'string' || !keepFileName.endsWith('.node')) {
     throw new Error(`[sqlite-prebuild-pruning] invalid keep file name: ${JSON.stringify(keepFileName)}`);
   }
   const dirs = findSqlitePrebuildDirs(rootDirectory);
-  let removedFiles = 0;
-  let removedBytes = 0;
-  let keptFiles = 0;
-  for (const dir of dirs) {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    const binaries = entries.filter((e) => e.isFile() && e.name.endsWith('.node')).map((e) => e.name);
+  const siteBinaries = dirs.map((dir) => {
+    const binaries = readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.node'))
+      .map((entry) => entry.name);
     if (!binaries.includes(keepFileName)) {
+      const found = binaries.join(', ') || 'no .node binaries';
       throw new Error(
-        `[sqlite-prebuild-pruning] ${dir} has no ${keepFileName} (found: ${binaries.join(', ') || 'no .node binaries'}) — ` +
+        `[sqlite-prebuild-pruning] ${dir} has no ${keepFileName} (found: ${found}) — ` +
         'refusing to prune a tree that lacks the target platform prebuild. Check the release target triple.',
       );
     }
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.node') || entry.name === keepFileName) continue;
-      const filePath = join(dir, entry.name);
+    return binaries;
+  });
+  let removedFiles = 0;
+  let removedBytes = 0;
+  let keptSites = 0;
+  dirs.forEach((dir, index) => {
+    for (const binary of siteBinaries[index]) {
+      if (binary === keepFileName) continue;
+      const filePath = join(dir, binary);
       removedBytes += statSync(filePath).size;
       rmSync(filePath);
       removedFiles += 1;
     }
-    keptFiles += 1;
-  }
-  return { sites: dirs.length, removedFiles, removedBytes, keptFiles };
+    keptSites += 1;
+  });
+  return { sites: dirs.length, removedFiles, removedBytes, keptSites };
 }
