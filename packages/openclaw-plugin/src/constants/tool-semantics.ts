@@ -31,7 +31,7 @@
  * static declaration is a programming error, not a runtime condition (rc-3).
  */
 
-import { buildToolSemanticRegistry, type CanonicalKind, type ToolSemanticMappingV1, type ToolSemanticRegistry } from '@principles/core/runtime-v2';
+import { buildToolSemanticRegistry, type CanonicalKind, type ToolSemanticMappingV1, type ToolSemanticRegistry } from '@principles/core/runtime-v2/internalization/tool-semantic-registry';
 import { BASH_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, AGENT_TOOL_NAMES } from './tools.js';
 
 function toMappings(names: readonly string[], canonicalKind: CanonicalKind): ToolSemanticMappingV1[] {

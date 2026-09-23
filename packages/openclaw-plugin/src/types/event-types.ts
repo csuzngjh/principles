@@ -39,4 +39,4 @@ export type {
 
 export {
   createEmptyDailyStats,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime-v2/types/event-types';

@@ -42,6 +42,38 @@
       "types": "./dist/runtime-v2/feedback/index.d.ts",
       "default": "./dist/runtime-v2/feedback/index.js"
     },
+    "./runtime-v2/store/workspace-leak-guard": {
+      "types": "./dist/runtime-v2/store/workspace-leak-guard.d.ts",
+      "default": "./dist/runtime-v2/store/workspace-leak-guard.js"
+    },
+    "./runtime-v2/feedback/redact-sensitive": {
+      "types": "./dist/runtime-v2/feedback/redact-sensitive.d.ts",
+      "default": "./dist/runtime-v2/feedback/redact-sensitive.js"
+    },
+    "./runtime-v2/types/event-types": {
+      "types": "./dist/runtime-v2/types/event-types.d.ts",
+      "default": "./dist/runtime-v2/types/event-types.js"
+    },
+    "./runtime-v2/trajectory-schema": {
+      "types": "./dist/runtime-v2/trajectory-schema.d.ts",
+      "default": "./dist/runtime-v2/trajectory-schema.js"
+    },
+    "./runtime-v2/internalization/rule-host-input-builder": {
+      "types": "./dist/runtime-v2/internalization/rule-host-input-builder.d.ts",
+      "default": "./dist/runtime-v2/internalization/rule-host-input-builder.js"
+    },
+    "./runtime-v2/internalization/rule-context-v2": {
+      "types": "./dist/runtime-v2/internalization/rule-context-v2.d.ts",
+      "default": "./dist/runtime-v2/internalization/rule-context-v2.js"
+    },
+    "./runtime-v2/internalization/behavior-example-pack": {
+      "types": "./dist/runtime-v2/internalization/behavior-example-pack.d.ts",
+      "default": "./dist/runtime-v2/internalization/behavior-example-pack.js"
+    },
+    "./runtime-v2/internalization/tool-semantic-registry": {
+      "types": "./dist/runtime-v2/internalization/tool-semantic-registry.d.ts",
+      "default": "./dist/runtime-v2/internalization/tool-semantic-registry.js"
+    },
     "./quality-scorecard": {
       "types": "./dist/quality-scorecard/index.d.ts",
       "default": "./dist/quality-scorecard/index.js"

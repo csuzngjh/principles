@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { copyFileSync, mkdirSync, existsSync, statSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { assertSatellitePurity } from '../../scripts/build/check-satellite-purity.mjs';
 
 const isProduction = process.argv.includes('--production');
 
@@ -31,7 +32,7 @@ async function bundlePlugin() {
     // Without this, pd-cli's `import { ... } from 'principles-disciple'`
     // throws "Dynamic require of 'process' is not supported".
     // OpenClaw loads via setupEntry (dynamic import), so the banner is safe.
-    await build({
+    const mainResult = await build({
       entryPoints: {
         bundle: 'src/index.ts',
         'governance-audit': 'src/governance-audit.ts',
@@ -59,6 +60,11 @@ async function bundlePlugin() {
       treeShaking: true,
       metafile: true,
     });
+
+    // OPT-002 guard: satellites must not carry the LLM SDK graph (fails loud
+    // on any barrel value-import regression; bundle.js is exempt by design).
+    assertSatellitePurity(mainResult.metafile);
+    console.log('Satellite purity guard: no LLM SDK deps in governance-audit / rulehost-evidence.');
 
     console.log('Main bundle created: dist/bundle.js');
 
