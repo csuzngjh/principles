@@ -478,6 +478,28 @@ describe('CR8 Backend Data Contract Routes', () => {
       expect(getStringField(firstRecord, 'channel')).toBeDefined();
       expect(getStringField(firstRecord, 'createdAt')).toBeDefined();
     });
+
+    it('PRI-908: carries the prompt injection budget status for the pre-approval forecast', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+
+      // The forecast is advisory in production (projection failure omits the
+      // field), but THIS fixture is deterministic: state.db exists with the
+      // full runtime DDL and no config.yaml, so the projection recomputes and
+      // the field is always present. Assert presence, not absence-by-skip
+      // (a test that can return early proves nothing).
+      const promptInjection = data!['promptInjection'];
+      expect(isRecord(promptInjection)).toBe(true);
+      const budget = promptInjection!['budget'];
+      const usedChars = promptInjection!['usedChars'];
+      expect(typeof budget).toBe('number');
+      expect(budget as number).toBeGreaterThanOrEqual(1);
+      expect(Number.isInteger(usedChars)).toBe(true);
+      expect(usedChars as number).toBeGreaterThanOrEqual(0);
+      expect(typeof promptInjection!['truncated']).toBe('boolean');
+    });
   });
 
   // ── 6. Governance queue returns required fields ───────────────────────────
