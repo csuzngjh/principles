@@ -6,6 +6,10 @@
   "bin": {
     "pd": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs",
     "clean": "node ../../scripts/build/clean-dist.mjs",
