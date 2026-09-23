@@ -1,7 +1,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { guardWorkspaceLeak } from '@principles/core/runtime-v2';
+import { guardWorkspaceLeak } from '@principles/core/runtime-v2/store/workspace-leak-guard';
 import type {
   EventLogEntry,
   EventType,
@@ -34,7 +34,7 @@ import type {
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
-import { redactTelemetryString } from '@principles/core/runtime-v2';
+import { redactTelemetryString } from '@principles/core/runtime-v2/feedback/redact-sensitive';
 
 const EVENT_LOG_RETENTION_DAYS = 7;
 

@@ -17,10 +17,12 @@
 
 import {
   computeBehaviorFacts,
+  UNAVAILABLE_RULE_CONTEXT,
+} from '@principles/core/runtime-v2/internalization/rule-context-v2';
+import {
   extractFilePathFromParams,
   normalizePathPure,
-  UNAVAILABLE_RULE_CONTEXT,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime-v2/internalization/rule-host-input-builder';
 import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
 import type {
   CanonicalKind,

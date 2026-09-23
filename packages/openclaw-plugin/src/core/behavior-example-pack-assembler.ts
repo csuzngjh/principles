@@ -19,11 +19,9 @@
  * Boundary: this module is I/O. Pure logic (type + validator) lives in
  * `@principles/core/runtime-v2` → `behavior-example-pack.ts`.
  */
-import {
-  buildRuleHostAction,
-  computeBehaviorFacts,
-  validateBehaviorExamplePack,
-} from '@principles/core/runtime-v2';
+import { buildRuleHostAction } from '@principles/core/runtime-v2/internalization/rule-host-input-builder';
+import { computeBehaviorFacts } from '@principles/core/runtime-v2/internalization/rule-context-v2';
+import { validateBehaviorExamplePack } from '@principles/core/runtime-v2/internalization/behavior-example-pack';
 import type {
   RuleContextV2,
   BehaviorExamplePack,
