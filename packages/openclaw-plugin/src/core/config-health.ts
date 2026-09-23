@@ -128,7 +128,13 @@ export function ensureConversationAccessInConfig(): boolean {
     }
     const hooks = entry.hooks as Record<string, unknown>;
 
-    if (hooks.allowConversationAccess === true) {
+    // An explicit value — true OR false — is an Owner decision recorded in the
+    // host-owned config (false is the documented turn-off: `openclaw config
+    // set plugins.entries.principles-disciple.hooks.allowConversationAccess
+    // false`). The auto-fix below repairs only an ABSENT flag; rewriting an
+    // explicit deny would silently reverse the Owner's decision on every
+    // gateway start and defeat the flag as the surface's disable control.
+    if (Object.hasOwn(hooks, CONVERSATION_ACCESS_CONFIG_KEY)) {
       return false;
     }
 
@@ -137,4 +143,16 @@ export function ensureConversationAccessInConfig(): boolean {
     writeConfigAtomic(configPath, cfg);
     return true;
   });
+}
+
+/**
+ * True when the plugin entry carries an explicit
+ * `hooks.allowConversationAccess === false`. Callers should honor the opt-out
+ * (structured rc-9 log) instead of attempting the absent-flag auto-fix.
+ */
+export function isExplicitConversationAccessOptOut(pluginEntry: unknown): boolean {
+  if (!pluginEntry || typeof pluginEntry !== 'object' || Array.isArray(pluginEntry)) return false;
+  const hooks = (pluginEntry as Record<string, unknown>).hooks;
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return false;
+  return (hooks as Record<string, unknown>)[CONVERSATION_ACCESS_CONFIG_KEY] === false;
 }

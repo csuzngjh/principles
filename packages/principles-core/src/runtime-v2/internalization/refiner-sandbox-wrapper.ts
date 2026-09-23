@@ -102,6 +102,20 @@ function isSafeRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function classifyError(err: unknown): { errorType: RefinerSandboxErrorType; message: string; stack?: string } {
+  // Security audit run-1 review follow-up (CodeRabbit on PR #1846): the
+  // hardened replay evaluator's vm hard timeout throws a CROSS-REALM error
+  // (instanceof Error is false) carrying code=ERR_SCRIPT_EXECUTION_TIMEOUT.
+  // Classify it as `timeout` before the generic branches, otherwise the
+  // repair loop receives a runtime_error mislabel for what is a hang.
+  if (typeof err === 'object' && err !== null && Reflect.get(err, 'code') === 'ERR_SCRIPT_EXECUTION_TIMEOUT') {
+    const message = Reflect.get(err, 'message');
+    const stack = Reflect.get(err, 'stack');
+    return {
+      errorType: 'timeout',
+      message: typeof message === 'string' ? message : safeErrorMessage(err),
+      ...(typeof stack === 'string' ? { stack } : {}),
+    };
+  }
   if (err instanceof SyntaxError) {
     return { errorType: 'syntax_error', message: err.message, stack: err.stack };
   }
@@ -272,11 +286,14 @@ function validateCaseDecision(
  * Evaluate rule code against GoldenTrace cases with structured error reporting.
  *
  * **Timeout semantics**: `softTimeoutMs` is an elapsed-time classification
- * threshold, NOT a hard cancellation mechanism. If `evaluateCode` blocks
- * synchronously (infinite loop, long computation), this wrapper cannot
- * interrupt it — the timeout is only detected after `evaluateCode` returns.
- * Hard cancellation requires `node:vm` or `AbortController` at the
- * plugin/sandbox-adapter layer, which is out of scope for core.
+ * threshold, NOT a hard cancellation mechanism — the timeout is only detected
+ * after `evaluateCode` returns. Since the security-audit run-1 fix, the
+ * default `evaluateCode` (compileHardenedRuleEvaluator) additionally runs each
+ * call through a vm script with a hard REPLAY_EVALUATE_HARD_TIMEOUT_MS cap, so
+ * a synchronously looping candidate is interrupted at the vm layer and this
+ * wrapper classifies the thrown timeout as a failed case. A custom
+ * `evaluateCode` without that hard cap still relies on the soft classification
+ * alone (and cannot be interrupted mid-call).
  */
 export function evaluateInRefinerSandbox(
   code: string,

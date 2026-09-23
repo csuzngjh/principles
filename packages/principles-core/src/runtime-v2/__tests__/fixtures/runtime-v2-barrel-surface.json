@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1769,
+ "count": 1773,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -79,6 +79,7 @@
   "ApprovalStats",
   "ApprovalStatus",
   "ApprovalWithContext",
+  "ArtifactDigestCheck",
   "ArtifactKind",
   "ArtifactLineageIdentity",
   "ArtifactLineageRecord",
@@ -885,6 +886,7 @@
   "PiAiAdapterConfigResult",
   "PiAiRuntimeAdapter",
   "PiAiRuntimeAdapterConfig",
+  "PiArtifactRow",
   "PluginSurfaceEntry",
   "Principle",
   "PrincipleAdherenceResult",
@@ -1644,6 +1646,7 @@
   "mapConfidenceToLabel",
   "mapFailureCategory",
   "mapLlmResultToOutput",
+  "mapPiArtifactRow",
   "mapSourceKind",
   "markOwnerResolutionApplied",
   "maxEvidencePreviewLength",
@@ -1770,6 +1773,7 @@
   "validateSurfaceRegistry",
   "validateTaskTransition",
   "validateToolSemanticMappings",
+  "verifyPiArtifactRowDigest",
   "writeOwnerIdentityFile"
  ]
 }

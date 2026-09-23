@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileHardenedRuleEvaluator, createProductionGateDeps } from '../production-gate-deps.js';
+import { evaluateInRefinerSandbox } from '../../internalization/refiner-sandbox-wrapper.js';
 import { createGoldenTraceFixture, createSyntheticRuleHostInput } from '../../golden-trace.js';
 import type { RuleHostInput } from '../../internalization/rule-host-contracts.js';
 import type { RuleHostHelpers } from '../../internalization/rule-host-helpers.js';
@@ -605,3 +606,87 @@ function evaluate(input, helpers) {
     expect(() => evaluate(poison, {} as RuleHostHelpers)).toThrow(/not JSON-serializable/);
   });
 });
+
+// ── Security audit run-1: rulecode.replay.in-process-evaluate-no-hard-timeout ──
+// The replay evaluate call must be hard-bounded: a non-terminating LLM-authored
+// candidate previously hung the replaying console server / evaluator worker /
+// CLI process forever (the call was a bare host-frame function invocation).
+// Now each call runs through a vm script whose runInContext timeout interrupts
+// even a synchronous infinite loop.
+
+describe('replay evaluate hard timeout (security audit run-1)', () => {
+  function probeInput(): RuleHostInput {
+    return createSyntheticRuleHostInput(
+      { toolName: 'edit', params: { filePath: '/src/index.ts' } },
+      {},
+      {},
+    );
+  }
+
+  it('interrupts a non-terminating evaluate body at the hard vm cap instead of hanging', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { for (;;) { } return { decision: "allow", matched: false, reason: "unreachable" }; }',
+      'audit-timeout-probe',
+    );
+    const startedAt = Date.now();
+    expect(() => evaluate(probeInput(), {} as RuleHostHelpers)).toThrow(/timed out/i);
+    const elapsedMs = Date.now() - startedAt;
+    // The vm cap is 2000ms; the interruption must be near-immediate after the
+    // cap, not an unbounded hang. Generous ceiling keeps CI-flake low.
+    expect(elapsedMs).toBeLessThan(10_000);
+  }, 20_000);
+
+  it('still evaluates a benign evaluator to a valid result after the change', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { return { decision: "block", matched: true, reason: "benign" }; }',
+      'audit-benign-probe',
+    );
+    const result = evaluate(probeInput(), {} as RuleHostHelpers);
+    expect(result.decision).toBe('block');
+    expect(result.matched).toBe(true);
+  });
+
+  // PR #1846 review follow-up (CodeRabbit): the hard cap must also cover
+  // Promise microtasks scheduled from evaluate. Without
+  // microtaskMode: 'afterEvaluate' the microtask queue drains on the HOST
+  // after runInContext returns — a looping microtask escapes the timeout and
+  // hangs the replaying process later.
+  it('interrupts a looping Promise microtask scheduled by evaluate', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { Promise.resolve().then(() => { for (;;) { } }); return { decision: "allow", matched: false, reason: "ok" }; }',
+      'audit-microtask-probe',
+    );
+    const startedAt = Date.now();
+    expect(() => evaluate(probeInput(), {} as RuleHostHelpers)).toThrow(/timed out/i);
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  }, 20_000);
+});
+
+// PR #1846 review follow-up (CodeRabbit): the vm hard timeout throws a
+// CROSS-REALM error (instanceof Error is false) whose only marker is
+// code=ERR_SCRIPT_EXECUTION_TIMEOUT. classifyError must surface it as
+// errorType 'timeout' — not the generic 'runtime_error' — so the refiner
+// repair loop receives honest replay evidence.
+describe('replay vm timeout classification (PR #1846 review)', () => {
+  it('reports errorType "timeout" when the hardened evaluator hard-interrupts a looping candidate', () => {
+    const goldenTrace = createGoldenTraceFixture({
+      toolName: 'edit',
+      negativeParams: { filePath: '/etc/passwd' },
+      positiveParams: { filePath: '/src/index.ts' },
+      expectedDecision: 'block',
+    });
+    const loopingCode = 'function evaluate(input, helpers) { for (;;) { } return { decision: "allow", matched: false, reason: "unreachable" }; }';
+    const evaluateCode = compileHardenedRuleEvaluator(loopingCode, 'audit-classify-probe');
+
+    const startedAt = Date.now();
+    const result = evaluateInRefinerSandbox(loopingCode, goldenTrace, { evaluateCode });
+    expect(result.success).toBe(false);
+    const failures = result.failedCases.filter((c) => c.caseId !== '__compile__');
+    expect(failures.length).toBeGreaterThan(0);
+    for (const failure of failures) {
+      expect(failure.errorType).toBe('timeout');
+    }
+    expect(Date.now() - startedAt).toBeLessThan(30_000);
+  }, 45_000);
+});
+
