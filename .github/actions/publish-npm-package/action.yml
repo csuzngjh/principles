@@ -168,8 +168,15 @@ runs:
         if [ "$PKG_DIR" = "openclaw-plugin" ]; then
           npm run build --workspace=principles-disciple
         elif [ "$PKG_DIR" = "pd-cli" ]; then
-          # pd-cli imports types from principles-disciple — build it first.
+          # pd-cli imports types from principles-disciple AND from
+          # @principles/codex-adapter (codex-worker / codex-ingest-catchup /
+          # health-codex). The adapter must be built HERE, not inherited from
+          # leg 4/7's side effect: when the adapter version is unchanged from
+          # the prior cohort the leg resolves PRESENT_PRIOR and every
+          # ABSENT-gated step — including its build — is skipped, leaving no
+          # dist/ for pd-cli's tsc (run 35834470066, TS2307 x4).
           npm run build --workspace=principles-disciple
+          npm run build --workspace=@principles/codex-adapter
           npm run build --workspace=@principles/pd-cli
         elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
           # esbuild first (cleans dist, produces bundle.js), then tsc
