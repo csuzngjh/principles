@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build:ui": "node scripts/build-ui.mjs",
-    "build": "npm run clean && npm run build:ui && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs",
+    "build:ui:production": "node scripts/build-ui.mjs --production",
+    "build": "npm run clean && npm run build:ui:production && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs",
     "clean": "node ../../scripts/build/clean-dist.mjs",
     "dev": "npx tsx src/server/index.ts --port 3100",
     "start": "node dist/server.js",

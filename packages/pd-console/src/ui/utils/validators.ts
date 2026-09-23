@@ -39,6 +39,10 @@ import type {
 
 export type { FeedbackChannelId, FeedbackChannelStatus, FeedbackChannelsData, FeedbackSubmitResult };
 
+// PRI-908: the injection-budget forecast shape has one authority in shared/, too.
+import type { PromptInjectionBudgetStatus } from '../../shared/prompt-injection-contract.js';
+export type { PromptInjectionBudgetStatus };
+
 // ── Primitive guards ──────────────────────────────────────────────────────────
 
 function isString(v: unknown): v is string {
@@ -1957,6 +1961,22 @@ export interface ApprovalsGroupedData {
   groups: ApprovalGroupData[];
   generatedAt: string;
   note?: string;
+  /** PRI-908: prompt-channel injection budget status for the pre-approval forecast. */
+  promptInjection?: PromptInjectionBudgetStatus;
+}
+
+export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjectionBudgetStatus | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'budget') || !Object.hasOwn(v, 'usedChars') || !Object.hasOwn(v, 'truncated')) return null;
+  const { budget, usedChars, truncated } = v;
+  if (
+    typeof budget !== 'number' || !Number.isInteger(budget) || budget <= 0 ||
+    typeof usedChars !== 'number' || !Number.isInteger(usedChars) || usedChars < 0 ||
+    typeof truncated !== 'boolean'
+  ) {
+    return null;
+  }
+  return { budget, usedChars, truncated };
 }
 
 export function validateApprovalsGrouped(v: unknown): ApprovalsGroupedData | null {
@@ -1967,6 +1987,13 @@ export function validateApprovalsGrouped(v: unknown): ApprovalsGroupedData | nul
   if (groups === null) return null;
   const result: ApprovalsGroupedData = { groups, generatedAt: v.generatedAt };
   if (Object.hasOwn(v, 'note') && isString(v.note)) result.note = v.note;
+  // PRI-908: additive optional field — malformed/absent forecast degrades to
+  // "no badge" (the approve-time warning from PRI-890 remains the fail-loud
+  // exclusion report), never to a rejected payload.
+  if (Object.hasOwn(v, 'promptInjection')) {
+    const promptInjection = validatePromptInjectionBudgetStatus(v.promptInjection);
+    if (promptInjection !== null) result.promptInjection = promptInjection;
+  }
   return result;
 }
 

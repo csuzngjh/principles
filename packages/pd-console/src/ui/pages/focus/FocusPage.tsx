@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -25,7 +25,15 @@ import type {
   ActivationRecord,
 } from "../../api.js";
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
+import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
+import { validateApprovalsGroupedData } from "./focus-validation.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
+import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
+
+/** PRI-908: how long the decided card stays visible before the pending list refresh removes it. */
+const DECIDED_REFRESH_DELAY_MS = 1600;
+/** PRI-908: per decision, at most this many warning toasts render individually; the rest aggregate into one (rc-9: nothing dropped). */
+const MAX_WARNING_TOASTS = 3;
 import { fetchGovernanceExperience, fetchOwnerDecisionInbox } from "../../api.js";
 import type { OwnerDecisionInboxData } from "../../api.js";
 import type {
@@ -73,104 +81,6 @@ export function summarizeDecisionResults(results: readonly DecisionResult[]): {
       ? { failureReason: first.nextAction ? `${first.error} ${first.nextAction}` : first.error }
       : {}),
     successWarnings,
-  };
-}
-
-// ── Approval group validator (not in validators.ts, page-specific) ─────────
-
-/** Type guard: is this a non-null object with own properties (not inherited)? */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "principleId") ||
-    !Object.hasOwn(raw, "principleTitle") ||
-    !Object.hasOwn(raw, "status") ||
-    !Object.hasOwn(raw, "records")
-  ) {
-    return null;
-  }
-  const principleId = raw.principleId;
-  const principleTitle = raw.principleTitle;
-  const status = raw.status;
-  const records = raw.records;
-  if (
-    typeof principleId !== "string" ||
-    typeof principleTitle !== "string" ||
-    typeof status !== "string" ||
-    !["pending", "approved", "rejected"].includes(status) ||
-    !Array.isArray(records)
-  ) {
-    return null;
-  }
-  const validRecords: ApprovalGroup["records"] = [];
-  for (const r of records) {
-    if (!isRecord(r)) return null;
-    if (
-      !Object.hasOwn(r, "id") ||
-      !Object.hasOwn(r, "artifactId") ||
-      !Object.hasOwn(r, "channel") ||
-      !Object.hasOwn(r, "createdAt") ||
-      !Object.hasOwn(r, "status") ||
-      typeof r.id !== "string" ||
-      typeof r.artifactId !== "string" ||
-      typeof r.channel !== "string" ||
-      typeof r.createdAt !== "string" ||
-      typeof r.status !== "string"
-    ) {
-      return null;
-    }
-    validRecords.push({
-      id: r.id,
-      artifactId: r.artifactId,
-      channel: r.channel,
-      createdAt: r.createdAt,
-      status: r.status,
-    });
-  }
-  // Wave 7: candidateDescription is optional — present when backend could
-  // extract human-readable content from the artifact contentJson.
-  // ERR-009: if field exists but is wrong type, fail loud (return null).
-  let candidateDescription: string | undefined;
-  if (Object.hasOwn(raw, "candidateDescription")) {
-    if (typeof raw.candidateDescription !== "string") return null;
-    candidateDescription = raw.candidateDescription;
-  }
-  return {
-    principleId,
-    principleTitle,
-    candidateDescription,
-    status: status as "pending" | "approved" | "rejected",
-    records: validRecords,
-  };
-}
-
-function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "groups") ||
-    !Object.hasOwn(raw, "generatedAt")
-  ) {
-    return null;
-  }
-  const groups = raw.groups;
-  const generatedAt = raw.generatedAt;
-  if (!Array.isArray(groups) || typeof generatedAt !== "string") {
-    return null;
-  }
-  const validatedGroups: ApprovalGroup[] = [];
-  for (const g of groups) {
-    const validated = validateApprovalGroup(g);
-    if (validated === null) return null;
-    validatedGroups.push(validated);
-  }
-  return {
-    groups: validatedGroups,
-    generatedAt,
-    note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined,
   };
 }
 
@@ -378,13 +288,17 @@ function PendingReviewCard({
   group,
   actionsLockedReason,
   onDecisionApplied,
+  promptInjection,
 }: {
   group: ApprovalGroup;
   /** PRI-889: 与 OwnerDecisionCard 同一治理就绪门（PRI-787）——锁定时禁用动作并给出可见原因。 */
   actionsLockedReason?: string;
   onDecisionApplied: () => void;
+  /** PRI-908: 提示词注入预算现状（批准前预告"批了是否会生效"）。 */
+  promptInjection?: PromptInjectionBudgetStatus;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const primaryChannel = group.records[0]?.channel ?? "prompt";
   const channelLabel = getChannelLabel(primaryChannel, t);
   const isReversible = primaryChannel === "prompt" || primaryChannel === "defer_archive";
@@ -397,8 +311,45 @@ function PendingReviewCard({
   const [showEditInput, setShowEditInput] = useState(false);
   const [editReason, setEditReason] = useState("");
   const [newArtifactId, setNewArtifactId] = useState("");
+  // PRI-908: 决策成功后卡片先呈现终态（已批准/已拒绝）短暂停留，再刷新待办
+  // 列表移除卡片——避免"点了就消失"让 Owner 无法确认操作是否落地。
+  const [decidedOutcome, setDecidedOutcome] = useState<"approved" | "rejected" | null>(null);
+  const refreshTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
+  }, []);
 
   const isActionable = group.status === "pending" && group.records.some((r) => r.status === "pending");
+  const decisionDisabled = !isActionable || actionLoading || actionsLocked || decidedOutcome !== null;
+
+  function scheduleDecisionRefresh() {
+    if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = window.setTimeout(() => onDecisionApplied(), DECIDED_REFRESH_DELAY_MS);
+  }
+
+  /** PRI-890/908: 非致命服务端警告必须抵达 Owner（rc-9），且必须说人话。 */
+  function notifySuccessWarnings(successWarnings: readonly string[]) {
+    const segments = successWarnings.flatMap((warning) => splitApprovalWarnings(warning));
+    const localized = segments.map((warning) => localizeApprovalWarning(warning, t));
+    const renderDetail = (detail: string) =>
+      `${t("pages.focus.approveWarningDetail", { defaultValue: "原始信息" })}: ${detail}`;
+    for (const item of localized.slice(0, MAX_WARNING_TOASTS)) {
+      toast.warning(item.title, {
+        description: item.body ? `${item.body}\n${renderDetail(item.detail)}` : item.detail,
+        duration: 15000,
+        action: item.activationAction
+          ? { label: t("pages.focus.goActivationCta", { defaultValue: "前往生效情况" }), onClick: () => navigate("/activation") }
+          : undefined,
+      });
+    }
+    const overflow = localized.slice(MAX_WARNING_TOASTS);
+    if (overflow.length > 0) {
+      toast.warning(t("pages.focus.approveWarning.overflowTitle", { defaultValue: "还有 {{count}} 条警告", count: overflow.length }), {
+        description: overflow.map((item) => renderDetail(item.detail)).join("\n"),
+        duration: 15000,
+      });
+    }
+  }
 
   // Display title: prefer candidateDescription (human-readable) over principleTitle
   // (which falls back to a fabricated principleId when the principle isn't in ledger).
@@ -431,19 +382,20 @@ function PendingReviewCard({
   }
 
   const handleApprove = async () => {
-    if (!isActionable || actionLoading) return;
+    if (!isActionable || actionLoading || decidedOutcome !== null) return;
     setActionLoading(true);
     try {
       const { allSucceeded, failedCount, totalCount, failureReason, successWarnings } = await applyDecisionToAllRecords("approve");
       if (allSucceeded) {
-        toast.success(t("pages.focus.approveSucceeded", { defaultValue: "已批准" }));
+        toast.success(t("pages.focus.approveSucceededCount", { defaultValue: "已批准 {{count}} 条原则", count: totalCount }));
         // PRI-890: a committed activation can still be excluded from agent
         // behavior (prompt injection budget saturated) — the server warning
         // must reach the Owner, not vanish behind the success toast (rc-9).
-        if (successWarnings.length > 0) {
-          toast.warning(successWarnings.join("\n"), { duration: 15000 });
-        }
-        onDecisionApplied();
+        // PRI-908: warnings render as localized plain-language toasts with an
+        // activation-page action, not raw English text.
+        notifySuccessWarnings(successWarnings);
+        setDecidedOutcome("approved");
+        scheduleDecisionRefresh();
       } else {
         toast.error(
           t("pages.focus.partialFailure", {
@@ -463,7 +415,7 @@ function PendingReviewCard({
   };
 
   const handleReject = async () => {
-    if (!isActionable || actionLoading || !rejectReason.trim()) return;
+    if (!isActionable || actionLoading || decidedOutcome !== null || !rejectReason.trim()) return;
     setActionLoading(true);
     try {
       const { allSucceeded, failedCount, totalCount, failureReason } = await applyDecisionToAllRecords("reject", rejectReason.trim());
@@ -471,7 +423,8 @@ function PendingReviewCard({
         toast.success(t("pages.focus.rejectSucceeded", { defaultValue: "已拒绝" }));
         setShowRejectInput(false);
         setRejectReason("");
-        onDecisionApplied();
+        setDecidedOutcome("rejected");
+        scheduleDecisionRefresh();
       } else {
         toast.error(
           t("pages.focus.partialFailure", {
@@ -493,7 +446,7 @@ function PendingReviewCard({
   const currentArtifactId = group.records.find((r) => r.status === "pending")?.artifactId ?? "";
 
   const handleEdit = async () => {
-    if (!isActionable || actionLoading || !editReason.trim() || !newArtifactId.trim()) return;
+    if (!isActionable || actionLoading || decidedOutcome !== null || !editReason.trim() || !newArtifactId.trim()) return;
     setActionLoading(true);
     try {
       const pendingRecords = group.records.filter((r) => r.status === "pending");
@@ -537,6 +490,23 @@ function PendingReviewCard({
       {/* Left border indicator */}
       <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-[6px] bg-gov" />
 
+      {/* PRI-908: 决策落地终态——卡片停留片刻再从待办列表移除（rc-9：操作结果必须可见）。 */}
+      {decidedOutcome !== null && (
+        <div
+          className={`mb-3 rounded-[3px] border px-3 py-2 text-[12.5px] ${
+            decidedOutcome === "approved"
+              ? "border-green/40 bg-green/10 text-green"
+              : "border-line bg-surface/80 text-ink-3"
+          }`}
+          role="status"
+          data-testid={`decided-banner-${group.principleId}`}
+        >
+          {decidedOutcome === "approved"
+            ? t("pages.focus.decidedApproved", { defaultValue: "已批准 ✓ 正在写入生效记录…" })
+            : t("pages.focus.decidedRejected", { defaultValue: "已拒绝" })}
+        </div>
+      )}
+
       {/* Tags row */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
@@ -576,12 +546,27 @@ function PendingReviewCard({
         </div>
       )}
 
+      {/* PRI-908: 批准前预算预告——FIFO 注入下新激活永远排在队尾，投影已截断
+          即意味着"批准了也暂时不生效"。让 Owner 在决策前就知道，而不是事后道歉。 */}
+      {decidedOutcome === null && primaryChannel === "prompt" && promptInjection?.truncated === true && (
+        <div
+          className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] text-amber"
+          data-testid={`approve-queue-badge-${group.principleId}`}
+        >
+          {t("pages.focus.approveQueueBadge", {
+            defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符），需先停用被取代的旧原则。",
+            used: promptInjection.usedChars,
+            budget: promptInjection.budget,
+          })}
+        </div>
+      )}
+
       {/* Inline review actions (Wave 7: no more 404 jump) */}
       <div className="flex gap-2 mt-4 flex-wrap items-center">
         <button
           type="button"
           onClick={handleApprove}
-          disabled={!isActionable || actionLoading || actionsLocked}
+          disabled={decisionDisabled}
           data-testid={`approve-btn-${group.principleId}`}
           className="inline-flex items-center border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
@@ -590,7 +575,7 @@ function PendingReviewCard({
         <button
           type="button"
           onClick={() => { setShowEditInput((v) => !v); setShowRejectInput(false); }}
-          disabled={!isActionable || actionLoading || actionsLocked}
+          disabled={decisionDisabled}
           data-testid={`edit-btn-${group.principleId}`}
           className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
@@ -599,7 +584,7 @@ function PendingReviewCard({
         <button
           type="button"
           onClick={() => { setShowRejectInput((v) => !v); setShowEditInput(false); }}
-          disabled={!isActionable || actionLoading || actionsLocked}
+          disabled={decisionDisabled}
           data-testid={`reject-btn-${group.principleId}`}
           className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
@@ -1266,6 +1251,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             key={group.principleId}
             group={group}
             actionsLockedReason={ownerActionsLockedReason ?? undefined}
+            promptInjection={groupedData.promptInjection}
             onDecisionApplied={() => { void loadData(); }}
           />
         ))}
