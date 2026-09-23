@@ -312,14 +312,17 @@ for (const item of PD_CLI_REQUIRED) {
 // "Required <pkg> item not found / Run: …" messages with raw type errors; and
 // if the console gate stayed above the build, a missing dist would exit first
 // and the build would never run.
-// Console's build is the RAH-1 release chain: clean + filtered tsc + dist hygiene assertion.
+// Console's build is the RAH-1 release chain: clean + production UI bundle + filtered tsc + dist hygiene assertion.
+// (OPT-001: the console `build` script itself carries --production for the UI step, so every
+// official caller — this script, release-metadata, publish action, reproducibility — ships the
+// minified browser bundle without threading flags; dev iteration and e2e keep calling build:ui.)
 {
   const npmCliJs = findNpmCliJs();
   if (!npmCliJs) {
     console.error('❌ npm-cli.js not found next to the running Node binary — cannot build @principles/pd-console before bundling.');
     process.exit(1);
   }
-  log('  Building @principles/pd-console (release chain: clean + filtered tsc + dist hygiene)...');
+  log('  Building @principles/pd-console (release chain: clean + production UI + filtered tsc + dist hygiene)...');
   // stdout is a machine channel in this script — the child's stdout is
   // discarded here; its stderr (where npm progress and errors live) passes
   // through. A non-zero build exit throws and fails the bundle fail-loud.
@@ -837,6 +840,25 @@ if (!existsSync(consoleWebIndex)) {
   process.exit(1);
 }
 log('  ✅ console dist/web/index.html present');
+
+// OPT-001 (artifact-size audit P1): the shipped browser bundle must be the
+// production one. build-ui.mjs without --production emits unminified code with
+// an INLINE sourcemap (8.6 MiB vs 1.1 MiB for app.js) and it used to reach
+// releases silently. The console `build` script now passes --production; this
+// gate fails loud if a future caller reverts the UI step to dev mode.
+const consoleAppJs = join(CONSOLE_DEST, 'dist', 'web', 'assets', 'app.js');
+if (!existsSync(consoleAppJs)) {
+  console.error(`❌ console dist/web/assets/app.js not found at ${consoleAppJs}`);
+  console.error('   nextAction: check pd-console build:ui:production (esbuild outfile).');
+  process.exit(1);
+}
+if (readFileSync(consoleAppJs, 'utf-8').includes('sourceMappingURL')) {
+  console.error('❌ console web bundle in the payload is a DEV build (inline sourcemap detected in app.js).');
+  console.error('   Releases must ship the production UI bundle: npm run build --workspace=@principles/pd-console');
+  console.error('   (build:ui without --production is for local dev/e2e only and must not feed a release payload).');
+  process.exit(1);
+}
+log('  ✅ console web bundle is a production build (no dev sourcemarkers)');
 
 log('\n✅ Console bundle verified!');
 
