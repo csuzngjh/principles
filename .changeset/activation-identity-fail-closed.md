@@ -1,5 +1,7 @@
 ---
 '@principles/core': patch
+'@principles/host-runtime': patch
+'@principles/pd-cli': patch
 ---
 
 Activation identity boundary is now **ledger-aware and end-to-end** (Phase 3, I2 + I3 — `docs/architecture/principle-identity-reconciliation.md`), fixing the Owner review of PR #1856 where the shape-only gate cut the live production chain.
