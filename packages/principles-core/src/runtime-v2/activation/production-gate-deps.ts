@@ -36,6 +36,16 @@ import { validateRuleHostResult } from '../internalization/rule-host-validator.j
 import { safeStringifyPreview } from '../feedback/safe-stringify.js';
 
 /**
+ * Security audit run-1 (rulecode.replay.in-process-evaluate-no-hard-timeout):
+ * hard wall-clock cap for each replay evaluate call. Mirrors the 1000ms vm
+ * compile budget above; the plugin's live child-process path keeps its own
+ * larger budget (EVALUATE_PROCESS_TIMEOUT_MS). A vm timeout throw surfaces as
+ * a rejected replay case (fail closed for the candidate) instead of hanging
+ * the replaying console server / evaluator worker / CLI process.
+ */
+const REPLAY_EVALUATE_HARD_TIMEOUT_MS = 2_000;
+
+/**
  * PRI-634 PR-A (Slice A): type-narrowing adapter over the canonical
  * validateRuleHostResult — the ONE RuleHostResult semantic authority, shared
  * with the live RuleHost (rule-host-evaluator.ts). This adapter adds no
@@ -111,11 +121,15 @@ function isCompiledModuleExports(value: unknown): value is CompiledModuleExports
  * - OUTBOUND: the result crosses back as a vm-realm object and is consumed
  *   only through the canonical validateRuleHostResult (field reads + JSON
  *   preview) — the host never invokes functions on it.
- * - TIMEOUT: only compilation is hard-bounded (runInContext timeout). The
- *   evaluate call is a host-frame invocation with no hard timeout — same as
- *   before this change and as documented in refiner-sandbox-wrapper.ts,
- *   whose soft-timeout classification remains the core-side contract; hard
- *   cancellation stays a plugin/child-process responsibility.
+ * - TIMEOUT: compilation is hard-bounded (runInContext timeout), and since the
+ *   security-audit run-1 fix each evaluate call is ALSO hard-bounded — the
+ *   call runs through a precompiled vm script with
+ *   REPLAY_EVALUATE_HARD_TIMEOUT_MS, so a non-terminating candidate is
+ *   interrupted (and its replay case fails) instead of hanging the replaying
+ *   process. The soft elapsed-time classification in
+ *   refiner-sandbox-wrapper.ts remains layered on top as the core-side
+ *   contract; hard cancellation for the LIVE path stays a plugin/child-process
+ *   responsibility.
  * - LOCKSTEP: the helper contract here (five getters over the JSON input)
  *   mirrors the live plugin executor's EVALUATION_PROCESS_SOURCE in
  *   openclaw-plugin/src/core/rule-implementation-runtime.ts. The two copies
@@ -137,18 +151,30 @@ export function compileHardenedRuleEvaluator(code: string, sourceLabel: string):
 
   // Treat sandbox output as untrusted — use Reflect.get + type guard, not `as`.
   const moduleExportsUnknown = Reflect.get(context, '__pdRuleModule');
-  Reflect.deleteProperty(context, '__pdRuleModule');
 
   if (!isCompiledModuleExports(moduleExportsUnknown)) {
     throw new Error(`[${sourceLabel}] compiled module export shape is invalid`);
   }
 
-  const evaluateFn = moduleExportsUnknown.evaluate;
-  if (typeof evaluateFn !== 'function') {
+  if (typeof moduleExportsUnknown.evaluate !== 'function') {
     throw new Error(
       `[${sourceLabel}] compiled module has no evaluate function`,
     );
   }
+
+  // Security audit run-1 (rulecode.replay.in-process-evaluate-no-hard-timeout):
+  // the evaluate call must be HARD-bounded. The module stays on the realm
+  // global and each replay runs through a precompiled vm script whose
+  // runInContext timeout interrupts even a synchronous `while (true)` inside
+  // the rule — previously the call was a bare host-frame function invocation
+  // that an LLM-authored looping candidate could hang forever (the console
+  // server, evaluator worker, or CLI process). The module object is a
+  // realm-internal value (created inside this context); it never crosses to
+  // the host except through the field-reading result validator below, so the
+  // PRI-809 inbound DATA-only crossing is unchanged.
+  const evaluateCallScript = new vm.Script('__pdRuleModule.evaluate(__pdCallJson)', {
+    filename: `${sourceLabel}#evaluate`,
+  });
 
   return (input: RuleHostInput, _helpers: RuleHostHelpers): RuleHostResult => {
     // Trust-boundary crossing: serialize host-built input to a JSON string
@@ -164,7 +190,16 @@ export function compileHardenedRuleEvaluator(code: string, sourceLabel: string):
         { cause: err },
       );
     }
-    const result: unknown = (evaluateFn as (json: string) => unknown)(inputJson);
+    context.__pdCallJson = inputJson;
+    let result: unknown;
+    try {
+      result = evaluateCallScript.runInContext(context, {
+        timeout: REPLAY_EVALUATE_HARD_TIMEOUT_MS,
+        displayErrors: true,
+      });
+    } finally {
+      Reflect.deleteProperty(context, '__pdCallJson');
+    }
     // PRI-634 PR-A (Slice A): canonical RuleHostResult authority. The failure
     // message carries the canonical validator's specific errors so the
     // write-test-fix loop receives actionable evidence (P-03).

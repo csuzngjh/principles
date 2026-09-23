@@ -605,3 +605,43 @@ function evaluate(input, helpers) {
     expect(() => evaluate(poison, {} as RuleHostHelpers)).toThrow(/not JSON-serializable/);
   });
 });
+
+// ── Security audit run-1: rulecode.replay.in-process-evaluate-no-hard-timeout ──
+// The replay evaluate call must be hard-bounded: a non-terminating LLM-authored
+// candidate previously hung the replaying console server / evaluator worker /
+// CLI process forever (the call was a bare host-frame function invocation).
+// Now each call runs through a vm script whose runInContext timeout interrupts
+// even a synchronous infinite loop.
+
+describe('replay evaluate hard timeout (security audit run-1)', () => {
+  function probeInput(): RuleHostInput {
+    return createSyntheticRuleHostInput(
+      { toolName: 'edit', params: { filePath: '/src/index.ts' } },
+      {},
+      {},
+    );
+  }
+
+  it('interrupts a non-terminating evaluate body at the hard vm cap instead of hanging', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { for (;;) { } return { decision: "allow", matched: false, reason: "unreachable" }; }',
+      'audit-timeout-probe',
+    );
+    const startedAt = Date.now();
+    expect(() => evaluate(probeInput(), {} as RuleHostHelpers)).toThrow(/timed out/i);
+    const elapsedMs = Date.now() - startedAt;
+    // The vm cap is 2000ms; the interruption must be near-immediate after the
+    // cap, not an unbounded hang. Generous ceiling keeps CI-flake low.
+    expect(elapsedMs).toBeLessThan(10_000);
+  }, 20_000);
+
+  it('still evaluates a benign evaluator to a valid result after the change', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { return { decision: "block", matched: true, reason: "benign" }; }',
+      'audit-benign-probe',
+    );
+    const result = evaluate(probeInput(), {} as RuleHostHelpers);
+    expect(result.decision).toBe('block');
+    expect(result.matched).toBe(true);
+  });
+});

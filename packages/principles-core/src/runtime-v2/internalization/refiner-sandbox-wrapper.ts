@@ -272,11 +272,14 @@ function validateCaseDecision(
  * Evaluate rule code against GoldenTrace cases with structured error reporting.
  *
  * **Timeout semantics**: `softTimeoutMs` is an elapsed-time classification
- * threshold, NOT a hard cancellation mechanism. If `evaluateCode` blocks
- * synchronously (infinite loop, long computation), this wrapper cannot
- * interrupt it — the timeout is only detected after `evaluateCode` returns.
- * Hard cancellation requires `node:vm` or `AbortController` at the
- * plugin/sandbox-adapter layer, which is out of scope for core.
+ * threshold, NOT a hard cancellation mechanism — the timeout is only detected
+ * after `evaluateCode` returns. Since the security-audit run-1 fix, the
+ * default `evaluateCode` (compileHardenedRuleEvaluator) additionally runs each
+ * call through a vm script with a hard REPLAY_EVALUATE_HARD_TIMEOUT_MS cap, so
+ * a synchronously looping candidate is interrupted at the vm layer and this
+ * wrapper classifies the thrown timeout as a failed case. A custom
+ * `evaluateCode` without that hard cap still relies on the soft classification
+ * alone (and cannot be interrupted mid-call).
  */
 export function evaluateInRefinerSandbox(
   code: string,

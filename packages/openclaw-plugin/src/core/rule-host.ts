@@ -29,6 +29,8 @@ import { mergeDecisions } from '@principles/core/runtime-v2';
 import { validateRuleHostResult } from '@principles/core/runtime-v2';
 import { SqliteConnection } from '@principles/core/runtime-v2';
 import { scanLegacyRuleContractDependencies } from '@principles/core/runtime-v2';
+import { verifyPiArtifactRowDigest } from '@principles/core/runtime-v2';
+import { recordDegradedEnforcement } from './degraded-enforcement-marker.js';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import { EventLogService } from './event-log.js';
 import { observeRuleCodeSafety } from './rulecode-safety-circuit.js';
@@ -285,6 +287,15 @@ export class RuleHost {
       this.logger.warn?.(
         `[RuleHost] Failed to load code_tool_hook activations: ${String(activationError)}`
       );
+      // Security audit run-1 (gate-failopen-allow-on-state-corruption): the
+      // read failure degrades enforcement to allow, so record the durable
+      // out-of-workspace marker (LOCKSTEP twin of the host-runtime gate).
+      // Best-effort; never replaces the allow decision.
+      if (this.workspaceDir) {
+        try {
+          recordDegradedEnforcement(this.workspaceDir, `activation_load_failed: ${String(activationError)}`.slice(0, 300));
+        } catch { /* observability only */ }
+      }
       return { loaded: [], skipped: [] };
     }
   }
@@ -335,7 +346,12 @@ export class RuleHost {
       const rows = db.prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
                c.enforcement, c.isolation_decision_id,
-               p.content_json, p.source_rule_id, p.source_principle_id
+               p.artifact_kind, p.source_task_id, p.lineage_artifact_ids,
+               p.validation_status, p.created_at, p.updated_at,
+               p.content_json, p.source_rule_id, p.source_principle_id,
+               (SELECT d.artifact_digest FROM activation_decisions d
+                WHERE d.subject_kind = 'activation' AND d.activation_id = a.activation_id
+                ORDER BY d.decided_at DESC, d.rowid DESC LIMIT 1) AS approved_artifact_digest
         FROM activations a
         JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
         LEFT JOIN activation_control_states c ON a.activation_id = c.activation_id
@@ -358,7 +374,7 @@ export class RuleHost {
         if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
         const record = row as Record<string, unknown>;
         fingerprintParts.push([
-          record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['enforcement'], record['isolation_decision_id'], record['content_json'], record['source_rule_id'], record['source_principle_id'],
+          record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['enforcement'], record['isolation_decision_id'], record['content_json'], record['source_rule_id'], record['source_principle_id'], record['approved_artifact_digest'],
         ].map((value) => typeof value === 'string' ? value : '').join('\u0001'));
       }
       const fingerprint = fingerprintParts.join('\u0002');
@@ -528,6 +544,38 @@ export class RuleHost {
             'nextAction=keep shadow until an authenticated Owner decision has immutable evidence bindings and a passing Promotion Readiness result, ' +
             'or leave as-is for shadow observation.',
           );
+        }
+        // Enforcement-time content binding (security audit run-1,
+        // rulecode-approval-content-unbound): re-verify the CURRENT artifact
+        // row against the digest the Owner decision recorded
+        // (activation_decisions.artifact_digest) before compiling it. A
+        // workspace-local writer can UPDATE content_json; executing content
+        // the Owner never approved silently defeats enforcement. A mismatch
+        // is an integrity failure: skip the activation with structured
+        // unhealthy evidence instead of evaluating it. Rows without a
+        // recorded activation-scoped decision (pre-owner-decision legacy
+        // activations) cannot be verified and keep their prior behavior.
+        // The check itself is core-owned (verifyPiArtifactRowDigest) so the
+        // plugin and the host-runtime gate cannot drift.
+        const approvedArtifactDigest = typeof r['approved_artifact_digest'] === 'string' ? r['approved_artifact_digest'] : null;
+        const digestCheck = verifyPiArtifactRowDigest(r, contentJson, approvedArtifactDigest);
+        if (digestCheck.outcome === 'tampered' || digestCheck.outcome === 'unverifiable') {
+          const reason = digestCheck.outcome === 'tampered'
+            ? 'artifact_content_tampered: artifact content no longer matches the Owner-approved digest'
+            : 'artifact_digest_unverifiable: artifact row integrity does not allow digest re-verification';
+          const nextAction = 'Deactivate and re-approve the rule through the Owner decision flow';
+          this.logger.warn?.(
+            `[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`,
+          );
+          skipped.push({
+            activationId,
+            ruleId: sourceRuleId ?? artifactId,
+            mode: activationMode,
+            reason,
+            nextAction,
+          });
+          this._recordSkipped(activationId, artifactId, sourceRuleId ?? artifactId, activationMode, reason, nextAction);
+          continue;
         }
         try {
           const content = JSON.parse(contentJson) as unknown;

@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore, computeArtifactDigest, mapPiArtifactRow } from '@principles/core/runtime-v2';
 import type { RuleHostInput } from '@principles/core/runtime-v2';
 import { RuleHost } from '../../src/core/rule-host.js';
 import type { RuleHostLogger } from '../../src/core/rule-host.js';
@@ -1334,5 +1334,102 @@ describe('PRI-491: RuleHost.evaluateDetailed returns skippedActivations', () => 
     // Duplicate group must NOT produce any live or shadow decisions.
     expect(report.liveDecision).toBeUndefined();
     expect(report.shadowDecisions).toHaveLength(0);
+  });
+});
+
+// ── Enforcement-time content binding (security audit run-1, rulecode-approval-content-unbound) ──
+//
+// The Owner decision records activation_decisions.artifact_digest over the
+// promotion-time artifact snapshot. The RuleHost must re-verify the CURRENT
+// row against that digest before compiling: a workspace-local writer can
+// UPDATE content_json, and evaluating content the Owner never approved
+// silently defeats enforcement. Mismatch => skip with structured evidence.
+
+describe('enforcement-time digest re-verification (RuleHost load path)', () => {
+  function insertDigestFixture(): { contentJson: string; row: Parameters<typeof mapPiArtifactRow>[0] } {
+    const contentJson = JSON.stringify({
+      principleId: 'P_DIGEST_RH',
+      ruleId: RULE_ID,
+      implementationCode: BLOCKING_CODE,
+      goldenTrace: { traceId: 'trace-digest-rh', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      ruleHostGateDecision: 'accepted_shadow',
+      affectedTools: ['write_file'],
+      painReasonSummary: 'Test: rulehost digest binding',
+    });
+    const row = {
+      artifact_id: ARTIFACT_ID,
+      artifact_kind: 'rule',
+      source_task_id: 'task-digest-rh-001',
+      source_principle_id: 'P_TEST_001',
+      source_rule_id: RULE_ID,
+      lineage_artifact_ids: '[]',
+      validation_status: 'validated',
+      content_json: contentJson,
+      created_at: '2026-09-22T00:00:00.000Z',
+      updated_at: '2026-09-22T00:00:00.000Z',
+    };
+    sqliteConn.getDb().prepare(`
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(row.artifact_id, row.artifact_kind, row.source_task_id, row.source_principle_id, row.source_rule_id, row.lineage_artifact_ids, row.validation_status, row.content_json, row.created_at, row.updated_at);
+    return { contentJson, row };
+  }
+
+  function insertOwnerDecision(artifactDigest: string): void {
+    sqliteConn.getDb().prepare(`
+      INSERT INTO activation_decisions (
+        decision_id, subject_kind, activation_id, artifact_id, artifact_digest,
+        decision, principal_kind, owner_id, authentication_method, credential_id,
+        reason_code, decided_at
+      ) VALUES (?, 'activation', ?, ?, ?, 'promote_live', 'configured_owner', 'owner-test', 'console_token', 'cred-test', 'test_digest_binding', ?)
+    `).run(`dec-${ACTIVATION_ID}`, ACTIVATION_ID, ARTIFACT_ID, artifactDigest, new Date().toISOString());
+  }
+
+  it('evaluates a live rule whose content matches the Owner-approved digest', async () => {
+    const { row } = insertDigestFixture();
+    await insertCodeToolHookActivation();
+    insertOwnerDecision(computeArtifactDigest(mapPiArtifactRow(row)));
+
+    const ruleHost = makeRuleHost();
+    const result = ruleHost.evaluate(makeInput('/etc/passwd'));
+
+    expect(result?.decision).toBe('block');
+    expect(result?.ruleId).toBe(RULE_ID);
+  });
+
+  it('skips and surfaces a tampered content_json rewrite after the Owner decision', async () => {
+    const { row } = insertDigestFixture();
+    await insertCodeToolHookActivation();
+    insertOwnerDecision(computeArtifactDigest(mapPiArtifactRow(row)));
+
+    // First evaluate caches the healthy load.
+    expect(makeRuleHost().evaluate(makeInput('/etc/passwd'))?.decision).toBe('block');
+
+    // Workspace-local tamper: swap implementationCode after approval.
+    const tampered = JSON.stringify({
+      principleId: 'P_DIGEST_RH',
+      ruleId: RULE_ID,
+      implementationCode: "function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'TAMPERED' }; }",
+      goldenTrace: { traceId: 't2', cases: [], createdAt: new Date().toISOString(), version: 1 },
+    });
+    sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(tampered, ARTIFACT_ID);
+
+    const warns: string[] = [];
+    const ruleHost = makeRuleHost({ warn: (m?: string) => { if (m) warns.push(m); } });
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.skippedActivations).toHaveLength(1);
+    expect(report.skippedActivations[0]!.reason).toContain('artifact_content_tampered');
+    expect(report.skippedActivations[0]!.nextAction).toContain('Deactivate and re-approve');
+    expect(warns.some((w) => w.includes('artifact_content_tampered'))).toBe(true);
+  });
+
+  it('keeps evaluating legacy rows without a recorded decision (behavior unchanged)', async () => {
+    insertDigestFixture();
+    await insertCodeToolHookActivation();
+
+    const ruleHost = makeRuleHost();
+    expect(ruleHost.evaluate(makeInput('/etc/passwd'))?.decision).toBe('block');
   });
 });

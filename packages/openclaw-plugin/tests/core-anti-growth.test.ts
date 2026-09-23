@@ -106,6 +106,11 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'runtime-v2-prompt-activation-reader.ts',
     'pd-config-loader.ts',
     'config-health.ts',  // PRI-346: conversation access check extracted to avoid circular imports
+    // Security audit run-1 (gate-failopen-allow-on-state-corruption): plugin
+    // I/O boundary — writes the durable degraded-enforcement marker under
+    // ~/.pd/enforcement-health/ when the governance store is unavailable.
+    // LOCKSTEP twin of packages/host-runtime/src/degraded-enforcement-marker.ts.
+    'degraded-enforcement-marker.ts',
     // PRI-467: Plugin I/O boundary — reads .principles/INTENT.md with TTL+mtime
     // cache, delegates parsing/validation/hashing to @principles/core. Never throws.
     'intent-doc-reader.ts',
