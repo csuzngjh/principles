@@ -57,10 +57,10 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs",
     "build:bundle": "node esbuild.config.js",
     "build:production": "node esbuild.config.js --production && node scripts/verify-build.mjs",
-    "build:types": "tsc --emitDeclarationOnly",
+    "build:types": "tsc --emitDeclarationOnly -p tsconfig.build.json",
     "prepack": "npm run build:production && npm run build:types",
     "test": "vitest run",
     "test:unit": "vitest run --config vitest.unit.config.ts tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts",
