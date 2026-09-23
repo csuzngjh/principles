@@ -155,6 +155,20 @@ const CREATE_PRINCIPLES_DISCIPLE_REQUIRED = [
   'package.json',
 ];
 
+// ERR-045: run npm through the running Node binary and npm-cli.js with pure
+// argv arrays — no cmd.exe shell string concatenation. npm-cli.js location
+// varies by platform: Windows puts it under <node_dir>/node_modules,
+// Linux/macOS hosted toolchains under <prefix>/lib/node_modules.
+function findNpmCliJs() {
+  const nodeDir = dirname(process.execPath);
+  const prefixDir = dirname(nodeDir);
+  return [
+    join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(prefixDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(prefixDir, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ].find(p => existsSync(p));
+}
+
 // PRI-907 (RAH-3): every recursive payload copy skips compiled test artifacts
 // (same contract as the per-package build gates — ERR-149 / EP-14).
 function copyPayloadTree(src, dest) {
@@ -290,6 +304,28 @@ for (const item of PD_CLI_REQUIRED) {
   const src = join(PD_CLI_SRC, item);
   log(`  Copying pd-cli/${item}...`);
   copyPayloadTree(src, join(PD_CLI_DEST, item));
+}
+
+// Review fix (PRI-907 round 1): console dist has NO upstream producer in any
+// build chain — root `build` skips pd-console, verify:merge only typechecks
+// it, and this script used to copy whatever dist happened to exist (a missing
+// copy failed loud, but a stale or polluted one shipped silently). Build it
+// here, right before the copy, on every invocation path. Console's build is
+// the RAH-1 release chain: clean + filtered tsc + dist hygiene assertion.
+{
+  const npmCliJs = findNpmCliJs();
+  if (!npmCliJs) {
+    console.error('❌ npm-cli.js not found next to the running Node binary — cannot build @principles/pd-console before bundling.');
+    process.exit(1);
+  }
+  log('  Building @principles/pd-console (release chain: clean + filtered tsc + dist hygiene)...');
+  // stdout is a machine channel in this script — the child's stdout is
+  // discarded here; its stderr (where npm progress and errors live) passes
+  // through. A non-zero build exit throws and fails the bundle fail-loud.
+  execFileSync(process.execPath, [npmCliJs, 'run', 'build', '--workspace=@principles/pd-console'], {
+    cwd: ROOT_DIR,
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
 }
 
 if (existsSync(CONSOLE_DEST)) {
@@ -514,17 +550,7 @@ if (BUILD_SELF_CONTAINED_ASSET) {
   log('\n📦 Installing build-time runtime dependencies for the self-contained release asset...');
 
   const installBundledRuntimeDependencies = async (directory, label) => {
-    // Run npm through the running Node binary and npm-cli.js with pure argv
-    // arrays — no cmd.exe shell string concatenation (ERR-045).  npm-cli.js
-    // location varies by platform: Windows puts it under <node_dir>/node_modules,
-    // Linux/macOS hosted toolchains under <prefix>/lib/node_modules.
-    const nodeDir = dirname(process.execPath);
-    const prefixDir = dirname(nodeDir);
-    const npmCliJs = [
-      join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-      join(prefixDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-      join(prefixDir, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    ].find(p => existsSync(p));
+    const npmCliJs = findNpmCliJs();
     if (!npmCliJs) {
       throw new Error(`npm-cli.js not found near ${process.execPath} (checked node_modules and lib/node_modules layouts)`);
     }
