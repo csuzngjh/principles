@@ -56,7 +56,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs",
+    "clean": "node ../../scripts/build/clean-dist.mjs",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src/"
   },
