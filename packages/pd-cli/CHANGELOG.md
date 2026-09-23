@@ -1,5 +1,15 @@
 # @principles/pd-cli
 
+## 1.152.14
+
+### Patch Changes
+
+- de38d90: Principle Ledger write boundary (Phase 1 / PR1): candidate-origin writes to the Principle Ledger now require a validated `recommendation_kind === 'principle'`. Unknown, missing, or malformed kinds are refused fail-closed and reported as an explicit disposition instead of silently collapsing into a principle; candidate persistence, kind routing, and defer handling are unchanged.
+- Updated dependencies [4ced615]
+- Updated dependencies [de38d90]
+  - @principles/core@1.287.3
+  - principles-disciple@2.0.4
+
 ## 1.152.13
 
 ### Patch Changes
