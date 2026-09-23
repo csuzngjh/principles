@@ -24,8 +24,9 @@ export const SATELLITE_OUTPUT_SUFFIXES = [
 ];
 
 /**
- * Vendored LLM SDK package path segments (rc: matched as /<pkg>/ path
- * segments under node_modules only, so source-file names never trip it).
+ * Vendored LLM SDK package path segments (matched at the
+ * `node_modules/<pkg>/` boundary only, so source-file names and other
+ * vendors' nested dirs never trip it — see matchesForbiddenPackage).
  * bundle.js is excluded from the check: the main package legitimately owns
  * the LLM runtime (host adapters) — see OPT-002.
  */
@@ -45,25 +46,62 @@ function normalizePath(p) {
 }
 
 /**
+ * Matches only at a package-directory boundary directly under node_modules
+ * (`…/node_modules/<pkg>/…`), so a source file named like a vendor (e.g.
+ * `src/adapters/openai-compat-shim.ts`) can never trip the guard.
+ * `@anthropic-ai` is a scope, not a full package name: it intentionally
+ * matches every package one level below it (`node_modules/@anthropic-ai/<pkg>/`).
+ */
+function matchesForbiddenPackage(normInput, pkg) {
+  const needle = `node_modules/${pkg.toLowerCase()}`;
+  let idx = normInput.indexOf(needle);
+  while (idx !== -1) {
+    const after = idx + needle.length;
+    if (pkg === '@anthropic-ai' ? normInput[after] === '/' : normInput.startsWith('/', after)) {
+      return true;
+    }
+    idx = normInput.indexOf(needle, idx + 1);
+  }
+  return false;
+}
+
+/**
  * @param {unknown} metafile esbuild BuildResult.metafile (validated as unknown, rc-1)
  * @returns {{output: string, input: string, pkg: string}[]} one row per violating input
+ * @throws if the metafile is malformed OR an expected satellite output is
+ * missing / unreadable — a guard that silently passes on absence is worse
+ * than no guard at all (rc-3).
  */
 export function collectSatelliteViolations(metafile) {
   if (typeof metafile !== 'object' || metafile === null || !Object.hasOwn(metafile, 'outputs')) {
     throw new Error('[satellite-purity] invalid input: expected an esbuild metafile object with an `outputs` map');
   }
   const outputs = /** @type {Record<string, unknown>} */ (metafile.outputs);
+  const outputEntries = Object.entries(outputs);
+
+  const satelliteOutputs = [];
+  for (const suffix of SATELLITE_OUTPUT_SUFFIXES) {
+    const matched = outputEntries.filter(([outputPath]) => outputPath.endsWith(suffix));
+    if (matched.length === 0) {
+      throw new Error(
+        `[satellite-purity] invalid metafile: expected satellite output '${suffix}' is missing from outputs — ` +
+        'the guard must not pass on absence (a build that forgot the satellite, or an entryPoint rename, would slip through).'
+      );
+    }
+    for (const [outputPath, output] of matched) {
+      if (typeof output !== 'object' || output === null || typeof output.inputs !== 'object' || output.inputs === null) {
+        throw new Error(`[satellite-purity] invalid metafile: satellite output '${outputPath}' has a missing or malformed inputs map`);
+      }
+      satelliteOutputs.push([outputPath, /** @type {Record<string, unknown>} */ (output.inputs)]);
+    }
+  }
+
   const violations = [];
-  for (const [outputPath, output] of Object.entries(outputs)) {
-    const isSatellite = SATELLITE_OUTPUT_SUFFIXES.some((suffix) => outputPath.endsWith(suffix));
-    if (!isSatellite) continue;
-    const inputs = (typeof output === 'object' && output !== null && typeof output.inputs === 'object' && output.inputs !== null)
-      ? Object.keys(/** @type {Record<string, unknown>} */ (output.inputs))
-      : [];
-    for (const inputPath of inputs) {
+  for (const [outputPath, inputs] of satelliteOutputs) {
+    for (const inputPath of Object.keys(inputs)) {
       const norm = normalizePath(inputPath);
       if (!norm.includes('node_modules/')) continue;
-      const hit = FORBIDDEN_LLM_PACKAGES.find((pkg) => norm.includes(`/${pkg.toLowerCase()}/`));
+      const hit = FORBIDDEN_LLM_PACKAGES.find((pkg) => matchesForbiddenPackage(norm, pkg));
       if (hit) violations.push({ output: outputPath, input: inputPath, pkg: hit });
     }
   }

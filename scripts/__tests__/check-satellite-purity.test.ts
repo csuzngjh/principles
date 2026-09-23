@@ -58,13 +58,13 @@ const POLLUTED = metafileWith({
   'dist/bundle.js': ['../../node_modules/@earendil-works/pi-ai/dist/index.js'],
   'dist/governance-audit.js': [
     '../../src/governance-audit.ts',
-    '../principles-core/dist/runtime-v2/index.js',
     '../../node_modules/@earendil-works/pi-ai/dist/providers/json',
     '../../node_modules/@anthropic-ai/sdk/index.mjs',
     '../../node_modules/openai/index.mjs',
     '../../node_modules/@google/genai/node_modules/undici/index.js',
     '../../node_modules/undici/lib/core/request.js',
   ],
+  'dist/rulehost-evidence.js': ['../../src/rulehost-evidence.ts'],
 });
 
 describe('collectSatelliteViolations', () => {
@@ -84,6 +84,7 @@ describe('collectSatelliteViolations', () => {
 
   it('normalizes Windows backslash input paths', () => {
     const win = metafileWith({
+      'dist\\governance-audit.js': ['..\\..\\src\\governance-audit.ts'],
       'dist\\rulehost-evidence.js': [
         '..\\..\\node_modules\\@earendil-works\\pi-agent-core\\dist\\index.js',
       ],
@@ -96,13 +97,41 @@ describe('collectSatelliteViolations', () => {
   it('does not trip on source-file names that merely contain SDK tokens', () => {
     const src = metafileWith({
       'dist/governance-audit.js': ['../../src/adapters/openai-compat-shim.ts'],
+      'dist/rulehost-evidence.js': ['../../src/rulehost-evidence.ts'],
     });
     expect(collectSatelliteViolations(src)).toEqual([]);
+  });
+
+  it('matches only at node_modules package boundaries, not nested dirs of other vendors', () => {
+    const nested = metafileWith({
+      'dist/governance-audit.js': ['../../node_modules/some-tool/vendor/openai/util.js'],
+      'dist/rulehost-evidence.js': ['../../node_modules/@sinclair/typebox/build/esm/type/type.mjs'],
+    });
+    expect(collectSatelliteViolations(nested)).toEqual([]);
   });
 
   it('fails loud on a malformed metafile (rc-3)', () => {
     expect(() => collectSatelliteViolations({})).toThrow(/metafile/);
     expect(() => collectSatelliteViolations(null)).toThrow(/metafile/);
+  });
+
+  it('fails loud when an expected satellite output is missing (rc-3, no vacuous pass)', () => {
+    const partial = metafileWith({
+      'dist/bundle.js': ['../../src/index.ts'],
+      'dist/governance-audit.js': ['../../src/governance-audit.ts'],
+    });
+    expect(() => collectSatelliteViolations(partial)).toThrow(/rulehost-evidence\.js.*missing/s);
+  });
+
+  it('fails loud when a satellite output has no readable inputs map', () => {
+    const malformed = {
+      inputs: {},
+      outputs: {
+        'dist/governance-audit.js': { bytes: 10 },
+        'dist/rulehost-evidence.js': { inputs: {} },
+      },
+    };
+    expect(() => collectSatelliteViolations(malformed)).toThrow(/inputs map/);
   });
 });
 
