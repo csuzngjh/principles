@@ -18,15 +18,18 @@ import { StoreEventEmitter } from '../../index.js';
 import type { TelemetryEvent } from '../../index.js';
 import type { PIArtifactSnapshot, DispatchInput, ChannelWriter } from '../index.js';
 
+// I3 identity boundary: an activation identity must be a ledger-shaped UUID.
+const PID_A = 'a0000000-0000-4000-8000-000000000001';
+
 function makePrincipleArtifact(overrides: Partial<PIArtifactSnapshot> = {}): PIArtifactSnapshot {
   return {
     artifactId: 'art-001',
     artifactKind: 'principle',
     sourceTaskId: 'task-001',
-    sourcePrincipleId: 'P_001',
+    sourcePrincipleId: PID_A,
     lineageArtifactIds: [],
     validationStatus: 'validated',
-    contentJson: JSON.stringify({ principleId: 'P_001', text: 'Test principle' }),
+    contentJson: JSON.stringify({ principleId: PID_A, text: 'Test principle' }),
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -127,12 +130,12 @@ describe('ActivationDispatcher', () => {
     }));
     expect(result.decision).toBe('activated');
     if (result.decision === 'activated') {
-      expect(result.activationId).toBe('act_prompt_P_001');
+      expect(result.activationId).toBe(`act_prompt_${PID_A}`);
       expect(result.action).toBe('prompt_activate');
-      expect(result.targetRef).toBe('ledger://P_001');
+      expect(result.targetRef).toBe(`ledger://${PID_A}`);
     }
     const status = await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'prompt'));
-    expect(status?.activationId).toBe('act_prompt_P_001');
+    expect(status?.activationId).toBe(`act_prompt_${PID_A}`);
   });
 
   it('repeat approved dispatch → already_activated', async () => {
@@ -154,7 +157,7 @@ describe('ActivationDispatcher', () => {
     const result = await dispatcher.dispatch(input);
     expect(result.decision).toBe('already_activated');
     if (result.decision === 'already_activated') {
-      expect(result.activationId).toBe('act_prompt_P_001');
+      expect(result.activationId).toBe(`act_prompt_${PID_A}`);
     }
   });
 
@@ -175,7 +178,7 @@ describe('ActivationDispatcher', () => {
       artifactId: 'corrupted-art-id', // ← corrupted/different artifactId
       channel: 'prompt',
       action: 'prompt_activate',
-      targetRef: 'ledger://P_001',
+      targetRef: `ledger://${PID_A}`,
       activatedAt: '2026-01-01T00:00:00.000Z',
       promotedAt: null,
       deactivatedAt: null,
@@ -204,7 +207,7 @@ describe('ActivationDispatcher', () => {
       artifactId: 'art-001', // ← matches input artifactId
       channel: 'prompt',
       action: 'prompt_activate',
-      targetRef: 'ledger://P_001',
+      targetRef: `ledger://${PID_A}`,
       activatedAt: '2026-01-01T00:00:00.000Z',
       promotedAt: null,
       deactivatedAt: null,
@@ -297,9 +300,9 @@ describe('ActivationDispatcher', () => {
     const status = await stateStore.getActivationStatus(key);
     expect(status).not.toBeNull();
     if (status) {
-      expect(status.activationId).toBe('act_prompt_P_001');
+      expect(status.activationId).toBe(`act_prompt_${PID_A}`);
       expect(status.action).toBe('prompt_activate');
-      expect(status.targetRef).toBe('ledger://P_001');
+      expect(status.targetRef).toBe(`ledger://${PID_A}`);
     }
   });
 
@@ -358,11 +361,11 @@ describe('ActivationDispatcher', () => {
     }));
     expect(result.decision).toBe('activated');
     if (result.decision === 'activated') {
-      expect(result.activationId).toBe('act_archive_P_001');
-      expect(result.targetRef).toBe('ledger://P_001#archived');
+      expect(result.activationId).toBe(`act_archive_${PID_A}`);
+      expect(result.targetRef).toBe(`ledger://${PID_A}#archived`);
     }
     const status = await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'defer_archive'));
-    expect(status?.activationId).toBe('act_archive_P_001');
+    expect(status?.activationId).toBe(`act_archive_${PID_A}`);
   });
 
   // PRI-811 Phase B: writer canActivate guards run inside the enqueue path
@@ -379,17 +382,24 @@ describe('ActivationDispatcher', () => {
     }
   });
 
-  it('artifact without principleId → refused by writer canActivate', async () => {
-    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
+  // Fail-closed rework: the identity gate is the DISPATCHER's job now (it runs
+  // BEFORE the approval enqueue — a pending approval for an artifact that can
+  // never be activated is a poisoned queue entry). Legacy strict-shape callers
+  // (no ledgerIdentity deps) surface the refusal as invalid_artifact, not the
+  // writer's canActivate refused decision.
+  it('artifact without principleId → invalid_artifact from dispatcher identity gate (no approval row)', async () => {
+    const { artifactStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact({
       sourcePrincipleId: undefined,
       contentJson: JSON.stringify({ text: 'No principle ID here' }),
     }));
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
-    expect(result.decision).toBe('refused');
-    if (result.decision === 'refused') {
+    expect(result.decision).toBe('invalid_artifact');
+    if (result.decision === 'invalid_artifact') {
       expect(result.reason).toBe('no_principle_id_in_artifact');
     }
+    // The gate runs BEFORE the enqueue: no poisoned approval row exists.
+    expect(await approvalStore.listPending()).toHaveLength(0);
   });
 
   it('pending validation artifact → refused by writer', async () => {
@@ -402,15 +412,15 @@ describe('ActivationDispatcher', () => {
     }
   });
 
-  it('whitespace-only sourcePrincipleId → refused by writer canActivate', async () => {
+  it('whitespace-only sourcePrincipleId → invalid_artifact from dispatcher identity gate', async () => {
     const { artifactStore, dispatcher } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact({
       sourcePrincipleId: '   ',
       contentJson: JSON.stringify({ text: 'No principle ID here' }),
     }));
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
-    expect(result.decision).toBe('refused');
-    if (result.decision === 'refused') {
+    expect(result.decision).toBe('invalid_artifact');
+    if (result.decision === 'invalid_artifact') {
       expect(result.reason).toBe('no_principle_id_in_artifact');
     }
   });
@@ -672,7 +682,7 @@ describe('ActivationDispatcher', () => {
   it('queued approval record contains context fields', async () => {
     const { artifactStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
     artifactStore.addArtifact(makePrincipleArtifact({
-      contentJson: JSON.stringify({ principleId: 'P_001', text: 'Always validate user input before processing' }),
+      contentJson: JSON.stringify({ principleId: PID_A, text: 'Always validate user input before processing' }),
     }));
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.85, confirm: true }));
     expect(result.decision).toBe('queued_for_approval');
@@ -758,13 +768,13 @@ describe('PromptWriter', () => {
     const result = await writer.activate({
       artifactId: 'art-001',
       channel: 'prompt',
-      principleId: 'P_001',
+      principleId: PID_A,
       idempotencyKey: 'art-001::prompt',
       now: '2026-05-17T00:00:00.000Z',
     }, makePrincipleArtifact());
-    expect(result.activationId).toBe('act_prompt_P_001');
+    expect(result.activationId).toBe(`act_prompt_${PID_A}`);
     expect(result.action).toBe('prompt_activate');
-    expect(result.targetRef).toBe('ledger://P_001');
+    expect(result.targetRef).toBe(`ledger://${PID_A}`);
   });
 });
 
@@ -780,36 +790,41 @@ describe('DeferArchiveWriter', () => {
     const result = await writer.activate({
       artifactId: 'art-001',
       channel: 'defer_archive',
-      principleId: 'P_001',
+      principleId: PID_A,
       idempotencyKey: 'art-001::defer_archive',
       now: '2026-05-17T00:00:00.000Z',
     }, makePrincipleArtifact());
-    expect(result.activationId).toBe('act_archive_P_001');
+    expect(result.activationId).toBe(`act_archive_${PID_A}`);
     expect(result.action).toBe('defer_archive');
-    expect(result.targetRef).toBe('ledger://P_001#archived');
+    expect(result.targetRef).toBe(`ledger://${PID_A}#archived`);
   });
 });
 
-describe('extractPrincipleId', () => {
-  it('trims whitespace from sourcePrincipleId', async () => {
+describe('I3 activation identity boundary (writer-level)', () => {
+  // NOTE: since the fail-closed rework, the identity boundary (shape +
+  // membership) lives in the DISPATCHER's resolveActivationIdentity, which
+  // runs before any writer.canActivate call. Writer-level canActivate only
+  // guards kind + validationStatus. The cases below assert that split — the
+  // dispatcher-level refusals are covered in the ledger-aware describe block.
+
+  it('writer accepts a whitespace-padded ledger-shaped UUID sourcePrincipleId (identity not checked here)', async () => {
     const writer = new PromptWriter();
-    const artifact = makePrincipleArtifact({ sourcePrincipleId: '  P_001  ' });
+    const artifact = makePrincipleArtifact({ sourcePrincipleId: `  ${PID_A}  ` });
     const result = await writer.canActivate(artifact);
     expect(result.ok).toBe(true);
   });
 
-  it('rejects whitespace-only sourcePrincipleId', async () => {
+  it('writer accepts whitespace-only sourcePrincipleId (identity gated at dispatcher)', async () => {
     const writer = new PromptWriter();
     const artifact = makePrincipleArtifact({
       sourcePrincipleId: '   ',
       contentJson: JSON.stringify({ text: 'No ID' }),
     });
     const result = await writer.canActivate(artifact);
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe('no_principle_id_in_artifact');
+    expect(result.ok).toBe(true);
   });
 
-  it('trims whitespace from contentJson principleId', async () => {
+  it('writer accepts a content-level principleId-only artifact (content is never an identity source; dispatcher gates)', async () => {
     const writer = new PromptWriter();
     const artifact = makePrincipleArtifact({
       sourcePrincipleId: undefined,
@@ -817,6 +832,318 @@ describe('extractPrincipleId', () => {
     });
     const result = await writer.canActivate(artifact);
     expect(result.ok).toBe(true);
+  });
+
+  it('I3: dispatcher refuses with no_principle_id_in_artifact when no validated identity exists', async () => {
+    const artifactStore = new MemoryArtifactReadModel();
+    const stateStore = new MemoryActivationStateStore();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [new PromptWriter()], approvalQueueStore: approvalStore },
+    );
+    artifactStore.addArtifact(makePrincipleArtifact({
+      artifactId: 'art-title-only',
+      // non-UUID column → not a ledger identity; content only has a draft title
+      sourcePrincipleId: 'PRI-001',
+      contentJson: JSON.stringify({ principleDraft: { title: 'Some principle title' } }),
+    }));
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-title-only',
+      channel: 'prompt',
+      confirm: true,
+    }));
+    // The dispatcher's identity gate (which runs BEFORE the approval enqueue)
+    // surfaces as an invalid_artifact decision; nothing is queued and nothing
+    // is activated.
+    expect(result).toMatchObject({ decision: 'invalid_artifact', reason: 'no_principle_id_in_artifact' });
+    expect(await stateStore.listAllActivations()).toHaveLength(0);
+    expect(await approvalStore.listPending()).toHaveLength(0);
+  });
+
+  it('I3: dispatcher activates when a ledger-shaped UUID identity is present', async () => {
+    const artifactStore = new MemoryArtifactReadModel();
+    const stateStore = new MemoryActivationStateStore();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [new PromptWriter()], approvalQueueStore: approvalStore },
+    );
+    artifactStore.addArtifact(makePrincipleArtifact({ artifactId: 'art-uuid-ok' }));
+    const queued = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-uuid-ok',
+      channel: 'prompt',
+      confirm: true,
+    }));
+    expect(queued.decision).toBe('queued_for_approval');
+    if (queued.decision !== 'queued_for_approval') return;
+    const approved = await approvalStore.approve(queued.approvalId, 'owner-test');
+    expect(approved.ok).toBe(true);
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-uuid-ok',
+      channel: 'prompt',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.approvalId,
+    }));
+    expect(result).toMatchObject({ decision: 'activated', targetRef: `ledger://${PID_A}` });
+  });
+
+  it('legacy compatibility: an already-recorded activation is returned unchanged by the state store', async () => {
+    // Fail-closed applies to NEW activations only; existing rows (including
+    // legacy title-shaped target_refs) are historical records and are never
+    // rewritten or hidden by the boundary.
+    const store = new MemoryActivationStateStore();
+    await store.recordActivation({
+      activationId: 'act_prompt_legacy-title',
+      idempotencyKey: 'legacy::prompt',
+      artifactId: 'art-legacy',
+      channel: 'prompt',
+      action: 'prompt_activate',
+      targetRef: 'ledger://some legacy title identity',
+      activatedAt: '2026-01-01T00:00:00.000Z',
+      deactivatedAt: null,
+    });
+    const rows = await store.listPromptActivations(true);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      activationId: 'act_prompt_legacy-title',
+      targetRef: 'ledger://some legacy title identity',
+    });
+  });
+});
+
+// ── I3 upgrade: ledger-aware identity gate (Owner review of PR #1856, P1) ────
+//
+// "UUID shape ≠ ledger membership": when ledgerIdentity deps are wired, BOTH
+// dispatch paths verify the artifact's identity against the LEDGER before any
+// state change — the approval record IS the pre-commit state change, so the
+// enqueue path is gated too (a pending approval for an artifact that can never
+// be activated is a poisoned queue entry).
+
+describe('ActivationDispatcher — ledger-aware identity gate (ledgerIdentity deps wired)', () => {
+  const LEDGER_PID = 'e1110000-0000-4000-8000-000000000111';
+  const UNRELATED_PID = 'e2220000-0000-4000-8000-000000000222';
+  const CANDIDATE_ID = 'c3330000-0000-4000-8000-000000003333';
+  const DREAMER_TASK_ID = `dreamer-${CANDIDATE_ID}-code_tool_hook`;
+  const DREAMER_ARTIFACT_ID = 'art-dreamer-seed'; // contains '-dreamer-' → lineage fallback matches
+
+  function makeDreamerArtifact(): PIArtifactSnapshot {
+    return makePrincipleArtifact({
+      artifactId: DREAMER_ARTIFACT_ID,
+      sourceTaskId: DREAMER_TASK_ID,
+      contentJson: '{}',
+    });
+  }
+
+  interface LedgerHarness {
+    artifactStore: MemoryArtifactReadModel;
+    stateStore: MemoryActivationStateStore;
+    approvalStore: MemoryApprovalQueueStore;
+    dispatcher: ActivationDispatcher;
+    knownPrinciples: Set<string>;
+  }
+
+  function makeLedgerDispatcher(opts: { candidateMatches?: number; seedCandidateId?: string | null } = {}): LedgerHarness {
+    const artifactStore = new MemoryArtifactReadModel();
+    const stateStore = new MemoryActivationStateStore();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const knownPrinciples = new Set<string>([LEDGER_PID]);
+    const seedCandidateId = opts.seedCandidateId === undefined ? CANDIDATE_ID : opts.seedCandidateId;
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      {
+        writers: [new PromptWriter(), new DeferArchiveWriter()],
+        approvalQueueStore: approvalStore,
+        ledgerIdentity: {
+          ledger: {
+            hasPrinciple: (id) => knownPrinciples.has(id),
+            listForCandidate: (cid) =>
+              cid === CANDIDATE_ID
+                ? Array.from({ length: opts.candidateMatches ?? 1 }, () => ({ id: LEDGER_PID }))
+                : [],
+          },
+          getArtifactById: (id) => artifactStore.getArtifactById(id),
+          getTaskDiagnosticJson: (taskId) =>
+            taskId === DREAMER_TASK_ID && seedCandidateId !== null
+              ? JSON.stringify({ candidateId: seedCandidateId })
+              : null,
+        },
+      },
+    );
+    return { artifactStore, stateStore, approvalStore, dispatcher, knownPrinciples };
+  }
+
+  it('direct_validated: stamped UUID present in the ledger → enqueue + approval + activate', async () => {
+    const { artifactStore, dispatcher, approvalStore, stateStore } = makeLedgerDispatcher();
+    artifactStore.addArtifact(makePrincipleArtifact({ sourcePrincipleId: LEDGER_PID }));
+
+    const queued = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(queued.decision).toBe('queued_for_approval');
+    // The approval record is the pre-commit state change — it exists only
+    // because membership was verified BEFORE the enqueue.
+    expect(await approvalStore.listPending()).toHaveLength(1);
+
+    const approved = await approvalStore.approve(
+      queued.decision === 'queued_for_approval' ? queued.approvalId : '',
+      'owner-test',
+    );
+    expect(approved.ok).toBe(true);
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      channel: 'prompt',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.decision === 'queued_for_approval' ? queued.approvalId : '',
+    }));
+    expect(result).toMatchObject({ decision: 'activated', targetRef: `ledger://${LEDGER_PID}` });
+    expect(await stateStore.listAllActivations()).toHaveLength(1);
+  });
+
+  it('principle_not_in_ledger: stamped UUID absent from the ledger → invalid_artifact on enqueue, NO approval row', async () => {
+    const { artifactStore, dispatcher, approvalStore } = makeLedgerDispatcher();
+    // UUID shape holds but the ledger does not know this principle (data drift).
+    artifactStore.addArtifact(makePrincipleArtifact({ sourcePrincipleId: UNRELATED_PID }));
+
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(result.decision).toBe('invalid_artifact');
+    if (result.decision === 'invalid_artifact') {
+      expect(result.reason).toBe(`principle_not_in_ledger: ${UNRELATED_PID}`);
+      expect(result.nextAction).toBe('check_pi_artifacts_source_principle_id_against_ledger_or_run_identity_reconciliation');
+    }
+    // The gate runs BEFORE the enqueue — no poisoned approval entry.
+    expect(await approvalStore.listPending()).toHaveLength(0);
+  });
+
+  it('principle_not_in_ledger: ledger membership lost between enqueue and commit → approved dispatch refused (no activation)', async () => {
+    const harness = makeLedgerDispatcher();
+    const { artifactStore, dispatcher, approvalStore, stateStore, knownPrinciples } = harness;
+    artifactStore.addArtifact(makePrincipleArtifact({ sourcePrincipleId: LEDGER_PID }));
+
+    const queued = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(queued.decision).toBe('queued_for_approval');
+    const approved = await approvalStore.approve(
+      queued.decision === 'queued_for_approval' ? queued.approvalId : '',
+      'owner-test',
+    );
+    expect(approved.ok).toBe(true);
+
+    // Data drift AFTER approval: the ledger principle vanishes before the
+    // activation commit. The commit path must re-verify membership and refuse.
+    knownPrinciples.delete(LEDGER_PID);
+
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      channel: 'prompt',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.decision === 'queued_for_approval' ? queued.approvalId : '',
+    }));
+    expect(result.decision).toBe('invalid_artifact');
+    if (result.decision === 'invalid_artifact') {
+      expect(result.reason).toBe(`principle_not_in_ledger: ${LEDGER_PID}`);
+    }
+    expect(await stateStore.listAllActivations()).toHaveLength(0);
+  });
+
+  it('candidate_lineage: unstamped artifact resolves through dreamer lineage → queued + activated with the ledger id', async () => {
+    const { artifactStore, dispatcher, approvalStore, stateStore } = makeLedgerDispatcher();
+    artifactStore.addArtifact(makeDreamerArtifact());
+    // Unstamped principle artifact whose lineage points at the dreamer artifact.
+    artifactStore.addArtifact(makePrincipleArtifact({
+      artifactId: 'art-unstamped-lineage',
+      sourcePrincipleId: undefined,
+      lineageArtifactIds: [DREAMER_ARTIFACT_ID],
+      contentJson: JSON.stringify({ text: 'Unstamped principle' }),
+    }));
+
+    const queued = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-unstamped-lineage',
+      channel: 'prompt',
+      confirm: true,
+    }));
+    expect(queued.decision).toBe('queued_for_approval');
+    const approved = await approvalStore.approve(
+      queued.decision === 'queued_for_approval' ? queued.approvalId : '',
+      'owner-test',
+    );
+    expect(approved.ok).toBe(true);
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-unstamped-lineage',
+      channel: 'prompt',
+      confirm: true,
+      rolloutDecision: 'approved',
+      approvalId: queued.decision === 'queued_for_approval' ? queued.approvalId : '',
+    }));
+    // The lineage-resolved LEDGER id (not a guessed content id) flows into the
+    // activation record.
+    expect(result).toMatchObject({ decision: 'activated', targetRef: `ledger://${LEDGER_PID}` });
+    expect(await stateStore.listAllActivations()).toHaveLength(1);
+  });
+
+  it('unstamped artifact with no dreamer lineage → invalid_artifact (ledger-aware reason), no approval row', async () => {
+    const { artifactStore, dispatcher, approvalStore } = makeLedgerDispatcher();
+    artifactStore.addArtifact(makePrincipleArtifact({
+      artifactId: 'art-no-lineage',
+      sourcePrincipleId: undefined,
+      contentJson: JSON.stringify({ text: 'No identity, no lineage' }),
+    }));
+
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-no-lineage',
+      channel: 'prompt',
+      confirm: true,
+    }));
+    expect(result.decision).toBe('invalid_artifact');
+    if (result.decision === 'invalid_artifact') {
+      expect(result.reason).toBe('no_principle_id_in_artifact: artifact has no identity and no dreamer lineage');
+      expect(result.nextAction).toBe('ensure_intake_minted_a_ledger_principle_for_this_candidate_before_internalization');
+    }
+    expect(await approvalStore.listPending()).toHaveLength(0);
+  });
+
+  it('ambiguous lineage (candidate maps to 2 ledger principles) → refusing to guess', async () => {
+    const { artifactStore, dispatcher } = makeLedgerDispatcher({ candidateMatches: 2 });
+    artifactStore.addArtifact(makeDreamerArtifact());
+    artifactStore.addArtifact(makePrincipleArtifact({
+      artifactId: 'art-ambiguous-lineage',
+      sourcePrincipleId: undefined,
+      lineageArtifactIds: [DREAMER_ARTIFACT_ID],
+      contentJson: JSON.stringify({ text: 'Ambiguous lineage' }),
+    }));
+
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-ambiguous-lineage',
+      channel: 'prompt',
+      confirm: true,
+    }));
+    expect(result.decision).toBe('invalid_artifact');
+    if (result.decision === 'invalid_artifact') {
+      expect(result.reason).toContain(`candidate ${CANDIDATE_ID} maps to 2 ledger principles`);
+      expect(result.reason).toContain('refusing to guess');
+    }
+  });
+
+  it('lineage with 0 ledger matches → invalid_artifact naming the candidate', async () => {
+    const { artifactStore, dispatcher } = makeLedgerDispatcher({ candidateMatches: 0 });
+    artifactStore.addArtifact(makeDreamerArtifact());
+    artifactStore.addArtifact(makePrincipleArtifact({
+      artifactId: 'art-zero-lineage',
+      sourcePrincipleId: undefined,
+      lineageArtifactIds: [DREAMER_ARTIFACT_ID],
+      contentJson: JSON.stringify({ text: 'No minted principle' }),
+    }));
+
+    const result = await dispatcher.dispatch(makeDispatchInput({
+      artifactId: 'art-zero-lineage',
+      channel: 'prompt',
+      confirm: true,
+    }));
+    expect(result.decision).toBe('invalid_artifact');
+    if (result.decision === 'invalid_artifact') {
+      expect(result.reason).toBe(`no_principle_id_in_artifact: ledger has no principle derived from candidate ${CANDIDATE_ID}`);
+    }
   });
 });
 

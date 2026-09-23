@@ -19,7 +19,8 @@ import {
   getChannelRiskLevel,
   makeIdempotencyKey,
 } from './activation-types.js';
-import { extractPrincipleId } from './low-risk-writers.js';
+import { resolveActivationPrincipleId } from './low-risk-writers.js';
+import { resolveLedgerActivationId, type LedgerIdentityLookupDeps } from './ledger-identity.js';
 
 /**
  * rc-2 type guard: narrow unknown to Record<string, unknown> without `as`.
@@ -146,12 +147,25 @@ export interface DispatcherConfig {
    * refused decision is the authoritative record regardless.
    */
   eventEmitter?: StoreEventEmitter;
+  /**
+   * I3 upgrade (Owner review of PR #1856, P1 ×3) — ledger-aware identity
+   * resolution. When provided, BOTH dispatch paths (enqueueForApproval and
+   * activateArtifact) verify the artifact's principle identity against the
+   * LEDGER before the approval record is enqueued and before the activation
+   * commit: a UUID-shaped `source_principle_id` must also be present in the
+   * ledger (`hasPrinciple`), and an unstamped artifact may resolve through
+   * candidate lineage (dreamer artifact → dreamer task seed candidateId →
+   * ledger principle). When omitted, the dispatcher falls back to the strict
+   * UUID-shape-only boundary (legacy callers, unchanged behavior).
+   */
+  ledgerIdentity?: LedgerIdentityLookupDeps;
 }
 
 export class ActivationDispatcher {
   private readonly writers: Map<InternalizationChannel, ChannelWriter>;
   private readonly approvalQueueStore?: ApprovalQueueStore;
   private readonly eventEmitter?: StoreEventEmitter;
+  private readonly ledgerIdentity?: LedgerIdentityLookupDeps;
 
   constructor(
     private readonly artifactReadModel: ActivationArtifactReadModel,
@@ -160,10 +174,45 @@ export class ActivationDispatcher {
   ) {
     this.approvalQueueStore = config.approvalQueueStore;
     this.eventEmitter = config.eventEmitter;
+    this.ledgerIdentity = config.ledgerIdentity;
     this.writers = new Map<InternalizationChannel, ChannelWriter>();
     for (const writer of config.writers) {
       this.writers.set(writer.channel, writer);
     }
+  }
+
+  /**
+   * Resolve the principle identity an activation may carry, BEFORE any state
+   * change (approval enqueue or activation commit).
+   *
+   * With `ledgerIdentity` deps: the identity must resolve against the ledger —
+   * either a stamped UUID that the ledger actually contains
+   * (`direct_validated`) or an unstamped artifact's candidate lineage. A
+   * stamped-but-unknown UUID is data drift (`principle_not_in_ledger`) and is
+   * refused — it never falls through to lineage guessing.
+   *
+   * Without `ledgerIdentity` deps (legacy callers): strict UUID shape only.
+   */
+  private async resolveActivationIdentity(artifact: PIArtifactSnapshot): Promise<{ principleId: string } | { error: { decision: 'invalid_artifact'; reason: string; nextAction?: string } }> {
+    if (!this.ledgerIdentity) {
+      const strict = resolveActivationPrincipleId(artifact);
+      return strict
+        ? { principleId: strict }
+        : { error: { decision: 'invalid_artifact', reason: 'no_principle_id_in_artifact' } };
+    }
+    const resolution = await resolveLedgerActivationId(artifact, this.ledgerIdentity);
+    if (resolution.status === 'resolved') {
+      return { principleId: resolution.principleId };
+    }
+    return {
+      error: {
+        decision: 'invalid_artifact',
+        reason: resolution.reason,
+        nextAction: resolution.reason.startsWith('principle_not_in_ledger')
+          ? 'check_pi_artifacts_source_principle_id_against_ledger_or_run_identity_reconciliation'
+          : 'ensure_intake_minted_a_ledger_principle_for_this_candidate_before_internalization',
+      },
+    };
   }
 
   async dispatch(input: DispatchInput): Promise<ActivationDecision> {
@@ -280,6 +329,15 @@ export class ActivationDispatcher {
       };
     }
 
+    // Identity gate BEFORE the approval record exists: the ledger membership
+    // (when ledgerIdentity deps are wired) or at least the strict UUID shape
+    // must hold here too — a pending approval for an artifact that can never
+    // be activated is a poisoned queue entry (Owner review of PR #1856, P1:
+    // "明确在激活提交前如何验证 Ledger 成员关系" — the approval record IS the
+    // pre-commit state change).
+    const identity = await this.resolveActivationIdentity(artifact);
+    if ('error' in identity) return identity.error;
+
     const writer = this.writers.get(input.channel);
     if (writer) {
       const canActivateResult = await checkCanActivate(writer, artifact, this.eventEmitter);
@@ -302,7 +360,7 @@ export class ActivationDispatcher {
         {
           artifactId: input.artifactId,
           channel: input.channel,
-          principleId: extractPrincipleId(artifact) ?? '',
+          principleId: identity.principleId,
           idempotencyKey: idempotencyKey,
           now: input.now,
         },
@@ -334,14 +392,22 @@ export class ActivationDispatcher {
 
   private async activateArtifact(input: DispatchInput, artifact: PIArtifactSnapshot, idempotencyKey: string): Promise<ActivationDecision> {
     // Resolve the principle ID for WriterInput.principleId. Rule artifacts
-    // (code_tool_hook channel) MUST carry sourcePrincipleId — without it,
+    // (code_tool_hook channel) MUST carry a resolvable identity — without it,
     // the activated rule cannot be traced back to the owner-approved principle,
     // producing an untraceable behavior change (P1 #3 fix: removed the
     // sourceRuleId/artifactId fallback that allowed untraceable activation).
-    const principleId = extractPrincipleId(artifact);
-    if (!principleId) {
-      return { decision: 'invalid_artifact', reason: 'no_principle_id' };
-    }
+    //
+    // I3 — ACTIVATION IDENTITY BOUNDARY (Phase 3 Option A′, upgraded per Owner
+    // review of PR #1856): with ledgerIdentity deps the identity must be a
+    // ledger MEMBER — either the stamped `source_principle_id` UUID present in
+    // the ledger (`direct_validated`) or an unstamped artifact resolved through
+    // candidate lineage (dreamer artifact → dreamer task seed candidateId →
+    // ledger principle). UUID shape alone never proves membership. Without
+    // ledgerIdentity deps the legacy strict shape boundary applies
+    // (see docs/architecture/principle-identity-reconciliation.md).
+    const identity = await this.resolveActivationIdentity(artifact);
+    if ('error' in identity) return identity.error;
+    const { principleId } = identity;
 
     const writer = this.writers.get(input.channel);
     if (!writer) {

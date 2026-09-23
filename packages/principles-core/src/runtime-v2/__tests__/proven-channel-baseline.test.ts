@@ -471,7 +471,7 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       const art = makePrincipleArtifact();
       expect(art.artifactKind).toBe('principle');
       expect(art.validationStatus).toBe('validated');
-      expect(art.sourcePrincipleId).toBe('synth-principle-PRI240');
+      expect(art.sourcePrincipleId).toBe('b2400000-0000-4000-8000-000000000240');
     });
 
     it('makeRuleArtifact produces consistent shape with goldenTrace', () => {

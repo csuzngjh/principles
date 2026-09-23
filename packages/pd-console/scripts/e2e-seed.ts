@@ -25,6 +25,53 @@ if (!workspaceDir || !fs.existsSync(workspaceDir)) {
 const now = new Date().toISOString();
 const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
 
+// ── I3 activation identity (PR #1856): seed ledger-backed UUID identities ────
+// The activation dispatcher now resolves the artifact's `source_principle_id`
+// against the LEDGER before committing an activation (fail-closed). Seeded
+// artifacts must therefore carry a UUID-shaped identity AND that UUID must be
+// a real ledger principle, otherwise every seeded approval fails with
+// `no_principle_id_in_artifact` / `principle_not_in_ledger` and the e2e
+// happy-path specs (focus-approve-flow, BDD, governance-experience,
+// focus-governance-clicks) see a 500 instead of a clean activation.
+//
+// These ids are stable (all-zeros body + fixed suffix) so failures stay
+// reproducible and grep-able. Each maps 1:1 to a ledger entry written below.
+const PRINCIPLE_IDS = {
+  promptConfig: 'e2e00000-0000-4000-8000-000000000001',
+  promptBdd: 'e2e00000-0000-4000-8000-000000000002',
+  experience: 'e2e00000-0000-4000-8000-000000000003',
+  hookRootCause: 'e2e00000-0000-4000-8000-000000000004',
+  badTrace: 'e2e00000-0000-4000-8000-000000000005',
+  rulecodeOwner: 'e2e00000-0000-4000-8000-000000000006',
+  rulecodeReject: 'e2e00000-0000-4000-8000-000000000007',
+  clickApprove: 'e2e00000-0000-4000-8000-000000000008',
+  clickReject: 'e2e00000-0000-4000-8000-000000000009',
+  clickEdit: 'e2e00000-0000-4000-8000-00000000000a',
+} as const;
+
+/** Minimal ledger principle entry for a seeded UUID identity. */
+function seededLedgerPrinciple(id: string, text: string, derivedFromPainIds: string[] = ['pain-e2e-1']) {
+  return {
+    id,
+    status: 'candidate',
+    text,
+    triggerPattern: 'on-seeded-e2e',
+    action: text,
+    evaluability: 'weak_heuristic',
+    priority: 'P2',
+    scope: 'general',
+    domain: '',
+    valueScore: 0,
+    adherenceRate: 0,
+    painPreventedCount: 0,
+    ruleIds: [],
+    conflictsWithPrincipleIds: [],
+    derivedFromPainIds,
+    createdAt: eightDaysAgo,
+    updatedAt: now,
+  };
+}
+
 // ── 1. 初始化 state.db 完整 schema（writable 模式自动建表）──────────────────
 const stateDir = path.join(workspaceDir, '.pd');
 fs.mkdirSync(stateDir, { recursive: true });
@@ -97,24 +144,24 @@ const insertPiArtifact = stateDb.prepare(`
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 insertPiArtifact.run(
-  'artifact-prompt-1', 'principle', 'task-diag-1', 'p-001',
-  '[]', 'validated', JSON.stringify({ principleId: 'p-001', title: '配置变更需确认' }), now, now,
+  'artifact-prompt-1', 'principle', 'task-diag-1', PRINCIPLE_IDS.promptConfig,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.promptConfig, title: '配置变更需确认' }), now, now,
 );
 insertPiArtifact.run(
-  'artifact-prompt-bdd', 'principle', 'task-diag-bdd', 'p-002',
-  '[]', 'validated', JSON.stringify({ principleId: 'p-002', title: 'BDD 审批隔离原则' }), now, now,
+  'artifact-prompt-bdd', 'principle', 'task-diag-bdd', PRINCIPLE_IDS.promptBdd,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.promptBdd, title: 'BDD 审批隔离原则' }), now, now,
 );
 // PRI-586: isolated artifact+approval pair for governance-experience.spec.ts
 // (nothing else consumes it, so the spec is deterministic in a full serial run).
 // pi_artifacts has UNIQUE(source_task_id, artifact_kind), so it needs its own
 // source task id.
 insertPiArtifact.run(
-  'artifact-experience-1', 'principle', 'task-diag-exp', 'p-002',
-  '[]', 'validated', JSON.stringify({ principleId: 'p-002', title: '治理体验快照验证原则' }), now, now,
+  'artifact-experience-1', 'principle', 'task-diag-exp', PRINCIPLE_IDS.experience,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.experience, title: '治理体验快照验证原则' }), now, now,
 );
 insertPiArtifact.run(
-  'artifact-hook-1', 'principle', 'task-diag-2', 'p-001',
-  '[]', 'validated', JSON.stringify({ principleId: 'p-001', title: '错误后必须分析根因' }), now, now,
+  'artifact-hook-1', 'principle', 'task-diag-2', PRINCIPLE_IDS.hookRootCause,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.hookRootCause, title: '错误后必须分析根因' }), now, now,
 );
 
 // Regression fixture for PR #1079: a rule artifact with an illegal
@@ -128,7 +175,7 @@ insertPiArtifact.run(
 // After PR #1079, the canonical validateGoldenTrace() rejects it at
 // the schema layer with `golden_trace_schema_invalid: <detail>`.
 insertPiArtifact.run(
-  'artifact-rule-bad-trace', 'rule', 'task-diag-1', 'p-001',
+  'artifact-rule-bad-trace', 'rule', 'task-diag-1', PRINCIPLE_IDS.badTrace,
   '[]', 'validated',
   JSON.stringify({
     implementationCode: 'function evaluate(input, helpers) { return { decision: "requireApproval", matched: true, reason: "test" }; }',
@@ -163,7 +210,7 @@ insertPiArtifact.run(
 );
 
 const safeRuleCode = 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }';
-function ownerReviewRuleContent(ruleId: string, principleId = 'p-rulecode-owner') {
+function ownerReviewRuleContent(ruleId: string, principleId: string = PRINCIPLE_IDS.rulecodeOwner) {
   return JSON.stringify({
     principleId,
     ruleId,
@@ -184,11 +231,11 @@ function ownerReviewRuleContent(ruleId: string, principleId = 'p-rulecode-owner'
 }
 
 insertPiArtifact.run(
-  'artifact-rule-owner-shadow', 'rule', 'task-rule-owner-shadow', 'p-rulecode-owner',
+  'artifact-rule-owner-shadow', 'rule', 'task-rule-owner-shadow', PRINCIPLE_IDS.rulecodeOwner,
   '["artifact-diag-output-1"]', 'validated', ownerReviewRuleContent('rule-owner-shadow'), now, now,
 );
 insertPiArtifact.run(
-  'artifact-rule-owner-live', 'rule', 'task-rule-owner-live', 'p-rulecode-owner',
+  'artifact-rule-owner-live', 'rule', 'task-rule-owner-live', PRINCIPLE_IDS.rulecodeOwner,
   '["artifact-diag-output-1"]', 'validated', ownerReviewRuleContent('rule-owner-live'), now, now,
 );
 
@@ -216,8 +263,8 @@ stateDb.prepare(`
 `).run('act-rule-live-e2e', now);
 if (ownerAuthEnabled) {
   insertPiArtifact.run(
-    'artifact-rule-owner-reject', 'rule', 'task-rule-owner-reject', 'p-rulecode-reject',
-    '["artifact-diag-output-1"]', 'validated', ownerReviewRuleContent('rule-owner-reject', 'p-rulecode-reject'), now, now,
+    'artifact-rule-owner-reject', 'rule', 'task-rule-owner-reject', PRINCIPLE_IDS.rulecodeReject,
+    '["artifact-diag-output-1"]', 'validated', ownerReviewRuleContent('rule-owner-reject', PRINCIPLE_IDS.rulecodeReject), now, now,
   );
   insertRuleActivation.run(
     'act-rule-reject-e2e', 'idem-rule-reject-e2e', 'artifact-rule-owner-reject',
@@ -306,23 +353,23 @@ stateDb.prepare(`
 // specs (focus-approve-flow / BDD). All are prompt channel (MVP-reversible)
 // so approve produces a real activation and deactivate is available.
 insertPiArtifact.run(
-  'artifact-click-approve', 'principle', 'task-click-approve', 'p-click-approve',
-  '[]', 'validated', JSON.stringify({ principleId: 'p-click-approve', title: '点击批准测试原则' }), now, now,
+  'artifact-click-approve', 'principle', 'task-click-approve', PRINCIPLE_IDS.clickApprove,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickApprove, title: '点击批准测试原则' }), now, now,
 );
 insertPiArtifact.run(
-  'artifact-click-reject', 'principle', 'task-click-reject', 'p-click-reject',
-  '[]', 'validated', JSON.stringify({ principleId: 'p-click-reject', title: '点击拒绝测试原则' }), now, now,
+  'artifact-click-reject', 'principle', 'task-click-reject', PRINCIPLE_IDS.clickReject,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickReject, title: '点击拒绝测试原则' }), now, now,
 );
 insertPiArtifact.run(
-  'artifact-click-edit', 'principle', 'task-click-edit', 'p-click-edit',
-  '[]', 'validated', JSON.stringify({ principleId: 'p-click-edit', title: '点击编辑测试原则' }), now, now,
+  'artifact-click-edit', 'principle', 'task-click-edit', PRINCIPLE_IDS.clickEdit,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickEdit, title: '点击编辑测试原则' }), now, now,
 );
 // Edit replacement artifact (pre-validated, so editApproval can point at it).
 // NOTE: pi_artifacts has a UNIQUE(source_task_id, artifact_kind) constraint, so
 // this artifact needs its own source_task_id distinct from artifact-click-edit.
 insertPiArtifact.run(
-  'artifact-click-edit-new', 'principle', 'task-click-edit-new', 'p-click-edit',
-  '[]', 'validated', JSON.stringify({ principleId: 'p-click-edit', title: '编辑后新原则' }), now, now,
+  'artifact-click-edit-new', 'principle', 'task-click-edit-new', PRINCIPLE_IDS.clickEdit,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickEdit, title: '编辑后新原则' }), now, now,
 );
 const insertClickApproval = stateDb.prepare(`
   INSERT INTO approvals (
@@ -427,30 +474,45 @@ trajDb.close();
 console.log('[e2e-seed] trajectory.db seeded: 1 pain_event');
 
 // ── 9. 写入 principle_training_state.json ───────────────────────────────────
+// Every seeded pi_artifact points at a ledger principle here (PR #1856). The
+// activation boundary now requires both a UUID-shaped `source_principle_id` and
+// a matching ledger entry (`hasPrinciple`); seeding one without the other makes
+// the happy-path approvals fail closed instead of activating.
 const ledgerPath = path.join(trajectoryDir, 'principle_training_state.json');
+const ledgerPrinciples: Record<string, ReturnType<typeof seededLedgerPrinciple>> = {
+  'p-001': {
+    id: 'p-001',
+    status: 'active',
+    text: '配置变更需确认',
+    triggerPattern: 'on-config-change',
+    action: '修改任何配置文件前，必须先向 Owner 确认',
+    evaluability: 'deterministic',
+    priority: 'P1',
+    scope: 'general',
+    domain: '',
+    valueScore: 0,
+    adherenceRate: 0,
+    painPreventedCount: 0,
+    ruleIds: [],
+    conflictsWithPrincipleIds: [],
+    derivedFromPainIds: ['pain-e2e-1'],
+    createdAt: eightDaysAgo,
+    updatedAt: now,
+  },
+  [PRINCIPLE_IDS.promptConfig]: seededLedgerPrinciple(PRINCIPLE_IDS.promptConfig, '配置变更需确认'),
+  [PRINCIPLE_IDS.promptBdd]: seededLedgerPrinciple(PRINCIPLE_IDS.promptBdd, 'BDD 审批隔离原则', ['pain-e2e-bdd']),
+  [PRINCIPLE_IDS.experience]: seededLedgerPrinciple(PRINCIPLE_IDS.experience, '治理体验快照验证原则', ['pain-e2e-exp']),
+  [PRINCIPLE_IDS.hookRootCause]: seededLedgerPrinciple(PRINCIPLE_IDS.hookRootCause, '错误后必须分析根因', ['pain-e2e-hook']),
+  [PRINCIPLE_IDS.badTrace]: seededLedgerPrinciple(PRINCIPLE_IDS.badTrace, 'goldenTrace 回归验证原则', ['pain-e2e-badtrace']),
+  [PRINCIPLE_IDS.rulecodeOwner]: seededLedgerPrinciple(PRINCIPLE_IDS.rulecodeOwner, 'RuleCode Owner 裁决原则', ['pain-e2e-ruleowner']),
+  [PRINCIPLE_IDS.rulecodeReject]: seededLedgerPrinciple(PRINCIPLE_IDS.rulecodeReject, 'RuleCode 拒绝路径原则', ['pain-e2e-rulereject']),
+  [PRINCIPLE_IDS.clickApprove]: seededLedgerPrinciple(PRINCIPLE_IDS.clickApprove, '点击批准测试原则', ['pain-e2e-click-approve']),
+  [PRINCIPLE_IDS.clickReject]: seededLedgerPrinciple(PRINCIPLE_IDS.clickReject, '点击拒绝测试原则', ['pain-e2e-click-reject']),
+  [PRINCIPLE_IDS.clickEdit]: seededLedgerPrinciple(PRINCIPLE_IDS.clickEdit, '点击编辑测试原则', ['pain-e2e-click-edit']),
+};
 const ledger = {
   _tree: {
-    principles: {
-      'p-001': {
-        id: 'p-001',
-        status: 'active',
-        text: '配置变更需确认',
-        triggerPattern: 'on-config-change',
-        action: '修改任何配置文件前，必须先向 Owner 确认',
-        evaluability: 'deterministic',
-        priority: 'P1',
-        scope: 'general',
-        domain: '',
-        valueScore: 0,
-        adherenceRate: 0,
-        painPreventedCount: 0,
-        ruleIds: [],
-        conflictsWithPrincipleIds: [],
-        derivedFromPainIds: ['pain-e2e-1'],
-        createdAt: eightDaysAgo,
-        updatedAt: now,
-      },
-    },
+    principles: ledgerPrinciples,
     rules: {},
   },
   'p-001': {
@@ -468,7 +530,7 @@ const ledger = {
   },
 };
 fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2), 'utf8');
-console.log('[e2e-seed] principle_training_state.json written: 1 principle (p-001)');
+console.log(`[e2e-seed] principle_training_state.json written: ${Object.keys(ledgerPrinciples).length} principles (p-001 + ${Object.keys(PRINCIPLE_IDS).length} seeded UUID identities)`);
 
 // ── 10. 写入最小有效 .pd/config.yaml ─────────────────────────────────────────
 // 必须包含 validatePdConfig 要求的所有 required sections（version/runtimeProfiles/

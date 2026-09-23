@@ -66,11 +66,22 @@ describe('Story A\' pure helpers', () => {
     const record = makePrincipleArtifactRecord('test-run');
     expect(record.artifactKind).toBe('principle');
     expect(record.validationStatus).toBe('validated');
-    expect(record.sourcePrincipleId).toBe('demo-principle-test-run');
+    // I3 (PR #1856): the identity is a real ledger principle UUID — a synthetic
+    // `demo-principle-<runId>` string is refused at the activation boundary.
+    expect(record.sourcePrincipleId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
     expect(record.artifactId).toBe('art-demo-principle-test-run');
     const content = JSON.parse(record.contentJson) as Record<string, unknown>;
-    expect(content.principleId).toBe('demo-principle-test-run');
+    expect(content.principleId).toBe(record.sourcePrincipleId);
     expect(content.text).toContain('system-critical');
+  });
+
+  it('makePrincipleArtifactRecord honours an explicit ledger identity', () => {
+    const ledgerId = 'a1100000-0000-4000-8000-000000000001';
+    const record = makePrincipleArtifactRecord('test-run', ledgerId);
+    expect(record.sourcePrincipleId).toBe(ledgerId);
+    expect((JSON.parse(record.contentJson) as Record<string, unknown>).principleId).toBe(ledgerId);
   });
 
   it('makeRuleArtifactRecord produces valid rule artifact with GoldenTrace', () => {

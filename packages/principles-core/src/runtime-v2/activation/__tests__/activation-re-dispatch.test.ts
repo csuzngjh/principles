@@ -27,10 +27,10 @@ function makePrincipleArtifact(overrides: Partial<PIArtifactSnapshot> = {}): PIA
     artifactId: 'art-001',
     artifactKind: 'principle',
     sourceTaskId: 'task-001',
-    sourcePrincipleId: 'P_001',
+    sourcePrincipleId: 'a0000000-0000-4000-8000-000000000001',
     lineageArtifactIds: [],
     validationStatus: 'validated',
-    contentJson: JSON.stringify({ principleId: 'P_001', text: 'Test principle' }),
+    contentJson: JSON.stringify({ principleId: 'a0000000-0000-4000-8000-000000000001', text: 'Test principle' }),
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -178,7 +178,7 @@ describe('Bug-Q: re-dispatch after deactivation', () => {
       expect(second.decision).toBe('already_activated');
 
       // Now deactivate the activation
-      const deactivated = await stateStore.deactivateActivation('act_prompt_P_001', '2026-06-01T00:00:00.000Z');
+      const deactivated = await stateStore.deactivateActivation('act_prompt_a0000000-0000-4000-8000-000000000001', '2026-06-01T00:00:00.000Z');
       expect(deactivated).toBe(true);
 
       // Bug-Q fix: re-dispatching the approved record should succeed (not
@@ -187,7 +187,7 @@ describe('Bug-Q: re-dispatch after deactivation', () => {
       expect(third.decision).toBe('activated');
       if (third.decision === 'activated') {
         // New activation record has a new activatedAt (re-activation timestamp).
-        expect(third.activationId).toBe('act_prompt_P_001');
+        expect(third.activationId).toBe('act_prompt_a0000000-0000-4000-8000-000000000001');
       }
 
       // Verify that getActivationStatus now returns the new active record (not null).

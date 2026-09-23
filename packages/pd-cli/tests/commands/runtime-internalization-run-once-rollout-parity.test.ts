@@ -38,6 +38,7 @@ import {
   factStoreFromStateManager,
   SqliteConnection,
   SqliteActivationStateStore,
+  PrincipleTreeLedgerAdapter,
   makeIdempotencyKey,
   type PITaskMetadata,
   type PDRuntimeAdapter,
@@ -84,6 +85,10 @@ const ROLL_ID_SEED = 'rollout-parity-craft'; // only used by crafted (T3/T4) wor
 const SCRIBE_ART = 'pi-art-scribe-parity-1';
 const ARTIFICER_ART = 'pi-art-artificer-parity-1';
 const EVAL_ART = 'pi-art-eval-parity-1';
+// I3 (PR #1856): a real ledger principle UUID + the candidate it derives from —
+// the durable identity a production internalization would have produced.
+const SCRIBE_PRINCIPLE_ID = 'c4920000-0000-4000-8000-000000000708';
+const PARITY_CANDIDATE_ID = 'c4920000-0000-4000-8000-000000000709';
 
 function evaluationApprovedPayload(): Record<string, unknown> {
   return {
@@ -128,10 +133,30 @@ async function seedWorkspace(workspaceDir: string): Promise<RuntimeStateManager>
     mappings: [{ rawToolName: 'Write', canonicalKind: 'write' }],
     declaredAt: new Date().toISOString(),
   });
+  // I3 (PR #1856): the activation boundary resolves the artifact identity
+  // against the LEDGER — a durable workspace whose scribe artifact carries no
+  // ledger-backed identity is refused (exactly the production gap this fix
+  // closes). This fixture therefore seeds the SAME durable state a real
+  // internalization produces: a ledger principle whose derivedFromPainIds
+  // carries the scribe chain's candidate, with the artifact stamped to it.
+  new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).writeProbationEntry({
+    id: SCRIBE_PRINCIPLE_ID,
+    title: 'parity-p',
+    status: 'probation',
+    sourceRef: `candidate://${PARITY_CANDIDATE_ID}`,
+    artifactRef: SCRIBE_ART,
+    taskRef: SCRIBE_ID,
+    text: 'parity principle text',
+    triggerPattern: 'parity trigger',
+    action: 'parity action',
+    evaluability: 'weak_heuristic',
+    createdAt: new Date().toISOString(),
+  });
   const sm = new RuntimeStateManager({ workspaceDir });
   await sm.initialize();
   await sm.piArtifactStore.upsertArtifact({
     artifactId: SCRIBE_ART, artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
+    sourcePrincipleId: SCRIBE_PRINCIPLE_ID,
     lineageArtifactIds: [], validationStatus: 'validated',
     contentJson: JSON.stringify({ principleDraft: { title: 'parity-p', statement: '原则正文' } }),
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),

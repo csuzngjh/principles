@@ -36,13 +36,25 @@ function makeGoldenTrace(): GoldenTrace {
   };
 }
 
+/**
+ * I3 ledger-shaped identity (Owner review of PR #1856). The activation
+ * identity boundary resolves `source_principle_id` as a ledger-shaped UUID —
+ * a placeholder like `P_001` is refused at the DISPATCHER (before the writer
+ * runs), so the dispatcher-integration cases below would never reach the
+ * writer checks they are actually testing. The ledger membership check itself
+ * is exercised by activation-dispatcher.test.ts (ledgerIdentity deps wired);
+ * this file intentionally wires NO ledgerIdentity so the legacy strict
+ * UUID-shape boundary applies.
+ */
+const RULE_PRINCIPLE_ID = 'a1100000-0000-4000-8000-000000000001';
+
 function makeRuleArtifact(overrides: Partial<PIArtifactSnapshot> = {}): PIArtifactSnapshot {
   const goldenTrace = makeGoldenTrace();
   return {
     artifactId: 'art-rule-001',
     artifactKind: 'rule',
     sourceTaskId: 'task-001',
-    sourcePrincipleId: 'P_001',
+    sourcePrincipleId: RULE_PRINCIPLE_ID,
     sourceRuleId: 'R_001',
     lineageArtifactIds: [],
     validationStatus: 'validated',

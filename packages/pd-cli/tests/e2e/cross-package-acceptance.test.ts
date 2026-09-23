@@ -277,7 +277,12 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     await seedDreamerWithId(sm, 'dreamer-xpkg-001', 'pain-xpkg-001', 'cand-xpkg-001');
     await sm.close();
     addPrincipleToLedger(path.join(tmpDir, '.state'), {
-      id: 'ledger-xpkg-001', version: 1, text: 'cross-package ledger principle', triggerPattern: '', action: '',
+      // I3 upgrade (Owner review of PR #1856): ledger principle ids are UUIDs
+      // (CandidateIntakeService mints randomUUID at intake). The dispatcher's
+      // identity boundary refuses non-UUID-shaped ids, so the fixture uses the
+      // production shape — the pipeline binds this UUID onto the scribe/rule
+      // artifacts and the activation carries it.
+      id: 'c4920000-0000-4000-8000-000000000492', version: 1, text: 'cross-package ledger principle', triggerPattern: '', action: '',
       status: 'candidate', evaluability: 'weak_heuristic', priority: 'P1', scope: 'general',
       valueScore: 0, adherenceRate: 0, painPreventedCount: 0, derivedFromPainIds: ['cand-xpkg-001'],
       ruleIds: [], conflictsWithPrincipleIds: [], createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',

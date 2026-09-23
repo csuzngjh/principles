@@ -185,6 +185,13 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('scribe_output_extraction_failed'),
   Type.Literal('scribe_mark_failed_error'),
   Type.Literal('scribe_mark_retry_error'),
+  // PR #1856 (I2): ScribeRunner resolves the ledger principle identity through
+  // the real chain (scribe → dreamer artifact → dreamer task seed candidateId →
+  // ledger.listForCandidate) and stamps it at write time. Stamping is fail-soft,
+  // so both non-stamp outcomes are observable events (ERR-060: never silently
+  // dropped) — a failed ledger read and an unresolvable/ambiguous chain.
+  Type.Literal('scribe_identity_stamp_failed'),
+  Type.Literal('scribe_identity_stamp_skipped'),
   // PRI-846 review round: scribe-side formation resolver vocabulary (the same
   // consumer-forwarded resolver names as the evaluator_formation_* block —
   // this closes the pre-existing PRI-838 registration gap for the first

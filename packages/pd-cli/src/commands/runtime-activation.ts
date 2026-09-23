@@ -12,6 +12,7 @@ import {
   SqliteActivationStateStore,
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
+  PrincipleTreeLedgerAdapter,
   ApprovalQueue,
   ApprovalCompletionService,
   isArtifactRevisionOf,
@@ -25,6 +26,37 @@ import {
   summarizeRuleCodeShadowEvents,
   buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
+import type { LedgerIdentityLookupDeps, SqliteConnection } from '@principles/core/runtime-v2';
+
+/**
+ * I3 upgrade (Owner review of PR #1856, P1): ledger-aware identity deps for
+ * the dispatcher. Membership is verified against the ledger SSOT at
+ * <workspace>/.state (the same dir intake used to mint the principle UUID)
+ * BEFORE the approval record is enqueued and BEFORE the activation commit.
+ * Candidate lineage reuses the artifact read model plus raw diagnostic_json
+ * reads off the shared SQLite connection.
+ */
+function buildLedgerIdentityDeps(
+  workspaceDir: string,
+  connection: SqliteConnection,
+  getArtifactById: (artifactId: string) => Promise<PIArtifactSnapshot | null>,
+): LedgerIdentityLookupDeps {
+  return {
+    ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }),
+    getArtifactById,
+    getTaskDiagnosticJson: (taskId: string): string | null => {
+      try {
+        const row = connection
+          .getDb()
+          .prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?')
+          .get(taskId) as { diagnostic_json?: string | null } | undefined;
+        return row?.diagnostic_json ?? null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
 import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime-v2';
 import type {
   ActivationDecision,
@@ -335,6 +367,7 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
           new DeferArchiveWriter(),
         ],
         approvalQueueStore,
+        ledgerIdentity: buildLedgerIdentityDeps(workspaceDir, stateManager.connection, artifactReadModel.getArtifactById),
       },
     );
 
@@ -1397,6 +1430,7 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
           new DeferArchiveWriter(),
         ],
         approvalQueueStore,
+        ledgerIdentity: buildLedgerIdentityDeps(workspaceDir, sqliteConn, artifactReadModel.getArtifactById),
       },
     );
     const completionService = new ApprovalCompletionService(
