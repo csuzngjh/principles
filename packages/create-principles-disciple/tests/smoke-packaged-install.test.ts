@@ -667,17 +667,21 @@ function readJsonFile(filePath: string): unknown {
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 }
 
-function stringField(value: unknown, key: string): string | undefined {
+function unknownField(value: unknown, key: string): unknown {
   if (typeof value !== 'object' || value === null || !Object.hasOwn(value, key)) return undefined;
-  const field = (value as Record<string, unknown>)[key];
+  return (value as Record<string, unknown>)[key];
+}
+
+function stringField(value: unknown, key: string): string | undefined {
+  const field = unknownField(value, key);
   return typeof field === 'string' ? field : undefined;
 }
 
 // Registry-visible versions for one package; null when the query itself
 // could not be trusted — a broken probe must never mint a skip.
-async function registryVersionsFor(packageName: string): Promise<string[] | null> {
+async function registryVersionsFor(packageName: string, cwd: string): Promise<string[] | null> {
   try {
-    const out = await npmRun(['view', packageName, 'versions', '--json'], { timeout: 60_000 });
+    const out = await npmRun(['view', packageName, 'versions', '--json'], { cwd, timeout: 60_000 });
     const parsed: unknown = JSON.parse(out);
     return Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')
       ? (parsed as string[])
@@ -706,16 +710,22 @@ describe('Registry-resolved dependency install (npx parity)', () => {
         ]
           .map((part) => (typeof part === 'string' ? part : ''))
           .join('\n');
-        const registryVersions = await registryVersionsFor(INSTALL_LAYOUT_PACKAGE);
+        // Cheap prefilter before any registry probe — unrelated install
+        // failures rethrow immediately (the classifier re-checks all of it).
+        if (
+          !/ETARGET|notarget/i.test(errorText) ||
+          !errorText.includes(`${INSTALL_LAYOUT_PACKAGE}@`)
+        ) {
+          throw installErr;
+        }
+        const registryVersions = await registryVersionsFor(INSTALL_LAYOUT_PACKAGE, cleanDir);
+        const installerManifest = readJsonFile(path.join(INSTALLER_DIR, 'package.json'));
         const cohortNote =
           registryVersions === null
             ? null
             : classifyPrePublishCohort({
                 npmErrorText: errorText,
-                range: stringField(
-                  (readJsonFile(path.join(INSTALLER_DIR, 'package.json')) as { dependencies?: unknown }).dependencies,
-                  INSTALL_LAYOUT_PACKAGE,
-                ),
+                range: stringField(unknownField(installerManifest, 'dependencies'), INSTALL_LAYOUT_PACKAGE),
                 localVersion: stringField(
                   readJsonFile(path.resolve(INSTALLER_DIR, '..', 'install-layout', 'package.json')),
                   'version',

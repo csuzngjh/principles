@@ -18,8 +18,15 @@
  *  - no registry-visible version may satisfy the range.
  * The version-field freeze (check-pr-release-intent, normal PRs may not edit
  * package `version`) makes the middle condition unreachable outside a
- * Version Packages PR, so the 2026-09-04 defect shape (range pinned to a
- * version whose interface never existed) keeps failing loudly.
+ * Version Packages PR (barring that guard's own narrow baseline-alignment
+ * exemption), so the 2026-09-04 defect shape (range pinned to a version
+ * whose interface never existed) keeps failing loudly.
+ *
+ * Known blind spot: the classifier cannot distinguish "cohort version will
+ * be published imminently" from "cohort publish failed permanently" — both
+ * look identical to the registry. Permanent non-publication is surfaced by
+ * the publish train's failure alerting (ERR-138 prevention rule 2), not by
+ * this gate.
  */
 import semver from 'semver';
 
