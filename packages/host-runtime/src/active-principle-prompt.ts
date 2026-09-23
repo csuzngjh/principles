@@ -28,10 +28,26 @@ export interface ActivePrinciplePromptResult {
   allValidatedPrinciplesExcluded: boolean;
 }
 
-export async function buildActivePrinciplePromptContext(input: {
+export interface PromptActivationCandidates {
+  principles: ActivatedPrinciple[];
+  excludedPrincipleIds: string[];
+  warnings: string[];
+  /** true = prompt flag off or state.db missing — candidates are necessarily empty */
+  aborted: boolean;
+  selfReportEnabled: boolean;
+  abstractionLayerEnabled: boolean;
+}
+
+/**
+ * PR #1844 follow-up: the activation READ half of buildActivePrinciplePromptContext,
+ * exported so the console budget projection can share the exact same input
+ * selection (FIFO activations → artifact resolve → exclude partition) without
+ * duplicating logic.
+ */
+export async function readPromptActivationCandidates(input: {
   workspaceDir: string;
   excludePrincipleIds?: ReadonlySet<string>;
-}): Promise<ActivePrinciplePromptResult> {
+}): Promise<PromptActivationCandidates> {
   const warnings: string[] = [];
   const principles: ActivatedPrinciple[] = [];
   const excludedPrincipleIds: string[] = [];
@@ -39,25 +55,22 @@ export async function buildActivePrinciplePromptContext(input: {
   if (!config.ok) {
     warnings.push(...config.errors.map((error) => `config_invalid: ${error.reason}; nextAction=${error.nextAction}`));
   }
-  const promptFlag = computeFeatureFlagsFromConfig(config.effective).flags.prompt;
+  const { flags } = computeFeatureFlagsFromConfig(config.effective);
+  const { prompt: promptFlag } = flags;
+  const abstractionLayerEnabled = flags.abstraction_layer_v1?.enabled === true;
   if (!promptFlag?.enabled) {
     warnings.push('prompt_feature_disabled; nextAction=set features.prompt.enabled=true in .pd/config.yaml');
-    return { additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings, budget: RUNTIME_V2_PRINCIPLE_BUDGET, truncated: false, excludedPrincipleIds, excludedCount: 0, allValidatedPrinciplesExcluded: false };
+    return { principles, excludedPrincipleIds, warnings, aborted: true, selfReportEnabled: false, abstractionLayerEnabled };
   }
   // PRI-532: agent self-report instruction rides the directive template when
   // the flag is on (flag-off keeps the template byte-identical).
-  const selfReportEnabled = computeFeatureFlagsFromConfig(config.effective)
-    .flags.principle_receipt_self_report?.enabled === true;
+  const selfReportEnabled = flags.principle_receipt_self_report?.enabled === true;
 
   let connection: SqliteConnection | undefined;
   const stateDbPath = path.join(input.workspaceDir, '.pd', 'state.db');
   if (!fs.existsSync(stateDbPath)) {
     warnings.push('activation_db_not_found; nextAction=initialize_workspace_runtime_state');
-    return {
-      additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings,
-      budget: RUNTIME_V2_PRINCIPLE_BUDGET, truncated: false, excludedPrincipleIds,
-      excludedCount: 0, allValidatedPrinciplesExcluded: false,
-    };
+    return { principles, excludedPrincipleIds, warnings, aborted: true, selfReportEnabled, abstractionLayerEnabled };
   }
   try {
     connection = new SqliteConnection({ workspaceDir: input.workspaceDir, readonly: true, bootstrapIfMissing: false });
@@ -97,6 +110,22 @@ export async function buildActivePrinciplePromptContext(input: {
     warnings.push(`activation_db_unreadable: ${message}; nextAction=check_workspace_pd_state_db`);
   } finally {
     connection?.close();
+  }
+  return { principles, excludedPrincipleIds, warnings, aborted: false, selfReportEnabled, abstractionLayerEnabled };
+}
+
+export async function buildActivePrinciplePromptContext(input: {
+  workspaceDir: string;
+  excludePrincipleIds?: ReadonlySet<string>;
+}): Promise<ActivePrinciplePromptResult> {
+  const { principles, excludedPrincipleIds, warnings, aborted, selfReportEnabled } =
+    await readPromptActivationCandidates(input);
+  if (aborted) {
+    return {
+      additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings,
+      budget: RUNTIME_V2_PRINCIPLE_BUDGET, truncated: false, excludedPrincipleIds,
+      excludedCount: excludedPrincipleIds.length, allValidatedPrinciplesExcluded: false,
+    };
   }
 
   const included: ActivatedPrinciple[] = [];

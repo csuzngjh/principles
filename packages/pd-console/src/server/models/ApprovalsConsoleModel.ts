@@ -27,7 +27,7 @@ import {
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
 import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
-import { resolveWorkspaceHostToolSemantics, buildActivePrinciplePromptContext } from '@principles/host-runtime';
+import { resolveWorkspaceHostToolSemantics, buildLivePromptInjectionProjection } from '@principles/host-runtime';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
@@ -217,31 +217,35 @@ export class ApprovalsConsoleModel {
 
   /**
    * PRI-890 (PRI-768 v6-02): recompute the production prompt injection
-   * projection (same FIFO + budget logic the prompt hook uses, readonly) and
-   * report whether `activationId` made it into the injected set. Budget
-   * exclusion is a warning, never a failure — the activation is committed and
-   * the Owner decides whether to retire older principles. A projection error
-   * is also surfaced (never silent) but must not fail the approve.
+   * projection and report whether `activationId` made it into the injected
+   * set. PR #1844 follow-up: the projection comes from
+   * `buildLivePromptInjectionProjection`, which follows the SAME route the
+   * real agent injection takes (legacy trimToBudget vs shared render, chosen
+   * by the abstraction_layer_v1 flag) instead of always forecasting with the
+   * shared-path renderer. Budget exclusion is a warning, never a failure —
+   * the activation is committed and the Owner decides whether to retire older
+   * principles. A projection error is also surfaced (never silent) but must
+   * not fail the approve.
    */
   private async checkPromptInjectionBudget(activationId: string): Promise<string | undefined> {
-    let context;
+    let projection;
     try {
-      context = await buildActivePrinciplePromptContext({ workspaceDir: this.workspaceDir });
+      projection = await buildLivePromptInjectionProjection({ workspaceDir: this.workspaceDir });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return `injection_budget_check_failed: could not recompute the prompt injection projection (${message}); the activation is committed but its injection status is unverified. nextAction=check .pd/state.db readability and re-run pd runtime activation list`;
     }
-    if (context.activationIds.includes(activationId)) {
+    if (projection.injectedActivationIds.includes(activationId)) {
       return undefined;
     }
-    const projectionDetail = context.warnings.length > 0 ? ` projection warnings: ${context.warnings.join(' | ')}` : '';
-    if (!context.truncated) {
+    const projectionDetail = projection.warnings.length > 0 ? ` projection warnings: ${projection.warnings.join(' | ')}` : '';
+    if (!projection.truncated) {
       // Not included and the budget did NOT truncate — the projection skipped
       // this activation for another reason (e.g. artifact resolution). Report
       // that instead of blaming the budget.
       return `injection_excluded_non_budget: the activation is committed but excluded from the prompt injection projection for a non-budget reason.${projectionDetail} nextAction=inspect the artifact/activation pair via pd runtime activation list`;
     }
-    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${context.budget}c, FIFO by activated_at) is already filled by ${context.activationIds.length} earlier activation(s) — this principle will NOT enter agent behavior until older ones are deactivated. nextAction=review the activations page and deactivate superseded principles`;
+    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${projection.budget}c, FIFO by activated_at) is already filled by ${projection.injectedActivationIds.length} earlier activation(s) — this principle will NOT enter agent behavior until older ones are deactivated. nextAction=review the activations page and deactivate superseded principles`;
   }
 
   /**

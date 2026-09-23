@@ -4,12 +4,14 @@ import {
   SqlitePIArtifactStore,
   ApprovalQueue,
 } from '@principles/core/runtime-v2';
+import { buildLivePromptInjectionProjection } from '@principles/host-runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
 import {
   createArtifactPrincipleResolutionDeps,
   resolveArtifactPrincipleId,
 } from './artifact-principle-resolver.js';
+import type { PromptInjectionBudgetStatus } from '../../shared/prompt-injection-contract.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -39,6 +41,8 @@ export interface ApprovalsGroupedResponse {
   generatedAt: string;
   /** Present when data is degraded/missing rather than genuinely empty */
   note?: string;
+  /** PRI-908: prompt-channel injection budget status for the pre-approval forecast. */
+  promptInjection?: PromptInjectionBudgetStatus;
 }
 
 function isMissingTableError(err: unknown): boolean {
@@ -253,9 +257,39 @@ export class ApprovalsGroupedConsoleModel {
       return {
         groups,
         generatedAt: new Date().toISOString(),
+        ...(await this.readPromptInjectionBudgetStatus()),
       };
     } finally {
       try { conn.close(); } catch { /* best-effort */ }
+    }
+  }
+
+  /**
+   * PRI-908: recompute the production prompt injection projection so the
+   * focus page can forecast "approved ≠ effective" BEFORE the Owner decides.
+   * PR #1844 follow-up: the forecast follows the workspace's REAL injection
+   * route (`buildLivePromptInjectionProjection` — legacy trimToBudget vs
+   * shared render via abstraction_layer_v1), matching the PRI-890 approve-time
+   * check. Advisory only: a projection failure omits the field — the
+   * approve-time warning remains the fail-loud exclusion report (rc-9), so
+   * this must never fail the grouped read.
+   */
+  private async readPromptInjectionBudgetStatus(): Promise<{ promptInjection?: PromptInjectionBudgetStatus }> {
+    try {
+      const projection = await buildLivePromptInjectionProjection({ workspaceDir: this.workspaceDir });
+      return {
+        promptInjection: {
+          budget: projection.budget,
+          usedChars: projection.usedChars,
+          truncated: projection.truncated,
+        },
+      };
+    } catch (err: unknown) {
+      // rc-9: degradation is observable to operators even though it stays
+      // invisible in the UI payload (the badge is advisory only).
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[pd-console] prompt injection forecast unavailable, omitting promptInjection: ${message}`);
+      return {};
     }
   }
 
