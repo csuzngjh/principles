@@ -15,6 +15,7 @@ import {
   InternalizationOrchestrator,
   SqliteConnection,
   SqlitePIArtifactStore,
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 // PRI-624: the wiring moved to the shared host-runtime module (one
 // implementation for OpenClaw auto-consumer + Companion workspace worker);
@@ -167,8 +168,28 @@ describe('createEvaluatorRepairDeps', () => {
 });
 
 describe('dispatchRolloutActivation (真实 dispatcher 冒烟)', () => {
+  // I3 fail-closed: the rollout dispatch resolves the artifact identity against
+  // the LEDGER before queuing. A UUID shape alone is not membership — the test
+  // must seed the ledger entry too, exactly like production intake does.
+  const WIRE_PRINCIPLE_ID = 'd1a50000-0000-4000-8000-000000000011';
+
   it('PRI-811 Phase B: validated principle artifact → prompt 推荐入 approval 队列（不直接激活）', async () => {
     writeConfig();
+    // Seed the durable ledger identity the artifact declares (production intake
+    // mints this before internalization; the dispatch gate refuses otherwise).
+    new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') }).writeProbationEntry({
+      id: WIRE_PRINCIPLE_ID,
+      title: 'wiring smoke principle',
+      status: 'probation',
+      sourceRef: 'candidate://wire-candidate-1',
+      artifactRef: 'pi-art-wire-1',
+      taskRef: 'eval-wire',
+      text: 'wiring smoke principle',
+      triggerPattern: 'on-wire',
+      action: 'wiring smoke principle',
+      evaluability: 'weak_heuristic',
+      createdAt: new Date().toISOString(),
+    });
     // 准备 validated artifact (dispatch 目标)
     const conn = new SqliteConnection(workspaceDir);
     try {
@@ -176,6 +197,8 @@ describe('dispatchRolloutActivation (真实 dispatcher 冒烟)', () => {
       await store.upsertArtifact({
         artifactId: 'pi-art-wire-1', artifactKind: 'principle', sourceTaskId: 'eval-wire',
         lineageArtifactIds: [], validationStatus: 'validated',
+        // I3 fail-closed: activation identity must be a ledger-shaped UUID.
+        sourcePrincipleId: WIRE_PRINCIPLE_ID,
         contentJson: JSON.stringify({ principleId: 'wire-p1', text: 'wiring smoke principle' }),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       });

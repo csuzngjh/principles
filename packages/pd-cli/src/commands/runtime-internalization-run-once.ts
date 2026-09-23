@@ -16,6 +16,7 @@ import {
   DefaultEvaluatorValidator,
   DefaultRolloutReviewerValidator,
   TestDoubleRuntimeAdapter,
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext } from '@principles/core/runtime-v2';
 import { resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, isRuntimeConfigError, buildArtificerHostSemanticContext } from '@principles/core/runtime-v2';
@@ -593,7 +594,16 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         } else if (runnerKind === 'scribe') {
           const validator = new DefaultScribeValidator();
           const runner = new ScribeRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+            {
+              stateManager, runtimeAdapter, eventEmitter, validator, artifactStore,
+              // I2 — CHAIN STAMPING (Owner review of PR #1856, P1): stamp the
+              // ledger principle UUID (via dreamer lineage → candidateId →
+              // ledger) at write time; fail-soft on unresolvable chains.
+              ledgerIdentity: {
+                listForCandidate: (candidateId: string) =>
+                  new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).listForCandidate(candidateId),
+              },
+            },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);

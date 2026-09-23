@@ -61,7 +61,10 @@ export interface ContinuityMatrixEntry {
   pri230ReuseEvidence: string;
 }
 
-const SYNTH_PRINCIPLE_ID = 'synth-principle-PRI240';
+// I3 — Activation identity is fail-closed now: `sourcePrincipleId` must be a
+// ledger-shaped principle UUID (see resolveActivationPrincipleId), so the
+// synthetic baseline fixture carries a UUID too.
+const SYNTH_PRINCIPLE_ID = 'b2400000-0000-4000-8000-000000000240';
 const SYNTH_RULE_ID = 'synth-rule-PRI240';
 
 function makePrincipleArtifact(): PIArtifactSnapshot {

@@ -57,6 +57,7 @@ import {
   SqliteConnection,
   SqliteReconciliationCursorStore,
   SUCCEEDED_TRANSITIONS_SCOPE,
+  PrincipleTreeLedgerAdapter,
   // PRI-714: resolve outputLanguage from the same effective config the
   // runners already receive (EP-07: canonical resolved value, not raw input).
   resolveOutputLanguage,
@@ -602,7 +603,19 @@ export async function runInternalizationConsumerCycle(
         break;
       case 'scribe':
         runner = new ScribeRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator() },
+          {
+            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator(),
+            // I2 — CHAIN STAMPING (Owner review of PR #1856, P1): the scribe
+            // stamps the ledger principle UUID (minted at intake, keyed by the
+            // dreamer task seed's candidateId) onto the artifact it writes, so
+            // the dispatcher's ledger identity gate sees a resolvable
+            // identity on the live production chain. listForCandidate reads
+            // the ledger from disk per call — no cross-cycle staleness.
+            ledgerIdentity: {
+              listForCandidate: (candidateId: string) =>
+                new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).listForCandidate(candidateId),
+            },
+          },
           runnerOptions,
         );
         break;

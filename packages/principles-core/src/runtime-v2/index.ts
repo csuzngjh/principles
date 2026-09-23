@@ -1419,6 +1419,9 @@ export type {
   ConfidenceLabel,
   BuildPromotionEvidenceSnapshotInput,
   PromotionEvidenceOwnerIdentity,
+  LedgerIdentityChecker,
+  LedgerIdentityLookupDeps,
+  LedgerActivationResolution,
 } from './activation/index.js';
 
 export {
@@ -1429,6 +1432,9 @@ export {
   isLowRiskChannel,
   getChannelRiskLevel,
   ActivationDispatcher,
+  resolveLedgerActivationId,
+  candidateIdFromDreamerTaskId,
+  candidateIdFromDreamerSeed,
   PromptWriter,
   DeferArchiveWriter,
   RuleHostWriter,

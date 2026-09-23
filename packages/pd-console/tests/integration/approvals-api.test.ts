@@ -3,12 +3,14 @@ import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as crypto from 'node:crypto';
 import {
   SqliteConnection,
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
   SqliteActivationStateStore,
   ApprovalQueue,
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { sendJson, sendNotFound } from '../../src/server/utils/response.js';
@@ -96,6 +98,37 @@ function seedApproval(channel: string, status: string = 'pending', extra?: Recor
 }
 
 // ── PRI-447 edit-then-approve helpers ────────────────────────────────────────
+
+/**
+ * I3 upgrade (Owner review of PR #1856, P1): the activation identity boundary
+ * verifies LEDGER MEMBERSHIP before the commit, so a fixture identity must be
+ * a ledger-shaped UUID that the ledger actually contains (production mints one
+ * per candidate at intake). A `P_*` placeholder is refused with
+ * `no_principle_id_in_artifact`, and these approve/edit-then-approve tests
+ * never reach the behaviour they exercise.
+ */
+function seedLedgerPrinciple(principleId: string): void {
+  const stateDir = path.join(tmpDir, '.state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  new PrincipleTreeLedgerAdapter({ stateDir }).writeProbationEntry({
+    id: principleId,
+    title: `approvals-api ledger principle ${principleId}`,
+    text: 'Test principle',
+    triggerPattern: 'before_tool_call',
+    action: 'inject review note',
+    status: 'probation',
+    evaluability: 'weak_heuristic',
+    sourceRef: `candidate://candidate-${principleId}`,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+/** Mint a ledger-shaped UUID and register it in the ledger. */
+function newLedgerPrincipleId(): string {
+  const id = crypto.randomUUID();
+  seedLedgerPrinciple(id);
+  return id;
+}
 
 async function seedPrincipleArtifact(
   artifactId: string,
@@ -1047,7 +1080,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const originalArtifactId = `art-original-${Date.now()}`;
       const revisedArtifactId = `art-revised-${Date.now()}`;
       const sourceTaskId = `task-edit-${Date.now()}`;
-      const sourcePrincipleId = `P_EDIT_${Date.now()}`;
+      const sourcePrincipleId = newLedgerPrincipleId();
 
       await seedPrincipleArtifact(originalArtifactId, {
         sourceTaskId,
@@ -1089,7 +1122,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const originalArtifactId = `art-original-approve-${Date.now()}`;
       const revisedArtifactId = `art-revised-approve-${Date.now()}`;
       const sourceTaskId = `task-edit-approve-${Date.now()}`;
-      const sourcePrincipleId = `P_EDIT_APPROVE_${Date.now()}`;
+      const sourcePrincipleId = newLedgerPrincipleId();
 
       await seedPrincipleArtifact(originalArtifactId, {
         sourceTaskId,
@@ -1151,7 +1184,8 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const approvalId = `apr-edit-missing-${Date.now()}`;
       const originalArtifactId = `art-original-missing-${Date.now()}`;
       await seedPrincipleArtifact(originalArtifactId, {
-        contentJson: { principleId: `P_MISSING_${Date.now()}`, text: 'Original' },
+        sourcePrincipleId: newLedgerPrincipleId(),
+        contentJson: { text: 'Original' },
       });
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
@@ -1169,7 +1203,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const approvalId = `apr-edit-unvalidated-${Date.now()}`;
       const originalArtifactId = `art-original-unvalidated-${Date.now()}`;
       const revisedArtifactId = `art-revised-unvalidated-${Date.now()}`;
-      const sourcePrincipleId = `P_UNVALIDATED_${Date.now()}`;
+      const sourcePrincipleId = newLedgerPrincipleId();
 
       await seedPrincipleArtifact(originalArtifactId, {
         sourcePrincipleId,
@@ -1197,17 +1231,21 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const approvalId = `apr-edit-lineage-${Date.now()}`;
       const originalArtifactId = `art-original-lineage-${Date.now()}`;
       const unrelatedArtifactId = `art-unrelated-${Date.now()}`;
+      // I3: both identities must be real ledger members — the refusal under
+      // test must come from the LINEAGE mismatch, not from an identity gate.
+      const originalPrincipleId = newLedgerPrincipleId();
+      const unrelatedPrincipleId = newLedgerPrincipleId();
 
       await seedPrincipleArtifact(originalArtifactId, {
         sourceTaskId: 'task-original-lineage',
-        sourcePrincipleId: 'P_ORIGINAL_LINEAGE',
-        contentJson: { principleId: 'P_ORIGINAL_LINEAGE', text: 'Original' },
+        sourcePrincipleId: originalPrincipleId,
+        contentJson: { principleId: originalPrincipleId, text: 'Original' },
       });
       // Unrelated artifact: different task, different principle, no lineage link.
       await seedPrincipleArtifact(unrelatedArtifactId, {
         sourceTaskId: 'task-unrelated',
-        sourcePrincipleId: 'P_UNRELATED',
-        contentJson: { principleId: 'P_UNRELATED', text: 'Unrelated' },
+        sourcePrincipleId: unrelatedPrincipleId,
+        contentJson: { principleId: unrelatedPrincipleId, text: 'Unrelated' },
       });
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
@@ -1225,7 +1263,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const approvalId = `apr-edit-decided-${Date.now()}`;
       const originalArtifactId = `art-original-decided-${Date.now()}`;
       const revisedArtifactId = `art-revised-decided-${Date.now()}`;
-      const sourcePrincipleId = `P_DECIDED_${Date.now()}`;
+      const sourcePrincipleId = newLedgerPrincipleId();
 
       await seedPrincipleArtifact(originalArtifactId, {
         sourcePrincipleId,
@@ -1264,7 +1302,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const approvalId = `apr-edit-audit-${Date.now()}`;
       const originalArtifactId = `art-original-audit-${Date.now()}`;
       const revisedArtifactId = `art-revised-audit-${Date.now()}`;
-      const sourcePrincipleId = `P_AUDIT_${Date.now()}`;
+      const sourcePrincipleId = newLedgerPrincipleId();
 
       await seedPrincipleArtifact(originalArtifactId, {
         sourcePrincipleId,
@@ -1407,21 +1445,40 @@ describe('Approvals API — reopen a terminal approval (EP002-R4)', () => {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
-  function seedArtifact(artifactId: string): void {
+  /**
+   * I3 (Owner review of PR #1856, P1): the re-dispatch path re-runs the
+   * ledger-aware identity gate, so the reopened artifact must carry a stamped
+   * identity that is a real ledger member. Ledger ids are UUIDs minted at
+   * intake; the fixture mints one per artifact and registers it.
+   */
+  function seedArtifact(artifactId: string): string {
+    const principleId = crypto.randomUUID();
+    new PrincipleTreeLedgerAdapter({ stateDir: path.join(tmpDir, '.state') }).writeProbationEntry({
+      id: principleId,
+      title: `reopen ledger principle ${artifactId}`,
+      text: 'reopen test principle',
+      triggerPattern: 'before_tool_call',
+      action: 'inject review note',
+      status: 'probation',
+      evaluability: 'weak_heuristic',
+      sourceRef: `candidate://candidate-${artifactId}`,
+      createdAt: new Date().toISOString(),
+    });
     const store = new SqlitePIArtifactStore(sqliteConn);
     const now = new Date().toISOString();
     void store.upsertArtifact({
       artifactId,
       artifactKind: 'principle',
       sourceTaskId: `task-${artifactId}`,
-      sourcePrincipleId: null,
+      sourcePrincipleId: principleId,
       sourceRuleId: undefined,
       lineageArtifactIds: [],
       validationStatus: 'validated',
-      contentJson: JSON.stringify({ principleId: artifactId, text: 'reopen test principle' }),
+      contentJson: JSON.stringify({ principleId, text: 'reopen test principle' }),
       createdAt: now,
       updatedAt: now,
     }).catch(() => { /* sync upsert */ });
+    return principleId;
   }
 
   function seedApprovalRow(approvalId: string, artifactId: string, status: string): void {

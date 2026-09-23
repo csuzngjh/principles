@@ -7,6 +7,7 @@ import {
   SqliteActivationStateStore,
   SqliteApprovalQueueStore,
   ApprovalCompletionService,
+  PrincipleTreeLedgerAdapter,
   STORY_A_CHANNELS,
   makeRunId,
   makePrincipleArtifactRecord,
@@ -17,6 +18,7 @@ import {
   validateDemoChannels,
   evaluateDemoGoldenTrace,
 } from '@principles/core/runtime-v2';
+import { randomUUID } from 'node:crypto';
 import type {
   MvpChannel,
   StoryADemoResult,
@@ -54,6 +56,7 @@ interface DispatchContext {
   stateManager: RuntimeStateManager;
   snapshotCache: Map<string, PIArtifactSnapshot>;
   runId: string;
+  workspaceDir: string;
 }
 
 function makeArtifactReadModel(ctx: DispatchContext) {
@@ -67,6 +70,18 @@ function makeArtifactReadModel(ctx: DispatchContext) {
       ctx.snapshotCache.set(id, snapshot);
       return snapshot;
     },
+  };
+}
+
+/**
+ * I3 (PR #1856): the dispatcher verifies ledger membership BEFORE the approval
+ * record / activation commit. The demo's principle is minted into the ledger
+ * above, so `hasPrinciple` resolves it directly.
+ */
+function makeLedgerIdentityDeps(ctx: DispatchContext, getArtifactById: (id: string) => Promise<PIArtifactSnapshot | null>) {
+  return {
+    ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${ctx.workspaceDir}/.state` }),
+    getArtifactById,
   };
 }
 
@@ -91,7 +106,11 @@ async function dispatchChannel(
   const dispatcher = new ActivationDispatcher(
     artifactReadModel,
     activationStateStore,
-    { writers, approvalQueueStore: approvalStore },
+    {
+      writers,
+      approvalQueueStore: approvalStore,
+      ledgerIdentity: makeLedgerIdentityDeps(ctx, artifactReadModel.getArtifactById),
+    },
   );
 
   const dispatchInput: DispatchInput = {
@@ -140,10 +159,15 @@ async function completePostApprovalActivation(
     : channel === 'prompt'
       ? [new PromptWriter()]
       : [new DeferArchiveWriter()];
+  const artifactReadModel = makeArtifactReadModel(ctx);
   const dispatcher = new ActivationDispatcher(
-    makeArtifactReadModel(ctx),
+    artifactReadModel,
     activationStateStore,
-    { writers, approvalQueueStore: approvalStore },
+    {
+      writers,
+      approvalQueueStore: approvalStore,
+      ledgerIdentity: makeLedgerIdentityDeps(ctx, artifactReadModel.getArtifactById),
+    },
   );
   const completionService = new ApprovalCompletionService(approvalStore, dispatcher, activationStateStore);
   const completion = await completionService.completeApproval({
@@ -313,8 +337,30 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
   await stateManager.initialize();
 
   try {
+    // I3 fail-closed activation (PR #1856): the activation boundary resolves the
+    // artifact identity against the LEDGER, so the demo must mint a REAL ledger
+    // principle (UUID) for its synthetic candidate and stamp that UUID onto both
+    // artifacts. A synthetic `demo-principle-<runId>` string is refused at the
+    // dispatcher — exactly the defect this demo is meant to surface, not bypass.
+    const ledger = new PrincipleTreeLedgerAdapter({ stateDir: `${opts.workspaceDir}/.state` });
+    const demoCandidateId = `demo-${runId}`;
+    const principleUuid = randomUUID();
+    ledger.writeProbationEntry({
+      id: principleUuid,
+      title: 'Demo principle: prevent writing to system-critical directories',
+      status: 'probation',
+      sourceRef: `candidate://${demoCandidateId}`,
+      artifactRef: `art-demo-principle-${runId}`,
+      taskRef: `task-demo-${runId}`,
+      text: 'Prevent writing to system-critical directories',
+      triggerPattern: 'write to a system-critical path',
+      action: 'block the write',
+      evaluability: 'weak_heuristic',
+      createdAt: new Date().toISOString(),
+    });
+
     // Persist artifacts to real workspace DB
-    const principleRecord = makePrincipleArtifactRecord(runId);
+    const principleRecord = makePrincipleArtifactRecord(runId, principleUuid);
     const ruleRecord = makeRuleArtifactRecord(runId, principleRecord);
     // P1-3: Seed parent task record for FK validation. Both demo artifacts share
     // sourceTaskId = `task-demo-${runId}`; createArtifact rejects it unless the
@@ -327,9 +373,9 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
     await stateManager.piArtifactStore.createArtifact(principleRecord);
     await stateManager.piArtifactStore.createArtifact(ruleRecord);
 
-    const principleId = principleRecord.sourcePrincipleId ?? `demo-principle-${runId}`;
+    const principleId = principleRecord.sourcePrincipleId ?? principleUuid;
     const snapshotCache = new Map<string, PIArtifactSnapshot>();
-    const ctx: DispatchContext = { stateManager, snapshotCache, runId };
+    const ctx: DispatchContext = { stateManager, snapshotCache, runId, workspaceDir: opts.workspaceDir };
     const stages: StoryADemoStage[] = [];
 
     // Stage 1: Evidence seed — verify artifacts exist in DB

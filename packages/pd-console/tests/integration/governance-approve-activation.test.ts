@@ -28,6 +28,7 @@ import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as crypto from 'node:crypto';
 import {
   SqliteConnection,
   SqliteApprovalQueueStore,
@@ -71,6 +72,32 @@ async function fetchJson(urlPath: string, options?: RequestInit): Promise<{ stat
   const res = await fetch(`${baseUrl}${urlPath}`, options);
   const body = await res.json();
   return { status: res.status, body };
+}
+
+/**
+ * Seed a ledger principle so the I3 activation identity gate (ledger MEMBERship,
+ * not just UUID shape) accepts the artifact. Ledger principles are UUIDs minted
+ * by intake; the fixtures here mint one directly.
+ */
+function seedLedgerPrinciple(principleId: string, text = 'Test principle'): void {
+  const stateDir = path.join(tmpDir, '.state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  new PrincipleTreeLedgerAdapter({ stateDir }).writeProbationEntry({
+    id: principleId,
+    title: `Test ledger principle ${principleId}`,
+    text,
+    triggerPattern: 'before_tool_call',
+    action: 'inject review note',
+    status: 'probation',
+    evaluability: 'weak_heuristic',
+    sourceRef: `candidate://candidate-${principleId}`,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+/** Mint a fresh ledger-shaped UUID principle id (ledger ids are UUIDs, not titles). */
+function newPrincipleId(): string {
+  return crypto.randomUUID();
 }
 
 async function seedPrincipleArtifact(
@@ -180,9 +207,11 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   it('approve prompt channel writes activation, visible in GET /api/v1/activations', async () => {
     const artifactId = `art-prompt-approve-${Date.now()}`;
     const approvalId = `apr-prompt-approve-${Date.now()}`;
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId, 'Prompt activation test principle');
     await seedPrincipleArtifact(artifactId, {
-      sourcePrincipleId: `P_PROMPT_${Date.now()}`,
-      contentJson: { principleId: artifactId, text: 'Prompt activation test principle' },
+      sourcePrincipleId: principleId,
+      contentJson: { principleId, text: 'Prompt activation test principle' },
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
@@ -230,7 +259,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   it('approve updates approval status, visible in GET /api/v1/approvals?status=approved', async () => {
     const artifactId = `art-status-check-${Date.now()}`;
     const approvalId = `apr-status-check-${Date.now()}`;
-    await seedPrincipleArtifact(artifactId);
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId);
+    await seedPrincipleArtifact(artifactId, { sourcePrincipleId: principleId, contentJson: { principleId, text: 'Status check principle' } });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     // Approve
@@ -262,24 +293,14 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   // ── 3. Approve → GET /api/v1/approvals/grouped shows group status='approved'
 
   it('approve updates grouped endpoint, group status becomes approved', async () => {
-    const principleId = `P_GROUPED_${Date.now()}`;
+    const principleId = newPrincipleId();
     const artifactId = `art-grouped-${Date.now()}`;
     const approvalId = `apr-grouped-${Date.now()}`;
     // The grouped resolver now ledger-validates direct hits (PR #1789 review
     // contract) — register the principle so the group keeps its principleId
-    // instead of degrading to `unlinked:<artifactId>`.
-    const groupedStateDir = path.join(tmpDir, '.state');
-    new PrincipleTreeLedgerAdapter({ stateDir: groupedStateDir }).writeProbationEntry({
-      id: principleId,
-      title: `Grouped endpoint test principle ${principleId}`,
-      text: 'Grouped endpoint test principle',
-      triggerPattern: 'before_tool_call',
-      action: 'inject review note',
-      status: 'probation',
-      evaluability: 'weak_heuristic',
-      sourceRef: `candidate://candidate-${principleId}`,
-      createdAt: new Date().toISOString(),
-    });
+    // instead of degrading to `unlinked:<artifactId>`. The same entry satisfies
+    // the I3 activation identity gate (UUID + ledger member).
+    seedLedgerPrinciple(principleId, 'Grouped endpoint test principle');
     await seedPrincipleArtifact(artifactId, {
       sourcePrincipleId: principleId,
       contentJson: { principleId, text: 'Grouped endpoint test principle' },
@@ -325,7 +346,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   it('re-approving an already-approved approval returns 409 conflict', async () => {
     const artifactId = `art-idempotent-${Date.now()}`;
     const approvalId = `apr-idempotent-${Date.now()}`;
-    await seedPrincipleArtifact(artifactId);
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId);
+    await seedPrincipleArtifact(artifactId, { sourcePrincipleId: principleId, contentJson: { principleId, text: 'Idempotency principle' } });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     // First approve succeeds
@@ -350,7 +373,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   it('approve then disable activation → status becomes deactivated in GET /activations', async () => {
     const artifactId = `art-disable-${Date.now()}`;
     const approvalId = `apr-disable-${Date.now()}`;
-    await seedPrincipleArtifact(artifactId);
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId);
+    await seedPrincipleArtifact(artifactId, { sourcePrincipleId: principleId, contentJson: { principleId, text: 'Disable test principle' } });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     // Approve
@@ -406,9 +431,10 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   // ── 6. rc-6: artifactId + channel consistency across all 3 endpoints ─────
 
   it('artifactId + channel are consistent across approvals, activations, and grouped', async () => {
-    const principleId = `P_CONSISTENCY_${Date.now()}`;
+    const principleId = newPrincipleId();
     const artifactId = `art-consistency-${Date.now()}`;
     const approvalId = `apr-consistency-${Date.now()}`;
+    seedLedgerPrinciple(principleId, 'Consistency test');
     await seedPrincipleArtifact(artifactId, {
       sourcePrincipleId: principleId,
       contentJson: { principleId, text: 'Consistency test' },
@@ -477,8 +503,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   it('approve upgrades the linked ledger principle from candidate to active (Bug-O L3b)', async () => {
     // The principle ID on the artifact MUST match the ledger principle id
     // — that is how ApprovalsConsoleModel.upgradeLedgerPrinciple resolves the
-    // link via extractPrincipleId (column → contentJson fallback).
-    const principleId = `P_LEDGER_UPGRADE_${Date.now()}`;
+    // link via extractPrincipleId (column → contentJson fallback). Ledger ids
+    // are UUIDs, which also satisfies the I3 activation identity gate.
+    const principleId = newPrincipleId();
     const artifactId = `art-ledger-upgrade-${Date.now()}`;
     const approvalId = `apr-ledger-upgrade-${Date.now()}`;
 
@@ -544,14 +571,16 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(stored?.updatedAt).not.toBe(probationEntry.createdAt);
   });
 
-  // ── 8. Bug-O L3b: missing ledger principle surfaces a non-fatal warning
+  // ── 8. I3 upgrade: an artifact whose stamped principle is NOT in the ledger
+  //        is refused BEFORE the activation commit (fail-closed). Previously
+  //        the activation was committed and only the ledger upgrade was
+  //        skipped — that post-commit resolution is now the pre-commit gate.
 
-  it('approve surfaces a non-fatal warning when the ledger principle is missing (Bug-O L3b, rc-9)', async () => {
-    // Artifact points at a principleId that does NOT exist in the ledger.
-    // The activation must still succeed (it is committed to SQLite first);
-    // the ledger upgrade failure must surface as a `warning` field on the
-    // approve response, NOT roll back the activation (rc-9-no-silent-fallback).
-    const principleId = `P_LEDGER_MISSING_${Date.now()}`;
+  it('approve refuses (no activation) when the stamped principle is not a ledger member', async () => {
+    // Artifact points at a UUID principleId that does NOT exist in the ledger.
+    // UUID shape alone never proves membership: the identity gate runs BEFORE
+    // the activation commit, so no untraceable activation fact is written.
+    const principleId = newPrincipleId();
     const artifactId = `art-ledger-missing-${Date.now()}`;
     const approvalId = `apr-ledger-missing-${Date.now()}`;
 
@@ -566,30 +595,23 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Missing ledger test' }),
     });
-    expect(approveRes.status).toBe(200);
+    // The pre-commit identity gate refuses: the activation can never be traced
+    // to an owner-approved ledger principle, so the approval must not produce
+    // an activation fact.
+    expect(approveRes.status).toBe(500);
+    expect(JSON.stringify(approveRes.body)).toContain('principle_not_in_ledger');
 
-    const approveData = getDataObject(approveRes.body);
-    expect(approveData).toBeDefined();
-    expect(getStringField(approveData, 'status')).toBe('approved');
-
-    // Activation must still be recorded as 'activated' — the ledger failure
-    // did NOT roll back the SQLite activation (rc-9).
-    const activation = approveData?.activation;
-    expect(isRecord(activation)).toBe(true);
-    if (isRecord(activation)) {
-      expect(getStringField(activation, 'decision')).toBe('activated');
+    // Cross-table verification: no activation row exists for this artifact.
+    const listRes = await fetchJson('/api/v1/activations');
+    expect(listRes.status).toBe(200);
+    const listData = getDataObject(listRes.body);
+    const activations = listData?.activations;
+    if (Array.isArray(activations)) {
+      const found = activations.find(
+        (a) => isRecord(a) && getStringField(a, 'artifactId') === artifactId,
+      );
+      expect(found).withContext('No activation may exist for a non-ledger principle').toBeUndefined();
     }
-
-    // Warning must be present + structured + actionable (cli-6-output-next-action).
-    // PRI-768 v5 follow-up (F4): an unresolvable id is now an OBSERVABLE SKIP
-    // instead of a doomed ledger update — the resolver refuses to flow an id
-    // the ledger does not contain into activatePrinciple, and states exactly
-    // why (no ledger principle for "<id>" and no dreamer lineage to recover).
-    const warning = getStringField(approveData, 'warning');
-    expect(warning).withContext('Missing ledger upgrade must surface a warning').toBeDefined();
-    expect(warning).toContain('ledger_activate_skipped');
-    expect(warning).toContain('no ledger principle');
-    expect(warning).toContain(principleId);
   });
 
   // ── 9. PRI-890 (PRI-768 v6-02): prompt injection budget exclusion is
@@ -603,8 +625,10 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const base = Date.now();
     for (let i = 0; i < 8; i += 1) {
       const artifactId = `art-budget-filler-${i}-${base}`;
-      const principleId = `P_BUDGET_FILLER_${i}_${base}`;
+      const principleId = newPrincipleId();
+      seedLedgerPrinciple(principleId, fillerText);
       await seedPrincipleArtifact(artifactId, {
+        sourcePrincipleId: principleId,
         contentJson: { principleId, text: fillerText },
       });
       db.prepare(
@@ -621,11 +645,13 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     // Approve a NEW prompt principle — it lands after the fillers in FIFO
     // order and must be reported as budget-excluded.
-    const newPrincipleId = `P_BUDGET_NEW_${base}`;
+    const newPromptPrincipleId = newPrincipleId();
     const newArtifactId = `art-budget-new-${base}`;
     const newApprovalId = `apr-budget-new-${base}`;
+    seedLedgerPrinciple(newPromptPrincipleId, 'N'.repeat(220));
     await seedPrincipleArtifact(newArtifactId, {
-      contentJson: { principleId: newPrincipleId, text: 'N'.repeat(220) },
+      sourcePrincipleId: newPromptPrincipleId,
+      contentJson: { principleId: newPromptPrincipleId, text: 'N'.repeat(220) },
     });
     await seedPendingApproval(newApprovalId, newArtifactId, 'prompt');
 
@@ -663,8 +689,11 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const base = Date.now();
     const artifactId = `art-budget-headroom-${base}`;
     const approvalId = `apr-budget-headroom-${base}`;
+    const headroomPrincipleId = newPrincipleId();
+    seedLedgerPrinciple(headroomPrincipleId, 'Headroom positive-path principle');
     await seedPrincipleArtifact(artifactId, {
-      contentJson: { principleId: `P_HEADROOM_${base}`, text: 'Headroom positive-path principle' },
+      sourcePrincipleId: headroomPrincipleId,
+      contentJson: { principleId: headroomPrincipleId, text: 'Headroom positive-path principle' },
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
@@ -681,9 +710,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       expect(getStringField(activation, 'decision')).toBe('activated');
     }
     // The INJECTION warning must be absent on the positive path. Other
-    // non-fatal warnings (e.g. ledger_activate_skipped for a seed artifact
-    // with no ledger entry) are orthogonal to PRI-890 and may legitimately
-    // appear.
+    // non-fatal warnings are orthogonal to PRI-890 and may legitimately appear.
     const warning = getStringField(approveData, 'warning') ?? '';
     expect(warning).not.toContain('injection_budget_excluded');
     expect(warning).not.toContain('injection_excluded_non_budget');
@@ -697,8 +724,11 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const base = Date.now();
     const artifactId = `art-budget-defer-${base}`;
     const approvalId = `apr-budget-defer-${base}`;
+    const deferPrincipleId = newPrincipleId();
+    seedLedgerPrinciple(deferPrincipleId, 'Defer archive control principle');
     await seedPrincipleArtifact(artifactId, {
-      contentJson: { principleId: `P_DEFER_${base}`, text: 'Defer archive control principle' },
+      sourcePrincipleId: deferPrincipleId,
+      contentJson: { principleId: deferPrincipleId, text: 'Defer archive control principle' },
     });
     await seedPendingApproval(approvalId, artifactId, 'defer_archive');
 
@@ -714,8 +744,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     if (isRecord(activation)) {
       expect(getStringField(activation, 'decision')).toBe('activated');
     }
-    // (ledger warnings may still appear; assert the injection-specific codes
-    // are absent rather than asserting warning === undefined.)
+    // (injection-specific codes must be absent rather than warning === undefined.)
     const warning = getStringField(approveData, 'warning') ?? '';
     expect(warning).not.toContain('injection_budget_excluded');
     expect(warning).not.toContain('injection_excluded_non_budget');

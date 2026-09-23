@@ -23,6 +23,7 @@ import {
   SqliteActivationStateStore,
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
+  PrincipleTreeLedgerAdapter,
   createProductionGateDeps,
   createPITaskDiagnosticJson,
   artificerRepairTaskId,
@@ -101,6 +102,27 @@ export async function dispatchRolloutActivation(
 
     const flagProbe = makeFlagProbe(workspaceDir);
 
+    // I3 upgrade (Owner review of PR #1856, P1): the production dispatch path
+    // verifies ledger membership BEFORE the approval record and the activation
+    // commit. The ledger SSOT lives in <workspace>/.state (same dir the intake
+    // used to mint the principle UUID); candidate lineage reuses the artifact
+    // read model plus raw diagnostic_json reads.
+    const ledgerIdentity = {
+      ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }),
+      getArtifactById: artifactReadModel.getArtifactById,
+      getTaskDiagnosticJson: (taskId: string): string | null => {
+        try {
+          const row = connection
+            .getDb()
+            .prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?')
+            .get(taskId) as { diagnostic_json?: string | null } | undefined;
+          return row?.diagnostic_json ?? null;
+        } catch {
+          return null;
+        }
+      },
+    };
+
     const dispatcher = new ActivationDispatcher(
       artifactReadModel,
       activationStateStore,
@@ -119,6 +141,7 @@ export async function dispatchRolloutActivation(
           new DeferArchiveWriter(),
         ],
         approvalQueueStore,
+        ledgerIdentity,
       },
     );
 
