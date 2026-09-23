@@ -94,6 +94,45 @@ describe('build-release-asset', () => {
     expect(fs.existsSync(path.join(outputDir, '_release', 'asset.json'))).toBe(true);
   });
 
+  it('prunes foreign-platform better-sqlite3 prebuilds before manifest generation', () => {
+    const { inputDir, outputDir } = createFixture();
+    const allPrebuilds = [
+      'darwin-arm64.node', 'darwin-x64.node',
+      'linux-arm64.node', 'linux-x64.node',
+      'linuxmusl-arm64.node', 'linuxmusl-x64.node',
+      'win32-arm64.node', 'win32-x64.node',
+    ];
+    // One depth-1 site (component's own node_modules) and one nested site
+    // (the materialized core copy inside plugin/node_modules) — the two
+    // topologies the recursive walk must both reach.
+    const sites = [
+      path.join(inputDir, 'core', 'node_modules', 'better-sqlite3'),
+      path.join(inputDir, 'plugin', 'node_modules', '@principles', 'core', 'node_modules', 'better-sqlite3'),
+    ];
+    for (const site of sites) {
+      fs.mkdirSync(path.join(site, 'prebuilds'), { recursive: true });
+      fs.writeFileSync(path.join(site, 'package.json'), JSON.stringify({ name: 'better-sqlite3' }));
+      for (const prebuild of allPrebuilds) {
+        fs.writeFileSync(path.join(site, 'prebuilds', prebuild), prebuild);
+      }
+    }
+    const script = path.resolve(__dirname, '..', 'scripts', 'build-release-asset.mjs');
+
+    execFileSync(process.execPath, [script, '--input', inputDir, '--output', outputDir, '--platform', 'win32', '--arch', 'x64', '--node-abi', '127'], {
+      env: { ...process.env, SOURCE_DATE_EPOCH: '1700000000' },
+      stdio: 'pipe',
+    });
+
+    for (const relativeSite of ['core/node_modules/better-sqlite3', 'plugin/node_modules/@principles/core/node_modules/better-sqlite3']) {
+      const outputPrebuilds = path.join(outputDir, ...relativeSite.split('/'), 'prebuilds');
+      expect(fs.readdirSync(outputPrebuilds).sort()).toEqual(['win32-x64.node']);
+      expect(fs.readdirSync(path.join(inputDir, ...relativeSite.split('/'), 'prebuilds')).sort()).toEqual([...allPrebuilds].sort());
+    }
+    const manifest: { files: Array<{ path: string }> } = JSON.parse(fs.readFileSync(path.join(outputDir, '_release', 'manifest.json'), 'utf-8'));
+    expect(manifest.files.filter((file) => file.path.endsWith('-arm64.node') || /(^|\/)(darwin|linux|linuxmusl)-x64\.node$/.test(file.path))).toEqual([]);
+    verifyReleaseAssetManifest(outputDir, parseReleaseAssetManifest(manifest));
+  });
+
   it('creates byte-identical immutable archives and detached digests from the same source', () => {
     const first = createFixture();
     const second = createFixture();

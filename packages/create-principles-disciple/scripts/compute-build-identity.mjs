@@ -62,6 +62,7 @@ for (const script of [
   'scripts/build-release-asset.mjs',
   'scripts/build-self-contained-release.mjs',
   'scripts/deterministic-release-archive.mjs',
+  'scripts/sqlite-prebuild-pruning.mjs',
 ]) {
   scriptHashes[script] = hashFile(join(INSTALLER_ROOT, script));
 }
