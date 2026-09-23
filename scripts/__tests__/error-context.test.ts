@@ -75,10 +75,10 @@ const realParsed = parsePatternRouting(realIndex);
 // ─── Pattern parser ─────────────────────────────────────────────────────
 
 describe('parsePatternRouting — real shipped index', () => {
-  it('parses all 13 active EP cards with valid metadata and zero errors', () => {
+  it('parses all 14 active EP cards with valid metadata and zero errors', () => {
     expect(realParsed.patterns.map((p) => p.id)).toEqual([
       'EP-01', 'EP-02', 'EP-03', 'EP-04', 'EP-05', 'EP-06', 'EP-07',
-      'EP-08', 'EP-09', 'EP-10', 'EP-11', 'EP-12', 'EP-13',
+      'EP-08', 'EP-09', 'EP-10', 'EP-11', 'EP-12', 'EP-13', 'EP-14',
     ]);
     expect(realParsed.errors).toEqual([]);
   });
