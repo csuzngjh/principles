@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CandidateIntakeService } from '../../src/runtime-v2/candidate-intake-service.js';
+import type { CandidateIntakeResult } from '../../src/runtime-v2/candidate-intake-service.js';
 import { CandidateIntakeError, INTAKE_ERROR_CODES } from '../../src/runtime-v2/candidate-intake.js';
 import type { LedgerPrincipleEntry, LedgerAdapter } from '../../src/runtime-v2/candidate-intake.js';
 import type { RuntimeStateManager } from '../../src/runtime-v2/store/runtime-state-manager.js';
@@ -38,10 +39,26 @@ function createCandidate(overrides: Record<string, unknown> = {}) {
       triggerPattern: 'file delete',
       action: 'verify backup exists',
     }),
+    // Phase 1 / PR1: the Principle Ledger write boundary validates the RAW
+    // persisted kind, so fixtures must declare it explicitly. Default is a
+    // legitimate principle candidate; the boundary cases override it.
+    recommendationKind: 'principle',
+    rawRecommendationKind: 'principle',
     status: 'pending' as const,
     createdAt: '2026-04-26T10:00:00.000Z',
     ...overrides,
   };
+}
+
+/**
+ * Narrow the intake result to the written/known-entry case, failing the test
+ * loudly instead of silently passing on a refusal.
+ */
+function expectLedgerEntry(result: CandidateIntakeResult): LedgerPrincipleEntry {
+  if (result.outcome !== 'ledger_entry') {
+    throw new Error(`expected a ledger entry, but intake refused it: ${result.reason} — ${result.message}`);
+  }
+  return result.entry;
 }
 
 function createArtifact(overrides: Record<string, unknown> = {}) {
@@ -124,9 +141,12 @@ describe('CandidateIntakeService', () => {
 
       const result = await service.intake('test-candidate-001');
 
-      expect(result).toBeDefined();
-      expect(result.title).toBe(candidate.title);
-      expect(result.sourceRef).toBe('candidate://test-candidate-001');
+      expect(result.outcome).toBe('ledger_entry');
+      const entry = expectLedgerEntry(result);
+      expect(result.written).toBe(true);
+      expect(entry).toBeDefined();
+      expect(entry.title).toBe(candidate.title);
+      expect(entry.sourceRef).toBe('candidate://test-candidate-001');
       expect(mockLedgerAdapter.writeProbationEntry).toHaveBeenCalledOnce();
     });
 
@@ -184,7 +204,10 @@ describe('CandidateIntakeService', () => {
 
       const result = await service.intake('test-candidate-001');
 
-      expect(result).toBe(existingEntry);
+      expect(result.outcome).toBe('ledger_entry');
+      // Idempotent no-op: the entry already existed, so THIS call wrote nothing.
+      expect(result.outcome === 'ledger_entry' && result.written).toBe(false);
+      expect(result.outcome === 'ledger_entry' && result.entry).toBe(existingEntry);
       expect(mockStateManager.getCandidate).not.toHaveBeenCalled();
       expect(mockLedgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
     });
@@ -206,8 +229,8 @@ describe('CandidateIntakeService', () => {
         .mockResolvedValueOnce(artifact2);
       vi.spyOn(mockLedgerAdapter, 'writeProbationEntry').mockImplementation((e: LedgerPrincipleEntry) => e);
 
-      const result1 = await service.intake('candidate-A');
-      const result2 = await service.intake('candidate-B');
+      const result1 = expectLedgerEntry(await service.intake('candidate-A'));
+      const result2 = expectLedgerEntry(await service.intake('candidate-B'));
 
       expect(result1.sourceRef).toBe('candidate://candidate-A');
       expect(result2.sourceRef).toBe('candidate://candidate-B');
@@ -308,7 +331,7 @@ describe('CandidateIntakeService', () => {
       vi.spyOn(mockStateManager, 'getArtifact').mockResolvedValue(artifact);
       vi.spyOn(mockLedgerAdapter, 'writeProbationEntry').mockReturnValue(written);
 
-      const result = await service.intake('test-candidate-001');
+      const result = expectLedgerEntry(await service.intake('test-candidate-001'));
       // Should succeed using the contentJson fallback (not throw).
       // The service returns the written LedgerPrincipleEntry (status 'probation'),
       // not the CandidateIntakeOutput ('consumed' is set by the CLI handler).
@@ -516,6 +539,108 @@ describe('CandidateIntakeService', () => {
       await service.intake('test-candidate-001');
 
       expect(capturedEntry!.text).toBe('Fallback description text');
+    });
+  });
+
+  // ── Phase 1 / PR1: Principle Ledger write boundary ────────────
+  //
+  // SPEC v2.1 §7 Candidate Disposition Contract. `intake()` is the single
+  // shared chokepoint every candidate-origin ledger write flows through, so
+  // these cases exercise the REAL entry point rather than a bare predicate.
+
+  describe('Principle Ledger write boundary (Phase 1 / PR1)', () => {
+    function arrange(overrides: Record<string, unknown>) {
+      const candidate = createCandidate(overrides);
+      const artifact = createArtifact();
+      vi.spyOn(mockLedgerAdapter, 'existsForCandidate').mockReturnValue(null);
+      vi.spyOn(mockStateManager, 'getCandidate').mockResolvedValue(candidate);
+      vi.spyOn(mockStateManager, 'getArtifact').mockResolvedValue(artifact);
+      vi.spyOn(mockLedgerAdapter, 'writeProbationEntry').mockImplementation((e: LedgerPrincipleEntry) => e);
+      return candidate;
+    }
+
+    it('Case 1: principle candidate IS written to the Principle Ledger', async () => {
+      arrange({ recommendationKind: 'principle', rawRecommendationKind: 'principle' });
+
+      const result = await service.intake('test-candidate-001');
+
+      expect(result.outcome).toBe('ledger_entry');
+      expect(result.outcome === 'ledger_entry' && result.written).toBe(true);
+      expect(mockLedgerAdapter.writeProbationEntry).toHaveBeenCalledOnce();
+    });
+
+    // Cases 2-4: valid kinds that do NOT target the Principle Ledger.
+    for (const kind of ['rule', 'prompt', 'implementation'] as const) {
+      it(`Case: ${kind} candidate is NOT written to the Principle Ledger`, async () => {
+        arrange({ recommendationKind: kind, rawRecommendationKind: kind });
+
+        const result = await service.intake('test-candidate-001');
+
+        expect(result.outcome).toBe('refused');
+        expect(result.outcome === 'refused' && result.reason).toBe('non_principle_kind');
+        expect(result.outcome === 'refused' && result.rawRecommendationKind).toBe(kind);
+        // Ledger untouched, and no other state mutated (persistence preserved by
+        // the callers, which this service deliberately does not change).
+        expect(mockLedgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
+        expect(mockStateManager.updateCandidateStatus).not.toHaveBeenCalled();
+      });
+    }
+
+    it('Case: defer candidate is NOT written to the Principle Ledger', async () => {
+      arrange({ recommendationKind: 'defer', rawRecommendationKind: 'defer' });
+
+      const result = await service.intake('test-candidate-001');
+
+      expect(result.outcome === 'refused' && result.reason).toBe('non_principle_kind');
+      expect(mockLedgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
+    });
+
+    it('Case 5: MISSING kind does NOT become a principle (fail closed)', async () => {
+      const candidate = arrange({});
+      delete (candidate as Record<string, unknown>).rawRecommendationKind;
+
+      const result = await service.intake('test-candidate-001');
+
+      expect(result.outcome).toBe('refused');
+      expect(result.outcome === 'refused' && result.reason).toBe('unknown_kind');
+      expect(result.outcome === 'refused' && result.rawRecommendationKind).toBeNull();
+      expect(mockLedgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
+    });
+
+    for (const bad of ['unknown_xyz', '', 'PRINCIPLE', 'skill'] as const) {
+      it(`Case 6: INVALID kind ${JSON.stringify(bad)} does NOT become a principle`, async () => {
+        arrange({ recommendationKind: bad, rawRecommendationKind: bad });
+
+        const result = await service.intake('test-candidate-001');
+
+        expect(result.outcome).toBe('refused');
+        expect(result.outcome === 'refused' && result.reason).toBe('unknown_kind');
+        expect(mockLedgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
+      });
+    }
+
+    it('Case 6b: NON-STRING kind does NOT become a principle', async () => {
+      arrange({ recommendationKind: 42, rawRecommendationKind: 42 });
+
+      const result = await service.intake('test-candidate-001');
+
+      expect(result.outcome).toBe('refused');
+      expect(result.outcome === 'refused' && result.reason).toBe('unknown_kind');
+      expect(mockLedgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
+    });
+
+    // ★ The decisive regression for this PR: the READ path normalizes unknown
+    // → 'principle' (resolveRecommendationKind). A boundary that trusted that
+    // normalized view would let this candidate through into the ledger, so the
+    // gate MUST validate the RAW persisted value instead.
+    it('guards against the fail-open normalized view leaking into the ledger', async () => {
+      arrange({ recommendationKind: 'principle', rawRecommendationKind: 'unknown_xyz' });
+
+      const result = await service.intake('test-candidate-001');
+
+      expect(result.outcome).toBe('refused');
+      expect(result.outcome === 'refused' && result.reason).toBe('unknown_kind');
+      expect(mockLedgerAdapter.writeProbationEntry).not.toHaveBeenCalled();
     });
   });
 });

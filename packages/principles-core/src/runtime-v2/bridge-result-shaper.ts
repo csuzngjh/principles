@@ -29,6 +29,18 @@ interface ShapeBridgeResultBase {
   runId?: string;
   artifactId?: string;
   autoIntakeEnabled: boolean;
+  /**
+   * Phase 1 / PR1 (Principle Ledger write boundary): how many candidates in
+   * this batch have a ledger entry EXPECTED of them — i.e. they were admitted
+   * and their validated `recommendation_kind` is exactly `'principle'`.
+   *
+   * "Admitted but zero ledger entries" is only an intake FAILURE when at least
+   * one candidate was actually ledger-eligible. For a batch of rule / prompt /
+   * implementation / defer candidates the boundary refuses the write BY DESIGN,
+   * so the absence of ledger entries is their normal disposition and must be
+   * reported as routed / not_internalizable rather than as a failed run.
+   */
+  ledgerEligibleCandidateCount: number;
   /** PRI-539: candidates admitted+ledgered but not internalizable (MVP-disabled channel). */
   notInternalizable?: NotInternalizableCandidate[];
 }
@@ -94,8 +106,10 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
     const admittedCount = admissionResults.filter((a) => a.admission.decision === 'admitted').length;
     const nonAdmittedCount = admissionResults.length - admittedCount;
 
-    // Admitted candidates exist but intake produced no ledger entries
-    if (autoIntakeEnabled && admittedCount > 0 && ledgerEntryIds.length === 0) {
+    // Admitted LEDGER-ELIGIBLE candidates exist but intake produced no ledger
+    // entries. Non-principle kinds are excluded here: the Principle Ledger write
+    // boundary refuses them by design (Phase 1 / PR1), which is not a failure.
+    if (autoIntakeEnabled && input.ledgerEligibleCandidateCount > 0 && ledgerEntryIds.length === 0) {
       return {
         status: 'failed',
         painId,
@@ -158,8 +172,10 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
     };
   }
 
-  // Existing path: no admission results, simpler decision tree
-  if (autoIntakeEnabled && ledgerEntryIds.length === 0) {
+  // Existing path: no admission results, simpler decision tree.
+  // Phase 1 / PR1: same reasoning as the fresh path — only ledger-eligible
+  // candidates can be legitimately "missing" a ledger entry.
+  if (autoIntakeEnabled && input.ledgerEligibleCandidateCount > 0 && ledgerEntryIds.length === 0) {
     return {
       status: 'failed',
       painId,

@@ -617,7 +617,7 @@ describe('pd pain retry — success paths', () => {
     mockGetCandidatesByTaskId.mockResolvedValue([
       { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
     ]);
-    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'Principle 1', status: 'probation' });
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -727,7 +727,7 @@ describe('pd pain retry — success paths', () => {
     mockGetCandidatesByTaskId.mockResolvedValue([
       { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
     ]);
-    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'Principle 1', status: 'probation' });
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -849,7 +849,7 @@ describe('pd pain retry — human-readable output', () => {
     mockGetCandidatesByTaskId.mockResolvedValue([
       { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
     ]);
-    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'Principle 1', status: 'probation' });
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);

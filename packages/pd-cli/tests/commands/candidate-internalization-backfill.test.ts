@@ -156,7 +156,7 @@ function setupDefaultMocks(): void {
   mockCreateTask.mockImplementation((input: { taskId: string }) =>
     Promise.resolve({ taskId: input.taskId }),
   );
-  mockIntake.mockResolvedValue({ id: 'ledger-entry-1' });
+  mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-entry-1' } });
   mockExistsForCandidate.mockReturnValue(null);
 }
 

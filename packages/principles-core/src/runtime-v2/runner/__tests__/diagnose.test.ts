@@ -119,6 +119,8 @@ function makeCandidateRecord(overrides: Partial<CandidateRecord> = {}): Candidat
     status: 'consumed',
     createdAt: '2026-06-30T00:00:00Z',
     ...overrides,
+    // Phase 1 / PR1: raw persisted kind is what the ledger write boundary reads.
+    rawRecommendationKind: overrides.rawRecommendationKind ?? 'principle',
   };
 }
 

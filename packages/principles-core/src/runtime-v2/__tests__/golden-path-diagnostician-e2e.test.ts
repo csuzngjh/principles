@@ -103,7 +103,7 @@ function createMockRunner(): DiagnosticianRunnerLike {
 /** Create a mock CandidateIntakeService. */
 function createMockIntakeService(): CandidateIntakeService {
   return {
-    intake: vi.fn().mockResolvedValue({ id: 'ledger-golden-1' }),
+    intake: vi.fn().mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-golden-1' } }),
   } as unknown as CandidateIntakeService;
 }
 

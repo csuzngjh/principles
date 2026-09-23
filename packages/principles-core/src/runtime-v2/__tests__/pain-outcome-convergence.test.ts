@@ -44,6 +44,8 @@ function candidateRecord(
     createdAt: '2026-09-02T00:00:00.000Z',
     sourceRecommendationJson: '{}',
     recommendationKind,
+    // Phase 1 / PR1: raw persisted kind is what the ledger write boundary reads.
+    rawRecommendationKind: recommendationKind,
   };
 }
 
@@ -67,7 +69,7 @@ function makeBridge(): { bridge: PainSignalBridge; createdTasks: TaskRecord[] } 
     stateManager,
     runner,
     intakeService: {
-      intake: async (candidateId: string) => ({ id: `ledger-${candidateId}` }),
+      intake: async (candidateId: string) => ({ outcome: 'ledger_entry', written: true, entry: { id: `ledger-${candidateId}` } }),
     } as never,
     ledgerAdapter: {
       register: () => undefined,

@@ -59,6 +59,7 @@ describe('shapeBridgeResult — fresh path', () => {
       candidateIds: [],
       ledgerEntryIds: [],
       admissionResults: [],
+      ledgerEligibleCandidateCount: 0,
       seedFailureNote: '',
       autoIntakeEnabled: true,
     };
@@ -89,6 +90,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1', 'cand-2'],
       ledgerEntryIds: [],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: '',
       autoIntakeEnabled: true,
@@ -117,6 +122,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: [],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: '',
       autoIntakeEnabled: false,
@@ -126,6 +135,60 @@ describe('shapeBridgeResult — fresh path', () => {
 
     expect(result.status).toBe('succeeded');
     expect(result.ledgerEntryIds).toEqual([]);
+  });
+
+  // ── Phase 1 / PR1: ledger-eligibility-aware status ────────────────────────
+  // "Admitted but no ledger entries" is only a FAILURE when a ledger entry was
+  // actually expected. Non-principle candidates are refused by the Principle
+  // Ledger write boundary by design, so their absence must not read as failure.
+
+  it('does NOT fail on zero ledger entries when no candidate is ledger-eligible', () => {
+    const admissionResults = [
+      makeAdmissionResult('cand-1', 'admitted'),
+      makeAdmissionResult('cand-2', 'admitted'),
+    ];
+
+    const input: ShapeBridgeResultFreshInput = {
+      path: 'fresh',
+      painId: PAIN_ID,
+      taskId: TASK_ID,
+      runId: RUN_ID,
+      artifactId: ARTIFACT_ID,
+      candidateIds: ['cand-1', 'cand-2'],
+      ledgerEntryIds: [],
+      ledgerEligibleCandidateCount: 0,
+      admissionResults,
+      seedFailureNote: '',
+      autoIntakeEnabled: true,
+    };
+
+    const result = shapeBridgeResult(input);
+
+    expect(result.status).toBe('succeeded');
+    expect(result.ledgerEntryIds).toEqual([]);
+  });
+
+  it('still FAILS on zero ledger entries when a candidate IS ledger-eligible', () => {
+    const admissionResults = [makeAdmissionResult('cand-1', 'admitted')];
+
+    const input: ShapeBridgeResultFreshInput = {
+      path: 'fresh',
+      painId: PAIN_ID,
+      taskId: TASK_ID,
+      runId: RUN_ID,
+      artifactId: ARTIFACT_ID,
+      candidateIds: ['cand-1'],
+      ledgerEntryIds: [],
+      ledgerEligibleCandidateCount: 1,
+      admissionResults,
+      seedFailureNote: '',
+      autoIntakeEnabled: true,
+    };
+
+    const result = shapeBridgeResult(input);
+
+    expect(result.status).toBe('failed');
+    expect(result.message).toBe('Candidate intake did not produce a ledger entry');
   });
 
   it('returns degraded when all candidates are gated (none admitted)', () => {
@@ -142,6 +205,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1', 'cand-2'],
       ledgerEntryIds: [],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: '',
       autoIntakeEnabled: true,
@@ -168,6 +235,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: [],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: 'dreamer seed failed: timeout',
       autoIntakeEnabled: true,
@@ -195,6 +266,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1', 'cand-2', 'cand-3'],
       ledgerEntryIds: ['ledger-1'],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: '',
       autoIntakeEnabled: true,
@@ -221,6 +296,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1', 'cand-2'],
       ledgerEntryIds: ['ledger-1'],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: 'some seeds failed: rate limit',
       autoIntakeEnabled: true,
@@ -247,6 +326,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1', 'cand-2'],
       ledgerEntryIds: ['ledger-1', 'ledger-2'],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: '',
       autoIntakeEnabled: true,
@@ -278,6 +361,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: ['ledger-1'],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: 'dreamer seed failed: LLM error',
       autoIntakeEnabled: true,
@@ -302,6 +389,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: ['ledger-1'],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: '',
       notInternalizable: [
@@ -330,6 +421,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: ['ledger-1'],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: 'dreamer seed failed: LLM error',
       notInternalizable: [
@@ -355,6 +450,10 @@ describe('shapeBridgeResult — fresh path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: ['ledger-1'],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: '',
       autoIntakeEnabled: true,
@@ -381,6 +480,7 @@ describe('shapeBridgeResult — existing path', () => {
       runId: RUN_ID,
       candidateIds: [],
       ledgerEntryIds: [],
+      ledgerEligibleCandidateCount: 0,
       autoIntakeEnabled: true,
     };
 
@@ -400,6 +500,7 @@ describe('shapeBridgeResult — existing path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1', 'cand-2'],
       ledgerEntryIds: [],
+      ledgerEligibleCandidateCount: 2,
       autoIntakeEnabled: true,
     };
 
@@ -407,6 +508,24 @@ describe('shapeBridgeResult — existing path', () => {
 
     expect(result.status).toBe('failed');
     expect(result.message).toBe('Candidate intake did not produce a ledger entry — treating as failed');
+  });
+
+  it('does NOT fail on zero ledger entries when no candidate is ledger-eligible (existing path)', () => {
+    const input: ShapeBridgeResultExistingInput = {
+      path: 'existing',
+      painId: PAIN_ID,
+      taskId: TASK_ID,
+      runId: RUN_ID,
+      artifactId: ARTIFACT_ID,
+      candidateIds: ['cand-1'],
+      ledgerEntryIds: [],
+      ledgerEligibleCandidateCount: 0,
+      autoIntakeEnabled: true,
+    };
+
+    const result = shapeBridgeResult(input);
+
+    expect(result.status).toBe('succeeded');
   });
 
   it('returns succeeded when candidates exist but no ledger (autoIntake disabled)', () => {
@@ -418,6 +537,7 @@ describe('shapeBridgeResult — existing path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: [],
+      ledgerEligibleCandidateCount: 1,
       autoIntakeEnabled: false,
     };
 
@@ -436,6 +556,7 @@ describe('shapeBridgeResult — existing path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1', 'cand-2'],
       ledgerEntryIds: ['ledger-1', 'ledger-2'],
+      ledgerEligibleCandidateCount: 2,
       autoIntakeEnabled: true,
     };
 
@@ -455,6 +576,7 @@ describe('shapeBridgeResult — existing path', () => {
       artifactId: ARTIFACT_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: ['ledger-1'],
+      ledgerEligibleCandidateCount: 1,
       autoIntakeEnabled: true,
     };
 
@@ -478,6 +600,7 @@ describe('shapeBridgeResult — cross-path consistency', () => {
       candidateIds: [],
       ledgerEntryIds: [],
       admissionResults: [],
+      ledgerEligibleCandidateCount: 0,
       seedFailureNote: '',
       autoIntakeEnabled: true,
     });
@@ -488,6 +611,7 @@ describe('shapeBridgeResult — cross-path consistency', () => {
       taskId: TASK_ID,
       candidateIds: [],
       ledgerEntryIds: [],
+      ledgerEligibleCandidateCount: 0,
       autoIntakeEnabled: true,
     });
 
@@ -505,6 +629,10 @@ describe('shapeBridgeResult — cross-path consistency', () => {
       taskId: TASK_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: ['ledger-1'],
+      // Phase 1 / PR1: ledger entries are only EXPECTED for admitted candidates
+      // whose kind targets the Principle Ledger. Fixtures here use principle-kind
+      // admissions, so eligibility follows the admitted count (pre-PR1 semantics).
+      ledgerEligibleCandidateCount: admissionResults.filter((a) => a.admission.decision === 'admitted').length,
       admissionResults,
       seedFailureNote: '',
       autoIntakeEnabled: true,
@@ -516,6 +644,7 @@ describe('shapeBridgeResult — cross-path consistency', () => {
       taskId: TASK_ID,
       candidateIds: ['cand-1'],
       ledgerEntryIds: ['ledger-1'],
+      ledgerEligibleCandidateCount: 1,
       autoIntakeEnabled: true,
     });
 

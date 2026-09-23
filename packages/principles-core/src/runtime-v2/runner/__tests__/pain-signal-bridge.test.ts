@@ -28,6 +28,7 @@ const mockCandidate = (id: string, taskId: string): CandidateRecord => ({
   confidence: 0.8,
   sourceRecommendationJson: '{}',
   recommendationKind: 'principle',
+  rawRecommendationKind: 'principle',
   status: 'pending',
   createdAt: new Date().toISOString(),
 });
