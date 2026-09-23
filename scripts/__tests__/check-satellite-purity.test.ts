@@ -12,7 +12,7 @@
  *      fails CI — a guard nobody calls is decoration).
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -136,8 +136,25 @@ describe('collectSatelliteViolations', () => {
 });
 
 describe('assertSatellitePurity', () => {
-  it('passes silently on the clean metafile', () => {
+  it('does not throw on the clean metafile', () => {
     expect(() => assertSatellitePurity(CLEAN)).not.toThrow();
+  });
+
+  it('logs the positive evidence line and returns zeroed per-satellite counts (OPT-003)', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const result = assertSatellitePurity(CLEAN);
+      expect(result).toEqual({
+        total: 0,
+        perSatellite: { 'governance-audit.js': 0, 'rulehost-evidence.js': 0 },
+      });
+      const line = log.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(line).toContain('Forbidden dependency count: 0');
+      expect(line).toContain('governance-audit.js: 0');
+      expect(line).toContain('rulehost-evidence.js: 0');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('throws with structured reason, bounded examples and the fix pointer (rc-9)', () => {
@@ -186,6 +203,7 @@ describe('CLI contract', () => {
     const ok = run(cleanFile);
     expect(ok.code).toBe(0);
     expect(ok.output).toContain('OK');
+    expect(ok.output).toContain('Forbidden dependency count: 0');
 
     const bad = run(badFile);
     expect(bad.code).toBe(1);
@@ -205,5 +223,13 @@ describe('production wiring', () => {
     expect(config).toContain("from '../../scripts/build/check-satellite-purity.mjs'");
     expect(config).toContain('const mainResult = await build(');
     expect(config).toContain('assertSatellitePurity(mainResult.metafile)');
+  });
+
+  it('root package.json exposes check-satellite-bundle-deps and verify:merge ends with it (OPT-003)', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+    expect(pkg.scripts['check-satellite-bundle-deps']).toBe(
+      'npm run build:bundle --workspace=principles-disciple',
+    );
+    expect(String(pkg.scripts['verify:merge']).trim().endsWith('npm run check-satellite-bundle-deps')).toBe(true);
   });
 });

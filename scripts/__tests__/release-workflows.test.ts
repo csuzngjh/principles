@@ -125,6 +125,20 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
     // The publish leg never pushes (no persisted credentials needed).
     expect(t).not.toContain('git push origin "$TAG"');
   });
+
+  it('pd-cli build branch is self-sufficient: it builds codex-adapter itself', () => {
+    // Run 35834470066: leg 4/7 (codex-adapter) resolved PRESENT_PRIOR for an
+    // unchanged version, so its ABSENT-gated build step was skipped and the
+    // pd-cli leg's tsc failed with TS2307 on @principles/codex-adapter. A
+    // leg must never rely on an upstream leg's build side effect — every
+    // workspace import has to be built within the leg that needs it.
+    const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ name?: string; run?: string }> } };
+    const build = doc.runs?.steps?.find((s) => s.name === 'Build target package');
+    expect(build?.run).toBeDefined();
+    const pdCliBranch = build!.run!.split('elif [ "$PKG_DIR" = ')[1];
+    expect(pdCliBranch).toContain('pd-cli" ]');
+    expect(pdCliBranch).toContain('npm run build --workspace=@principles/codex-adapter');
+  });
 });
 
 describe('finalize-npm-release action — isolated closing steps (PRI-886)', () => {
