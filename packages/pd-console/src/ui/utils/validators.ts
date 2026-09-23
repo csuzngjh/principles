@@ -39,6 +39,10 @@ import type {
 
 export type { FeedbackChannelId, FeedbackChannelStatus, FeedbackChannelsData, FeedbackSubmitResult };
 
+// PRI-908: the injection-budget forecast shape has one authority in shared/, too.
+import type { PromptInjectionBudgetStatus } from '../../shared/prompt-injection-contract.js';
+export type { PromptInjectionBudgetStatus };
+
 // ── Primitive guards ──────────────────────────────────────────────────────────
 
 function isString(v: unknown): v is string {
@@ -1959,15 +1963,6 @@ export interface ApprovalsGroupedData {
   note?: string;
   /** PRI-908: prompt-channel injection budget status for the pre-approval forecast. */
   promptInjection?: PromptInjectionBudgetStatus;
-}
-
-export interface PromptInjectionBudgetStatus {
-  /** Hard char cap of the prompt injection surface (e.g. 2000). */
-  budget: number;
-  /** Chars currently injected into the agent prompt. */
-  usedChars: number;
-  /** True when the FIFO projection already truncated — new approvals will queue. */
-  truncated: boolean;
 }
 
 export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjectionBudgetStatus | null {

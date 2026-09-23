@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { localizeApprovalWarning, splitApprovalWarnings, type TranslateFn } from '../../src/ui/utils/approval-warning-localization.js';
 import { validateApprovalsGrouped } from '../../src/ui/utils/validators.js';
-import { validateApprovalsGroupedData } from '../../src/ui/pages/focus/FocusPage.js';
+import { validateApprovalsGroupedData } from '../../src/ui/pages/focus/focus-validation.js';
 
 // The exact live server text (ApprovalsConsoleModel.ts:244, PRI-890).
 const BUDGET_WARNING =

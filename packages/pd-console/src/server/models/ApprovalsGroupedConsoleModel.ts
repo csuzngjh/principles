@@ -11,6 +11,7 @@ import {
   createArtifactPrincipleResolutionDeps,
   resolveArtifactPrincipleId,
 } from './artifact-principle-resolver.js';
+import type { PromptInjectionBudgetStatus } from '../../shared/prompt-injection-contract.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -33,15 +34,6 @@ export interface ApprovalGroup {
     channel: string;
     createdAt: string;
   }[];
-}
-
-export interface PromptInjectionBudgetStatus {
-  /** Hard char cap of the prompt injection surface (e.g. 2000). */
-  budget: number;
-  /** Chars currently injected into the agent prompt. */
-  usedChars: number;
-  /** True when the FIFO projection already truncated — new approvals will queue. */
-  truncated: boolean;
 }
 
 export interface ApprovalsGroupedResponse {

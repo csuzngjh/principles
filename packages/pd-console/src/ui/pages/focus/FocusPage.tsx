@@ -25,8 +25,8 @@ import type {
   ActivationRecord,
 } from "../../api.js";
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
-import { validatePromptInjectionBudgetStatus } from "../../utils/validators.js";
 import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
+import { validateApprovalsGroupedData } from "./focus-validation.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
 import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
 
@@ -81,109 +81,6 @@ export function summarizeDecisionResults(results: readonly DecisionResult[]): {
       ? { failureReason: first.nextAction ? `${first.error} ${first.nextAction}` : first.error }
       : {}),
     successWarnings,
-  };
-}
-
-// ── Approval group validator (not in validators.ts, page-specific) ─────────
-
-/** Type guard: is this a non-null object with own properties (not inherited)? */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "principleId") ||
-    !Object.hasOwn(raw, "principleTitle") ||
-    !Object.hasOwn(raw, "status") ||
-    !Object.hasOwn(raw, "records")
-  ) {
-    return null;
-  }
-  const principleId = raw.principleId;
-  const principleTitle = raw.principleTitle;
-  const status = raw.status;
-  const records = raw.records;
-  if (
-    typeof principleId !== "string" ||
-    typeof principleTitle !== "string" ||
-    typeof status !== "string" ||
-    !["pending", "approved", "rejected"].includes(status) ||
-    !Array.isArray(records)
-  ) {
-    return null;
-  }
-  const validRecords: ApprovalGroup["records"] = [];
-  for (const r of records) {
-    if (!isRecord(r)) return null;
-    if (
-      !Object.hasOwn(r, "id") ||
-      !Object.hasOwn(r, "artifactId") ||
-      !Object.hasOwn(r, "channel") ||
-      !Object.hasOwn(r, "createdAt") ||
-      !Object.hasOwn(r, "status") ||
-      typeof r.id !== "string" ||
-      typeof r.artifactId !== "string" ||
-      typeof r.channel !== "string" ||
-      typeof r.createdAt !== "string" ||
-      typeof r.status !== "string"
-    ) {
-      return null;
-    }
-    validRecords.push({
-      id: r.id,
-      artifactId: r.artifactId,
-      channel: r.channel,
-      createdAt: r.createdAt,
-      status: r.status,
-    });
-  }
-  // Wave 7: candidateDescription is optional — present when backend could
-  // extract human-readable content from the artifact contentJson.
-  // ERR-009: if field exists but is wrong type, fail loud (return null).
-  let candidateDescription: string | undefined;
-  if (Object.hasOwn(raw, "candidateDescription")) {
-    if (typeof raw.candidateDescription !== "string") return null;
-    candidateDescription = raw.candidateDescription;
-  }
-  return {
-    principleId,
-    principleTitle,
-    candidateDescription,
-    status: status as "pending" | "approved" | "rejected",
-    records: validRecords,
-  };
-}
-
-// Exported for the focus-page contract tests (same precedent as
-// summarizeDecisionResults / selectDecisionSurfaceItems).
-export function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData | null {  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "groups") ||
-    !Object.hasOwn(raw, "generatedAt")
-  ) {
-    return null;
-  }
-  const groups = raw.groups;
-  const generatedAt = raw.generatedAt;
-  if (!Array.isArray(groups) || typeof generatedAt !== "string") {
-    return null;
-  }
-  const validatedGroups: ApprovalGroup[] = [];
-  for (const g of groups) {
-    const validated = validateApprovalGroup(g);
-    if (validated === null) return null;
-    validatedGroups.push(validated);
-  }
-  return {
-    groups: validatedGroups,
-    generatedAt,
-    note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined,
-    // PRI-908: the pre-approval injection-budget forecast must survive page-local
-    // validation, or the queue badge can never render; malformed status degrades
-    // to undefined (badge absent) rather than rejecting the payload.
-    promptInjection: validatePromptInjectionBudgetStatus(raw.promptInjection) ?? undefined,
   };
 }
 
