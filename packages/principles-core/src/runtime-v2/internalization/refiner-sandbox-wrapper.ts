@@ -102,6 +102,20 @@ function isSafeRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function classifyError(err: unknown): { errorType: RefinerSandboxErrorType; message: string; stack?: string } {
+  // Security audit run-1 review follow-up (CodeRabbit on PR #1846): the
+  // hardened replay evaluator's vm hard timeout throws a CROSS-REALM error
+  // (instanceof Error is false) carrying code=ERR_SCRIPT_EXECUTION_TIMEOUT.
+  // Classify it as `timeout` before the generic branches, otherwise the
+  // repair loop receives a runtime_error mislabel for what is a hang.
+  if (typeof err === 'object' && err !== null && Reflect.get(err, 'code') === 'ERR_SCRIPT_EXECUTION_TIMEOUT') {
+    const message = Reflect.get(err, 'message');
+    const stack = Reflect.get(err, 'stack');
+    return {
+      errorType: 'timeout',
+      message: typeof message === 'string' ? message : safeErrorMessage(err),
+      ...(typeof stack === 'string' ? { stack } : {}),
+    };
+  }
   if (err instanceof SyntaxError) {
     return { errorType: 'syntax_error', message: err.message, stack: err.stack };
   }

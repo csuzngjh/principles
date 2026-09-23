@@ -2,7 +2,7 @@
 '@principles/core': patch
 '@principles/host-runtime': patch
 'principles-disciple': patch
-'@principles/pd-console': patch
+'create-principles-disciple': patch
 ---
 
 Security audit run-1 remediation (findings verified against eabbde6d, applied on ccc69252):

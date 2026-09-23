@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileHardenedRuleEvaluator, createProductionGateDeps } from '../production-gate-deps.js';
+import { evaluateInRefinerSandbox } from '../../internalization/refiner-sandbox-wrapper.js';
 import { createGoldenTraceFixture, createSyntheticRuleHostInput } from '../../golden-trace.js';
 import type { RuleHostInput } from '../../internalization/rule-host-contracts.js';
 import type { RuleHostHelpers } from '../../internalization/rule-host-helpers.js';
@@ -644,4 +645,48 @@ describe('replay evaluate hard timeout (security audit run-1)', () => {
     expect(result.decision).toBe('block');
     expect(result.matched).toBe(true);
   });
+
+  // PR #1846 review follow-up (CodeRabbit): the hard cap must also cover
+  // Promise microtasks scheduled from evaluate. Without
+  // microtaskMode: 'afterEvaluate' the microtask queue drains on the HOST
+  // after runInContext returns — a looping microtask escapes the timeout and
+  // hangs the replaying process later.
+  it('interrupts a looping Promise microtask scheduled by evaluate', () => {
+    const evaluate = compileHardenedRuleEvaluator(
+      'function evaluate(input, helpers) { Promise.resolve().then(() => { for (;;) { } }); return { decision: "allow", matched: false, reason: "ok" }; }',
+      'audit-microtask-probe',
+    );
+    const startedAt = Date.now();
+    expect(() => evaluate(probeInput(), {} as RuleHostHelpers)).toThrow(/timed out/i);
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  }, 20_000);
 });
+
+// PR #1846 review follow-up (CodeRabbit): the vm hard timeout throws a
+// CROSS-REALM error (instanceof Error is false) whose only marker is
+// code=ERR_SCRIPT_EXECUTION_TIMEOUT. classifyError must surface it as
+// errorType 'timeout' — not the generic 'runtime_error' — so the refiner
+// repair loop receives honest replay evidence.
+describe('replay vm timeout classification (PR #1846 review)', () => {
+  it('reports errorType "timeout" when the hardened evaluator hard-interrupts a looping candidate', () => {
+    const goldenTrace = createGoldenTraceFixture({
+      toolName: 'edit',
+      negativeParams: { filePath: '/etc/passwd' },
+      positiveParams: { filePath: '/src/index.ts' },
+      expectedDecision: 'block',
+    });
+    const loopingCode = 'function evaluate(input, helpers) { for (;;) { } return { decision: "allow", matched: false, reason: "unreachable" }; }';
+    const evaluateCode = compileHardenedRuleEvaluator(loopingCode, 'audit-classify-probe');
+
+    const startedAt = Date.now();
+    const result = evaluateInRefinerSandbox(loopingCode, goldenTrace, { evaluateCode });
+    expect(result.success).toBe(false);
+    const failures = result.failedCases.filter((c) => c.caseId !== '__compile__');
+    expect(failures.length).toBeGreaterThan(0);
+    for (const failure of failures) {
+      expect(failure.errorType).toBe('timeout');
+    }
+    expect(Date.now() - startedAt).toBeLessThan(30_000);
+  }, 45_000);
+});
+

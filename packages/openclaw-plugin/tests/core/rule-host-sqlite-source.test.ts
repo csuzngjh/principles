@@ -1432,4 +1432,30 @@ describe('enforcement-time digest re-verification (RuleHost load path)', () => {
     const ruleHost = makeRuleHost();
     expect(ruleHost.evaluate(makeInput('/etc/passwd'))?.decision).toBe('block');
   });
+
+  // PR #1846 review follow-up (CodeRabbit): the activation fingerprint caches
+  // compiled implementations per RuleHost instance. It must cover EVERY input
+  // of the approved digest — a lineage-only rewrite leaves content_json (and,
+  // pre-fix, the fingerprint) untouched, hits the cache, and never re-runs
+  // the digest re-verification, silently breaking the rc-6 lineage binding.
+  it('busts the fingerprint cache on a lineage-only rewrite and skips digest re-verification', async () => {
+    const { row } = insertDigestFixture();
+    await insertCodeToolHookActivation();
+    insertOwnerDecision(computeArtifactDigest(mapPiArtifactRow(row)));
+
+    const warns: string[] = [];
+    const ruleHost = makeRuleHost({ warn: (m?: string) => { if (m) warns.push(m); } });
+    // Same instance: the first evaluate caches the healthy load.
+    expect(ruleHost.evaluate(makeInput('/etc/passwd'))?.decision).toBe('block');
+
+    // Tamper ONLY a digest-input field the content check cannot see.
+    sqliteConn.getDb().prepare('UPDATE pi_artifacts SET lineage_artifact_ids = ? WHERE artifact_id = ?')
+      .run('["artifact-forged-lineage"]', ARTIFACT_ID);
+
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.skippedActivations).toHaveLength(1);
+    expect(report.skippedActivations[0]!.reason).toContain('artifact_content_tampered');
+    expect(warns.some((w) => w.includes('artifact_content_tampered'))).toBe(true);
+  });
 });

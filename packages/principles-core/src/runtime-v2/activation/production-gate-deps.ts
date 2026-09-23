@@ -144,7 +144,13 @@ export function compileHardenedRuleEvaluator(code: string, sourceLabel: string):
     throw new Error(`[${sourceLabel}] rule code is empty or not a string`);
   }
 
-  const context = vm.createContext(Object.create(null));
+  // microtaskMode: 'afterEvaluate' drains the context's microtask queue INSIDE
+  // each runInContext call, so it is covered by the SAME hard timeout as
+  // synchronous code. Without it, a candidate that schedules a looping Promise
+  // microtask returns cleanly and the loop then hangs the HOST microtask queue
+  // (console server / evaluator worker / CLI) outside any timeout boundary
+  // (security audit run-1 review follow-up, CodeRabbit on PR #1846).
+  const context = vm.createContext(Object.create(null), { microtaskMode: 'afterEvaluate' });
   const script = new vm.Script(normalizeSource(code), { filename: sourceLabel });
 
   script.runInContext(context, { timeout: 1000, displayErrors: true });

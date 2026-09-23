@@ -24,6 +24,8 @@
  *   - Never throw, never bypass downstream gates (Progressive Gate, Edit Verification)
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { createRuleHostHelpers } from '@principles/core/runtime-v2';
 import { mergeDecisions } from '@principles/core/runtime-v2';
 import { validateRuleHostResult } from '@principles/core/runtime-v2';
@@ -274,6 +276,24 @@ export class RuleHost {
       return { loaded: [], skipped: [] };
     }
 
+    // Security audit run-1 review follow-up (CodeRabbit on PR #1846): a
+    // DELETED state.db must leave the same durable trace as the host-runtime
+    // gate. Checking before connecting is required — SqliteConnection's
+    // default write mode would auto-create an empty database, the load would
+    // "succeed" with zero activations, and the catch-based marker below would
+    // never fire. The allow posture is unchanged; only the trace is added.
+    const dbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    if (!fs.existsSync(dbPath)) {
+      this._emitEmptyLoadWarn(
+        'activation_db_not_found — governance store missing, RuleHost fails open (will not block or require approval)',
+        'Verify workspace initialization: run `pd runtime init --confirm --workspace <dir>`; if the store was deleted after initialization, enforcement has degraded (marker recorded under ~/.pd/enforcement-health/)',
+      );
+      try {
+        recordDegradedEnforcement(this.workspaceDir, 'activation_db_not_found');
+      } catch { /* observability only */ }
+      return { loaded: [], skipped: [] };
+    }
+
     try {
       const { loaded, skipped } = this._loadFromActivationsTable(this.workspaceDir, supportsContextV2);
       if (loaded.length === 0) {
@@ -373,9 +393,16 @@ export class RuleHost {
       for (const row of rows) {
         if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
         const record = row as Record<string, unknown>;
+        // The fingerprint must cover EVERY input of computeArtifactDigest (via
+        // mapPiArtifactRow) — a digest-bound field absent here lets a workspace
+        // writer mutate it (e.g. lineage_artifact_ids) without a cache miss,
+        // so the cached implementation keeps running and the enforcement-time
+        // digest re-verification below is never re-run (security audit run-1
+        // review follow-up, CodeRabbit CR on PR #1846).
         fingerprintParts.push([
           record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['enforcement'], record['isolation_decision_id'], record['content_json'], record['source_rule_id'], record['source_principle_id'], record['approved_artifact_digest'],
-        ].map((value) => typeof value === 'string' ? value : '').join('\u0001'));
+          record['artifact_kind'], record['source_task_id'], record['lineage_artifact_ids'], record['validation_status'], record['created_at'], record['updated_at'],
+        ].map((value) => typeof value === 'string' ? value : value == null ? '' : String(value)).join('\u0001'));
       }
       const fingerprint = fingerprintParts.join('\u0002');
       if (fingerprint === this.activationFingerprint) {

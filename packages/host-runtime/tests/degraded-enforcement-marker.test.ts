@@ -20,12 +20,11 @@ vi.mock('os', async () => {
 import { markerPathFor, recordDegradedEnforcement } from '../src/degraded-enforcement-marker.js';
 
 describe('recordDegradedEnforcement (durable out-of-workspace marker)', () => {
-  const testHome = path.join(os.tmpdir(), `pd-marker-test-${Date.now()}-${process.pid}`);
+  let testHome = '';
 
   beforeEach(() => {
+    testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-marker-test-'));
     vi.mocked(os.homedir).mockReturnValue(testHome);
-    fs.rmSync(testHome, { recursive: true, force: true });
-    fs.mkdirSync(testHome, { recursive: true });
   });
 
   afterEach(() => {
