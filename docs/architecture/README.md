@@ -29,6 +29,7 @@
 | **痛苦信号来源 / 目标对齐** | [`INTERNALIZATION_PIPELINE.md`](./INTERNALIZATION_PIPELINE.md) §2.1.1 + ADR-0010 |
 | **长任务执行 / Agent 交付规范（何时停、产物写哪）** | [`AGENT_DELIVERY_OPERATING_MODEL.md`](./AGENT_DELIVERY_OPERATING_MODEL.md) |
 | **多 AI 工作树治理（worktree 生命周期 / 清理 / 空间回收）** | [`WORKTREE_GOVERNANCE.md`](./WORKTREE_GOVERNANCE.md) + `AGENTS.md` §23A |
+| **改 runtime-v2 导入 / 插件 bundle 产物体积 / satellite 入口** | [`SATELLITE_BUNDLE_DEPENDENCY_BOUNDARY.md`](./SATELLITE_BUNDLE_DEPENDENCY_BOUNDARY.md) |
 | **OKR / Mission / 任务调度** | [`COMPONENTS.md`](./COMPONENTS.md) §3.10-3.11 + ADR-0010/0011 |
 
 ---
@@ -96,6 +97,7 @@
 | [`VERSIONING_AND_COMPATIBILITY.md`](./VERSIONING_AND_COMPATIBILITY.md) | Active | 版本与兼容 |
 | [`PERFORMANCE_BUDGETS.md`](./PERFORMANCE_BUDGETS.md) | Active | 性能预算 |
 | [`WORKTREE_GOVERNANCE.md`](./WORKTREE_GOVERNANCE.md) | Active | 多 AI 工作树治理（`AGENTS.md` §23A 的解释性文档）|
+| [`SATELLITE_BUNDLE_DEPENDENCY_BOUNDARY.md`](./SATELLITE_BUNDLE_DEPENDENCY_BOUNDARY.md) | Active | satellite 产物（governance-audit / rulehost-evidence）禁带 LLM 依赖图的构建级边界（OPT-002 修复 / OPT-003 断言）|
 
 ### 历史与废弃文档
 

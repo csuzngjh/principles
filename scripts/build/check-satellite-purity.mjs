@@ -10,8 +10,10 @@
 // failure.
 //
 // Wired into packages/openclaw-plugin/esbuild.config.js on every official
-// bundle build (dev + production), fed the live esbuild metafile. Also usable
-// as a CLI over a persisted metafile JSON for tests and forensics:
+// bundle build (dev + production), fed the live esbuild metafile — and thus
+// reached from `npm run check-satellite-bundle-deps` and the tail of
+// `npm run verify:merge` (OPT-003). Also usable as a CLI over a persisted
+// metafile JSON for tests and forensics:
 //   node scripts/build/check-satellite-purity.mjs --metafile <file.json>
 
 import { readFileSync } from 'node:fs';
@@ -110,12 +112,24 @@ export function collectSatelliteViolations(metafile) {
 
 /**
  * Fail loud (rc-3/rc-9): throws with the violating SDK packages, per-package
- * bounded example inputs, and the fix pointer. Returns silently when clean.
+ * bounded example inputs, and the fix pointer. On success, logs the positive
+ * evidence line (OPT-003: `Forbidden dependency count: 0` per satellite) and
+ * returns the summary.
  * @param {unknown} metafile
+ * @returns {{total: number, perSatellite: Record<string, number>}} zeroed counts on success
  */
 export function assertSatellitePurity(metafile) {
   const violations = collectSatelliteViolations(metafile);
-  if (violations.length === 0) return;
+  const perSatellite = Object.fromEntries(SATELLITE_OUTPUT_SUFFIXES.map((s) => [s, 0]));
+  for (const v of violations) {
+    const suffix = SATELLITE_OUTPUT_SUFFIXES.find((s) => v.output.endsWith(s));
+    if (suffix) perSatellite[suffix] += 1;
+  }
+  if (violations.length === 0) {
+    const breakdown = Object.entries(perSatellite).map(([s, n]) => `${s}: ${n}`).join(', ');
+    console.log(`[satellite-purity] OK: Forbidden dependency count: 0 (${breakdown})`);
+    return { total: 0, perSatellite };
+  }
   const lines = [
     `[satellite-purity] FAIL: LLM SDK dependencies found inside satellite bundles (${violations.length} inputs).`,
     'Satellites (governance-audit / rulehost-evidence) must not reach the LLM graph.',
@@ -149,8 +163,9 @@ function runCli() {
   }
   try {
     const metafile = JSON.parse(readFileSync(metafilePath, 'utf8'));
+    // assertSatellitePurity logs the `Forbidden dependency count: 0` evidence
+    // line itself on success (OPT-003) and throws with the violation list on failure.
     assertSatellitePurity(metafile);
-    console.log('[satellite-purity] OK: no LLM SDK dependencies in satellite bundles.');
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
