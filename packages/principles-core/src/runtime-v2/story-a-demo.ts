@@ -9,6 +9,7 @@ import type { RuleHostHelpers } from './internalization/rule-host-helpers.js';
 import { evaluateInRefinerSandbox } from './internalization/refiner-sandbox-wrapper.js';
 import { compileHardenedRuleEvaluator } from './activation/production-gate-deps.js';
 import type { RefinerSandboxResult } from './internalization/refiner-sandbox-wrapper.js';
+import { randomUUID } from 'node:crypto';
 
 export type MvpChannel = 'prompt' | 'code_tool_hook' | 'defer_archive';
 
@@ -73,8 +74,17 @@ export function makeRunId(opts: StoryADemoOptions): string {
   return opts.runId ?? `story-a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function makePrincipleArtifactRecord(runId: string): PIArtifactRecord {
-  const principleId = `demo-principle-${runId}`;
+/**
+ * Deterministic-per-run ledger principle id for the demo.
+ *
+ * I3 fail-closed activation (PR #1856) requires `source_principle_id` to be a
+ * real LEDGER principle UUID — a synthetic string like `demo-principle-<runId>`
+ * is refused at the dispatcher boundary. The demo therefore mints a genuine
+ * ledger principle (see `runStoryADemo`) and stamps this UUID onto both
+ * artifacts, so the demo exercises the SAME identity contract production does
+ * instead of bypassing it.
+ */
+export function makePrincipleArtifactRecord(runId: string, principleId: string = randomUUID()): PIArtifactRecord {
   return {
     artifactId: `art-demo-principle-${runId}`,
     artifactKind: 'principle',

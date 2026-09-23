@@ -1322,3 +1322,237 @@ describe('PRI-838: ScribeRunner resolves formation evidence into the prompt', ()
     expect(payload.sourceDreamerArtifactId).toBe(DREAMER_ART_ID);
   });
 });
+
+// ── I2 — CHAIN STAMPING (Owner review of PR #1856, P1: fix the production
+// chain, not the test) ────────────────────────────────────────────────────────
+//
+// ScribeRunner resolves the ledger principle id from the scribe → dreamer
+// artifact → dreamer task seed (candidateId) → ledger chain and stamps
+// `sourcePrincipleId` onto the artifact it writes. Fail-soft: an unresolvable
+// chain writes the artifact unstamped and emits `identity_stamp_skipped` —
+// the activation boundary then resolves from lineage or refuses. Never a
+// guess.
+
+describe('I2: ScribeRunner ledger identity chain stamping', () => {
+  // Task id spelling carries a UUID-shaped candidate so BOTH resolution paths
+  // (authoritative seed and task-id fallback) can be exercised independently.
+  const DREAMER_TASK_ID = 'dreamer-c3330000-0000-4000-8000-000000003333-code_tool_hook';
+  const UUID_CANDIDATE = 'c3330000-0000-4000-8000-000000003333';
+  const SEED_CANDIDATE = 'seed-candidate-pri492'; // non-UUID: proves the seed path is shape-free
+  const DREAMER_ART_ID = 'pi-art-dreamer-stamp';
+  const PHILOSOPHER_ART_ID = 'pi-art-philosopher-001-run-001';
+  const LEDGER_PID = 'e1110000-0000-4000-8000-000000000111';
+  const STAMPED_ARTIFACT_ID = 'pi-art-scribe-001-run-scribe-001';
+
+  function makeStampArtifact(artifactId: string, sourceTaskId: string, content: unknown): PIArtifactRecord {
+    return {
+      artifactId,
+      artifactKind: 'principle',
+      sourceTaskId,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify(content),
+      createdAt: '2026-09-18T00:00:00.000Z',
+      updatedAt: '2026-09-18T00:00:00.000Z',
+    };
+  }
+
+  async function runStampingScribe(params: {
+    seedCandidateId?: string | null; // null → dreamer task has no top-level candidateId (fallback path)
+    candidateMatches: number;
+    withDreamerArtifact?: boolean;
+    withDreamerLineage?: boolean; // false → philosopher artifact carries no sourceDreamerArtifactId
+    withLedgerDeps?: boolean; // false → legacy caller without ledgerIdentity (no stamping at all)
+  }) {
+    const artifactStore = new MemoryPIArtifactStore();
+    const philosopherContent: Record<string, unknown> = {
+      taskId: PHILOSOPHER_TASK_ID,
+      thesis: 'prefer evidence over guessing',
+      principleCandidate: { title: 'Evidence First', rationale: 'R', scope: 'S', confidence: 0.9 },
+      risks: [],
+      generatedAt: '2026-09-18T00:00:00.000Z',
+    };
+    if (params.withDreamerLineage !== false) {
+      philosopherContent.sourceDreamerArtifactId = DREAMER_ART_ID;
+    }
+    await artifactStore.upsertArtifact(makeStampArtifact(PHILOSOPHER_ART_ID, PHILOSOPHER_TASK_ID, philosopherContent));
+
+    if (params.withDreamerArtifact !== false) {
+      await artifactStore.upsertArtifact(makeStampArtifact(DREAMER_ART_ID, DREAMER_TASK_ID, {
+        valid: true,
+        taskId: DREAMER_TASK_ID,
+        candidates: [],
+        generatedAt: '2026-09-18T00:00:00.000Z',
+      }));
+    }
+
+    const scribeTask = makeScribeTask();
+    const philosopherTask = makePhilosopherTask();
+    // The dreamer task seed: the authoritative candidateId carrier (bridge shape).
+    const dreamerTask: TaskRecord = {
+      taskId: DREAMER_TASK_ID,
+      taskKind: 'dreamer',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'dreamer://run-stamp',
+      createdAt: '2026-09-18T00:00:00.000Z',
+      updatedAt: '2026-09-18T00:00:00.000Z',
+      diagnosticJson: params.seedCandidateId == null
+        ? createPITaskDiagnosticJson({
+            dependencyTaskIds: [],
+            channel: 'prompt',
+            timeoutMs: 300_000,
+            inputArtifactRefs: [],
+            outputArtifactRefs: [],
+          })
+        : JSON.stringify({ pi_metadata: { correlationId: params.seedCandidateId }, candidateId: params.seedCandidateId }),
+    };
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(scribeTask),
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
+        if (id === PHILOSOPHER_TASK_ID) return Promise.resolve(philosopherTask);
+        if (id === DREAMER_TASK_ID) return Promise.resolve(dreamerTask);
+        return Promise.resolve(null);
+      }),
+      getRunsByTask: vi.fn().mockResolvedValue([{ runId: 'run-scribe-001', taskId: SCRIBE_TASK_ID, runtimeKind: 'scribe', startedAt: '2026-09-18T00:00:00.000Z' }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-scribe-001', taskId: SCRIBE_TASK_ID, runtimeKind: 'scribe', startedAt: '2026-09-18T00:00:00.000Z' }],
+        degradedRuns: [],
+      }),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    const runHandle: RunHandle = { runId: 'run-scribe-001', runtimeKind: 'test-double', startedAt: '2026-09-18T00:00:00.000Z' };
+    const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-scribe-001' };
+
+    const runtimeAdapter = {
+      startRun: vi.fn().mockResolvedValue(runHandle),
+      pollRun: vi.fn().mockResolvedValue(succeededStatus),
+      fetchOutput: vi.fn().mockResolvedValue({ payload: makeScribeOutput() }),
+      cancelRun: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PDRuntimeAdapter;
+
+    const emitTelemetry = vi.fn();
+    const deps: ScribeRunnerDeps = {
+      stateManager,
+      runtimeAdapter,
+      eventEmitter: { emitTelemetry } as unknown as StoreEventEmitter,
+      validator: new DefaultScribeValidator(),
+      artifactStore,
+      ...(params.withLedgerDeps === false
+        ? {}
+        : {
+            ledgerIdentity: {
+              listForCandidate: (candidateId: string) => {
+                const wanted = params.seedCandidateId ?? UUID_CANDIDATE;
+                return candidateId === wanted
+                  ? Array.from({ length: params.candidateMatches }, () => ({ id: LEDGER_PID }))
+                  : [];
+              },
+            },
+          }),
+    };
+
+    const runner = new ScribeRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'scribe',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(SCRIBE_TASK_ID);
+    const stampedArtifact = await artifactStore.getArtifactById(STAMPED_ARTIFACT_ID);
+    return { result, stampedArtifact, emitTelemetry };
+  }
+
+  function stampEvents(emitTelemetry: { mock: { calls: unknown[][] } }, eventType: string): Record<string, unknown>[] {
+    return emitTelemetry.mock.calls
+      .map((call) => call[0] as { eventType?: string; payload?: Record<string, unknown> })
+      .filter((event) => event.eventType === `scribe_${eventType}`)
+      .map((event) => event.payload ?? {});
+  }
+
+  it('stamps sourcePrincipleId from the authoritative dreamer task seed (candidateId)', async () => {
+    const { result, stampedArtifact } = await runStampingScribe({ seedCandidateId: SEED_CANDIDATE, candidateMatches: 1 });
+
+    expect(result.status).toBe('succeeded');
+    expect(stampedArtifact?.sourcePrincipleId).toBe(LEDGER_PID);
+  });
+
+  it('stamps via the dreamer task-id spelling fallback when the seed carries no candidateId', async () => {
+    const { result, stampedArtifact } = await runStampingScribe({ seedCandidateId: null, candidateMatches: 1 });
+
+    expect(result.status).toBe('succeeded');
+    expect(stampedArtifact?.sourcePrincipleId).toBe(LEDGER_PID);
+  });
+
+  it('writes the artifact unstamped + identity_stamp_skipped when the dreamer artifact is missing', async () => {
+    const { result, stampedArtifact, emitTelemetry } = await runStampingScribe({
+      seedCandidateId: SEED_CANDIDATE,
+      candidateMatches: 1,
+      withDreamerArtifact: false,
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(stampedArtifact?.sourcePrincipleId).toBeUndefined();
+    const skipped = stampEvents(emitTelemetry, 'identity_stamp_skipped');
+    expect(skipped).toHaveLength(1);
+  });
+
+  it('writes the artifact unstamped + identity_stamp_skipped when the lineage has 0 ledger matches', async () => {
+    const { result, stampedArtifact, emitTelemetry } = await runStampingScribe({ seedCandidateId: SEED_CANDIDATE, candidateMatches: 0 });
+
+    expect(result.status).toBe('succeeded');
+    expect(stampedArtifact?.sourcePrincipleId).toBeUndefined();
+    expect(stampEvents(emitTelemetry, 'identity_stamp_skipped')).toHaveLength(1);
+  });
+
+  it('writes the artifact unstamped + identity_stamp_skipped when the candidate is ambiguous (>1 matches)', async () => {
+    const { result, stampedArtifact, emitTelemetry } = await runStampingScribe({ seedCandidateId: SEED_CANDIDATE, candidateMatches: 2 });
+
+    expect(result.status).toBe('succeeded');
+    expect(stampedArtifact?.sourcePrincipleId).toBeUndefined();
+    expect(stampEvents(emitTelemetry, 'identity_stamp_skipped')).toHaveLength(1);
+  });
+
+  it('writes the artifact unstamped when the chain has no dreamer lineage at all', async () => {
+    const { result, stampedArtifact, emitTelemetry } = await runStampingScribe({
+      seedCandidateId: SEED_CANDIDATE,
+      candidateMatches: 1,
+      withDreamerLineage: false,
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(stampedArtifact?.sourcePrincipleId).toBeUndefined();
+    expect(stampEvents(emitTelemetry, 'identity_stamp_skipped')).toHaveLength(1);
+  });
+
+  it('legacy callers without ledgerIdentity deps never stamp and emit no stamp events', async () => {
+    const { result, stampedArtifact, emitTelemetry } = await runStampingScribe({
+      seedCandidateId: SEED_CANDIDATE,
+      candidateMatches: 1,
+      withLedgerDeps: false,
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(stampedArtifact?.sourcePrincipleId).toBeUndefined();
+    expect(stampEvents(emitTelemetry, 'identity_stamp_skipped')).toHaveLength(0);
+    expect(stampEvents(emitTelemetry, 'identity_stamp_failed')).toHaveLength(0);
+  });
+
+  it('task_succeeded event carries sourcePrincipleId when the chain resolves', async () => {
+    const { result, emitTelemetry } = await runStampingScribe({ seedCandidateId: SEED_CANDIDATE, candidateMatches: 1 });
+
+    expect(result.status).toBe('succeeded');
+    const succeeded = stampEvents(emitTelemetry, 'task_succeeded');
+    expect(succeeded).toHaveLength(1);
+    expect(succeeded[0]?.sourcePrincipleId).toBe(LEDGER_PID);
+  });
+});

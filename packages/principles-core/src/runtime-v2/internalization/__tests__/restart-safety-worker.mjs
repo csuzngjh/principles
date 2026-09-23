@@ -35,6 +35,32 @@ const { SqliteApprovalQueueStore } = await import(dist('activation/sqlite-approv
 const { SqlitePIArtifactStore } = await import(dist('store/artifact/sqlite-pi-artifact-store.js'));
 const { storeEmitter } = await import(dist('store/event-emitter.js'));
 
+// I3 upgrade (Owner review of PR #1856): the seeded scribe artifact carries a
+// ledger-shaped UUID identity, and the dispatcher under test resolves identity
+// through the SAME ledger-aware path production uses (membership verified
+// before the approval record). Journey 11's subject is restart idempotency,
+// not intake minting, so the ledger is an in-memory stub containing exactly
+// the fixture principle — the real intake→ledger minting is exercised by the
+// rulehost-seed-mvp E2E chain.
+const J11_PRINCIPLE_ID = 'e4920000-0000-4000-8000-000000000492';
+const j11LedgerIdentity = {
+  ledger: {
+    hasPrinciple: (principleId) => principleId === J11_PRINCIPLE_ID,
+    listForCandidate: (candidateId) => (candidateId === 'j11-candidate' ? [{ id: J11_PRINCIPLE_ID }] : []),
+  },
+  getTaskDiagnosticJson: (taskId) => {
+    try {
+      const row = new SqliteConnection(workspaceDir)
+        .getDb()
+        .prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?')
+        .get(taskId);
+      return row?.diagnostic_json ?? null;
+    } catch {
+      return null;
+    }
+  },
+};
+
 const EVAL_ID = 'evaluator-j11-prompt';
 const REPAIR_ID = 'artificer-repair-j11-1';
 const ROLLOUT_ID = 'rollout_reviewer-j11-prompt';
@@ -149,6 +175,9 @@ async function main() {
       await seedStore.upsertArtifact({
         artifactId: 'pi-art-scribe-j11', artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
         lineageArtifactIds: [], validationStatus: 'validated',
+        // I3: ledger-shaped identity (the dispatcher gate verifies membership
+        // against the in-memory stub ledger below — same production path).
+        sourcePrincipleId: J11_PRINCIPLE_ID,
         contentJson: JSON.stringify({ principleId: 'j11-principle', text: '重启安全测试', principleDraft: { title: 'j11-principle', statement: '重启安全测试' } }),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       });
@@ -184,11 +213,16 @@ async function main() {
             {
               getArtifactById: async (id) => {
                 const rec = await store.getArtifactById(id);
-                return rec ? { artifactId: rec.artifactId, artifactKind: rec.artifactKind, sourceTaskId: rec.sourceTaskId, lineageArtifactIds: rec.lineageArtifactIds, validationStatus: rec.validationStatus, contentJson: rec.contentJson, createdAt: rec.createdAt, updatedAt: rec.updatedAt } : null;
+                return rec ? { artifactId: rec.artifactId, artifactKind: rec.artifactKind, sourceTaskId: rec.sourceTaskId, sourcePrincipleId: rec.sourcePrincipleId, lineageArtifactIds: rec.lineageArtifactIds, validationStatus: rec.validationStatus, contentJson: rec.contentJson, createdAt: rec.createdAt, updatedAt: rec.updatedAt } : null;
               },
             },
             new SqliteActivationStateStore(connection),
-            { writers: [new PromptWriter(), new DeferArchiveWriter()], approvalQueueStore: new SqliteApprovalQueueStore(connection) },
+            {
+              writers: [new PromptWriter(), new DeferArchiveWriter()],
+              approvalQueueStore: new SqliteApprovalQueueStore(connection),
+              // I3: identity resolves through the ledger-aware production path.
+              ledgerIdentity: { ...j11LedgerIdentity, getArtifactById: (id) => store.getArtifactById(id) },
+            },
           );
           const decision = await dispatcher.dispatch({
             artifactId: input.artifactId, channel: 'prompt', rolloutDecision: 'auto_activate',

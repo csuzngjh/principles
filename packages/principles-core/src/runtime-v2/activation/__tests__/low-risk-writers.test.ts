@@ -353,19 +353,20 @@ describe('PromptWriter', () => {
       expect(result.riskLevel).toBe('low');
     });
 
-    it('returns ok:false for artifact without principle ID', async () => {
+    // Identity gating (ledger membership, id shape) is the dispatcher's responsibility
+    // since the fail-closed rework: writers only guard kind + validationStatus. The
+    // dispatcher's resolveActivationIdentity runs BEFORE any writer.canActivate call.
+    it('returns ok:true for artifact without embedded principle ID (identity gated at dispatcher)', async () => {
       const artifact = createArtifact({ contentJson: '{}' });
       const result = await writer.canActivate(artifact);
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe('no_principle_id_in_artifact');
+      expect(result.ok).toBe(true);
       expect(result.riskLevel).toBe('low');
     });
 
-    it('returns ok:false for artifact with empty contentJson', async () => {
+    it('returns ok:true for empty contentJson (identity gated at dispatcher)', async () => {
       const artifact = createArtifact({ contentJson: '' });
       const result = await writer.canActivate(artifact);
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe('no_principle_id_in_artifact');
+      expect(result.ok).toBe(true);
       expect(result.riskLevel).toBe('low');
     });
 
@@ -376,14 +377,15 @@ describe('PromptWriter', () => {
       expect(result.riskLevel).toBe('low');
     });
 
-    it('I3: returns ok:false when sourcePrincipleId is not a UUID (title-form ids are not identities)', async () => {
+    // Title-form ids ("PRI-005") are not identities — but the shape/membership check
+    // lives in the dispatcher's ledger-aware resolveActivationIdentity now, not here.
+    it('I3: returns ok:true for non-UUID sourcePrincipleId (shape checked at dispatcher against ledger)', async () => {
       const artifact = createArtifact({
         contentJson: JSON.stringify({ principleDraft: { title: 'Some title' } }),
         sourcePrincipleId: 'PRI-005',
       });
       const result = await writer.canActivate(artifact);
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe('no_principle_id_in_artifact');
+      expect(result.ok).toBe(true);
       expect(result.riskLevel).toBe('low');
     });
   });
@@ -479,11 +481,12 @@ describe('DeferArchiveWriter', () => {
       expect(result.riskLevel).toBe('low');
     });
 
-    it('returns ok:false for artifact without principle ID', async () => {
+    // Identity gating moved to the dispatcher (fail-closed rework) — writer only
+    // guards kind + validationStatus.
+    it('returns ok:true for artifact without embedded principle ID (identity gated at dispatcher)', async () => {
       const artifact = createArtifact({ contentJson: '{}' });
       const result = await writer.canActivate(artifact);
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe('no_principle_id_in_artifact');
+      expect(result.ok).toBe(true);
       expect(result.riskLevel).toBe('low');
     });
 
@@ -569,10 +572,12 @@ describe('integration: PromptWriter + DeferArchiveWriter', () => {
     const promptWriter = new PromptWriter();
     const archiveWriter = new DeferArchiveWriter();
 
+    // Note: identity-less artifacts are intentionally NOT in this list — since the
+    // fail-closed rework, writers no longer gate identity (dispatcher's job); the
+    // artifact below would now pass canActivate on both writers.
     const invalidArtifacts = [
       createArtifact({ contentJson: '{}', artifactKind: 'rule' }), // wrong kind
       createArtifact({ contentJson: '{}', validationStatus: 'pending' }), // wrong status
-      createArtifact({ contentJson: '{}' }), // no principle ID
     ];
 
     for (const artifact of invalidArtifacts) {
@@ -580,6 +585,23 @@ describe('integration: PromptWriter + DeferArchiveWriter', () => {
       const archiveResult = await archiveWriter.canActivate(artifact);
       expect(promptResult.ok).toBe(false);
       expect(archiveResult.ok).toBe(false);
+    }
+  });
+
+  it('both writers behave identically for identity-less artifacts (now accepted at writer level)', async () => {
+    const promptWriter = new PromptWriter();
+    const archiveWriter = new DeferArchiveWriter();
+
+    const identityLessArtifacts = [
+      createArtifact({ contentJson: '{}' }), // no principle ID
+      createArtifact({ contentJson: '', sourcePrincipleId: 'PRI-title-form' }),
+    ];
+
+    for (const artifact of identityLessArtifacts) {
+      const promptResult = await promptWriter.canActivate(artifact);
+      const archiveResult = await archiveWriter.canActivate(artifact);
+      expect(promptResult.ok).toBe(true);
+      expect(archiveResult.ok).toBe(true);
     }
   });
 

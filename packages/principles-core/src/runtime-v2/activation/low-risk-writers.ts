@@ -70,8 +70,14 @@ const PRINCIPLE_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[
  * pd-console's `resolveLedgerPrincipleId`); this boundary guarantees the value
  * is at least UUID-shaped, so a title can never become a durable identity.
  *
- * @returns the trimmed UUID, or `null` when the artifact carries no usable
- *          identity — callers must refuse with `no_principle_id_in_artifact`.
+ * The returned value is LOWERCASE-normalized: ledger keys are minted by
+ * `randomUUID()` (always lowercase), so an uppercase UUID that passes the shape
+ * check would otherwise miss `hasPrinciple` and be refused as
+ * `principle_not_in_ledger` — a case-only mismatch masquerading as data drift.
+ *
+ * @returns the trimmed, lowercase UUID, or `null` when the artifact carries no
+ *          usable identity — callers must refuse with
+ *          `no_principle_id_in_artifact`.
  */
 export function resolveActivationPrincipleId(artifact: PIArtifactSnapshot): string | null {
   const raw = artifact.sourcePrincipleId;
@@ -79,7 +85,7 @@ export function resolveActivationPrincipleId(artifact: PIArtifactSnapshot): stri
   const candidate = raw.trim();
   if (candidate === '') return null;
   if (!PRINCIPLE_ID_UUID_RE.test(candidate)) return null;
-  return candidate;
+  return candidate.toLowerCase();
 }
 
 export class PromptWriter implements ChannelWriter {
@@ -93,10 +99,12 @@ export class PromptWriter implements ChannelWriter {
     if (artifact.validationStatus !== 'validated') {
       return { ok: false, reason: `artifact_validation_status_${artifact.validationStatus}`, riskLevel: 'low' };
     }
-    const principleId = resolveActivationPrincipleId(artifact);
-    if (!principleId) {
-      return { ok: false, reason: 'no_principle_id_in_artifact', riskLevel: 'low' };
-    }
+    // Identity gating deliberately does NOT live here anymore (Owner review of
+    // PR #1856, P1): the writer only knows artifact shape — ledger membership
+    // requires the ActivationDispatcher's ledgerIdentity deps. The dispatcher
+    // gates BOTH paths (enqueueForApproval + activateArtifact) so the identity
+    // check happens once, before the approval queue and before the activation
+    // commit, against the ledger.
     return { ok: true, riskLevel: 'low' };
   }
 
@@ -121,10 +129,7 @@ export class DeferArchiveWriter implements ChannelWriter {
     if (artifact.validationStatus !== 'validated') {
       return { ok: false, reason: `artifact_validation_status_${artifact.validationStatus}`, riskLevel: 'low' };
     }
-    const principleId = resolveActivationPrincipleId(artifact);
-    if (!principleId) {
-      return { ok: false, reason: 'no_principle_id_in_artifact', riskLevel: 'low' };
-    }
+    // See PromptWriter.canActivate: identity gating moved to the dispatcher.
     return { ok: true, riskLevel: 'low' };
   }
 

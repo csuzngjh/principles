@@ -468,6 +468,28 @@ export class ApprovalsConsoleModel {
             new DeferArchiveWriter(),
           ],
           approvalQueueStore,
+          // I3 upgrade (Owner review of PR #1856, P1): the Console approve
+          // path verifies ledger membership BEFORE the activation commit.
+          // Until now the ledger identity was only resolved AFTER the commit
+          // (upgradeLedgerPrinciple, non-fatal warning) — a stamped-but-unknown
+          // UUID or an unstamped artifact could commit an activation first and
+          // warn later. The dispatcher gate now blocks both, and the existing
+          // post-commit upgrade below keeps its role unchanged.
+          ledgerIdentity: {
+            ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${this.workspaceDir}/.state` }),
+            getArtifactById: artifactReadModel.getArtifactById,
+            getTaskDiagnosticJson: (taskId: string): string | null => {
+              try {
+                const row = connection
+                  .getDb()
+                  .prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?')
+                  .get(taskId) as { diagnostic_json?: string | null } | undefined;
+                return row?.diagnostic_json ?? null;
+              } catch {
+                return null;
+              }
+            },
+          },
         },
       );
 

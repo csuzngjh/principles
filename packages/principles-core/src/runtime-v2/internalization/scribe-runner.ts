@@ -36,6 +36,10 @@ import { resolveFormationContext } from './formation-context.js';
 import type { FormationContext, FormationTaskView } from './formation-context.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
+import {
+  candidateIdFromDreamerSeed,
+  candidateIdFromDreamerTaskId,
+} from '../activation/ledger-identity.js';
 import type {
   PeerRunnerOptions,
   PeerRunnerDeps,
@@ -148,12 +152,29 @@ export function resolveScribeRunnerOptions(options: ScribeRunnerOptions): Resolv
 
 export interface ScribeRunnerDeps extends PeerRunnerDeps {
   readonly validator: ScribeValidator;
+  /**
+   * I2 — CHAIN STAMPING (Phase 3 Option A′, §6 of
+   * docs/architecture/principle-identity-reconciliation.md; Owner review of
+   * PR #1856 P1: the activation gate must not cut the live chain).
+   *
+   * When provided, ScribeRunner stamps the ledger principle identity onto the
+   * artifact it writes: scribe context carries the dreamer artifact id, whose
+   * task seed carries the candidateId, which the ledger maps back to the
+   * principle minted at intake. Stamping is fail-soft — an unresolvable chain
+   * writes the artifact unstamped and emits an observable event; the
+   * activation boundary then either resolves the identity from lineage or
+   * refuses. Ambiguity (0 or >1 ledger matches) is never guessed.
+   */
+  readonly ledgerIdentity?: {
+    readonly listForCandidate: (candidateId: string) => readonly { readonly id: string }[];
+  };
 }
 
 // ── ScribeRunner ─────────────────────────────────────────────────────────────
 
 export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> {
   private readonly validator: ScribeValidator;
+  private readonly ledgerIdentity?: ScribeRunnerDeps['ledgerIdentity'];
 
   constructor(deps: ScribeRunnerDeps, options: PeerRunnerOptions) {
     super(deps, options, {
@@ -163,6 +184,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       resultRefPrefix: 'scribe',
     });
     this.validator = deps.validator;
+    this.ledgerIdentity = deps.ledgerIdentity;
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
@@ -403,6 +425,29 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       });
     }
 
+    // I2 — CHAIN STAMPING (fail-soft): resolve the ledger principle id from
+    // the scribe → dreamer artifact → dreamer task seed (candidateId) → ledger
+    // chain and stamp it onto the artifact. Unresolvable/ambiguous chains
+    // write the artifact unstamped with an observable event — the activation
+    // boundary then refuses or resolves from lineage; never a guess.
+    let stampedPrincipleId: string | null = null;
+    if (this.ledgerIdentity) {
+      try {
+        stampedPrincipleId = await this.resolveLedgerStampPrincipleId(context);
+      } catch (stampErr) {
+        this.emitEvent('identity_stamp_failed', taskId, {
+          runId,
+          errorMessage: stampErr instanceof Error ? stampErr.message : String(stampErr),
+        });
+      }
+      if (stampedPrincipleId === null) {
+        this.emitEvent('identity_stamp_skipped', taskId, {
+          runId,
+          reason: 'ledger principle id unresolved from scribe chain (missing dreamer lineage, unreadable seed, or 0/>1 ledger matches)',
+        });
+      }
+    }
+
     // Write PIArtifact via artifactStore (idempotent upsert)
     const artifactId = `pi-art-${taskId}-${runId}`;
     const now = new Date().toISOString();
@@ -413,6 +458,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
+        ...(stampedPrincipleId !== null ? { sourcePrincipleId: stampedPrincipleId } : {}),
         contentJson: JSON.stringify(output),
         createdAt: now,
         updatedAt: now,
@@ -447,6 +493,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       attemptCount: task.attemptCount,
       resultRef,
       principleTitle: output.principleDraft.title,
+      ...(stampedPrincipleId !== null ? { sourcePrincipleId: stampedPrincipleId } : {}),
     });
 
     return {
@@ -459,6 +506,45 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       output,
       attemptCount: task.attemptCount,
     };
+  }
+
+  /**
+   * I2 — resolve the ledger principle id for chain stamping.
+   *
+   * Chain: scribe context's dreamer artifact id → dreamer artifact record →
+   * its source task's diagnostic_json (authoritative candidateId, written by
+   * intake-to-internalization-bridge) with the task-id spelling
+   * (`dreamer-<candidateId>-<channel>`) as fallback → ledger principles
+   * derived from that candidate. Exactly one match is required — 0 or >1
+   * stays unresolved (never guessed).
+   */
+  private async resolveLedgerStampPrincipleId(context: ScribeContext): Promise<string | null> {
+    const ledger = this.ledgerIdentity;
+    if (!ledger) return null;
+
+    const dreamerArtifactId = context.sourceDreamerArtifactId;
+    if (!dreamerArtifactId) return null;
+
+    const dreamerArtifact = await this.artifactStore.getArtifactById(dreamerArtifactId);
+    if (!dreamerArtifact) return null;
+
+    let candidateId: string | null = null;
+    if (dreamerArtifact.sourceTaskId) {
+      try {
+        const dreamerTask = await this.stateManager.getTask(dreamerArtifact.sourceTaskId);
+        if (dreamerTask) {
+          candidateId = candidateIdFromDreamerSeed(dreamerTask.diagnosticJson);
+        }
+      } catch {
+        // Seed read failed — the task-id spelling fallback below still applies.
+      }
+      candidateId ??= candidateIdFromDreamerTaskId(dreamerArtifact.sourceTaskId);
+    }
+    if (!candidateId) return null;
+
+    const matches = ledger.listForCandidate(candidateId);
+    if (matches.length !== 1) return null;
+    return matches[0]?.id ?? null;
   }
 
   // ── Optional hooks ─────────────────────────────────────────────────────────

@@ -44,6 +44,10 @@ export {
 export { ActivationDispatcher } from './activation-dispatcher.js';
 export type { DispatcherConfig } from './activation-dispatcher.js';
 
+// I3 upgrade (Owner review of PR #1856): ledger-aware activation identity.
+export { resolveLedgerActivationId, candidateIdFromDreamerTaskId, candidateIdFromDreamerSeed } from './ledger-identity.js';
+export type { LedgerIdentityChecker, LedgerIdentityLookupDeps, LedgerActivationResolution } from './ledger-identity.js';
+
 export {
   PromptWriter,
   DeferArchiveWriter,

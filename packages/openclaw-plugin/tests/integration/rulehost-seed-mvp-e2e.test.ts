@@ -62,6 +62,7 @@ import {
   ApprovalCompletionService,
   getChannelRiskLevel,
   SqliteConnection,
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import type {
   PDRuntimeAdapter,
@@ -437,6 +438,16 @@ function buildV2Context(priorReadOfTarget: 'yes' | 'no'): RuleContextV2 {
 const PAIN_CANONICAL_ID = 'pain_pri492_e2e_001';
 const SESSION_ID = 'pri492-e2e-session';
 
+// I3 upgrade (Owner review of PR #1856, P1): the chain identity is REAL, not
+// stamped by hand. The ledger principle UUID plays the role intake mints in
+// production (CandidateIntakeService.intake → randomUUID + writeProbationEntry
+// keyed by candidate://<candidateId>); the dreamer task seed carries the
+// candidateId the same way intake-to-internalization-bridge writes it
+// (top-level `candidateId` + `pi_metadata.correlationId`), and ScribeRunner
+// stamps `sourcePrincipleId` at write time by resolving candidate → ledger.
+const PRINCIPLE_ID = 'e4920000-0000-4000-8000-000000000492';
+const CANDIDATE_ID = 'b4920000-0000-4000-8000-000000000492';
+
 let workspaceDir = '';
 let stateManager: RuntimeStateManager;
 let adapter: ScriptedAdapter;
@@ -526,6 +537,24 @@ beforeAll(async () => {
     projectDir: workspaceDir,
   });
 
+  // 3b. I3 upgrade: mint the ledger principle the way intake does in
+  // production (UUID keyed by candidate://<candidateId>). ScribeRunner's
+  // chain stamping and the dispatcher's ledger identity gate both resolve
+  // against THIS ledger — no synthetic hand-stamping anywhere in the chain.
+  new PrincipleTreeLedgerAdapter({ stateDir }).writeProbationEntry({
+    id: PRINCIPLE_ID,
+    title: 'PRI-492 e2e ledger principle',
+    status: 'probation',
+    sourceRef: `candidate://${CANDIDATE_ID}`,
+    artifactRef: '',
+    taskRef: '',
+    text: 'Block writes to files that have not been read in the current session',
+    triggerPattern: 'before_tool_call',
+    action: 'inject read-before-write guard',
+    evaluability: 'manual_only',
+    createdAt: new Date().toISOString(),
+  });
+
   // 4. Build ScriptedAdapter (only LLM mock)
   adapter = new ScriptedAdapter({
     dreamer: (taskId) => dreamerOut(taskId, PAIN_CANONICAL_ID),
@@ -554,7 +583,15 @@ beforeAll(async () => {
     runnerOpts,
   );
   scribeRunner = new ScribeRunner(
-    { stateManager, runtimeAdapter: adapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator() },
+    {
+      stateManager, runtimeAdapter: adapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator(),
+      // I2 — chain stamping: the scribe resolves dreamer lineage → candidateId
+      // → ledger principle and stamps sourcePrincipleId at write time.
+      ledgerIdentity: {
+        listForCandidate: (candidateId: string) =>
+          new PrincipleTreeLedgerAdapter({ stateDir }).listForCandidate(candidateId),
+      },
+    },
     runnerOpts,
   );
   artificerRunner = new ArtificerRunner(
@@ -603,6 +640,16 @@ beforeAll(async () => {
     {
       writers: [new PromptWriter(), capturingWriter, new DeferArchiveWriter()],
       approvalQueueStore: approvalStore,
+      // I3 upgrade: the dispatch under test verifies LEDGER MEMBERSHIP (not
+      // just UUID shape) before the approval record and the activation commit.
+      ledgerIdentity: {
+        ledger: new PrincipleTreeLedgerAdapter({ stateDir }),
+        getArtifactById: async (id) => stateManager.piArtifactStore.getArtifactById(id),
+        getTaskDiagnosticJson: async (taskId: string): Promise<string | null> => {
+          const task = await stateManager.getTask(taskId);
+          return task?.diagnosticJson ?? null;
+        },
+      },
     },
   );
 
@@ -644,19 +691,26 @@ describe('PRI-492: RuleHost seed-MVP production E2E chain', () => {
     // STAGE 1: Run dreamer → philosopher → scribe (real runners, real validators)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    const dreamerTaskId = 'dreamer-pri492-001';
+    // I3 upgrade: the dreamer task id and seed follow the production bridge
+    // contract (intake-to-internalization-bridge): `dreamer-<candidateId>-<channel>`
+    // with a top-level `candidateId` beside `pi_metadata`. This is the lineage
+    // ScribeRunner walks to stamp the ledger identity at write time.
+    const dreamerTaskId = `dreamer-${CANDIDATE_ID}-code_tool_hook`;
     await stateManager.createTask({
       taskId: dreamerTaskId,
       taskKind: 'dreamer',
       status: 'pending',
       attemptCount: 0,
       maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({
-        dependencyTaskIds: [],
-        channel: 'code_tool_hook',
-        timeoutMs: 10_000,
-        inputArtifactRefs: [],
-        outputArtifactRefs: [],
+      diagnosticJson: JSON.stringify({
+        ...JSON.parse(createPITaskDiagnosticJson({
+          dependencyTaskIds: [],
+          channel: 'code_tool_hook',
+          timeoutMs: 10_000,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+        }) as string),
+        candidateId: CANDIDATE_ID,
       }),
     });
     const dreamerResult = await dreamerRunner.run(dreamerTaskId);
@@ -718,24 +772,16 @@ describe('PRI-492: RuleHost seed-MVP production E2E chain', () => {
 
     const ruleArtifactId = loopResult.ruleArtifactId!;
 
-    // I3 fail-closed: activation requires a ledger-shaped principle identity on
-    // the artifact. Chain stamping at write time lands separately (Phase 3
-    // Option A′); this E2E stamps the artifact the way post-stamping production
-    // will, so the dispatch under test exercises the real completion service.
+    // I3 upgrade (Owner review of PR #1856, P1): NO hand-stamping. The
+    // identity on this artifact is the real chain's product: ScribeRunner
+    // stamped the ledger UUID at write time (candidate lineage → ledger),
+    // and EvaluatorRunner forwarded it onto the rule artifact. The
+    // dispatcher's ledger identity gate validates membership before the
+    // approval record and the activation commit below.
     const piArtifactStore = stateManager.piArtifactStore;
-    const ruleArtifactForStamp = await piArtifactStore.getArtifactById(ruleArtifactId);
-    if (!ruleArtifactForStamp) throw new Error('unreachable: rule artifact exists after adversarial loop');
-    await piArtifactStore.upsertArtifact({
-      artifactId: ruleArtifactForStamp.artifactId,
-      artifactKind: ruleArtifactForStamp.artifactKind,
-      sourceTaskId: ruleArtifactForStamp.sourceTaskId,
-      lineageArtifactIds: ruleArtifactForStamp.lineageArtifactIds,
-      validationStatus: ruleArtifactForStamp.validationStatus,
-      sourcePrincipleId: 'e4920000-0000-4000-8000-000000000492',
-      contentJson: ruleArtifactForStamp.contentJson,
-      createdAt: ruleArtifactForStamp.createdAt,
-      updatedAt: new Date().toISOString(),
-    });
+    const ruleArtifactForIdentity = await piArtifactStore.getArtifactById(ruleArtifactId);
+    if (!ruleArtifactForIdentity) throw new Error('unreachable: rule artifact exists after adversarial loop');
+    expect(ruleArtifactForIdentity.sourcePrincipleId).toBe(PRINCIPLE_ID);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ACCEPTANCE CRITERION 1: v2 rule artifact with requiresContextVersion,
