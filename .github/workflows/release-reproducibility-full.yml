@@ -101,6 +101,15 @@ jobs:
           # PRI-874: the test copies transaction journals + a state summary
           # here BEFORE its temp-root cleanup, so failures stay diagnosable.
           PD_UPGRADE_GATE_DIAG_DIR: ${{ github.workspace }}/upgrade-gate-diagnostics
+      # PRI-913: junction lifecycle regression (real install → reconcile
+      # idempotency → mixed-tree diagnosis → rollback → uninstall) on the
+      # same double-build-verified asset. Linux leg here; the authoritative
+      # Windows reparse semantics run in the upgrade-gate-windows job.
+      - name: Junction lifecycle gate (linux)
+        if: matrix.runner == 'ubuntu-24.04' && matrix.node == '22.22.2'
+        run: npm test --workspace=create-principles-disciple -- --run tests/release-junction-lifecycle.test.ts
+        env:
+          PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
       - name: Upload upgrade-gate diagnostics on failure
         if: matrix.runner == 'ubuntu-24.04' && matrix.node == '22.22.2' && failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -131,11 +140,12 @@ jobs:
     name: N-1 to N real upgrade gate (windows-2025, 22.22.2)
     needs: native-release-matrix
     runs-on: windows-2025
-    # 120 min: measured full gate on Windows ≈ 50-60 min (extract-n + extract
-    # -n1 ≈ 21 min, install ≈ 7 min, apply-full ≈ 17-23 min) plus workspace
-    # build and artifact download; the smoke job's 60 min budget cannot hold
-    # it.
-    timeout-minutes: 120
+    # 180 min: measured full upgrade gate on Windows ≈ 50-60 min (extract-n +
+    # extract-n1 ≈ 21 min, install ≈ 7 min, apply-full ≈ 17-23 min) PLUS the
+    # PRI-913 junction lifecycle leg (one extract + two real installs with
+    # backup/restore churn, ≈ 45-60 min on the same Defender-scanned disk);
+    # the smoke job's 60 min budget cannot hold either heavy leg.
+    timeout-minutes: 180
     env:
       SOURCE_DATE_EPOCH: '1700000000'
     steps:
@@ -170,6 +180,15 @@ jobs:
           PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
           # PRI-874: journals + state summary land here before temp cleanup.
           PD_UPGRADE_GATE_DIAG_DIR: ${{ github.workspace }}/upgrade-gate-diagnostics
+      # PRI-913: the Windows reparse-point lifecycle (real install → reconcile
+      # idempotency → mixed-tree diagnosis → rollback restore → uninstall
+      # safety) on the SAME double-build-verified asset. This is the
+      # authoritative junction leg — Windows junctions are the production
+      # topology the PRI-912 pass ships.
+      - name: Junction lifecycle gate (windows)
+        run: npm test --workspace=create-principles-disciple -- --run tests/release-junction-lifecycle.test.ts
+        env:
+          PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
       - name: Upload upgrade-gate diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

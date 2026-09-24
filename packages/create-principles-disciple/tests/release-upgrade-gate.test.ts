@@ -27,6 +27,10 @@
  *   7. verify the upgraded runtime: version N, pd CLI, /api/health after a
  *      console restart, canonical @principles/* link layout (the injected
  *      physical duplicate must be reconciled), trust root, no npm use;
+ *      PRI-913: plus the junction-pass product — both plugin dirs'
+ *      @principles/core slots are live canonical links after the REAL
+ *      upgrade, and the superseded backup trees survived the rename-swap
+ *      with their links intact (the swap never followed a junction);
  *   8. failure injection: a corrupted candidate artifact must fail the update
  *      WITHOUT leaving a half-updated runtime (N stays healthy and serving);
  *      the journal must reach terminal 'failed' with the download/digest
@@ -38,6 +42,7 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
+import { createRequire } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -484,6 +489,64 @@ function expectCanonicalRuntimeLayout(): void {
   }
 }
 
+/**
+ * PRI-913 Phase 1: the PRI-912 reconcile pass must have re-run on the
+ * freshly deployed tree — BOTH plugin dirs' materialized
+ * `node_modules/@principles/core` copies are live canonical links into the
+ * deployed `<home>/.pd/runtime/core`, and a bare import from each plugin
+ * resolves through them. `expectCanonicalRuntimeLayout` deliberately does
+ * NOT cover this (its invariant for pd-cli slots is content freshness); the
+ * plugin-core LINK is the junction-pass product and is asserted here on the
+ * real upgrade path.
+ */
+function expectPluginCoreCanonicalLinks(): void {
+  const runtimeCore = path.join(homeDir, '.pd', 'runtime', 'core');
+  expect(fs.existsSync(path.join(runtimeCore, 'package.json')), 'canonical runtime core exists').toBe(true);
+  const runtimeCoreReal = fs.realpathSync(runtimeCore);
+  for (const pluginDir of [
+    path.join(homeDir, '.pd', 'runtime', 'plugin'),
+    path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple'),
+  ]) {
+    const slot = path.join(pluginDir, 'node_modules', '@principles', 'core');
+    expect(fs.existsSync(slot), `plugin core slot exists at ${slot}`).toBe(true);
+    expect(fs.lstatSync(slot).isSymbolicLink(), `plugin core slot is canonical at ${slot}`).toBe(true);
+    expect(fs.realpathSync(slot), `plugin core slot resolves to the deployed runtime core: ${slot}`).toBe(runtimeCoreReal);
+    const resolved = createRequire(path.join(pluginDir, 'probe.cjs')).resolve('@principles/core');
+    expect(resolved.startsWith(runtimeCoreReal), `bare import resolved outside the canonical core: ${resolved}`).toBe(true);
+  }
+}
+
+/**
+ * PRI-913 Phase 1 (backup leg): the upgrade's rename-swap must have MOVED
+ * (never traversed) the superseded junction-carrying trees. Exactly one
+ * runtime backup is retained; it carries the N-1-stamped pd-cli, and its
+ * plugin core slot is STILL a link (lstat) — proof the swap did not
+ * materialize or follow the junction. The ext-plugin backup lives outside
+ * extensions/ (ERR-097 discovery isolation) and likewise keeps its link.
+ */
+function expectBackupTreesJunctionIntact(): void {
+  const backupsDir = path.join(homeDir, '.pd', 'backups');
+  const runtimeBackups = fs.readdirSync(backupsDir).filter((name) => name.startsWith('runtime.backup.'));
+  expect(runtimeBackups.length, 'exactly one superseded runtime backup retained').toBe(1);
+  const [runtimeBackupName] = runtimeBackups;
+  if (runtimeBackupName === undefined) throw new Error('unreachable: empty runtime backup list');
+  const backupRuntime = path.join(backupsDir, runtimeBackupName);
+  expect(
+    readPackageVersion(path.join(backupRuntime, 'pd-cli', 'package.json')),
+    'the retained backup carries the superseded N-1 runtime',
+  ).toBe(baselineVersion);
+  const backupPluginSlot = path.join(backupRuntime, 'plugin', 'node_modules', '@principles', 'core');
+  expect(fs.lstatSync(backupPluginSlot).isSymbolicLink(), 'backup plugin core slot survived the rename as a link').toBe(true);
+
+  const extBackupsDir = path.join(homeDir, '.openclaw', 'pd-backups');
+  const extBackups = fs.readdirSync(extBackupsDir).filter((name) => name.startsWith('principles-disciple.backup.'));
+  expect(extBackups.length >= 1, 'the superseded ext plugin backup is retained').toBe(true);
+  const [extBackupName] = extBackups;
+  if (extBackupName === undefined) throw new Error('unreachable: empty ext backup list');
+  const extBackupSlot = path.join(extBackupsDir, extBackupName, 'node_modules', '@principles', 'core');
+  expect(fs.lstatSync(extBackupSlot).isSymbolicLink(), 'backup ext plugin core slot survived the rename as a link').toBe(true);
+}
+
 beforeAll(async () => {
   if (buildPublicationInternally) {
     await phaseAsync('internal-build', () => gateBuildPublicationInternal(INSTALLER_DIR, path.join(root, 'publication-internal')));
@@ -683,6 +746,14 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       // The injected physical duplicate was replaced by the deployed
       // candidate content (freshness, not link-ness — see the helper).
       expectCanonicalRuntimeLayout();
+      // PRI-913 Phase 1: the reconcile pass ran on the REAL upgrade path —
+      // both plugin dirs carry live canonical core links into the deployed
+      // runtime core, and the superseded junction-carrying trees landed in
+      // the backup exactly once, still as links (rename never followed a
+      // junction). Windows reparse semantics included: this scenario runs
+      // on the windows-2025 upgrade-gate job.
+      expectPluginCoreCanonicalLinks();
+      expectBackupTreesJunctionIntact();
 
       // Trust root still pins the gate anchor (the candidate payload carries
       // the repository's production anchor — a DIFFERENT anchor must be kept,
@@ -787,6 +858,10 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       expect(pdVersion.exitCode).toBe(0);
       expect((JSON.parse(pdVersion.stdout) as Record<string, unknown>).productVersion).toBe(candidateVersion);
       expectCanonicalRuntimeLayout();
+      // PRI-913: a refused update must leave the EXISTING canonical junctions
+      // untouched (the download fails before any backup/deploy, so the live
+      // links the confirmed upgrade established are still live links).
+      expectPluginCoreCanonicalLinks();
       // Runtime state first, console health second (same ordering discipline).
       await waitForRuntimeVersion(candidateVersion, UPGRADE_RESULT_CONVERGE_TIMEOUT_MS, 'N runtime after corruption refusal');
       await waitForConsole();
