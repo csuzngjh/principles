@@ -2620,8 +2620,16 @@ export function reconcilePluginCoreCanonicalJunction(): CoreJunctionReconciliati
     // All gates hold: rename-swap the materialized copy for a canonical link.
     const backupPath = `${coreSlot}.pri912-materialized`;
     // The backup name is reserved by this pass; clear our own stale residue
-    // so the swap below can never collide with it.
-    rmSync(backupPath, { recursive: true, force: true });
+    // so the swap below can never collide with it. If the residue cannot be
+    // removed (e.g. Windows EBUSY from an AV scan holding the ~17k-file tree),
+    // the swap would collide anyway — skip with the working copy intact
+    // rather than throw out of the pass and fail a healthy install (rc-9).
+    try {
+      rmSync(backupPath, { recursive: true, force: true });
+    } catch (error) {
+      skipped.push({ dir: coreSlot, reason: `stale_backup_unremovable: ${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
     try {
       renameSync(coreSlot, backupPath);
     } catch (error) {
@@ -2640,9 +2648,13 @@ export function reconcilePluginCoreCanonicalJunction(): CoreJunctionReconciliati
     } catch (error) {
       // Conversion failed — put the proven-identical copy back. The slot must
       // never be left empty or dangling; only a failed RESTORE breaks
-      // resolution and deserves the fail → rollback channel.
+      // resolution and deserves the fail → rollback channel. Remove the slot
+      // unconditionally (force handles absent, lstat semantics unlinks a
+      // dangling link without following it); guarding on existsSync would MISS
+      // a dangling link — existsSync follows it to a missing target and returns
+      // false — leaving it to make the restore renameSync fail.
       try {
-        if (existsSync(coreSlot)) rmSync(coreSlot, { recursive: true, force: true });
+        rmSync(coreSlot, { recursive: true, force: true });
         renameSync(backupPath, coreSlot);
       } catch (restoreError) {
         throw new Error(
@@ -2655,7 +2667,18 @@ export function reconcilePluginCoreCanonicalJunction(): CoreJunctionReconciliati
       skipped.push({ dir: coreSlot, reason: `conversion_failed_restored: ${error instanceof Error ? error.message : String(error)}` });
       continue;
     }
-    rmSync(backupPath, { recursive: true, force: true });
+    // The link is created and verified — the conversion is a success. Removing
+    // the now-redundant materialized backup is only disk reclamation; if it
+    // fails (Windows EBUSY/EPERM on ~17k files) we must NOT roll back a
+    // working install. Leave the residue, warn, and keep the converted slot.
+    try {
+      rmSync(backupPath, { recursive: true, force: true });
+    } catch (error) {
+      logger.warn(
+        `PRI-912: converted ${coreSlot} to a canonical junction but could not remove the redundant materialized backup at ${backupPath}: `
+        + `${error instanceof Error ? error.message : String(error)} — reclamation deferred, install is healthy.`,
+      );
+    }
     converted.push(coreSlot);
   }
 

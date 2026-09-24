@@ -24,17 +24,41 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { reconcilePluginCoreCanonicalJunction } from '../src/installer.js';
 
-// Injection seam for the mid-conversion failure test: the installer imports
-// symlinkSync from the 'fs' SPECIFIER, so mocking 'fs' (this file's own
+// Injection seams for the mid-conversion failure tests: the installer imports
+// symlinkSync/rmSync from the 'fs' SPECIFIER, so mocking 'fs' (this file's own
 // helpers keep using the real 'node:fs') reaches exactly the conversion path.
-const linkFailure = vi.hoisted(() => ({ active: false }));
+//   - linkFailure.active   → symlinkSync throws before creating the link
+//   - linkFailure.dangling → symlinkSync creates a link to a missing target,
+//     so realpathSync fails and the RESTORE path must unlink the dangling link
+//   - backupRemoveFailure  → rmSync throws only for *.pri912-materialized
+//     backup paths, exercising the "backup cleanup must never fail the install"
+//     contract on both the stale-residue and post-conversion removal sites.
+const linkFailure = vi.hoisted(() => ({ active: false, dangling: false }));
+const backupRemoveFailure = vi.hoisted(() => ({ active: false }));
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   return {
     ...actual,
     symlinkSync: (target: string, linkPath: string, type?: 'junction' | 'dir' | 'file') => {
       if (linkFailure.active) throw new Error('injected symlink failure');
+      if (linkFailure.dangling) {
+        // Un-normalized '../' is fine: the link must simply never resolve.
+        return actual.symlinkSync(linkPath + '/../pri912-dangling-missing-target', linkPath, type);
+      }
       return actual.symlinkSync(target, linkPath, type);
+    },
+    rmSync: (target: string, options?: fs.RmOptions) => {
+      // Realistic failure: EBUSY hits an EXISTING locked tree, not an absent
+      // pre-clean — so the post-conversion cleanup site is still reachable.
+      if (
+        backupRemoveFailure.active
+        && typeof target === 'string'
+        && target.endsWith('.pri912-materialized')
+        && actual.existsSync(target)
+      ) {
+        throw Object.assign(new Error('injected EBUSY'), { code: 'EBUSY' });
+      }
+      return actual.rmSync(target, options);
     },
   };
 });
@@ -129,7 +153,9 @@ describe('reconcilePluginCoreCanonicalJunction', () => {
       // The actual contract: a bare import from the plugin resolves to the
       // runtime core through the converted slot (PRI-711-style probe).
       const resolved = resolveFromPlugin(pluginDirs()[index] as string, '@principles/core');
-      expect(resolved).toBe(path.join(runtimeCoreDir(), 'dist', 'entry.js'));
+      // resolve() returns the realpath; resolve the expected side too so the
+      // comparison holds on macOS where os.tmpdir() is itself a symlink.
+      expect(resolved).toBe(path.join(fs.realpathSync(runtimeCoreDir()), 'dist', 'entry.js'));
       expect(fs.readFileSync(resolved, 'utf8')).toContain("'canonical'");
     }
   });
@@ -324,6 +350,80 @@ describe('reconcilePluginCoreCanonicalJunction', () => {
       expect(fs.lstatSync(slot).isSymbolicLink()).toBe(false);
       expect(fs.readFileSync(path.join(slot, 'dist', 'entry.js'), 'utf8')).toContain("'canonical'");
       expect(fs.existsSync(path.join(slot, 'dist', 'deep', 'lib.js'))).toBe(true);
+    }
+  });
+
+  it('restores the copy when the fresh link is dangling (existsSync would miss it and block restore)', () => {
+    writeRuntimeCore('canonical');
+    for (const pluginDir of pluginDirs()) writePluginWithMaterializedCopy(pluginDir);
+
+    // symlinkSync creates a link whose target does not resolve, so
+    // realpathSync throws and we enter the restore path with a DANGLING link
+    // sitting at coreSlot. The old guard-on-existsSync left that dangling link
+    // in place (existsSync follows it to a missing target → false), making the
+    // restore renameSync fail and the whole install roll back despite a
+    // fully restorable copy.
+    linkFailure.dangling = true;
+    let result: ReturnType<typeof reconcilePluginCoreCanonicalJunction>;
+    try {
+      result = reconcilePluginCoreCanonicalJunction();
+    } finally {
+      linkFailure.dangling = false;
+    }
+
+    expect(result.converted).toEqual([]);
+    for (const slot of coreSlots()) {
+      expect(result.skipped.find((skip) => skip.dir === slot)?.reason).toContain('conversion_failed_restored');
+      // No dangling link remains — the materialized copy was restored in its place.
+      expect(fs.lstatSync(slot).isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(path.join(slot, 'dist', 'entry.js'), 'utf8')).toContain("'canonical'");
+    }
+  });
+
+  it('skips (does not fail) when the reserved backup name cannot be cleared before the swap', () => {
+    writeRuntimeCore('canonical');
+    for (const pluginDir of pluginDirs()) writePluginWithMaterializedCopy(pluginDir);
+    for (const slot of coreSlots()) {
+      fs.mkdirSync(slot + '.pri912-materialized', { recursive: true });
+    }
+
+    backupRemoveFailure.active = true;
+    let result: ReturnType<typeof reconcilePluginCoreCanonicalJunction>;
+    try {
+      result = reconcilePluginCoreCanonicalJunction();
+    } finally {
+      backupRemoveFailure.active = false;
+    }
+
+    expect(result.converted).toEqual([]);
+    for (const slot of coreSlots()) {
+      expect(result.skipped.find((skip) => skip.dir === slot)?.reason).toContain('stale_backup_unremovable');
+      // The working materialized copy is untouched — the install is no worse.
+      expect(fs.lstatSync(slot).isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(path.join(slot, 'dist', 'entry.js'), 'utf8')).toContain("'canonical'");
+    }
+  });
+
+  it('keeps a healthy converted install when the redundant backup cannot be reclaimed', () => {
+    writeRuntimeCore('canonical');
+    for (const pluginDir of pluginDirs()) writePluginWithMaterializedCopy(pluginDir);
+
+    // The link is created and verified successfully; only the post-conversion
+    // backup cleanup throws. That is disk reclamation, not correctness — the
+    // slot must still count as converted and the install must NOT roll back.
+    let result: ReturnType<typeof reconcilePluginCoreCanonicalJunction>;
+    try {
+      backupRemoveFailure.active = true;
+      result = reconcilePluginCoreCanonicalJunction();
+    } finally {
+      backupRemoveFailure.active = false;
+    }
+
+    expect(result.skipped).toEqual([]);
+    for (const slot of coreSlots()) {
+      expect(result.converted).toContain(slot);
+      expect(fs.lstatSync(slot).isSymbolicLink()).toBe(true);
+      expect(fs.realpathSync(slot)).toBe(fs.realpathSync(runtimeCoreDir()));
     }
   });
 });
