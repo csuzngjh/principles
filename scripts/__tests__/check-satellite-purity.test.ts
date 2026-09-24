@@ -447,4 +447,13 @@ describe('production wiring', () => {
     );
     expect(String(pkg.scripts['verify:merge']).trim().endsWith('npm run check-satellite-bundle-deps')).toBe(true);
   });
+
+  it('the publish dry-run CI step never pipes npm pack through head (PRI-919 EPIPE incident)', () => {
+    // The budget PASS block grows prepack stdout; `| head -N` under pipefail
+    // turns that into a fake npm-pack failure (EPIPE). Display truncation must
+    // stay decoupled from the exit code.
+    const ci = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+    expect(ci).not.toMatch(/npm pack[^\n]*\|\s*head/);
+    expect(ci).toContain('pack-dry-run.log');
+  });
 });

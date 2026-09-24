@@ -104,3 +104,18 @@ Phase 1/2 的全部所需事实已固化：名册与禁止清单复用 D1 SSoT�
 §2 实测值；体积腿与依赖腿合并进 `assertSatellitePurity`，verify:merge 与
 release 构建两条路径**零接线改动**同时获得两腿门禁。Complexity Delta 目标
 全部 NO（无新文件、无新持久状态、无新接线、无 topology 变化）。
+
+## 7. 首轮 CI 实证（补充，实施后）
+
+CI release-parity job 实测确认两件事：
+
+1. **守卫在真实 pack 链路按设计工作**：`npm pack --dry-run` 触发的 prepack 生产构建打出
+   `Bundle dependency budget PASS (production)`，两卫星尺寸与 §2 基线字节级一致（70786 / 60244）。
+2. **发现一处接线盲区（已修复并票内记录 ERR-140 复发）**：`ci.yml` 的
+   `Verify publish dry-run` 步骤用 `npm pack --dry-run 2>&1 | head -50` + pipefail。
+   PASS 证据块经 prepack 拼接进 pack 的 stdout 后，整包输出（本地预演实测 309 行）越过
+   50 行预算 → head 先退 → npm 收 EPIPE 以 exit 1 伪失败。§6 的"零接线改动"判断对
+   verify:merge 与 build 路径成立，但漏枚举了 pack 流的第三个 consumer——展示型管道。
+   处置：步骤改为文件捕获（tail 展示 + 透传 npm 真实退出码），并新增接线回归测试钉住
+   "npm pack 不得再管道进 head"。教训：给构建期新增固定输出前，必须枚举该 stdout 的
+   全部 consumer（ERR-140 不变量的行预算变体）。
