@@ -1,6 +1,6 @@
 {
   "name": "create-principles-disciple",
-  "version": "1.144.4",
+  "version": "1.144.5",
   "description": "Interactive CLI installer for Principles Disciple OpenClaw plugin",
   "type": "module",
   "bin": {
