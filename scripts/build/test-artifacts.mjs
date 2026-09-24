@@ -25,6 +25,39 @@ export function skipTestArtifacts(sourcePath) {
   return !isTestArtifact(sourcePath);
 }
 
+// --- PRI-918 release-artifact hygiene contract ---------------------------
+// The RAH gates above assert the narrowest class (compiled test output).
+// PRI-918 widens it for the release-artifact checker ONLY: inside an
+// artifact root (packages/*/dist, installer payload, npm tarball listing)
+// a non-published test shape is a violation even when it would be legal in
+// the source tree. Deliberately NOT used by skipTestArtifacts /
+// check-dist-hygiene so bundle-copy semantics stay unchanged (PRI-918
+// adds checks, never pipeline behaviour).
+//
+// Still deliberately NOT matched (see docs/release/artifact-hygiene-gate-audit.md §4):
+// production modules named *-fixtures.ts or test-double-*.js (basename forms
+// stay legal; only DIRECTORY segments are judged), samples/, and root
+// data files shipped via files[] whitelists (trust/root.json, …).
+const WIDE_TEST_BASENAME = TEST_BASENAME;
+// A violation directory must appear as a real path segment followed by a
+// separator — callers pass directories with a trailing '/' (see
+// classifyEntry in check-release-artifact-hygiene.mjs). A plain FILE named
+// `test` or `coverage` is therefore NOT a directory violation.
+const WIDE_TEST_DIR_SEGMENT =
+  /(^|[\\/])(__tests__|__snapshots__|__fixtures__|tests|test|snapshots|fixtures|coverage|\.vitest)([\\/])/;
+
+/**
+ * Classify a path relative to an artifact root (dist dir, payload component,
+ * or npm tarball entry). Returns the violated rule id, or null when clean.
+ */
+export function classifyArtifactViolation(relativePath) {
+  const normalized = relativePath.split(/[\\/]/).join('/');
+  const basename = normalized.split('/').pop() ?? '';
+  if (WIDE_TEST_BASENAME.test(basename)) return 'NO_TEST_FILES';
+  if (WIDE_TEST_DIR_SEGMENT.test(normalized)) return 'NO_TEST_DIRECTORIES';
+  return null;
+}
+
 export function collectTestArtifacts(root, dir = root, hits = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
