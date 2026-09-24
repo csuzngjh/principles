@@ -1025,6 +1025,7 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Installing pd-console', weight: 8 },
   { name: 'Preparing core library for console', weight: 3 },
   { name: 'Validating bundled console dependencies', weight: 5 },
+  { name: 'Reconciling canonical core junction', weight: 1 },
   { name: 'Verifying pd-console', weight: 3 },
   { name: 'Copying templates', weight: 3 },
   { name: 'Generating config.yaml', weight: 2 },
@@ -2438,6 +2439,258 @@ export function ensureCodexAdapterResolution(): void {
   }
 }
 
+/**
+ * PRI-912 (SPEC-P1′-A): canonical junction reconciliation for the plugin's
+ * bundled @principles/core copy. The self-contained release asset must ship
+ * node_modules materialized (the asset builder refuses symlinks), so every
+ * deployed plugin carries a full physical duplicate of the runtime root core
+ * (~119MB / 17k files on a real install). This pass runs once ALL components
+ * are deployed and BEFORE the journal 'staged' transition — a conversion that
+ * breaks runtime resolution must surface through the EXISTING console-probe →
+ * rollback channel, not a new one.
+ *
+ * The ONLY candidate is <pluginDir>/node_modules/@principles/core with the
+ * runtime root core (<runtime>/core) as canonical source. A materialized copy
+ * is converted to a junction (Windows) / relative symlink (Unix) only when
+ * ALL three gates hold:
+ *   1. package identity — the copy's and the source's package.json `name`
+ *      agree (evidence-based; never name-matching alone),
+ *   2. declared relationship — the plugin manifest declares
+ *      `@principles/core` as a `file:` dependency whose declared path stays
+ *      inside the plugin dir (rc-1) and RESOLVES to the canonical runtime
+ *      core (the <plugin>/core slot installPluginToStaging creates),
+ *   3. content digest — digestDirectory(copy) === digestDirectory(source).
+ * Any gate failure (or an unreadable/partial state) SKIPS the copy with a
+ * structured reason (rc-9) and never mutates it — dedup must never make an
+ * install worse. Conversion is rename-swap with verification and restore:
+ * a failed link creation/verification puts the materialized copy back; only
+ * a restore failure (which WOULD break resolution) fails the install loud
+ * into the existing fail → rollback channel. Idempotent: an existing link
+ * that already resolves to the canonical core is a no-op. The canonical
+ * target itself is never deleted: removing a converted tree unlinks the
+ * junction, it does not follow it (rmSync/fse.remove symlink semantics).
+ */
+export interface CoreJunctionReconciliation {
+  /** Materialized copies replaced by a verified canonical junction. */
+  readonly converted: readonly string[];
+  /** Existing links already resolving to the canonical core (idempotent no-op). */
+  readonly alreadyCanonical: readonly string[];
+  /** Structured skip records — every non-conversion carries a reason (rc-9). */
+  readonly skipped: readonly { dir: string; reason: string }[];
+}
+
+const CORE_JUNCTION_PACKAGE = '@principles/core';
+
+/** Reads a package.json `name` as untrusted input (rc-1); null when absent/malformed. */
+function readPackageJsonName(manifestPath: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (!isRecord(parsed)) return null;
+    const {name} = parsed;
+    return typeof name === 'string' && name.length > 0 ? name : null;
+  } catch {
+    return null;
+  }
+}
+
+export function reconcilePluginCoreCanonicalJunction(): CoreJunctionReconciliation {
+  const converted: string[] = [];
+  const alreadyCanonical: string[] = [];
+  const skipped: { dir: string; reason: string }[] = [];
+  const runtimeCoreDir = getInstalledCoreDir();
+  const runtimeCoreReal = (() => {
+    try {
+      return realpathSync(runtimeCoreDir);
+    } catch {
+      return null;
+    }
+  })();
+  if (runtimeCoreReal === null) {
+    // No canonical source → nothing safe to link to; the copies still work.
+    for (const pluginDir of pluginInstallDirs()) {
+      skipped.push({ dir: path.join(pluginDir, 'node_modules', CORE_JUNCTION_PACKAGE), reason: 'canonical_runtime_core_missing' });
+    }
+    return { converted, alreadyCanonical, skipped };
+  }
+  // Computed at most once, only when a materialized candidate reaches gate 3.
+  let runtimeCoreDigest: string | null = null;
+
+  for (const pluginDir of pluginInstallDirs()) {
+    const coreSlot = path.join(pluginDir, 'node_modules', CORE_JUNCTION_PACKAGE);
+    // lstat (never existsSync): a dangling link must be reported as a link
+    // problem, not misread as an absent copy.
+    let slotStat: Stats;
+    try {
+      slotStat = lstatSync(coreSlot);
+    } catch {
+      skipped.push({ dir: coreSlot, reason: 'copy_absent' });
+      continue;
+    }
+    try {
+      if (slotStat.isSymbolicLink()) {
+        try {
+          if (realpathSync(coreSlot) === runtimeCoreReal) {
+            alreadyCanonical.push(coreSlot);
+          } else {
+            skipped.push({ dir: coreSlot, reason: 'existing_link_resolves_elsewhere' });
+          }
+        } catch {
+          skipped.push({ dir: coreSlot, reason: 'existing_link_target_unreadable' });
+        }
+        continue;
+      }
+      if (!slotStat.isDirectory()) {
+        skipped.push({ dir: coreSlot, reason: 'copy_not_a_directory' });
+        continue;
+      }
+    } catch (error) {
+      // An unreadable/partial slot state is never mutated and never fails
+      // the install — dedup is an optimization over a working copy (rc-9).
+      skipped.push({ dir: coreSlot, reason: `copy_unreadable: ${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
+
+    // Gate 1 — package identity from both manifests.
+    const copyName = readPackageJsonName(path.join(coreSlot, 'package.json'));
+    const sourceName = readPackageJsonName(path.join(runtimeCoreDir, 'package.json'));
+    if (copyName === null || sourceName === null || copyName !== sourceName) {
+      skipped.push({ dir: coreSlot, reason: `package_identity_mismatch: copy=${JSON.stringify(copyName)} source=${JSON.stringify(sourceName)}` });
+      continue;
+    }
+
+    // Gate 2 — the declared file: dependency binds the copy slot to the
+    // canonical core. The ref is untrusted (rc-1): only relative refs that
+    // stay inside the plugin dir are considered.
+    const pluginManifestPath = path.join(pluginDir, 'package.json');
+    let declaredRef: unknown;
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(pluginManifestPath, 'utf8'));
+      if (!isRecord(parsed) || !isRecord(parsed.dependencies)) {
+        skipped.push({ dir: coreSlot, reason: 'plugin_manifest_dependencies_unreadable' });
+        continue;
+      }
+      declaredRef = parsed.dependencies[CORE_JUNCTION_PACKAGE];
+    } catch (error) {
+      skipped.push({ dir: coreSlot, reason: `plugin_manifest_unreadable: ${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
+    if (typeof declaredRef !== 'string' || !declaredRef.startsWith('file:')) {
+      skipped.push({ dir: coreSlot, reason: `declared_dependency_not_file_ref: ${JSON.stringify(declaredRef ?? null)}` });
+      continue;
+    }
+    const declaredDir = path.resolve(pluginDir, declaredRef.slice('file:'.length));
+    if (declaredDir !== pluginDir && !declaredDir.startsWith(pluginDir + path.sep)) {
+      skipped.push({ dir: coreSlot, reason: `declared_dependency_escapes_plugin_dir: ${declaredRef}` });
+      continue;
+    }
+    let declaredResolvesToCore: boolean;
+    try {
+      declaredResolvesToCore = existsSync(declaredDir) && realpathSync(declaredDir) === runtimeCoreReal;
+    } catch {
+      // Unreadable declared slot — treat as not resolving to the canonical core.
+      declaredResolvesToCore = false;
+    }
+    if (!declaredResolvesToCore) {
+      skipped.push({ dir: coreSlot, reason: `declared_file_dep_does_not_resolve_to_runtime_core: ${declaredRef}` });
+      continue;
+    }
+
+    // Gate 3 — content digest equality. Either side failing to digest is a
+    // skip (rc-9), never an install failure.
+    if (runtimeCoreDigest === null) {
+      try {
+        runtimeCoreDigest = digestDirectory(runtimeCoreDir);
+      } catch (error) {
+        skipped.push({ dir: coreSlot, reason: `canonical_core_unreadable: ${error instanceof Error ? error.message : String(error)}` });
+        continue;
+      }
+    }
+    let copyDigest: string;
+    try {
+      copyDigest = digestDirectory(coreSlot);
+    } catch (error) {
+      skipped.push({ dir: coreSlot, reason: `copy_unreadable: ${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
+    if (copyDigest !== runtimeCoreDigest) {
+      skipped.push({ dir: coreSlot, reason: 'content_digest_mismatch' });
+      continue;
+    }
+
+    // All gates hold: rename-swap the materialized copy for a canonical link.
+    const backupPath = `${coreSlot}.pri912-materialized`;
+    // The backup name is reserved by this pass; clear our own stale residue
+    // so the swap below can never collide with it. If the residue cannot be
+    // removed (e.g. Windows EBUSY from an AV scan holding the ~17k-file tree),
+    // the swap would collide anyway — skip with the working copy intact
+    // rather than throw out of the pass and fail a healthy install (rc-9).
+    try {
+      rmSync(backupPath, { recursive: true, force: true });
+    } catch (error) {
+      skipped.push({ dir: coreSlot, reason: `stale_backup_unremovable: ${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
+    try {
+      renameSync(coreSlot, backupPath);
+    } catch (error) {
+      skipped.push({ dir: coreSlot, reason: `rename_aside_failed: ${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
+    try {
+      if (isWindows()) {
+        symlinkSync(runtimeCoreDir, coreSlot, 'junction');
+      } else {
+        symlinkSync(path.relative(path.dirname(coreSlot), runtimeCoreDir), coreSlot, 'dir');
+      }
+      if (realpathSync(coreSlot) !== runtimeCoreReal) {
+        throw new Error('fresh link does not resolve to the canonical core');
+      }
+    } catch (error) {
+      // Conversion failed — put the proven-identical copy back. The slot must
+      // never be left empty or dangling; only a failed RESTORE breaks
+      // resolution and deserves the fail → rollback channel. Remove the slot
+      // unconditionally (force handles absent, lstat semantics unlinks a
+      // dangling link without following it); guarding on existsSync would MISS
+      // a dangling link — existsSync follows it to a missing target and returns
+      // false — leaving it to make the restore renameSync fail.
+      try {
+        rmSync(coreSlot, { recursive: true, force: true });
+        renameSync(backupPath, coreSlot);
+      } catch (restoreError) {
+        throw new Error(
+          `PRI-912 core junction conversion failed at ${coreSlot} AND the materialized copy could not be restored: `
+          + `${restoreError instanceof Error ? restoreError.message : String(restoreError)}`
+          + ` (original conversion failure: ${error instanceof Error ? error.message : String(error)})`,
+          { cause: restoreError },
+        );
+      }
+      skipped.push({ dir: coreSlot, reason: `conversion_failed_restored: ${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
+    // The link is created and verified — the conversion is a success. Removing
+    // the now-redundant materialized backup is only disk reclamation; if it
+    // fails (Windows EBUSY/EPERM on ~17k files) we must NOT roll back a
+    // working install. Leave the residue, warn, and keep the converted slot.
+    try {
+      rmSync(backupPath, { recursive: true, force: true });
+    } catch (error) {
+      logger.warn(
+        `PRI-912: converted ${coreSlot} to a canonical junction but could not remove the redundant materialized backup at ${backupPath}: `
+        + `${error instanceof Error ? error.message : String(error)} — reclamation deferred, install is healthy.`,
+      );
+    }
+    converted.push(coreSlot);
+  }
+
+  if (converted.length > 0) {
+    logger.info(`PRI-912: converted ${converted.length} materialized @principles/core plugin copy/copies to canonical junctions.`);
+  }
+  for (const skip of skipped) {
+    logger.warn(`PRI-912: core dedup skipped at ${skip.dir}: ${skip.reason}`);
+  }
+  return { converted, alreadyCanonical, skipped };
+}
+
 function ensureCoreDependency(_targetDir: string): void {
   const coreDir = getInstalledCoreDir();
   if (!existsSync(coreDir)) {
@@ -3552,6 +3805,16 @@ export async function install(
 
     if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled console dependencies...');
     await installConsoleDependencies();
+    stepIndex++;
+
+    // PRI-912 (SPEC-P1′-A): dedup the plugin's bundled @principles/core copy
+    // into a canonical junction only after EVERY component is deployed, so a
+    // conversion that breaks runtime resolution fails the console probe below
+    // and lands in the EXISTING fail → restoreBackup channel (no new
+    // rollback mechanism). Runs before the journal 'staged' transition: an
+    // install that failed here is still fully covered by the backups.
+    if (spinner) updateProgress(spinner, stepIndex, 'Reconciling canonical core junction...');
+    reconcilePluginCoreCanonicalJunction();
     stepIndex++;
     // ADR-0024 D-2: all runtime content is laid down — the new installation
     // is staged (nothing has been discarded yet; backups still hold the old one).
