@@ -17,8 +17,8 @@ v0.4 将 **Principle Identity** 正式收编为长期治理对象。触发证据
 
 1. **INV-03 升级**：拆分 **Entity Identity**（账本 UUID，回答“这是哪一条 Principle”）与 **Content Revision Identity**（revision / digest / hash，回答“这是哪一版内容”）；明确 **Entity Identity ≠ Content Identity**；
 2. **新增 INV-11**：Principle identity 由 Ledger 唯一铸造、生产链必须携带、激活边界 fail-closed；
-3. **新增 §4A Principle Identity Contract**：I1 Identity Minting / I2 Identity Carry / I3 Activation Fail Closed，以及 Identity Flow Model 与 lineage join key 义务；
-4. **§15 Lineage Model** 扩展身份链；**§16 Exact Execution Identity** 补 principle identity 字段；**§22 G1** 增加 identity checks；
+3. **新增 §4A Principle Identity Contract**：I1 Identity Minting / I2 Identity Carry / I3 Activation Fail Closed，以及 Identity Flow Model、lineage join key 义务与 §4A.6 已知边界记录（现状差距如实声明，防止把规范目标误读为已达成现状）；
+4. **§15 Lineage Model** 扩展身份链；**§16 Exact Execution Identity** 补 principle identity 字段；**§22 G1** 增加 identity checks；另对 §20/§33 做与身份收编一致的行级对齐，并更新文档头元数据；
 5. **内容边界清理**：PRI-803 冲刺契约与当前工程快照（§12 / §13 / §14 / §23 / §24 / §25 / §26 / §35）移至 `docs/audit/pd-core-value-pipeline-spec-v0.3-snapshot.md`，原编号位置保留指针、不复用、不重排。
 
 编号规则：本 SPEC 的章节编号是稳定引用 ID。新增章节使用新稳定编号（如 §4A）；移出章节的编号不复用、不重排，避免破坏外部引用。
@@ -317,7 +317,7 @@ executed
 
 * 唯一合法来源：**Principle Ledger 在 intake 时刻铸造的 UUID**；
 * UUID 是治理实体主键（governance entity primary key）；
-* Entity Identity 只能在 Ledger intake 阶段创建，此外不存在任何铸造点；
+* Entity Identity 只能在 Ledger intake 阶段创建；生产 Pain → Principle 链中不存在其他铸造点（已知的非 intake 铸造路径作为已知边界记录于 §4A.6）；
 * 下游（Artifact / Activation / Execution / Evidence）禁止使用 `title` / `text` / `content` 等自然语言片段或派生值充当实体身份。
 
 ### Content Revision Identity —「这是当前 Principle 内容的哪一个版本？」
@@ -511,7 +511,7 @@ Principle 的实体身份由 Principle Ledger 唯一铸造，并且必须在生�
 激活边界 fail-closed：无已验证身份 ⇒ reject / defer（§4A I3）
 ```
 
-宽松的文本解析（title → principle）只允许存在于 display / resolution 展示面，永远不得作为写入或闸门边界的身份来源。
+宽松的文本解析（title → principle）只允许存在于 display / resolution 展示面，永远不得作为写入或闸门边界的身份来源。（截至 v0.4 仍有少数非展示面残留宽松解析点，作为已知边界记录于 §4A.6，收口属于后续演进。）
 
 ---
 
@@ -569,7 +569,7 @@ Activation 边界必须在授权提交**之前**验证：
 2. Ledger membership 存在——**UUID 形态正确不等于成员资格成立**，必须对账本验证该身份真实存在；
 3. identity 无歧义——经 lineage 解析身份时必须恰好一条，0 条或多条都视为歧义。
 
-失败 ⇒ `reject` / `defer`。禁止 fallback 到：
+失败 ⇒ `reject` / `defer`（实现中以结构化的 `invalid_artifact` 决策表达，含 reason + nextAction）。禁止 fallback 到：
 
 ```text
 title
@@ -584,7 +584,7 @@ lineage 猜测
 lineage 解析非恰好一条      ⇒ 歧义，拒绝，不得猜测
 ```
 
-> 已知边界（v0.4 如实记录）：membership 证明“存在”，不证明“派生”。上游直接断言 UUID（而非链路推导盖章）的携带方式，存在把 artifact 误归因到一条**已存在**原则的理论面。身份的盖章/推导者清单应保持受控；该收紧属于后续演进，不改变 I3 的 fail-closed 判据。
+> 已知边界（v0.4 如实记录）：membership 证明“存在”，不证明“派生”。断言型携带（如 contentJson 内嵌 principle id 的透传、上游 LLM 断言值，而非链路推导盖章）存在把 artifact 误归因到一条**已存在**原则的理论面。身份的盖章/推导者清单应保持受控；该收紧属于后续演进，不改变 I3 的 fail-closed 判据。其他现状差距统一见 §4A.6。
 
 ## 4A.4 Identity Flow Model
 
@@ -604,6 +604,17 @@ Pain Signal
 ## 4A.5 对存量数据与历史 reconciliation 的适用
 
 本契约同样是历史身份对账（reconciliation）的稳定标准：任何存量身份回填/归因修复，必须以账本 UUID 为目标身份、以已存在的 lineage 为推导依据、以“恰好一条”为通过判据；推导失败显式记为 unresolved 并上浮，禁止以文本猜测兜底。本 SPEC 不定义 reconciliation 的实现。
+
+## 4A.6 已知边界（v0.4 如实记录的现状）
+
+以下是收编时刻经独立审查确认的现状差距。它们不改变本契约的规范效力，但读者**不得把本契约误读为“已全部达成”**：
+
+* **非 intake 铸造路径**：演示链路会为合成候选直接向真实账本铸造 UUID（不经 intake service）；遗留代码中还存在 T-NN / P_NNN 形态的身份铸造函数（当前无生产调用方接线）。任何此类路径若进入生产 Pain → Principle 链，即违反 I1。
+* **evidence 层身份未收口**：激活/审批边界已 UUID-only，但注入面的 directive id 解析与 evidence 行的键仍可回退到标题 / ruleId——同一原则在激活侧是 Ledger UUID、在 evidence 侧可能是文本键，两处尚不能可靠 JOIN。§15 的 join key 义务正是要求消除这一残留；收口前新旧键形态并存，其清理适用 §4A.5 的对账标准。
+* **携带链中的静默文本写入**：rule 产物身份透传链中存在 title 兜底并写入身份列的路径，该跳无结构化事件（与 I2 可观察性存在张力）；标题最终无法通过激活边界的 UUID 形态检查，因此不会产生标题键的激活。
+* **宽松解析残留**：除 display / resolution 面外，仍存在少数读取/回执面使用内容回退解析身份。INV-11 的“仅限展示面”是规范要求，尚未完全达成。
+* **非生产调用方的回落差异**：未接线账本身份依赖的调用方（dogfood 脚本、合成基线夹具）回落到仅 UUID 形态的边界——不做账本成员校验、不支持未盖章产物的 lineage 解析。
+* **存储层形态残留**：candidate kind 列的数据库默认值仍是 fail-open 形态（应用层写边界是唯一强制点）；旧身份空间的读侧 COALESCE 类兼容查询仍在（对账收口后移除）。
 
 ---
 
@@ -1063,6 +1074,8 @@ Pain
 > **identity 是 lineage 的 join key。**
 > 执行血缘的每一跳都必须能以同一 Principle UUID 回链；无法回链的段落在归因时必须显式标记，不得静默拼接。
 
+（该义务截至 v0.4 的现状差距——evidence/注入面的键形态残留——见 §4A.6。）
+
 关键：
 
 ```text
@@ -1102,6 +1115,8 @@ activation id
 ```
 
 其中 `principle_id` 是**实体身份**（INV-03 Entity Identity / §4A），content revision/digest 是内容版本身份，activation id 把二者绑定到一次授权执行。
+
+（三要素为规范性要求；截至 v0.4 的落地差距——evidence 行尚未持久化 content revision/digest、注入面与 evidence 键仍有文本回退——见 §4A.6。）
 
 目的不是增加数据库，而是：
 
