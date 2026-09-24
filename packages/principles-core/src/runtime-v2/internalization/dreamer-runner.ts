@@ -274,15 +274,30 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
 
     const artifactId = `pi-art-${taskId}-${runId}`;
     const now = new Date().toISOString();
+    // PRI-911A (I1+I3 writer boundary): the identity column is reserved for
+    // canonical ledger UUIDs. An LLM-asserted `sourcePrincipleId` is an
+    // UNTRUSTED CLAIM — postFetchTransform's stripFabricatedCorePrincipleIds
+    // already removed everything except a Historical Core Principle id
+    // (`T-NN`), and those are registry entries, not ledger principles. So no
+    // assertion this runner can see is ever a canonical identity, and none is
+    // carried. The value still rides in contentJson, which is where the display
+    // resolver reads it from — Bug-O L1's 'unlinked' symptom is unaffected.
+    // Stamping the real identity is ScribeRunner's job (PR #1856 I2), which
+    // resolves it against the ledger instead of asserting it.
+    const assertedPrincipleId = output.sourcePrincipleId;
+    if (typeof assertedPrincipleId === 'string' && assertedPrincipleId.trim() !== '') {
+      this.emitEvent('identity_assertion_not_carried', taskId, {
+        runId,
+        reason: 'non_canonical_identity',
+        assertedPrincipleId,
+        nextAction: 'identity_is_stamped_from_the_ledger_by_the_chain_not_asserted',
+      });
+    }
     try {
       await this.artifactStore.upsertArtifact({
         artifactId,
         artifactKind: 'principle',
         sourceTaskId: taskId,
-        // Bug-O L1 fix: propagate sourcePrincipleId so downstream activation
-        // dispatch and ActivationsConsoleModel can resolve the principle link.
-        // Without this, the activation list shows 'unlinked' for dreamer artifacts.
-        sourcePrincipleId: output.sourcePrincipleId,
         lineageArtifactIds,
         validationStatus: 'pending',
         contentJson: JSON.stringify(output),
