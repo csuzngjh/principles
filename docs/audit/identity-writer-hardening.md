@@ -181,6 +181,34 @@ node D:/pd-probe-pri910/pri911a_recount.cjs
 按 `artifact_kind × 值类别` 归因（一条 node 内联查询即可）：`principle::T-NN = 19`、
 `rule::title = 3`、`principle::uuid = 4`、`rule::uuid = 1`。
 
+### 6.2 接线与事件名的静态守卫（Owner 复核 P2-1 / P3 的处置）
+
+"三个生产构造点全部注入 `ledgerIdentity`"与"事件的 wire 名已登记"原本是**只靠 grep 人工核对**的主张，
+未来新增构造点或改名会无声漂移。现由
+`packages/principles-core/src/runtime-v2/internalization/__tests__/identity-writer-production-wiring.test.ts`
+钉住（扫描范围 = 四个包的 `src/**`，排除 `__tests__`/`*.test.ts`/`dist`；单测**故意**不注入以覆盖
+legacy shape-only 契约，故必须排除测试文件）：
+
+| 断言 | 内容 | 失败形态 |
+| --- | --- | --- |
+| G1 authority | 被信任的工厂 `createEvaluatorRunnerDeps` 自身必须产出 `ledgerIdentity` | 工厂被摘掉注入 ⇒ 红 |
+| G1 sites | 每处生产 `new EvaluatorRunner(` 的参数文本须含 `ledgerIdentity` 或走上述工厂；另断言站点数 ≥ 3 防空跑 | 新站点漏注入 ⇒ 红并打印 `file:line` |
+| G2 | `runnerName: 'x'` + `this.emitEvent('suffix'` ⇒ `TelemetryEventType` 必须登记 `x_suffix` | 改前缀或漏登记 ⇒ 红 |
+
+站点现状（由该扫描得出）：`host-runtime/src/internalization-consumer-cycle.ts:643` 内联注入；
+`pd-cli/src/commands/runtime-internalization-run-once.ts:640` 与
+`pd-cli/src/services/rulehost-pipeline-runner.ts:476` 走工厂。传裸 `deps` 变量的写法会被判红（fail-closed）。
+
+G2 与 `npm run check:telemetry-events --strict` 同源（Pattern A 按 `${runnerName}_${suffix}` 合成后双向比对：
+`union=336 emitted=342 missingRegistered=0 deadMembers=0`）；本测试的价值是让评审者在**测试层**看到证据。
+前缀合成实现在 `runtime-v2/runner/base-peer-runner.ts:351-364`，
+`emitEvent('identity_assertion_not_carried')` 落 wire 即 `dreamer_identity_assertion_not_carried`
+（运行时同链证据：`__tests__/dreamer-runner.test.ts:267`）。
+
+三条断言都做过去反向变异（改后跑红、随后 `git checkout --` 还原）：摘工厂注入 → G1 authority 红；
+摘 `internalization-consumer-cycle.ts:652` 的 `ledgerIdentity` → G1 sites 红并报 `:643`；
+把 union 里的 `dreamer_identity_assertion_not_carried` 改名 → G2 红。**守卫会咬，不是装饰。**
+
 ## 7. 剩余风险与未纳入范围
 
 | 项 | 说明 | 归属 |
@@ -206,4 +234,6 @@ node D:/pd-probe-pri910/pri911a_recount.cjs
 | 复核发现：账本不可用时真 UUID 被判 `invalid_identity` | **成立**，且是本契约收紧后新暴露的语义缺口（"不可用"被误标成"漂移"）。修它须改 `loadLedger` 可用性契约或给失败契约加第五种 reason，均在 SPEC Non Goals 内。 | 开 **PRI-915**（Backlog，Owner 决策方案） |
 | 复核发现：§0 的"17 条 T-NN + 5 条标题"与副本实测不符 | **成立**：实测 `principle::T-NN = 19`、`rule::title = 3`（总数 22 不变）。原分解是分类错误，非副本被改写。 | 已按 `artifact_kind × 值类别` 更正 §0 / §2，并补 §6.1 复现命令 |
 | 复核疑问："5 条账本验证 UUID 无法从副本独立复证（ledger principle 数为 0）" | **不复现**：该副本账本只有顶层 `_tree` 一个键，`_tree.principles` 共 **122** 条；3 个去重 UUID 全部命中（2 条 `archived` + 1 条 `candidate`）。误判来自读顶层 `principles`（不存在）。 | 已在 §1 记明键路径与命中结果，避免再次误读 |
+| 复核（Blocking）：Dreamer 发的是裸后缀 `identity_assertion_not_carried`，与登记的 `dreamer_identity_assertion_not_carried` 不一致 ⇒ strict 失败 / 事件被降级 / Owner 看不到拒绝 | **不成立**：`base-peer-runner.ts:351-364` 的 `emitEvent` 按 `{runnerName}_{eventType}` 合成，`dreamer-runner.ts:122` 的 runnerName 即 `dreamer`；wire 名与登记名逐字相同。"未注册即被改写"的防线是 `check:telemetry-events --strict`（双向：`missingRegistered=0` 且 `deadMembers=0`）；若前缀合成不存在，该事件会进 `deadMembers` 并当场红。`emitEvent` 路径本身不改写名字，:488 的 `degradation_triggered` 是 `malformed_historical_run_rows` 的独立分支。 | 不改代码；补 §6.2 的 G2 断言把该契约钉在测试层（原要求的运行时证据已由 `dreamer-runner.test.ts:267` 提供） |
+| 复核（P2-1 / P3）：`ledgerIdentity` 可选 ⇒ 未注入的站点只剩形状 gate；"三个生产站点全部注入"只靠 grep，易漂移 | **成立**（且是本次收紧后仍开放的漂移面：漏注入时残余风险为"形状合法但账本不认的 UUID"）。 | 新增静态守卫测试（§6.2 G1 authority + G1 sites，三条断言均经去反向变异证明会咬） |
 
