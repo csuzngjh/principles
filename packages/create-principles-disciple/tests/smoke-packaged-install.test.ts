@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'child_process';
 import * as http from 'http';
 import {
@@ -320,6 +321,48 @@ describe('Real packaged install smoke test', () => {
     }
     expect(npmWasInvoked).toBe(false);
   }, 600_000);
+
+  it('PRI-912: installed plugin core copies are canonical junctions into the runtime core', () => {
+    // Runs right after the real installer succeeded above, so tempHomeDir is
+    // the production-path AFTER state: both deployed plugins' materialized
+    // @principles/core copies (what the release asset ships, ~119MB each on a
+    // real install) must have been converted to junctions/symlinks resolving
+    // to <home>/.pd/runtime/core, and a bare import from each plugin must
+    // resolve through the canonical tree.
+    const runtimeCore = path.join(tempHomeDir, '.pd', 'runtime', 'core');
+    expect(fs.existsSync(path.join(runtimeCore, 'package.json'))).toBe(true);
+    const runtimeCoreReal = fs.realpathSync(runtimeCore);
+
+    const pluginDirs = [
+      path.join(tempHomeDir, '.pd', 'runtime', 'plugin'),
+      path.join(tempHomeDir, '.openclaw', 'extensions', 'principles-disciple'),
+    ];
+    let physicalCopyBytes = 0;
+    for (const pluginDir of pluginDirs) {
+      const slot = path.join(pluginDir, 'node_modules', '@principles', 'core');
+      expect(fs.existsSync(slot), `core slot missing at ${slot}`).toBe(true);
+      expect(fs.lstatSync(slot).isSymbolicLink(), `core slot is still a materialized copy at ${slot}`).toBe(true);
+      expect(fs.realpathSync(slot)).toBe(runtimeCoreReal);
+      const resolved = createRequire(path.join(pluginDir, 'probe.cjs')).resolve('@principles/core');
+      expect(resolved.startsWith(runtimeCoreReal), `bare import resolved outside the canonical core: ${resolved}`).toBe(true);
+    }
+
+    // Installed-footprint evidence: the canonical tree is counted once; each
+    // converted slot adds only link metadata (0 physical bytes).
+    const measure = (dir: string): number => {
+      let total = 0;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const child = path.join(dir, entry.name);
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) total += measure(child);
+        else if (entry.isFile()) total += fs.statSync(child).size;
+      }
+      return total;
+    };
+    physicalCopyBytes = measure(runtimeCore);
+    console.info(`[pri-912] canonical core ${physicalCopyBytes} bytes counted once; ${pluginDirs.length} plugin slots converted to links.`);
+    expect(physicalCopyBytes).toBeGreaterThan(0);
+  }, 120_000);
 
   it('installer demo verification does not pollute the user workspace', () => {
     // P0-1 anti-regression: the installer's Story A verification must run in
