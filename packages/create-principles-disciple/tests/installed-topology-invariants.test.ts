@@ -17,7 +17,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import * as path from 'path';
 import * as childProcess from 'child_process';
 import { EventEmitter } from 'events';
 import { install } from '../src/installer.js';
