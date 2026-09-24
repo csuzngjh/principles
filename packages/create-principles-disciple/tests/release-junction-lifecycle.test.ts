@@ -161,17 +161,14 @@ function digestTree(dir: string): string {
   const rows: string[] = [];
   const walk = (current: string): void => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-      // basename() is a deliberate no-op here (dir entry names are single
-      // segments); it pins the traversal for CodeQL's js/path-injection.
-      const child = path.join(current, path.basename(entry.name));
+      const child = path.join(current, entry.name);
       const rel = path.relative(dir, child).split(path.sep).join('/');
-      const link = fs.lstatSync(child);
-      if (link.isSymbolicLink()) {
+      if (entry.isSymbolicLink()) {
         rows.push(`L\0${rel}\0${fs.readlinkSync(child)}\n`);
-      } else if (link.isDirectory()) {
+      } else if (entry.isDirectory()) {
         rows.push(`D\0${rel}\n`);
         walk(child);
-      } else if (link.isFile()) {
+      } else if (entry.isFile()) {
         const hash = createHash('sha256');
         hash.update(fs.readFileSync(child));
         rows.push(`F\0${rel}\0${hash.digest('hex')}\n`);
@@ -194,8 +191,7 @@ function journalFiles(): string[] {
 }
 
 function journalTransitions(file: string): Record<string, unknown>[] {
-  // basename(): CodeQL js/path-injection pin, see digestTree.
-  return fs.readFileSync(path.join(transactionsDir, path.basename(file)), 'utf8')
+  return fs.readFileSync(path.join(transactionsDir, file), 'utf8')
     .split('\n')
     .filter((line) => line.trim().length > 0)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
