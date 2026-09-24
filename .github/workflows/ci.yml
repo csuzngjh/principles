@@ -149,9 +149,16 @@ jobs:
 
       - name: Verify publish dry-run
         working-directory: packages/openclaw-plugin
+        # File capture, not `| head`: prepack now prints the bundle-budget
+        # evidence block, so the pipeline's line budget decides npm's exit
+        # code via EPIPE under pipefail (PRI-919 CI incident) — the display
+        # limit must never be able to fake a publish failure.
         run: |
-          set -o pipefail
-          npm pack --dry-run 2>&1 | head -50
+          set +e
+          npm pack --dry-run > /tmp/pack-dry-run.log 2>&1
+          status=$?
+          tail -n 80 /tmp/pack-dry-run.log
+          exit $status
 
   lint:
     name: Lint
