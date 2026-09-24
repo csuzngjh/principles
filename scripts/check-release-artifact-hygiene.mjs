@@ -35,8 +35,11 @@ export function scanArtifactTree(label, root) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name === 'node_modules') continue;
-        violations.push(...classifyEntry(label, root, path, entry.isDirectory()));
-        walk(path);
+        const dirViolations = classifyEntry(label, root, path, true);
+        violations.push(...dirViolations);
+        // A flagged directory is the top-level finding; its whole subtree
+        // inherits the violation — report once, do not cascade.
+        if (dirViolations.length === 0) walk(path);
         continue;
       }
       scanned += 1;
@@ -103,35 +106,51 @@ export function packDryRunListing(pkgDir) {
   };
 }
 
-export function runReleaseArtifactHygiene(repoRoot) {
-  const results = [];
-  const merge = (r) => results.push(r);
-
-  // Leg 1 — every workspace package's dist.
-  for (const pkg of listWorkspacePackages(repoRoot)) {
+/** Enumerate the artifact roots the gate asserts, as { label, dir, pkg }.
+ *  Pure fs walk — no npm, no mutation — so the wiring itself is testable
+ *  (EP-09: a guard's own enumeration needs a self-check, not only the
+ *  classifier). `pkg` is set for real package dirs (tarball-eligible). */
+export function enumerateArtifactRoots(repoRoot) {
+  const roots = [];
+  const packages = listWorkspacePackages(repoRoot);
+  for (const pkg of packages) {
     const distDir = join(pkg.dir, 'dist');
     if (existsSync(distDir)) {
-      merge(scanArtifactTree(`packages/${pkg.dir.split(/[\\/]/).pop()}/dist`, distDir));
+      roots.push({ label: `packages/${pkg.dir.split(/[\\/]/).pop()}/dist`, dir: distDir, pkg });
     }
   }
-
-  // Leg 2 — installer payload components (empty package.json-only dirs at PR
-  // time, fully materialised after a bundle run; scanned either way so a
-  // dirty local payload tree can never pass silently — PRI-913/G2 lesson).
+  // Installer payload components (empty package.json-only dirs at PR time,
+  // fully materialised after a bundle run; scanned either way so a dirty
+  // local payload tree can never pass silently — PRI-913/G2 lesson).
   const installerDir = join(repoRoot, 'packages', 'create-principles-disciple');
   if (existsSync(installerDir)) {
     for (const entry of readdirSync(installerDir, { withFileTypes: true })) {
       if (!entry.isDirectory() || ['node_modules', 'dist', 'src', 'tests', 'scripts', 'release-locks'].includes(entry.name)) continue;
       const componentDir = join(installerDir, entry.name);
       if (!existsSync(join(componentDir, 'package.json'))) continue;
-      merge(scanArtifactTree(`packages/create-principles-disciple/${entry.name}`, componentDir));
+      roots.push({ label: `packages/create-principles-disciple/${entry.name}`, dir: componentDir, pkg: null });
     }
+  }
+  return roots;
+}
+
+/** The non-private packages whose publish surface must be checked. */
+export function listPublishablePackages(repoRoot) {
+  return listWorkspacePackages(repoRoot).filter((pkg) => !pkg.private);
+}
+
+export function runReleaseArtifactHygiene(repoRoot) {
+  const results = [];
+  const merge = (r) => results.push(r);
+
+  // Legs 1+2 — every workspace dist and every installer payload component.
+  for (const root of enumerateArtifactRoots(repoRoot)) {
+    merge(scanArtifactTree(root.label, root.dir));
   }
 
   // Leg 3 — npm tarball listings for every publishable (non-private) package.
   const tarballs = [];
-  for (const pkg of listWorkspacePackages(repoRoot)) {
-    if (pkg.private) continue;
+  for (const pkg of listPublishablePackages(repoRoot)) {
     const listing = packDryRunListing(pkg.dir);
     const label = `tarball:${listing.name}@${listing.version}`;
     merge(scanTarballEntries(label, listing.paths));
