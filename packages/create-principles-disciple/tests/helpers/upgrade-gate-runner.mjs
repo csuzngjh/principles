@@ -24,6 +24,10 @@
  *   uninstall (PD_GATE_ROOT / PD_GATE_HOST)
  *             PRI-913: run the REAL uninstaller transaction for the given
  *             host target and print the UninstallResult.
+ *   repair    (PD_GATE_ROOT)
+ *             PRI-913: run the production repair path (repairUpdateChain,
+ *             PRI-850) against the HOME env's installed tree and print the
+ *             RepairUpdateChainResult — the G4 junction zero-contact probe.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, openSync, writeSync, closeSync } from 'node:fs';
@@ -198,6 +202,22 @@ async function runUninstall() {
   process.stdout.write(`${RESULT_MARKER}${JSON.stringify(result)}`);
 }
 
+/**
+ * PRI-913: run the production repair path (the `repair-update-chain` CLI's
+ * exact call shape: same package root as sourcePackageDir) against the HOME
+ * env's installed tree. The result is the production RepairUpdateChainResult.
+ */
+async function runRepair() {
+  const installerEntry = resolve(__dirname, '..', '..', 'dist', 'installer.js');
+  if (!existsSync(installerEntry)) {
+    throw new Error(`installer build output is missing: ${installerEntry}`);
+  }
+  const sourcePackageDir = resolve(__dirname, '..', '..');
+  const { repairUpdateChain } = await import(pathToFileURL(installerEntry).href);
+  const result = await repairUpdateChain({ sourcePackageDir });
+  process.stdout.write(`${RESULT_MARKER}${JSON.stringify(result)}`);
+}
+
 const mode = process.env.PD_GATE_MODE;
 try {
   if (mode === 'install') {
@@ -212,8 +232,10 @@ try {
     await runReconcile();
   } else if (mode === 'uninstall') {
     await runUninstall();
+  } else if (mode === 'repair') {
+    await runRepair();
   } else {
-    throw new Error(`PD_GATE_MODE must be "install", "pd-version", "restamp", "console", "reconcile" or "uninstall", got: ${JSON.stringify(mode)}`);
+    throw new Error(`PD_GATE_MODE must be "install", "pd-version", "restamp", "console", "reconcile", "uninstall" or "repair", got: ${JSON.stringify(mode)}`);
   }
 } catch (error) {
   process.stderr.write(`upgrade-gate-runner: ${error instanceof Error ? error.message : String(error)}\n`);

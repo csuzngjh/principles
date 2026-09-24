@@ -1,4 +1,3 @@
----
 # Junction 生命周期回归审计 — PRI-913 Phase 0
 
 - 日期：2026-09-24
@@ -109,3 +108,5 @@ uninstaller.ts：先停运行中的 console 进程（PRI-696 :490-500）→ 步�
 junction 的**创建端**安全（三门禁+单测+首装 smoke），**生命周期端**基本裸奔：upgrade/rollback/uninstall 三个真实链路各有一个零断言缺口（G1/G3/G5），是 Phase 1/2/4 的核心；Phase 3（G4/G2）、Phase 5（G6）锁住"不触碰"与"识别"承诺。全部新测试遵循 mission 约束：**走真实 installer/uninstaller/repair 流程，不 mock fs 链接语义，Windows 覆盖挂在既有 upgrade-gate-windows 同类 job，不改任何生产 topology。**
 
 实施顺序建议：G5（uninstall，纯本地快）→ G2/G4（同 HOME 重入 + repair 幂等，快）→ G6（混合树诊断）→ G3（回滚注入）→ G1（upgrade-gate 扩展，最慢、放最后并复用 gate 已建的 publication 前置）。
+
+> 实施后对账（PR #1865）：本审计各行的落点已实现。G4 的回归锁不是只靠 reconcile 幂等——`release-junction-lifecycle.test.ts` Phase 3 在 reconcile no-op 断言之外，真实调用生产修复入口 `repairUpdateChain`（PRI-850，与 `repair-update-chain` CLI 同一 package-root 调用形状），断言其部署 bootstrap/注册更新源后双 canonical 链接、canonical 字节与 journal 集合零变化，即上表"代码层面零接触"由读码保证升级为回归锁保证。

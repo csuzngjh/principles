@@ -55,6 +55,7 @@ import {
   gateRunInstall,
   gateRunPdVersion,
   gateRunReconcile,
+  gateRunRepair,
   gateRunUninstall,
   gateStartConsole,
   gateStopConsole,
@@ -318,7 +319,7 @@ describe('PRI-913 junction lifecycle (real installer / reconciler / uninstaller)
   );
 
   it(
-    'Phase 3: re-invoking the production reconcile pass over the installed tree is a pure no-op',
+    'Phase 3: re-invoking the production reconcile pass is a pure no-op, and the production repair path never touches the junctions',
     async () => {
       const coreDigestBefore = digestTree(runtimeCore);
       const linesBefore = totalJournalLineCount();
@@ -333,6 +334,17 @@ describe('PRI-913 junction lifecycle (real installer / reconciler / uninstaller)
       expect(digestTree(runtimeCore), 'canonical core bytes unchanged by a repeated pass').toBe(coreDigestBefore);
       expect(totalJournalLineCount(), 'the reconcile pass journals nothing').toBe(linesBefore);
       expect(findMaterializedResidue(), 'still no materialized residue').toEqual([]);
+      expectPluginCoreLinks();
+
+      // G4 regression lock: repairUpdateChain (PRI-850) deploys the bootstrap
+      // executor and registers the update source — it must leave both
+      // canonical junction slots, the core bytes, and the journals untouched.
+      const repair = await phaseAsync('repair-zero-contact', async () => await gateRunRepair(gateContext));
+      expect(repair.success, `production repair failed: ${JSON.stringify(repair.error ?? '')}`).toBe(true);
+      expect(repair.needsFullInstall, 'a verified install must not be flagged for full install').toBe(false);
+      expect(digestTree(runtimeCore), 'canonical core bytes unchanged by the repair path').toBe(coreDigestBefore);
+      expect(totalJournalLineCount(), 'the repair path journals no payload transaction').toBe(linesBefore);
+      expect(findMaterializedResidue(), 'the repair path left no materialized residue').toEqual([]);
       expectPluginCoreLinks();
     },
     SCENARIO_PROBE_TIMEOUT_MS,
