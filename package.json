@@ -51,14 +51,15 @@
     "test:guard-contracts": "npx vitest run tests/sync-plugin-installation-truth.test.js",
     "ci:impact": "node scripts/ci/impact.mjs",
     "test:website": "npm test --workspace=@principles/website",
-    "verify:merge": "npm run check:generated-artifacts && npm run check:error-handbook && npm run check:telemetry-events -- --strict && npm run check:repo-hygiene && npm run check:runtime-contract && npm run check:docs-structure && npm run check:security-baseline && npm run check:workspace-tools && npm run test:guard-contracts && npm test --workspace=create-principles-disciple -- --run tests/release-target-matrix.test.ts && npm run build --workspace=@principles/core && npm run test:website && npm run lint && npm run build && npm run check:pipeline-contract && npm run build --workspace=@principles/pd-cli && npm run build --workspace=@principles/pd-console && npm run check:workspace-artifacts && npm run typecheck --workspace=@principles/core && npm run typecheck --workspace=@principles/pd-cli && npm run typecheck --workspace=@principles/install-layout && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console && npm run typecheck:pd-companion && npm run check-satellite-bundle-deps",
+    "verify:merge": "npm run check:generated-artifacts && npm run check:error-handbook && npm run check:telemetry-events -- --strict && npm run check:repo-hygiene && npm run check:runtime-contract && npm run check:docs-structure && npm run check:security-baseline && npm run check:workspace-tools && npm run test:guard-contracts && npm test --workspace=create-principles-disciple -- --run tests/release-target-matrix.test.ts && npm run build --workspace=@principles/core && npm run test:website && npm run lint && npm run build && npm run check:pipeline-contract && npm run build --workspace=@principles/pd-cli && npm run build --workspace=@principles/pd-console && npm run check:workspace-artifacts && npm run check:release-artifact-hygiene && npm run typecheck --workspace=@principles/core && npm run typecheck --workspace=@principles/pd-cli && npm run typecheck --workspace=@principles/install-layout && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console && npm run typecheck:pd-companion && npm run check-satellite-bundle-deps",
     "verify:publish": "npm run build && cd packages/openclaw-plugin && npm pack --dry-run",
     "pre-commit": "lint-staged",
     "e2e:story-a": "node scripts/e2e-story-a.mjs",
     "quality:report": "node scripts/quality-report.mjs",
     "version:patch": "cd packages/openclaw-plugin && npm version patch --no-git-tag-version",
     "version:minor": "cd packages/openclaw-plugin && npm version minor --no-git-tag-version",
-    "version:major": "cd packages/openclaw-plugin && npm version major --no-git-tag-version"
+    "version:major": "cd packages/openclaw-plugin && npm version major --no-git-tag-version",
+    "check:release-artifact-hygiene": "node scripts/check-release-artifact-hygiene.mjs"
   },
   "lint-staged": {
     "*.ts": [
