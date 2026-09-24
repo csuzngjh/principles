@@ -39,8 +39,12 @@ export function skipTestArtifacts(sourcePath) {
 // stay legal; only DIRECTORY segments are judged), samples/, and root
 // data files shipped via files[] whitelists (trust/root.json, …).
 const WIDE_TEST_BASENAME = TEST_BASENAME;
+// A violation directory must appear as a real path segment followed by a
+// separator — callers pass directories with a trailing '/' (see
+// classifyEntry in check-release-artifact-hygiene.mjs). A plain FILE named
+// `test` or `coverage` is therefore NOT a directory violation.
 const WIDE_TEST_DIR_SEGMENT =
-  /(^|[\\/])(__tests__|__snapshots__|__fixtures__|tests|test|snapshots|fixtures|coverage|\.vitest)([\\/]|$)/;
+  /(^|[\\/])(__tests__|__snapshots__|__fixtures__|tests|test|snapshots|fixtures|coverage|\.vitest)([\\/])/;
 
 /**
  * Classify a path relative to an artifact root (dist dir, payload component,
@@ -50,7 +54,7 @@ export function classifyArtifactViolation(relativePath) {
   const normalized = relativePath.split(/[\\/]/).join('/');
   const basename = normalized.split('/').pop() ?? '';
   if (WIDE_TEST_BASENAME.test(basename)) return 'NO_TEST_FILES';
-  if (WIDE_TEST_DIR_SEGMENT.test(`${normalized}/`)) return 'NO_TEST_DIRECTORIES';
+  if (WIDE_TEST_DIR_SEGMENT.test(normalized)) return 'NO_TEST_DIRECTORIES';
   return null;
 }
 

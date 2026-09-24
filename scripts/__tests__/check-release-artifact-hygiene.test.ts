@@ -54,6 +54,9 @@ describe('classifyArtifactViolation — Phase 1 contract', () => {
       'samples/example.json', 'samples/fixtures-readme.md',
       'trust/root.json', '_release/product-identity.json',
       'index.js', 'codec/index.d.ts',
+      // CodeRabbit #1866: a plain FILE whose name is a directory-rule word
+      // must not fire NO_TEST_DIRECTORIES (only real segments do).
+      'coverage', 'dist/test', 'notes/coverage.txt',
     ]) {
       expect(classifyArtifactViolation(p), p).toBeNull();
     }
@@ -129,12 +132,13 @@ describe('enumerateArtifactRoots — the guard covers its own declared legs (EP-
   it('scans every package dist, installer payload components, and rejects a polluted materialised payload', () => {
     const root = makeRepo();
     const roots = enumerateArtifactRoots(root);
-    const labels = roots.map((r) => r.label);
+    // readdir order is not a Node guarantee — compare as sorted sets.
+    const labels = roots.map((r) => r.label).sort();
     expect(labels).toEqual([
       'packages/core/dist',
-      'packages/pd-console/dist',
       'packages/create-principles-disciple/console',
-    ]);
+      'packages/pd-console/dist',
+    ].sort());
 
     const violations = roots.flatMap((r) => scanArtifactTree(r.label, r.dir).violations);
     expect(violations).toEqual(

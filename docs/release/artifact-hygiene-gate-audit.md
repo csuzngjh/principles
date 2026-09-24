@@ -37,7 +37,7 @@ npm 发布 / 自包含 release asset：
 
 | # | 机制 | 位置 | 何时执行 | 实际覆盖 |
 |---|------|------|----------|----------|
-| C1 | 工件类契约 SSoT | `scripts/build/test-artifacts.mjs` | 被 C2/C3/C4 共享 | basename `(^|\.)test\.\|(^|\.)spec\.\|\.snap$`；目录段仅 `__tests__/__snapshots__/__fixtures__`；排除 vendored node_modules（ERR-149/EP-14 定型） |
+| C1 | 工件类契约 SSoT | `scripts/build/test-artifacts.mjs` | 被 C2/C3/C4 共享 | basename 判定 `.test.` / `.spec.` 前缀形态与 `.snap` 后缀（正则见 `TEST_BASENAME`）；目录段仅 `__tests__/__snapshots__/__fixtures__`；排除 vendored node_modules（ERR-149/EP-14 定型） |
 | C2 | 逐包 build 尾检 | `check-dist-hygiene.mjs`，wire 进 principles-core / install-layout / pd-cli / pd-console / openclaw-plugin 的 `build` script | 每次 `npm run build` | 本包 dist |
 | C3 | 仓库级 backstop | `check-workspace-artifacts.mjs`，`verify:merge` 成员（ci.yml Merge Gate，行 127） | 每个 PR | `packages/*/dist`（存在即扫）+ **仅当 payload 组件同时有 package.json 和 dist 才扫** |
 | C4 | bundle 路径断言 | `bundle-plugin.mjs:185 assertPayloadHygiene`（:868 调用） | 手动 bundle / prepack / release-asset 构建 | bundle 后的 payload 组件 dist |
