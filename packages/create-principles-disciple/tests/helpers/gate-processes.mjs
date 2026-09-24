@@ -204,6 +204,55 @@ export async function gateRunPdVersion(context) {
 }
 
 /**
+ * PRI-913: invoke the production reconcile pass against the installed tree in
+ * the context's HOME (idempotency / mixed-tree probe).
+ *
+ * @param {GateProcessContext} context
+ * @returns {Promise<{converted: string[], alreadyCanonical: string[], skipped: {dir: string, reason: string}[]}>}
+ */
+export async function gateRunReconcile(context) {
+  const { stdout } = await execFileAsync(process.execPath, [GATE_RUNNER], {
+    env: gateEnv(context, 'reconcile', {}),
+    timeout: 300_000,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  return parseGateResult(stdout);
+}
+
+/**
+ * PRI-913: run the REAL uninstaller transaction for one host target.
+ *
+ * @param {GateProcessContext} context
+ * @param {'openclaw' | 'codex' | 'all'} host
+ * @returns {Promise<Record<string, unknown>>} the production UninstallResult
+ */
+export async function gateRunUninstall(context, host) {
+  const { stdout } = await execFileAsync(process.execPath, [GATE_RUNNER], {
+    env: gateEnv(context, 'uninstall', { PD_GATE_HOST: host }),
+    timeout: 600_000,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  return parseGateResult(stdout);
+}
+
+/**
+ * PRI-913: run the production repair path (repairUpdateChain, PRI-850)
+ * against the installed tree in the context's HOME — the G4 junction
+ * zero-contact probe.
+ *
+ * @param {GateProcessContext} context
+ * @returns {Promise<{success: boolean, installedProductVersion: string | null, bootstrap: Record<string, unknown> | null, metadataSourceRegistered: boolean, needsFullInstall: boolean, notes: string[], error: string | null}>}
+ */
+export async function gateRunRepair(context) {
+  const { stdout } = await execFileAsync(process.execPath, [GATE_RUNNER], {
+    env: gateEnv(context, 'repair', {}),
+    timeout: 300_000,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  return parseGateResult(stdout);
+}
+
+/**
  * Boot the INSTALLED console server through the runner. Returns once the
  * runner has recorded the server pid + port in the pidfile.
  *

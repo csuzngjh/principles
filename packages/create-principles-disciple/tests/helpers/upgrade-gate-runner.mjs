@@ -17,6 +17,17 @@
  *   console   (PD_GATE_ROOT / PD_GATE_HOME / PD_GATE_WORKSPACE_DIR / PD_GATE_PIDFILE)
  *             boot the INSTALLED console server on a free loopback port,
  *             record its pid + port in the pidfile, stay alive until killed.
+ *   reconcile (PD_GATE_ROOT)
+ *             PRI-913: invoke the production reconcile pass against the HOME
+ *             env's installed tree and print its structured result — the
+ *             junction idempotency / mixed-tree diagnosis probe.
+ *   uninstall (PD_GATE_ROOT / PD_GATE_HOST)
+ *             PRI-913: run the REAL uninstaller transaction for the given
+ *             host target and print the UninstallResult.
+ *   repair    (PD_GATE_ROOT)
+ *             PRI-913: run the production repair path (repairUpdateChain,
+ *             PRI-850) against the HOME env's installed tree and print the
+ *             RepairUpdateChainResult — the G4 junction zero-contact probe.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, openSync, writeSync, closeSync } from 'node:fs';
@@ -157,6 +168,56 @@ async function runConsole() {  const homeRoot = gateDirectoryInsideRoot('PD_GATE
   setInterval(() => {}, 60_000);
 }
 
+/**
+ * PRI-913: invoke the production reconcile pass against the installed tree
+ * resolved from the HOME env — the junction idempotency / mixed-tree probe.
+ * No paths are executed from HOME; the pass itself is production code.
+ */
+async function runReconcile() {
+  const installerEntry = resolve(__dirname, '..', '..', 'dist', 'installer.js');
+  if (!existsSync(installerEntry)) {
+    throw new Error(`installer build output is missing: ${installerEntry}`);
+  }
+  const { reconcilePluginCoreCanonicalJunction } = await import(pathToFileURL(installerEntry).href);
+  const result = reconcilePluginCoreCanonicalJunction();
+  process.stdout.write(`${RESULT_MARKER}${JSON.stringify(result)}`);
+}
+
+/**
+ * PRI-913: run the REAL uninstaller transaction for PD_GATE_HOST. force:true
+ * is the scripted-confirmation contract (the uninstaller refuses a non-TTY
+ * without it); the result is the production UninstallResult.
+ */
+async function runUninstall() {
+  const host = process.env.PD_GATE_HOST;
+  if (host !== 'openclaw' && host !== 'codex' && host !== 'all') {
+    throw new Error(`PD_GATE_HOST must be "openclaw", "codex" or "all", got: ${JSON.stringify(host)}`);
+  }
+  const uninstallerEntry = resolve(__dirname, '..', '..', 'dist', 'uninstaller.js');
+  if (!existsSync(uninstallerEntry)) {
+    throw new Error(`uninstaller build output is missing: ${uninstallerEntry}`);
+  }
+  const { uninstall } = await import(pathToFileURL(uninstallerEntry).href);
+  const result = await uninstall({ force: true, lang: 'en', host });
+  process.stdout.write(`${RESULT_MARKER}${JSON.stringify(result)}`);
+}
+
+/**
+ * PRI-913: run the production repair path (the `repair-update-chain` CLI's
+ * exact call shape: same package root as sourcePackageDir) against the HOME
+ * env's installed tree. The result is the production RepairUpdateChainResult.
+ */
+async function runRepair() {
+  const installerEntry = resolve(__dirname, '..', '..', 'dist', 'installer.js');
+  if (!existsSync(installerEntry)) {
+    throw new Error(`installer build output is missing: ${installerEntry}`);
+  }
+  const sourcePackageDir = resolve(__dirname, '..', '..');
+  const { repairUpdateChain } = await import(pathToFileURL(installerEntry).href);
+  const result = await repairUpdateChain({ sourcePackageDir });
+  process.stdout.write(`${RESULT_MARKER}${JSON.stringify(result)}`);
+}
+
 const mode = process.env.PD_GATE_MODE;
 try {
   if (mode === 'install') {
@@ -167,8 +228,14 @@ try {
     runRestamp();
   } else if (mode === 'console') {
     await runConsole();
+  } else if (mode === 'reconcile') {
+    await runReconcile();
+  } else if (mode === 'uninstall') {
+    await runUninstall();
+  } else if (mode === 'repair') {
+    await runRepair();
   } else {
-    throw new Error(`PD_GATE_MODE must be "install", "pd-version", "restamp" or "console", got: ${JSON.stringify(mode)}`);
+    throw new Error(`PD_GATE_MODE must be "install", "pd-version", "restamp", "console", "reconcile", "uninstall" or "repair", got: ${JSON.stringify(mode)}`);
   }
 } catch (error) {
   process.stderr.write(`upgrade-gate-runner: ${error instanceof Error ? error.message : String(error)}\n`);
