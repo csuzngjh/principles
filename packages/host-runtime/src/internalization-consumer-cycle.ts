@@ -644,6 +644,15 @@ export async function runInternalizationConsumerCycle(
           {
             stateManager, runtimeAdapter: adapter, eventEmitter: workspaceEmitter,
             artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
+            // PRI-911A (I1 writer boundary): the rule artifact's identity is a
+            // ledger UUID or nothing. hasPrinciple turns "UUID-shaped" into
+            // "UUID the ledger actually mints", so a shaped-but-unknown id is
+            // refused as invalid_identity instead of being carried forward.
+            // Same per-call disk read as the scribe wiring above.
+            ledgerIdentity: {
+              hasPrinciple: (principleId: string) =>
+                new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).hasPrinciple(principleId),
+            },
             ...createEvaluatorRepairDeps(workspaceDir, stateManager, logger),
           },
           {

@@ -192,6 +192,19 @@ export const TelemetryEventType = Type.Union([
   // dropped) — a failed ledger read and an unresolvable/ambiguous chain.
   Type.Literal('scribe_identity_stamp_failed'),
   Type.Literal('scribe_identity_stamp_skipped'),
+  // PRI-911A (I1+I3 writer boundary): EvaluatorRunner carries the bearer
+  // principle's identity onto the RULE artifact. The carry is now a verified
+  // stamp — success is recorded, and every refusal reports a SPEC §6.4 reason
+  // (missing_identity / non_canonical_identity / invalid_identity) instead of
+  // falling back to a principleDraft title.
+  Type.Literal('evaluator_identity_stamp_success'),
+  Type.Literal('evaluator_identity_stamp_failed'),
+  // PRI-911A: DreamerRunner refuses to propagate an LLM-asserted
+  // `sourcePrincipleId` into the identity column. Only a Historical Core
+  // Principle id (`T-NN`) can reach that point — the fabricated-id strip removes
+  // everything else — and it is a registry entry, not a ledger identity. Not a
+  // degradation: the value still rides in contentJson for display.
+  Type.Literal('dreamer_identity_assertion_not_carried'),
   // PRI-846 review round: scribe-side formation resolver vocabulary (the same
   // consumer-forwarded resolver names as the evaluator_formation_* block —
   // this closes the pre-existing PRI-838 registration gap for the first

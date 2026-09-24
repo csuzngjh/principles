@@ -75,17 +75,20 @@ const PRINCIPLE_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[
  * check would otherwise miss `hasPrinciple` and be refused as
  * `principle_not_in_ledger` — a case-only mismatch masquerading as data drift.
  *
- * @returns the trimmed, lowercase UUID, or `null` when the artifact carries no
+ * @returns the trimmed, lowercase UUID, or `null` when the value carries no
  *          usable identity — callers must refuse with
  *          `no_principle_id_in_artifact`.
  */
-export function resolveActivationPrincipleId(artifact: PIArtifactSnapshot): string | null {
-  const raw = artifact.sourcePrincipleId;
-  if (typeof raw !== 'string') return null;
-  const candidate = raw.trim();
+export function canonicalLedgerPrincipleId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const candidate = value.trim();
   if (candidate === '') return null;
   if (!PRINCIPLE_ID_UUID_RE.test(candidate)) return null;
   return candidate.toLowerCase();
+}
+
+export function resolveActivationPrincipleId(artifact: PIArtifactSnapshot): string | null {
+  return canonicalLedgerPrincipleId(artifact.sourcePrincipleId);
 }
 
 export class PromptWriter implements ChannelWriter {

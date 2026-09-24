@@ -34,6 +34,9 @@ import type {
   AdversarialCase,
 } from './evaluator-output.js';
 import { isEvaluatorOutputV2 } from './evaluator-output.js';
+// PRI-911A: the identity shape gate is the SAME authority the activation
+// boundary uses (PR #1856) — never re-implement a UUID parser here.
+import { canonicalLedgerPrincipleId } from '../activation/low-risk-writers.js';
 // PRI-634 A2 (authority migration): gate necessity derives from the durable
 // Artificer artifact, not from optional LLM output shape.
 import { assessArtificerCodeBearing } from './artificer-code-bearing.js';
@@ -411,7 +414,39 @@ export interface EvaluatorRunnerDeps extends PeerRunnerDeps {
    * Returns the newly created repair task's ID.
    */
   readonly seedArtificerRepairTask?: (params: SeedArtificerRepairParams) => Promise<string>;
+  /**
+   * PRI-911A — WRITER IDENTITY BOUNDARY (I1+I3). The ledger membership check the
+   * rule-assembly stamp uses to verify a UUID it is about to carry forward
+   * (`PrincipleTreeLedgerAdapter.hasPrinciple`). Optional and inject-only, same
+   * shape as ScribeRunner's `ledgerIdentity` (PR #1856): core stays free of any
+   * ledger I/O (D5), and when absent the shape gate still holds — the check is
+   * what turns "UUID-shaped" into "UUID the ledger actually knows".
+   */
+  readonly ledgerIdentity?: {
+    readonly hasPrinciple: (principleId: string) => boolean;
+  };
 }
+
+/**
+ * PRI-911A SPEC §6.4 — the identity writer's failure vocabulary. Every refusal
+ * to carry a principle identity reports exactly one of these; there is no
+ * "unknown" bucket, because an unclassified refusal is an unobservable one.
+ *
+ * - `missing_identity`       — the bearer artifact carries no identity at all
+ *                              (its `source_principle_id` column is empty).
+ * - `non_canonical_identity` — a value exists but it is content masquerading as
+ *                              identity (philosopher title, `T-NN`, any text).
+ * - `invalid_identity`       — UUID-shaped, but the ledger does not know it
+ *                              (data drift; never upgraded to a guess).
+ * - `ambiguous_identity`     — more than one plausible identity (reported by
+ *                              the bearer/lineage resolvers, which own that
+ *                              comparison).
+ */
+export type IdentityStampFailureReason =
+  | 'missing_identity'
+  | 'non_canonical_identity'
+  | 'invalid_identity'
+  | 'ambiguous_identity';
 
 // ── EvaluatorRunner ───────────────────────────────────────────────────────────
 
@@ -443,6 +478,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * Undefined = no directive (backward compatible).
    */
   private readonly outputLanguage: OutputLanguage | undefined;
+  /** PRI-911A: ledger membership authority for the rule-assembly identity stamp; null = shape gate only. */
+  private readonly ledgerIdentity: { readonly hasPrinciple: (principleId: string) => boolean } | null;
 
   constructor(deps: EvaluatorRunnerDeps, options: EvaluatorRunnerOptions) {
     super(deps, options, {
@@ -461,6 +498,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     this.hostToolCatalog = options.hostToolCatalog ?? null;
     this.hostSemanticContext = options.hostSemanticContext ?? null;
     this.outputLanguage = options.outputLanguage;
+    this.ledgerIdentity = deps.ledgerIdentity ?? null;
   }
 
   /**
@@ -2779,46 +2817,40 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   /**
-   * Extract a principle ID from a PIArtifactRecord. Mirrors the logic in
-   * activation/low-risk-writers.ts extractPrincipleId() but operates on
-   * PIArtifactRecord (internalization module type) instead of PIArtifactSnapshot
-   * (activation module type). Kept inline to avoid a cross-module runtime
-   * dependency on the activation module.
+   * PRI-911A — WRITER IDENTITY BOUNDARY (I1+I3): the principle id this runner
+   * may carry onto a rule artifact is the bearer artifact's
+   * `sourcePrincipleId` COLUMN, and only when it is a canonical ledger UUID
+   * (shape-gated by the single authority `canonicalLedgerPrincipleId`, plus a
+   * ledger membership check when the host injected one).
    *
-   * Resolution order:
-   *   1. record.sourcePrincipleId (top-level field)
-   *   2. parsed.principleId (contentJson)
-   *   3. parsed.sourcePrincipleId (contentJson)
-   *   4. parsed.principleDraft.title (contentJson — scribe output shape)
+   * The lenient chain this replaces (column → content.principleId →
+   * content.sourcePrincipleId → principleDraft.title) is exactly how the
+   * philosopher's natural-language title became a durable identity in
+   * `pi_artifacts.source_principle_id` (22 text-valued rows in the Phase 1
+   * audit). A title is display data: it still lives in contentJson, where the
+   * display surfaces' own lenient resolver reads it — dropping the fallback
+   * here removes a WRITE path, not a read capability.
+   *
+   * Never re-add a content fallback (SPEC §6.2; writer inventory and the
+   * before/after flow live in
+   * `docs/audit/identity-writer-hardening.md`).
    */
-  private static extractPrincipleIdFromArtifact(
-    record: { sourcePrincipleId?: string; contentJson: string },
-  ): string | undefined {
-    if (typeof record.sourcePrincipleId === 'string' && record.sourcePrincipleId.trim() !== '') {
-      return record.sourcePrincipleId.trim();
+  private resolveRuleSourcePrincipleId(
+    record: { sourcePrincipleId?: string },
+  ): { readonly ok: true; readonly principleId: string }
+    | { readonly ok: false; readonly reason: IdentityStampFailureReason } {
+    const raw = record.sourcePrincipleId;
+    if (typeof raw !== 'string' || raw.trim() === '') {
+      return { ok: false, reason: 'missing_identity' };
     }
-    try {
-      const parsed: unknown = JSON.parse(record.contentJson);
-      if (!EvaluatorRunner.isRecord(parsed)) return undefined;
-      const {principleId} = parsed;
-      if (typeof principleId === 'string' && principleId.trim() !== '') {
-        return principleId.trim();
-      }
-      const {sourcePrincipleId} = parsed;
-      if (typeof sourcePrincipleId === 'string' && sourcePrincipleId.trim() !== '') {
-        return sourcePrincipleId.trim();
-      }
-      const {principleDraft} = parsed;
-      if (EvaluatorRunner.isRecord(principleDraft)) {
-        const {title} = principleDraft;
-        if (typeof title === 'string' && title.trim() !== '') {
-          return title.trim();
-        }
-      }
-    } catch {
-      // contentJson unparseable — fall through
+    const principleId = canonicalLedgerPrincipleId(raw);
+    if (principleId === null) {
+      return { ok: false, reason: 'non_canonical_identity' };
     }
-    return undefined;
+    if (this.ledgerIdentity && !this.ledgerIdentity.hasPrinciple(principleId)) {
+      return { ok: false, reason: 'invalid_identity' };
+    }
+    return { ok: true, principleId };
   }
 
   /**
@@ -3169,10 +3201,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
     // P1 #7 (cross-package acceptance test discovery): resolve the scribe
     // principle artifact and carry forward its principle ID as
-    // sourcePrincipleId on the rule artifact. Without this, extractPrincipleId()
-    // in the activation dispatcher returns null for rule artifacts, causing
-    // activateArtifact() to fail with 'invalid_artifact'/'no_principle_id'.
-    // The rule artifact must carry lineage to the principle it enforces.
+    // sourcePrincipleId on the rule artifact. Without this,
+    // resolveActivationPrincipleId() in the activation boundary returns null for
+    // rule artifacts, causing activateArtifact() to fail with
+    // 'invalid_artifact'/'no_principle_id'. The rule artifact must carry lineage
+    // to the principle it enforces.
+    //
+    // PRI-911A (I1+I3 writer boundary): carrying it forward is now a STAMP with
+    // a verification obligation, not a text copy. An identity that cannot be
+    // canonicalized is written as NULL and reported through
+    // `identity_stamp_failed` (SPEC §6.4) — never guessed from display text.
     //
     // PRI-703 Phase 1: the same resolution deterministically forwards the
     // principle's intent contract onto the rule artifact (single author of the
@@ -3180,6 +3218,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // never re-derives it — no second source of truth). Resolved BEFORE the
     // ruleContent build so the contract rides in the same contentJson write.
     let resolvedSourcePrincipleId: string | undefined;
+    let identityStampReason: IdentityStampFailureReason | null = null;
     let forwardedIntentContract: IntentContractV1 | undefined;
     let bearerPrincipleContentJson: string | undefined;
     try {
@@ -3188,7 +3227,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         const principleArtifact = await this.artifactStore.getArtifactById(principleBearerId);
         if (principleArtifact) {
           bearerPrincipleContentJson = principleArtifact.contentJson;
-          resolvedSourcePrincipleId = EvaluatorRunner.extractPrincipleIdFromArtifact(principleArtifact);
+          const stamp = this.resolveRuleSourcePrincipleId(principleArtifact);
+          if (stamp.ok) {
+            resolvedSourcePrincipleId = stamp.principleId;
+            this.emitEvent('identity_stamp_success', taskId, {
+              runId,
+              principleId: stamp.principleId,
+              bearerArtifactId: principleBearerId,
+            });
+          } else {
+            identityStampReason = stamp.reason;
+          }
           let parsedPrincipleContent: unknown;
           try {
             parsedPrincipleContent = JSON.parse(principleArtifact.contentJson);
@@ -3216,7 +3265,23 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
     }
 
-    if (!resolvedSourcePrincipleId) {
+    if (identityStampReason !== null) {
+      // I3 (SPEC §6.4): the bearer is there, but the identity it carries is not
+      // a canonical ledger UUID. The writer refuses to GUESS — it writes the
+      // rule with `source_principle_id` left NULL (the same design-legal state
+      // as the 894 pre-existing NULL rows) and reports why.
+      //
+      // This deliberately does NOT abort rule assembly: PR #1856 established
+      // that identity gaps are enforced at the PUBLICATION boundary (rule
+      // preserved, no approval subject, no activation — see
+      // `identity_binding_unverified`). Silently converting a wrong identity
+      // into a lost candidate would widen this PR past the writer boundary.
+      this.emitEvent('identity_stamp_failed', taskId, {
+        runId,
+        reason: identityStampReason,
+        nextAction: 'verify_scribe_identity_stamp',
+      });
+    } else if (!resolvedSourcePrincipleId) {
       this.emitEvent('rule_assembly_failed', taskId, {
         runId,
         reason: 'sourcePrincipleId_unresolved',

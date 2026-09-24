@@ -117,11 +117,18 @@ function makeScribeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   };
 }
 
-function makeScribeArtifact(): PIArtifactRecord {
+// The ledger UUID a production ScribeRunner stamps onto its principle artifact
+// (PR #1856 I2 chain stamping). The evaluator's rule assembly carries THIS
+// forward, so the fixture must look like the real chain output, not a pre-#1856
+// hand-written artifact — PRI-911A made the carry fail-closed on identity.
+const STAMPED_LEDGER_PRINCIPLE_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+
+function makeScribeArtifact(overrides: Partial<PIArtifactRecord> = {}): PIArtifactRecord {
   return {
     artifactId: 'pi-art-scribe-001',
     artifactKind: 'principle',
     sourceTaskId: SCRIBE_TASK_ID,
+    sourcePrincipleId: STAMPED_LEDGER_PRINCIPLE_ID,
     lineageArtifactIds: [],
     validationStatus: 'pending',
     contentJson: JSON.stringify({
@@ -133,6 +140,7 @@ function makeScribeArtifact(): PIArtifactRecord {
     }),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...overrides,
   };
 }
 
@@ -316,6 +324,8 @@ function makeEvaluatorV2Output(overrides: Partial<EvaluatorOutputV2> = {}): Eval
 interface CreateMockDepsOptions {
   readonly artifactStore?: PIArtifactStore;
   readonly output?: EvaluatorOutputV1;
+  /** PRI-911A: ledger membership authority for the rule identity stamp. */
+  readonly ledgerIdentity?: { readonly hasPrinciple: (principleId: string) => boolean };
 }
 
 function createMockDeps(options: CreateMockDepsOptions = {}): EvaluatorRunnerDeps {
@@ -374,6 +384,7 @@ function createMockDeps(options: CreateMockDepsOptions = {}): EvaluatorRunnerDep
     eventEmitter,
     validator,
     artifactStore,
+    ...(options.ledgerIdentity ? { ledgerIdentity: options.ledgerIdentity } : {}),
   };
   return deps;
 }
@@ -1143,5 +1154,115 @@ describe('EvaluatorRunner V2 — rule artifact assembly (PRI-427)', () => {
     const assembled = events.find((e) => e.eventType === 'evaluator_rule_assembled');
     expect(assembled).toBeDefined();
     expect(typeof assembled?.payload?.artifactId).toBe('string');
+  });
+});
+
+// ── PRI-911A: identity writer boundary ────────────────────────────────────────
+//
+// The rule artifact's `sourcePrincipleId` is a STAMPED ledger identity, not a
+// copied string. These are the SPEC §Verification cases 1-4: what may be
+// written, and how every refusal is observable. Case 5 (the existing production
+// flow is unaffected) is the rest of this file plus mvp-core-loop-journeys J8.
+
+describe('EvaluatorRunner — identity writer boundary (PRI-911A)', () => {
+  function passingGate(): RefinerRuleHostGateDeps {
+    return makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+  }
+
+  function telemetryOf(deps: EvaluatorRunnerDeps): { eventType: string; payload: Record<string, unknown> }[] {
+    return (deps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> },
+    );
+  }
+
+  /** Run the evaluator over a bearer principle artifact stamped with `stampedId`. */
+  async function assembleAgainstBearer(
+    stampedId: string | undefined,
+    ledgerIds: readonly string[],
+  ): Promise<{ deps: EvaluatorRunnerDeps; store: MemoryPIArtifactStore }> {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact(
+      stampedId === undefined ? { sourcePrincipleId: undefined } : { sourcePrincipleId: stampedId },
+    ));
+    const deps = createMockDeps({
+      artifactStore: store,
+      ledgerIdentity: { hasPrinciple: (id: string) => ledgerIds.includes(id) },
+    });
+    await makeRunner(deps, passingGate()).run(EVALUATOR_TASK_ID);
+    return { deps, store };
+  }
+
+  async function ruleArtifacts(store: MemoryPIArtifactStore): Promise<PIArtifactRecord[]> {
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    return artifacts.filter((a) => a.artifactKind === 'rule');
+  }
+
+  // Case 1 — the only write-legal input: a canonical UUID the ledger knows.
+  it('writes the ledger-verified UUID onto the rule artifact and records the stamp', async () => {
+    const id = STAMPED_LEDGER_PRINCIPLE_ID;
+    const { deps, store } = await assembleAgainstBearer(id, [id]);
+
+    const rules = await ruleArtifacts(store);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]?.sourcePrincipleId).toBe(id);
+
+    const success = telemetryOf(deps).find((e) => e.eventType === 'evaluator_identity_stamp_success');
+    expect(success).toBeDefined();
+    expect(success?.payload.principleId).toBe(id);
+    expect(telemetryOf(deps).some((e) => e.eventType === 'evaluator_identity_stamp_failed')).toBe(false);
+  });
+
+  // Case 2 — UUID-shaped but unknown to the ledger: shape is not membership.
+  // The rule survives (PR #1856 enforces identity at the PUBLICATION boundary),
+  // but the writer refuses to propagate an identity it cannot verify.
+  it('writes a NULL identity for a ledger-unknown UUID and reports invalid_identity', async () => {
+    const { deps, store } = await assembleAgainstBearer(
+      'ffffffff-1111-4111-8111-111111111111',
+      [STAMPED_LEDGER_PRINCIPLE_ID],
+    );
+
+    const rules = await ruleArtifacts(store);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]?.sourcePrincipleId).toBeUndefined();
+    const failed = telemetryOf(deps).find((e) => e.eventType === 'evaluator_identity_stamp_failed');
+    expect(failed).toBeDefined();
+    expect(failed?.payload.reason).toBe('invalid_identity');
+  });
+
+  // Case 3 — the historic pollution: a philosopher title used as identity.
+  it('writes a NULL identity for a title-valued bearer and reports non_canonical_identity', async () => {
+    const { deps, store } = await assembleAgainstBearer(
+      'Always validate async input',
+      [STAMPED_LEDGER_PRINCIPLE_ID],
+    );
+
+    const rules = await ruleArtifacts(store);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]?.sourcePrincipleId).toBeUndefined();
+    const failed = telemetryOf(deps).find((e) => e.eventType === 'evaluator_identity_stamp_failed');
+    expect(failed?.payload.reason).toBe('non_canonical_identity');
+  });
+
+  // Case 4 — no identity at all: null, never a guess from contentJson.
+  it('writes a NULL identity for an unstamped bearer and reports missing_identity', async () => {
+    const { deps, store } = await assembleAgainstBearer(undefined, [STAMPED_LEDGER_PRINCIPLE_ID]);
+
+    // The bearer still carries a principleDraft.title in contentJson — the
+    // pre-PRI-911A chain keyed the rule by that title (22 polluted rows in the
+    // Phase 1 audit). Assembly continues; only the identity column is refused.
+    const rules = await ruleArtifacts(store);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]?.sourcePrincipleId).toBeUndefined();
+    const failed = telemetryOf(deps).find((e) => e.eventType === 'evaluator_identity_stamp_failed');
+    expect(failed?.payload.reason).toBe('missing_identity');
+    // rule_assembly_failed stays reserved for structural degradation (no bearer
+    // artifact / store failure), not for a refused guess.
+    expect(telemetryOf(deps).some((e) => e.eventType === 'evaluator_rule_assembly_failed')).toBe(false);
   });
 });

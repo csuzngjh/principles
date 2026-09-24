@@ -249,13 +249,42 @@ describe('DreamerRunner', () => {
       expect.any(String),
     );
 
-    // Bug-O L1: artifact must carry sourcePrincipleId so downstream activation
-    // dispatch can resolve the principle link. Without this, ActivationsConsoleModel
-    // shows 'unlinked' for dreamer artifacts even after successful activation.
+    // Bug-O L1 (display half) + PRI-911A (identity half): the LLM's asserted
+    // `sourcePrincipleId` must NOT become a durable identity — it is a content
+    // claim ('T-01' is not a ledger UUID), so the identity column stays unset.
+    // The value still lives in contentJson, which is where the display resolver
+    // reads it from, so the activation list still does not show 'unlinked'.
     const expectedArtifactId = `pi-art-${TASK_ID}-${RUN_ID}`;
     const storedArtifact = await mocks._artifactStore.getArtifactById(expectedArtifactId);
     expect(storedArtifact).not.toBeNull();
-    expect(storedArtifact?.sourcePrincipleId).toBe('T-01');
+    expect(storedArtifact?.sourcePrincipleId).toBeUndefined();
+    expect(JSON.parse(storedArtifact?.contentJson ?? '{}')).toMatchObject({ sourcePrincipleId: 'T-01' });
+
+    // The refusal is observable, never silent (rc-9).
+    const events = mocks._eventEmitter.emitTelemetry.mock.calls.map(
+      (call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> },
+    );
+    const notCarried = events.find((e) => e.eventType === 'dreamer_identity_assertion_not_carried');
+    expect(notCarried).toBeDefined();
+    expect(notCarried?.payload.reason).toBe('non_canonical_identity');
+  });
+
+  // A dreamer output with no assertion is the normal case: no event noise.
+  // (A UUID-shaped assertion never reaches this point at all — postFetchTransform's
+  // stripFabricatedCorePrincipleIds deletes anything that is not a Historical Core
+  // Principle id, so 'T-NN' is the only shape that arrives and gets refused here.)
+  it('emits no identity event when the dreamer asserts no principle id', async () => {
+    const mocks = createMocks();
+    const withoutAssertion: DreamerOutput = { ...mocks.output, sourcePrincipleId: undefined };
+    mocks._runtimeAdapter.fetchOutput.mockResolvedValue({ runId: RUN_ID, payload: withoutAssertion });
+
+    const runner = createRunner(mocks);
+    await runner.run(TASK_ID);
+
+    const eventTypes = mocks._eventEmitter.emitTelemetry.mock.calls.map(
+      (call: unknown[]) => (call[0] as { eventType: string }).eventType,
+    );
+    expect(eventTypes).not.toContain('dreamer_identity_assertion_not_carried');
   });
 
   // 2. Runtime method call order

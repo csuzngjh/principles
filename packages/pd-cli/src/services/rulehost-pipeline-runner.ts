@@ -726,6 +726,11 @@ export interface CreateEvaluatorRunnerDepsInputs {
  *   artificer runner (PRI-509 D1) rather than introducing a new task kind.
  *
  * Returns the newly created repair task's ID (UUIDv4, rc-7: fresh per call).
+ *
+ * PRI-911A also wires `ledgerIdentity.hasPrinciple` here: every production
+ * EvaluatorRunner construction goes through this factory, so the rule artifact's
+ * identity stamp is ledger-verified on all CLI paths (rulehost + run-once) with
+ * one connection.
  */
 export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInputs): EvaluatorRunnerDeps {
   const { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, workspaceDir } = inputs;
@@ -735,6 +740,10 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
     eventEmitter,
     validator,
     artifactStore,
+    ledgerIdentity: {
+      hasPrinciple: (principleId: string) =>
+        new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') }).hasPrinciple(principleId),
+    },
     isRepairLoopEnabled: (): boolean => {
       // rc-9: never throw on malformed config — fail safe to false so the
       // legacy (non-repair) path runs. The malformed config is already
@@ -1043,9 +1052,10 @@ interface BackfillIdentityParams {
  * EP002-R4 follow-up #2 + Phase A: backfill the scribe principle artifact's
  * source_principle_id with the LEDGER principle UUID (shared by the rule and
  * text paths — runs right after the scribe stage succeeds). Every downstream
- * identity resolution reads this column FIRST (extractPrincipleId /
- * EvaluatorRunner.extractPrincipleIdFromArtifact), so this single write is
- * what binds approvals, Console grouping, ledger upgrades, and rule
+ * identity resolution reads this column FIRST (the activation boundary's
+ * `resolveActivationPrincipleId`, and since PRI-911A the evaluator's rule
+ * stamp, which accepts ONLY this column's canonical UUID), so this single write
+ * is what binds approvals, Console grouping, ledger upgrades, and rule
  * artifacts to the ledger UUID instead of the title namespace.
  *
  * Phase A contract changes vs the note-only version:

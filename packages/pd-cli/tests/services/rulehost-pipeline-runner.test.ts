@@ -153,6 +153,15 @@ const PIPE_PACK = {
   redactionNotes: [],
 };
 
+// PRI-911A: the ledger mints principle identities as UUIDs (`crypto.randomUUID`),
+// and the rule writer now carries forward ONLY a canonical UUID. Ledger fixtures
+// therefore use the real shape — a human-readable seed id could only ever reach
+// a display field, never `source_principle_id`.
+const LEDGER_PRINCIPLE_001 = 'b7f3c1d2-4a5e-4f60-9c7b-1d2e3f4a5b6c';
+const LEDGER_PRINCIPLE_002 = '2e5b8c3d-7f41-4a96-b0d5-e6f7a8b9c0d1';
+const LEDGER_ORIGINAL = 'c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f';
+const LEDGER_REPLACEMENT = 'd2e3f4a5-b6c7-4d8e-9f0a-1b2c3d4e5f6a';
+
 function artificerV2(taskId: string, priorId?: string): unknown {
   return {
     taskId, sourceScribeArtifactId: requireLineage(priorId, 'sourceScribeArtifactId'),
@@ -279,7 +288,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     await seedDreamerWithId(sm, 'dreamer-seeded-001', 'pain-test-001', 'code_tool_hook', 'cand-001');
     await sm.close();
     addPrincipleToLedger(path.join(tmpDir, '.state'), {
-      id: 'ledger-principle-001', version: 1, text: 'test ledger principle', triggerPattern: '', action: '',
+      id: LEDGER_PRINCIPLE_001, version: 1, text: 'test ledger principle', triggerPattern: '', action: '',
       status: 'candidate', evaluability: 'weak_heuristic', priority: 'P1', scope: 'general',
       valueScore: 0, adherenceRate: 0, painPreventedCount: 0, derivedFromPainIds: ['cand-001'],
       ruleIds: [], conflictsWithPrincipleIds: [], createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',
@@ -311,9 +320,9 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
         (await verify.piArtifactStore.listBySourceTaskId(result.stages.find((s) => s.name === 'scribe')!.taskId!))
           .find((a) => a.artifactKind === 'principle')!.artifactId,
       );
-      expect(scribeArt?.sourcePrincipleId).toBe('ledger-principle-001');
+      expect(scribeArt?.sourcePrincipleId).toBe(LEDGER_PRINCIPLE_001);
       const ruleArt = await verify.piArtifactStore.getArtifactById(result.ruleArtifactId!);
-      expect(ruleArt?.sourcePrincipleId).toBe('ledger-principle-001');
+      expect(ruleArt?.sourcePrincipleId).toBe(LEDGER_PRINCIPLE_001);
     } finally {
       await verify.close();
     }
@@ -393,7 +402,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     // PRI-804(a): seed the ledger with the principle this chain's candidate maps
     // to, mirroring what the intake bridge creates in production workspaces.
     addPrincipleToLedger(path.join(tmpDir, '.state'), {
-      id: 'ledger-principle-002', version: 1, text: 'test ledger principle', triggerPattern: '', action: '',
+      id: LEDGER_PRINCIPLE_002, version: 1, text: 'test ledger principle', triggerPattern: '', action: '',
       status: 'candidate', evaluability: 'weak_heuristic', priority: 'P1', scope: 'general',
       valueScore: 0, adherenceRate: 0, painPreventedCount: 0, derivedFromPainIds: ['cand-002'],
       ruleIds: [], conflictsWithPrincipleIds: [], createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',
@@ -435,7 +444,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       expect(record!.channel).toBe('prompt');
       expect(record!.artifactId).toBe(result.principleArtifactId);
       const artifact = await verify.piArtifactStore.getArtifactById(result.principleArtifactId!);
-      expect(artifact?.sourcePrincipleId).toBe('ledger-principle-002');
+      expect(artifact?.sourcePrincipleId).toBe(LEDGER_PRINCIPLE_002);
       expect(artifact?.validationStatus).toBe('validated');
     } finally {
       await verify.close();
@@ -1064,7 +1073,7 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
     await sm.initialize();
     await seedDreamerWithId(sm, 'dreamer-id-conflict', 'pain-id-conflict', 'code_tool_hook', 'cand-conflict');
     await sm.close();
-    seedLedger(tmpDir, 'ledger-original', 'cand-conflict');
+    seedLedger(tmpDir, LEDGER_ORIGINAL, 'cand-conflict');
 
     const adapter = makeAdapter();
     const first = await runRuleHostPipeline({
@@ -1079,8 +1088,8 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
     // Repoint the candidate: detach it from the original principle so the
     // chain now resolves to a DIFFERENT (still unique) target. Otherwise the
     // plural lookup would correctly report ledger_ambiguous, not a conflict.
-    updatePrinciple(path.join(tmpDir, '.state'), 'ledger-original', { derivedFromPainIds: [] });
-    seedLedger(tmpDir, 'ledger-replacement', 'cand-conflict');
+    updatePrinciple(path.join(tmpDir, '.state'), LEDGER_ORIGINAL, { derivedFromPainIds: [] });
+    seedLedger(tmpDir, LEDGER_REPLACEMENT, 'cand-conflict');
     const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
     await verify.initialize();
     try {
@@ -1093,9 +1102,9 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
         workspaceDir: tmpDir,
         now: new Date().toISOString(),
       });
-      expect(binding).toEqual({ status: 'identity_conflict', existingPrincipleId: 'ledger-original', resolvedPrincipleId: 'ledger-replacement' });
+      expect(binding).toEqual({ status: 'identity_conflict', existingPrincipleId: LEDGER_ORIGINAL, resolvedPrincipleId: LEDGER_REPLACEMENT });
       const scribeArt = (await verify.piArtifactStore.listBySourceTaskId(scribeTaskId)).find((a) => a.artifactKind === 'principle');
-      expect(scribeArt?.sourcePrincipleId).toBe('ledger-original');
+      expect(scribeArt?.sourcePrincipleId).toBe(LEDGER_ORIGINAL);
     } finally {
       await verify.close();
     }
