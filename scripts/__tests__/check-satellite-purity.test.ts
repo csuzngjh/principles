@@ -440,12 +440,14 @@ describe('production wiring', () => {
     expect(config).toContain('assertSatellitePurity(mainResult.metafile)');
   });
 
-  it('root package.json exposes check-satellite-bundle-deps and verify:merge ends with it (OPT-003)', () => {
+  it('root package.json exposes check-satellite-bundle-deps and verify:merge runs it (OPT-003)', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
     expect(pkg.scripts['check-satellite-bundle-deps']).toBe(
       'npm run build:bundle --workspace=principles-disciple',
     );
-    expect(String(pkg.scripts['verify:merge']).trim().endsWith('npm run check-satellite-bundle-deps')).toBe(true);
+    // Wiring presence, not chain position: PRI-920 appended check:runtime-writers
+    // after this leg. An endsWith here made the gate chain positionally frozen.
+    expect(String(pkg.scripts['verify:merge']).includes('npm run check-satellite-bundle-deps')).toBe(true);
   });
 
   it('the publish dry-run CI step never pipes npm pack through head (PRI-919 EPIPE incident)', () => {
