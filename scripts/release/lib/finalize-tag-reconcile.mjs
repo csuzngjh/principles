@@ -38,7 +38,11 @@ export function decideFinalizeTag(f) {
     f.registryStatus === 'PRESENT_PRIOR' &&
     typeof f.publishedCommit === 'string' &&
     f.publishedCommit.length > 0 &&
-    f.publishedCommitIsAncestor === true;
+    f.publishedCommitIsAncestor === true &&
+    // The skip summary claims the tag is recorded at that earlier release —
+    // that is only proven, never assumed: a tag moved by hand or an
+    // unreadable local ref (taggedCommit null) falls to fail-loud.
+    f.taggedCommit === f.publishedCommit;
   if (priorOwned) {
     return {
       action: 'skip-closing',

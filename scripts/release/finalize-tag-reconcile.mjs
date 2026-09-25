@@ -35,8 +35,8 @@ function argValue(flag) {
 }
 
 const repoRoot = path.resolve(argValue('--repo-root') ?? DEFAULT_REPO_ROOT);
-const cohort = argValue('--cohort');
-if (!cohort || !/^[0-9a-f]{7,40}$/i.test(cohort)) {
+const cohortArg = argValue('--cohort');
+if (!cohortArg || !/^[0-9a-f]{7,40}$/i.test(cohortArg)) {
   console.error('::error::usage: finalize-tag-reconcile.mjs --cohort <sha> — a cohort SHA is required.');
   process.exit(1);
 }
@@ -57,6 +57,15 @@ function writeOutput(name, value) {
   fs.appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
 }
 
+// Every later comparison is against `git rev-parse` output (40-hex lowercase).
+// A short or mixed-case SHA from a manual dispatch must be normalized first,
+// or a tag that IS at the cohort reads as foreign (CodeRabbit PRI-923 review).
+const cohort = gitSafe(['rev-parse', '--verify', `${cohortArg}^{commit}`]);
+if (!cohort) {
+  console.error(`::error::--cohort ${cohortArg} does not resolve to a commit in ${repoRoot}.`);
+  process.exit(1);
+}
+
 // --- facts -----------------------------------------------------------------
 // The committed plugin version is read from the cohort tree itself (the
 // checkout IS the cohort), matching what the publish leg uploaded.
@@ -69,7 +78,16 @@ const remoteSha = gitSafe(['ls-remote', '--tags', 'origin', `refs/tags/${tag}`])
 const tagExistsRemotely = Boolean(remoteSha);
 let taggedCommit = null;
 if (tagExistsRemotely) {
-  gitSafe(['fetch', 'origin', `refs/tags/${tag}`]);
+  // --force: a stale LOCAL tag (left by an earlier finalize on this ref) is
+  // never a fast-forward, and without force the fetch silently keeps it.
+  // --no-tags: deterministic fetch, no tag auto-following. Failure aborts:
+  // judging on an unfetched ref is exactly the unreadable state §18.3 forbids.
+  try {
+    git(['fetch', '--force', '--no-tags', 'origin', `refs/tags/${tag}:refs/tags/${tag}`]);
+  } catch (err) {
+    console.error(`::error::Failed to fetch refs/tags/${tag} from origin: ${err?.message ?? err} — cannot prove where the tag points; refusing to decide on unreadable state.`);
+    process.exit(1);
+  }
   taggedCommit = gitSafe(['rev-parse', `${tag}^{commit}`]);
 }
 const tagPointsAtCohort = taggedCommit !== null && taggedCommit === cohort;

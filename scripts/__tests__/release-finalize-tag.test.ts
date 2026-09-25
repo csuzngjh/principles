@@ -69,6 +69,7 @@ describe('finalize tag decision (pure, PRI-923)', () => {
       registryStatus: 'PRESENT_PRIOR',
       publishedCommit: 'aaaa1111',
       publishedCommitIsAncestor: true,
+      taggedCommit: 'aaaa1111',
     });
     expect(d.action).toBe('skip-closing');
     expect(d.closingSteps).toBe('skipped-prior-tag');
@@ -81,7 +82,7 @@ describe('finalize tag decision (pure, PRI-923)', () => {
       tag: 'v2.0.4',
       tagExistsRemotely: true,
       tagPointsAtCohort: false,
-      taggedCommit: 'oldsha',
+      taggedCommit: 'aaaa1111',
       cohort: 'c0hort',
       pluginName: 'principles-disciple',
       pluginVersion: '2.0.4',
@@ -101,6 +102,8 @@ describe('finalize tag decision (pure, PRI-923)', () => {
       ['cohort introduced the plugin', { introducedByCohort: true }],
       ['publisher commit not an ancestor', { publishedCommitIsAncestor: false }],
       ['publisher commit missing', { publishedCommit: '' }],
+      ['tag sits on a different commit than the publisher', { taggedCommit: 'oldsha' }],
+      ['tag commit unreadable locally', { taggedCommit: null }],
     ];
     for (const [label, patch] of mutations) {
       const d = decide({ ...base, ...patch });
@@ -264,6 +267,16 @@ describe('finalize-tag-reconcile CLI on fixture repos (PRI-923)', { timeout: 180
     expect(readOut(r.outFile)).toContain('closing_steps=ran');
   });
 
+  it('short/mixed-case cohort SHA is normalized, not misread as a foreign tag', async () => {
+    const f = await makeFixture('shortsha');
+    await pushTagAt(f.product, f.c1, 'v1.0.0');
+    const short = f.c1.slice(0, 12);
+    const r = await runCli(f.product, short);
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toContain('already exists at the cohort commit');
+    expect(readOut(r.outFile)).toContain('closing_steps=ran');
+  });
+
   it('plugin-unchanged cohort with prior-cohort publish: green skip of the closing steps', async () => {
     const f = await makeFixture('prior');
     await pushTagAt(f.product, f.c1, 'v1.0.0');
@@ -276,6 +289,27 @@ describe('finalize-tag-reconcile CLI on fixture repos (PRI-923)', { timeout: 180
     expect(readOut(r.outFile)).toContain('closing_steps=skipped-prior-tag');
     expect(r.stderr + r.stdout).toContain('closing steps skipped (PRI-923)');
     expect(readOut(r.summaryFile)).toContain('belongs to an earlier cohort');
+  });
+
+  it('tag sits elsewhere than the registry publisher commit: skip claim unproven -> fail loud', async () => {
+    const f = await makeFixture('tag-not-at-publisher');
+    // Registry published from c1 (an ancestor of c2), but the tag was moved
+    // onto a side-branch commit — priorOwned must NOT green-skip on it.
+    await gitSh(['checkout', '-b', 'side', f.c1], f.product);
+    fs.writeFileSync(path.join(f.product, 'side.md'), 'side\n');
+    await gitSh(['add', '-A'], f.product);
+    await gitSh(['-c', 'user.name=T', '-c', 'user.email=t@example.invalid', 'commit', '-m', 'side'], f.product);
+    const side = (await sh('git', ['rev-parse', 'HEAD'], f.product)).stdout.trim();
+    await gitSh(['checkout', 'main'], f.product);
+    await pushTagAt(f.product, side, 'v1.0.0');
+    stubPacks.set('principles-disciple-fixture', {
+      'dist-tags': { latest: '1.0.0' },
+      versions: { '1.0.0': { version: '1.0.0', gitHead: f.c1 } },
+    });
+    const r = await runCli(f.product, f.c2);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('Refusing to move an existing tag');
+    expect(readOut(r.summaryFile)).not.toContain('belongs to an earlier cohort');
   });
 
   it('foreign publisher commit (not an ancestor) still refuses to move the tag', async () => {
