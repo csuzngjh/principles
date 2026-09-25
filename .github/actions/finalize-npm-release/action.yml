@@ -8,6 +8,11 @@ description: >-
   failure is visible (red job) but can never block an npm upload that
   has not happened yet, because the npm phase has already finished. The
   tag keeps its real semantics: it marks the PLUGIN release (SPEC §25).
+  A cohort that does not change the plugin version publishes no new tag:
+  the tag reconciliation reads the plugin leg's registry authority (PRI-923)
+  and SKIPS the closing steps instead of failing, while a genuine conflict
+  (the cohort really changed the plugin but the tag belongs to another
+  commit) still fails loud.
 inputs:
   cohort_sha:
     description: 'Release cohort SHA (the Version Packages PR merge commit)'
@@ -22,44 +27,49 @@ inputs:
     required: false
     type: string
     default: ''
+  tools_dir:
+    description: 'Directory (relative to the workspace root) holding the TOOLS checkout that provides scripts/release/finalize-tag-reconcile.mjs'
+    required: true
+    type: string
+
+outputs:
+  closing_steps:
+    description: "'ran' when the tag/GitHub Release/ClawHub legs were reconciled; 'skipped-prior-tag' when this cohort left the plugin version unchanged and the tag legitimately belongs to an earlier cohort"
+    value: ${{ steps.tag-reconcile.outputs.closing_steps }}
 
 runs:
   using: composite
   steps:
     - name: Reconcile Git tag (idempotent)
+      id: tag-reconcile
       # The vX.Y.Z tag keeps its real semantics: it marks the PLUGIN
       # release (SPEC §25) — it has never represented the other packages'
       # independent versions and must not start now. Idempotent per SPEC
-      # §24.2: absent -> create; present at the cohort commit -> skip;
-      # present elsewhere -> FAIL loud.
+      # §24.2: absent -> create; present at the cohort commit -> skip the
+      # upload but keep reconciling the closing steps; present elsewhere ->
+      # decide by the plugin leg's registry authority (PRI-923): if this
+      # cohort did NOT introduce the committed plugin version and the
+      # registry copy was published from a commit inside this cohort's
+      # history, the tag legitimately belongs to that earlier cohort —
+      # skip the closing steps green. Anything else is a real conflict
+      # and fails loud; a registry failure is never read as "fine".
+      # The whole decision lives in the TOOLS script (pure judgment in
+      # scripts/release/lib/finalize-tag-reconcile.mjs, unit-tested);
+      # this step only wires the runner environment to it.
       shell: bash
       env:
         COHORT: ${{ inputs.cohort_sha }}
+        TOOLS_DIR: ${{ inputs.tools_dir }}
       run: |
         set -euo pipefail
         # cwd = PRODUCT checkout at the cohort SHA (workspace root).
-        VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
-        TAG="v$VERSION"
-        EXISTING=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
-        if [ -z "$EXISTING" ]; then
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Release $TAG (plugin; bound to cohort $COHORT)"
-          git push origin "$TAG"
-          echo "Created and pushed tag: $TAG"
-        else
-          git fetch origin "refs/tags/$TAG" --quiet
-          TAGGED_COMMIT=$(git rev-parse "$TAG^{commit}" 2>/dev/null || echo "")
-          if [ "$TAGGED_COMMIT" = "$COHORT" ]; then
-            echo "Tag $TAG already exists at the cohort commit — skip (idempotent)."
-          else
-            echo "::error::Tag $TAG exists at $TAGGED_COMMIT but this release cohort is $COHORT. Refusing to move an existing tag."
-            exit 1
-          fi
-        fi
+        node "$TOOLS_DIR/scripts/release/finalize-tag-reconcile.mjs" \
+          --cohort "$COHORT" --repo-root "$(pwd)"
 
     - name: Generate release notes
       id: changelog
+      if: >-
+        steps.tag-reconcile.outputs.closing_steps != 'skipped-prior-tag'
       shell: bash
       env:
         COHORT: ${{ inputs.cohort_sha }}
@@ -92,6 +102,8 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
     - name: Reconcile GitHub Release (idempotent)
+      if: >-
+        steps.tag-reconcile.outputs.closing_steps != 'skipped-prior-tag'
       shell: bash
       env:
         COHORT: ${{ inputs.cohort_sha }}
@@ -118,6 +130,8 @@ runs:
       # to a warning + manual fallback — it must not block npm/tag/release
       # that already succeeded.
       continue-on-error: true
+      if: >-
+        steps.tag-reconcile.outputs.closing_steps != 'skipped-prior-tag'
       env:
         CLAWHUB_TOKEN: ${{ inputs.clawhub_token }}
       shell: bash

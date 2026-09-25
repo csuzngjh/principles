@@ -443,3 +443,4 @@ jobs:
           cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
+          tools_dir: release-tools

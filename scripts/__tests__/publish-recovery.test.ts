@@ -717,9 +717,16 @@ describe('drill 10: closing-step isolation (workflow structure)', () => {
     expect(t).toContain('publish-finalize:');
     expect(t).toContain('needs: [resolve-cohort, publish-full-product]');
     expect(t).toContain('needs.publish-full-product.result == \'success\'');
-    // Idempotent reconciliation is preserved (tag semantics + conflict check).
+    // Idempotent reconciliation is preserved (tag semantics + conflict
+    // check). PRI-923 moved the decision into the TOOLS script; the pin
+    // follows the wording to its authority.
     const f = finalizeText();
-    expect(f).toContain('Refusing to move an existing tag');
+    const cli = fs.readFileSync(
+      path.join(REPO_ROOT, 'scripts', 'release', 'finalize-tag-reconcile.mjs'),
+      'utf8',
+    );
+    expect(cli).toContain('Refusing to move an existing tag');
+    expect(f).toContain('finalize-tag-reconcile.mjs');
     expect(f).toContain('continue-on-error: true'); // ClawHub degrades, never blocks
   });
 
