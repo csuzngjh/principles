@@ -154,10 +154,30 @@ describe('finalize-npm-release action — isolated closing steps (PRI-886)', () 
     expect(t).toContain('Reconcile Git tag (idempotent)');
     expect(t).toContain('Reconcile GitHub Release (idempotent)');
     expect(t).toContain('Reconcile ClawHub marketplace (idempotent)');
-    // Tag conflict is a hard failure, never a silent move.
-    expect(t).toContain('Refusing to move an existing tag');
+    // Tag conflict is a hard failure, never a silent move — the verdict
+    // (including the refusal wording) lives in the TOOLS decision script.
+    const cli = fs.readFileSync(
+      path.join(REPO_ROOT, 'scripts', 'release', 'finalize-tag-reconcile.mjs'),
+      'utf8',
+    );
+    expect(cli).toContain('Refusing to move an existing tag');
     // The marketplace sync degrades to a warning, never blocks npm.
     expect(t).toContain('continue-on-error: true');
+  });
+
+  it('a plugin-unchanged cohort skips the closing steps instead of failing (PRI-923)', () => {
+    // Run 36104100294 (cohort 6199897a): the tag is the PLUGIN version
+    // (SPEC §25), so a cohort that bumps only other packages can never own
+    // it — the old unconditional fail left a red finalize leg on every such
+    // cohort. The decision lives in the TOOLS script (pure judgment +
+    // unit tests); the action only wires the runner to it, and every
+    // closing step is gated on the same verdict.
+    const t = text();
+    expect(t).toContain('finalize-tag-reconcile.mjs');
+    expect(t).toContain('skipped-prior-tag');
+    const gate = "steps.tag-reconcile.outputs.closing_steps != 'skipped-prior-tag'";
+    const gated = t.split(gate).length - 1;
+    expect(gated).toBeGreaterThanOrEqual(3);
   });
 });
 
