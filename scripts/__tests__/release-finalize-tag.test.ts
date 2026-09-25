@@ -202,7 +202,12 @@ async function makeFixture(scenario: string) {
 
 async function pushTagAt(workDir: string, sha: string, tag: string) {
   await gitSh(['checkout', sha], workDir);
-  await gitSh(['tag', '-a', tag, '-m', tag], workDir);
+  // Annotated tags carry a tagger identity; CI runners have no global git
+  // config, so pin it explicitly like the fixture commits do.
+  await gitSh(
+    ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid', 'tag', '-a', tag, '-m', tag],
+    workDir,
+  );
   await gitSh(['push', 'origin', `refs/tags/${tag}`], workDir);
   await gitSh(['checkout', 'main'], workDir);
 }
