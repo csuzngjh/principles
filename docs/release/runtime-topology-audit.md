@@ -146,12 +146,12 @@ missing canonical（删 junction 目标，断言 reader fail-loud 不猜）。
 - 谓词：runtime 路径 token（`runtimeDir|getInstallLayoutPaths|resolveInstallLayout|active\.json|install\.json|\.pd/runtime|".pd","runtime"`）× 写原语（`cpSync|rmSync|writeFileSync|…`）**同文件共现**即触发。
 - 校准教训：单独 `\.pd\b` 会命中 49 处**工作区状态**写者（I3 明确 state 与 runtime 分离，状态写不在射程）→ 收窄到 runtime 树专有 token。
 - SSoT 白名单 9 条（`ALLOWED_RUNTIME_WRITERS`），双向核查：越界触发 = FAIL；白名单陈旧条目 = FAIL（ERR-146）。权威豁免目录：`packages/create-principles-disciple/src/`（唯一部署写者，installer.ts / bootstrap-executor / atomic-file 等全在此）。
-- 基线实测：944 文件、9 触发、全部登记在册 → PASS。
+- 基线实测：944 文件、9 触发、全部登记在册 → PASS。（CodeRabbit 评审轮加宽后：写原语补 `\brm\(|\bmkdir\(|\brename\(` 异步形、扫描扩展名补 tsx/jsx/mts/cts → 1001 文件、仍 9 触发 → PASS。）
 
 **Guard B — `packages/create-principles-disciple/tests/installed-topology-invariants.test.ts`**（4 测）
 - 真实 `install()` 落进沙箱 HOME（复用 global-shim-lifecycle + installer-gateway-notice 两套件的合成 harness：真 fs 委托 + spawn/http mock + `PD_SKIP_CONSOLE_AUTOLAUNCH`），8 组件合成 payload（版本戳须严格 `x.y.z`）。
-- 断言即 §6 提议的落盘不变量，经**生产 reader API**（`resolveInstallLayout`/`getInstallLayoutPaths`/`getPdCliEntry` + installer 自身 `readActiveRecord`）：canonical 解析成立（I1）、active.json 身份 == payload 身份（I4）、runtime 树零数据 + 无 `~/.pd/state`（I3/R3）、部署组件 digest == payload digest（stale-copy 防线）。
-- junction realpath 断言被 digest 断言取代：沙箱 install 走 copy 语义，digest 对"部署字节 ≠ 载荷字节"的判别力覆盖 junction 漂移情形。
-- 三失败模拟各自独立成立：S1 stale copy（篡改 console/dist/server.js → digest 断言炸）；S2 wrong-writer（事务外直写 runtime/core/state.db → 零数据扫描炸）；S3 missing canonical（删 console 目录 → 生产 reader 显式 mode='missing' + reason='install_runtime_missing' + nextAction 指回 installer，不静默回退）。
+- 断言即 §6 提议的落盘不变量，经**生产 reader API**（`resolveInstallLayout`/`getInstallLayoutPaths`/`getPdCliEntry` + installer 自身 `readActiveRecord`）：canonical 解析成立（I1，且以生产同款 `existsSync(openClawExtensionDir)` 实值验证 canonical 优先于 legacy）、active.json 身份 == payload 身份含 sourceCommit（I4）、runtime 树零数据（后缀式 `.db/.sqlite/config.yaml` + `.state` 目录）+ 无 `~/.pd/state`（I3/R3）、部署组件 digest == payload digest（stale-copy 防线）。
+- digest 断言只覆盖 consoleDir/coreDir 的**部署字节 vs 载荷字节**一致性：`digestDirectory` 跳过非普通文件，不检测 junction 目标漂移，也不证明目标是 canonical 组件。故对 `installConsole()` 在 `console/node_modules` 建的两条依赖链接（principles-disciple→runtime/plugin、create-principles-disciple→runtime/release-manager）另落显式 realpath 断言（评审轮补）。
+- 三失败模拟各自独立成立：S1 stale copy（篡改 console/dist/server.js → digest 断言炸）；S2 wrong-writer（事务外直写 runtime/core/state.db → 零数据扫描炸）；S3 分级降级用实值 flag：删 canonical 目录而 legacy extension 仍在 → 生产 reader 报 `mode='legacy'`；再删 extension → `mode='missing'` + reason='install_runtime_missing' + nextAction 指回 installer，全程不静默。
 
 **harness 坑（记录以防复发）**：只钉 `HOME` 不够——deliverBootstrapExecutor 探测步会动态 import 暂存 executor 模块，该模块经 `os.homedir()` 解析 home，Windows 下走 `USERPROFILE`。一次 HOME-only 的运行把 `executor.staging/` 与一条沙箱 workspace 注册写进了**真实** `~/.pd`（install.json mtime 01:07:49 取证；真实 `runtime/`、`active.json`、活动 `bootstrap/executor` 未受影响）。修正 = HOME+USERPROFILE 双钉（测试内已注释），并以"复跑后真实 `~/.pd` mtime 不变"为遏制证据。残留（install.json 中一条指向已删沙箱的陈旧 workspace 条目 + `~/.pd/bootstrap/executor.staging/`）不手改——手写安装面违反本 PR 自己守护的 I2；留给下一次合法 install/repair 覆盖，已在 PR/交接中如实报告。

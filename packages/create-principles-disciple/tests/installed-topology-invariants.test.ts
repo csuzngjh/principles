@@ -13,7 +13,10 @@
  * proving each invariant is discriminating:
  *   S1 stale runtime copy    → payload-drift check reddens
  *   S2 wrong-writer mutation → zero-data check reddens
- *   S3 missing canonical     → reader resolution reports mode 'missing'
+ *   S3 missing canonical     → with REAL existsSync flags (as production
+ *                              callers pass them) the reader first reports
+ *                              'legacy' (extension copy still present), then
+ *                              'missing' after it is removed too
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -199,7 +202,10 @@ describe('PRI-920 settled-install topology invariants', () => {
       homeDir: sandboxRoot,
       manifest: JSON.parse(manifest),
       canonicalRuntimeExists: realFs.existsSync(layout.consoleDir),
-      legacyExtensionExists: false,
+      // Real legacy state, as every production caller passes it
+      // (pd-cli/console.ts, companion locate.ts): canonical must win the
+      // precedence even though the openclaw extension copy also exists.
+      legacyExtensionExists: realFs.existsSync(layout.openClawExtensionDir),
     });
     expect(resolution.mode).toBe('canonical');
     expect(realFs.existsSync(getPdCliEntry(resolution.paths, resolution.mode))).toBe(true);
@@ -210,15 +216,23 @@ describe('PRI-920 settled-install topology invariants', () => {
     const active = readActiveRecord(realPath.join(layout.pdDir, 'active.json'));
     expect(active, 'active.json must exist after a settled install').not.toBeNull();
     expect(active!.productVersion).toBe(PAYLOAD_VERSION);
+    const stamp = JSON.parse(realFs.readFileSync(realPath.join(fixtureDir, '_release', 'product-identity.json'), 'utf8')) as { sourceCommit: string };
+    expect(active!.sourceCommit, 'active.json must carry the payload identity sourceCommit').toBe(stamp.sourceCommit);
+    expect(active!.releaseMetadataDigest).toMatch(/^[a-f0-9]{64}$/);
 
     // I3 — runtime zero-data: no workspace state lives under the runtime tree.
-    const STATE_NAMES = ['state.db', 'config.yaml', 'state.sqlite'];
+    // Suffix match, not a name whitelist: any *.db / *.sqlite (owner.db,
+    // cache.sqlite, ...) and a foreign `.state` dir violate the invariant.
+    const isStateName = (name: string) =>
+      name === 'config.yaml' || name.endsWith('.db') || name.endsWith('.sqlite');
     const finders: string[] = [];
     const walk = (dir: string) => {
       for (const entry of realFs.readdirSync(dir, { withFileTypes: true })) {
         const p = realPath.join(dir, entry.name);
-        if (entry.isDirectory()) walk(p);
-        else if (STATE_NAMES.includes(entry.name)) finders.push(p);
+        if (entry.isDirectory()) {
+          if (entry.name === '.state') finders.push(p);
+          else walk(p);
+        } else if (isStateName(entry.name)) finders.push(p);
       }
     };
     walk(layout.runtimeDir);
@@ -228,6 +242,15 @@ describe('PRI-920 settled-install topology invariants', () => {
     // I1 drift — deployed bytes equal the payload bytes that were installed.
     expect(digestDirectory(layout.consoleDir)).toBe(digestDirectory(realPath.join(fixtureDir, 'console')));
     expect(digestDirectory(layout.coreDir)).toBe(digestDirectory(realPath.join(fixtureDir, 'core')));
+    // digestDirectory skips non-regular entries, so the two dependency links
+    // installConsole() creates under console/node_modules need explicit
+    // realpath checks — a link aimed at a wrong component is drift the
+    // digest cannot see. (coreDir has no such links; nothing to assert there.)
+    const consoleModules = realPath.join(layout.consoleDir, 'node_modules');
+    expect(realFs.realpathSync(realPath.join(consoleModules, 'principles-disciple')))
+      .toBe(realFs.realpathSync(layout.pluginDir));
+    expect(realFs.realpathSync(realPath.join(consoleModules, 'create-principles-disciple')))
+      .toBe(realFs.realpathSync(layout.releaseManagerDir));
   }
 
   it('settled install satisfies canonical resolution, identity, zero-data and byte-drift invariants', async () => {
@@ -253,12 +276,18 @@ describe('PRI-920 settled-install topology invariants', () => {
     const layout = await settleInstalledRuntime();
     realFs.rmSync(layout.consoleDir, { recursive: true, force: true });
     const manifest = JSON.parse(realFs.readFileSync(layout.manifest, 'utf8'));
-    const resolution = resolveInstallLayout({
-      homeDir: sandboxRoot,
-      manifest,
+    const flags = () => ({
       canonicalRuntimeExists: realFs.existsSync(layout.consoleDir),
-      legacyExtensionExists: false,
+      // Exactly what production callers pass (pd-cli, companion, console):
+      // the live existsSync of the openclaw extension copy.
+      legacyExtensionExists: realFs.existsSync(layout.openClawExtensionDir),
     });
+    // Canonical gone while the host still has its plugin copy → legacy.
+    const legacy = resolveInstallLayout({ homeDir: sandboxRoot, manifest, ...flags() });
+    expect(legacy.mode).toBe('legacy');
+    // Nothing left → missing, with nextAction pointing back at the installer.
+    realFs.rmSync(layout.openClawExtensionDir, { recursive: true, force: true });
+    const resolution = resolveInstallLayout({ homeDir: sandboxRoot, manifest, ...flags() });
     expect(resolution.mode).toBe('missing');
     expect(resolution.reason).toBe('install_runtime_missing');
     expect(resolution.nextAction).toMatch(/create-principles-disciple/);

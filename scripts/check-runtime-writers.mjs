@@ -30,9 +30,10 @@ export const AUTHORIZED_WRITER_PREFIX = 'packages/create-principles-disciple/src
 export const RUNTIME_PATH_TOKEN =
   /runtimeDir|getInstallLayoutPaths|resolveInstallLayout|active\.json|install\.json|\.pd[\\/]+runtime|['"]\.pd['"]\s*,\s*['"]runtime['"]/;
 
-/** Synchronous filesystem mutation primitives (static, file-level signal). */
+/** Filesystem mutation primitives, sync AND async (static, file-level signal).
+ *  The async forms use word boundaries so `confirm(`/`arm(` cannot match `rm(`. */
 export const WRITE_PRIMITIVE =
-  /cpSync|rmSync|writeFileSync|writeFile\(|appendFileSync|renameSync|symlinkSync|mkdirSync|unlinkSync|copyFile\(|copyFileSync/;
+  /cpSync|rmSync|\brm\(|writeFileSync|writeFile\(|appendFileSync|renameSync|\brename\(|symlinkSync|mkdirSync|\bmkdir\(|unlinkSync|copyFile\(|copyFileSync/;
 
 /**
  * Every in-scope file that trips the predicate, with its verified reason.
@@ -78,7 +79,9 @@ export const ALLOWED_RUNTIME_WRITERS = [
   },
 ];
 
-const SOURCE_EXT = /\.(ts|js|mjs|cjs)$/;
+// All first-party production source forms, including Electron/.mts/.cts entry
+// points (pd-companion's preload is .cts) — PRI-920 review nitpick.
+const SOURCE_EXT = /\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/;
 const TEST_PATH = /\.test\.|[/\\]__tests__[/\\]|[/\\]tests[/\\]/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.git']);
 

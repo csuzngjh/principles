@@ -30,6 +30,24 @@ const STATE_WRITER_BODY = [
   "import { writeFileSync } from 'node:fs';",
   "writeFileSync(join(workspace, '.pd', 'config.yaml'), 'telemetry: off');",
 ].join('\n');
+// PRI-920 review: the async fs/promises forms must trip the predicate too —
+// a future runtime writer using only rm/mkdir/rename must not bypass the scan.
+const ASYNC_WRITER_BODY = [
+  "import { mkdir, rename, rm } from 'node:fs/promises';",
+  'export async function mutate(runtimeDir) {',
+  '  await mkdir(runtimeDir, { recursive: true });',
+  "  await rename(runtimeDir + '.old', runtimeDir);",
+  "  await rm(runtimeDir + '/stale', { recursive: true });",
+  '}',
+].join('\n');
+// Word-boundary control: confirm( / arm( contain the literal `rm(` but are
+// not call sites; they must not flag a file that only READS the runtime.
+const LOOKALIKE_BODY = [
+  'export function confirmLayout(runtimeDir) {',
+  "  const armed = confirm('arm(' + runtimeDir);",
+  '  return armed;',
+  '}',
+].join('\n');
 
 const sandboxes: string[] = [];
 function makeRepo(files: Record<string, string>): string {
@@ -75,6 +93,27 @@ describe('negative controls on synthetic repositories', () => {
     const r = evaluateRuntimeWriters(root, []);
     expect(r.flagged).toEqual(['packages/evil/src/steal.mjs']);
     expect(r.unauthorized).toEqual(['packages/evil/src/steal.mjs']);
+  });
+
+  it('flags async fs mutation primitives (rm/mkdir/rename) beside a runtime token', () => {
+    const root = makeRepo({ 'packages/evil/src/async-steal.mjs': ASYNC_WRITER_BODY });
+    const { flagged } = scanRuntimeWriters(root);
+    expect(flagged).toEqual(['packages/evil/src/async-steal.mjs']);
+  });
+
+  it('does not flag word look-alikes of the async primitives', () => {
+    const root = makeRepo({ 'packages/evil/src/dialog.ts': LOOKALIKE_BODY });
+    const { flagged } = scanRuntimeWriters(root);
+    expect(flagged).toEqual([]);
+  });
+
+  it('scans .cts and .tsx production files (PRI-920 review scope nitpick)', () => {
+    const root = makeRepo({
+      'packages/evil/src/preload.cts': ASYNC_WRITER_BODY,
+      'packages/evil/src/panel.tsx': WRITER_BODY,
+    });
+    const { flagged } = scanRuntimeWriters(root);
+    expect([...flagged].sort()).toEqual(['packages/evil/src/panel.tsx', 'packages/evil/src/preload.cts']);
   });
 
   it('does not flag the same code inside the installer authority', () => {
