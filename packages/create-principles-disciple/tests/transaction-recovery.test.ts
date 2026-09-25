@@ -252,7 +252,9 @@ describe('journal torn-tail crash contract (SPEC §8: append+fsync interrupted m
 });
 
 describe('crash recovery matrix (SPEC 14.3: interruption at every boundary)', () => {
-  const previousRecord = activeRecord(5, OLD_RELEASE, OLD_DIGEST, 'txn-000');
+  // PRI-922: there is no previous.json slot — the active record IS the
+  // previously confirmed release while an update transaction is in flight.
+  const oldConfirmed = activeRecord(5, OLD_RELEASE, OLD_DIGEST, 'txn-000');
 
   it('recovers every pre-activation interruption to the old confirmed release', () => {
     const sequence = fullSequence();
@@ -261,8 +263,7 @@ describe('crash recovery matrix (SPEC 14.3: interruption at every boundary)', ()
       const transitions = preActivation.slice(0, crashAfter + 1);
       const outcome = recoverUnfinishedTransaction({
         transitions,
-        activeRecord: previousRecord,
-        previousRecord,
+        activeRecord: oldConfirmed,
         transactionId: TRANSACTION_ID,
       });
       expect(outcome.kind, `crash after ${transitions[crashAfter]?.to}`).toBe('old_confirmed');
@@ -282,11 +283,14 @@ describe('crash recovery matrix (SPEC 14.3: interruption at every boundary)', ()
     // record took the new generation: the old confirmed generation wins.
     const crashAtActivation = recoverUnfinishedTransaction({
       transitions: sequence.slice(0, activationIndex + 1),
-      activeRecord: previousRecord,
-      previousRecord,
+      activeRecord: oldConfirmed,
       transactionId: TRANSACTION_ID,
     });
     expect(crashAtActivation.kind).toBe('old_confirmed');
+    if (crashAtActivation.kind === 'old_confirmed') {
+      expect(crashAtActivation.releaseId).toBe(OLD_RELEASE);
+      expect(crashAtActivation.generation).toBe(5);
+    }
 
     // Crash after the active record landed the new generation AND host
     // verification was journaled, but before `confirmed`: complete as
@@ -294,7 +298,6 @@ describe('crash recovery matrix (SPEC 14.3: interruption at every boundary)', ()
     const crashBeforeConfirm = recoverUnfinishedTransaction({
       transitions: sequence.slice(0, hostVerifiedIndex + 1),
       activeRecord: activeRecord(6, NEW_RELEASE, NEW_DIGEST, TRANSACTION_ID),
-      previousRecord,
       transactionId: TRANSACTION_ID,
     });
     expect(crashBeforeConfirm.kind).toBe('new_confirmed');
@@ -307,23 +310,24 @@ describe('crash recovery matrix (SPEC 14.3: interruption at every boundary)', ()
     const afterAll = recoverUnfinishedTransaction({
       transitions: sequence.slice(0, confirmedIndex + 1),
       activeRecord: activeRecord(6, NEW_RELEASE, NEW_DIGEST, TRANSACTION_ID),
-      previousRecord,
       transactionId: TRANSACTION_ID,
     });
     expect(afterAll.kind).toBe('new_confirmed');
 
     // Pointer landed generation 6, but host verification never journaled:
-    // fall back to the previous confirmed generation (no hybrid).
+    // the landed pointer is itself the unverified hybrid and there is no
+    // second pointer to fall back to — refuse explicitly and demand the
+    // official installer (this was always the production verdict, because
+    // previous.json never had a writer).
     const unverifiedActivation = recoverUnfinishedTransaction({
       transitions: sequence.slice(0, activationIndex + 1),
       activeRecord: activeRecord(6, NEW_RELEASE, NEW_DIGEST, TRANSACTION_ID),
-      previousRecord,
       transactionId: TRANSACTION_ID,
     });
-    expect(unverifiedActivation.kind).toBe('old_confirmed');
-    if (unverifiedActivation.kind === 'old_confirmed') {
-      expect(unverifiedActivation.releaseId).toBe(OLD_RELEASE);
-      expect(unverifiedActivation.generation).toBe(5);
+    expect(unverifiedActivation.kind).toBe('explicit_refusal');
+    if (unverifiedActivation.kind === 'explicit_refusal') {
+      expect(unverifiedActivation.reason).toBe('activation_interrupted_without_previous');
+      expect(unverifiedActivation.nextAction).toMatch(/official installer/i);
     }
   });
 
@@ -333,7 +337,6 @@ describe('crash recovery matrix (SPEC 14.3: interruption at every boundary)', ()
     const outcome = recoverUnfinishedTransaction({
       transitions: sequence.slice(0, activationIndex + 1),
       activeRecord: null,
-      previousRecord: null,
       transactionId: TRANSACTION_ID,
     });
     expect(outcome.kind).toBe('explicit_refusal');
@@ -351,8 +354,7 @@ describe('crash recovery matrix (SPEC 14.3: interruption at every boundary)', ()
       ];
       const outcome = recoverUnfinishedTransaction({
         transitions: sequence,
-        activeRecord: previousRecord,
-        previousRecord,
+        activeRecord: oldConfirmed,
         transactionId: TRANSACTION_ID,
       });
       expect(outcome.kind, terminal).toBe('old_confirmed');
@@ -362,13 +364,52 @@ describe('crash recovery matrix (SPEC 14.3: interruption at every boundary)', ()
   it('reports nothing to reconcile for an unknown transaction', () => {
     const outcome = recoverUnfinishedTransaction({
       transitions: fullSequence(),
-      activeRecord: previousRecord,
-      previousRecord,
+      activeRecord: oldConfirmed,
       transactionId: 'txn-other',
     });
     expect(outcome.kind).toBe('old_confirmed');
     if (outcome.kind === 'old_confirmed') {
       expect(outcome.releaseId).toBeNull();
     }
+  });
+
+  it('ignores a fabricated previous.json — it is not a recovery input (PRI-921 risk closure)', () => {
+    // PRI-921 §5: a hand-written previous.json used to be the only unguarded
+    // disk input that could flip a recovery verdict. The layout no longer
+    // declares the slot, so the recovery stack must never read it.
+    const root = tempRoot();
+    const home = path.join(root, '.pd');
+    const activePath = path.join(home, 'active.json');
+    const previousPath = path.join(home, 'previous.json');
+    const journalPath = path.join(home, 'transactions', `${TRANSACTION_ID}.jsonl`);
+    fs.mkdirSync(path.join(home, 'transactions'), { recursive: true });
+
+    // Active pointer still on the old release: activation crashed before the
+    // write landed. Verdict must be old_confirmed onto the ACTIVE record...
+    writeActiveRecord(activePath, {
+      generation: 5, releaseId: OLD_RELEASE, releaseMetadataDigest: OLD_DIGEST,
+      previousReleaseId: null, transactionId: 'txn-000', productVersion: '1.222.0',
+    });
+    // ...while a fabricated previous.json points at a release that exists
+    // nowhere in the lineage.
+    writeActiveRecord(previousPath, {
+      generation: 99, releaseId: 'f'.repeat(64), releaseMetadataDigest: '3'.repeat(64),
+      previousReleaseId: null, transactionId: 'txn-injected', productVersion: '9.9.9',
+    });
+    for (const item of fullSequence().slice(0, fullSequence().findIndex((t) => t.to === 'activated'))) {
+      appendJournalTransition(journalPath, item);
+    }
+
+    const read = readTransactionJournalForRecovery(journalPath);
+    const outcome = recoverUnfinishedTransaction({
+      transitions: read.transitions,
+      activeRecord: readActiveRecord(activePath),
+      transactionId: TRANSACTION_ID,
+    });
+    expect(outcome).toMatchObject({ kind: 'old_confirmed', releaseId: OLD_RELEASE, generation: 5 });
+
+    // The fabricated file was never consumed: leaving it on disk untouched,
+    // unhashed and unmodified is the whole point of the retired slot.
+    expect(JSON.parse(fs.readFileSync(previousPath, 'utf8')).generation).toBe(99);
   });
 });

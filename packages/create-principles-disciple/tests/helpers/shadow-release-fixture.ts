@@ -201,16 +201,6 @@ export async function createShadowFixture(overrides: {
     transactionId: 'txn-fixture-active',
     productVersion: activeRelease.productVersion,
   });
-  // PRI-853: the retention policy keeps ONE previous confirmed release — the
-  // data-compatibility preflight reads it to decide ordinary-update eligibility.
-  writeActiveRecord(paths.previousRecordPath, {
-    generation: 1,
-    releaseId: activeRelease.releaseId,
-    releaseMetadataDigest: activeRelease.metadataDigest,
-    previousReleaseId: null,
-    transactionId: 'txn-fixture-previous',
-    productVersion: activeRelease.productVersion,
-  });
 
   const channelPayload: ChannelMetadata = {
     schemaVersion: 1,

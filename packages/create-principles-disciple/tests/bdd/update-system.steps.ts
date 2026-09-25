@@ -129,7 +129,6 @@ async function createFixture(ctx: { state: Record<string, unknown> }): Promise<F
     transactionId: 'bdd-prev',
     productVersion: active.productVersion,
   });
-  fs.copyFileSync(withinHome(home, paths.activeRecordPath), withinHome(home, paths.previousRecordPath));
 
   const channelPayload = Buffer.from(JSON.stringify({
     schemaVersion: 1,
@@ -202,10 +201,13 @@ registry.given(/一个隔离的临时 HOME 作为安装根/, async (ctx) => {
   await createFixture(ctx);
 });
 
-registry.given(/一个带 bootstrap 与双槽安装状态的 ~\/\.pd 布局/, (ctx) => {
+registry.given(/一个带 bootstrap 与已确认活动发布的 ~\/\.pd 布局/, (ctx) => {
   const fixture = fixtureOf(ctx);
   expect(fs.existsSync(fixture.paths.bootstrapManifestPath)).toBe(true);
   expect(readActiveRecord(fixture.paths.activeRecordPath)?.generation).toBe(2);
+  // PRI-922: the previous.json ghost slot is retired — the layout declares no
+  // second pointer and nothing writes one.
+  expect(fs.existsSync(path.join(fixture.paths.home, 'previous.json'))).toBe(false);
 });
 
 registry.when(/对 stable 渠道执行 ReleaseManager\.check/, async (ctx) => {
@@ -329,12 +331,12 @@ registry.when(/事务 journal 记录到 activated 但 active\.json 未落到新 
   for (const item of transitions) {
     appendJournalTransition(journalPath, item);
   }
+  // The active record still carries the PREVIOUS transaction — it is the
+  // authority for the previously confirmed release (PRI-922: no second slot).
   const active = readActiveRecord(fixture.paths.activeRecordPath) as ActiveRecord;
-  const previous = readActiveRecord(fixture.paths.previousRecordPath) as ActiveRecord;
   ctx.state['recovery'] = recoverUnfinishedTransaction({
     transitions,
     activeRecord: active,
-    previousRecord: previous,
     transactionId: 'bdd-crash',
   });
 });
@@ -344,7 +346,6 @@ registry.when(/事务 journal 记录到 activated 且没有任何先前 active �
   ctx.state['recovery'] = recoverUnfinishedTransaction({
     transitions: crashTransitions(fixture, 'bdd-first', 1),
     activeRecord: null,
-    previousRecord: null,
     transactionId: 'bdd-first',
   });
 });

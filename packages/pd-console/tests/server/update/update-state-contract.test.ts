@@ -220,6 +220,29 @@ describe('PRI-848 update state contract', () => {
     expect(after).toBe(before);
   });
 
+  it('recovery resolve ignores a fabricated previous.json — it is not a recovery input (PRI-922)', async () => {
+    writeJournal(mocks.fakeHome, 'update-9-stuck', [
+      { at: '2026-09-19T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-9-stuck', releaseId: 'rel-2', productVersion: '1.2.0', generation: 3 },
+    ]);
+    const liveRelease = 'e'.repeat(64);
+    fs.writeFileSync(path.join(mocks.fakeHome, '.pd', 'active.json'), JSON.stringify({
+      schemaVersion: 1, generation: 3, releaseId: liveRelease,
+      releaseMetadataDigest: '4'.repeat(64), previousReleaseId: null,
+      transactionId: 'txn-live', productVersion: '1.2.0',
+    }), 'utf8');
+    // Ghost-slot file from the pre-retirement era, pointing at a release that
+    // exists nowhere in the lineage. Not even valid JSON schema — the endpoint
+    // must never parse it.
+    fs.writeFileSync(path.join(mocks.fakeHome, '.pd', 'previous.json'), '{"generation":"bogus"}', 'utf8');
+
+    const body = await (await fetch(`${transactionBase}/api/update/recovery/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ transactionId: 'update-9-stuck' }),
+    })).json();
+    expect(body.data.ok).toBe(true);
+    expect(body.data.outcome).toMatchObject({ kind: 'old_confirmed', releaseId: liveRelease, generation: 3 });
+  });
+
   it('recovery endpoint flags an unfinished transaction and stays quiet when all are terminal', async () => {
     writeJournal(mocks.fakeHome, 'update-1-terminal', [
       { at: '2026-09-19T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-1-terminal', releaseId: 'rel-1', productVersion: '1.1.0', generation: 1 },
