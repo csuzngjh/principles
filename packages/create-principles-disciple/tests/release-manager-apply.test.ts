@@ -270,4 +270,85 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     const transitions = readTransactionJournal(path.join(fixture.pdHome, 'transactions', journalFiles[0]));
     expect(transitions.map((t) => t.to)).toEqual(['planned', 'downloaded', 'verified', 'failed']);
   });
+
+  /**
+   * PRI-924: staging (verified tarball + extracted payload, GB-scale) is
+   * recycled exactly when the journal reaches a RECOVERABLE terminal state —
+   * never while a mid-chain crash residue could still be recovery material.
+   */
+  describe('staging recycle at recoverable terminal states (PRI-924)', () => {
+    it('confirmed apply removes the transaction staging dir', async () => {
+      const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+      const artifact = buildReleaseAssetPayload(payloadRoot);
+      const fixture = await createShadowFixture({
+        candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+        artifact: () => artifact,
+      });
+      const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+      installMock.mockImplementation(async (options, _payloadDir, _mode, journal) => {
+        confirmThroughInstaller(journal);
+        return fakeInstallResult(options.workspaceDir);
+      });
+
+      const outcome: ApplyOutcome = await manager.apply({ workspaceDir: fixture.pdHome });
+      expect(outcome.kind).toBe('applied');
+      if (outcome.kind !== 'applied') return;
+      expect(fs.existsSync(path.join(fixture.pdHome, 'staging', outcome.transactionId))).toBe(false);
+    });
+
+    it('installer failure ending rolled_back removes the staging dir (journal tail unchanged)', async () => {
+      const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+      const artifact = buildReleaseAssetPayload(payloadRoot);
+      const fixture = await createShadowFixture({
+        candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+        artifact: () => artifact,
+      });
+      const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+      installMock.mockImplementation(async (_options, _payloadDir, _mode, journal) => {
+        const handle = journal as InstallerJournal;
+        journalInstallerTransition(handle, handle.lastState, 'staged', 'test: half deployed');
+        journalInstallerTransition(handle, handle.lastState, 'rolled_back', 'test: EPERM; backup restored');
+        return fakeInstallResult(fixture.pdHome, { success: false, error: 'EPERM', reason: 'install_failed', nextAction: 'retry' });
+      });
+
+      const error = await manager.apply({ workspaceDir: fixture.pdHome }).then(
+        () => { throw new Error('apply should have failed'); },
+        (e: unknown) => e as ReleaseManagerError,
+      );
+      expect(error.reason).toBe('apply_failed');
+      const journalFiles = fs.readdirSync(path.join(fixture.pdHome, 'transactions')).filter((f) => f.startsWith('update-'));
+      expect(journalFiles).toHaveLength(1);
+      const transactionId = journalFiles[0].replace(/\.jsonl$/, '');
+      expect(fs.existsSync(path.join(fixture.pdHome, 'staging', transactionId))).toBe(false);
+    });
+
+    it('mid-transaction crash WITHOUT a terminal tail keeps the staging dir (recovery material)', async () => {
+      const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+      const artifact = buildReleaseAssetPayload(payloadRoot);
+      const fixture = await createShadowFixture({
+        candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+        artifact: () => artifact,
+      });
+      const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+      // The installer journals 'staged' for real; then the journal FILE is
+      // replaced by a directory at the same path, so the manager's terminal
+      // 'failed' append cannot be written (openSync('a') on a directory
+      // throws). The verdict at recycle time stays mid-chain ('staged'), so
+      // the staging residue must SURVIVE — recovery would reason about it.
+      installMock.mockImplementation(async (_options, _payloadDir, _mode, journal) => {
+        const handle = journal as InstallerJournal;
+        journalInstallerTransition(handle, handle.lastState, 'staged', 'test: deployed before the process died');
+        fs.rmSync(handle.journalPath);
+        fs.mkdirSync(handle.journalPath);
+        throw new Error('worker exploded and the journal tail could not be closed');
+      });
+
+      await expect(manager.apply({ workspaceDir: fixture.pdHome })).rejects.toMatchObject({ reason: 'apply_failed' });
+      const stagingDirs = fs.existsSync(path.join(fixture.pdHome, 'staging'))
+        ? fs.readdirSync(path.join(fixture.pdHome, 'staging'))
+        : [];
+      expect(stagingDirs.length).toBe(1);
+      expect(fs.existsSync(path.join(fixture.pdHome, 'staging', stagingDirs[0], 'release-asset.tar.gz'))).toBe(true);
+    });
+  });
 });
