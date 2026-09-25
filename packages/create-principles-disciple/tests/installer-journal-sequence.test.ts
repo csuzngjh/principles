@@ -174,7 +174,6 @@ describe('installer journal sequence (real journal reader)', () => {
       const outcome = recoverUnfinishedTransaction({
         transitions: recovery.transitions,
         activeRecord: null,
-        previousRecord: null,
         transactionId: journal.transactionId,
       });
       expect(outcome).toMatchObject({ kind: 'old_confirmed', releaseId: null, generation: null });
@@ -193,7 +192,6 @@ describe('installer journal sequence (real journal reader)', () => {
       const outcome = recoverUnfinishedTransaction({
         transitions: recovery.transitions,
         activeRecord: null, // installer never writes active.json (ADR-0023 audit F3)
-        previousRecord: null,
         transactionId: journal.transactionId,
       });
       // Activation lineage exists but there is no active record to reconcile:

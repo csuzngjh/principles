@@ -9,7 +9,7 @@ Feature: 商业级版本更新系统行为契约
 
   Background:
     Given 一个隔离的临时 HOME 作为安装根
-    And 一个带 bootstrap 与双槽安装状态的 ~/.pd 布局
+    And 一个带 bootstrap 与已确认活动发布的 ~/.pd 布局
 
   @update-check
   Scenario: check 通过签名链解析渠道并给出前进决策

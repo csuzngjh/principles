@@ -10,7 +10,7 @@
  *   releases/<release-id>/
  *   staging/<transaction-id>/
  *   transactions/<transaction-id>.json
- *   active.json / previous.json
+ *   active.json
  *   logs/
  *
  * This module owns ONLY path derivation and strict readers. Every read of
@@ -37,7 +37,6 @@ export interface PdHomePaths {
   readonly stagingDir: string;
   readonly transactionsDir: string;
   readonly activeRecordPath: string;
-  readonly previousRecordPath: string;
   readonly logsDir: string;
 }
 
@@ -55,7 +54,6 @@ export function resolvePdHomePaths(pdHome: string): PdHomePaths {
     stagingDir: path.join(home, 'staging'),
     transactionsDir: path.join(home, 'transactions'),
     activeRecordPath: path.join(home, 'active.json'),
-    previousRecordPath: path.join(home, 'previous.json'),
     logsDir: path.join(home, 'logs'),
   };
 }

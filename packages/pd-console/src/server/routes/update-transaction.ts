@@ -170,11 +170,9 @@ async function recoveryResolve(res: ServerResponse, req: IncomingMessage): Promi
   try {
     const read = journal.readTransactionJournalForRecovery(journalPath);
     const activeRecord = journal.readActiveRecord(paths.activeRecordPath);
-    const previousRecord = journal.readActiveRecord(paths.previousRecordPath);
     const outcome = journal.recoverUnfinishedTransaction({
       transitions: read.transitions,
       activeRecord,
-      previousRecord,
       transactionId,
     });
     sendSuccess(res, { ok: true, transactionId, outcome });

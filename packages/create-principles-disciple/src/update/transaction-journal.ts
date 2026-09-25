@@ -372,18 +372,18 @@ export type RecoveryOutcome =
  *   swapped); staging residue is cleaned up by the caller.
  * - Journal reached `activated` (or later, unconfirmed) but active.json does
  *   not carry this transaction's generation → the crash interrupted the
- *   active-record write. The journal-confirmed PREVIOUS generation wins:
- *   recovery re-points to it; a hybrid (new code, old pointer) is never
- *   activated. If there is no previous pointer to fall back to, refuse
+ *   active-record write. The active record IS the previously confirmed
+ *   release (PRI-922: there is no separate previous slot; the sole pointer is
+ *   the authority), so recovery re-points to it; a hybrid (new code, old
+ *   pointer) is never activated. If there is no active record at all, refuse
  *   explicitly and demand the official installer.
  */
 export function recoverUnfinishedTransaction(input: {
   transitions: readonly JournalTransition[];
   activeRecord: ActiveRecord | null;
-  previousRecord: ActiveRecord | null;
   transactionId: string;
 }): RecoveryOutcome {
-  const { transitions, activeRecord, previousRecord, transactionId } = input;
+  const { transitions, activeRecord, transactionId } = input;
   const mine = transitions.filter((transition) => transition.transactionId === transactionId);
   if (mine.length === 0) {
     return { kind: 'old_confirmed', releaseId: null, generation: null, reason: 'no journal activity for this transaction' };
@@ -401,8 +401,8 @@ export function recoverUnfinishedTransaction(input: {
   if (last.to === 'rolled_back' || last.to === 'refused' || last.to === 'failed') {
     return {
       kind: 'old_confirmed',
-      releaseId: previousRecord?.releaseId ?? activeRecord?.releaseId ?? null,
-      generation: previousRecord?.generation ?? activeRecord?.generation ?? null,
+      releaseId: activeRecord?.releaseId ?? null,
+      generation: activeRecord?.generation ?? null,
       reason: `transaction ended in ${last.to}; the previously confirmed release remains active`,
     };
   }
@@ -411,8 +411,8 @@ export function recoverUnfinishedTransaction(input: {
   if (!reachedActivation) {
     return {
       kind: 'old_confirmed',
-      releaseId: previousRecord?.releaseId ?? activeRecord?.releaseId ?? null,
-      generation: previousRecord?.generation ?? activeRecord?.generation ?? null,
+      releaseId: activeRecord?.releaseId ?? null,
+      generation: activeRecord?.generation ?? null,
       reason: 'activation was never journaled; no swap happened and staging can be discarded',
     };
   }
@@ -436,30 +436,24 @@ export function recoverUnfinishedTransaction(input: {
     };
   }
   if (activeMatchesNew && last.to === 'activated') {
-    // Pointer landed but host verification never ran: NOT confirmed. The
-    // previous confirmed generation is the safe answer when it exists.
-    if (previousRecord !== null) {
-      return {
-        kind: 'old_confirmed',
-        releaseId: previousRecord.releaseId,
-        generation: previousRecord.generation,
-        reason: 'activation pointer landed but the release was never host-verified; falling back to the previous confirmed generation',
-      };
-    }
+    // Pointer landed but host verification never ran: NOT confirmed, and the
+    // landed pointer is itself the unverified hybrid — there is no separate
+    // previous pointer (PRI-922 retired previous.json; the sole pointer is on
+    // the new side), so the safe answer is an explicit refusal.
     return {
       kind: 'explicit_refusal',
       reason: 'activation_interrupted_without_previous',
-      nextAction: 'The first-ever activation was interrupted before host verification and there is no previously confirmed release to fall back to. Re-run the official installer to install a complete release.',
+      nextAction: 'Activation was interrupted before host verification and there is no confirmed release to fall back to. Re-run the official installer to install a complete release.',
     };
   }
 
   // Active record does not carry this transaction — the swap never landed.
-  const fallback = previousRecord ?? activeRecord;
-  if (fallback !== null) {
+  // The active record IS the previously confirmed release.
+  if (activeRecord !== null) {
     return {
       kind: 'old_confirmed',
-      releaseId: fallback.releaseId,
-      generation: fallback.generation,
+      releaseId: activeRecord.releaseId,
+      generation: activeRecord.generation,
       reason: 'the active record never took this transaction\'s generation; the previously confirmed release stands',
     };
   }

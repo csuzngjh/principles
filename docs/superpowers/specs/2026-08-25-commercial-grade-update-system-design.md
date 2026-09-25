@@ -119,7 +119,6 @@ Production installation state lives outside source worktrees:
   staging/<transaction-id>/
   transactions/<transaction-id>.json
   active.json
-  previous.json
   logs/
 ```
 
@@ -127,7 +126,7 @@ Production installation state lives outside source worktrees:
 
 `releases/` and `staging/` must be on the same volume so final directory moves can be atomic. The stable host shim resolves `active.json` once at process start and loads all runtime components from that single release directory.
 
-The default retention policy keeps the current confirmed release and one previous confirmed release. Preflight requires space for current, previous, new, and staging data before any download begins.
+The default retention policy keeps the current confirmed release plus one superseded backup set (`runtime.backup.*` / `principles-disciple.backup.*`, trimmed by the installer on each successful apply). Lineage lives in `active.json` itself (`previousReleaseId`) and in `logs/history.jsonl` — there is no `previous.json` pointer (retired by PRI-922; its sole writer was removed on 2026-08-26 because a second pointer enabled fake same-generation rollbacks). Preflight requires space for current, backup, new, and staging data before any download begins.
 
 ## 6. Bootstrap and Deep Module Interface
 
