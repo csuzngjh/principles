@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "productVersion": "2.2.0",
+  "releaseId": "d50062930996d902ea70ad6749408f2a42cfab09024ba082d6f5a4c3912f0581",
+  "sourceCommit": "8b70f608a5f4d6573330e5380813d9b7ea402f48",
+  "metadataDigest": "a2708c978d8a5247efba6be27fed9477d524295ebd8e63ee4de74a93bf136b93",
+  "minBootstrapVersion": "1.0.0",
+  "publicationSequence": 8,
+  "expiresAt": "2026-12-24T13:19:14Z",
+  "assets": [
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "nodeAbi": "127",
+      "archiveSha256": "8904aaceb87dac9a19c7227dcc7534ce76047b67d17b1dce695122f95fd96ea8",
+      "archiveSizeBytes": 194736202,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-darwin-arm64-abi127-8904aaceb87d.tar.gz"
+    },
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "nodeAbi": "137",
+      "archiveSha256": "db867315d4ed936c07cbdb110fbe0924b7a2755997a0b289beb5b8546488de06",
+      "archiveSizeBytes": 194735193,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-darwin-arm64-abi137-db867315d4ed.tar.gz"
+    },
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "nodeAbi": "147",
+      "archiveSha256": "c29ea8f4af99fe5f7d0d63bb6770488a5d7549186b22642ac26a75c742e7660b",
+      "archiveSizeBytes": 194735193,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-darwin-arm64-abi147-c29ea8f4af99.tar.gz"
+    },
+    {
+      "platform": "linux",
+      "arch": "x64",
+      "nodeAbi": "127",
+      "archiveSha256": "3855659fd6d8dbbb18d9d258fb249911eacd9fd74a2fc2b0b4d3acebdd4d9196",
+      "archiveSizeBytes": 203393158,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-linux-x64-abi127-3855659fd6d8.tar.gz"
+    },
+    {
+      "platform": "linux",
+      "arch": "x64",
+      "nodeAbi": "137",
+      "archiveSha256": "e607694267dc37b6eea9db3eacd97f4a92eacfb70833d990edf5b0dda7671525",
+      "archiveSizeBytes": 203392531,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-linux-x64-abi137-e607694267dc.tar.gz"
+    },
+    {
+      "platform": "linux",
+      "arch": "x64",
+      "nodeAbi": "147",
+      "archiveSha256": "3b742a65ef045c2dc5eb7c41f63e4b83e1f864fdadee158dafde58951c47a096",
+      "archiveSizeBytes": 203392531,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-linux-x64-abi147-3b742a65ef04.tar.gz"
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "nodeAbi": "127",
+      "archiveSha256": "028b741a0d098b3a4a21d62f635b8da1f35258d0b3809c84c08e8753e9b6add8",
+      "archiveSizeBytes": 198360995,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-win32-x64-abi127-028b741a0d09.tar.gz"
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "nodeAbi": "137",
+      "archiveSha256": "3c25015370660da34f4187ac0e143795a417131cf33747bd5d0310cd0cb1be3e",
+      "archiveSizeBytes": 198362466,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-win32-x64-abi137-3c2501537066.tar.gz"
+    },
+    {
+      "platform": "win32",
+      "arch": "x64",
+      "nodeAbi": "147",
+      "archiveSha256": "cd26e0cbc912c8b01dd1caba781c8fa17215bd93061f061fad6e657ea32b5f83",
+      "archiveSizeBytes": 198362466,
+      "url": "https://github.com/csuzngjh/principles/releases/download/pd-assets/release-asset-win32-x64-abi147-cd26e0cbc912.tar.gz"
+    }
+  ],
+  "compatibility": {
+    "dataSchemaForwardReadableFrom": "2.1.0"
+  }
+}
