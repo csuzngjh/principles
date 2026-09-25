@@ -65,14 +65,14 @@
 | N1 | **cohort 绑定**：一次发布=一个 Version PR 合并 SHA，身份由复现证明（SPEC §17）；resolver 硬要求**双父 merge commit**（`resolve-release-cohort.mjs:59`） | publish-npm.yml / resolver | **实测已断**：#1858/#1862/#1864/#1870 均 squash（p=1），auto 扫描 `git rev-list --merges main` 找不到 cohort；`resolver:106` 在火车的 detached-SHA tools 检出（`fetch-depth: 0`，无本地 `main` ref）上直接 fatal；周 cron 把"窗口无 cohort"当 exit-2 干净 no-op → **npm 链断链两天、烧 1.144.4/5/6、零告警**（run 36094167454 / 36094525933 取证）。resolver 本身零测试覆盖 | **断裂**（2026-09-25 实证） | **New Ticket：已立**（Linear PRI-922 号位复用，题=修复发布火车断链：squash 兼容裁决 + detached main 修复 + 断链告警 + resolver 单测） |
 | N2 | 火车重试幂等（精确 `name@version` 查 registry，gitHead 溯源） | SPEC §18/§24 | 火车各腿运行时逐包核查（本次失败运行验证了 fail-loud 端；成功端有历史 v2.0.4 运行） | 自动 | Keep |
 | N3 | 产品版本链（根 package.json version）与签名频道链由 Owner 手动推进 | PRI-874 / skill 三条链模型 | `release-metadata.yml` 的 product_version 降级拒绝守卫；**手动 dispatch 本身是治理设计**（对外发布须人点头），不是缺口 | 人工（by design） | Keep |
-| N4 | 「合并 ≠ 发版」：Version PR 合并不自动触发火车 | publish-npm.yml 无 push 触发（实测） | 无任何机制保证合并后有人记得 dispatch（本轮 Owner 靠人喊） | **靠人工记忆** | Strengthen 候选：N1 修复票里一并裁决——周 cron 已是安全网（前提 N1 修好），文档/skill 已同步修正（2026-09-25），不再单独立票 |
+| N4 | 「合并 → 火车」自动派发腿：`version-packages.yml:84-97`（push 到 main 即跑，`--is-cohort` 复现证明通过才 dispatch，绑定该 SHA） | SPEC §16/§17 | **存在且工作正常——但门与 N1 同门**：squash 的 Version PR 合并 push（run 36093288167 @ `6199897a`）绿且只 `echo "Not a release cohort"`，不派发也不变红。自动腿本身不需要新机制，需要的是"识别为 Version PR 形状却没派发"时的告警（归入 N1 缺口 3） | 自动（受 N1 断裂牵连） | Keep（修复随 N1 票，勿单开） |
 | N5 | plugin bundle 级 digest 登记（0023 §2.3 后半） | RTA §5 G4 | 未实现 | 无 | New Ticket（RTA 已登记为独立 SPEC 范围，勿并入它票） |
 | N6 | settled 安装两版之间的带外漂移检测（pd doctor，0023 §2.9 Phase 1） | RTA §5 G3 | 未实现（规划中的 runtime 功能） | 无 | New Ticket（RTA 已排除出 guard 任务范围，维持独立） |
 | N7 | `history.jsonl` 是恢复/审计叙事的一半：pd-cli `version-report.ts:251` 真实读 `<pdHome>/logs/history.jsonl`，但 `appendHistoryEvent`（update-history.ts:99）**生产零调用**；pd-cli 测试自己造文件 | 本审计实测 | 无（死 writer 不会被任何测试炸出来） | 断裂（半接线权威） | **New Ticket**：wire-or-retire 裁决（与 previous.json 同形态：要么 writer 接进事务终态、要么删 reader 链），勿顺手修 |
 
 ## 2. Missing Coverage 汇总（按风险排序）
 
-1. **N1 发布火车断链**——已实际发生、影响已量化（3 个版本号 + 组件链静默 2 天，影响面：所有等 npm 更新的新装用户）。唯一一条"已被证伪为可靠"的边界。→ 票已立。
+1. **N1 发布火车断链**——已实际发生、影响已量化（3 个版本号 + 组件链静默 2 天，影响面：所有等 npm 更新的新装用户）。三条腿共享同一失效门：`version-packages.yml` 的合并自动派发（`--is-cohort` 拒绝单父 squash → echo-only 静默不派发、push run 仍绿）、周五 cron 的 auto 扫描（detached 检出下 `rev-list ... main` fatal）、以及两者共同的"断链零告警"。→ 票已立。
 2. **N7 history.jsonl 半接线**——一个生产 reader 消费着永远为空的文件；version-report 的更新历史段落实际是恒空降级。属 P4 单权威漂移，不是故障源。
 3. **C5 check:runtime-pin 无人调用**——脚本存在即安全感，实际 pin 漂移只被下限守卫挡住一半。
 4. **L5 previous.json 复活面**——恢复裁决不被翻转有负向锁，但"槽位再现"（layout 字段回加 / 幽灵文件再现）无静态防线；Guard A token 列表实测不含 `previous`。
@@ -112,7 +112,7 @@ New external/network capability: NO
 
 ## 6. Maturity 评级
 
-**B**。理由：安装面核心（writer 唯一 / 零数据 / journal-first / canonical 拓扑 / junction 生命周期 / 产物卫生 / 尺寸预算）已全员机械化且有 merge-time 防线，这是 A 的底盘；但发布边界上仍存在一条**已被现实击穿且静默无告警**的不变量（N1），外加一条半接线权威（N7）与两条"记得才跑"的人工腿（C5/N4）——A 级要求"违反必变红"，本轮取证证明该词在发布边界尚不成立。N1 修复票合并 + C5 接线后可升 A-；N7 裁决收口 + previous.json 复活面封死后升 A。
+**B**。理由：安装面核心（writer 唯一 / 零数据 / journal-first / canonical 拓扑 / junction 生命周期 / 产物卫生 / 尺寸预算）已全员机械化且有 merge-time 防线，这是 A 的底盘；但发布边界上仍存在一条**已被现实击穿且静默无告警**的不变量（N1，连带吞掉本已存在的合并自动派发腿 N4），外加一条半接线权威（N7）与一条"记得才跑"的人工腿（C5）——A 级要求"违反必变红"，本轮取证证明该词在发布边界尚不成立。N1 修复票合并 + C5 接线后可升 A-；N7 裁决收口 + previous.json 复活面封死后升 A。
 
 ---
 
