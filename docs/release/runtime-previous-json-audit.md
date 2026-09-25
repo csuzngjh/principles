@@ -58,7 +58,7 @@ transactions 模板与 `transactions-superseded-*`）零命中；插件 shell `~
 ### 3. Current Reality
 
 - 生产 writer 数量：**0**（历史存在 1 天，2026-08-26 当天被删，此后再未出现）
-- 生产 reader 数量：**1**（console `POST /api/update/recovery/resolve`），且**永远读到 null**（文件不存在时 `readActiveRecord` 返回 null，transaction-journal.ts:302）
+- 生产 reader 数量：**1**（console `POST /api/update/recovery/resolve`）。在**正常安装布局**（无 writer ⇒ 文件不存在）下恒读到 null（`readActiveRecord` 缺文件返回 null，transaction-journal.ts:302）；注意这是"文件不存在"的推论而非 reader 的性质——若某台机器存在残留/伪造的合法格式 previous.json，旧 reader 会读到非 null 并可能改变恢复裁决（见 §5 负风险）。本工作区真机扫描零残留（§2）。
 - 缺失时行为：系统**正常继续**——`recoverUnfinishedTransaction` 的 null 分支是设计内路径：
   - 多数场景 fallback 到 `activeRecord`（`fallback = previousRecord ?? activeRecord`，:457）；
   - 仅"首次激活即中断且无 active"这一最坏场景走 `explicit_refusal`，nextAction 指回 installer——降级是响亮且正确的。
