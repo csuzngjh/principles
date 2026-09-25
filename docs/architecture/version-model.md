@@ -43,9 +43,10 @@ Invariants:
   ranges, the lockfile, and the single approved component mirror
   (`openclaw.plugin.json` ← plugin version). Its diff is reproducible from
   the pending changesets (identity by proof, not by branch name/actor).
-- A release cohort binds to the Version PR merge SHA; the publish train
-  distributes exact committed versions and reconciles closing steps
-  idempotently. See [RELEASE_PROCESS](../process/release/RELEASE_PROCESS.md).
+- A release cohort binds to the Version PR landing SHA (merge or squash —
+  identity is the first-parent reproduction, never the commit shape); the
+  publish train distributes exact committed versions and reconciles closing
+  steps idempotently. See [RELEASE_PROCESS](../process/release/RELEASE_PROCESS.md).
 
 ## Approved mirrors and forbidden propagations
 

@@ -87,7 +87,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.tools_ref || github.sha }}
-          # Cohort detection walks recent merge commits (bounded scan).
+          # Cohort detection walks main's first-parent spine (bounded scan).
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -109,19 +109,23 @@ jobs:
           if [ -n "$EXPLICIT" ]; then MODE="explicit"; ARGS=(--explicit "$EXPLICIT"); fi
           echo "Resolving release cohort ($MODE)..."
 
-          # Exit 2 = no cohort in the scan window: for the weekly window
-          # that is a clean no-op (SPEC §23). An invalid explicit SHA fails
-          # with exit 1 and aborts the run.
-          if ! node scripts/release/resolve-release-cohort.mjs "${ARGS[@]}" > cohort.json; then
-            CODE=$?
-            if [ "$CODE" -eq 2 ]; then
-              echo "No release cohort found — nothing pending. Weekly reconciliation no-op."
-              echo "has_cohort=false" >> "$GITHUB_OUTPUT"
-              echo "cohort_sha=" >> "$GITHUB_OUTPUT"
-              echo "pending_json=[]" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            exit 1
+          # Exit codes: 0 = cohort resolved, 2 = clean no-op (nothing to do in
+          # this window, SPEC §23), 1 = invalid explicit SHA, a registry
+          # failure, or the chain-break alarm (main carries versions the
+          # registry has never seen while no cohort was found) — all of which
+          # must abort the run. Capture the status WITHOUT `if !`, because the
+          # negation resets $? to 0 and would make the exit-2 branch dead code.
+          node scripts/release/resolve-release-cohort.mjs "${ARGS[@]}" > cohort.json && RC=0 || RC=$?
+          if [ "$RC" -eq 2 ]; then
+            echo "No release cohort found — nothing pending. Weekly reconciliation no-op."
+            echo "has_cohort=false" >> "$GITHUB_OUTPUT"
+            echo "cohort_sha=" >> "$GITHUB_OUTPUT"
+            echo "pending_json=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::Release cohort resolution failed (exit $RC) — see the resolver output above."
+            exit "$RC"
           fi
           cat cohort.json
 

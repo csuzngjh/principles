@@ -24,7 +24,7 @@
 Version Packages PR（机器人，changesets/action）
         =  版本 + CHANGELOG + 内部依赖范围 + lockfile + 插件镜像
         ↓  Owner 审阅并合并        ← 唯一的版本落地路径
-release cohort = 该合并 SHA
+release cohort = 该落地提交 SHA（merge / squash 皆可——身份是「复现」，不是提交形态）
         ↓
 发布火车（合并后自动派发；或每周对账窗口）
         =  checkout cohort SHA → 精确 name@version 查询 registry
@@ -39,7 +39,8 @@ tag vX.Y.Z（插件语义）/ GitHub Release / ClawHub
   bump 输入、没有"重置到 registry 再 bump"。旧路径已随切换删除，无遗留回退。
 - **版本落地** = 仅 Version Packages PR。普通 PR 不得修改任何
   `packages/*/package.json` 的 `version` 字段。
-- **Release cohort** = Version PR 合并 SHA。重试与每周窗口都从该 SHA 构建；
+- **Release cohort** = Version PR 落地提交 SHA（merge / squash 皆可，身份是
+  对第一父提交的复现，不是提交形态）。重试与每周窗口都从该 SHA 构建；
   之后 main 的新变化不会泄漏进已规划的发布。
 - **精确版本发布** = 按精确 `name@version` 查询 registry：不存在 → 发布；
   存在且来源匹配（gitHead = cohort SHA）→ 跳过上传并补齐收尾；冲突 /
@@ -89,12 +90,14 @@ runtime pin、或"因为一起发布就让版本相同"。
 
 ### 发布触发
 
-- **Cohort 合并**：合并 Version Packages PR 会自动派发绑定该合并 SHA 的发布
-  火车（`version-packages.yml`）。
+- **Cohort 合并**：合并 Version Packages PR 会自动派发绑定该落地 SHA 的发布
+  火车（`version-packages.yml`；merge / squash 皆由复现证明身份）。
 - **恢复 / 手动**：Actions → Publish to npm → Run，可指定 `cohort_sha`
   （留空 = 自动探测最新 cohort）。
 - **每周窗口**（周五 04:00 UTC）：只做对账——补齐待发布 cohort 与未完成收尾；
-  永不制造版本；无 cohort → 成功空跑。
+  永不制造版本。无 cohort 且 registry 已含 main 上的全部精确版本 → 成功空跑；
+  无 cohort 但 main 上有版本在 registry 缺失 → **断链告警**（exit 1 +
+  `::error::`，PRI-922：squash 合并曾让整条 npm 链静默停摆）。
 
 Version PR 机器人（`changesets/action`，已锁版本）**必须**配置
 `PD_VERSION_PR_TOKEN` secret（细粒度 PAT：contents:write +
