@@ -2,23 +2,27 @@
 /**
  * Release cohort resolver (SPEC v1.2 §17 / Step J).
  *
- * A release cohort is defined by EXACTLY one SHA: the Version Packages PR
- * merge commit. Identity is proven by reproduction (the merge commit's
- * first-parent diff must equal the materialization of the pending
+ * A release cohort is defined by EXACTLY one SHA: the commit that landed the
+ * Version Packages PR on main. Identity is proven by reproduction (the
+ * commit's first-parent diff must equal the materialization of the pending
  * changesets at its first parent) — never by commit message, branch name,
- * or actor.
+ * actor, or merge-vs-squash shape (SPEC §17; PRI-922).
  *
  * Modes:
- *   --is-cohort <sha>   exit 0 iff <sha> is a Version PR merge commit
+ *   --is-cohort <sha>   exit 0 iff <sha> is a Version PR landing commit
  *   --explicit <sha>    resolve that SHA as the cohort (fails loud if not)
- *   (default)           scan main's recent merge commits newest-first for
- *                       the latest cohort; also report whether every
+ *   (default)           scan main's recent commits newest-first for the
+ *                       latest cohort; also report whether every
  *                       publishable package's exact version already exists
- *                       on the registry (published-complete -> no-op)
+ *                       on the registry (published-complete -> no-op).
+ *                       When NO cohort is found but main still carries
+ *                       versions absent from the registry, that is a release
+ *                       chain break and alarms red instead of no-opping.
  *
- * Output: one JSON object on stdout. Exit 0 on resolution/no-op, 1 on
- * invalid explicit SHA, 2 on nothing found (callers that treat "no cohort"
- * as a clean no-op — the weekly window — use the JSON, not the code).
+ * Output: one JSON object on stdout. Exit 0 on resolution, 1 on an invalid
+ * explicit SHA, a registry failure (SPEC §18.3) or the chain-break alarm,
+ * 2 on a clean no-op (callers that treat "no cohort, nothing pending" as a
+ * no-op — the weekly window — use the JSON, not the code).
  */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -48,15 +52,19 @@ function gitSafe(args) {
 }
 
 async function isCohort(sha) {
-  // A Version PR merge commit has two parents; the reproduction base is the
-  // first parent (main before the merge). A plain commit whose diff happens
-  // to be a materialization is NOT a cohort — the release identity is the
-  // MERGE SHA (SPEC §17), and single-parent commits on main are feature
-  // pushes, not Version PR merges.
+  // The reproduction base is the commit's FIRST PARENT — main before the
+  // Version PR landed. Whether the PR was merged with a merge commit or
+  // squashed/rebased is irrelevant: both forms produce exactly one commit
+  // on main whose first-parent diff is the materialization, and both must
+  // be valid cohorts (PRI-922: squash-only merge policy made every cohort
+  // single-parent and silently dead-ended the train). Root commits (no
+  // parent) cannot be cohorts; a feature push fails the reproduction
+  // because its diff carries files outside the Version PR allowlist or
+  // does not equal the deterministic materialization.
   const parents = gitSafe(['rev-list', '--parents', '-n', '1', sha]);
   if (!parents) return { ok: false, reason: `cannot read commit ${sha}` };
   const parts = parents.trim().split(/\s+/);
-  if (parts.length < 3) return { ok: false, reason: `${sha} is not a merge commit` };
+  if (parts.length < 2) return { ok: false, reason: `${sha} has no parent commit` };
   const firstParent = parts[1];
   const repro = await reproduceVersionMaterialization({ repoRoot, baseSha: firstParent, headSha: sha });
   return { ok: repro.reproducible, reason: repro.reasons.join('; '), releases: repro.releases };
@@ -101,14 +109,18 @@ if (explicitSha) {
   process.exit(0);
 }
 
-// Default: newest-first bounded scan of main's merge commits.
+// Default: newest-first bounded scan of main's spine for the latest cohort.
+// --first-parent walks the integration line (merge commits and squash/rebase
+// landings alike) and skips the interior commits of feature branches, which
+// can never be cohorts; scanning HEAD rather than `main` because the train's
+// tools checkout is a detached SHA where no `main` ref exists.
 const SCAN_LIMIT = Number(argValue('--scan-limit') ?? 40);
-const merges = gitSafe(['rev-list', '--merges', '-n', String(SCAN_LIMIT), 'main'])
+const spine = gitSafe(['rev-list', '--first-parent', '-n', String(SCAN_LIMIT), 'HEAD'])
   ?.split('\n')
   .filter(Boolean) ?? [];
 
 let found = null;
-for (const sha of merges) {
+for (const sha of spine) {
   const verdict = await isCohort(sha); // eslint-disable-line no-await-in-loop
   if (verdict.ok) {
     found = { sha, releases: verdict.releases };
@@ -117,7 +129,36 @@ for (const sha of merges) {
 }
 
 if (!found) {
-  console.log(JSON.stringify({ cohort: false, scanned: merges.length, reason: 'no Version Packages merge commit in the scanned window' }));
+  // A cohort-free scan window is a clean no-op ONLY when the tree we scanned
+  // carries nothing unpublished. A Version PR whose train never ran leaves
+  // main holding package versions that no publish ever recorded, and it stays
+  // silent forever unless somebody says so (PRI-922).
+  const headSha = gitSafe(['rev-parse', 'HEAD'])?.trim();
+  if (!headSha) {
+    console.error(`::error::No cohort in the scanned window and HEAD is not readable in ${repoRoot} — cannot reconcile what main should have published.`);
+    process.exit(1);
+  }
+  const unpublished = [];
+  for (const [name, version] of Object.entries(committedVersions(headSha))) {
+    let manifest;
+    try {
+      manifest = await fetchExactManifest(name, version); // eslint-disable-line no-await-in-loop
+    } catch (err) {
+      console.error(`::error::Registry query failed for ${name}@${version}: ${err?.message ?? err}. A registry failure is never "absent" (SPEC §18.3).`);
+      process.exit(1);
+    }
+    if (manifest === null) unpublished.push(`${name}@${version}`);
+  }
+  if (unpublished.length > 0) {
+    console.error(
+      `::error::Release chain break: ${spine.length} commit(s) scanned on main with no release cohort, ` +
+        `yet these committed versions are absent from the registry: ${unpublished.join(', ')}. ` +
+        `A Version PR landed without its publish train — dispatch publish-npm.yml with an explicit cohort_sha.`,
+    );
+    console.log(JSON.stringify({ cohort: false, scanned: spine.length, chainBreak: true, unpublished }));
+    process.exit(1);
+  }
+  console.log(JSON.stringify({ cohort: false, scanned: spine.length, reason: 'no release cohort in the scanned window and nothing unpublished' }));
   process.exit(2);
 }
 

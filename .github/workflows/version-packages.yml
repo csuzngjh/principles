@@ -5,9 +5,10 @@ name: Version Packages
 # never creates GitHub releases (create-github-releases/push-git-tags are
 # explicitly off — those are PD publish-train closing steps).
 #
-# The same workflow closes the release-cohort loop: when a push to main is a
-# Version PR MERGE commit (proven by reproduction, not by message/actor), it
-# dispatches the publish train bound to that exact SHA (SPEC §17).
+# The same workflow closes the release-cohort loop: when a push to main IS the
+# Version PR landing commit — proven by reproduction against its first parent,
+# not by message/actor or merge-vs-squash shape — it dispatches the publish
+# train bound to that exact SHA (SPEC §17, PRI-922).
 
 on:
   push:
@@ -82,9 +83,9 @@ jobs:
           github-token: ${{ secrets.PD_VERSION_PR_TOKEN || github.token }}
 
       - name: Dispatch publish train on cohort merge
-        # A push that leaves NO pending changesets and IS a Version PR merge
-        # commit = a release cohort. Dispatch the publish train bound to
-        # this exact SHA; feature pushes are ignored.
+        # A push that leaves NO pending changesets and IS the Version PR
+        # landing commit = a release cohort. Dispatch the publish train bound
+        # to this exact SHA; feature pushes are ignored.
         if: steps.changesets.outputs.has-changesets == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

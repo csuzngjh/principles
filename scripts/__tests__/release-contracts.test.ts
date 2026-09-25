@@ -23,8 +23,14 @@
 //   T14 product version ......... version-pr/root product version unchanged
 //   T15 runtime pins ............ version-pr/runtime pin file untouched
 //   T16 component mirror ........ version-pr/openclaw.plugin.json mirror
-//   T21 main advances ........... cohort/resolve stays on cohort merge SHA
-//   T24 weekly no pending ....... cohort/no cohort is a clean exit-2 no-op
+//   T21 main advances ........... cohort/resolve stays on cohort landing SHA
+//   T21-squash .................... a single-parent (squash) Version PR landing
+//                                   commit is the cohort — identity is the
+//                                   reproduction, not the commit shape (PRI-922)
+//   T21-detached ................ auto-scan works from a detached SHA checkout
+//   T24 weekly no pending ....... cohort/no cohort + nothing unpublished = exit 2
+//   T24-alarm ................... no cohort but unpublished versions on main =
+//                                 red chain break (exit 1), never a silent no-op
 //   T26 ERR-131 ................. err131/changeset version is install-free
 
 import fs from 'node:fs';
@@ -66,9 +72,9 @@ async function sh(
 }
 
 /** Fixture writer with a hard containment boundary (test hygiene). */
-function write(rel: string, content: string) {
-  const abs = path.resolve(repo, rel);
-  if (abs !== repo && !abs.startsWith(repo + path.sep)) {
+function write(rel: string, content: string, dir = repo) {
+  const abs = path.resolve(dir, rel);
+  if (abs !== dir && !abs.startsWith(dir + path.sep)) {
     throw new Error(`fixture write escaped the repo boundary: ${rel}`);
   }
   fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -79,15 +85,20 @@ function read(rel: string): string {
   return fs.readFileSync(path.join(repo, rel), 'utf8');
 }
 
-async function git(args: string[]): Promise<string> {
-  return (await sh('git', args, repo)).stdout.trim();
+/** write() with the directory first, for scenarios on a second fixture tree. */
+function writeIn(dir: string, rel: string, content: string) {
+  write(rel, content, dir);
 }
 
-async function commitAll(message: string): Promise<string> {
-  await sh('git', ['add', '-A'], repo);
-  const r = await sh('git', ['commit', '-m', message, '--no-verify'], repo);
+async function git(args: string[], dir = repo): Promise<string> {
+  return (await sh('git', args, dir)).stdout.trim();
+}
+
+async function commitAll(message: string, dir = repo): Promise<string> {
+  await sh('git', ['add', '-A'], dir);
+  const r = await sh('git', ['commit', '-m', message, '--no-verify'], dir);
   if (r.code !== 0) throw new Error(`commit failed: ${r.stderr}`);
-  return await git(['rev-parse', 'HEAD']);
+  return await git(['rev-parse', 'HEAD'], dir);
 }
 
 async function runGuard(baseSha: string): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -117,13 +128,17 @@ function changeset(body: string): string {
   return `---\n${body}\n---\n\nRelease-affecting change for contract tests.\n`;
 }
 
-beforeAll(async () => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-release-contracts-'));
-  repo = path.join(root, 'repo');
-  fs.mkdirSync(repo, { recursive: true });
-  await sh('git', ['init', '-b', 'main'], repo);
-  await sh('git', ['config', 'user.name', 'test'], repo);
-  await sh('git', ['config', 'user.email', 'test@example.com'], repo);
+/**
+ * Seed a fixture tree with the real workspace SHAPE (root manifest, lockfile
+ * stub, changeset config, publishable + private packages, ghost copy, runtime
+ * pin). Parameterized by directory because cohort scenarios must not mutate
+ * the shared fixture's version line — later scenarios assert on it.
+ */
+async function seedRepo(dir: string) {
+  fs.mkdirSync(dir, { recursive: true });
+  await sh('git', ['init', '-b', 'main'], dir);
+  await sh('git', ['config', 'user.name', 'test'], dir);
+  await sh('git', ['config', 'user.email', 'test@example.com'], dir);
 
   write(
     'package.json',
@@ -132,6 +147,7 @@ beforeAll(async () => {
       null,
       2,
     ) + '\n',
+    dir,
   );
   // @manypkg's NpmTool only recognizes an npm workspace root when
   // package-lock.json EXISTS (existence check) — without it, changesets'
@@ -141,6 +157,7 @@ beforeAll(async () => {
   write(
     'package-lock.json',
     JSON.stringify({ name: 'fixture-monorepo', version: '1.0.0', lockfileVersion: 3, requires: true, packages: { '': { name: 'fixture-monorepo', version: '1.0.0' } } }, null, 2) + '\n',
+    dir,
   );
   write(
     '.changeset/config.json',
@@ -159,30 +176,64 @@ beforeAll(async () => {
       null,
       2,
     ) + '\n',
+    dir,
   );
   const pkg = (name: string, version: string, extra: Record<string, unknown> = {}) =>
     JSON.stringify({ name, version, main: 'index.js', ...extra }, null, 2) + '\n';
-  write('packages/core/package.json', pkg('@principles/core', '1.0.0'));
-  write('packages/core/index.js', "module.exports = 'core';\n");
+  write('packages/core/package.json', pkg('@principles/core', '1.0.0'), dir);
+  write('packages/core/index.js', "module.exports = 'core';\n", dir);
   write(
     'packages/openclaw-plugin/package.json',
     pkg('principles-disciple', '1.0.0', { dependencies: { '@principles/core': '^1.0.0' } }),
+    dir,
   );
-  write('packages/openclaw-plugin/index.js', "module.exports = 'plugin';\n");
+  write('packages/openclaw-plugin/index.js', "module.exports = 'plugin';\n", dir);
   write(
     'packages/openclaw-plugin/openclaw.plugin.json',
     JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }, null, 2) + '\n',
+    dir,
   );
-  write('packages/create-principles-disciple/package.json', pkg('create-principles-disciple', '1.0.0'));
-  write('packages/create-principles-disciple/index.js', "module.exports = 'installer';\n");
+  write('packages/create-principles-disciple/package.json', pkg('create-principles-disciple', '1.0.0'), dir);
+  write('packages/create-principles-disciple/index.js', "module.exports = 'installer';\n", dir);
   // Runtime pin artifact (C5 territory — must never be touched by a Version PR).
-  write('packages/create-principles-disciple/release-locks/core.json', JSON.stringify({ pin: '1.0.0' }, null, 2) + '\n');
+  write('packages/create-principles-disciple/release-locks/core.json', JSON.stringify({ pin: '1.0.0' }, null, 2) + '\n', dir);
   // Ghost nested copy inside the installer (SPEC §7.3): NOT a workspace
   // member, never discovered, never versioned.
-  write('packages/create-principles-disciple/vendor/core-copy/package.json', pkg('@principles/core', '0.0.1-ghost'));
-  write('packages/pd-console/package.json', pkg('@principles/pd-console', '0.1.0', { private: true }));
-  write('packages/pd-console/index.js', "module.exports = 'console';\n");
-  await commitAll('base');
+  write('packages/create-principles-disciple/vendor/core-copy/package.json', pkg('@principles/core', '0.0.1-ghost'), dir);
+  write('packages/pd-console/package.json', pkg('@principles/pd-console', '0.1.0', { private: true }), dir);
+  write('packages/pd-console/index.js', "module.exports = 'console';\n", dir);
+  await commitAll('base', dir);
+}
+
+/**
+ * Local npm registry stub. `present(name, version)` decides 200 vs 404, so
+ * cohort scenarios control the reconciliation outcome instead of hitting the
+ * real registry (a registry failure must never read as "absent", SPEC §18.3,
+ * and a fixture-private version would 404 for the wrong reason).
+ */
+async function mockRegistry(present: (name: string, version: string) => boolean) {
+  const { createServer } = await import('node:http');
+  const server = createServer((req, res) => {
+    const parts = decodeURIComponent(req.url ?? '').split('/').filter(Boolean);
+    const [name, version] = parts[0]?.startsWith('@')
+      ? [`${parts[0]}/${parts[1]}`, parts[2]]
+      : [parts[0], parts[1]];
+    const hit = Boolean(name && version && present(name, version));
+    res.writeHead(hit ? 200 : 404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(hit ? { name, version, gitHead: 'mock' } : { error: 'Not found' }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+beforeAll(async () => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-release-contracts-'));
+  repo = path.join(root, 'repo');
+  await seedRepo(repo);
 }, 120000);
 
 afterAll(() => {
@@ -476,7 +527,7 @@ describe('cohort: release cohort resolution', () => {
 
     // Feature B lands AFTER the cohort merge.
     write('packages/core/post-cohort.js', 'export {};\n');
-    await commitAll('feat(core): after cohort');
+    const featureB = await commitAll('feat(core): after cohort');
 
     // Default resolution finds the COHORT merge SHA (not HEAD, not B). The
     // registry check afterwards hits the real registry for fixture-private
@@ -491,10 +542,20 @@ describe('cohort: release cohort resolution', () => {
       PD_RELEASE_RETRY_DELAY_MS: '1',
     });
     expect(isCohort.code).toBe(0);
-    const notCohort = await sh(process.execPath, [COHORT, '--repo-root', repo, '--is-cohort', before], repo, {
+    // A feature push is NOT a cohort: its diff carries files outside the
+    // Version PR allowlist, so the reproduction fails.
+    const notCohort = await sh(process.execPath, [COHORT, '--repo-root', repo, '--is-cohort', featureB], repo, {
       PD_RELEASE_RETRY_DELAY_MS: '1',
     });
     expect(notCohort.code).toBe(1);
+    // PRI-922: `before` is a SINGLE-PARENT Version PR landing (the shape this
+    // repo's squash-only merge policy produces). Identity is the reproduction
+    // against its first parent, so it is a cohort exactly like a merge commit.
+    const squashShaped = await sh(process.execPath, [COHORT, '--repo-root', repo, '--is-cohort', before], repo, {
+      PD_RELEASE_RETRY_DELAY_MS: '1',
+    });
+    expect(squashShaped.code).toBe(0);
+    expect(squashShaped.stdout).toContain('"cohort":true');
 
     // T24: a tree with no cohort anywhere resolves to a clean exit-2 no-op.
     const empty = path.join(root, 'empty-repo');
@@ -508,6 +569,173 @@ describe('cohort: release cohort resolution', () => {
     const noCohort = await sh(process.execPath, [COHORT, '--repo-root', empty], empty);
     expect(noCohort.code).toBe(2);
     expect(noCohort.stdout).toContain('"cohort":false');
+  }, 300000);
+
+  it('T21-squash: a squash-merged Version PR (one parent) is still the cohort', async () => {
+    // PRI-922: the repository's merge policy is squash-only, and cohort
+    // identity is the first-parent REPRODUCTION, never the commit shape.
+    const squashRepo = path.join(root, 'squash-repo');
+    await seedRepo(squashRepo);
+
+    await writeIn(squashRepo, '.changeset/core-squash.md', changeset("'@principles/core': patch"));
+    await commitAll('chore: pending changeset', squashRepo);
+    await sh('git', ['checkout', '-b', 'vp-branch'], squashRepo);
+    const m = await sh(process.execPath, [MATERIALIZE, '--repo-root', squashRepo], squashRepo, {
+      PD_RELEASE_RETRY_DELAY_MS: '1',
+    });
+    expect(m.code).toBe(0);
+    await commitAll('chore: version packages [version-packages]', squashRepo);
+    await sh('git', ['checkout', 'main'], squashRepo);
+    const preSquash = await git(['rev-parse', 'HEAD'], squashRepo);
+    const sq = await sh('git', ['merge', '--squash', 'vp-branch'], squashRepo);
+    expect(sq.code).toBe(0);
+    const squashSha = await commitAll('chore: version packages [version-packages] (squash)', squashRepo);
+
+    // The fixture really produced a SINGLE-parent commit.
+    const parents = await git(['rev-list', '--parents', '-n', '1', squashSha], squashRepo);
+    expect(parents.split(/\s+/)).toEqual([squashSha, preSquash]);
+
+    const registry = await mockRegistry(() => false);
+    try {
+      const isCohort = await sh(
+        process.execPath,
+        [COHORT, '--repo-root', squashRepo, '--is-cohort', squashSha],
+        squashRepo,
+        { PD_RELEASE_REGISTRY: registry.url, PD_RELEASE_RETRY_DELAY_MS: '1' },
+      );
+      expect(isCohort.code).toBe(0);
+      expect(isCohort.stdout).toContain('"cohort":true');
+
+      // --explicit proves the same identity for the train's manual path.
+      const explicit = await sh(
+        process.execPath,
+        [COHORT, '--repo-root', squashRepo, '--explicit', squashSha],
+        squashRepo,
+        { PD_RELEASE_REGISTRY: registry.url, PD_RELEASE_RETRY_DELAY_MS: '1' },
+      );
+      expect(explicit.code).toBe(0);
+      expect(explicit.stdout).toContain('"cohort":true');
+
+      // The auto-scan (weekly window / detached tools checkout) finds it too.
+      const scan = await sh(
+        process.execPath,
+        [COHORT, '--repo-root', squashRepo, '--scan-limit', '10'],
+        squashRepo,
+        { PD_RELEASE_REGISTRY: registry.url, PD_RELEASE_RETRY_DELAY_MS: '1' },
+      );
+      expect(scan.code).toBe(0);
+      expect(scan.stdout).toContain(squashSha.slice(0, 10));
+      expect(JSON.parse(scan.stdout.trim()).publishComplete).toBe(false);
+    } finally {
+      await registry.close();
+    }
+  }, 300000);
+
+  it('T21-detached: the auto-scan resolves a cohort from a detached SHA checkout', async () => {
+    // The train checks out the cohort as a detached SHA, where no local
+    // `main` ref exists (PRI-922: scanning `main` there made the weekly
+    // reconciliation window fatal, and the resolver read it as no cohort).
+    const detachRepo = path.join(root, 'detach-repo');
+    await seedRepo(detachRepo);
+    await writeIn(detachRepo, '.changeset/core-detach.md', changeset("'@principles/core': patch"));
+    await commitAll('chore: pending changeset', detachRepo);
+    const cohort = await sh(process.execPath, [MATERIALIZE, '--repo-root', detachRepo], detachRepo, {
+      PD_RELEASE_RETRY_DELAY_MS: '1',
+    });
+    expect(cohort.code).toBe(0);
+    const cohortSha = await commitAll('chore: version packages [version-packages]', detachRepo);
+
+    const worktree = path.join(root, 'detach-worktree');
+    fs.mkdirSync(worktree, { recursive: true });
+    const buf = execFileSync('git', ['-c', 'core.autocrlf=false', 'archive', '--format=tar', cohortSha], {
+      cwd: detachRepo,
+      maxBuffer: 512 * 1024 * 1024,
+    });
+    fs.writeFileSync(path.join(worktree, 'archive.tar'), buf);
+    execFileSync('tar', ['-xf', 'archive.tar'], { cwd: worktree });
+    fs.rmSync(path.join(worktree, 'archive.tar'), { force: true });
+    // A git tree with NO metadata at all is the hardest case: the resolver
+    // must fail loud there rather than report "no cohort".
+    const noMeta = await sh(process.execPath, [COHORT, '--repo-root', worktree], worktree, {
+      PD_RELEASE_RETRY_DELAY_MS: '1',
+    });
+    expect(noMeta.code).not.toBe(0);
+
+    // The detached checkout the train actually uses.
+    const clone = path.join(root, 'detach-clone');
+    const cl = await sh('git', ['clone', '--no-checkout', detachRepo, clone], root);
+    expect(cl.code).toBe(0);
+    await sh('git', ['checkout', '--detach', cohortSha], clone);
+    const registry = await mockRegistry(() => false);
+    try {
+      const scan = await sh(
+        process.execPath,
+        [COHORT, '--repo-root', clone, '--scan-limit', '10'],
+        clone,
+        { PD_RELEASE_REGISTRY: registry.url, PD_RELEASE_RETRY_DELAY_MS: '1' },
+      );
+      expect(scan.code).toBe(0);
+      expect(scan.stdout).toContain(cohortSha.slice(0, 10));
+    } finally {
+      await registry.close();
+    }
+  }, 300000);
+
+  it('T24-alarm: main carrying unpublished versions with no cohort is a red chain break', async () => {
+    // The squash-only merge policy used to leave exactly this state and
+    // report it as a clean no-op, so the npm chain stalled in silence.
+    const breakRepo = path.join(root, 'chain-break-repo');
+    await seedRepo(breakRepo);
+    const registry = await mockRegistry(() => false);
+    try {
+      const alarm = await sh(process.execPath, [COHORT, '--repo-root', breakRepo], breakRepo, {
+        PD_RELEASE_REGISTRY: registry.url,
+        PD_RELEASE_RETRY_DELAY_MS: '1',
+      });
+      expect(alarm.code).toBe(1);
+      expect(alarm.stderr).toContain('::error::');
+      expect(alarm.stderr).toContain('chain break');
+      expect(alarm.stdout).toContain('"chainBreak":true');
+      expect(alarm.stdout).toContain('@principles/core@1.0.0');
+    } finally {
+      await registry.close();
+    }
+
+    // Same tree, registry already has every committed version -> exit 2.
+    const settled = await mockRegistry((_name, version) => version === '1.0.0');
+    try {
+      const noOp = await sh(process.execPath, [COHORT, '--repo-root', breakRepo], breakRepo, {
+        PD_RELEASE_REGISTRY: settled.url,
+        PD_RELEASE_RETRY_DELAY_MS: '1',
+      });
+      expect(noOp.code).toBe(2);
+      expect(noOp.stdout).toContain('"cohort":false');
+      expect(noOp.stdout).not.toContain('chainBreak');
+    } finally {
+      await settled.close();
+    }
+  }, 300000);
+
+  it('T24-registry: a registry failure is never read as absent (SPEC §18.3)', async () => {
+    const breakRepo = path.join(root, 'chain-break-repo');
+    const { createServer } = await import('node:http');
+    const server = createServer((_req, res) => {
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end('{}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    try {
+      const r = await sh(process.execPath, [COHORT, '--repo-root', breakRepo], breakRepo, {
+        PD_RELEASE_REGISTRY: url,
+        PD_RELEASE_RETRY_DELAY_MS: '1',
+      });
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('A registry failure is never "absent"');
+      expect(r.stdout).not.toContain('"chainBreak":true');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   }, 300000);
 });
 

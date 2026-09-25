@@ -27,7 +27,8 @@ feature PR  =  code  +  .changeset/*.md  (declared intent; guard blocks missing 
 Version Packages PR (bot, changesets/action)
         =  versions + CHANGELOGs + internal ranges + lockfile + plugin mirror
         ↓  Owner reviews + merges        ← the ONLY version materialization path
-release cohort = that merge SHA
+release cohort = that landing commit SHA (merge or squash — identity is
+                    the reproduction, never the commit shape)
         ↓
 publish train (dispatched automatically, or weekly reconciliation window)
         =  checkout cohort SHA → exact name@version registry check
@@ -43,9 +44,10 @@ Key contracts (enforced by `scripts/release/*` guards + tests):
   the cutover; no legacy fallback exists.
 - **Version materialization** = the Version Packages PR only. A normal PR
   may not edit any `packages/*/package.json` `version` field.
-- **Release cohort** = the Version PR merge SHA. Retries and the weekly
-  window build that exact SHA; later main changes cannot leak into a
-  release.
+- **Release cohort** = the Version PR landing SHA (merge commit, squash or
+  rebase — identity is the first-parent reproduction, never the shape).
+  Retries and the weekly window build that exact SHA; later main changes
+  cannot leak into a release.
 - **Exact-version publish** = the registry is queried for the exact
   `name@version`; absent → publish, present + matching provenance
   (gitHead = cohort SHA) → skip upload and reconcile closing steps,
@@ -104,12 +106,17 @@ versions equal "because they ship together".
 ### Release Triggers
 
 - **Cohort merge**: merging the Version Packages PR automatically dispatches
-  the publish train bound to that merge SHA (`version-packages.yml`).
+  the publish train bound to that landing SHA, whatever the merge shape
+  (merge commit / squash / rebase) — `version-packages.yml` proves the
+  cohort by reproduction.
 - **Recovery / manual**: Actions → Publish to npm → Run, optionally pinning
   `cohort_sha` (empty = auto-detect the latest cohort).
 - **Weekly window** (Fri 04:00 UTC): reconciliation ONLY — pending cohort
-  publishes, incomplete closing steps; no versions are ever created; no
-  cohort → success no-op.
+  publishes, incomplete closing steps; no versions are ever created. No
+  cohort AND every committed version already on the registry → success
+  no-op; no cohort but a committed version missing from the registry →
+  CHAIN-BREAK ALARM (exit 1 + `::error::`; PRI-922: squash merges silently
+  stalled the whole npm chain).
 
 The Version PR bot (`changesets/action`, pinned) requires the
 `PD_VERSION_PR_TOKEN` secret (a fine-grained PAT with contents:write +
