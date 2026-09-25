@@ -98,7 +98,12 @@ if (tagExistsRemotely && !tagPointsAtCohort) {
   if (registryStatus === null) {
     const exact = packument?.versions?.[pluginVersion] ?? null;
     const base = classifyPresence(exact, { expectGitHead: cohort });
-    publishedCommit = typeof exact?.gitHead === 'string' ? exact.gitHead : null;
+    const rawGitHead = typeof exact?.gitHead === 'string' ? exact.gitHead : null;
+    // rc-1/rc-2: gitHead is untrusted registry payload. Only a 40-hex commit
+    // id may reach git argv or the step summary; anything else is dropped to
+    // null, which keeps a conflicting tag in fail-loud territory (never a
+    // promoted skip, never an injected summary line — CodeQL js/http-to-file-access).
+    publishedCommit = rawGitHead !== null && /^[0-9a-f]{40}$/.test(rawGitHead) ? rawGitHead : null;
     if (base === 'PRESENT_CONFLICT' && introducedByCohort === false && publishedCommit) {
       // Same promotion the publish leg applies: an UNCHANGED package may
       // reuse a prior publish only when that commit is provably inside
