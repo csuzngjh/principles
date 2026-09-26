@@ -123,10 +123,10 @@ describe('probeCompiler', () => {
     );
   });
 
-  it('falls back to a bare exit code when the child prints nothing', () => {
+  it('falls back to exit status when the child prints nothing usable', () => {
     const root = makeTree({ 'node_modules/typescript': 'process.exit(3);' });
     const verdict = probeCompiler(path.join(root, 'node_modules', 'typescript'));
-    expect(verdict).toEqual({ ok: false, reason: 'exited with code 3' });
+    expect(verdict).toEqual({ ok: false, reason: 'exited with code 3 / signal null' });
   });
 
   it('reports a compiler directory with no executable entry', () => {

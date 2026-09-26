@@ -87,8 +87,17 @@ export function probeCompiler(compilerDir) {
   });
   if (result.status === 0) return { ok: true, detail: (result.stdout || '').trim() };
 
-  const headline = failureHeadline(`${result.stderr ?? ''}\n${result.stdout ?? ''}`);
-  return { ok: false, reason: headline || `exited with code ${result.status}` };
+  // `result.error` is how spawnSync reports its own failure (EACCES, a killed
+  // child leaves status null); folding it into the pool keeps the guard honest
+  // about *why* nothing ran, instead of printing "exited with code null".
+  const pool = [result.stderr, result.stdout, result.error && result.error.message]
+    .filter(Boolean)
+    .join('\n');
+  const headline = failureHeadline(pool);
+  return {
+    ok: false,
+    reason: headline || `exited with code ${result.status} / signal ${result.signal}`,
+  };
 }
 
 /** Every installed compiler with its verdict — entries with `ok: false` are the gap. */
