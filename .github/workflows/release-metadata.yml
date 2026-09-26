@@ -423,7 +423,19 @@ jobs:
           package-manager-cache: false
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        run: |
+          # PRI-928: npm treats optionalDependencies as best-effort — a tarball it
+          # cannot fetch is skipped silently and `npm ci` still exits 0. TypeScript 7
+          # ships its native compiler as one such package per OS/CPU, so an incomplete
+          # install survives this step and dies minutes later inside `tsc` with a
+          # resolver error that names neither the cause nor the install (run
+          # 36232435033, job 108378015444). Probe the tree, retry once, then fail loud.
+          npm ci --ignore-scripts
+          node scripts/build/check-compiler-runnable.mjs --root . || {
+            echo "::warning::npm ci left an incomplete toolchain (PRI-928) — reinstalling once"
+            npm ci --ignore-scripts
+            node scripts/build/check-compiler-runnable.mjs --root .
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
       # Same component build order as the create-principles-disciple path in
@@ -508,7 +520,16 @@ jobs:
           package-manager-cache: false
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        run: |
+          # Same incomplete-install posture as build-asset (PRI-928): this job also
+          # execs `tsc`, so a silently dropped optional package must not reach the
+          # signing step as a resolver error.
+          npm ci --ignore-scripts
+          node scripts/build/check-compiler-runnable.mjs --root . || {
+            echo "::warning::npm ci left an incomplete toolchain (PRI-928) — reinstalling once"
+            npm ci --ignore-scripts
+            node scripts/build/check-compiler-runnable.mjs --root .
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
 

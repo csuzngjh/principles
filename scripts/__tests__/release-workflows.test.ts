@@ -258,6 +258,40 @@ describe('ci.yml — release intent guard is inside the required gate', () => {
   });
 });
 
+describe('release-metadata.yml — install completeness before tsc (PRI-928)', () => {
+  const rel = '.github/workflows/release-metadata.yml';
+  const text = () => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+
+  it('every job that execs the compiler probes the installed tree after npm ci', () => {
+    // Both `build-asset` and `assemble-publish` run `npm run build`, so a
+    // silently dropped optional package must be caught in both. Deleting the
+    // probe from either leg fails here, not on a release train.
+    const doc = loadWorkflow(rel) as {
+      jobs?: Record<string, { steps?: Array<{ name?: string; run?: string }> }>;
+    };
+    const installing = Object.entries(doc.jobs ?? {}).filter(([, job]) =>
+      (job.steps ?? []).some((step) => (step.run ?? '').includes('npm ci --ignore-scripts')),
+    );
+    expect(installing.map(([name]) => name).sort()).toEqual(['assemble-publish', 'build-asset']);
+    for (const [, job] of installing) {
+      const step = (job.steps ?? []).find((s) => (s.run ?? '').includes('npm ci --ignore-scripts'));
+      expect(step?.run).toContain('check-compiler-runnable.mjs --root .');
+    }
+  });
+
+  it('retries the install exactly once, then fails (bounded, not a retry loop)', () => {
+    const installs = text().match(/npm ci --ignore-scripts/g) ?? [];
+    expect(installs).toHaveLength(4);
+    expect(text()).toContain('reinstalling once');
+  });
+
+  it('never special-cases a platform (the probe is content-based)', () => {
+    const t = text();
+    expect(t).not.toMatch(/if.*darwin.*npm install/i);
+    expect(t).not.toContain('npm install @typescript/');
+  });
+});
+
 describe('bundle-plugin — cohort version source (SPEC §21)', () => {
   it('supports the preserve-source mode used by the publish train', () => {
     const t = fs.readFileSync(
