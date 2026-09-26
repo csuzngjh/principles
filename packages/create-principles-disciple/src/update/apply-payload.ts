@@ -9,6 +9,10 @@
  *   ~/.pd/staging/<transactionId>/release-asset.tar.gz   (verified download)
  *   ~/.pd/staging/<transactionId>/payload/               (extracted payload)
  *
+ * A verified download is published onto the first path by rename: the bytes
+ * first land in a private `release-asset-<uuid>-<releaseId>.tar.gz.part`
+ * candidate in that same directory (PRI-927), which never outlives the call.
+ *
  * Deployment writes (~/.pd/runtime, host extension dirs) belong exclusively
  * to the installer; this module never touches them (ADR-0023 Decision 1,
  * ADR-0024 §2.1). release-manager.ts itself stays free of filesystem
@@ -32,7 +36,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -45,6 +49,19 @@ import type { ReleaseChannelName } from './product-identity.js';
 import type { PdHomePaths } from './install-layout.js';
 
 type TrustFetcher = NonNullable<Parameters<typeof resolveTrustedReleaseTarget>[0]['fetcher']>;
+
+/**
+ * PRI-927: the transport for signed ASSET bytes, injectable for tests.
+ *
+ * It is fetch-shaped rather than the tuf-js `Fetcher` the metadata branch uses,
+ * because the bounded-retry policy reads the HTTP status to tell a stable
+ * refusal (404) from a transient one (408/429/5xx) — a download-by-bytes
+ * interface cannot report that. Production never injects it: the default is
+ * `globalThis.fetch`. Tests use it to drive the transport classes
+ * deterministically; it is NOT a way around the protocol gate, which runs on
+ * the URL before the transport is ever called.
+ */
+export type AssetFetcher = (url: string, init?: { readonly redirect?: 'follow' }) => Promise<Response>;
 
 /** Acquisition failure with a stable reason; release-manager.ts maps it onto the ReleaseManagerError contract. */
 export class ApplyPayloadError extends Error {
@@ -111,6 +128,13 @@ export interface DownloadReleaseAssetOptions {
   readonly paths: PdHomePaths;
   readonly metadataBaseUrl: string;
   readonly fetcher?: TrustFetcher;
+  /**
+   * PRI-927: transport for the url branch only. The two branches have two
+   * genuinely different transports (the TUF client takes a `Fetcher` object,
+   * the asset carrier takes fetch), so the seams stay named separately rather
+   * than unioned. Unset in production.
+   */
+  readonly assetFetcher?: AssetFetcher;
   readonly releaseMetadata: ReleaseMetadata;
   readonly channel: ReleaseChannelName;
   /** Transaction the acquisition is journaled under; scopes the staging dir. */
@@ -126,8 +150,9 @@ export interface DownloadedReleaseAsset {
 /**
  * PRI-854 (option A): fetch the asset from its signed delivery URL and verify
  * the sha256 (and declared size) BEFORE the bytes are considered acquired.
- * Only http(s) URLs are accepted; the URL comes from the signed release
- * metadata, never from user input.
+ * PRI-927: only an **https** URL is accepted, and verified bytes are published
+ * to the canonical name by an atomic rename out of a private candidate file —
+ * see the two Owner-decision notes inside.
  *
  * PRI-924: the acquisition is a transport with a bounded retry, not a
  * single-shot gamble. A ~200MB asset over a CDN that resets connections was
@@ -144,30 +169,50 @@ function isRetriableHttpStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
 
+/** Undefined for a value no transport could resolve; the caller refuses those. */
+function parseAssetUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function downloadAndVerifyAssetFile(input: {
   url: string;
   destinationPath: string;
   expectedSha256: string;
   expectedSizeBytes?: number;
   releaseId: string;
+  /** Test seam for the transport (PRI-927); production uses global fetch. */
+  fetcher?: AssetFetcher;
   /** Test seam: backoff between attempts (default 2000ms × attempt). */
   sleep?: (ms: number) => Promise<void>;
 }): Promise<void> {
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(input.url);
-  } catch {
-    throw new ApplyPayloadError('release_metadata_invalid', `Asset URL is not a valid URL: ${input.url}`, 'Re-fetch the signed release metadata and retry.');
+  // PRI-927 (Owner decision): HTTPS-only, no warning mode and no insecure
+  // override. The signed sha256+size below is the trust anchor, so a plaintext
+  // carrier cannot substitute bytes — but it can corrupt every delivery and
+  // turn the update into a permanent, unrecoverable failure. Refusing the
+  // protocol is the availability fix, and it runs BEFORE any transport call.
+  //
+  // The test lives in THIS scope, on the URL object the transport is handed,
+  // not behind a shared helper: an insecure carrier has to be refused where it
+  // would actually be opened, which is also where the analyzer watching this
+  // boundary looks (CodeQL js/insecure-download reported the fetch call itself
+  // while the policy sat in a cross-module predicate). The signed-document
+  // parser applies the same 'https:' policy to the same field before this
+  // function can be reached; both sides are pinned by their own tests.
+  const assetUrl = parseAssetUrl(input.url);
+  if (assetUrl === undefined || assetUrl.protocol !== 'https:') {
+    throw new ApplyPayloadError('release_metadata_invalid', `Asset URL must be an https URL: ${input.url}`, 'Do not install this release. The signed release metadata names a non-HTTPS asset URL; refresh it from the official repository.');
   }
-  if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-    throw new ApplyPayloadError('release_metadata_invalid', `Asset URL must be http(s): ${input.url}`, 'The signed release metadata is invalid; do not install this release.');
-  }
+  const fetchAsset = input.fetcher ?? globalThis.fetch;
   const sleep = input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   fs.mkdirSync(path.dirname(input.destinationPath), { recursive: true });
   let bytes: Buffer | undefined;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      const response = await fetch(input.url, { redirect: 'follow' });
+      const response = await fetchAsset(assetUrl.href, { redirect: 'follow' });
       if (!response.ok) {
         // A rejected response is not the payload: release its connection now
         // instead of parking it until GC, or three attempts per call across
@@ -204,11 +249,48 @@ export async function downloadAndVerifyAssetFile(input: {
   if (input.expectedSizeBytes !== undefined && size !== input.expectedSizeBytes) {
     throw new ApplyPayloadError('release_metadata_invalid', `Asset size ${size} disagrees with the signed size ${input.expectedSizeBytes}.`, 'The release repository is inconsistent; wait for refreshed signed metadata.');
   }
-  // CodeQL "network data written to file": the URL is transport only — the
-  // trust anchor is the SIGNED sha256+size above (TUF delegation model), and
-  // the destination path is code-constructed under ~/.pd/staging, never
-  // URL-derived. No path-traversal or trust surface.
-  fs.writeFileSync(input.destinationPath, bytes);
+  // PRI-927 (Owner decision: fix, do not dismiss): network bytes never reach
+  // the canonical name in an unverified or predictable form. The verified bytes
+  // go to an unguessable, exclusively-created candidate in the SAME staging
+  // transaction directory (same filesystem, so the publish step below is an
+  // atomic rename), and only that candidate is renamed onto the canonical
+  // path. This is the discipline the TUF branch already followed
+  // (trust-metadata.ts downloadTrustedReleasePayload), reused rather than
+  // reinvented; the size re-check is on the file that actually landed, so a
+  // short write can never be published. Every failure removes the candidate.
+  const candidatePath = path.join(
+    path.dirname(input.destinationPath),
+    `release-asset-${randomUUID()}-${input.releaseId.slice(0, 12)}.tar.gz.part`,
+  );
+  try {
+    fs.writeFileSync(candidatePath, bytes, { mode: 0o600, flag: 'wx' });
+    const landedBytes = fs.statSync(candidatePath).size;
+    if (input.expectedSizeBytes !== undefined && landedBytes !== input.expectedSizeBytes) {
+      throw new ApplyPayloadError(
+        'metadata_refresh_failed',
+        `The staged asset file is ${landedBytes} bytes, disagreeing with the signed size ${input.expectedSizeBytes}.`,
+        'Nothing was deployed; the runtime is unchanged. Retry the update.',
+      );
+    }
+    fs.renameSync(candidatePath, input.destinationPath);
+  } catch (error) {
+    // The candidate is garbage the moment anything below it fails; staging
+    // recycle (PRI-924) owns the directory, this owns only its own file.
+    // Windows can hold a just-written file (EBUSY/EPERM, ERR-071), and a
+    // cleanup error must never replace the acquisition error: the leftover
+    // keeps an unguessable name inside a directory this transaction owns.
+    try {
+      fs.rmSync(candidatePath, { force: true });
+    } catch {
+      /* ignored on purpose — the real failure is the one being reported */
+    }
+    if (error instanceof ApplyPayloadError) throw error;
+    throw new ApplyPayloadError(
+      'metadata_refresh_failed',
+      `The verified release asset could not be staged: ${error instanceof Error ? error.message : String(error)}`,
+      'Nothing was deployed; the runtime is unchanged. Check disk space and permissions under the PD staging area, then retry.',
+    );
+  }
 }
 
 /**
@@ -221,7 +303,7 @@ export async function downloadAndVerifyAssetFile(input: {
  * Zero deployment writes happen before every identity check has passed.
  */
 export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions): Promise<DownloadedReleaseAsset> {
-  const { paths, metadataBaseUrl, fetcher, releaseMetadata, channel, transactionId } = options;
+  const { paths, metadataBaseUrl, fetcher, assetFetcher, releaseMetadata, channel, transactionId } = options;
   const asset = selectReleaseAsset(releaseMetadata);
 
   // PRI-854 (option A): the signed metadata carries the asset's delivery URL —
@@ -236,6 +318,7 @@ export async function downloadReleaseAsset(options: DownloadReleaseAssetOptions)
       expectedSha256: asset.archiveSha256,
       expectedSizeBytes: asset.archiveSizeBytes,
       releaseId: releaseMetadata.releaseId,
+      fetcher: assetFetcher,
     });
     const syntheticTarget: TrustedReleaseTarget = {
       artifactSha256: asset.archiveSha256,
