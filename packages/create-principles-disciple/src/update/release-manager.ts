@@ -187,6 +187,24 @@ function ensureTerminalFailed(journal: InstallerJournal, detail: string): void {
   }
 }
 
+/**
+ * PRI-924: recycle the transaction's staging dir (verified tarball + extracted
+ * payload, ~1.3GB per apply) once the journal has reached a terminal state —
+ * 'confirmed' (success), 'failed' (closed by this manager) or 'rolled_back'
+ * (closed by the installer's restore). A crash that left the journal mid-chain
+ * keeps its staging untouched: the journal is the recovery authority, and
+ * residue that recovery might still reason about is not garbage. Best-effort: a
+ * failed recycle is loud in the console log, never fatal to the apply outcome.
+ */
+function recycleStaging(paths: PdHomePaths, transactionId: string, journal: InstallerJournal): void {
+  if (journal.lastState === null || !APPLY_TERMINAL_STATES.has(journal.lastState)) return;
+  try {
+    fs.rmSync(path.join(paths.stagingDir, transactionId), { recursive: true, force: true });
+  } catch (error) {
+    console.error(`[release-manager] staging recycle failed for ${transactionId} (left in place, safe to delete manually): ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function toReleaseManagerError(error: unknown): ReleaseManagerError {
   if (error instanceof ReleaseManagerError) return error;
   if (error instanceof ApplyPayloadError) {
@@ -490,6 +508,9 @@ export class ReleaseManager {
           'Treat the update as NOT applied. Inspect the transaction journal and re-run the installer to reach a consistent state.',
         );
       }
+      // PRI-924: the transaction is closed as a success — the acquired release
+      // asset has been deployed, so staging is garbage, not recovery material.
+      recycleStaging(this.paths, transactionId, journal);
       return {
         kind: 'applied',
         productVersion: releaseMetadata.productVersion,
@@ -505,6 +526,9 @@ export class ReleaseManager {
         journal,
         `update failed at '${journal.lastState ?? 'planned'}': ${error instanceof Error ? error.message : String(error)}`,
       );
+      // PRI-924: the terminal failure (or the installer's rolled_back) closed
+      // the transaction — its staging is now garbage, not recovery material.
+      recycleStaging(this.paths, transactionId, journal);
       // The transaction was opened (planned journaled): mark the refusal so
       // the caller knows runtime-side effects may exist (staging writes +
       // terminal journal tail) and must NOT be reported as a pre-transaction

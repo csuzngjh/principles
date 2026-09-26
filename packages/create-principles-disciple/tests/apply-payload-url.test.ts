@@ -85,6 +85,104 @@ describe('downloadAndVerifyAssetFile (PRI-854 trust boundary)', () => {
   });
 });
 
+/**
+ * PRI-924: the acquisition is a bounded-retry transport. Retry policy covers
+ * the transport class ONLY (connection throw mid-body — the real-world
+ * `terminated` — and 5xx/408/429); the signed sha256/size trust anchor aborts
+ * on the first disagreement, and a stable 4xx refusal is never re-asked.
+ */
+describe('downloadAndVerifyAssetFile bounded retry (PRI-924)', () => {
+  const NO_SLEEP = () => Promise.resolve();
+
+  it('connection reset on attempt 1, full body on attempt 2 → written once', async () => {
+    let requests = 0;
+    await withHttpServer((_req, res) => {
+      requests += 1;
+      if (requests === 1) { res.destroy(); return; }
+      res.writeHead(200); res.end(PAYLOAD);
+    }, async (base) => {
+      const destination = path.join(os.tmpdir(), `pd-retry-recover-${Date.now()}.tar.gz`);
+      await downloadAndVerifyAssetFile({
+        url: `${base}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP,
+      });
+      expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
+      expect(requests).toBe(2);
+      fs.rmSync(destination, { force: true });
+    });
+  });
+
+  it('503 then 200 → recovers through the retry', async () => {
+    let requests = 0;
+    await withHttpServer((_req, res) => {
+      requests += 1;
+      if (requests === 1) { res.writeHead(503); res.end(); return; }
+      res.writeHead(200); res.end(PAYLOAD);
+    }, async (base) => {
+      const destination = path.join(os.tmpdir(), `pd-retry-503-${Date.now()}.tar.gz`);
+      await downloadAndVerifyAssetFile({
+        url: `${base}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP,
+      });
+      expect(fs.existsSync(destination)).toBe(true);
+      expect(requests).toBe(2);
+      fs.rmSync(destination, { force: true });
+    });
+  });
+
+  it('500 WITH a body → body is cancelled, never treated as payload, retry recovers', async () => {
+    let requests = 0;
+    await withHttpServer((_req, res) => {
+      requests += 1;
+      if (requests === 1) { res.writeHead(500); res.end('error page bytes that must never reach disk'); return; }
+      res.writeHead(200); res.end(PAYLOAD);
+    }, async (base) => {
+      const destination = path.join(os.tmpdir(), `pd-retry-500-body-${Date.now()}.tar.gz`);
+      await downloadAndVerifyAssetFile({
+        url: `${base}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP,
+      });
+      expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
+      expect(requests).toBe(2);
+      fs.rmSync(destination, { force: true });
+    });
+  });
+
+  it('persistent connection reset → attempts are BOUNDED, then metadata_refresh_failed', async () => {
+    let requests = 0;
+    await withHttpServer((_req, res) => { requests += 1; res.destroy(); }, async (base) => {
+      await expect(downloadAndVerifyAssetFile({
+        url: `${base}/asset.tar.gz`, destinationPath: path.join(os.tmpdir(), `pd-retry-exhaust-${Date.now()}.tar.gz`),
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP,
+      })).rejects.toMatchObject({ reason: 'metadata_refresh_failed', message: /after 3 attempts/ });
+      expect(requests).toBe(3);
+    });
+  });
+
+  it('404 is a stable refusal — never retried', async () => {
+    let requests = 0;
+    await withHttpServer((_req, res) => { requests += 1; res.writeHead(404); res.end(); }, async (base) => {
+      await expect(downloadAndVerifyAssetFile({
+        url: `${base}/missing.tar.gz`, destinationPath: path.join(os.tmpdir(), 'pd-retry-404.tar.gz'),
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP,
+      })).rejects.toMatchObject({ reason: 'metadata_refresh_failed', message: /HTTP 404/ });
+      expect(requests).toBe(1);
+    });
+  });
+
+  it('signed sha256 disagreement ABORTS immediately — a corrupt candidate is never re-drawn', async () => {
+    let requests = 0;
+    await withHttpServer((_req, res) => { requests += 1; res.writeHead(200); res.end(PAYLOAD); }, async (base) => {
+      const wrong = 'b'.repeat(64);
+      await expect(downloadAndVerifyAssetFile({
+        url: `${base}/asset.tar.gz`, destinationPath: path.join(os.tmpdir(), 'pd-retry-digest.tar.gz'),
+        expectedSha256: wrong, releaseId: 'r1', sleep: NO_SLEEP,
+      })).rejects.toMatchObject({ reason: 'release_metadata_invalid' });
+      expect(requests).toBe(1);
+    });
+  });
+});
+
 describe('downloadReleaseAsset url branch (PRI-854)', () => {
   it('url-carrying metadata downloads from the delivery url and skips TUF resolution', async () => {
     await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (base) => {

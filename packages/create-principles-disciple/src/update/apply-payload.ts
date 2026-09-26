@@ -128,13 +128,30 @@ export interface DownloadedReleaseAsset {
  * the sha256 (and declared size) BEFORE the bytes are considered acquired.
  * Only http(s) URLs are accepted; the URL comes from the signed release
  * metadata, never from user input.
+ *
+ * PRI-924: the acquisition is a transport with a bounded retry, not a
+ * single-shot gamble. A ~200MB asset over a CDN that resets connections was
+ * killing apply at 'planned' with zero recovery attempts. Retry policy is a
+ * transport/HTTP-5xx-or-408/429-or-network-throw classification ONLY — a
+ * signed sha256/size disagreement (the trust anchor) aborts immediately, so a
+ * corrupt or substituted candidate is never re-drawn until it looks right.
  */
+const ASSET_DOWNLOAD_ATTEMPTS = 3;
+
+function isRetriableHttpStatus(status: number): boolean {
+  // 4xx = the carrier refuses on its face (404: not published) — retrying
+  // re-asks a stable answer. Server-side and rate-limit codes are transient.
+  return status === 408 || status === 429 || status >= 500;
+}
+
 export async function downloadAndVerifyAssetFile(input: {
   url: string;
   destinationPath: string;
   expectedSha256: string;
   expectedSizeBytes?: number;
   releaseId: string;
+  /** Test seam: backoff between attempts (default 2000ms × attempt). */
+  sleep?: (ms: number) => Promise<void>;
 }): Promise<void> {
   let parsedUrl: URL;
   try {
@@ -145,12 +162,38 @@ export async function downloadAndVerifyAssetFile(input: {
   if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
     throw new ApplyPayloadError('release_metadata_invalid', `Asset URL must be http(s): ${input.url}`, 'The signed release metadata is invalid; do not install this release.');
   }
+  const sleep = input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   fs.mkdirSync(path.dirname(input.destinationPath), { recursive: true });
-  const response = await fetch(input.url, { redirect: 'follow' });
-  if (!response.ok) {
-    throw new ApplyPayloadError('metadata_refresh_failed', `Asset download failed: HTTP ${response.status} for ${input.url}`, 'Verify that the release pipeline published this release asset, then retry.');
+  let bytes: Buffer | undefined;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = await fetch(input.url, { redirect: 'follow' });
+      if (!response.ok) {
+        // A rejected response is not the payload: release its connection now
+        // instead of parking it until GC, or three attempts per call across
+        // repeated applies would accumulate sockets.
+        await response.body?.cancel();
+        const detail = `Asset download failed: HTTP ${response.status} for ${input.url}`;
+        if (!isRetriableHttpStatus(response.status) || attempt >= ASSET_DOWNLOAD_ATTEMPTS) {
+          throw new ApplyPayloadError('metadata_refresh_failed', detail, 'Verify that the release pipeline published this release asset, then retry.');
+        }
+      } else {
+        bytes = Buffer.from(await response.arrayBuffer());
+        break;
+      }
+    } catch (error) {
+      // Trust-anchor refusals and terminal transport verdicts escape as-is.
+      if (error instanceof ApplyPayloadError) throw error;
+      if (attempt >= ASSET_DOWNLOAD_ATTEMPTS) {
+        throw new ApplyPayloadError(
+          'metadata_refresh_failed',
+          `Asset download failed after ${ASSET_DOWNLOAD_ATTEMPTS} attempts: ${input.url} (${error instanceof Error ? error.message : String(error)})`,
+          'Check network access to the release asset carrier and retry; nothing was deployed.',
+        );
+      }
+    }
+    await sleep(2000 * attempt);
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
   const size = bytes.length;
   const hash = createHash('sha256');
   hash.update(bytes);
