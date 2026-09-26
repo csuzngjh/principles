@@ -44,7 +44,7 @@ import {
   downloadTrustedReleasePayload,
   type TrustedReleaseTarget,
 } from './trust-metadata.js';
-import { isSignedAssetUrl, type ReleaseMetadata } from './release-metadata.js';
+import type { ReleaseMetadata } from './release-metadata.js';
 import type { ReleaseChannelName } from './product-identity.js';
 import type { PdHomePaths } from './install-layout.js';
 
@@ -169,6 +169,15 @@ function isRetriableHttpStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
 
+/** Undefined for a value no transport could resolve; the caller refuses those. */
+function parseAssetUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function downloadAndVerifyAssetFile(input: {
   url: string;
   destinationPath: string;
@@ -185,7 +194,16 @@ export async function downloadAndVerifyAssetFile(input: {
   // carrier cannot substitute bytes — but it can corrupt every delivery and
   // turn the update into a permanent, unrecoverable failure. Refusing the
   // protocol is the availability fix, and it runs BEFORE any transport call.
-  if (!isSignedAssetUrl(input.url)) {
+  //
+  // The test lives in THIS scope, on the URL object the transport is handed,
+  // not behind a shared helper: an insecure carrier has to be refused where it
+  // would actually be opened, which is also where the analyzer watching this
+  // boundary looks (CodeQL js/insecure-download reported the fetch call itself
+  // while the policy sat in a cross-module predicate). The signed-document
+  // parser applies the same 'https:' policy to the same field before this
+  // function can be reached; both sides are pinned by their own tests.
+  const assetUrl = parseAssetUrl(input.url);
+  if (assetUrl === undefined || assetUrl.protocol !== 'https:') {
     throw new ApplyPayloadError('release_metadata_invalid', `Asset URL must be an https URL: ${input.url}`, 'Do not install this release. The signed release metadata names a non-HTTPS asset URL; refresh it from the official repository.');
   }
   const fetchAsset = input.fetcher ?? globalThis.fetch;
@@ -194,7 +212,7 @@ export async function downloadAndVerifyAssetFile(input: {
   let bytes: Buffer | undefined;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      const response = await fetchAsset(input.url, { redirect: 'follow' });
+      const response = await fetchAsset(assetUrl.href, { redirect: 'follow' });
       if (!response.ok) {
         // A rejected response is not the payload: release its connection now
         // instead of parking it until GC, or three attempts per call across

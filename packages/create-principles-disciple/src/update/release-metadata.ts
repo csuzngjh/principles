@@ -94,17 +94,20 @@ function parsePositiveInteger(value: unknown, field: string): number {
  * forge the signed sha256, but it can poison every attempt into a permanent
  * update failure, so the protocol is refused rather than tolerated.
  *
- * This is the single predicate for that policy. The signed-document parser and
- * the download gate both consult it, so the two can never disagree about which
- * URLs are installable. It tests `URL.protocol` rather than a scheme prefix
- * regex: the URL parser is the same authority `fetch` resolves against, so the
- * gate and the transport cannot disagree about what a scheme prefix means
+ * This is the policy on the SIGNED-DOCUMENT surface: a metadata file that names
+ * an http asset URL never becomes a parsed release, so nothing downstream can
+ * act on it. The download gate in apply-payload.ts re-tests the protocol where
+ * the carrier is opened, because that is the scope an insecure fetch would
+ * happen in — the same 'https:' decision on two different surfaces, not a
+ * second authority. It tests `URL.protocol` rather than a scheme prefix regex:
+ * the URL parser is the same authority `fetch` resolves against, so the gate
+ * and the transport cannot disagree about what a scheme prefix means
  * (`https:example.com/a.tar.gz` is not a malformed URL — the parser recovers it
  * into host `example.com`, and that is exactly what `fetch` would then request).
  * A successful parse of a special scheme always yields a non-empty host, so no
  * separate host check is possible here.
  */
-export function isSignedAssetUrl(value: unknown): value is string {
+function isSignedAssetUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   try {
     return new URL(value).protocol === 'https:';
