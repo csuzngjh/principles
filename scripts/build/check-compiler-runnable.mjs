@@ -47,6 +47,35 @@ export function compilerInstallDirs(rootDir) {
   return dirs;
 }
 
+/**
+ * Pull the one line an operator has to act on out of a compiler's failure
+ * output. Node prints a crash dump as code frame, then the real message, then
+ * the stack — so "first line", "last lines" or a plain case-insensitive
+ * `error` match all land on the source snippet (`throw new Error(…`) and hide
+ * the missing package name, which is the whole point of this probe.
+ */
+const MESSAGE_LINE = /^[A-Za-z][A-Za-z0-9_$]*(Error|Exception):/;
+
+export function failureHeadline(output) {
+  const lines = output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line !== '' &&
+        !/^at /i.test(line) &&
+        !/^Node\.js v/i.test(line) &&
+        !/^\^+$/.test(line) &&
+        !/^throw\b/i.test(line),
+    );
+  return (
+    lines.find((line) => MESSAGE_LINE.test(line)) ??
+    lines.find((line) => /unable|cannot|missing/i.test(line)) ??
+    lines[0] ??
+    ''
+  );
+}
+
 /** Exec the compiler's own entry the same way an `npm run build` does. */
 export function probeCompiler(compilerDir) {
   const bin = join(compilerDir, 'bin', 'tsc');
@@ -58,12 +87,8 @@ export function probeCompiler(compilerDir) {
   });
   if (result.status === 0) return { ok: true, detail: (result.stdout || '').trim() };
 
-  const output = `${result.stderr ?? ''}\n${result.stdout ?? ''}`
-    .split('\n')
-    .filter((line) => line.trim() !== '')
-    .slice(-3)
-    .join(' | ');
-  return { ok: false, reason: output || `exited with code ${result.status}` };
+  const headline = failureHeadline(`${result.stderr ?? ''}\n${result.stdout ?? ''}`);
+  return { ok: false, reason: headline || `exited with code ${result.status}` };
 }
 
 /** Every installed compiler with its verdict — entries with `ok: false` are the gap. */
@@ -89,8 +114,17 @@ export function runCli(rootDir) {
       `[check-compiler-runnable] ${failures.length}/${inspected.length} installed TypeScript ` +
         `compilers cannot run on ${platform}:`,
     );
+    // Nested copies of the same compiler version fail for one shared reason;
+    // repeating it per copy buries the package name in a 9-block stack dump.
+    const byReason = new Map();
     for (const failure of failures) {
-      console.error(`  ${relative(rootDir, failure.dir)}: ${failure.probe.reason}`);
+      const dirs = byReason.get(failure.probe.reason) ?? [];
+      dirs.push(relative(rootDir, failure.dir));
+      byReason.set(failure.probe.reason, dirs);
+    }
+    for (const [reason, dirs] of byReason) {
+      console.error(`  ${reason}`);
+      console.error(`    in: ${dirs.join(', ')}`);
     }
     console.error(
       'nextAction: run `npm ci` again — npm skips an optional dependency it failed to ' +

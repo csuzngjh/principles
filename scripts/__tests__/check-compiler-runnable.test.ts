@@ -23,6 +23,7 @@ import {
   compilerInstallDirs,
   probeCompiler,
   inspectCompilers,
+  failureHeadline,
 } from '../build/check-compiler-runnable.mjs';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -47,15 +48,22 @@ function makeTree(layout: Record<string, string | null>): string {
 }
 
 const RUNNABLE = "console.log('Version 7.0.2');\n";
-const MISSING_PLATFORM_BINARY = [
-  'const err = new Error(',
-  "  'Unable to resolve @typescript/typescript-darwin-arm64. Either your platform is unsupported, '",
-  "  + 'or you are missing the package on disk.',",
-  ');',
-  "process.stderr.write(err.message + '\\n');",
-  'process.exit(1);',
+// Verbatim node crash-dump shape from the release-metadata darwin/arm64 leg
+// (run 36232435033, job 108378015444): code frame, caret, message, stack,
+// version. The code frame also contains the word `Error`, which is the trap
+// failureHeadline must not fall into.
+const CRASH_DUMP = [
+  'file:///runner/work/principles/principles/packages/principles-core/node_modules/typescript/lib/getExePath.js:53',
+  '    throw new Error("Unable to resolve " + platformPackageName + ". Either your platform is unsupported, or you are missing the package on disk.");',
+  '          ^',
   '',
+  'Error: Unable to resolve @typescript/typescript-darwin-arm64. Either your platform is unsupported, or you are missing the package on disk.',
+  '    at getExePath (file:///runner/work/principles/principles/packages/principles-core/node_modules/typescript/lib/getExePath.js:53:19)',
+  '    at file:///runner/work/principles/principles/packages/principles-core/node_modules/typescript/lib/tsc.js:6:13',
+  'Node.js v24.20.0',
 ].join('\n');
+
+const MISSING_PLATFORM_BINARY = `process.stderr.write(${JSON.stringify(`${CRASH_DUMP}\n`)});\nprocess.exit(1);\n`;
 
 beforeAll(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-compiler-runnable-'));
@@ -105,10 +113,48 @@ describe('probeCompiler', () => {
     expect(verdict.reason).toContain('Unable to resolve @typescript/typescript-darwin-arm64');
   });
 
+  it('reports the compiler message, not the stack noise under it', () => {
+    const root = makeTree({ 'node_modules/typescript': MISSING_PLATFORM_BINARY });
+    const verdict = probeCompiler(path.join(root, 'node_modules', 'typescript'));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toBe(
+      'Error: Unable to resolve @typescript/typescript-darwin-arm64. ' +
+        'Either your platform is unsupported, or you are missing the package on disk.',
+    );
+  });
+
+  it('falls back to a bare exit code when the child prints nothing', () => {
+    const root = makeTree({ 'node_modules/typescript': 'process.exit(3);' });
+    const verdict = probeCompiler(path.join(root, 'node_modules', 'typescript'));
+    expect(verdict).toEqual({ ok: false, reason: 'exited with code 3' });
+  });
+
   it('reports a compiler directory with no executable entry', () => {
     const root = makeTree({ 'node_modules/typescript': null });
     const verdict = probeCompiler(path.join(root, 'node_modules', 'typescript'));
     expect(verdict).toEqual({ ok: false, reason: 'bin/tsc is not on disk' });
+  });
+});
+
+describe('failureHeadline', () => {
+  it('keeps the actionable line out of a node crash dump', () => {
+    const dump = [
+      'file:///runner/typescript/lib/getExePath.js:53',
+      '    throw new Error("Unable to resolve " + platformPackageName);',
+      '          ^',
+      '',
+      'Error: Unable to resolve @typescript/typescript-darwin-arm64.',
+      '    at getExePath (file:///runner/typescript/lib/getExePath.js:53:19)',
+      '    at file:///runner/typescript/lib/tsc.js:6:13',
+      'Node.js v24.20.0',
+    ].join('\n');
+    expect(failureHeadline(dump)).toBe(
+      'Error: Unable to resolve @typescript/typescript-darwin-arm64.',
+    );
+  });
+
+  it('returns empty for output with no usable line, so the caller can fall back', () => {
+    expect(failureHeadline('  \n\n')).toBe('');
   });
 });
 
@@ -130,10 +176,11 @@ describe('CLI contract', () => {
     expect(stdout).toMatch(/installed TypeScript compilers run on /);
   });
 
-  it('exits 1 and names the unrunnable compiler', () => {
+  it('exits 1, groups copies that share one cause, and stays readable', () => {
     const root = makeTree({
       'node_modules/typescript': RUNNABLE,
       'packages/core/node_modules/typescript': MISSING_PLATFORM_BINARY,
+      'packages/cli/node_modules/typescript': MISSING_PLATFORM_BINARY,
     });
     let captured: { status: number; stderr: string } | undefined;
     try {
@@ -143,9 +190,16 @@ describe('CLI contract', () => {
       captured = { status: failure.status, stderr: failure.stderr };
     }
     expect(captured?.status).toBe(1);
-    expect(captured?.stderr).toContain('1/2 installed TypeScript compilers cannot run');
+    expect(captured?.stderr).toContain('2/3 installed TypeScript compilers cannot run');
     expect(captured?.stderr).toContain('Unable to resolve @typescript/typescript-darwin-arm64');
     expect(captured?.stderr).toContain('npm ci');
+    // One report per cause, not one stack dump per nested copy.
+    expect(captured?.stderr.match(/Unable to resolve/g)).toHaveLength(1);
+    const listed = captured?.stderr.split('\n').find((line) => line.includes(' in: ')) ?? '';
+    expect(listed).toContain(path.join('packages', 'core', 'node_modules', 'typescript'));
+    expect(listed).toContain(path.join('packages', 'cli', 'node_modules', 'typescript'));
+    expect(captured?.stderr).not.toContain('Node.js v24.20.0');
+    expect(captured?.stderr).not.toContain('at getExePath');
   });
 
   it('refuses to pass vacuously on a tree with no compiler at all', () => {
