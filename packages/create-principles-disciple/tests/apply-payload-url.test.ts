@@ -130,6 +130,24 @@ describe('downloadAndVerifyAssetFile bounded retry (PRI-924)', () => {
     });
   });
 
+  it('500 WITH a body → body is cancelled, never treated as payload, retry recovers', async () => {
+    let requests = 0;
+    await withHttpServer((_req, res) => {
+      requests += 1;
+      if (requests === 1) { res.writeHead(500); res.end('error page bytes that must never reach disk'); return; }
+      res.writeHead(200); res.end(PAYLOAD);
+    }, async (base) => {
+      const destination = path.join(os.tmpdir(), `pd-retry-500-body-${Date.now()}.tar.gz`);
+      await downloadAndVerifyAssetFile({
+        url: `${base}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP,
+      });
+      expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
+      expect(requests).toBe(2);
+      fs.rmSync(destination, { force: true });
+    });
+  });
+
   it('persistent connection reset → attempts are BOUNDED, then metadata_refresh_failed', async () => {
     let requests = 0;
     await withHttpServer((_req, res) => { requests += 1; res.destroy(); }, async (base) => {

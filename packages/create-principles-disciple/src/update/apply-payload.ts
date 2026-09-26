@@ -169,6 +169,10 @@ export async function downloadAndVerifyAssetFile(input: {
     try {
       const response = await fetch(input.url, { redirect: 'follow' });
       if (!response.ok) {
+        // A rejected response is not the payload: release its connection now
+        // instead of parking it until GC, or three attempts per call across
+        // repeated applies would accumulate sockets.
+        await response.body?.cancel();
         const detail = `Asset download failed: HTTP ${response.status} for ${input.url}`;
         if (!isRetriableHttpStatus(response.status) || attempt >= ASSET_DOWNLOAD_ATTEMPTS) {
           throw new ApplyPayloadError('metadata_refresh_failed', detail, 'Verify that the release pipeline published this release asset, then retry.');
