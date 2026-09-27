@@ -207,7 +207,24 @@ runs:
       run: |
         set -o pipefail
         cd "packages/${{ inputs.pkg_dir }}"
-        npm pack --dry-run 2>&1 | head -50
+        # Capture the full pack output first, then preview its head. Piping
+        # npm straight into `head` closed the read end after 50 lines while
+        # npm was still writing, so the inner prepack (build:production &&
+        # build:types — ~50 lines on its own, plus npm lifecycle banners)
+        # died on EPIPE, `npm pack` exited 1, and `pipefail` promoted a
+        # purely cosmetic log truncation into a failed release: cohort
+        # d6fa4055 aborted at 5/7 with no npm error visible in the log.
+        # The preview must never own the verdict.
+        pack_log="$(mktemp)"
+        npm pack --dry-run > "$pack_log" 2>&1
+        pack_status=$?
+        head -50 "$pack_log"
+        if [ "$pack_status" -ne 0 ]; then
+          echo "::error::npm pack --dry-run failed (exit $pack_status); full output follows"
+          cat "$pack_log"
+        fi
+        rm -f "$pack_log"
+        exit "$pack_status"
 
     - name: Stamp npm payload product identity
       # Unchanged authority (SPEC v0.3 §12): the installer payload carries
