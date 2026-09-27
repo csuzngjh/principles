@@ -1,6 +1,8 @@
 # PRI-904 Prompt Injection Fairness — Implementation Notes
 
-> 实施记录（2026-09-27）。上游依据：`docs/audit/pri-904-activation-injection-root-cause.md`（根因审计）+ PD Prompt Principle Injection Fairness & Starvation Prevention SPEC v0.1。本文件记录 Reality Check 结论、roundKey 决策、旧行为特征化、16 轮 replay 实算数据、路由 parity 与 Complexity Delta。
+> 实施记录（2026-09-27）。上游依据：`docs/audit/pri-904-activation-injection-root-cause.md`（根因审计）+ PD Prompt Principle Injection Fairness & Starvation Prevention SPEC v0.1。本文件记录 Reality Check 结论、轮次事实决策、旧行为特征化、16 轮 replay 实算数据、选择器 parity 与 Complexity Delta。
+>
+> **交付边界：Phase-1（Owner 裁定 Option 3）** —— 本 PR 只修复当前 live 的 **OpenClaw plugin-local** 路由饥饿，bounded 保证限定在**一个持续推进的 OpenClaw session 内**。跨 session / 跨 host / workspace 级 bounded fairness **仍是未完成的架构目标**，host-shared production 明确不宣称 fair rotation（见 §2 与文末「最终架构目标」）。
 
 ---
 
@@ -35,36 +37,75 @@
 | `Date.now()` / `Math.random()` | — | NO | — | — | — | ✗ SPEC 禁止 |
 | 新建持久化计数器 | NO（新状态） | — | — | — | — | ✗ SPEC 禁止 |
 
-### 最终选择（评审轮修订：hash(runId) → 确定性 session 轮次序数）
+### 最终选择（Phase-1 交付边界，Owner 裁定 Option 3）
 
 ```text
-roundKey = nextSessionTurnOrdinal(workspaceDir, sessionId)   // = max(user_turns.turn_index) + 1
-plugin-local:  同一函数（handleBeforePromptBuild 持 workspaceDir + sessionId）
-host-shared:   同一函数（beforePromptBuild 持 event.context.{workspaceDir,sessionId}）
+OpenClaw plugin-local（当前 live 路由）:
+  roundKey = nextSessionTurnOrdinal(workspaceDir, sessionId)   // = max(user_turns.turn_index) + 1
+
+host-shared production（含 Codex）:
+  roundKey = 不存在 —— 不传
 ```
 
 - file: `packages/principles-core/src/trajectory-store.ts`（**已登记的 core I/O seam**，registry 第 15–18 行）
-- 函数: `nextSessionTurnOrdinal` — 只读打开 `{workspaceDir}/.state/trajectory.db`，走 `idx_user_turns_session_id` 索引做 `MAX(turn_index)` 聚合（live 实测 0ms）
-- 数据来源: `user_turns.turn_index`——**已存在**的生产持久列，由 openclaw-plugin `TrajectoryDatabase.recordUserTurn` 写入（live: 1045 行 / 297 个 session），也是纠正流水线锚定所用的同一事实
-- why deterministic: 同一 session 的 max(turn_index) 单调递增，+1 精确
-- why it advances: 每次记录一个用户回合 → 序数 +1
+- 函数: `nextSessionTurnOrdinal` — 只读打开 `{workspaceDir}/.state/trajectory.db`，走 `idx_user_turns_session_id` 做 `MAX(turn_index)` 聚合（live 实测 0ms）
+- 数据来源: `user_turns.turn_index`——**已存在**的生产持久列，**唯一生产 writer 是 OpenClaw `TrajectoryDatabase.recordUserTurn`**
 - 无新增状态: 只读既有表；**无新列、无新表、无新文件、无 cursor、无 module-global 可变状态**
-- 库缺失/不可读: 抛 `TrajectoryDbUnavailableError` → 两路由均降级 legacy policy，经 `selectionPolicy` 字段可观测（rc-9）
+- 库缺失/不可读 → 抛 `TrajectoryDbUnavailableError` → 降级 legacy policy，经 `selectionPolicy` 字段可观测（rc-9）
 
-### 覆盖语义（bounded，可证明）
+#### 时序与 off-by-one（如实记录）
 
-生产层直接成立：对同一 eligible ring（N 条），同一 session 连续 N 个用户回合的序数为 o, o+1, …, o+N−1，
-`start = ordinal mod N` 恰好遍历全部 N 个位置各一次 —— **≤N 轮全覆盖，确定性，非概率**。
+```text
+user prompt 到达
+  → SignalCollectorHost.detectSync 同步写 user_turns   （prompt.ts:407，早于选择）
+  → nextSessionTurnOrdinal 读 MAX(turn_index)+1          （prompt.ts:661）
+  → trimToBudget                                        （prompt.ts:666）
+```
+
+选择时**本回合已被写入**，故 helper 返回的是**下一回合**的序号（off-by-one）。该偏移对公平性无影响——公平只依赖严格 +1 递进；此处记录真实语义而非掩盖。
+
+#### host-shared production 为何不传 roundKey
+
+`createProductionHostRuntime` 同时服务 Codex。Codex 的 ingestion 只写 `governance_*`（state.db），其生产夹具仅有 `sessions/tool_calls/pain_events`——**从不写 `user_turns`**。若在此读取 session 回合序号：库缺失→抛错降级；有库无表→query failed 降级；有表无该 session 行→**恒返回 1**，起点固定为 1（另一种位置性饥饿），而事件仍会声称 fair rotation + 轮次溯源。
+
+故 shared production **不传 roundKey**，如实报告 `legacy_fifo_prefix_v1` 且不带任何 rotation provenance。selector 的 fair-rotation 能力保留，供确实持有合法推进权威的调用方使用。
+
+### 覆盖语义（bounded，范围严格限定）
+
+**Phase-1 契约（本 PR 交付）**：对稳定的 N 条 eligible Principle，在一个**持续推进 user turns 的 OpenClaw session** 内，N 个连续 session selection rounds 覆盖全部 N 个 rotation start positions，union opportunity coverage = N/N。
 
 生产路径证明（不使用人为 key 搜索）：
-- plugin-local：`T-PROD-01` 用真实 `handleBeforePromptBuild` + 真实 trajectory.db 行推进，断言 16 轮的 start 集合等于 {0..15}、union=16/16、序数逐轮 +1；
-- host-shared：`T-PROD-02` 断言连续 roundKey 1..N 的 start = round % N 且全部位置被覆盖；
-- seam 层：`trajectory-store-round-ordinal.test.ts` 对真实 SQLite 断言 +1 语义、per-session 隔离、非 1 起点（历史裁剪）与 ≤N 覆盖。
+- `T-PROD-01`：真实 `handleBeforePromptBuild` + 真实 trajectory.db 行推进，断言 16 轮 start 集合 == {0..15}、union 16/16、序数逐轮 +1；
+- `T-PROD-02`：target(#14) 与 oldest(#1) 均在窗口内获得席位（无反向饥饿）；
+- seam 层 `trajectory-store-round-ordinal.test.ts`：真实 SQLite 断言 +1 语义、per-session 隔离、非 1 起点（历史裁剪）、≤N 覆盖；
+- `T6`：host-shared **production** dispatch 报 legacy 且无 provenance；
+- `T7`：Codex **真实 dist/pd-hook.js** 可执行文件——注入仍工作，事件不虚假宣称 fair。
 
-边界语义（诚实声明）：
-- "一轮" = 该 session 记录的一个用户回合。heartbeat/cron 等非用户触发的 prompt build 不推进轮次（沿用上一次的起点），不构成位置性饥饿——下一次用户回合即推进。
-- 新 session 序数从 1 重新开始，因此 bounded 保证是**每 session 内**的；多 session 交错只会增加多样性。
-- turn_index 可因历史保留策略从 >1 开始（live 实测存在此类 session），不影响 +1 与 mod N 语义。
+#### 明确不保证（Explicit Non-Claim）
+
+- **不保证**跨 session 的 N 轮覆盖（「A:2 回合 / B:2 回合…」模式下起点只在 {1,2} 循环）；
+- **不保证** Codex / host-shared production 的任何 bounded fairness；
+- 「一轮」= 一个**记录的用户回合**；heartbeat/cron 等非用户触发构建不推进轮次；
+- 新 session 序数从 1 重新开始。
+
+### 最终架构目标（未被本 PR 降低）
+
+```text
+Workspace/runtime scoped bounded fairness remains an architectural target.
+
+PR #1878 Phase-1 delivery:
+Bounded fairness is guaranteed only within a continuously advancing OpenClaw
+session on the currently live plugin-local route.
+
+This Phase-1 contract does NOT satisfy final cross-session or cross-host
+bounded fairness.
+
+Host-shared production MUST NOT claim fair_rotation_v1 until a legitimate
+shared advancing round authority exists.
+```
+
+跟进工单：见 Linear「[P2] Cross-host Principle Injection Fairness Clock」。
+
 
 ### 被否决的候选（保留审计痕迹）
 
@@ -117,14 +158,16 @@ dropped           = [act_prompt_10]
 - round 11 恰好 2000 字符压线——预算边界精确。
 - 每轮 ≤ 2000（0..99 连续 roundKey 全部断言）。上表 roundKey = 该轮 session 序数；生产层由 `nextSessionTurnOrdinal` 提供（第 k 轮读数即 o+k-1，`start=(o+k-1) mod 16`），故 round k+1 的起点是 round k 的下一格。
 
-## 5. Route Parity
+## 5. Selector Parity（能力层，非生产接线）
 
-两条路由共享同一策略语义（stable ASC base ring → roundKey mod N 起点 → circular scan → continue-on-non-fit → oversized 单列）：
+两条路由的**选择器**实现同一策略语义（stable ASC base ring → roundKey mod N 起点 → circular scan → continue-on-non-fit → oversized 单列）：
 
-- Route A 用 `trimToBudget(entries, 2000, escapeXml, roundKey)`（核心实现）。
-- Route B 在 `buildActivePrinciplePromptContext` 内实现同语义，成本用其真实序列化器（`renderPrinciplesToDirectives` 全量渲染增量）度量。
-- T10 parity 测试：以 shared 路由真实渲染算术测出 per-entry block 成本与固定模板开销，构造等价成本的 plugin fixture 与等价预算，同 entries+budget+roundKey 下两路由 **selected IDs / truncated / rotationStartIndex 全等**（`packages/host-runtime/tests/active-principle-prompt-fair-rotation.test.ts`）。
-- 序列化差异（真实变体轴）：plugin 行条目 ~200c vs shared directive 块 ~350c+ 固定模板 ~700c——故 parity 前提是 INV-P01 的"same serialization"，测试按此构造。
+- Route A（plugin-local）用 `trimToBudget(entries, 2000, escapeXml, roundKey)`（核心实现）。
+- Route B（host-shared）在 `buildActivePrinciplePromptContext` 内实现同语义，成本用其真实序列化器（`renderPrinciplesToDirectives` 全量渲染增量）度量。
+- T10 parity 测试：以 shared 路由真实渲染算术测出 per-entry block 成本与固定模板开销，构造等价成本的 plugin fixture 与等价预算，同 entries+budget+roundKey 下两选择器 **selected IDs / truncated / rotationStartIndex 全等**。
+- 序列化差异（真实变体轴）：plugin 行条目 ~200c vs shared directive 块 ~350c+ 固定模板 ~700c——故 parity 前提是 INV-P01 的 "same serialization"，测试按此构造。
+
+> ⚠️ **这是能力层 parity，不是生产接线 parity。** Phase-1 只有 Route A 获得 round authority；Route B 的 production caller（同时服务 Codex）**不传 roundKey**，故其生产行为是 `legacy_fifo_prefix_v1`。T6/T7 专门锁定这一事实。
 
 ## 6. Telemetry（仅扩展现有事件）
 
@@ -157,7 +200,7 @@ new subsystem:               NO
 new background process:      NO
 new feature flag:            NO
 new cross-package dependency: NO（host-runtime/plugin 原有 @principles/core 依赖内新增 import）
-new host-specific behavior:  NO（两路由各自从既有 hook 事实取 round 身份，无宿主特判）
+new host-specific behavior:  NO（plugin-local 从既有 hook/session 事实取轮次，无宿主特判）
 runtime behavior change:     YES —— prompt Principle 预算调度策略（FIFO 前缀 → 确定性公平轮转）
 existing telemetry extension: YES —— 上述 5 个 optional 字段
 ```

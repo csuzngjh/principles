@@ -84,6 +84,40 @@ describe('pd-hook executable shared MVP paths', () => {
     expect(result.stderr.trim()).toEqual(expect.stringContaining('host.codex_disabled'));
     expect(fs.existsSync(path.join(root, '.state'))).toBe(false);
   });
+
+  it('T7 (PRI-904 Phase-1): Codex prompt injection still works and never claims an unearned fair rotation', async () => {
+    // Codex never writes trajectory.db::user_turns (its ingestion writes
+    // governance_* rows), so the shared production route holds NO advancing
+    // round authority. This runs the REAL built executable and pins that
+    // (a) injection still works, and (b) the emitted event reports the legacy
+    // policy with NO rotation provenance. It does NOT claim Codex fairness.
+    const root = workspace();
+    await artifact(root, { id: 'art-prompt-904', kind: 'principle', principleId: 'P_CODEX_FAIRNESS_904', content: { principleId: 'P_CODEX_FAIRNESS_904', text: 'UNIQUE_CODEX_FAIRNESS_TEXT_904' }, channel: 'prompt', action: 'prompt_activate', target: 'ledger://P_CODEX_FAIRNESS_904' });
+
+    const result = invoke({ ...base(root), hook_event_name: 'UserPromptSubmit', prompt: 'help' });
+    expect(result.status).toBe(0);
+    // (a) injection still works on the Codex production route
+    expect(JSON.parse(result.stdout)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: expect.stringContaining('UNIQUE_CODEX_FAIRNESS_TEXT_904'),
+      },
+    });
+
+    // (b) the emitted injection event must not claim fair rotation
+    const logsDir = path.join(root, '.state', 'logs');
+    const events = fs.readdirSync(logsDir)
+      .filter((f) => f.startsWith('events_') && f.endsWith('.jsonl'))
+      .flatMap((f) => fs.readFileSync(path.join(logsDir, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { type: string; data: Record<string, unknown> }))
+      .filter((e) => e.type === 'runtime_v2_prompt_activations_injected');
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    for (const e of events) {
+      expect(e.data['selectionPolicy']).toBe('legacy_fifo_prefix_v1');
+      expect(e.data['rotationStartIndex']).toBeUndefined();
+      expect(e.data['selectionRoundOrdinal']).toBeUndefined();
+      expect(e.data['selectionRoundSource']).toBeUndefined();
+    }
+  });
 });
 
 describe('PRI-780 Codex runtime context capability declaration (v2 rules)', () => {

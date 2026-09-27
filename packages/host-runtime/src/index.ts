@@ -6,7 +6,6 @@ import {
   type HostEventEmitter,
 } from '@principles/core/host';
 import { RUNTIME_V2_PRINCIPLE_BUDGET } from '@principles/core/runtime-v2';
-import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
@@ -250,20 +249,19 @@ export function createProductionHostRuntime(
     }),
     beforeToolCall: options.beforeToolCall ?? productionGate,
     async beforePromptBuild(event) {
-      // PRI-904: fair rotation round = the same session-local user-turn
-      // ordinal the plugin route reads (registered trajectory-store seam), so
-      // both routes share one round semantic. An absent/unreadable trajectory
-      // db degrades to the legacy FIFO policy, observable via selectionPolicy.
-      let roundKey: number | undefined;
-      try {
-        roundKey = nextSessionTurnOrdinal(event.context.workspaceDir, event.context.sessionId);
-      } catch {
-        roundKey = undefined;
-      }
+      // PRI-904 Phase-1 (Option 3): this production path is ALSO the Codex
+      // route, and Codex never writes trajectory.db::user_turns — its
+      // ingestion writes governance_* rows instead. Reading a session turn
+      // ordinal here would therefore be a false round authority: on Codex it
+      // either throws (→ legacy) or returns a constant 1 (→ fixed start, a
+      // different positional starvation while the event still claimed a fair
+      // rotation). So the shared production path passes NO round key and
+      // reports `legacy_fifo_prefix_v1` honestly. The selector's fair-rotation
+      // capability is retained and stays reachable for callers that DO hold a
+      // legitimate advancing round authority.
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
         excludePrincipleIds: options.promptExcludePrincipleIds?.(event),
-        ...(roundKey !== undefined ? { roundKey } : {}),
       });
       // PRI-750: record the injection event on the shared path with the host
       // turn id (Codex turn_id → runId) so receipt events carry a turn-level
@@ -287,11 +285,12 @@ export function createProductionHostRuntime(
           budget: RUNTIME_V2_PRINCIPLE_BUDGET,
           ...(prompt.truncated !== undefined ? { v2Truncated: prompt.truncated } : {}),
           ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
-          // PRI-904: fair-rotation observability (bounded, optional).
+          // PRI-904: selection diagnostics (bounded, optional). On this route
+          // the policy is legacy_fifo_prefix_v1 and NO rotation provenance is
+          // emitted — a fair claim would be untrue here (see above).
           ...(prompt.selectionPolicy !== undefined ? { selectionPolicy: prompt.selectionPolicy } : {}),
           ...(prompt.eligibleCount !== undefined ? { eligibleCount: prompt.eligibleCount } : {}),
           ...(prompt.rotationStartIndex !== undefined ? { rotationStartIndex: prompt.rotationStartIndex } : {}),
-          ...(roundKey !== undefined ? { selectionRoundOrdinal: roundKey, selectionRoundSource: 'session_user_turn_ordinal' as const } : {}),
           ...(prompt.droppedActivationIds !== undefined && prompt.droppedActivationIds.length > 0 ? { droppedActivationIds: prompt.droppedActivationIds } : {}),
           ...(prompt.oversizedActivationIds !== undefined && prompt.oversizedActivationIds.length > 0 ? { oversizedActivationIds: prompt.oversizedActivationIds } : {}),
         });

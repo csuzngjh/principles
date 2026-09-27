@@ -15,8 +15,10 @@ import {
 import { escapeXml } from '@principles/core/prompt-builder';
 import {
   buildActivePrinciplePromptContext,
+  createProductionHostRuntime,
   readPromptActivationCandidates,
 } from '../src/index.js';
+import type { HostEvent, HostEventEmitter } from '@principles/core/host';
 
 const tempDirs: string[] = [];
 
@@ -154,15 +156,16 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
     expect(result.truncated).toBe(false);
   });
 
-  it('T-PROD-02: N consecutive production round ordinals cover all N ring positions (bounded, not probabilistic)', async () => {
+  it('shared selector bounded-rotation contract: N consecutive round keys cover all N ring positions', async () => {
     const workspaceDir = tempWorkspace();
     const N = 8;
     await seedPromptActivations(
       workspaceDir,
       Array.from({ length: N }, (_, i) => ({ principleId: `COV_${i}`, text: 'c'.repeat(300) })),
     );
-    // The round fact the shared route reads: consecutive session user-turn
-    // ordinals, exactly as the production writer advances them.
+    // This proves the SELECTOR's capability when handed a legitimate
+    // consecutive round key. It does NOT prove that the shared production
+    // route holds such an authority — see the production-downgrade test below.
     const starts: number[] = [];
     const union = new Set<string>();
     for (let round = 1; round <= N; round++) {
@@ -173,6 +176,42 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
     }
     expect(new Set(starts).size).toBe(N);
     expect(union.size).toBe(N);
+  });
+
+  it('T6: shared PRODUCTION path reports legacy policy and no round provenance (Codex is a shared host)', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedPromptActivations(workspaceDir, [{ principleId: 'PROD_1', text: 'shared production principle' }]);
+
+    const emitted: Record<string, unknown>[] = [];
+    const runtime = createProductionHostRuntime({
+      hostKind: 'codex',
+      events: {
+        recordRuntimeV2ActivationsInjected: (data) => { emitted.push(data as unknown as Record<string, unknown>); },
+      } as unknown as HostEventEmitter,
+    });
+
+    // Deliberately a Codex-shaped event (turnId present, sessionId present).
+    const result = await runtime.dispatch({
+      kind: 'before_prompt_build',
+      source: 'codex:user_prompt_submit',
+      rawPayload: {},
+      context: {
+        sessionId: 'codex-session-1',
+        workspaceDir,
+        turnId: 'codex-turn-1',
+      },
+    } as unknown as HostEvent);
+
+    // Injection itself still works on the shared route.
+    expect(JSON.stringify(result)).toContain('PROD_1');
+
+    // But it must not claim a fair rotation it does not have.
+    expect(emitted).toHaveLength(1);
+    const data = emitted[0]!;
+    expect(data.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+    expect(data.rotationStartIndex).toBeUndefined();
+    expect(data.selectionRoundOrdinal).toBeUndefined();
+    expect(data.selectionRoundSource).toBeUndefined();
   });
 });
 

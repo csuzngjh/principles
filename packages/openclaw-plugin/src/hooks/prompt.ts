@@ -649,12 +649,22 @@ export async function handleBeforePromptBuild(
       v2DroppedActivationIds = sharedActivePrinciplePrompt.droppedActivationIds;
       v2OversizedActivationIds = sharedActivePrinciplePrompt.oversizedActivationIds;
     } else if (dedupedV2.length > 0) {
-      // PRI-904: fair rotation round = the session-local user-turn ordinal
-      // (already-persisted user_turns.turn_index, the same fact correction
-      // anchoring uses). Consecutive user turns advance it by exactly one, so
-      // N rounds cover all N eligible positions — a bounded opportunity
-      // window, not a probabilistic one. A missing/unreadable trajectory db
-      // degrades to the legacy FIFO policy, observable via selectionPolicy.
+      // PRI-904 Phase-1 (Option 3) fair rotation round = the session-local
+      // user-turn ordinal already persisted in trajectory.db (same fact the
+      // correction pipeline anchors on). Timing, verified on this route:
+      // SignalCollectorHost.detectSync writes user_turns synchronously at the
+      // top of this hook, so at selection time THIS turn is already recorded
+      // and the helper returns MAX(turn_index)+1 — the NEXT turn's ordinal,
+      // not the current one. That off-by-one is harmless for fairness (only
+      // the strict +1 progression matters); it is documented rather than
+      // papered over. Consecutive user turns therefore advance the rotation
+      // start by exactly one, and N such turns cover all N eligible ring
+      // positions. A missing sessionId or unreadable trajectory db degrades to
+      // the legacy FIFO policy, observable via selectionPolicy.
+      //
+      // Scope: this guarantee is per CONTINUOUSLY ADVANCING SESSION on the
+      // currently live plugin-local route. It is NOT cross-session, and it is
+      // NOT claimed for the host-shared/Codex route (which passes no round key).
       let v2RoundKey: number | undefined;
       if (sessionId) {
         try {
