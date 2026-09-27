@@ -89,6 +89,34 @@ function parsePositiveInteger(value: unknown, field: string): number {
 }
 
 /**
+ * PRI-927 (Owner decision): release ASSET bytes are delivered over TLS only —
+ * no plaintext carrier, no warning mode, no override. A plaintext carrier cannot
+ * forge the signed sha256, but it can poison every attempt into a permanent
+ * update failure, so the protocol is refused rather than tolerated.
+ *
+ * This is the policy on the SIGNED-DOCUMENT surface: a metadata file that names
+ * an http asset URL never becomes a parsed release, so nothing downstream can
+ * act on it. The download gate in apply-payload.ts re-tests the protocol where
+ * the carrier is opened, because that is the scope an insecure fetch would
+ * happen in — the same 'https:' decision on two different surfaces, not a
+ * second authority. It tests `URL.protocol` rather than a scheme prefix regex:
+ * the URL parser is the same authority `fetch` resolves against, so the gate
+ * and the transport cannot disagree about what a scheme prefix means
+ * (`https:example.com/a.tar.gz` is not a malformed URL — the parser recovers it
+ * into host `example.com`, and that is exactly what `fetch` would then request).
+ * A successful parse of a special scheme always yields a non-empty host, so no
+ * separate host check is possible here.
+ */
+function isSignedAssetUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Field-by-field strict parse. Rejects unknown top-level fields so a future
  * schema change fails loud instead of silently dropping meaning.
  */
@@ -142,16 +170,15 @@ export function parseReleaseMetadata(value: unknown): ReleaseMetadata {
         throw new ReleaseMetadataError('release_metadata_invalid', 'assets', `assets[${index}] contains unknown field "${key}"`);
       }
     }
-    let url: string | undefined;
+    let deliveryUrl: string | undefined;
     if (Object.hasOwn(asset, 'url')) {
       // PRI-854 (option A): the byte carrier is a GitHub Release attachment —
       // the URL is part of the SIGNED document while sha256+size bind the
-      // bytes. Only http(s) is accepted.
-      const rawUrl = asset.url;
-      if (typeof rawUrl !== 'string' || !/^https?:\/\//i.test(rawUrl)) {
-        throw new ReleaseMetadataError('release_metadata_invalid', 'assets', `assets[${index}].url must be an http(s) URL, got: ${JSON.stringify(rawUrl)}`);
+      // bytes. PRI-927: only https is accepted (see isSignedAssetUrl).
+      if (!isSignedAssetUrl(asset.url)) {
+        throw new ReleaseMetadataError('release_metadata_invalid', 'assets', `assets[${index}].url must be an https URL, got: ${JSON.stringify(asset.url)}`);
       }
-      url = rawUrl;
+      deliveryUrl = asset.url;
     }
     return {
       platform: requireOwn(asset, 'platform') as string,
@@ -159,7 +186,7 @@ export function parseReleaseMetadata(value: unknown): ReleaseMetadata {
       nodeAbi: requireOwn(asset, 'nodeAbi') as string,
       archiveSha256: requireOwn(asset, 'archiveSha256') as string,
       archiveSizeBytes: requireOwn(asset, 'archiveSizeBytes') as number,
-      ...(url !== undefined ? { url } : {}),
+      ...(deliveryUrl !== undefined ? { url: deliveryUrl } : {}),
     };
   });
 

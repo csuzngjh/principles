@@ -2,8 +2,16 @@
  * PRI-854 review: contract tests for the url delivery path — the trust
  * boundary where network bytes become installable payload. Positive flow
  * plus every fail-loud branch (rc-3): sha256 mismatch, size mismatch, HTTP
- * failure, non-http(s) scheme, url validation on parse, and the publisher's
+ * failure, protocol refusal, url validation on parse, and the publisher's
  * url-mode naming/shape contract.
+ *
+ * PRI-927 (Owner decision: no insecure override): the production gate accepts
+ * https only, so these tests may NOT hand the code under test a plaintext URL
+ * just because a local server is easier. They hand it an https URL plus an
+ * injected transport that maps that URL's path onto the local server — the
+ * socket, the status codes and the connection resets are still real undici,
+ * only the delivery host is swapped. The gate itself is asserted separately,
+ * including that a refusal performs zero transport calls.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer, type IncomingMessage } from 'node:http';
@@ -11,7 +19,7 @@ import { createHash as createSha, generateKeyPairSync } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { downloadAndVerifyAssetFile, downloadReleaseAsset } from '../src/update/apply-payload.js';
+import { downloadAndVerifyAssetFile, downloadReleaseAsset, type AssetFetcher } from '../src/update/apply-payload.js';
 import { parseReleaseMetadata, buildReleaseMetadata } from '../src/update/release-metadata.js';
 import { buildReleasePublication, contentAddressedAssetName } from '../src/update/release-metadata-publisher.js';
 import { resolvePdHomePaths, type PdHomePaths } from '../src/update/install-layout.js';
@@ -21,67 +29,332 @@ const PAYLOAD_SHA = createSha('sha256').update(PAYLOAD).digest('hex');
 
 type Handler = (req: IncomingMessage, res: import('node:http').ServerResponse) => void;
 
-function withHttpServer(handler: Handler, run: (baseUrl: string) => Promise<void>): Promise<void> {
+/** The logical (signed-metadata) host the code under test is told to fetch from. */
+const ASSET_HOST = 'https://release.example';
+
+function withHttpServer(handler: Handler, run: (fetcher: AssetFetcher) => Promise<void>): Promise<void> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => { try { handler(req, res); } catch (error) { reject(error); } });
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
       if (address === null || typeof address === 'string') { server.close(() => reject(new Error('no port'))); return; }
-      run(`http://127.0.0.1:${address.port}`)
+      const baseUrl = `http://127.0.0.1:${address.port}`;
+      const fetcher: AssetFetcher = (url, init) => fetch(`${baseUrl}${new URL(url).pathname}`, init);
+      run(fetcher)
         .then(() => server.close(() => resolve()), (error) => server.close(() => reject(error)));
     });
   });
 }
 
-function tempPaths(): PdHomePaths {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-url-dl-'));
-  return resolvePdHomePaths(home);
+/** A transport that records calls, so a refusal can be proven to precede transport. */
+function countingFetcher(target: AssetFetcher): AssetFetcher & { calls: () => number } {
+  let calls = 0;
+  const wrapped: AssetFetcher & { calls: () => number } = (url, init) => {
+    calls += 1;
+    return target(url, init);
+  };
+  wrapped.calls = () => calls;
+  return wrapped;
+}
+
+/** Fresh staging-shaped dir per test — the assertions below inspect its contents. */
+function tempDestination(prefix: string): { destination: string; dir: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  return { dir, destination: path.join(dir, 'release-asset.tar.gz') };
+}
+
+function leftoverCandidates(dir: string): string[] {
+  return fs.readdirSync(dir).filter((name) => name.endsWith('.part'));
 }
 
 describe('downloadAndVerifyAssetFile (PRI-854 trust boundary)', () => {
-  it('happy path: bytes served, signed sha256+size match → written', async () => {
-    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (base) => {
-      const destination = path.join(os.tmpdir(), `pd-url-happy-${Date.now()}.tar.gz`);
-      await downloadAndVerifyAssetFile({ url: `${base}/asset.tar.gz`, destinationPath: destination, expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1' });
+  it('happy path: bytes served, signed sha256+size match → canonical file only', async () => {
+    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-url-happy');
+      await downloadAndVerifyAssetFile({ url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination, expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', fetcher });
       expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
-      fs.rmSync(destination, { force: true });
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
   it('UPPERCASE signed digest is case-normalized and still passes', async () => {
-    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (base) => {
-      const destination = path.join(os.tmpdir(), `pd-url-case-${Date.now()}.tar.gz`);
-      await downloadAndVerifyAssetFile({ url: `${base}/asset.tar.gz`, destinationPath: destination, expectedSha256: PAYLOAD_SHA.toUpperCase(), releaseId: 'r1' });
+    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-url-case');
+      await downloadAndVerifyAssetFile({ url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination, expectedSha256: PAYLOAD_SHA.toUpperCase(), releaseId: 'r1', fetcher });
       expect(fs.existsSync(destination)).toBe(true);
-      fs.rmSync(destination, { force: true });
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
   it('sha256 mismatch → release_metadata_invalid (fail loud before any use)', async () => {
-    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (base) => {
-      const wrong = 'b'.repeat(64);
-      await expect(downloadAndVerifyAssetFile({ url: `${base}/asset.tar.gz`, destinationPath: path.join(os.tmpdir(), 'x1.tar.gz'), expectedSha256: wrong, releaseId: 'r1' }))
+    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-url-digest');
+      await expect(downloadAndVerifyAssetFile({ url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination, expectedSha256: 'b'.repeat(64), releaseId: 'r1', fetcher }))
         .rejects.toMatchObject({ reason: 'release_metadata_invalid' });
+      // The trust anchor refuses before anything is published: neither the
+      // canonical name nor a candidate survives.
+      expect(fs.existsSync(destination)).toBe(false);
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
   it('size mismatch → release_metadata_invalid', async () => {
-    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (base) => {
-      await expect(downloadAndVerifyAssetFile({ url: `${base}/asset.tar.gz`, destinationPath: path.join(os.tmpdir(), 'x2.tar.gz'), expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length + 1, releaseId: 'r1' }))
+    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-url-size');
+      await expect(downloadAndVerifyAssetFile({ url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination, expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length + 1, releaseId: 'r1', fetcher }))
         .rejects.toMatchObject({ reason: 'release_metadata_invalid' });
+      expect(fs.existsSync(destination)).toBe(false);
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
   it('HTTP 404 → metadata_refresh_failed', async () => {
-    await withHttpServer((_req, res) => { res.writeHead(404); res.end(); }, async (base) => {
-      await expect(downloadAndVerifyAssetFile({ url: `${base}/missing.tar.gz`, destinationPath: path.join(os.tmpdir(), 'x3.tar.gz'), expectedSha256: PAYLOAD_SHA, releaseId: 'r1' }))
+    await withHttpServer((_req, res) => { res.writeHead(404); res.end(); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-url-404');
+      await expect(downloadAndVerifyAssetFile({ url: `${ASSET_HOST}/missing.tar.gz`, destinationPath: destination, expectedSha256: PAYLOAD_SHA, releaseId: 'r1', fetcher }))
         .rejects.toMatchObject({ reason: 'metadata_refresh_failed' });
+      expect(fs.existsSync(destination)).toBe(false);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
-  it('non-http(s) scheme refused BEFORE any network activity', async () => {
-    await expect(downloadAndVerifyAssetFile({ url: 'ftp://host/asset.tar.gz', destinationPath: path.join(os.tmpdir(), 'x4.tar.gz'), expectedSha256: PAYLOAD_SHA, releaseId: 'r1' }))
+  it('non-https scheme refused BEFORE any transport call', async () => {
+    const fetcher = countingFetcher(() => fetch('data:,'));
+    await expect(downloadAndVerifyAssetFile({ url: 'ftp://host/asset.tar.gz', destinationPath: path.join(os.tmpdir(), 'x4.tar.gz'), expectedSha256: PAYLOAD_SHA, releaseId: 'r1', fetcher }))
       .rejects.toMatchObject({ reason: 'release_metadata_invalid' });
+    expect(fetcher.calls()).toBe(0);
+  });
+
+  it('unparseable URL refused with a structured reason and nextAction', async () => {
+    await expect(downloadAndVerifyAssetFile({ url: 'not a url', destinationPath: path.join(os.tmpdir(), 'x5.tar.gz'), expectedSha256: PAYLOAD_SHA, releaseId: 'r1' }))
+      .rejects.toMatchObject({ reason: 'release_metadata_invalid', nextAction: expect.any(String) });
+  });
+});
+
+/**
+ * PRI-927 (Owner decision: fix, do not dismiss): unverified network bytes must
+ * never be reachable under the canonical asset name. Verified bytes land in a
+ * private, exclusively-created, unguessable candidate in the SAME directory as
+ * the destination and only then reach the canonical name by rename — so the
+ * publish is atomic on one filesystem and no partial candidate is ever named.
+ */
+describe('downloadAndVerifyAssetFile private candidate (PRI-927)', () => {
+  const NO_SLEEP = () => Promise.resolve();
+
+  it('https-only gate is not bypassable by injecting a transport', async () => {
+    // The refusal is about the URL, not the transport: an http:// asset URL is
+    // rejected even though a working fetcher is supplied.
+    const fetcher = countingFetcher(() => fetch('data:,'));
+    await expect(downloadAndVerifyAssetFile({
+      url: 'http://127.0.0.1:1/asset.tar.gz', destinationPath: path.join(os.tmpdir(), 'pd-insecure.asset.tar.gz'),
+      expectedSha256: PAYLOAD_SHA, releaseId: 'r1', fetcher,
+    })).rejects.toMatchObject({ reason: 'release_metadata_invalid', message: /must be an https URL/ });
+    expect(fetcher.calls()).toBe(0);
+  });
+
+  it('a stale canonical file from an earlier attempt is replaced only by a verified rename', async () => {
+    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-url-replace');
+      fs.writeFileSync(destination, 'garbage from an interrupted earlier transaction');
+      await downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', fetcher,
+      });
+      expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('a failed digest leaves the pre-existing canonical bytes untouched', async () => {
+    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-url-untouched');
+      const previous = Buffer.from('previous confirmed release bytes');
+      fs.writeFileSync(destination, previous);
+      await expect(downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: 'b'.repeat(64), releaseId: 'r1', fetcher, sleep: NO_SLEEP,
+      })).rejects.toMatchObject({ reason: 'release_metadata_invalid' });
+      expect(fs.readFileSync(destination).equals(previous)).toBe(true);
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('a failed publish surfaces as a structured staging error, candidate removed', async () => {
+    // Real OS refusal, no mocks: the canonical name is an existing directory,
+    // so the atomic rename of the verified candidate cannot succeed. Before
+    // PRI-927 this same situation was a plain writeFileSync over a path the
+    // caller expected to be a file.
+    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-url-publish-refused');
+      fs.mkdirSync(destination);
+      const error = await downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', fetcher,
+      }).catch((thrown: unknown) => thrown as Error);
+      expect(error).toMatchObject({ reason: 'metadata_refresh_failed' });
+      expect(error?.message).toMatch(/could not be staged/);
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmdirSync(destination);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  // POSIX-only: Windows reports NTFS ACLs through stat and does not honour the
+  // creation mode bits, so asserting 0600 there would test the OS, not the code.
+  it.runIf(process.platform !== 'win32')('the published asset is not readable by other users', async () => {
+    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-url-mode');
+      await downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', fetcher,
+      });
+      // Pre-fix this was 0o644 (writeFileSync default & ~umask): the verified
+      // bytes were materialised under the canonical name for any local user.
+      expect(fs.statSync(destination).mode & 0o777).toBe(0o600);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+});
+
+/**
+ * PRI-927 review: the HTTPS-only decision is a property of the DELIVERY PATH,
+ * not of the first URL string. `redirect: 'follow'` hands the rest of the path
+ * to the transport, and undici crosses schemes when told to follow — measured
+ * on Node 24: a 302 is followed to another origin/scheme and the body reads
+ * fine, so a signed https URL that answers 302 → http:// delivers the asset in
+ * plaintext before this module sees a byte. These tests pin the replacement:
+ * hops are stepped explicitly, every target is re-gated BEFORE its request,
+ * and the chain is bounded.
+ */
+describe('downloadAndVerifyAssetFile redirect gating (PRI-927)', () => {
+  const NO_SLEEP = () => Promise.resolve();
+
+  it('an https→http downgrade is refused without ever requesting the plaintext hop', async () => {
+    const seen: string[] = [];
+    await withHttpServer((req, res) => {
+      seen.push(req.url ?? '');
+      if (req.url === '/asset.tar.gz') {
+        // A reachable plaintext hop: with `redirect: 'follow'` the transport
+        // would complete this second request itself and hand back a 200 body,
+        // which is exactly the delivery the Owner's decision forbids.
+        res.writeHead(302, { location: `http://${req.headers.host}/downgraded.tar.gz` });
+        res.end();
+        return;
+      }
+      res.writeHead(200);
+      res.end(PAYLOAD);
+    }, async (transport) => {
+      const fetcher = countingFetcher(transport);
+      const { dir, destination } = tempDestination('pd-redirect-downgrade');
+      await expect(downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
+      })).rejects.toMatchObject({ reason: 'release_metadata_invalid', message: /redirect #1 is not an https URL/ });
+      // The refusal is what makes this unobservable-over-the-wire: one request
+      // (the https one), and the plaintext target was never asked for.
+      expect(fetcher.calls()).toBe(1);
+      expect(seen).toEqual(['/asset.tar.gz']);
+      expect(fs.existsSync(destination)).toBe(false);
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('an https→https redirect is followed to the final hop (production shape)', async () => {
+    const seen: string[] = [];
+    await withHttpServer((req, res) => {
+      seen.push(req.url ?? '');
+      if (req.url === '/asset.tar.gz') {
+        res.writeHead(302, { location: `${ASSET_HOST}/cdn/asset.tar.gz` });
+        res.end();
+        return;
+      }
+      res.writeHead(200);
+      res.end(PAYLOAD);
+    }, async (transport) => {
+      const fetcher = countingFetcher(transport);
+      const { dir, destination } = tempDestination('pd-redirect-https');
+      await downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
+      });
+      // GitHub's real asset delivery is exactly this: one 302 from
+      // github.com to release-assets.githubusercontent.com. Stepping hops must
+      // not break it — and the bytes come from the hop, not from the signed URL.
+      expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
+      expect(seen).toEqual(['/asset.tar.gz', '/cdn/asset.tar.gz']);
+      expect(fetcher.calls()).toBe(2);
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('a relative Location is resolved against its hop, so it keeps the https scheme', async () => {
+    const seen: string[] = [];
+    await withHttpServer((req, res) => {
+      seen.push(req.url ?? '');
+      if (req.url === '/deep/asset.tar.gz') {
+        res.writeHead(302, { location: '../signed-copy.tar.gz' });
+        res.end();
+        return;
+      }
+      res.writeHead(200);
+      res.end(PAYLOAD);
+    }, async (transport) => {
+      const fetcher = countingFetcher(transport);
+      const { dir, destination } = tempDestination('pd-redirect-relative');
+      await downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/deep/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
+      });
+      // Resolved against https://release.example/deep/asset.tar.gz, NOT against
+      // a fabricated origin or a naive string append onto the hop's path.
+      expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
+      expect(seen).toEqual(['/deep/asset.tar.gz', '/signed-copy.tar.gz']);
+      expect(fetcher.calls()).toBe(2);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('a redirect with no Location header is a refusal, not a silent retry', async () => {
+    await withHttpServer((_req, res) => { res.writeHead(302); res.end(); }, async (transport) => {
+      const fetcher = countingFetcher(transport);
+      const { dir, destination } = tempDestination('pd-redirect-nolocation');
+      await expect(downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
+      })).rejects.toMatchObject({ reason: 'release_metadata_invalid', message: /missing Location header/ });
+      expect(fetcher.calls()).toBe(1);
+      expect(fs.existsSync(destination)).toBe(false);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('a redirect loop is BOUNDED and not re-entered by the download retry', async () => {
+    let requests = 0;
+    await withHttpServer((req, res) => {
+      requests += 1;
+      const next = Number((req.url ?? '').split('/')[2] ?? '0') + 1;
+      res.writeHead(302, { location: `${ASSET_HOST}/hop/${next}` });
+      res.end();
+    }, async (transport) => {
+      const { dir, destination } = tempDestination('pd-redirect-loop');
+      await expect(downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/hop/0`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP, fetcher: transport,
+      })).rejects.toMatchObject({ reason: 'metadata_refresh_failed', message: /exceeded 5 https redirects/ });
+      // 6 requests = the signed URL plus 5 further hops. NOT 6 × 3 attempts:
+      // a hop verdict is terminal, so the retry policy cannot multiply it.
+      expect(requests).toBe(6);
+      expect(fs.existsSync(destination)).toBe(false);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
   });
 });
 
@@ -100,15 +373,16 @@ describe('downloadAndVerifyAssetFile bounded retry (PRI-924)', () => {
       requests += 1;
       if (requests === 1) { res.destroy(); return; }
       res.writeHead(200); res.end(PAYLOAD);
-    }, async (base) => {
-      const destination = path.join(os.tmpdir(), `pd-retry-recover-${Date.now()}.tar.gz`);
+    }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-retry-recover');
       await downloadAndVerifyAssetFile({
-        url: `${base}/asset.tar.gz`, destinationPath: destination,
-        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP,
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
       });
       expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
       expect(requests).toBe(2);
-      fs.rmSync(destination, { force: true });
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
@@ -118,15 +392,15 @@ describe('downloadAndVerifyAssetFile bounded retry (PRI-924)', () => {
       requests += 1;
       if (requests === 1) { res.writeHead(503); res.end(); return; }
       res.writeHead(200); res.end(PAYLOAD);
-    }, async (base) => {
-      const destination = path.join(os.tmpdir(), `pd-retry-503-${Date.now()}.tar.gz`);
+    }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-retry-503');
       await downloadAndVerifyAssetFile({
-        url: `${base}/asset.tar.gz`, destinationPath: destination,
-        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP,
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
       });
       expect(fs.existsSync(destination)).toBe(true);
       expect(requests).toBe(2);
-      fs.rmSync(destination, { force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
@@ -136,56 +410,63 @@ describe('downloadAndVerifyAssetFile bounded retry (PRI-924)', () => {
       requests += 1;
       if (requests === 1) { res.writeHead(500); res.end('error page bytes that must never reach disk'); return; }
       res.writeHead(200); res.end(PAYLOAD);
-    }, async (base) => {
-      const destination = path.join(os.tmpdir(), `pd-retry-500-body-${Date.now()}.tar.gz`);
+    }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-retry-500-body');
       await downloadAndVerifyAssetFile({
-        url: `${base}/asset.tar.gz`, destinationPath: destination,
-        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP,
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
       });
       expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
       expect(requests).toBe(2);
-      fs.rmSync(destination, { force: true });
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
   it('persistent connection reset → attempts are BOUNDED, then metadata_refresh_failed', async () => {
     let requests = 0;
-    await withHttpServer((_req, res) => { requests += 1; res.destroy(); }, async (base) => {
+    await withHttpServer((_req, res) => { requests += 1; res.destroy(); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-retry-exhaust');
       await expect(downloadAndVerifyAssetFile({
-        url: `${base}/asset.tar.gz`, destinationPath: path.join(os.tmpdir(), `pd-retry-exhaust-${Date.now()}.tar.gz`),
-        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP,
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
       })).rejects.toMatchObject({ reason: 'metadata_refresh_failed', message: /after 3 attempts/ });
       expect(requests).toBe(3);
+      expect(fs.existsSync(destination)).toBe(false);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
   it('404 is a stable refusal — never retried', async () => {
     let requests = 0;
-    await withHttpServer((_req, res) => { requests += 1; res.writeHead(404); res.end(); }, async (base) => {
+    await withHttpServer((_req, res) => { requests += 1; res.writeHead(404); res.end(); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-retry-404');
       await expect(downloadAndVerifyAssetFile({
-        url: `${base}/missing.tar.gz`, destinationPath: path.join(os.tmpdir(), 'pd-retry-404.tar.gz'),
-        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP,
+        url: `${ASSET_HOST}/missing.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
       })).rejects.toMatchObject({ reason: 'metadata_refresh_failed', message: /HTTP 404/ });
       expect(requests).toBe(1);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 
   it('signed sha256 disagreement ABORTS immediately — a corrupt candidate is never re-drawn', async () => {
     let requests = 0;
-    await withHttpServer((_req, res) => { requests += 1; res.writeHead(200); res.end(PAYLOAD); }, async (base) => {
-      const wrong = 'b'.repeat(64);
+    await withHttpServer((_req, res) => { requests += 1; res.writeHead(200); res.end(PAYLOAD); }, async (fetcher) => {
+      const { dir, destination } = tempDestination('pd-retry-digest');
       await expect(downloadAndVerifyAssetFile({
-        url: `${base}/asset.tar.gz`, destinationPath: path.join(os.tmpdir(), 'pd-retry-digest.tar.gz'),
-        expectedSha256: wrong, releaseId: 'r1', sleep: NO_SLEEP,
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: 'b'.repeat(64), releaseId: 'r1', sleep: NO_SLEEP, fetcher,
       })).rejects.toMatchObject({ reason: 'release_metadata_invalid' });
       expect(requests).toBe(1);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 });
 
 describe('downloadReleaseAsset url branch (PRI-854)', () => {
   it('url-carrying metadata downloads from the delivery url and skips TUF resolution', async () => {
-    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (base) => {
+    await withHttpServer((_req, res) => { res.writeHead(200); res.end(PAYLOAD); }, async (assetFetcher) => {
       const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-url-branch-'));
       const metadata = buildReleaseMetadata({
         productVersion: '2.0.0',
@@ -199,25 +480,29 @@ describe('downloadReleaseAsset url branch (PRI-854)', () => {
           nodeAbi: process.versions.modules,
           archiveSha256: PAYLOAD_SHA,
           archiveSizeBytes: PAYLOAD.length,
-          url: `${base}/release-asset.tar.gz`,
+          url: `${ASSET_HOST}/release-asset.tar.gz`,
         }],
         dataSchemaForwardReadableFrom: '1.0.0',
       });
       const downloaded = await downloadReleaseAsset({
         paths: resolvePdHomePaths(home),
-        metadataBaseUrl: `${base}/no-tuf-needed`,
+        metadataBaseUrl: `${ASSET_HOST}/no-tuf-needed`,
+        assetFetcher,
         releaseMetadata: metadata,
         channel: 'stable',
         transactionId: 'update-1-urlpath1',
       });
       expect(fs.readFileSync(downloaded.archivePath).equals(PAYLOAD)).toBe(true);
-      expect(downloaded.trustedTarget.targetPath).toBe(`${base}/release-asset.tar.gz`);
+      expect(downloaded.trustedTarget.targetPath).toBe(`${ASSET_HOST}/release-asset.tar.gz`);
+      // The whole staging transaction dir holds nothing but the canonical
+      // archive — no candidate left behind by the production wiring either.
+      expect(leftoverCandidates(path.dirname(downloaded.archivePath))).toEqual([]);
       fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     });
   });
 });
 
-describe('assets[].url parse contract (PRI-854)', () => {
+describe('assets[].url parse contract (PRI-854, tightened by PRI-927)', () => {
   function validDoc(url?: string): Record<string, unknown> {
     // buildReleaseMetadata computes the self-consistent releaseId/digest;
     // the optional url rides along (or is injected for the invalid cases).
@@ -240,19 +525,41 @@ describe('assets[].url parse contract (PRI-854)', () => {
     return JSON.parse(JSON.stringify(doc)) as Record<string, unknown>;
   }
 
-  it('valid http url survives parsing', () => {
+  it('https url survives parsing', () => {
     const parsed = parseReleaseMetadata(validDoc('https://example.com/a.tar.gz'));
     expect(parsed.assets[0]?.url).toBe('https://example.com/a.tar.gz');
   });
 
+  it('plaintext http url is refused — the asset carrier is TLS-only (PRI-927)', () => {
+    expect(() => parseReleaseMetadata(validDoc('http://example.com/a.tar.gz'))).toThrow(/must be an https URL/);
+  });
+
+  it('case-shifted https url is accepted (the URL parser normalizes it)', () => {
+    const parsed = parseReleaseMetadata(validDoc('HTTPS://example.com/a.tar.gz'));
+    expect(parsed.assets[0]?.url).toBe('HTTPS://example.com/a.tar.gz');
+  });
+
   it('non-http scheme rejected', () => {
-    expect(() => parseReleaseMetadata(validDoc('ftp://example.com/a.tar.gz'))).toThrow(/must be an http\(s\) URL/);
+    expect(() => parseReleaseMetadata(validDoc('ftp://example.com/a.tar.gz'))).toThrow(/must be an https URL/);
+  });
+
+  it('scheme-prefix look-alike is normalized by the URL parser, so the gate agrees with fetch', () => {
+    // `https:example.com/a.tar.gz` is not an unresolvable string: WHATWG
+    // recovery for a special scheme parses it into host `example.com`, and that
+    // is precisely what fetch would then request. The gate must accept it —
+    // rejecting here would mean the gate and the transport disagree.
+    const parsed = parseReleaseMetadata(validDoc('https:example.com/a.tar.gz'));
+    expect(parsed.assets[0]?.url).toBe('https:example.com/a.tar.gz');
+  });
+
+  it('hostless https url is refused — the parse itself fails', () => {
+    expect(() => parseReleaseMetadata(validDoc('https://'))).toThrow(/must be an https URL/);
   });
 
   it('non-string url rejected', () => {
     const doc = validDoc();
     (doc.assets as Record<string, unknown>[])[0]!.url = 42;
-    expect(() => parseReleaseMetadata(doc)).toThrow(/must be an http\(s\) URL/);
+    expect(() => parseReleaseMetadata(doc)).toThrow(/must be an https URL/);
   });
 });
 
