@@ -2,6 +2,7 @@
 "@principles/core": patch
 "@principles/host-runtime": patch
 "principles-disciple": patch
+"create-principles-disciple": patch
 ---
 
 Prompt principle injection now rotates deterministically under the fixed
