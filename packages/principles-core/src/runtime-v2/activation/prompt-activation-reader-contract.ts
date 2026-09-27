@@ -199,9 +199,11 @@ export function trimToBudget(
       const entry = `- [${escapeFn(p.principleId)}] ${escapeFn(p.text)}`;
       if (remaining < entry.length + 1) {
         truncated = true;
+        // The loop breaks here, so both lists hold at most this one entry —
+        // no cap guard needed on the legacy path.
         if (entry.length + 1 > emptyPayloadRemaining) {
-          if (oversizedActivationIds.length < MAX_INJECTION_DIAGNOSTIC_IDS) oversizedActivationIds.push(p.activationId);
-        } else if (droppedActivationIds.length < MAX_INJECTION_DIAGNOSTIC_IDS) {
+          oversizedActivationIds.push(p.activationId);
+        } else {
           droppedActivationIds.push(p.activationId);
         }
         break;

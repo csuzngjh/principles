@@ -273,6 +273,19 @@ describe('PRI-904 trimToBudget — adversarial inputs', () => {
     expect(result.droppedActivationIds.length).toBeLessThanOrEqual(16);
     expect(result.truncated).toBe(true);
   });
+
+  it('oversized diagnostics are hard-capped at 16 entries (fair scan continues past every oversized entry)', () => {
+    const entries = Array.from({ length: 20 }, (_, i) => ({
+      principleId: `O-${String(i).padStart(2, '0')}`,
+      text: 'o'.repeat(5000),
+      artifactId: `a-${i}`,
+      activationId: `act_o_${i}`,
+    }));
+    const result = trimToBudget(entries, 1000, (s) => s, 3);
+    expect(result.oversizedActivationIds.length).toBe(16);
+    expect(result.injectedIds.size).toBe(0);
+    expect(result.truncated).toBe(false);
+  });
 });
 
 describe('PRI-904 roundKeyFromRunIdentity — round key provenance', () => {
