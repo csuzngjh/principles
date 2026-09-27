@@ -21,37 +21,60 @@
 
 ## 2. Round Key（Phase 2 调查与决策）
 
-### 决策表
+### 决策表（首轮调查）
+
+首轮曾把 `ctx.runId` / `turnId` 的 FNV 哈希选为 round key。评审轮复核判定其**只提供概率公平**（哈希不产生 bounded 推进），故重做审计，下方"最终选择"改用确定性 session 轮次序数。
 
 | Candidate | Existing? | Deterministic? | Changes per round? | Plugin available? | Shared available? | Chosen? |
 |---|---:|---:|---:|---:|---:|---:|
-| OpenClaw `ctx.runId`（UUID）→ FNV-1a32 | YES（hook ctx；PRI-750 lineage 字段；live 1431/1431 事件携带、868 个不同值） | YES（纯哈希，per-build 不可变事实） | YES——90% run 单次 build（779/868），run 间必变；同一 run 内多次 build 稳定（= 语义正确的"一轮"） | YES | N/A（本路由自有事实） | ✅ plugin-local |
-| Codex `event.context.turnId` → FNV-1a32 | YES（HostEventContext.turnId；PRI-750 已统一映射 runId） | YES | YES（每 turn 新值） | N/A | YES（SessionStart 缺失→可观测降级 legacy） | ✅ host-shared |
-| `nextUserTurnIndex()`（trajectory user turns） | YES（prompt.ts:124） | YES | 仅 user turn +1；heartbeat-only session 冻结 | YES | NO | ✗ |
-| `event.messages` user-role 计数 | YES（event payload） | YES | 通常变化；上下文压缩可回退 | YES | NO（HostEvent 无 messages） | ✗ |
+| OpenClaw `ctx.runId`（UUID）→ FNV-1a32 | YES（live 1431/1431 事件携带、868 个不同值） | YES（纯哈希） | 会变但**非推进**（随机身份） | YES | N/A | ✗ 评审轮否决 |
+| Codex `event.context.turnId` → FNV-1a32 | YES | YES | 同上 | N/A | YES | ✗ 评审轮否决 |
+| `nextUserTurnIndex()`（trajectory user turns） | YES（prompt.ts:124） | YES | 仅 user turn +1 | YES | NO（HostEvent 无 messages） | ✗ 载体不可达 |
+| `event.messages` user-role 计数 | YES | YES | 通常变化；上下文压缩可回退 | YES | NO | ✗ |
 | trajectory assistant-turn 计数 | YES | YES | 每 LLM 响应 +1 | YES | NO | ✗ |
 | `Date.now()` / `Math.random()` | — | NO | — | — | — | ✗ SPEC 禁止 |
 | 新建持久化计数器 | NO（新状态） | — | — | — | — | ✗ SPEC 禁止 |
 
-### 最终选择
+### 最终选择（评审轮修订：hash(runId) → 确定性 session 轮次序数）
 
 ```text
-roundKey = roundKeyFromRunIdentity(host_run_identity)
-plugin-local:  host_run_identity = ctx.runId          (OpenClaw hook context)
-host-shared:   host_run_identity = event.context.turnId (Codex; SessionStart 无 → 不传 roundKey)
+roundKey = nextSessionTurnOrdinal(workspaceDir, sessionId)   // = max(user_turns.turn_index) + 1
+plugin-local:  同一函数（handleBeforePromptBuild 持 workspaceDir + sessionId）
+host-shared:   同一函数（beforePromptBuild 持 event.context.{workspaceDir,sessionId}）
 ```
 
-- file: `packages/principles-core/src/runtime-v2/activation/prompt-activation-reader-contract.ts`
-- 函数: `roundKeyFromRunIdentity`（FNV-1a 32-bit，纯函数，`>>> 0` 无符号）
-- why deterministic: 同一 run 身份字符串 → 同一整数；无时钟、无随机、无持久状态。
-- why it changes: 生产 live 证据——8 个 events_*.jsonl 共 1431 条注入事件全部携带 runId，868 个不同值；OpenClaw 每个 protocol run 分配新 run id，90%（779/868）的 run 恰好一次 prompt build。同一 run 内多次重建 prompt（长工具循环）保持同一起点——一个 run = 一轮，语义正确且对 prompt cache 友好。
-- plugin path availability: `handleBeforePromptBuild` 已解构 `ctx.runId`（缺 runId → 可观测降级 legacy policy）。
-- shared path availability: `createProductionHostRuntime.beforePromptBuild` 持有 `event.context.turnId`（即 PRI-750 事件里写为 runId 的同一事实）。
+- file: `packages/principles-core/src/trajectory-store.ts`（**已登记的 core I/O seam**，registry 第 15–18 行）
+- 函数: `nextSessionTurnOrdinal` — 只读打开 `{workspaceDir}/.state/trajectory.db`，走 `idx_user_turns_session_id` 索引做 `MAX(turn_index)` 聚合（live 实测 0ms）
+- 数据来源: `user_turns.turn_index`——**已存在**的生产持久列，由 openclaw-plugin `TrajectoryDatabase.recordUserTurn` 写入（live: 1045 行 / 297 个 session），也是纠正流水线锚定所用的同一事实
+- why deterministic: 同一 session 的 max(turn_index) 单调递增，+1 精确
+- why it advances: 每次记录一个用户回合 → 序数 +1
+- 无新增状态: 只读既有表；**无新列、无新表、无新文件、无 cursor、无 module-global 可变状态**
+- 库缺失/不可读: 抛 `TrajectoryDbUnavailableError` → 两路由均降级 legacy policy，经 `selectionPolicy` 字段可观测（rc-9）
 
-### 覆盖语义（诚实声明）
+### 覆盖语义（bounded，可证明）
 
-纯函数层：连续 roundKey `k..k+N-1` → **确定性** ≤N 轮全覆盖（T2/AT-03）。
-生产派生层：roundKey 来自 run 身份哈希，起点在 `[0,N)` 上近似均匀重抽，而非严格 +1 递进。因此 INV-F02 的"≤N 轮"上界在纯函数层严格成立；在生产派生层为概率性：每轮约 9/16 命中（当前 pack≈9/16），连续 16 轮仍缺席的概率 ≈ 1.8e-6，32 轮 ≈ 3e-12，随轮数指数趋零——**永久位置性饥饿被消除**（选择不再依赖固定前缀位置），但单条原则的首次入选时刻不是确定性上界。runId 缺失的 build 降级 legacy policy 并经 `selectionPolicy` 字段可观测（rc-9）。
+生产层直接成立：对同一 eligible ring（N 条），同一 session 连续 N 个用户回合的序数为 o, o+1, …, o+N−1，
+`start = ordinal mod N` 恰好遍历全部 N 个位置各一次 —— **≤N 轮全覆盖，确定性，非概率**。
+
+生产路径证明（不使用人为 key 搜索）：
+- plugin-local：`T-PROD-01` 用真实 `handleBeforePromptBuild` + 真实 trajectory.db 行推进，断言 16 轮的 start 集合等于 {0..15}、union=16/16、序数逐轮 +1；
+- host-shared：`T-PROD-02` 断言连续 roundKey 1..N 的 start = round % N 且全部位置被覆盖；
+- seam 层：`trajectory-store-round-ordinal.test.ts` 对真实 SQLite 断言 +1 语义、per-session 隔离、非 1 起点（历史裁剪）与 ≤N 覆盖。
+
+边界语义（诚实声明）：
+- "一轮" = 该 session 记录的一个用户回合。heartbeat/cron 等非用户触发的 prompt build 不推进轮次（沿用上一次的起点），不构成位置性饥饿——下一次用户回合即推进。
+- 新 session 序数从 1 重新开始，因此 bounded 保证是**每 session 内**的；多 session 交错只会增加多样性。
+- turn_index 可因历史保留策略从 >1 开始（live 实测存在此类 session），不影响 +1 与 mod N 语义。
+
+### 被否决的候选（保留审计痕迹）
+
+| Candidate | Existing | Deterministically advancing | Plugin-local | Host-shared | Same semantics | New state | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---|
+| A. `ctx.runId` / `HostEventContext.turnId` 本身 | YES | **NO**（live 1474 条：1457 UUID + 17 `name:uuid:status` 复合串，无单调性） | YES | YES | YES | NO | **REJECT** — 随机身份，哈希后"会变"≠"推进" |
+| B. `nextUserTurnIndex()`（trajectory 封装） | YES | YES（底层即 C） | YES | NO（HostEvent 无 messages） | 部分 | NO | REJECT（仅因载体不可达；语义采纳自 C） |
+| C. `user_turns.turn_index`（core seam 只读） | YES | **YES**（live 297/297 session 严格单调、span==count 连续） | YES | YES | YES（同一函数） | **NO** | **CHOSEN** |
+| D. `hash(runId)` 派生的 start（首版实现） | YES | **NO**（仅统计性） | YES | YES | YES | NO | **REJECT** — 无法证明 ≤N 轮上界 |
+
 
 ## 3. Old Behavior（特征化，T1）
 
@@ -92,7 +115,7 @@ dropped           = [act_prompt_10]
 - target（#14）入选轮：6–13（8/16 轮在场）；oldest（#1）入选轮：0, 9–15（8/16 轮在场）——无反向饥饿。
 - round 2/5 展示 continue-on-non-fit：装不下的长条目被跳过，更短的后继（12、02）仍入选。
 - round 11 恰好 2000 字符压线——预算边界精确。
-- 每轮 ≤ 2000（0..99 连续 roundKey 全部断言）。
+- 每轮 ≤ 2000（0..99 连续 roundKey 全部断言）。上表 roundKey = 该轮 session 序数；生产层由 `nextSessionTurnOrdinal` 提供（第 k 轮读数即 o+k-1，`start=(o+k-1) mod 16`），故 round k+1 的起点是 round k 的下一格。
 
 ## 5. Route Parity
 
@@ -112,14 +135,17 @@ dropped           = [act_prompt_10]
   "selectionPolicy": "fair_rotation_v1",
   "eligibleCount": 16,
   "rotationStartIndex": 7,
+  "selectionRoundOrdinal": 23,
+  "selectionRoundSource": "session_user_turn_ordinal",
   "droppedActivationIds": ["act_prompt_10"],
   "oversizedActivationIds": []
 }
 ```
 
-- `droppedActivationIds` / `oversizedActivationIds` 硬上限 16（SPEC §10）。
+- `droppedActivationIds` / `oversizedActivationIds` **schema 层** `maxItems: 16`（不只是 producer 约定，wire contract 强制）。
+- 轮次溯源：`fair_rotation_v1` 必然伴随 `selectionRoundOrdinal` + `selectionRoundSource`——没有溯源的轮转选择不是合法事件（评审 P2-B）。
 - `truncated`（v2Truncated）语义：fair 模式下 = 至少一条非-oversized eligible 条目因预算未入选；oversized-only 不置位。legacy 模式 = 原语义（首不合 break）。
-- 降级可观测：runId/turnId 缺失 → `selectionPolicy=legacy_fifo_prefix_v1`（无 rotationStartIndex）。
+- 降级可观测：sessionId 缺失或 trajectory 库不可读 → `selectionPolicy=legacy_fifo_prefix_v1`（无 rotationStartIndex/轮次溯源）。
 
 ## 7. Complexity Delta
 
@@ -136,7 +162,7 @@ runtime behavior change:     YES —— prompt Principle 预算调度策略（FI
 existing telemetry extension: YES —— 上述 5 个 optional 字段
 ```
 
-新增公共面：`roundKeyFromRunIdentity`（+ types `PromptSelectionPolicy`/`TrimToBudgetResult`）经 runtime-v2 barrel 导出（快照 1779→1780，PRI-775 意内更新流程）。SQL 变更仅 prompt 查询追加 `activation_id ASC` tie-break。
+新增公共面：types `PromptSelectionPolicy` / `TrimToBudgetResult` 经 runtime-v2 barrel 导出（快照 1779→1781，PRI-775 意内更新流程）。评审轮**删除**了首版的 `roundKeyFromRunIdentity` 导出（改造后无真实 consumer，不留 ghost API），新增 `nextSessionTurnOrdinal` 位于**既有已登记** trajectory-store seam 内（非 runtime-v2 barrel 新面）。SQL 变更仅 prompt 查询追加 `activation_id ASC` tie-break。
 
 ## 8. 回滚
 

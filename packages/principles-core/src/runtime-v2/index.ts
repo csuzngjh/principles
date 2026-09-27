@@ -1464,7 +1464,6 @@ export {
   filterPromptActivations,
   resolvePrincipleFromArtifact,
   trimToBudget,
-  roundKeyFromRunIdentity,
   renderPrinciplesToDirectives,
   createProductionGateDeps,
   compileHardenedRuleEvaluator,

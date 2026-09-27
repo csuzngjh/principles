@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   trimToBudget,
-  roundKeyFromRunIdentity,
   RUNTIME_V2_PRINCIPLE_BUDGET,
 } from '../prompt-activation-reader-contract.js';
 import { escapeXml } from '../../../prompt-builder/index.js';
@@ -285,29 +284,5 @@ describe('PRI-904 trimToBudget — adversarial inputs', () => {
     expect(result.oversizedActivationIds.length).toBe(16);
     expect(result.injectedIds.size).toBe(0);
     expect(result.truncated).toBe(false);
-  });
-});
-
-describe('PRI-904 roundKeyFromRunIdentity — round key provenance', () => {
-  it('is a pure deterministic unsigned 32-bit hash of the host run identity', () => {
-    const a = roundKeyFromRunIdentity('08a5daa9-8ddb-4ba2-89e5-8edd58788c62');
-    expect(roundKeyFromRunIdentity('08a5daa9-8ddb-4ba2-89e5-8edd58788c62')).toBe(a);
-    expect(Number.isInteger(a)).toBe(true);
-    expect(a).toBeGreaterThanOrEqual(0);
-    expect(a).toBeLessThanOrEqual(0xffffffff);
-  });
-
-  it('varies across distinct host run identities (live ledger sample)', () => {
-    const keys = [
-      '08a5daa9-8ddb-4ba2-89e5-8edd58788c62',
-      '9ce756c5-6a3b-4e2e-9b2b-1eb59e3d3e53',
-      'bc330eeb-90aa-41c9-8a7a-befae3ab850e',
-    ].map(roundKeyFromRunIdentity);
-    expect(new Set(keys).size).toBe(3);
-  });
-
-  it('empty run identity hashes deterministically (degenerate but stable)', () => {
-    expect(roundKeyFromRunIdentity('')).toBe(roundKeyFromRunIdentity(''));
-    expect(roundKeyFromRunIdentity('')).toBe(0x811c9dc5);
   });
 });

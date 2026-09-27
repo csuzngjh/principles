@@ -153,6 +153,27 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
     expect(result.eligibleCount).toBe(0);
     expect(result.truncated).toBe(false);
   });
+
+  it('T-PROD-02: N consecutive production round ordinals cover all N ring positions (bounded, not probabilistic)', async () => {
+    const workspaceDir = tempWorkspace();
+    const N = 8;
+    await seedPromptActivations(
+      workspaceDir,
+      Array.from({ length: N }, (_, i) => ({ principleId: `COV_${i}`, text: 'c'.repeat(300) })),
+    );
+    // The round fact the shared route reads: consecutive session user-turn
+    // ordinals, exactly as the production writer advances them.
+    const starts: number[] = [];
+    const union = new Set<string>();
+    for (let round = 1; round <= N; round++) {
+      const result = await buildActivePrinciplePromptContext({ workspaceDir, roundKey: round });
+      expect(result.rotationStartIndex).toBe(round % N);
+      starts.push(result.rotationStartIndex!);
+      for (const id of result.principleIds) union.add(id);
+    }
+    expect(new Set(starts).size).toBe(N);
+    expect(union.size).toBe(N);
+  });
 });
 
 describe('PRI-904 route parity — plugin-local selector vs host-shared renderer (T10 / AT-09)', () => {

@@ -26,7 +26,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SqliteConnection, SqliteActivationStateStore, RUNTIME_V2_PRINCIPLE_BUDGET } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget } from '@principles/core/runtime-v2';
+import { escapeXml } from '@principles/core/prompt-builder';
 import { handleBeforePromptBuild } from '../../src/hooks/prompt.js';
 import { EventLogService } from '../../src/core/event-log.js';
 
@@ -151,9 +152,25 @@ describe('PRI-537: activations-injected event pairs source arrays with the injec
     expect(activationIds).toHaveLength(injectedCount);
     expect(artifactIds).toHaveLength(injectedCount);
 
-    // Injected set = the FIRST K seeds (trimToBudget walks in list order).
-    const expectedPrincipleIds = seededIds.slice(0, injectedCount);
-    expect(principleIds).toEqual(expectedPrincipleIds);
+    // Injected set = whatever the PRODUCTION selector chose for this build's
+    // round. Recomputed from the event's own round provenance (PRI-904) with
+    // the real selector, so this stays an exact expectation rather than a
+    // weakened "whatever came out" assertion.
+    const roundOrdinal = d['selectionRoundOrdinal'] as number | undefined;
+    const selectionPolicy = d['selectionPolicy'] as string | undefined;
+    expect(selectionPolicy).toBeDefined();
+    const selectedBySelector = trimToBudget(
+      seededIds.map((pid, i) => ({
+        principleId: pid,
+        text: `${PRINCIPLE_TEXT}_${i}`,
+        artifactId: seededArtifactById.get(pid)!,
+        activationId: seededActivationById.get(pid)!,
+      })),
+      RUNTIME_V2_PRINCIPLE_BUDGET,
+      escapeXml,
+      selectionPolicy === 'fair_rotation_v1' ? roundOrdinal : undefined,
+    );
+    expect(principleIds).toEqual([...selectedBySelector.injectedIds]);
     for (let i = 0; i < injectedCount; i++) {
       const pid = principleIds[i]!;
       expect(activationIds[i]).toBe(seededActivationById.get(pid));

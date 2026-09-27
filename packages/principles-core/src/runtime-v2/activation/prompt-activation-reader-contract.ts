@@ -150,22 +150,14 @@ export interface TrimToBudgetResult {
 const MAX_INJECTION_DIAGNOSTIC_IDS = 16;
 
 /**
- * PRI-904 fair-rotation round key: deterministic 32-bit FNV-1a hash of the
- * host run/turn identity — the same lineage fact PRI-750 already unifies as
- * the injection event's `runId` (OpenClaw hook `runId`; Codex
- * `HostEventContext.turnId`). Pure: same string → same integer. Successive
- * prompt builds normally run under new host run identities, so the rotation
- * start varies per run without any persisted cursor, clock, or randomness.
+ * PRI-904: the round key is a deterministic session-local user-turn ordinal
+ * (see `nextSessionTurnOrdinal` in the registered trajectory-store seam) —
+ * NOT a hash of an opaque run identity. Because consecutive recorded user
+ * turns yield consecutive ordinals, N consecutive rounds cover all N
+ * positions of an N-entry eligible ring: a bounded opportunity window, not a
+ * statistical one. Both injection routes read the same fact, so their
+ * fairness semantics are identical.
  */
-export function roundKeyFromRunIdentity(runIdentity: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < runIdentity.length; i++) {
-    hash ^= runIdentity.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
-}
-
 // PRI-904: the optional roundKey extends the frozen 3-param public surface
 // positionally rather than via an options bag — existing callers (plugin hook,
 // console projection, tests) pass (principles, budget, escapeFn?) and must not

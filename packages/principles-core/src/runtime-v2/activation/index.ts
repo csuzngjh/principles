@@ -106,7 +106,6 @@ export {
   filterPromptActivations,
   resolvePrincipleFromArtifact,
   trimToBudget,
-  roundKeyFromRunIdentity,
   renderPrinciplesToDirectives,
 } from './prompt-activation-reader-contract.js';
 

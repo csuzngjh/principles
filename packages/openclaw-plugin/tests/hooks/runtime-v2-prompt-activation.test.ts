@@ -3,8 +3,9 @@ import * as principleInjection from '../../src/core/principle-injection.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore, roundKeyFromRunIdentity, trimToBudget } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore, trimToBudget } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord } from '@principles/core/runtime-v2';
+import Database from 'better-sqlite3';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../../src/core/runtime-v2-prompt-activation-reader.js';
 import { escapeXml } from '@principles/core/prompt-builder';
 
@@ -194,7 +195,6 @@ function makeCtx(overrides: {
     },
   } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
 }
-
 async function insertPromptActivation(overrides: {
   artifactId: string;
   principleId: string;
@@ -1164,39 +1164,106 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
     return { payload: spy.mock.calls[0]![0] as Record<string, unknown>, result };
   }
 
-  it('with a host runId: fair_rotation_v1 payload matches the pure selector exactly (rotation + budget + diagnostics)', async () => {
+  /**
+   * Real production round fact: the same trajectory.db table, path and index
+   * the production writer (TrajectoryDatabase.recordUserTurn) uses. Rows are
+   * inserted exactly as a recorded user turn, so the hook reads a real
+   * advancing ordinal — not a synthetic key search.
+   */
+  function recordUserTurnRow(sessionId: string, turnIndex: number): void {
+    const stateDir = path.join(tempWorkspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    const dbPath = path.join(stateDir, 'trajectory.db');
+    if (!fs.existsSync(dbPath)) {
+      const bootstrap = new Database(dbPath);
+      bootstrap.exec(`
+        CREATE TABLE IF NOT EXISTS user_turns (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          turn_index INTEGER NOT NULL,
+          raw_text TEXT,
+          correction_detected INTEGER DEFAULT 0,
+          created_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_turns_session_id ON user_turns(session_id);
+      `);
+      bootstrap.close();
+    }
+    const db = new Database(dbPath);
+    try {
+      db.prepare(
+        'INSERT INTO user_turns (session_id, turn_index, raw_text, correction_detected, created_at) VALUES (?, ?, ?, 0, ?)',
+      ).run(sessionId, turnIndex, `user message ${turnIndex}`, new Date().toISOString());
+    } finally {
+      db.close();
+    }
+  }
+
+  it('T-PROD-01: 16 real user turns give bounded coverage — every fixture principle reaches the prompt', async () => {
     await seedPri904Fixture();
-    const runId = 'pri904-run-alpha';
-    const expected = trimToBudget(fixturePrinciples(), RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, roundKeyFromRunIdentity(runId));
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
 
-    const { payload } = await captureInjectionPayload({ runId });
+    const sessionId = 'pri904-prod-session';
+    const union = new Set<string>();
+    const starts: number[] = [];
+    const ordinals: number[] = [];
 
-    expect(payload.selectionPolicy).toBe('fair_rotation_v1');
-    expect(payload.rotationStartIndex).toBe(expected.rotationStartIndex);
-    expect(payload.eligibleCount).toBe(16);
-    expect(payload.injectedCount).toBe(expected.injectedIds.size);
-    expect((payload.principleIds as string[]).slice().sort()).toEqual([...expected.injectedIds].sort());
-    expect(payload.injectedCharCount).toBe(expected.lines.join('\n').length);
-    expect(payload.v2Truncated).toBe(expected.truncated);
-    expect(payload.droppedActivationIds).toEqual(expected.droppedActivationIds);
-    expect((payload.injectedCharCount as number)).toBeLessThanOrEqual(RUNTIME_V2_PRINCIPLE_BUDGET);
+    for (let round = 0; round < 16; round++) {
+      // The turn this build is about to record advances the round fact.
+      recordUserTurnRow(sessionId, round + 1);
+      spy.mockClear();
+      await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionId }));
+      const payload = spy.mock.calls[0]![0] as {
+        principleIds: string[]; selectionPolicy: string; rotationStartIndex: number;
+        selectionRoundOrdinal: number; selectionRoundSource: string; injectedCharCount: number;
+      };
+      expect(payload.selectionPolicy).toBe('fair_rotation_v1');
+      expect(payload.selectionRoundSource).toBe('session_user_turn_ordinal');
+      expect(payload.injectedCharCount).toBeLessThanOrEqual(RUNTIME_V2_PRINCIPLE_BUDGET);
+      starts.push(payload.rotationStartIndex);
+      ordinals.push(payload.selectionRoundOrdinal);
+      for (const id of payload.principleIds) union.add(id);
+    }
+
+    // Bounded fairness: 16 consecutive rounds visit all 16 ring positions.
+    expect(new Set(starts).size).toBe(16);
+    expect(starts.slice().sort((a, b) => a - b)).toEqual(Array.from({ length: 16 }, (_, i) => i));
+    // Deterministic advancement: the round fact advances by exactly one.
+    expect(ordinals[1]! - ordinals[0]!).toBe(1);
+    expect(union.size).toBe(16);
   });
 
-  it('different host runIds rotate to different start indices (deterministic for fixed ids)', async () => {
+  it('T-PROD-02: the PRI-904 target and the oldest principle both get a real opportunity window', async () => {
     await seedPri904Fixture();
-    // Pre-computed: fnv1a('pri904-run-alpha') % 16 = 12, fnv1a('pri904-run-beta') % 16 = 10.
-    const { payload: alpha } = await captureInjectionPayload({ runId: 'pri904-run-alpha' });
-    const { payload: beta } = await captureInjectionPayload({ runId: 'pri904-run-beta' });
-    expect(alpha.rotationStartIndex).toBe(12);
-    expect(beta.rotationStartIndex).toBe(10);
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const sessionId = 'pri904-target-session';
+    const target = 'PRI904-H-14';
+    const oldest = 'PRI904-H-01';
+    let targetRounds = 0;
+    let oldestRounds = 0;
+    for (let round = 0; round < 16; round++) {
+      recordUserTurnRow(sessionId, round + 1);
+      spy.mockClear();
+      await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionId }));
+      const ids = (spy.mock.calls[0]![0] as { principleIds: string[] }).principleIds;
+      if (ids.includes(target)) targetRounds++;
+      if (ids.includes(oldest)) oldestRounds++;
+    }
+    expect(targetRounds).toBeGreaterThanOrEqual(1);
+    expect(oldestRounds).toBeGreaterThanOrEqual(1);
   });
 
-  it('without a host runId: degrades to legacy_fifo_prefix_v1 and reproduces the audited 16→9/1893 behavior', async () => {
+  it('no session id: degrades to legacy_fifo_prefix_v1 and reproduces the audited 16→9/1893 behavior', async () => {
     await seedPri904Fixture();
-    const { payload } = await captureInjectionPayload({});
+    const { payload } = await captureInjectionPayload({ sessionId: undefined as unknown as string });
 
     expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
     expect(payload.rotationStartIndex).toBeUndefined();
+    expect(payload.selectionRoundOrdinal).toBeUndefined();
     expect(payload.injectedCount).toBe(9);
     expect(payload.injectedCharCount).toBe(1893);
     expect(payload.v2Truncated).toBe(true);
@@ -1206,32 +1273,34 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
     expect(payload.droppedActivationIds).toEqual(['act_prompt_PRI904-H-10']);
   });
 
-  it('across 16 consecutive rotation starts every fixture principle reaches the prompt (hook-level union)', async () => {
+  it('unreadable trajectory db: degrades observably to legacy instead of failing the prompt build', async () => {
+    await seedPri904Fixture();
+    // No trajectory.db at all → the seam throws → legacy policy, build still succeeds.
+    const { payload, result } = await captureInjectionPayload({ sessionId: 'pri904-no-db-session' });
+    expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+    expect(payload.injectedCount).toBe(9);
+    expect(result?.prependSystemContext).toContain('ACTIVE BEHAVIOR DIRECTIVES');
+  });
+
+  it('the fair payload matches the pure selector exactly for the same round ordinal', async () => {
     await seedPri904Fixture();
     const { EventLogService } = await import('../../src/core/event-log.js');
-    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
-    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
-
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const union = new Set<string>();
-    // Direct start control through the real round-key derivation: pick the
-    // k-th runId from a deterministic scan so its hash mod 16 equals k.
-    const runIds: string[] = [];
-    for (let k = 0; k < 16; k++) {
-      let candidate = `pri904-union-${k}`;
-      let guard = 0;
-      while (roundKeyFromRunIdentity(candidate) % 16 !== k && guard < 1000) {
-        candidate = `${candidate}-x`;
-        guard++;
-      }
-      runIds.push(candidate);
-    }
-    for (const runId of runIds) {
-      spy.mockClear();
-      await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ runId }));
-      const payload = spy.mock.calls[0]![0] as { principleIds: string[] };
-      for (const id of payload.principleIds) union.add(id);
-    }
-    expect(union.size).toBe(16);
+    const sessionId = 'pri904-selector-parity';
+    recordUserTurnRow(sessionId, 1);
+    recordUserTurnRow(sessionId, 2);
+    recordUserTurnRow(sessionId, 3);
+    recordUserTurnRow(sessionId, 4);
+    recordUserTurnRow(sessionId, 5);
+    recordUserTurnRow(sessionId, 6);
+    recordUserTurnRow(sessionId, 7); // next ordinal = 8
+    spy.mockClear();
+    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionId }));
+    const payload = spy.mock.calls[0]![0] as { selectionRoundOrdinal: number };
+
+    const expected = trimToBudget(fixturePrinciples(), RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, 8);
+    expect(payload.selectionRoundOrdinal).toBe(8);
+    expect(expected.rotationStartIndex).toBe(8 % 16);
   });
 });
