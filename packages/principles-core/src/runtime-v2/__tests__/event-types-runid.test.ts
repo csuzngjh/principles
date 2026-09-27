@@ -30,4 +30,72 @@ describe('PRI-750 receipt chain event fields (runId / toolCallId)', () => {
     expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, { ...base, runId: 'turn-1' })).toBe(true);
     expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, base)).toBe(true);
   });
+
+  it('PRI-904: accepts the fair-rotation observability fields and stays compatible without them', () => {
+    const base = {
+      sessionId: 'sess-1',
+      workspaceDir: '/ws',
+      principleIds: ['p1'],
+      activationIds: ['act_1'],
+      artifactIds: ['art_1'],
+      injectedCount: 1,
+      skippedWarnings: [],
+      injectedCharCount: 208,
+      budget: 2000,
+    };
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, base)).toBe(true);
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, {
+      ...base,
+      runId: 'run-42',
+      selectionPolicy: 'fair_rotation_v1',
+      eligibleCount: 16,
+      rotationStartIndex: 7,
+      droppedActivationIds: ['act_10', 'act_11'],
+      oversizedActivationIds: [],
+    })).toBe(true);
+    // Unknown policy literals are rejected (wire shape stays closed).
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, {
+      ...base,
+      selectionPolicy: 'random_shuffle_v9',
+    })).toBe(false);
+  });
+
+  it('PRI-904: diagnostic id lists are schema-bounded at 16 entries', () => {
+    const base = {
+      sessionId: 'sess-1',
+      workspaceDir: '/ws',
+      principleIds: [],
+      activationIds: [],
+      artifactIds: [],
+      injectedCount: 0,
+      skippedWarnings: [],
+      injectedCharCount: 0,
+      budget: 2000,
+    };
+    const ids = (n: number): string[] => Array.from({ length: n }, (_, i) => `act_${i}`);
+    // 16 (the producer cap) is valid; 17 violates the wire contract.
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, {
+      ...base, droppedActivationIds: ids(16), oversizedActivationIds: ids(16),
+    })).toBe(true);
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, {
+      ...base, droppedActivationIds: ids(17),
+    })).toBe(false);
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, {
+      ...base, oversizedActivationIds: ids(17),
+    })).toBe(false);
+  });
+
+  it('PRI-904: round provenance is carried by the schema (ordinal + source)', () => {
+    const base = {
+      sessionId: 'sess-1', workspaceDir: '/ws', principleIds: [], activationIds: [], artifactIds: [],
+      injectedCount: 0, skippedWarnings: [], injectedCharCount: 0, budget: 2000,
+    };
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, {
+      ...base, selectionPolicy: 'fair_rotation_v1', rotationStartIndex: 3,
+      selectionRoundOrdinal: 19, selectionRoundSource: 'session_user_turn_ordinal',
+    })).toBe(true);
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, {
+      ...base, selectionRoundSource: 'somewhere_else',
+    })).toBe(false);
+  });
 });

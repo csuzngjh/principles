@@ -3,6 +3,7 @@
  */
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
+import type { PromptSelectionPolicy } from '../activation/prompt-activation-reader-contract.js';
 
 // ============== Event Types ==============
 
@@ -648,6 +649,26 @@ export interface RuntimeV2PromptActivationsInjectedEventData {
   crossBlockDuplicateIds?: string[];
   /** PRI-750: host run/turn id — DIRECT turn binding (OpenClaw `runId`; Codex `turn_id`). Optional: absent when the host supplies none. */
   runId?: string;
+  /** PRI-904: budget-packing policy that produced this injection. */
+  selectionPolicy?: PromptSelectionPolicy;
+  /** PRI-904: candidates that reached the budget selector (post eligibility + dedup). */
+  eligibleCount?: number;
+  /** PRI-904: circular scan start index. Present only under fair_rotation_v1. */
+  rotationStartIndex?: number;
+  /**
+   * PRI-904: the deterministic round fact that produced this selection (the
+   * session-local user-turn ordinal). Emitted together with
+   * `selectionRoundSource` so every fair_rotation_v1 selection is traceable
+   * to the round it came from — a rotating selection without provenance is
+   * not a valid event.
+   */
+  selectionRoundOrdinal?: number;
+  /** PRI-904: provenance of `selectionRoundOrdinal`. */
+  selectionRoundSource?: 'session_user_turn_ordinal';
+  /** PRI-904 (bounded, max 16): activation ids dropped because the remaining budget was insufficient. */
+  droppedActivationIds?: string[];
+  /** PRI-904 (bounded, max 16): activation ids whose single entry exceeds the whole principle budget (never fit alone). */
+  oversizedActivationIds?: string[];
 }
 
 export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
@@ -668,6 +689,15 @@ export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
   v2Truncated: Type.Optional(Type.Boolean()),
   crossBlockDuplicateIds: Type.Optional(Type.Array(Type.String())),
   runId: Type.Optional(Type.String()),
+  selectionPolicy: Type.Optional(Type.Union([Type.Literal('legacy_fifo_prefix_v1'), Type.Literal('fair_rotation_v1')])),
+  eligibleCount: Type.Optional(Type.Number()),
+  rotationStartIndex: Type.Optional(Type.Number()),
+  selectionRoundOrdinal: Type.Optional(Type.Number()),
+  selectionRoundSource: Type.Optional(Type.Literal('session_user_turn_ordinal')),
+  // Schema-level bound (not just a producer convention): the diagnostic lists
+  // are capped at 16 ids by the selector, and the wire contract says so.
+  droppedActivationIds: Type.Optional(Type.Array(Type.String(), { maxItems: 16 })),
+  oversizedActivationIds: Type.Optional(Type.Array(Type.String(), { maxItems: 16 })),
 });
 export type RuntimeV2PromptActivationsInjectedEventDataStatic = Static<typeof RuntimeV2PromptActivationsInjectedEventDataSchema>;
 

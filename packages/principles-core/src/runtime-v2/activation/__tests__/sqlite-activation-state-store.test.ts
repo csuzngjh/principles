@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { SqliteActivationStateStore } from '../sqlite-activation-state-store.js';
-import type { SqliteConnection } from '../../store/sqlite-connection.js';
+import { SqliteConnection } from '../../store/sqlite-connection.js';
+import { SqlitePIArtifactStore } from '../../store/artifact/sqlite-pi-artifact-store.js';
 import type { ActivationStatusRecord } from '../activation-types.js';
 
 const mockDb = {
@@ -117,6 +121,20 @@ describe('SqliteActivationStateStore', () => {
       const sql = sqlCall ? String(sqlCall) : '';
       expect(sql).toContain("channel = 'prompt'");
       expect(sql).not.toContain('deactivated_at IS NULL');
+    });
+
+    it('PRI-904: prompt queries tie-break equal activated_at by activation_id ASC (stable ring base order)', async () => {
+      const mockAll = vi.fn().mockReturnValue([]);
+      mockDb.prepare.mockReturnValue({ all: mockAll });
+
+      const store = new SqliteActivationStateStore(mockConnection);
+      await store.listPromptActivations();
+      await store.listPromptActivations(true);
+
+      const sqls = mockDb.prepare.mock.calls.map((c) => String(c));
+      for (const sql of sqls) {
+        expect(sql).toContain('ORDER BY activated_at ASC, activation_id ASC');
+      }
     });
   });
 
@@ -323,5 +341,51 @@ describe('SqliteActivationStateStore', () => {
       expect(mockDb.exec).toHaveBeenCalledWith('ROLLBACK');
       expect(mockDb.exec).not.toHaveBeenCalledWith('COMMIT');
     });
+  });
+});
+
+describe('SqliteActivationStateStore listPromptActivations — PRI-904 deterministic tie-break (real SQLite)', () => {
+  it('identical activated_at rows return in activation_id ASC order regardless of insertion order (T9)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri904-tie-'));
+    try {
+      fs.mkdirSync(path.join(tmpDir, '.pd'), { recursive: true });
+      const connection = new SqliteConnection({ workspaceDir: tmpDir });
+      const store = new SqliteActivationStateStore(connection);
+      const artifactStore = new SqlitePIArtifactStore(connection);
+      const tie = '2026-09-22T16:01:19.111Z';
+      const ids = ['act_zz', 'act_mm', 'act_aa', 'act_bb'];
+      for (const id of ids) {
+        await artifactStore.upsertArtifact({
+          artifactId: `art-${id}`, artifactKind: 'principle', sourceTaskId: `task-${id}`,
+          lineageArtifactIds: [], validationStatus: 'validated',
+          contentJson: JSON.stringify({ principleId: id, text: `text ${id}` }),
+          createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
+        });
+      }
+      const record = (activationId: string, activatedAt: string): ActivationStatusRecord => ({
+        activationId,
+        idempotencyKey: `art-${activationId}::prompt`,
+        artifactId: `art-${activationId}`,
+        channel: 'prompt',
+        action: 'prompt_activate',
+        targetRef: `ledger://P_${activationId}`,
+        activatedAt,
+        promotedAt: null,
+        deactivatedAt: null,
+      });
+      // Insert out of id order; the query must still return ASC.
+      await store.recordActivation(record('act_zz', tie));
+      await store.recordActivation(record('act_mm', tie));
+      await store.recordActivation(record('act_aa', tie));
+      await store.recordActivation(record('act_bb', '2026-09-18T00:00:00.000Z'));
+
+      const listed = await store.listPromptActivations();
+      expect(listed.map((r) => r.activationId)).toEqual(['act_bb', 'act_aa', 'act_mm', 'act_zz']);
+      connection.close();
+    } finally {
+      // Best-effort teardown per the test temp lifecycle SPEC — the managed
+      // .pd-test-temp root reclaims leftovers at the next run on Windows.
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* EPERM while SQLite handle drains */ }
+    }
   });
 });

@@ -107,9 +107,12 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
 
   async listPromptActivations(includeDeactivated = false): Promise<ActivationStatusRecord[]> {
     const db = this.connection.getDb();
+    // PRI-904 SPEC §5.1: activation_id tie-break keeps the base order a total,
+    // deterministic ordering when activated_at collides — the fair rotation
+    // ring must not depend on SQLite's unspecified row order for equal keys.
     const sql = includeDeactivated
-      ? `SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at FROM activations WHERE channel = 'prompt' ORDER BY activated_at ASC`
-      : `SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at FROM activations WHERE channel = 'prompt' AND deactivated_at IS NULL ORDER BY activated_at ASC`;
+      ? `SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at FROM activations WHERE channel = 'prompt' ORDER BY activated_at ASC, activation_id ASC`
+      : `SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at FROM activations WHERE channel = 'prompt' AND deactivated_at IS NULL ORDER BY activated_at ASC, activation_id ASC`;
     const rows = db.prepare(sql).all();
 
     if (!Array.isArray(rows)) return [];

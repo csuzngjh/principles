@@ -112,4 +112,6 @@ export {
 export type {
   ActivatedPrinciple,
   PromptActivationReaderResult,
+  PromptSelectionPolicy,
+  TrimToBudgetResult,
 } from './prompt-activation-reader-contract.js';

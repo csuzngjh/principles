@@ -127,6 +127,45 @@ export function rethrowAsQueryFailed(dbPath: string, err: unknown): never {
 // ---------------------------------------------------------------------------
 
 /**
+ * PRI-904: the next session-local user-turn ordinal — the deterministic
+ * round fact the prompt principle fair rotation advances on.
+ *
+ * Reads the ALREADY-PERSISTED `user_turns.turn_index` counter for one
+ * session (written by openclaw-plugin `TrajectoryDatabase.recordUserTurn`).
+ * It is the same fact the correction pipeline anchors on
+ * (`nextUserTurnIndex` in the prompt hook), so no new column, table, file or
+ * cursor is introduced: this is a read of production state through the
+ * registered trajectory-store seam.
+ *
+ * Determinism contract (SPEC INV-F02): for one session the value is
+ * `max(turn_index) + 1`, so consecutive recorded user turns yield consecutive
+ * ordinals. Modulo the eligible-ring size N, N consecutive turns therefore
+ * cover every ring position exactly once — a bounded, provable opportunity
+ * window, unlike hashing an opaque run identity.
+ *
+ * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/trajectory.db)
+ * @param sessionId - Session whose next user-turn ordinal is requested
+ * @returns The next ordinal (>= 1); 1 when the session has no recorded turn yet
+ * @throws TrajectoryDbUnavailableError if the database does not exist or
+ *         cannot be opened — callers must degrade observably, never assume 0
+ */
+export function nextSessionTurnOrdinal(workspaceDir: string, sessionId: string): number {
+  const db = openTrajectoryDbReadonly(workspaceDir);
+  try {
+    // idx_user_turns_session_id covers this filter; the aggregate is O(matches).
+    const row = db
+      .prepare('SELECT MAX(turn_index) AS max_turn FROM user_turns WHERE session_id = ?')
+      .get(sessionId) as { max_turn: number | null } | undefined;
+    const max = row?.max_turn;
+    return typeof max === 'number' && Number.isFinite(max) ? max + 1 : 1;
+  } catch (err: unknown) {
+    rethrowAsQueryFailed(resolveTrajectoryDbPath(workspaceDir), err);
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * List correction samples by review status.
  *
  * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/trajectory.db)

@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1779,
+ "count": 1781,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -958,6 +958,7 @@
   "PromptActivationReaderResult",
   "PromptBuildResult",
   "PromptInput",
+  "PromptSelectionPolicy",
   "PromptWriter",
   "ProposalCreatedResult",
   "ProposeNextTaskResult",
@@ -1337,6 +1338,7 @@
   "TriggerControllerInput",
   "TriggerDecision",
   "TriggerOutcome",
+  "TrimToBudgetResult",
   "UNAVAILABLE_RULE_CONTEXT",
   "UiConfig",
   "UnifiedKeyword",

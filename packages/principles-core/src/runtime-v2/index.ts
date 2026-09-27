@@ -1477,6 +1477,8 @@ export {
 export type {
   ActivatedPrinciple,
   PromptActivationReaderResult,
+  PromptSelectionPolicy,
+  TrimToBudgetResult,
   ApprovalCompletionInput,
   ApprovalCompletionResult,
   ArtifactDigestCheck,

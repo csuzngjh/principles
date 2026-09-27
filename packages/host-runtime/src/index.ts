@@ -249,6 +249,16 @@ export function createProductionHostRuntime(
     }),
     beforeToolCall: options.beforeToolCall ?? productionGate,
     async beforePromptBuild(event) {
+      // PRI-904 Phase-1 (Option 3): this production path is ALSO the Codex
+      // route, and Codex never writes trajectory.db::user_turns — its
+      // ingestion writes governance_* rows instead. Reading a session turn
+      // ordinal here would therefore be a false round authority: on Codex it
+      // either throws (→ legacy) or returns a constant 1 (→ fixed start, a
+      // different positional starvation while the event still claimed a fair
+      // rotation). So the shared production path passes NO round key and
+      // reports `legacy_fifo_prefix_v1` honestly. The selector's fair-rotation
+      // capability is retained and stays reachable for callers that DO hold a
+      // legitimate advancing round authority.
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
         excludePrincipleIds: options.promptExcludePrincipleIds?.(event),
@@ -275,6 +285,14 @@ export function createProductionHostRuntime(
           budget: RUNTIME_V2_PRINCIPLE_BUDGET,
           ...(prompt.truncated !== undefined ? { v2Truncated: prompt.truncated } : {}),
           ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
+          // PRI-904: selection diagnostics (bounded, optional). On this route
+          // the policy is legacy_fifo_prefix_v1 and NO rotation provenance is
+          // emitted — a fair claim would be untrue here (see above).
+          ...(prompt.selectionPolicy !== undefined ? { selectionPolicy: prompt.selectionPolicy } : {}),
+          ...(prompt.eligibleCount !== undefined ? { eligibleCount: prompt.eligibleCount } : {}),
+          ...(prompt.rotationStartIndex !== undefined ? { rotationStartIndex: prompt.rotationStartIndex } : {}),
+          ...(prompt.droppedActivationIds !== undefined && prompt.droppedActivationIds.length > 0 ? { droppedActivationIds: prompt.droppedActivationIds } : {}),
+          ...(prompt.oversizedActivationIds !== undefined && prompt.oversizedActivationIds.length > 0 ? { oversizedActivationIds: prompt.oversizedActivationIds } : {}),
         });
       } catch (err) {
         emissionWarnings.push(`receipt_event_write_failed:${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`);

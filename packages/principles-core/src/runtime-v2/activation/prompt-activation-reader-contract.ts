@@ -112,11 +112,63 @@ export function resolvePrincipleFromArtifact(
   };
 }
 
+/**
+ * PRI-904 (SPEC v0.1): which budget-packing policy produced a selection.
+ *
+ * - `legacy_fifo_prefix_v1` — the pre-PRI-904 policy and the rollback target:
+ *   greedy prefix packing in base order, first non-fit breaks. Also the
+ *   characterization baseline reproducing the audited 16→9/1893 behavior.
+ * - `fair_rotation_v1` — deterministic rotating start + circular
+ *   continue-on-non-fit packing. Eliminates permanent positional starvation
+ *   under the fixed budget without randomness or persisted cursors.
+ */
+export type PromptSelectionPolicy = 'legacy_fifo_prefix_v1' | 'fair_rotation_v1';
+
+export interface TrimToBudgetResult {
+  lines: string[];
+  injectedIds: Set<string>;
+  truncated: boolean;
+  /** PRI-904: policy that produced this selection. */
+  selectionPolicy: PromptSelectionPolicy;
+  /** PRI-904: candidates that reached the budget selector (post eligibility + dedup). */
+  eligibleCount: number;
+  /** PRI-904: circular scan start; present only under fair_rotation_v1. */
+  rotationStartIndex?: number;
+  /**
+   * PRI-904 (bounded, max 16): activation ids dropped because the remaining
+   * budget was insufficient. Ordered by scan position.
+   */
+  droppedActivationIds: string[];
+  /**
+   * PRI-904 (bounded, max 16): activation ids whose single entry exceeds the
+   * whole principle budget — they can never fit alone and are not starvation.
+   */
+  oversizedActivationIds: string[];
+}
+
+/** PRI-904 SPEC §10: hard cap for diagnostic id lists in telemetry. */
+const MAX_INJECTION_DIAGNOSTIC_IDS = 16;
+
+/**
+ * PRI-904: the round key is a deterministic session-local user-turn ordinal
+ * (see `nextSessionTurnOrdinal` in the registered trajectory-store seam) —
+ * NOT a hash of an opaque run identity. Because consecutive recorded user
+ * turns yield consecutive ordinals, N consecutive rounds cover all N
+ * positions of an N-entry eligible ring: a bounded opportunity window, not a
+ * statistical one. Both injection routes read the same fact, so their
+ * fairness semantics are identical.
+ */
+// PRI-904: the optional roundKey extends the frozen 3-param public surface
+// positionally rather than via an options bag — existing callers (plugin hook,
+// console projection, tests) pass (principles, budget, escapeFn?) and must not
+// be rewritten for a scheduling-policy extension.
+// eslint-disable-next-line @typescript-eslint/max-params
 export function trimToBudget(
   principles: ActivatedPrinciple[],
   budget: number,
   escapeFn: (s: string) => string = (s) => s,
-): { lines: string[]; injectedIds: Set<string>; truncated: boolean } {
+  roundKey?: number,
+): TrimToBudgetResult {
   const lines: string[] = [];
   const injectedIds = new Set<string>();
   let remaining = budget;
@@ -126,18 +178,63 @@ export function trimToBudget(
   lines.push(header);
   remaining -= header.length;
 
-  for (const p of principles) {
-    const entry = `- [${escapeFn(p.principleId)}] ${escapeFn(p.text)}`;
-    if (remaining < entry.length + 1) {
-      truncated = true;
-      break;
+  const eligibleCount = principles.length;
+  // The most budget any single entry can ever claim: an otherwise empty payload.
+  const emptyPayloadRemaining = remaining;
+  const droppedActivationIds: string[] = [];
+  const oversizedActivationIds: string[] = [];
+
+  if (roundKey === undefined || principles.length === 0) {
+    // legacy_fifo_prefix_v1 — byte-identical to the pre-PRI-904 loop: greedy
+    // prefix packing, first non-fit breaks. Rollback = omit the round key.
+    for (const p of principles) {
+      const entry = `- [${escapeFn(p.principleId)}] ${escapeFn(p.text)}`;
+      if (remaining < entry.length + 1) {
+        truncated = true;
+        // The loop breaks here, so both lists hold at most this one entry —
+        // no cap guard needed on the legacy path.
+        if (entry.length + 1 > emptyPayloadRemaining) {
+          oversizedActivationIds.push(p.activationId);
+        } else {
+          droppedActivationIds.push(p.activationId);
+        }
+        break;
+      }
+      lines.push(entry);
+      remaining -= entry.length + 1;
+      injectedIds.add(p.principleId);
     }
-    lines.push(entry);
-    remaining -= entry.length + 1;
-    injectedIds.add(p.principleId);
+    return { lines, injectedIds, truncated, selectionPolicy: 'legacy_fifo_prefix_v1', eligibleCount, droppedActivationIds, oversizedActivationIds };
   }
 
-  return { lines, injectedIds, truncated };
+  // fair_rotation_v1 — deterministic rotating start over the base (ASC) order,
+  // circular scan, continue-on-non-fit. Entry costs keep the exact legacy
+  // arithmetic (serialized entry + 1 newline), so budget accounting is
+  // unchanged: every round stays within `budget`.
+  const n = principles.length;
+  const rotationStartIndex = ((roundKey % n) + n) % n;
+  const ring = principles.slice(rotationStartIndex).concat(principles.slice(0, rotationStartIndex));
+  for (const p of ring) {
+    const entry = `- [${escapeFn(p.principleId)}] ${escapeFn(p.text)}`;
+    const cost = entry.length + 1;
+    if (cost > emptyPayloadRemaining) {
+      // Cannot fit even in an empty payload — oversize, not starvation.
+      if (oversizedActivationIds.length < MAX_INJECTION_DIAGNOSTIC_IDS) oversizedActivationIds.push(p.activationId);
+      continue;
+    }
+    if (cost <= remaining) {
+      lines.push(entry);
+      remaining -= cost;
+      injectedIds.add(p.principleId);
+    } else {
+      // Non-fit no longer terminates the scan: a later, shorter entry may
+      // still fit (PRI-904 SPEC §6.5).
+      truncated = true;
+      if (droppedActivationIds.length < MAX_INJECTION_DIAGNOSTIC_IDS) droppedActivationIds.push(p.activationId);
+    }
+  }
+
+  return { lines, injectedIds, truncated, selectionPolicy: 'fair_rotation_v1', eligibleCount, rotationStartIndex, droppedActivationIds, oversizedActivationIds };
 }
 
 export interface RenderDirectivesOptions {

@@ -11,7 +11,8 @@ import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingM
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
 import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
-import type { ResolvedOutputLanguage } from '@principles/core/runtime-v2';
+import type { ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime-v2';
+import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
@@ -589,6 +590,16 @@ export async function handleBeforePromptBuild(
   let runtimeV2PrinciplesContent = '';
   const runtimeV2PrincipleIds = new Set<string>();
   let v2Truncated: boolean | undefined;
+  // PRI-904: fair-rotation selection diagnostics, hoisted for the event below.
+  let v2SelectionPolicy: PromptSelectionPolicy | undefined;
+  let v2EligibleCount: number | undefined;
+  let v2RotationStartIndex: number | undefined;
+  // Round provenance: a fair_rotation_v1 selection is only emitted together
+  // with the session-turn ordinal that produced it, so every rotating
+  // selection is traceable to the round fact that caused it.
+  let v2RoundOrdinal: number | undefined;
+  let v2DroppedActivationIds: string[] | undefined;
+  let v2OversizedActivationIds: string[] | undefined;
   // Hoisted so the owner_approved_behavior_directives section can access them
   let dedupedV2: Array<{ principleId: string; text: string; artifactId: string; activationId: string }> = [];
   try {
@@ -632,11 +643,47 @@ export async function handleBeforePromptBuild(
       runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
       for (const id of sharedActivePrinciplePrompt.principleIds) runtimeV2PrincipleIds.add(id);
       v2Truncated = sharedActivePrinciplePrompt.truncated;
+      v2SelectionPolicy = sharedActivePrinciplePrompt.selectionPolicy;
+      v2EligibleCount = sharedActivePrinciplePrompt.eligibleCount;
+      v2RotationStartIndex = sharedActivePrinciplePrompt.rotationStartIndex;
+      v2DroppedActivationIds = sharedActivePrinciplePrompt.droppedActivationIds;
+      v2OversizedActivationIds = sharedActivePrinciplePrompt.oversizedActivationIds;
     } else if (dedupedV2.length > 0) {
-      const { lines, injectedIds, truncated } = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+      // PRI-904 Phase-1 (Option 3) fair rotation round = the session-local
+      // user-turn ordinal already persisted in trajectory.db (same fact the
+      // correction pipeline anchors on). Timing, verified on this route:
+      // SignalCollectorHost.detectSync writes user_turns synchronously at the
+      // top of this hook, so at selection time THIS turn is already recorded
+      // and the helper returns MAX(turn_index)+1 — the NEXT turn's ordinal,
+      // not the current one. That off-by-one is harmless for fairness (only
+      // the strict +1 progression matters); it is documented rather than
+      // papered over. Consecutive user turns therefore advance the rotation
+      // start by exactly one, and N such turns cover all N eligible ring
+      // positions. A missing sessionId or unreadable trajectory db degrades to
+      // the legacy FIFO policy, observable via selectionPolicy.
+      //
+      // Scope: this guarantee is per CONTINUOUSLY ADVANCING SESSION on the
+      // currently live plugin-local route. It is NOT cross-session, and it is
+      // NOT claimed for the host-shared/Codex route (which passes no round key).
+      let v2RoundKey: number | undefined;
+      if (sessionId) {
+        try {
+          v2RoundKey = nextSessionTurnOrdinal(wctx.workspaceDir, sessionId);
+        } catch (ordinalErr) {
+          logger?.warn?.(`[PD:RuntimeV2] Fair-rotation round ordinal unavailable (${String(ordinalErr)}); falling back to legacy FIFO selection for this build`);
+        }
+      }
+      const selection = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, v2RoundKey);
+      const { lines, injectedIds, truncated } = selection;
       v2Truncated = truncated;
+      v2SelectionPolicy = selection.selectionPolicy;
+      v2EligibleCount = selection.eligibleCount;
+      v2RotationStartIndex = selection.rotationStartIndex;
+      v2RoundOrdinal = v2RoundKey;
+      v2DroppedActivationIds = selection.droppedActivationIds;
+      v2OversizedActivationIds = selection.oversizedActivationIds;
       if (truncated) {
-        logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${injectedIds.size} principles`);
+        logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — ${injectedIds.size} principles injected under ${selection.selectionPolicy} (round=${v2RoundKey ?? 'n/a'}, start=${selection.rotationStartIndex ?? 0}, dropped=${selection.droppedActivationIds.length}, oversized=${selection.oversizedActivationIds.length})`);
       }
       for (const id of injectedIds) {
         runtimeV2PrincipleIds.add(id);
@@ -674,6 +721,14 @@ export async function handleBeforePromptBuild(
         legacyTruncated,
         ...(v2Truncated !== undefined ? { v2Truncated } : {}),
         crossBlockDuplicateIds,
+        // PRI-904: fair-rotation observability (bounded, optional — old
+        // readers ignore; SPEC §10/§INV-O01 make truncation explainable).
+        ...(v2SelectionPolicy !== undefined ? { selectionPolicy: v2SelectionPolicy } : {}),
+        ...(v2EligibleCount !== undefined ? { eligibleCount: v2EligibleCount } : {}),
+        ...(v2RotationStartIndex !== undefined ? { rotationStartIndex: v2RotationStartIndex } : {}),
+        ...(v2RoundOrdinal !== undefined ? { selectionRoundOrdinal: v2RoundOrdinal, selectionRoundSource: 'session_user_turn_ordinal' as const } : {}),
+        ...(v2DroppedActivationIds !== undefined && v2DroppedActivationIds.length > 0 ? { droppedActivationIds: v2DroppedActivationIds } : {}),
+        ...(v2OversizedActivationIds !== undefined && v2OversizedActivationIds.length > 0 ? { oversizedActivationIds: v2OversizedActivationIds } : {}),
         ...(runtimeV2PrincipleIds.size === 0
           ? {
               skipReason: sharedActivePrinciplePrompt
