@@ -10,8 +10,8 @@ import type { ContextInjectionConfig } from '../types.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
-import type { ResolvedOutputLanguage } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, roundKeyFromRunIdentity, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
+import type { ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
@@ -589,6 +589,12 @@ export async function handleBeforePromptBuild(
   let runtimeV2PrinciplesContent = '';
   const runtimeV2PrincipleIds = new Set<string>();
   let v2Truncated: boolean | undefined;
+  // PRI-904: fair-rotation selection diagnostics, hoisted for the event below.
+  let v2SelectionPolicy: PromptSelectionPolicy | undefined;
+  let v2EligibleCount: number | undefined;
+  let v2RotationStartIndex: number | undefined;
+  let v2DroppedActivationIds: string[] | undefined;
+  let v2OversizedActivationIds: string[] | undefined;
   // Hoisted so the owner_approved_behavior_directives section can access them
   let dedupedV2: Array<{ principleId: string; text: string; artifactId: string; activationId: string }> = [];
   try {
@@ -632,11 +638,26 @@ export async function handleBeforePromptBuild(
       runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
       for (const id of sharedActivePrinciplePrompt.principleIds) runtimeV2PrincipleIds.add(id);
       v2Truncated = sharedActivePrinciplePrompt.truncated;
+      v2SelectionPolicy = sharedActivePrinciplePrompt.selectionPolicy;
+      v2EligibleCount = sharedActivePrinciplePrompt.eligibleCount;
+      v2RotationStartIndex = sharedActivePrinciplePrompt.rotationStartIndex;
+      v2DroppedActivationIds = sharedActivePrinciplePrompt.droppedActivationIds;
+      v2OversizedActivationIds = sharedActivePrinciplePrompt.oversizedActivationIds;
     } else if (dedupedV2.length > 0) {
-      const { lines, injectedIds, truncated } = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+      // PRI-904: fair rotation round key from the host run identity — the same
+      // lineage fact PRI-750 records as the event runId. Absent runId degrades
+      // to the legacy FIFO prefix policy (observable via selectionPolicy).
+      const v2RoundKey = runId !== undefined ? roundKeyFromRunIdentity(runId) : undefined;
+      const selection = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, v2RoundKey);
+      const { lines, injectedIds, truncated } = selection;
       v2Truncated = truncated;
+      v2SelectionPolicy = selection.selectionPolicy;
+      v2EligibleCount = selection.eligibleCount;
+      v2RotationStartIndex = selection.rotationStartIndex;
+      v2DroppedActivationIds = selection.droppedActivationIds;
+      v2OversizedActivationIds = selection.oversizedActivationIds;
       if (truncated) {
-        logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${injectedIds.size} principles`);
+        logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — ${injectedIds.size} principles injected under ${selection.selectionPolicy} (start=${selection.rotationStartIndex ?? 0}, dropped=${selection.droppedActivationIds.length}, oversized=${selection.oversizedActivationIds.length})`);
       }
       for (const id of injectedIds) {
         runtimeV2PrincipleIds.add(id);
@@ -674,6 +695,13 @@ export async function handleBeforePromptBuild(
         legacyTruncated,
         ...(v2Truncated !== undefined ? { v2Truncated } : {}),
         crossBlockDuplicateIds,
+        // PRI-904: fair-rotation observability (bounded, optional — old
+        // readers ignore; SPEC §10/§INV-O01 make truncation explainable).
+        ...(v2SelectionPolicy !== undefined ? { selectionPolicy: v2SelectionPolicy } : {}),
+        ...(v2EligibleCount !== undefined ? { eligibleCount: v2EligibleCount } : {}),
+        ...(v2RotationStartIndex !== undefined ? { rotationStartIndex: v2RotationStartIndex } : {}),
+        ...(v2DroppedActivationIds !== undefined && v2DroppedActivationIds.length > 0 ? { droppedActivationIds: v2DroppedActivationIds } : {}),
+        ...(v2OversizedActivationIds !== undefined && v2OversizedActivationIds.length > 0 ? { oversizedActivationIds: v2OversizedActivationIds } : {}),
         ...(runtimeV2PrincipleIds.size === 0
           ? {
               skipReason: sharedActivePrinciplePrompt

@@ -106,10 +106,13 @@ export {
   filterPromptActivations,
   resolvePrincipleFromArtifact,
   trimToBudget,
+  roundKeyFromRunIdentity,
   renderPrinciplesToDirectives,
 } from './prompt-activation-reader-contract.js';
 
 export type {
   ActivatedPrinciple,
   PromptActivationReaderResult,
+  PromptSelectionPolicy,
+  TrimToBudgetResult,
 } from './prompt-activation-reader-contract.js';

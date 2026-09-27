@@ -30,4 +30,33 @@ describe('PRI-750 receipt chain event fields (runId / toolCallId)', () => {
     expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, { ...base, runId: 'turn-1' })).toBe(true);
     expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, base)).toBe(true);
   });
+
+  it('PRI-904: accepts the fair-rotation observability fields and stays compatible without them', () => {
+    const base = {
+      sessionId: 'sess-1',
+      workspaceDir: '/ws',
+      principleIds: ['p1'],
+      activationIds: ['act_1'],
+      artifactIds: ['art_1'],
+      injectedCount: 1,
+      skippedWarnings: [],
+      injectedCharCount: 208,
+      budget: 2000,
+    };
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, base)).toBe(true);
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, {
+      ...base,
+      runId: 'run-42',
+      selectionPolicy: 'fair_rotation_v1',
+      eligibleCount: 16,
+      rotationStartIndex: 7,
+      droppedActivationIds: ['act_10', 'act_11'],
+      oversizedActivationIds: [],
+    })).toBe(true);
+    // Unknown policy literals are rejected (wire shape stays closed).
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, {
+      ...base,
+      selectionPolicy: 'random_shuffle_v9',
+    })).toBe(false);
+  });
 });

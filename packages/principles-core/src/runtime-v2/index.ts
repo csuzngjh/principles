@@ -1464,6 +1464,7 @@ export {
   filterPromptActivations,
   resolvePrincipleFromArtifact,
   trimToBudget,
+  roundKeyFromRunIdentity,
   renderPrinciplesToDirectives,
   createProductionGateDeps,
   compileHardenedRuleEvaluator,
@@ -1477,6 +1478,8 @@ export {
 export type {
   ActivatedPrinciple,
   PromptActivationReaderResult,
+  PromptSelectionPolicy,
+  TrimToBudgetResult,
   ApprovalCompletionInput,
   ApprovalCompletionResult,
   ArtifactDigestCheck,

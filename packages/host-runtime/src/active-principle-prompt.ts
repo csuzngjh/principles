@@ -8,11 +8,15 @@ import {
   renderPrinciplesToDirectives,
   resolvePrincipleFromArtifact,
   type ActivatedPrinciple,
+  type PromptSelectionPolicy,
 } from '@principles/core/runtime-v2';
 import fs from 'node:fs';
 import path from 'node:path';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
+
+/** PRI-904 SPEC §10: bounded diagnostic id lists (mirrors the core selector's cap of 16). */
+const MAX_SHARED_DIAGNOSTIC_IDS = 16;
 
 export interface ActivePrinciplePromptResult {
   additionalContext: string;
@@ -26,6 +30,16 @@ export interface ActivePrinciplePromptResult {
   excludedCount: number;
   exclusionReason?: 'host_principle_overlap';
   allValidatedPrinciplesExcluded: boolean;
+  /** PRI-904: budget-packing policy that produced this selection. */
+  selectionPolicy?: PromptSelectionPolicy;
+  /** PRI-904: candidates that reached the budget selector. */
+  eligibleCount?: number;
+  /** PRI-904: circular scan start; present only under fair_rotation_v1. */
+  rotationStartIndex?: number;
+  /** PRI-904 (bounded, max 16): activation ids dropped for insufficient remaining budget. */
+  droppedActivationIds?: string[];
+  /** PRI-904 (bounded, max 16): activation ids that cannot fit even in an empty payload. */
+  oversizedActivationIds?: string[];
 }
 
 export interface PromptActivationCandidates {
@@ -117,6 +131,12 @@ export async function readPromptActivationCandidates(input: {
 export async function buildActivePrinciplePromptContext(input: {
   workspaceDir: string;
   excludePrincipleIds?: ReadonlySet<string>;
+  /**
+   * PRI-904 fair-rotation round key (derive via roundKeyFromRunIdentity from
+   * the host run/turn id). Absent → legacy FIFO prefix policy (rollback /
+   * characterization baseline).
+   */
+  roundKey?: number;
 }): Promise<ActivePrinciplePromptResult> {
   const { principles, excludedPrincipleIds, warnings, aborted, selfReportEnabled } =
     await readPromptActivationCandidates(input);
@@ -125,13 +145,33 @@ export async function buildActivePrinciplePromptContext(input: {
       additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings,
       budget: RUNTIME_V2_PRINCIPLE_BUDGET, truncated: false, excludedPrincipleIds,
       excludedCount: excludedPrincipleIds.length, allValidatedPrinciplesExcluded: false,
+      selectionPolicy: 'legacy_fifo_prefix_v1', eligibleCount: 0,
     };
   }
 
   const included: ActivatedPrinciple[] = [];
   let additionalContext = '';
   let truncated = false;
-  for (const principle of principles) {
+  // PRI-904: same fair-rotation semantics as the plugin route's trimToBudget —
+  // deterministic rotating start over the base (ASC) candidate order, circular
+  // scan, continue-on-non-fit. Costs are measured with the REAL serializer
+  // (renderPrinciplesToDirectives) so budget accounting stays exact here too.
+  const { roundKey } = input;
+  const selectionPolicy: PromptSelectionPolicy =
+    roundKey === undefined || principles.length === 0 ? 'legacy_fifo_prefix_v1' : 'fair_rotation_v1';
+  const n = principles.length;
+  const rotationStartIndex = roundKey === undefined ? undefined : ((roundKey % n) + n) % n;
+  const droppedActivationIds: string[] = [];
+  const oversizedActivationIds: string[] = [];
+  const standaloneFits = (principle: ActivatedPrinciple): boolean =>
+    renderPrinciplesToDirectives([principle], new Set([principle.principleId]), { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled }).length
+      <= RUNTIME_V2_PRINCIPLE_BUDGET;
+
+  const scanOrder: ActivatedPrinciple[] = rotationStartIndex === undefined
+    ? principles
+    : principles.slice(rotationStartIndex).concat(principles.slice(0, rotationStartIndex));
+
+  for (const principle of scanOrder) {
     const candidate = [...included, principle];
     const candidateContext = renderPrinciplesToDirectives(
       candidate,
@@ -139,8 +179,16 @@ export async function buildActivePrinciplePromptContext(input: {
       { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled },
     );
     if (candidateContext.length > RUNTIME_V2_PRINCIPLE_BUDGET) {
-      truncated = true;
-      break;
+      if (standaloneFits(principle)) {
+        // Fits alone but not now — normal budget truncation.
+        truncated = true;
+        if (droppedActivationIds.length < MAX_SHARED_DIAGNOSTIC_IDS) droppedActivationIds.push(principle.activationId);
+      } else if (oversizedActivationIds.length < MAX_SHARED_DIAGNOSTIC_IDS) {
+        // Can never fit alone — oversize, not starvation (PRI-904 SPEC §6.6).
+        oversizedActivationIds.push(principle.activationId);
+      }
+      if (selectionPolicy === 'legacy_fifo_prefix_v1') break;
+      continue;
     }
     included.push(principle);
     additionalContext = candidateContext;
@@ -161,5 +209,10 @@ export async function buildActivePrinciplePromptContext(input: {
     excludedCount: excludedPrincipleIds.length,
     allValidatedPrinciplesExcluded: excludedPrincipleIds.length > 0 && principles.length === 0,
     ...(excludedPrincipleIds.length > 0 ? { exclusionReason: 'host_principle_overlap' as const } : {}),
+    selectionPolicy,
+    eligibleCount: principles.length,
+    ...(rotationStartIndex !== undefined ? { rotationStartIndex } : {}),
+    ...(droppedActivationIds.length > 0 ? { droppedActivationIds } : {}),
+    ...(oversizedActivationIds.length > 0 ? { oversizedActivationIds } : {}),
   };
 }

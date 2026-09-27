@@ -3,9 +3,10 @@ import * as principleInjection from '../../src/core/principle-injection.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore, roundKeyFromRunIdentity, trimToBudget } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord } from '@principles/core/runtime-v2';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../../src/core/runtime-v2-prompt-activation-reader.js';
+import { escapeXml } from '@principles/core/prompt-builder';
 
 const TEST_PRINCIPLE_TEXT = 'UNIQUE_RUNTIME_V2_TEST_PRINCIPLE_7x9k2';
 
@@ -173,16 +174,19 @@ function makeCtx(overrides: {
   workspaceDir?: string;
   trigger?: string;
   sessionId?: string;
+  runId?: string;
 } = {}) {
   const {
     workspaceDir = tempWorkspaceDir,
     trigger = 'user',
     sessionId = 'test-session-v2',
+    runId,
   } = overrides;
   return {
     workspaceDir,
     trigger,
     sessionId,
+    ...(runId !== undefined ? { runId } : {}),
     api: {
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       runtime: {},
@@ -1117,5 +1121,117 @@ describe('Runtime V2 authority derivation + artifact recycling (Safety Net v1.2,
       (message) => message.includes('artifact_not_found') && message.includes(artifactIdOld),
     );
     expect(hasDanglingWarning).toBe(true);
+  });
+});
+
+describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local production route)', () => {
+  // Audited live entry lengths (see docs/audit/pri-904-activation-injection-root-cause.md §5):
+  // under the old FIFO prefix policy these produce selected=9 / 1893 chars / truncated.
+  const LIVE_ENTRY_LENGTHS = [208, 150, 223, 226, 143, 147, 290, 216, 249, 210, 256, 186, 219, 202, 286, 259];
+
+  async function seedPri904Fixture(): Promise<void> {
+    for (let i = 0; i < LIVE_ENTRY_LENGTHS.length; i++) {
+      const principleId = `PRI904-H-${String(i + 1).padStart(2, '0')}`;
+      const prefix = `- [${principleId}] `;
+      const text = 'F'.repeat(LIVE_ENTRY_LENGTHS[i]! - prefix.length);
+      insertValidatedPrincipleArtifact({ artifactId: `art-${principleId}`, principleId, text });
+      await insertPromptActivation({ artifactId: `art-${principleId}`, principleId });
+    }
+  }
+
+  function fixturePrinciples() {
+    return LIVE_ENTRY_LENGTHS.map((len, i) => {
+      const principleId = `PRI904-H-${String(i + 1).padStart(2, '0')}`;
+      const prefix = `- [${principleId}] `;
+      return {
+        principleId,
+        text: 'F'.repeat(len - prefix.length),
+        artifactId: `art-${principleId}`,
+        activationId: `act_prompt_${principleId}`,
+      };
+    });
+  }
+
+  async function captureInjectionPayload(ctxOverrides: { runId?: string }) {
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx(ctxOverrides));
+    expect(spy).toHaveBeenCalledTimes(1);
+    return { payload: spy.mock.calls[0]![0] as Record<string, unknown>, result };
+  }
+
+  it('with a host runId: fair_rotation_v1 payload matches the pure selector exactly (rotation + budget + diagnostics)', async () => {
+    await seedPri904Fixture();
+    const runId = 'pri904-run-alpha';
+    const expected = trimToBudget(fixturePrinciples(), RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, roundKeyFromRunIdentity(runId));
+
+    const { payload } = await captureInjectionPayload({ runId });
+
+    expect(payload.selectionPolicy).toBe('fair_rotation_v1');
+    expect(payload.rotationStartIndex).toBe(expected.rotationStartIndex);
+    expect(payload.eligibleCount).toBe(16);
+    expect(payload.injectedCount).toBe(expected.injectedIds.size);
+    expect((payload.principleIds as string[]).slice().sort()).toEqual([...expected.injectedIds].sort());
+    expect(payload.injectedCharCount).toBe(expected.lines.join('\n').length);
+    expect(payload.v2Truncated).toBe(expected.truncated);
+    expect(payload.droppedActivationIds).toEqual(expected.droppedActivationIds);
+    expect((payload.injectedCharCount as number)).toBeLessThanOrEqual(RUNTIME_V2_PRINCIPLE_BUDGET);
+  });
+
+  it('different host runIds rotate to different start indices (deterministic for fixed ids)', async () => {
+    await seedPri904Fixture();
+    // Pre-computed: fnv1a('pri904-run-alpha') % 16 = 12, fnv1a('pri904-run-beta') % 16 = 10.
+    const { payload: alpha } = await captureInjectionPayload({ runId: 'pri904-run-alpha' });
+    const { payload: beta } = await captureInjectionPayload({ runId: 'pri904-run-beta' });
+    expect(alpha.rotationStartIndex).toBe(12);
+    expect(beta.rotationStartIndex).toBe(10);
+  });
+
+  it('without a host runId: degrades to legacy_fifo_prefix_v1 and reproduces the audited 16→9/1893 behavior', async () => {
+    await seedPri904Fixture();
+    const { payload } = await captureInjectionPayload({});
+
+    expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+    expect(payload.rotationStartIndex).toBeUndefined();
+    expect(payload.injectedCount).toBe(9);
+    expect(payload.injectedCharCount).toBe(1893);
+    expect(payload.v2Truncated).toBe(true);
+    expect((payload.principleIds as string[])).toEqual(
+      Array.from({ length: 9 }, (_, i) => `PRI904-H-${String(i + 1).padStart(2, '0')}`),
+    );
+    expect(payload.droppedActivationIds).toEqual(['act_prompt_PRI904-H-10']);
+  });
+
+  it('across 16 consecutive rotation starts every fixture principle reaches the prompt (hook-level union)', async () => {
+    await seedPri904Fixture();
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const union = new Set<string>();
+    // Direct start control through the real round-key derivation: pick the
+    // k-th runId from a deterministic scan so its hash mod 16 equals k.
+    const runIds: string[] = [];
+    for (let k = 0; k < 16; k++) {
+      let candidate = `pri904-union-${k}`;
+      let guard = 0;
+      while (roundKeyFromRunIdentity(candidate) % 16 !== k && guard < 1000) {
+        candidate = `${candidate}-x`;
+        guard++;
+      }
+      runIds.push(candidate);
+    }
+    for (const runId of runIds) {
+      spy.mockClear();
+      await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ runId }));
+      const payload = spy.mock.calls[0]![0] as { principleIds: string[] };
+      for (const id of payload.principleIds) union.add(id);
+    }
+    expect(union.size).toBe(16);
   });
 });
