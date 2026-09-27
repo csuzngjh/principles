@@ -58,10 +58,11 @@ type TrustFetcher = NonNullable<Parameters<typeof resolveTrustedReleaseTarget>[0
  * refusal (404) from a transient one (408/429/5xx) — a download-by-bytes
  * interface cannot report that. Production never injects it: the default is
  * `globalThis.fetch`. Tests use it to drive the transport classes
- * deterministically; it is NOT a way around the protocol gate, which runs on
- * the URL before the transport is ever called.
+ * deterministically; it is NOT a way around the protocol gate, which checks the
+ * first URL before the transport is ever called and every redirect hop before
+ * the next request is made.
  */
-export type AssetFetcher = (url: string, init?: { readonly redirect?: 'follow' }) => Promise<Response>;
+export type AssetFetcher = (url: string, init?: { readonly redirect?: 'manual' }) => Promise<Response>;
 
 /** Acquisition failure with a stable reason; release-manager.ts maps it onto the ReleaseManagerError contract. */
 export class ApplyPayloadError extends Error {
@@ -163,6 +164,9 @@ export interface DownloadedReleaseAsset {
  */
 const ASSET_DOWNLOAD_ATTEMPTS = 3;
 
+/** PRI-927: https is re-checked per hop, so a redirect chain must be bounded. */
+const ASSET_REDIRECT_HOPS = 5;
+
 function isRetriableHttpStatus(status: number): boolean {
   // 4xx = the carrier refuses on its face (404: not published) — retrying
   // re-asks a stable answer. Server-side and rate-limit codes are transient.
@@ -176,6 +180,20 @@ function parseAssetUrl(value: string): URL | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** A Location header resolved against the hop that sent it; undefined if unusable. */
+function resolveRedirectTarget(location: string, from: URL): URL | undefined {
+  try {
+    return parseAssetUrl(new URL(location, from).href);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Redirect statuses whose Location header must be re-gated before the next request. */
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
 export async function downloadAndVerifyAssetFile(input: {
@@ -212,20 +230,46 @@ export async function downloadAndVerifyAssetFile(input: {
   let bytes: Buffer | undefined;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      const response = await fetchAsset(assetUrl.href, { redirect: 'follow' });
-      if (!response.ok) {
-        // A rejected response is not the payload: release its connection now
-        // instead of parking it until GC, or three attempts per call across
-        // repeated applies would accumulate sockets.
-        await response.body?.cancel();
-        const detail = `Asset download failed: HTTP ${response.status} for ${input.url}`;
-        if (!isRetriableHttpStatus(response.status) || attempt >= ASSET_DOWNLOAD_ATTEMPTS) {
-          throw new ApplyPayloadError('metadata_refresh_failed', detail, 'Verify that the release pipeline published this release asset, then retry.');
+      let target = assetUrl;
+      for (let hop = 0; ; hop += 1) {
+        const response = await fetchAsset(target.href, { redirect: 'manual' });
+        if (isRedirectStatus(response.status)) {
+          // PRI-927 review (Owner): the carrier contract is https on EVERY hop,
+          // so the chain is stepped here rather than by `redirect: 'follow'`.
+          // Handing it to the transport lets a signed https URL that answers
+          // 302 → http://… carry the payload in plaintext before this function
+          // ever sees a byte. 'manual' is the only mode on globalThis.fetch
+          // whose 3xx response still exposes Location (undici does not apply
+          // the opaque-redirect filtering), so this is what the gate can check.
+          const location = response.headers.get('location');
+          // A redirect's body is not the payload either: release its connection
+          // before asking the next hop.
+          await response.body?.cancel();
+          const next = location === null ? undefined : resolveRedirectTarget(location, target);
+          if (next === undefined || next.protocol !== 'https:') {
+            throw new ApplyPayloadError('release_metadata_invalid', `Asset redirect #${hop + 1} is not an https URL: ${location ?? '(missing Location header)'}`, 'Do not install this release. Its delivery path leaves HTTPS; refresh the signed metadata from the official repository.');
+          }
+          if (hop >= ASSET_REDIRECT_HOPS) {
+            throw new ApplyPayloadError('metadata_refresh_failed', `Asset delivery exceeded ${ASSET_REDIRECT_HOPS} https redirects for ${input.url}.`, 'Nothing was deployed. Retry the update; a redirect loop is a carrier fault, not a signed-metadata one.');
+          }
+          target = next;
+          continue;
         }
-      } else {
-        bytes = Buffer.from(await response.arrayBuffer());
+        if (!response.ok) {
+          // A rejected response is not the payload: release its connection now
+          // instead of parking it until GC, or three attempts per call across
+          // repeated applies would accumulate sockets.
+          await response.body?.cancel();
+          const detail = `Asset download failed: HTTP ${response.status} for ${target.href}`;
+          if (!isRetriableHttpStatus(response.status) || attempt >= ASSET_DOWNLOAD_ATTEMPTS) {
+            throw new ApplyPayloadError('metadata_refresh_failed', detail, 'Verify that the release pipeline published this release asset, then retry.');
+          }
+        } else {
+          bytes = Buffer.from(await response.arrayBuffer());
+        }
         break;
       }
+      if (bytes !== undefined) break;
     } catch (error) {
       // Trust-anchor refusals and terminal transport verdicts escape as-is.
       if (error instanceof ApplyPayloadError) throw error;

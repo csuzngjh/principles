@@ -223,6 +223,142 @@ describe('downloadAndVerifyAssetFile private candidate (PRI-927)', () => {
 });
 
 /**
+ * PRI-927 review: the HTTPS-only decision is a property of the DELIVERY PATH,
+ * not of the first URL string. `redirect: 'follow'` hands the rest of the path
+ * to the transport, and undici crosses schemes when told to follow — measured
+ * on Node 24: a 302 is followed to another origin/scheme and the body reads
+ * fine, so a signed https URL that answers 302 → http:// delivers the asset in
+ * plaintext before this module sees a byte. These tests pin the replacement:
+ * hops are stepped explicitly, every target is re-gated BEFORE its request,
+ * and the chain is bounded.
+ */
+describe('downloadAndVerifyAssetFile redirect gating (PRI-927)', () => {
+  const NO_SLEEP = () => Promise.resolve();
+
+  it('an https→http downgrade is refused without ever requesting the plaintext hop', async () => {
+    const seen: string[] = [];
+    await withHttpServer((req, res) => {
+      seen.push(req.url ?? '');
+      if (req.url === '/asset.tar.gz') {
+        // A reachable plaintext hop: with `redirect: 'follow'` the transport
+        // would complete this second request itself and hand back a 200 body,
+        // which is exactly the delivery the Owner's decision forbids.
+        res.writeHead(302, { location: `http://${req.headers.host}/downgraded.tar.gz` });
+        res.end();
+        return;
+      }
+      res.writeHead(200);
+      res.end(PAYLOAD);
+    }, async (transport) => {
+      const fetcher = countingFetcher(transport);
+      const { dir, destination } = tempDestination('pd-redirect-downgrade');
+      await expect(downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
+      })).rejects.toMatchObject({ reason: 'release_metadata_invalid', message: /redirect #1 is not an https URL/ });
+      // The refusal is what makes this unobservable-over-the-wire: one request
+      // (the https one), and the plaintext target was never asked for.
+      expect(fetcher.calls()).toBe(1);
+      expect(seen).toEqual(['/asset.tar.gz']);
+      expect(fs.existsSync(destination)).toBe(false);
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('an https→https redirect is followed to the final hop (production shape)', async () => {
+    const seen: string[] = [];
+    await withHttpServer((req, res) => {
+      seen.push(req.url ?? '');
+      if (req.url === '/asset.tar.gz') {
+        res.writeHead(302, { location: `${ASSET_HOST}/cdn/asset.tar.gz` });
+        res.end();
+        return;
+      }
+      res.writeHead(200);
+      res.end(PAYLOAD);
+    }, async (transport) => {
+      const fetcher = countingFetcher(transport);
+      const { dir, destination } = tempDestination('pd-redirect-https');
+      await downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
+      });
+      // GitHub's real asset delivery is exactly this: one 302 from
+      // github.com to release-assets.githubusercontent.com. Stepping hops must
+      // not break it — and the bytes come from the hop, not from the signed URL.
+      expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
+      expect(seen).toEqual(['/asset.tar.gz', '/cdn/asset.tar.gz']);
+      expect(fetcher.calls()).toBe(2);
+      expect(leftoverCandidates(dir)).toEqual([]);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('a relative Location is resolved against its hop, so it keeps the https scheme', async () => {
+    const seen: string[] = [];
+    await withHttpServer((req, res) => {
+      seen.push(req.url ?? '');
+      if (req.url === '/deep/asset.tar.gz') {
+        res.writeHead(302, { location: '../signed-copy.tar.gz' });
+        res.end();
+        return;
+      }
+      res.writeHead(200);
+      res.end(PAYLOAD);
+    }, async (transport) => {
+      const fetcher = countingFetcher(transport);
+      const { dir, destination } = tempDestination('pd-redirect-relative');
+      await downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/deep/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, expectedSizeBytes: PAYLOAD.length, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
+      });
+      // Resolved against https://release.example/deep/asset.tar.gz, NOT against
+      // a fabricated origin or a naive string append onto the hop's path.
+      expect(fs.readFileSync(destination).equals(PAYLOAD)).toBe(true);
+      expect(seen).toEqual(['/deep/asset.tar.gz', '/signed-copy.tar.gz']);
+      expect(fetcher.calls()).toBe(2);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('a redirect with no Location header is a refusal, not a silent retry', async () => {
+    await withHttpServer((_req, res) => { res.writeHead(302); res.end(); }, async (transport) => {
+      const fetcher = countingFetcher(transport);
+      const { dir, destination } = tempDestination('pd-redirect-nolocation');
+      await expect(downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/asset.tar.gz`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP, fetcher,
+      })).rejects.toMatchObject({ reason: 'release_metadata_invalid', message: /missing Location header/ });
+      expect(fetcher.calls()).toBe(1);
+      expect(fs.existsSync(destination)).toBe(false);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+
+  it('a redirect loop is BOUNDED and not re-entered by the download retry', async () => {
+    let requests = 0;
+    await withHttpServer((req, res) => {
+      requests += 1;
+      const next = Number((req.url ?? '').split('/')[2] ?? '0') + 1;
+      res.writeHead(302, { location: `${ASSET_HOST}/hop/${next}` });
+      res.end();
+    }, async (transport) => {
+      const { dir, destination } = tempDestination('pd-redirect-loop');
+      await expect(downloadAndVerifyAssetFile({
+        url: `${ASSET_HOST}/hop/0`, destinationPath: destination,
+        expectedSha256: PAYLOAD_SHA, releaseId: 'r1', sleep: NO_SLEEP, fetcher: transport,
+      })).rejects.toMatchObject({ reason: 'metadata_refresh_failed', message: /exceeded 5 https redirects/ });
+      // 6 requests = the signed URL plus 5 further hops. NOT 6 × 3 attempts:
+      // a hop verdict is terminal, so the retry policy cannot multiply it.
+      expect(requests).toBe(6);
+      expect(fs.existsSync(destination)).toBe(false);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  });
+});
+
+/**
  * PRI-924: the acquisition is a bounded-retry transport. Retry policy covers
  * the transport class ONLY (connection throw mid-body — the real-world
  * `terminated` — and 5xx/408/429); the signed sha256/size trust anchor aborts
