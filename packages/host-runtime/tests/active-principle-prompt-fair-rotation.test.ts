@@ -137,6 +137,22 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
     expect(result.droppedActivationIds ?? []).toEqual([]);
     expect(result.truncated).toBe(false);
   });
+
+  it('all candidates excluded + roundKey: degrades to legacy without a NaN rotation start (CodeRabbit finding)', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedPromptActivations(workspaceDir, [{ principleId: 'SH_X', text: 'excluded everywhere' }]);
+    const result = await buildActivePrinciplePromptContext({
+      workspaceDir,
+      roundKey: 12345,
+      excludePrincipleIds: new Set(['SH_X']),
+    });
+    expect(result.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+    expect(result.rotationStartIndex).toBeUndefined(); // not NaN — schema violation if serialized
+    expect(Number.isFinite(result.rotationStartIndex as unknown as number) || result.rotationStartIndex === undefined).toBe(true);
+    expect(result.principleIds).toEqual([]);
+    expect(result.eligibleCount).toBe(0);
+    expect(result.truncated).toBe(false);
+  });
 });
 
 describe('PRI-904 route parity — plugin-local selector vs host-shared renderer (T10 / AT-09)', () => {

@@ -160,7 +160,12 @@ export async function buildActivePrinciplePromptContext(input: {
   const selectionPolicy: PromptSelectionPolicy =
     roundKey === undefined || principles.length === 0 ? 'legacy_fifo_prefix_v1' : 'fair_rotation_v1';
   const n = principles.length;
-  const rotationStartIndex = roundKey === undefined ? undefined : ((roundKey % n) + n) % n;
+  // Guard on the policy, not just the key: an all-excluded candidate list has
+  // n === 0 and must not emit a NaN start (core trimToBudget omits the field
+  // for empty input — parity requires the same here).
+  const rotationStartIndex = selectionPolicy === 'fair_rotation_v1' && roundKey !== undefined
+    ? ((roundKey % n) + n) % n
+    : undefined;
   const droppedActivationIds: string[] = [];
   const oversizedActivationIds: string[] = [];
   const standaloneFits = (principle: ActivatedPrinciple): boolean =>
