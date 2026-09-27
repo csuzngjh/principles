@@ -139,6 +139,26 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
     expect(pdCliBranch).toContain('pd-cli" ]');
     expect(pdCliBranch).toContain('npm run build --workspace=@principles/codex-adapter');
   });
+
+  it('Verify package dry-run: a cosmetic head preview must never own the exit verdict', () => {
+    // Cohort d6fa4055 aborted at 5/7 (principles-disciple) with the log
+    // ending at "Build verification passed!" and NO npm error anywhere. Cause:
+    // `npm pack --dry-run 2>&1 | head -50` — head closed the pipe after 50
+    // lines while the inner prepack (build:production && build:types, ~50
+    // lines plus npm banners) was still writing, so it died on EPIPE, npm
+    // pack exited 1, and `set -o pipefail` turned a log truncation into a
+    // failed release. The step must capture the real exit code first and
+    // only then preview.
+    const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ name?: string; run?: string }> } };
+    const dryRun = doc.runs?.steps?.find((s) => s.name === 'Verify package dry-run');
+    expect(dryRun?.run).toBeDefined();
+    const script = dryRun!.run!;
+    expect(script).toContain('pack_status=$?');
+    expect(script).toContain('exit "$pack_status"');
+    expect(script).not.toMatch(/npm pack --dry-run\s+2>&1\s*\|\s*head/);
+    // The preview is preserved so the step still reads as a dry-run report.
+    expect(script).toContain('head -50 "$pack_log"');
+  });
 });
 
 describe('finalize-npm-release action — isolated closing steps (PRI-886)', () => {
