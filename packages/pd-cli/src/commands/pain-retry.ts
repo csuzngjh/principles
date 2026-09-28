@@ -37,6 +37,11 @@ import {
   PrincipleTreeLedgerAdapter,
   SqliteDeadLetterStore,
   PainSignalBridge,
+  recoverFailedTask,
+  persistPainDiagnosis,
+  computeFeatureFlagsFromConfig,
+  isFeatureEnabled,
+  createBridgeTelemetryEventEmitter,
   type PainDetectedData,
   type PainSignalBridgeResult,
   type DeadLetterRow,
@@ -568,6 +573,15 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     }
     const effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
 
+    // PRI-935: derive the pain_diagnosis_persistence flag from the SAME
+    // canonical authority the production factory uses
+    // (pain-signal-runtime-factory), so a `pd pain retry` ledger write is
+    // gated identically to the automatic bridge path — no CLI-local flag.
+    const diagnosisPersistenceEnabled = isFeatureEnabled(
+      computeFeatureFlagsFromConfig(effectiveConfig),
+      'pain_diagnosis_persistence',
+    );
+
     const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
     const perStageTimeoutMs = pipelineTimeoutMs / 3;
     const rootCauseRunner = new DiagRootCauseRunner(
@@ -617,6 +631,13 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         ledgerAdapter,
         owner: 'pd-cli-pain-retry-dead-letter',
         workspaceDir,
+        // PRI-935: dead-letter replays must record the pain_diagnoses
+        // attribution ledger exactly like the production bridge — the flag
+        // is derived from the same canonical authority as the normal branch.
+        diagnosisPersistenceEnabled,
+        // rc-9: same production degradation-telemetry wiring as the factory —
+        // only persistence events reach the store emitter.
+        eventEmitter: createBridgeTelemetryEventEmitter(),
         // PRI-720: honor the Owner's full-prompt-pipeline switch on replay seeds.
         fullPipelinePromptSeeds: resolvePromptFullPipelineSeedMode(workspaceDir) === 'full_chain',
       });
@@ -638,6 +659,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             errorCategory: 'execution_failed',
             message: errorMessage,
             markRetriedOk: markFail.ok,
+            // mvp-q-2: the dead-letter branch writes the ledger inside the
+            // bridge, so report the same dispatched/observed semantics here.
+            painDiagnosisLedgerWrite: diagnosisPersistenceEnabled ? 'attempted' as const : 'disabled' as const,
             nextAction: 'Replay threw; retry_count incremented. Adjust parameters and run pd pain retry --pain-id again.',
           }, null, 2));
         } else {
@@ -650,6 +674,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
       const success = bridgeResult.status === 'succeeded';
       const markResult = dlStore.markRetried(opts.painId, success);
+      // mvp-q-2: the ledger write happens inside the bridge on this branch;
+      // report the same dispatched/observed semantics as the other branches.
+      const dlLedgerWrite = diagnosisPersistenceEnabled
+        ? 'attempted' as const
+        : 'disabled' as const;
 
       if (opts.json) {
         // cli-1-strict-json: exactly one parseable JSON object on stdout.
@@ -665,6 +694,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           ledgerEntryIds: bridgeResult.ledgerEntryIds,
           markRetriedOk: markResult.ok,
           message: bridgeResult.message ?? null,
+          painDiagnosisLedgerWrite: dlLedgerWrite,
           nextAction: success
             ? (bridgeResult.candidateIds.length > 0
               ? `Dead letter replayed. Internalize candidates:\n  ${bridgeResult.candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
@@ -685,6 +715,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       console.log(`  Bridge Status:   ${bridgeResult.status}`);
       if (bridgeResult.message) {
         console.log(`  Message:         ${bridgeResult.message}`);
+      }
+      if (dlLedgerWrite === 'attempted') {
+        console.log(`  Diagnosis Ledger: pain_diagnoses write dispatched by the bridge (skips/failures surface as pain_diagnosis_persist_* events)`);
+      } else {
+        console.log(`  Diagnosis Ledger: disabled — pain_diagnosis_persistence flag off; no attribution row written`);
       }
       if (success) {
         console.log(`  Candidates:      ${bridgeResult.candidateIds.length}`);
@@ -710,6 +745,37 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       console.log(`  Workspace: ${workspaceDir}\n`);
     }
 
+    // PRI-934: a failed parent task can never re-acquire a lease —
+    // DefaultLeaseManager accepts pending/retry_wait only — so retry died with
+    // lease_conflict before doing anything. Recover the whole diagnostician
+    // family (parent + the three split-pipeline stages) through the single
+    // recovery authority (recoverFailedTask, shared with the sweep service)
+    // BEFORE running. force=true is honest here: an explicit
+    // `pd pain retry --pain-id` IS the operator's recovery decision, and the
+    // stage tasks are typically budget-exhausted (recoverFailedTask would
+    // otherwise throw input_invalid mid-family and leave a half-recovered
+    // pipeline). Non-failed family members return null and are untouched
+    // (cli-5-failure-no-mutation) — which is why the gate also accepts a
+    // retry_wait PARENT: the parent itself can acquire a lease, but budget-
+    // exhausted stage tasks stuck in failed still dead-end the split runner
+    // with lease_conflict, and recoverFailedTask resets only the failed
+    // stages while no-op'ing the retry_wait parent. needs_human_review /
+    // live-lease states are deliberately NOT reset — the lease_conflict
+    // nextAction below routes those to `pd runtime recovery`.
+    const recoveredTasks: string[] = [];
+    if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
+      const diagFamily = [
+        taskId,
+        `diag_rootcause-${taskId}`,
+        `diag_distiller-${taskId}`,
+        `diag_router-${taskId}`,
+      ];
+      for (const familyTaskId of diagFamily) {
+        const recovered = await recoverFailedTask(stateManager, familyTaskId, true);
+        if (recovered) recoveredTasks.push(recovered.taskId);
+      }
+    }
+
     const result = await diagnoseRun({
       taskId,
       stateManager,
@@ -717,6 +783,10 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     });
 
     if (result.status !== 'succeeded') {
+      // PRI-934: lease_conflict survived the pre-run recovery, so it is
+      // either a live worker holding the lease or a state pain retry must
+      // not reset (needs_human_review). Name the authoritative tool.
+      const leaseConflictNextAction = `A live worker holds the lease or the task is in a state pain retry must not reset. Wait for the lease to expire, or run: pd runtime recovery failed-tasks -w "${workspaceDir}" --confirm (then re-run pd pain retry --pain-id ${opts.painId}).`;
       if (opts.json) {
         console.log(JSON.stringify({
           status: 'failed',
@@ -727,21 +797,36 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           previousTaskStatus,
           previousLastError,
           newTaskStatus: result.status,
+          // Same shape as the succeeded branch (cli-1: consumers need not
+          // special-case presence).
+          recoveredTasks,
           errorCategory: result.errorCategory ?? null,
           failureReason: result.failureReason ?? null,
           nextAction: result.errorCategory === 'output_invalid'
             ? 'The LLM output failed validation. Try a different model or provider.'
+            : result.errorCategory === 'lease_conflict'
+              ? leaseConflictNextAction
             : 'Check the error category and retry with adjusted parameters.',
         }, null, 2));
       } else {
         console.log(`\nRetry failed:`);
         console.log(`  Status:         ${result.status}`);
         console.log(`  Task ID:        ${result.taskId}`);
+        if (recoveredTasks.length > 0) {
+          // Failure is exactly where the operator needs to know which tasks
+          // were reset before the runner died (85273fa1 review §3).
+          console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.join(', ')}`);
+        }
         if (result.errorCategory) {
           console.log(`  Error Category: ${result.errorCategory}`);
         }
         if (result.failureReason) {
           console.log(`  Failure Reason: ${result.failureReason}`);
+        }
+        if (result.errorCategory === 'lease_conflict') {
+          // cli-6-output-next-action: the text path must name the same
+          // authoritative recovery entry point as the JSON path.
+          console.log(`  Next Action:    ${leaseConflictNextAction}`);
         }
         console.log('');
       }
@@ -751,6 +836,33 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
     // Step 6: Intake candidates
     const candidates = await stateManager.getCandidatesByTaskId(taskId);
+
+    // PRI-935: the CLI retry path must record the pain_diagnoses attribution
+    // ledger like the production bridge does — before intake, mirroring the
+    // bridge's persist-before-admission ordering (the attribution must not
+    // depend on admission outcome). 'attempted' is honest: persistPainDiagnosis
+    // degrades observably via pain_diagnosis_persist_* telemetry (rc-9) rather
+    // than throwing, so this field reports "dispatched", not "row landed".
+    let painDiagnosisLedgerWrite: 'attempted' | 'disabled' = 'disabled';
+    if (diagnosisPersistenceEnabled && result.output) {
+      await persistPainDiagnosis(
+        // Single rc-9 mapping authority shared with the production factory.
+        { stateManager, eventEmitter: createBridgeTelemetryEventEmitter() },
+        {
+          // rc-6: same canonical lineage the bridge uses (task.inputRef),
+          // not the CLI-supplied painId — they are equal by the
+          // diagnosis_<painId> convention but the record is the authority.
+          painId: typeof task?.inputRef === 'string' && task.inputRef.length > 0
+            ? task.inputRef
+            : opts.painId,
+          taskId,
+          diagnosticianOutput: result.output,
+          artifactId: candidates[0]?.artifactId ?? null,
+        },
+      );
+      painDiagnosisLedgerWrite = 'attempted';
+    }
+
     const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string }[] = [];
     let intakeFailed = false;
 
@@ -829,6 +941,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         previousTaskStatus,
         previousLastError,
         newTaskStatus: 'succeeded',
+        recoveredTasks,
+        painDiagnosisLedgerWrite,
         candidateIds,
         ledgerEntryIds,
         intake: {
@@ -848,6 +962,14 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     console.log(`  Task ID:         ${taskId}`);
     console.log(`  Previous Status: ${previousTaskStatus}${previousLastError ? ` (${previousLastError})` : ''}`);
     console.log(`  New Status:      succeeded`);
+    if (recoveredTasks.length > 0) {
+      console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.join(', ')}`);
+    }
+    if (painDiagnosisLedgerWrite === 'attempted') {
+      console.log(`  Diagnosis Ledger: pain_diagnoses write dispatched (skips/failures surface as pain_diagnosis_persist_* events)`);
+    } else {
+      console.log(`  Diagnosis Ledger: disabled — pain_diagnosis_persistence flag off (or no diagnosis output); no attribution row written`);
+    }
     console.log(`  Candidates:      ${candidateIds.length}`);
     if (result.contextHash) {
       console.log(`  Context Hash:    ${result.contextHash.substring(0, 16)}...`);
