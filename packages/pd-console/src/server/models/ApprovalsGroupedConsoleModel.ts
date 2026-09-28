@@ -32,9 +32,9 @@ export interface ApprovalGroup {
   candidateDescription?: string;
   status: 'pending' | 'approved' | 'rejected';
   /**
-   * PRI-935: whether this candidate's own serialized prompt entry fits the
+   * PR-1894: whether this candidate's own serialized prompt entry fits the
    * injection budget on its own. `false` means the entry is oversized, so fair
-   * rotation can NEVER inject it â€?the pre-approval badge must not promise it
+   * rotation can NEVER inject it ï¿½?the pre-approval badge must not promise it
    * will come around. Computed server-side with the production serializer
    * (the client has no access to the escaped, serialized size).
    */
@@ -64,7 +64,7 @@ function isMissingTableError(err: unknown): boolean {
 /**
  * Wave 7: Extract a human-readable description from a PIArtifact's contentJson.
  *
- * The artifact kinds have different contentJson shapes â€?this function unifies
+ * The artifact kinds have different contentJson shapes ï¿½?this function unifies
  * them into a single description string the Owner can actually read to make a
  * review decision, instead of staring at a fabricated principleId.
  *
@@ -95,7 +95,7 @@ function extractCandidateDescription(contentJson: string): string | null {
     const ruleRaw = ruleMatch ? ruleMatch[1] : undefined;
     const principleText = principleRaw ? principleRaw.trim() : null;
     const ruleText = ruleRaw ? ruleRaw.trim() : null;
-    if (principleText && ruleText) return `${principleText} â€?${ruleText}`;
+    if (principleText && ruleText) return `${principleText} ï¿½?${ruleText}`;
     if (ruleText) return ruleText;
     if (principleText) return principleText;
   }
@@ -108,7 +108,7 @@ function extractCandidateDescription(contentJson: string): string | null {
     const draft = obj.principleDraft;
     const title = typeof draft.title === 'string' ? draft.title.trim() : '';
     const statement = typeof draft.statement === 'string' ? draft.statement.trim() : '';
-    if (title && statement) return `${title} â€?${statement}`;
+    if (title && statement) return `${title} ï¿½?${statement}`;
     if (title) return title;
     if (statement) return statement;
   }
@@ -134,7 +134,7 @@ function extractCandidateDescription(contentJson: string): string | null {
 }
 
 /**
- * PRI-935: would this candidate's own prompt entry fit the injection budget if
+ * PR-1894: would this candidate's own prompt entry fit the injection budget if
  * it were the ONLY entry?
  *
  * Uses the production text resolver and the production entry format/escaping
@@ -145,12 +145,12 @@ function extractCandidateDescription(contentJson: string): string | null {
  * fair rotation cannot deliver it.
  *
  * Degrades to `false` (do not promise rotation) whenever the real size cannot be
- * determined â€?an unknown size must never become a promise (rc-9).
+ * determined ï¿½?an unknown size must never become a promise (rc-9).
  */
 function candidateFitsPromptBudget(artifact: PIArtifactRecord | null): boolean {
   if (!artifact?.contentJson) return false;
   // The pending candidate has no activation row yet, but the resolver only
-  // needs the artifact plus an id pair â€?this mirrors what approve will do.
+  // needs the artifact plus an id pair ï¿½?this mirrors what approve will do.
   const resolved = resolvePrincipleFromArtifact(
     {
       artifact_id: artifact.artifactId,
@@ -187,7 +187,7 @@ export class ApprovalsGroupedConsoleModel {
   async getApprovalsGrouped(): Promise<ApprovalsGroupedResponse> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
-      return { groups: [], generatedAt: new Date().toISOString(), note: 'state.db not found â€?workspace may not be initialized' };
+      return { groups: [], generatedAt: new Date().toISOString(), note: 'state.db not found ï¿½?workspace may not be initialized' };
     }
 
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
@@ -201,22 +201,22 @@ export class ApprovalsGroupedConsoleModel {
         allApprovals = await queue.listAll();
       } catch (err) {
         if (isMissingTableError(err)) {
-          return { groups: [], generatedAt: new Date().toISOString(), note: 'approval table not found â€?workspace may not be initialized' };
+          return { groups: [], generatedAt: new Date().toISOString(), note: 'approval table not found ï¿½?workspace may not be initialized' };
         }
         throw err;
       }
 
-      // Build artifactId â†?sourcePrincipleId map AND artifactId â†?candidateDescription map.
+      // Build artifactId ï¿½?sourcePrincipleId map AND artifactId ï¿½?candidateDescription map.
       // Wave 7: candidateDescription lets FocusPage show human-readable content
       // instead of a fabricated principleId.
       //
       // PRI-768 v5 follow-up (F3): sourcePrincipleId is null for most scribe
       // artifacts, which used to collapse every group to `unlinked:<id>` and
       // dead-end the owner decision UI. When the column is missing, fall back
-      // to the shared lineage resolver (scribe â†?dreamer seed â†?candidateId â†?      // ledger derivedFromPainIds) so groups bind to the REAL ledger id.
+      // to the shared lineage resolver (scribe ï¿½?dreamer seed ï¿½?candidateId ï¿½?      // ledger derivedFromPainIds) so groups bind to the REAL ledger id.
       const artifactPrincipleMap = new Map<string, string | null>();
       const artifactDescriptionMap = new Map<string, string | null>();
-      // PRI-935: per-artifact "does this entry fit the budget alone" fact, so
+      // PR-1894: per-artifact "does this entry fit the budget alone" fact, so
       // the pre-approval badge never promises rotation for an entry that is
       // oversized (rotation cannot rescue a per-entry overflow).
       const artifactFitsBudgetMap = new Map<string, boolean>();
@@ -254,10 +254,10 @@ export class ApprovalsGroupedConsoleModel {
           principleTitles.set(id, principle.text);
         }
       } catch {
-        // Ledger not available â€?will fall back to principleId
+        // Ledger not available ï¿½?will fall back to principleId
       }
 
-      // Group by principleId (null â†?"unlinked")
+      // Group by principleId (null ï¿½?"unlinked")
       const groupMap = new Map<string, {
         id: string;
         artifactId: string;
@@ -310,7 +310,7 @@ export class ApprovalsGroupedConsoleModel {
           principleTitle,
           candidateDescription,
           status,
-          // PRI-935: undefined-safe â€?absent when the artifact could not be
+          // PR-1894: undefined-safe ï¿½?absent when the artifact could not be
           // read, which the UI treats as "do not promise rotation".
           ...(firstArtifactId !== undefined && artifactFitsBudgetMap.has(firstArtifactId)
             ? { fitsPromptBudget: artifactFitsBudgetMap.get(firstArtifactId) === true }
@@ -331,11 +331,11 @@ export class ApprovalsGroupedConsoleModel {
 
   /**
    * PRI-908: recompute the production prompt injection projection so the
-   * focus page can forecast "approved â‰?effective" BEFORE the Owner decides.
+   * focus page can forecast "approved ï¿½?effective" BEFORE the Owner decides.
    * PR #1844 follow-up: the forecast follows the workspace's REAL injection
-   * route (`buildLivePromptInjectionProjection` â€?legacy trimToBudget vs
+   * route (`buildLivePromptInjectionProjection` ï¿½?legacy trimToBudget vs
    * shared render via abstraction_layer_v1), matching the PRI-890 approve-time
-   * check. Advisory only: a projection failure omits the field â€?the
+   * check. Advisory only: a projection failure omits the field ï¿½?the
    * approve-time warning remains the fail-loud exclusion report (rc-9), so
    * this must never fail the grouped read.
    */
@@ -347,7 +347,7 @@ export class ApprovalsGroupedConsoleModel {
           budget: projection.budget,
           usedChars: projection.usedChars,
           truncated: projection.truncated,
-          // PRI-935: the badge must describe what the PRODUCTION route will do,
+          // PR-1894: the badge must describe what the PRODUCTION route will do,
           // not which policy this session-less forecast happened to run.
           // Without it the UI can only say "will queue", which under fair
           // rotation reads as permanent starvation and pushes the Owner to

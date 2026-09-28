@@ -25,14 +25,14 @@ export interface PromptInjectionProjection {
   injectedActivationIds: string[];
   warnings: string[];
   /**
-   * PRI-935: the budget-packing policy that produced THIS projection
+   * PR-1894: the budget-packing policy that produced THIS projection
    * (`legacy_fifo_prefix_v1` | `fair_rotation_v1`). The console must not
    * describe a fair-rotation workspace in FIFO terms, so the policy travels
    * with the projection instead of being re-derived by each consumer.
    */
   selectionPolicy: PromptSelectionPolicy;
   /**
-   * PRI-935: activations that the production route will inject under SOME
+   * PR-1894: activations that the production route will inject under SOME
    * round key, i.e. activations that are merely rotated out of the current
    * window rather than structurally starved.
    *
@@ -48,7 +48,7 @@ export interface PromptInjectionProjection {
   /** Number of eligible candidates that reached the selector. */
   eligibleCount: number;
   /**
-   * PRI-935: whether the PRODUCTION route for this workspace rotates.
+   * PR-1894: whether the PRODUCTION route for this workspace rotates.
    * The forecast's own `selectionPolicy` answers "which policy did THIS
    * projection run", which is legacy for a console that holds no session
    * round key; this answers "will the agent's real injection rotate",
@@ -59,7 +59,7 @@ export interface PromptInjectionProjection {
 }
 
 /**
- * PRI-935: which activations a fair-rotation selector injects across the
+ * PR-1894: which activations a fair-rotation selector injects across the
  * whole ring. The plugin's round key advances by one per recorded user turn
  * within a continuously advancing session, so N consecutive turns cover all
  * N ring positions: an activation absent from the current window but present
@@ -101,7 +101,7 @@ function collectReachableActivationIds(
  * console cannot replay that reducer read-only, so this projection may
  * forecast slightly MORE consumption than the real injection (never less).
  *
- * PRI-935 — round-key alignment. The plugin derives its fair-rotation round
+ * PR-1894 — round-key alignment. The plugin derives its fair-rotation round
  * key from the CURRENT session's turn ordinal
  * (`nextSessionTurnOrdinal`), which the console has no access to. Passing no
  * key therefore does NOT make the forecast "more conservative": it selects a
@@ -115,7 +115,7 @@ export async function buildLivePromptInjectionProjection(input: {
   workspaceDir: string;
   excludePrincipleIds?: ReadonlySet<string>;
   /**
-   * PRI-935: the fair-rotation round key the production route is using this
+   * PR-1894: the fair-rotation round key the production route is using this
    * turn. Callers that hold one (the plugin) pass it; callers that do not
    * (the console) omit it and MUST read `selectionPolicy` off the result
    * rather than assuming FIFO.
@@ -163,11 +163,11 @@ export async function buildLivePromptInjectionProjection(input: {
       productionRotates: false,
     };
   }
-  // PRI-935: pass the caller's round key so the forecast runs the SAME
+  // PR-1894: pass the caller's round key so the forecast runs the SAME
   // packing policy production runs this turn.
   const trimmed = trimToBudget(principles, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, input.roundKey);
   const injected = principles.filter((p) => trimmed.injectedIds.has(p.principleId));
-  // PRI-935: the legacy_trim route IS the OpenClaw plugin-local route, which
+  // PR-1894: the legacy_trim route IS the OpenClaw plugin-local route, which
   // rotates on every recorded user turn (PRI-904). Reachability is therefore
   // computed under fair rotation regardless of whether THIS forecast holds a
   // round key — a console without a session key must still be able to tell

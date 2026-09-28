@@ -80,7 +80,7 @@ export function localizeApprovalWarning(warning: string, t: TranslateFn): Locali
       activationAction: true,
     };
   }
-  // PRI-935: the activation is merely rotated out of the CURRENT window, not
+  // PR-1894: the activation is merely rotated out of the CURRENT window, not
   // starved. This is the common case on a live fair-rotation workspace and the
   // copy must NOT tell the Owner to deactivate healthy older principles.
   if (code === 'injection_budget_queued') {

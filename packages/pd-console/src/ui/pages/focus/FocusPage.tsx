@@ -331,7 +331,7 @@ function PendingReviewCard({
   function notifySuccessWarnings(successWarnings: readonly string[]) {
     const segments = successWarnings.flatMap((warning) => splitApprovalWarnings(warning));
     const localized = segments.map((warning) => localizeApprovalWarning(warning, t));
-    // PRI-935: the raw server text is still preserved verbatim (rc-9 — never
+    // PR-1894: the raw server text is still preserved verbatim (rc-9 — never
     // dropped), but it is operator-facing English, not Owner-facing prose. It
     // used to be appended flat under the localized body, so the toast rendered
     // as one mixed Chinese/English block and the machine text visually
@@ -576,7 +576,7 @@ function PendingReviewCard({
 
       {/* PRI-908: 批准前预算预告——注入窗口已满即意味着"批准了也可能这一轮不生效"。
           让 Owner 在决策前就知道，而不是事后道歉。
-          PRI-935: 两层条件都要满足才承诺轮转——(1) 生产路由确实轮转；
+          PR-1894: 两层条件都要满足才承诺轮转——(1) 生产路由确实轮转；
           (2) 这条候选自身的序列化内容能装进预算。超预算的条目在任何一轮都
           塞不进去，轮转救不了它，此时不得承诺"会自行轮到"。 */}
       {decidedOutcome === null && primaryChannel === "prompt" && promptInjection?.truncated === true && (

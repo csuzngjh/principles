@@ -164,14 +164,14 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     expect(shared.injectedPrincipleIds.length).toBeLessThan(projection.injectedPrincipleIds.length);
   });
 
-  // ── PRI-935: the console/production policy divergence ──────────────────────
+  // ── PR-1894: the console/production policy divergence ──────────────────────
   // Before this fix the projection omitted the round key, so it always ran
   // legacy_fifo_prefix_v1 and structurally excluded the NEWEST activation from
   // every truncated selection. The console then told the Owner their fresh
   // principle "will NOT enter agent behavior until older ones are deactivated"
   // while the live plugin route (fair rotation) injected it within N turns.
 
-  it('PRI-935: a caller-supplied round key selects fair_rotation_v1 and reports it', async () => {
+  it('PR-1894: a caller-supplied round key selects fair_rotation_v1 and reports it', async () => {
     const workspaceDir = tempWorkspace();
     await seedPromptActivations(workspaceDir, FIFO_11);
 
@@ -184,7 +184,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     expect(withoutKey.selectionPolicy).toBe('legacy_fifo_prefix_v1');
   });
 
-  it('PRI-935: the newest activation is reachable by rotation even though FIFO drops it', async () => {
+  it('PR-1894: the newest activation is reachable by rotation even though FIFO drops it', async () => {
     const workspaceDir = tempWorkspace();
     await seedPromptActivations(workspaceDir, FIFO_11);
 
@@ -198,7 +198,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     expect(projection.eventuallyInjectedActivationIds).toHaveLength(11);
   });
 
-  it('PRI-935: an entry larger than the whole budget is never reachable (true starvation)', async () => {
+  it('PR-1894: an entry larger than the whole budget is never reachable (true starvation)', async () => {
     const workspaceDir = tempWorkspace();
     await seedPromptActivations(workspaceDir, [
       { principleId: 'P_SMALL', text: 'ok' },
@@ -211,7 +211,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     expect(projection.eventuallyInjectedActivationIds).not.toContain('act-P_HUGE');
   });
 
-  it('PRI-935: the shared route genuinely does not rotate and claims no reachability', async () => {
+  it('PR-1894: the shared route genuinely does not rotate and claims no reachability', async () => {
     const workspaceDir = tempWorkspace({ sharedRoute: true });
     await seedPromptActivations(workspaceDir, FIFO_11);
 

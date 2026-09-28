@@ -4,11 +4,11 @@ import { validateApprovalsGrouped } from '../../src/ui/utils/validators.js';
 import { validateApprovalsGroupedData } from '../../src/ui/pages/focus/focus-validation.js';
 
 // The exact live server text (ApprovalsConsoleModel.ts, PRI-890 wording as
-// corrected by PRI-935 — the copy no longer asserts a bare FIFO prefix).
+// corrected by PR-1894 — the copy no longer asserts a bare FIFO prefix).
 const BUDGET_WARNING =
   'injection_budget_excluded: the activation is committed but the prompt injection budget (2000c) is full and this activation is not reachable under the current production selection policy (legacy_fifo_prefix_v1; 3/11 eligible injected, FIFO by activated_at) — this principle will NOT enter agent behavior until capacity frees up. nextAction=review the activations page and deactivate superseded principles';
 
-// PRI-935: the live workspace case — a fair-rotation route where the new
+// PR-1894: the live workspace case — a fair-rotation route where the new
 // activation is merely rotated out of the current window.
 const QUEUED_WARNING =
   'injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (2000c; 7 of 19 eligible activations injected this round; production selection policy fair_rotation_v1). Fair rotation advances the window by one position per recorded user turn, so this principle WILL enter agent behavior within at most 19 consecutive user turns of a continuously advancing session — deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry';
@@ -36,7 +36,7 @@ describe('localizeApprovalWarning (PRI-908)', () => {
     expect(result.body).toBe('pages.focus.approveWarning.budgetExcludedBodySimple');
   });
 
-  it('maps injection_budget_queued to rotation-aware copy and offers NO deactivation CTA (PRI-935)', () => {
+  it('maps injection_budget_queued to rotation-aware copy and offers NO deactivation CTA (PR-1894)', () => {
     const result = localizeApprovalWarning(QUEUED_WARNING, fakeT);
     expect(result.code).toBe('injection_budget_queued');
     expect(result.title).toBe('pages.focus.approveWarning.queuedTitle');
@@ -44,7 +44,7 @@ describe('localizeApprovalWarning (PRI-908)', () => {
       `pages.focus.approveWarning.queuedBody?${JSON.stringify({ budget: 2000, turns: 19 })}`,
     );
     // Rotation means the principle arrives on its own — sending the Owner to
-    // deactivate healthy older principles here is the exact defect PRI-935 fixes.
+    // deactivate healthy older principles here is the exact defect PR-1894 fixes.
     expect(result.activationAction).toBe(false);
     expect(result.detail).toBe(QUEUED_WARNING);
   });
@@ -99,7 +99,7 @@ describe('validateApprovalsGrouped promptInjection (PRI-908)', () => {
     expect(result?.promptInjection).toEqual({ budget: 2000, usedChars: 1940, truncated: true });
   });
 
-  it('carries fitsPromptBudget through when it is a real boolean (PRI-935 review fix)', () => {
+  it('carries fitsPromptBudget through when it is a real boolean (PR-1894 review fix)', () => {
     const withFits = validateApprovalsGrouped({
       ...base,
       groups: [{ principleId: 'P1', principleTitle: 't', status: 'pending', records: [], fitsPromptBudget: true }],
@@ -123,7 +123,7 @@ describe('validateApprovalsGrouped promptInjection (PRI-908)', () => {
     expect(result?.groups[0]?.fitsPromptBudget).toBeUndefined();
   });
 
-  it('carries the PRI-935 rotation facts when present (productionRotates drives truthful badge copy)', () => {
+  it('carries the PR-1894 rotation facts when present (productionRotates drives truthful badge copy)', () => {
     const result = validateApprovalsGrouped({
       ...base,
       promptInjection: { budget: 2000, usedChars: 1947, truncated: true, productionRotates: true, eligibleCount: 19 },

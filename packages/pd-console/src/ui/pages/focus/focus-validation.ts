@@ -66,7 +66,7 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     if (typeof description !== "string") return null;
     candidateDescription = description;
   }
-  // PRI-935: fitsPromptBudget is optional. ERR-009 discipline — present but
+  // PR-1894: fitsPromptBudget is optional. ERR-009 discipline — present but
   // wrong type fails loud; absent stays undefined, which the badge treats as
   // "unknown size → do not promise rotation".
   let fitsPromptBudget: boolean | undefined;
