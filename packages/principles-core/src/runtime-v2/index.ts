@@ -387,6 +387,12 @@ export type {
 export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
 /** Deterministic diagnostician task id (`diagnosis_<painId>`) — the pain→task dedup key (Codex Governance Closure §13). */
 export { createDiagnosticianTaskId } from './pain-signal-bridge.js';
+/**
+ * PRI-935: single authority for the pain_diagnoses attribution ledger write.
+ * The bridge and the CLI diagnosis paths (`pd diagnose run`, `pd pain retry`)
+ * all persist through this function; callers own the feature-flag gate.
+ */
+export { persistPainDiagnosis } from './pain-signal-bridge.js';
 // PRI-642 SPEC §9: persisted `painIngress.v1` contract — written by the
 // bridge beside the legacy top-level fields, re-validated on re-entry.
 export {
@@ -427,7 +433,7 @@ export { recordPainSignalObservability, appendEventLogLine } from './pain-signal
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
 export { sanitizeString, sanitizeValue, sanitizeToolParams, convergePath, MAX_EVIDENCE_VALUE_CHARS } from './evidence-sanitizer.js';
 /** @deprecated Internal factory — use PainToPrincipleService constructor instead */
-export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
+export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, mapBridgeTelemetryToStoreEvent, createBridgeTelemetryEventEmitter, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
 
 // Pain-to-Principle service facade (PRI-12)
 export { PainToPrincipleService } from './pain-to-principle-service.js';
@@ -1298,7 +1304,7 @@ export type {
 
 // ── Recovery Sweep Service (PRI-149 Tier 2) ────────────────────────────────
 
-export { createRecoverySweepService } from './recovery-sweep-service.js';
+export { createRecoverySweepService, recoverFailedTask } from './recovery-sweep-service.js';
 export type { RecoverySweepService, RecoverySweepServiceHandle, FailedTaskRecoveryInfo, FailedTaskRecoveryResult } from './recovery-sweep-service.js';
 
 // Owner authority reset for needs_human_review tasks (shared by CLI retry and
