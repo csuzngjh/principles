@@ -1,11 +1,14 @@
-# PRI-917 Reuse Before Create — SPEC v0.1
+# PRI-917 Reuse Before Create — SPEC v0.1.1
 
-> **Status:** Proposed — Reality Audit PASS, pending Owner Review
+> **Status:** Implementation Ready — Reality Audit PASS, Owner Decision OD-PRI917-01 recorded
 > **Scope:** Principle Reuse Decision Loop Phase 1
 > **Change type:** Runtime behavior correction (knowledge governance)
 > **Historical migration:** None
 > **New SSOT:** None
-> **Implementation:** NOT authorized by this SPEC
+> **Persistence route:** R1 (approved) — evidence accumulation on the existing Principle, no schema migration
+> **Implementation:** NOT started by this SPEC revision; PR1 is the next step
+>
+> **Revision v0.1.1 (2026-09-28):** records Owner Decision OD-PRI917-01 (R1 approved). Resolves the §12 persistence fork, restates INV-R05 as *No Semantic Mutation on Reuse*, and reframes Slice 3 as *reuse evidence persistence*. Retrieval design, Top-3 proposal, Owner review flow, failure semantics, test matrix, rollback, and complexity budget are unchanged.
 
 ---
 
@@ -139,21 +142,25 @@ interface PrincipleReuseDecision {
 
 ## 12. Persistence / Relationship Model
 
-**Audit E — the one genuine architectural fork.** No existing durable model has a typed, queryable home for "Candidate C resolved by existing Principle P":
+**Route Selected: R1** (Owner Decision OD-PRI917-01, 2026-09-28). No existing durable model has a typed, queryable home for "Candidate C resolved by existing Principle P":
 
 - `activation_decisions` is a general governance table (`subject_kind` discriminator, `decision`, `reason_code`, `note`, `principal_kind`, `operator_*`, `authentication_method`, `evidence_snapshot_id`, `decided_at`) — but has **no `candidate_id` and no `principle_id` column**.
 - `principle_applications` carries `principle_id` but is *effect* semantics (a principle was applied), and is explicitly not an identity source.
 - `principle_candidates` has no resolved-principle column (`status` ∈ {pending, consumed}).
 - Ledger `Principle.derivedFromPainIds` is an existing, populated lineage field meaning "this Principle is supported by these Pains".
 
-Two viable routes, differing **only** in whether existing schema is touched:
+Phase 1 therefore splits the two concerns across the two authorities that already own them, and **creates no relationship entity**:
 
-| Route | Mechanism | New schema | Cost |
-|---|---|---|---|
-| **R1 (zero schema)** | Append the Pain to the reused Principle's existing `derivedFromPainIds`; candidate reaches the Principle through the bridge's `painId` ↔ `candidateIds` linkage. Governance trail additionally written to `activation_decisions` with `subject_kind='principle_reuse'` and the principle id in `note`. | **NO** | Mutates the reused Principle's lineage array. |
-| **R2 (schema change)** | Add a typed relation (e.g. `principle_candidates.resolved_principle_id` or a dedicated table) holding `candidateId → principleId` canonically. | **YES** (new column or table) | Migration + new durable model to govern. |
+| Concern | Owner | What is written |
+|---|---|---|
+| **Principle fact + supporting lineage evidence** | Principle Ledger (`_tree.principles`) | Append the new Pain to the reused Principle's existing `derivedFromPainIds`. This is **evidence accumulation** — the Principle was validated again by a new real occurrence — not a change to what the Principle says. |
+| **Governance process audit** | `activation_decisions` | Who decided reuse (`principal_kind` / `operator_kind` / `operator_id`), why (`reason_code` / `note` / `effectDescription` semantics), when (`decided_at`), and the decision evidence (`evidence_snapshot_id`). |
 
-**R1 is recommended** (zero new schema, reuses an existing lineage field whose semantics already mean exactly this), **but it requires an Owner ruling** on whether appending to `derivedFromPainIds` counts as "modification of the existing Principle" under INV-R05. This SPEC does not decide that. If the Owner rules that R1 violates INV-R05, R2 applies and the task's **S4 stop condition is triggered** (new persisted schema required) — the decision then returns to the Owner rather than being made here.
+The Candidate reaches the Principle through the bridge's existing `painId` ↔ `candidateIds` linkage; no new edge is materialised.
+
+**`activation_decisions` is the audit trail, not the relation source.** It must never be treated as the canonical "Candidate → Principle" relation: it has no typed key for either side, and a relation reconstructed from free text is not a relation. The canonical relation is the ledger lineage plus the existing bridge linkage.
+
+**Consequence:** no schema migration is required, and no new table, column, or relationship model is introduced (OD-PRI917-01).
 
 ## 13. State Transitions
 
@@ -225,7 +232,22 @@ Gate inside `CandidateIntakeService.intake()` between step 4c and step 5. All fo
 - **INV-R02 Canonical Identity** — reuse targets are canonical Principle Ledger UUIDs.
 - **INV-R03 No Silent Duplicate Creation** — an unresolved reuse decision never silently proceeds to Create.
 - **INV-R04 Owner Authority** — the final verdict goes through the existing governance authority.
-- **INV-R05 No Mutation on Reuse** — reuse does not modify Principle text, version, identity, or activation. *(Whether lineage append counts as mutation is the Owner ruling in §12.)*
+- **INV-R05 No Semantic Mutation on Reuse** — reuse accumulates evidence; it never changes what the Principle means.
+
+  Reuse **MUST NOT** modify:
+
+  - Principle `text`
+  - Principle meaning / semantic claim
+  - Principle identity (`id`)
+  - Principle `version`
+  - Principle activation state
+
+  Reuse **MAY** append:
+
+  - `derivedFromPainIds` (supporting lineage evidence)
+  - supporting lineage evidence generally
+
+  Rationale: a new Pain that resolves to an existing Principle is a *new occurrence validating that Principle again* — evidence accumulation, not semantic mutation. The Principle continues to say exactly what it said before.
 - **INV-R06 Relationship Is Durable** — reuse leaves a traceable `Candidate/Pain → existing Principle` fact.
 - **INV-R07 Idempotent Replay** — replaying the same candidate produces no new Principle and no new logical decision.
 - **INV-R08 Fail Closed** — invalid target UUID, missing authority, or malformed decision ⇒ no Create, no Reuse, explicit failure.
@@ -253,31 +275,34 @@ Disable the gate at the single insertion point (route the candidate straight to 
 
 ```text
 new DB:                      NO
-new table:                   NO (R1) / OWNER DECISION (R2)
-new column:                  NO (R1) / OWNER DECISION (R2)
+new table:                   NO
+new column:                  NO
 new file-based state:        NO
 new background process:      NO
 new LLM subsystem:           NO (reuses the existing agent/LLM path)
 new vector store:            NO
 new identity source:         NO
 new approval subsystem:      NO (extends ApprovalRequest + existing Console routes)
+new relationship model:      NO (R1: evidence accumulation on existing authorities)
 new public SSOT:             NO
 ```
 
-Two items are conditional on the §12 ruling and are the only possible YES.
+Unconditionally all-NO under R1 (OD-PRI917-01). Reuse reuses the Principle Ledger's existing `derivedFromPainIds` lineage field and the existing `activation_decisions` governance table; no new table, column, edge type, or relationship entity is introduced, and no schema migration is required.
 
 ## 23. Open Questions
 
-1. **Does appending to `derivedFromPainIds` violate INV-R05?** (R1 vs R2; decides whether this is schema-free or S4-blocked.)
-2. Should `archived` principles be reusable after explicit Owner reinstatement? Phase 1 says no.
-3. Retrieval threshold and shortlist size — Phase 1 suggests Top-3; the exact cut is a tuning decision, not an architecture one.
-4. Whether the proposal should also be surfaced for non-principle kinds later (Phase 1: no).
+1. Should `archived` principles be reusable after explicit Owner reinstatement? Phase 1 says no.
+2. Retrieval threshold and shortlist size — Phase 1 suggests Top-3; the exact cut is a tuning decision, not an architecture one.
+3. Whether the proposal should also be surfaced for non-principle kinds later (Phase 1: no).
 
-## 24. Implementation Plan (slices, not authorized)
+## 24. Implementation Plan (slices — PR1 is the next step)
 
 - **Slice 1** — reuse domain contract + read-only retrieval over `loadLedger` (add a list-all read to the adapter; no new repository).
 - **Slice 2** — `CandidateIntakeService` reuse gate (single insertion point).
-- **Slice 3** — durable reuse relation (R1 lineage append + `activation_decisions` governance row).
+- **Slice 3** — reuse evidence persistence (R1):
+  - Append lineage evidence: the Pain is added to the reused Principle's existing `derivedFromPainIds`.
+  - Record the governance decision in `activation_decisions` (who / why / when / evidence).
+  - **No relationship entity is created** — no new table, no new column, no new edge type.
 - **Slice 4** — Console / governance decision surface (proposal display + reuse|create decision).
 - **Slice 5** — production E2E + telemetry.
 
@@ -287,9 +312,26 @@ No "Principle Knowledge Platform" groundwork.
 
 1. **Problem** — every eligible candidate becomes a new Principle; cross-candidate semantic reuse does not exist.
 2. **Existing mechanism reused** — `CandidateIntakeService`, Principle Ledger, `loadLedger`, `ApprovalQueue` + Console governance routes, `activation_decisions`, `derivedFromPainIds`, `principle_applications` (evidence only).
-3. **Minimal new mechanism** — a read-only retrieval + advisory proposal in front of the existing write, plus one durable relation.
-4. **Complexity** — all NO except the §12-conditional table/column.
+3. **Minimal new mechanism** — a read-only retrieval + advisory proposal in front of the existing write, plus reuse evidence persistence on existing authorities.
+4. **Complexity** — all NO; R1 (OD-PRI917-01) requires no schema migration.
 5. **Verification** — Audit A–E against live `1f5f8307`; no code written.
 6. **Risk** — retrieval quality determines proposal quality; a weak shortlist degrades to CREATE, which is the status quo, so the failure mode is safe.
 7. **Rollback** — remove the gate; pre-existing path is the default.
 8. **Follow-ups deliberately excluded** — Phase 2 EXTEND/MERGE, Codex parity, budget fairness clock.
+
+---
+
+## 26. Owner Decisions
+
+### OD-PRI917-01 — Persistence route for reuse (R1 approved)
+
+- **Date:** 2026-09-28
+- **Decided by:** Owner
+- **Decision:** R1 approved — reuse is recorded as **accumulation of supporting evidence** on the existing Principle, not as a mutation of Principle semantics.
+- **Reasoning:** Reuse means the system recognized that an already-learned Principle covers a new Pain. The new Pain is a fresh real-world validation of that Principle, so it belongs in the Principle's supporting lineage (`derivedFromPainIds`). What the Principle *says* is unchanged — the Principle is not rewritten, re-versioned, or re-scoped. Therefore appending lineage evidence is evidence accumulation, not semantic mutation.
+- **Effect on this SPEC:**
+  - §12 is settled on R1; no schema migration, no new table, no new column, no relationship entity.
+  - INV-R05 is restated as **No Semantic Mutation on Reuse**, with an explicit MUST-NOT (text / meaning / identity / version / activation state) and MAY-APPEND (`derivedFromPainIds`, supporting lineage evidence) split.
+  - Slice 3 becomes **reuse evidence persistence**.
+  - The Ledger owns Principle fact + supporting lineage evidence; `activation_decisions` owns the governance process audit (who / why / when / evidence) and is explicitly **not** the Candidate → Principle relation source.
+- **Impact:** No schema migration required. Complexity budget is now unconditionally all-NO.
