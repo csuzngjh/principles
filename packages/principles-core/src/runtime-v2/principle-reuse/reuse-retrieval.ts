@@ -10,7 +10,8 @@
  * @see docs/specs/PRI-917-reuse-before-create-v0.1.md (SPEC v0.2)
  */
 
-import { loadLedger } from '../../principle-tree-ledger.js';
+import { existsSync, readFileSync } from 'fs';
+import { getLedgerFilePathPublic, loadLedger } from '../../principle-tree-ledger.js';
 import { isPrincipleLedgerEligibleKind } from '../store/candidate/recommendation-kind-resolver.js';
 import { PRINCIPLE_STATUSES } from '../types/principle-enums.js';
 import type { Principle } from '../types/principle-schema.js';
@@ -55,14 +56,35 @@ function toReusablePrinciple(principle: Principle): ReusablePrinciple {
   };
 }
 
+function assertLedgerReadable(stateDir: string): void {
+  const filePath = getLedgerFilePathPublic(stateDir);
+  if (!existsSync(filePath)) return; // no corpus yet — nothing to reuse
+  const raw = readFileSync(filePath, 'utf-8');
+  if (raw.trim() === '') return; // an empty document is an empty corpus
+  // Throws on malformed JSON so the caller fails the gate rather than silently
+  // treating unreadable knowledge as absent knowledge.
+  JSON.parse(raw);
+}
+
 /**
  * Read every reusable Principle from the canonical ledger.
  *
  * Read-only: opens the ledger document and filters in memory. No caching is
  * introduced here — the corpus is small (order 10^2) and a cache would be a
  * second place where ledger truth could go stale.
+ *
+ * Fail-closed on an UNREADABLE corpus. The shared `loadLedger` deliberately
+ * swallows a parse error and returns an empty store, which is indistinguishable
+ * from "nothing has been learned yet" — and the write that follows would then
+ * overwrite the unreadable file. Reporting that as an empty candidate set is
+ * precisely the silent duplicate this whole path exists to prevent, so an
+ * existing-but-unparseable ledger throws here instead.
+ *
+ * A genuinely MISSING ledger is not a failure: there is simply nothing to
+ * reuse yet, and blocking the first write of a fresh workspace would be wrong.
  */
 export function readReusablePrinciples(stateDir: string): ReusablePrinciple[] {
+  assertLedgerReadable(stateDir);
   const store = loadLedger(stateDir);
   const entries = Object.values(store.tree.principles) as Principle[];
   return entries
