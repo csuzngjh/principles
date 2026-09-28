@@ -1,16 +1,18 @@
-# PRI-917 Reuse Before Create — SPEC v0.2
+# PRI-917 Reuse Before Create — SPEC v0.2.1
 
-> **Status:** Implementation Ready — Reality Audit PASS, Owner Decisions OD-PRI917-01 + OD-PRI917-02 recorded
+> **Status:** Implementation Ready — Reality Audit PASS; Owner Decisions OD-PRI917-01, OD-PRI917-02, OD-PRI917-03 recorded
 > **Scope:** Principle Reuse Decision Loop Phase 1
 > **Change type:** Runtime behavior correction (knowledge governance)
 > **Historical migration:** None
 > **New SSOT:** None
-> **Persistence route:** additive `reuseEvidence[]` on the existing Principle (OD-PRI917-02) — no migration
-> **Implementation:** NOT started by this SPEC revision; PR1 is the next step
+> **Persistence route:** `Principle.reuseEvidence[]` — additive optional field on the existing Principle (OD-PRI917-03)
+> **Implementation:** NOT started by this SPEC revision
 >
 > **Revision v0.1.1 (2026-09-28):** recorded OD-PRI917-01 (R1 approved). Superseded on the persistence question by v0.2.
 >
-> **Revision v0.2 (2026-09-28):** a pre-implementation reality check against live production data **refuted R1**. `Principle.derivedFromPainIds` does not hold supporting Pain ids — it holds **source Candidate ids**, and it is simultaneously the intake idempotency index, the candidate→principle join key, and the Console evidence-presence signal. §12 is rewritten around a new additive `reuseEvidence[]` field; OD-PRI917-02 records the correction. INV-R05 (No Semantic Mutation) is unchanged and remains correct. Retrieval design, Top-3 proposal, Owner review flow, failure semantics, test matrix, and rollback are unchanged.
+> **Revision v0.2 (2026-09-28):** a pre-implementation reality check **refuted R1**. `Principle.derivedFromPainIds` does not hold supporting Pain ids — it holds **source Candidate ids**, and is simultaneously the intake idempotency index, the candidate→principle join key, and the Console evidence-presence signal. §12 was rewritten around `reuseEvidence[]` (OD-PRI917-02).
+>
+> **Revision v0.2.1 (2026-09-28):** records the **PR3A stop reason** (OD-PRI917-03). `activation_decisions` was investigated as the governance audit sink for the Owner decision and **rejected**: its `subject_kind` and `decision` are closed by CHECK constraints to the activation lifecycle, and it holds no typed Candidate→Principle relation. `reuseEvidence[]` is therefore the **authoritative and only** persistence for both the reuse decision and its relation, and **PR3B (persistence) now precedes PR3A (decision surface)**. Retrieval, Top-3 proposal, Owner review flow, failure semantics, test matrix, rollback, and INV-R05 are unchanged.
 
 ---
 
@@ -157,6 +159,24 @@ R1 assumed `Principle.derivedFromPainIds` holds supporting Pain ids and is a saf
 
 Appending therefore either corrupts the idempotency index (candidate id) or launders a Pain id into a field four consumers read as candidate ids (pain id). Neither is evidence accumulation; both are semantic pollution.
 
+#### Reality Correction — `activation_decisions` rejected as the reuse sink (OD-PRI917-03)
+
+PR3A investigated `activation_decisions` as the governance audit sink for the Owner's reuse decision, and **rejected it**. It models **activation lifecycle** decisions, not **knowledge reuse** decisions:
+
+- `subject_kind` is closed by a CHECK constraint to `('activation','all_live_rulecode')`;
+- `decision` is closed by a CHECK constraint to the nine activation-governance values (`continue_observing`, `promote_live`, `recover_to_shadow`, `supersede`, …);
+- a compound CHECK further pins which of `activation_id / artifact_id / artifact_digest` must be non-null per subject kind;
+- there is **no typed column** for a Candidate→Principle relation.
+
+Reusing `activation` or `all_live_rulecode` to record a reuse decision would be a **false record in the audit ledger** — worse than no record — and widening those CHECKs would require rebuilding a live production table (a migration).
+
+**Architecture boundary (binding):**
+
+| Store | MUST | MUST NOT |
+|---|---|---|
+| `activation_decisions` | record activation governance decisions | store the Candidate → Principle reuse **relationship**; store reuse **decision semantics** |
+| `Principle.reuseEvidence[]` | record reuse relations **and** their decision/evidence | encode anything about Principle semantics (see INV-R05) |
+
 #### Selected model
 
 Reuse evidence is carried by a **new additive optional array on the existing Principle**, leaving every existing field and consumer untouched:
@@ -164,23 +184,18 @@ Reuse evidence is carried by a **new additive optional array on the existing Pri
 ```ts
 // additive; absent on all pre-existing entries, read as []
 reuseEvidence?: Array<{
-  painId: string;
-  candidateId: string;
-  decisionId: string;   // → activation_decisions.decision_id
+  painId: string;                  // the Pain that re-validated this Principle
+  candidateId: string;             // the Candidate that was resolved by reuse
+  reusedFromCandidateId?: string;  // reserved; NOT written by Phase 1 (see Open Questions)
+  decisionId?: string;             // id of the decision that authorised the reuse
+  decidedBy: string;               // owner id of the decision maker
   createdAt: string;
 }>;
 ```
 
-Responsibility split is unchanged from OD-PRI917-01 and remains correct:
+`reuseEvidence[]` is the **authoritative and only** persistence for both the reuse relation and the decision that created it. There is no second copy of this fact anywhere: no new table, no new relationship entity, no parallel ledger, and **no reuse decision is written to `activation_decisions`**.
 
-| Concern | Owner | What is written |
-|---|---|---|
-| **Reuse relation + its evidence** | Principle Ledger (`_tree.principles`) | Append one `reuseEvidence` entry to the reused Principle. Purely additive: the Principle still says exactly what it said, and its version, identity, and activation state are untouched. |
-| **Governance process audit** | `activation_decisions` | Who decided reuse (`principal_kind` / `operator_kind` / `operator_id`), why (`reason_code` / `note`), when (`decided_at`), evidence (`evidence_snapshot_id`). Referenced by `decisionId`. |
-
-`activation_decisions` remains the audit trail, not the relation source: it has no typed key for either side, and a relation reconstructed from free text is not a relation.
-
-**Why this needs no migration:** the ledger is a JSON document (`principle_training_state.json`) and `loadLedger` performs no TypeBox validation on read. A new **optional** field is invisible to all 127 existing entries (read as `[]`), and no existing writer, reader, or UI surface changes. `derivedFromPainIds` keeps its current content, meaning, and every consumer's behaviour.
+**Why this needs no migration:** the ledger is a JSON document (`principle_training_state.json`) and `loadLedger` performs no TypeBox validation on read. A new **optional** field is invisible to all existing entries (read as `[]`), and no existing writer, reader, or UI surface changes. `derivedFromPainIds` keeps its current content, meaning, and every consumer's behaviour.
 
 **Bounded growth:** `reuseEvidence` only grows on an actual reuse decision (rare), unlike `derivedFromPainIds`, which is an index touched on every intake.
 
@@ -257,7 +272,11 @@ Gate inside `CandidateIntakeService.intake()` between step 4c and step 5. All fo
 - **INV-R04 Owner Authority** — the final verdict goes through the existing governance authority.
 - **INV-R05 No Semantic Mutation on Reuse** — reuse accumulates evidence; it never changes what the Principle means.
 
-  Reuse **MUST NOT** modify:
+  Mutating `reuseEvidence[]` — **ALLOWED**:
+
+  - append one evidence entry for a reuse decision
+
+  Mutating the Principle — **FORBIDDEN**:
 
   - Principle `text`
   - Principle meaning / semantic claim
@@ -265,10 +284,9 @@ Gate inside `CandidateIntakeService.intake()` between step 4c and step 5. All fo
   - Principle `version`
   - Principle activation state
 
-  Reuse **MAY** append:
+  Mutating other lineage fields — **FORBIDDEN**:
 
-  - `derivedFromPainIds` (supporting lineage evidence)
-  - supporting lineage evidence generally
+  - `derivedFromPainIds` in any way (it is the candidate-provenance / idempotency index; see §12 "Why R1 failed")
 
   Rationale: a new Pain that resolves to an existing Principle is a *new occurrence validating that Principle again* — evidence accumulation, not semantic mutation. The Principle continues to say exactly what it said before.
 - **INV-R06 Relationship Is Durable** — reuse leaves a traceable `Candidate/Pain → existing Principle` fact.
@@ -311,23 +329,30 @@ new field on existing entity: YES (one optional array on `Principle`)
 new public SSOT:             NO
 ```
 
-All-NO except one additive optional field on an existing entity. Under `reuseEvidence[]` (OD-PRI917-02) reuse writes a new optional array on the reused Principle in the existing JSON ledger document, and reuses the existing `activation_decisions` governance table. No new table, no relational column, no edge type, no relationship entity, and no schema migration: `loadLedger` performs no TypeBox validation on read, so all 127 existing entries are unaffected and read the field as empty. `derivedFromPainIds` and every one of its consumers are untouched.
+All-NO except one additive optional field on an existing entity. Under `reuseEvidence[]` (OD-PRI917-02/03) reuse writes a new optional array on the reused Principle in the existing JSON ledger document, and **nothing else**. No new table, no new database, no relational column, no edge type, no relationship entity, no second SSOT, and no schema migration: `loadLedger` performs no TypeBox validation on read, so all existing entries are unaffected and read the field as empty. `derivedFromPainIds` and every one of its consumers are untouched, and `activation_decisions` is **not written at all** for reuse (its CHECK constraints make reuse unrepresentable there — §12).
 
 ## 23. Open Questions
 
 1. Should `archived` principles be reusable after explicit Owner reinstatement? Phase 1 says no.
 2. Retrieval threshold and shortlist size — Phase 1 suggests Top-3; the exact cut is a tuning decision, not an architecture one.
 3. Whether the proposal should also be surfaced for non-principle kinds later (Phase 1: no).
+4. `reuseEvidence[].reusedFromCandidateId` — the field is reserved but **Phase 1 does not write it**, because its precise semantics for repeat reuse of the same Principle are not yet settled. It must not be populated until that meaning is agreed, rather than guessed at write time.
 
-## 24. Implementation Plan (slices — PR1 is the next step)
+## 24. Implementation Plan (slices — Slice 3B is the next step)
 
-- **Slice 1** — reuse domain contract + read-only retrieval over `loadLedger` (add a list-all read to the adapter; no new repository).
-- **Slice 2** — `CandidateIntakeService` reuse gate (single insertion point).
-- **Slice 3** — reuse evidence persistence (`reuseEvidence[]`, OD-PRI917-02):
-  - Append one entry to the reused Principle's new optional `reuseEvidence[]` (`painId`, `candidateId`, `decisionId`, `createdAt`).
-  - Record the governance decision in `activation_decisions` (who / why / when / evidence), referenced by `decisionId`.
-  - **No relationship entity is created, and `derivedFromPainIds` is not touched** — no new table, no relational column, no edge type, no schema migration.
-- **Slice 4** — Console / governance decision surface (proposal display + reuse|create decision).
+Delivered so far:
+
+- **Slice 1 (PR1)** — reuse domain contract + deterministic shortlist + read-only retrieval over `loadLedger`.
+- **Slice 2 (PR2)** — `CandidateIntakeService` reuse gate: proposal generation, opt-in decision injection, fail-closed semantics.
+
+Remaining, **reordered by OD-PRI917-03**:
+
+- **Slice 3B (next) — reuse evidence persistence** (`reuseEvidence[]`):
+  - Append one entry to the reused Principle's new optional `reuseEvidence[]` (`painId`, `candidateId`, `decidedBy`, `createdAt`, and `decisionId` once the decision id exists).
+  - **No relationship entity is created, and neither `derivedFromPainIds` nor `activation_decisions` is written** — no new table, no relational column, no edge type, no schema migration.
+- **Slice 3A (after 3B) — Owner decision surface** (`pd candidate review`): show the proposal, record `reuse` (append evidence, write nothing else) or `create` (existing intake path, unchanged).
+  - It follows 3B deliberately: a decision surface without an authoritative sink would either fail at write time or be tempted into a false record elsewhere.
+- **Slice 4** — Console / governance presentation of reuse evidence (read-only over the same field).
 - **Slice 5** — production E2E + telemetry.
 
 No "Principle Knowledge Platform" groundwork.
@@ -335,7 +360,7 @@ No "Principle Knowledge Platform" groundwork.
 ## 25. Owner Review Card
 
 1. **Problem** — every eligible candidate becomes a new Principle; cross-candidate semantic reuse does not exist.
-2. **Existing mechanism reused** — `CandidateIntakeService`, Principle Ledger, `loadLedger`, `ApprovalQueue` + Console governance routes, `activation_decisions`, `derivedFromPainIds`, `principle_applications` (evidence only).
+2. **Existing mechanism reused** — `CandidateIntakeService`, Principle Ledger, `loadLedger`, `ApprovalQueue` + Console governance routes, `derivedFromPainIds` (untouched), `principle_applications` (evidence only). `activation_decisions` is deliberately **not** used for reuse.
 3. **Minimal new mechanism** — a read-only retrieval + advisory proposal in front of the existing write, plus a `reuseEvidence[]` entry on the reused Principle.
 4. **Complexity** — all NO except one additive optional field on an existing entity; no migration (OD-PRI917-02).
 5. **Verification** — Audit A–E against live `1f5f8307`; no code written.
@@ -353,7 +378,7 @@ No "Principle Knowledge Platform" groundwork.
 - **Decided by:** Owner
 - **Decision:** R1 approved — reuse is recorded as **accumulation of supporting evidence** on the existing Principle, not as a mutation of Principle semantics.
 - **Reasoning:** Reuse means the system recognized that an already-learned Principle covers a new Pain. The new Pain is a fresh real-world validation of that Principle, so it belongs in the Principle's supporting lineage. What the Principle *says* is unchanged — the Principle is not rewritten, re-versioned, or re-scoped. Therefore appending lineage evidence is evidence accumulation, not semantic mutation.
-- **Still valid:** the *semantic* ruling — reuse is evidence accumulation, never semantic mutation — which is now carried by INV-R05. The Ledger-owns-the-relation / `activation_decisions`-owns-the-audit-trail split also stands.
+- **Still valid:** the *semantic* ruling — reuse is evidence accumulation, never semantic mutation — which is now carried by INV-R05. The "the Ledger owns the relation" half of OD-01's split also stands; the "`activation_decisions` owns the audit trail" half is **superseded by OD-03**, because that table cannot represent a reuse decision at all. The Ledger now carries the relation **and** the decision that made it.
 - **Superseded:** the choice of `derivedFromPainIds` as the carrier. See OD-PRI917-02.
 - **Effect on this SPEC (as originally written):**
   - §12 settled on R1; INV-R05 restated as **No Semantic Mutation on Reuse** (MUST-NOT: text / meaning / identity / version / activation state; MAY-APPEND: lineage evidence); Slice 3 became **reuse evidence persistence**.
@@ -377,3 +402,18 @@ No "Principle Knowledge Platform" groundwork.
 ### Follow-up recorded by the audit (not in scope for PR1)
 
 `derivedFromPainIds` carries two incompatible contracts today (adapter writes `candidateId`; `evolution-reducer` writes `painId`), and `PainEvidenceValidators` / `PrincipleDetailPage` treat its contents as Pain ids. In the live workspace the evolution path has not been exercised (0 Pain-id occurrences), so no live data is corrupted today — but the latent mismatch is real and pre-dates PRI-917. Cleaning it up (rename/split, or correcting the Console labels and validators) is a **separate change** with its own migration and risk surface, and is deliberately **excluded** from PRI-917 Phase 1.
+
+---
+
+### OD-PRI917-03 — Persistence boundary correction: `reuseEvidence[]` is the only reuse sink
+
+- **Date:** 2026-09-28
+- **Decided by:** Owner
+- **Trigger:** PR3A (Owner decision surface) stopped during implementation. A decision surface without an authoritative sink would either fail at write time or be tempted into a false record elsewhere.
+- **Finding:** `activation_decisions` was investigated as the governance audit sink and **rejected**. Its `subject_kind` and `decision` are closed by CHECK constraints to the activation lifecycle (`subject_kind IN ('activation','all_live_rulecode')`, nine `decision` values, plus a compound CHECK pinning `activation_id`/`artifact_id`/`artifact_digest` per subject). It models activation governance, not knowledge reuse, and holds no typed Candidate→Principle relation. Recording reuse under either existing subject kind would be a false record in the audit ledger; widening the constraints would require rebuilding a live production table (a migration).
+- **Decision:**
+  1. `activation_decisions` **MUST** record activation governance, and **MUST NOT** store the Candidate→Principle reuse relationship or reuse decision semantics.
+  2. `Principle.reuseEvidence[]` is the **authoritative and only** persistence for the reuse relation and the decision that created it — including the deciding owner (`decidedBy`), so auditability is carried by the record itself.
+  3. **PR3B (persistence) precedes PR3A (decision surface).**
+- **Effect on this SPEC:** §12 gained the Reality Correction and the binding store boundary; INV-R05 restated as explicit ALLOWED (append `reuseEvidence`) / FORBIDDEN (text, meaning, id, version, activation state, and any `derivedFromPainIds` mutation); §24 reordered; §22 complexity re-evaluated.
+- **Impact:** Still zero new tables, zero migrations, zero `activation_decisions` schema change, zero `derivedFromPainIds` change. The single YES remains one additive optional field on an existing entity.
