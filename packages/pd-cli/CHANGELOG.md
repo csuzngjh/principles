@@ -1,5 +1,25 @@
 # @principles/pd-cli
 
+## 1.152.17
+
+### Patch Changes
+
+- b50ec74: `pd pain retry` no longer dead-ends on a failed diagnosis task: it now
+  recovers the failed diagnostician family (parent + rootcause/distiller/router
+  stages) through the shared recovery authority before re-running, and a
+  surviving `lease_conflict` says so with a nextAction pointing at
+  `pd runtime recovery failed-tasks`. Both CLI diagnosis paths
+  (`pd diagnose run` and `pd pain retry`, including dead-letter replay) now
+  write the `pain_diagnoses` attribution ledger when the
+  `pain_diagnosis_persistence` flag is on — the result reports
+  `attempted` / `disabled` / `skipped_no_pain_lineage` honestly instead of
+  silently dropping the attribution row (PRI-934, PRI-935).
+- Updated dependencies [7421049]
+- Updated dependencies [b50ec74]
+  - @principles/host-runtime@0.7.12
+  - principles-disciple@2.0.7
+  - @principles/core@1.287.7
+
 ## 1.152.16
 
 ### Patch Changes
