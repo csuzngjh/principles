@@ -1938,7 +1938,7 @@ export interface ApprovalGroupData {
   /** Wave 7: human-readable principle text from artifact contentJson, if available */
   candidateDescription?: string;
   /**
-   * PRI-935: whether this candidate's own serialized prompt entry fits the
+   * PR-1894: whether this candidate's own serialized prompt entry fits the
    * injection budget alone. Absent = unknown, which the badge treats as
    * "do not promise rotation".
    */
@@ -1960,7 +1960,7 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   if (Object.hasOwn(v, 'candidateDescription') && isString(v.candidateDescription) && v.candidateDescription.length > 0) {
     result.candidateDescription = v.candidateDescription;
   }
-  // PRI-935: optional fitsPromptBudget. Only a real boolean is propagated; a
+  // PR-1894: optional fitsPromptBudget. Only a real boolean is propagated; a
   // present-but-wrong value is dropped (rc-1/rc-2) so the badge falls back to
   // copy that promises nothing rather than rendering an unverified claim.
   if (Object.hasOwn(v, 'fitsPromptBudget') && typeof v.fitsPromptBudget === 'boolean') {
@@ -1989,7 +1989,7 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
     return null;
   }
   const result: PromptInjectionBudgetStatus = { budget, usedChars, truncated };
-  // PRI-935: these are optional so a pre-PRI-935 server payload still
+  // PR-1894: these are optional so a pre-PR-1894 server payload still
   // validates (backward compatibility). A present-but-invalid value is
   // DROPPED, never propagated (rc-1/rc-2): the UI then falls back to
   // policy-agnostic copy rather than rendering an unverified policy claim.

@@ -676,7 +676,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     const warning = getStringField(approveData, 'warning');
     expect(warning).withContext('Budget exclusion must surface a warning').toBeDefined();
-    // PRI-935: the live plugin-local route ROTATES, so a fresh activation that
+    // PR-1894: the live plugin-local route ROTATES, so a fresh activation that
     // FIFO would drop is queued, not starved. The old assertion expected
     // `injection_budget_excluded` + "deactivate older principles", which is
     // exactly the falsehood this fix removes.
@@ -685,7 +685,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(warning).toContain('deactivating older principles is NOT required');
   });
 
-  // PRI-935: on the shared route (abstraction_layer_v1 ON) the production path
+  // PR-1894: on the shared route (abstraction_layer_v1 ON) the production path
   // deliberately passes no round key, so nothing is merely "queued" — an
   // out-of-window activation IS starved and the FIFO wording is correct. This
   // test flips the flag to prove the branch selects the truthful copy for the
@@ -739,7 +739,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       const res = await fetchJson(`/api/v1/approvals/${starveApproval}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note: 'PRI-935 non-rotating route starvation' }),
+        body: JSON.stringify({ note: 'PR-1894 non-rotating route starvation' }),
       });
       expect(res.status).toBe(200);
 
@@ -757,7 +757,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     }
   });
 
-  // PRI-935 review fix: on a ROTATING route the starvation branch must not
+  // PR-1894 review fix: on a ROTATING route the starvation branch must not
   // label the forecast's own legacy-FIFO policy as "the production selection
   // policy" — production runs fair rotation there. The console holds no round
   // key, so selectionPolicy is legacy_fifo_prefix_v1 while production rotates;
@@ -805,7 +805,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const res = await fetchJson(`/api/v1/approvals/${newApproval}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ note: 'PRI-935 oversized on rotating route' }),
+      body: JSON.stringify({ note: 'PR-1894 oversized on rotating route' }),
     });
     expect(res.status).toBe(200);
 
