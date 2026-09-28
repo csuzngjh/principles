@@ -17,7 +17,7 @@
  */
 
 import type { OpenClawPluginApi, PluginCommandContext } from '../openclaw-sdk.js';
-import { validateWorkspaceDir, type WorkspaceResolutionContext } from '../core/workspace-dir-validation.js';
+import { isDriveQualifiedWorkspacePath, validateWorkspaceDir, type WorkspaceResolutionContext } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import * as path from 'path';
 import * as os from 'os';
@@ -54,7 +54,9 @@ export function resolveCommandWorkspaceDir(
   options?: CommandWorkspaceResolutionOptions,
 ): string {
   // 1. PD explicit sources (owner-declared) take priority over session context
-  const explicit = (options?.explicitPdResolver ?? resolveExplicitPdSources)();
+  const injectedExplicit = options?.explicitPdResolver;
+  const declared = injectedExplicit ? null : resolveExplicitPdSourcesWithDiagnostics();
+  const explicit = injectedExplicit ? injectedExplicit() : declared?.resolved ?? null;
   if (explicit) {
     if (ctx.workspaceDir && path.resolve(ctx.workspaceDir) !== path.resolve(explicit.workspaceDir)) {
       api.logger.warn(
@@ -63,13 +65,23 @@ export function resolveCommandWorkspaceDir(
         `If this is wrong, update ~/.openclaw/principles-disciple.json or unset PD_WORKSPACE_DIR/OPENCLAW_WORKSPACE.`,
       );
     }
+    const rejectionWarning = describeRejectedCandidates(declared?.rejected ?? [], explicit.source);
+    if (rejectionWarning) {
+      api.logger.warn(`[PD:Command] ${rejectionWarning}`);
+    }
     return explicit.workspaceDir;
   }
 
   // 2. Direct from command context (set by OpenClaw for current session)
   if (ctx.workspaceDir) {
     const issue = validateWorkspaceDir(ctx.workspaceDir);
-    if (!issue) return ctx.workspaceDir;
+    if (!issue) {
+      const rejectionWarning = describeRejectedCandidates(declared?.rejected ?? [], 'openclaw_context');
+      if (rejectionWarning) {
+        api.logger.warn(`[PD:Command] ${rejectionWarning}`);
+      }
+      return ctx.workspaceDir;
+    }
     // Validation failed — fail immediately, do not silently fall back
     const errorMsg = `[PD:Command] ctx.workspaceDir="${ctx.workspaceDir}" is invalid: ${issue}`;
     api.logger.error(errorMsg);
@@ -165,7 +177,15 @@ export interface CanonicalWorkspaceResult {
 
 const PD_CONFIG_FILENAME = 'principles-disciple.json';
 
-function loadWorkspaceFromPdConfigFile(): string | null {
+/**
+ * Find the first usable `workspace` pointer among the known config locations.
+ *
+ * A candidate file whose pointer cannot be trusted is skipped and the scan
+ * continues: refusing the whole `pd_config` source because the first file holds
+ * a bad value would ignore a perfectly good pointer further down the list.
+ * Refusals are pushed into `rejected` so the caller can report them.
+ */
+function loadWorkspaceFromPdConfigFile(rejected: RejectedWorkspaceCandidate[]): string | null {
   const candidates = [
     path.join(os.homedir(), '.openclaw', PD_CONFIG_FILENAME),
     path.join(os.homedir(), '.principles', PD_CONFIG_FILENAME),
@@ -181,7 +201,12 @@ function loadWorkspaceFromPdConfigFile(): string | null {
         if (Object.hasOwn(parsed, 'workspace')) {
           const workspaceValue = (parsed as Record<string, unknown>)['workspace'];
           if (typeof workspaceValue === 'string' && workspaceValue.trim()) {
-            return workspaceValue.trim();
+            const value = workspaceValue.trim();
+            if (!isDriveQualifiedWorkspacePath(value)) {
+              rejected.push({ source: 'pd_config', value, reason: 'not_absolute' });
+              continue;
+            }
+            return value;
           }
         }
       }
@@ -192,29 +217,97 @@ function loadWorkspaceFromPdConfigFile(): string | null {
   return null;
 }
 
+/** A declared workspace candidate that was refused, with why. */
+export interface RejectedWorkspaceCandidate {
+  source: CanonicalWorkspaceSource;
+  value: string;
+  reason: 'not_absolute' | 'rejected_by_validation';
+}
+
+interface DeclaredWorkspaceResolution {
+  resolved: CanonicalWorkspaceResult | null;
+  rejected: RejectedWorkspaceCandidate[];
+}
+
+/** Reads one declared candidate; may record its own refusals into `rejected`. */
+type DeclaredCandidateReader = (rejected: RejectedWorkspaceCandidate[]) => string | null | undefined;
+
+/**
+ * Resolve owner-declared workspace candidates in priority order.
+ *
+ * A candidate that does not name one fixed directory is REJECTED instead of
+ * resolved: path.resolve() turns a drive-relative or separator-less value
+ * (e.g. "D:.openclawworkspace" — what a Windows path becomes when its
+ * backslashes are lost in transit) into a plausible absolute path that depends
+ * on the process CWD, and anchors a root-relative value such as "\workspace"
+ * to whichever drive the process is on. Either way governance state is aimed
+ * at a directory that depends on who is reading. Skipping to the next source
+ * degrades safely; resolving it does not.
+ *
+ * A rejected candidate is reported, never swallowed: a silent fallback that
+ * changes which directory owns governance state is the same class of problem
+ * this guard exists to prevent.
+ *
+ * Candidates are read lazily so a higher-priority source still short-circuits
+ * the file read behind it — this runs per hook event.
+ */
+function resolveDeclaredWorkspaceDir(
+  candidates: ReadonlyArray<readonly [CanonicalWorkspaceSource, DeclaredCandidateReader]>,
+): DeclaredWorkspaceResolution {
+  const rejected: RejectedWorkspaceCandidate[] = [];
+
+  for (const [source, read] of candidates) {
+    const raw = read(rejected);
+    if (typeof raw !== 'string') continue;
+    const value = raw.trim();
+    if (!value) continue;
+    if (!isDriveQualifiedWorkspacePath(value)) {
+      rejected.push({ source, value, reason: 'not_absolute' });
+      continue;
+    }
+    const dir = path.resolve(value);
+    if (!validateWorkspaceDir(dir)) {
+      return { resolved: { workspaceDir: dir, source }, rejected };
+    }
+    rejected.push({ source, value, reason: 'rejected_by_validation' });
+  }
+
+  return { resolved: null, rejected };
+}
+
+/** The owner-declared candidates, in priority order, each read lazily. */
+function declaredWorkspaceCandidates(): ReadonlyArray<readonly [CanonicalWorkspaceSource, DeclaredCandidateReader]> {
+  return [
+    ['pd_env', () => process.env.PD_WORKSPACE_DIR],
+    ['openclaw_env', () => process.env.OPENCLAW_WORKSPACE],
+    ['pd_config', (rejected) => loadWorkspaceFromPdConfigFile(rejected)],
+  ];
+}
+
+/**
+ * Describe refused candidates for the operator log. `fallback` is the source
+ * that was actually used, so the line states where resolution landed — not
+ * only that something was refused.
+ */
+function describeRejectedCandidates(
+  rejected: readonly RejectedWorkspaceCandidate[],
+  fallback: string,
+): string | undefined {
+  if (rejected.length === 0) return undefined;
+  const details = rejected
+    .map((r) => `${r.source} (value="${r.value}", reason=${r.reason})`)
+    .join(', ');
+  return (
+    `Workspace pointer rejected, falling back to ${fallback}: ${details}. ` +
+    'A workspace pointer must be an absolute path; a drive-relative or ' +
+    'separator-less value would resolve against the process working directory.'
+  );
+}
+
 export function resolveCanonicalWorkspaceDir(): CanonicalWorkspaceResult | null {
-  const pdEnv = process.env.PD_WORKSPACE_DIR;
-  if (pdEnv && pdEnv.trim()) {
-    const dir = path.resolve(pdEnv.trim());
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'pd_env' };
-    }
-  }
-
-  const ocEnv = process.env.OPENCLAW_WORKSPACE;
-  if (ocEnv && ocEnv.trim()) {
-    const dir = path.resolve(ocEnv.trim());
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'openclaw_env' };
-    }
-  }
-
-  const configWorkspace = loadWorkspaceFromPdConfigFile();
-  if (configWorkspace) {
-    const dir = path.resolve(configWorkspace);
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'pd_config' };
-    }
+  const explicit = resolveDeclaredWorkspaceDir(declaredWorkspaceCandidates()).resolved;
+  if (explicit) {
+    return explicit;
   }
 
   const defaultDir = path.join(os.homedir(), '.openclaw', 'workspace');
@@ -229,33 +322,16 @@ export function resolveCanonicalWorkspaceDir(): CanonicalWorkspaceResult | null 
  * Resolve only PD explicit sources (env vars + config file), excluding pd_default.
  * Used by hook resolution to ensure ctx.workspaceDir takes priority over the
  * hardcoded default fallback.
+ *
+ * Returns the refused candidates alongside the winner so hook resolution can
+ * report them; see resolveHookWorkspaceDir.
  */
+function resolveExplicitPdSourcesWithDiagnostics(): DeclaredWorkspaceResolution {
+  return resolveDeclaredWorkspaceDir(declaredWorkspaceCandidates());
+}
+
 function resolveExplicitPdSources(): CanonicalWorkspaceResult | null {
-  const pdEnv = process.env.PD_WORKSPACE_DIR;
-  if (pdEnv && pdEnv.trim()) {
-    const dir = path.resolve(pdEnv.trim());
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'pd_env' };
-    }
-  }
-
-  const ocEnv = process.env.OPENCLAW_WORKSPACE;
-  if (ocEnv && ocEnv.trim()) {
-    const dir = path.resolve(ocEnv.trim());
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'openclaw_env' };
-    }
-  }
-
-  const configWorkspace = loadWorkspaceFromPdConfigFile();
-  if (configWorkspace) {
-    const dir = path.resolve(configWorkspace);
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'pd_config' };
-    }
-  }
-
-  return null;
+  return resolveExplicitPdSourcesWithDiagnostics().resolved;
 }
 
 // ── Hook Workspace Resolution (PRI-259) ────────────────────────────────
@@ -308,19 +384,27 @@ export function resolveHookWorkspaceDir(
 ): HookWorkspaceResolutionResult {
   // Priority 1: PD explicit sources (env vars + config file) — these are
   // owner-declared and intentionally override the live session context.
-  const resolveExplicit = options?.explicitPdResolver ?? resolveExplicitPdSources;
-  const explicit = resolveExplicit();
+  //
+  // Priority order is unchanged: a refused candidate is skipped, never fatal.
+  // An injected resolver is a test seam and carries no diagnostics of its own.
+  const injectedExplicit = options?.explicitPdResolver;
+  const declared = injectedExplicit ? null : resolveExplicitPdSourcesWithDiagnostics();
+  const explicit = injectedExplicit ? injectedExplicit() : declared?.resolved ?? null;
+  const rejectedCandidates = declared?.rejected ?? [];
 
   if (explicit) {
-    let consistencyWarning: string | undefined;
+    const warnings: string[] = [];
+    const rejectionWarning = describeRejectedCandidates(rejectedCandidates, explicit.source);
+    if (rejectionWarning) warnings.push(rejectionWarning);
 
     if (ctx.workspaceDir) {
       const normalizedCtx = path.resolve(ctx.workspaceDir);
       const normalizedExplicit = path.resolve(explicit.workspaceDir);
       if (normalizedCtx !== normalizedExplicit) {
-        consistencyWarning =
+        warnings.push(
           `PD explicit workspace (${explicit.source}: ${explicit.workspaceDir}) ` +
-          `differs from OpenClaw context (${ctx.workspaceDir}). Using PD explicit.`;
+          `differs from OpenClaw context (${ctx.workspaceDir}). Using PD explicit.`,
+        );
       }
     }
 
@@ -328,7 +412,7 @@ export function resolveHookWorkspaceDir(
       ok: true,
       workspaceDir: explicit.workspaceDir,
       source: explicit.source,
-      consistencyWarning,
+      consistencyWarning: warnings.length > 0 ? warnings.join(' ') : undefined,
     };
   }
 
@@ -341,6 +425,7 @@ export function resolveHookWorkspaceDir(
         ok: true,
         workspaceDir: ctx.workspaceDir,
         source: 'openclaw_context',
+        consistencyWarning: describeRejectedCandidates(rejectedCandidates, 'openclaw_context'),
       };
     }
   }
@@ -352,6 +437,7 @@ export function resolveHookWorkspaceDir(
       ok: true,
       workspaceDir: apiResolved,
       source: 'openclaw_api',
+      consistencyWarning: describeRejectedCandidates(rejectedCandidates, 'openclaw_api'),
     };
   }
 
@@ -359,13 +445,16 @@ export function resolveHookWorkspaceDir(
   const resolveCanonical = options?.canonicalResolver ?? resolveCanonicalWorkspaceDir;
   const canonical = resolveCanonical();
   if (canonical && canonical.source === 'pd_default') {
+    const warnings = [
+      'Using hardcoded default workspace (~/.openclaw/workspace). ' +
+      'Set PD_WORKSPACE_DIR or create ~/.openclaw/principles-disciple.json for stable resolution.',
+      describeRejectedCandidates(rejectedCandidates, 'pd_default'),
+    ];
     return {
       ok: true,
       workspaceDir: canonical.workspaceDir,
       source: 'pd_default',
-      consistencyWarning:
-        'Using hardcoded default workspace (~/.openclaw/workspace). ' +
-        'Set PD_WORKSPACE_DIR or create ~/.openclaw/principles-disciple.json for stable resolution.',
+      consistencyWarning: warnings.filter(Boolean).join(' '),
     };
   }
 
