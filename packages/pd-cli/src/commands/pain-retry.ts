@@ -37,6 +37,12 @@ import {
   PrincipleTreeLedgerAdapter,
   SqliteDeadLetterStore,
   PainSignalBridge,
+  recoverFailedTask,
+  persistPainDiagnosis,
+  computeFeatureFlagsFromConfig,
+  isFeatureEnabled,
+  mapBridgeTelemetryToStoreEvent,
+  storeEmitter,
   type PainDetectedData,
   type PainSignalBridgeResult,
   type DeadLetterRow,
@@ -568,6 +574,15 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     }
     const effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
 
+    // PRI-935: derive the pain_diagnosis_persistence flag from the SAME
+    // canonical authority the production factory uses
+    // (pain-signal-runtime-factory), so a `pd pain retry` ledger write is
+    // gated identically to the automatic bridge path — no CLI-local flag.
+    const diagnosisPersistenceEnabled = isFeatureEnabled(
+      computeFeatureFlagsFromConfig(effectiveConfig),
+      'pain_diagnosis_persistence',
+    );
+
     const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
     const perStageTimeoutMs = pipelineTimeoutMs / 3;
     const rootCauseRunner = new DiagRootCauseRunner(
@@ -617,6 +632,18 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         ledgerAdapter,
         owner: 'pd-cli-pain-retry-dead-letter',
         workspaceDir,
+        // PRI-935: dead-letter replays must record the pain_diagnoses
+        // attribution ledger exactly like the production bridge — the flag
+        // is derived from the same canonical authority as the normal branch.
+        diagnosisPersistenceEnabled,
+        // rc-9: same production degradation-telemetry wiring as the factory —
+        // only persistence events reach the store emitter.
+        eventEmitter: {
+          emitTelemetry: (event) => {
+            const mapped = mapBridgeTelemetryToStoreEvent(event);
+            if (mapped) storeEmitter.emitTelemetry(mapped);
+          },
+        },
         // PRI-720: honor the Owner's full-prompt-pipeline switch on replay seeds.
         fullPipelinePromptSeeds: resolvePromptFullPipelineSeedMode(workspaceDir) === 'full_chain',
       });
@@ -710,6 +737,36 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       console.log(`  Workspace: ${workspaceDir}\n`);
     }
 
+    // PRI-934: a failed parent task can never re-acquire a lease —
+    // DefaultLeaseManager accepts pending/retry_wait only — so retry died with
+    // lease_conflict before doing anything. Recover the whole diagnostician
+    // family (parent + the three split-pipeline stages) through the single
+    // recovery authority (recoverFailedTask, shared with the sweep service)
+    // BEFORE running. force=true is honest here: an explicit
+    // `pd pain retry --pain-id` IS the operator's recovery decision, and the
+    // stage tasks are typically budget-exhausted (recoverFailedTask would
+    // otherwise throw input_invalid mid-family and leave a half-recovered
+    // pipeline). Non-failed family members return null and are untouched
+    // (cli-5-failure-no-mutation); needs_human_review / live-lease states are
+    // deliberately NOT reset — the lease_conflict nextAction below routes
+    // those to `pd runtime recovery`.
+    const recoveredTasks: string[] = [];
+    if (task && task.status === 'failed') {
+      const diagFamily = [
+        taskId,
+        `diag_rootcause-${taskId}`,
+        `diag_distiller-${taskId}`,
+        `diag_router-${taskId}`,
+      ];
+      for (const familyTaskId of diagFamily) {
+        const recovered = await recoverFailedTask(stateManager, familyTaskId, true);
+        if (recovered) recoveredTasks.push(recovered.taskId);
+      }
+      if (recoveredTasks.length > 0 && !opts.json) {
+        console.log(`  Recovered: ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.join(', ')}\n`);
+      }
+    }
+
     const result = await diagnoseRun({
       taskId,
       stateManager,
@@ -729,8 +786,14 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           newTaskStatus: result.status,
           errorCategory: result.errorCategory ?? null,
           failureReason: result.failureReason ?? null,
+          ...(recoveredTasks.length > 0 ? { recoveredTasks } : {}),
           nextAction: result.errorCategory === 'output_invalid'
             ? 'The LLM output failed validation. Try a different model or provider.'
+            // PRI-934: lease_conflict survived the pre-run recovery, so it is
+            // either a live worker holding the lease or a state pain retry must
+            // not reset (needs_human_review). Name the authoritative tool.
+            : result.errorCategory === 'lease_conflict'
+              ? `A live worker holds the lease or the task is in a state pain retry must not reset. Wait for the lease to expire, or run: pd runtime recovery failed-tasks -w "${workspaceDir}" --confirm (then re-run pd pain retry --pain-id ${opts.painId}).`
             : 'Check the error category and retry with adjusted parameters.',
         }, null, 2));
       } else {
@@ -743,6 +806,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         if (result.failureReason) {
           console.log(`  Failure Reason: ${result.failureReason}`);
         }
+        if (result.errorCategory === 'lease_conflict') {
+          // cli-6-output-next-action: the text path must name the same
+          // authoritative recovery entry point as the JSON path.
+          console.log(`  Next Action:    A live worker holds the lease or the task is in a state pain retry must not reset. Wait for the lease to expire, or run: pd runtime recovery failed-tasks -w "${workspaceDir}" --confirm (then re-run pd pain retry --pain-id ${opts.painId}).`);
+        }
         console.log('');
       }
       process.exit(1);
@@ -751,6 +819,29 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
     // Step 6: Intake candidates
     const candidates = await stateManager.getCandidatesByTaskId(taskId);
+
+    // PRI-935: the CLI retry path must record the pain_diagnoses attribution
+    // ledger like the production bridge does — before intake, mirroring the
+    // bridge's persist-before-admission ordering (the attribution must not
+    // depend on admission outcome). 'attempted' is honest: persistPainDiagnosis
+    // degrades observably via pain_diagnosis_persist_* telemetry (rc-9) rather
+    // than throwing, so this field reports "dispatched", not "row landed".
+    let painDiagnosisLedgerWrite: 'attempted' | 'disabled' = 'disabled';
+    if (diagnosisPersistenceEnabled && result.output) {
+      await persistPainDiagnosis(
+        // Same production mapping as pain-signal-runtime-factory: only
+        // persistence degradation events reach the store emitter (rc-9).
+        { stateManager, eventEmitter: { emitTelemetry: (event) => { const mapped = mapBridgeTelemetryToStoreEvent(event); if (mapped) storeEmitter.emitTelemetry(mapped); } } },
+        {
+          painId: opts.painId,
+          taskId,
+          diagnosticianOutput: result.output,
+          artifactId: candidates[0]?.artifactId ?? null,
+        },
+      );
+      painDiagnosisLedgerWrite = 'attempted';
+    }
+
     const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string }[] = [];
     let intakeFailed = false;
 
@@ -829,6 +920,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         previousTaskStatus,
         previousLastError,
         newTaskStatus: 'succeeded',
+        recoveredTasks: recoveredTasks.length > 0 ? recoveredTasks : [],
+        painDiagnosisLedgerWrite,
         candidateIds,
         ledgerEntryIds,
         intake: {
@@ -848,6 +941,12 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     console.log(`  Task ID:         ${taskId}`);
     console.log(`  Previous Status: ${previousTaskStatus}${previousLastError ? ` (${previousLastError})` : ''}`);
     console.log(`  New Status:      succeeded`);
+    if (recoveredTasks.length > 0) {
+      console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.join(', ')}`);
+    }
+    if (painDiagnosisLedgerWrite === 'attempted') {
+      console.log(`  Diagnosis Ledger: pain_diagnoses write dispatched (skips/failures surface as pain_diagnosis_persist_* events)`);
+    }
     console.log(`  Candidates:      ${candidateIds.length}`);
     if (result.contextHash) {
       console.log(`  Context Hash:    ${result.contextHash.substring(0, 16)}...`);

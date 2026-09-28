@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1781,
+ "count": 1784,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -1650,6 +1650,7 @@
   "makeRuleArtifactRecord",
   "makeRunId",
   "makeSandboxAlwaysPass",
+  "mapBridgeTelemetryToStoreEvent",
   "mapConfidenceToLabel",
   "mapFailureCategory",
   "mapLlmResultToOutput",
@@ -1675,6 +1676,7 @@
   "parsePainIngressReport",
   "parsePainIngressV1Payload",
   "parseSeedSourcePainId",
+  "persistPainDiagnosis",
   "planOwnerVerdictOverrideResume",
   "probeRuntime",
   "readOwnerIdentityFile",
@@ -1684,6 +1686,7 @@
   "recommendProvenChannelNextIssue",
   "recordPainSignalObservability",
   "recordRejection",
+  "recoverFailedTask",
   "redactAbsolutePaths",
   "redactConfigValue",
   "redactEnvLikeValues",
