@@ -29,7 +29,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
+import * as yaml from 'js-yaml';
 import {
+  getDefaultPdConfig,
   SqliteConnection,
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
@@ -681,6 +683,78 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(warning).toContain('injection_budget_queued');
     expect(warning).toContain('nextAction=');
     expect(warning).toContain('deactivating older principles is NOT required');
+  });
+
+  // PRI-935: on the shared route (abstraction_layer_v1 ON) the production path
+  // deliberately passes no round key, so nothing is merely "queued" — an
+  // out-of-window activation IS starved and the FIFO wording is correct. This
+  // test flips the flag to prove the branch selects the truthful copy for the
+  // workspace's actual policy rather than a fixed one.
+  it('approve reports true starvation (not queued) when the production route does not rotate', async () => {
+    const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    const originalConfig = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+    // Build from the real default config: the validator requires version /
+    // runtimeProfiles / internalAgents, so a hand-written fragment is rejected
+    // as malformed and the flag silently stays off.
+    const sharedConfig = getDefaultPdConfig();
+    sharedConfig.features.abstraction_layer_v1 = { ...sharedConfig.features.abstraction_layer_v1, enabled: true };
+    fs.writeFileSync(configPath, yaml.dump(sharedConfig), 'utf8');
+
+    try {
+      // Saturate the shared renderer: a few very long principles blow the
+      // 2000c cap well before the new one is considered.
+      const db = sqliteConn.getDb();
+      const base = Date.now();
+      for (let i = 0; i < 3; i += 1) {
+        const fillerArtifact = `art-starve-filler-${i}-${base}`;
+        const fillerPrinciple = newPrincipleId();
+        seedLedgerPrinciple(fillerPrinciple, 'F'.repeat(900));
+        await seedPrincipleArtifact(fillerArtifact, {
+          sourcePrincipleId: fillerPrinciple,
+          contentJson: { principleId: fillerPrinciple, text: 'F'.repeat(900) },
+        });
+        db.prepare(
+          `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+           VALUES (?, ?, ?, 'prompt', 'prompt_activate', ?, ?, NULL, NULL)`,
+        ).run(
+          `act_prompt_${fillerPrinciple}`,
+          `${fillerArtifact}::prompt`,
+          fillerArtifact,
+          `ledger://${fillerPrinciple}`,
+          new Date(base - (3 - i) * 60_000).toISOString(),
+        );
+      }
+
+      const starvePrinciple = newPrincipleId();
+      const starveArtifact = `art-starve-new-${base}`;
+      const starveApproval = `apr-starve-new-${base}`;
+      seedLedgerPrinciple(starvePrinciple, 'S'.repeat(900));
+      await seedPrincipleArtifact(starveArtifact, {
+        sourcePrincipleId: starvePrinciple,
+        contentJson: { principleId: starvePrinciple, text: 'S'.repeat(900) },
+      });
+      await seedPendingApproval(starveApproval, starveArtifact, 'prompt');
+
+      const res = await fetchJson(`/api/v1/approvals/${starveApproval}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'PRI-935 non-rotating route starvation' }),
+      });
+      expect(res.status).toBe(200);
+
+      const warning = getStringField(getDataObject(res.body), 'warning');
+      expect(warning).toBeDefined();
+      // The shared route does not rotate, so the honest report is starvation
+      // WITH the FIFO wording — not the rotation/queued promise.
+      expect(warning).toContain('injection_budget_excluded');
+      expect(warning).not.toContain('injection_budget_queued');
+      expect(warning).toContain('FIFO by activated_at');
+      expect(warning).toContain('nextAction=');
+    } finally {
+      if (originalConfig === null) fs.rmSync(configPath, { force: true });
+      else fs.writeFileSync(configPath, originalConfig, 'utf8');
+    }
   });
 
   it('approve stays warning-free for a prompt activation when the budget has room (PRI-890 positive path)', async () => {
