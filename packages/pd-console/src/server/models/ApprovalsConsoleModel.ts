@@ -266,7 +266,20 @@ export class ApprovalsConsoleModel {
       const window = projection.eligibleCount;
       return `injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (${projection.budget}c; ${projection.injectedActivationIds.length} of ${window} eligible activations injected this round; production selection policy fair_rotation_v1). Fair rotation advances the window by one position per recorded user turn, so this principle WILL enter agent behavior within at most ${window} consecutive user turns of a continuously advancing session — deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry`;
     }
-    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${projection.budget}c) is full and this activation is not reachable under the current production selection policy (${projection.productionRotates ? projection.selectionPolicy : 'legacy_fifo_prefix_v1'}; ${projection.injectedActivationIds.length}/${projection.eligibleCount} eligible injected${projection.productionRotates ? '' : ', FIFO by activated_at'}) — this principle will NOT enter agent behavior until capacity frees up. nextAction=review the activations page and deactivate superseded principles`;
+    // PRI-935: report the PRODUCTION policy, not the policy this forecast
+    // happened to run. The console holds no session round key, so its own
+    // projection is always `legacy_fifo_prefix_v1` even on a route where
+    // production rotates — labelling that value "the current production
+    // selection policy" would reintroduce exactly the lie this fix removes.
+    const policyNote = projection.productionRotates
+      ? 'production selection policy fair_rotation_v1'
+      : 'production selection policy legacy_fifo_prefix_v1 (FIFO by activated_at)';
+    // On a rotating route the only unreachable entries are oversized ones, so
+    // say WHY rather than implying a positional problem that rotation solves.
+    const unreachableNote = projection.productionRotates
+      ? ' (this forecast ran without a round key, so the window shown is the legacy FIFO prefix; the entry is unreachable because it exceeds the budget on its own, not because of its position)'
+      : '';
+    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${projection.budget}c) is full and this activation is not reachable under the ${policyNote}; ${projection.injectedActivationIds.length}/${projection.eligibleCount} eligible injected${unreachableNote} — this principle will NOT enter agent behavior until capacity frees up. nextAction=review the activations page and deactivate superseded principles`;
   }
 
   /**

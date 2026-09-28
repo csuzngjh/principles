@@ -113,6 +113,7 @@
       "decidedRejected": "已拒绝",
       "approveQueueBadge": "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。",
       "approveQueueBadgeRotation": "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。当前按公平轮转选取，新原则会在后续轮次自行轮到，无需停用旧原则。",
+      "approveQueueBadgeOversized": "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。但这条原则本身已超出注入位上限，轮转也装不下它——需要先精简它的内容。",
       "approveWarningDetail": "原始信息",
       "goActivationCta": "前往生效情况",
       "approveWarning": {

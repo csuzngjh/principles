@@ -757,6 +757,65 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     }
   });
 
+  // PRI-935 review fix: on a ROTATING route the starvation branch must not
+  // label the forecast's own legacy-FIFO policy as "the production selection
+  // policy" — production runs fair rotation there. The console holds no round
+  // key, so selectionPolicy is legacy_fifo_prefix_v1 while production rotates;
+  // rendering that value as the production policy reintroduces the exact lie
+  // this PR removes.
+  it('approve never reports legacy FIFO as the production policy on a rotating route', async () => {
+    // Fresh workspace: only oversized entries, so the new activation is
+    // unreachable and the starvation branch is taken with productionRotates=true.
+    sqliteConn.getDb()
+      .prepare("UPDATE activations SET deactivated_at = ? WHERE channel = 'prompt' AND deactivated_at IS NULL")
+      .run(new Date().toISOString());
+    const db = sqliteConn.getDb();
+    const base = Date.now();
+    const hugeText = 'H'.repeat(3000);
+    for (let i = 0; i < 2; i += 1) {
+      const artifactId = `art-oversize-filler-${i}-${base}`;
+      const principleId = newPrincipleId();
+      seedLedgerPrinciple(principleId, hugeText);
+      await seedPrincipleArtifact(artifactId, {
+        sourcePrincipleId: principleId,
+        contentJson: { principleId, text: hugeText },
+      });
+      db.prepare(
+        `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+         VALUES (?, ?, ?, 'prompt', 'prompt_activate', ?, ?, NULL, NULL)`,
+      ).run(
+        `act_prompt_${principleId}`,
+        `${artifactId}::prompt`,
+        artifactId,
+        `ledger://${principleId}`,
+        new Date(base - (2 - i) * 60_000).toISOString(),
+      );
+    }
+
+    const newPrinciple = newPrincipleId();
+    const newArtifact = `art-oversize-new-${base}`;
+    const newApproval = `apr-oversize-new-${base}`;
+    seedLedgerPrinciple(newPrinciple, hugeText);
+    await seedPrincipleArtifact(newArtifact, {
+      sourcePrincipleId: newPrinciple,
+      contentJson: { principleId: newPrinciple, text: hugeText },
+    });
+    await seedPendingApproval(newApproval, newArtifact, 'prompt');
+
+    const res = await fetchJson(`/api/v1/approvals/${newApproval}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'PRI-935 oversized on rotating route' }),
+    });
+    expect(res.status).toBe(200);
+
+    const warning = getStringField(getDataObject(res.body), 'warning');
+    expect(warning).toBeDefined();
+    // The claim under test: the production policy must read fair_rotation_v1.
+    expect(warning).toContain('production selection policy fair_rotation_v1');
+    expect(warning).not.toContain('legacy_fifo_prefix_v1');
+  });
+
   it('approve stays warning-free for a prompt activation when the budget has room (PRI-890 positive path)', async () => {
     // Fixture reset: earlier tests in this file (notably the saturation test)
     // left prompt activations behind. Deactivate them all so this test

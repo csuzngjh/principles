@@ -99,6 +99,30 @@ describe('validateApprovalsGrouped promptInjection (PRI-908)', () => {
     expect(result?.promptInjection).toEqual({ budget: 2000, usedChars: 1940, truncated: true });
   });
 
+  it('carries fitsPromptBudget through when it is a real boolean (PRI-935 review fix)', () => {
+    const withFits = validateApprovalsGrouped({
+      ...base,
+      groups: [{ principleId: 'P1', principleTitle: 't', status: 'pending', records: [], fitsPromptBudget: true }],
+    });
+    expect(withFits?.groups[0]?.fitsPromptBudget).toBe(true);
+
+    // Absent stays undefined → the badge promises nothing.
+    const withoutFits = validateApprovalsGrouped({
+      ...base,
+      groups: [{ principleId: 'P1', principleTitle: 't', status: 'pending', records: [] }],
+    });
+    expect(withoutFits?.groups[0]?.fitsPromptBudget).toBeUndefined();
+  });
+
+  it('drops a present-but-non-boolean fitsPromptBudget instead of propagating it (rc-1/rc-2)', () => {
+    const result = validateApprovalsGrouped({
+      ...base,
+      groups: [{ principleId: 'P1', principleTitle: 't', status: 'pending', records: [], fitsPromptBudget: 'yes' }],
+    });
+    expect(result).not.toBeNull();
+    expect(result?.groups[0]?.fitsPromptBudget).toBeUndefined();
+  });
+
   it('carries the PRI-935 rotation facts when present (productionRotates drives truthful badge copy)', () => {
     const result = validateApprovalsGrouped({
       ...base,

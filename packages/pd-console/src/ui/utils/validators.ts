@@ -1937,6 +1937,12 @@ export interface ApprovalGroupData {
   principleTitle: string;
   /** Wave 7: human-readable principle text from artifact contentJson, if available */
   candidateDescription?: string;
+  /**
+   * PRI-935: whether this candidate's own serialized prompt entry fits the
+   * injection budget alone. Absent = unknown, which the badge treats as
+   * "do not promise rotation".
+   */
+  fitsPromptBudget?: boolean;
   status: string;
   records: ApprovalGroupRecordData[];
 }
@@ -1953,6 +1959,12 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   // Wave 7: optional candidateDescription from artifact contentJson
   if (Object.hasOwn(v, 'candidateDescription') && isString(v.candidateDescription) && v.candidateDescription.length > 0) {
     result.candidateDescription = v.candidateDescription;
+  }
+  // PRI-935: optional fitsPromptBudget. Only a real boolean is propagated; a
+  // present-but-wrong value is dropped (rc-1/rc-2) so the badge falls back to
+  // copy that promises nothing rather than rendering an unverified claim.
+  if (Object.hasOwn(v, 'fitsPromptBudget') && typeof v.fitsPromptBudget === 'boolean') {
+    result.fitsPromptBudget = v.fitsPromptBudget;
   }
   return result;
 }

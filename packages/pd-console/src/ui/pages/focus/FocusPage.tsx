@@ -576,24 +576,31 @@ function PendingReviewCard({
 
       {/* PRI-908: 批准前预算预告——注入窗口已满即意味着"批准了也可能这一轮不生效"。
           让 Owner 在决策前就知道，而不是事后道歉。
-          PRI-935: 文案按预测实际使用的选择策略区分——公平轮转下新原则会自行轮到，
-          旧文案"需先停用被取代的旧原则"在该策略下是错的。 */}
+          PRI-935: 两层条件都要满足才承诺轮转——(1) 生产路由确实轮转；
+          (2) 这条候选自身的序列化内容能装进预算。超预算的条目在任何一轮都
+          塞不进去，轮转救不了它，此时不得承诺"会自行轮到"。 */}
       {decidedOutcome === null && primaryChannel === "prompt" && promptInjection?.truncated === true && (
         <div
           className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] text-amber"
           data-testid={`approve-queue-badge-${group.principleId}`}
         >
-          {promptInjection.productionRotates === true
+          {promptInjection.productionRotates === true && group.fitsPromptBudget === true
             ? t("pages.focus.approveQueueBadgeRotation", {
                 defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。当前按公平轮转选取，新原则会在后续轮次自行轮到，无需停用旧原则。",
                 used: promptInjection.usedChars,
                 budget: promptInjection.budget,
               })
-            : t("pages.focus.approveQueueBadge", {
-                defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。",
-                used: promptInjection.usedChars,
-                budget: promptInjection.budget,
-              })}
+            : promptInjection.productionRotates === true
+              ? t("pages.focus.approveQueueBadgeOversized", {
+                  defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。这条原则本身已超出注入位上限，轮转也无法让它进入提示词——需要先精简它的内容。",
+                  used: promptInjection.usedChars,
+                  budget: promptInjection.budget,
+                })
+              : t("pages.focus.approveQueueBadge", {
+                  defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。",
+                  used: promptInjection.usedChars,
+                  budget: promptInjection.budget,
+                })}
         </div>
       )}
 

@@ -113,6 +113,7 @@
       "decidedRejected": "Rejected",
       "approveQueueBadge": "May queue after approval: prompt injection slots are full ({{used}}/{{budget}} chars).",
       "approveQueueBadgeRotation": "May queue after approval: prompt injection slots are full ({{used}}/{{budget}} chars). Selection is rotating fairly, so new principles come around on later turns — no need to deactivate older principles.",
+      "approveQueueBadgeOversized": "May queue after approval: prompt injection slots are full ({{used}}/{{budget}} chars). This principle is itself larger than the injection limit, so rotation cannot fit it — shorten its content first.",
       "approveWarningDetail": "Server details",
       "goActivationCta": "Open activations",
       "approveWarning": {
