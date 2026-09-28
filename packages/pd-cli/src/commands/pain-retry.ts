@@ -812,6 +812,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         console.log(`\nRetry failed:`);
         console.log(`  Status:         ${result.status}`);
         console.log(`  Task ID:        ${result.taskId}`);
+        if (recoveredTasks.length > 0) {
+          // Failure is exactly where the operator needs to know which tasks
+          // were reset before the runner died (85273fa1 review §3).
+          console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.join(', ')}`);
+        }
         if (result.errorCategory) {
           console.log(`  Error Category: ${result.errorCategory}`);
         }
@@ -936,7 +941,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         previousTaskStatus,
         previousLastError,
         newTaskStatus: 'succeeded',
-        recoveredTasks: recoveredTasks.length > 0 ? recoveredTasks : [],
+        recoveredTasks,
         painDiagnosisLedgerWrite,
         candidateIds,
         ledgerEntryIds,

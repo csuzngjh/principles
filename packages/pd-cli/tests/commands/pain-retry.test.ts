@@ -1365,6 +1365,43 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it('REC-05b: text-mode FAILURE path still lists recovered tasks (review §3 regression)', async () => {
+    mockGetTask.mockResolvedValue(FAILED_TASK);
+    mockRecoverFailedTask.mockImplementation(async (_sm: unknown, taskId: string) => ({
+      taskId, previousStatus: 'failed', newStatus: 'pending',
+      attemptCount: 0, maxAttempts: 6, forceApplied: true,
+    }));
+    mockRun.mockResolvedValueOnce({
+      status: 'failed',
+      taskId: 'diagnosis_test-pain-failed',
+      errorCategory: 'lease_conflict',
+      failureReason: 'Stage lease acquisition failed',
+      attemptCount: 1,
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-failed',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    });
+
+    const allOutput = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(allOutput).toContain('Retry failed');
+    // Operators need the recovery list exactly where the runner died.
+    expect(allOutput).toContain('Recovered:');
+    expect(allOutput).toContain('diag_router-diagnosis_test-pain-failed');
+    // ...printed once, not duplicated (F1).
+    expect(allOutput.match(/Recovered:/g)).toHaveLength(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 // ── PRI-935: CLI retry path must dispatch the pain_diagnoses ledger write ────
