@@ -164,6 +164,63 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     expect(shared.injectedPrincipleIds.length).toBeLessThan(projection.injectedPrincipleIds.length);
   });
 
+  // ── PRI-935: the console/production policy divergence ──────────────────────
+  // Before this fix the projection omitted the round key, so it always ran
+  // legacy_fifo_prefix_v1 and structurally excluded the NEWEST activation from
+  // every truncated selection. The console then told the Owner their fresh
+  // principle "will NOT enter agent behavior until older ones are deactivated"
+  // while the live plugin route (fair rotation) injected it within N turns.
+
+  it('PRI-935: a caller-supplied round key selects fair_rotation_v1 and reports it', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedPromptActivations(workspaceDir, FIFO_11);
+
+    const withKey = await buildLivePromptInjectionProjection({ workspaceDir, roundKey: 3 });
+    expect(withKey.selectionPolicy).toBe('fair_rotation_v1');
+    expect(withKey.productionRotates).toBe(true);
+    expect(withKey.eligibleCount).toBe(11);
+
+    const withoutKey = await buildLivePromptInjectionProjection({ workspaceDir });
+    expect(withoutKey.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+  });
+
+  it('PRI-935: the newest activation is reachable by rotation even though FIFO drops it', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedPromptActivations(workspaceDir, FIFO_11);
+
+    // No round key — exactly the console's situation.
+    const projection = await buildLivePromptInjectionProjection({ workspaceDir });
+    const newest = FIFO_11[FIFO_11.length - 1]!;
+    expect(projection.injectedActivationIds).not.toContain(`act-${newest.principleId}`);
+    // ...yet production reaches it within the ring, so the console must report
+    // "queued", not "starved".
+    expect(projection.eventuallyInjectedActivationIds).toContain(`act-${newest.principleId}`);
+    expect(projection.eventuallyInjectedActivationIds).toHaveLength(11);
+  });
+
+  it('PRI-935: an entry larger than the whole budget is never reachable (true starvation)', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedPromptActivations(workspaceDir, [
+      { principleId: 'P_SMALL', text: 'ok' },
+      { principleId: 'P_HUGE', text: 'H'.repeat(RUNTIME_V2_PRINCIPLE_BUDGET * 2) },
+    ]);
+
+    const projection = await buildLivePromptInjectionProjection({ workspaceDir });
+    expect(projection.productionRotates).toBe(true);
+    // Oversized entries can never fit in any round — rotation does not save them.
+    expect(projection.eventuallyInjectedActivationIds).not.toContain('act-P_HUGE');
+  });
+
+  it('PRI-935: the shared route genuinely does not rotate and claims no reachability', async () => {
+    const workspaceDir = tempWorkspace({ sharedRoute: true });
+    await seedPromptActivations(workspaceDir, FIFO_11);
+
+    const projection = await buildLivePromptInjectionProjection({ workspaceDir });
+    expect(projection.route).toBe('shared_render');
+    expect(projection.productionRotates).toBe(false);
+    expect(projection.eventuallyInjectedActivationIds).toEqual([]);
+  });
+
   it('Case 3 — exact budget boundary: an entry that exactly fills the cap injects; one char over discards it', async () => {
     // entry = "- [id] text"; fit rule: remaining >= entry.length + 1.
     // With a 10-char id, text 1952c → entry 1967c → joined content is
