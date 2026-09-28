@@ -53,6 +53,58 @@ export interface RecoverySweepServiceHandle {
   close: () => Promise<void>;
 }
 
+/**
+ * Recover a failed task to `pending` — the single recovery authority for the
+ * failed→pending reset semantics (PRI-674), shared by the recovery sweep
+ * service and `pd pain retry` (PRI-934). Callers must not re-implement this
+ * transition: attempt-budget handling (exhausted + force → +3) and lease/
+ * result clearing live here only.
+ *
+ * Returns null (no mutation) when the task is absent or not in `failed`
+ * status; throws `input_invalid` when the budget is exhausted and force is
+ * not supplied.
+ */
+export async function recoverFailedTask(
+  stateManager: RuntimeStateHandle['stateManager'],
+  taskId: string,
+  force = false,
+): Promise<FailedTaskRecoveryResult | null> {
+  const task = await stateManager.getTask(taskId);
+  if (!task) return null;
+  if (task.status !== 'failed') return null;
+
+  const isExhausted = task.attemptCount >= task.maxAttempts;
+  if (isExhausted && !force) {
+    throw new PDRuntimeError(
+      'input_invalid',
+      `Task ${taskId} has exhausted max attempts (${task.attemptCount}/${task.maxAttempts}). Use force to recover.`,
+    );
+  }
+
+  const newMaxAttempts = isExhausted && force
+    ? Math.max(task.maxAttempts, task.attemptCount) + 3
+    : task.maxAttempts;
+
+  const updated = await stateManager.updateTask(taskId, {
+    status: 'pending',
+    attemptCount: 0,
+    maxAttempts: newMaxAttempts,
+    lastError: null,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    resultRef: null,
+  });
+
+  return {
+    taskId: updated.taskId,
+    previousStatus: 'failed',
+    newStatus: updated.status,
+    attemptCount: updated.attemptCount,
+    maxAttempts: updated.maxAttempts,
+    forceApplied: isExhausted && force,
+  };
+}
+
 class RecoverySweepServiceImpl implements RecoverySweepService {
   constructor(private readonly stateManager: RuntimeStateHandle['stateManager']) {}
 
@@ -84,40 +136,7 @@ class RecoverySweepServiceImpl implements RecoverySweepService {
   }
 
   async recoverFailedTask(taskId: string, force = false): Promise<FailedTaskRecoveryResult | null> {
-    const task = await this.stateManager.getTask(taskId);
-    if (!task) return null;
-    if (task.status !== 'failed') return null;
-
-    const isExhausted = task.attemptCount >= task.maxAttempts;
-    if (isExhausted && !force) {
-      throw new PDRuntimeError(
-        'input_invalid',
-        `Task ${taskId} has exhausted max attempts (${task.attemptCount}/${task.maxAttempts}). Use force to recover.`,
-      );
-    }
-
-    const newMaxAttempts = isExhausted && force
-      ? Math.max(task.maxAttempts, task.attemptCount) + 3
-      : task.maxAttempts;
-
-    const updated = await this.stateManager.updateTask(taskId, {
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: newMaxAttempts,
-      lastError: null,
-      leaseOwner: null,
-      leaseExpiresAt: null,
-      resultRef: null,
-    });
-
-    return {
-      taskId: updated.taskId,
-      previousStatus: 'failed',
-      newStatus: updated.status,
-      attemptCount: updated.attemptCount,
-      maxAttempts: updated.maxAttempts,
-      forceApplied: isExhausted && force,
-    };
+    return recoverFailedTask(this.stateManager, taskId, force);
   }
 
   async recoverNeedsHumanReviewTask(taskId: string): Promise<OwnerRetryOutcome> {
