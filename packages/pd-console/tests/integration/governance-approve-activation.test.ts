@@ -29,7 +29,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
+import * as yaml from 'js-yaml';
 import {
+  getDefaultPdConfig,
   SqliteConnection,
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
@@ -674,8 +676,144 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     const warning = getStringField(approveData, 'warning');
     expect(warning).withContext('Budget exclusion must surface a warning').toBeDefined();
-    expect(warning).toContain('injection_budget_excluded');
+    // PRI-935: the live plugin-local route ROTATES, so a fresh activation that
+    // FIFO would drop is queued, not starved. The old assertion expected
+    // `injection_budget_excluded` + "deactivate older principles", which is
+    // exactly the falsehood this fix removes.
+    expect(warning).toContain('injection_budget_queued');
     expect(warning).toContain('nextAction=');
+    expect(warning).toContain('deactivating older principles is NOT required');
+  });
+
+  // PRI-935: on the shared route (abstraction_layer_v1 ON) the production path
+  // deliberately passes no round key, so nothing is merely "queued" — an
+  // out-of-window activation IS starved and the FIFO wording is correct. This
+  // test flips the flag to prove the branch selects the truthful copy for the
+  // workspace's actual policy rather than a fixed one.
+  it('approve reports true starvation (not queued) when the production route does not rotate', async () => {
+    const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    const originalConfig = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+    // Build from the real default config: the validator requires version /
+    // runtimeProfiles / internalAgents, so a hand-written fragment is rejected
+    // as malformed and the flag silently stays off.
+    const sharedConfig = getDefaultPdConfig();
+    sharedConfig.features.abstraction_layer_v1 = { ...sharedConfig.features.abstraction_layer_v1, enabled: true };
+    fs.writeFileSync(configPath, yaml.dump(sharedConfig), 'utf8');
+
+    try {
+      // Saturate the shared renderer: a few very long principles blow the
+      // 2000c cap well before the new one is considered.
+      const db = sqliteConn.getDb();
+      const base = Date.now();
+      for (let i = 0; i < 3; i += 1) {
+        const fillerArtifact = `art-starve-filler-${i}-${base}`;
+        const fillerPrinciple = newPrincipleId();
+        seedLedgerPrinciple(fillerPrinciple, 'F'.repeat(900));
+        await seedPrincipleArtifact(fillerArtifact, {
+          sourcePrincipleId: fillerPrinciple,
+          contentJson: { principleId: fillerPrinciple, text: 'F'.repeat(900) },
+        });
+        db.prepare(
+          `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+           VALUES (?, ?, ?, 'prompt', 'prompt_activate', ?, ?, NULL, NULL)`,
+        ).run(
+          `act_prompt_${fillerPrinciple}`,
+          `${fillerArtifact}::prompt`,
+          fillerArtifact,
+          `ledger://${fillerPrinciple}`,
+          new Date(base - (3 - i) * 60_000).toISOString(),
+        );
+      }
+
+      const starvePrinciple = newPrincipleId();
+      const starveArtifact = `art-starve-new-${base}`;
+      const starveApproval = `apr-starve-new-${base}`;
+      seedLedgerPrinciple(starvePrinciple, 'S'.repeat(900));
+      await seedPrincipleArtifact(starveArtifact, {
+        sourcePrincipleId: starvePrinciple,
+        contentJson: { principleId: starvePrinciple, text: 'S'.repeat(900) },
+      });
+      await seedPendingApproval(starveApproval, starveArtifact, 'prompt');
+
+      const res = await fetchJson(`/api/v1/approvals/${starveApproval}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'PRI-935 non-rotating route starvation' }),
+      });
+      expect(res.status).toBe(200);
+
+      const warning = getStringField(getDataObject(res.body), 'warning');
+      expect(warning).toBeDefined();
+      // The shared route does not rotate, so the honest report is starvation
+      // WITH the FIFO wording — not the rotation/queued promise.
+      expect(warning).toContain('injection_budget_excluded');
+      expect(warning).not.toContain('injection_budget_queued');
+      expect(warning).toContain('FIFO by activated_at');
+      expect(warning).toContain('nextAction=');
+    } finally {
+      if (originalConfig === null) fs.rmSync(configPath, { force: true });
+      else fs.writeFileSync(configPath, originalConfig, 'utf8');
+    }
+  });
+
+  // PRI-935 review fix: on a ROTATING route the starvation branch must not
+  // label the forecast's own legacy-FIFO policy as "the production selection
+  // policy" — production runs fair rotation there. The console holds no round
+  // key, so selectionPolicy is legacy_fifo_prefix_v1 while production rotates;
+  // rendering that value as the production policy reintroduces the exact lie
+  // this PR removes.
+  it('approve never reports legacy FIFO as the production policy on a rotating route', async () => {
+    // Fresh workspace: only oversized entries, so the new activation is
+    // unreachable and the starvation branch is taken with productionRotates=true.
+    sqliteConn.getDb()
+      .prepare("UPDATE activations SET deactivated_at = ? WHERE channel = 'prompt' AND deactivated_at IS NULL")
+      .run(new Date().toISOString());
+    const db = sqliteConn.getDb();
+    const base = Date.now();
+    const hugeText = 'H'.repeat(3000);
+    for (let i = 0; i < 2; i += 1) {
+      const artifactId = `art-oversize-filler-${i}-${base}`;
+      const principleId = newPrincipleId();
+      seedLedgerPrinciple(principleId, hugeText);
+      await seedPrincipleArtifact(artifactId, {
+        sourcePrincipleId: principleId,
+        contentJson: { principleId, text: hugeText },
+      });
+      db.prepare(
+        `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+         VALUES (?, ?, ?, 'prompt', 'prompt_activate', ?, ?, NULL, NULL)`,
+      ).run(
+        `act_prompt_${principleId}`,
+        `${artifactId}::prompt`,
+        artifactId,
+        `ledger://${principleId}`,
+        new Date(base - (2 - i) * 60_000).toISOString(),
+      );
+    }
+
+    const newPrinciple = newPrincipleId();
+    const newArtifact = `art-oversize-new-${base}`;
+    const newApproval = `apr-oversize-new-${base}`;
+    seedLedgerPrinciple(newPrinciple, hugeText);
+    await seedPrincipleArtifact(newArtifact, {
+      sourcePrincipleId: newPrinciple,
+      contentJson: { principleId: newPrinciple, text: hugeText },
+    });
+    await seedPendingApproval(newApproval, newArtifact, 'prompt');
+
+    const res = await fetchJson(`/api/v1/approvals/${newApproval}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'PRI-935 oversized on rotating route' }),
+    });
+    expect(res.status).toBe(200);
+
+    const warning = getStringField(getDataObject(res.body), 'warning');
+    expect(warning).toBeDefined();
+    // The claim under test: the production policy must read fair_rotation_v1.
+    expect(warning).toContain('production selection policy fair_rotation_v1');
+    expect(warning).not.toContain('legacy_fifo_prefix_v1');
   });
 
   it('approve stays warning-free for a prompt activation when the budget has room (PRI-890 positive path)', async () => {
