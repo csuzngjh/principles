@@ -6,9 +6,12 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 function resolveTimeoutMs(envKey: string, defaultMs: number): number {
   const raw = process.env[envKey];
   if (raw === undefined || raw.trim().length === 0) return defaultMs;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0 || parsed > MAX_TIMEOUT_MS) {
-    console.error(`[pd-console] ${envKey}=${JSON.stringify(raw)} must be an integer between 1 and ${MAX_TIMEOUT_MS} — using the ${defaultMs}ms default.`);
+  // Plain decimal digits only: Number() also reads '0x10' as 16, so a hex or
+  // exponent form would silently collapse the budget instead of widening it.
+  const trimmed = raw.trim();
+  const parsed = /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > MAX_TIMEOUT_MS) {
+    console.error(`[pd-console] ${envKey}=${JSON.stringify(raw)} must be a plain decimal integer between 1 and ${MAX_TIMEOUT_MS} — using the ${defaultMs}ms default.`);
     return defaultMs;
   }
   return parsed;

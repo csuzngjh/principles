@@ -498,7 +498,8 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // Update routes: GET /api/update/check, POST /api/update/apply, POST /api/update/rollback
+      // Update routes: GET /api/update/check, POST /api/update/apply-full
+      // (handleUpdateRoute 404s every other subPath)
       if (urlPath === '/api/update' || urlPath.startsWith('/api/update/')) {
         const subPath = urlPath.slice('/api/update'.length);
         const isApply = subPath === '/apply';
