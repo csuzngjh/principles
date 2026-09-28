@@ -1,5 +1,14 @@
 # create-principles-disciple
 
+## 1.144.12
+
+### Patch Changes
+
+- 349b747: chore(deps): bump @fontsource/jetbrains-mono 5.2.8 -> 5.3.0 (pd-console，随 installer 分发)。
+- 9fc1a31: chore(deps-dev): bump @types/node 26.6.1 -> 26.6.2 in create-principles-disciple.
+- a438282: chore(deps): bump @principles/install-layout 0.2.4 -> 0.2.7 in create-principles-disciple（同步 cpd package-lock）。
+- 47fad14: chore(deps-dev): bump vitest 5.0.1 -> 5.0.2 in create-principles-disciple.
+
 ## 1.144.11
 
 ### Patch Changes
