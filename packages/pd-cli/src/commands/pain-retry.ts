@@ -741,11 +741,15 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // stage tasks are typically budget-exhausted (recoverFailedTask would
     // otherwise throw input_invalid mid-family and leave a half-recovered
     // pipeline). Non-failed family members return null and are untouched
-    // (cli-5-failure-no-mutation); needs_human_review / live-lease states are
-    // deliberately NOT reset — the lease_conflict nextAction below routes
-    // those to `pd runtime recovery`.
+    // (cli-5-failure-no-mutation) — which is why the gate also accepts a
+    // retry_wait PARENT: the parent itself can acquire a lease, but budget-
+    // exhausted stage tasks stuck in failed still dead-end the split runner
+    // with lease_conflict, and recoverFailedTask resets only the failed
+    // stages while no-op'ing the retry_wait parent. needs_human_review /
+    // live-lease states are deliberately NOT reset — the lease_conflict
+    // nextAction below routes those to `pd runtime recovery`.
     const recoveredTasks: string[] = [];
-    if (task && task.status === 'failed') {
+    if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
       const diagFamily = [
         taskId,
         `diag_rootcause-${taskId}`,

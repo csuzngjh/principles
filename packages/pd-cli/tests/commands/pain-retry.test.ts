@@ -1236,7 +1236,7 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
     exitSpy.mockRestore();
   });
 
-  it('REC-02: retry_wait task → no recovery attempted (cli-5: nothing to reset)', async () => {
+  it('REC-02: retry_wait task with no failed stages → recovery attempted but nothing reset (cli-5)', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -1249,9 +1249,55 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
       json: true,
     });
 
-    expect(mockRecoverFailedTask).not.toHaveBeenCalled();
+    // The family is probed (recoverFailedTask is the status authority), but
+    // every member is non-failed, so the mock's null default resets nothing.
+    expect(mockRecoverFailedTask).toHaveBeenCalledTimes(4);
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.recoveredTasks).toEqual([]);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('REC-05: retry_wait parent + failed stages → stages reset, parent untouched (CodeRabbit #1885)', async () => {
+    mockGetTask.mockResolvedValue({ ...RETRY_WAIT_TASK, taskId: 'diagnosis_test-pain-rw', lastError: null });
+    mockRecoverFailedTask.mockImplementation(async (_sm: unknown, taskId: string) => {
+      if (taskId === 'diagnosis_test-pain-rw') return null; // retry_wait parent — authority no-ops
+      return {
+        taskId, previousStatus: 'failed', newStatus: 'pending',
+        attemptCount: 0, maxAttempts: 6, forceApplied: true,
+      };
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-rw',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    const family = mockRecoverFailedTask.mock.calls.map((call) => call[1]);
+    expect(family).toEqual([
+      'diagnosis_test-pain-rw',
+      'diag_rootcause-diagnosis_test-pain-rw',
+      'diag_distiller-diagnosis_test-pain-rw',
+      'diag_router-diagnosis_test-pain-rw',
+    ]);
+    expect(mockRecoverFailedTask.mock.invocationCallOrder[0])
+      .toBeLessThan(mockRun.mock.invocationCallOrder[0]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.status).toBe('succeeded');
+    // Only the three failed stages are reported — the retry_wait parent is
+    // not reset (recoverFailedTask returns null for non-failed statuses).
+    expect(output.recoveredTasks).toEqual([
+      'diag_rootcause-diagnosis_test-pain-rw',
+      'diag_distiller-diagnosis_test-pain-rw',
+      'diag_router-diagnosis_test-pain-rw',
+    ]);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
