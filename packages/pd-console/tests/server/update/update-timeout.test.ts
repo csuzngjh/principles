@@ -1,30 +1,33 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveApplyFullTimeoutMs } from '../../../src/server/update-timeout.js';
+import { resolveApplyFullTimeoutMs, resolveCheckTimeoutMs } from '../../../src/server/update-timeout.js';
 
-const ENV_KEY = 'PD_UPDATE_APPLY_FULL_TIMEOUT_MS';
+const CASES = [
+  { label: 'apply-full', envKey: 'PD_UPDATE_APPLY_FULL_TIMEOUT_MS', defaultMs: 180000, resolve: resolveApplyFullTimeoutMs },
+  { label: 'check', envKey: 'PD_UPDATE_CHECK_TIMEOUT_MS', defaultMs: 30000, resolve: resolveCheckTimeoutMs },
+] as const;
 
-describe('apply-full request timeout configuration', () => {
+describe.each(CASES)('$label request timeout configuration', ({ envKey, defaultMs, resolve }) => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
   it.each([undefined, '', '   '])('defaults silently for %j', (raw) => {
-    vi.stubEnv(ENV_KEY, raw);
+    vi.stubEnv(envKey, raw);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(resolveApplyFullTimeoutMs()).toBe(180000);
+    expect(resolve()).toBe(defaultMs);
     expect(error).not.toHaveBeenCalled();
   });
 
   it.each(['abc', 'NaN', 'Infinity', '0', '-1', '1.5', '2147483648', '3000000000'])(
     'rejects %s with an observable fallback', (raw) => {
-      vi.stubEnv(ENV_KEY, raw);
+      vi.stubEnv(envKey, raw);
       const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-      expect(resolveApplyFullTimeoutMs()).toBe(180000);
+      expect(resolve()).toBe(defaultMs);
       expect(error).toHaveBeenCalledTimes(1);
-      expect(error).toHaveBeenCalledWith(expect.stringContaining(ENV_KEY));
+      expect(error).toHaveBeenCalledWith(expect.stringContaining(envKey));
       expect(error).toHaveBeenCalledWith(expect.stringContaining(raw));
-      expect(error).toHaveBeenCalledWith(expect.stringContaining('180000'));
+      expect(error).toHaveBeenCalledWith(expect.stringContaining(String(defaultMs)));
     },
   );
 
@@ -34,9 +37,9 @@ describe('apply-full request timeout configuration', () => {
     ['2147483647', 2147483647],
     ['1e3', 1000],
   ])('accepts %s unchanged', (raw, expected) => {
-    vi.stubEnv(ENV_KEY, raw);
+    vi.stubEnv(envKey, raw);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(resolveApplyFullTimeoutMs()).toBe(expected);
+    expect(resolve()).toBe(expected);
     expect(error).not.toHaveBeenCalled();
   });
 });

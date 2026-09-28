@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { resolveApplyFullTimeoutMs } from './update-timeout.js';
+import { resolveApplyFullTimeoutMs, resolveCheckTimeoutMs } from './update-timeout.js';
 import {
   loadPdConfig,
   computeFlagsFromLoadResult,
@@ -229,6 +229,13 @@ const UPDATE_APPLY_TIMEOUT_MS = 120000;
 // the PRI-671 upgrade gate on Windows/AV-slow disks). Same knob pattern as
 // the installer's PD_INSTALL_TIMEOUT_MS.
 const UPDATE_APPLY_FULL_TIMEOUT_MS = resolveApplyFullTimeoutMs();
+// A check refreshes the signed channel over the network (TUF metadata + channel
+// document + release metadata, several sequential requests to the metadata
+// host). Measured on a CN network against GitHub Pages: normally ~1.2s, but a
+// single slow DNS/TLS leg pushes it past 12s, which the old 10s default turned
+// into a 504 "Request timeout" on every page load (observed ~1 run in 5).
+// Same knob pattern as apply-full: PD_UPDATE_CHECK_TIMEOUT_MS (ms) overrides.
+const UPDATE_CHECK_TIMEOUT_MS = resolveCheckTimeoutMs();
 
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 
@@ -496,8 +503,10 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         const subPath = urlPath.slice('/api/update'.length);
         const isApply = subPath === '/apply';
         const isApplyFull = subPath === '/apply-full';
+        const isCheck = subPath === '/check';
         const timeout = isApplyFull ? UPDATE_APPLY_FULL_TIMEOUT_MS
           : isApply ? UPDATE_APPLY_TIMEOUT_MS
+          : isCheck ? UPDATE_CHECK_TIMEOUT_MS
           : undefined;
         asyncHandler(
           () => handleUpdateRoute(req, res, services.workspaceDir, subPath),
