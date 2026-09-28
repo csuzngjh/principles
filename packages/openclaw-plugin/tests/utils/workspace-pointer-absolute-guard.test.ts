@@ -23,7 +23,7 @@ vi.mock('os', async (importOriginal) => {
   };
 });
 
-const { resolveCanonicalWorkspaceDir, resolveHookWorkspaceDir } = await import(
+const { resolveCanonicalWorkspaceDir, resolveCommandWorkspaceDir, resolveHookWorkspaceDir } = await import(
   '../../src/utils/workspace-resolver.js'
 );
 
@@ -75,6 +75,38 @@ describe('non-absolute workspace pointers are rejected, not resolved', () => {
     expect(resolveCanonicalWorkspaceDir()?.source).toBe('pd_default');
   });
 
+  // path.isAbsolute accepts these on Windows, but path.resolve anchors them to
+  // the calling process's drive — the same silent swap as a relative value.
+  it('ignores a root-relative workspace in principles-disciple.json', () => {
+    writePdConfig('\\workspace');
+    const result = resolveCanonicalWorkspaceDir();
+    expect(result?.source).toBe('pd_default');
+    expect(result?.workspaceDir).not.toBe('\\workspace');
+  });
+
+  it('ignores a root-relative PD_WORKSPACE_DIR', () => {
+    process.env.PD_WORKSPACE_DIR = '\\workspace';
+    process.env.OPENCLAW_WORKSPACE = sessionWorkspace;
+    expect(resolveCanonicalWorkspaceDir()?.source).toBe('openclaw_env');
+  });
+
+  // One bad config file must not disqualify a good pointer in the next one.
+  it('keeps scanning config files after an unusable pointer', () => {
+    writePdConfig('D:.openclawworkspace');
+    const fallbackConfigDir = path.join(sandboxHome, '.principles');
+    fs.mkdirSync(fallbackConfigDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(fallbackConfigDir, 'principles-disciple.json'),
+      JSON.stringify({ workspace: sessionWorkspace, mvpFirst: true }),
+      'utf8',
+    );
+
+    expect(resolveCanonicalWorkspaceDir()).toEqual({
+      workspaceDir: path.resolve(sessionWorkspace),
+      source: 'pd_config',
+    });
+  });
+
   it('still honors an absolute workspace in principles-disciple.json', () => {
     writePdConfig(sessionWorkspace);
     expect(resolveCanonicalWorkspaceDir()).toEqual({
@@ -92,6 +124,17 @@ describe('non-absolute workspace pointers are rejected, not resolved', () => {
     });
   });
 
+  // A refused pointer must never take the system down with it: the next
+  // declared source still wins, and the order env > config > default holds.
+  it('keeps source priority when the config pointer is refused but PD_WORKSPACE_DIR is valid', () => {
+    writePdConfig('D:.openclawworkspace');
+    process.env.PD_WORKSPACE_DIR = sessionWorkspace;
+    expect(resolveCanonicalWorkspaceDir()).toEqual({
+      workspaceDir: path.resolve(sessionWorkspace),
+      source: 'pd_env',
+    });
+  });
+
   it('uses the live session workspace when the config pointer is not absolute', () => {
     writePdConfig('D:.openclawworkspace');
     const result = resolveHookWorkspaceDir({ workspaceDir: sessionWorkspace }, hostApi() as never, 'test');
@@ -101,5 +144,43 @@ describe('non-absolute workspace pointers are rejected, not resolved', () => {
       expect(result.workspaceDir).toBe(sessionWorkspace);
       expect(result.source).toBe('openclaw_context');
     }
+  });
+
+  // A silent fallback that changes which directory owns governance state is
+  // the failure this guard prevents, so the refusal has to be reportable.
+  it('reports the refused pointer, its reason and where resolution landed', () => {
+    writePdConfig('D:.openclawworkspace');
+    const result = resolveHookWorkspaceDir({ workspaceDir: sessionWorkspace }, hostApi() as never, 'test');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.consistencyWarning).toContain('Workspace pointer rejected');
+    expect(result.consistencyWarning).toContain('pd_config');
+    expect(result.consistencyWarning).toContain('reason=not_absolute');
+    expect(result.consistencyWarning).toContain('D:.openclawworkspace');
+    expect(result.consistencyWarning).toContain('falling back to openclaw_context');
+  });
+
+  it('reports no warning when every declared source is usable', () => {
+    writePdConfig(sessionWorkspace);
+    const result = resolveHookWorkspaceDir({ workspaceDir: sessionWorkspace }, hostApi() as never, 'test');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.consistencyWarning).toBeUndefined();
+    }
+  });
+
+  it('logs the refused pointer on the command path too', () => {
+    writePdConfig('D:.openclawworkspace');
+    const api = hostApi();
+
+    const resolved = resolveCommandWorkspaceDir(api as never, { workspaceDir: sessionWorkspace });
+
+    expect(resolved).toBe(sessionWorkspace);
+    const warned = api.logger.warn.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(warned).toContain('Workspace pointer rejected');
+    expect(warned).toContain('reason=not_absolute');
+    expect(warned).toContain('falling back to openclaw_context');
   });
 });

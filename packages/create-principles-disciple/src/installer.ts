@@ -3112,22 +3112,57 @@ async function generateConfigYamlConfig(
   }
 }
 
+/**
+ * Does this workspace pointer name one fixed directory in every process?
+ *
+ * Mirrors `isDriveQualifiedWorkspacePath` in the plugin's workspace-dir
+ * validation (openclaw-plugin/src/core/workspace-dir-validation.ts), which is
+ * the reading side. It is duplicated rather than imported because the installer
+ * is the bootstrap package: it must not depend on the runtime it installs.
+ * Keep the two in step.
+ *
+ * `path.isAbsolute` alone is not enough on Windows — it accepts root-relative
+ * values like `\workspace`, which resolve against whatever drive the calling
+ * process is on.
+ */
+function isUsableWorkspacePointer(workspaceDir: string): boolean {
+  if (typeof workspaceDir !== 'string' || !workspaceDir.trim()) return false;
+  if (!path.isAbsolute(workspaceDir)) return false;
+  if (process.platform !== 'win32') return true;
+  return /^[A-Za-z]:[\\/]/.test(workspaceDir) || /^\\\\[^\\/]/.test(workspaceDir);
+}
+
+/**
+ * Fail loud on a workspace pointer that would make the installed config point
+ * at a different directory depending on which process reads it. The message is
+ * structured for an operator or agent: what is wrong, what was received, what
+ * is expected, and what to re-run.
+ */
+function assertUsableWorkspaceDir(workspaceDir: string): void {
+  if (isUsableWorkspacePointer(workspaceDir)) return;
+  throw new Error(
+    'Workspace path must be an absolute path that names one fixed directory.\n' +
+    `  Received: ${JSON.stringify(workspaceDir)}\n` +
+    '  Expected: a drive-qualified path such as "D:\\.openclaw\\workspace",\n' +
+    '            a UNC path such as "\\\\server\\share\\workspace",\n' +
+    `            or on other platforms "/home/me/workspace"\n` +
+    '  Rejected: relative paths, drive-relative paths ("D:workspace") and\n' +
+    '            root-relative paths ("\\workspace") — each of these names a\n' +
+    '            different directory depending on the calling process.\n' +
+    '\n' +
+    'Re-run with the path quoted, so the shell cannot strip its separators:\n' +
+    '  --workspace "D:\\.openclaw\\workspace"',
+  );
+}
+
 async function createConfigFile(workspaceDir: string, channels: string[]): Promise<void> {
   const configDir = getOpenClawDir();
   const configPath = path.join(configDir, 'principles-disciple.json');
 
-  // A non-absolute workspaceDir is written verbatim into the pointer the plugin
-  // reads on every hook. The plugin rejects such a value, but writing it would
-  // leave a config that silently resolves to nothing useful — refuse instead.
-  if (!path.isAbsolute(workspaceDir)) {
-    throw new Error(
-      `Refusing to write ${configPath}: workspace must be an absolute path, got "${workspaceDir}". ` +
-      'A drive-relative or separator-less path resolves against the current working directory, ' +
-      'so the pointer would name a different directory depending on where a process runs. ' +
-      'Re-run the installer with an absolute workspace path, for example --workspace "C:\\\\Users\\\\me\\\\workspace" ' +
-      '(quote it so the shell cannot mangle the separators).',
-    );
-  }
+  // Defense in depth: the same refusal the install entry makes, kept here
+  // because this is the only writer of the pointer the plugin reads on every
+  // hook, and other callers reach it without passing through install().
+  assertUsableWorkspaceDir(workspaceDir);
 
   let existingChannels: string[] | null = null;
   let existingFeatures: string[] | null = null;
@@ -3495,6 +3530,13 @@ export async function install(
   const quiet = mode.quiet === true;
   const nonInteractive = mode.nonInteractive ?? quiet;
   activeHostTarget = options.host;
+
+  // Refuse an unusable workspace pointer before ANY side effect — the gateway
+  // may already have been stopped and the workspace already templated by the
+  // time the config writer runs, and the rollback path does not undo workspace
+  // files. Validated here, the failure costs nothing.
+  assertUsableWorkspaceDir(options.workspaceDir);
+
   // Decide the payload shape once: self-contained (release asset) or
   // npm-distributed (registry-resolved dependencies). A present `_release`
   // asset keeps the hard preflight; the npm-distributed shape must pass
