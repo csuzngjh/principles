@@ -47,12 +47,36 @@ const { mockIntake, MockCandidateIntakeService } = vi.hoisted(() => {
   return { mockIntake, MockCandidateIntakeService };
 });
 
+// PRI-934/935: the barrel mock must provide the new single-authority imports.
+// recoverFailedTask defaults to null (nothing recovered → no mutation), which
+// keeps pre-fix tests on their original path; each describe re-primes it after
+// vi.clearAllMocks().
+const { mockRecoverFailedTask, mockPersistPainDiagnosis } = vi.hoisted(() => {
+  const mockRecoverFailedTask = vi.fn().mockResolvedValue(null);
+  const mockPersistPainDiagnosis = vi.fn().mockResolvedValue(undefined);
+  return { mockRecoverFailedTask, mockPersistPainDiagnosis };
+});
+
 const { MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
   function MockPrincipleTreeLedgerAdapter(this: any) {
     return {};
   }
   MockPrincipleTreeLedgerAdapter.prototype = {};
   return { MockPrincipleTreeLedgerAdapter };
+});
+
+// PRI-935: capture PainSignalBridge constructor args so the dead-letter
+// replay branch can be asserted to receive the persistence flag + emitter.
+const { MockPainSignalBridge, painSignalBridgeCtorCalls } = vi.hoisted(() => {
+  const painSignalBridgeCtorCalls: Record<string, unknown>[] = [];
+  function MockPainSignalBridge(this: any, opts: Record<string, unknown>) {
+    painSignalBridgeCtorCalls.push(opts);
+    return {
+      onPainDetected: vi.fn().mockResolvedValue({ status: 'succeeded', candidateIds: [], ledgerEntryIds: [] }),
+    };
+  }
+  MockPainSignalBridge.prototype = {};
+  return { MockPainSignalBridge, painSignalBridgeCtorCalls };
 });
 
 const { mockRun, mockResolveRuntimeConfig, mockResolveRuntimeFromPdConfig } = vi.hoisted(() => {
@@ -99,6 +123,9 @@ const { diagRootCauseRunnerCtor, diagDistillerRunnerCtor, diagRouterRunnerCtor }
 });
 
 vi.mock('../../src/services/pd-config-loader.js', () => ({
+  // PRI-935: the dead-letter replay branch reads the full-pipeline seed mode;
+  // default to the non-full-chain mode so replay seeds stay minimal.
+  resolvePromptFullPipelineSeedMode: vi.fn().mockReturnValue(undefined),
   loadPdConfig: vi.fn().mockReturnValue({
     ok: true,
     effective: { config: { featureFlags: { diagnostician_llm_degradation: true } }, source: 'file', warnings: [] },
@@ -114,6 +141,7 @@ const { MockSqliteDeadLetterStore, mockDeadLetterGetByPainId } = vi.hoisted(() =
   const mockDeadLetterGetByPainId = vi.fn().mockReturnValue(null);
   class MockSqliteDeadLetterStore {
     getByPainId = mockDeadLetterGetByPainId;
+    markRetried = vi.fn().mockReturnValue({ ok: true });
     constructor(_connection: unknown) {}
   }
   return { MockSqliteDeadLetterStore, mockDeadLetterGetByPainId };
@@ -130,7 +158,7 @@ vi.mock('@principles/core/runtime-v2', () => {
     SqliteTrajectoryLocator: vi.fn().mockImplementation(function () { return {}; }),
     SqliteSourceTraceLocator: vi.fn().mockImplementation(function () { return {}; }),
     SqliteDeadLetterStore: MockSqliteDeadLetterStore,
-    PainSignalBridge: vi.fn().mockImplementation(function () { return {}; }),
+    PainSignalBridge: MockPainSignalBridge,
     StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
@@ -165,6 +193,12 @@ vi.mock('@principles/core/runtime-v2', () => {
     resolveRuntimeConfig: mockResolveRuntimeConfig,
     isRuntimeConfigError: vi.fn().mockReturnValue(false),
     isFeatureEnabled: vi.fn().mockReturnValue(true),
+    // PRI-934/935: recovery + ledger single authorities (see hoisted mocks).
+    recoverFailedTask: mockRecoverFailedTask,
+    persistPainDiagnosis: mockPersistPainDiagnosis,
+    // Single rc-9 telemetry bridge (factory-owned); CLI sites receive a
+    // no-op emitter from it.
+    createBridgeTelemetryEventEmitter: vi.fn().mockReturnValue({ emitTelemetry: vi.fn() }),
     resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
     validatePdConfig: vi.fn().mockReturnValue({ valid: true, errors: [] }),
     computeEffectivePdConfig: vi.fn().mockReturnValue({ config: {}, source: 'defaults', warnings: [] }),
@@ -276,6 +310,9 @@ describe('pd pain retry — validation and error paths', () => {
     mockGetRunsByTask.mockResolvedValue([]);
     mockIntake.mockReset();
     mockDeadLetterGetByPainId.mockReturnValue(null);
+    // PRI-934: default "nothing recovered" after clearAllMocks() (null = no
+    // mutation), keeping pre-fix tests on their original path.
+    mockRecoverFailedTask.mockResolvedValue(null);
     mockRun.mockResolvedValue({
       status: 'succeeded',
       taskId: 'diagnosis_test-pain-1',
@@ -604,6 +641,8 @@ describe('pd pain retry — success paths', () => {
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockGetRunsByTask.mockResolvedValue([]);
     mockIntake.mockReset();
+    // PRI-934: null = nothing recovered, no mutation (post-clearAllMocks re-prime).
+    mockRecoverFailedTask.mockResolvedValue(null);
     mockRun.mockResolvedValue({
       status: 'succeeded',
       taskId: 'diagnosis_test-pain-1',
@@ -814,6 +853,9 @@ describe('pd pain retry — human-readable output', () => {
     mockGetRunsByTask.mockResolvedValue([]);
     mockIntake.mockReset();
     mockDeadLetterGetByPainId.mockReturnValue(null);
+    // PRI-934: default "nothing recovered" after clearAllMocks() (null = no
+    // mutation), keeping pre-fix tests on their original path.
+    mockRecoverFailedTask.mockResolvedValue(null);
     mockRun.mockResolvedValue({
       status: 'succeeded',
       taskId: 'diagnosis_test-pain-1',
@@ -1012,6 +1054,8 @@ describe('BUG-1 (PRI-442): pain retry — effectiveConfig wiring to split-pipeli
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockGetRunsByTask.mockResolvedValue([]);
     mockIntake.mockReset();
+    // PRI-934: null = nothing recovered, no mutation (post-clearAllMocks re-prime).
+    mockRecoverFailedTask.mockResolvedValue(null);
     mockRun.mockResolvedValue({
       status: 'succeeded',
       taskId: 'diagnosis_test-pain-1',
@@ -1116,6 +1160,451 @@ describe('PRI-638: pd pain retry when Diagnostician capability is disabled', () 
     expect(runtimeV2.SplitDiagnosticianRunner).not.toHaveBeenCalled();
 
     errSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ── PRI-934: failed diagnostician family must be recovered before re-run ─────
+//
+// Before this fix, `pd pain retry` on a failed task died with lease_conflict
+// (DefaultLeaseManager accepts pending/retry_wait only) and the exhausted
+// split-pipeline stage tasks could not be re-pended by the runner either. The
+// handler now resets the whole diagnostician family through the single
+// recovery authority (recoverFailedTask, shared with the sweep service).
+
+describe('PRI-934: pd pain retry — failed-task recovery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetCandidatesByTaskId.mockResolvedValue([]);
+    mockUpdateCandidateStatus.mockResolvedValue(undefined);
+    mockGetRunsByTask.mockResolvedValue([]);
+    mockIntake.mockReset();
+    mockRecoverFailedTask.mockResolvedValue(null);
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'diagnosis_test-pain-failed',
+      runId: 'run-retry-1',
+      contextHash: 'abc123',
+    });
+  });
+
+  it('REC-01: failed parent → family reset (parent + 3 stages, force) BEFORE the runner executes', async () => {
+    mockGetTask.mockResolvedValue(FAILED_TASK);
+    mockRecoverFailedTask.mockImplementation(async (_sm: unknown, taskId: string) => ({
+      taskId, previousStatus: 'failed', newStatus: 'pending',
+      attemptCount: 0, maxAttempts: 6, forceApplied: true,
+    }));
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-failed',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    const family = mockRecoverFailedTask.mock.calls.map((call) => call[1]);
+    expect(family).toEqual([
+      'diagnosis_test-pain-failed',
+      'diag_rootcause-diagnosis_test-pain-failed',
+      'diag_distiller-diagnosis_test-pain-failed',
+      'diag_router-diagnosis_test-pain-failed',
+    ]);
+    // force=true: an explicit pain retry IS the operator recovery decision
+    // (stage tasks are typically budget-exhausted).
+    for (const call of mockRecoverFailedTask.mock.calls) {
+      expect(call[2]).toBe(true);
+    }
+    // Recovery precedes execution — otherwise the parent lease acquisition
+    // fails on the still-failed status (the original dead end).
+    expect(mockRecoverFailedTask.mock.invocationCallOrder[0])
+      .toBeLessThan(mockRun.mock.invocationCallOrder[0]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.status).toBe('succeeded');
+    expect(output.recoveredTasks).toEqual([
+      'diagnosis_test-pain-failed',
+      'diag_rootcause-diagnosis_test-pain-failed',
+      'diag_distiller-diagnosis_test-pain-failed',
+      'diag_router-diagnosis_test-pain-failed',
+    ]);
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('REC-02: retry_wait task with no failed stages → recovery attempted but nothing reset (cli-5)', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    // The family is probed (recoverFailedTask is the status authority), but
+    // every member is non-failed, so the mock's null default resets nothing.
+    expect(mockRecoverFailedTask).toHaveBeenCalledTimes(4);
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.recoveredTasks).toEqual([]);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('REC-05: retry_wait parent + failed stages → stages reset, parent untouched (CodeRabbit #1885)', async () => {
+    mockGetTask.mockResolvedValue({ ...RETRY_WAIT_TASK, taskId: 'diagnosis_test-pain-rw', lastError: null });
+    mockRecoverFailedTask.mockImplementation(async (_sm: unknown, taskId: string) => {
+      if (taskId === 'diagnosis_test-pain-rw') return null; // retry_wait parent — authority no-ops
+      return {
+        taskId, previousStatus: 'failed', newStatus: 'pending',
+        attemptCount: 0, maxAttempts: 6, forceApplied: true,
+      };
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-rw',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    const family = mockRecoverFailedTask.mock.calls.map((call) => call[1]);
+    expect(family).toEqual([
+      'diagnosis_test-pain-rw',
+      'diag_rootcause-diagnosis_test-pain-rw',
+      'diag_distiller-diagnosis_test-pain-rw',
+      'diag_router-diagnosis_test-pain-rw',
+    ]);
+    expect(mockRecoverFailedTask.mock.invocationCallOrder[0])
+      .toBeLessThan(mockRun.mock.invocationCallOrder[0]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.status).toBe('succeeded');
+    // Only the three failed stages are reported — the retry_wait parent is
+    // not reset (recoverFailedTask returns null for non-failed statuses).
+    expect(output.recoveredTasks).toEqual([
+      'diag_rootcause-diagnosis_test-pain-rw',
+      'diag_distiller-diagnosis_test-pain-rw',
+      'diag_router-diagnosis_test-pain-rw',
+    ]);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('REC-03: surviving lease_conflict → nextAction names the authoritative recovery tool (cli-6)', async () => {
+    mockGetTask.mockResolvedValue(FAILED_TASK);
+    mockRun.mockResolvedValueOnce({
+      status: 'failed',
+      taskId: 'diagnosis_test-pain-failed',
+      errorCategory: 'lease_conflict',
+      failureReason: 'Parent task lease acquisition failed',
+      attemptCount: 1,
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-failed',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.status).toBe('failed');
+    expect(output.errorCategory).toBe('lease_conflict');
+    // cli-1: failure branch carries the same recoveredTasks shape as success.
+    expect(output.recoveredTasks).toEqual([]);
+    expect(output.nextAction).toContain('pd runtime recovery failed-tasks');
+    expect(output.nextAction).toContain('--confirm');
+    expect(output.nextAction).toContain('pd pain retry --pain-id test-pain-failed');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('REC-04: text mode lease_conflict also carries the recovery nextAction', async () => {
+    mockGetTask.mockResolvedValue(FAILED_TASK);
+    mockRun.mockResolvedValueOnce({
+      status: 'failed',
+      taskId: 'diagnosis_test-pain-failed',
+      errorCategory: 'lease_conflict',
+      failureReason: 'Parent task lease acquisition failed',
+      attemptCount: 1,
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-failed',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    });
+
+    const allOutput = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(allOutput).toContain('Next Action');
+    expect(allOutput).toContain('pd runtime recovery failed-tasks');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('REC-05b: text-mode FAILURE path still lists recovered tasks (review §3 regression)', async () => {
+    mockGetTask.mockResolvedValue(FAILED_TASK);
+    mockRecoverFailedTask.mockImplementation(async (_sm: unknown, taskId: string) => ({
+      taskId, previousStatus: 'failed', newStatus: 'pending',
+      attemptCount: 0, maxAttempts: 6, forceApplied: true,
+    }));
+    mockRun.mockResolvedValueOnce({
+      status: 'failed',
+      taskId: 'diagnosis_test-pain-failed',
+      errorCategory: 'lease_conflict',
+      failureReason: 'Stage lease acquisition failed',
+      attemptCount: 1,
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-failed',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    });
+
+    const allOutput = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(allOutput).toContain('Retry failed');
+    // Operators need the recovery list exactly where the runner died.
+    expect(allOutput).toContain('Recovered:');
+    expect(allOutput).toContain('diag_router-diagnosis_test-pain-failed');
+    // ...printed once, not duplicated (F1).
+    expect(allOutput.match(/Recovered:/g)).toHaveLength(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ── PRI-935: CLI retry path must dispatch the pain_diagnoses ledger write ────
+//
+// persistPainDiagnosis is the single ledger authority (bridge + CLI). The
+// flag is derived from the same canonical computation the production factory
+// uses; the dead-letter replay branch must pass it to the bridge like the
+// factory does.
+
+describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
+  const RETRY_SUCCESS_OUTPUT = {
+    valid: true as const,
+    diagnosisId: 'diag-935',
+    summary: 'test diagnosis',
+    rootCause: 'People: Agent retried without inspecting the lease state',
+    violatedPrinciples: [],
+    evidence: [{ sourceRef: 'tool_calls:1', note: 'test evidence' }],
+    recommendations: [{ kind: 'defer' as const, description: 'no actionable principle' }],
+    confidence: 0.7,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
+    ]);
+    mockUpdateCandidateStatus.mockResolvedValue(undefined);
+    mockGetRunsByTask.mockResolvedValue([]);
+    mockIntake.mockReset();
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
+    mockRecoverFailedTask.mockResolvedValue(null);
+    mockPersistPainDiagnosis.mockResolvedValue(undefined);
+    painSignalBridgeCtorCalls.length = 0;
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'diagnosis_test-pain-1',
+      runId: 'run-retry-1',
+      contextHash: 'abc123',
+      output: RETRY_SUCCESS_OUTPUT,
+    });
+  });
+
+  it('LEDGER-01: flag on + diagnosis output → persist dispatched before intake with the requested painId, JSON says attempted', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    expect(mockPersistPainDiagnosis).toHaveBeenCalledTimes(1);
+    const [deps, opts] = mockPersistPainDiagnosis.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
+    expect(opts.painId).toBe('test-pain-1');
+    expect(opts.taskId).toBe('diagnosis_test-pain-1');
+    expect(opts.artifactId).toBe('art-1');
+    expect(deps.stateManager).toBeDefined();
+    // persist-before-admission ordering (mirrors the bridge).
+    expect(mockPersistPainDiagnosis.mock.invocationCallOrder[0]).toBeLessThan(mockIntake.mock.invocationCallOrder[0]);
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.painDiagnosisLedgerWrite).toBe('attempted');
+    // The handler must consult the canonical flag name, not a CLI-local one.
+    expect(vi.mocked(runtimeV2.isFeatureEnabled).mock.calls.some((call) => call[1] === 'pain_diagnosis_persistence')).toBe(true);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('LEDGER-04: task.inputRef diverges from CLI painId → ledger uses canonical inputRef (rc-6)', async () => {
+    mockGetTask.mockResolvedValue({ ...RETRY_WAIT_TASK, inputRef: 'pain-authoritative-9' });
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    expect(mockPersistPainDiagnosis).toHaveBeenCalledTimes(1);
+    const [, opts] = mockPersistPainDiagnosis.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
+    // The task record is the attribution authority, not the CLI argument.
+    expect(opts.painId).toBe('pain-authoritative-9');
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('LEDGER-02: flag off (default) → no ledger dispatch, JSON says disabled', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(false);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    expect(mockPersistPainDiagnosis).not.toHaveBeenCalled();
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.painDiagnosisLedgerWrite).toBe('disabled');
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('LEDGER-03: dead-letter replay bridge receives the flag + telemetry wiring like the factory', async () => {
+    mockGetTask.mockResolvedValue(null);
+    mockDeadLetterGetByPainId.mockReturnValue({
+      id: 'dl-1',
+      painId: 'test-pain-1',
+      painData: {
+        painId: 'test-pain-1',
+        painType: 'tool_failure',
+        source: 'openclaw',
+        reason: 'tool call failed',
+      },
+      failedAt: '2026-09-27T00:00:00.000Z',
+      retryCount: 0,
+      retriedAt: null,
+    });
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    // The dead-letter branch constructs the bridge with the persistence flag
+    // (previously absent → replays silently skipped the ledger).
+    expect(painSignalBridgeCtorCalls.length).toBeGreaterThan(0);
+    const bridgeOpts = painSignalBridgeCtorCalls[painSignalBridgeCtorCalls.length - 1];
+    expect(bridgeOpts.diagnosisPersistenceEnabled).toBe(true);
+    expect(bridgeOpts.eventEmitter).toBeDefined();
+
+    const output = JSON.parse(logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    })![0] as string);
+    expect(output.source).toBe('dead_letter');
+    // mvp-q-2: the dead-letter branch must also OBSERVE the ledger dispatch.
+    expect(output.painDiagnosisLedgerWrite).toBe('attempted');
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('LEDGER-05: dead-letter JSON says disabled when the persistence flag is off', async () => {
+    mockGetTask.mockResolvedValue(null);
+    mockDeadLetterGetByPainId.mockReturnValue({
+      id: 'dl-2',
+      painId: 'test-pain-2',
+      painData: {
+        painId: 'test-pain-2',
+        painType: 'tool_failure',
+        source: 'openclaw',
+        reason: 'tool call failed',
+      },
+      failedAt: '2026-09-27T00:00:00.000Z',
+      retryCount: 0,
+      retriedAt: null,
+    });
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(false);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-2',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    const output = JSON.parse(logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    })![0] as string);
+    expect(output.source).toBe('dead_letter');
+    expect(output.painDiagnosisLedgerWrite).toBe('disabled');
+
+    logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });
