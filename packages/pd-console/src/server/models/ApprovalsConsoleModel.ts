@@ -201,7 +201,7 @@ export class ApprovalsConsoleModel {
     // The prompt surface renders active activations under a hard char cap;
     // when the budget is saturated the newest Owner approval may not reach
     // agent behavior on THIS turn. Surface it as a non-fatal warning (rc-9)
-    // instead — the activation stays committed. PRI-935: whether "not on this
+    // instead — the activation stays committed. PR-1894: whether "not on this
     // turn" means "queued behind rotation" or genuinely starved depends on the
     // selection policy, which checkPromptInjectionBudget now reports honestly.
     let injectionWarning: string | undefined;
@@ -229,7 +229,7 @@ export class ApprovalsConsoleModel {
    * principles. A projection error is also surfaced (never silent) but must
    * not fail the approve.
    *
-   * PRI-935 — the console holds no session, so it cannot supply the production
+   * PR-1894 — the console holds no session, so it cannot supply the production
    * round key and the projection runs `legacy_fifo_prefix_v1`. That is NOT a
    * conservative forecast: FIFO structurally drops the newest activation from
    * every truncated selection, while the live plugin route rotates and injects
@@ -257,7 +257,7 @@ export class ApprovalsConsoleModel {
       // that instead of blaming the budget.
       return `injection_excluded_non_budget: the activation is committed but excluded from the prompt injection projection for a non-budget reason.${projectionDetail} nextAction=inspect the artifact/activation pair via pd runtime activation list`;
     }
-    // PRI-935: fair rotation is the live plugin-local policy (PRI-904). An
+    // PR-1894: fair rotation is the live plugin-local policy (PRI-904). An
     // activation that SOME round does inject is rotated out of the current
     // window, not starved — report that bounded fact instead of the old FIFO
     // starvation claim. The shared route genuinely does not rotate, so its
@@ -266,7 +266,7 @@ export class ApprovalsConsoleModel {
       const window = projection.eligibleCount;
       return `injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (${projection.budget}c; ${projection.injectedActivationIds.length} of ${window} eligible activations injected this round; production selection policy fair_rotation_v1). Fair rotation advances the window by one position per recorded user turn, so this principle WILL enter agent behavior within at most ${window} consecutive user turns of a continuously advancing session — deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry`;
     }
-    // PRI-935: report the PRODUCTION policy, not the policy this forecast
+    // PR-1894: report the PRODUCTION policy, not the policy this forecast
     // happened to run. The console holds no session round key, so its own
     // projection is always `legacy_fifo_prefix_v1` even on a route where
     // production rotates — labelling that value "the current production
