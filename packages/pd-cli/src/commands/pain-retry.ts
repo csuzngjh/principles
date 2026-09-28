@@ -659,6 +659,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             errorCategory: 'execution_failed',
             message: errorMessage,
             markRetriedOk: markFail.ok,
+            // mvp-q-2: the dead-letter branch writes the ledger inside the
+            // bridge, so report the same dispatched/observed semantics here.
+            painDiagnosisLedgerWrite: diagnosisPersistenceEnabled ? 'attempted' as const : 'disabled' as const,
             nextAction: 'Replay threw; retry_count incremented. Adjust parameters and run pd pain retry --pain-id again.',
           }, null, 2));
         } else {
@@ -671,6 +674,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
       const success = bridgeResult.status === 'succeeded';
       const markResult = dlStore.markRetried(opts.painId, success);
+      // mvp-q-2: the ledger write happens inside the bridge on this branch;
+      // report the same dispatched/observed semantics as the other branches.
+      const dlLedgerWrite = diagnosisPersistenceEnabled
+        ? 'attempted' as const
+        : 'disabled' as const;
 
       if (opts.json) {
         // cli-1-strict-json: exactly one parseable JSON object on stdout.
@@ -686,6 +694,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           ledgerEntryIds: bridgeResult.ledgerEntryIds,
           markRetriedOk: markResult.ok,
           message: bridgeResult.message ?? null,
+          painDiagnosisLedgerWrite: dlLedgerWrite,
           nextAction: success
             ? (bridgeResult.candidateIds.length > 0
               ? `Dead letter replayed. Internalize candidates:\n  ${bridgeResult.candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
@@ -706,6 +715,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       console.log(`  Bridge Status:   ${bridgeResult.status}`);
       if (bridgeResult.message) {
         console.log(`  Message:         ${bridgeResult.message}`);
+      }
+      if (dlLedgerWrite === 'attempted') {
+        console.log(`  Diagnosis Ledger: pain_diagnoses write dispatched by the bridge (skips/failures surface as pain_diagnosis_persist_* events)`);
+      } else {
+        console.log(`  Diagnosis Ledger: disabled — pain_diagnosis_persistence flag off; no attribution row written`);
       }
       if (success) {
         console.log(`  Candidates:      ${bridgeResult.candidateIds.length}`);
@@ -760,9 +774,6 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         const recovered = await recoverFailedTask(stateManager, familyTaskId, true);
         if (recovered) recoveredTasks.push(recovered.taskId);
       }
-      if (recoveredTasks.length > 0 && !opts.json) {
-        console.log(`  Recovered: ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.join(', ')}\n`);
-      }
     }
 
     const result = await diagnoseRun({
@@ -786,9 +797,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           previousTaskStatus,
           previousLastError,
           newTaskStatus: result.status,
+          // Same shape as the succeeded branch (cli-1: consumers need not
+          // special-case presence).
+          recoveredTasks,
           errorCategory: result.errorCategory ?? null,
           failureReason: result.failureReason ?? null,
-          ...(recoveredTasks.length > 0 ? { recoveredTasks } : {}),
           nextAction: result.errorCategory === 'output_invalid'
             ? 'The LLM output failed validation. Try a different model or provider.'
             : result.errorCategory === 'lease_conflict'
@@ -831,7 +844,12 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         // Single rc-9 mapping authority shared with the production factory.
         { stateManager, eventEmitter: createBridgeTelemetryEventEmitter() },
         {
-          painId: opts.painId,
+          // rc-6: same canonical lineage the bridge uses (task.inputRef),
+          // not the CLI-supplied painId — they are equal by the
+          // diagnosis_<painId> convention but the record is the authority.
+          painId: typeof task?.inputRef === 'string' && task.inputRef.length > 0
+            ? task.inputRef
+            : opts.painId,
           taskId,
           diagnosticianOutput: result.output,
           artifactId: candidates[0]?.artifactId ?? null,

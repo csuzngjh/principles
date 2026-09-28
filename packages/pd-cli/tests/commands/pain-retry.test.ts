@@ -1326,6 +1326,8 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.status).toBe('failed');
     expect(output.errorCategory).toBe('lease_conflict');
+    // cli-1: failure branch carries the same recoveredTasks shape as success.
+    expect(output.recoveredTasks).toEqual([]);
     expect(output.nextAction).toContain('pd runtime recovery failed-tasks');
     expect(output.nextAction).toContain('--confirm');
     expect(output.nextAction).toContain('pd pain retry --pain-id test-pain-failed');
@@ -1438,6 +1440,30 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
     exitSpy.mockRestore();
   });
 
+  it('LEDGER-04: task.inputRef diverges from CLI painId → ledger uses canonical inputRef (rc-6)', async () => {
+    mockGetTask.mockResolvedValue({ ...RETRY_WAIT_TASK, inputRef: 'pain-authoritative-9' });
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    expect(mockPersistPainDiagnosis).toHaveBeenCalledTimes(1);
+    const [, opts] = mockPersistPainDiagnosis.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
+    // The task record is the attribution authority, not the CLI argument.
+    expect(opts.painId).toBe('pain-authoritative-9');
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
   it('LEDGER-02: flag off (default) → no ledger dispatch, JSON says disabled', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     const runtimeV2 = await import('@principles/core/runtime-v2');
@@ -1500,6 +1526,46 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
       try { JSON.parse(call[0] as string); return true; } catch { return false; }
     })![0] as string);
     expect(output.source).toBe('dead_letter');
+    // mvp-q-2: the dead-letter branch must also OBSERVE the ledger dispatch.
+    expect(output.painDiagnosisLedgerWrite).toBe('attempted');
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('LEDGER-05: dead-letter JSON says disabled when the persistence flag is off', async () => {
+    mockGetTask.mockResolvedValue(null);
+    mockDeadLetterGetByPainId.mockReturnValue({
+      id: 'dl-2',
+      painId: 'test-pain-2',
+      painData: {
+        painId: 'test-pain-2',
+        painType: 'tool_failure',
+        source: 'openclaw',
+        reason: 'tool call failed',
+      },
+      failedAt: '2026-09-27T00:00:00.000Z',
+      retryCount: 0,
+      retriedAt: null,
+    });
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(false);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-2',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    const output = JSON.parse(logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    })![0] as string);
+    expect(output.source).toBe('dead_letter');
+    expect(output.painDiagnosisLedgerWrite).toBe('disabled');
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
