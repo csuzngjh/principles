@@ -282,6 +282,13 @@ export class ApprovalsGroupedConsoleModel {
           budget: projection.budget,
           usedChars: projection.usedChars,
           truncated: projection.truncated,
+          // PRI-935: the badge must describe what the PRODUCTION route will do,
+          // not which policy this session-less forecast happened to run.
+          // Without it the UI can only say "will queue", which under fair
+          // rotation reads as permanent starvation and pushes the Owner to
+          // deactivate healthy principles.
+          productionRotates: projection.productionRotates,
+          eligibleCount: projection.eligibleCount,
         },
       };
     } catch (err: unknown) {

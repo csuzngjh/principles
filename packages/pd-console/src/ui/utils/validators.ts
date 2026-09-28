@@ -1976,7 +1976,18 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
   ) {
     return null;
   }
-  return { budget, usedChars, truncated };
+  const result: PromptInjectionBudgetStatus = { budget, usedChars, truncated };
+  // PRI-935: these are optional so a pre-PRI-935 server payload still
+  // validates (backward compatibility). A present-but-invalid value is
+  // DROPPED, never propagated (rc-1/rc-2): the UI then falls back to
+  // policy-agnostic copy rather than rendering an unverified policy claim.
+  if (Object.hasOwn(v, 'productionRotates') && typeof v.productionRotates === 'boolean') {
+    result.productionRotates = v.productionRotates;
+  }
+  if (Object.hasOwn(v, 'eligibleCount') && typeof v.eligibleCount === 'number' && Number.isInteger(v.eligibleCount) && v.eligibleCount >= 0) {
+    result.eligibleCount = v.eligibleCount;
+  }
+  return result;
 }
 
 export function validateApprovalsGrouped(v: unknown): ApprovalsGroupedData | null {

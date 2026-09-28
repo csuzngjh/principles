@@ -331,11 +331,29 @@ function PendingReviewCard({
   function notifySuccessWarnings(successWarnings: readonly string[]) {
     const segments = successWarnings.flatMap((warning) => splitApprovalWarnings(warning));
     const localized = segments.map((warning) => localizeApprovalWarning(warning, t));
-    const renderDetail = (detail: string) =>
-      `${t("pages.focus.approveWarningDetail", { defaultValue: "原始信息" })}: ${detail}`;
+    // PRI-935: the raw server text is still preserved verbatim (rc-9 — never
+    // dropped), but it is operator-facing English, not Owner-facing prose. It
+    // used to be appended flat under the localized body, so the toast rendered
+    // as one mixed Chinese/English block and the machine text visually
+    // dominated the message. Collapse it behind a native <details> so the
+    // Owner reads plain language first and can still open the raw evidence.
+    const renderDetail = (detail: string) => (
+      <details className="mt-2 text-[11.5px] opacity-80">
+        <summary className="cursor-pointer select-none">
+          {t("pages.focus.approveWarningDetail", { defaultValue: "原始信息" })}
+        </summary>
+        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">
+          {detail}
+        </pre>
+      </details>
+    );
     for (const item of localized.slice(0, MAX_WARNING_TOASTS)) {
       toast.warning(item.title, {
-        description: item.body ? `${item.body}\n${renderDetail(item.detail)}` : item.detail,
+        description: item.body
+          ? (<>{item.body}{renderDetail(item.detail)}</>)
+          // An unrecognized code degrades to the raw string as the whole
+          // message (rc-9) — there is no localized body to sit above it.
+          : item.detail,
         duration: 15000,
         action: item.activationAction
           ? { label: t("pages.focus.goActivationCta", { defaultValue: "前往生效情况" }), onClick: () => navigate("/activation") }
@@ -345,7 +363,17 @@ function PendingReviewCard({
     const overflow = localized.slice(MAX_WARNING_TOASTS);
     if (overflow.length > 0) {
       toast.warning(t("pages.focus.approveWarning.overflowTitle", { defaultValue: "还有 {{count}} 条警告", count: overflow.length }), {
-        description: overflow.map((item) => renderDetail(item.detail)).join("\n"),
+        description: (
+          <>
+            {overflow.map((item) => (
+              <div key={item.detail} className="mb-1 last:mb-0">
+                <div>{item.title}</div>
+                {item.body ? <div>{item.body}</div> : null}
+                {renderDetail(item.detail)}
+              </div>
+            ))}
+          </>
+        ),
         duration: 15000,
       });
     }
@@ -546,18 +574,26 @@ function PendingReviewCard({
         </div>
       )}
 
-      {/* PRI-908: 批准前预算预告——FIFO 注入下新激活永远排在队尾，投影已截断
-          即意味着"批准了也暂时不生效"。让 Owner 在决策前就知道，而不是事后道歉。 */}
+      {/* PRI-908: 批准前预算预告——注入窗口已满即意味着"批准了也可能这一轮不生效"。
+          让 Owner 在决策前就知道，而不是事后道歉。
+          PRI-935: 文案按预测实际使用的选择策略区分——公平轮转下新原则会自行轮到，
+          旧文案"需先停用被取代的旧原则"在该策略下是错的。 */}
       {decidedOutcome === null && primaryChannel === "prompt" && promptInjection?.truncated === true && (
         <div
           className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] text-amber"
           data-testid={`approve-queue-badge-${group.principleId}`}
         >
-          {t("pages.focus.approveQueueBadge", {
-            defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符），需先停用被取代的旧原则。",
-            used: promptInjection.usedChars,
-            budget: promptInjection.budget,
-          })}
+          {promptInjection.productionRotates === true
+            ? t("pages.focus.approveQueueBadgeRotation", {
+                defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。当前按公平轮转选取，新原则会在后续轮次自行轮到，无需停用旧原则。",
+                used: promptInjection.usedChars,
+                budget: promptInjection.budget,
+              })
+            : t("pages.focus.approveQueueBadge", {
+                defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。",
+                used: promptInjection.usedChars,
+                budget: promptInjection.budget,
+              })}
         </div>
       )}
 

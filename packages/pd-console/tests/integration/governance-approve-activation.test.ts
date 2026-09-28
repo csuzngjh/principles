@@ -674,8 +674,13 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     const warning = getStringField(approveData, 'warning');
     expect(warning).withContext('Budget exclusion must surface a warning').toBeDefined();
-    expect(warning).toContain('injection_budget_excluded');
+    // PRI-935: the live plugin-local route ROTATES, so a fresh activation that
+    // FIFO would drop is queued, not starved. The old assertion expected
+    // `injection_budget_excluded` + "deactivate older principles", which is
+    // exactly the falsehood this fix removes.
+    expect(warning).toContain('injection_budget_queued');
     expect(warning).toContain('nextAction=');
+    expect(warning).toContain('deactivating older principles is NOT required');
   });
 
   it('approve stays warning-free for a prompt activation when the budget has room (PRI-890 positive path)', async () => {

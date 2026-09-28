@@ -198,10 +198,12 @@ export class ApprovalsConsoleModel {
 
     // PRI-890 (PRI-768 v6-02): after a successful prompt-channel activation,
     // verify the new activation actually fits the prompt injection budget.
-    // The prompt surface renders active activations FIFO (activated_at ASC)
-    // under a hard char cap; when the budget is saturated the newest Owner
-    // approval silently never reaches agent behavior. Surface it as a
-    // non-fatal warning (rc-9) instead — the activation stays committed.
+    // The prompt surface renders active activations under a hard char cap;
+    // when the budget is saturated the newest Owner approval may not reach
+    // agent behavior on THIS turn. Surface it as a non-fatal warning (rc-9)
+    // instead — the activation stays committed. PRI-935: whether "not on this
+    // turn" means "queued behind rotation" or genuinely starved depends on the
+    // selection policy, which checkPromptInjectionBudget now reports honestly.
     let injectionWarning: string | undefined;
     if (isActivationSuccess(activation) && existing.channel === 'prompt') {
       // isActivationSuccess is not a type predicate; the success variants all
@@ -226,6 +228,16 @@ export class ApprovalsConsoleModel {
    * the activation is committed and the Owner decides whether to retire older
    * principles. A projection error is also surfaced (never silent) but must
    * not fail the approve.
+   *
+   * PRI-935 — the console holds no session, so it cannot supply the production
+   * round key and the projection runs `legacy_fifo_prefix_v1`. That is NOT a
+   * conservative forecast: FIFO structurally drops the newest activation from
+   * every truncated selection, while the live plugin route rotates and injects
+   * it within N user turns (PRI-904). Reporting that as "will NOT enter agent
+   * behavior until older ones are deactivated" told the Owner a falsehood and
+   * pushed them to deactivate healthy principles. The console now reports the
+   * policy it actually ran and, when the activation is merely rotated out of
+   * the current window, says so instead of claiming starvation.
    */
   private async checkPromptInjectionBudget(activationId: string): Promise<string | undefined> {
     let projection;
@@ -245,7 +257,16 @@ export class ApprovalsConsoleModel {
       // that instead of blaming the budget.
       return `injection_excluded_non_budget: the activation is committed but excluded from the prompt injection projection for a non-budget reason.${projectionDetail} nextAction=inspect the artifact/activation pair via pd runtime activation list`;
     }
-    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${projection.budget}c, FIFO by activated_at) is already filled by ${projection.injectedActivationIds.length} earlier activation(s) — this principle will NOT enter agent behavior until older ones are deactivated. nextAction=review the activations page and deactivate superseded principles`;
+    // PRI-935: fair rotation is the live plugin-local policy (PRI-904). An
+    // activation that SOME round does inject is rotated out of the current
+    // window, not starved — report that bounded fact instead of the old FIFO
+    // starvation claim. The shared route genuinely does not rotate, so its
+    // empty reachability set falls through to the starvation branch below.
+    if (projection.productionRotates && projection.eventuallyInjectedActivationIds.includes(activationId)) {
+      const window = projection.eligibleCount;
+      return `injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (${projection.budget}c; ${projection.injectedActivationIds.length} of ${window} eligible activations injected this round; production selection policy fair_rotation_v1). Fair rotation advances the window by one position per recorded user turn, so this principle WILL enter agent behavior within at most ${window} consecutive user turns of a continuously advancing session — deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry`;
+    }
+    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${projection.budget}c) is full and this activation is not reachable under the current production selection policy (${projection.productionRotates ? projection.selectionPolicy : 'legacy_fifo_prefix_v1'}; ${projection.injectedActivationIds.length}/${projection.eligibleCount} eligible injected${projection.productionRotates ? '' : ', FIFO by activated_at'}) — this principle will NOT enter agent behavior until capacity frees up. nextAction=review the activations page and deactivate superseded principles`;
   }
 
   /**
