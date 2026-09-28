@@ -41,8 +41,7 @@ import {
   persistPainDiagnosis,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
-  mapBridgeTelemetryToStoreEvent,
-  storeEmitter,
+  createBridgeTelemetryEventEmitter,
   type PainDetectedData,
   type PainSignalBridgeResult,
   type DeadLetterRow,
@@ -638,12 +637,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         diagnosisPersistenceEnabled,
         // rc-9: same production degradation-telemetry wiring as the factory —
         // only persistence events reach the store emitter.
-        eventEmitter: {
-          emitTelemetry: (event) => {
-            const mapped = mapBridgeTelemetryToStoreEvent(event);
-            if (mapped) storeEmitter.emitTelemetry(mapped);
-          },
-        },
+        eventEmitter: createBridgeTelemetryEventEmitter(),
         // PRI-720: honor the Owner's full-prompt-pipeline switch on replay seeds.
         fullPipelinePromptSeeds: resolvePromptFullPipelineSeedMode(workspaceDir) === 'full_chain',
       });
@@ -774,6 +768,10 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     });
 
     if (result.status !== 'succeeded') {
+      // PRI-934: lease_conflict survived the pre-run recovery, so it is
+      // either a live worker holding the lease or a state pain retry must
+      // not reset (needs_human_review). Name the authoritative tool.
+      const leaseConflictNextAction = `A live worker holds the lease or the task is in a state pain retry must not reset. Wait for the lease to expire, or run: pd runtime recovery failed-tasks -w "${workspaceDir}" --confirm (then re-run pd pain retry --pain-id ${opts.painId}).`;
       if (opts.json) {
         console.log(JSON.stringify({
           status: 'failed',
@@ -789,11 +787,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           ...(recoveredTasks.length > 0 ? { recoveredTasks } : {}),
           nextAction: result.errorCategory === 'output_invalid'
             ? 'The LLM output failed validation. Try a different model or provider.'
-            // PRI-934: lease_conflict survived the pre-run recovery, so it is
-            // either a live worker holding the lease or a state pain retry must
-            // not reset (needs_human_review). Name the authoritative tool.
             : result.errorCategory === 'lease_conflict'
-              ? `A live worker holds the lease or the task is in a state pain retry must not reset. Wait for the lease to expire, or run: pd runtime recovery failed-tasks -w "${workspaceDir}" --confirm (then re-run pd pain retry --pain-id ${opts.painId}).`
+              ? leaseConflictNextAction
             : 'Check the error category and retry with adjusted parameters.',
         }, null, 2));
       } else {
@@ -809,7 +804,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         if (result.errorCategory === 'lease_conflict') {
           // cli-6-output-next-action: the text path must name the same
           // authoritative recovery entry point as the JSON path.
-          console.log(`  Next Action:    A live worker holds the lease or the task is in a state pain retry must not reset. Wait for the lease to expire, or run: pd runtime recovery failed-tasks -w "${workspaceDir}" --confirm (then re-run pd pain retry --pain-id ${opts.painId}).`);
+          console.log(`  Next Action:    ${leaseConflictNextAction}`);
         }
         console.log('');
       }
@@ -829,9 +824,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     let painDiagnosisLedgerWrite: 'attempted' | 'disabled' = 'disabled';
     if (diagnosisPersistenceEnabled && result.output) {
       await persistPainDiagnosis(
-        // Same production mapping as pain-signal-runtime-factory: only
-        // persistence degradation events reach the store emitter (rc-9).
-        { stateManager, eventEmitter: { emitTelemetry: (event) => { const mapped = mapBridgeTelemetryToStoreEvent(event); if (mapped) storeEmitter.emitTelemetry(mapped); } } },
+        // Single rc-9 mapping authority shared with the production factory.
+        { stateManager, eventEmitter: createBridgeTelemetryEventEmitter() },
         {
           painId: opts.painId,
           taskId,
@@ -946,6 +940,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     }
     if (painDiagnosisLedgerWrite === 'attempted') {
       console.log(`  Diagnosis Ledger: pain_diagnoses write dispatched (skips/failures surface as pain_diagnosis_persist_* events)`);
+    } else {
+      console.log(`  Diagnosis Ledger: disabled — pain_diagnosis_persistence flag off (or no diagnosis output); no attribution row written`);
     }
     console.log(`  Candidates:      ${candidateIds.length}`);
     if (result.contextHash) {

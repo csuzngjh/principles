@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1784,
+ "count": 1785,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -1475,6 +1475,7 @@
   "convergePath",
   "createAdapterConfigFromProfile",
   "createAdmissionDecisionEvent",
+  "createBridgeTelemetryEventEmitter",
   "createDemoSandboxEvaluate",
   "createDiagnosisTaskCreatedEvent",
   "createDiagnosticianTaskId",

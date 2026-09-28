@@ -194,10 +194,9 @@ vi.mock('@principles/core/runtime-v2', () => {
       'prompt-candidate': 'prompt',
     },
     MVP_ENABLED_CHANNELS: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
-    // PRI-935: ledger single authority + factory telemetry mapper (null =
-    // not a degradation event, matching real unmapped behavior).
+    // PRI-935: ledger single authority + factory-owned rc-9 telemetry bridge.
     persistPainDiagnosis: mockPersistPainDiagnosis,
-    mapBridgeTelemetryToStoreEvent: vi.fn().mockReturnValue(null),
+    createBridgeTelemetryEventEmitter: vi.fn().mockReturnValue({ emitTelemetry: vi.fn() }),
   };
 });
 

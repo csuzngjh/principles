@@ -34,7 +34,7 @@ import {
   ROUTE_CHANNEL_MAP,
   MVP_ENABLED_CHANNELS,
   persistPainDiagnosis,
-  mapBridgeTelemetryToStoreEvent,
+  createBridgeTelemetryEventEmitter,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
 } from '@principles/core/runtime-v2';
@@ -554,9 +554,8 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, { taskId: opts.taskId });
       if (sourcePainId) {
         await persistPainDiagnosis(
-          // Same production mapping as pain-signal-runtime-factory: only
-          // persistence degradation events reach the store emitter (rc-9).
-          { stateManager, eventEmitter: { emitTelemetry: (event) => { const mapped = mapBridgeTelemetryToStoreEvent(event); if (mapped) storeEmitter.emitTelemetry(mapped); } } },
+          // Single rc-9 mapping authority shared with the production factory.
+          { stateManager, eventEmitter: createBridgeTelemetryEventEmitter() },
           {
             painId: sourcePainId,
             taskId: opts.taskId,
@@ -750,6 +749,8 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       console.log(`  Diagnosis Ledger: pain_diagnoses write dispatched (skips/failures surface as pain_diagnosis_persist_* events)`);
     } else if (painDiagnosisLedgerWrite === 'skipped_no_pain_lineage') {
       console.log(`  Diagnosis Ledger: SKIPPED — task has no sourcePainId lineage (manual diagnosis; nothing to attribute)`);
+    } else {
+      console.log(`  Diagnosis Ledger: disabled — pain_diagnosis_persistence flag off (or no diagnosis output); no attribution row written`);
     }
 
     if (intakeResults.length > 0) {

@@ -196,9 +196,9 @@ vi.mock('@principles/core/runtime-v2', () => {
     // PRI-934/935: recovery + ledger single authorities (see hoisted mocks).
     recoverFailedTask: mockRecoverFailedTask,
     persistPainDiagnosis: mockPersistPainDiagnosis,
-    // Factory telemetry mapper — null = not a degradation event (matches real
-    // unmapped behavior); the CLI dead-letter replay wiring uses this.
-    mapBridgeTelemetryToStoreEvent: vi.fn().mockReturnValue(null),
+    // Single rc-9 telemetry bridge (factory-owned); CLI sites receive a
+    // no-op emitter from it.
+    createBridgeTelemetryEventEmitter: vi.fn().mockReturnValue({ emitTelemetry: vi.fn() }),
     resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
     validatePdConfig: vi.fn().mockReturnValue({ valid: true, errors: [] }),
     computeEffectivePdConfig: vi.fn().mockReturnValue({ config: {}, source: 'defaults', warnings: [] }),

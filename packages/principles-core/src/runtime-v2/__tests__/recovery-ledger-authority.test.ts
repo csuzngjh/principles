@@ -16,9 +16,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { recoverFailedTask } from '../recovery-sweep-service.js';
 import { persistPainDiagnosis } from '../pain-signal-bridge.js';
+import { createBridgeTelemetryEventEmitter } from '../pain-signal-runtime-factory.js';
+import { storeEmitter } from '../store/event-emitter.js';
+import type { TelemetryEvent } from '../../telemetry-event.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { PDRuntimeError } from '../error-categories.js';
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
@@ -166,5 +169,30 @@ describe('persistPainDiagnosis — direct export for CLI callers (PRI-935)', () 
     expect(events).toHaveLength(1);
     expect(events[0]?.eventType).toBe('pain_diagnosis_persist_skipped');
     expect(events[0]?.payload.reason).toBe('unparseable_root_cause_prefix');
+  });
+});
+
+// The CLI review follow-up: the rc-9 degradation bridge is now a single
+// exported authority (createBridgeTelemetryEventEmitter) used by the factory
+// AND every CLI diagnosis site — it must actually forward mapped events.
+describe('createBridgeTelemetryEventEmitter — single rc-9 mapping bridge (PRI-935 review)', () => {
+  it('forwards persistence-degradation events and drops the rest', () => {
+    const seen: TelemetryEvent[] = [];
+    const spy = vi.spyOn(storeEmitter, 'emitTelemetry').mockImplementation((event: TelemetryEvent) => {
+      seen.push(event);
+      return true;
+    });
+    try {
+      const emitter = createBridgeTelemetryEventEmitter();
+      const base = { traceId: 't-1', timestamp: '2026-09-28T00:00:00.000Z', payload: { reason: 'db_down' } };
+      emitter.emitTelemetry({ ...base, eventType: 'pain_diagnosis_persist_failed' });
+      emitter.emitTelemetry({ ...base, eventType: 'pain_diagnosis_persist_skipped' });
+      emitter.emitTelemetry({ ...base, eventType: 'task_completed' });
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(seen.map((e) => e.eventType)).toEqual(['degradation_triggered', 'degradation_triggered']);
+      expect(seen[0]?.payload.originalEventType).toBe('pain_diagnosis_persist_failed');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
