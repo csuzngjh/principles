@@ -215,9 +215,18 @@ runs:
         # purely cosmetic log truncation into a failed release: cohort
         # d6fa4055 aborted at 5/7 with no npm error visible in the log.
         # The preview must never own the verdict.
+        #
+        # `set +e` is REQUIRED here: GitHub runs `bash -e`, so a bare
+        # `npm pack ...` followed by `pack_status=$?` aborts the step AT the
+        # npm exit and never reaches the diagnostics below — reproducing the
+        # very invisible-failure symptom this step exists to prevent, plus
+        # leaking the temp file. Same pattern the Stamp step in this file
+        # already uses.
         pack_log="$(mktemp)"
+        set +e
         npm pack --dry-run > "$pack_log" 2>&1
         pack_status=$?
+        set -e
         head -50 "$pack_log"
         if [ "$pack_status" -ne 0 ]; then
           echo "::error::npm pack --dry-run failed (exit $pack_status); full output follows"

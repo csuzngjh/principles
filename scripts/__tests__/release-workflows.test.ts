@@ -158,6 +158,20 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
     expect(script).not.toMatch(/npm pack --dry-run\s+2>&1\s*\|\s*head/);
     // The preview is preserved so the step still reads as a dry-run report.
     expect(script).toContain('head -50 "$pack_log"');
+    // GitHub runs `bash -e`, so WITHOUT `set +e` the step aborts at the npm
+    // exit and the diagnostics below never run — reproducing the very
+    // invisible-failure symptom this step exists to prevent. Assert the
+    // ordering of the REAL code lines, line-anchored so the prose in the
+    // comment explaining this cannot satisfy the assertion.
+    const setPlusE = script.search(/^\s*set \+e\s*$/m);
+    const packCall = script.search(/^\s*npm pack --dry-run > /m);
+    const capture = script.search(/^\s*pack_status=\$\?\s*$/m);
+    const diagnostic = script.indexOf('::error::npm pack --dry-run failed');
+    expect(setPlusE).toBeGreaterThanOrEqual(0);
+    expect(setPlusE).toBeLessThan(packCall);
+    expect(packCall).toBeLessThan(capture);
+    expect(capture).toBeLessThan(diagnostic);
+    expect(script).toContain('rm -f "$pack_log"');
   });
 });
 
