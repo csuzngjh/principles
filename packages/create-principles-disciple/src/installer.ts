@@ -3116,6 +3116,19 @@ async function createConfigFile(workspaceDir: string, channels: string[]): Promi
   const configDir = getOpenClawDir();
   const configPath = path.join(configDir, 'principles-disciple.json');
 
+  // A non-absolute workspaceDir is written verbatim into the pointer the plugin
+  // reads on every hook. The plugin rejects such a value, but writing it would
+  // leave a config that silently resolves to nothing useful — refuse instead.
+  if (!path.isAbsolute(workspaceDir)) {
+    throw new Error(
+      `Refusing to write ${configPath}: workspace must be an absolute path, got "${workspaceDir}". ` +
+      'A drive-relative or separator-less path resolves against the current working directory, ' +
+      'so the pointer would name a different directory depending on where a process runs. ' +
+      'Re-run the installer with an absolute workspace path, for example --workspace "C:\\\\Users\\\\me\\\\workspace" ' +
+      '(quote it so the shell cannot mangle the separators).',
+    );
+  }
+
   let existingChannels: string[] | null = null;
   let existingFeatures: string[] | null = null;
 

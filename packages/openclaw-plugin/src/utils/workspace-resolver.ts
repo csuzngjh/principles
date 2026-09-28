@@ -192,29 +192,47 @@ function loadWorkspaceFromPdConfigFile(): string | null {
   return null;
 }
 
+/**
+ * Resolve owner-declared workspace candidates in priority order.
+ *
+ * A candidate that is not already absolute is REJECTED instead of resolved:
+ * path.resolve() turns a drive-relative or separator-less value (e.g.
+ * "D:.openclawworkspace" — what a Windows path becomes when its backslashes are
+ * lost in transit) into a plausible absolute path that depends on the process
+ * CWD, silently aiming governance state at a different directory. Skipping to
+ * the next source degrades safely; resolving it does not.
+ *
+ * Candidates are read lazily so a higher-priority source still short-circuits
+ * the file read behind it — this runs per hook event.
+ */
+function resolveFirstDeclaredWorkspaceDir(
+  candidates: ReadonlyArray<readonly [CanonicalWorkspaceSource, () => string | null | undefined]>,
+): CanonicalWorkspaceResult | null {
+  for (const [source, read] of candidates) {
+    const raw = read();
+    if (typeof raw !== 'string') continue;
+    const value = raw.trim();
+    if (!value || !path.isAbsolute(value)) continue;
+    const dir = path.resolve(value);
+    if (!validateWorkspaceDir(dir)) {
+      return { workspaceDir: dir, source };
+    }
+  }
+  return null;
+}
+
+function declaredWorkspaceCandidates(): ReadonlyArray<readonly [CanonicalWorkspaceSource, () => string | null | undefined]> {
+  return [
+    ['pd_env', () => process.env.PD_WORKSPACE_DIR],
+    ['openclaw_env', () => process.env.OPENCLAW_WORKSPACE],
+    ['pd_config', loadWorkspaceFromPdConfigFile],
+  ];
+}
+
 export function resolveCanonicalWorkspaceDir(): CanonicalWorkspaceResult | null {
-  const pdEnv = process.env.PD_WORKSPACE_DIR;
-  if (pdEnv && pdEnv.trim()) {
-    const dir = path.resolve(pdEnv.trim());
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'pd_env' };
-    }
-  }
-
-  const ocEnv = process.env.OPENCLAW_WORKSPACE;
-  if (ocEnv && ocEnv.trim()) {
-    const dir = path.resolve(ocEnv.trim());
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'openclaw_env' };
-    }
-  }
-
-  const configWorkspace = loadWorkspaceFromPdConfigFile();
-  if (configWorkspace) {
-    const dir = path.resolve(configWorkspace);
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'pd_config' };
-    }
+  const explicit = resolveFirstDeclaredWorkspaceDir(declaredWorkspaceCandidates());
+  if (explicit) {
+    return explicit;
   }
 
   const defaultDir = path.join(os.homedir(), '.openclaw', 'workspace');
@@ -231,31 +249,7 @@ export function resolveCanonicalWorkspaceDir(): CanonicalWorkspaceResult | null 
  * hardcoded default fallback.
  */
 function resolveExplicitPdSources(): CanonicalWorkspaceResult | null {
-  const pdEnv = process.env.PD_WORKSPACE_DIR;
-  if (pdEnv && pdEnv.trim()) {
-    const dir = path.resolve(pdEnv.trim());
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'pd_env' };
-    }
-  }
-
-  const ocEnv = process.env.OPENCLAW_WORKSPACE;
-  if (ocEnv && ocEnv.trim()) {
-    const dir = path.resolve(ocEnv.trim());
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'openclaw_env' };
-    }
-  }
-
-  const configWorkspace = loadWorkspaceFromPdConfigFile();
-  if (configWorkspace) {
-    const dir = path.resolve(configWorkspace);
-    if (!validateWorkspaceDir(dir)) {
-      return { workspaceDir: dir, source: 'pd_config' };
-    }
-  }
-
-  return null;
+  return resolveFirstDeclaredWorkspaceDir(declaredWorkspaceCandidates());
 }
 
 // ── Hook Workspace Resolution (PRI-259) ────────────────────────────────
