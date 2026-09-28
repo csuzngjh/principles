@@ -72,7 +72,9 @@ The gate sits **after** step 4c (semantics available) and **before** step 5 (`ra
 - Reuse / Create decision for `recommendation_kind == principle` candidates.
 - Read-only retrieval of existing canonical Principles.
 - Advisory proposal with explainable evidence.
-- Owner/AI-Owner decision recorded in the existing governance store.
+- Owner/AI-Owner makes an explicit `reuse | create` decision.
+  - **REUSE** is durably recorded in `Principle.reuseEvidence[]`.
+  - **CREATE** proceeds through the existing canonical Principle creation path; Phase 1 creates no duplicate standalone decision record.
 - Telemetry for proposal / decision / outcome.
 
 ## 6. Non-Goals
@@ -87,7 +89,7 @@ No embedding, vector store, knowledge graph, new retrieval service, background i
 | Existing Principle | A canonical entry in `_tree.principles` addressed by `Principle.id` |
 | Reuse Candidate | An existing Principle proposed as covering the new Candidate |
 | Proposal | Advisory shortlist produced by retrieval; **never** a decision |
-| Decision | Owner's recorded `reuse` \| `create` verdict |
+| Decision | Owner's explicit `reuse` \| `create` verdict. **REUSE** is durably evidenced in `reuseEvidence[]`; **CREATE** is evidenced by the resulting canonical Principle creation (itself the durable result of that decision). |
 
 ## 8. Canonical Identity
 
@@ -144,6 +146,13 @@ interface PrincipleReuseDecision {
 
 `decision='reuse'` with a `selectedPrincipleId` absent from the canonical Ledger ⇒ **fail closed**, never fall back to Create (INV-R08).
 
+**This is the decision-EXCHANGE contract, not a standalone persisted entity.** Where each verdict becomes durable:
+
+- **REUSE** is materialised into the existing Principle's `reuseEvidence[]` entry (§12) — the relation and the decision travel together, so nothing about the verdict can drift from the relation it created.
+- **CREATE** receives **no** second standalone decision record in Phase 1. Its durable result *is* the newly created canonical Principle with `sourceRef = candidate://<candidateId>`: the creation is the evidence that the Owner saw the proposal and still chose to create.
+
+The asymmetry is deliberate. REUSE resolves a Candidate into an **already-existing** Principle, so without an explicit record the knowledge relation would be invisible — and reusing a Principle that nobody decided to reuse is exactly the silent behaviour this feature must not have. CREATE, by contrast, produces a self-evidencing artifact (the Principle, carrying its candidate provenance) and needs no second copy of the same fact.
+
 ## 12. Persistence / Relationship Model
 
 **Route Selected: `reuseEvidence[]` on the existing Principle** (OD-PRI917-02, 2026-09-28). This supersedes R1 (OD-PRI917-01), which a pre-implementation reality check refuted.
@@ -183,17 +192,23 @@ Reuse evidence is carried by a **new additive optional array on the existing Pri
 
 ```ts
 // additive; absent on all pre-existing entries, read as []
+// relation target = the ENCLOSING Principle (this array is appended to it)
 reuseEvidence?: Array<{
-  painId: string;                  // the Pain that re-validated this Principle
-  candidateId: string;             // the Candidate that was resolved by reuse
-  reusedFromCandidateId?: string;  // reserved; NOT written by Phase 1 (see Open Questions)
-  decisionId?: string;             // id of the decision that authorised the reuse
-  decidedBy: string;               // owner id of the decision maker
-  createdAt: string;
+  painId: string;        // the Pain that re-validated this Principle
+  candidateId: string;   // the Candidate that was resolved into this Principle
+  decision: 'reuse';     // only REUSE is ever materialised here (see §11)
+  actor: { kind: 'owner' | 'ai_owner'; id: string };
+  reason: string;        // why the Owner judged this Principle to already cover it
+  decidedAt: string;     // when the decision was taken
+  decisionId?: string;   // OPTIONAL CORRELATION ID ONLY — see the note below
 }>;
 ```
 
-`reuseEvidence[]` is the **authoritative and only** persistence for both the reuse relation and the decision that created it. There is no second copy of this fact anywhere: no new table, no new relationship entity, no parallel ledger, and **no reuse decision is written to `activation_decisions`**.
+**The relation target is the enclosing `Principle.id`.** It is therefore deliberately NOT repeated inside each entry: a second copy of the same id could drift from its parent, and this repository has already been burned once by a lineage field whose name and content disagreed. A reader that has the entry has the target by construction.
+
+`decisionId` is an **optional correlation id only** — NOT an identity, NOT required in Phase 1, and **MUST NOT** introduce a new decision identity source (no new UUID space, no new SSOT). If no existing decision record is available, it is simply absent; the evidence entry is still complete without it, because `actor` + `reason` + `decidedAt` already make it auditable and self-contained.
+
+`reuseEvidence[]` is the **authoritative and only** persistence for the REUSE relation **and** the REUSE decision that created it — which is why it carries the actor, the reason, the verdict, and the time, not just the provenance. There is no second copy of this fact anywhere: no new table, no new relationship entity, no parallel ledger, and **no reuse decision is written to `activation_decisions`**.
 
 **Why this needs no migration:** the ledger is a JSON document (`principle_training_state.json`) and `loadLedger` performs no TypeBox validation on read. A new **optional** field is invisible to all existing entries (read as `[]`), and no existing writer, reader, or UI surface changes. `derivedFromPainIds` keeps its current content, meaning, and every consumer's behaviour.
 
@@ -258,18 +273,22 @@ shared problem / trigger / action relationship (the actual reason string)
 source Pain evidence where available           (painId via the bridge linkage)
 ```
 
-The existing `ApprovalRequest` already provides the right persistence slots — `triggerReason`, `confidenceExplanation`, `effectDescription`, `summary` — so no new explainability schema is needed. The Owner should be able to read, in one line, why a new Pain was folded into an existing Principle.
+An approval/proposal surface may carry this material as **presentation, explanation, and interaction payload** — `ApprovalRequest`'s `triggerReason`, `confidenceExplanation`, `effectDescription` and `summary` are the natural fields for it.
+
+It **MUST NOT** be treated as durable authority for the reuse relation or the reuse decision. The only durable authority for a REUSE is `Principle.reuseEvidence[]` (§12). A rationale that lives only in a proposal or approval payload is lost the moment the decision is taken, and nothing in that payload can be joined back to the Principle it justified. The Owner should be able to read, in one line, why a new Pain was folded into an existing Principle — and that line must still be there months later, next to the Principle.
 
 ## 18. Production Wiring
 
-Gate inside `CandidateIntakeService.intake()` between step 4c and step 5. All four production callers inherit it without modification. Proposal + decision surface reuses `ApprovalQueue` and the Console approvals/owner-decision routes — no second approval subsystem. AI Owner may act, but only through that same formal surface.
+Gate inside `CandidateIntakeService.intake()` between step 4c and step 5. All four production callers inherit it without modification.
+
+The decision surface may reuse existing CLI/Console presentation and Owner-identity mechanisms where appropriate, but those surfaces are **interaction layers only** and **MUST NOT** become a second persistence authority. Phase 1's decision surface is `pd candidate review`; the authoritative REUSE fact is written only to `Principle.reuseEvidence[]`, and CREATE is evidenced only by the Principle it creates. No claim is made that `ApprovalQueue` or the approvals routes are suitable carriers — the Reality Audit has not established that, and if a later slice finds a CLI surface cannot present the proposal, the fix is a better surface, not a new durable store. AI Owner may act, but only through a formal surface that records the verdict as evidence, never by deciding silently.
 
 ## 19. Invariants
 
 - **INV-R01 Reuse Before Create** — every `recommendation_kind=principle` candidate passes a reuse decision boundary before any new Ledger Principle is created.
 - **INV-R02 Canonical Identity** — reuse targets are canonical Principle Ledger UUIDs.
 - **INV-R03 No Silent Duplicate Creation** — an unresolved reuse decision never silently proceeds to Create.
-- **INV-R04 Owner Authority** — the final verdict goes through the existing governance authority.
+- **INV-R04 Owner Authority** — the verdict is the Owner's (or AI Owner's) explicit answer; nothing may be auto-decided. REUSE is durably recorded in `reuseEvidence[]`; CREATE is durably evidenced by the created Principle itself. Neither verdict requires a separate governance-table record.
 - **INV-R05 No Semantic Mutation on Reuse** — reuse accumulates evidence; it never changes what the Principle means.
 
   Mutating `reuseEvidence[]` — **ALLOWED**:
@@ -323,7 +342,7 @@ new background process:      NO
 new LLM subsystem:           NO (reuses the existing agent/LLM path)
 new vector store:            NO
 new identity source:         NO
-new approval subsystem:      NO (extends ApprovalRequest + existing Console routes)
+new approval subsystem:      NO (interaction surfaces only; never a second persistence authority)
 new relationship model:      NO (additive `reuseEvidence[]` on the existing Principle)
 new field on existing entity: YES (one optional array on `Principle`)
 new public SSOT:             NO
@@ -336,19 +355,19 @@ All-NO except one additive optional field on an existing entity. Under `reuseEvi
 1. Should `archived` principles be reusable after explicit Owner reinstatement? Phase 1 says no.
 2. Retrieval threshold and shortlist size — Phase 1 suggests Top-3; the exact cut is a tuning decision, not an architecture one.
 3. Whether the proposal should also be surfaced for non-principle kinds later (Phase 1: no).
-4. `reuseEvidence[].reusedFromCandidateId` — the field is reserved but **Phase 1 does not write it**, because its precise semantics for repeat reuse of the same Principle are not yet settled. It must not be populated until that meaning is agreed, rather than guessed at write time.
+4. Whether a repeat reuse of the SAME Principle by a later Candidate needs any extra linkage beyond one evidence entry per (pain, candidate) pair. Phase 1 assumes it does not; if a later slice finds the per-entry record is insufficient, the answer is a decision about evidence shape — never a silent new field guessed at write time.
 
 ## 24. Implementation Plan (slices — Slice 3B is the next step)
 
-Delivered so far:
+Implemented on development branches, **pending merge to `main`** (neither slice is in `main` yet; do not read this as delivered):
 
-- **Slice 1 (PR1)** — reuse domain contract + deterministic shortlist + read-only retrieval over `loadLedger`.
-- **Slice 2 (PR2)** — `CandidateIntakeService` reuse gate: proposal generation, opt-in decision injection, fail-closed semantics.
+- **Slice 1 (PR1, `ce854fcc`)** — reuse domain contract + deterministic shortlist + read-only retrieval over `loadLedger`.
+- **Slice 2 (PR2, final `8249b9ff`)** — `CandidateIntakeService` reuse gate: proposal generation, opt-in decision injection, runtime decision validation, fail-closed semantics. Stacked on PR1; it needs a rebase onto `main` and an independent review once PR1 lands.
 
 Remaining, **reordered by OD-PRI917-03**:
 
 - **Slice 3B (next) — reuse evidence persistence** (`reuseEvidence[]`):
-  - Append one entry to the reused Principle's new optional `reuseEvidence[]` (`painId`, `candidateId`, `decidedBy`, `createdAt`, and `decisionId` once the decision id exists).
+  - Append one entry to the reused Principle's new optional `reuseEvidence[]` (`painId`, `candidateId`, `decision`, `actor`, `reason`, `decidedAt`; `decisionId` only as an optional correlation id, §12).
   - **No relationship entity is created, and neither `derivedFromPainIds` nor `activation_decisions` is written** — no new table, no relational column, no edge type, no schema migration.
 - **Slice 3A (after 3B) — Owner decision surface** (`pd candidate review`): show the proposal, record `reuse` (append evidence, write nothing else) or `create` (existing intake path, unchanged).
   - It follows 3B deliberately: a decision surface without an authoritative sink would either fail at write time or be tempted into a false record elsewhere.
@@ -360,7 +379,7 @@ No "Principle Knowledge Platform" groundwork.
 ## 25. Owner Review Card
 
 1. **Problem** — every eligible candidate becomes a new Principle; cross-candidate semantic reuse does not exist.
-2. **Existing mechanism reused** — `CandidateIntakeService`, Principle Ledger, `loadLedger`, `ApprovalQueue` + Console governance routes, `derivedFromPainIds` (untouched), `principle_applications` (evidence only). `activation_decisions` is deliberately **not** used for reuse.
+2. **Existing mechanism reused** — `CandidateIntakeService`, Principle Ledger, `loadLedger`, the existing Owner-identity resolver for the decision surface, `derivedFromPainIds` (untouched), `principle_applications` (evidence only). `activation_decisions` is deliberately **not** used for reuse, and no approval/console surface is treated as a persistence authority.
 3. **Minimal new mechanism** — a read-only retrieval + advisory proposal in front of the existing write, plus a `reuseEvidence[]` entry on the reused Principle.
 4. **Complexity** — all NO except one additive optional field on an existing entity; no migration (OD-PRI917-02).
 5. **Verification** — Audit A–E against live `1f5f8307`; no code written.
