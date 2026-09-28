@@ -379,6 +379,70 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
   });
 }
 
+/**
+ * Pain Diagnosis Persistence: link the diagnostician's root-cause attribution
+ * to the canonical pain_id in state.db pain_diagnoses. Runs BEFORE admission
+ * so the attribution is durable even when every candidate is later rejected —
+ * the pain's diagnosis history must not depend on admission outcome.
+ * Persistence is auxiliary to the admission→intake flow: failures degrade
+ * observably via telemetry and never break the main pipeline
+ * (rc-9-no-silent-fallback).
+ *
+ * PRI-935: module-level single authority. The bridge's onDiagnosisComplete
+ * and the CLI diagnosis paths (`pd diagnose run`, `pd pain retry`) all write
+ * through this function so the pain_diagnoses ledger cannot drift per-caller.
+ * Callers own the `pain_diagnosis_persistence` flag gate — this function
+ * persists whenever invoked.
+ */
+export async function persistPainDiagnosis(deps: {
+  stateManager: RuntimeStateManager;
+  eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
+}, opts: {
+  painId: string;
+  taskId: string;
+  diagnosticianOutput: DiagnosticianOutputV1;
+  artifactId: string | null;
+}): Promise<void> {
+  const { painId, taskId, diagnosticianOutput, artifactId } = opts;
+  const category = parseRootCauseCategory(diagnosticianOutput.rootCause);
+  if (!category) {
+    deps.eventEmitter?.emitTelemetry({
+      eventType: 'pain_diagnosis_persist_skipped',
+      traceId: painId,
+      timestamp: new Date().toISOString(),
+      payload: {
+        reason: 'unparseable_root_cause_prefix',
+        nextAction: 'Inspect the diagnostician output — rootCause must start with "People: "/"Design: "/"Assumption: "/"Tooling: ".',
+        rootCausePreview: diagnosticianOutput.rootCause.slice(0, 80),
+      },
+    });
+    return;
+  }
+  try {
+    await deps.stateManager.recordPainDiagnosis({
+      painId,
+      taskId,
+      diagnosisId: diagnosticianOutput.diagnosisId,
+      category,
+      rootCause: diagnosticianOutput.rootCause,
+      evidence: diagnosticianOutput.evidence,
+      confidence: typeof diagnosticianOutput.confidence === 'number' ? diagnosticianOutput.confidence : null,
+      artifactId,
+    });
+  } catch (error) {
+    deps.eventEmitter?.emitTelemetry({
+      eventType: 'pain_diagnosis_persist_failed',
+      traceId: painId,
+      timestamp: new Date().toISOString(),
+      payload: {
+        reason: error instanceof Error ? error.message : String(error),
+        nextAction: 'Inspect state.db pain_diagnoses and re-run the diagnosis if the attribution history is required.',
+        taskId,
+      },
+    });
+  }
+}
+
 export class PainSignalBridge {
   private readonly stateManager: RuntimeStateManager;
   private readonly runner: DiagnosticianRunnerLike;
@@ -697,64 +761,10 @@ export class PainSignalBridge {
   }
 
   /**
-   * Pain Diagnosis Persistence: link the diagnostician's root-cause attribution
-   * to the canonical pain_id in state.db pain_diagnoses. Runs BEFORE admission
-   * so the attribution is durably recorded even when every candidate is later
-   * rejected — the pain's diagnosis history must not depend on admission
-   * outcome. Persistence is auxiliary to the admission→intake flow: failures
-   * degrade observably via telemetry and never break the main pipeline
-   * (rc-9-no-silent-fallback).
-   */
-  private async persistPainDiagnosis(opts: {
-    painId: string;
-    taskId: string;
-    diagnosticianOutput: DiagnosticianOutputV1;
-    artifactId: string | null;
-  }): Promise<void> {
-    const { painId, taskId, diagnosticianOutput, artifactId } = opts;
-    const category = parseRootCauseCategory(diagnosticianOutput.rootCause);
-    if (!category) {
-      this.eventEmitter?.emitTelemetry({
-        eventType: 'pain_diagnosis_persist_skipped',
-        traceId: painId,
-        timestamp: new Date().toISOString(),
-        payload: {
-          reason: 'unparseable_root_cause_prefix',
-          nextAction: 'Inspect the diagnostician output — rootCause must start with "People: "/"Design: "/"Assumption: "/"Tooling: ".',
-          rootCausePreview: diagnosticianOutput.rootCause.slice(0, 80),
-        },
-      });
-      return;
-    }
-    try {
-      await this.stateManager.recordPainDiagnosis({
-        painId,
-        taskId,
-        diagnosisId: diagnosticianOutput.diagnosisId,
-        category,
-        rootCause: diagnosticianOutput.rootCause,
-        evidence: diagnosticianOutput.evidence,
-        confidence: typeof diagnosticianOutput.confidence === 'number' ? diagnosticianOutput.confidence : null,
-        artifactId,
-      });
-    } catch (error) {
-      this.eventEmitter?.emitTelemetry({
-        eventType: 'pain_diagnosis_persist_failed',
-        traceId: painId,
-        timestamp: new Date().toISOString(),
-        payload: {
-          reason: error instanceof Error ? error.message : String(error),
-          nextAction: 'Inspect state.db pain_diagnoses and re-run the diagnosis if the attribution history is required.',
-          taskId,
-        },
-      });
-    }
-  }
-
-  /**
    * PRI-372 (T-G): Post-diagnosis processing extracted from onPainDetected().
    * Handles admission → intake → seedDreamer after a successful diagnosis.
-   * Also called by DiagRouterRunner's onDiagnosisComplete callback.
+   * Reached only via onPainDetected / re-run above — DiagRouterRunner does
+   * NOT call it (INF-9, PRI-857): the router only commits stage output.
    */
   async onDiagnosisComplete(opts: {
     taskId: string;
@@ -768,12 +778,15 @@ export class PainSignalBridge {
     const ledgerEntryIds: string[] = [];
 
     if (this.diagnosisPersistenceEnabled && diagnosticianOutput) {
-      await this.persistPainDiagnosis({
-        painId,
-        taskId,
-        diagnosticianOutput,
-        artifactId: candidates[0]?.artifactId ?? null,
-      });
+      await persistPainDiagnosis(
+        { stateManager: this.stateManager, eventEmitter: this.eventEmitter },
+        {
+          painId,
+          taskId,
+          diagnosticianOutput,
+          artifactId: candidates[0]?.artifactId ?? null,
+        },
+      );
     }
 
     const admissionResults = diagnosticianOutput

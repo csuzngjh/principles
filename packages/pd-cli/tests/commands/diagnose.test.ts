@@ -81,6 +81,14 @@ const { buildDreamerSeedCalls, mockResolveSourcePainId } = vi.hoisted(() => {
   return { buildDreamerSeedCalls, mockResolveSourcePainId };
 });
 
+// PRI-935: capture the pain_diagnoses ledger dispatch through the single
+// authority (persistPainDiagnosis) — the barrel mock must provide it because
+// diagnose.ts imports it from the runtime-v2 entry.
+const { mockPersistPainDiagnosis } = vi.hoisted(() => {
+  const mockPersistPainDiagnosis = vi.fn().mockResolvedValue(undefined);
+  return { mockPersistPainDiagnosis };
+});
+
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
 }));
@@ -186,6 +194,9 @@ vi.mock('@principles/core/runtime-v2', () => {
       'prompt-candidate': 'prompt',
     },
     MVP_ENABLED_CHANNELS: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+    // PRI-935: ledger single authority + factory-owned rc-9 telemetry bridge.
+    persistPainDiagnosis: mockPersistPainDiagnosis,
+    createBridgeTelemetryEventEmitter: vi.fn().mockReturnValue({ emitTelemetry: vi.fn() }),
   };
 });
 
@@ -1798,6 +1809,117 @@ describe('PRI-638: pd diagnose run when Diagnostician capability is disabled', (
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     errSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ── PRI-935: pd diagnose run must write the pain_diagnoses ledger ─────────────
+//
+// Before this fix the attribution ledger was written only by
+// PainSignalBridge.onDiagnosisComplete, so every manual `pd diagnose run`
+// succeeded without a pain_diagnoses row. The CLI now goes through the
+// single authority persistPainDiagnosis, gated by the SAME canonical flag
+// derivation the production factory uses.
+
+describe('PRI-935: pd diagnose run — pain_diagnoses ledger dispatch', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { run } = await import('@principles/core/runtime-v2');
+    vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
+    mockGetCandidatesByTaskId.mockResolvedValue([]);
+    mockUpdateCandidateStatus.mockResolvedValue(undefined);
+    mockCreateTask.mockResolvedValue(undefined);
+    mockGetTask.mockResolvedValue(null);
+    mockIntake.mockReset();
+    mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
+    // isFeatureEnabled and resolveSourcePainId are cleared by vi.clearAllMocks()
+    // — re-prime the defaults these tests assume (flag ON, lineage resolves).
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
+    mockResolveSourcePainId.mockResolvedValue('pain_test-source-1');
+  });
+
+  function parseJsonLine(calls: Array<unknown[]>): Record<string, unknown> {
+    const jsonCall = calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    return JSON.parse(jsonCall![0] as string);
+  }
+
+  it('LEDGER-01: flag on + pain lineage → persistPainDiagnosis dispatched before intake, JSON says attempted', async () => {
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+    ]);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(mockPersistPainDiagnosis).toHaveBeenCalledTimes(1);
+    const [deps, opts] = mockPersistPainDiagnosis.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
+    expect(opts.painId).toBe('pain_test-source-1');
+    expect(opts.taskId).toBe('test-task-1');
+    expect(opts.artifactId).toBe('art-1');
+    expect(deps.stateManager).toBeDefined();
+
+    // persist-before-admission ordering (mirrors the bridge): the attribution
+    // must not depend on intake outcome.
+    expect(mockPersistPainDiagnosis.mock.invocationCallOrder[0]).toBeLessThan(mockIntake.mock.invocationCallOrder[0]);
+
+    const output = parseJsonLine(consoleSpy.mock.calls);
+    expect(output.painDiagnosisLedgerWrite).toBe('attempted');
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('LEDGER-02: flag off (default) → no ledger dispatch, JSON says disabled', async () => {
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(false);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(mockPersistPainDiagnosis).not.toHaveBeenCalled();
+    const output = parseJsonLine(consoleSpy.mock.calls);
+    expect(output.painDiagnosisLedgerWrite).toBe('disabled');
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('LEDGER-03: flag on but no pain lineage → honest skip, nothing invented (ERR-004)', async () => {
+    mockResolveSourcePainId.mockResolvedValue(null);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(mockPersistPainDiagnosis).not.toHaveBeenCalled();
+    const output = parseJsonLine(consoleSpy.mock.calls);
+    expect(output.painDiagnosisLedgerWrite).toBe('skipped_no_pain_lineage');
+
+    consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });
