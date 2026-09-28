@@ -130,16 +130,22 @@ async function seedPrincipleCandidate(
   return candidateId;
 }
 
-function service(opts: { decision?: (p: ReuseProposal) => ReuseDecision; stateDir?: string } = {}): CandidateIntakeService {
+function service(opts: {
+  decision?: (p: ReuseProposal) => ReuseDecision;
+  stateDir?: string;
+  /** Pass `false` to omit reuseStateDir entirely (partial configuration). */
+  omitStateDir?: boolean;
+} = {}): CandidateIntakeService {
   const adapter = new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') });
   return new CandidateIntakeService({
     stateManager,
     ledgerAdapter: adapter,
     ...(opts.decision ? { reuseDecision: opts.decision } : {}),
-    reuseStateDir: opts.stateDir ?? join(workspaceDir, '.state'),
+    ...(opts.omitStateDir ? {} : { reuseStateDir: opts.stateDir ?? join(workspaceDir, '.state') }),
     reuseRecommendationKind: 'principle',
   });
 }
+
 
 beforeEach(async () => {
   workspaceDir = join(process.env.TEMP ?? '.', `pd-reuse-pr2-${randomUUID()}`);
@@ -348,5 +354,109 @@ describe('T5 — retrieval failure never manufactures a duplicate', () => {
     expect(result.outcome).toBe('ledger_entry');
     if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
     expect(result.reuseCheck).toBe('no_candidates');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRI-917 hardening: the decision boundary and the configuration boundary
+// must both fail closed. Every case below previously either wrote a duplicate
+// or reported a disabled gate while running one.
+// ---------------------------------------------------------------------------
+
+describe('H1 — a malformed decision never becomes a create', () => {
+  const malformed: [string, unknown][] = [
+    ['null', null],
+    ['undefined', undefined],
+    ['empty object', {}],
+    ['bare string', 'create'],
+    ['wrong-cased value', { decision: 'REUSE' }],
+    ['unknown decision', { decision: 'maybe' }],
+    ['reuse without id', { decision: 'reuse' }],
+    ['reuse with non-string id', { decision: 'reuse', selectedPrincipleId: 42 }],
+    ['array', []],
+  ];
+
+  it.each(malformed)('rejects %s with reuse_check_failed and writes nothing', async (_label, value) => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate();
+    const before = ledgerEntryCount();
+
+    await expect(
+      service({ decision: () => value as ReuseDecision }).intake(candidateId),
+    ).rejects.toMatchObject({ code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED });
+
+    // The whole point: no new Principle, and the existing one untouched.
+    expect(ledgerEntryCount()).toBe(before);
+  });
+
+  it('wraps a throwing decision function as reuse_check_failed', async () => {
+    addPrincipleToLedger(join(workspaceDir, '.state'), makePrinciple());
+    const candidateId = await seedPrincipleCandidate();
+    const before = ledgerEntryCount();
+
+    await expect(
+      service({
+        decision: () => { throw new Error('AI Owner timeout'); },
+      }).intake(candidateId),
+    ).rejects.toMatchObject({ code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED });
+
+    expect(ledgerEntryCount()).toBe(before);
+  });
+});
+
+describe('H2 — a half-configured gate is a configuration error, not a disabled one', () => {
+  it('refuses when a decision function is supplied without a state dir', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate();
+    const before = ledgerEntryCount();
+
+    await expect(
+      service({ decision: () => ({ decision: 'create' }), omitStateDir: true }).intake(candidateId),
+    ).rejects.toMatchObject({ code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED, context: { reason: 'reuse_gate_misconfigured' } });
+
+    expect(ledgerEntryCount()).toBe(before);
+  });
+
+  it('still reports not_configured when the gate is genuinely absent', async () => {
+    addPrincipleToLedger(join(workspaceDir, '.state'), makePrinciple());
+    const candidateId = await seedPrincipleCandidate();
+
+    const bare = new CandidateIntakeService({
+      stateManager,
+      ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') }),
+    });
+    const result = await bare.intake(candidateId);
+    expect(result.outcome).toBe('ledger_entry');
+    if (result.outcome !== 'ledger_entry') throw new Error('expected the unchanged path');
+    expect(result.reuseCheck).toBe('not_configured');
+  });
+});
+
+describe('H3 — the reuse refusal tells the operator the truth', () => {
+  it('never claims the candidate does not target the Principle Ledger', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate();
+
+    const result = await service({
+      decision: (p) => {
+        const [first] = p.candidates;
+        if (!first) throw new Error('expected a proposal');
+        return { decision: 'reuse', selectedPrincipleId: first.principleId };
+      },
+    }).intake(candidateId);
+
+    expect(result.outcome).toBe('refused');
+    if (result.outcome !== 'refused') throw new Error('expected a reuse refusal');
+    expect(result.reason).toBe('reuse_selected');
+    expect(result.rawRecommendationKind).toBe('principle');
+    // The decision is valid, so nothing is thrown and nothing is written.
+    const lower = result.message.toLowerCase();
+    expect(lower).not.toContain('does not target');
+    expect(lower).not.toContain('non principle kind');
+    expect(lower).toContain('no new principle was created');
+    expect(result.message).toContain(existing.id);
   });
 });

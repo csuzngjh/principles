@@ -14,7 +14,7 @@ import { existsSync, readFileSync } from 'fs';
 import { getLedgerFilePathPublic, loadLedger } from '../../principle-tree-ledger.js';
 import { isPrincipleLedgerEligibleKind } from '../store/candidate/recommendation-kind-resolver.js';
 import { PRINCIPLE_STATUSES } from '../types/principle-enums.js';
-import type { Principle } from '../types/principle-schema.js';
+import { isRecord } from '../candidate-intake.js';
 import { selectReuseShortlist } from './reuse-shortlist.js';
 import type {
   ReuseCandidateInput,
@@ -46,16 +46,6 @@ export function isReusablePrincipleStatus(status: unknown): boolean {
   return REUSABLE_PRINCIPLE_STATUSES.has(status);
 }
 
-function toReusablePrinciple(principle: Principle): ReusablePrinciple {
-  return {
-    id: principle.id,
-    text: principle.text ?? '',
-    triggerPattern: principle.triggerPattern ?? '',
-    action: principle.action ?? '',
-    status: principle.status,
-  };
-}
-
 function assertLedgerReadable(stateDir: string): void {
   const filePath = getLedgerFilePathPublic(stateDir);
   if (!existsSync(filePath)) return; // no corpus yet — nothing to reuse
@@ -83,13 +73,32 @@ function assertLedgerReadable(stateDir: string): void {
  * A genuinely MISSING ledger is not a failure: there is simply nothing to
  * reuse yet, and blocking the first write of a fresh workspace would be wrong.
  */
+function normalizeLedgerEntry(entry: unknown): ReusablePrinciple | null {
+  if (!isRecord(entry)) return null;
+  const { id, text, triggerPattern, action, status } = entry;
+  if (typeof id !== 'string' || id.length === 0) return null;
+  return {
+    id,
+    text: typeof text === 'string' ? text : '',
+    triggerPattern: typeof triggerPattern === 'string' ? triggerPattern : '',
+    action: typeof action === 'string' ? action : '',
+    status: typeof status === 'string' ? status : '',
+  };
+}
+
 export function readReusablePrinciples(stateDir: string): ReusablePrinciple[] {
   assertLedgerReadable(stateDir);
   const store = loadLedger(stateDir);
-  const entries = Object.values(store.tree.principles) as Principle[];
-  return entries
-    .filter((p) => isReusablePrincipleStatus(p?.status))
-    .map(toReusablePrinciple);
+  // The ledger is an untrusted document (rc-1/rc-2): validate each entry's
+  // fields instead of asserting the shape, so a malformed entry is skipped
+  // rather than flowing a non-string into the tokenizer as if it were text.
+  const entries = Object.values(store.tree.principles) as unknown[];
+  const reusable: ReusablePrinciple[] = [];
+  for (const entry of entries) {
+    const normalized = normalizeLedgerEntry(entry);
+    if (normalized && isReusablePrincipleStatus(normalized.status)) reusable.push(normalized);
+  }
+  return reusable;
 }
 
 /**

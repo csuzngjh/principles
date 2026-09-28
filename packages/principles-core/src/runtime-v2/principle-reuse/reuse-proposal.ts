@@ -73,3 +73,31 @@ export function buildReuseProposal(
 export function proposalNeedsDecision(proposal: ReuseProposal): boolean {
   return proposal.status === 'pending';
 }
+
+export type ReuseDecisionValidation =
+  | { ok: true; decision: ReuseDecision }
+  | { ok: false; reason: string };
+
+/**
+ * Runtime validator for the reuse decision (rc-1/rc-2/rc-3).
+ *
+ * The decision function is an untrusted boundary — an AI Owner parses model
+ * output into it — so its TypeScript type cannot be the guard. A bare
+ * `"create"` string, `{}`, `{decision:'REUSE'}`, a non-string principle id, or
+ * a missing id for reuse are ALL rejected here, because the alternative is
+ * silently reading a malformed answer as "go ahead and create" — the exact
+ * duplicate manufacturing this gate exists to prevent.
+ */
+export function validateReuseDecision(raw: unknown): ReuseDecisionValidation {
+  if (raw === null || raw === undefined) return { ok: false, reason: 'decision_is_nullish' };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: 'decision_is_not_an_object' };
+  const record = raw as Record<string, unknown>;
+  const { decision } = record;
+  if (decision === 'create') return { ok: true, decision: { decision: 'create' } };
+  if (decision !== 'reuse') return { ok: false, reason: `unknown_decision_value:${String(decision)}` };
+  const selected = record.selectedPrincipleId;
+  if (typeof selected !== 'string' || selected.length === 0) {
+    return { ok: false, reason: 'reuse_without_principle_id' };
+  }
+  return { ok: true, decision: { decision: 'reuse', selectedPrincipleId: selected } };
+}

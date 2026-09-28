@@ -44,6 +44,7 @@ import {
 } from './store/candidate/recommendation-kind-resolver.js';
 import { buildReuseProposal, proposalNeedsDecision } from './principle-reuse/reuse-proposal.js';
 import { buildReuseShortlist } from './principle-reuse/reuse-retrieval.js';
+import { validateReuseDecision } from './principle-reuse/reuse-proposal.js';
 import type { ReuseDecision, ReuseProposal } from './principle-reuse/reuse-proposal.js';
 
 /**
@@ -358,6 +359,20 @@ export class CandidateIntakeService {
     // A retrieval failure NEVER falls through to create (rc-9): it throws, so
     // the candidate stays pending and visible instead of silently manufacturing
     // the duplicate this gate exists to prevent.
+    //
+    // PRI-917 hardening: a HALF-configured gate is a configuration error, not
+    // a disabled one. Previously a decision function without a state dir
+    // skipped the gate silently while still reporting 'not_configured', so a
+    // one-option misconfiguration looked exactly like "the gate is off" and
+    // wrote duplicates without ever asking.
+    if (this.#reuseDecision && !this.#reuseStateDir) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse gate is misconfigured: reuseDecision was provided without reuseStateDir; no Principle was created for candidate ${candidateId}. nextAction: pass reuseStateDir, or remove reuseDecision to disable the gate.`,
+        { candidateId, reason: 'reuse_gate_misconfigured' },
+      );
+    }
+
     let reuseCheck: ReuseCheckOutcome = 'not_configured';
     if (this.#reuseDecision && this.#reuseStateDir) {
       let proposal: ReuseProposal;
@@ -383,7 +398,35 @@ export class CandidateIntakeService {
       }
 
       if (proposalNeedsDecision(proposal)) {
-        const decision = this.#reuseDecision(proposal);
+        // PRI-917 hardening: the decision function is an UNTRUSTED boundary
+        // (an AI Owner parses model output), so its return value is validated
+        // at runtime. Previously anything that was not exactly 'reuse' fell
+        // through to 'create' — a malformed answer silently manufactured the
+        // very duplicate this gate exists to prevent (rc-1/rc-2/rc-3).
+        let decision: ReuseDecision;
+        try {
+          const raw: unknown = this.#reuseDecision(proposal);
+          const validated = validateReuseDecision(raw);
+          if (!validated.ok) {
+            throw new CandidateIntakeError(
+              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+              `Reuse decision for candidate ${candidateId} is not a valid reuse|create decision (${validated.reason}); no Principle was created.`,
+              { candidateId, reason: validated.reason },
+            );
+          }
+          ({ decision } = validated);
+        } catch (decisionErr: unknown) {
+          if (decisionErr instanceof CandidateIntakeError) throw decisionErr;
+          // A throwing decision function (LLM timeout, parse crash) is a reuse
+          // check failure, not an internal error: it must fail closed with a
+          // candidate-scoped code rather than escaping as an arbitrary throw.
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Reuse decision for candidate ${candidateId} failed (${decisionErr instanceof Error ? decisionErr.message : String(decisionErr)}); no Principle was created.`,
+            { candidateId, cause: decisionErr },
+          );
+        }
+
         if (decision.decision === 'reuse') {
           const known = new Set(proposal.candidates.map((c) => c.principleId));
           if (!known.has(decision.selectedPrincipleId)) {
@@ -400,7 +443,7 @@ export class CandidateIntakeService {
             reason: 'reuse_selected',
             candidateId,
             rawRecommendationKind: typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
-            message: `Candidate ${candidateId} resolved to existing principle ${decision.selectedPrincipleId}; no new Principle was created.`,
+            message: `Candidate ${candidateId} was resolved to existing Principle ${decision.selectedPrincipleId}; no new Principle was created. This candidate DOES target the Principle Ledger — review the reuse proposal, and do not re-run intake to force a new Principle.`,
             reuseProposal: proposal,
             selectedPrincipleId: decision.selectedPrincipleId,
           };

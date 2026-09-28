@@ -17,6 +17,14 @@
 export type ReuseSemanticField = 'text' | 'triggerPattern' | 'action';
 
 /**
+ * The field a piece of evidence was found on: a single field, or a `from~to`
+ * pair when the claim is phrased differently on the two sides. Modelled as a
+ * template-literal type rather than asserted at the push site (rc-2), so a
+ * cross-field entry cannot hide behind a type that says it is impossible.
+ */
+export type ReuseEvidenceField = ReuseSemanticField | `${ReuseSemanticField}~${ReuseSemanticField}`;
+
+/**
  * The semantic claim of a new Principle candidate, in the same three fields
  * the existing ledger Principles use. Mirrors `Principle` — deliberately NOT a
  * `Principle` (a candidate has no identity, version, or lifecycle yet).
@@ -34,7 +42,7 @@ export interface ReuseCandidateInput {
  * is part of the shape rather than an optional extra (SPEC §17).
  */
 export interface ReuseEvidence {
-  field: ReuseSemanticField;
+  field: ReuseEvidenceField;
   /** Terms both sides used on this field (bounded, sorted). */
   sharedTerms: string[];
   /** Fraction of the smaller side's term set that is shared, in [0, 1]. */

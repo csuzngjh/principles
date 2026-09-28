@@ -15,6 +15,7 @@ import type {
   ReuseCandidate,
   ReuseCandidateInput,
   ReuseEvidence,
+  ReuseEvidenceField,
   ReusablePrinciple,
   ReuseSemanticField,
   ReuseShortlist,
@@ -152,11 +153,12 @@ export function scoreReuseCandidate(
     if (shared.length === 0) continue;
     const coverage = shared.length / smaller;
     weighted += pair.weight * coverage;
+    const field: ReuseEvidenceField = pair.from === pair.to ? pair.from : `${pair.from}~${pair.to}`;
     evidence.push({
-      field: pair.from === pair.to ? pair.from : `${pair.from}~${pair.to}`,
+      field,
       sharedTerms: shared.slice(0, maxEvidenceTerms),
       coverage,
-    } as ReuseEvidence);
+    });
   }
 
   if (evidence.length === 0 || totalWeight === 0) return null;
