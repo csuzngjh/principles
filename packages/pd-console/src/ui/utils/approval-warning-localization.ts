@@ -64,17 +64,36 @@ export function localizeApprovalWarning(warning: string, t: TranslateFn): Locali
 
   if (code === 'injection_budget_excluded') {
     const budget = intAfterPrefix(message, '(');
-    const earlierCount = intAfterPrefix(message, 'filled by ');
+    // The server reports "<injected>/<eligible> eligible injected"; the digit
+    // precedes the label, so parse the ratio directly instead of scanning after it.
+    const injectedMatch = /(\d+)\/(\d+) eligible/.exec(message);
+    const injectedCount = injectedMatch?.[1] !== undefined ? Number(injectedMatch[1]) : null;
     return {
       ...base,
       title: t('pages.focus.approveWarning.budgetExcludedTitle'),
       // PRI-875 precedent: a template with placeholders is only safe to use
       // when every value was parsed — otherwise fall back to the
       // placeholder-free variant so no raw "{{budget}}" ever reaches the UI.
-      body: budget !== null && earlierCount !== null
-        ? t('pages.focus.approveWarning.budgetExcludedBody', { budget, earlierCount })
+      body: budget !== null && injectedCount !== null
+        ? t('pages.focus.approveWarning.budgetExcludedBody', { budget, earlierCount: injectedCount })
         : t('pages.focus.approveWarning.budgetExcludedBodySimple'),
       activationAction: true,
+    };
+  }
+  // PRI-935: the activation is merely rotated out of the CURRENT window, not
+  // starved. This is the common case on a live fair-rotation workspace and the
+  // copy must NOT tell the Owner to deactivate healthy older principles.
+  if (code === 'injection_budget_queued') {
+    const budget = intAfterPrefix(message, '(');
+    const turnsMatch = /within at most (\d+) consecutive user turns/.exec(message);
+    const turns = turnsMatch?.[1] !== undefined ? Number(turnsMatch[1]) : null;
+    return {
+      ...base,
+      title: t('pages.focus.approveWarning.queuedTitle'),
+      body: budget !== null && turns !== null
+        ? t('pages.focus.approveWarning.queuedBody', { budget, turns })
+        : t('pages.focus.approveWarning.queuedBodySimple'),
+      activationAction: false,
     };
   }
   if (code === 'injection_excluded_non_budget') {

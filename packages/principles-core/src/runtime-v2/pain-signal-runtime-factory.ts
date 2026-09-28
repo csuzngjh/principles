@@ -550,6 +550,23 @@ export function mapBridgeTelemetryToStoreEvent(event: {
   };
 }
 
+/**
+ * The single bridge→store telemetry emitter, shared by the factory and the
+ * CLI diagnosis paths (PRI-935). Call sites must not re-implement the mapping
+ * rule: only persistence-degradation events reach the store emitter, so
+ * rc-9 observability stays identical wherever the bridge runs.
+ */
+export function createBridgeTelemetryEventEmitter(): {
+  emitTelemetry: (event: Parameters<typeof mapBridgeTelemetryToStoreEvent>[0]) => void;
+} {
+  return {
+    emitTelemetry: (event) => {
+      const mapped = mapBridgeTelemetryToStoreEvent(event);
+      if (mapped) storeEmitter.emitTelemetry(mapped);
+    },
+  };
+}
+
 async function constructBridge(
   opts: PainSignalRuntimeFactoryOptions,
   runtimeConfig: RuntimeConfig,
@@ -661,13 +678,8 @@ async function constructBridge(
     fullPipelinePromptSeeds: pipeline.fullPipelinePromptSeeds,
     // rc-9: the persistence path must degrade observably in production. Only
     // the persistence degradation events are forwarded (see
-    // mapBridgeTelemetryToStoreEvent); other bridge events stay dormant as on main.
-    eventEmitter: {
-      emitTelemetry: (event) => {
-        const mapped = mapBridgeTelemetryToStoreEvent(event);
-        if (mapped) storeEmitter.emitTelemetry(mapped);
-      },
-    },
+    // createBridgeTelemetryEventEmitter); other bridge events stay dormant as on main.
+    eventEmitter: createBridgeTelemetryEventEmitter(),
     // PRI-624: the factory opens one extra connection (history/committer/
     // context assemblers) beyond the state manager — dispose() releases both.
     ownedResources: [connection],
