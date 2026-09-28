@@ -227,3 +227,12 @@ packages/website/.wrangler/
 /.current-code-numbered.txt
 /.playwright-mcp/
 /--full-page
+
+# ===== Workspace housekeeping (2026-09-27) =====
+# Owner-private live-data audit snapshot (2026-09-22): copies of the live
+# state/trajectory DBs, memory carriers (MEMORY.md etc.), session event logs
+# and case samples with real conversation content. Never publish. The
+# derived reports that belong in the repo live under docs/audit/PRI-904_*.
+/pd-data-audit/
+# ZCode CLI tool state (auto-synced from .gitignore; local-only)
+/.zcodeignore
