@@ -22,7 +22,7 @@
     "verify:build": "node scripts/verify-build.mjs"
   },
   "dependencies": {
-    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@principles/core": "*",
     "@principles/host-runtime": "*",
     "@principles/install-layout": "^0.2.7",

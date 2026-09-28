@@ -17,6 +17,21 @@ export interface PromptInjectionBudgetStatus {
   budget: number;
   /** Chars currently injected into the agent prompt. */
   usedChars: number;
-  /** True when the FIFO projection already truncated — new approvals will queue. */
+  /**
+   * True when the CURRENT projection already truncated — the newly approved
+   * principle may not enter the prompt on this turn. PR-1894: this is
+   * policy-dependent (see `selectionPolicy`); the badge copy must not imply
+   * permanent starvation when rotation is in play.
+   */
   truncated: boolean;
+  /**
+   * PR-1894: whether the PRODUCTION route rotates. This — not the forecast's
+   * own selection policy — decides whether an out-of-window approval is queued
+   * behind rotation or genuinely starved, and therefore which badge copy is
+   * truthful. Optional so a pre-PR-1894 payload still validates; absent
+   * behaves as `false` (the conservative pre-PR-1894 reading).
+   */
+  productionRotates?: boolean;
+  /** PR-1894: eligible activations that reached the selector. */
+  eligibleCount?: number;
 }

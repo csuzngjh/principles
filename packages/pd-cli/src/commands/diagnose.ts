@@ -33,6 +33,10 @@ import {
   CANDIDATE_KIND_TO_ROUTE,
   ROUTE_CHANNEL_MAP,
   MVP_ENABLED_CHANNELS,
+  persistPainDiagnosis,
+  createBridgeTelemetryEventEmitter,
+  computeFeatureFlagsFromConfig,
+  isFeatureEnabled,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -438,6 +442,15 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
     const effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
 
+    // PRI-935: derive pain_diagnosis_persistence from the SAME canonical
+    // authority the production factory uses (pain-signal-runtime-factory),
+    // so a manual `pd diagnose run` ledger write is gated identically to the
+    // automatic bridge path — no CLI-local flag.
+    const diagnosisPersistenceEnabled = isFeatureEnabled(
+      computeFeatureFlagsFromConfig(effectiveConfig),
+      'pain_diagnosis_persistence',
+    );
+
     const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
     const perStageTimeoutMs = pipelineTimeoutMs / 3;
     const rootCauseRunner = new DiagRootCauseRunner(
@@ -527,6 +540,35 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
 
     const candidates = await stateManager.getCandidatesByTaskId(opts.taskId);
+
+    // PRI-935: a manually-run diagnosis must record the pain_diagnoses
+    // attribution ledger like the production bridge does — before intake, so
+    // the attribution never depends on admission outcome. The pain lineage is
+    // resolved from the canonical diagnostician task chain (ERR-004: never
+    // invent lineage); a manual task without pain ingress facts is honestly
+    // skipped, not fabricated. 'attempted' reports dispatch, not landing —
+    // persistPainDiagnosis degrades observably via pain_diagnosis_persist_*
+    // telemetry (rc-9) instead of throwing.
+    let painDiagnosisLedgerWrite: 'attempted' | 'disabled' | 'skipped_no_pain_lineage' = 'disabled';
+    if (diagnosisPersistenceEnabled && result.output) {
+      const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, { taskId: opts.taskId });
+      if (sourcePainId) {
+        await persistPainDiagnosis(
+          // Single rc-9 mapping authority shared with the production factory.
+          { stateManager, eventEmitter: createBridgeTelemetryEventEmitter() },
+          {
+            painId: sourcePainId,
+            taskId: opts.taskId,
+            diagnosticianOutput: result.output,
+            artifactId: candidates[0]?.artifactId ?? null,
+          },
+        );
+        painDiagnosisLedgerWrite = 'attempted';
+      } else {
+        painDiagnosisLedgerWrite = 'skipped_no_pain_lineage';
+      }
+    }
+
     const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string }[] = [];
     let intakeFailed = false;
 
@@ -672,6 +714,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
+        painDiagnosisLedgerWrite,
         intake: {
           enabled: opts.intake !== false,
           candidates: intakeResults,
@@ -702,6 +745,13 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     }
     console.log(`  Attempt Count:  ${result.attemptCount}`);
+    if (painDiagnosisLedgerWrite === 'attempted') {
+      console.log(`  Diagnosis Ledger: pain_diagnoses write dispatched (skips/failures surface as pain_diagnosis_persist_* events)`);
+    } else if (painDiagnosisLedgerWrite === 'skipped_no_pain_lineage') {
+      console.log(`  Diagnosis Ledger: SKIPPED — task has no sourcePainId lineage (manual diagnosis; nothing to attribute)`);
+    } else {
+      console.log(`  Diagnosis Ledger: disabled — pain_diagnosis_persistence flag off (or no diagnosis output); no attribution row written`);
+    }
 
     if (intakeResults.length > 0) {
       console.log(`\n  Candidate Intake:`);
