@@ -89,7 +89,9 @@ No embedding, vector store, knowledge graph, new retrieval service, background i
 | Existing Principle | A canonical entry in `_tree.principles` addressed by `Principle.id` |
 | Reuse Candidate | An existing Principle proposed as covering the new Candidate |
 | Proposal | Advisory shortlist produced by retrieval; **never** a decision |
-| Decision | Owner's explicit `reuse` \| `create` verdict. **REUSE** is durably evidenced in `reuseEvidence[]`; **CREATE** is evidenced by the resulting canonical Principle creation (itself the durable result of that decision). |
+| Decision | An **explicit** Owner / AI Owner verdict, required **only when a credible reuse proposal exists**. There is no Decision on the no-match path. |
+| no-match CREATE | The **automatic** gate outcome when retrieval finds nothing credible. **Not** an Owner decision: no proposal was ever put to anyone. |
+| proposal → CREATE | An **explicit** Owner / AI Owner decision to create despite a credible reuse proposal being on the table. |
 
 ## 8. Canonical Identity
 
@@ -146,12 +148,25 @@ interface PrincipleReuseDecision {
 
 `decision='reuse'` with a `selectedPrincipleId` absent from the canonical Ledger ⇒ **fail closed**, never fall back to Create (INV-R08).
 
+**This contract is invoked ONLY when a credible reuse proposal exists** (`proposalNeedsDecision === true`). If retrieval returns no credible candidate, **no Owner decision is created** — the intake flow proceeds directly through the existing CREATE path, and none of `actor` / `reason` / `decidedAt` is ever produced.
+
 **This is the decision-EXCHANGE contract, not a standalone persisted entity.** Where each verdict becomes durable:
 
 - **REUSE** is materialised into the existing Principle's `reuseEvidence[]` entry (§12) — the relation and the decision travel together, so nothing about the verdict can drift from the relation it created.
-- **CREATE** receives **no** second standalone decision record in Phase 1. Its durable result *is* the newly created canonical Principle with `sourceRef = candidate://<candidateId>`: the creation is the evidence that the Owner saw the proposal and still chose to create.
+- **proposal → CREATE** receives **no** second standalone decision record in Phase 1. The newly created canonical Principle is the durable **RESULT** of that decision.
 
-The asymmetry is deliberate. REUSE resolves a Candidate into an **already-existing** Principle, so without an explicit record the knowledge relation would be invisible — and reusing a Principle that nobody decided to reuse is exactly the silent behaviour this feature must not have. CREATE, by contrast, produces a self-evidencing artifact (the Principle, carrying its candidate provenance) and needs no second copy of the same fact.
+**A created Principle is NOT proof that an Owner reviewed a proposal.** The resulting artifact alone cannot distinguish these two cases:
+
+```text
+1. no credible reuse candidate  → automatic CREATE
+2. credible proposal           → Owner explicitly chose CREATE
+```
+
+Both produce the same Principle. Phase 1 enforces Owner authorization for case 2 **at runtime** (no valid verdict ⇒ fail closed, never CREATE), but does not persist a record that would let the distinction be reconstructed after the fact.
+
+The asymmetry is deliberate. REUSE resolves a Candidate into an **already-existing** Principle, so without an explicit record the knowledge relation would be invisible — and reusing a Principle that nobody decided to reuse is exactly the silent behaviour this feature must not have. CREATE needs no second copy of that fact.
+
+**Phase-1 limitation:** explicit CREATE authorization is **runtime-enforced but not durably auditable as a standalone decision fact.** If future governance requires proving after the fact that an Owner reviewed a reuse proposal and chose CREATE, that is a separate persistence design decision and is **outside Phase 1**. Stating the limitation here is deliberate — designing that store now would pre-commit a later phase to a shape nobody has audited.
 
 ## 12. Persistence / Relationship Model
 
@@ -218,18 +233,25 @@ reuseEvidence?: Array<{
 
 ```text
 candidate(pending) ──intake──▶ reuse_check
-      │  no credible candidate          │  credible candidate
-      ▼                                 ▼
-   CREATE                    awaiting_decision (proposal surfaced)
-      │                                 │
-      ▼                    ┌────────────┴────────────┐
-  consumed                        REUSE               CREATE
-                                   │                    │
-                                   ▼                    ▼
-                          existing Principle      consumed
-                          (no new Principle)
-                          + reuseEvidence entry
+                                   │
+             ┌─────────────────────┴─────────────────────┐
+   no credible candidate                      credible candidate
+             │                                           │
+             ▼                                           ▼
+   AUTOMATIC CREATE                             awaiting_decision
+   (no Owner verdict)                        (explicit verdict required)
+             │                              ┌────────────┴────────────┐
+             ▼                             REUSE                 explicit CREATE
+        consumed                              │                       │
+                                    (never automatic)                ▼
+                                              │                  consumed
+                                              ▼
+                                    existing Principle
+                                    (no new Principle)
+                                    + reuseEvidence entry
 ```
+
+The two CREATE branches have **different provenance** and the diagram must not make them look alike: the left branch is an automatic gate outcome (nothing was ever put to an Owner), the right branch is an explicit verdict. They converge on the same artifact, which is why the outcome alone cannot prove a review happened (§11).
 
 No new candidate status is invented. The candidate still reaches `consumed` (its knowledge was applied), and the reuse relation is recorded on the Principle side as a `reuseEvidence[]` entry (OD-PRI917-02).
 
@@ -281,14 +303,14 @@ It **MUST NOT** be treated as durable authority for the reuse relation or the re
 
 Gate inside `CandidateIntakeService.intake()` between step 4c and step 5. All four production callers inherit it without modification.
 
-The decision surface may reuse existing CLI/Console presentation and Owner-identity mechanisms where appropriate, but those surfaces are **interaction layers only** and **MUST NOT** become a second persistence authority. Phase 1's decision surface is `pd candidate review`; the authoritative REUSE fact is written only to `Principle.reuseEvidence[]`, and CREATE is evidenced only by the Principle it creates. No claim is made that `ApprovalQueue` or the approvals routes are suitable carriers — the Reality Audit has not established that, and if a later slice finds a CLI surface cannot present the proposal, the fix is a better surface, not a new durable store. AI Owner may act, but only through a formal surface that records the verdict as evidence, never by deciding silently.
+The decision surface may reuse existing CLI/Console presentation and Owner-identity mechanisms where appropriate, but those surfaces are **interaction layers only** and **MUST NOT** become a second persistence authority. Phase 1's decision surface is `pd candidate review`; the authoritative REUSE fact is written only to `Principle.reuseEvidence[]`. For a **proposal-driven** CREATE the created Principle is the durable **outcome**, not a standalone audit record of the Owner's authorization (§11). No claim is made that `ApprovalQueue` or the approvals routes are suitable carriers — the Reality Audit has not established that, and if a later slice finds a CLI surface cannot present the proposal, the fix is a better surface, not a new durable store. AI Owner may act, but only through a formal surface that records the verdict as evidence, never by deciding silently.
 
 ## 19. Invariants
 
 - **INV-R01 Reuse Before Create** — every `recommendation_kind=principle` candidate passes a reuse decision boundary before any new Ledger Principle is created.
 - **INV-R02 Canonical Identity** — reuse targets are canonical Principle Ledger UUIDs.
 - **INV-R03 No Silent Duplicate Creation** — an unresolved reuse decision never silently proceeds to Create.
-- **INV-R04 Owner Authority** — the verdict is the Owner's (or AI Owner's) explicit answer; nothing may be auto-decided. REUSE is durably recorded in `reuseEvidence[]`; CREATE is durably evidenced by the created Principle itself. Neither verdict requires a separate governance-table record.
+- **INV-R04 Owner Authority** — *When a credible reuse proposal exists*, only an **explicit** Owner / AI Owner verdict may resolve it, to REUSE or to CREATE. *When no credible reuse candidate exists*, the gate may proceed through the existing CREATE path **without an Owner verdict**. REUSE may **never** be automatic, in either path.
 - **INV-R05 No Semantic Mutation on Reuse** — reuse accumulates evidence; it never changes what the Principle means.
 
   Mutating `reuseEvidence[]` — **ALLOWED**:
@@ -316,13 +338,13 @@ The decision surface may reuse existing CLI/Console presentation and Owner-ident
 
 | ID | Scenario | Expectation |
 |---|---|---|
-| T1 | No matching Principle | CREATE; exactly one new Ledger Principle |
-| T2 | Matching existing Principle + REUSE | no new UUID, no new Ledger entry |
+| T1 | No credible Principle (no-match path) | **automatic** CREATE — no Owner verdict is requested and none is produced; exactly one new Ledger Principle |
+| T2 | Matching existing Principle + explicit REUSE | no new UUID, no new Ledger entry; `reuseEvidence[]` appended |
 | T3 | Reuse replay | same result; no duplicate relation, no new Principle |
-| T4 | `selectedPrincipleId` nonexistent | fail closed |
+| T4 | `selectedPrincipleId` not in the proposal | fail closed — never falls back to CREATE |
 | T5 | Reuse evaluation unavailable | must **not** silently create |
 | T6 | Non-principle kinds (#1851 behaviour) | reuse logic MUST NOT run; ledger write still refused |
-| T7 | Existing create path | canonical UUID / ledger semantics unchanged |
+| T7 | Credible proposal + explicit CREATE | creates **only** after a valid Owner / AI Owner verdict; a malformed or missing verdict fails closed and creates nothing |
 | T8 | Production caller | at least one test through the real `Pain → Diagnostician Candidate → CandidateIntakeService → reuse decision` path |
 | T9 | Retrieval determinism | same ledger + same candidate ⇒ same shortlist |
 | T10 | Eligibility | archived/deprecated never proposed |
