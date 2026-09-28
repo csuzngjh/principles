@@ -8,6 +8,7 @@ import { PrincipleTreeLedgerAdapter } from '../../adapter/principle-tree-ledger-
 import { addPrincipleToLedger } from '../../../principle-tree-ledger.js';
 import type { LedgerPrinciple } from '../../../principle-tree-ledger.js';
 import { CandidateIntakeService } from '../../candidate-intake-service.js';
+import type { CandidateIntakeServiceOptions } from '../../candidate-intake-service.js';
 import { INTAKE_ERROR_CODES } from '../../candidate-intake.js';
 import type { ReuseDecision, ReuseProposal } from '../reuse-proposal.js';
 
@@ -142,7 +143,6 @@ function service(opts: {
     ledgerAdapter: adapter,
     ...(opts.decision ? { reuseDecision: opts.decision } : {}),
     ...(opts.omitStateDir ? {} : { reuseStateDir: opts.stateDir ?? join(workspaceDir, '.state') }),
-    reuseRecommendationKind: 'principle',
   });
 }
 
@@ -312,7 +312,10 @@ describe('T4 — reuse decision creates nothing', () => {
 
     await expect(
       service({ decision: () => ({ decision: 'reuse', selectedPrincipleId: randomUUID() }) }).intake(candidateId),
-    ).rejects.toMatchObject({ code: INTAKE_ERROR_CODES.INPUT_INVALID });
+    ).rejects.toMatchObject({
+      code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+      context: { reason: 'selected_principle_not_in_proposal' },
+    });
 
     expect(ledgerEntryCount()).toBe(before);
   });
@@ -458,5 +461,26 @@ describe('H3 — the reuse refusal tells the operator the truth', () => {
     expect(lower).not.toContain('non principle kind');
     expect(lower).toContain('no new principle was created');
     expect(result.message).toContain(existing.id);
+  });
+
+  it('reads the kind from the persisted candidate, not from caller configuration', async () => {
+    // The service exposes NO reuseRecommendationKind option any more: a caller
+    // cannot inject a second, drifting notion of the candidate's kind.
+    const opts: CandidateIntakeServiceOptions = {
+      stateManager,
+      ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') }),
+      reuseDecision: () => ({ decision: 'create' }),
+      reuseStateDir: join(workspaceDir, '.state'),
+    };
+    expect(Object.keys(opts)).not.toContain('reuseRecommendationKind');
+
+    // ...and the gate still runs for a genuine principle candidate.
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate();
+    const result = await new CandidateIntakeService(opts).intake(candidateId);
+    expect(result.outcome).toBe('ledger_entry');
+    if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
+    expect(result.reuseCheck).toBe('create_decided');
   });
 });

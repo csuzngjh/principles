@@ -58,8 +58,16 @@ import type { ReuseDecision, ReuseProposal } from './principle-reuse/reuse-propo
  * - `reuse_selected` (PRI-917 Slice 2) — the reuse gate produced a credible
  *   proposal and the injected decision function answered `reuse`, so no new
  *   Principle was written. Encoded as a refusal rather than a new result
- *   variant on purpose: every existing caller already renders `reason`
- *   correctly, so the flow needs no consumer changes.
+ *   variant, which keeps the result-union shape stable for every consumer.
+ *
+ *   ⚠ That is shape compatibility ONLY, not message compatibility. Known
+ *   counter-example (verified, not fixed here): `pd candidate` presents ANY
+ *   refusal as "this candidate kind does not target the Principle Ledger" and
+ *   re-throws it as INPUT_INVALID — both wrong for a reuse decision, which
+ *   DOES target the Ledger. No production caller injects `reuseDecision`
+ *   yet, so this cannot surface today; but any consumer that renders
+ *   refusal-specific operator messages MUST branch on
+ *   `reason === 'reuse_selected'` BEFORE production reuse is enabled.
  */
 export type LedgerRefusalReason = 'non_principle_kind' | 'unknown_kind' | 'reuse_selected';
 
@@ -125,8 +133,6 @@ export interface CandidateIntakeServiceOptions {
   reuseDecision?: (proposal: ReuseProposal) => ReuseDecision;
   /** Workspace state dir used for read-only reuse retrieval. */
   reuseStateDir?: string;
-  /** Raw persisted recommendation kind, so non-principle kinds never enter the gate. */
-  reuseRecommendationKind?: unknown;
 }
 
 /**
@@ -189,14 +195,12 @@ export class CandidateIntakeService {
   readonly #ledgerAdapter: LedgerAdapter;
   readonly #reuseDecision: ((proposal: ReuseProposal) => ReuseDecision) | undefined;
   readonly #reuseStateDir: string | undefined;
-  readonly #reuseRecommendationKind: unknown;
 
   constructor(opts: CandidateIntakeServiceOptions) {
     this.#stateManager = opts.stateManager;
     this.#ledgerAdapter = opts.ledgerAdapter;
     this.#reuseDecision = opts.reuseDecision;
     this.#reuseStateDir = opts.reuseStateDir;
-    this.#reuseRecommendationKind = opts.reuseRecommendationKind;
   }
 
   /**
@@ -353,8 +357,12 @@ export class CandidateIntakeService {
     //                      the write proceeds EXACTLY as before.
     //   no_candidates    — the gate ran and found nothing credible.
     //   reuse_selected   — the Owner/AI Owner answered `reuse`; nothing is
-    //                      written. Encoded as a refusal disposition so every
-    //                      existing caller renders it correctly unchanged.
+    //                      written. Encoded as a refusal disposition to keep
+    //                      the result-union shape stable. See the ⚠ note on
+    //                      LedgerRefusalReason: shape-compatible does NOT
+    //                      mean message-compatible — consumers with
+    //                      refusal-specific wording must branch on
+    //                      `reason === 'reuse_selected'` before reuse ships.
     //
     // A retrieval failure NEVER falls through to create (rc-9): it throws, so
     // the candidate stays pending and visible instead of silently manufacturing
@@ -386,7 +394,10 @@ export class CandidateIntakeService {
               action: recommendation.action ?? '',
             },
             this.#reuseStateDir,
-            { recommendationKind: this.#reuseRecommendationKind },
+            // Single truth: the persisted candidate's own kind. Step 3b has
+            // already proved eligibility fail-closed, so this is a restatement,
+            // never a second source a caller can override.
+            { recommendationKind: candidate.rawRecommendationKind },
           ),
         );
       } catch (reuseErr: unknown) {
@@ -431,11 +442,14 @@ export class CandidateIntakeService {
           const known = new Set(proposal.candidates.map((c) => c.principleId));
           if (!known.has(decision.selectedPrincipleId)) {
             // INV-R08: a selection outside the proposal fails closed. It must
-            // NOT silently degrade into "create".
+            // NOT silently degrade into "create". This is a defect in the
+            // reuse decision contract, not a malformed intake input, so it
+            // carries REUSE_CHECK_FAILED rather than INPUT_INVALID — the
+            // latter would file a governance error under "bad input".
             throw new CandidateIntakeError(
-              INTAKE_ERROR_CODES.INPUT_INVALID,
-              `Reuse decision selected principle '${decision.selectedPrincipleId}' which is not in the proposal for candidate ${candidateId}`,
-              { candidateId, selectedPrincipleId: decision.selectedPrincipleId },
+              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+              `Reuse decision selected principle '${decision.selectedPrincipleId}' which is not in the proposal for candidate ${candidateId}; no Principle was created.`,
+              { candidateId, selectedPrincipleId: decision.selectedPrincipleId, reason: 'selected_principle_not_in_proposal' },
             );
           }
           return {
