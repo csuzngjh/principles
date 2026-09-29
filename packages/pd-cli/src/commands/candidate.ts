@@ -660,6 +660,7 @@ async function executeOwnerDecision(deps: {
     const extracted = candidate ? extractIntakeRecommendation(candidate, artifact) : null;
     if (!candidate || !extracted || !extracted.ok) {
       failCli('Cannot build the reuse proposal for this candidate', 'Run `pd candidate review --candidate-id <id>` first.');
+      return;
     }
     const proposal = buildReuseProposal(opts.candidateId, buildReuseShortlist({
       text: extracted.recommendation.text || candidate.description || '',
