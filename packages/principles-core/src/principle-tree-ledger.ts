@@ -33,9 +33,12 @@ import type {
 import { TREE_NAMESPACE } from './runtime-v2/types/ledger-store.js';
 // PRI-459: lifecycle enum is the core SSOT (values match the transition table)
 import type { ImplementationLifecycleState } from './runtime-v2/types/principle-enums.js';
+// PRI-917 PR3B: reuse evidence contract lives with the Principle schema SSOT
+import type { ReuseEvidenceActor, ReuseEvidenceEntry } from './runtime-v2/types/principle-schema.js';
 
 // PRI-443: Pure parse/serialize functions extracted to codec module
 import {
+  isRecord,
   uniqueStrings,
   createEmptyTree,
   parseHybridLedger,
@@ -57,6 +60,7 @@ export type {
   HybridLedgerStore,
   ImplementationLifecycleState,
 };
+export type { ReuseEvidenceActor, ReuseEvidenceEntry };
 export { TREE_NAMESPACE };
 
 const PRINCIPLE_TRAINING_FILE = 'principle_training_state.json';
@@ -461,6 +465,148 @@ export function updatePrinciple(stateDir: string, principleId: string, updates: 
     };
     store.tree.principles[principleId] = next;
     return next;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// PRI-917 PR3B: reuse evidence append (SPEC v0.2.1 §12)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when the ledger file's content is not trustworthy for a read-modify-
+ * write: it parses to an empty principles tree while the file exists on disk
+ * (empty, corrupt, or truncated), or an entity's persisted reuseEvidence field
+ * has a malformed shape. Unlike a missing principle, writing over this state
+ * would DESTROY ledger content, so the write refuses instead of proceeding
+ * (rc-3).
+ */
+export class LedgerIntegrityError extends Error {
+  public readonly filePath: string;
+  constructor(message: string, filePath: string) {
+    super(message);
+    this.name = 'LedgerIntegrityError';
+    this.filePath = filePath;
+  }
+}
+
+const REUSE_EVIDENCE_KEYS: readonly string[] = [
+  'painId',
+  'candidateId',
+  'decision',
+  'actor',
+  'reason',
+  'decidedAt',
+  'decisionId',
+];
+
+/**
+ * Runtime shape check for an untrusted reuse evidence entry (rc-1/rc-2/rc-3).
+ * The caller-side decision surface parses owner/model output, so the ledger
+ * writer re-validates at this boundary: any malformed or unexpected field
+ * refuses the write — a half-valid evidence row must never land in the ledger.
+ */
+function validateReuseEvidenceEntry(entry: ReuseEvidenceEntry): void {
+  const refuse = (detail: string): never => {
+    throw new Error(
+      `appendReuseEvidence: malformed reuse evidence entry (${detail}) — refusing to write (fail closed).`,
+    );
+  };
+  if (!isRecord(entry)) refuse(`expected an object, got ${typeof entry}`);
+  for (const key of Object.keys(entry)) {
+    if (!REUSE_EVIDENCE_KEYS.includes(key)) refuse(`unknown field "${key}"`);
+  }
+  if (typeof entry.painId !== 'string' || entry.painId.trim() === '') refuse('painId must be a non-empty string');
+  if (typeof entry.candidateId !== 'string' || entry.candidateId.trim() === '') {
+    refuse('candidateId must be a non-empty string');
+  }
+  if (entry.decision !== 'reuse') refuse('decision must be exactly "reuse"');
+  if (!isRecord(entry.actor)) refuse('actor must be an object');
+  if (entry.actor.kind !== 'owner' && entry.actor.kind !== 'ai_owner') {
+    refuse('actor.kind must be "owner" or "ai_owner"');
+  }
+  if (typeof entry.actor.id !== 'string' || entry.actor.id.trim() === '') refuse('actor.id must be a non-empty string');
+  if (typeof entry.reason !== 'string' || entry.reason.trim() === '') refuse('reason must be a non-empty string');
+  if (typeof entry.decidedAt !== 'string' || entry.decidedAt.trim() === '' || Number.isNaN(Date.parse(entry.decidedAt))) {
+    refuse('decidedAt must be a parseable date string');
+  }
+  if (entry.decisionId !== undefined && (typeof entry.decisionId !== 'string' || entry.decisionId.trim() === '')) {
+    refuse('decisionId, when present, must be a non-empty string');
+  }
+}
+
+/**
+ * Append one reuse-evidence entry to an existing Principle (PRI-917 PR3B,
+ * SPEC v0.2.1 §12). The ONLY writer for `Principle.reuseEvidence`.
+ *
+ * Runs entirely inside the single-writer file lock via mutateLedger —
+ * read → integrity guard → dedupe → append → save — so a concurrent append
+ * can never be lost, and there is no load-then-update window between
+ * processes. Do NOT implement appends via addPrincipleToLedger (it replaces
+ * the whole entry and would silently drop existing evidence) or via an
+ * external loadLedger+updatePrinciple sequence (read outside the lock).
+ *
+ * Fail-closed:
+ *   - a ledger file that exists but parses to an empty principles tree (empty
+ *     file, corrupt, or truncated) is treated as corruption — the write
+ *     refuses rather than risk replacing the corpus with the new entry alone
+ *     (LedgerIntegrityError);
+ *   - a missing principleId refuses the write (no file mutation);
+ *   - a malformed entry refuses the write.
+ *
+ * Idempotency key: (principleId, entry.candidateId). A candidate resolves
+ * into a principle at most once, so replaying the same decision is a no-op
+ * that returns the existing evidence with `appended: false` (INV-R07). A
+ * no-op still goes through the normal save path, so the tree's lastUpdated
+ * is refreshed; the ledger content itself is unchanged.
+ *
+ * Append-only (INV-R05): no other Principle field — including updatedAt —
+ * is touched, and existing entries are never rewritten or removed. Target
+ * eligibility (e.g. archived/deprecated exclusion, SPEC §15) is the
+ * retrieval/proposal layer's invariant; this writer records the decision
+ * verbatim.
+ */
+export function appendReuseEvidence(
+  stateDir: string,
+  principleId: string,
+  entry: ReuseEvidenceEntry,
+): { principleId: string; reuseEvidence: ReuseEvidenceEntry[]; appended: boolean } {
+  validateReuseEvidenceEntry(entry);
+  const filePath = getLedgerFilePath(stateDir);
+  // Stat captured just before the lock as a hint; the authoritative check is
+  // the in-lock one below against the parsed store. A file created between
+  // this stat and the lock cannot trip the guard (it only fires when the
+  // file already existed at stat time AND the parsed tree is empty).
+  const statBefore = fs.existsSync(filePath) ? fs.statSync(filePath) : null;
+  return mutateLedger(stateDir, (store) => {
+    if (statBefore !== null && Object.keys(store.tree.principles).length === 0) {
+      throw new LedgerIntegrityError(
+        `Ledger file ${filePath} exists (${statBefore.size} bytes) but parsed to an empty principles tree — ` +
+          'the file is likely corrupt or truncated. Refusing to append reuse evidence, because the save ' +
+          'below would replace the ledger with this write alone. Restore the ledger file first (fail closed).',
+        filePath,
+      );
+    }
+    const principle = store.tree.principles[principleId];
+    if (!principle) {
+      throw new Error(`Cannot append reuse evidence: principle "${principleId}" does not exist in the ledger.`);
+    }
+    const existing = principle.reuseEvidence;
+    if (existing !== undefined && !Array.isArray(existing)) {
+      throw new LedgerIntegrityError(
+        `Principle "${principleId}" has a malformed reuseEvidence field (expected an array, got ${typeof existing}). ` +
+          'Refusing to append — fix or restore the ledger entry first (fail closed).',
+        filePath,
+      );
+    }
+    const current = existing ?? [];
+    if (current.some((e) => isRecord(e) && e.candidateId === entry.candidateId)) {
+      // Idempotent replay (INV-R07): this candidate already resolved into
+      // this principle. No new entry, no new logical decision.
+      return { principleId, reuseEvidence: current, appended: false };
+    }
+    const next: ReuseEvidenceEntry[] = [...current, entry];
+    principle.reuseEvidence = next;
+    return { principleId, reuseEvidence: next, appended: true };
   });
 }
 
