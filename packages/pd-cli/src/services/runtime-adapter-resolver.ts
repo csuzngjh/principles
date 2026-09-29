@@ -87,6 +87,12 @@ export interface ResolveAdapterOptions {
    */
   agentName?: InternalAgentName;
   /**
+   * PRI-917 v0.3.2 §8: resolve the adapter from this explicit profile id
+   * instead of an agent binding (the reuse evaluation capability is a
+   * dedicated config section, not an agent). Takes precedence when present.
+   */
+  runtimeProfileId?: string;
+  /**
    * PRI-719 review: resolve the binding even when the agent is disabled —
    * peer execution scope is the internalization_full_chain flag (auto-
    * consumer AND explicit run-once), not agents[kind].enabled. Omitted by
@@ -178,6 +184,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
   // ── Resolve config from .pd/config.yaml (for pi-ai, openclaw-cli, config) ──
   const resolved = resolveRuntimeFromPdConfig(opts.workspaceDir, {
     agentName: opts.agentName,
+    ...(opts.runtimeProfileId !== undefined ? { runtimeProfileId: opts.runtimeProfileId } : {}),
     ignoreAgentEnabled: opts.ignoreAgentEnabled,
   });
   const configResult: RuntimeConfigResult = resolved.result;
