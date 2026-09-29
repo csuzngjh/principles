@@ -14,6 +14,7 @@
  */
 
 import type { ReuseCandidate, ReuseShortlist } from './reuse-domain.js';
+import type { ReuseEvidenceActor } from '../types/principle-schema.js';
 
 /**
  * `pending` — credible existing Principles were found and an Owner decision is
@@ -38,10 +39,24 @@ export interface ReuseProposal {
   eligibleCount: number;
 }
 
-/** The Owner's answer. There is no automatic option. */
+/**
+ * The Owner's answer. There is no automatic option.
+ *
+ * A `reuse` verdict carries the SPEC §11 decision-exchange fields (`actor`,
+ * `reason`, `decidedAt`) because PRI-917 PR3B materialises the verdict into
+ * `Principle.reuseEvidence[]` verbatim (SPEC §12): the durable evidence must
+ * record WHO decided, WHY, and WHEN — an answer without them cannot be
+ * persisted as a reuse resolution, so the validator rejects it fail-closed.
+ */
 export type ReuseDecision =
   | { decision: 'create' }
-  | { decision: 'reuse'; selectedPrincipleId: string };
+  | {
+      decision: 'reuse';
+      selectedPrincipleId: string;
+      actor: ReuseEvidenceActor;
+      reason: string;
+      decidedAt: string;
+    };
 
 /**
  * Converts a deterministic shortlist into the proposal contract.
@@ -87,6 +102,11 @@ export type ReuseDecisionValidation =
  * a missing id for reuse are ALL rejected here, because the alternative is
  * silently reading a malformed answer as "go ahead and create" — the exact
  * duplicate manufacturing this gate exists to prevent.
+ *
+ * PRI-917 PR3B Phase 2: a `reuse` verdict must additionally carry the
+ * SPEC §11 accountability fields (`actor` / `reason` / `decidedAt`) — they are
+ * materialised verbatim into `Principle.reuseEvidence[]`, and an answer
+ * without them cannot produce a self-contained, auditable evidence entry.
  */
 export function validateReuseDecision(raw: unknown): ReuseDecisionValidation {
   if (raw === null || raw === undefined) return { ok: false, reason: 'decision_is_nullish' };
@@ -99,5 +119,33 @@ export function validateReuseDecision(raw: unknown): ReuseDecisionValidation {
   if (typeof selected !== 'string' || selected.length === 0) {
     return { ok: false, reason: 'reuse_without_principle_id' };
   }
-  return { ok: true, decision: { decision: 'reuse', selectedPrincipleId: selected } };
+  const actorRaw: unknown = record.actor;
+  if (typeof actorRaw !== 'object' || actorRaw === null || Array.isArray(actorRaw)) {
+    return { ok: false, reason: 'reuse_actor_invalid' };
+  }
+  const actorRecord = actorRaw as Record<string, unknown>;
+  if (
+    !(actorRecord.kind === 'owner' || actorRecord.kind === 'ai_owner')
+    || typeof actorRecord.id !== 'string'
+    || actorRecord.id.length === 0
+  ) {
+    return { ok: false, reason: 'reuse_actor_invalid' };
+  }
+  const { reason, decidedAt } = record;
+  if (typeof reason !== 'string' || reason.length === 0) {
+    return { ok: false, reason: 'reuse_reason_missing' };
+  }
+  if (typeof decidedAt !== 'string' || decidedAt.length === 0 || Number.isNaN(Date.parse(decidedAt))) {
+    return { ok: false, reason: 'reuse_decidedAt_invalid' };
+  }
+  return {
+    ok: true,
+    decision: {
+      decision: 'reuse',
+      selectedPrincipleId: selected,
+      actor: { kind: actorRecord.kind, id: actorRecord.id },
+      reason,
+      decidedAt,
+    },
+  };
 }

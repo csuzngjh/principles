@@ -64,6 +64,14 @@ export interface PainDiagnosisStore {
 
   /** All diagnosis rows for a pain, oldest first. */
   getDiagnosesByPainId(painId: string): Promise<PainDiagnosisRecord[]>;
+
+  /**
+   * All diagnosis rows produced by one diagnostician task, oldest first
+   * (PRI-917 PR3B Phase 2: the candidate → pain bridge for reuse evidence —
+   * a candidate knows only its task; its Pain resolves through this query).
+   * Uses the existing idx_pain_diagnoses_task_id index; no schema change.
+   */
+  getDiagnosesByTaskId(taskId: string): Promise<PainDiagnosisRecord[]>;
 }
 
 const VALID_CATEGORIES: ReadonlySet<string> = new Set(['People', 'Design', 'Assumption', 'Tooling']);

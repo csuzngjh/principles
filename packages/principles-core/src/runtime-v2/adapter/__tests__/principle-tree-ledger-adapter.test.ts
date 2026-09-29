@@ -185,3 +185,57 @@ describe('PrincipleTreeLedgerAdapter — listForCandidate / hasPrinciple (Phase 
     expect(adapter.hasPrinciple('')).toBe(false);
   });
 });
+
+// ── PRI-917 PR3B Phase 2: reuse resolution lookup + evidence append ────────
+
+describe('PrincipleTreeLedgerAdapter — findReuseResolutionForCandidate / appendReuseEvidence', () => {
+  it('returns null for a candidate with no recorded reuse resolution', () => {
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    adapter.writeProbationEntry(makeProbationEntry());
+    expect(adapter.findReuseResolutionForCandidate('candidate-P_test_001')).toBeNull();
+    expect(adapter.findReuseResolutionForCandidate('never-seen-candidate')).toBeNull();
+  });
+
+  it('appends evidence and resolves it by candidateId, round-trip through the ledger file', () => {
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    adapter.writeProbationEntry(makeProbationEntry());
+    const principleId = 'P_test_001';
+    const entry = {
+      painId: 'pain-1',
+      candidateId: 'candidate-P_test_001',
+      decision: 'reuse' as const,
+      actor: { kind: 'owner' as const, id: 'owner-1' },
+      reason: 'covers the same demand',
+      decidedAt: '2026-09-29T00:00:00.000Z',
+    };
+
+    const appended = adapter.appendReuseEvidence(principleId, entry);
+    expect(appended.appended).toBe(true);
+    expect(appended.reuseEvidence).toHaveLength(1);
+
+    const resolved = adapter.findReuseResolutionForCandidate('candidate-P_test_001');
+    expect(resolved).toEqual({ principleId, evidence: entry });
+    // Persisted through the real file, not just in memory.
+    const stored = loadLedger(stateDir).tree.principles[principleId];
+    expect(stored?.reuseEvidence).toHaveLength(1);
+  });
+
+  it('append is idempotent per candidateId and the lookup returns the original entry', () => {
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    adapter.writeProbationEntry(makeProbationEntry());
+    const principleId = 'P_test_001';
+    const entry = {
+      painId: 'pain-1',
+      candidateId: 'candidate-P_test_001',
+      decision: 'reuse' as const,
+      actor: { kind: 'ai_owner' as const, id: 'ai-1' },
+      reason: 'first verdict',
+      decidedAt: '2026-09-29T00:00:00.000Z',
+    };
+    adapter.appendReuseEvidence(principleId, entry);
+    const replay = adapter.appendReuseEvidence(principleId, { ...entry, reason: 'replayed wording' });
+
+    expect(replay.appended).toBe(false);
+    expect(adapter.findReuseResolutionForCandidate('candidate-P_test_001')?.evidence.reason).toBe('first verdict');
+  });
+});

@@ -8,6 +8,7 @@ import {
   LedgerPrincipleEntrySchema,
 } from '../src/runtime-v2/candidate-intake.js';
 import type { CandidateIntakeInput, CandidateIntakeOutput, LedgerPrincipleEntry, LedgerAdapter } from '../src/runtime-v2/candidate-intake.js';
+import type { ReuseEvidenceEntry } from '../src/runtime-v2/types/principle-schema.js';
 
 describe('INTAKE-01 — CandidateIntakeInputSchema', () => {
   it('validates correct shape: { candidateId, workspaceDir }', () => {
@@ -111,9 +112,17 @@ describe('INTAKE-04 — LedgerAdapter interface (structural conformance)', () =>
       existsForCandidate(candidateId: string): LedgerPrincipleEntry | null {
         return null;
       },
+      findReuseResolutionForCandidate(candidateId: string): { principleId: string; evidence: ReuseEvidenceEntry } | null {
+        return null;
+      },
+      appendReuseEvidence(principleId: string, entry: ReuseEvidenceEntry) {
+        return { principleId, reuseEvidence: [entry], appended: true };
+      },
     };
     expect(typeof mock.writeProbationEntry).toBe('function');
     expect(typeof mock.existsForCandidate).toBe('function');
+    expect(typeof mock.findReuseResolutionForCandidate).toBe('function');
+    expect(typeof mock.appendReuseEvidence).toBe('function');
     const entry: LedgerPrincipleEntry = {
       id: 'P_test',
       title: 'Test',
@@ -133,6 +142,10 @@ describe('INTAKE-04 — LedgerAdapter interface (structural conformance)', () =>
     const mock: LedgerAdapter = {
       writeProbationEntry(entry: LedgerPrincipleEntry) { return entry; },
       existsForCandidate(candidateId: string) { return null; },
+      findReuseResolutionForCandidate(candidateId: string) { return null; },
+      appendReuseEvidence(principleId: string, entry: ReuseEvidenceEntry) {
+        return { principleId, reuseEvidence: [entry], appended: true };
+      },
     };
     expect(mock.existsForCandidate('nonexistent')).toBeNull();
   });

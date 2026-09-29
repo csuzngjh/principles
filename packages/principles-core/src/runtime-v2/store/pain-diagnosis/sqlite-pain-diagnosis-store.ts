@@ -138,4 +138,17 @@ export class SqlitePainDiagnosisStore implements PainDiagnosisStore {  construct
     }
     return rows.map(mapRow);
   }
+
+  async getDiagnosesByTaskId(taskId: string): Promise<PainDiagnosisRecord[]> {
+    const db = this.connection.getDb();
+    const rawRows: unknown[] = db.prepare('SELECT id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at FROM pain_diagnoses WHERE task_id = ? ORDER BY created_at ASC, id ASC').all(taskId);
+    const rows = rawRows.filter(isPainDiagnosisRow);
+    // Same fail-loud posture as getDiagnosesByPainId (rc-3/rc-9).
+    if (rows.length !== rawRows.length) {
+      throw new PDRuntimeError('storage_unavailable', `task ${taskId} has malformed pain diagnosis row(s)`, {
+        nextAction: 'Inspect state.db pain_diagnoses for externally modified rows.',
+      });
+    }
+    return rows.map(mapRow);
+  }
 }

@@ -75,6 +75,8 @@ function makeBridge(stateManager: RuntimeStateManager, opts: { persistenceEnable
   const ledgerAdapter: LedgerAdapter = {
     existsForCandidate: () => null,
     writeProbationEntry: undefined as never,
+    findReuseResolutionForCandidate: () => null,
+    appendReuseEvidence: undefined as never,
   };
   return new PainSignalBridge({
     stateManager,

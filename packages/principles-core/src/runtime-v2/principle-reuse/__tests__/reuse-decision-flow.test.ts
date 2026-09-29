@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import { PrincipleTreeLedgerAdapter } from '../../adapter/principle-tree-ledger-adapter.js';
-import { addPrincipleToLedger } from '../../../principle-tree-ledger.js';
+import { addPrincipleToLedger, loadLedger } from '../../../principle-tree-ledger.js';
 import type { LedgerPrinciple } from '../../../principle-tree-ledger.js';
 import { CandidateIntakeService } from '../../candidate-intake-service.js';
 import type { CandidateIntakeServiceOptions } from '../../candidate-intake-service.js';
@@ -51,7 +51,7 @@ function makePrinciple(overrides: Partial<LedgerPrinciple> = {}): LedgerPrincipl
 }
 
 async function seedPrincipleCandidate(
-  opts: { text?: string; trigger?: string; action?: string; kind?: string } = {},
+  opts: { text?: string; trigger?: string; action?: string; kind?: string; painId?: string } = {},
 ): Promise<string> {
   const candidateId = randomUUID();
   const artifactId = randomUUID();
@@ -59,6 +59,20 @@ async function seedPrincipleCandidate(
 
   // principle_candidates has real FKs on tasks and runs, so seed both.
   const taskId = randomUUID();
+  if (opts.painId !== undefined) {
+    // Real production write path (Pain Diagnosis Persistence SPEC): the reuse
+    // evidence resolves its painId through this table (PR3B Phase 2).
+    await stateManager.recordPainDiagnosis({
+      painId: opts.painId,
+      taskId,
+      diagnosisId: `diag-${candidateId}`,
+      category: 'People',
+      rootCause: 'People: seeded diagnosis for reuse evidence',
+      evidence: [],
+      confidence: 0.9,
+      artifactId,
+    });
+  }
   await stateManager.taskStore.createTask({
     taskId,
     taskKind: 'diagnostician',
@@ -146,6 +160,31 @@ function service(opts: {
   });
 }
 
+
+/**
+ * A SPEC §11-shaped reuse decision (PR3B Phase 2): the verdict now carries the
+ * accountability fields that are materialised verbatim into reuseEvidence.
+ */
+function reuseOf(
+  principleId: string,
+  overrides: Partial<Extract<ReuseDecision, { decision: 'reuse' }>> = {},
+): ReuseDecision {
+  return {
+    decision: 'reuse',
+    selectedPrincipleId: principleId,
+    actor: { kind: 'owner', id: 'owner-1' },
+    reason: 'existing principle already covers this behavioral demand',
+    decidedAt: '2026-09-29T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/** Answers `reuse` on the top proposal entry; throws if the proposal is empty. */
+function reuseFirstProposal(p: ReuseProposal): ReuseDecision {
+  const [first] = p.candidates;
+  if (!first) throw new Error('expected at least one reuse candidate in the proposal');
+  return reuseOf(first.principleId);
+}
 
 beforeEach(async () => {
   workspaceDir = join(process.env.TEMP ?? '.', `pd-reuse-pr2-${randomUUID()}`);
@@ -284,13 +323,13 @@ describe('T4 — reuse decision creates nothing', () => {
     const existing = makePrinciple();
     addPrincipleToLedger(join(workspaceDir, '.state'), existing);
     const before = ledgerEntryCount();
-    const candidateId = await seedPrincipleCandidate();
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-t4' });
 
     const result = await service({
       decision: (p) => {
         const [first] = p.candidates;
         if (!first) throw new Error('expected at least one reuse candidate');
-        return { decision: 'reuse', selectedPrincipleId: first.principleId };
+        return reuseOf(first.principleId);
       },
     }).intake(candidateId);
 
@@ -300,6 +339,8 @@ describe('T4 — reuse decision creates nothing', () => {
     expect(result.selectedPrincipleId).toBe(existing.id);
     expect(result.reuseProposal?.status).toBe('pending');
     expect(result.message).toContain(existing.id);
+    // PR3B Phase 2: the verdict is durably materialised as evidence.
+    expect(result.reuseEvidence).toMatchObject({ candidateId, decision: 'reuse' });
 
     // The ledger is untouched — no new UUID, no new entry.
     expect(ledgerEntryCount()).toBe(before);
@@ -311,7 +352,7 @@ describe('T4 — reuse decision creates nothing', () => {
     const before = ledgerEntryCount();
 
     await expect(
-      service({ decision: () => ({ decision: 'reuse', selectedPrincipleId: randomUUID() }) }).intake(candidateId),
+      service({ decision: () => reuseOf(randomUUID()) }).intake(candidateId),
     ).rejects.toMatchObject({
       code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
       context: { reason: 'selected_principle_not_in_proposal' },
@@ -376,6 +417,10 @@ describe('H1 — a malformed decision never becomes a create', () => {
     ['unknown decision', { decision: 'maybe' }],
     ['reuse without id', { decision: 'reuse' }],
     ['reuse with non-string id', { decision: 'reuse', selectedPrincipleId: 42 }],
+    ['reuse without actor', { decision: 'reuse', selectedPrincipleId: 'some-id' }],
+    ['reuse with invalid actor kind', { decision: 'reuse', selectedPrincipleId: 'some-id', actor: { kind: 'robot', id: 'x' } }],
+    ['reuse without reason', { decision: 'reuse', selectedPrincipleId: 'some-id', actor: { kind: 'owner', id: 'o' } }],
+    ['reuse with unparsable decidedAt', { decision: 'reuse', selectedPrincipleId: 'some-id', actor: { kind: 'owner', id: 'o' }, reason: 'r', decidedAt: 'not-a-date' }],
     ['array', []],
   ];
 
@@ -441,13 +486,13 @@ describe('H3 — the reuse refusal tells the operator the truth', () => {
   it('never claims the candidate does not target the Principle Ledger', async () => {
     const existing = makePrinciple();
     addPrincipleToLedger(join(workspaceDir, '.state'), existing);
-    const candidateId = await seedPrincipleCandidate();
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-h3' });
 
     const result = await service({
       decision: (p) => {
         const [first] = p.candidates;
         if (!first) throw new Error('expected a proposal');
-        return { decision: 'reuse', selectedPrincipleId: first.principleId };
+        return reuseOf(first.principleId);
       },
     }).intake(candidateId);
 
@@ -482,5 +527,174 @@ describe('H3 — the reuse refusal tells the operator the truth', () => {
     expect(result.outcome).toBe('ledger_entry');
     if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
     expect(result.reuseCheck).toBe('create_decided');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRI-917 PR3B Phase 2 — the reuse verdict is durable evidence
+// ---------------------------------------------------------------------------
+
+describe('PR3B Phase 2 — reuse_selected writes durable evidence', () => {
+  it('Pain → candidate → REUSE: the evidence entry lands on the selected Principle', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const before = ledgerEntryCount();
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-phase2-1' });
+
+    const result = await service({ decision: reuseFirstProposal }).intake(candidateId);
+
+    expect(result.outcome).toBe('refused');
+    if (result.outcome !== 'refused' || result.reason !== 'reuse_selected') throw new Error('expected a reuse refusal');
+    expect(result.reuseEvidence).toEqual({
+      painId: 'pain-phase2-1',
+      candidateId,
+      decision: 'reuse',
+      actor: { kind: 'owner', id: 'owner-1' },
+      reason: 'existing principle already covers this behavioral demand',
+      decidedAt: '2026-09-29T00:00:00.000Z',
+    });
+
+    // Persisted on the Principle, exactly as returned.
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.reuseEvidence).toHaveLength(1);
+    expect(stored?.reuseEvidence?.[0]).toEqual(result.reuseEvidence);
+    // No new Principle, and the corpus itself unchanged in size.
+    expect(ledgerEntryCount()).toBe(before);
+  });
+
+  it('replaying the same candidate returns the recorded resolution without re-asking the decision', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-phase2-2' });
+
+    let decisions = 0;
+    const decisionService = service({
+      decision: (p) => {
+        decisions += 1;
+        return reuseFirstProposal(p);
+      },
+    });
+
+    const first = await decisionService.intake(candidateId);
+    expect(decisions).toBe(1);
+    if (first.outcome !== 'refused' || first.reason !== 'reuse_selected') throw new Error('expected a reuse refusal');
+
+    const replay = await decisionService.intake(candidateId);
+    // The decision function was NOT consulted again (INV-R07).
+    expect(decisions).toBe(1);
+    expect(replay.outcome).toBe('refused');
+    if (replay.outcome !== 'refused' || replay.reason !== 'reuse_selected') throw new Error('expected a reuse refusal');
+    expect(replay.selectedPrincipleId).toBe(existing.id);
+    expect(replay.reuseEvidence).toEqual(first.reuseEvidence);
+    expect(replay.message).toContain('INV-R07 replay');
+
+    // Still exactly one evidence entry — the replay appended nothing.
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.reuseEvidence).toHaveLength(1);
+  });
+
+  it('a replay is honoured even when the gate is not configured (no duplicate create)', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-phase2-3' });
+
+    const first = await service({ decision: reuseFirstProposal }).intake(candidateId);
+    if (first.outcome !== 'refused') throw new Error('expected the first intake to resolve by reuse');
+
+    // Gate absent entirely — the resolution is durable state, so the replay
+    // must still return it instead of silently creating a Principle.
+    const bare = new CandidateIntakeService({
+      stateManager,
+      ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') }),
+    });
+    const replay = await bare.intake(candidateId);
+
+    expect(replay.outcome).toBe('refused');
+    if (replay.outcome !== 'refused' || replay.reason !== 'reuse_selected') throw new Error('expected a reuse replay');
+    expect(replay.selectedPrincipleId).toBe(existing.id);
+    expect(ledgerEntryCount()).toBe(1);
+  });
+
+  it('a different candidate reusing the same Principle appends a second evidence entry', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidate1 = await seedPrincipleCandidate({ painId: 'pain-phase2-4' });
+    const candidate2 = await seedPrincipleCandidate({ painId: 'pain-phase2-5' });
+
+    await service({ decision: reuseFirstProposal }).intake(candidate1);
+    await service({ decision: reuseFirstProposal }).intake(candidate2);
+
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.reuseEvidence).toHaveLength(2);
+    expect(stored?.reuseEvidence?.map((e) => e.candidateId)).toEqual([candidate1, candidate2]);
+    expect(stored?.reuseEvidence?.map((e) => e.painId)).toEqual(['pain-phase2-4', 'pain-phase2-5']);
+  });
+
+  it('reuse evidence never touches derivedFromPainIds (SPEC v0.2.1 §12)', async () => {
+    const existing = makePrinciple({ derivedFromPainIds: ['untouched-provenance-candidate'] });
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-phase2-6' });
+
+    await service({ decision: reuseFirstProposal }).intake(candidateId);
+
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.derivedFromPainIds).toEqual(['untouched-provenance-candidate']);
+    // And no ledger principle claimed this candidate through the create-path
+    // idempotency field either.
+    const ledger = loadLedger(join(workspaceDir, '.state'));
+    for (const principle of Object.values(ledger.tree.principles)) {
+      expect(principle.derivedFromPainIds).not.toContain(candidateId);
+    }
+  });
+
+  it('fails closed when the candidate has no persisted pain diagnosis (no fabricated painId)', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const before = ledgerEntryCount();
+    const candidateId = await seedPrincipleCandidate(); // NO painId seeded
+
+    await expect(
+      service({ decision: reuseFirstProposal }).intake(candidateId),
+    ).rejects.toMatchObject({
+      code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+      context: { reason: 'reuse_pain_unresolvable' },
+    });
+
+    // Nothing recorded, nothing created.
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.reuseEvidence).toBeUndefined();
+    expect(ledgerEntryCount()).toBe(before);
+  });
+
+  it('an append failure at write time surfaces as reuse_check_failed and never repairs a corrupt file', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-phase2-7' });
+
+    // Sabotage the ledger at append time only (proposal and retrieval already
+    // succeeded against the readable file): the append must fail loud, the
+    // candidate must stay pending, and the corrupt file must NOT be replaced
+    // by a near-empty ledger write.
+    const ledgerFile = join(workspaceDir, '.state', 'principle_training_state.json');
+    const realAdapter = new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') });
+    const sabotagingService = new CandidateIntakeService({
+      stateManager,
+      ledgerAdapter: {
+        writeProbationEntry: (entry) => realAdapter.writeProbationEntry(entry),
+        existsForCandidate: (id) => realAdapter.existsForCandidate(id),
+        findReuseResolutionForCandidate: (id) => realAdapter.findReuseResolutionForCandidate(id),
+        appendReuseEvidence: (principleId, entry) => {
+          writeFileSync(ledgerFile, '{ corrupt after proposal', 'utf8');
+          return realAdapter.appendReuseEvidence(principleId, entry);
+        },
+      },
+      reuseDecision: reuseFirstProposal,
+      reuseStateDir: join(workspaceDir, '.state'),
+    });
+
+    await expect(sabotagingService.intake(candidateId)).rejects.toMatchObject({
+      code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+    });
+    expect(readFileSync(ledgerFile, 'utf8')).toBe('{ corrupt after proposal');
   });
 });

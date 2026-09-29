@@ -4,11 +4,19 @@
  * Workflow:
  *   1. Validate input
  *   2. Check idempotency (existsForCandidate) — O(1) lookup
+ *   2b. Check durable reuse resolution replay (PRI-917 PR3B Phase 2) —
+ *       a candidate already resolved into an existing Principle returns that
+ *       resolution; no decision is re-asked, no Principle is created
  *   3. Load candidate from DB (RuntimeStateManager)
  *   3b. ★ Principle Ledger write boundary (Phase 1 / PR1) — see below
  *   4. Load artifact from DB and parse recommendation
  *   5. Build 11-field LedgerPrincipleEntry
  *   6. Write via adapter.writeProbationEntry()
+ *
+ * 4d (PRI-917 Slice 2 + PR3B Phase 2) — the reuse gate sits between 4c and 5:
+ * a credible proposal + a `reuse` verdict is materialised as durable evidence
+ * on the selected Principle (appendReuseEvidence) and reported as a
+ * `reuse_selected` refusal; a `create` verdict proceeds exactly as before.
  *
  * ── Principle Ledger write boundary (Phase 1 / PR1) ─────────────────────────
  * This service is the single shared chokepoint through which EVERY
@@ -46,6 +54,7 @@ import { buildReuseProposal, proposalNeedsDecision } from './principle-reuse/reu
 import { buildReuseShortlist } from './principle-reuse/reuse-retrieval.js';
 import { validateReuseDecision } from './principle-reuse/reuse-proposal.js';
 import type { ReuseDecision, ReuseProposal } from './principle-reuse/reuse-proposal.js';
+import type { ReuseEvidenceEntry } from './types/principle-schema.js';
 
 /**
  * Why the Principle Ledger write boundary refused a candidate (Phase 1 / PR1).
@@ -59,6 +68,11 @@ import type { ReuseDecision, ReuseProposal } from './principle-reuse/reuse-propo
  *   proposal and the injected decision function answered `reuse`, so no new
  *   Principle was written. Encoded as a refusal rather than a new result
  *   variant, which keeps the result-union shape stable for every consumer.
+ *   PRI-917 PR3B Phase 2: the verdict is now ALSO materialised as durable
+ *   evidence on the selected Principle (`reuseEvidence[]`) before this
+ *   disposition is returned, and this reason doubles as the replay
+ *   disposition when a candidate's resolution already exists (no new decision
+ *   is asked, no Principle is created — INV-R07).
  *
  *   ⚠ That is shape compatibility ONLY, not message compatibility. Known
  *   counter-example (verified, not fixed here): `pd candidate` presents ANY
@@ -94,13 +108,20 @@ export type CandidateIntakeResult =
       readonly outcome: 'refused';
       readonly reason: LedgerRefusalReason;
       readonly candidateId: string;
-      /** The raw persisted kind, or `null` when it was absent / not a string. */
+      /** The raw persisted kind, or `null` when it was absent / not a string / not loaded. */
       readonly rawRecommendationKind: string | null;
       readonly message: string;
       /** PRI-917 Slice 2 — present only when `reason === 'reuse_selected'`. */
       readonly reuseProposal?: ReuseProposal;
       /** The Principle the decision function selected, when it chose reuse. */
       readonly selectedPrincipleId?: string;
+      /**
+       * PRI-917 PR3B Phase 2 — present only when `reason === 'reuse_selected'`:
+       * the evidence entry just written (fresh decision), or the pre-existing
+       * resolution (replay). This is the durable record that the candidate was
+       * resolved into `selectedPrincipleId` instead of creating a Principle.
+       */
+      readonly reuseEvidence?: ReuseEvidenceEntry;
     };
 
 /**
@@ -234,6 +255,36 @@ export class CandidateIntakeService {
     const existing = this.#ledgerAdapter.existsForCandidate(candidateId);
     if (existing) {
       return { outcome: 'ledger_entry', written: false, entry: existing };
+    }
+
+    // 2b. PRI-917 PR3B Phase 2 — durable reuse resolution replay (INV-R07).
+    //
+    // A candidate resolved by a recorded REUSE decision left its evidence on
+    // the target Principle and NO ledger principle of its own, so step 2
+    // cannot see it — without this check a replay would reach the gate again
+    // (re-asking the Owner) or, with the gate absent, fall through to CREATE
+    // and manufacture the very duplicate this feature exists to prevent.
+    //
+    // Unconditional (not gated on reuseDecision being injected): the
+    // resolution is durable persisted state, and honouring it is idempotency,
+    // not gate behaviour. Gate-unconfigured candidates WITHOUT a recorded
+    // resolution keep the exact pre-Phase-2 flow.
+    const resolved = this.#ledgerAdapter.findReuseResolutionForCandidate(candidateId);
+    if (resolved) {
+      return {
+        outcome: 'refused',
+        reason: 'reuse_selected',
+        candidateId,
+        // The candidate row is intentionally not loaded for a replay: the
+        // recorded evidence is itself the authoritative proof that this
+        // candidate was fully validated and resolved before.
+        rawRecommendationKind: null,
+        message:
+          `Candidate ${candidateId} was already resolved into existing Principle ${resolved.principleId} by a ` +
+          'recorded reuse decision; the decision was NOT asked again and no new Principle was created (INV-R07 replay).',
+        selectedPrincipleId: resolved.principleId,
+        reuseEvidence: resolved.evidence,
+      };
     }
 
     // 3. Load candidate from DB
@@ -452,14 +503,54 @@ export class CandidateIntakeService {
               { candidateId, selectedPrincipleId: decision.selectedPrincipleId, reason: 'selected_principle_not_in_proposal' },
             );
           }
+
+          // PRI-917 PR3B Phase 2 — materialise the verdict as durable evidence
+          // BEFORE reporting it. A reuse verdict that is not persisted would
+          // leave the resolution invisible: replay would re-ask the Owner, and
+          // the SPEC §11/§12 asymmetry (REUSE must be auditable, CREATE's
+          // artifact speaks for itself) would silently break. The write runs
+          // INSIDE the ledger's single-writer lock (appendReuseEvidence) and is
+          // fail-closed: an integrity/shape failure propagates and the
+          // candidate stays pending — it NEVER degrades into creating a
+          // Principle (INV-R03/INV-R08).
+          const painId = await this.#resolveReusePainId(candidateId, candidate);
+          let evidence: ReuseEvidenceEntry;
+          try {
+            const appended = this.#ledgerAdapter.appendReuseEvidence(decision.selectedPrincipleId, {
+              painId,
+              candidateId,
+              decision: 'reuse',
+              actor: decision.actor,
+              reason: decision.reason,
+              decidedAt: decision.decidedAt,
+            });
+            // The writer either appended this candidate's entry or returned the
+            // already-recorded one (concurrent-intake dedupe) — the entry for
+            // THIS candidateId must be present; anything else is a broken
+            // adapter and fails loud instead of reporting a fabricated record.
+            const recorded = appended.reuseEvidence.find((e) => e.candidateId === candidateId);
+            if (!recorded) {
+              throw new Error(
+                `appendReuseEvidence returned no evidence entry for candidate ${candidateId} (adapter contract violation)`,
+              );
+            }
+            evidence = recorded;
+          } catch (evidenceErr: unknown) {
+            throw new CandidateIntakeError(
+              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+              `Reuse decision for candidate ${candidateId} could not be recorded on principle '${decision.selectedPrincipleId}'; no Principle was created and the decision is not durable. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
+              { candidateId, selectedPrincipleId: decision.selectedPrincipleId, cause: evidenceErr },
+            );
+          }
           return {
             outcome: 'refused',
             reason: 'reuse_selected',
             candidateId,
             rawRecommendationKind: typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
-            message: `Candidate ${candidateId} was resolved to existing Principle ${decision.selectedPrincipleId}; no new Principle was created. This candidate DOES target the Principle Ledger — review the reuse proposal, and do not re-run intake to force a new Principle.`,
+            message: `Candidate ${candidateId} was resolved to existing Principle ${decision.selectedPrincipleId}; the reuse decision was recorded on that Principle's reuseEvidence and no new Principle was created. This candidate DOES target the Principle Ledger — review the reuse proposal, and do not re-run intake to force a new Principle.`,
             reuseProposal: proposal,
             selectedPrincipleId: decision.selectedPrincipleId,
+            reuseEvidence: evidence,
           };
         }
         reuseCheck = 'create_decided';
@@ -497,5 +588,59 @@ export class CandidateIntakeService {
         { candidateId, cause: err },
       );
     }
+  }
+
+  /**
+   * PRI-917 PR3B Phase 2 — resolve the Pain behind a candidate for its reuse
+   * evidence entry (SPEC v0.2.1 §12 requires a non-empty `painId`).
+   *
+   * `principle_candidates` carries NO pain column (audit F5); the durable
+   * bridge is `pain_diagnoses(task_id → pain_id)`, written by the diagnosis
+   * persistence path. Rows for one task are re-diagnoses / mixed attributions,
+   * so the LATEST row wins — ordered by (createdAt, id) for determinism.
+   *
+   * Fail-closed: a candidate with no resolvable Pain cannot produce a
+   * self-contained evidence entry, so the reuse decision is refused
+   * (`reuse_pain_unresolvable`) instead of writing a fabricated painId (rc-3).
+   * The candidate stays pending; no Principle is created.
+   */
+  async #resolveReusePainId(candidateId: string, candidate: { taskId: string }): Promise<string> {
+    const refuse = (detail: string): never => {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse decision for candidate ${candidateId} cannot be recorded: ${detail} ` +
+          'The evidence entry requires the Pain that re-validated the Principle. ' +
+          'nextAction: ensure the candidate\'s diagnostician task has a persisted pain diagnosis (pain_diagnoses), then retry intake.',
+        { candidateId, reason: 'reuse_pain_unresolvable' },
+      );
+    };
+    if (typeof candidate.taskId !== 'string' || candidate.taskId === '') {
+      refuse('the candidate has no diagnostician task reference');
+    }
+    let diagnoses;
+    try {
+      diagnoses = await this.#stateManager.getDiagnosesByTaskId(candidate.taskId);
+    } catch (err: unknown) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse decision for candidate ${candidateId} cannot be recorded: the pain diagnosis lookup failed. Cause: ${err instanceof Error ? err.message : String(err)}`,
+        { candidateId, reason: 'reuse_pain_unresolvable', cause: err },
+      );
+    }
+    if (diagnoses.length === 0) {
+      refuse('no persisted pain diagnosis exists for its task');
+    }
+    const sorted = [...diagnoses].sort((a, b) => {
+      if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+    const latest = sorted.at(-1);
+    const latestPainId = typeof latest?.painId === 'string' ? latest.painId : '';
+    if (latestPainId === '') {
+      // Empty history or a latest row without a usable pain id — either way
+      // no fabricated value is written (rc-3).
+      refuse('no usable pain id in the candidate\'s diagnosis history');
+    }
+    return latestPainId;
   }
 }

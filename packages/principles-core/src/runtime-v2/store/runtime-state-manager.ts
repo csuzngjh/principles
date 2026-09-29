@@ -552,6 +552,15 @@ export class RuntimeStateManager {
     return this._painDiagnosisStore.getDiagnosesByPainId(painId);
   }
 
+  /**
+   * All persisted diagnoses produced by one diagnostician task (PRI-917 PR3B
+   * Phase 2: the candidate → pain bridge for reuse evidence resolution).
+   */
+  async getDiagnosesByTaskId(taskId: string): Promise<PainDiagnosisRecord[]> {
+    this.assertInitialized();
+    return this._painDiagnosisStore.getDiagnosesByTaskId(taskId);
+  }
+
   async getArtifactWithCandidates(artifactId: string): Promise<ArtifactWithCandidates | null> {
     this.assertInitialized();
     return this._artifactStore.getArtifactWithCandidates(artifactId);

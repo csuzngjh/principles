@@ -20,6 +20,15 @@ function createMockLedgerAdapter(overrides = {}) {
   return {
     writeProbationEntry: vi.fn(),
     existsForCandidate: vi.fn(),
+    // PRI-917 PR3B Phase 2: the real service calls the reuse-resolution
+    // lookup on every intake (step 2b), so the default must be a truthful
+    // "no recorded resolution" rather than an undefined return.
+    findReuseResolutionForCandidate: vi.fn(() => null),
+    appendReuseEvidence: vi.fn((principleId: string, entry: { candidateId: string }) => ({
+      principleId,
+      reuseEvidence: [entry],
+      appended: true,
+    })),
     ...overrides,
   } as unknown as LedgerAdapter;
 }

@@ -41,6 +41,7 @@ import type { PDRuntimeAdapter, RunHandle, RunStatus, StartRunInput, StructuredR
 import { PainSignalBridge } from '../pain-signal-bridge.js';
 import { CandidateIntakeService } from '../candidate-intake-service.js';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../candidate-intake.js';
+import type { ReuseEvidenceEntry } from '../types/principle-schema.js';
 import { InternalizationOrchestrator } from '../internalization/internalization-orchestrator.js';
 import { decideInternalizationRoute } from '../internalization/internalization-route.js';
 import { computeBridgeDecision } from '../internalization/intake-to-internalization-bridge.js';
@@ -78,6 +79,12 @@ class InMemoryLedgerAdapter implements LedgerAdapter {
   }
   existsForCandidate(candidateId: string): LedgerPrincipleEntry | null {
     return this.entries.get(candidateId) ?? null;
+  }
+  findReuseResolutionForCandidate(): { principleId: string; evidence: ReuseEvidenceEntry } | null {
+    return null;
+  }
+  appendReuseEvidence(_principleId: string, _entry: ReuseEvidenceEntry): { principleId: string; reuseEvidence: ReuseEvidenceEntry[]; appended: boolean } {
+    throw new Error('reuse evidence is not exercised by this smoke test');
   }
   private static extractCandidateId(sourceRef: string): string {
     return sourceRef.startsWith('candidate://') ? sourceRef.slice('candidate://'.length) : sourceRef;
