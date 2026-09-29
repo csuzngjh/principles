@@ -104,6 +104,17 @@ export interface DoctorOutput {
   };
   featureFlags: FeatureFlagSummary;
   internalAgents: InternalAgentDiagnostics[];
+  /**
+   * PRI-917 v0.3.2 §8 — Semantic Reuse Evaluation Capability config.
+   * Reported read-only; the capability only produces recommendations, so
+   * `enabled: false` disables an advisory stage, never a governance path.
+   */
+  reuseEvaluation: {
+    enabled: boolean;
+    runtimeProfile: string;
+    profileConfigured: boolean;
+    timeoutMs?: number;
+  };
   providerHealth: ProviderHealthEntry[];
   warnings: string[];
   reason?: string;
@@ -684,6 +695,12 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
     },
     featureFlags,
     internalAgents,
+    reuseEvaluation: {
+      enabled: redacted.reuseEvaluation?.enabled ?? true,
+      runtimeProfile: redacted.reuseEvaluation?.runtimeProfile ?? redacted.defaultRuntime,
+      profileConfigured: profileMap.has(redacted.reuseEvaluation?.runtimeProfile ?? redacted.defaultRuntime),
+      ...(redacted.reuseEvaluation?.timeoutMs !== undefined ? { timeoutMs: redacted.reuseEvaluation.timeoutMs } : {}),
+    },
     providerHealth,
     warnings,
     nextActions: nextActions.length > 0 ? nextActions : ['All checks passed — configuration is valid'],

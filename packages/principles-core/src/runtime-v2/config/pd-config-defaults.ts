@@ -15,6 +15,7 @@ import {
   type InternalAgentsConfig,
   type UiConfig,
   type ContextInjectionConfig,
+  type ReuseEvaluationConfig,
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
 } from './pd-config-types.js';
@@ -102,6 +103,15 @@ export const DEFAULT_CONTEXT_INJECTION: ContextInjectionConfig = {
 
 // ── Full Default Config ─────────────────────────────────────────────────────
 
+/**
+ * PRI-917 v0.3.2 §8 — defaults for the Semantic Reuse Evaluation Capability.
+ * `runtimeProfile` stays absent on purpose: the effective layer falls back to
+ * `internalAgents.defaultRuntime` (the user's), not to a hard-coded id.
+ */
+export const DEFAULT_REUSE_EVALUATION: ReuseEvaluationConfig = {
+  enabled: true,
+};
+
 export function getDefaultPdConfig(): PdConfig {
   return {
     version: PD_CONFIG_VERSION,
@@ -113,6 +123,9 @@ export function getDefaultPdConfig(): PdConfig {
     internalAgents: getDefaultInternalAgents(),
     ui: { ...DEFAULT_UI },
     principles: { outputLanguage: undefined },
+    // PRI-917 v0.3.2 §8: default ON (PRI-797 precedent); runtimeProfile
+    // resolved against internalAgents.defaultRuntime by the effective layer.
+    reuseEvaluation: { ...DEFAULT_REUSE_EVALUATION },
     contextInjection: undefined,
   };
 }
