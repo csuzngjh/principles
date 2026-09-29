@@ -6,7 +6,7 @@
  *   pd pain record --reason <text> [--score N] [--source manual]
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { handlePainRecord } from './commands/pain-record.js';
 import { registerPainRetryCommand } from './commands/pain-retry.js';
 import { handlePainEvidence } from './commands/pain-evidence.js';
@@ -1066,7 +1066,7 @@ candidateCmd
   .requiredOption('--candidate-id <id>', 'Candidate ID to review')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output as JSON')
-  .option('--decide <decision>', 'Record the Owner decision: "reuse" or "create" (omit for read-only proposal view)')
+  .addOption(new Option('--decide <decision>', 'Record the Owner decision (omit for read-only proposal view)').choices(['reuse', 'create']))
   .option('--principle-id <id>', 'Existing Principle to reuse (required with --decide reuse)')
   .option('--reason <text>', 'Why the Owner resolved this candidate (required with --decide)')
   .action(async (opts) => {

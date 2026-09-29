@@ -56,7 +56,7 @@ const CJK_STOP_TERMS: ReadonlySet<string> = new Set([
   '应', '须', '要', '可', '个', '种', '些', '之', '者', '此', '该', '某',
 ]);
 
-const CJK_RANGE = /[㐀-䶿一-鿿豈-﫿]/;
+const CJK_RANGE = /[㐀-䶿一-鿿]/;
 
 function isCjk(ch: string): boolean {
   return CJK_RANGE.test(ch);

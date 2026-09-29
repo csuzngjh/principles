@@ -128,7 +128,12 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
   findReuseResolutionForCandidate(candidateId: string): { principleId: string; evidence: ReuseEvidenceEntry } | null {
     const ledger = loadLedger(this.#stateDir);
     for (const principle of Object.values(ledger.tree.principles)) {
-      for (const entry of principle.reuseEvidence ?? []) {
+      // rc-1/rc-3/rc-9: read-side defense — the writer validates, but the reader
+      // must also guard against externally-modified ledger files. A non-array
+      // reuseEvidence field (e.g. number, object) would cause for...of to throw
+      // TypeError, which is not a structured error. Skip such entries.
+      if (!Array.isArray(principle.reuseEvidence)) continue;
+      for (const entry of principle.reuseEvidence) {
         if (isRecord(entry) && entry.candidateId === candidateId) {
           return { principleId: principle.id, evidence: entry };
         }

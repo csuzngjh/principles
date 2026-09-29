@@ -651,6 +651,26 @@ async function executeOwnerDecision(deps: {
       }
     : { decision: 'create' };
 
+  // INV-R08: verify the selected principle is in the current proposal.
+  // This prevents a stale or empty proposal from silently degrading reuse
+  // into create.
+  if (opts.decide === 'reuse') {
+    const candidate = await stateManager.getCandidate(opts.candidateId);
+    const artifact = candidate ? await stateManager.getArtifact(candidate.artifactId) : null;
+    const extracted = candidate ? extractIntakeRecommendation(candidate, artifact) : null;
+    if (!candidate || !extracted?.ok) {
+      failCli('Cannot build the reuse proposal for this candidate', 'Run `pd candidate review --candidate-id <id>` first.');
+    }
+    const proposal = buildReuseProposal(opts.candidateId, buildReuseShortlist({
+      text: extracted.recommendation.text || candidate.description || '',
+      triggerPattern: extracted.recommendation.triggerPattern ?? '',
+      action: extracted.recommendation.action ?? '',
+    }, stateDir, { recommendationKind: candidate.rawRecommendationKind }));
+    if (!proposal.candidates.some((c) => c.principleId === opts.principleId)) {
+      failCli(`Principle ${opts.principleId} is not in the current reuse proposal`, 'Re-run `pd candidate review` to see the current proposal.');
+    }
+  }
+
   const service = new CandidateIntakeService({
     stateManager,
     ledgerAdapter,
@@ -905,6 +925,27 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
     }
 
     if (opts.decide === 'reuse' || opts.decide === 'create') {
+      // PRI-442 Stage 4: admission gate check — same as handleCandidateIntake.
+      // Prevents CLI from bypassing the production admission gate.
+      const admissionBlock = checkAdmissionGate(candidate);
+      if (admissionBlock) {
+        const payload = {
+          candidateId: opts.candidateId,
+          status: 'refused',
+          admissionDecision: admissionBlock.decision,
+          reason: admissionBlock.reason,
+          nextAction: admissionBlock.nextAction,
+        };
+        if (opts.json) {
+          console.log(JSON.stringify(payload, null, 2));
+        } else {
+          console.error(`Admission gate refused candidate ${opts.candidateId}: ${admissionBlock.decision}`);
+          console.error(`  Reason:      ${admissionBlock.reason}`);
+          console.error(`  Next Action: ${admissionBlock.nextAction}`);
+        }
+        process.exit(1);
+        return;
+      }
       // opts.decide is narrowed here — no cast needed to build the decision-mode shape.
       await executeOwnerDecision({ opts: { ...opts, decide: opts.decide }, stateManager, ledgerAdapter, stateDir });
       return;
