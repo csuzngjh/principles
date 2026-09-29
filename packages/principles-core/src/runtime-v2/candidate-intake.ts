@@ -235,6 +235,13 @@ export const INTAKE_ERROR_CODES = {
   ARTIFACT_NOT_FOUND: 'artifact_not_found',
   LEDGER_WRITE_FAILED: 'ledger_write_failed',
   INPUT_INVALID: 'input_invalid',
+  /**
+   * PRI-917 Slice 2 — the reuse gate ran and could not complete (ledger
+   * unreadable, shortlist construction failed). Thrown rather than falling
+   * through to create: a failed reuse check must not silently manufacture the
+   * very duplicate the gate exists to prevent (rc-9).
+   */
+  REUSE_CHECK_FAILED: 'reuse_check_failed',
 } as const;
 
 /**

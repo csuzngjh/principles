@@ -42,6 +42,10 @@ import {
   isPrincipleLedgerEligibleKind,
   validateRecommendationKind,
 } from './store/candidate/recommendation-kind-resolver.js';
+import { buildReuseProposal, proposalNeedsDecision } from './principle-reuse/reuse-proposal.js';
+import { buildReuseShortlist } from './principle-reuse/reuse-retrieval.js';
+import { validateReuseDecision } from './principle-reuse/reuse-proposal.js';
+import type { ReuseDecision, ReuseProposal } from './principle-reuse/reuse-proposal.js';
 
 /**
  * Why the Principle Ledger write boundary refused a candidate (Phase 1 / PR1).
@@ -51,8 +55,21 @@ import {
  *   candidate keeps flowing through its existing route / defer handling.
  * - `unknown_kind` — no usable kind at all (missing / non-string / not in the
  *   known set). This is the case that previously FAILED OPEN into a principle.
+ * - `reuse_selected` (PRI-917 Slice 2) — the reuse gate produced a credible
+ *   proposal and the injected decision function answered `reuse`, so no new
+ *   Principle was written. Encoded as a refusal rather than a new result
+ *   variant, which keeps the result-union shape stable for every consumer.
+ *
+ *   ⚠ That is shape compatibility ONLY, not message compatibility. Known
+ *   counter-example (verified, not fixed here): `pd candidate` presents ANY
+ *   refusal as "this candidate kind does not target the Principle Ledger" and
+ *   re-throws it as INPUT_INVALID — both wrong for a reuse decision, which
+ *   DOES target the Ledger. No production caller injects `reuseDecision`
+ *   yet, so this cannot surface today; but any consumer that renders
+ *   refusal-specific operator messages MUST branch on
+ *   `reason === 'reuse_selected'` BEFORE production reuse is enabled.
  */
-export type LedgerRefusalReason = 'non_principle_kind' | 'unknown_kind';
+export type LedgerRefusalReason = 'non_principle_kind' | 'unknown_kind' | 'reuse_selected';
 
 /**
  * Explicit disposition returned by {@link CandidateIntakeService.intake}.
@@ -67,6 +84,11 @@ export type CandidateIntakeResult =
       /** `true` when THIS call wrote a new entry; `false` for the idempotent no-op. */
       readonly written: boolean;
       readonly entry: LedgerPrincipleEntry;
+      /**
+       * PRI-917 Slice 2 — what the reuse gate did, for observability.
+       * Optional so every existing producer of this variant stays valid.
+       */
+      readonly reuseCheck?: ReuseCheckOutcome;
     }
   | {
       readonly outcome: 'refused';
@@ -75,12 +97,42 @@ export type CandidateIntakeResult =
       /** The raw persisted kind, or `null` when it was absent / not a string. */
       readonly rawRecommendationKind: string | null;
       readonly message: string;
+      /** PRI-917 Slice 2 — present only when `reason === 'reuse_selected'`. */
+      readonly reuseProposal?: ReuseProposal;
+      /** The Principle the decision function selected, when it chose reuse. */
+      readonly selectedPrincipleId?: string;
     };
+
+/**
+ * PRI-917 Slice 2 — what the reuse gate did before a ledger write.
+ *
+ * - `not_configured` — no decision function was injected, so no gate ran. This
+ *   is the current production shape; it is reported rather than assumed, so a
+ *   caller can never mistake "gate absent" for "gate found nothing".
+ * - `no_candidates` — the gate ran and found nothing credible.
+ * - `create_decided` — the gate found candidates and the decision function
+ *   answered `create`; the write proceeded exactly as before.
+ */
+export type ReuseCheckOutcome = 'not_configured' | 'no_candidates' | 'create_decided';
 
 
 export interface CandidateIntakeServiceOptions {
   stateManager: RuntimeStateManager;
   ledgerAdapter: LedgerAdapter;
+  /**
+   * PRI-917 Slice 2 — optional reuse decision function.
+   *
+   * When omitted (the current production shape) the reuse gate does not run
+   * and intake behaves exactly as before; the result still reports
+   * `reuseCheck: 'not_configured'` so "no gate" is never mistaken for "no
+   * duplicate found".
+   *
+   * When provided, it receives the bounded proposal and MUST answer `reuse`
+   * or `create` — there is no automatic option and no default.
+   */
+  reuseDecision?: (proposal: ReuseProposal) => ReuseDecision;
+  /** Workspace state dir used for read-only reuse retrieval. */
+  reuseStateDir?: string;
 }
 
 /**
@@ -141,10 +193,14 @@ function extractRecommendationFromContentJson(parsed: unknown): Recommendation |
 export class CandidateIntakeService {
   readonly #stateManager: RuntimeStateManager;
   readonly #ledgerAdapter: LedgerAdapter;
+  readonly #reuseDecision: ((proposal: ReuseProposal) => ReuseDecision) | undefined;
+  readonly #reuseStateDir: string | undefined;
 
   constructor(opts: CandidateIntakeServiceOptions) {
     this.#stateManager = opts.stateManager;
     this.#ledgerAdapter = opts.ledgerAdapter;
+    this.#reuseDecision = opts.reuseDecision;
+    this.#reuseStateDir = opts.reuseStateDir;
   }
 
   /**
@@ -290,6 +346,128 @@ export class CandidateIntakeService {
       }
     }
 
+    // 4d. PRI-917 Slice 2 — reuse gate.
+    //
+    // Sits between "we know what this candidate claims" (4c) and "we mint a new
+    // canonical identity for it" (5), which is the only place a duplicate can
+    // still be prevented without changing any downstream contract.
+    //
+    // Three shapes, and the default one is "no gate":
+    //   not_configured  — no decision function injected (today's production);
+    //                      the write proceeds EXACTLY as before.
+    //   no_candidates    — the gate ran and found nothing credible.
+    //   reuse_selected   — the Owner/AI Owner answered `reuse`; nothing is
+    //                      written. Encoded as a refusal disposition to keep
+    //                      the result-union shape stable. See the ⚠ note on
+    //                      LedgerRefusalReason: shape-compatible does NOT
+    //                      mean message-compatible — consumers with
+    //                      refusal-specific wording must branch on
+    //                      `reason === 'reuse_selected'` before reuse ships.
+    //
+    // A retrieval failure NEVER falls through to create (rc-9): it throws, so
+    // the candidate stays pending and visible instead of silently manufacturing
+    // the duplicate this gate exists to prevent.
+    //
+    // PRI-917 hardening: a HALF-configured gate is a configuration error, not
+    // a disabled one. Previously a decision function without a state dir
+    // skipped the gate silently while still reporting 'not_configured', so a
+    // one-option misconfiguration looked exactly like "the gate is off" and
+    // wrote duplicates without ever asking.
+    if (this.#reuseDecision && !this.#reuseStateDir) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse gate is misconfigured: reuseDecision was provided without reuseStateDir; no Principle was created for candidate ${candidateId}. nextAction: pass reuseStateDir, or remove reuseDecision to disable the gate.`,
+        { candidateId, reason: 'reuse_gate_misconfigured' },
+      );
+    }
+
+    let reuseCheck: ReuseCheckOutcome = 'not_configured';
+    if (this.#reuseDecision && this.#reuseStateDir) {
+      let proposal: ReuseProposal;
+      try {
+        proposal = buildReuseProposal(
+          candidateId,
+          buildReuseShortlist(
+            {
+              text: recommendation.text || candidate.description || '',
+              triggerPattern: recommendation.triggerPattern ?? '',
+              action: recommendation.action ?? '',
+            },
+            this.#reuseStateDir,
+            // Single truth: the persisted candidate's own kind. Step 3b has
+            // already proved eligibility fail-closed, so this is a restatement,
+            // never a second source a caller can override.
+            { recommendationKind: candidate.rawRecommendationKind },
+          ),
+        );
+      } catch (reuseErr: unknown) {
+        throw new CandidateIntakeError(
+          INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+          `Reuse check could not be completed for candidate ${candidateId}; no Principle was created. Cause: ${reuseErr instanceof Error ? reuseErr.message : String(reuseErr)}`,
+          { candidateId, cause: reuseErr },
+        );
+      }
+
+      if (proposalNeedsDecision(proposal)) {
+        // PRI-917 hardening: the decision function is an UNTRUSTED boundary
+        // (an AI Owner parses model output), so its return value is validated
+        // at runtime. Previously anything that was not exactly 'reuse' fell
+        // through to 'create' — a malformed answer silently manufactured the
+        // very duplicate this gate exists to prevent (rc-1/rc-2/rc-3).
+        let decision: ReuseDecision;
+        try {
+          const raw: unknown = this.#reuseDecision(proposal);
+          const validated = validateReuseDecision(raw);
+          if (!validated.ok) {
+            throw new CandidateIntakeError(
+              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+              `Reuse decision for candidate ${candidateId} is not a valid reuse|create decision (${validated.reason}); no Principle was created.`,
+              { candidateId, reason: validated.reason },
+            );
+          }
+          ({ decision } = validated);
+        } catch (decisionErr: unknown) {
+          if (decisionErr instanceof CandidateIntakeError) throw decisionErr;
+          // A throwing decision function (LLM timeout, parse crash) is a reuse
+          // check failure, not an internal error: it must fail closed with a
+          // candidate-scoped code rather than escaping as an arbitrary throw.
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Reuse decision for candidate ${candidateId} failed (${decisionErr instanceof Error ? decisionErr.message : String(decisionErr)}); no Principle was created.`,
+            { candidateId, cause: decisionErr },
+          );
+        }
+
+        if (decision.decision === 'reuse') {
+          const known = new Set(proposal.candidates.map((c) => c.principleId));
+          if (!known.has(decision.selectedPrincipleId)) {
+            // INV-R08: a selection outside the proposal fails closed. It must
+            // NOT silently degrade into "create". This is a defect in the
+            // reuse decision contract, not a malformed intake input, so it
+            // carries REUSE_CHECK_FAILED rather than INPUT_INVALID — the
+            // latter would file a governance error under "bad input".
+            throw new CandidateIntakeError(
+              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+              `Reuse decision selected principle '${decision.selectedPrincipleId}' which is not in the proposal for candidate ${candidateId}; no Principle was created.`,
+              { candidateId, selectedPrincipleId: decision.selectedPrincipleId, reason: 'selected_principle_not_in_proposal' },
+            );
+          }
+          return {
+            outcome: 'refused',
+            reason: 'reuse_selected',
+            candidateId,
+            rawRecommendationKind: typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+            message: `Candidate ${candidateId} was resolved to existing Principle ${decision.selectedPrincipleId}; no new Principle was created. This candidate DOES target the Principle Ledger — review the reuse proposal, and do not re-run intake to force a new Principle.`,
+            reuseProposal: proposal,
+            selectedPrincipleId: decision.selectedPrincipleId,
+          };
+        }
+        reuseCheck = 'create_decided';
+      } else {
+        reuseCheck = 'no_candidates';
+      }
+    }
+
     // 5. Build 11-field LedgerPrincipleEntry (E-06)
     const entry: LedgerPrincipleEntry = {
       id: randomUUID(),
@@ -308,7 +486,7 @@ export class CandidateIntakeService {
     // 6. Write to ledger via adapter (E-01, D-09)
     try {
       const written = this.#ledgerAdapter.writeProbationEntry(entry);
-      return { outcome: 'ledger_entry', written: true, entry: written };
+      return { outcome: 'ledger_entry', written: true, entry: written, reuseCheck };
     } catch (err: unknown) {
       if (err instanceof CandidateIntakeError) {
         throw err;
