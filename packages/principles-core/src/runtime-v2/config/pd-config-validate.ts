@@ -26,6 +26,7 @@ import {
   type WorkspaceConfig,
   type WorkspaceEnvironment,
   type PrinciplesConfig,
+  type ReuseEvaluationConfig,
   WORKSPACE_ENVIRONMENTS,
   type ProfileConfig,
   type ContextInjectionConfig,
@@ -42,6 +43,14 @@ import {
 } from './pd-config-types.js';
 import { validateProfileConfig } from './pd-validate-profile.js';
 import { VALID_OUTPUT_LANGUAGES, isValidOutputLanguage } from '../language-directive.js';
+
+/**
+ * PRI-917 v0.3.2 §8 — the dedicated `reuseEvaluation` section's closed key set.
+ * A key outside this set is a config error (fail loud), NOT a silently
+ * ignored key: a config key that looks valid while nothing reads it is how
+ * ghost configuration starts (the feature-flag lesson, generalized).
+ */
+const REUSE_EVALUATION_KEYS: ReadonlySet<string> = new Set(['enabled', 'runtimeProfile', 'timeoutMs']);
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -765,6 +774,42 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     }
   }
 
+  // reuseEvaluation (optional — PRI-917 v0.3.2 §8). Legacy configs have no
+  // such section and must keep loading unchanged (zero migration); a present
+  // but malformed section is a hard error, never a silent drop (rc-3).
+  const reuseEvaluationRaw = readOwn(raw, 'reuseEvaluation');
+  let reuseEvaluation: ReuseEvaluationConfig | undefined;
+  if (reuseEvaluationRaw !== undefined) {
+    if (!isRecord(reuseEvaluationRaw)) {
+      errors.push(err('reuseEvaluation', `reuseEvaluation must be an object, got ${safePreview(reuseEvaluationRaw)}`, 'Set reuseEvaluation to a mapping (e.g. reuseEvaluation: { enabled: true })'));
+    } else {
+      for (const key of Object.keys(reuseEvaluationRaw)) {
+        if (!REUSE_EVALUATION_KEYS.has(key)) {
+          errors.push(err(`reuseEvaluation.${key}`, `unknown key '${key}' in reuseEvaluation`, `Remove '${key}'; only ${[...REUSE_EVALUATION_KEYS].join(', ')} are supported`));
+        }
+      }
+      const enabledRaw = readOwn(reuseEvaluationRaw, 'enabled');
+      if (enabledRaw !== undefined && typeof enabledRaw !== 'boolean') {
+        errors.push(err('reuseEvaluation.enabled', `enabled must be a boolean, got ${safePreview(enabledRaw)}`, 'Set reuseEvaluation.enabled to true or false'));
+      }
+      const reuseProfileRaw = readOwn(reuseEvaluationRaw, 'runtimeProfile');
+      if (reuseProfileRaw !== undefined && (typeof reuseProfileRaw !== 'string' || reuseProfileRaw.trim() === '')) {
+        errors.push(err('reuseEvaluation.runtimeProfile', `runtimeProfile must be a non-empty string, got ${safePreview(reuseProfileRaw)}`, 'Set reuseEvaluation.runtimeProfile to a runtimeProfiles id, or remove the key to fall back to internalAgents.defaultRuntime'));
+      }
+      const timeoutRaw = readOwn(reuseEvaluationRaw, 'timeoutMs');
+      if (timeoutRaw !== undefined && (!isNumber(timeoutRaw) || !Number.isFinite(timeoutRaw) || timeoutRaw <= 0)) {
+        errors.push(err('reuseEvaluation.timeoutMs', `timeoutMs must be a positive number of milliseconds, got ${safePreview(timeoutRaw)}`, 'Set reuseEvaluation.timeoutMs to a positive integer (e.g. 60000), or remove the key to use the profile timeout'));
+      }
+      if (errors.every((e) => !e.path.startsWith('reuseEvaluation'))) {
+        reuseEvaluation = {
+          enabled: enabledRaw === undefined ? true : enabledRaw as boolean,
+          ...(typeof reuseProfileRaw === 'string' && reuseProfileRaw.trim() !== '' ? { runtimeProfile: reuseProfileRaw } : {}),
+          ...(isNumber(timeoutRaw) && timeoutRaw > 0 ? { timeoutMs: timeoutRaw } : {}),
+        };
+      }
+    }
+  }
+
   // principles (optional — PRI-336). Must survive validation into the returned
   // PdConfig: `principles.outputLanguage` is the canonical language SSOT that
   // loadPdConfigForPlugin consumers (prompt injection, principle generation)
@@ -802,6 +847,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     internalAgents,
     ui: ui ?? { diagnostics: { mode: 'simple' } },
     ...(principles ? { principles } : {}),
+    ...(reuseEvaluation ? { reuseEvaluation } : {}),
     ...(profile ? { profile } : {}),
     ...(contextInjection ? { contextInjection } : {}),
   };
