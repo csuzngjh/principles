@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.287.8
+
+### Patch Changes
+
+- 0939eac: fix: address PR 1900 review findings — admission gate bypass, reuse proposal validation, CLI contract hardening, and telemetry registration
+
 ## 1.287.7
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @principles/pd-cli
 
+## 1.152.18
+
+### Patch Changes
+
+- 0939eac: fix: address PR 1900 review findings — admission gate bypass, reuse proposal validation, CLI contract hardening, and telemetry registration
+- Updated dependencies [0939eac]
+  - @principles/core@1.287.8
+
 ## 1.152.17
 
 ### Patch Changes
