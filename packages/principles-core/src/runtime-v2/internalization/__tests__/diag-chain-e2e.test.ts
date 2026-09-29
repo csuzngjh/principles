@@ -957,6 +957,8 @@ describe('Diag chain e2e', () => {
       const ledgerAdapter = {
         writeProbationEntry: vi.fn().mockImplementation((entry) => entry),
         existsForCandidate: vi.fn().mockReturnValue(null),
+        findReuseResolutionForCandidate: vi.fn().mockReturnValue(null),
+        appendReuseEvidence: vi.fn().mockImplementation((principleId, entry) => ({ principleId, reuseEvidence: [entry], appended: true })),
       };
       const intakeService = new CandidateIntakeService({
         stateManager,

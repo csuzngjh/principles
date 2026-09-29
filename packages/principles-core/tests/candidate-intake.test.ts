@@ -8,6 +8,7 @@ import {
   LedgerPrincipleEntrySchema,
 } from '../src/runtime-v2/candidate-intake.js';
 import type { CandidateIntakeInput, CandidateIntakeOutput, LedgerPrincipleEntry, LedgerAdapter } from '../src/runtime-v2/candidate-intake.js';
+import type { ReuseEvidenceEntry } from '../src/runtime-v2/types/principle-schema.js';
 
 describe('INTAKE-01 — CandidateIntakeInputSchema', () => {
   it('validates correct shape: { candidateId, workspaceDir }', () => {
@@ -89,14 +90,16 @@ describe('INTAKE-03 — CandidateIntakeError + INTAKE_ERROR_CODES', () => {
     expect(err.context).toEqual({ artifactId: 'x' });
   });
 
-  it('INTAKE_ERROR_CODES has all 5 required keys (D-12)', () => {
+  it('INTAKE_ERROR_CODES has all required keys (D-12)', () => {
     const keys = Object.keys(INTAKE_ERROR_CODES);
-    expect(keys).toHaveLength(5);
+    // PRI-917 Slice 2 added REUSE_CHECK_FAILED; the D-12 set is unchanged.
+    expect(keys).toHaveLength(6);
     expect(keys).toContain('CANDIDATE_NOT_FOUND');
     expect(keys).toContain('CANDIDATE_ALREADY_CONSUMED');
     expect(keys).toContain('ARTIFACT_NOT_FOUND');
     expect(keys).toContain('LEDGER_WRITE_FAILED');
     expect(keys).toContain('INPUT_INVALID');
+    expect(keys).toContain('REUSE_CHECK_FAILED');
   });
 });
 
@@ -109,9 +112,17 @@ describe('INTAKE-04 — LedgerAdapter interface (structural conformance)', () =>
       existsForCandidate(candidateId: string): LedgerPrincipleEntry | null {
         return null;
       },
+      findReuseResolutionForCandidate(candidateId: string): { principleId: string; evidence: ReuseEvidenceEntry } | null {
+        return null;
+      },
+      appendReuseEvidence(principleId: string, entry: ReuseEvidenceEntry) {
+        return { principleId, reuseEvidence: [entry], appended: true };
+      },
     };
     expect(typeof mock.writeProbationEntry).toBe('function');
     expect(typeof mock.existsForCandidate).toBe('function');
+    expect(typeof mock.findReuseResolutionForCandidate).toBe('function');
+    expect(typeof mock.appendReuseEvidence).toBe('function');
     const entry: LedgerPrincipleEntry = {
       id: 'P_test',
       title: 'Test',
@@ -131,6 +142,10 @@ describe('INTAKE-04 — LedgerAdapter interface (structural conformance)', () =>
     const mock: LedgerAdapter = {
       writeProbationEntry(entry: LedgerPrincipleEntry) { return entry; },
       existsForCandidate(candidateId: string) { return null; },
+      findReuseResolutionForCandidate(candidateId: string) { return null; },
+      appendReuseEvidence(principleId: string, entry: ReuseEvidenceEntry) {
+        return { principleId, reuseEvidence: [entry], appended: true };
+      },
     };
     expect(mock.existsForCandidate('nonexistent')).toBeNull();
   });

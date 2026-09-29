@@ -4,11 +4,19 @@
  * Workflow:
  *   1. Validate input
  *   2. Check idempotency (existsForCandidate) — O(1) lookup
+ *   2b. Check durable reuse resolution replay (PRI-917 PR3B Phase 2) —
+ *       a candidate already resolved into an existing Principle returns that
+ *       resolution; no decision is re-asked, no Principle is created
  *   3. Load candidate from DB (RuntimeStateManager)
  *   3b. ★ Principle Ledger write boundary (Phase 1 / PR1) — see below
  *   4. Load artifact from DB and parse recommendation
  *   5. Build 11-field LedgerPrincipleEntry
  *   6. Write via adapter.writeProbationEntry()
+ *
+ * 4d (PRI-917 Slice 2 + PR3B Phase 2) — the reuse gate sits between 4c and 5:
+ * a credible proposal + a `reuse` verdict is materialised as durable evidence
+ * on the selected Principle (appendReuseEvidence) and reported as a
+ * `reuse_selected` refusal; a `create` verdict proceeds exactly as before.
  *
  * ── Principle Ledger write boundary (Phase 1 / PR1) ─────────────────────────
  * This service is the single shared chokepoint through which EVERY
@@ -42,6 +50,11 @@ import {
   isPrincipleLedgerEligibleKind,
   validateRecommendationKind,
 } from './store/candidate/recommendation-kind-resolver.js';
+import { buildReuseProposal, proposalNeedsDecision } from './principle-reuse/reuse-proposal.js';
+import { buildReuseShortlist } from './principle-reuse/reuse-retrieval.js';
+import { validateReuseDecision } from './principle-reuse/reuse-proposal.js';
+import type { ReuseDecision, ReuseProposal } from './principle-reuse/reuse-proposal.js';
+import type { ReuseEvidenceEntry } from './types/principle-schema.js';
 
 /**
  * Why the Principle Ledger write boundary refused a candidate (Phase 1 / PR1).
@@ -51,8 +64,26 @@ import {
  *   candidate keeps flowing through its existing route / defer handling.
  * - `unknown_kind` — no usable kind at all (missing / non-string / not in the
  *   known set). This is the case that previously FAILED OPEN into a principle.
+ * - `reuse_selected` (PRI-917 Slice 2) — the reuse gate produced a credible
+ *   proposal and the injected decision function answered `reuse`, so no new
+ *   Principle was written. Encoded as a refusal rather than a new result
+ *   variant, which keeps the result-union shape stable for every consumer.
+ *   PRI-917 PR3B Phase 2: the verdict is now ALSO materialised as durable
+ *   evidence on the selected Principle (`reuseEvidence[]`) before this
+ *   disposition is returned, and this reason doubles as the replay
+ *   disposition when a candidate's resolution already exists (no new decision
+ *   is asked, no Principle is created — INV-R07).
+ *
+ *   ⚠ That is shape compatibility ONLY, not message compatibility. Known
+ *   counter-example (verified, not fixed here): `pd candidate` presents ANY
+ *   refusal as "this candidate kind does not target the Principle Ledger" and
+ *   re-throws it as INPUT_INVALID — both wrong for a reuse decision, which
+ *   DOES target the Ledger. No production caller injects `reuseDecision`
+ *   yet, so this cannot surface today; but any consumer that renders
+ *   refusal-specific operator messages MUST branch on
+ *   `reason === 'reuse_selected'` BEFORE production reuse is enabled.
  */
-export type LedgerRefusalReason = 'non_principle_kind' | 'unknown_kind';
+export type LedgerRefusalReason = 'non_principle_kind' | 'unknown_kind' | 'reuse_selected';
 
 /**
  * Explicit disposition returned by {@link CandidateIntakeService.intake}.
@@ -67,20 +98,62 @@ export type CandidateIntakeResult =
       /** `true` when THIS call wrote a new entry; `false` for the idempotent no-op. */
       readonly written: boolean;
       readonly entry: LedgerPrincipleEntry;
+      /**
+       * PRI-917 Slice 2 — what the reuse gate did, for observability.
+       * Optional so every existing producer of this variant stays valid.
+       */
+      readonly reuseCheck?: ReuseCheckOutcome;
     }
   | {
       readonly outcome: 'refused';
       readonly reason: LedgerRefusalReason;
       readonly candidateId: string;
-      /** The raw persisted kind, or `null` when it was absent / not a string. */
+      /** The raw persisted kind, or `null` when it was absent / not a string / not loaded. */
       readonly rawRecommendationKind: string | null;
       readonly message: string;
+      /** PRI-917 Slice 2 — present only when `reason === 'reuse_selected'`. */
+      readonly reuseProposal?: ReuseProposal;
+      /** The Principle the decision function selected, when it chose reuse. */
+      readonly selectedPrincipleId?: string;
+      /**
+       * PRI-917 PR3B Phase 2 — present only when `reason === 'reuse_selected'`:
+       * the evidence entry just written (fresh decision), or the pre-existing
+       * resolution (replay). This is the durable record that the candidate was
+       * resolved into `selectedPrincipleId` instead of creating a Principle.
+       */
+      readonly reuseEvidence?: ReuseEvidenceEntry;
     };
+
+/**
+ * PRI-917 Slice 2 — what the reuse gate did before a ledger write.
+ *
+ * - `not_configured` — no decision function was injected, so no gate ran. This
+ *   is the current production shape; it is reported rather than assumed, so a
+ *   caller can never mistake "gate absent" for "gate found nothing".
+ * - `no_candidates` — the gate ran and found nothing credible.
+ * - `create_decided` — the gate found candidates and the decision function
+ *   answered `create`; the write proceeded exactly as before.
+ */
+export type ReuseCheckOutcome = 'not_configured' | 'no_candidates' | 'create_decided';
 
 
 export interface CandidateIntakeServiceOptions {
   stateManager: RuntimeStateManager;
   ledgerAdapter: LedgerAdapter;
+  /**
+   * PRI-917 Slice 2 — optional reuse decision function.
+   *
+   * When omitted (the current production shape) the reuse gate does not run
+   * and intake behaves exactly as before; the result still reports
+   * `reuseCheck: 'not_configured'` so "no gate" is never mistaken for "no
+   * duplicate found".
+   *
+   * When provided, it receives the bounded proposal and MUST answer `reuse`
+   * or `create` — there is no automatic option and no default.
+   */
+  reuseDecision?: (proposal: ReuseProposal) => ReuseDecision;
+  /** Workspace state dir used for read-only reuse retrieval. */
+  reuseStateDir?: string;
 }
 
 /**
@@ -138,13 +211,106 @@ function extractRecommendationFromContentJson(parsed: unknown): Recommendation |
   return null;
 }
 
+/**
+ * PRI-917 PR3A (surface audit C4): the candidate-semantics extraction shared
+ * by BOTH the intake flow (steps 4b/4c) and the `pd candidate review`
+ * surface — one implementation, so the retrieval input shown to the Owner can
+ * never drift from what intake actually consumes.
+ *
+ * Resolution order (identical to intake steps 4b→4c):
+ *   1. candidate.sourceRecommendationJson — validated directly, then via the
+ *      diagnostician description→text normalization; malformed JSON warns and
+ *      falls through (rc-9 observable degradation);
+ *   2. artifact.contentJson — the three historical shapes.
+ *
+ * Pure apart from the rc-9 warn; never throws — failures come back as
+ * `{ ok: false, error }` carrying the exact CandidateIntakeError intake
+ * itself would throw.
+ */
+export type CandidateRecommendationExtraction =
+  | { ok: true; recommendation: Recommendation }
+  | { ok: false; error: CandidateIntakeError };
+
+export function extractIntakeRecommendation(
+  candidate: { candidateId: string; sourceRecommendationJson?: string | null },
+  artifact: { contentJson: string } | null,
+): CandidateRecommendationExtraction {
+  const { candidateId } = candidate;
+
+  // 4b: the canonical source first.
+  const sourceRecJson = candidate.sourceRecommendationJson;
+  if (sourceRecJson && sourceRecJson.trim() !== '') {
+    try {
+      const parsed = JSON.parse(sourceRecJson) as unknown;
+      const fromCandidate = validateRecommendation(parsed);
+      if (fromCandidate) return { ok: true, recommendation: fromCandidate };
+      // diagnostician-committer stores a DiagnosticianRecommendation, whose
+      // body field is `description` (not `text`). Normalize that shape to the
+      // Recommendation contract. rc-4: validate the normalized value too.
+      const normalized = normalizeDiagnosticianRecommendation(parsed);
+      const fromNorm = normalized ? validateRecommendation(normalized) : null;
+      if (fromNorm) return { ok: true, recommendation: fromNorm };
+    } catch (err: unknown) {
+      // sourceRecommendationJson is non-empty but malformed — warn and fall through
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn(`[CandidateIntakeService] sourceRecommendationJson parse failed for candidate ${candidateId}: ${detail}. Falling back to artifact.contentJson.`);
+    }
+  }
+
+  // 4c: fall back to artifact.contentJson.
+  if (!artifact) {
+    return {
+      ok: false,
+      error: new CandidateIntakeError(
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Cannot extract recommendation for candidate ${candidateId}: no artifact content available`,
+        { candidateId },
+      ),
+    };
+  }
+  try {
+    const parsed = JSON.parse(artifact.contentJson) as unknown;
+    // Three historical shapes can land in contentJson:
+    //   1. { recommendation: {...} }  — manual E2E wrapper
+    //   2. DiagnosticianOutputV1      — { summary, rootCause, recommendations: [...] }
+    //   3. bare Recommendation-like object
+    // rc-1/rc-2: parsed is untrusted — validate, never cast. rc-5: Object.hasOwn.
+    const rec = extractRecommendationFromContentJson(parsed);
+    if (!rec) {
+      return {
+        ok: false,
+        error: new CandidateIntakeError(
+          INTAKE_ERROR_CODES.INPUT_INVALID,
+          `Failed to parse artifact content for candidate ${candidateId}: contentJson is not a valid recommendation object`,
+          { candidateId },
+        ),
+      };
+    }
+    return { ok: true, recommendation: rec };
+  } catch (err: unknown) {
+    if (err instanceof CandidateIntakeError) return { ok: false, error: err };
+    return {
+      ok: false,
+      error: new CandidateIntakeError(
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Failed to parse artifact content for candidate ${candidateId}: ${err instanceof Error ? err.message : String(err)}`,
+        { candidateId, cause: err },
+      ),
+    };
+  }
+}
+
 export class CandidateIntakeService {
   readonly #stateManager: RuntimeStateManager;
   readonly #ledgerAdapter: LedgerAdapter;
+  readonly #reuseDecision: ((proposal: ReuseProposal) => ReuseDecision) | undefined;
+  readonly #reuseStateDir: string | undefined;
 
   constructor(opts: CandidateIntakeServiceOptions) {
     this.#stateManager = opts.stateManager;
     this.#ledgerAdapter = opts.ledgerAdapter;
+    this.#reuseDecision = opts.reuseDecision;
+    this.#reuseStateDir = opts.reuseStateDir;
   }
 
   /**
@@ -178,6 +344,36 @@ export class CandidateIntakeService {
     const existing = this.#ledgerAdapter.existsForCandidate(candidateId);
     if (existing) {
       return { outcome: 'ledger_entry', written: false, entry: existing };
+    }
+
+    // 2b. PRI-917 PR3B Phase 2 — durable reuse resolution replay (INV-R07).
+    //
+    // A candidate resolved by a recorded REUSE decision left its evidence on
+    // the target Principle and NO ledger principle of its own, so step 2
+    // cannot see it — without this check a replay would reach the gate again
+    // (re-asking the Owner) or, with the gate absent, fall through to CREATE
+    // and manufacture the very duplicate this feature exists to prevent.
+    //
+    // Unconditional (not gated on reuseDecision being injected): the
+    // resolution is durable persisted state, and honouring it is idempotency,
+    // not gate behaviour. Gate-unconfigured candidates WITHOUT a recorded
+    // resolution keep the exact pre-Phase-2 flow.
+    const resolved = this.#ledgerAdapter.findReuseResolutionForCandidate(candidateId);
+    if (resolved) {
+      return {
+        outcome: 'refused',
+        reason: 'reuse_selected',
+        candidateId,
+        // The candidate row is intentionally not loaded for a replay: the
+        // recorded evidence is itself the authoritative proof that this
+        // candidate was fully validated and resolved before.
+        rawRecommendationKind: null,
+        message:
+          `Candidate ${candidateId} was already resolved into existing Principle ${resolved.principleId} by a ` +
+          'recorded reuse decision; the decision was NOT asked again and no new Principle was created (INV-R07 replay).',
+        selectedPrincipleId: resolved.principleId,
+        reuseEvidence: resolved.evidence,
+      };
     }
 
     // 3. Load candidate from DB
@@ -230,63 +426,176 @@ export class CandidateIntakeService {
       );
     }
 
-    // 4b. Parse recommendation from candidate.sourceRecommendationJson FIRST (canonical source)
-    // Fall back to artifact.contentJson for backwards-compatibility with legacy/manual inserts.
-     
-    let recommendation!: Recommendation;
-    const sourceRecJson = candidate.sourceRecommendationJson;
-    try {
-      if (sourceRecJson && sourceRecJson.trim() !== '') {
-        // rc-1/rc-2 (ERR-001/ERR-005): candidate JSON is untrusted — validate shape,
-        // never cast directly. validateRecommendation returns null on bad shape;
-        // a null result falls through to the contentJson branch below.
-        const parsed = JSON.parse(sourceRecJson) as unknown;
-        const fromCandidate = validateRecommendation(parsed);
-        if (fromCandidate) {
-          recommendation = fromCandidate;
-        } else {
-          // diagnostician-committer stores a DiagnosticianRecommendation, whose
-          // body field is `description` (not `text`). Normalize that shape to the
-          // Recommendation contract so the canonical source path is preferred over
-          // the contentJson fallback. rc-4: validate the normalized value too.
-          const normalized = normalizeDiagnosticianRecommendation(parsed);
-          const fromNorm = normalized ? validateRecommendation(normalized) : null;
-          if (fromNorm) {
-            recommendation = fromNorm;
-          }
-        }
-      }
-    } catch (err: unknown) {
-      // sourceRecommendationJson is non-empty but malformed — warn and fall through
-      const detail = err instanceof Error ? err.message : String(err);
-      console.warn(`[CandidateIntakeService] sourceRecommendationJson parse failed for candidate ${candidateId}: ${detail}. Falling back to artifact.contentJson.`);
+    // 4b/4c. Extract the recommendation via the SHARED semantics extraction
+    // (PRI-917 PR3A C4) — the exact logic `pd candidate review` uses to show
+    // the Owner what this candidate claims, so proposal and intake can never
+    // disagree about the input. Failures carry the same CandidateIntakeError
+    // this method always threw.
+    const extracted = extractIntakeRecommendation(candidate, artifact);
+    if (!extracted.ok) {
+      throw extracted.error;
+    }
+    const recommendation: Recommendation = extracted.recommendation;
+
+    // 4d. PRI-917 Slice 2 — reuse gate.
+    //
+    // Sits between "we know what this candidate claims" (4c) and "we mint a new
+    // canonical identity for it" (5), which is the only place a duplicate can
+    // still be prevented without changing any downstream contract.
+    //
+    // Three shapes, and the default one is "no gate":
+    //   not_configured  — no decision function injected (today's production);
+    //                      the write proceeds EXACTLY as before.
+    //   no_candidates    — the gate ran and found nothing credible.
+    //   reuse_selected   — the Owner/AI Owner answered `reuse`; nothing is
+    //                      written. Encoded as a refusal disposition to keep
+    //                      the result-union shape stable. See the ⚠ note on
+    //                      LedgerRefusalReason: shape-compatible does NOT
+    //                      mean message-compatible — consumers with
+    //                      refusal-specific wording must branch on
+    //                      `reason === 'reuse_selected'` before reuse ships.
+    //
+    // A retrieval failure NEVER falls through to create (rc-9): it throws, so
+    // the candidate stays pending and visible instead of silently manufacturing
+    // the duplicate this gate exists to prevent.
+    //
+    // PRI-917 hardening: a HALF-configured gate is a configuration error, not
+    // a disabled one. Previously a decision function without a state dir
+    // skipped the gate silently while still reporting 'not_configured', so a
+    // one-option misconfiguration looked exactly like "the gate is off" and
+    // wrote duplicates without ever asking.
+    if (this.#reuseDecision && !this.#reuseStateDir) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse gate is misconfigured: reuseDecision was provided without reuseStateDir; no Principle was created for candidate ${candidateId}. nextAction: pass reuseStateDir, or remove reuseDecision to disable the gate.`,
+        { candidateId, reason: 'reuse_gate_misconfigured' },
+      );
     }
 
-    // 4c. Fall back to artifact.contentJson if no valid sourceRecommendationJson
-    if (!recommendation) {
+    let reuseCheck: ReuseCheckOutcome = 'not_configured';
+    if (this.#reuseDecision && this.#reuseStateDir) {
+      let proposal: ReuseProposal;
       try {
-        const parsed = JSON.parse(artifact.contentJson) as unknown;
-        // Three historical shapes can land in contentJson:
-        //   1. { recommendation: {...} }  — manual E2E wrapper
-        //   2. DiagnosticianOutputV1      — { summary, rootCause, recommendations: [...] }
-        //   3. bare Recommendation-like object
-        // rc-1/rc-2: parsed is untrusted — validate, never cast. rc-5: Object.hasOwn.
-        const rec = extractRecommendationFromContentJson(parsed);
-        if (!rec) {
+        proposal = buildReuseProposal(
+          candidateId,
+          buildReuseShortlist(
+            {
+              text: recommendation.text || candidate.description || '',
+              triggerPattern: recommendation.triggerPattern ?? '',
+              action: recommendation.action ?? '',
+            },
+            this.#reuseStateDir,
+            // Single truth: the persisted candidate's own kind. Step 3b has
+            // already proved eligibility fail-closed, so this is a restatement,
+            // never a second source a caller can override.
+            { recommendationKind: candidate.rawRecommendationKind },
+          ),
+        );
+      } catch (reuseErr: unknown) {
+        throw new CandidateIntakeError(
+          INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+          `Reuse check could not be completed for candidate ${candidateId}; no Principle was created. Cause: ${reuseErr instanceof Error ? reuseErr.message : String(reuseErr)}`,
+          { candidateId, cause: reuseErr },
+        );
+      }
+
+      if (proposalNeedsDecision(proposal)) {
+        // PRI-917 hardening: the decision function is an UNTRUSTED boundary
+        // (an AI Owner parses model output), so its return value is validated
+        // at runtime. Previously anything that was not exactly 'reuse' fell
+        // through to 'create' — a malformed answer silently manufactured the
+        // very duplicate this gate exists to prevent (rc-1/rc-2/rc-3).
+        let decision: ReuseDecision;
+        try {
+          const raw: unknown = this.#reuseDecision(proposal);
+          const validated = validateReuseDecision(raw);
+          if (!validated.ok) {
+            throw new CandidateIntakeError(
+              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+              `Reuse decision for candidate ${candidateId} is not a valid reuse|create decision (${validated.reason}); no Principle was created.`,
+              { candidateId, reason: validated.reason },
+            );
+          }
+          ({ decision } = validated);
+        } catch (decisionErr: unknown) {
+          if (decisionErr instanceof CandidateIntakeError) throw decisionErr;
+          // A throwing decision function (LLM timeout, parse crash) is a reuse
+          // check failure, not an internal error: it must fail closed with a
+          // candidate-scoped code rather than escaping as an arbitrary throw.
           throw new CandidateIntakeError(
-            INTAKE_ERROR_CODES.INPUT_INVALID,
-            `Failed to parse artifact content for candidate ${candidateId}: contentJson is not a valid recommendation object`,
-            { candidateId },
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Reuse decision for candidate ${candidateId} failed (${decisionErr instanceof Error ? decisionErr.message : String(decisionErr)}); no Principle was created.`,
+            { candidateId, cause: decisionErr },
           );
         }
-        recommendation = rec;
-      } catch (err: unknown) {
-        if (err instanceof CandidateIntakeError) throw err;
-        throw new CandidateIntakeError(
-          INTAKE_ERROR_CODES.INPUT_INVALID,
-          `Failed to parse artifact content for candidate ${candidateId}: ${err instanceof Error ? err.message : String(err)}`,
-          { candidateId, cause: err },
-        );
+
+        if (decision.decision === 'reuse') {
+          const known = new Set(proposal.candidates.map((c) => c.principleId));
+          if (!known.has(decision.selectedPrincipleId)) {
+            // INV-R08: a selection outside the proposal fails closed. It must
+            // NOT silently degrade into "create". This is a defect in the
+            // reuse decision contract, not a malformed intake input, so it
+            // carries REUSE_CHECK_FAILED rather than INPUT_INVALID — the
+            // latter would file a governance error under "bad input".
+            throw new CandidateIntakeError(
+              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+              `Reuse decision selected principle '${decision.selectedPrincipleId}' which is not in the proposal for candidate ${candidateId}; no Principle was created.`,
+              { candidateId, selectedPrincipleId: decision.selectedPrincipleId, reason: 'selected_principle_not_in_proposal' },
+            );
+          }
+
+          // PRI-917 PR3B Phase 2 — materialise the verdict as durable evidence
+          // BEFORE reporting it. A reuse verdict that is not persisted would
+          // leave the resolution invisible: replay would re-ask the Owner, and
+          // the SPEC §11/§12 asymmetry (REUSE must be auditable, CREATE's
+          // artifact speaks for itself) would silently break. The write runs
+          // INSIDE the ledger's single-writer lock (appendReuseEvidence) and is
+          // fail-closed: an integrity/shape failure propagates and the
+          // candidate stays pending — it NEVER degrades into creating a
+          // Principle (INV-R03/INV-R08).
+          const painId = await this.#resolveReusePainId(candidateId, candidate);
+          let evidence: ReuseEvidenceEntry;
+          try {
+            const appended = this.#ledgerAdapter.appendReuseEvidence(decision.selectedPrincipleId, {
+              painId,
+              candidateId,
+              decision: 'reuse',
+              actor: decision.actor,
+              reason: decision.reason,
+              decidedAt: decision.decidedAt,
+            });
+            // The writer either appended this candidate's entry or returned the
+            // already-recorded one (concurrent-intake dedupe) — the entry for
+            // THIS candidateId must be present; anything else is a broken
+            // adapter and fails loud instead of reporting a fabricated record.
+            const recorded = appended.reuseEvidence.find((e) => e.candidateId === candidateId);
+            if (!recorded) {
+              throw new Error(
+                `appendReuseEvidence returned no evidence entry for candidate ${candidateId} (adapter contract violation)`,
+              );
+            }
+            evidence = recorded;
+          } catch (evidenceErr: unknown) {
+            throw new CandidateIntakeError(
+              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+              `Reuse decision for candidate ${candidateId} could not be recorded on principle '${decision.selectedPrincipleId}'; no Principle was created and the decision is not durable. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
+              { candidateId, selectedPrincipleId: decision.selectedPrincipleId, cause: evidenceErr },
+            );
+          }
+          return {
+            outcome: 'refused',
+            reason: 'reuse_selected',
+            candidateId,
+            rawRecommendationKind: typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+            message: `Candidate ${candidateId} was resolved to existing Principle ${decision.selectedPrincipleId}; the reuse decision was recorded on that Principle's reuseEvidence and no new Principle was created. This candidate DOES target the Principle Ledger — review the reuse proposal, and do not re-run intake to force a new Principle.`,
+            reuseProposal: proposal,
+            selectedPrincipleId: decision.selectedPrincipleId,
+            reuseEvidence: evidence,
+          };
+        }
+        reuseCheck = 'create_decided';
+      } else {
+        reuseCheck = 'no_candidates';
       }
     }
 
@@ -308,7 +617,7 @@ export class CandidateIntakeService {
     // 6. Write to ledger via adapter (E-01, D-09)
     try {
       const written = this.#ledgerAdapter.writeProbationEntry(entry);
-      return { outcome: 'ledger_entry', written: true, entry: written };
+      return { outcome: 'ledger_entry', written: true, entry: written, reuseCheck };
     } catch (err: unknown) {
       if (err instanceof CandidateIntakeError) {
         throw err;
@@ -319,5 +628,59 @@ export class CandidateIntakeService {
         { candidateId, cause: err },
       );
     }
+  }
+
+  /**
+   * PRI-917 PR3B Phase 2 — resolve the Pain behind a candidate for its reuse
+   * evidence entry (SPEC v0.2.1 §12 requires a non-empty `painId`).
+   *
+   * `principle_candidates` carries NO pain column (audit F5); the durable
+   * bridge is `pain_diagnoses(task_id → pain_id)`, written by the diagnosis
+   * persistence path. Rows for one task are re-diagnoses / mixed attributions,
+   * so the LATEST row wins — ordered by (createdAt, id) for determinism.
+   *
+   * Fail-closed: a candidate with no resolvable Pain cannot produce a
+   * self-contained evidence entry, so the reuse decision is refused
+   * (`reuse_pain_unresolvable`) instead of writing a fabricated painId (rc-3).
+   * The candidate stays pending; no Principle is created.
+   */
+  async #resolveReusePainId(candidateId: string, candidate: { taskId: string }): Promise<string> {
+    const refuse = (detail: string): never => {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse decision for candidate ${candidateId} cannot be recorded: ${detail} ` +
+          'The evidence entry requires the Pain that re-validated the Principle. ' +
+          'nextAction: ensure the candidate\'s diagnostician task has a persisted pain diagnosis (pain_diagnoses), then retry intake.',
+        { candidateId, reason: 'reuse_pain_unresolvable' },
+      );
+    };
+    if (typeof candidate.taskId !== 'string' || candidate.taskId === '') {
+      refuse('the candidate has no diagnostician task reference');
+    }
+    let diagnoses;
+    try {
+      diagnoses = await this.#stateManager.getDiagnosesByTaskId(candidate.taskId);
+    } catch (err: unknown) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse decision for candidate ${candidateId} cannot be recorded: the pain diagnosis lookup failed. Cause: ${err instanceof Error ? err.message : String(err)}`,
+        { candidateId, reason: 'reuse_pain_unresolvable', cause: err },
+      );
+    }
+    if (diagnoses.length === 0) {
+      refuse('no persisted pain diagnosis exists for its task');
+    }
+    const sorted = [...diagnoses].sort((a, b) => {
+      if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+    const latest = sorted.at(-1);
+    const latestPainId = typeof latest?.painId === 'string' ? latest.painId : '';
+    if (latestPainId === '') {
+      // Empty history or a latest row without a usable pain id — either way
+      // no fabricated value is written (rc-3).
+      refuse('no usable pain id in the candidate\'s diagnosis history');
+    }
+    return latestPainId;
   }
 }

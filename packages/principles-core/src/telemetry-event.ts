@@ -447,6 +447,8 @@ export const TelemetryEventType = Type.Union([
   // Rollout reviewer (PRI-653 family)
   Type.Literal('rollout_activation_candidate_resolved'),
   Type.Literal('rollout_activation_candidate_unresolved'),
+  // PRI-917 PR3A: candidate intake failure in bridge loop (sibling isolation)
+  Type.Literal('candidate_intake_failed'),
   Type.Literal('rollout_completion_intent_finalize_terminal'),
   Type.Literal('rollout_completion_intent_resumed'),
   Type.Literal('rollout_completion_intent_stale_epoch'),

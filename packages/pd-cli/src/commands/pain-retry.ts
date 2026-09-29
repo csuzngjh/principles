@@ -863,7 +863,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       painDiagnosisLedgerWrite = 'attempted';
     }
 
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string }[] = [];
     let intakeFailed = false;
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
@@ -900,6 +900,14 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             candidateId: candidate.candidateId,
             ledgerEntryId: intakeResult.entry.id,
             status: 'consumed',
+          });
+        } else if (intakeResult.reason === 'reuse_selected') {
+          // PRI-917 PR3A (C3): a reuse resolution is a success with its own
+          // fact — never reported as a refused ledger write.
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'consumed',
+            reusedPrincipleId: intakeResult.selectedPrincipleId,
           });
         } else {
           intakeResults.push({
@@ -979,9 +987,13 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       console.log(`\n  Candidate Intake:`);
       for (const ir of intakeResults) {
         if (ir.status === 'consumed') {
-          console.log(ir.ledgerEntryId
-            ? `    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`
-            : `    ${ir.candidateId}: consumed (Principle Ledger write refused: ${ir.ledgerWriteRefused})`);
+          if (ir.reusedPrincipleId) {
+            console.log(`    ${ir.candidateId}: reused existing Principle ${ir.reusedPrincipleId} (evidence recorded on its reuseEvidence)`);
+          } else {
+            console.log(ir.ledgerEntryId
+              ? `    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`
+              : `    ${ir.candidateId}: consumed (Principle Ledger write refused: ${ir.ledgerWriteRefused})`);
+          }
         } else if (ir.status === 'intake_failed') {
           console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);
           console.log(`      Next action: ${ir.nextAction}`);

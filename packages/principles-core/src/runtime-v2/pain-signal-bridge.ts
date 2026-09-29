@@ -819,7 +819,19 @@ export class PainSignalBridge {
           continue;
         }
 
-        const intakeResult = await this.intakeService.intake(candidate.candidateId);
+        // sibling 隔离：一个 candidate 的 intake 失败不应中止整批（ERR-089 模式）
+        let intakeResult;
+        try {
+          intakeResult = await this.intakeService.intake(candidate.candidateId);
+        } catch (intakeErr) {
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'candidate_intake_failed',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: { reason: intakeErr instanceof Error ? intakeErr.message : String(intakeErr) },
+          });
+          continue;
+        }
         // Phase 1 / PR1 (Principle Ledger write boundary): the intake service only
         // writes the ledger when the candidate's persisted recommendation_kind is
         // a validated 'principle'. A refusal is an explicit disposition, not a

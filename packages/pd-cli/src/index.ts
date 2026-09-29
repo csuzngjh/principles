@@ -6,7 +6,7 @@
  *   pd pain record --reason <text> [--score N] [--source manual]
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { handlePainRecord } from './commands/pain-record.js';
 import { registerPainRetryCommand } from './commands/pain-retry.js';
 import { handlePainEvidence } from './commands/pain-evidence.js';
@@ -38,7 +38,7 @@ import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-interna
 import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internalization-run-once.js';
 import { handleRuntimeInternalizationRetry } from './commands/runtime-internalization-retry.js';
 import { registerRunRuleHostCommand } from './commands/runtime-internalization-run-rulehost.js';
-import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize, handleCandidateInternalizationBackfill } from './commands/candidate.js';
+import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateReview, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize, handleCandidateInternalizationBackfill } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 import { handleRuntimeCanary } from './commands/runtime-canary.js';
 import { handleRuntimeSyntheticBaseline } from './commands/runtime-synthetic-baseline.js';
@@ -1056,6 +1056,21 @@ candidateCmd
   .option('--dry-run', 'Show what would be written without writing')
   .action(async (opts) => {
     await handleCandidateIntake(opts);
+  });
+
+// PRI-917 PR3A: the Owner reuse decision surface (SPEC §18 — interaction
+// layer only; the durable authority stays Principle.reuseEvidence[]).
+candidateCmd
+  .command('review')
+  .description('Review a candidate\'s reuse proposal and optionally record the Owner decision (reuse|create)')
+  .requiredOption('--candidate-id <id>', 'Candidate ID to review')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .addOption(new Option('--decide <decision>', 'Record the Owner decision (omit for read-only proposal view)').choices(['reuse', 'create']))
+  .option('--principle-id <id>', 'Existing Principle to reuse (required with --decide reuse)')
+  .option('--reason <text>', 'Why the Owner resolved this candidate (required with --decide)')
+  .action(async (opts) => {
+    await handleCandidateReview(opts);
   });
 
 candidateCmd

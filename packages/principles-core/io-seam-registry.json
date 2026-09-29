@@ -5,9 +5,10 @@
   "seams": [
     {
       "name": "ledger-tree",
-      "description": "File-based principle ledger (principle_training_state.json). Single source of truth for parse, serialize, and mutate. Lives in core so pd-cli can read/write the ledger without importing openclaw-plugin private code.",
+      "description": "File-based principle ledger (principle_training_state.json). Single source of truth for parse, serialize, and mutate. Lives in core so pd-cli can read/write the ledger without importing openclaw-plugin private code. PRI-917 reuse retrieval joins this seam: it reads the same ledger document (read-only) so an existing-but-unparseable corpus fails closed instead of being reported as empty.",
       "files": [
-        "principle-tree-ledger.ts"
+        "principle-tree-ledger.ts",
+        "runtime-v2/principle-reuse/reuse-retrieval.ts"
       ]
     },
     {

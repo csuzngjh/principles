@@ -26,6 +26,36 @@ import {
   ImplementationTypeSchema,
 } from './principle-enums.js';
 
+/**
+ * Who took a reuse decision (PRI-917, SPEC v0.2.1 §11/§12). The same shape as
+ * the decision-exchange contract's actor so the verdict and the evidence it
+ * produced cannot disagree about who decided.
+ */
+export interface ReuseEvidenceActor {
+  kind: 'owner' | 'ai_owner';
+  id: string;
+}
+
+/**
+ * One durable REUSE resolution (PRI-917 PR3B, SPEC v0.2.1 §12): a Candidate —
+ * and the Pain behind it — was resolved into the ENCLOSING Principle instead of
+ * creating a new one. The relation target is the enclosing Principle.id by
+ * construction and is deliberately NOT repeated inside the entry, so it cannot
+ * drift from its parent.
+ *
+ * Append-only (INV-R05): entries are never rewritten or removed. `decisionId`
+ * is an optional correlation id only — never an identity, never a second SSOT.
+ */
+export interface ReuseEvidenceEntry {
+  painId: string;
+  candidateId: string;
+  decision: 'reuse';
+  actor: ReuseEvidenceActor;
+  reason: string;
+  decidedAt: string;
+  decisionId?: string;
+}
+
 export interface Principle {
   id: string;
   version: number;
@@ -51,7 +81,31 @@ export interface Principle {
   deprecatedAt?: string;
   deprecatedReason?: string;
   compilationRetryCount?: number;
+  /**
+   * Reuse evidence accumulated by explicit Owner/AI-Owner REUSE decisions
+   * (PRI-917, SPEC v0.2.1 §12). Additive and optional: absent on every
+   * pre-existing entry, read as [] by consumers. Written only by
+   * appendReuseEvidence — never by the intake path, and never by rewriting
+   * `derivedFromPainIds`, which keeps its candidate-provenance/idempotency
+   * semantics untouched.
+   */
+  reuseEvidence?: ReuseEvidenceEntry[];
 }
+
+export const ReuseEvidenceActorSchema = Type.Object({
+  kind: Type.Union([Type.Literal('owner'), Type.Literal('ai_owner')]),
+  id: Type.String(),
+});
+
+export const ReuseEvidenceEntrySchema = Type.Object({
+  painId: Type.String(),
+  candidateId: Type.String(),
+  decision: Type.Literal('reuse'),
+  actor: ReuseEvidenceActorSchema,
+  reason: Type.String(),
+  decidedAt: Type.String(),
+  decisionId: Type.Optional(Type.String()),
+});
 
 export const PrincipleSchema = Type.Object({
   id: Type.String(),
@@ -78,6 +132,7 @@ export const PrincipleSchema = Type.Object({
   deprecatedAt: Type.Optional(Type.String()),
   deprecatedReason: Type.Optional(Type.String()),
   compilationRetryCount: Type.Optional(Type.Number()),
+  reuseEvidence: Type.Optional(Type.Array(ReuseEvidenceEntrySchema)),
 });
 export type PrincipleStatic = Static<typeof PrincipleSchema>;
 

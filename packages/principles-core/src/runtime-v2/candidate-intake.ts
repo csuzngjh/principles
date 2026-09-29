@@ -62,6 +62,8 @@
  *   reviewCycle:      undefined
  */
 import { Type, type Static } from '@sinclair/typebox';
+// PRI-917 PR3B Phase 2: the reuse evidence contract carried by LedgerAdapter
+import type { ReuseEvidenceEntry } from './types/principle-schema.js';
 
 // ── Schema ────────────────────────────────────────────────────────────────
 
@@ -235,6 +237,13 @@ export const INTAKE_ERROR_CODES = {
   ARTIFACT_NOT_FOUND: 'artifact_not_found',
   LEDGER_WRITE_FAILED: 'ledger_write_failed',
   INPUT_INVALID: 'input_invalid',
+  /**
+   * PRI-917 Slice 2 — the reuse gate ran and could not complete (ledger
+   * unreadable, shortlist construction failed). Thrown rather than falling
+   * through to create: a failed reuse check must not silently manufacture the
+   * very duplicate the gate exists to prevent (rc-9).
+   */
+  REUSE_CHECK_FAILED: 'reuse_check_failed',
 } as const;
 
 /**
@@ -306,4 +315,38 @@ export interface LedgerAdapter {
    * @returns The existing LedgerPrincipleEntry if found, null otherwise.
    */
   existsForCandidate(candidateId: string): LedgerPrincipleEntry | null;
+
+  /**
+   * PRI-917 PR3B Phase 2 — look up the durable reuse resolution for a
+   * candidate, if one was ever recorded: the evidence entry whose
+   * `candidateId` matches, plus the Principle it resolved into.
+   *
+   * This is the REUSE-side counterpart of {@link existsForCandidate} and is
+   * deliberately a SEPARATE method: existsForCandidate keeps its
+   * derivedFromPainIds-based create-path idempotency semantics untouched
+   * (SPEC v0.2.1 §12 — that field is never repurposed for reuse).
+   *
+   * @param candidateId — The candidate to look up.
+   * @returns The recorded resolution (principle id + evidence entry), or null
+   *          when this candidate has never been resolved by a reuse decision.
+   */
+  findReuseResolutionForCandidate(candidateId: string): { principleId: string; evidence: ReuseEvidenceEntry } | null;
+
+  /**
+   * PRI-917 PR3B Phase 2 — persist one reuse resolution: append the evidence
+   * entry to the Principle's `reuseEvidence[]` inside the single-writer
+   * ledger lock. Implementations delegate to the core appendReuseEvidence
+   * writer (fail-closed on corruption, idempotent per candidateId,
+   * append-only).
+   *
+   * @param principleId — The reused Principle (canonical ledger UUID).
+   * @param entry — The evidence entry (painId/candidateId/decision/actor/
+   *                reason/decidedAt[/decisionId]).
+   * @throws on integrity/shape failures — the caller must NOT fall back to
+   *         creating a Principle (INV-R03/INV-R08).
+   */
+  appendReuseEvidence(
+    principleId: string,
+    entry: ReuseEvidenceEntry,
+  ): { principleId: string; reuseEvidence: ReuseEvidenceEntry[]; appended: boolean };
 }

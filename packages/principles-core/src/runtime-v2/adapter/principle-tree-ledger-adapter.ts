@@ -5,8 +5,15 @@
  * as openclaw-plugin without depending on openclaw-plugin private code.
  */
 
-import { addPrincipleToLedger, loadLedger, updatePrinciple } from '../../principle-tree-ledger.js';
+import {
+  addPrincipleToLedger,
+  appendReuseEvidence as appendReuseEvidenceToLedger,
+  loadLedger,
+  updatePrinciple,
+} from '../../principle-tree-ledger.js';
+import { isRecord } from '../principle-tree/ledger-codec.js';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../candidate-intake.js';
+import type { ReuseEvidenceEntry } from '../types/principle-schema.js';
 
 const VALID_EVALUABILITIES = ['deterministic', 'weak_heuristic', 'manual_only'] as const;
 
@@ -107,6 +114,44 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
     return Object.values(ledger.tree.principles)
       .filter((p) => p.derivedFromPainIds.includes(candidateId))
       .map((p) => ({ id: p.id }));
+  }
+
+  /**
+   * PRI-917 PR3B Phase 2 — the reuse-side resolution lookup (LedgerAdapter
+   * contract, see candidate-intake.ts). Scans `reuseEvidence[]` for the
+   * candidate; never touches `derivedFromPainIds` / existsForCandidate.
+   *
+   * Entries on disk were shape-validated by the append writer; a record that
+   * fails even the minimal read-side check cannot be a resolution and is
+   * skipped rather than trusted (rc-2).
+   */
+  findReuseResolutionForCandidate(candidateId: string): { principleId: string; evidence: ReuseEvidenceEntry } | null {
+    const ledger = loadLedger(this.#stateDir);
+    for (const principle of Object.values(ledger.tree.principles)) {
+      // rc-1/rc-3/rc-9: read-side defense — the writer validates, but the reader
+      // must also guard against externally-modified ledger files. A non-array
+      // reuseEvidence field (e.g. number, object) would cause for...of to throw
+      // TypeError, which is not a structured error. Skip such entries.
+      if (!Array.isArray(principle.reuseEvidence)) continue;
+      for (const entry of principle.reuseEvidence) {
+        if (isRecord(entry) && entry.candidateId === candidateId) {
+          return { principleId: principle.id, evidence: entry };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * PRI-917 PR3B Phase 2 — persist one reuse resolution (LedgerAdapter
+   * contract). Thin delegation to the core writer, which owns the lock, the
+   * integrity guards, candidateId idempotency, and append-only semantics.
+   */
+  appendReuseEvidence(
+    principleId: string,
+    entry: ReuseEvidenceEntry,
+  ): { principleId: string; reuseEvidence: ReuseEvidenceEntry[]; appended: boolean } {
+    return appendReuseEvidenceToLedger(this.#stateDir, principleId, entry);
   }
 
   /**
