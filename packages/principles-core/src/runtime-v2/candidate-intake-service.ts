@@ -211,6 +211,95 @@ function extractRecommendationFromContentJson(parsed: unknown): Recommendation |
   return null;
 }
 
+/**
+ * PRI-917 PR3A (surface audit C4): the candidate-semantics extraction shared
+ * by BOTH the intake flow (steps 4b/4c) and the `pd candidate review`
+ * surface — one implementation, so the retrieval input shown to the Owner can
+ * never drift from what intake actually consumes.
+ *
+ * Resolution order (identical to intake steps 4b→4c):
+ *   1. candidate.sourceRecommendationJson — validated directly, then via the
+ *      diagnostician description→text normalization; malformed JSON warns and
+ *      falls through (rc-9 observable degradation);
+ *   2. artifact.contentJson — the three historical shapes.
+ *
+ * Pure apart from the rc-9 warn; never throws — failures come back as
+ * `{ ok: false, error }` carrying the exact CandidateIntakeError intake
+ * itself would throw.
+ */
+export type CandidateRecommendationExtraction =
+  | { ok: true; recommendation: Recommendation }
+  | { ok: false; error: CandidateIntakeError };
+
+export function extractIntakeRecommendation(
+  candidate: { candidateId: string; sourceRecommendationJson?: string | null },
+  artifact: { contentJson: string } | null,
+): CandidateRecommendationExtraction {
+  const { candidateId } = candidate;
+
+  // 4b: the canonical source first.
+  const sourceRecJson = candidate.sourceRecommendationJson;
+  if (sourceRecJson && sourceRecJson.trim() !== '') {
+    try {
+      const parsed = JSON.parse(sourceRecJson) as unknown;
+      const fromCandidate = validateRecommendation(parsed);
+      if (fromCandidate) return { ok: true, recommendation: fromCandidate };
+      // diagnostician-committer stores a DiagnosticianRecommendation, whose
+      // body field is `description` (not `text`). Normalize that shape to the
+      // Recommendation contract. rc-4: validate the normalized value too.
+      const normalized = normalizeDiagnosticianRecommendation(parsed);
+      const fromNorm = normalized ? validateRecommendation(normalized) : null;
+      if (fromNorm) return { ok: true, recommendation: fromNorm };
+    } catch (err: unknown) {
+      // sourceRecommendationJson is non-empty but malformed — warn and fall through
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn(`[CandidateIntakeService] sourceRecommendationJson parse failed for candidate ${candidateId}: ${detail}. Falling back to artifact.contentJson.`);
+    }
+  }
+
+  // 4c: fall back to artifact.contentJson.
+  if (!artifact) {
+    return {
+      ok: false,
+      error: new CandidateIntakeError(
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Cannot extract recommendation for candidate ${candidateId}: no artifact content available`,
+        { candidateId },
+      ),
+    };
+  }
+  try {
+    const parsed = JSON.parse(artifact.contentJson) as unknown;
+    // Three historical shapes can land in contentJson:
+    //   1. { recommendation: {...} }  — manual E2E wrapper
+    //   2. DiagnosticianOutputV1      — { summary, rootCause, recommendations: [...] }
+    //   3. bare Recommendation-like object
+    // rc-1/rc-2: parsed is untrusted — validate, never cast. rc-5: Object.hasOwn.
+    const rec = extractRecommendationFromContentJson(parsed);
+    if (!rec) {
+      return {
+        ok: false,
+        error: new CandidateIntakeError(
+          INTAKE_ERROR_CODES.INPUT_INVALID,
+          `Failed to parse artifact content for candidate ${candidateId}: contentJson is not a valid recommendation object`,
+          { candidateId },
+        ),
+      };
+    }
+    return { ok: true, recommendation: rec };
+  } catch (err: unknown) {
+    if (err instanceof CandidateIntakeError) return { ok: false, error: err };
+    return {
+      ok: false,
+      error: new CandidateIntakeError(
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Failed to parse artifact content for candidate ${candidateId}: ${err instanceof Error ? err.message : String(err)}`,
+        { candidateId, cause: err },
+      ),
+    };
+  }
+}
+
 export class CandidateIntakeService {
   readonly #stateManager: RuntimeStateManager;
   readonly #ledgerAdapter: LedgerAdapter;
@@ -337,65 +426,16 @@ export class CandidateIntakeService {
       );
     }
 
-    // 4b. Parse recommendation from candidate.sourceRecommendationJson FIRST (canonical source)
-    // Fall back to artifact.contentJson for backwards-compatibility with legacy/manual inserts.
-     
-    let recommendation!: Recommendation;
-    const sourceRecJson = candidate.sourceRecommendationJson;
-    try {
-      if (sourceRecJson && sourceRecJson.trim() !== '') {
-        // rc-1/rc-2 (ERR-001/ERR-005): candidate JSON is untrusted — validate shape,
-        // never cast directly. validateRecommendation returns null on bad shape;
-        // a null result falls through to the contentJson branch below.
-        const parsed = JSON.parse(sourceRecJson) as unknown;
-        const fromCandidate = validateRecommendation(parsed);
-        if (fromCandidate) {
-          recommendation = fromCandidate;
-        } else {
-          // diagnostician-committer stores a DiagnosticianRecommendation, whose
-          // body field is `description` (not `text`). Normalize that shape to the
-          // Recommendation contract so the canonical source path is preferred over
-          // the contentJson fallback. rc-4: validate the normalized value too.
-          const normalized = normalizeDiagnosticianRecommendation(parsed);
-          const fromNorm = normalized ? validateRecommendation(normalized) : null;
-          if (fromNorm) {
-            recommendation = fromNorm;
-          }
-        }
-      }
-    } catch (err: unknown) {
-      // sourceRecommendationJson is non-empty but malformed — warn and fall through
-      const detail = err instanceof Error ? err.message : String(err);
-      console.warn(`[CandidateIntakeService] sourceRecommendationJson parse failed for candidate ${candidateId}: ${detail}. Falling back to artifact.contentJson.`);
+    // 4b/4c. Extract the recommendation via the SHARED semantics extraction
+    // (PRI-917 PR3A C4) — the exact logic `pd candidate review` uses to show
+    // the Owner what this candidate claims, so proposal and intake can never
+    // disagree about the input. Failures carry the same CandidateIntakeError
+    // this method always threw.
+    const extracted = extractIntakeRecommendation(candidate, artifact);
+    if (!extracted.ok) {
+      throw extracted.error;
     }
-
-    // 4c. Fall back to artifact.contentJson if no valid sourceRecommendationJson
-    if (!recommendation) {
-      try {
-        const parsed = JSON.parse(artifact.contentJson) as unknown;
-        // Three historical shapes can land in contentJson:
-        //   1. { recommendation: {...} }  — manual E2E wrapper
-        //   2. DiagnosticianOutputV1      — { summary, rootCause, recommendations: [...] }
-        //   3. bare Recommendation-like object
-        // rc-1/rc-2: parsed is untrusted — validate, never cast. rc-5: Object.hasOwn.
-        const rec = extractRecommendationFromContentJson(parsed);
-        if (!rec) {
-          throw new CandidateIntakeError(
-            INTAKE_ERROR_CODES.INPUT_INVALID,
-            `Failed to parse artifact content for candidate ${candidateId}: contentJson is not a valid recommendation object`,
-            { candidateId },
-          );
-        }
-        recommendation = rec;
-      } catch (err: unknown) {
-        if (err instanceof CandidateIntakeError) throw err;
-        throw new CandidateIntakeError(
-          INTAKE_ERROR_CODES.INPUT_INVALID,
-          `Failed to parse artifact content for candidate ${candidateId}: ${err instanceof Error ? err.message : String(err)}`,
-          { candidateId, cause: err },
-        );
-      }
-    }
+    const recommendation: Recommendation = extracted.recommendation;
 
     // 4d. PRI-917 Slice 2 — reuse gate.
     //

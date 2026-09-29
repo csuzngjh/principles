@@ -219,6 +219,15 @@ export type {
 export { validateRecommendation } from './candidate-intake.js';
 export { CandidateIntakeService } from './candidate-intake-service.js';
 export type { CandidateIntakeServiceOptions } from './candidate-intake-service.js';
+// PRI-917 PR3A — the Owner decision surface (`pd candidate review`) consumes
+// the same proposal/semantics machinery as the intake gate, through this
+// barrel only (interaction layer; the durable authority stays reuseEvidence).
+export { extractIntakeRecommendation } from './candidate-intake-service.js';
+export type { CandidateRecommendationExtraction, CandidateIntakeResult } from './candidate-intake-service.js';
+export { buildReuseProposal, proposalNeedsDecision } from './principle-reuse/reuse-proposal.js';
+export type { ReuseProposal, ReuseProposalEntry, ReuseDecision } from './principle-reuse/reuse-proposal.js';
+export { buildReuseShortlist } from './principle-reuse/reuse-retrieval.js';
+export { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
 
 // Store
 export { SqliteTaskStore } from './store/task/sqlite-task-store.js';

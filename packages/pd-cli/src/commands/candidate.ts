@@ -1,10 +1,13 @@
 /**
- * pd candidate commands — Principle candidate inspection, intake, audit, repair.
+ * pd candidate commands — Principle candidate inspection, intake, audit, repair, reuse review.
  *
  * Usage:
  *   pd candidate list --task-id <taskId> --workspace <path> [--json]
  *   pd candidate show <candidateId> --workspace <path> [--json]
  *   pd candidate intake --candidate-id <id> [--workspace <path>] [--json] [--dry-run]
+ *   pd candidate review --candidate-id <id> [--workspace <path>] [--json]
+ *   pd candidate review --candidate-id <id> --decide reuse --principle-id <id> --reason "..." [--json]
+ *   pd candidate review --candidate-id <id> --decide create --reason "..." [--json]
  *   pd candidate audit --workspace <path> [--json]
  *   pd candidate repair --candidate-id <id> --workspace <path> [--json]
  *   pd candidate route --candidate-id <id> --workspace <path> [--json]
@@ -24,7 +27,17 @@ import {
   findExistingDreamerTask,
   parseSeedSourcePainId,
   PrincipleTreeLedgerAdapter,
+  // PRI-917 PR3A: the review surface consumes the SAME proposal/semantics
+  // machinery as the intake gate (audit C4 — one implementation, no drift).
+  buildReuseProposal,
+  buildReuseShortlist,
+  extractIntakeRecommendation,
+  isPrincipleLedgerEligibleKind,
+  resolveOwnerIdentity,
+  defaultOwnerIdentityHomeDir,
   type LedgerPrincipleEntry,
+  type ReuseDecision,
+  type CandidateIntakeResult,
 } from '@principles/core/runtime-v2';
 import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -508,6 +521,193 @@ export async function handleCandidateShow(opts: CandidateShowOptions): Promise<v
 
 // ── Intake ───────────────────────────────────────────────────────────────────
 
+// ── Shared intake/decision finalizers (PRI-917 PR3A) ─────────────────────────
+
+/**
+ * PRI-917 PR3A (surface audit C2): unify the candidate terminal state after a
+ * successful ledger write OR a recorded reuse resolution — always through the
+ * guarded {@link updateCandidateStatus} (optimistic pending→consumed +
+ * consumed_at), never bypassing the existing mechanism (SPEC §13: the
+ * candidate still reaches `consumed`).
+ *
+ * Returns 'already_consumed' when the candidate was consumed before this call
+ * (e.g. an INV-R07 replay). Exits non-zero on a guarded-transition failure —
+ * the ledger/LEDGER fact is already durable, so the inconsistency must be
+ * loud (same posture as the pre-PR3A intake path).
+ */
+async function markCandidateConsumed(
+  stateManager: RuntimeStateManager,
+  candidateId: string,
+  ledgerFact: string,
+): Promise<'consumed' | 'already_consumed'> {
+  const candidate = await stateManager.getCandidate(candidateId);
+  if (candidate?.status === 'consumed') {
+    return 'already_consumed';
+  }
+  try {
+    await updateCandidateStatus({ stateManager, candidateId, targetStatus: 'consumed', expectedCurrentStatus: 'pending' });
+  } catch (err) {
+    const msg = `The ledger fact is durable (${ledgerFact}) but the candidate status update failed: ${err instanceof Error ? err.message : String(err)}. ` +
+      `Candidate ${candidateId} may be in inconsistent state.`;
+    console.error(`ERROR: ${msg}`);
+    process.exit(1);
+  }
+  return 'consumed';
+}
+
+/**
+ * PRI-917 PR3A (surface audit C1/C2): report a `reuse_selected` intake result
+ * as the SUCCESS it is — resolution + selected Principle + evidence, exit 0 —
+ * and unify the candidate terminal state (C2). Used by BOTH `pd candidate
+ * intake` (replay path) and `pd candidate review --decide reuse` (fresh
+ * decision). The CLI prints the durable fact; it does not create one.
+ */
+async function reportReuseResolution(opts: {
+  stateManager: RuntimeStateManager;
+  candidateId: string;
+  result: Extract<CandidateIntakeResult, { outcome: 'refused' }>;
+  json: boolean;
+}): Promise<void> {
+  const { stateManager, candidateId, result, json } = opts;
+  if (!result.selectedPrincipleId || !result.reuseEvidence) {
+    // Adapter/service contract violation — never print a hollow resolution.
+    throw new CandidateIntakeError(
+      INTAKE_ERROR_CODES.INPUT_INVALID,
+      `reuse_selected result for candidate ${candidateId} is missing selectedPrincipleId/reuseEvidence (contract violation)`,
+      { candidateId, reason: 'reuse_resolution_contract_violation' },
+    );
+  }
+  const consumedState = await markCandidateConsumed(stateManager, candidateId, `reuse evidence on ${result.selectedPrincipleId}`);
+  const replayed = result.reuseProposal === undefined;
+  const resolution = {
+    candidateId,
+    status: 'reused',
+    selectedPrincipleId: result.selectedPrincipleId,
+    reuseEvidence: result.reuseEvidence,
+    replayed,
+    candidateStatus: consumedState,
+    message: result.message,
+  };
+  if (json) {
+    console.log(JSON.stringify(resolution, null, 2));
+    return;
+  }
+  console.log(`\nPrinciple Candidate Reuse: ${candidateId}\n`);
+  console.log(`  Candidate:         ${candidateId}`);
+  console.log(`  Reused Principle:  ${result.selectedPrincipleId}`);
+  console.log(`  Pain:              ${result.reuseEvidence.painId}`);
+  console.log(`  Decided By:        ${result.reuseEvidence.actor.kind} ${result.reuseEvidence.actor.id}`);
+  console.log(`  Decided At:        ${result.reuseEvidence.decidedAt}`);
+  console.log(`  Reason:            ${result.reuseEvidence.reason}`);
+  console.log(`  Candidate Status:  ${consumedState === 'already_consumed' ? 'already consumed (INV-R07 replay)' : 'consumed'}`);
+  console.log('  Evidence:          recorded on the Principle\'s reuseEvidence (append-only)\n');
+}
+
+/**
+ * Decision mode of {@link handleCandidateReview}: validate the CLI contract
+ * (rc-3), resolve the Owner identity (fail-closed), then run the EXISTING
+ * intake chain with the §11 verdict injected. No CLI-side persistence.
+ */
+async function executeOwnerDecision(deps: {
+  opts: CandidateReviewOptions & { decide: 'reuse' | 'create' };
+  stateManager: RuntimeStateManager;
+  ledgerAdapter: PrincipleTreeLedgerAdapter;
+  stateDir: string;
+}): Promise<void> {
+  const { opts, stateManager, ledgerAdapter, stateDir } = deps;
+  const failCli = (message: string, nextAction: string): never => {
+    if (opts.json) {
+      console.log(JSON.stringify({ candidateId: opts.candidateId, status: 'refused', decision: opts.decide, error: message, nextAction }, null, 2));
+    } else {
+      console.error(`ERROR: ${message}`);
+      console.error(`  Next Action: ${nextAction}`);
+    }
+    process.exit(1);
+  };
+
+  if (typeof opts.reason !== 'string' || opts.reason.trim() === '') {
+    failCli('--reason is required with --decide (the evidence entry must record why the Owner resolved this candidate)', 'Re-run with --reason "..." (non-empty).');
+  }
+  if (opts.decide === 'reuse' && (typeof opts.principleId !== 'string' || opts.principleId.trim() === '')) {
+    failCli('--principle-id is required with --decide reuse', 'Re-run with --principle-id <id from the review proposal>.');
+  }
+
+  // Owner identity: env > ~/.pd/owner.json > none (ADR-0022 resolver).
+  const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
+  if ((identity.source !== 'env' && identity.source !== 'file') || !identity.ownerId) {
+    failCli(
+      `Owner identity is required to record a ${opts.decide} decision (identity source: ${identity.source})${identity.error ? `: ${identity.error}` : ''}`,
+      'Register the Owner identity file (~/.pd/owner.json) or set PD_OWNER_ID and PD_OWNER_CREDENTIAL_ID together, then retry.',
+    );
+  }
+
+  const decision: ReuseDecision = opts.decide === 'reuse'
+    ? {
+        decision: 'reuse',
+        selectedPrincipleId: opts.principleId as string,
+        actor: { kind: 'owner', id: identity.ownerId as string },
+        reason: opts.reason as string,
+        decidedAt: new Date().toISOString(),
+      }
+    : { decision: 'create' };
+
+  const service = new CandidateIntakeService({
+    stateManager,
+    ledgerAdapter,
+    // The verdict is fixed by the CLI invocation; the intake gate still
+    // validates it (rc-1/rc-2/rc-3) and checks the selection against the
+    // proposal (INV-R08) — the CLI cannot smuggle a decision past the gate.
+    reuseDecision: () => decision,
+    reuseStateDir: stateDir,
+  });
+
+  const intakeResult = await service.intake(opts.candidateId);
+
+  if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_selected') {
+    await reportReuseResolution({ stateManager, candidateId: opts.candidateId, result: intakeResult, json: opts.json === true });
+    return;
+  }
+  if (intakeResult.outcome === 'refused') {
+    // A non-principle kind or unknown kind cannot carry a reuse decision.
+    throw new CandidateIntakeError(
+      INTAKE_ERROR_CODES.INPUT_INVALID,
+      `Principle Ledger write refused: ${intakeResult.message}`,
+      { candidateId: opts.candidateId, reason: intakeResult.reason },
+    );
+  }
+
+  // create verdict (or gate absent shapes) — same durable outcome as intake.
+  const { entry } = intakeResult;
+  const consumedState = await markCandidateConsumed(stateManager, opts.candidateId, entry.id);
+  if (consumedState === 'already_consumed') {
+    // Consumed before this call — the ledger entry is identical by intake
+    // idempotency; report it like `pd candidate intake` does.
+    const infoMessage = `Candidate ${opts.candidateId} was already consumed. Ledger entry: ${entry.id}`;
+    if (opts.json) {
+      console.log(JSON.stringify({ candidateId: opts.candidateId, ledgerEntryId: entry.id, status: 'already_consumed', message: infoMessage }, null, 2));
+    } else {
+      console.log(infoMessage);
+    }
+    return;
+  }
+  const result = {
+    candidateId: opts.candidateId,
+    decision: opts.decide,
+    ledgerEntryId: entry.id,
+    status: 'consumed' as const,
+  };
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.log(`\nPrinciple Candidate Decision: ${opts.candidateId}\n`);
+  console.log(`  Decision:     ${opts.decide}`);
+  console.log(`  Candidate:    ${opts.candidateId}`);
+  console.log(`  Ledger Entry: ${entry.id}`);
+  console.log(`  Status:       consumed\n`);
+  console.log('Decision complete.\n');
+}
+
 /**
  * pd candidate intake --candidate-id <id> [--workspace <path>] [--json] [--dry-run]
  *
@@ -596,6 +796,16 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
     // candidate id, so a Principle Ledger write boundary refusal is surfaced
     // loudly (never silently swallowed) instead of being treated as success.
     const intakeResult = await service.intake(opts.candidateId);
+    if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_selected') {
+      // PRI-917 PR3A (surface audit C1/C2): a recorded reuse resolution is a
+      // SUCCESS, not a failure — the evidence is already durable on the
+      // selected Principle (fresh decision) or was recorded earlier (INV-R07
+      // replay via intake step 2b, which is how this branch is reachable from
+      // the gate-less intake command). Report the resolution, unify the
+      // candidate terminal state with the automatic paths (SPEC §13), exit 0.
+      await reportReuseResolution({ stateManager, candidateId: opts.candidateId, result: intakeResult, json: opts.json === true });
+      return;
+    }
     if (intakeResult.outcome === 'refused') {
       throw new CandidateIntakeError(
         INTAKE_ERROR_CODES.INPUT_INVALID,
@@ -604,9 +814,9 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       );
     }
     const { entry } = intakeResult;
+    const consumedState = await markCandidateConsumed(stateManager, opts.candidateId, entry.id);
 
-    // Check if already consumed before this call
-    if (candidate?.status === 'consumed') {
+    if (consumedState === 'already_consumed') {
       const infoMessage = `Candidate ${opts.candidateId} was already consumed. Ledger entry: ${entry.id}`;
       if (opts.json) {
         console.log(JSON.stringify({
@@ -619,16 +829,6 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
         console.log(infoMessage);
       }
       return;
-    }
-
-    // Update DB status — this must succeed; if it fails, exit non-zero
-    try {
-      await updateCandidateStatus({ stateManager, candidateId: opts.candidateId, targetStatus: 'consumed', expectedCurrentStatus: 'pending' });
-    } catch (err) {
-      const msg = `Ledger write succeeded (entry ${entry.id}) but DB status update failed: ${err instanceof Error ? err.message : String(err)}. ` +
-        `Candidate ${opts.candidateId} may be in inconsistent state.`;
-      console.error(`ERROR: ${msg}`);
-      process.exit(1);
     }
 
     const result = {
@@ -652,6 +852,174 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       console.error(`Intake failed [${e.code ?? 'unknown'}]: ${e.message}`);
     } else {
       console.error(`Intake failed: ${String(err)}`);
+    }
+    process.exit(1);
+  } finally {
+    await stateManager.close();
+  }
+}
+
+// ── Review (PRI-917 PR3A — the Owner reuse decision surface) ──────────────────
+
+interface CandidateReviewOptions {
+  candidateId: string;
+  workspace?: string;
+  json?: boolean;
+  /** Omit for the read-only proposal view; `reuse`/`create` enter decision mode. */
+  decide?: 'reuse' | 'create';
+  /** Required with `--decide reuse`. */
+  principleId?: string;
+  /** Required with `--decide` (rc-3): why the Owner resolved this candidate. */
+  reason?: string;
+}
+
+/**
+ * pd candidate review — PRI-917 PR3A Owner decision surface (SPEC §18).
+ *
+ * Phase 1 (read-only): shows the candidate and the deterministic Top-K reuse
+ * proposal (score, reasons/shared terms, and the existing Principle's text /
+ * triggerPattern / action / status) so the Owner can decide with the same
+ * information the gate will consume.
+ *
+ * Phase 2 (`--decide`): constructs the SPEC §11 verdict (actor from
+ * resolveOwnerIdentity — fail-closed when unresolvable) and injects it into
+ * CandidateIntakeService, which runs the EXISTING gate → appendReuseEvidence
+ * chain. The CLI is an interaction layer only: it never writes reuseEvidence,
+ * decision files, or any other state (SPEC §18 — the only durable authority
+ * is `Principle.reuseEvidence[]`).
+ */
+export async function handleCandidateReview(opts: CandidateReviewOptions): Promise<void> {
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+
+  try {
+    await stateManager.initialize();
+
+    const stateDir = path.join(workspaceDir, '.state');
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    const candidate = await stateManager.getCandidate(opts.candidateId);
+    if (!candidate) {
+      console.error(`Candidate not found: ${opts.candidateId}`);
+      process.exit(1);
+      return;
+    }
+
+    if (opts.decide === 'reuse' || opts.decide === 'create') {
+      // opts.decide is narrowed here — no cast needed to build the decision-mode shape.
+      await executeOwnerDecision({ opts: { ...opts, decide: opts.decide }, stateManager, ledgerAdapter, stateDir });
+      return;
+    }
+
+    // ── Read-only proposal view ──
+    const rawKindEligible = isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind);
+    if (!rawKindEligible) {
+      // Fail closed like the intake boundary: a non-principle candidate never
+      // reaches the reuse gate, so reviewing a proposal for it would lie.
+      const rawKind = typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null;
+      const payload = {
+        candidateId: opts.candidateId,
+        recommendationKindEligible: false,
+        rawRecommendationKind: rawKind,
+        message: `Candidate ${opts.candidateId} has recommendation_kind '${rawKind ?? 'absent'}' which does not target the Principle Ledger; there is no reuse proposal to review.`,
+        nextAction: 'Run `pd candidate route --candidate-id <id>` for this candidate\'s internalization route instead.',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+      console.log(`\nPrinciple Candidate Review: ${opts.candidateId}\n`);
+      console.log(`  Kind:         ${rawKind ?? 'absent'} (not Principle-Ledger eligible)`);
+      console.log(`  ${payload.message}`);
+      console.log(`  Next Action:  ${payload.nextAction}\n`);
+      return;
+    }
+
+    const artifact = await stateManager.getArtifact(candidate.artifactId);
+    if (!artifact) {
+      console.error(`Artifact not found for candidate: ${opts.candidateId} (artifact ${candidate.artifactId})`);
+      process.exit(1);
+      return;
+    }
+    // C4: the SAME extraction intake uses (4b/4c) — never a second parser.
+    const extracted = extractIntakeRecommendation(candidate, artifact);
+    if (!extracted.ok) {
+      throw extracted.error;
+    }
+    const { recommendation } = extracted;
+
+    const shortlist = buildReuseShortlist(
+      {
+        text: recommendation.text || candidate.description || '',
+        triggerPattern: recommendation.triggerPattern ?? '',
+        action: recommendation.action ?? '',
+      },
+      stateDir,
+      { recommendationKind: candidate.rawRecommendationKind },
+    );
+    const proposal = buildReuseProposal(opts.candidateId, shortlist);
+
+    // Enrich each entry with the existing Principle's durable content.
+    const ledger = loadLedger(stateDir);
+    const entries = proposal.candidates.map((entry) => {
+      const principle = ledger.tree.principles[entry.principleId];
+      return {
+        principleId: entry.principleId,
+        score: entry.score,
+        reasons: entry.reasons,
+        existingPrinciple: principle
+          ? { text: principle.text, triggerPattern: principle.triggerPattern, action: principle.action, status: principle.status }
+          : { text: '', triggerPattern: '', action: '', status: 'missing' },
+      };
+    });
+
+    const nextAction = entries.length > 0
+      ? `pd candidate review --candidate-id ${opts.candidateId} --decide reuse --principle-id <id> --reason "..." (or --decide create --reason "...")`
+      : `No credible reuse proposal — intake will create a new Principle: pd candidate intake --candidate-id ${opts.candidateId} --workspace "${workspaceDir}"`;
+
+    if (opts.json) {
+      console.log(JSON.stringify({
+        candidateId: opts.candidateId,
+        title: candidate.title,
+        description: candidate.description,
+        status: candidate.status,
+        taskId: candidate.taskId,
+        recommendationKindEligible: true,
+        claim: { text: recommendation.text || candidate.description || '', triggerPattern: recommendation.triggerPattern ?? '', action: recommendation.action ?? '' },
+        proposal: { status: proposal.status, eligibleCount: proposal.eligibleCount, candidates: entries },
+        nextAction,
+      }, null, 2));
+      return;
+    }
+
+    console.log(`\nPrinciple Candidate Review: ${opts.candidateId}\n`);
+    console.log(`  Title:        ${candidate.title}`);
+    console.log(`  Description:  ${candidate.description}`);
+    console.log(`  Status:       ${candidate.status}`);
+    console.log(`  Task:         ${candidate.taskId}`);
+    console.log(`  Claim:        ${recommendation.text || candidate.description || ''}`);
+    console.log(`  Trigger:      ${recommendation.triggerPattern ?? ''}`);
+    console.log(`  Action:       ${recommendation.action ?? ''}`);
+    console.log(`\n  Reuse Proposal (${entries.length} of ${proposal.eligibleCount} eligible, Top-3):\n`);
+    if (entries.length === 0) {
+      console.log('    No credible existing Principle found — the intake gate will create a new one.\n');
+    }
+    entries.forEach((entry, index) => {
+      console.log(`    ${index + 1}. ${entry.principleId}  (score ${entry.score.toFixed(3)})`);
+      for (const reason of entry.reasons) {
+        console.log(`       reason: ${reason}`);
+      }
+      console.log(`       text:    ${entry.existingPrinciple.text}`);
+      console.log(`       trigger: ${entry.existingPrinciple.triggerPattern}`);
+      console.log(`       action:  ${entry.existingPrinciple.action}`);
+      console.log(`       status:  ${entry.existingPrinciple.status}`);
+    });
+    console.log(`\n  Next Action:  ${nextAction}\n`);
+  } catch (err) {
+    if (err instanceof CandidateIntakeError || (err as { name?: string }).name === 'CandidateIntakeError') {
+      const e = err as { code?: string; message: string };
+      console.error(`Review failed [${e.code ?? 'unknown'}]: ${e.message}`);
+    } else {
+      console.error(`Review failed: ${String(err)}`);
     }
     process.exit(1);
   } finally {
