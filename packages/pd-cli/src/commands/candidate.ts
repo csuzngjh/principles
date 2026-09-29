@@ -658,7 +658,7 @@ async function executeOwnerDecision(deps: {
     const candidate = await stateManager.getCandidate(opts.candidateId);
     const artifact = candidate ? await stateManager.getArtifact(candidate.artifactId) : null;
     const extracted = candidate ? extractIntakeRecommendation(candidate, artifact) : null;
-    if (!candidate || !extracted?.ok) {
+    if (!candidate || !extracted || !extracted.ok) {
       failCli('Cannot build the reuse proposal for this candidate', 'Run `pd candidate review --candidate-id <id>` first.');
     }
     const proposal = buildReuseProposal(opts.candidateId, buildReuseShortlist({
