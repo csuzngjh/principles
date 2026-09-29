@@ -28,6 +28,7 @@ import { EvaluatorOutputV1Schema } from '../internalization/evaluator-output.js'
 import { RolloutReviewerOutputV1Schema } from '../internalization/rollout-reviewer-output.js';
 import { CorrectionObserverOutputV1Schema } from '../observer/correction-observer.js';
 import { SignalClassificationOutputV1Schema } from '../signal-collector/types.js';
+import { ReuseEvaluationOutputV1Schema } from '../principle-reuse/reuse-evaluation-output.js';
 
 /**
  * Map of `outputSchemaRef` string → TypeBox schema. Keys match the
@@ -45,6 +46,9 @@ export const OUTPUT_SCHEMA_REGISTRY: ReadonlyMap<string, TSchema> = new Map<stri
   ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema],
   ['correction-observer-output-v1', CorrectionObserverOutputV1Schema],
   ['signal-classification-output-v1', SignalClassificationOutputV1Schema],
+  // PRI-917 v0.3.2: the Semantic Reuse Evaluation Capability's proposal contract
+  // (proposal-only — its outputs are never persisted; SPEC section 4.2/10).
+  ['reuse-evaluation-output-v1', ReuseEvaluationOutputV1Schema],
 ]);
 
 /**
