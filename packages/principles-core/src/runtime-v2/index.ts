@@ -227,6 +227,18 @@ export type { CandidateRecommendationExtraction, CandidateIntakeResult } from '.
 export { buildReuseProposal, proposalNeedsDecision } from './principle-reuse/reuse-proposal.js';
 export type { ReuseProposal, ReuseProposalEntry, ReuseDecision } from './principle-reuse/reuse-proposal.js';
 export { buildReuseShortlist } from './principle-reuse/reuse-retrieval.js';
+// PRI-917 v0.3.2 (Phase 3C-1): the Semantic Reuse Evaluation Capability's
+// proposal contract — proposal-only, never persisted (SPEC section 4.2/10).
+export {
+  REUSE_EVALUATION_OUTPUT_SCHEMA_REF,
+  ReuseEvaluationRecommendationSchema,
+  ReuseEvaluationOutputV1Schema,
+  validateReuseEvaluationOutput,
+} from './principle-reuse/reuse-evaluation-output.js';
+export type {
+  ReuseEvaluationOutputV1,
+  ReuseEvaluationValidation,
+} from './principle-reuse/reuse-evaluation-output.js';
 export { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
 
 // Store
