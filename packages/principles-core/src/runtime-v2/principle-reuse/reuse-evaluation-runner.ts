@@ -32,7 +32,6 @@ import {
   attemptStructuredOutputRepair,
   type SchemaValidationError,
 } from '../adapter/structured-output-repair.js';
-import { Value } from '@sinclair/typebox/value';
 
 // ── Input contract (SPEC §4.2) ──────────────────────────────────────────────
 
@@ -335,5 +334,8 @@ export class ReuseEvaluationRunner {
 // Re-exported for callers that want a plain boolean pre-check without
 // constructing a runner (e.g. a surface deciding whether to show a warning).
 export function isValidReuseEvaluationOutput(value: unknown): boolean {
-  return Value.Check(ReuseEvaluationOutputV1Schema, value);
+  // PRI-917 review (P2): delegate to the FULL trust boundary (closed field
+  // set + cross-field rules). The bare TypeBox schema is an open field set,
+  // so a raw Value.Check would pass outputs the contract must reject (T7a).
+  return validateReuseEvaluationOutput(value).ok;
 }

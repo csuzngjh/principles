@@ -48,6 +48,13 @@ export interface ResolvedRuntimeFromPdConfig {
    * Matches the label format used by `pd config doctor`.
    */
   runtimeProfileLabel: string | null;
+  /**
+   * PRI-917 review (P1): the resolved profile's `source` (e.g. 'default'),
+   * so the resolver can apply profile-specific semantics — a source=default
+   * OpenClaw profile delegates mode resolution to OpenClaw (openclawMode
+   * omitted). null when config resolution fails or the profile is not found.
+   */
+  runtimeProfileSource: string | null;
 }
 
 /**
@@ -143,6 +150,7 @@ export function resolveRuntimeFromPdConfig(
       configSource: '.pd/config.yaml',
       runtimeProfileId: null,
       runtimeProfileLabel: null,
+      runtimeProfileSource: null,
     };
   }
 
@@ -154,6 +162,7 @@ export function resolveRuntimeFromPdConfig(
   // PRI-402: Extract profile ID and label for probe output alignment with doctor
   let runtimeProfileId: string | null = null;
   let runtimeProfileLabel: string | null = null;
+  let runtimeProfileSource: string | null = null;
   // Profile identity for probe/doctor alignment. On the explicit capability
   // path the profile id is already known (no agent binding to resolve).
   const bindingResult = explicitProfileId !== undefined
@@ -166,6 +175,8 @@ export function resolveRuntimeFromPdConfig(
     // falls back to the id (the resolution result already failed loud with
     // profile_not_found, so this only affects display).
     runtimeProfileLabel = profile ? buildProfileLabel(bindingResult.profileId, profile) : bindingResult.profileId;
+    // Only OpenClaw profiles carry `source`; pi-ai profiles have no such field.
+    runtimeProfileSource = profile?.type === 'openclaw' ? (profile.source ?? null) : null;
   } else if (!isRuntimeConfigError(result) && result.runtimeProfileId !== undefined) {
     // PRI-719 review: on the peer path (ignoreAgentEnabled) the runtime may
     // resolve fine for a shipped-disabled agent while the raw binding still
@@ -192,6 +203,7 @@ export function resolveRuntimeFromPdConfig(
     configSource: '.pd/config.yaml',
     runtimeProfileId,
     runtimeProfileLabel,
+    runtimeProfileSource,
   };
 }
 

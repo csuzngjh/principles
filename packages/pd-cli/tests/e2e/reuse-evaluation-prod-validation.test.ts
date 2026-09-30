@@ -25,8 +25,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { writeFileSync } from 'fs';
-import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
@@ -303,7 +303,7 @@ class ScriptedEvaluationAdapter implements PDRuntimeAdapter {
 }
 
 beforeEach(async () => {
-  workspaceDir = join(process.env.TEMP ?? '.', `pd-reuse-prodval-${randomUUID()}`);
+  workspaceDir = join(os.tmpdir(), `pd-reuse-prodval-${randomUUID()}`);
   fs.mkdirSync(join(workspaceDir, '.pd'), { recursive: true });
   stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();

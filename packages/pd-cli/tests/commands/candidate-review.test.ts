@@ -640,6 +640,26 @@ describe('Phase 3C-4 — semantic evaluation on the review surface', () => {
     expect(candidateStatus(candidateId)).toBe('consumed');
   });
 
+  it('P2: a hallucinated selectedPrincipleId is downgraded to unavailable, never shown as executable', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-3c4-p2' });
+    writeEvaluationConfig(workspaceDir);
+    scriptEvaluation([
+      { payload: { recommendation: 'reuse', selectedPrincipleId: 'hallucinated-uuid', rationale: 'r', confidence: 0.99 } },
+    ]);
+
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+
+    const parsed = printedJson() as { evaluation: { status: string; reason: string } };
+    expect(parsed.evaluation.status).toBe('unavailable');
+    expect(parsed.evaluation.reason).toContain('selected_principle_not_in_shortlist');
+    expect(parsed.evaluation.reason).toContain('hallucinated-uuid');
+    // And nothing about the ledger moved.
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.reuseEvidence).toBeUndefined();
+  });
+
   it('T5: evaluation unavailable degrades observably and the CREATE capability is untouched', async () => {
     // Same wording as the candidate so the LEXICAL shortlist is non-empty —
     // the judge must actually be reached (and fail) for this scenario.
