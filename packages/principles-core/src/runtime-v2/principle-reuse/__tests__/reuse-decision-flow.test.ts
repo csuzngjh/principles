@@ -8,8 +8,7 @@ import { PrincipleTreeLedgerAdapter } from '../../adapter/principle-tree-ledger-
 import { addPrincipleToLedger, loadLedger } from '../../../principle-tree-ledger.js';
 import type { LedgerPrinciple } from '../../../principle-tree-ledger.js';
 import { CandidateIntakeService } from '../../candidate-intake-service.js';
-import type { CandidateIntakeServiceOptions } from '../../candidate-intake-service.js';
-import { INTAKE_ERROR_CODES } from '../../candidate-intake.js';
+import type { CandidateIntakeServiceOptions } from '../../candidate-intake-service.js';import { INTAKE_ERROR_CODES } from '../../candidate-intake.js';
 import type { ReuseDecision, ReuseProposal } from '../reuse-proposal.js';
 
 /**
@@ -147,6 +146,8 @@ async function seedPrincipleCandidate(
 
 function service(opts: {
   decision?: (p: ReuseProposal) => ReuseDecision;
+  /** PRI-917 v0.3.3 — auto-path Reuse Review Gate recommendation hook. */
+  recommendation?: NonNullable<CandidateIntakeServiceOptions['reuseRecommendation']>;
   stateDir?: string;
   /** Pass `false` to omit reuseStateDir entirely (partial configuration). */
   omitStateDir?: boolean;
@@ -156,6 +157,7 @@ function service(opts: {
     stateManager,
     ledgerAdapter: adapter,
     ...(opts.decision ? { reuseDecision: opts.decision } : {}),
+    ...(opts.recommendation ? { reuseRecommendation: opts.recommendation } : {}),
     ...(opts.omitStateDir ? {} : { reuseStateDir: opts.stateDir ?? join(workspaceDir, '.state') }),
   });
 }
@@ -696,5 +698,342 @@ describe('PR3B Phase 2 — reuse_selected writes durable evidence', () => {
       code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
     });
     expect(readFileSync(ledgerFile, 'utf8')).toBe('{ corrupt after proposal');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRI-917 v0.3.3 (OD-PRI917-05) — auto-path Reuse Review Gate (SPEC T8-T13).
+// The gate runs the recommendation hook on the auto path (no Owner decision
+// function): `reuse` parks, everything else creates.
+// ---------------------------------------------------------------------------
+
+function recommendationOf(
+  principleId: string,
+  overrides: { confidence?: number; rationale?: string } = {},
+): { status: 'recommended'; recommendation: 'reuse'; selectedPrincipleId: string; rationale: string; confidence: number } {
+  return {
+    status: 'recommended',
+    recommendation: 'reuse',
+    selectedPrincipleId: principleId,
+    rationale: overrides.rationale ?? 'candidate expresses the same experience as this principle',
+    confidence: overrides.confidence ?? 0.93,
+  };
+}
+
+async function candidateStatus(candidateId: string): Promise<string | undefined> {
+  return (await stateManager.getCandidate(candidateId))?.status;
+}
+
+describe('v0.3.3 T8 — recommendation=reuse parks the candidate for the Owner', () => {
+  it('refuses reuse_pending_owner: no ledger write, no evidence, candidate stays pending', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+    const before = ledgerEntryCount();
+
+    const result = await service({
+      recommendation: async () => recommendationOf(principle.id),
+    }).intake(candidateId);
+
+    expect(result.outcome).toBe('refused');
+    if (result.outcome !== 'refused' || result.reason !== 'reuse_pending_owner') {
+      throw new Error('expected a reuse_pending_owner refusal');
+    }
+    expect(result.reuseRecommendation).toEqual(recommendationOf(principle.id));
+    expect(result.reuseProposal?.candidates.map((c) => c.principleId) ?? []).toContain(principle.id);
+    // No new Principle...
+    expect(ledgerEntryCount()).toBe(before);
+    // ...and NO evidence on the targeted one (the park writes nothing — T7).
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[principle.id];
+    expect(stored?.reuseEvidence ?? []).toHaveLength(0);
+    // The candidate stays PENDING for the Owner — no consumed marking here
+    // (marking is a caller duty, and callers skip it for parked candidates).
+    expect(await candidateStatus(candidateId)).toBe('pending');
+  });
+
+  it('never consults the hook when the lexical shortlist is empty (Rule 5)', async () => {
+    addPrincipleToLedger(join(workspaceDir, '.state'), makePrinciple({
+      text: '视频导出后比对音轨波形峰值与时间轴偏移量。',
+      triggerPattern: '渲染收尾阶段',
+      action: '导出后统计偏移',
+    }));
+    const candidateId = await seedPrincipleCandidate();
+    let hookCalls = 0;
+
+    const result = await service({
+      recommendation: async () => {
+        hookCalls += 1;
+        throw new Error('hook must not run without a credible proposal');
+      },
+    }).intake(candidateId);
+
+    // No credible candidate → create WITHOUT calling the LLM (cost control).
+    expect(result.outcome).toBe('ledger_entry');
+    expect(hookCalls).toBe(0);
+  });
+});
+
+describe('v0.3.3 T9 — recommendation create/uncertain keeps creating (Rules 2/3)', () => {
+  it.each(['create', 'uncertain'] as const)('recommendation=%s → normal CREATE', async (recommendation) => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+
+    const result = await service({
+      recommendation: async (claim, proposal) => {
+        // The hook receives the same claim/proposal the review surface shows.
+        expect(claim.text).toContain('可观察证据');
+        expect(proposal.candidates.length).toBeGreaterThan(0);
+        return {
+          status: 'recommended',
+          recommendation,
+          rationale: 'not the same experience',
+          confidence: 0.7,
+        };
+      },
+    }).intake(candidateId);
+
+    expect(result.outcome).toBe('ledger_entry');
+    if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
+    expect(result.reuseCheck).toBe('recommended_create');
+  });
+});
+
+describe('v0.3.3 T10 — evaluation failure degrades to CREATE (Rule 4)', () => {
+  it('unavailable recommendation → CREATE', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+
+    const result = await service({
+      recommendation: async () => ({ status: 'unavailable', reason: 'reuse_evaluation_timeout' }),
+    }).intake(candidateId);
+
+    expect(result.outcome).toBe('ledger_entry');
+    if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
+    expect(result.reuseCheck).toBe('recommended_create');
+  });
+
+  it('throwing hook → CREATE (never blocks learning)', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+
+    const result = await service({
+      recommendation: async () => {
+        throw new Error('adapter crashed');
+      },
+    }).intake(candidateId);
+
+    expect(result.outcome).toBe('ledger_entry');
+  });
+
+  it('hallucinated selectedPrincipleId (outside the proposal) → CREATE', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+
+    const result = await service({
+      recommendation: async () => recommendationOf(randomUUID()),
+    }).intake(candidateId);
+
+    expect(result.outcome).toBe('ledger_entry');
+    if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
+    expect(result.reuseCheck).toBe('recommended_create');
+  });
+});
+
+describe('v0.3.3 T11 — disabled capability restores the exact pre-v0.3.3 behavior', () => {
+  it('no recommendation hook injected → not_configured gate, plain CREATE', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+
+    const result = await service({}).intake(candidateId);
+
+    expect(result.outcome).toBe('ledger_entry');
+    if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
+    expect(result.reuseCheck).toBe('not_configured');
+  });
+
+  it('a recommendation hook without a state dir is a hard misconfiguration', async () => {
+    const candidateId = await seedPrincipleCandidate();
+    await expect(
+      service({
+        recommendation: async () => recommendationOf(randomUUID()),
+        omitStateDir: true,
+      }).intake(candidateId),
+    ).rejects.toMatchObject({ code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED });
+  });
+
+  it('an Owner decision function always outranks the recommendation hook', async () => {
+    // Production never injects both; this pins the precedence if someone does:
+    // the Owner verdict path runs, the hook is never consulted.
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+    let hookCalls = 0;
+
+    const result = await service({
+      decision: () => ({ decision: 'create' }),
+      recommendation: async () => {
+        hookCalls += 1;
+        return recommendationOf(principle.id);
+      },
+    }).intake(candidateId);
+
+    expect(result.outcome).toBe('ledger_entry');
+    expect(hookCalls).toBe(0);
+  });
+});
+
+describe('v0.3.3 T13 — park → Owner decide closes the loop on the REAL ledger', () => {
+  it('parked candidate, decided reuse → evidence +1; replay is durable (INV-R07)', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain_r6_replay_1' });
+
+    // 1. Auto path parks (no Principle, no evidence).
+    const parked = await service({
+      recommendation: async () => recommendationOf(principle.id),
+    }).intake(candidateId);
+    expect(parked.outcome).toBe('refused');
+    if (parked.outcome !== 'refused' || parked.reason !== 'reuse_pending_owner') {
+      throw new Error('expected a reuse_pending_owner refusal');
+    }
+
+    // 2. Owner resolves reuse via the SAME gate with a decision function.
+    const decided = await service({ decision: () => reuseOf(principle.id) }).intake(candidateId);
+    expect(decided.outcome).toBe('refused');
+    if (decided.outcome !== 'refused' || decided.reason !== 'reuse_selected') {
+      throw new Error('expected a reuse_selected resolution');
+    }
+    expect(decided.selectedPrincipleId).toBe(principle.id);
+    expect(decided.reuseEvidence?.candidateId).toBe(candidateId);
+
+    // 3. Durable: evidence is ON the principle; a replay never re-asks.
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[principle.id];
+    expect(stored?.reuseEvidence).toHaveLength(1);
+    const replay = await service({}).intake(candidateId);
+    expect(replay.outcome).toBe('refused');
+    if (replay.outcome !== 'refused' || replay.reason !== 'reuse_selected') {
+      throw new Error('expected a durable reuse replay');
+    }
+    // The principle text itself is untouched (T6: evidence is append-only).
+    const after = loadLedger(join(workspaceDir, '.state'));
+    const storedAfter = after.tree.principles[principle.id];
+    expect(storedAfter?.text).toBe(stored?.text);
+    expect(storedAfter?.reuseEvidence).toHaveLength(1);
+  });
+});
+
+describe('v0.3.3 T15 — router-subtask candidates resolve their painId through the top diagnostician task', () => {
+  it('a production-shaped candidate (minted on the diag_router sub-task) completes the reuse decision', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const now = new Date().toISOString();
+    const painId = 'pain_r6_router_1';
+
+    // Top diagnostician task + the persisted diagnosis (where pain_diagnoses
+    // rows live in production).
+    const topTaskId = randomUUID();
+    await stateManager.taskStore.createTask({
+      taskId: topTaskId,
+      taskKind: 'diagnostician',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+      lastError: undefined,
+      inputRef: '',
+      resultRef: '',
+      diagnosticJson: JSON.stringify({ sourcePainId: painId }),
+    });
+    await stateManager.recordPainDiagnosis({
+      painId,
+      taskId: topTaskId,
+      diagnosisId: `diag-${topTaskId}`,
+      category: 'People',
+      rootCause: 'People: top-level diagnosis for router lineage',
+      evidence: [],
+      confidence: 0.9,
+      artifactId: randomUUID(),
+    });
+
+    // Router sub-task + run carrying the validated diagnosisId (production
+    // SplitDiagnosticianRunner shape). The canonical parent link is inputRef.
+    const routerTaskId = randomUUID();
+    await stateManager.taskStore.createTask({
+      taskId: routerTaskId,
+      taskKind: 'diag_router',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+      lastError: undefined,
+      inputRef: topTaskId,
+      resultRef: '',
+      diagnosticJson: undefined,
+    });
+    const routerRunId = randomUUID();
+    await stateManager.runStore.createRun({
+      runId: routerRunId,
+      taskId: routerTaskId,
+      runtimeKind: 'openclaw',
+      attemptNumber: 1,
+      executionStatus: 'succeeded',
+      startedAt: now,
+      endedAt: now,
+      outputPayload: JSON.stringify({ diagnosisId: topTaskId }),
+    });
+
+    // Candidate minted on the ROUTER sub-task — the production shape that the
+    // R6 reality replay proved unresolvable before the lineage walk.
+    const candidateId = randomUUID();
+    const artifactId = randomUUID();
+    const db = new Database(join(workspaceDir, '.pd', 'state.db'));
+    try {
+      db.prepare(`
+        INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        artifactId,
+        routerRunId,
+        routerTaskId,
+        'principle',
+        JSON.stringify({ text: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }),
+        now,
+      );
+      db.prepare(`
+        INSERT INTO principle_candidates
+          (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence,
+           source_recommendation_json, idempotency_key, status, created_at, recommendation_kind)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 'principle')
+      `).run(
+        candidateId,
+        artifactId,
+        routerTaskId,
+        routerRunId,
+        '测试候选（router 子任务）',
+        CANDIDATE_TEXT,
+        0.78,
+        JSON.stringify({ text: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }),
+        `${artifactId}::prompt`,
+        now,
+      );
+    } finally {
+      db.close();
+    }
+
+    // Owner decides reuse — the painId must resolve through the router chain.
+    const decided = await service({ decision: () => reuseOf(principle.id) }).intake(candidateId);
+    expect(decided.outcome).toBe('refused');
+    if (decided.outcome !== 'refused' || decided.reason !== 'reuse_selected') {
+      throw new Error('expected a reuse_selected resolution');
+    }
+    expect(decided.reuseEvidence?.painId).toBe(painId);
+    expect(decided.reuseEvidence?.candidateId).toBe(candidateId);
   });
 });

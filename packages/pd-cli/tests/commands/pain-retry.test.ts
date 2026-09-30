@@ -181,6 +181,9 @@ vi.mock('@principles/core/runtime-v2', () => {
       }
     },
     CandidateIntakeService: MockCandidateIntakeService,
+    // PRI-917 v0.3.3: the Reuse Review Gate hook builder — undefined hook in
+    // tests keeps the pre-v0.3.3 intake flow unless a test opts in.
+    createReuseRecommendationHook: vi.fn(() => undefined),
     // PRI-503: admission gate mock — admit by default so existing retry/intake
     // tests keep their original flow. Tests that need to assert refusal behavior
     // can override this mock per-test.

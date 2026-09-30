@@ -42,6 +42,7 @@ import {
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
   createBridgeTelemetryEventEmitter,
+  createReuseRecommendationHook,
   type PainDetectedData,
   type PainSignalBridgeResult,
   type DeadLetterRow,
@@ -623,7 +624,22 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       }
 
       const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-      const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+      // PRI-917 v0.3.3 — auto-path Reuse Review Gate (dead-letter replay is an
+      // automatic intake path too): inject the semantic reuse recommendation
+      // hook. Undefined when reuseEvaluation.enabled=false → old behavior (T11).
+      const dlConfigLoad = loadPdConfig(workspaceDir);
+      const dlReuseRecommendation = createReuseRecommendationHook({
+        effectiveConfig: dlConfigLoad.ok ? dlConfigLoad.effective : dlConfigLoad.defaults,
+        workspaceDir,
+        stateDir: path.join(workspaceDir, '.state'),
+      });
+      const intakeService = new CandidateIntakeService({
+        stateManager,
+        ledgerAdapter,
+        ...(dlReuseRecommendation
+          ? { reuseRecommendation: dlReuseRecommendation, reuseStateDir: path.join(workspaceDir, '.state') }
+          : {}),
+      });
       const bridge = new PainSignalBridge({
         stateManager,
         runner,
@@ -867,7 +883,20 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     let intakeFailed = false;
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-    const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+    // PRI-917 v0.3.3 — auto-path Reuse Review Gate: inject the semantic reuse
+    // recommendation hook. Undefined when reuseEvaluation.enabled=false →
+    // intake behaves exactly as before (T11 rollback switch).
+    const retryConfigLoad = loadPdConfig(workspaceDir);
+    const reuseRecommendation = createReuseRecommendationHook({
+      effectiveConfig: retryConfigLoad.ok ? retryConfigLoad.effective : retryConfigLoad.defaults,
+      workspaceDir,
+      stateDir: path.join(workspaceDir, '.state'),
+    });
+    const intakeService = new CandidateIntakeService({
+      stateManager,
+      ledgerAdapter,
+      ...(reuseRecommendation ? { reuseRecommendation, reuseStateDir: path.join(workspaceDir, '.state') } : {}),
+    });
 
     for (const candidate of candidates) {
       // PRI-503: admission gate check — refuse non-admitted candidates before
@@ -889,6 +918,19 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       }
       try {
         const intakeResult = await intakeService.intake(candidate.candidateId);
+        // PRI-917 v0.3.3: a parked candidate stays PENDING — no consumed
+        // marking. The Owner resolves it via `pd candidate review --decide`.
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
+          const recommended =
+            intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'review_required',
+            reusedPrincipleId: recommended?.selectedPrincipleId,
+            nextAction: `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`,
+          });
+          continue;
+        }
         // Phase 1 / PR1: candidate status handling is deliberately unchanged
         // (SPEC v2.1 Step 2 "保持现有 candidate persistence 行为"). Only the
         // Principle Ledger write is gated on a validated recommendation_kind.
