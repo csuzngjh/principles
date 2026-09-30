@@ -25,10 +25,15 @@
  * conservative path-rule hits (SPEC §10.2) — it waives N-3 and C4-direct,
  * never a plan-triggered edge. No waiver database.
  *
- * Usage (CI verify-merge step / local):
+ * Usage (CI verify-merge step, local verify:merge, and pre-push):
  *   node scripts/release/check-pr-release-intent.mjs
  * Env: PR_BASE_SHA (base SHA of the pull request). Falls back to the
- * merge-base of origin/main and HEAD, then HEAD~1.
+ * merge-base of origin/main and HEAD (strict — task-branch local runs are
+ * authoritative). A final HEAD~1 fallback (no differing main ref, e.g. on
+ * the main checkout itself) degrades the run to ADVISORY: findings are
+ * reported as a warning, never a verdict, because HEAD~1 cannot represent
+ * a PR base (PRI-917 v0.3.2: a missing changeset escaped to CI exactly
+ * because this guard was CI-only — it now also runs in local verify:merge).
  */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -62,25 +67,40 @@ function git(args) {
 
 function resolveBase() {
   if (process.env.PR_BASE_SHA && /^[0-9a-f]{7,40}$/.test(process.env.PR_BASE_SHA)) {
-    return process.env.PR_BASE_SHA;
+    return { sha: process.env.PR_BASE_SHA, advisory: false };
   }
   const head = git(['rev-parse', 'HEAD']).trim();
-  for (const candidate of ['origin/main', 'main']) {
-    const sha = (() => {
-      try {
-        return git(['rev-parse', '--verify', `${candidate}^{commit}`]).trim();
-      } catch {
-        return null;
-      }
-    })();
-    if (!sha || sha === head) continue;
+  // origin/main is the fetch authority for the PR base. The old logic
+  // skipped it when it equals HEAD (`sha === head: continue`) and fell back
+  // to the LOCAL `main` ref — which can be arbitrarily stale on long-lived
+  // checkouts, producing a completely wrong diff (PRI-917 v0.3.2: base
+  // resolved to a weeks-old main and "failed" on 17 unrelated commits).
+  // When origin/main == HEAD the correct base IS HEAD (empty diff = nothing
+  // to judge), so it is no longer skipped. The local `main` candidate is
+  // gone for the same reason.
+  const originMain = (() => {
     try {
-      return git(['merge-base', sha, head]).trim();
+      return git(['rev-parse', '--verify', 'origin/main^{commit}']).trim();
     } catch {
-      continue;
+      return null;
+    }
+  })();
+  if (originMain) {
+    try {
+      return { sha: git(['merge-base', originMain, head]).trim(), advisory: false };
+    } catch {
+      // Unrelated histories — cannot derive a PR base from origin/main.
     }
   }
-  return `${head}~1`;
+  // Fallback: no usable origin/main ref. HEAD~1 cannot represent a PR base,
+  // so the strict release-intent contract is NOT evaluated here — the run
+  // degrades to advisory (see the exit path) instead of risking a silent
+  // wrong verdict. CI (PR_BASE_SHA) remains authoritative.
+  console.warn(
+    'RELEASE_INTENT_GUARD ADVISORY: no usable origin/main ref found — falling back to HEAD~1. ' +
+      'The release-intent contract is NOT fully evaluated in this mode; CI (PR_BASE_SHA) is authoritative.',
+  );
+  return { sha: `${head}~1`, advisory: true };
 }
 
 function showFile(sha, relPath) {
@@ -94,7 +114,9 @@ function showFile(sha, relPath) {
 }
 
 const headSha = git(['rev-parse', 'HEAD']).trim();
-const baseSha = resolveBase();
+const resolvedBase = resolveBase();
+const baseSha = resolvedBase.sha;
+const baseAdvisory = resolvedBase.advisory;
 const changedPaths = diffPaths(baseSha, headSha);
 
 if (changedPaths.length === 0) {
@@ -307,6 +329,15 @@ if (failures.length > 0) {
   console.error(
     `RELEASE_INTENT_GUARD FAIL mode=normal (base=${baseSha.slice(0, 10)} head=${headSha.slice(0, 10)}, reproduction rejected: ${repro.reasons[0] ?? 'n/a'})`,
   );
+  if (baseAdvisory) {
+    // Degraded base (HEAD~1): the findings may not reflect the real PR diff,
+    // so they are surfaced as a loud warning instead of a verdict. CI
+    // (PR_BASE_SHA) remains the authoritative enforcement point.
+    console.warn(
+      'RELEASE_INTENT_GUARD ADVISORY: base was resolved via the HEAD~1 fallback, so the findings above are NOT a PR verdict. Run from a task branch or rely on CI for enforcement.',
+    );
+    process.exit(0);
+  }
   process.exit(1);
 }
 
