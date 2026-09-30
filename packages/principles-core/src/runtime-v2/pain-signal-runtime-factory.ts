@@ -45,7 +45,7 @@ import {
   checkAgentRuntimeReadiness,
   createAdapterConfigFromProfile,
 } from './config/pd-config-agent-binding.js';
-import type { EffectivePdConfig, InternalAgentName } from './config/pd-config-types.js';
+import type { EffectivePdConfig, InternalAgentName, RuntimeProfile } from './config/pd-config-types.js';
 import {
   resolveDiagnosticianCapability,
   type DiagnosticianCapability,
@@ -363,6 +363,69 @@ export interface ResolveRuntimeConfigForAgentOptions {
  * kind — sharing one agent's binding across the whole chain silently
  * ignored every other agent's declared profile (EP002-R2 F4).
  */
+/**
+ * Shared tail of profile resolution: readiness -> adapter config -> RuntimeConfig.
+ *
+ * Shared by the agent-binding path and the capability-profile path
+ * (PRI-917 v0.3.2 §8: the reuse evaluation capability is NOT an agent, so it
+ * resolves from its own named config section rather than an agent binding).
+ * One implementation so the two paths cannot drift in readiness rules or in
+ * the run-evidence profile identity.
+ */
+function resolveRuntimeConfigForProfileImpl(args: {
+  profile: RuntimeProfile;
+  profileId: string;
+  getEnvVar: (name: string) => string | undefined;
+  subject: 'Agent' | 'Capability';
+}): RuntimeConfigResult {
+  const { profile, profileId, getEnvVar, subject } = args;
+  // Check readiness (env vars, provider, etc.)
+  const readiness = checkAgentRuntimeReadiness(profile, getEnvVar);
+  if (readiness.readiness !== 'ready') {
+    return {
+      ok: false,
+      reason: readiness.readiness,
+      message: readiness.reason ?? `${subject} runtime profile '${profileId}' is not ready`,
+      nextAction: readiness.nextAction ?? 'Check .pd/config.yaml runtime profile configuration',
+    };
+  }
+
+  // Convert profile to adapter config
+  const adapterConfig = createAdapterConfigFromProfile(profile, '');
+
+  if (adapterConfig.runtimeKind === 'pi-ai') {
+    return {
+      runtimeKind: 'pi-ai',
+      provider: adapterConfig.provider,
+      model: adapterConfig.model,
+      apiKeyEnv: adapterConfig.apiKeyEnv,
+      baseUrl: adapterConfig.baseUrl,
+      timeoutMs: adapterConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxRetries: adapterConfig.maxRetries,
+      maxTokens: adapterConfig.maxTokens,
+      agentId: 'main',
+      // PRI-719: profile identity for run evidence (declared == executed).
+      runtimeProfileId: profileId,
+      ...(adapterConfig.reasoning !== undefined ? { reasoning: adapterConfig.reasoning } : {}),
+      ...(adapterConfig.systemPrompt ? { systemPrompt: adapterConfig.systemPrompt } : {}),
+    };
+  }
+
+  // openclaw-cli
+  // openclawMode='default' means "delegate to OpenClaw's own mode resolution" -> omit openclawMode
+  // so the factory's existing mode resolution (CLI flags, workflows.yaml) decides
+  const result: RuntimeConfig = {
+    runtimeKind: 'openclaw-cli',
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    agentId: 'main',
+    runtimeProfileId: profileId,
+  };
+  if (adapterConfig.openclawMode !== 'default') {
+    result.openclawMode = adapterConfig.openclawMode;
+  }
+  return result;
+}
+
 export function resolveRuntimeConfigForAgent(
   effectiveConfig: EffectivePdConfig,
   agentName: InternalAgentName,
@@ -397,51 +460,33 @@ export function resolveRuntimeConfigForAgent(
     };
   }
 
-  // Check readiness (env vars, provider, etc.)
-  const readiness = checkAgentRuntimeReadiness(bindingResult.profile, getEnvVar);
-  if (readiness.readiness !== 'ready') {
+  return resolveRuntimeConfigForProfileImpl({ profile: bindingResult.profile, profileId: bindingResult.profileId, getEnvVar, subject: 'Agent' });
+}
+
+/**
+ * Resolve runtime configuration from a NAMED profile id rather than an agent
+ * binding (PRI-917 v0.3.2 §8 — the Semantic Reuse Evaluation Capability is a
+ * dedicated config section, NOT an internal agent, so it must not acquire an
+ * `internalAgents.agents[*]` entry in order to reach a profile).
+ *
+ * Fail-closed: an unknown profile id is a config error, never a silent
+ * fallback onto some other profile's LLM.
+ */
+export function resolveRuntimeConfigForProfile(
+  effectiveConfig: EffectivePdConfig,
+  profileId: string,
+  getEnvVar: (name: string) => string | undefined,
+): RuntimeConfigResult {
+  const profile = effectiveConfig.config.runtimeProfiles[profileId];
+  if (!profile) {
     return {
       ok: false,
-      reason: readiness.readiness,
-      message: readiness.reason ?? `Agent runtime profile '${bindingResult.profileId}' is not ready`,
-      nextAction: readiness.nextAction ?? 'Check .pd/config.yaml runtime profile configuration',
+      reason: 'profile_not_found',
+      message: `runtime profile '${profileId}' is not defined in runtimeProfiles`,
+      nextAction: 'Add the profile to .pd/config.yaml runtimeProfiles, or point reuseEvaluation.runtimeProfile at an existing id',
     };
   }
-
-  // Convert profile to adapter config
-  const adapterConfig = createAdapterConfigFromProfile(bindingResult.profile, '');
-
-  if (adapterConfig.runtimeKind === 'pi-ai') {
-    return {
-      runtimeKind: 'pi-ai',
-      provider: adapterConfig.provider,
-      model: adapterConfig.model,
-      apiKeyEnv: adapterConfig.apiKeyEnv,
-      baseUrl: adapterConfig.baseUrl,
-      timeoutMs: adapterConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      maxRetries: adapterConfig.maxRetries,
-      maxTokens: adapterConfig.maxTokens,
-      agentId: 'main',
-      // PRI-719: profile identity for run evidence (declared == executed).
-      runtimeProfileId: bindingResult.profileId,
-      ...(adapterConfig.reasoning !== undefined ? { reasoning: adapterConfig.reasoning } : {}),
-      ...(adapterConfig.systemPrompt ? { systemPrompt: adapterConfig.systemPrompt } : {}),
-    };
-  }
-
-  // openclaw-cli
-  // openclawMode='default' means "delegate to OpenClaw's own mode resolution" → omit openclawMode
-  // so the factory's existing mode resolution (CLI flags, workflows.yaml) decides
-  const result: RuntimeConfig = {
-    runtimeKind: 'openclaw-cli',
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    agentId: 'main',
-    runtimeProfileId: bindingResult.profileId,
-  };
-  if (adapterConfig.openclawMode !== 'default') {
-    result.openclawMode = adapterConfig.openclawMode;
-  }
-  return result;
+  return resolveRuntimeConfigForProfileImpl({ profile, profileId, getEnvVar, subject: 'Capability' });
 }
 
 /**

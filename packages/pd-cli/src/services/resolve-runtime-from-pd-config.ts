@@ -15,6 +15,7 @@
 
 import {
   resolveRuntimeConfigForAgent,
+  resolveRuntimeConfigForProfile,
   isRuntimeConfigError,
   resolveAgentRuntimeBinding,
 } from '@principles/core/runtime-v2';
@@ -79,6 +80,13 @@ export interface ResolveRuntimeFromPdConfigOptions {
    */
   readonly agentName?: InternalAgentName;
   /**
+   * PRI-917 v0.3.2 §8: resolve from an EXPLICIT profile id instead of an agent
+   * binding — the reuse evaluation capability is a dedicated config section,
+   * not an internal agent, so it must not acquire an agents[*] entry to reach
+   * a profile. Takes precedence over agentName when present.
+   */
+  readonly runtimeProfileId?: string;
+  /**
    * PRI-719 review: resolve the binding even when the agent is disabled.
    * Peer execution scope (auto-consumer AND explicit run-once) is governed
    * by the internalization_full_chain FLAG, not by
@@ -138,15 +146,26 @@ export function resolveRuntimeFromPdConfig(
     };
   }
 
-  const result = resolveRuntimeConfigForAgent(configLoadResult.effective, agentName, { getEnvVar, ignoreAgentEnabled });
+  const explicitProfileId = options.runtimeProfileId;
+  const result = explicitProfileId !== undefined
+    ? resolveRuntimeConfigForProfile(configLoadResult.effective, explicitProfileId, getEnvVar)
+    : resolveRuntimeConfigForAgent(configLoadResult.effective, agentName, { getEnvVar, ignoreAgentEnabled });
 
   // PRI-402: Extract profile ID and label for probe output alignment with doctor
   let runtimeProfileId: string | null = null;
   let runtimeProfileLabel: string | null = null;
-  const bindingResult = resolveAgentRuntimeBinding(configLoadResult.effective, agentName);
+  // Profile identity for probe/doctor alignment. On the explicit capability
+  // path the profile id is already known (no agent binding to resolve).
+  const bindingResult = explicitProfileId !== undefined
+    ? { ok: true as const, profileId: explicitProfileId, profile: configLoadResult.effective.config.runtimeProfiles[explicitProfileId] }
+    : resolveAgentRuntimeBinding(configLoadResult.effective, agentName);
   if (bindingResult.ok) {
     runtimeProfileId = bindingResult.profileId;
-    runtimeProfileLabel = buildProfileLabel(bindingResult.profileId, bindingResult.profile);
+    const { profile } = bindingResult;
+    // An explicit profile id that does not exist yields no profile; the label
+    // falls back to the id (the resolution result already failed loud with
+    // profile_not_found, so this only affects display).
+    runtimeProfileLabel = profile ? buildProfileLabel(bindingResult.profileId, profile) : bindingResult.profileId;
   } else if (!isRuntimeConfigError(result) && result.runtimeProfileId !== undefined) {
     // PRI-719 review: on the peer path (ignoreAgentEnabled) the runtime may
     // resolve fine for a shipped-disabled agent while the raw binding still
