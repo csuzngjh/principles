@@ -18,6 +18,7 @@ import {
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
   DANGEROUS_KEYS,
+  type ReuseEvaluationConfig,
 } from './pd-config-types.js';
 import {
   DEFAULT_FEATURE_FLAGS,
@@ -25,6 +26,7 @@ import {
   DEFAULT_RUNTIME_PROFILE,
   DEFAULT_UI,
   DEFAULT_CONTEXT_INJECTION,
+  DEFAULT_REUSE_EVALUATION,
   getDefaultInternalAgents,
   getDefaultPdConfig,
 } from './pd-config-defaults.js';
@@ -217,6 +219,26 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     agents: agents,
   };
 
+  // Reuse evaluation (PRI-917 v0.3.2 §8): dedicated capability config, not a
+  // general capability registry. Absent in legacy configs → full defaults
+  // (zero migration). runtimeProfile falls back to the USER's
+  // internalAgents.defaultRuntime (not a hard-coded id), and a profile that
+  // does not exist is reported as a warning — never a silent fallback to a
+  // different LLM than the workspace configured.
+  const userReuseEvaluation: Partial<ReuseEvaluationConfig> = userConfig.reuseEvaluation ?? {};
+  const reuseEvaluationProfile = userReuseEvaluation.runtimeProfile ?? userConfig.internalAgents.defaultRuntime;
+  if (userReuseEvaluation.enabled && !Object.hasOwn(runtimeProfiles, reuseEvaluationProfile)) {
+    warnings.push(
+      `reuseEvaluation: runtime profile '${reuseEvaluationProfile}' not found in runtimeProfiles ` +
+      '(the capability will not run until a configured profile is available)',
+    );
+  }
+  const reuseEvaluation: ReuseEvaluationConfig = {
+    enabled: userReuseEvaluation.enabled ?? DEFAULT_REUSE_EVALUATION.enabled,
+    runtimeProfile: reuseEvaluationProfile,
+    ...(userReuseEvaluation.timeoutMs !== undefined ? { timeoutMs: userReuseEvaluation.timeoutMs } : {}),
+  };
+
   // UI: use user config or default
   const ui = userConfig.ui ?? { ...DEFAULT_UI };
 
@@ -237,6 +259,7 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     internalAgents,
     ui,
     principles,
+    reuseEvaluation,
     ...(userConfig.profile ? { profile: userConfig.profile } : {}),
     ...(userConfig.contextInjection ? { contextInjection: userConfig.contextInjection } : {}),
   };

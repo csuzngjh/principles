@@ -227,6 +227,31 @@ export type { CandidateRecommendationExtraction, CandidateIntakeResult } from '.
 export { buildReuseProposal, proposalNeedsDecision } from './principle-reuse/reuse-proposal.js';
 export type { ReuseProposal, ReuseProposalEntry, ReuseDecision } from './principle-reuse/reuse-proposal.js';
 export { buildReuseShortlist } from './principle-reuse/reuse-retrieval.js';
+// PRI-917 v0.3.2 (Phase 3C-3): the Semantic Reuse Evaluation Capability's
+// execution path. Proposal-only: it returns a RECOMMENDATION through the
+// injected PDRuntimeAdapter and has no path to any ledger writer.
+export { ReuseEvaluationRunner, isValidReuseEvaluationOutput } from './principle-reuse/reuse-evaluation-runner.js';
+export { ReuseEvaluationError } from './principle-reuse/reuse-evaluation-runner.js';
+export type {
+  ReuseEvaluationRunnerDeps,
+  ReuseEvaluationRunnerOptions,
+  ReuseEvaluationInput,
+  ReuseEvaluationCandidateInput,
+  ReuseEvaluationShortlistEntry,
+  ReuseEvaluationFailureReason,
+} from './principle-reuse/reuse-evaluation-runner.js';
+// PRI-917 v0.3.2 (Phase 3C-1): the Semantic Reuse Evaluation Capability's
+// proposal contract — proposal-only, never persisted (SPEC section 4.2/10).
+export {
+  REUSE_EVALUATION_OUTPUT_SCHEMA_REF,
+  ReuseEvaluationRecommendationSchema,
+  ReuseEvaluationOutputV1Schema,
+  validateReuseEvaluationOutput,
+} from './principle-reuse/reuse-evaluation-output.js';
+export type {
+  ReuseEvaluationOutputV1,
+  ReuseEvaluationValidation,
+} from './principle-reuse/reuse-evaluation-output.js';
 export { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
 
 // Store
@@ -442,7 +467,7 @@ export { recordPainSignalObservability, appendEventLogLine } from './pain-signal
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
 export { sanitizeString, sanitizeValue, sanitizeToolParams, convergePath, MAX_EVIDENCE_VALUE_CHARS } from './evidence-sanitizer.js';
 /** @deprecated Internal factory — use PainToPrincipleService constructor instead */
-export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, mapBridgeTelemetryToStoreEvent, createBridgeTelemetryEventEmitter, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
+export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, resolveRuntimeConfigForAgent, resolveRuntimeConfigForProfile, AGENT_NAME_FOR_TASK_KIND, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, mapBridgeTelemetryToStoreEvent, createBridgeTelemetryEventEmitter, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
 
 // Pain-to-Principle service facade (PRI-12)
 export { PainToPrincipleService } from './pain-to-principle-service.js';
