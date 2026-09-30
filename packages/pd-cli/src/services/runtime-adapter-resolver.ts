@@ -87,6 +87,12 @@ export interface ResolveAdapterOptions {
    */
   agentName?: InternalAgentName;
   /**
+   * PRI-917 v0.3.2 §8: resolve the adapter from this explicit profile id
+   * instead of an agent binding (the reuse evaluation capability is a
+   * dedicated config section, not an agent). Takes precedence when present.
+   */
+  runtimeProfileId?: string;
+  /**
    * PRI-719 review: resolve the binding even when the agent is disabled —
    * peer execution scope is the internalization_full_chain flag (auto-
    * consumer AND explicit run-once), not agents[kind].enabled. Omitted by
@@ -178,6 +184,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
   // ── Resolve config from .pd/config.yaml (for pi-ai, openclaw-cli, config) ──
   const resolved = resolveRuntimeFromPdConfig(opts.workspaceDir, {
     agentName: opts.agentName,
+    ...(opts.runtimeProfileId !== undefined ? { runtimeProfileId: opts.runtimeProfileId } : {}),
     ignoreAgentEnabled: opts.ignoreAgentEnabled,
   });
   const configResult: RuntimeConfigResult = resolved.result;
@@ -324,8 +331,17 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     const openclawConfigFields: Partial<RuntimeConfig> = isRuntimeConfigError(configResult)
       ? {}
       : configResult;
-    // CLI override takes precedence over config
-    const openclawMode = opts.openclawMode ?? openclawConfigFields.openclawMode;
+    // CLI override takes precedence over config. PRI-917 review (P1): a
+    // source='default' OpenClaw profile DELEGATES mode resolution to OpenClaw
+    // (createAdapterConfigFromProfile -> openclawMode 'default'; the factory
+    // omits it from RuntimeConfig, and validateRuntimeConfig accepts exactly
+    // that). Construct the adapter in delegated mode instead of throwing, so
+    // the two resolution paths agree on the same profile.
+    const delegatedDefault =
+      resolved.runtimeProfileSource === 'default' && opts.openclawMode === undefined;
+    const openclawMode = opts.openclawMode
+      ?? openclawConfigFields.openclawMode
+      ?? (delegatedDefault ? 'default' : undefined);
     if (!openclawMode) {
       throw new ConfigResolutionError(
         "runtimeKind 'openclaw-cli' requires openclawMode.",
@@ -339,7 +355,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     }
     // PRI-431 Step 1d: only pass agentId when explicitly provided (backward compat with run-once.ts)
     const openclawAdapterOpts: {
-      runtimeMode: 'local' | 'gateway';
+      runtimeMode: 'local' | 'gateway' | 'default';
       workspaceDir: string;
       agentId?: string;
     } = {

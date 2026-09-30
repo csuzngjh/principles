@@ -87,6 +87,21 @@ function formatTextOutput(output: DoctorOutput): string {
   }
   lines.push('');
 
+  // PRI-917 v0.3.2 §8: the Semantic Reuse Evaluation Capability is advisory
+  // only — it recommends, it never decides. Keep that visible here so an
+  // operator reading doctor knows disabling it removes a suggestion stage,
+  // not a governance gate.
+  lines.push('Semantic reuse evaluation:');
+  lines.push(`  enabled:  ${output.reuseEvaluation.enabled ? 'enabled' : 'disabled'}`);
+  lines.push(`    profile:  ${output.reuseEvaluation.runtimeProfile}${output.reuseEvaluation.profileConfigured ? '' : ' (NOT CONFIGURED)'}`);
+  if (output.reuseEvaluation.timeoutMs !== undefined) {
+    lines.push(`    timeout:  ${output.reuseEvaluation.timeoutMs}ms`);
+  }
+  if (!output.reuseEvaluation.profileConfigured && output.reuseEvaluation.enabled) {
+    lines.push('    note:     no configured runtime profile — the capability will not run until one exists');
+  }
+  lines.push('');
+
   lines.push('Provider health:');
   if (output.providerHealth.length === 0) {
     lines.push('  (no providers discovered)');

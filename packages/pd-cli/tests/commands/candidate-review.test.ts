@@ -21,12 +21,16 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
-import { mkdirSync, rmSync, existsSync } from 'fs';
+import * as path from 'path';
+import { mkdirSync, readFileSync, rmSync, existsSync, writeFileSync } from 'fs';
+import * as yaml from 'js-yaml';
 import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 
-const { mockResolveOwnerIdentity } = vi.hoisted(() => ({
+const { mockResolveOwnerIdentity, mockResolveRuntimeAdapter, evaluationScript } = vi.hoisted(() => ({
   mockResolveOwnerIdentity: vi.fn(),
+  mockResolveRuntimeAdapter: vi.fn(),
+  evaluationScript: { outcomes: [] as unknown[] },
 }));
 
 vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
@@ -34,6 +38,14 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
   resolveOwnerIdentity: mockResolveOwnerIdentity,
 }));
 
+// The evaluation capability reaches its LLM ONLY through the resolver-provided
+// PDRuntimeAdapter — mocking the resolver therefore mocks the entire evaluation
+// execution while the review surface, the intake chain, and the ledger stay real.
+vi.mock('../../src/services/runtime-adapter-resolver.js', () => ({
+  resolveRuntimeAdapterFromConfig: mockResolveRuntimeAdapter,
+}));
+
+import type { PDRuntimeAdapter, RunHandle, RunStatus, RuntimeCapabilities, RuntimeArtifactRef, RuntimeHealth, StartRunInput, StructuredRunOutput } from '@principles/core/runtime-v2';
 import { handleCandidateReview, handleCandidateIntake } from '../../src/commands/candidate.js';
 import { RuntimeStateManager } from '@principles/core/runtime-v2';
 import { addPrincipleToLedger, loadLedger } from '@principles/core/principle-tree-ledger';
@@ -198,6 +210,108 @@ afterEach(() => {
   try { rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* best effort */ }
   mockResolveOwnerIdentity.mockReset();
 });
+
+// ── Phase 3C-4: the semantic evaluation on the review surface ────────────────
+
+interface ScriptedOutcome {
+  payload?: unknown;
+  failRun?: string;
+}
+
+class ScriptedEvaluationAdapter implements PDRuntimeAdapter {
+  readonly startedRuns: StartRunInput[] = [];
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  kind(): 'test-double' {
+    return 'test-double';
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  async getCapabilities(): Promise<RuntimeCapabilities> {
+    return {
+      supportsStructuredJsonOutput: true,
+      supportsToolUse: false,
+      supportsWorkingDirectory: false,
+      supportsModelSelection: false,
+      supportsLongRunningSessions: false,
+      supportsCancellation: true,
+      supportsArtifactWriteBack: false,
+      supportsConcurrentRuns: false,
+      supportsStreaming: false,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  async healthCheck(): Promise<RuntimeHealth> {
+    return { healthy: true, degraded: false, warnings: [], lastCheckedAt: '2026-09-29T00:00:00.000Z' };
+  }
+
+  async startRun(input: StartRunInput): Promise<RunHandle> {
+    this.startedRuns.push(input);
+    return { runId: `run-${this.startedRuns.length}`, runtimeKind: 'test-double', startedAt: '2026-09-29T00:00:00.000Z' };
+  }
+
+  async pollRun(runId: string): Promise<RunStatus> {
+    const outcome = evaluationScript.outcomes[0] as ScriptedOutcome | undefined;
+    if (outcome?.failRun) {
+      return { runId, status: 'failed', reason: outcome.failRun };
+    }
+    return { runId, status: 'succeeded' };
+  }
+
+  async fetchOutput(runId: string): Promise<StructuredRunOutput | null> {
+    const outcome = evaluationScript.outcomes.shift() as ScriptedOutcome | undefined;
+    if (!outcome || outcome.failRun || outcome.payload === undefined) {
+      return null;
+    }
+    return { runId, payload: outcome.payload };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  async cancelRun(runId: string): Promise<void> {
+    void runId;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  async fetchArtifacts(runId: string): Promise<RuntimeArtifactRef[]> {
+    void runId;
+    return [];
+  }
+}
+
+function scriptEvaluation(outcomes: unknown[]): void {
+  evaluationScript.outcomes = outcomes;
+  mockResolveRuntimeAdapter.mockImplementation(() => new ScriptedEvaluationAdapter());
+}
+
+function makeResolverThrow(): void {
+  mockResolveRuntimeAdapter.mockImplementation(() => {
+    throw new Error('auth_missing: reuse evaluation profile has no API key');
+  });
+}
+
+/** Write a workspace config that enables the evaluation capability on pd.custom. */
+function writeEvaluationConfig(workspace: string): void {
+  writeFileSync(
+    path.join(workspace, '.pd', 'config.yaml'),
+    yaml.dump({
+      version: 1,
+      features: {
+        prompt: { category: 'core', enabled: true },
+        code_tool_hook: { category: 'core', enabled: true },
+        defer_archive: { category: 'core', enabled: true },
+      },
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+        'pd.custom': { type: 'pi-ai', provider: 'test', model: 'test-model', apiKeyEnv: 'PD_TEST_EVAL_KEY' },
+      },
+      internalAgents: { defaultRuntime: 'pd.custom', agents: { diagnostician: { enabled: true } } },
+      reuseEvaluation: { enabled: true, runtimeProfile: 'pd.custom', timeoutMs: 5000 },
+    }),
+    'utf8',
+  );
+  process.env.PD_TEST_EVAL_KEY = 'test-key';
+}
 
 // ── 1. read-only review ──────────────────────────────────────────────────────
 
@@ -435,5 +549,164 @@ describe('review decision on an empty workspace', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(consoleErrorSpy.mock.calls.map((a) => String(a)).join('\n')).toContain('Candidate not found');
     expect(existsSync(join(workspaceDir, '.state', 'principle_training_state.json'))).toBe(false);
+  });
+});
+
+// ── PRI-917 v0.3.2 Phase 3C-4 — semantic evaluation on the review surface ────
+
+function ledgerBytes(): string {
+  return readFileSync(join(workspaceDir, '.state', 'principle_training_state.json'), 'utf8');
+}
+
+describe('Phase 3C-4 — semantic evaluation on the review surface', () => {
+  it('shows the recommendation/rationale/confidence next to the lexical proposal (judge=reuse)', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-3c4-1' });
+    writeEvaluationConfig(workspaceDir);
+    scriptEvaluation([
+      { payload: { recommendation: 'reuse', selectedPrincipleId: existing.id, rationale: 'same experience, different wording', confidence: 0.88 } },
+    ]);
+
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+
+    const parsed = printedJson() as {
+      evaluation: { status: string; recommendation: string; selectedPrincipleId: string; rationale: string; confidence: number };
+      proposal: { candidates: Array<{ principleId: string; semanticMatch: boolean }> };
+    };
+    expect(parsed.evaluation).toEqual({
+      status: 'recommended',
+      recommendation: 'reuse',
+      selectedPrincipleId: existing.id,
+      rationale: 'same experience, different wording',
+      confidence: 0.88,
+    });
+    const matched = parsed.proposal.candidates.find((c) => c.semanticMatch);
+    expect(matched?.principleId).toBe(existing.id);
+    // T7: the read-only review NEVER writes.
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.reuseEvidence).toBeUndefined();
+    expect(candidateStatus(candidateId)).toBe('pending');
+  });
+
+  it('T4 (Owner override create): evaluation recommends reuse, the Owner decides create — the Owner wins', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-3c4-t4a' });
+    writeEvaluationConfig(workspaceDir);
+    scriptEvaluation([
+      { payload: { recommendation: 'reuse', selectedPrincipleId: existing.id, rationale: 'judge says reuse', confidence: 0.95 } },
+    ]);
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+    consoleLogSpy.mockClear();
+
+    // The Owner explicitly overrides with create.
+    await handleCandidateReview({
+      candidateId, workspace: workspaceDir, decide: 'create', reason: 'owner disagrees with the evaluation', json: true,
+    });
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    const parsed = printedJson() as { decision: string; status: string };
+    expect(parsed.decision).toBe('create');
+    expect(parsed.status).toBe('consumed');
+    // A NEW principle exists; the evaluation's proposed target has NO evidence.
+    const principles = loadLedger(join(workspaceDir, '.state')).tree.principles;
+    expect(Object.keys(principles)).toHaveLength(2);
+    expect(principles[existing.id]?.reuseEvidence).toBeUndefined();
+    expect(candidateStatus(candidateId)).toBe('consumed');
+  });
+
+  it('T4 (Owner override reuse): evaluation recommends create, the Owner decides reuse — the Owner wins', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-3c4-t4b' });
+    writeEvaluationConfig(workspaceDir);
+    scriptEvaluation([
+      { payload: { recommendation: 'create', rationale: 'judge says create', confidence: 0.7 } },
+    ]);
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+    consoleLogSpy.mockClear();
+
+    await handleCandidateReview({
+      candidateId, workspace: workspaceDir, decide: 'reuse', principleId: existing.id, reason: 'owner sees the coverage', json: true,
+    });
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    const parsed = printedJson() as { status: string; selectedPrincipleId: string };
+    expect(parsed.status).toBe('reused');
+    expect(parsed.selectedPrincipleId).toBe(existing.id);
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.reuseEvidence).toHaveLength(1);
+    expect(candidateStatus(candidateId)).toBe('consumed');
+  });
+
+  it('P2: a hallucinated selectedPrincipleId is downgraded to unavailable, never shown as executable', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-3c4-p2' });
+    writeEvaluationConfig(workspaceDir);
+    scriptEvaluation([
+      { payload: { recommendation: 'reuse', selectedPrincipleId: 'hallucinated-uuid', rationale: 'r', confidence: 0.99 } },
+    ]);
+
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+
+    const parsed = printedJson() as { evaluation: { status: string; reason: string } };
+    expect(parsed.evaluation.status).toBe('unavailable');
+    expect(parsed.evaluation.reason).toContain('selected_principle_not_in_shortlist');
+    expect(parsed.evaluation.reason).toContain('hallucinated-uuid');
+    // And nothing about the ledger moved.
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.reuseEvidence).toBeUndefined();
+  });
+
+  it('T5: evaluation unavailable degrades observably and the CREATE capability is untouched', async () => {
+    // Same wording as the candidate so the LEXICAL shortlist is non-empty —
+    // the judge must actually be reached (and fail) for this scenario.
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-3c4-t5' });
+    writeEvaluationConfig(workspaceDir);
+    makeResolverThrow();
+
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    const parsed = printedJson() as {
+      evaluation: { status: string; reason: string };
+      proposal: { candidates: unknown[] };
+    };
+    expect(parsed.evaluation.status).toBe('unavailable');
+    expect(parsed.evaluation.reason).toContain('auth_missing');
+    expect(parsed.proposal.candidates.length).toBeGreaterThan(0);
+    const before = ledgerBytes();
+
+    // SPEC §9 cuts both ways: a failed evaluation must not silently BLOCK
+    // creation either — the create capability stays fully intact.
+    consoleLogSpy.mockClear();
+    await handleCandidateIntake({ candidateId, workspace: workspaceDir, json: true });
+    expect(exitSpy).not.toHaveBeenCalled();
+    const intake = JSON.parse(printedStdout()) as { status: string };
+    expect(['consumed', 'reused']).toContain(intake.status);
+    expect(candidateStatus(candidateId)).toBe('consumed');
+    expect(ledgerBytes()).not.toBe(before);
+  });
+
+  it('T7: review leaves the ledger byte-identical whether the judge succeeds or fails', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-3c4-t7' });
+    writeEvaluationConfig(workspaceDir);
+    const before = ledgerBytes();
+
+    scriptEvaluation([
+      { payload: { recommendation: 'reuse', selectedPrincipleId: existing.id, rationale: 'r', confidence: 0.9 } },
+    ]);
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+    expect(ledgerBytes()).toBe(before);
+
+    makeResolverThrow();
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+    expect(ledgerBytes()).toBe(before);
   });
 });
