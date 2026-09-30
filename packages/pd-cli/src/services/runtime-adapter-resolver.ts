@@ -331,8 +331,17 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     const openclawConfigFields: Partial<RuntimeConfig> = isRuntimeConfigError(configResult)
       ? {}
       : configResult;
-    // CLI override takes precedence over config
-    const openclawMode = opts.openclawMode ?? openclawConfigFields.openclawMode;
+    // CLI override takes precedence over config. PRI-917 review (P1): a
+    // source='default' OpenClaw profile DELEGATES mode resolution to OpenClaw
+    // (createAdapterConfigFromProfile -> openclawMode 'default'; the factory
+    // omits it from RuntimeConfig, and validateRuntimeConfig accepts exactly
+    // that). Construct the adapter in delegated mode instead of throwing, so
+    // the two resolution paths agree on the same profile.
+    const delegatedDefault =
+      resolved.runtimeProfileSource === 'default' && opts.openclawMode === undefined;
+    const openclawMode = opts.openclawMode
+      ?? openclawConfigFields.openclawMode
+      ?? (delegatedDefault ? 'default' : undefined);
     if (!openclawMode) {
       throw new ConfigResolutionError(
         "runtimeKind 'openclaw-cli' requires openclawMode.",
@@ -346,7 +355,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     }
     // PRI-431 Step 1d: only pass agentId when explicitly provided (backward compat with run-once.ts)
     const openclawAdapterOpts: {
-      runtimeMode: 'local' | 'gateway';
+      runtimeMode: 'local' | 'gateway' | 'default';
       workspaceDir: string;
       agentId?: string;
     } = {

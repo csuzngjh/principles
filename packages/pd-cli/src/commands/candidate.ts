@@ -650,6 +650,11 @@ async function evaluateReuseProposal(
     return null;
   }
 
+  // PRI-917 review (P2): timeout precedence — capability.timeoutMs wins,
+  // otherwise the resolved PROFILE's own timeout (its documented default),
+  // otherwise the runner's built-in default.
+    const capabilityProfile = effective.config.runtimeProfiles[capability.runtimeProfile ?? ''];
+  const profileTimeoutMs = capabilityProfile?.type === 'pi-ai' ? capabilityProfile.timeoutMs : undefined;
   try {
     const adapter = resolveRuntimeAdapterFromConfig({
       runtimeKind: 'config',
@@ -658,7 +663,7 @@ async function evaluateReuseProposal(
     });
     const runner = new ReuseEvaluationRunner(
       { runtimeAdapter: adapter },
-      { ...(capability.timeoutMs !== undefined ? { timeoutMs: capability.timeoutMs } : {}) },
+      { ...(capability.timeoutMs !== undefined ? { timeoutMs: capability.timeoutMs } : { ...(profileTimeoutMs !== undefined ? { timeoutMs: profileTimeoutMs } : {}) }) },
     );
     const output = await runner.recommend({
       candidate: claim,
@@ -669,6 +674,19 @@ async function evaluateReuseProposal(
         action: entry.existingPrinciple.action,
       })),
     });
+    // PRI-917 review (P2): the validator deliberately does NOT check id
+    // existence (INV-R08 lives one layer up, against the REAL shortlist).
+    // This is that layer: a hallucinated/foreign id must not reach the Owner
+    // as an executable-looking recommendation.
+    if (output.recommendation === 'reuse') {
+      const inShortlist = entries.some((entry) => entry.principleId === output.selectedPrincipleId);
+      if (!inShortlist) {
+        return {
+          status: 'unavailable',
+          reason: `selected_principle_not_in_shortlist:${output.selectedPrincipleId ?? '(absent)'}`,
+        };
+      }
+    }
     return {
       status: 'recommended',
       recommendation: output.recommendation,

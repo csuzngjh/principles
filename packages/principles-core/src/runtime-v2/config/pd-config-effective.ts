@@ -227,7 +227,12 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
   // different LLM than the workspace configured.
   const userReuseEvaluation: Partial<ReuseEvaluationConfig> = userConfig.reuseEvaluation ?? {};
   const reuseEvaluationProfile = userReuseEvaluation.runtimeProfile ?? userConfig.internalAgents.defaultRuntime;
-  if (userReuseEvaluation.enabled && !Object.hasOwn(runtimeProfiles, reuseEvaluationProfile)) {
+  // PRI-917 review (P1): judge on the RESOLVED enabled value — a legacy
+  // config has no section, so the raw value is undefined while the capability
+  // still resolves to enabled (default). Skipping the check there silently
+  // dropped the missing-profile warning (rc-9).
+  const reuseEvaluationEnabled = userReuseEvaluation.enabled ?? DEFAULT_REUSE_EVALUATION.enabled;
+  if (reuseEvaluationEnabled && !Object.hasOwn(runtimeProfiles, reuseEvaluationProfile)) {
     warnings.push(
       `reuseEvaluation: runtime profile '${reuseEvaluationProfile}' not found in runtimeProfiles ` +
       '(the capability will not run until a configured profile is available)',

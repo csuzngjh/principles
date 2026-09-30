@@ -21,6 +21,7 @@ import {
   ReuseEvaluationOutputV1Schema,
   validateReuseEvaluationOutput,
 } from '../reuse-evaluation-output.js';
+import { isValidReuseEvaluationOutput } from '../reuse-evaluation-runner.js';
 import { Value } from '@sinclair/typebox/value';
 
 const VALID_REUSE = {
@@ -162,6 +163,14 @@ describe('validateReuseEvaluationOutput — malformed schema values (rc-3)', () 
       if (result.ok) throw new Error('unreachable');
       expect(result.reason).toContain('schema_validation_failed');
     }
+  });
+
+  it('isValidReuseEvaluationOutput delegates to the FULL trust boundary (P2 review fix)', () => {
+    // The bare schema is an open field set — the boolean helper must apply the
+    // same closed-field-set + cross-field rules as the validator (T7a).
+    expect(isValidReuseEvaluationOutput(VALID_REUSE)).toBe(true);
+    expect(isValidReuseEvaluationOutput({ ...VALID_REUSE, write: true })).toBe(false);
+    expect(isValidReuseEvaluationOutput({ recommendation: 'reuse', rationale: 'r', confidence: 0.9 })).toBe(false);
   });
 
   it('rejects empty rationale', () => {
