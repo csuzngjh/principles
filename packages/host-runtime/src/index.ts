@@ -221,6 +221,8 @@ export function createProductionHostRuntime(
     painDatabaseFactory?: PainDatabaseFactory;
     /** PRI-640: host attribution supplied by the constructing host adapter (OpenClaw / Codex). */
     hostKind?: GovernanceHostKind;
+    /** Host project cwd, distinct from the workspace owning shared PD state. */
+    projectDir?: string;
     /** PRI-634-F: host-declared tool semantics supplied by the constructing host adapter. */
     toolSemantics?: ToolSemanticRegistry;
     /**
@@ -235,6 +237,7 @@ export function createProductionHostRuntime(
   } = {},
 ): HostRuntime {
   const productionGate = createProductionRuleHostGate({
+    ...(options.projectDir ? { projectDir: options.projectDir } : {}),
     ...(options.ruleContextProvider ? { ruleContextProvider: options.ruleContextProvider } : {}),
     ...(options.ruleInputEnrichmentProvider ? { ruleInputEnrichmentProvider: options.ruleInputEnrichmentProvider } : {}),
     ...(options.ruleImplementationRuntime ? { implementationRuntime: options.ruleImplementationRuntime } : {}),

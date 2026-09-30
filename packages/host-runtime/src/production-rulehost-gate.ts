@@ -112,6 +112,7 @@ export interface RuleInputEnrichment {
 export type RuleInputEnrichmentProvider = (request: ProductionRuleContextRequest) => unknown | Promise<unknown>;
 
 export interface ProductionRuleHostGateOptions {
+  projectDir?: string;
   ruleContextProvider?: RuleContextProvider;
   ruleInputEnrichmentProvider?: RuleInputEnrichmentProvider;
   implementationRuntime?: RuleImplementationRuntime;
@@ -146,7 +147,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
 
     const canonicalKind = toolSemantics.resolve(input.toolName);
     const { isBashTool: isBash, isWriteTool: isWrite } = deriveToolHintsFromCanonicalKind(canonicalKind);
-    const action = buildRuleHostAction(input.toolName, input.params, event.context.workspaceDir, { isBashTool: isBash, isWriteTool: isWrite, canonicalKind });
+    const action = buildRuleHostAction(input.toolName, input.params, options.projectDir ?? event.context.workspaceDir, { isBashTool: isBash, isWriteTool: isWrite, canonicalKind });
     if (action.normalizedPath === null) return { decision: 'allow', source: event.source, metadata: { evaluatedLiveRules: 0 } };
 
     let context: RuleContextV2 | undefined;

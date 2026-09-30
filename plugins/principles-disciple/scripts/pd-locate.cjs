@@ -16,7 +16,7 @@ const os = require('os');
 const path = require('path');
 
 function codexDir() {
-  return path.join(os.homedir(), '.codex');
+  return process.env.CODEX_HOME ? path.resolve(process.env.CODEX_HOME) : path.join(os.homedir(), '.codex');
 }
 
 /** Numeric semver compare ("0.10.0" > "0.9.0"); invalid versions sort lowest. */
@@ -134,8 +134,19 @@ function ensurePluginData(explicit, pluginRoot) {
   return locatePluginData(undefined);
 }
 
-/** Nearest ancestor (inclusive) of startDir containing .pd/config.yaml. */
+/** An initialized user workspace takes precedence; otherwise use the nearest project. */
 function locateWorkspace(startDir) {
+  const userWorkspace = path.join(codexDir(), 'pd-workspace');
+  try {
+    if (fs.statSync(path.join(userWorkspace, '.pd', 'config.yaml')).isFile()) {
+      return { ok: true, workspaceDir: userWorkspace };
+    }
+    return { ok: false, reason: 'user_workspace_config_invalid', nextAction: 'Repair the user workspace .pd/config.yaml; project configuration was not used.' };
+  } catch (error) {
+    if (!(error instanceof Error && Object.hasOwn(error, 'code') && error.code === 'ENOENT')) {
+      return { ok: false, reason: 'user_workspace_config_unreadable', nextAction: 'Restore access to the user workspace .pd/config.yaml; project configuration was not used.' };
+    }
+  }
   let current = path.resolve(startDir);
   for (;;) {
     if (fs.existsSync(path.join(current, '.pd', 'config.yaml'))) return { ok: true, workspaceDir: current };
@@ -198,6 +209,10 @@ function pdEntryFromPath() {
  * Returns { command, prefix } or undefined (caller fails loud, ERR-002).
  */
 function pdCliCommand() {
+  // The official installer now owns the canonical CLI + non-npm shims.
+  // Looking only for npm global packages misses a healthy installed runtime.
+  const canonicalEntry = path.join(os.homedir(), '.pd', 'runtime', 'pd-cli', 'dist', 'index.js');
+  if (fs.existsSync(canonicalEntry)) return { command: process.execPath, prefix: [canonicalEntry] };
   let globalRoot;
   try {
     globalRoot = execSync('npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 }).trim();
