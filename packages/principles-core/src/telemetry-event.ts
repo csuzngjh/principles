@@ -455,6 +455,11 @@ export const TelemetryEventType = Type.Union([
   // Principle.reuseEvidence[]) and never influence intake outcomes.
   Type.Literal('reuse_evaluation_recommended'),
   Type.Literal('reuse_evaluation_unavailable'),
+  // PRI-917 v0.3.3 (OD-PRI917-05): the auto-path Reuse Review Gate parked a
+  // candidate for Owner review. Observation only — the Owner's verdict lives
+  // exclusively in Principle.reuseEvidence[]; this event is never decision
+  // storage and never influences outcomes by itself.
+  Type.Literal('reuse_gate_triggered'),
   Type.Literal('rollout_completion_intent_finalize_terminal'),
   Type.Literal('rollout_completion_intent_resumed'),
   Type.Literal('rollout_completion_intent_stale_epoch'),

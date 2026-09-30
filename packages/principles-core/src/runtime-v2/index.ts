@@ -219,6 +219,12 @@ export type {
 export { validateRecommendation } from './candidate-intake.js';
 export { CandidateIntakeService } from './candidate-intake-service.js';
 export type { CandidateIntakeServiceOptions } from './candidate-intake-service.js';
+// PRI-917 v0.3.3 (OD-PRI917-05) — auto-path Reuse Review Gate: the semantic
+// recommendation hook builder shared by the three automatic intake sites
+// (pain-signal-runtime-factory / pd diagnose / pd pain-retry). RECOMMENDATION
+// channel only; the durable authority stays reuseEvidence.
+export { createReuseRecommendationHook } from './pain-signal-runtime-factory.js';
+export type { ReuseRecommendationOutcome } from './candidate-intake-service.js';
 // PRI-917 PR3A — the Owner decision surface (`pd candidate review`) consumes
 // the same proposal/semantics machinery as the intake gate, through this
 // barrel only (interaction layer; the durable authority stays reuseEvidence).

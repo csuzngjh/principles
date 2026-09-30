@@ -41,6 +41,14 @@ interface ShapeBridgeResultBase {
    * reported as routed / not_internalizable rather than as a failed run.
    */
   ledgerEligibleCandidateCount: number;
+  /**
+   * PRI-917 v0.3.3 — candidateIds parked by the Reuse Review Gate (suspected
+   * duplicates awaiting the Owner). A parked ledger-eligible candidate has NO
+   * ledger entry BY DESIGN, so a batch whose ledger-eligible candidates are
+   * ALL parked is a degraded "waiting for the Owner" outcome, not the intake
+   * failure this branch used to report.
+   */
+  reuseReviewRequiredCandidateIds?: string[];
   /** PRI-539: candidates admitted+ledgered but not internalizable (MVP-disabled channel). */
   notInternalizable?: NotInternalizableCandidate[];
 }
@@ -109,7 +117,25 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
     // Admitted LEDGER-ELIGIBLE candidates exist but intake produced no ledger
     // entries. Non-principle kinds are excluded here: the Principle Ledger write
     // boundary refuses them by design (Phase 1 / PR1), which is not a failure.
+    // PRI-917 v0.3.3: candidates parked by the Reuse Review Gate also have no
+    // ledger entry BY DESIGN — when EVERY ledger-eligible candidate is parked,
+    // the run is a degraded "awaiting the Owner" outcome (rc-9), not a failure.
     if (autoIntakeEnabled && input.ledgerEligibleCandidateCount > 0 && ledgerEntryIds.length === 0) {
+      const parked = input.reuseReviewRequiredCandidateIds ?? [];
+      if (parked.length > 0 && parked.length >= input.ledgerEligibleCandidateCount) {
+        return {
+          status: 'degraded',
+          painId,
+          taskId,
+          runId,
+          artifactId,
+          candidateIds,
+          ledgerEntryIds,
+          admissionResults,
+          notInternalizable: input.notInternalizable,
+          message: `reuse_review_required:${parked.join(',')} — suspected duplicates parked for Owner review; nextAction: pd candidate review --candidate-id <id> --decide reuse|create`,
+        };
+      }
       return {
         status: 'failed',
         painId,
