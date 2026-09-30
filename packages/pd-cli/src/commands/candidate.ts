@@ -35,12 +35,16 @@ import {
   isPrincipleLedgerEligibleKind,
   resolveOwnerIdentity,
   defaultOwnerIdentityHomeDir,
+  ReuseEvaluationRunner,
+  ReuseEvaluationError,
   type LedgerPrincipleEntry,
   type ReuseDecision,
   type CandidateIntakeResult,
 } from '@principles/core/runtime-v2';
 import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { loadPdConfig } from '../services/pd-config-loader.js';
+import { resolveRuntimeAdapterFromConfig } from '../services/runtime-adapter-resolver.js';
 import { resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';
@@ -604,6 +608,84 @@ async function reportReuseResolution(opts: {
 }
 
 /**
+ * PRI-917 v0.3.2 (Phase 3C-4): run the Semantic Reuse Evaluation Capability
+ * against the lexical proposal and return a DISPLAY object.
+ *
+ * Display-only by construction:
+ *   - the result is rendered for the Owner; nothing here persists, and the
+ *     runner itself has no ledger path (Phase 3C-3);
+ *   - the recommendation NEVER flows into an automatic decision — the Owner's
+ *     `--decide` verdict is the only thing that reaches intake (T4);
+ *   - any failure (capability disabled, profile unconfigured, LLM timeout,
+ *     contract violation) degrades OBSERVABLY to `status: 'unavailable'`
+ *     with the reason (SPEC §9) — the lexical proposal still shows, and the
+ *     Owner can still decide (T5).
+ *
+ * Returns null when the capability is disabled in config (silent by design —
+ * `pd config doctor` is the place that advertises the capability; a disabled
+ * advisory stage should not add review noise).
+ */
+type ReuseEvaluationDisplay =
+  | { status: 'recommended'; recommendation: 'reuse' | 'create' | 'uncertain'; selectedPrincipleId?: string; rationale: string; confidence: number }
+  | { status: 'unavailable'; reason: string };
+
+async function evaluateReuseProposal(
+  workspaceDir: string,
+  claim: { text: string; triggerPattern: string; action: string },
+  entries: readonly {
+    principleId: string;
+    existingPrinciple: { text: string; triggerPattern: string; action: string; status: string };
+  }[],
+): Promise<ReuseEvaluationDisplay | null> {
+  const configLoad = loadPdConfig(workspaceDir);
+  const effective = configLoad.ok ? configLoad.effective : configLoad.defaults;
+  const capability = effective.config.reuseEvaluation;
+  if (!capability?.enabled) {
+    return null;
+  }
+  if (entries.length === 0) {
+    // Case A (SPEC §6): nothing credible was found — there is nothing to
+    // evaluate, and intake proceeds to create without an Owner decision.
+    return null;
+  }
+
+  try {
+    const adapter = resolveRuntimeAdapterFromConfig({
+      runtimeKind: 'config',
+      workspaceDir,
+      runtimeProfileId: capability.runtimeProfile,
+    });
+    const runner = new ReuseEvaluationRunner(
+      { runtimeAdapter: adapter },
+      { ...(capability.timeoutMs !== undefined ? { timeoutMs: capability.timeoutMs } : {}) },
+    );
+    const output = await runner.recommend({
+      candidate: claim,
+      candidates: entries.map((entry) => ({
+        principleId: entry.principleId,
+        text: entry.existingPrinciple.text,
+        triggerPattern: entry.existingPrinciple.triggerPattern,
+        action: entry.existingPrinciple.action,
+      })),
+    });
+    return {
+      status: 'recommended',
+      recommendation: output.recommendation,
+      ...(output.selectedPrincipleId !== undefined ? { selectedPrincipleId: output.selectedPrincipleId } : {}),
+      rationale: output.rationale,
+      confidence: output.confidence,
+    };
+  } catch (err: unknown) {
+    const reason = err instanceof ReuseEvaluationError
+      ? `${err.reason}: ${err.detail ?? err.message}`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+    return { status: 'unavailable', reason };
+  }
+}
+
+/**
  * Decision mode of {@link handleCandidateReview}: validate the CLI contract
  * (rc-3), resolve the Owner identity (fail-closed), then run the EXISTING
  * intake chain with the §11 verdict injected. No CLI-side persistence.
@@ -1014,6 +1096,16 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
       };
     });
 
+    // PRI-917 v0.3.2 (Phase 3C-4): run the Semantic Reuse Evaluation
+    // Capability as a DISPLAY enhancement on the read-only review path. Its
+    // output is a RECOMMENDATION for the Owner — it never decides, never
+    // writes, and its failure degrades observably to lexical-only (SPEC §9).
+    const evaluation = await evaluateReuseProposal(workspaceDir, {
+      text: recommendation.text || candidate.description || '',
+      triggerPattern: recommendation.triggerPattern ?? '',
+      action: recommendation.action ?? '',
+    }, entries);
+
     const nextAction = entries.length > 0
       ? `pd candidate review --candidate-id ${opts.candidateId} --decide reuse --principle-id <id> --reason "..." (or --decide create --reason "...")`
       : `No credible reuse proposal — intake will create a new Principle: pd candidate intake --candidate-id ${opts.candidateId} --workspace "${workspaceDir}"`;
@@ -1027,7 +1119,17 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
         taskId: candidate.taskId,
         recommendationKindEligible: true,
         claim: { text: recommendation.text || candidate.description || '', triggerPattern: recommendation.triggerPattern ?? '', action: recommendation.action ?? '' },
-        proposal: { status: proposal.status, eligibleCount: proposal.eligibleCount, candidates: entries },
+        proposal: {
+          status: proposal.status,
+          eligibleCount: proposal.eligibleCount,
+          candidates: entries.map((entry) => ({
+            ...entry,
+            semanticMatch: evaluation?.status === 'recommended'
+              && evaluation.recommendation === 'reuse'
+              && evaluation.selectedPrincipleId === entry.principleId,
+          })),
+        },
+        ...(evaluation ? { evaluation } : {}),
         nextAction,
       }, null, 2));
       return;
@@ -1055,6 +1157,22 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
       console.log(`       action:  ${entry.existingPrinciple.action}`);
       console.log(`       status:  ${entry.existingPrinciple.status}`);
     });
+    console.log('');
+    if (evaluation === null) {
+      // Capability disabled (or nothing to evaluate): lexical-only review,
+      // exactly the pre-3C-4 output.
+    } else if (evaluation.status === 'recommended') {
+      console.log('  Semantic evaluation (advisory — the Owner decides):');
+      console.log(`    recommendation: ${evaluation.recommendation}`);
+      if (evaluation.selectedPrincipleId) {
+        console.log(`    principle:      ${evaluation.selectedPrincipleId}`);
+      }
+      console.log(`    rationale:      ${evaluation.rationale}`);
+      console.log(`    confidence:     ${evaluation.confidence}`);
+    } else {
+      console.log('  Semantic evaluation: UNAVAILABLE (lexical proposal only — not semantically judged)');
+      console.log(`    reason: ${evaluation.reason}`);
+    }
     console.log(`\n  Next Action:  ${nextAction}\n`);
   } catch (err) {
     if (err instanceof CandidateIntakeError || (err as { name?: string }).name === 'CandidateIntakeError') {
