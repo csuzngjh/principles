@@ -132,7 +132,7 @@ function detectHookTrust() {
   const configToml = path.join(codexDir(), 'config.toml');
   try {
     const raw = fs.readFileSync(configToml, 'utf8');
-    const match = /\bhooks\s*=\s*(true|false)/.exec(raw);
+    const match = /^\s*(?:hooks|codex_hooks)\s*=\s*(true|false)\s*(?:#.*)?$/m.exec(raw);
     if (!match) return { detectable: false, trusted: undefined, reason: 'hooks_setting_not_found', nextAction: 'Run /hooks in Codex and trust the Principles Disciple hooks.' };
     return { detectable: true, trusted: match[1] === 'true' };
   } catch {

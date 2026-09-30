@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -200,11 +201,21 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     return { stdout: {}, exitCode: 0, stderr: [diagnostic(reason, nextAction)] };
   }
 
-  // Codex 0.147 supplies the invocation cwd. It is the authoritative starting
-  // point; a process-global environment variable can otherwise route one
-  // Workspace's hook into another Workspace's business state.
+  // Initializing the user workspace explicitly opts Codex into shared
+  // governance. Otherwise preserve the existing per-project resolution.
   const requestedCwd = event.context.workspaceDir || cwd;
-  const resolution = resolveNearestPdWorkspace(requestedCwd);
+  if (!path.isAbsolute(requestedCwd)) return { stdout: {}, exitCode: 0, stderr: [diagnostic('cwd_not_absolute', 'Provide the absolute Codex project directory.')] };
+  const userWorkspace = path.join(_env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'pd-workspace');
+  let userWorkspaceInitialized = false;
+  try {
+    userWorkspaceInitialized = statSync(path.join(userWorkspace, '.pd', 'config.yaml')).isFile();
+    if (!userWorkspaceInitialized) return { stdout: {}, exitCode: 0, stderr: [diagnostic('user_workspace_config_invalid', 'Repair the user workspace .pd/config.yaml; project configuration was not used.')] };
+  } catch (error) {
+    if (!(error instanceof Error && Object.hasOwn(error, 'code') && Reflect.get(error, 'code') === 'ENOENT')) {
+      return { stdout: {}, exitCode: 0, stderr: [diagnostic('user_workspace_config_unreadable', 'Restore access to the user workspace .pd/config.yaml; project configuration was not used.')] };
+    }
+  }
+  const resolution = resolveNearestPdWorkspace(userWorkspaceInitialized ? userWorkspace : requestedCwd);
   if (!resolution.ok) return { stdout: {}, exitCode: 0, stderr: [diagnostic(resolution.reason, resolution.nextAction)] };
   event = { ...event, context: { ...event.context, workspaceDir: resolution.workspaceDir } };
   const config = loadPdConfigForPlugin(resolution.workspaceDir);
@@ -247,6 +258,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // the Codex adapter stays independent of the OpenClaw plugin). The line
     // writer appends synchronously — no flush/dispose needed for the subprocess.
     const result = await createProductionHostRuntime({
+      projectDir: requestedCwd,
       hostKind: 'codex',
       toolSemantics: CODEX_TOOL_SEMANTICS,
       events: codexEventEmitter(path.join(resolution.workspaceDir, '.state')),
