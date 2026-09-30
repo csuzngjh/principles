@@ -334,3 +334,77 @@ describe('CLI handler: --json stdout purity and exit code', () => {
     } finally { rmTmpDir(tmp); }
   });
 });
+
+
+// ── Semantic Reuse Evaluation Capability (PRI-917 v0.3.2 §8) ─────────────────
+
+describe('reuseEvaluation capability reporting', () => {
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    stdoutSpy.mockRestore();
+  });
+
+  it('reports defaults (enabled, defaultRuntime fallback) for a config WITHOUT the section', async () => {
+    const tmp = mkTmpDir();
+    try {
+      writeConfig(tmp, makeValidConfigYaml());
+      const out: DoctorOutput = await buildDoctorOutput({ workspaceDir: tmp });
+      expect(out.reuseEvaluation.enabled).toBe(true);
+      expect(out.reuseEvaluation.runtimeProfile).toBe('openclaw.default');
+      expect(out.reuseEvaluation.profileConfigured).toBe(true);
+      expect(out.reuseEvaluation.timeoutMs).toBeUndefined();
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('reports a configured section verbatim (enabled/runtimeProfile/timeoutMs)', async () => {
+    const tmp = mkTmpDir();
+    try {
+      writeConfig(tmp, yaml.dump({
+        version: 1,
+        features: { prompt: { category: 'core', enabled: true }, code_tool_hook: { category: 'core', enabled: true }, defer_archive: { category: 'core', enabled: true } },
+        runtimeProfiles: { 'openclaw.default': { type: 'openclaw', source: 'default' }, 'pd.custom': { type: 'pi-ai', provider: 'x', model: 'y', apiKeyEnv: 'X_KEY' } },
+        internalAgents: { defaultRuntime: 'openclaw.default', agents: { diagnostician: { enabled: true } } },
+        reuseEvaluation: { enabled: false, runtimeProfile: 'pd.custom', timeoutMs: 45000 },
+      }));
+      const out: DoctorOutput = await buildDoctorOutput({ workspaceDir: tmp });
+      expect(out.reuseEvaluation).toEqual({
+        enabled: false,
+        runtimeProfile: 'pd.custom',
+        profileConfigured: true,
+        timeoutMs: 45000,
+      });
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('flags an unconfigured profile instead of implying the capability can run', async () => {
+    const tmp = mkTmpDir();
+    try {
+      writeConfig(tmp, yaml.dump({
+        version: 1,
+        features: { prompt: { category: 'core', enabled: true }, code_tool_hook: { category: 'core', enabled: true }, defer_archive: { category: 'core', enabled: true } },
+        runtimeProfiles: { 'openclaw.default': { type: 'openclaw', source: 'default' } },
+        internalAgents: { defaultRuntime: 'openclaw.default', agents: { diagnostician: { enabled: true } } },
+        reuseEvaluation: { enabled: true, runtimeProfile: 'missing.profile' },
+      }));
+      const out: DoctorOutput = await buildDoctorOutput({ workspaceDir: tmp });
+      expect(out.reuseEvaluation.profileConfigured).toBe(false);
+      expect(out.warnings.some((w) => w.includes('reuseEvaluation') && w.includes('missing.profile'))).toBe(true);
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('CLI text output shows the capability section', async () => {
+    const tmp = mkTmpDir();
+    try {
+      writeConfig(tmp, makeValidConfigYaml());
+      await handleConfigDoctor({ workspace: tmp, json: false });
+      const printed = stdoutSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(printed).toContain('Semantic reuse evaluation:');
+      expect(printed).toContain('enabled');
+      expect(printed).toContain('openclaw.default');
+    } finally { rmTmpDir(tmp); }
+  });
+});

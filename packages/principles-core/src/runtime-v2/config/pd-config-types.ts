@@ -156,6 +156,40 @@ export interface UiConfig {
   };
 }
 
+// ── Reuse Evaluation Config (PRI-917 v0.3.2 §8) ─────────────────────────────
+
+/**
+ * Semantic Reuse Evaluation Capability (SPEC v0.3.2 §8).
+ *
+ * A DEDICATED, named config section — deliberately NOT a general capability
+ * registry: there is exactly one instance, and a generic registry would be a
+ * speculative abstraction (P7 / antipattern-future-extensibility). A second
+ * real capability earns its own explicit design decision.
+ *
+ * Legacy configs without this section load unchanged (zero migration): the
+ * effective layer resolves it against the defaults below.
+ */
+export interface ReuseEvaluationConfig {
+  /**
+   * Whether the evaluation capability is enabled. Default: true (PRI-797
+   * precedent — default on; an unconfigured runtime profile degrades
+   * observably instead of failing silently). The capability only produces
+   * RECOMMENDATIONS; it never decides and never blocks Principle creation.
+   */
+  enabled: boolean;
+  /**
+   * Runtime profile id for the evaluation LLM call. Falls back to
+   * `internalAgents.defaultRuntime` when unset.
+   */
+  runtimeProfile?: string;
+  /**
+   * Per-run timeout override in milliseconds. Same shape and style as
+   * `runtimeProfiles.*.timeoutMs`; when unset, the resolved profile's own
+   * timeout applies.
+   */
+  timeoutMs?: number;
+}
+
 // ── Principles Config (PRI-336) ──────────────────────────────────────────────
 
 import type { OutputLanguage } from '../language-directive.js';
@@ -289,6 +323,12 @@ export interface PdConfig {
   ui: UiConfig;
   /** Principle generation preferences (PRI-336). */
   principles?: PrinciplesConfig;
+  /**
+   * Semantic Reuse Evaluation Capability (PRI-917 v0.3.2 §8) — dedicated
+   * config section, not a general capability registry. Absent in legacy
+   * configs; the effective layer resolves the defaults.
+   */
+  reuseEvaluation?: ReuseEvaluationConfig;
   /** Agent behavioral profile — partial user input; defaults resolved in effective config (PRI-304). */
   profile?: Partial<ProfileConfig>;
   /** Context injection configuration — partial user input; defaults resolved in effective config. */
@@ -381,6 +421,8 @@ export interface RedactedPdConfigSummary {
   ui: UiConfig;
   profile?: RedactedProfileSummary;
   contextInjection?: ContextInjectionConfig;
+  /** PRI-917 v0.3.2 §8 — Semantic Reuse Evaluation Capability (read-only display). */
+  reuseEvaluation?: ReuseEvaluationConfig;
   warnings: string[];
 }
 
