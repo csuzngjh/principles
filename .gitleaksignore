@@ -67,3 +67,14 @@ a75c89f7bb529be3f96adb75df458c5492bd16fd:docs/architecture/SECURITY_ARCHITECTURE
 a75c89f7bb529be3f96adb75df458c5492bd16fd:packages/pd-cli/src/commands/runtime-uat.guard.test.ts:generic-api-key:56
 a75c89f7bb529be3f96adb75df458c5492bd16fd:packages/principles-core/src/runtime-v2/store/context/sqlite-context-assembler.test.ts:generic-api-key:657
 a75c89f7bb529be3f96adb75df458c5492bd16fd:packages/principles-core/src/runtime-v2/store/context/sqlite-context-assembler.test.ts:generic-api-key:789
+
+# PRI-917 v0.3.2 (2026-09-30): findings at commit 42f0f4a7 (#1856) — all four
+# are test fixtures / documentation examples, not secrets:
+#   SECURITY_ARCHITECTURE.md:439          doc example "sk-1234567890..."
+#   runtime-uat.guard.test.ts:56          test env 'test-key-for-pri-334'
+#   sqlite-context-assembler.test.ts:657  redaction-logic fixture (fake values)
+#   sqlite-context-assembler.test.ts:789  redaction-logic fixture (fake values)
+42f0f4a7ad1c5d8be4d0b8cb6cf34a0274ba6b79:docs/architecture/SECURITY_ARCHITECTURE.md:generic-api-key:439
+42f0f4a7ad1c5d8be4d0b8cb6cf34a0274ba6b79:packages/pd-cli/src/commands/runtime-uat.guard.test.ts:generic-api-key:56
+42f0f4a7ad1c5d8be4d0b8cb6cf34a0274ba6b79:packages/principles-core/src/runtime-v2/store/context/sqlite-context-assembler.test.ts:generic-api-key:657
+42f0f4a7ad1c5d8be4d0b8cb6cf34a0274ba6b79:packages/principles-core/src/runtime-v2/store/context/sqlite-context-assembler.test.ts:generic-api-key:789
