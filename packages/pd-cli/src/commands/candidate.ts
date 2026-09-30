@@ -37,6 +37,7 @@ import {
   defaultOwnerIdentityHomeDir,
   ReuseEvaluationRunner,
   ReuseEvaluationError,
+  storeEmitter,
   type LedgerPrincipleEntry,
   type ReuseDecision,
   type CandidateIntakeResult,
@@ -1105,6 +1106,42 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
       triggerPattern: recommendation.triggerPattern ?? '',
       action: recommendation.action ?? '',
     }, entries);
+
+    // PRI-917 v0.3.2 §11: the events are OBSERVATION ONLY. They record what
+    // the capability recommended; they are never decision storage (the
+    // Owner's verdict lives exclusively in Principle.reuseEvidence[]) and
+    // no intake outcome reads them. Emitted only when the capability
+    // actually ran (disabled or nothing-to-evaluate emits nothing).
+    if (evaluation !== null) {
+      const timestamp = new Date().toISOString();
+      if (evaluation.status === 'recommended') {
+        storeEmitter.emitTelemetry({
+          eventType: 'reuse_evaluation_recommended',
+          traceId: opts.candidateId,
+          timestamp,
+          sessionId: 'pd-cli-review',
+          agentId: 'reuse-evaluation',
+          payload: {
+            candidateId: opts.candidateId,
+            recommendation: evaluation.recommendation,
+            ...(evaluation.selectedPrincipleId !== undefined ? { selectedPrincipleId: evaluation.selectedPrincipleId } : {}),
+            confidence: evaluation.confidence,
+          },
+        });
+      } else {
+        storeEmitter.emitTelemetry({
+          eventType: 'reuse_evaluation_unavailable',
+          traceId: opts.candidateId,
+          timestamp,
+          sessionId: 'pd-cli-review',
+          agentId: 'reuse-evaluation',
+          payload: {
+            candidateId: opts.candidateId,
+            reason: evaluation.reason.slice(0, 200),
+          },
+        });
+      }
+    }
 
     const nextAction = entries.length > 0
       ? `pd candidate review --candidate-id ${opts.candidateId} --decide reuse --principle-id <id> --reason "..." (or --decide create --reason "...")`

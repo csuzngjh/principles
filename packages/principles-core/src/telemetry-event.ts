@@ -449,6 +449,12 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('rollout_activation_candidate_unresolved'),
   // PRI-917 PR3A: candidate intake failure in bridge loop (sibling isolation)
   Type.Literal('candidate_intake_failed'),
+  // PRI-917 v0.3.2 §11: Semantic Reuse Evaluation Capability — observation
+  // only. These events RECORD what the capability recommended; they are never
+  // decision storage (the Owner's verdict lives exclusively in
+  // Principle.reuseEvidence[]) and never influence intake outcomes.
+  Type.Literal('reuse_evaluation_recommended'),
+  Type.Literal('reuse_evaluation_unavailable'),
   Type.Literal('rollout_completion_intent_finalize_terminal'),
   Type.Literal('rollout_completion_intent_resumed'),
   Type.Literal('rollout_completion_intent_stale_epoch'),
