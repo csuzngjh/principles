@@ -1,5 +1,13 @@
 # @principles/host-runtime
 
+## 0.7.13
+
+### Patch Changes
+
+- cee2304: Use the Codex user governance workspace across projects while resolving tool paths from the active project. Register Marketplace setup with the existing canonical installation so Companion can discover its Codex worker.
+- Updated dependencies [df9e555]
+  - @principles/core@1.289.0
+
 ## 0.7.12
 
 ### Patch Changes
