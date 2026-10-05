@@ -137,8 +137,7 @@ describe('PainSignalBridge.buildExistingResult', () => {
   });
 
   it('HG-4b: an EXPIRED principle candidate without a ledger entry (no parked carrier) still returns failed', async () => {
-    const candidates = [mockCandidate('c1', TASK_ID)];
-    candidates[0] = { ...candidates[0], status: 'expired' };
+    const candidates = [{ ...mockCandidate('c1', TASK_ID), status: 'expired' as const }];
     const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
     const ledgerAdapter = makeMockLedgerAdapter(new Map());
     const runner = makeMockRunner();
