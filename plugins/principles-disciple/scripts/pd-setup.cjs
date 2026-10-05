@@ -30,7 +30,7 @@ const path = require('path');
 const os = require('os');
 const { pathToFileURL } = require('url');
 const readline = require('node:readline/promises');
-const { ensurePluginData, locatePluginRoot, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
+const { ensurePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:setup] status=failed reason=${reason}`);
@@ -92,7 +92,21 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.error) { fail(args.error, args.nextAction ?? 'Check the argument list.'); return; }
-  const workspaceDir = path.resolve(args.workspace ?? process.cwd());
+  // Workspace-selection parity with hooks and the owner scripts (ERR-117):
+  // they resolve through locateWorkspace — an initialized user workspace wins
+  // over the project, and a broken user config fails loud instead of silently
+  // falling back to project configuration. Explicit --workspace still wins for
+  // the documented first-run opt-in, and a project with no config anywhere
+  // keeps the legacy cwd behavior (this script initializes it in step 3).
+  let workspaceDir;
+  if (args.workspace) {
+    workspaceDir = path.resolve(args.workspace);
+  } else {
+    const located = locateWorkspace(process.cwd());
+    if (located.ok) workspaceDir = located.workspaceDir;
+    else if (located.reason === 'workspace_not_initialized') workspaceDir = process.cwd();
+    else { fail(located.reason, located.nextAction); return; }
+  }
 
   // 1. Environment gate. The pinned @principles/core runtime depends on
   //    better-sqlite3 ^13, whose prebuilt binaries require Node >= 22 — the

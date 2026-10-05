@@ -7,7 +7,7 @@ description: Initialize Principles Disciple for this Codex workspace — install
 
 Prepares PD so owner-approved principles can steer Codex sessions. The runtime is installed into the plugin's private data dir and workspace state is initialized through `pd runtime init`.
 
-When the Owner requests principles shared across projects, initialize `<CODEX_HOME>/pd-workspace` (default `~/.codex/pd-workspace`) using `--workspace <absolute-path>`. Once that directory contains `.pd/config.yaml`, Codex hooks and the review/status/disable skills use it before project-local configurations. This is an explicit opt-in to one Codex user-level governance workspace; OpenClaw remains separate. Without it, the nearest project workspace still applies. A disabled or malformed user configuration does not fall back to a project configuration.
+When the Owner requests principles shared across projects, initialize `<CODEX_HOME>/pd-workspace` (default `~/.codex/pd-workspace`) using `--workspace <absolute-path>`. Once that directory contains `.pd/config.yaml`, Codex hooks and the review/status/disable skills use it before project-local configurations. Setup follows the same rule: without `--workspace` it targets that initialized user workspace and fails loud when its config is broken, while a project with no configuration anywhere still initializes the current directory. This is an explicit opt-in to one Codex user-level governance workspace; OpenClaw remains separate. Without it, the nearest project workspace still applies. A disabled or malformed user configuration does not fall back to a project configuration.
 
 ## Steps
 
