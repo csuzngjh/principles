@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HostEvent } from '@principles/core/host';
 import { extractFilePathFromParams } from '@principles/core/runtime-v2';
 import { createProductionHostRuntime } from '../src/index.js';
-import { productionPainCooldownEntryCountForTest, resetProductionPainCooldownForTest } from '../src/production-pain-evidence.js';
+import { deriveProductionToolPainIdentity, productionPainCooldownEntryCountForTest, resetProductionPainCooldownForTest } from '../src/production-pain-evidence.js';
 
 const workspaces: string[] = [];
 
@@ -49,6 +49,28 @@ afterEach(() => {
 });
 
 describe('production after-tool pain/evidence kernel', () => {
+  it('keeps live evidence compatible with replay when project cwd differs from governance workspace', async () => {
+    const workspaceDir = workspaceWithTrajectory();
+    const projectDir = path.join(os.tmpdir(), 'pd-separate-project');
+    const event = failedWrite(workspaceDir);
+    event.context.toolInput = { file_path: path.join(projectDir, 'src', 'a.ts'), content: 'blocked' };
+    const runtime = createProductionHostRuntime({ projectDir });
+    await runtime.dispatch(event);
+    const replay = deriveProductionToolPainIdentity({ ...event.context, source: event.source });
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      expect(db.prepare('SELECT params_json, result_preview FROM tool_calls').get()).toEqual({
+        params_json: replay.paramsJson,
+        result_preview: replay.resultPreview,
+      });
+      expect(db.prepare('SELECT canonical_pain_id FROM pain_events').get()).toEqual({ canonical_pain_id: replay.painId });
+      expect((await createProductionHostRuntime().dispatch(event)).metadata?.duplicate).toBe(true);
+      expect(db.prepare('SELECT count(*) AS count FROM pain_events').get()).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
   it('persists one lineaged tool failure and admitted pain through the production runtime', async () => {
     const workspaceDir = workspaceWithTrajectory();
     const runtime = createProductionHostRuntime({

@@ -457,7 +457,7 @@ describe('first-run $pd-setup (real user flow)', () => {
       encoding: 'utf8',
       timeout: 240_000,
       // Redirect the home dir cross-platform: os.homedir() reads HOME on POSIX and USERPROFILE/HOMEDRIVE+HOMEPATH on Windows.
-      env: { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome, HOMEDRIVE: path.parse(fakeHome).root.slice(0, 2), HOMEPATH: fakeHome.slice(2).split(path.sep).join('/'), PLUGIN_DATA: undefined },
+      env: { ...process.env, CODEX_HOME: path.join(fakeHome, '.codex'), HOME: fakeHome, USERPROFILE: fakeHome, HOMEDRIVE: path.parse(fakeHome).root.slice(0, 2), HOMEPATH: fakeHome.slice(2).split(path.sep).join('/'), PLUGIN_DATA: undefined },
     });
     expect(result.status, result.stderr.slice(0, 400)).toBe(0);
     const report = JSON.parse(result.stdout) as { pluginData: string; runtime: Record<string, string>; runtimeInstalled: string };
