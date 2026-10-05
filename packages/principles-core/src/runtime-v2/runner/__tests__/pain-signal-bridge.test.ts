@@ -112,8 +112,33 @@ describe('PainSignalBridge.buildExistingResult', () => {
     expect(result.ledgerEntryIds).toEqual([]);
   });
 
-  it('HG-4: autoIntakeEnabled=true requires ledger entries — none exist returns failed', async () => {
+  it('HG-4 (P2-3 contract change): a STILL-PENDING principle candidate without a ledger entry is the parked carrier — review_required, not failed', async () => {
+    // Owner PR review P2-3: this replay previously reported 'failed', flipping
+    // the fresh path's review_required outcome on every replay. The pending
+    // candidate IS the durable parked carrier, so the replay keeps it.
     const candidates = [mockCandidate('c1', TASK_ID)];
+    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
+    const ledgerAdapter = makeMockLedgerAdapter(new Map());
+    const runner = makeMockRunner();
+
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: runner,
+      intakeService: undefined as any,
+      ledgerAdapter,
+      autoIntakeEnabled: true,
+    });
+
+    const result = await (bridge as any).buildExistingResult({ painId: PAIN_ID, taskId: TASK_ID });
+    expect(result.status).toBe('degraded');
+    expect(result.message).toContain('reuse_review_required:c1');
+    expect(result.message).toContain('pd candidate review');
+    expect(result.candidateOutcomes?.[0]?.reason).toBe('reuse_review_required');
+  });
+
+  it('HG-4b: an EXPIRED principle candidate without a ledger entry (no parked carrier) still returns failed', async () => {
+    const candidates = [mockCandidate('c1', TASK_ID)];
+    candidates[0] = { ...candidates[0], status: 'expired' };
     const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
     const ledgerAdapter = makeMockLedgerAdapter(new Map());
     const runner = makeMockRunner();
