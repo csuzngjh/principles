@@ -3,6 +3,7 @@
 '@principles/pd-cli': minor
 '@principles/codex-adapter': patch
 'principles-disciple': patch
+'create-principles-disciple': patch
 ---
 
 PRI-917 v0.3.3 (OD-PRI917-05): Reuse Review Gate — automatic candidate intake now consults the semantic reuse evaluation capability before creating a Principle.
