@@ -179,6 +179,19 @@ function createBridge(deps: MockDeps, autoIntakeEnabled = true): PainSignalBridg
   });
 }
 
+function enableReplayReview(deps: MockDeps, candidates: CandidateRecord[], output = makeHighConfidenceOutput()): void {
+  Object.defineProperty(deps.intakeService, 'reuseReviewEnabled', { value: true, configurable: true });
+  deps.intakeService.reviewReuse = async (candidateId) => ({
+    outcome: 'refused', reason: 'reuse_pending_owner', candidateId,
+    rawRecommendationKind: 'principle', message: 'confirmed reuse recommendation',
+  });
+  deps.stateManager = {
+    ...deps.stateManager,
+    getTask: async () => ({ taskId: TASK_ID, status: 'succeeded', diagnosticJson: JSON.stringify({ provenance: 'owner_reported_no_host_trace', evidence: [{ sourceRef: 'input', note: 'submitted evidence' }] }) }),
+    getRun: async (runId: string) => ({ runId, taskId: candidates.find((c) => c.sourceRunId === runId)?.taskId, executionStatus: 'succeeded', outputPayload: JSON.stringify(output) }),
+  } as unknown as RuntimeStateManager;
+}
+
 // Interface for accessing private buildExistingResult
 interface BridgeWithPrivate {
   buildExistingResult(input: { painId: string; taskId: string }): Promise<PainSignalBridgeResult>;
@@ -554,15 +567,12 @@ describe('PRI-456: buildExistingResult result-shaping characterization', () => {
     expect(result.message).toBe('Task has no principle candidates — treating as failed');
   });
 
-  it('review_required (P2-3): replay of a task whose principle candidate is STILL PENDING without a ledger entry — the parked carrier, not an intake failure', async () => {
-    // Contract change (Owner PR review, P2-3): this scenario previously reported
-    // 'failed' ("Candidate intake did not produce a ledger entry"), flipping the
-    // fresh path's review_required outcome on every replay. A principle-kind
-    // candidate still PENDING without a ledger entry IS the durable carrier of
-    // "parked by the Reuse Review Gate" (the park persists nothing), so the
-    // replay must keep the same review_required outcome and guidance.
+  it('review_required (P2-3): replay admission and read-only reuse review confirm the pending candidate', async () => {
+    // Pending alone is insufficient: only an admitted candidate with a fresh
+    // read-only reuse recommendation receives the review disposition.
     const candidates = [makeCandidate('c1', 'principle')];
     const deps = makeMockDeps({ candidates, ledgerEntries: new Map() });
+    enableReplayReview(deps, candidates);
     const bridge = createBridge(deps);
 
     const result = await (bridge as unknown as BridgeWithPrivate).buildExistingResult({
@@ -604,17 +614,14 @@ describe('PRI-456: buildExistingResult result-shaping characterization', () => {
   });
 
   it('review_required (P2-2/F3): replayed batch with one ledgered and one still-pending candidate keeps the park visible', async () => {
-    // Contract change (Owner PR review, P2-2 + P2-3): this mixed replay
-    // previously reported plain 'succeeded' / "Task already succeeded",
-    // hiding the pending candidate from every consumer. Only existing ledgers
-    // are counted — and the still-pending principle candidate without one is
-    // the parked carrier, so the replay keeps the review_required outcome.
+    // Only a confirmed reuse recommendation belongs in the parked subset.
     const candidates = [
       makeCandidate('c1', 'principle'),
       makeCandidate('c2', 'principle'),
     ];
     const ledgerEntries = new Map<string, LedgerPrincipleEntry>([['c1', makeLedgerEntry('c1')]]);
     const deps = makeMockDeps({ candidates, ledgerEntries });
+    enableReplayReview(deps, candidates);
     const bridge = createBridge(deps);
 
     const result = await (bridge as unknown as BridgeWithPrivate).buildExistingResult({
@@ -633,6 +640,50 @@ describe('PRI-456: buildExistingResult result-shaping characterization', () => {
     expect(result.candidateOutcomes).toHaveLength(1);
     expect(result.candidateOutcomes?.[0]?.candidateId).toBe('c2');
     expect(result.candidateOutcomes?.[0]?.reason).toBe('reuse_review_required');
+  });
+
+  it('gate off: pending without a ledger keeps the original failure and never asks for reuse', async () => {
+    const candidates = [makeCandidate('c1', 'principle')];
+    const deps = makeMockDeps({ candidates });
+    deps.stateManager.getTask = async () => ({ taskId: TASK_ID, status: 'succeeded' }) as never;
+    let calls = 0;
+    deps.intakeService.reviewReuse = async () => { calls += 1; return null; };
+    const result = await createBridge(deps).executePendingDiagnosis({ taskId: TASK_ID });
+    // Public replay needs a succeeded diagnosis task, without any reuse hook.
+    expect(calls).toBe(0);
+    expect(result.status).toBe('failed');
+    expect(result.message).toBe('Candidate intake did not produce a ledger entry — treating as failed');
+    expect(result.candidateOutcomes).toBeUndefined();
+  });
+
+  it.each(['low_confidence', 'empty_evidence', 'invalid_output', 'wrong_run_lineage'] as const)('does not turn %s into a reuse park', async (failure) => {
+    const candidates = [makeCandidate('c1', 'principle')];
+    const deps = makeMockDeps({ candidates });
+    const output = makeHighConfidenceOutput();
+    if (failure === 'low_confidence') output.confidence = 0.3;
+    if (failure === 'empty_evidence') output.evidence = [];
+    enableReplayReview(deps, candidates, output);
+    if (failure === 'invalid_output' || failure === 'wrong_run_lineage') {
+      deps.stateManager.getRun = async () => ({ taskId: failure === 'wrong_run_lineage' ? 'another-task' : TASK_ID, executionStatus: 'succeeded', outputPayload: failure === 'invalid_output' ? '{}' : JSON.stringify(output) }) as never;
+    }
+    let calls = 0;
+    deps.intakeService.reviewReuse = async () => { calls += 1; throw new Error('must not evaluate rejected input'); };
+    const result = await createBridge(deps).executePendingDiagnosis({ taskId: TASK_ID });
+    expect(result.status).toBe('failed');
+    expect(result.candidateOutcomes).toBeUndefined();
+    expect(calls).toBe(0);
+  });
+
+  it('keeps intake validation errors visible instead of reporting reuse review', async () => {
+    const candidates = [makeCandidate('c1', 'principle')];
+    const deps = makeMockDeps({ candidates });
+    enableReplayReview(deps, candidates);
+    deps.intakeService.reviewReuse = async () => { throw new Error('artifact missing'); };
+    const result = await createBridge(deps).executePendingDiagnosis({ taskId: TASK_ID });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('artifact missing');
+    expect(result.message).toContain('nextAction');
+    expect(result.candidateOutcomes).toBeUndefined();
   });
 });
 

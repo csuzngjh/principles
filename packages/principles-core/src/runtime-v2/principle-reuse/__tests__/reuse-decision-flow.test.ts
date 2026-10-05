@@ -10,6 +10,10 @@ import type { LedgerPrinciple } from '../../../principle-tree-ledger.js';
 import { CandidateIntakeService } from '../../candidate-intake-service.js';
 import type { CandidateIntakeServiceOptions } from '../../candidate-intake-service.js';import { INTAKE_ERROR_CODES } from '../../candidate-intake.js';
 import type { ReuseDecision, ReuseProposal } from '../reuse-proposal.js';
+import { PainSignalBridge } from '../../pain-signal-bridge.js';
+import { SqliteConnection } from '../../store/sqlite-connection.js';
+import { SqliteDiagnosticianCommitter } from '../../store/commit/diagnostician-committer.js';
+import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 
 /**
  * PRI-917 Slice 2 — the reuse gate inside `CandidateIntakeService.intake()`.
@@ -844,6 +848,84 @@ describe('v0.3.3 T10 — evaluation failure degrades to CREATE (Rule 4)', () => 
 });
 
 describe('v0.3.3 T11 — disabled capability restores the exact pre-v0.3.3 behavior', () => {
+  it('replays a real router candidate through admission and read-only reuse, preserving gate-off and rejected states', async () => {
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') });
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const topId = randomUUID();
+    const routerId = randomUUID();
+    const runId = randomUUID();
+    await stateManager.createTask({ taskId: topId, taskKind: 'diagnostician', status: 'succeeded', inputRef: 'pain-replay', attemptCount: 1, maxAttempts: 3, diagnosticJson: JSON.stringify({ provenance: 'owner_reported_no_host_trace', evidence: [{ sourceRef: 'input', note: 'Owner evidence' }] }) });
+    await stateManager.createTask({ taskId: routerId, taskKind: 'diag_router', status: 'succeeded', inputRef: topId, attemptCount: 1, maxAttempts: 3 });
+    const output: DiagnosticianOutputV1 = { valid: true, diagnosisId: topId, summary: 'Replay diagnosis', rootCause: 'People: evidence was ignored', violatedPrinciples: [], evidence: [{ sourceRef: 'input', note: 'Owner evidence' }], confidence: 0.9, recommendations: [{ kind: 'principle', description: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }] };
+    await stateManager.runStore.createRun({ runId, taskId: routerId, runtimeKind: 'openclaw', attemptNumber: 1, executionStatus: 'succeeded', startedAt: new Date().toISOString(), outputPayload: JSON.stringify(output) });
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      await new SqliteDiagnosticianCommitter(connection).commit({ runId, taskId: routerId, output, idempotencyKey: runId });
+      const candidates = await stateManager.getCandidatesByTaskId(topId);
+      expect(candidates).toHaveLength(1);
+      const [candidate] = candidates;
+      if (!candidate) throw new Error('expected the committed router candidate');
+      const { candidateId } = candidate;
+      const before = readFileSync(ledgerPath(), 'utf8');
+      let evaluations = 0;
+      const intake = service({ recommendation: async () => { evaluations += 1; return recommendationOf(principle.id); } });
+      const runner = { run: async (): Promise<never> => { throw new Error('replay must not diagnose again'); } };
+      const bridge = new PainSignalBridge({ stateManager, runner, intakeService: intake, ledgerAdapter: adapter, autoIntakeEnabled: true });
+      const fresh = await bridge.onDiagnosisComplete({ taskId: topId, painId: 'pain-replay', diagnosticianOutput: output, provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 1 });
+      expect(fresh.candidateOutcomes?.[0]?.reason).toBe('reuse_review_required');
+      const replay = await bridge.executePendingDiagnosis({ taskId: topId });
+      expect(replay.status).toBe('degraded');
+      expect(replay.candidateOutcomes?.[0]?.reason).toBe('reuse_review_required');
+      expect(evaluations).toBe(2);
+      expect(readFileSync(ledgerPath(), 'utf8')).toBe(before);
+      expect(await candidateStatus(candidateId)).toBe('pending');
+      const disabled = new PainSignalBridge({ stateManager, runner, intakeService: service({}), ledgerAdapter: adapter, autoIntakeEnabled: true });
+      expect((await disabled.executePendingDiagnosis({ taskId: topId })).status).toBe('failed');
+      for (const rejected of [{ ...output, confidence: 0.3 }, { ...output, evidence: [] }]) {
+        await stateManager.updateRunOutput(runId, JSON.stringify(rejected));
+        const result = await bridge.executePendingDiagnosis({ taskId: topId });
+        expect(result.status).toBe('failed');
+        expect(result.candidateOutcomes).toBeUndefined();
+      }
+      expect(evaluations).toBe(2);
+      expect(readFileSync(ledgerPath(), 'utf8')).toBe(before);
+    } finally {
+      connection.close();
+    }
+  });
+  it('read-only replay never writes a Principle for create/uncertain/unavailable outcomes', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+    const before = readFileSync(ledgerPath(), 'utf8');
+    for (const outcome of [
+      { status: 'recommended', recommendation: 'create', confidence: 0.8, rationale: 'new experience' },
+      { status: 'recommended', recommendation: 'uncertain', confidence: 0.4, rationale: 'ambiguous' },
+      { status: 'unavailable', reason: 'timeout' },
+    ] as const) {
+      const intake = service({ recommendation: async () => outcome });
+      expect(await intake.reviewReuse(candidateId)).toBeNull();
+      expect(readFileSync(ledgerPath(), 'utf8')).toBe(before);
+      expect(await candidateStatus(candidateId)).toBe('pending');
+    }
+  });
+
+  it('read-only replay confirms reuse without evidence or consumed writes', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+    const before = readFileSync(ledgerPath(), 'utf8');
+    const intake = service({ recommendation: async () => recommendationOf(principle.id) });
+    expect(intake.reuseReviewEnabled).toBe(true);
+    expect(await intake.reviewReuse(candidateId)).toMatchObject({ outcome: 'refused', reason: 'reuse_pending_owner' });
+    expect(readFileSync(ledgerPath(), 'utf8')).toBe(before);
+    expect(await candidateStatus(candidateId)).toBe('pending');
+    const disabled = service({});
+    expect(disabled.reuseReviewEnabled).toBe(false);
+    expect(await disabled.reviewReuse(candidateId)).toBeNull();
+    expect(readFileSync(ledgerPath(), 'utf8')).toBe(before);
+  });
   it('no recommendation hook injected → not_configured gate, plain CREATE', async () => {
     const principle = makePrinciple();
     addPrincipleToLedger(join(workspaceDir, '.state'), principle);

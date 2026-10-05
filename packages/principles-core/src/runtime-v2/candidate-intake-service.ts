@@ -408,6 +408,23 @@ export class CandidateIntakeService {
    *   - LEDGER_WRITE_FAILED when ledger write fails
    */
   async intake(candidateId: string): Promise<CandidateIntakeResult> {
+    return this.#intake(candidateId, false);
+  }
+
+  /** Whether the automatic recommendation channel is configured for read-only review. */
+  get reuseReviewEnabled(): boolean {
+    return this.#reuseRecommendation !== undefined && !this.#reuseDecision;
+  }
+
+  /** Uses the same input validation and gate as intake, but never writes. */
+  async reviewReuse(candidateId: string): Promise<CandidateIntakeResult | null> {
+    if (!this.reuseReviewEnabled) return null;
+    return this.#intake(candidateId, true);
+  }
+
+  async #intake(candidateId: string, reviewOnly: false): Promise<CandidateIntakeResult>;
+  async #intake(candidateId: string, reviewOnly: true): Promise<CandidateIntakeResult | null>;
+  async #intake(candidateId: string, reviewOnly: boolean): Promise<CandidateIntakeResult | null> {
     // 1. Input validation (E-01)
     if (!candidateId || typeof candidateId !== 'string' || candidateId.trim() === '') {
       throw new CandidateIntakeError(
@@ -726,6 +743,10 @@ export class CandidateIntakeService {
         reuseCheck = 'no_candidates';
       }
     }
+
+    // Replay review is read-only: create/uncertain/unavailable never resumes a
+    // ledger write, and the Owner verdict path is excluded by reviewReuse.
+    if (reviewOnly) return null;
 
     // 5. Build 11-field LedgerPrincipleEntry (E-06)
     const entry: LedgerPrincipleEntry = {

@@ -5,6 +5,8 @@ import type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
 import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
+import { DiagnosticianOutputV1Schema } from './diagnostician-output.js';
+import { Value } from '@sinclair/typebox/value';
 import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
@@ -1054,13 +1056,10 @@ export class PainSignalBridge {
     const candidateIds = candidates.map((candidate) => candidate.candidateId);
     const firstCandidate = candidates.at(0);
     const ledgerEntryIds: string[] = [];
-    // PRI-917 v0.3.3 review fix (P2-3): the park persists NOTHING by design —
-    // the candidate's own PENDING status is its durable carrier. On replay,
-    // principle-kind candidates still pending without a ledger entry are
-    // therefore the ones awaiting the Owner; surface them so the replay keeps
-    // the fresh path's review_required outcome instead of a bare intake
-    // failure, and so callers can filter them out of internalization guidance.
+    // Pending also represents admission refusal and intake failure. Re-check
+    // admission and the read-only reuse gate instead of inferring a park.
     const pendingReviewCandidateIds: string[] = [];
+    const reviewFailures: string[] = [];
 
     if (this.autoIntakeEnabled) {
       for (const candidate of candidates) {
@@ -1069,8 +1068,27 @@ export class PainSignalBridge {
         if (candidate.status !== 'consumed' && ledgerEntry) {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
-        if (candidate.status === 'pending' && !ledgerEntry && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind)) {
-          pendingReviewCandidateIds.push(candidate.candidateId);
+        if (candidate.status === 'pending' && !ledgerEntry && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind) && this.intakeService?.reuseReviewEnabled) {
+          try {
+            const task = await this.stateManager.getTask(input.taskId);
+            const ingress = validatePersistedIngressFacts(task?.diagnosticJson);
+            if (ingress.errorCode !== null) continue;
+            const sourceRun = await this.stateManager.getRun(candidate.sourceRunId);
+            if (!sourceRun || sourceRun.taskId !== candidate.taskId || sourceRun.executionStatus !== 'succeeded' || !sourceRun.outputPayload) continue;
+            const output: unknown = JSON.parse(sourceRun.outputPayload);
+            if (!Value.Check(DiagnosticianOutputV1Schema, output) || !output.valid) continue;
+            const [admission] = evaluateCandidateAdmissions([candidate], output, {
+              provenance: ingress.provenance,
+              inputEvidenceCount: ingress.evidenceCount,
+            });
+            if (admission?.admission.decision !== 'admitted') continue;
+            const review = await this.intakeService.reviewReuse(candidate.candidateId);
+            if (review?.outcome === 'refused' && review.reason === 'reuse_pending_owner') {
+              pendingReviewCandidateIds.push(candidate.candidateId);
+            }
+          } catch (err: unknown) {
+            reviewFailures.push(`${candidate.candidateId}: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
     }
@@ -1091,6 +1109,10 @@ export class PainSignalBridge {
       artifactId: firstCandidate?.artifactId,
       autoIntakeEnabled: this.autoIntakeEnabled,
     });
+    if (reviewFailures.length > 0) {
+      shaped.status = 'failed';
+      shaped.message = `Replay intake review failed: ${reviewFailures.join('; ')}. nextAction: inspect the candidate artifacts and retry intake.`;
+    }
     // P2-2/F3: candidate-level dispositions for the parked subset so callers
     // (worker report, CLI nextAction) see WHAT awaits the Owner. Other
     // candidates are omitted on this path — admission results are not

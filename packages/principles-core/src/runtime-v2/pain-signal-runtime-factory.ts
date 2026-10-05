@@ -11,6 +11,7 @@
  *   await bridge.onPainDetected(data);
  */
 
+import { createHash } from 'node:crypto';
 import { PainSignalBridge, type DiagnosticianRunnerLike } from './pain-signal-bridge.js';
 import type { RunnerResult } from './runner/runner-result.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
@@ -988,7 +989,20 @@ export async function createPainSignalBridge(
     getEnvVar: opts.getEnvVar,
   });
 
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${reuseRecommendation ? 'reuse-gate' : 'no-reuse-gate'}`;
+  let reuseCacheKey = 'no-reuse-gate';
+  if (reuseRecommendation && opts.effectiveConfig) {
+    const { config } = opts.effectiveConfig;
+    const profileId = config.reuseEvaluation?.runtimeProfile ?? config.internalAgents.defaultRuntime;
+    const profile = config.runtimeProfiles[profileId];
+    // Only validated, non-secret configuration participates. Sorting profile
+    // fields keeps identical YAML configurations on the same cache slot.
+    reuseCacheKey = createHash('sha256').update(JSON.stringify([
+      profileId,
+      config.reuseEvaluation?.timeoutMs,
+      Object.entries(profile ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    ])).digest('hex');
+  }
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${reuseCacheKey}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 

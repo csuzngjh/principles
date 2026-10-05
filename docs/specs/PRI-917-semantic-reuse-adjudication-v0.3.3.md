@@ -339,8 +339,17 @@ R5 Reality Replay（Phase 6，真实 workspace、真实 LLM、非 mock）：Open
 
 1. **回滚开关对长驻 bridge 不生效**：bridge 缓存键不含 `reuseEvaluation` 状态，长驻宿主（OpenClaw 插件 / Codex worker，均跨周期复用缓存且无 dispose）翻转开关后仍用旧 hook——T11 在两个方向上都退化为"需重启进程"。修复：hook 构建上移至 `createPainSignalBridge`、其存在性入缓存键（与 pdp/pfp 同一纪律）；`invalidatePainSignalBridge` 改按 workspace+kind 前缀清除以覆盖新键分量。
 2. **混合批次隐藏挂起候选**：`reuse_review_required` 降级分支原先要求零入账（全挂起）；一入账一挂起的混合批次报 plain succeeded。修复：shaper fresh 路径在 partial_admission 与 success 分支追加 parkedNote 并降级 degraded；Codex worker 报告新增 `reuseReviewRequiredCandidateIds`；OpenClaw 插件在含挂起候选的 degraded 结果上打 `PAIN_SERVICE_REUSE_REVIEW_REQUIRED` 日志（按挂起处置 gate，保持 flag-off 日志流逐字节不变）。
-3. **重放把等待裁决误报为 intake 失败**：父任务在管线完成时即 `succeeded`（与候选挂起无关），重放走 `buildExistingResult` 仅查账本——全挂起重放从 `review_required` 翻成 `failed`。修复：existing 路径把"仍 pending 且无账本条目的 principle 候选"（挂起的持久承载，§11）作为 parked 集传入 shaper，全挂起重放报同一 `review_required` 语义；混合重放追加 parkedNote 并降级 degraded；`candidateOutcomes` 在重放路径携带挂起子集（decision 用既有 admission-unknown 值 `needs_evidence`，不虚构 admission 结果）。
+3. **重放把等待裁决误报为 intake 失败**：父任务在管线完成时即 `succeeded`（与候选挂起无关），重放走 `buildExistingResult` 仅查账本——全挂起重放从 `review_required` 翻成 `failed`。重放须保留经过明确复用建议确认的挂起处置；pending 本身也承载 admission 拒绝及 intake 失败，不能单独证明挂起。具体复核方式见 R6-P7。
 4. **CLI 不显示挂起、仍建议 internalize**：diagnose/pain-retry 的文本渲染与顶层 nextAction 不识别 `review_required`，并对挂起候选输出 `pd candidate internalize`（诱导绕过裁决）。修复：两个命令的渲染循环增加 `review_required` 分支；顶层 nextAction 从 internalize 列表剔除挂起候选并给出 `pd candidate review --decide` 指引；pain-retry 死信 JSON 在成功与未成功两分支都携带挂起指引。
+
+### R6-P7 — 二次评审修复（PRI-938，2026-10-05）
+
+1. **评估配置缓存**：缓存键包含选中的 runtimeProfile ID、reuseEvaluation.timeoutMs 及排序后的 profile 字段指纹。模型、凭据环境变量名称、profile 参数变化会更换 bridge；开关关闭后换 profile 再开启不会复活旧 hook。键不包含凭据值。
+2. **重放只读复核**：开启建议通道时，读取候选自身 sourceRunId 对应的成功运行及父诊断任务的 ingress，验证 lineage、诊断输出 schema 和 valid，并通过既有 admission 检查。随后调用 `CandidateIntakeService.reviewReuse`，复用 intake 的候选、artifact、shortlist 及建议验证，在任何新 Principle 写入前停止。只有当次明确 reuse 建议才报告 review_required；不从 pending 或 telemetry 推导历史裁决。artifact 等检查失败仍报告原因与恢复指引。
+3. **关闭与副作用边界**：建议通道关闭时不执行上述复核，维持旧重放结果。复核不写 Principle、不追加 evidence、不消费候选、不播种、不重新运行诊断。语义评估的 create/uncertain/unavailable 在只读复核中不能触发创建；候选仍可由 Owner 经既有决策面处理。
+4. **验证矩阵**：缓存覆盖 A(on)→off→B(on) 及 enabled 不变时更改模型/超时/凭据变量/系统提示；重放覆盖真实 SQLite router 候选 fresh park→公开 replay、gate-off、低置信/空证据、无效输出、run lineage 不匹配、artifact 检查失败。正向复核与各降级建议均断言 ledger 字节及 pending 状态不变。
+
+本次 Complexity Delta：仅 **New public abstraction/interface: YES**（既有 CandidateIntakeService 增加只读 reviewReuse 与派生开关查询）。原 intake 接口会创建 Principle，无法用于只读重放；新方法隐藏同一套验证与建议逻辑，避免 bridge 复制实现或以 telemetry 为决策源。通过真实存储及负向矩阵验证，可随重放复核一起回退。新事实源、持久状态、子系统、feature flag、跨包依赖、宿主特有行为、外部能力均 NO。
 
 ---
 

@@ -209,9 +209,9 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
   // Existing path: no admission results, simpler decision tree.
   // Phase 1 / PR1: same reasoning as the fresh path — only ledger-eligible
   // candidates can be legitimately "missing" a ledger entry.
-  // PRI-917 v0.3.3 review fix (P2-3): the caller passes principle-kind
-  // candidates that are STILL PENDING without a ledger entry — the durable
-  // carrier of "parked by the Reuse Review Gate" (the park persists nothing).
+  // The caller passes candidates whose replay admission and read-only reuse
+  // review confirmed a current reuse recommendation. Pending alone proves
+  // neither admission nor reuse.
   // A replay of a parked task used to flip from the fresh path's
   // review_required outcome into a bare intake failure here.
   const parked = input.reuseReviewRequiredCandidateIds ?? [];
@@ -225,7 +225,7 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
         artifactId,
         candidateIds,
         ledgerEntryIds,
-        message: `reuse_review_required:${parked.join(',')} — candidates still pending without a ledger entry (parked for Owner review or a prior intake did not complete); nextAction: pd candidate review --candidate-id <id> --decide reuse|create`,
+        message: `reuse_review_required:${parked.join(',')} — suspected duplicates confirmed by read-only reuse review; nextAction: pd candidate review --candidate-id <id> --decide reuse|create`,
       };
     }
     return {

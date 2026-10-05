@@ -235,6 +235,38 @@ function stubLedgerAdapter(): LedgerAdapter {
 }
 
 describe('PRI-917 v0.3.3 review fix (P2-1) — bridge cache key respects the reuse-gate switch', () => {
+  it('does not resurrect a hook with an obsolete evaluation profile after rollback', async () => {
+    const ws = workspace();
+    try {
+      const args = { workspaceDir: ws.dir, stateDir: ws.stateDir, ledgerAdapter: stubLedgerAdapter(), getEnvVar: () => 'test-key' };
+      const firstConfig = bridgeConfig(true);
+      const first = await createPainSignalBridge({ ...args, effectiveConfig: firstConfig });
+      await createPainSignalBridge({ ...args, effectiveConfig: bridgeConfig(false) });
+      const nextConfig = bridgeConfig(true);
+      nextConfig.config.reuseEvaluation = { enabled: true, runtimeProfile: 'replacement-profile' };
+      nextConfig.config.runtimeProfiles['replacement-profile'] = { type: 'pi-ai', provider: 'openrouter', model: 'test/replacement', apiKeyEnv: 'OTHER_KEY' };
+      const next = await createPainSignalBridge({ ...args, effectiveConfig: nextConfig });
+      expect(next).not.toBe(first);
+      expect(await createPainSignalBridge({ ...args, effectiveConfig: nextConfig })).toBe(next);
+    } finally {
+      await disposePainSignalBridgesForWorkspace(ws.dir);
+      ws.cleanup();
+    }
+  });
+
+  it.each(['model', 'timeoutMs', 'apiKeyEnv', 'systemPrompt'] as const)('applies changed evaluation profile %s without an enabled toggle', async (field) => {
+    const ws = workspace();
+    try {
+      const args = { workspaceDir: ws.dir, stateDir: ws.stateDir, ledgerAdapter: stubLedgerAdapter(), getEnvVar: () => 'test-key' };
+      const first = await createPainSignalBridge({ ...args, effectiveConfig: bridgeConfig(true) });
+      const changed = bridgeConfig(true);
+      changed.config.runtimeProfiles['eval-profile'] = { type: 'pi-ai', provider: 'openrouter', model: 'test/eval-model', apiKeyEnv: 'PRI917_R6_TEST_KEY', [field]: field === 'timeoutMs' ? 1234 : 'replacement' };
+      expect(await createPainSignalBridge({ ...args, effectiveConfig: changed })).not.toBe(first);
+    } finally {
+      await disposePainSignalBridgesForWorkspace(ws.dir);
+      ws.cleanup();
+    }
+  });
   it('a re-read config that toggles reuseEvaluation.enabled yields a FRESH bridge in BOTH directions', async () => {
     const ws = workspace();
     try {
