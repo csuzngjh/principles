@@ -697,6 +697,14 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         : 'disabled' as const;
 
       if (opts.json) {
+        // PRI-917 v0.3.3 review fix (P2-4): parked candidates get review
+        // guidance, never an internalize command that would bypass the Owner
+        // decision. Dispositions come from the bridge's candidateOutcomes
+        // (fresh and replayed paths both carry the parked subset now).
+        const dlParkedIds = (bridgeResult.candidateOutcomes ?? [])
+          .filter((o) => o.reason === 'reuse_review_required')
+          .map((o) => o.candidateId);
+        const dlInternalizableIds = bridgeResult.candidateIds.filter((id) => !dlParkedIds.includes(id));
         // cli-1-strict-json: exactly one parseable JSON object on stdout.
         console.log(JSON.stringify({
           status: success ? 'succeeded' : 'failed',
@@ -712,10 +720,14 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           message: bridgeResult.message ?? null,
           painDiagnosisLedgerWrite: dlLedgerWrite,
           nextAction: success
-            ? (bridgeResult.candidateIds.length > 0
-              ? `Dead letter replayed. Internalize candidates:\n  ${bridgeResult.candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
-              : 'Dead letter replayed. No candidates generated.')
-            : `Replay did not succeed (status=${bridgeResult.status}). The dead letter remains available for future retry.`,
+            ? (dlInternalizableIds.length > 0
+              ? `Dead letter replayed. Internalize candidates:\n  ${dlInternalizableIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${dlParkedIds.length > 0 ? `\n${dlParkedIds.length} candidate(s) parked for reuse review — decide with: pd candidate review --candidate-id <id> --decide reuse|create` : ''}`
+              : dlParkedIds.length > 0
+                ? `Dead letter replayed. ${dlParkedIds.length} candidate(s) parked for reuse review (suspected duplicates) — decide with:\n  ${dlParkedIds.map((id) => `pd candidate review --candidate-id ${id} --decide reuse|create`).join('\n  ')}`
+                : 'Dead letter replayed. No candidates generated.')
+            : dlParkedIds.length > 0
+              ? `Replay parked ${dlParkedIds.length} candidate(s) for reuse review (suspected duplicates) — decide with: pd candidate review --candidate-id <id> --decide reuse|create. The dead letter remains available for future retry.`
+              : `Replay did not succeed (status=${bridgeResult.status}). The dead letter remains available for future retry.`,
         }, null, 2));
         if (!success) {
           process.exit(1);
@@ -975,10 +987,21 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       .filter((ir): ir is { candidateId: string; ledgerEntryId: string; status: string } => ir.status === 'consumed' && typeof ir.ledgerEntryId === 'string')
       .map((ir) => ir.ledgerEntryId);
 
-    // Build nextAction: candidates generated but internalization not automatic
-    const internalizeNextAction = candidateIds.length > 0
-      ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
-      : 'No candidates were generated from this diagnosis.';
+    // Build nextAction: candidates generated but internalization not automatic.
+    // PRI-917 v0.3.3 review fix (P2-4): parked candidates get review guidance,
+    // never an internalize command that would bypass the Owner decision.
+    const reviewRequiredIds = intakeResults
+      .filter((r) => r.status === 'review_required')
+      .map((r) => r.candidateId);
+    const reviewRequiredNote = reviewRequiredIds.length > 0
+      ? ` ${reviewRequiredIds.length} candidate(s) parked for reuse review (suspected duplicates) — decide before internalizing: pd candidate review --candidate-id <id> --decide reuse|create`
+      : '';
+    const internalizableCandidateIds = candidateIds.filter((id) => !reviewRequiredIds.includes(id));
+    const internalizeNextAction = internalizableCandidateIds.length > 0
+      ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}`
+      : reviewRequiredIds.length > 0
+        ? `All candidates are parked for reuse review (suspected duplicates). To decide each, run:\n  ${reviewRequiredIds.map((id) => `pd candidate review --candidate-id ${id} --decide reuse|create`).join('\n  ')}`
+        : 'No candidates were generated from this diagnosis.';
 
     if (opts.json) {
       // Strict single JSON object output
@@ -1038,6 +1061,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           }
         } else if (ir.status === 'intake_failed') {
           console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);
+          console.log(`      Next action: ${ir.nextAction}`);
+        } else if (ir.status === 'review_required') {
+          // PRI-917 v0.3.3 review fix (P2-4): a parked candidate must be
+          // visible with its review guidance, never silently absent.
+          console.log(`    ${ir.candidateId}: REUSE REVIEW REQUIRED${ir.reusedPrincipleId ? ` — suspected duplicate of existing Principle ${ir.reusedPrincipleId}` : ' — suspected duplicate'}`);
           console.log(`      Next action: ${ir.nextAction}`);
         }
       }

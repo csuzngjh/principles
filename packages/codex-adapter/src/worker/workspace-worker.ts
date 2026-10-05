@@ -59,6 +59,12 @@ export interface CodexWorkerCycleStepReport {
     readonly errorCategory?: string;
     /** PRI-638 P1-C: recovery action for capability-disabled pauses. */
     readonly nextAction?: string;
+    /**
+     * PRI-917 v0.3.3 review fix (P2-2): candidates parked by the Reuse Review
+     * Gate (suspected duplicates awaiting the Owner). Forwarded per-candidate
+     * so the report shows WHAT awaits the Owner, not just a degraded status.
+     */
+    readonly reuseReviewRequiredCandidateIds?: readonly string[];
   } | null;
   readonly downstream: InternalizationConsumerCycleOutcome | null;
 }
@@ -218,11 +224,18 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
             getEnvVar: (name: string) => process.env[name],
           });
           const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
+          // PRI-917 v0.3.3 review fix (P2-2): forward the parked-candidate
+          // dispositions so the Owner sees the pending items instead of a bare
+          // degraded status with no subject.
+          const reuseReviewRequired = (executed.candidateOutcomes ?? [])
+            .filter((outcome) => outcome.reason === 'reuse_review_required')
+            .map((outcome) => outcome.candidateId);
           diagnostician = {
             taskId: candidate.taskId,
             status: executed.status,
             ...(executed.message !== undefined ? { message: executed.message.slice(0, 200) } : {}),
             ...(executed.errorCategory !== undefined ? { errorCategory: executed.errorCategory } : {}),
+            ...(reuseReviewRequired.length > 0 ? { reuseReviewRequiredCandidateIds: reuseReviewRequired } : {}),
           };
           // The bridge stays cached per workspace (bounded: one per workspace
           // per worker process, exactly like the OpenClaw plugin host) — no

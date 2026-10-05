@@ -1054,6 +1054,13 @@ export class PainSignalBridge {
     const candidateIds = candidates.map((candidate) => candidate.candidateId);
     const firstCandidate = candidates.at(0);
     const ledgerEntryIds: string[] = [];
+    // PRI-917 v0.3.3 review fix (P2-3): the park persists NOTHING by design —
+    // the candidate's own PENDING status is its durable carrier. On replay,
+    // principle-kind candidates still pending without a ledger entry are
+    // therefore the ones awaiting the Owner; surface them so the replay keeps
+    // the fresh path's review_required outcome instead of a bare intake
+    // failure, and so callers can filter them out of internalization guidance.
+    const pendingReviewCandidateIds: string[] = [];
 
     if (this.autoIntakeEnabled) {
       for (const candidate of candidates) {
@@ -1062,10 +1069,13 @@ export class PainSignalBridge {
         if (candidate.status !== 'consumed' && ledgerEntry) {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
+        if (candidate.status === 'pending' && !ledgerEntry && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind)) {
+          pendingReviewCandidateIds.push(candidate.candidateId);
+        }
       }
     }
 
-    return shapeBridgeResult({
+    const shaped = shapeBridgeResult({
       path: 'existing',
       painId: input.painId,
       taskId: input.taskId,
@@ -1076,9 +1086,24 @@ export class PainSignalBridge {
       ledgerEligibleCandidateCount: candidates.filter((candidate) =>
         isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind),
       ).length,
+      reuseReviewRequiredCandidateIds: pendingReviewCandidateIds,
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       autoIntakeEnabled: this.autoIntakeEnabled,
     });
+    // P2-2/F3: candidate-level dispositions for the parked subset so callers
+    // (worker report, CLI nextAction) see WHAT awaits the Owner. Other
+    // candidates are omitted on this path — admission results are not
+    // replayed, so their dispositions are unknown, not fabricable
+    // ('needs_evidence' is the established admission-unknown value).
+    if (pendingReviewCandidateIds.length > 0) {
+      shaped.candidateOutcomes = pendingReviewCandidateIds.map((candidateId) => ({
+        candidateId,
+        decision: 'needs_evidence' as const,
+        reason: 'reuse_review_required',
+        nextAction: `pd candidate review --candidate-id ${candidateId} --decide reuse|create`,
+      }));
+    }
+    return shaped;
   }
 }

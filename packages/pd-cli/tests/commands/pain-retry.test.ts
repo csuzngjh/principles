@@ -687,6 +687,53 @@ describe('pd pain retry — success paths', () => {
     exitSpy.mockRestore();
   });
 
+  it('RETRY-06b (P2-4): parked candidate surfaces review guidance and is EXCLUDED from internalize nextAction', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+    mockGetCandidatesByTaskId.mockResolvedValue([
+      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
+      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'diagnosis_test-pain-1', status: 'pending' },
+    ]);
+    mockIntake
+      .mockResolvedValueOnce({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-ok', title: 'OK', status: 'probation' } })
+      .mockResolvedValueOnce({
+        outcome: 'refused',
+        reason: 'reuse_pending_owner',
+        candidateId: 'cand-parked',
+        rawRecommendationKind: 'principle',
+        message: 'suspected duplicate — parked for the Owner',
+        reuseRecommendation: {
+          status: 'recommended',
+          recommendation: 'reuse',
+          selectedPrincipleId: 'existing-p1',
+          rationale: 'same experience',
+          confidence: 0.9,
+        },
+      });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.intake.candidates[1].status).toBe('review_required');
+    expect(output.intake.candidates[1].reusedPrincipleId).toBe('existing-p1');
+    expect(output.intake.candidates[1].nextAction).toContain('pd candidate review --candidate-id cand-parked --decide reuse|create');
+    // The parked candidate is NOT told to internalize (P2-4).
+    expect(output.nextAction).toContain('pd candidate internalize --candidate-id cand-ok');
+    expect(output.nextAction).not.toContain('internalize --candidate-id cand-parked');
+    expect(output.nextAction).toContain('pd candidate review');
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
   it('RETRY-07: failed task → succeeded — JSON output', async () => {
     mockGetTask.mockResolvedValue(FAILED_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([]);

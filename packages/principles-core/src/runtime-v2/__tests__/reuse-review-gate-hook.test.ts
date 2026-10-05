@@ -18,7 +18,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
-import { createReuseRecommendationHook, mapBridgeTelemetryToStoreEvent } from '../pain-signal-runtime-factory.js';
+import type { LedgerAdapter } from '../candidate-intake.js';
+import {
+  createReuseRecommendationHook,
+  createPainSignalBridge,
+  disposePainSignalBridgesForWorkspace,
+  invalidatePainSignalBridge,
+  mapBridgeTelemetryToStoreEvent,
+} from '../pain-signal-runtime-factory.js';
 
 describe('PRI-917 v0.3.3 — reuse_gate_triggered telemetry passthrough', () => {
   it('the park observation passes through the store-emitter mapper verbatim', () => {
@@ -191,6 +198,95 @@ describe('PRI-917 v0.3.3 — createReuseRecommendationHook config decision table
         expect(outcome.reason).toContain('PRI917_R6_TEST_KEY');
       }
     } finally {
+      ws.cleanup();
+    }
+  });
+});
+
+// ── PRI-917 v0.3.3 review fix (P2-1) — bridge cache key vs the gate switch ───
+
+/**
+ * Full config for REAL bridge construction on a temp workspace: the
+ * diagnostician capability must be enabled (resolveDiagnosticianCapability)
+ * AND its runtime profile must be ready (resolveRuntimeConfigFromPdConfig),
+ * otherwise createPainSignalBridge never reaches constructBridge.
+ */
+function bridgeConfig(reuseEnabled: boolean): EffectivePdConfig {
+  return {
+    config: {
+      features: {},
+      reuseEvaluation: { enabled: reuseEnabled, runtimeProfile: 'eval-profile' },
+      internalAgents: {
+        defaultRuntime: 'diag-profile',
+        agents: {
+          diagnostician: { enabled: true, runtimeProfile: 'diag-profile' },
+        },
+      },
+      runtimeProfiles: {
+        'diag-profile': { type: 'pi-ai', provider: 'openrouter', model: 'test/diag-model', apiKeyEnv: 'PRI917_R6_TEST_KEY' },
+        'eval-profile': { type: 'pi-ai', provider: 'openrouter', model: 'test/eval-model', apiKeyEnv: 'PRI917_R6_TEST_KEY' },
+      },
+    },
+  } as unknown as EffectivePdConfig;
+}
+
+function stubLedgerAdapter(): LedgerAdapter {
+  return {} as unknown as LedgerAdapter;
+}
+
+describe('PRI-917 v0.3.3 review fix (P2-1) — bridge cache key respects the reuse-gate switch', () => {
+  it('a re-read config that toggles reuseEvaluation.enabled yields a FRESH bridge in BOTH directions', async () => {
+    const ws = workspace();
+    try {
+      invalidatePainSignalBridge(ws.dir);
+      const bridgeOpts = (effectiveConfig: EffectivePdConfig) => ({
+        workspaceDir: ws.dir,
+        stateDir: ws.stateDir,
+        ledgerAdapter: stubLedgerAdapter(),
+        effectiveConfig,
+        getEnvVar: () => 'test-key',
+      });
+
+      // Gate on. A host re-reads config per pain event — the same content in a
+      // FRESH config object must stay a cache hit (no bridge churn).
+      const onA = await createPainSignalBridge(bridgeOpts(bridgeConfig(true)));
+      const onB = await createPainSignalBridge(bridgeOpts(bridgeConfig(true)));
+      expect(onB).toBe(onA);
+
+      // Owner DISABLES the gate: a cached bridge whose hook captured the old
+      // config would keep evaluating (T11 rollback would need a restart).
+      const off = await createPainSignalBridge(bridgeOpts(bridgeConfig(false)));
+      expect(off).not.toBe(onA);
+      const offB = await createPainSignalBridge(bridgeOpts(bridgeConfig(false)));
+      expect(offB).toBe(off);
+
+      // Re-enabling must not resurrect the disabled bridge either — it returns
+      // to the original gate-on cache entry (both entries coexist).
+      const onC = await createPainSignalBridge(bridgeOpts(bridgeConfig(true)));
+      expect(onC).not.toBe(off);
+      expect(onC).toBe(onA);
+    } finally {
+      await disposePainSignalBridgesForWorkspace(ws.dir);
+      ws.cleanup();
+    }
+  });
+
+  it('invalidatePainSignalBridge clears the new cache-key component too', async () => {
+    const ws = workspace();
+    try {
+      const bridgeOpts = {
+        workspaceDir: ws.dir,
+        stateDir: ws.stateDir,
+        ledgerAdapter: stubLedgerAdapter(),
+        effectiveConfig: bridgeConfig(true),
+        getEnvVar: () => 'test-key',
+      };
+      const first = await createPainSignalBridge(bridgeOpts);
+      invalidatePainSignalBridge(ws.dir);
+      const second = await createPainSignalBridge(bridgeOpts);
+      expect(second).not.toBe(first);
+    } finally {
+      await disposePainSignalBridgesForWorkspace(ws.dir);
       ws.cleanup();
     }
   });

@@ -713,7 +713,14 @@ export function createBridgeTelemetryEventEmitter(): {
 async function constructBridge(
   opts: PainSignalRuntimeFactoryOptions,
   runtimeConfig: RuntimeConfig,
-  pipeline: { diagnosisPersistenceEnabled: boolean; fullPipelinePromptSeeds: boolean },
+  // PRI-917 v0.3.3 review fix (P2-1): the reuse-gate hook is built ONCE by
+  // createPainSignalBridge so the hook's captured reuseEvaluation config and
+  // the cache key can never disagree about whether the gate is on.
+  construction: {
+    diagnosisPersistenceEnabled: boolean;
+    fullPipelinePromptSeeds: boolean;
+    reuseRecommendation: CandidateIntakeServiceOptions['reuseRecommendation'];
+  },
 ): Promise<PainSignalBridge> {
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
   await stateManager.initialize();
@@ -804,19 +811,16 @@ async function constructBridge(
   });
 
   // PRI-917 v0.3.3 — auto-path Reuse Review Gate: inject the semantic reuse
-  // recommendation hook. `undefined` when reuseEvaluation is disabled or no
-  // effective config was supplied → the gate reports 'not_configured' and
-  // intake behaves EXACTLY as before v0.3.3 (SPEC T11 rollback switch).
-  const reuseRecommendation = createReuseRecommendationHook({
-    effectiveConfig: opts.effectiveConfig,
-    workspaceDir: opts.workspaceDir,
-    stateDir: opts.stateDir,
-    getEnvVar: opts.getEnvVar,
-  });
+  // recommendation hook handed down from createPainSignalBridge. `undefined`
+  // when reuseEvaluation is disabled or no effective config was supplied →
+  // the gate reports 'not_configured' and intake behaves EXACTLY as before
+  // v0.3.3 (SPEC T11 rollback switch).
   const intakeService = new CandidateIntakeService({
     stateManager,
     ledgerAdapter: opts.ledgerAdapter,
-    ...(reuseRecommendation ? { reuseRecommendation, reuseStateDir: opts.stateDir } : {}),
+    ...(construction.reuseRecommendation
+      ? { reuseRecommendation: construction.reuseRecommendation, reuseStateDir: opts.stateDir }
+      : {}),
   });
 
   const bridge = new PainSignalBridge({
@@ -826,10 +830,10 @@ async function constructBridge(
     ledgerAdapter: opts.ledgerAdapter,
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
     workspaceDir: opts.workspaceDir,
-    diagnosisPersistenceEnabled: pipeline.diagnosisPersistenceEnabled,
+    diagnosisPersistenceEnabled: construction.diagnosisPersistenceEnabled,
     // PRI-720: seed-time full-chain override for prompt/defer_archive chains
     // (prompt_full_pipeline flag; Owner switch via Console / config file).
-    fullPipelinePromptSeeds: pipeline.fullPipelinePromptSeeds,
+    fullPipelinePromptSeeds: construction.fullPipelinePromptSeeds,
     // rc-9: the persistence path must degrade observably in production. Only
     // the persistence degradation events are forwarded (see
     // createBridgeTelemetryEventEmitter); other bridge events stay dormant as on main.
@@ -970,11 +974,29 @@ export async function createPainSignalBridge(
     fullPipelinePromptSeeds = isFeatureEnabled(featureFlags, 'prompt_full_pipeline');
   }
 
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}`;
+  // PRI-917 v0.3.3 review fix (P2-1): build the reuse-gate hook BEFORE the
+  // cache key and fold its presence into the key. A long-lived host (OpenClaw
+  // plugin, Codex worker) re-reads config per pain event but reuses the cached
+  // bridge, so a hook that captured the OLD reuseEvaluation setting would keep
+  // running after the Owner flipped the switch — in BOTH directions — and the
+  // T11 rollback would silently require a process restart. Same cache-key
+  // discipline as the persistence / prompt-seed toggles below.
+  const reuseRecommendation = createReuseRecommendationHook({
+    effectiveConfig: opts.effectiveConfig,
+    workspaceDir: opts.workspaceDir,
+    stateDir: opts.stateDir,
+    getEnvVar: opts.getEnvVar,
+  });
+
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${reuseRecommendation ? 'reuse-gate' : 'no-reuse-gate'}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
-  const bridge = await constructBridge(opts, runtimeConfig, { diagnosisPersistenceEnabled, fullPipelinePromptSeeds });
+  const bridge = await constructBridge(opts, runtimeConfig, {
+    diagnosisPersistenceEnabled,
+    fullPipelinePromptSeeds,
+    reuseRecommendation,
+  });
   // PRI-624: a concurrent constructor may have won the cache slot while we
   // were building — the loser self-disposes so its handles never leak.
   const winner = bridgeCache.get(cacheKey);
@@ -995,13 +1017,15 @@ export async function createPainSignalBridge(
  * keep landing and can be diagnosed after the Owner re-enables the agent.
  */
 export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: string): void {
+  // PRI-917 v0.3.3 review fix (P2-1): the cache key also encodes the reuse-gate
+  // state now, so exact-key enumeration can miss entries. Drop every cache slot
+  // of this workspace+runtime kind by prefix — the same discipline
+  // disposePainSignalBridgesForWorkspace uses — instead of enumerating key
+  // components by hand.
   const effectiveKind = runtimeKind ?? 'pi-ai';
   bridgeCache.delete(`${workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`);
-  for (const mode of ['local', 'gateway', '']) {
-    for (const pdp of ['pdp', 'nopdp']) {
-      for (const pfp of ['pfp', 'nopfp']) {
-        bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pdp}:${pfp}`);
-      }
-    }
+  const kindPrefix = `${workspaceDir}:${effectiveKind}:`;
+  for (const key of [...bridgeCache.keys()]) {
+    if (key.startsWith(kindPrefix)) bridgeCache.delete(key);
   }
 }

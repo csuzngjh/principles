@@ -335,6 +335,13 @@ R5 Reality Replay（Phase 6，真实 workspace、真实 LLM、非 mock）：Open
 2. **park-only 误报 failed**：bridge 结果 shaper 把"admitted 但零入账"一律报 `failed`——挂起是 BY DESIGN 不写账，全挂起批次改报 `degraded` + `reuse_review_required:<ids>` 消息。
 3. **遥测直通道**：`mapBridgeTelemetryToStoreEvent` 原本只透传持久化降级事件，`reuse_gate_triggered` 会被丢弃——加入 passthrough 集合（自带事件类型，非降级映射）。
 
+### R6-P6 — PR 评审判定修复（Owner 评审 4×P2，全部属实，2026-10-05）
+
+1. **回滚开关对长驻 bridge 不生效**：bridge 缓存键不含 `reuseEvaluation` 状态，长驻宿主（OpenClaw 插件 / Codex worker，均跨周期复用缓存且无 dispose）翻转开关后仍用旧 hook——T11 在两个方向上都退化为"需重启进程"。修复：hook 构建上移至 `createPainSignalBridge`、其存在性入缓存键（与 pdp/pfp 同一纪律）；`invalidatePainSignalBridge` 改按 workspace+kind 前缀清除以覆盖新键分量。
+2. **混合批次隐藏挂起候选**：`reuse_review_required` 降级分支原先要求零入账（全挂起）；一入账一挂起的混合批次报 plain succeeded。修复：shaper fresh 路径在 partial_admission 与 success 分支追加 parkedNote 并降级 degraded；Codex worker 报告新增 `reuseReviewRequiredCandidateIds`；OpenClaw 插件在含挂起候选的 degraded 结果上打 `PAIN_SERVICE_REUSE_REVIEW_REQUIRED` 日志（按挂起处置 gate，保持 flag-off 日志流逐字节不变）。
+3. **重放把等待裁决误报为 intake 失败**：父任务在管线完成时即 `succeeded`（与候选挂起无关），重放走 `buildExistingResult` 仅查账本——全挂起重放从 `review_required` 翻成 `failed`。修复：existing 路径把"仍 pending 且无账本条目的 principle 候选"（挂起的持久承载，§11）作为 parked 集传入 shaper，全挂起重放报同一 `review_required` 语义；混合重放追加 parkedNote 并降级 degraded；`candidateOutcomes` 在重放路径携带挂起子集（decision 用既有 admission-unknown 值 `needs_evidence`，不虚构 admission 结果）。
+4. **CLI 不显示挂起、仍建议 internalize**：diagnose/pain-retry 的文本渲染与顶层 nextAction 不识别 `review_required`，并对挂起候选输出 `pd candidate internalize`（诱导绕过裁决）。修复：两个命令的渲染循环增加 `review_required` 分支；顶层 nextAction 从 internalize 列表剔除挂起候选并给出 `pd candidate review --decide` 指引；pain-retry 死信 JSON 在成功与未成功两分支都携带挂起指引。
+
 ---
 
 ## 15. Complexity Delta（v0.3.3）

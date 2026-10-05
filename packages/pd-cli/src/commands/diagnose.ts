@@ -743,11 +743,22 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       // said "NOT started automatically" even when dreamer tasks were seeded.
       const dreamerSeededCount = intakeResults.filter((r) => r.status === 'dreamer_seeded').length;
       const dreamerSeedFailedCount = intakeResults.filter((r) => r.status === 'dreamer_seed_failed').length;
+      // PRI-917 v0.3.3 review fix (P2-4): parked candidates must NOT be told to
+      // internalize — the Owner decides via `pd candidate review` first.
+      const reviewRequiredIds = intakeResults
+        .filter((r) => r.status === 'review_required')
+        .map((r) => r.candidateId);
+      const reviewRequiredNote = reviewRequiredIds.length > 0
+        ? ` ${reviewRequiredIds.length} candidate(s) parked for reuse review (suspected duplicates) — decide before internalizing: pd candidate review --candidate-id <id> --decide reuse|create`
+        : '';
+      const internalizableCandidateIds = candidateIds.filter((id) => !reviewRequiredIds.includes(id));
       const internalizeNextAction = dreamerSeededCount > 0
-        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}`
-        : candidateIds.length > 0
-          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
-          : 'No candidates were generated from this diagnosis.';
+        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}${reviewRequiredNote}`
+        : internalizableCandidateIds.length > 0
+          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${internalizableCandidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}${reviewRequiredNote}`
+          : reviewRequiredIds.length > 0
+            ? `All candidates are parked for reuse review (suspected duplicates). To decide each, run:\n  ${reviewRequiredIds.map((id) => `pd candidate review --candidate-id ${id} --decide reuse|create`).join('\n  ')}`
+            : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
         painDiagnosisLedgerWrite,
@@ -812,6 +823,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           // CodeRabbit review fix: surface dreamer seed failure in TTY output
           console.log(`    ${ir.candidateId}: DREAMER SEED FAILED — ${ir.error}`);
           console.log(`      Next action: ${ir.nextAction}`);
+        } else if (ir.status === 'review_required') {
+          // PRI-917 v0.3.3 review fix (P2-4): a parked candidate must be
+          // visible with its review guidance, never silently absent.
+          console.log(`    ${ir.candidateId}: REUSE REVIEW REQUIRED${ir.reusedPrincipleId ? ` — suspected duplicate of existing Principle ${ir.reusedPrincipleId}` : ' — suspected duplicate'}`);
+          console.log(`      Next action: ${ir.nextAction}`);
         }
       }
     }
@@ -825,11 +841,24 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
 
     if (candidates.length > 0) {
-      console.log(`\n  Next Action:`);
-      console.log(`  Candidates generated but internalization has NOT started automatically.`);
-      console.log(`  To begin internalization:`);
-      for (const c of candidates) {
-        console.log(`    pd candidate internalize --candidate-id ${c.candidateId} --workspace "${workspaceDir}"`);
+      // PRI-917 v0.3.3 review fix (P2-4): parked candidates get review
+      // guidance instead of an internalize command that would bypass the
+      // Owner decision.
+      const parkedResults = intakeResults.filter((ir) => ir.status === 'review_required');
+      if (parkedResults.length > 0) {
+        console.log(`\n  Reuse Review Required (suspected duplicates parked for Owner decision):`);
+        for (const ir of parkedResults) {
+          console.log(`    pd candidate review --candidate-id ${ir.candidateId} --decide reuse|create`);
+        }
+      }
+      const internalizable = candidates.filter((c) => !parkedResults.some((ir) => ir.candidateId === c.candidateId));
+      if (internalizable.length > 0) {
+        console.log(`\n  Next Action:`);
+        console.log(`  Candidates generated but internalization has NOT started automatically.`);
+        console.log(`  To begin internalization:`);
+        for (const c of internalizable) {
+          console.log(`    pd candidate internalize --candidate-id ${c.candidateId} --workspace "${workspaceDir}"`);
+        }
       }
     }
 

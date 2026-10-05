@@ -261,6 +261,21 @@ export async function emitPainDetectedEvent(
           latencyMs: result.latencyMs,
           message: result.message,
         }));
+      } else if (result.status === 'degraded'
+        && (result.candidateOutcomes ?? []).some((o) => o.reason === 'reuse_review_required')) {
+        // PRI-917 v0.3.3 review fix (P2-2): a parked candidate is invisible in a
+        // plain succeeded/degraded result here — surface it so the Owner sees
+        // WHAT awaits review. Gated on the park disposition (not any degraded
+        // run) so the pre-v0.3.3 log stream stays byte-identical (T11).
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_REUSE_REVIEW_REQUIRED', JSON.stringify({
+          painId: result.painId,
+          taskId: result.taskId,
+          latencyMs: result.latencyMs,
+          parkedCandidateIds: (result.candidateOutcomes ?? [])
+            .filter((o) => o.reason === 'reuse_review_required')
+            .map((o) => o.candidateId),
+          message: result.message,
+        }));
       }
     } catch (err) {
       // rc-9: no silent fallback — persist pain data to dead_letter_pains so
