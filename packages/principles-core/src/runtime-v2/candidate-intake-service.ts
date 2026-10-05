@@ -183,6 +183,7 @@ export interface CandidateIntakeServiceOptions {
    * `reuseCheck: 'not_configured'` so "no gate" is never mistaken for "no
    * duplicate found".
    *
+   * Mutually exclusive with reuseRecommendation; supplying both fails at construction.
    * When provided, it receives the bounded proposal and MUST answer `reuse`
    * or `create` — there is no automatic option and no default.
    */
@@ -360,6 +361,13 @@ export class CandidateIntakeService {
   readonly #reuseStateDir: string | undefined;
 
   constructor(opts: CandidateIntakeServiceOptions) {
+    if (opts.reuseDecision && opts.reuseRecommendation) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        'reuseDecision and reuseRecommendation are mutually exclusive. nextAction: supply reuseRecommendation for automatic intake or reuseDecision for Owner decisions, never both.',
+        { reason: 'reuse_gate_misconfigured' },
+      );
+    }
     this.#stateManager = opts.stateManager;
     this.#ledgerAdapter = opts.ledgerAdapter;
     this.#reuseDecision = opts.reuseDecision;

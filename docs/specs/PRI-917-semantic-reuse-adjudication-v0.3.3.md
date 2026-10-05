@@ -351,6 +351,14 @@ R5 Reality Replay（Phase 6，真实 workspace、真实 LLM、非 mock）：Open
 
 本次 Complexity Delta：仅 **New public abstraction/interface: YES**（既有 CandidateIntakeService 增加只读 reviewReuse 与派生开关查询）。原 intake 接口会创建 Principle，无法用于只读重放；新方法隐藏同一套验证与建议逻辑，避免 bridge 复制实现或以 telemetry 为决策源。通过真实存储及负向矩阵验证，可随重放复核一起回退。新事实源、持久状态、子系统、feature flag、跨包依赖、宿主特有行为、外部能力均 NO。
 
+### R6-P8 — Owner 批准的通道互斥加固（方案 A，2026-10-05）
+
+Owner 明确批准将此前“同时注入时 Owner decision 优先”的契约改为“混配立即报配置错误”。CandidateIntakeService 构造时同时收到 reuseDecision 与 reuseRecommendation 即抛出既有 REUSE_CHECK_FAILED，原因 reuse_gate_misconfigured，指引调用方只选择一个通道。错误发生在执行回调、候选读取和写入之前。未配置、仅 recommendation、仅 decision 三种合法配置保持原行为；没有新增权限来源或写入路径。
+
+原优先级测试替换为 create/reuse 两种混配负向测试：构造同步抛错，两种回调调用次数均为零，ledger 字节与候选 pending 状态不变。该加固不将既有优先级行为追记为历史越权缺陷。
+
+本次 Complexity Delta：新事实源、持久状态、子系统、公开抽象/接口、feature flag、跨包依赖、宿主特有行为、外部能力均 NO（仅收紧既有 options 配置契约）。回退该构造校验可恢复此前优先级语义。Emotional value: N/A — no direct Owner-facing behavior.
+
 ---
 
 ## 15. Complexity Delta（v0.3.3）

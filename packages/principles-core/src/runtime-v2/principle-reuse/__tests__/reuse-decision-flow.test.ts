@@ -948,24 +948,28 @@ describe('v0.3.3 T11 — disabled capability restores the exact pre-v0.3.3 behav
     ).rejects.toMatchObject({ code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED });
   });
 
-  it('an Owner decision function always outranks the recommendation hook', async () => {
-    // Production never injects both; this pins the precedence if someone does:
-    // the Owner verdict path runs, the hook is never consulted.
+  it.each(['create', 'reuse'] as const)('rejects mixed channels before a %s decision or any mutation', async (decision) => {
     const principle = makePrinciple();
     addPrincipleToLedger(join(workspaceDir, '.state'), principle);
     const candidateId = await seedPrincipleCandidate();
+    const before = readFileSync(ledgerPath(), 'utf8');
+    let decisionCalls = 0;
     let hookCalls = 0;
-
-    const result = await service({
-      decision: () => ({ decision: 'create' }),
-      recommendation: async () => {
-        hookCalls += 1;
-        return recommendationOf(principle.id);
+    expect(() => service({
+      decision: () => {
+        decisionCalls += 1;
+        return decision === 'reuse' ? reuseOf(principle.id) : { decision: 'create' };
       },
-    }).intake(candidateId);
-
-    expect(result.outcome).toBe('ledger_entry');
+      recommendation: async () => { hookCalls += 1; return recommendationOf(principle.id); },
+    })).toThrowError(expect.objectContaining({
+      code: INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+      context: { reason: 'reuse_gate_misconfigured' },
+      message: expect.stringMatching(/mutually exclusive.*nextAction:/),
+    }));
+    expect(decisionCalls).toBe(0);
     expect(hookCalls).toBe(0);
+    expect(readFileSync(ledgerPath(), 'utf8')).toBe(before);
+    expect(await candidateStatus(candidateId)).toBe('pending');
   });
 });
 
