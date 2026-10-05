@@ -27,8 +27,10 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { pathToFileURL } = require('url');
 const readline = require('node:readline/promises');
-const { ensurePluginData, locatePluginRoot, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
+const { ensurePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:setup] status=failed reason=${reason}`);
@@ -53,7 +55,7 @@ function runNpm(args, options) {
 }
 
 function parseArgs(argv) {
-  const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, skipInit: false, json: false, ingest: undefined };
+  const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, adapterSource: undefined, hostRuntimeSource: undefined, skipInit: false, json: false, ingest: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--plugin-root') {
       const value = requireFlagValue(argv, i, '--plugin-root');
@@ -67,6 +69,11 @@ function parseArgs(argv) {
       const value = requireFlagValue(argv, i, '--workspace');
       if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
       out.workspace = value.value; i += 1;
+    } else if (argv[i] === '--adapter-source' || argv[i] === '--host-runtime-source') {
+      const flag = argv[i];
+      const value = requireFlagValue(argv, i, flag);
+      if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
+      out[flag === '--adapter-source' ? 'adapterSource' : 'hostRuntimeSource'] = path.resolve(value.value); i += 1;
     } else if (argv[i] === '--skip-init') out.skipInit = true;
     else if (argv[i] === '--json') out.json = true;
     else if (argv[i] === '--ingest') {
@@ -77,7 +84,7 @@ function parseArgs(argv) {
       }
       out.ingest = value.value; i += 1;
     }
-    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --skip-init --ingest accept|decline|skip --json' };
+    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --adapter-source <dir> --host-runtime-source <dir> --skip-init --ingest accept|decline|skip --json' };
   }
   return out;
 }
@@ -85,7 +92,21 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.error) { fail(args.error, args.nextAction ?? 'Check the argument list.'); return; }
-  const workspaceDir = path.resolve(args.workspace ?? process.cwd());
+  // Workspace-selection parity with hooks and the owner scripts (ERR-117):
+  // they resolve through locateWorkspace — an initialized user workspace wins
+  // over the project, and a broken user config fails loud instead of silently
+  // falling back to project configuration. Explicit --workspace still wins for
+  // the documented first-run opt-in, and a project with no config anywhere
+  // keeps the legacy cwd behavior (this script initializes it in step 3).
+  let workspaceDir;
+  if (args.workspace) {
+    workspaceDir = path.resolve(args.workspace);
+  } else {
+    const located = locateWorkspace(process.cwd());
+    if (located.ok) workspaceDir = located.workspaceDir;
+    else if (located.reason === 'workspace_not_initialized') workspaceDir = process.cwd();
+    else { fail(located.reason, located.nextAction); return; }
+  }
 
   // 1. Environment gate. The pinned @principles/core runtime depends on
   //    better-sqlite3 ^13, whose prebuilt binaries require Node >= 22 — the
@@ -117,6 +138,26 @@ async function main() {
     return;
   }
   const desired = { codexAdapter: pins.codexAdapter, hostRuntime: pins.hostRuntime, core: pins.core };
+  if (args.adapterSource) {
+    let sourcePackage;
+    try { sourcePackage = JSON.parse(fs.readFileSync(path.join(args.adapterSource, 'package.json'), 'utf8')); }
+    catch { fail('adapter_source_invalid', 'Pass the built codex-adapter package directory containing package.json and dist/pd-hook.js.'); return; }
+    if (!sourcePackage || sourcePackage.name !== '@principles/codex-adapter'
+      || sourcePackage.version !== desired.codexAdapter
+      || !fs.existsSync(path.join(args.adapterSource, 'dist', 'pd-hook.js'))) {
+      fail('adapter_source_invalid', 'The built adapter name/version must match the plugin runtime pin.'); return;
+    }
+  }
+  if (args.hostRuntimeSource) {
+    let sourcePackage;
+    try { sourcePackage = JSON.parse(fs.readFileSync(path.join(args.hostRuntimeSource, 'package.json'), 'utf8')); }
+    catch { fail('host_runtime_source_invalid', 'Pass the built host-runtime package directory.'); return; }
+    if (!sourcePackage || sourcePackage.name !== '@principles/host-runtime'
+      || sourcePackage.version !== desired.hostRuntime
+      || !fs.existsSync(path.join(args.hostRuntimeSource, 'dist', 'index.js'))) {
+      fail('host_runtime_source_invalid', 'The built host-runtime name/version must match the plugin runtime pin.'); return;
+    }
+  }
   const missingPins = Object.entries(desired)
     .filter(([, value]) => typeof value !== 'string' || value.length === 0)
     .map(([key]) => key);
@@ -127,11 +168,13 @@ async function main() {
   const runtimeDir = path.join(data.pluginData, 'runtime');
   const markerPath = path.join(runtimeDir, '.pd-runtime.json');
   let installNeeded = true;
+  let adapterSource = args.adapterSource;
   try {
     const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+    if (!adapterSource && typeof marker.adapterSource === 'string') adapterSource = marker.adapterSource;
     if (marker.codexAdapter === desired.codexAdapter
       && marker.hostRuntime === desired.hostRuntime
-      && marker.core === desired.core) installNeeded = false;
+      && marker.core === desired.core && !args.adapterSource && !args.hostRuntimeSource) installNeeded = false;
   } catch { /* no/broken marker → install */ }
 
   if (installNeeded) {
@@ -140,8 +183,10 @@ async function main() {
     const install = runNpm(
       [
         'install', '--no-audit', '--no-fund', '--loglevel=error', '--omit=dev',
-        `@principles/codex-adapter@${desired.codexAdapter}`,
-        `@principles/host-runtime@${desired.hostRuntime}`,
+        '--prefer-offline', '--fetch-retries=0', '--fetch-timeout=30000',
+        ...(args.adapterSource || args.hostRuntimeSource ? ['--install-links'] : []),
+        args.adapterSource ? `file:${args.adapterSource}` : `@principles/codex-adapter@${desired.codexAdapter}`,
+        args.hostRuntimeSource ? `file:${args.hostRuntimeSource}` : `@principles/host-runtime@${desired.hostRuntime}`,
         `@principles/core@${desired.core}`,
       ],
       { cwd: runtimeDir, stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 },
@@ -153,7 +198,8 @@ async function main() {
       );
       return;
     }
-    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, installedAt: new Date().toISOString() }, null, 2));
+    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, ...(args.adapterSource ? { adapterSource: args.adapterSource } : {}), ...(args.hostRuntimeSource ? { hostRuntimeSource: args.hostRuntimeSource } : {}), installedAt: new Date().toISOString() }, null, 2));
+    adapterSource = args.adapterSource;
   }
 
   // Verify the runtime resolves from the installed location.
@@ -182,6 +228,17 @@ async function main() {
     initResult = 'initialized';
   }
 
+  // The Marketplace installer must register its workspace too: the retired
+  // global-hook installer no longer reaches writeInstallManifest. Companion
+  // discovers workers only from this existing installer-owned manifest.
+  let workerRegistration;
+  try {
+    workerRegistration = await registerWorkspaceWorker(workspaceDir);
+  } catch (error) {
+    fail(`worker_registration_failed:${error.message.slice(0, 160)}`, 'Restore the canonical PD install manifest/runtime and re-run $pd-setup. The existing manifest was not replaced.');
+    return;
+  }
+
   // 4. Codex conversation-ingestion consent (PRI-625, G2A frozen disclosure).
   //    The disclosure text ALWAYS comes from the installed pd CLI
   //    (`pd codex setup --show-disclosure`) — this script embeds no copy, so
@@ -198,10 +255,12 @@ async function main() {
     pluginRoot: root.pluginRoot,
     pluginData: data.pluginData,
     runtime: desired,
+    runtimeSource: adapterSource ? 'local_adapter_build' : 'published_packages',
     runtimeInstalled: !installNeeded ? 'already-present' : 'installed',
     workspace: workspaceDir,
     workspaceConfig: fs.existsSync(configPath) ? 'present' : 'absent (run pd runtime init without --skip-init, or create .pd/config.yaml)',
     workspaceInit: initResult,
+    workerRegistration,
     ingestionConsent: consent.outcome,
     ...(consent.note ? { ingestionConsentNote: consent.note } : {}),
     hookTrustNextAction: 'In Codex, run /hooks and trust the Principles Disciple hooks — hooks never execute until trusted.',
@@ -212,8 +271,56 @@ async function main() {
     console.log(`  runtime   : @principles/codex-adapter@${desired.codexAdapter} + host-runtime@${desired.hostRuntime} + core@${desired.core} (${report.runtimeInstalled})`);
     console.log(`  workspace : ${workspaceDir} — config ${report.workspaceConfig}`);
     console.log(`  ingestion : ${report.ingestionConsent}${consent.note ? ` (${consent.note})` : ''}`);
+    console.log(`  worker    : ${workerRegistration.status} — ${workerRegistration.nextAction}`);
     console.log(`  next      : ${report.hookTrustNextAction}`);
   }
+}
+
+async function registerWorkspaceWorker(workspaceDir) {
+  const pdDir = path.join(os.homedir(), '.pd');
+  const manifestPath = path.join(pdDir, 'install.json');
+  const layoutEntry = path.join(pdDir, 'runtime', 'install-layout', 'dist', 'index.js');
+  const manual = (reason) => ({
+    status: 'manual_action_required', reason,
+    nextAction: `Automatic processing requires the canonical PD runtime and a running PD Companion. Manual processing: pd codex worker --once --workspace "${workspaceDir}" --json`,
+  });
+  let current;
+  try {
+    current = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    if (error instanceof Error && Object.hasOwn(error, 'code') && Reflect.get(error, 'code') === 'ENOENT') return manual('canonical_install_unavailable');
+    throw error;
+  }
+  // Legacy installs and a missing/broken canonical runtime cannot register
+  // here: report manual processing instead of crashing setup. The manifest
+  // itself is classified before the canonical module is ever required.
+  if (current && current.mode === 'legacy') return manual('canonical_install_unavailable');
+  let layout;
+  try {
+    layout = await import(pathToFileURL(layoutEntry).href);
+  } catch {
+    return manual('canonical_install_unavailable');
+  }
+  const { parseInstallManifest, mergeInstallManifestWorkspaces } = layout;
+  const parsed = parseInstallManifest(current);
+  if (!parsed.manifest) throw new Error(parsed.error);
+  if (parsed.manifest.mode !== 'canonical') return manual('canonical_install_unavailable');
+  const workspaceConfigPath = path.join(workspaceDir, '.pd', 'config.yaml');
+  let workspaceConfigStat;
+  try {
+    workspaceConfigStat = fs.statSync(workspaceConfigPath);
+  } catch (error) {
+    if (!(error instanceof Error && Object.hasOwn(error, 'code') && Reflect.get(error, 'code') === 'ENOENT')) throw error;
+    return manual('workspace_not_initialized');
+  }
+  if (!workspaceConfigStat.isFile()) throw new Error('workspace_config_invalid');
+  const hosts = [...new Set([...parsed.manifest.hosts, 'codex'])];
+  const workspaces = mergeInstallManifestWorkspaces(parsed.manifest, workspaceDir);
+  fs.writeFileSync(manifestPath, JSON.stringify({ ...current, hosts, workspaces }, null, 2) + '\n', 'utf8');
+  return {
+    status: 'registered', manifest: manifestPath,
+    nextAction: 'Start PD Companion and keep it running. Registration allows discovery; it does not prove a worker is running. Verify processing with pd codex worker --once --workspace "' + workspaceDir + '" --json.',
+  };
 }
 
 /**
