@@ -125,6 +125,9 @@ vi.mock('@principles/core/runtime-v2', () => {
       }
     },
     CandidateIntakeService: MockCandidateIntakeService,
+    // PRI-917 v0.3.3: the Reuse Review Gate hook builder — undefined hook in
+    // tests keeps the pre-v0.3.3 intake flow unless a test opts in.
+    createReuseRecommendationHook: vi.fn(() => undefined),
     // PRI-503: admission gate mock — admit by default so existing diagnose/intake
     // tests keep their original flow. Tests that need to assert refusal behavior
     // can override this mock per-test.
@@ -705,6 +708,105 @@ describe('pd diagnose run — auto-intake after success', () => {
     expect(parsed.intake.candidates[1].error).toContain('Ledger write failed');
     expect(parsed.intake.candidates[1].nextAction).toContain('pd candidate intake --candidate-id cand-fail');
     expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('INTAKE-02b (P2-4): parked candidate surfaces review guidance and is EXCLUDED from internalize nextAction', async () => {
+    const candidates = [
+      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'test-task-1', status: 'pending' },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+    mockIntake
+      .mockResolvedValueOnce({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-ok', title: 'OK', status: 'probation' } })
+      .mockResolvedValueOnce({
+        outcome: 'refused',
+        reason: 'reuse_pending_owner',
+        candidateId: 'cand-parked',
+        rawRecommendationKind: 'principle',
+        message: 'suspected duplicate — parked for the Owner',
+        reuseRecommendation: {
+          status: 'recommended',
+          recommendation: 'reuse',
+          selectedPrincipleId: 'existing-p1',
+          rationale: 'same experience',
+          confidence: 0.9,
+        },
+      });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    const jsonOutput = consoleSpy.mock.calls.find(call => {
+      try {
+        const parsed = JSON.parse(call[0] as string);
+        return parsed.intake && Array.isArray(parsed.intake.candidates);
+      } catch { return false; }
+    });
+    expect(jsonOutput).toBeDefined();
+    const parsed = JSON.parse((jsonOutput as [string])[0]);
+    expect(parsed.intake.candidates[1].status).toBe('review_required');
+    expect(parsed.intake.candidates[1].reusedPrincipleId).toBe('existing-p1');
+    expect(parsed.intake.candidates[1].nextAction).toContain('pd candidate review --candidate-id cand-parked --decide reuse|create');
+    // The parked candidate is NOT told to internalize (P2-4).
+    expect(parsed.nextAction).toContain('pd candidate internalize --candidate-id cand-ok');
+    expect(parsed.nextAction).not.toContain('internalize --candidate-id cand-parked');
+    expect(parsed.nextAction).toContain('pd candidate review');
+    // Park is not an intake failure: no consumed marking, no non-zero exit.
+    expect(mockUpdateCandidateStatus).toHaveBeenCalledTimes(1);
+    expect(mockUpdateCandidateStatus).toHaveBeenCalledWith('cand-ok', { status: 'consumed' });
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('INTAKE-02c (P2-4): text output prints the parked candidate with review guidance', async () => {
+    const candidates = [
+      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'test-task-1', status: 'pending' },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+    mockIntake.mockResolvedValue({
+      outcome: 'refused',
+      reason: 'reuse_pending_owner',
+      candidateId: 'cand-parked',
+      rawRecommendationKind: 'principle',
+      message: 'suspected duplicate — parked for the Owner',
+      reuseRecommendation: {
+        status: 'recommended',
+        recommendation: 'reuse',
+        selectedPrincipleId: 'existing-p1',
+        rationale: 'same experience',
+        confidence: 0.9,
+      },
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    } as DiagnoseRunOptions);
+
+    const printed = consoleSpy.mock.calls.map((call) => String(call[0] ?? '')).join('\n');
+    expect(printed).toContain('REUSE REVIEW REQUIRED');
+    expect(printed).toContain('suspected duplicate of existing Principle existing-p1');
+    expect(printed).toContain('pd candidate review --candidate-id cand-parked --decide reuse|create');
+    // The internalize section excludes the parked candidate entirely.
+    expect(printed).not.toContain('pd candidate internalize --candidate-id cand-parked');
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();

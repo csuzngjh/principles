@@ -179,6 +179,19 @@ function createBridge(deps: MockDeps, autoIntakeEnabled = true): PainSignalBridg
   });
 }
 
+function enableReplayReview(deps: MockDeps, candidates: CandidateRecord[], output = makeHighConfidenceOutput()): void {
+  Object.defineProperty(deps.intakeService, 'reuseReviewEnabled', { value: true, configurable: true });
+  deps.intakeService.reviewReuse = async (candidateId) => ({
+    outcome: 'refused', reason: 'reuse_pending_owner', candidateId,
+    rawRecommendationKind: 'principle', message: 'confirmed reuse recommendation',
+  });
+  deps.stateManager = {
+    ...deps.stateManager,
+    getTask: async () => ({ taskId: TASK_ID, status: 'succeeded', diagnosticJson: JSON.stringify({ provenance: 'owner_reported_no_host_trace', evidence: [{ sourceRef: 'input', note: 'submitted evidence' }] }) }),
+    getRun: async (runId: string) => ({ runId, taskId: candidates.find((c) => c.sourceRunId === runId)?.taskId, executionStatus: 'succeeded', outputPayload: JSON.stringify(output) }),
+  } as unknown as RuntimeStateManager;
+}
+
 // Interface for accessing private buildExistingResult
 interface BridgeWithPrivate {
   buildExistingResult(input: { painId: string; taskId: string }): Promise<PainSignalBridgeResult>;
@@ -389,6 +402,114 @@ describe('PRI-456: onDiagnosisComplete result-shaping characterization', () => {
 
 // ── buildExistingResult() characterization ───────────────────────────────────
 
+describe('PRI-917 v0.3.3: Reuse Review Gate — parked candidate handling (T12)', () => {
+  it('a reuse_pending_owner candidate stays pending: no seed, no consume, observable outcome', async () => {
+    const candidates = [makeCandidate('c1', 'principle')];
+    const deps = makeMockDeps({ candidates, output: makeHighConfidenceOutput() });
+    // The REAL service parks a suspected duplicate; the mock returns exactly
+    // the disposition the gate produces (refused/reuse_pending_owner).
+    (deps.intakeService as unknown as { intake: (candidateId: string) => Promise<unknown> }).intake = async (
+      candidateId: string,
+    ) => ({
+      outcome: 'refused',
+      reason: 'reuse_pending_owner',
+      candidateId,
+      rawRecommendationKind: 'principle',
+      message: 'suspected duplicate — parked for the Owner',
+      reuseProposal: {
+        candidateId,
+        status: 'pending',
+        candidates: [{ principleId: 'existing-p1', score: 0.4, reasons: ['shares terms'] }],
+        eligibleCount: 1,
+      },
+      reuseRecommendation: {
+        status: 'recommended',
+        recommendation: 'reuse',
+        selectedPrincipleId: 'existing-p1',
+        rationale: 'same experience',
+        confidence: 0.93,
+      },
+    });
+    const bridge = createBridge(deps);
+
+    const result = await bridge.onDiagnosisComplete({
+      taskId: TASK_ID,
+      diagnosticianOutput: makeHighConfidenceOutput(),
+      painId: PAIN_ID,
+      provenance: PROVENANCE,
+      inputEvidenceCount: 1,
+    });
+
+    // No dreamer task seeded, candidate NOT marked consumed (stays pending).
+    expect(deps.createTaskCalls).toHaveLength(0);
+    expect(deps.updateCandidateStatusCalls).toHaveLength(0);
+    // A fully-parked batch is "awaiting the Owner" (degraded), NOT a failure.
+    expect(result.status).toBe('degraded');
+    expect(result.message).toContain('reuse_review_required');
+    // rc-9: the waiting state is visible — per-candidate outcome + telemetry.
+    const outcome = result.candidateOutcomes?.[0];
+    expect(outcome?.reason).toBe('reuse_review_required');
+    expect(outcome?.nextAction).toContain('pd candidate review');
+    const gateEvent = deps.telemetryEvents.find((e) => e.eventType === 'reuse_gate_triggered') as
+      | { payload: Record<string, unknown> }
+      | undefined;
+    expect(gateEvent).toBeDefined();
+    expect(gateEvent?.payload).toMatchObject({
+      candidateId: 'c1',
+      selectedPrincipleId: 'existing-p1',
+      confidence: 0.93,
+      recommendation: 'reuse',
+    });
+  });
+
+  it('P2-2: a MIXED batch (one ledgered, one parked) reports review_required instead of plain succeeded', async () => {
+    // Previously only a FULLY-parked batch surfaced the review requirement; a
+    // batch with one ledgered and one parked candidate returned succeeded with
+    // no message, hiding the pending item from the Owner on every consumer.
+    const candidates = [makeCandidate('c-ledgered', 'principle'), makeCandidate('c-parked', 'principle')];
+    const deps = makeMockDeps({ candidates, output: makeHighConfidenceOutput() });
+    (deps.intakeService as unknown as { intake: (candidateId: string) => Promise<unknown> }).intake = async (
+      candidateId: string,
+    ) => {
+      if (candidateId === 'c-parked') {
+        return {
+          outcome: 'refused',
+          reason: 'reuse_pending_owner',
+          candidateId,
+          rawRecommendationKind: 'principle',
+          message: 'suspected duplicate — parked for the Owner',
+          reuseRecommendation: {
+            status: 'recommended',
+            recommendation: 'reuse',
+            selectedPrincipleId: 'existing-p1',
+            rationale: 'same experience',
+            confidence: 0.9,
+          },
+        };
+      }
+      return { outcome: 'ledger_entry', written: true, entry: { id: `ledger-${candidateId}` } };
+    };
+    const bridge = createBridge(deps);
+
+    const result = await bridge.onDiagnosisComplete({
+      taskId: TASK_ID,
+      diagnosticianOutput: makeHighConfidenceOutput(),
+      painId: PAIN_ID,
+      provenance: PROVENANCE,
+      inputEvidenceCount: 1,
+    });
+
+    expect(result.status).toBe('degraded');
+    expect(result.ledgerEntryIds).toEqual(['ledger-c-ledgered']);
+    expect(result.message).toContain('reuse_review_required:c-parked');
+    expect(result.message).toContain('pd candidate review');
+    const parkedOutcome = result.candidateOutcomes?.find((o) => o.candidateId === 'c-parked');
+    expect(parkedOutcome?.reason).toBe('reuse_review_required');
+    const ledgeredOutcome = result.candidateOutcomes?.find((o) => o.candidateId === 'c-ledgered');
+    expect(ledgeredOutcome?.ledgerEntryId).toBe('ledger-c-ledgered');
+  });
+});
+
 describe('PRI-456: buildExistingResult result-shaping characterization', () => {
   it('succeeded: existing task with candidates and ledger entries', async () => {
     const candidates = [makeCandidate('c1', 'principle')];
@@ -446,8 +567,38 @@ describe('PRI-456: buildExistingResult result-shaping characterization', () => {
     expect(result.message).toBe('Task has no principle candidates — treating as failed');
   });
 
-  it('failed: no ledger entries with autoIntakeEnabled=true', async () => {
+  it('review_required (P2-3): replay admission and read-only reuse review confirm the pending candidate', async () => {
+    // Pending alone is insufficient: only an admitted candidate with a fresh
+    // read-only reuse recommendation receives the review disposition.
     const candidates = [makeCandidate('c1', 'principle')];
+    const deps = makeMockDeps({ candidates, ledgerEntries: new Map() });
+    enableReplayReview(deps, candidates);
+    const bridge = createBridge(deps);
+
+    const result = await (bridge as unknown as BridgeWithPrivate).buildExistingResult({
+      painId: PAIN_ID,
+      taskId: TASK_ID,
+    });
+
+    expect(result.status).toBe('degraded');
+    expect(result.runId).toBe(RUN_ID);
+    expect(result.artifactId).toBe('artifact-c1');
+    expect(result.candidateIds).toEqual(['c1']);
+    expect(result.ledgerEntryIds).toEqual([]);
+    expect(result.message).toContain('reuse_review_required:c1');
+    expect(result.message).toContain('pd candidate review');
+    // P2-2: the parked subset reaches callers as candidate-level dispositions.
+    expect(result.candidateOutcomes).toHaveLength(1);
+    expect(result.candidateOutcomes?.[0]?.candidateId).toBe('c1');
+    expect(result.candidateOutcomes?.[0]?.reason).toBe('reuse_review_required');
+    expect(result.candidateOutcomes?.[0]?.nextAction).toContain('pd candidate review');
+  });
+
+  it('failed: no ledger entries and NO pending parked candidate — integrity signal preserved (P2-3)', async () => {
+    // An expired principle candidate without a ledger entry is NOT the parked
+    // carrier — it is a genuine "admitted/eligible but never ledgered" state,
+    // which stays a failure exactly as before the review fix.
+    const candidates = [makeCandidate('c1', 'principle', { status: 'expired' })];
     const deps = makeMockDeps({ candidates, ledgerEntries: new Map() });
     const bridge = createBridge(deps);
 
@@ -457,20 +608,20 @@ describe('PRI-456: buildExistingResult result-shaping characterization', () => {
     });
 
     expect(result.status).toBe('failed');
-    expect(result.runId).toBe(RUN_ID);
-    expect(result.artifactId).toBe('artifact-c1');
     expect(result.candidateIds).toEqual(['c1']);
     expect(result.ledgerEntryIds).toEqual([]);
     expect(result.message).toBe('Candidate intake did not produce a ledger entry — treating as failed');
   });
 
-  it('multiple candidates with mixed ledger existence — only existing ledgers counted', async () => {
+  it('review_required (P2-2/F3): replayed batch with one ledgered and one still-pending candidate keeps the park visible', async () => {
+    // Only a confirmed reuse recommendation belongs in the parked subset.
     const candidates = [
       makeCandidate('c1', 'principle'),
       makeCandidate('c2', 'principle'),
     ];
     const ledgerEntries = new Map<string, LedgerPrincipleEntry>([['c1', makeLedgerEntry('c1')]]);
     const deps = makeMockDeps({ candidates, ledgerEntries });
+    enableReplayReview(deps, candidates);
     const bridge = createBridge(deps);
 
     const result = await (bridge as unknown as BridgeWithPrivate).buildExistingResult({
@@ -478,10 +629,61 @@ describe('PRI-456: buildExistingResult result-shaping characterization', () => {
       taskId: TASK_ID,
     });
 
-    expect(result.status).toBe('succeeded');
+    expect(result.status).toBe('degraded');
     expect(result.candidateIds).toEqual(['c1', 'c2']);
     expect(result.ledgerEntryIds).toEqual(['ledger-c1']);
-    expect(result.message).toBe('Task already succeeded');
+    expect(result.message).toContain('Task already succeeded');
+    expect(result.message).toContain('reuse_review_required:c2');
+    expect(result.message).toContain('pd candidate review');
+    // Only the parked subset appears on the replay path — admission results are
+    // not replayed, so other dispositions stay unknown rather than fabricable.
+    expect(result.candidateOutcomes).toHaveLength(1);
+    expect(result.candidateOutcomes?.[0]?.candidateId).toBe('c2');
+    expect(result.candidateOutcomes?.[0]?.reason).toBe('reuse_review_required');
+  });
+
+  it('gate off: pending without a ledger keeps the original failure and never asks for reuse', async () => {
+    const candidates = [makeCandidate('c1', 'principle')];
+    const deps = makeMockDeps({ candidates });
+    deps.stateManager.getTask = async () => ({ taskId: TASK_ID, status: 'succeeded' }) as never;
+    let calls = 0;
+    deps.intakeService.reviewReuse = async () => { calls += 1; return null; };
+    const result = await createBridge(deps).executePendingDiagnosis({ taskId: TASK_ID });
+    // Public replay needs a succeeded diagnosis task, without any reuse hook.
+    expect(calls).toBe(0);
+    expect(result.status).toBe('failed');
+    expect(result.message).toBe('Candidate intake did not produce a ledger entry — treating as failed');
+    expect(result.candidateOutcomes).toBeUndefined();
+  });
+
+  it.each(['low_confidence', 'empty_evidence', 'invalid_output', 'wrong_run_lineage'] as const)('does not turn %s into a reuse park', async (failure) => {
+    const candidates = [makeCandidate('c1', 'principle')];
+    const deps = makeMockDeps({ candidates });
+    const output = makeHighConfidenceOutput();
+    if (failure === 'low_confidence') output.confidence = 0.3;
+    if (failure === 'empty_evidence') output.evidence = [];
+    enableReplayReview(deps, candidates, output);
+    if (failure === 'invalid_output' || failure === 'wrong_run_lineage') {
+      deps.stateManager.getRun = async () => ({ taskId: failure === 'wrong_run_lineage' ? 'another-task' : TASK_ID, executionStatus: 'succeeded', outputPayload: failure === 'invalid_output' ? '{}' : JSON.stringify(output) }) as never;
+    }
+    let calls = 0;
+    deps.intakeService.reviewReuse = async () => { calls += 1; throw new Error('must not evaluate rejected input'); };
+    const result = await createBridge(deps).executePendingDiagnosis({ taskId: TASK_ID });
+    expect(result.status).toBe('failed');
+    expect(result.candidateOutcomes).toBeUndefined();
+    expect(calls).toBe(0);
+  });
+
+  it('keeps intake validation errors visible instead of reporting reuse review', async () => {
+    const candidates = [makeCandidate('c1', 'principle')];
+    const deps = makeMockDeps({ candidates });
+    enableReplayReview(deps, candidates);
+    deps.intakeService.reviewReuse = async () => { throw new Error('artifact missing'); };
+    const result = await createBridge(deps).executePendingDiagnosis({ taskId: TASK_ID });
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('artifact missing');
+    expect(result.message).toContain('nextAction');
+    expect(result.candidateOutcomes).toBeUndefined();
   });
 });
 

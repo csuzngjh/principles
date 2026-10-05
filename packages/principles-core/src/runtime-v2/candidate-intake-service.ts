@@ -54,6 +54,8 @@ import { buildReuseProposal, proposalNeedsDecision } from './principle-reuse/reu
 import { buildReuseShortlist } from './principle-reuse/reuse-retrieval.js';
 import { validateReuseDecision } from './principle-reuse/reuse-proposal.js';
 import type { ReuseDecision, ReuseProposal } from './principle-reuse/reuse-proposal.js';
+import type { ReuseEvaluationOutputV1 } from './principle-reuse/reuse-evaluation-output.js';
+import type { ReuseCandidateInput } from './principle-reuse/reuse-domain.js';
 import type { ReuseEvidenceEntry } from './types/principle-schema.js';
 
 /**
@@ -82,8 +84,19 @@ import type { ReuseEvidenceEntry } from './types/principle-schema.js';
  *   yet, so this cannot surface today; but any consumer that renders
  *   refusal-specific operator messages MUST branch on
  *   `reason === 'reuse_selected'` BEFORE production reuse is enabled.
+ * - `reuse_pending_owner` (PRI-917 v0.3.3, OD-PRI917-05) — the Reuse Review
+ *   Gate ran the semantic evaluation on the AUTO path (no Owner decision
+ *   function present) and the recommendation was `reuse` with a selection
+ *   inside the proposal. No Principle is created, NO evidence is written, and
+ *   the candidate stays PENDING for the Owner. Consumers MUST branch on this
+ *   reason: unlike every other refusal, the candidate is intentionally kept
+ *   pending — do not mark it consumed and do not seed internalization for it.
  */
-export type LedgerRefusalReason = 'non_principle_kind' | 'unknown_kind' | 'reuse_selected';
+export type LedgerRefusalReason =
+  | 'non_principle_kind'
+  | 'unknown_kind'
+  | 'reuse_selected'
+  | 'reuse_pending_owner';
 
 /**
  * Explicit disposition returned by {@link CandidateIntakeService.intake}.
@@ -122,7 +135,25 @@ export type CandidateIntakeResult =
        * resolved into `selectedPrincipleId` instead of creating a Principle.
        */
       readonly reuseEvidence?: ReuseEvidenceEntry;
+      /**
+       * PRI-917 v0.3.3 — present only when `reason === 'reuse_pending_owner'`:
+       * the semantic recommendation that triggered the park. NEVER persisted —
+       * the Owner re-evaluates via `pd candidate review` (T7: proposal output
+       * cannot mutate ledger/evidence; the park itself writes nothing).
+       */
+      readonly reuseRecommendation?: ReuseRecommendationOutcome;
     };
+
+/**
+ * PRI-917 v0.3.3 — outcome of the auto-path Reuse Review Gate's evaluation
+ * hook. `recommended` wraps the validated `reuse-evaluation-output-v1` payload
+ * (a RECOMMENDATION — never a decision); `unavailable` is the observable
+ * degradation that lets CREATE proceed (SPEC v0.3.3 Rule 4: evaluation failure
+ * must never block learning).
+ */
+export type ReuseRecommendationOutcome =
+  | ({ status: 'recommended' } & ReuseEvaluationOutputV1)
+  | { status: 'unavailable'; reason: string };
 
 /**
  * PRI-917 Slice 2 — what the reuse gate did before a ledger write.
@@ -133,8 +164,12 @@ export type CandidateIntakeResult =
  * - `no_candidates` — the gate ran and found nothing credible.
  * - `create_decided` — the gate found candidates and the decision function
  *   answered `create`; the write proceeded exactly as before.
+ * - `recommended_create` (PRI-917 v0.3.3) — the auto-path recommendation hook
+ *   ran and did NOT answer reuse (create / uncertain / unavailable / selection
+ *   outside the proposal); the write proceeded per Rules 2-4. Never emitted
+ *   when only an Owner decision function is configured.
  */
-export type ReuseCheckOutcome = 'not_configured' | 'no_candidates' | 'create_decided';
+export type ReuseCheckOutcome = 'not_configured' | 'no_candidates' | 'create_decided' | 'recommended_create';
 
 
 export interface CandidateIntakeServiceOptions {
@@ -148,12 +183,28 @@ export interface CandidateIntakeServiceOptions {
    * `reuseCheck: 'not_configured'` so "no gate" is never mistaken for "no
    * duplicate found".
    *
+   * Mutually exclusive with reuseRecommendation; supplying both fails at construction.
    * When provided, it receives the bounded proposal and MUST answer `reuse`
    * or `create` — there is no automatic option and no default.
    */
   reuseDecision?: (proposal: ReuseProposal) => ReuseDecision;
   /** Workspace state dir used for read-only reuse retrieval. */
   reuseStateDir?: string;
+  /**
+   * PRI-917 v0.3.3 (OD-PRI917-05) — optional auto-path Reuse Review Gate
+   * recommendation hook. When injected (WITHOUT `reuseDecision`), the gate
+   * runs the semantic evaluation for every candidate with a credible proposal
+   * and parks the candidate (`refused/reuse_pending_owner`) when the
+   * recommendation is `reuse` with a selection inside the proposal. Any other
+   * outcome (create / uncertain / unavailable / throw) degrades to CREATE —
+   * evaluation failure must never block learning (Rule 4). The hook is a
+   * RECOMMENDATION channel only: it can never write, and it is never injected
+   * together with an Owner decision function by production callers.
+   */
+  reuseRecommendation?: (
+    claim: ReuseCandidateInput,
+    proposal: ReuseProposal,
+  ) => Promise<ReuseRecommendationOutcome>;
 }
 
 /**
@@ -304,13 +355,47 @@ export class CandidateIntakeService {
   readonly #stateManager: RuntimeStateManager;
   readonly #ledgerAdapter: LedgerAdapter;
   readonly #reuseDecision: ((proposal: ReuseProposal) => ReuseDecision) | undefined;
+  readonly #reuseRecommendation:
+    | ((claim: ReuseCandidateInput, proposal: ReuseProposal) => Promise<ReuseRecommendationOutcome>)
+    | undefined;
   readonly #reuseStateDir: string | undefined;
 
   constructor(opts: CandidateIntakeServiceOptions) {
+    if (opts.reuseDecision && opts.reuseRecommendation) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        'reuseDecision and reuseRecommendation are mutually exclusive. nextAction: supply reuseRecommendation for automatic intake or reuseDecision for Owner decisions, never both.',
+        { reason: 'reuse_gate_misconfigured' },
+      );
+    }
     this.#stateManager = opts.stateManager;
     this.#ledgerAdapter = opts.ledgerAdapter;
     this.#reuseDecision = opts.reuseDecision;
+    this.#reuseRecommendation = opts.reuseRecommendation;
     this.#reuseStateDir = opts.reuseStateDir;
+  }
+
+  /**
+   * PRI-917 v0.3.3 — run the auto-path recommendation hook. A throwing hook
+   * (buggy builder, adapter crash) is an `unavailable` recommendation, NOT an
+   * intake failure: Rule 4 forbids evaluation failures from blocking learning.
+   */
+  async #runReuseRecommendation(
+    claim: ReuseCandidateInput,
+    proposal: ReuseProposal,
+  ): Promise<ReuseRecommendationOutcome> {
+    const hook = this.#reuseRecommendation;
+    if (!hook) {
+      return { status: 'unavailable', reason: 'reuse recommendation hook is not configured' };
+    }
+    try {
+      return await hook(claim, proposal);
+    } catch (err: unknown) {
+      return {
+        status: 'unavailable',
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 
   /**
@@ -331,6 +416,23 @@ export class CandidateIntakeService {
    *   - LEDGER_WRITE_FAILED when ledger write fails
    */
   async intake(candidateId: string): Promise<CandidateIntakeResult> {
+    return this.#intake(candidateId, false);
+  }
+
+  /** Whether the automatic recommendation channel is configured for read-only review. */
+  get reuseReviewEnabled(): boolean {
+    return this.#reuseRecommendation !== undefined && !this.#reuseDecision;
+  }
+
+  /** Uses the same input validation and gate as intake, but never writes. */
+  async reviewReuse(candidateId: string): Promise<CandidateIntakeResult | null> {
+    if (!this.reuseReviewEnabled) return null;
+    return this.#intake(candidateId, true);
+  }
+
+  async #intake(candidateId: string, reviewOnly: false): Promise<CandidateIntakeResult>;
+  async #intake(candidateId: string, reviewOnly: true): Promise<CandidateIntakeResult | null>;
+  async #intake(candidateId: string, reviewOnly: boolean): Promise<CandidateIntakeResult | null> {
     // 1. Input validation (E-01)
     if (!candidateId || typeof candidateId !== 'string' || candidateId.trim() === '') {
       throw new CandidateIntakeError(
@@ -471,19 +573,27 @@ export class CandidateIntakeService {
         { candidateId, reason: 'reuse_gate_misconfigured' },
       );
     }
+    if (this.#reuseRecommendation && !this.#reuseStateDir) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+        `Reuse gate is misconfigured: reuseRecommendation was provided without reuseStateDir; no Principle was created for candidate ${candidateId}. nextAction: pass reuseStateDir, or remove reuseRecommendation to disable the gate.`,
+        { candidateId, reason: 'reuse_gate_misconfigured' },
+      );
+    }
 
     let reuseCheck: ReuseCheckOutcome = 'not_configured';
-    if (this.#reuseDecision && this.#reuseStateDir) {
+    if ((this.#reuseDecision || this.#reuseRecommendation) && this.#reuseStateDir) {
+      const reuseClaim = {
+        text: recommendation.text || candidate.description || '',
+        triggerPattern: recommendation.triggerPattern ?? '',
+        action: recommendation.action ?? '',
+      };
       let proposal: ReuseProposal;
       try {
         proposal = buildReuseProposal(
           candidateId,
           buildReuseShortlist(
-            {
-              text: recommendation.text || candidate.description || '',
-              triggerPattern: recommendation.triggerPattern ?? '',
-              action: recommendation.action ?? '',
-            },
+            reuseClaim,
             this.#reuseStateDir,
             // Single truth: the persisted candidate's own kind. Step 3b has
             // already proved eligibility fail-closed, so this is a restatement,
@@ -500,104 +610,151 @@ export class CandidateIntakeService {
       }
 
       if (proposalNeedsDecision(proposal)) {
-        // PRI-917 hardening: the decision function is an UNTRUSTED boundary
-        // (an AI Owner parses model output), so its return value is validated
-        // at runtime. Previously anything that was not exactly 'reuse' fell
-        // through to 'create' — a malformed answer silently manufactured the
-        // very duplicate this gate exists to prevent (rc-1/rc-2/rc-3).
-        let decision: ReuseDecision;
-        try {
-          const raw: unknown = this.#reuseDecision(proposal);
-          const validated = validateReuseDecision(raw);
-          if (!validated.ok) {
-            throw new CandidateIntakeError(
-              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
-              `Reuse decision for candidate ${candidateId} is not a valid reuse|create decision (${validated.reason}); no Principle was created.`,
-              { candidateId, reason: validated.reason },
-            );
+        // PRI-917 v0.3.3 (OD-PRI917-05) — AUTO-path Reuse Review Gate.
+        //
+        // Runs only when a recommendation hook is injected WITHOUT an Owner
+        // decision function (the production auto shape: bridge / diagnose /
+        // pain-retry). The hook is a RECOMMENDATION channel: `reuse` parks the
+        // candidate for the Owner (refused/reuse_pending_owner — no Principle,
+        // no evidence, candidate stays pending); every other outcome
+        // (create / uncertain / unavailable / selection outside the proposal)
+        // proceeds to CREATE exactly as the unconfigured gate would (Rules
+        // 2-4: uncertain keeps creating in phase 1; evaluation failure must
+        // never block learning; a hallucinated id is treated as unavailable).
+        if (this.#reuseRecommendation && !this.#reuseDecision) {
+          const recommendationOutcome = await this.#runReuseRecommendation(reuseClaim, proposal);
+          if (recommendationOutcome.status === 'recommended') {
+            const { recommendation: verdict, selectedPrincipleId, confidence } = recommendationOutcome;
+            if (
+              verdict === 'reuse' &&
+              selectedPrincipleId !== undefined &&
+              proposal.candidates.some((entry) => entry.principleId === selectedPrincipleId)
+            ) {
+              return {
+                outcome: 'refused',
+                reason: 'reuse_pending_owner',
+                candidateId,
+                rawRecommendationKind:
+                  typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+                message:
+                  `Candidate ${candidateId} is a suspected duplicate of existing Principle ${selectedPrincipleId} ` +
+                  `(semantic reuse recommendation, confidence ${confidence}). No Principle was created and no evidence ` +
+                  'was written; the candidate stays PENDING for the Owner. ' +
+                  `nextAction: pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
+                reuseProposal: proposal,
+                reuseRecommendation: recommendationOutcome,
+              };
+            }
           }
-          ({ decision } = validated);
-        } catch (decisionErr: unknown) {
-          if (decisionErr instanceof CandidateIntakeError) throw decisionErr;
-          // A throwing decision function (LLM timeout, parse crash) is a reuse
-          // check failure, not an internal error: it must fail closed with a
-          // candidate-scoped code rather than escaping as an arbitrary throw.
-          throw new CandidateIntakeError(
-            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
-            `Reuse decision for candidate ${candidateId} failed (${decisionErr instanceof Error ? decisionErr.message : String(decisionErr)}); no Principle was created.`,
-            { candidateId, cause: decisionErr },
-          );
-        }
-
-        if (decision.decision === 'reuse') {
-          const known = new Set(proposal.candidates.map((c) => c.principleId));
-          if (!known.has(decision.selectedPrincipleId)) {
-            // INV-R08: a selection outside the proposal fails closed. It must
-            // NOT silently degrade into "create". This is a defect in the
-            // reuse decision contract, not a malformed intake input, so it
-            // carries REUSE_CHECK_FAILED rather than INPUT_INVALID — the
-            // latter would file a governance error under "bad input".
-            throw new CandidateIntakeError(
-              INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
-              `Reuse decision selected principle '${decision.selectedPrincipleId}' which is not in the proposal for candidate ${candidateId}; no Principle was created.`,
-              { candidateId, selectedPrincipleId: decision.selectedPrincipleId, reason: 'selected_principle_not_in_proposal' },
-            );
-          }
-
-          // PRI-917 PR3B Phase 2 — materialise the verdict as durable evidence
-          // BEFORE reporting it. A reuse verdict that is not persisted would
-          // leave the resolution invisible: replay would re-ask the Owner, and
-          // the SPEC §11/§12 asymmetry (REUSE must be auditable, CREATE's
-          // artifact speaks for itself) would silently break. The write runs
-          // INSIDE the ledger's single-writer lock (appendReuseEvidence) and is
-          // fail-closed: an integrity/shape failure propagates and the
-          // candidate stays pending — it NEVER degrades into creating a
-          // Principle (INV-R03/INV-R08).
-          const painId = await this.#resolveReusePainId(candidateId, candidate);
-          let evidence: ReuseEvidenceEntry;
+          // create / uncertain / unavailable / hallucinated id → Rules 2/3/4:
+          // CREATE proceeds (uncertain keeps creating in phase 1; evaluation
+          // failure must never block learning).
+          reuseCheck = 'recommended_create';
+        } else if (this.#reuseDecision) {
+          // PRI-917 hardening: the decision function is an UNTRUSTED boundary
+          // (an AI Owner parses model output), so its return value is validated
+          // at runtime. Previously anything that was not exactly 'reuse' fell
+          // through to 'create' — a malformed answer silently manufactured the
+          // very duplicate this gate exists to prevent (rc-1/rc-2/rc-3).
+          let decision: ReuseDecision;
           try {
-            const appended = this.#ledgerAdapter.appendReuseEvidence(decision.selectedPrincipleId, {
-              painId,
-              candidateId,
-              decision: 'reuse',
-              actor: decision.actor,
-              reason: decision.reason,
-              decidedAt: decision.decidedAt,
-            });
-            // The writer either appended this candidate's entry or returned the
-            // already-recorded one (concurrent-intake dedupe) — the entry for
-            // THIS candidateId must be present; anything else is a broken
-            // adapter and fails loud instead of reporting a fabricated record.
-            const recorded = appended.reuseEvidence.find((e) => e.candidateId === candidateId);
-            if (!recorded) {
-              throw new Error(
-                `appendReuseEvidence returned no evidence entry for candidate ${candidateId} (adapter contract violation)`,
+            const raw: unknown = this.#reuseDecision(proposal);
+            const validated = validateReuseDecision(raw);
+            if (!validated.ok) {
+              throw new CandidateIntakeError(
+                INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+                `Reuse decision for candidate ${candidateId} is not a valid reuse|create decision (${validated.reason}); no Principle was created.`,
+                { candidateId, reason: validated.reason },
               );
             }
-            evidence = recorded;
-          } catch (evidenceErr: unknown) {
+            ({ decision } = validated);
+          } catch (decisionErr: unknown) {
+            if (decisionErr instanceof CandidateIntakeError) throw decisionErr;
+            // A throwing decision function (LLM timeout, parse crash) is a reuse
+            // check failure, not an internal error: it must fail closed with a
+            // candidate-scoped code rather than escaping as an arbitrary throw.
             throw new CandidateIntakeError(
               INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
-              `Reuse decision for candidate ${candidateId} could not be recorded on principle '${decision.selectedPrincipleId}'; no Principle was created and the decision is not durable. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
-              { candidateId, selectedPrincipleId: decision.selectedPrincipleId, cause: evidenceErr },
+              `Reuse decision for candidate ${candidateId} failed (${decisionErr instanceof Error ? decisionErr.message : String(decisionErr)}); no Principle was created.`,
+              { candidateId, cause: decisionErr },
             );
           }
-          return {
-            outcome: 'refused',
-            reason: 'reuse_selected',
-            candidateId,
-            rawRecommendationKind: typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
-            message: `Candidate ${candidateId} was resolved to existing Principle ${decision.selectedPrincipleId}; the reuse decision was recorded on that Principle's reuseEvidence and no new Principle was created. This candidate DOES target the Principle Ledger — review the reuse proposal, and do not re-run intake to force a new Principle.`,
-            reuseProposal: proposal,
-            selectedPrincipleId: decision.selectedPrincipleId,
-            reuseEvidence: evidence,
-          };
+
+          if (decision.decision === 'reuse') {
+            const known = new Set(proposal.candidates.map((c) => c.principleId));
+            if (!known.has(decision.selectedPrincipleId)) {
+              // INV-R08: a selection outside the proposal fails closed. It must
+              // NOT silently degrade into "create". This is a defect in the
+              // reuse decision contract, not a malformed intake input, so it
+              // carries REUSE_CHECK_FAILED rather than INPUT_INVALID — the
+              // latter would file a governance error under "bad input".
+              throw new CandidateIntakeError(
+                INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+                `Reuse decision selected principle '${decision.selectedPrincipleId}' which is not in the proposal for candidate ${candidateId}; no Principle was created.`,
+                { candidateId, selectedPrincipleId: decision.selectedPrincipleId, reason: 'selected_principle_not_in_proposal' },
+              );
+            }
+
+            // PRI-917 PR3B Phase 2 — materialise the verdict as durable evidence
+            // BEFORE reporting it. A reuse verdict that is not persisted would
+            // leave the resolution invisible: replay would re-ask the Owner, and
+            // the SPEC §11/§12 asymmetry (REUSE must be auditable, CREATE's
+            // artifact speaks for itself) would silently break. The write runs
+            // INSIDE the ledger's single-writer lock (appendReuseEvidence) and is
+            // fail-closed: an integrity/shape failure propagates and the
+            // candidate stays pending — it NEVER degrades into creating a
+            // Principle (INV-R03/INV-R08).
+            const painId = await this.#resolveReusePainId(candidateId, candidate);
+            let evidence: ReuseEvidenceEntry;
+            try {
+              const appended = this.#ledgerAdapter.appendReuseEvidence(decision.selectedPrincipleId, {
+                painId,
+                candidateId,
+                decision: 'reuse',
+                actor: decision.actor,
+                reason: decision.reason,
+                decidedAt: decision.decidedAt,
+              });
+              // The writer either appended this candidate's entry or returned the
+              // already-recorded one (concurrent-intake dedupe) — the entry for
+              // THIS candidateId must be present; anything else is a broken
+              // adapter and fails loud instead of reporting a fabricated record.
+              const recorded = appended.reuseEvidence.find((e) => e.candidateId === candidateId);
+              if (!recorded) {
+                throw new Error(
+                  `appendReuseEvidence returned no evidence entry for candidate ${candidateId} (adapter contract violation)`,
+                );
+              }
+              evidence = recorded;
+            } catch (evidenceErr: unknown) {
+              throw new CandidateIntakeError(
+                INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+                `Reuse decision for candidate ${candidateId} could not be recorded on principle '${decision.selectedPrincipleId}'; no Principle was created and the decision is not durable. Cause: ${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
+                { candidateId, selectedPrincipleId: decision.selectedPrincipleId, cause: evidenceErr },
+              );
+            }
+            return {
+              outcome: 'refused',
+              reason: 'reuse_selected',
+              candidateId,
+              rawRecommendationKind:
+                typeof candidate.rawRecommendationKind === 'string' ? candidate.rawRecommendationKind : null,
+              message: `Candidate ${candidateId} was resolved to existing Principle ${decision.selectedPrincipleId}; the reuse decision was recorded on that Principle's reuseEvidence and no new Principle was created. This candidate DOES target the Principle Ledger — review the reuse proposal, and do not re-run intake to force a new Principle.`,
+              reuseProposal: proposal,
+              selectedPrincipleId: decision.selectedPrincipleId,
+              reuseEvidence: evidence,
+            };
+          }
+          reuseCheck = 'create_decided';
         }
-        reuseCheck = 'create_decided';
       } else {
         reuseCheck = 'no_candidates';
       }
     }
+
+    // Replay review is read-only: create/uncertain/unavailable never resumes a
+    // ledger write, and the Owner verdict path is excluded by reviewReuse.
+    if (reviewOnly) return null;
 
     // 5. Build 11-field LedgerPrincipleEntry (E-06)
     const entry: LedgerPrincipleEntry = {
@@ -644,7 +801,10 @@ export class CandidateIntakeService {
    * (`reuse_pain_unresolvable`) instead of writing a fabricated painId (rc-3).
    * The candidate stays pending; no Principle is created.
    */
-  async #resolveReusePainId(candidateId: string, candidate: { taskId: string }): Promise<string> {
+  async #resolveReusePainId(
+    candidateId: string,
+    candidate: { taskId: string; sourceRunId?: string },
+  ): Promise<string> {
     const refuse = (detail: string): never => {
       throw new CandidateIntakeError(
         INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
@@ -668,6 +828,29 @@ export class CandidateIntakeService {
       );
     }
     if (diagnoses.length === 0) {
+      // PRI-917 v0.3.3 replay fix (R6 reality replay finding): production
+      // candidates are minted on the diag_router SUB-task, while pain_diagnoses
+      // rows are persisted under the TOP diagnostician task — a lookup by the
+      // candidate's own taskId can therefore NEVER resolve, making every fresh
+      // reuse decision fail closed. Walk the canonical router → diagnostician
+      // chain (same discipline as the seeding-side resolver: verify the task
+      // kind, read diagnosisId from the router run's validated outputPayload)
+      // and retry the lookup against the top task. rc-6: the walk only follows
+      // real task/run records, never parses ids out of task-id strings.
+      const topTaskId = await this.#resolveTopDiagnosticianTaskId(candidate);
+      if (topTaskId !== null) {
+        try {
+          diagnoses = await this.#stateManager.getDiagnosesByTaskId(topTaskId);
+        } catch (err: unknown) {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.REUSE_CHECK_FAILED,
+            `Reuse decision for candidate ${candidateId} cannot be recorded: the pain diagnosis lookup for the top diagnostician task failed. Cause: ${err instanceof Error ? err.message : String(err)}`,
+            { candidateId, reason: 'reuse_pain_unresolvable', cause: err },
+          );
+        }
+      }
+    }
+    if (diagnoses.length === 0) {
       refuse('no persisted pain diagnosis exists for its task');
     }
     const sorted = [...diagnoses].sort((a, b) => {
@@ -682,5 +865,25 @@ export class CandidateIntakeService {
       refuse('no usable pain id in the candidate\'s diagnosis history');
     }
     return latestPainId;
+  }
+
+  /**
+   * PRI-917 v0.3.3 replay fix — resolve the TOP diagnostician task behind a
+   * diag_router sub-task. The sub-task's canonical parent link is its
+   * `inputRef` (verified against a real diagnostician task record — rc-6: the
+   * walk only follows persisted task records, never parses ids out of
+   * task-id strings). Returns `null` for any non-router task or broken link
+   * (the caller keeps the direct-lookup behavior).
+   */
+  async #resolveTopDiagnosticianTaskId(
+    candidate: { taskId: string },
+  ): Promise<string | null> {
+    const task = await this.#stateManager.getTask(candidate.taskId);
+    if (!task || task.taskKind !== 'diag_router') return null;
+    const parentTaskId = typeof task.inputRef === 'string' ? task.inputRef.trim() : '';
+    if (parentTaskId === '') return null;
+    const topTask = await this.#stateManager.getTask(parentTaskId);
+    if (!topTask || topTask.taskKind !== 'diagnostician') return null;
+    return topTask.taskId;
   }
 }

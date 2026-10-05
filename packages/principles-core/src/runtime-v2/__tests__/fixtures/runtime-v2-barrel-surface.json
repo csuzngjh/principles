@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1811,
+ "count": 1813,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -1064,6 +1064,7 @@
   "ReuseEvaluationValidation",
   "ReuseProposal",
   "ReuseProposalEntry",
+  "ReuseRecommendationOutcome",
   "ReviewEvidenceCompleteness",
   "ReviewKeyFacts",
   "RevisionIdentity",
@@ -1514,6 +1515,7 @@
   "createProductionGateDeps",
   "createRecoverySweepService",
   "createRemediationResult",
+  "createReuseRecommendationHook",
   "createRuleHostHelpers",
   "createRuntimeStateHandle",
   "createSkippedRefusedEvent",

@@ -12,12 +12,14 @@ import {
   SplitDiagnosticianRunner,
   PrincipleTreeLedgerAdapter,
   DreamerRunner,
+  ReuseEvaluationRunner,
   RuntimeStateManager,
   SqliteConnection,
   SqliteDiagnosticianCommitter,
   type RunnerResult,
   type DiagnosticianOutputV1,
 } from '@principles/core/runtime-v2';
+import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { runCodexWorkspaceWorkerCycle } from '../../src/worker/workspace-worker.js';
 import { setCodexTranscriptPortForTest } from '../../src/ingestion/ingestion.js';
 import type { CodexCatchUpResult } from '../../src/ingestion/catch-up.js';
@@ -411,6 +413,71 @@ describe('worker cycle — diagnostician terminal closure (matrix C, acceptance 
     expect(second.report?.diagnostician).toMatchObject({ taskId, status: 'succeeded' });
     expect(spy.calls).toEqual([taskId]);
     expect(candidateCount(ws.root)).toBe(1);
+  });
+});
+
+describe('worker cycle — Reuse Review Gate park reporting (PRI-917 v0.3.3 review fix P2-2)', () => {
+  it('a parked candidate reaches the report as reuseReviewRequiredCandidateIds with a degraded status', async () => {
+    const ws = makeWorkspace();
+    // Enable the auto-path gate on a ready pi-ai profile and seed a principle
+    // whose text CJK-bigram-matches the candidate text, so the lexical
+    // shortlist is non-empty and the gate consults the (spied) evaluation.
+    const config = JSON.parse(fs.readFileSync(path.join(ws.root, '.pd', 'config.yaml'), 'utf8'));
+    config.runtimeProfiles = config.runtimeProfiles ?? {};
+    config.runtimeProfiles['test.eval'] = { type: 'pi-ai', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'PD_WORKER_REUSE_TEST_KEY' };
+    config.reuseEvaluation = { enabled: true, runtimeProfile: 'test.eval' };
+    fs.writeFileSync(path.join(ws.root, '.pd', 'config.yaml'), JSON.stringify(config));
+    process.env.PD_WORKER_REUSE_TEST_KEY = 'test-key';
+    try {
+      addPrincipleToLedger(path.join(ws.root, '.state'), {
+        id: 'p-dup-target',
+        version: 1,
+        text: '修改前先调查已有实现',
+        triggerPattern: '修改前',
+        action: '先调查已有实现再动手',
+        status: 'active',
+        priority: 'P1',
+        scope: 'general',
+        evaluability: 'manual_only',
+        valueScore: 0.5,
+        adherenceRate: 0.8,
+        painPreventedCount: 0,
+        derivedFromPainIds: [],
+        ruleIds: [],
+        conflictsWithPrincipleIds: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      });
+      spySplitPipelineSuccess(ws);
+      // The semantic evaluation LLM boundary: recommend reuse of the seeded
+      // principle. Everything around it is the production path.
+      vi.spyOn(ReuseEvaluationRunner.prototype, 'recommend').mockResolvedValue({
+        recommendation: 'reuse',
+        selectedPrincipleId: 'p-dup-target',
+        confidence: 0.9,
+        rationale: 'same experience',
+      });
+
+      const { taskId } = await seedAdmittedPendingTask(ws);
+      const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+
+      expect(result.report?.diagnostician).toMatchObject({ taskId, status: 'degraded' });
+      const parked = result.report?.diagnostician?.reuseReviewRequiredCandidateIds;
+      expect(parked).toBeDefined();
+      expect(parked).toHaveLength(1);
+      // The park wrote NOTHING: zero ledger entries, candidate stays pending,
+      // and no dreamer task was seeded for it.
+      expect(candidateCount(ws.root)).toBe(1);
+      const db = stateDbOf(ws.root);
+      try {
+        const dreamerSeeded = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'dreamer'").get() as { n: number };
+        expect(dreamerSeeded.n).toBe(0);
+      } finally {
+        db.close();
+      }
+    } finally {
+      delete process.env.PD_WORKER_REUSE_TEST_KEY;
+    }
   });
 });
 

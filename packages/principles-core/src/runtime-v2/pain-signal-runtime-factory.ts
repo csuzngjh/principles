@@ -11,6 +11,7 @@
  *   await bridge.onPainDetected(data);
  */
 
+import { createHash } from 'node:crypto';
 import { PainSignalBridge, type DiagnosticianRunnerLike } from './pain-signal-bridge.js';
 import type { RunnerResult } from './runner/runner-result.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
@@ -23,7 +24,9 @@ import { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-ou
 import { resolveOutputLanguage } from './language-directive.js';
 import type { OutputLanguage } from './language-directive.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from './config/pd-config-feature-flags.js';
-import { CandidateIntakeService } from './candidate-intake-service.js';
+import { CandidateIntakeService, type CandidateIntakeServiceOptions, type ReuseRecommendationOutcome } from './candidate-intake-service.js';
+import { readReusablePrinciples } from './principle-reuse/reuse-retrieval.js';
+import { ReuseEvaluationError, ReuseEvaluationRunner } from './principle-reuse/reuse-evaluation-runner.js';
 import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
 import { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
 import type { TrajectoryTurnReader } from './store/context/trajectory-turn-reader.js';
@@ -490,6 +493,88 @@ export function resolveRuntimeConfigForProfile(
 }
 
 /**
+ * PRI-917 v0.3.3 (OD-PRI917-05) — build the auto-path Reuse Review Gate
+ * recommendation hook from the `reuseEvaluation` config section.
+ *
+ * Single implementation shared by all three automatic intake construction
+ * sites (this factory + `pd diagnose` + `pd pain-retry`). Returns `undefined`
+ * when the capability is disabled or no effective config was supplied — the
+ * caller then injects nothing and intake behaves EXACTLY as before v0.3.3
+ * (SPEC T11: the rollback switch). The returned hook NEVER throws and NEVER
+ * returns a decision: every failure degrades to `{ status: 'unavailable' }`
+ * so CREATE proceeds (Rule 4). It reads the ledger read-only
+ * (readReusablePrinciples) to assemble the proposal texts — the same data the
+ * `pd candidate review` surface shows the Owner.
+ */
+export function createReuseRecommendationHook(args: {
+  effectiveConfig?: EffectivePdConfig;
+  workspaceDir: string;
+  stateDir: string;
+  getEnvVar?: (name: string) => string | undefined;
+}): CandidateIntakeServiceOptions['reuseRecommendation'] {
+  const effective = args.effectiveConfig;
+  const capability = effective?.config.reuseEvaluation;
+  if (!effective || !capability?.enabled) {
+    return undefined;
+  }
+  const getEnv = args.getEnvVar ?? ((name: string) => process.env[name]);
+  return async (claim, proposal) => {
+    try {
+      const profileId = capability.runtimeProfile ?? effective.config.internalAgents.defaultRuntime;
+      const runtimeConfig = resolveRuntimeConfigForProfile(effective, profileId, getEnv);
+      if (isRuntimeConfigError(runtimeConfig)) {
+        return {
+          status: 'unavailable',
+          reason: `reuse profile resolution failed (${runtimeConfig.reason}): ${runtimeConfig.message}`,
+        };
+      }
+      if (runtimeConfig.runtimeKind !== 'pi-ai') {
+        return {
+          status: 'unavailable',
+          reason: `reuse evaluation requires a pi-ai runtime profile (profile '${profileId}' resolved to '${runtimeConfig.runtimeKind}')`,
+        };
+      }
+      const byId = new Map(readReusablePrinciples(args.stateDir).map((principle) => [principle.id, principle]));
+      const evaluationEntries = proposal.candidates.flatMap((entry) => {
+        const principle = byId.get(entry.principleId);
+        return principle
+          ? [{ principleId: principle.id, text: principle.text, triggerPattern: principle.triggerPattern, action: principle.action }]
+          : [];
+      });
+      if (evaluationEntries.length === 0) {
+        return { status: 'unavailable', reason: 'shortlist principles not found in ledger' };
+      }
+      const adapter = new PiAiRuntimeAdapter({
+        provider: String(runtimeConfig.provider),
+        model: String(runtimeConfig.model),
+        apiKeyEnv: String(runtimeConfig.apiKeyEnv),
+        maxRetries: runtimeConfig.maxRetries,
+        maxTokens: runtimeConfig.maxTokens,
+        timeoutMs: runtimeConfig.timeoutMs,
+        baseUrl: runtimeConfig.baseUrl,
+        workspace: args.workspaceDir,
+        ...(runtimeConfig.reasoning !== undefined ? { reasoning: runtimeConfig.reasoning } : {}),
+        ...(runtimeConfig.systemPrompt ? { systemPrompt: runtimeConfig.systemPrompt } : {}),
+      });
+      const runner = new ReuseEvaluationRunner(
+        { runtimeAdapter: adapter },
+        { ...(capability.timeoutMs !== undefined ? { timeoutMs: capability.timeoutMs } : { ...(runtimeConfig.timeoutMs !== undefined ? { timeoutMs: runtimeConfig.timeoutMs } : {}) }) },
+      );
+      const output = await runner.recommend({ candidate: claim, candidates: evaluationEntries });
+      const recommended: ReuseRecommendationOutcome = { status: 'recommended', ...output };
+      return recommended;
+    } catch (err: unknown) {
+      const reason = err instanceof ReuseEvaluationError
+        ? `${err.reason}: ${err.detail ?? err.message}`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      return { status: 'unavailable', reason };
+    }
+  };
+}
+
+/**
  * PRI-306: Resolve runtime configuration from EffectivePdConfig.
  *
  * Uses resolveAgentRuntimeBinding() to determine which profile the diagnostician
@@ -579,12 +664,26 @@ const BRIDGE_DEGRADATION_EVENT_TYPES: ReadonlySet<string> = new Set([
  * Returns null for bridge events that were not emitted in production before
  * the persistence feature (they keep their pre-main dormant status).
  */
+const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set(['reuse_gate_triggered']);
+
 export function mapBridgeTelemetryToStoreEvent(event: {
   eventType: string;
   traceId: string;
   timestamp: string;
   payload: Record<string, unknown>;
 }): TelemetryEvent | null {
+  // PRI-917 v0.3.3: the Reuse Review Gate's park observation passes through
+  // verbatim under its own event type (observation only — it is never
+  // decision storage). Everything else stays on the degradation-only allowlist.
+  if (BRIDGE_PASSTHROUGH_EVENT_TYPES.has(event.eventType)) {
+    return {
+      eventType: event.eventType,
+      traceId: event.traceId,
+      timestamp: event.timestamp,
+      sessionId: '',
+      payload: event.payload,
+    } as TelemetryEvent;
+  }
   if (!BRIDGE_DEGRADATION_EVENT_TYPES.has(event.eventType)) return null;
   return {
     eventType: 'degradation_triggered',
@@ -615,7 +714,14 @@ export function createBridgeTelemetryEventEmitter(): {
 async function constructBridge(
   opts: PainSignalRuntimeFactoryOptions,
   runtimeConfig: RuntimeConfig,
-  pipeline: { diagnosisPersistenceEnabled: boolean; fullPipelinePromptSeeds: boolean },
+  // PRI-917 v0.3.3 review fix (P2-1): the reuse-gate hook is built ONCE by
+  // createPainSignalBridge so the hook's captured reuseEvaluation config and
+  // the cache key can never disagree about whether the gate is on.
+  construction: {
+    diagnosisPersistenceEnabled: boolean;
+    fullPipelinePromptSeeds: boolean;
+    reuseRecommendation: CandidateIntakeServiceOptions['reuseRecommendation'];
+  },
 ): Promise<PainSignalBridge> {
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
   await stateManager.initialize();
@@ -705,9 +811,17 @@ async function constructBridge(
     perStageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
 
+  // PRI-917 v0.3.3 — auto-path Reuse Review Gate: inject the semantic reuse
+  // recommendation hook handed down from createPainSignalBridge. `undefined`
+  // when reuseEvaluation is disabled or no effective config was supplied →
+  // the gate reports 'not_configured' and intake behaves EXACTLY as before
+  // v0.3.3 (SPEC T11 rollback switch).
   const intakeService = new CandidateIntakeService({
     stateManager,
     ledgerAdapter: opts.ledgerAdapter,
+    ...(construction.reuseRecommendation
+      ? { reuseRecommendation: construction.reuseRecommendation, reuseStateDir: opts.stateDir }
+      : {}),
   });
 
   const bridge = new PainSignalBridge({
@@ -717,10 +831,10 @@ async function constructBridge(
     ledgerAdapter: opts.ledgerAdapter,
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
     workspaceDir: opts.workspaceDir,
-    diagnosisPersistenceEnabled: pipeline.diagnosisPersistenceEnabled,
+    diagnosisPersistenceEnabled: construction.diagnosisPersistenceEnabled,
     // PRI-720: seed-time full-chain override for prompt/defer_archive chains
     // (prompt_full_pipeline flag; Owner switch via Console / config file).
-    fullPipelinePromptSeeds: pipeline.fullPipelinePromptSeeds,
+    fullPipelinePromptSeeds: construction.fullPipelinePromptSeeds,
     // rc-9: the persistence path must degrade observably in production. Only
     // the persistence degradation events are forwarded (see
     // createBridgeTelemetryEventEmitter); other bridge events stay dormant as on main.
@@ -861,11 +975,42 @@ export async function createPainSignalBridge(
     fullPipelinePromptSeeds = isFeatureEnabled(featureFlags, 'prompt_full_pipeline');
   }
 
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}`;
+  // PRI-917 v0.3.3 review fix (P2-1): build the reuse-gate hook BEFORE the
+  // cache key and fold its presence into the key. A long-lived host (OpenClaw
+  // plugin, Codex worker) re-reads config per pain event but reuses the cached
+  // bridge, so a hook that captured the OLD reuseEvaluation setting would keep
+  // running after the Owner flipped the switch — in BOTH directions — and the
+  // T11 rollback would silently require a process restart. Same cache-key
+  // discipline as the persistence / prompt-seed toggles below.
+  const reuseRecommendation = createReuseRecommendationHook({
+    effectiveConfig: opts.effectiveConfig,
+    workspaceDir: opts.workspaceDir,
+    stateDir: opts.stateDir,
+    getEnvVar: opts.getEnvVar,
+  });
+
+  let reuseCacheKey = 'no-reuse-gate';
+  if (reuseRecommendation && opts.effectiveConfig) {
+    const { config } = opts.effectiveConfig;
+    const profileId = config.reuseEvaluation?.runtimeProfile ?? config.internalAgents.defaultRuntime;
+    const profile = config.runtimeProfiles[profileId];
+    // Only validated, non-secret configuration participates. Sorting profile
+    // fields keeps identical YAML configurations on the same cache slot.
+    reuseCacheKey = createHash('sha256').update(JSON.stringify([
+      profileId,
+      config.reuseEvaluation?.timeoutMs,
+      Object.entries(profile ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    ])).digest('hex');
+  }
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}:${fullPipelinePromptSeeds ? 'pfp' : 'nopfp'}:${reuseCacheKey}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
-  const bridge = await constructBridge(opts, runtimeConfig, { diagnosisPersistenceEnabled, fullPipelinePromptSeeds });
+  const bridge = await constructBridge(opts, runtimeConfig, {
+    diagnosisPersistenceEnabled,
+    fullPipelinePromptSeeds,
+    reuseRecommendation,
+  });
   // PRI-624: a concurrent constructor may have won the cache slot while we
   // were building — the loser self-disposes so its handles never leak.
   const winner = bridgeCache.get(cacheKey);
@@ -886,13 +1031,15 @@ export async function createPainSignalBridge(
  * keep landing and can be diagnosed after the Owner re-enables the agent.
  */
 export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: string): void {
+  // PRI-917 v0.3.3 review fix (P2-1): the cache key also encodes the reuse-gate
+  // state now, so exact-key enumeration can miss entries. Drop every cache slot
+  // of this workspace+runtime kind by prefix — the same discipline
+  // disposePainSignalBridgesForWorkspace uses — instead of enumerating key
+  // components by hand.
   const effectiveKind = runtimeKind ?? 'pi-ai';
   bridgeCache.delete(`${workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`);
-  for (const mode of ['local', 'gateway', '']) {
-    for (const pdp of ['pdp', 'nopdp']) {
-      for (const pfp of ['pfp', 'nopfp']) {
-        bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pdp}:${pfp}`);
-      }
-    }
+  const kindPrefix = `${workspaceDir}:${effectiveKind}:`;
+  for (const key of [...bridgeCache.keys()]) {
+    if (key.startsWith(kindPrefix)) bridgeCache.delete(key);
   }
 }

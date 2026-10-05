@@ -5,6 +5,8 @@ import type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
 import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
+import { DiagnosticianOutputV1Schema } from './diagnostician-output.js';
+import { Value } from '@sinclair/typebox/value';
 import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
@@ -807,6 +809,9 @@ export class PainSignalBridge {
     // PRI-642 §10: per-candidate ledger/seed linkage for outcome reporting.
     const ledgerEntryByCandidate = new Map<string, string>();
     const seededTaskByCandidate = new Map<string, string>();
+    // PRI-917 v0.3.3: candidates parked by the Reuse Review Gate (suspected
+    // duplicates awaiting the Owner) — kept OUT of seeding/consumption.
+    const reuseReviewRequiredByCandidate = new Map<string, { selectedPrincipleId?: string; confidence?: number }>();
 
     if (this.autoIntakeEnabled) {
       for (let i = 0; i < candidates.length; i++) {
@@ -842,6 +847,33 @@ export class PainSignalBridge {
         if (intakeResult.outcome === 'ledger_entry') {
           ledgerEntryIds.push(intakeResult.entry.id);
           ledgerEntryByCandidate.set(candidate.candidateId, intakeResult.entry.id);
+        }
+
+        // PRI-917 v0.3.3 — Reuse Review Gate: a parked candidate is a suspected
+        // duplicate awaiting the Owner. It must stay PENDING: skip the
+        // kind-aware dreamer seeding below AND the consumed marking at loop
+        // end, and make the park observable (telemetry + outcome reporting).
+        // The park writes NOTHING (no ledger entry, no evidence — T7).
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
+          const recommendation = intakeResult.reuseRecommendation;
+          const recommended = recommendation?.status === 'recommended' ? recommendation : undefined;
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'reuse_gate_triggered',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: {
+              candidateId: candidate.candidateId,
+              ...(recommended?.selectedPrincipleId !== undefined
+                ? { selectedPrincipleId: recommended.selectedPrincipleId }
+                : {}),
+              ...(recommended ? { confidence: recommended.confidence, recommendation: recommended.recommendation } : {}),
+            },
+          });
+          reuseReviewRequiredByCandidate.set(candidate.candidateId, {
+            selectedPrincipleId: recommended?.selectedPrincipleId,
+            confidence: recommended?.confidence,
+          });
+          continue;
         }
 
         try {
@@ -960,6 +992,14 @@ export class PainSignalBridge {
           outcome.nextAction = 'Inspect state.db and telemetry; re-run intake.';
         }
       }
+      // PRI-917 v0.3.3 — park override LAST: a Reuse-Review-Gate candidate is
+      // neither seed-failed nor not-internalizable; it is deliberately awaiting
+      // the Owner (rc-9: the waiting state must be visible, not silent).
+      const parked = reuseReviewRequiredByCandidate.get(candidate.candidateId);
+      if (parked !== undefined) {
+        outcome.reason = 'reuse_review_required';
+        outcome.nextAction = `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`;
+      }
       return outcome;
     });
 
@@ -988,6 +1028,9 @@ export class PainSignalBridge {
         admissionResults[i]?.admission.decision === 'admitted'
         && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind),
       ).length,
+      // PRI-917 v0.3.3: parked candidates intentionally have no ledger entry —
+      // a fully-parked batch is "awaiting the Owner", not an intake failure.
+      reuseReviewRequiredCandidateIds: [...reuseReviewRequiredByCandidate.keys()],
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       autoIntakeEnabled: this.autoIntakeEnabled,
@@ -1013,6 +1056,10 @@ export class PainSignalBridge {
     const candidateIds = candidates.map((candidate) => candidate.candidateId);
     const firstCandidate = candidates.at(0);
     const ledgerEntryIds: string[] = [];
+    // Pending also represents admission refusal and intake failure. Re-check
+    // admission and the read-only reuse gate instead of inferring a park.
+    const pendingReviewCandidateIds: string[] = [];
+    const reviewFailures: string[] = [];
 
     if (this.autoIntakeEnabled) {
       for (const candidate of candidates) {
@@ -1021,10 +1068,32 @@ export class PainSignalBridge {
         if (candidate.status !== 'consumed' && ledgerEntry) {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
+        if (candidate.status === 'pending' && !ledgerEntry && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind) && this.intakeService?.reuseReviewEnabled) {
+          try {
+            const task = await this.stateManager.getTask(input.taskId);
+            const ingress = validatePersistedIngressFacts(task?.diagnosticJson);
+            if (ingress.errorCode !== null) continue;
+            const sourceRun = await this.stateManager.getRun(candidate.sourceRunId);
+            if (!sourceRun || sourceRun.taskId !== candidate.taskId || sourceRun.executionStatus !== 'succeeded' || !sourceRun.outputPayload) continue;
+            const output: unknown = JSON.parse(sourceRun.outputPayload);
+            if (!Value.Check(DiagnosticianOutputV1Schema, output) || !output.valid) continue;
+            const [admission] = evaluateCandidateAdmissions([candidate], output, {
+              provenance: ingress.provenance,
+              inputEvidenceCount: ingress.evidenceCount,
+            });
+            if (admission?.admission.decision !== 'admitted') continue;
+            const review = await this.intakeService.reviewReuse(candidate.candidateId);
+            if (review?.outcome === 'refused' && review.reason === 'reuse_pending_owner') {
+              pendingReviewCandidateIds.push(candidate.candidateId);
+            }
+          } catch (err: unknown) {
+            reviewFailures.push(`${candidate.candidateId}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
       }
     }
 
-    return shapeBridgeResult({
+    const shaped = shapeBridgeResult({
       path: 'existing',
       painId: input.painId,
       taskId: input.taskId,
@@ -1035,9 +1104,28 @@ export class PainSignalBridge {
       ledgerEligibleCandidateCount: candidates.filter((candidate) =>
         isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind),
       ).length,
+      reuseReviewRequiredCandidateIds: pendingReviewCandidateIds,
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       autoIntakeEnabled: this.autoIntakeEnabled,
     });
+    if (reviewFailures.length > 0) {
+      shaped.status = 'failed';
+      shaped.message = `Replay intake review failed: ${reviewFailures.join('; ')}. nextAction: inspect the candidate artifacts and retry intake.`;
+    }
+    // P2-2/F3: candidate-level dispositions for the parked subset so callers
+    // (worker report, CLI nextAction) see WHAT awaits the Owner. Other
+    // candidates are omitted on this path — admission results are not
+    // replayed, so their dispositions are unknown, not fabricable
+    // ('needs_evidence' is the established admission-unknown value).
+    if (pendingReviewCandidateIds.length > 0) {
+      shaped.candidateOutcomes = pendingReviewCandidateIds.map((candidateId) => ({
+        candidateId,
+        decision: 'needs_evidence' as const,
+        reason: 'reuse_review_required',
+        nextAction: `pd candidate review --candidate-id ${candidateId} --decide reuse|create`,
+      }));
+    }
+    return shaped;
   }
 }

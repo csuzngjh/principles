@@ -84,7 +84,7 @@ function makePrinciple(overrides: Partial<LedgerPrinciple> = {}): LedgerPrincipl
   };
 }
 
-async function seedPrincipleCandidate(opts: { painId?: string } = {}): Promise<string> {
+async function seedPrincipleCandidate(opts: { painId?: string; confidence?: number } = {}): Promise<string> {
   const candidateId = randomUUID();
   const artifactId = randomUUID();
   const now = new Date().toISOString();
@@ -156,7 +156,7 @@ async function seedPrincipleCandidate(opts: { painId?: string } = {}): Promise<s
       runId,
       '测试候选',
       CANDIDATE_TEXT,
-      0.9,
+      opts.confidence ?? 0.9,
       JSON.stringify({
         text: CANDIDATE_TEXT,
         triggerPattern: CANDIDATE_TRIGGER,
@@ -708,5 +708,53 @@ describe('Phase 3C-4 — semantic evaluation on the review surface', () => {
     makeResolverThrow();
     await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
     expect(ledgerBytes()).toBe(before);
+  });
+});
+
+// ── PRI-917 v0.3.3 (R5 F4) — admission pre-check vs the Owner verdict ────────
+
+describe('PRI-917 v0.3.3 — review --decide vs the admission pre-check (R5 F4 two-heads-block fix)', () => {
+  it('T14: a LOW-CONFIDENCE candidate CAN be resolved reuse — the pre-check does not block reuse', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-r6-lowconf', confidence: 0.35 });
+
+    await handleCandidateReview({
+      candidateId,
+      workspace: workspaceDir,
+      decide: 'reuse',
+      principleId: existing.id,
+      reason: 'R6: the recurrence itself is the proof of value',
+      json: true,
+    });
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    const parsed = printedJson() as { status: string; candidateStatus: string };
+    expect(parsed.status).toBe('reused');
+    expect(candidateStatus(candidateId)).toBe('consumed');
+    // The evidence landed on the EXISTING principle — reuse creates nothing.
+    const stored = loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id];
+    expect(stored?.reuseEvidence).toHaveLength(1);
+    expect(Object.keys(loadLedger(join(workspaceDir, '.state')).tree.principles)).toHaveLength(1);
+  });
+
+  it('--decide create on a LOW-CONFIDENCE candidate is still refused by the pre-check', async () => {
+    addPrincipleToLedger(join(workspaceDir, '.state'), makePrinciple());
+    const candidateId = await seedPrincipleCandidate({ confidence: 0.35 });
+
+    await handleCandidateReview({
+      candidateId,
+      workspace: workspaceDir,
+      decide: 'create',
+      reason: 'wants a new principle',
+      json: true,
+    });
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const parsed = printedJson() as { status: string; reason?: string };
+    expect(parsed.status).toBe('refused');
+    expect(parsed.reason).toContain('confidence_below_threshold');
+    // cli-5: refusal mutates nothing.
+    expect(candidateStatus(candidateId)).toBe('pending');
   });
 });

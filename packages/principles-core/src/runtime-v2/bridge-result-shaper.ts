@@ -41,6 +41,14 @@ interface ShapeBridgeResultBase {
    * reported as routed / not_internalizable rather than as a failed run.
    */
   ledgerEligibleCandidateCount: number;
+  /**
+   * PRI-917 v0.3.3 — candidateIds parked by the Reuse Review Gate (suspected
+   * duplicates awaiting the Owner). A parked ledger-eligible candidate has NO
+   * ledger entry BY DESIGN, so a batch whose ledger-eligible candidates are
+   * ALL parked is a degraded "waiting for the Owner" outcome, not the intake
+   * failure this branch used to report.
+   */
+  reuseReviewRequiredCandidateIds?: string[];
   /** PRI-539: candidates admitted+ledgered but not internalizable (MVP-disabled channel). */
   notInternalizable?: NotInternalizableCandidate[];
 }
@@ -103,13 +111,38 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
     const notInternalizableNote = notInternalizable.length > 0
       ? `not_internalizable:${notInternalizable.map((n) => `${n.candidateId}=${n.reason}`).join(',')}`
       : '';
+    // PRI-917 v0.3.3 review fix (P2-2): parked candidates must stay visible in
+    // MIXED batches too. Previously only a fully-parked batch surfaced the
+    // review requirement; a batch with one ledgered and one parked candidate
+    // reported plain succeeded and hid the pending item from the Owner.
+    const parked = input.reuseReviewRequiredCandidateIds ?? [];
+    const parkedNote = parked.length > 0
+      ? `reuse_review_required:${parked.join(',')} — suspected duplicates parked for Owner review; nextAction: pd candidate review --candidate-id <id> --decide reuse|create`
+      : '';
     const admittedCount = admissionResults.filter((a) => a.admission.decision === 'admitted').length;
     const nonAdmittedCount = admissionResults.length - admittedCount;
 
     // Admitted LEDGER-ELIGIBLE candidates exist but intake produced no ledger
     // entries. Non-principle kinds are excluded here: the Principle Ledger write
     // boundary refuses them by design (Phase 1 / PR1), which is not a failure.
+    // PRI-917 v0.3.3: candidates parked by the Reuse Review Gate also have no
+    // ledger entry BY DESIGN — when EVERY ledger-eligible candidate is parked,
+    // the run is a degraded "awaiting the Owner" outcome (rc-9), not a failure.
     if (autoIntakeEnabled && input.ledgerEligibleCandidateCount > 0 && ledgerEntryIds.length === 0) {
+      if (parked.length > 0 && parked.length >= input.ledgerEligibleCandidateCount) {
+        return {
+          status: 'degraded',
+          painId,
+          taskId,
+          runId,
+          artifactId,
+          candidateIds,
+          ledgerEntryIds,
+          admissionResults,
+          notInternalizable: input.notInternalizable,
+          message: parkedNote,
+        };
+      }
       return {
         status: 'failed',
         painId,
@@ -152,12 +185,13 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
         ledgerEntryIds,
         admissionResults,
         notInternalizable: input.notInternalizable,
-        message: `partial_admission:${admittedCount}_admitted_${nonAdmittedCount}_gated${seedFailureNote ? `; ${seedFailureNote}` : ''}${notInternalizableNote ? `; ${notInternalizableNote}` : ''}`,
+        message: `partial_admission:${admittedCount}_admitted_${nonAdmittedCount}_gated${seedFailureNote ? `; ${seedFailureNote}` : ''}${notInternalizableNote ? `; ${notInternalizableNote}` : ''}${parkedNote ? `; ${parkedNote}` : ''}`,
       };
     }
 
-    // Success (or degraded when seed failed or a candidate was not internalizable)
-    const combinedNote = [notInternalizableNote, seedFailureNote].filter(Boolean).join('; ');
+    // Success (or degraded when seed failed, a candidate was not internalizable,
+    // or a candidate is parked awaiting the Owner — P2-2)
+    const combinedNote = [notInternalizableNote, seedFailureNote, parkedNote].filter(Boolean).join('; ');
     return {
       status: combinedNote ? 'degraded' : 'succeeded',
       painId,
@@ -175,7 +209,25 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
   // Existing path: no admission results, simpler decision tree.
   // Phase 1 / PR1: same reasoning as the fresh path — only ledger-eligible
   // candidates can be legitimately "missing" a ledger entry.
+  // The caller passes candidates whose replay admission and read-only reuse
+  // review confirmed a current reuse recommendation. Pending alone proves
+  // neither admission nor reuse.
+  // A replay of a parked task used to flip from the fresh path's
+  // review_required outcome into a bare intake failure here.
+  const parked = input.reuseReviewRequiredCandidateIds ?? [];
   if (autoIntakeEnabled && input.ledgerEligibleCandidateCount > 0 && ledgerEntryIds.length === 0) {
+    if (parked.length > 0 && parked.length >= input.ledgerEligibleCandidateCount) {
+      return {
+        status: 'degraded',
+        painId,
+        taskId,
+        runId,
+        artifactId,
+        candidateIds,
+        ledgerEntryIds,
+        message: `reuse_review_required:${parked.join(',')} — suspected duplicates confirmed by read-only reuse review; nextAction: pd candidate review --candidate-id <id> --decide reuse|create`,
+      };
+    }
     return {
       status: 'failed',
       painId,
@@ -185,6 +237,21 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
       candidateIds,
       ledgerEntryIds,
       message: 'Candidate intake did not produce a ledger entry — treating as failed',
+    };
+  }
+
+  // P2-2/F3: a replayed batch that ledgered SOME candidates while others are
+  // still pending keeps the same review_required visibility as the fresh path.
+  if (autoIntakeEnabled && parked.length > 0) {
+    return {
+      status: 'degraded',
+      painId,
+      taskId,
+      runId,
+      artifactId,
+      candidateIds,
+      ledgerEntryIds,
+      message: `Task already succeeded; reuse_review_required:${parked.join(',')} — pending candidates await Owner review; nextAction: pd candidate review --candidate-id <id> --decide reuse|create`,
     };
   }
 

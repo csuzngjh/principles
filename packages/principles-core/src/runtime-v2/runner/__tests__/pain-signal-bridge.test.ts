@@ -112,8 +112,29 @@ describe('PainSignalBridge.buildExistingResult', () => {
     expect(result.ledgerEntryIds).toEqual([]);
   });
 
-  it('HG-4: autoIntakeEnabled=true requires ledger entries — none exist returns failed', async () => {
+  it('HG-4: pending without a ledger is still a failure when reuse review is not configured', async () => {
+    // The same pending status also carries intake errors; it cannot prove reuse.
     const candidates = [mockCandidate('c1', TASK_ID)];
+    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
+    const ledgerAdapter = makeMockLedgerAdapter(new Map());
+    const runner = makeMockRunner();
+
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: runner,
+      intakeService: undefined as any,
+      ledgerAdapter,
+      autoIntakeEnabled: true,
+    });
+
+    const result = await (bridge as any).buildExistingResult({ painId: PAIN_ID, taskId: TASK_ID });
+    expect(result.status).toBe('failed');
+    expect(result.message).toBe('Candidate intake did not produce a ledger entry — treating as failed');
+    expect(result.candidateOutcomes).toBeUndefined();
+  });
+
+  it('HG-4b: an EXPIRED principle candidate without a ledger entry (no parked carrier) still returns failed', async () => {
+    const candidates = [{ ...mockCandidate('c1', TASK_ID), status: 'expired' as const }];
     const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
     const ledgerAdapter = makeMockLedgerAdapter(new Map());
     const runner = makeMockRunner();
