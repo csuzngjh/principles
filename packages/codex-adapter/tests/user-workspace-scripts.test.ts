@@ -85,11 +85,33 @@ describe('user-level Codex principle injection', () => {
     const user = path.join(home, 'pd-workspace');
     fs.mkdirSync(path.join(user, '.pd'), { recursive: true });
     const config = getDefaultPdConfig();
-    config.features['host.codex'].enabled = false;
-    fs.writeFileSync(path.join(user, '.pd', 'config.yaml'), JSON.stringify(config));
+    // getDefaultPdConfig shallow-copies `features`, so the inner flag object is
+    // shared module state: clone before mutating or later tests read enabled=false.
+    const isolated = structuredClone(config);
+    isolated.features['host.codex'].enabled = false;
+    fs.writeFileSync(path.join(user, '.pd', 'config.yaml'), JSON.stringify(isolated));
     const result = await processHookInvocation(JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 's', turn_id: 't', transcript_path: null, cwd: project, model: 'gpt-6', permission_mode: 'default', prompt: 'help' }), { CODEX_HOME: home });
     expect(result.stdout).toEqual({});
     expect(result.stderr).toEqual([expect.stringContaining('host.codex_disabled')]);
     expect(fs.existsSync(path.join(user, '.pd', 'state.db'))).toBe(false);
+  });
+
+  // Cross-drive filesystems (Windows with C:\ tmp and D:\ cwd) cannot express
+  // the fixture home as a relative path; POSIX CI and same-drive Windows run it.
+  it.skipIf(path.isAbsolute(path.relative(process.cwd(), os.tmpdir())))('accepts a relative CODEX_HOME by resolving it the same way pd-locate does', async () => {
+    const { home, project } = fixture();
+    const user = path.join(home, 'pd-workspace');
+    fs.mkdirSync(path.join(user, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(user, '.pd', 'config.yaml'), JSON.stringify(getDefaultPdConfig()));
+    const connection = new SqliteConnection(user);
+    try {
+      const now = new Date().toISOString();
+      connection.getDb().prepare('INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run('rel-artifact', 'principle', 'rel-task', 'P_REL_HOME', '[]', 'validated', JSON.stringify({ principleId: 'P_REL_HOME', text: 'USER_SCOPE_DIRECTIVE' }), now, now);
+      await new SqliteActivationStateStore(connection).recordActivation({ activationId: 'rel-activation', idempotencyKey: 'rel-prompt', artifactId: 'rel-artifact', channel: 'prompt', action: 'prompt_activate', targetRef: 'ledger://P_REL_HOME', activatedAt: now, deactivatedAt: null });
+    } finally { connection.close(); }
+    const result = await processHookInvocation(JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 'rel-home-session', turn_id: 'rel-home-turn', transcript_path: null, cwd: project, model: 'gpt-6', permission_mode: 'default', prompt: 'help' }), { CODEX_HOME: path.relative(process.cwd(), home) });
+    expect(result.stderr).toEqual([]);
+    expect(result.stdout).toEqual({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: expect.stringContaining('USER_SCOPE_DIRECTIVE') } });
   });
 });

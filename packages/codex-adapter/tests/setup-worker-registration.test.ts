@@ -33,7 +33,7 @@ function fixture() {
     encoding: 'utf8', timeout: 30_000,
     env: { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex') },
   });
-  return { workspace, manifest, previous, run };
+  return { home, workspace, manifest, previous, run };
 }
 
 describe('real plugin setup connects the existing Companion worker', () => {
@@ -76,5 +76,43 @@ describe('real plugin setup connects the existing Companion worker', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout).workerRegistration).toMatchObject({ status: 'manual_action_required', reason: 'canonical_install_unavailable' });
     expect(fs.existsSync(manifest)).toBe(false);
+  });
+
+  it('reports manual processing when a canonical manifest has no canonical runtime module', () => {
+    const { home, manifest, previous, run } = fixture();
+    fs.rmSync(path.join(home, '.pd', 'runtime', 'install-layout'), { recursive: true, force: true });
+    const result = run();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain('worker_registration_failed');
+    expect(JSON.parse(result.stdout).workerRegistration).toMatchObject({ status: 'manual_action_required', reason: 'canonical_install_unavailable' });
+    expect(JSON.parse(fs.readFileSync(manifest, 'utf8'))).toEqual(previous);
+  });
+
+  it('reports manual processing for a legacy manifest without requiring the canonical module', () => {
+    const { home, manifest, run } = fixture();
+    fs.rmSync(path.join(home, '.pd', 'runtime', 'install-layout'), { recursive: true, force: true });
+    fs.writeFileSync(manifest, JSON.stringify({ layoutVersion: 1, mode: 'legacy', hosts: ['openclaw'] }));
+    const result = run();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain('worker_registration_failed');
+    expect(JSON.parse(result.stdout).workerRegistration).toMatchObject({ status: 'manual_action_required', reason: 'canonical_install_unavailable' });
+  });
+
+  it('reports manual workspace initialization when the workspace has no config', () => {
+    const { workspace, run } = fixture();
+    fs.rmSync(path.join(workspace, '.pd', 'config.yaml'));
+    const result = run();
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).workerRegistration).toMatchObject({ status: 'manual_action_required', reason: 'workspace_not_initialized' });
+  });
+
+  it('fails loud when the workspace config path is not a file', () => {
+    const { workspace, run } = fixture();
+    fs.rmSync(path.join(workspace, '.pd', 'config.yaml'));
+    fs.mkdirSync(path.join(workspace, '.pd', 'config.yaml'));
+    const result = run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('worker_registration_failed');
+    expect(result.stderr).toContain('workspace_config_invalid');
   });
 });

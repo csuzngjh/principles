@@ -270,15 +270,36 @@ async function registerWorkspaceWorker(workspaceDir) {
     status: 'manual_action_required', reason,
     nextAction: `Automatic processing requires the canonical PD runtime and a running PD Companion. Manual processing: pd codex worker --once --workspace "${workspaceDir}" --json`,
   });
-  if (!fs.existsSync(manifestPath)) return manual('canonical_install_unavailable');
-  // Reuse the canonical parser and workspace merge; retain update-owned keys.
-  const { parseInstallManifest, mergeInstallManifestWorkspaces } = await import(pathToFileURL(layoutEntry).href);
-  const current = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  let current;
+  try {
+    current = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    if (error instanceof Error && Object.hasOwn(error, 'code') && Reflect.get(error, 'code') === 'ENOENT') return manual('canonical_install_unavailable');
+    throw error;
+  }
+  // Legacy installs and a missing/broken canonical runtime cannot register
+  // here: report manual processing instead of crashing setup. The manifest
+  // itself is classified before the canonical module is ever required.
+  if (current && current.mode === 'legacy') return manual('canonical_install_unavailable');
+  let layout;
+  try {
+    layout = await import(pathToFileURL(layoutEntry).href);
+  } catch {
+    return manual('canonical_install_unavailable');
+  }
+  const { parseInstallManifest, mergeInstallManifestWorkspaces } = layout;
   const parsed = parseInstallManifest(current);
   if (!parsed.manifest) throw new Error(parsed.error);
   if (parsed.manifest.mode !== 'canonical') return manual('canonical_install_unavailable');
-  if (!fs.existsSync(path.join(workspaceDir, '.pd', 'config.yaml'))) return manual('workspace_not_initialized');
-  if (!fs.statSync(path.join(workspaceDir, '.pd', 'config.yaml')).isFile()) throw new Error('workspace_config_invalid');
+  const workspaceConfigPath = path.join(workspaceDir, '.pd', 'config.yaml');
+  let workspaceConfigStat;
+  try {
+    workspaceConfigStat = fs.statSync(workspaceConfigPath);
+  } catch (error) {
+    if (!(error instanceof Error && Object.hasOwn(error, 'code') && Reflect.get(error, 'code') === 'ENOENT')) throw error;
+    return manual('workspace_not_initialized');
+  }
+  if (!workspaceConfigStat.isFile()) throw new Error('workspace_config_invalid');
   const hosts = [...new Set([...parsed.manifest.hosts, 'codex'])];
   const workspaces = mergeInstallManifestWorkspaces(parsed.manifest, workspaceDir);
   fs.writeFileSync(manifestPath, JSON.stringify({ ...current, hosts, workspaces }, null, 2) + '\n', 'utf8');

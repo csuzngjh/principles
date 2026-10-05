@@ -205,7 +205,10 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   // governance. Otherwise preserve the existing per-project resolution.
   const requestedCwd = event.context.workspaceDir || cwd;
   if (!path.isAbsolute(requestedCwd)) return { stdout: {}, exitCode: 0, stderr: [diagnostic('cwd_not_absolute', 'Provide the absolute Codex project directory.')] };
-  const userWorkspace = path.join(_env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'pd-workspace');
+  // Resolve like pd-locate.cjs does: a relative CODEX_HOME must yield the same
+  // absolute workspace for hooks and owner scripts, or resolveNearestPdWorkspace
+  // rejects it after the config check already accepted it.
+  const userWorkspace = path.join(path.resolve(_env.CODEX_HOME || path.join(os.homedir(), '.codex')), 'pd-workspace');
   let userWorkspaceInitialized = false;
   try {
     userWorkspaceInitialized = statSync(path.join(userWorkspace, '.pd', 'config.yaml')).isFile();
