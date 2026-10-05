@@ -807,6 +807,9 @@ export class PainSignalBridge {
     // PRI-642 §10: per-candidate ledger/seed linkage for outcome reporting.
     const ledgerEntryByCandidate = new Map<string, string>();
     const seededTaskByCandidate = new Map<string, string>();
+    // PRI-917 v0.3.3: candidates parked by the Reuse Review Gate (suspected
+    // duplicates awaiting the Owner) — kept OUT of seeding/consumption.
+    const reuseReviewRequiredByCandidate = new Map<string, { selectedPrincipleId?: string; confidence?: number }>();
 
     if (this.autoIntakeEnabled) {
       for (let i = 0; i < candidates.length; i++) {
@@ -842,6 +845,33 @@ export class PainSignalBridge {
         if (intakeResult.outcome === 'ledger_entry') {
           ledgerEntryIds.push(intakeResult.entry.id);
           ledgerEntryByCandidate.set(candidate.candidateId, intakeResult.entry.id);
+        }
+
+        // PRI-917 v0.3.3 — Reuse Review Gate: a parked candidate is a suspected
+        // duplicate awaiting the Owner. It must stay PENDING: skip the
+        // kind-aware dreamer seeding below AND the consumed marking at loop
+        // end, and make the park observable (telemetry + outcome reporting).
+        // The park writes NOTHING (no ledger entry, no evidence — T7).
+        if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
+          const recommendation = intakeResult.reuseRecommendation;
+          const recommended = recommendation?.status === 'recommended' ? recommendation : undefined;
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'reuse_gate_triggered',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: {
+              candidateId: candidate.candidateId,
+              ...(recommended?.selectedPrincipleId !== undefined
+                ? { selectedPrincipleId: recommended.selectedPrincipleId }
+                : {}),
+              ...(recommended ? { confidence: recommended.confidence, recommendation: recommended.recommendation } : {}),
+            },
+          });
+          reuseReviewRequiredByCandidate.set(candidate.candidateId, {
+            selectedPrincipleId: recommended?.selectedPrincipleId,
+            confidence: recommended?.confidence,
+          });
+          continue;
         }
 
         try {
@@ -960,6 +990,14 @@ export class PainSignalBridge {
           outcome.nextAction = 'Inspect state.db and telemetry; re-run intake.';
         }
       }
+      // PRI-917 v0.3.3 — park override LAST: a Reuse-Review-Gate candidate is
+      // neither seed-failed nor not-internalizable; it is deliberately awaiting
+      // the Owner (rc-9: the waiting state must be visible, not silent).
+      const parked = reuseReviewRequiredByCandidate.get(candidate.candidateId);
+      if (parked !== undefined) {
+        outcome.reason = 'reuse_review_required';
+        outcome.nextAction = `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`;
+      }
       return outcome;
     });
 
@@ -988,6 +1026,9 @@ export class PainSignalBridge {
         admissionResults[i]?.admission.decision === 'admitted'
         && isPrincipleLedgerEligibleKind(candidate.rawRecommendationKind),
       ).length,
+      // PRI-917 v0.3.3: parked candidates intentionally have no ledger entry —
+      // a fully-parked batch is "awaiting the Owner", not an intake failure.
+      reuseReviewRequiredCandidateIds: [...reuseReviewRequiredByCandidate.keys()],
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       autoIntakeEnabled: this.autoIntakeEnabled,

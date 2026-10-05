@@ -389,6 +389,67 @@ describe('PRI-456: onDiagnosisComplete result-shaping characterization', () => {
 
 // ── buildExistingResult() characterization ───────────────────────────────────
 
+describe('PRI-917 v0.3.3: Reuse Review Gate — parked candidate handling (T12)', () => {
+  it('a reuse_pending_owner candidate stays pending: no seed, no consume, observable outcome', async () => {
+    const candidates = [makeCandidate('c1', 'principle')];
+    const deps = makeMockDeps({ candidates, output: makeHighConfidenceOutput() });
+    // The REAL service parks a suspected duplicate; the mock returns exactly
+    // the disposition the gate produces (refused/reuse_pending_owner).
+    (deps.intakeService as unknown as { intake: (candidateId: string) => Promise<unknown> }).intake = async (
+      candidateId: string,
+    ) => ({
+      outcome: 'refused',
+      reason: 'reuse_pending_owner',
+      candidateId,
+      rawRecommendationKind: 'principle',
+      message: 'suspected duplicate — parked for the Owner',
+      reuseProposal: {
+        candidateId,
+        status: 'pending',
+        candidates: [{ principleId: 'existing-p1', score: 0.4, reasons: ['shares terms'] }],
+        eligibleCount: 1,
+      },
+      reuseRecommendation: {
+        status: 'recommended',
+        recommendation: 'reuse',
+        selectedPrincipleId: 'existing-p1',
+        rationale: 'same experience',
+        confidence: 0.93,
+      },
+    });
+    const bridge = createBridge(deps);
+
+    const result = await bridge.onDiagnosisComplete({
+      taskId: TASK_ID,
+      diagnosticianOutput: makeHighConfidenceOutput(),
+      painId: PAIN_ID,
+      provenance: PROVENANCE,
+      inputEvidenceCount: 1,
+    });
+
+    // No dreamer task seeded, candidate NOT marked consumed (stays pending).
+    expect(deps.createTaskCalls).toHaveLength(0);
+    expect(deps.updateCandidateStatusCalls).toHaveLength(0);
+    // A fully-parked batch is "awaiting the Owner" (degraded), NOT a failure.
+    expect(result.status).toBe('degraded');
+    expect(result.message).toContain('reuse_review_required');
+    // rc-9: the waiting state is visible — per-candidate outcome + telemetry.
+    const outcome = result.candidateOutcomes?.[0];
+    expect(outcome?.reason).toBe('reuse_review_required');
+    expect(outcome?.nextAction).toContain('pd candidate review');
+    const gateEvent = deps.telemetryEvents.find((e) => e.eventType === 'reuse_gate_triggered') as
+      | { payload: Record<string, unknown> }
+      | undefined;
+    expect(gateEvent).toBeDefined();
+    expect(gateEvent?.payload).toMatchObject({
+      candidateId: 'c1',
+      selectedPrincipleId: 'existing-p1',
+      confidence: 0.93,
+      recommendation: 'reuse',
+    });
+  });
+});
+
 describe('PRI-456: buildExistingResult result-shaping characterization', () => {
   it('succeeded: existing task with candidates and ledger entries', async () => {
     const candidates = [makeCandidate('c1', 'principle')];

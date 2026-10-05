@@ -1029,24 +1029,36 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
     if (opts.decide === 'reuse' || opts.decide === 'create') {
       // PRI-442 Stage 4: admission gate check — same as handleCandidateIntake.
       // Prevents CLI from bypassing the production admission gate.
-      const admissionBlock = checkAdmissionGate(candidate);
-      if (admissionBlock) {
-        const payload = {
-          candidateId: opts.candidateId,
-          status: 'refused',
-          admissionDecision: admissionBlock.decision,
-          reason: admissionBlock.reason,
-          nextAction: admissionBlock.nextAction,
-        };
-        if (opts.json) {
-          console.log(JSON.stringify(payload, null, 2));
-        } else {
-          console.error(`Admission gate refused candidate ${opts.candidateId}: ${admissionBlock.decision}`);
-          console.error(`  Reason:      ${admissionBlock.reason}`);
-          console.error(`  Next Action: ${admissionBlock.nextAction}`);
+      //
+      // PRI-917 v0.3.3 (R5 F4 two-heads-block fix): the pre-check does NOT
+      // apply to a `reuse` verdict. Admission confidence protects the LEDGER
+      // from low-quality NEW principles; a reuse decision creates nothing — it
+      // appends one auditable evidence entry to an EXISTING principle whose
+      // recurrence is itself the proof of value. Blocking it here left every
+      // low-confidence historical candidate permanently undecidable while the
+      // auto path consumed high-confidence ones before any Owner could ask.
+      // `create` keeps the pre-check: a low-confidence candidate still cannot
+      // become a new Principle via the CLI.
+      if (opts.decide === 'create') {
+        const admissionBlock = checkAdmissionGate(candidate);
+        if (admissionBlock) {
+          const payload = {
+            candidateId: opts.candidateId,
+            status: 'refused',
+            admissionDecision: admissionBlock.decision,
+            reason: admissionBlock.reason,
+            nextAction: admissionBlock.nextAction,
+          };
+          if (opts.json) {
+            console.log(JSON.stringify(payload, null, 2));
+          } else {
+            console.error(`Admission gate refused candidate ${opts.candidateId}: ${admissionBlock.decision}`);
+            console.error(`  Reason:      ${admissionBlock.reason}`);
+            console.error(`  Next Action: ${admissionBlock.nextAction}`);
+          }
+          process.exit(1);
+          return;
         }
-        process.exit(1);
-        return;
       }
       // opts.decide is narrowed here — no cast needed to build the decision-mode shape.
       await executeOwnerDecision({ opts: { ...opts, decide: opts.decide }, stateManager, ledgerAdapter, stateDir });

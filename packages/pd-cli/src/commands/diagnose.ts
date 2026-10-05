@@ -35,6 +35,7 @@ import {
   MVP_ENABLED_CHANNELS,
   persistPainDiagnosis,
   createBridgeTelemetryEventEmitter,
+  createReuseRecommendationHook,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
 } from '@principles/core/runtime-v2';
@@ -581,7 +582,20 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     } else {
       const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-      const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+      // PRI-917 v0.3.3 — auto-path Reuse Review Gate: inject the semantic reuse
+      // recommendation hook. Undefined when reuseEvaluation.enabled=false →
+      // intake behaves exactly as before (T11 rollback switch).
+      const configLoad = loadPdConfig(workspaceDir);
+      const reuseRecommendation = createReuseRecommendationHook({
+        effectiveConfig: configLoad.ok ? configLoad.effective : configLoad.defaults,
+        workspaceDir,
+        stateDir: path.join(workspaceDir, '.state'),
+      });
+      const intakeService = new CandidateIntakeService({
+        stateManager,
+        ledgerAdapter,
+        ...(reuseRecommendation ? { reuseRecommendation, reuseStateDir: path.join(workspaceDir, '.state') } : {}),
+      });
 
       for (const candidate of candidates) {
         // PRI-503: admission gate check — refuse non-admitted candidates before
@@ -603,6 +617,20 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         }
         try {
           const intakeResult = await intakeService.intake(candidate.candidateId);
+          // PRI-917 v0.3.3: a parked candidate stays PENDING — no consumed
+          // marking, no dreamer seeding. The Owner resolves it via
+          // `pd candidate review --decide`.
+          if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
+            const recommended =
+              intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
+            intakeResults.push({
+              candidateId: candidate.candidateId,
+              status: 'review_required',
+              reusedPrincipleId: recommended?.selectedPrincipleId,
+              nextAction: `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`,
+            });
+            continue;
+          }
           // Phase 1 / PR1: candidate status handling is deliberately UNCHANGED
           // (SPEC v2.1 Step 2 "保持现有 candidate persistence / routing / defer
           // 行为"). Only the Principle Ledger write is gated, so a refused
