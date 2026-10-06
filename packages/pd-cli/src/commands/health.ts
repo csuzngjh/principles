@@ -113,7 +113,9 @@ function assessReuseEvaluationTelemetry(workspaceDir: string): ReuseEvaluationHe
     if (!fs.existsSync(criticalEventsFile)) return { criticalEventsFile };
     const lines = fs.readFileSync(criticalEventsFile, 'utf8').split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
+      const raw = lines[i];
+      if (raw === undefined) continue;
+      const line = raw.trim();
       if (line === '') continue;
       let evt: unknown;
       try {
