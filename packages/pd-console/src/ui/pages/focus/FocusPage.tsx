@@ -381,13 +381,9 @@ function PendingReviewCard({
 
   // Display title: prefer candidateDescription (human-readable) over principleTitle
   // (which falls back to a fabricated principleId when the principle isn't in ledger).
-  // PRI-940: the selection rule lives in focus-validation (contract-tested) —
-  // when the pinned artifact is missing, principleTitle IS the machine id
-  // (`unlinked:<artifactId>`) and must fall through to the untitled copy; the
-  // degradation note below explains why there is no content.
-  // PRI-941: the same machine id also arrives with a READABLE artifact (no
-  // description extractable + lineage unresolved), so the untitled copy needs
-  // its own visible reason instead of an unexplained blank title.
+  // The selection rule and each degradation reason live in focus-validation
+  // (PRI-940 / PRI-941, contract-tested); the mutually exclusive notes below say
+  // why a particular card has no title.
   const displayTitle = selectApprovalGroupDisplayTitle(group)
     ?? t("pages.focus.untitledCandidate", { defaultValue: "待命名候选原则" });
   const unlinkedCandidateNote = showsUnlinkedCandidateNote(group);

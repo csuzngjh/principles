@@ -97,7 +97,7 @@
       "evidenceSummary": "证据：{{count}} 条记录",
       "untitledCandidate": "待命名候选原则",
       "artifactUnavailableNote": "该审批指向的草稿原件已不在工件库中（可能已被新版本取代），内容无法显示。如无法判断，可选择拒绝；原始工件编号可点「编辑」后在「当前工件」一栏查看。",
-      "unlinkedCandidateNote": "这条候选原则内容可读，但尚未与原则台账中的任何原则建立关联，因此暂时没有可展示的原则名称。请依据下方的证据摘要判断；如无法判断，可选择拒绝。",
+      "unlinkedCandidateNote": "这条候选原则内容可读，但无法把它的血缘解析到台账中的某条原则，因此暂时没有可展示的原则名称。请依据下方的证据摘要判断；如无法判断，可选择拒绝。",
       "approveAction": "批准",
       "rejectAction": "拒绝",
       "editAction": "编辑",

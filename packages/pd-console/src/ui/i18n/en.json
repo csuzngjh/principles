@@ -97,7 +97,7 @@
       "evidenceSummary": "Evidence: {{count}} record(s)",
       "untitledCandidate": "Untitled candidate principle",
       "artifactUnavailableNote": "The draft artifact this approval points to is no longer in the artifact store (likely superseded by a newer revision), so its content cannot be shown. If in doubt, reject it; the raw artifact ID is shown in the edit section's current-artifact field.",
-      "unlinkedCandidateNote": "This candidate is readable but not yet linked to a principle in the ledger, so there is no principle name to show yet. Judge it from the evidence summary below; if you cannot decide, reject it.",
+      "unlinkedCandidateNote": "This candidate is readable, but its lineage cannot be resolved to a principle, so there is no principle name to show yet. Judge it from the evidence summary below; if you cannot decide, reject it.",
       "approveAction": "Approve",
       "rejectAction": "Reject",
       "editAction": "Edit",

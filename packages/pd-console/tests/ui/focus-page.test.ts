@@ -17,7 +17,6 @@ import * as nodePath from "node:path";
 // it and only cover legacy shapes). focus-validation.ts imports api.js as
 // types only, so loading it here never pulls in React.
 import {
-  isUnlinkedSyntheticPrincipleTitle,
   selectApprovalGroupDisplayTitle,
   showsUnlinkedCandidateNote,
   validateApprovalsGroupedData as validateApprovalsGroupedDataReal,
@@ -408,10 +407,12 @@ describe("FocusPage: unlinked machine-id title (PRI-941)", () => {
     artifactUnavailable: undefined,
   };
 
-  it("detects only the synthesized grouping key", () => {
-    expect(isUnlinkedSyntheticPrincipleTitle("unlinked:pi-art-scribe-x_prompt_3")).toBe(true);
-    expect(isUnlinkedSyntheticPrincipleTitle("「我未找到」不等于「它不存在」")).toBe(false);
-    expect(isUnlinkedSyntheticPrincipleTitle("unlinked")).toBe(false);
+  it("treats only the synthesized grouping key as untitled", () => {
+    // The bare "unlinked" sentinel is written by a different model
+    // (ActivationsConsoleModel) and surfaces on a different page; widening this
+    // rule to cover it would change that page's visible text, so it stays out.
+    expect(selectApprovalGroupDisplayTitle({ ...readableUnlinkedGroup, principleTitle: "unlinked" }))
+      .toBe("unlinked");
   });
 
   it("title selection declines the machine id for a READABLE artifact (negative control: fails against the pre-fix chain)", () => {
@@ -429,6 +430,19 @@ describe("FocusPage: unlinked machine-id title (PRI-941)", () => {
 
   it("untitled is explained, never silent (rc-9) — the unlinked note shows for a readable artifact", () => {
     expect(showsUnlinkedCandidateNote(readableUnlinkedGroup)).toBe(true);
+  });
+
+  it("a candidate that did get a title is never warned about (negative control: fails against the first fix)", () => {
+    // Lineage can be unresolved while the artifact content still yields a
+    // readable description. The card then shows that description as its title,
+    // so the "no principle name" note would contradict it.
+    const titledDespiteUnlinked = {
+      ...readableUnlinkedGroup,
+      candidateDescription: "先核验全集，再下否定性断言",
+    };
+    expect(selectApprovalGroupDisplayTitle(titledDespiteUnlinked))
+      .toBe("先核验全集，再下否定性断言");
+    expect(showsUnlinkedCandidateNote(titledDespiteUnlinked)).toBe(false);
   });
 
   it("the two degradation notes are mutually exclusive — artifactUnavailable keeps its own copy", () => {

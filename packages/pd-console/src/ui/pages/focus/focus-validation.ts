@@ -132,7 +132,7 @@ export function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData
 const UNLINKED_GROUPING_KEY_PREFIX = "unlinked:";
 
 /** True when a title is the synthesized grouping key rather than a real name. */
-export function isUnlinkedSyntheticPrincipleTitle(title: string): boolean {
+function isUnlinkedSyntheticPrincipleTitle(title: string): boolean {
   return title.startsWith(UNLINKED_GROUPING_KEY_PREFIX);
 }
 
@@ -167,12 +167,18 @@ export function selectApprovalGroupDisplayTitle(
 /**
  * PRI-941: an untitled card must say why (rc-9 — degradation may not be silent).
  * The artifactUnavailable copy already covers "the draft artifact is gone"; this
- * is the other reason the title is empty: the artifact is readable but its
- * candidate was never mapped into the principle ledger. The two are mutually
- * exclusive by construction, so one card can never claim both causes.
+ * is the other reason the title ends up empty: the artifact is readable, but its
+ * grouping key never resolved to a principle. Derived from the title rule itself
+ * so the note can never contradict a title the card actually managed to show —
+ * a readable candidate whose description extracted fine keeps its title and gets
+ * no warning.
  */
 export function showsUnlinkedCandidateNote(
-  group: Pick<ApprovalGroup, "principleTitle" | "artifactUnavailable">,
+  group: Pick<ApprovalGroup, "candidateDescription" | "principleTitle" | "artifactUnavailable">,
 ): boolean {
-  return group.artifactUnavailable !== true && isUnlinkedSyntheticPrincipleTitle(group.principleTitle);
+  if (group.artifactUnavailable === true) return false;
+  return (
+    isUnlinkedSyntheticPrincipleTitle(group.principleTitle)
+    && selectApprovalGroupDisplayTitle(group) === undefined
+  );
 }
