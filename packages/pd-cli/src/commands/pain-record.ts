@@ -35,11 +35,11 @@ import {
   isBuiltinPiAiProvider,
   evaluatePainIngress,
 } from '@principles/core/runtime-v2';
-import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation } from '@principles/core/runtime-v2';
+import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation, PainEvidenceBundle } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
-import { acquireTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
+import { acquireTrajectoryEvidenceFromDb, acquireCodexToolFailureEvidenceFromDb } from './build-trajectory-evidence.js';
 
 interface RecordOptions {
   reason?: string;
@@ -134,10 +134,17 @@ function resolveIngressDecision(
   // key is derived with the SAME rule the Codex ingestion path uses
   // (codex-adapter admission.ts buildLiveCorrectionCandidate →
   // `codex|<rolloutIdentity>|<turnId>|user`) unless --logical-key overrides it.
-  // The CLI cannot read the Codex trajectory (that is the ingestion path's
-  // job), so the evidence class is honestly 'unavailable': the shared
-  // evaluator takes its bound+unavailable 'degrade' branch and submits the
-  // pain with real lineage and empty evidence rather than fabricating either.
+  //
+  // PRI-941 Option A (Owner-approved, supersedes the earlier "CLI cannot read
+  // the Codex trajectory" stance): the CLI now consumes ONLY the already-
+  // authorized `tool_calls` failure evidence (PRI-624 tool-governance surface)
+  // via acquireCodexToolFailureEvidenceFromDb. Conversation tables
+  // (user_turns / assistant_turns) are NEVER queried on this path — they
+  // remain ingestion-exclusive behind the G2A consent boundary — and rollout
+  // transcript files are never opened. A zero-failure set keeps the honest
+  // unavailable degradation (reason now accurately reflects the cause), so the
+  // shared evaluator still takes its bound+unavailable 'degrade' branch with
+  // real lineage rather than fabricating evidence.
   if (opts.host === 'codex') {
     const rolloutIdentity = opts.rolloutId as string;
     const hostTurnId = opts.hostTurnId as string;
@@ -150,13 +157,24 @@ function resolveIngressDecision(
       logicalObservationKey: opts.logicalKey ?? `codex|${rolloutIdentity}|${hostTurnId}|user`,
       hostTurnId,
     };
+    const acquisition = acquireCodexToolFailureEvidenceFromDb(stateDir, rootSessionId, workspaceDir);
+    const evidence: PainEvidenceBundle = acquisition.status === 'available'
+      ? {
+          status: 'available',
+          entries: acquisition.entries.map(toIngressEntry) as [IngressEvidenceEntry, ...IngressEvidenceEntry[]],
+        }
+      : { status: 'unavailable', reason: acquisition.reasonCode };
     const decision = evaluatePainIngress({
       ...base,
       origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
       correlation,
-      evidence: { status: 'unavailable', reason: 'trajectory_unavailable' },
+      evidence,
     });
-    return { decision, acquisitionDetail: null, acquisitionReason: null };
+    return {
+      decision,
+      acquisitionDetail: acquisition.status === 'unavailable' ? acquisition.detail : null,
+      acquisitionReason: acquisition.status === 'unavailable' ? acquisition.reasonCode : null,
+    };
   }
 
   if (!opts.session) {

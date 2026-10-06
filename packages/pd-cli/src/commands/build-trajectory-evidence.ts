@@ -52,6 +52,52 @@ const PLACEHOLDER_SOURCE_REFS = new Set([
   'trajectory:empty',
 ]);
 
+/**
+ * PRI-941 Option A — the SINGLE reader of `tool_calls` failure rows, shared by
+ * the OpenClaw acquisition (collectEvidenceFromDb) and the Codex-scoped
+ * acquisition (acquireCodexToolFailureEvidenceFromDb) so the two hosts can
+ * never drift. Never throws: a missing/unreadable `tool_calls` table is
+ * reported through `readFailed` and the caller owns placeholder handling.
+ */
+function readToolFailureEvidence(
+  db: Database.Database,
+  sessionId: string,
+  workspaceDir?: string,
+): { entries: PainEvidenceEntry[]; readFailed: boolean } {
+  const entries: PainEvidenceEntry[] = [];
+  let readFailed = false;
+  try {
+    const failedToolCalls = db.prepare(`
+        SELECT tool_name, error_type, exit_code, result_preview, created_at
+        FROM (
+          SELECT tool_name, error_type, exit_code, result_preview, created_at
+          FROM tool_calls
+          WHERE session_id = ? AND outcome = 'failure'
+          ORDER BY created_at DESC
+          LIMIT 3
+        )
+        ORDER BY created_at ASC
+      `).all(sessionId) as Record<string, unknown>[];
+
+    for (const tc of failedToolCalls) {
+      const toolName = typeof tc.tool_name === 'string' ? tc.tool_name : 'unknown';
+      const errorType = typeof tc.error_type === 'string' ? tc.error_type : 'unknown';
+      const exitCode = tc.exit_code != null ? String(tc.exit_code) : 'N/A';
+      // Enhanced: append resultPreview when available
+      const resultPreview = typeof tc.result_preview === 'string' ? tc.result_preview : null;
+      const previewSuffix = resultPreview ? ` | ${resultPreview.slice(0, 200)}` : '';
+      const note = `Tool ${toolName} failed: ${errorType} (exitCode: ${exitCode})${previewSuffix}`;
+      entries.push({
+        sourceRef: `tool_call_failure:${String(tc.created_at ?? 'unknown')}`,
+        note: sanitizeString(note.slice(0, MAX_EVIDENCE_NOTE_CHARS), workspaceDir),
+      });
+    }
+  } catch {
+    readFailed = true;
+  }
+  return { entries, readFailed };
+}
+
 interface TrajectoryDbCollection {
   entries: PainEvidenceEntry[];
   realEntryCount: number;
@@ -145,35 +191,24 @@ function collectEvidenceFromDb(
 
   // PRI-358: Try to read failed tool_calls (last 3 failures, chronological order)
   try {
-    const failedToolCalls = db.prepare(`
-        SELECT tool_name, error_type, exit_code, result_preview, created_at
-        FROM (
-          SELECT tool_name, error_type, exit_code, result_preview, created_at
-          FROM tool_calls
-          WHERE session_id = ? AND outcome = 'failure'
-          ORDER BY created_at DESC
-          LIMIT 3
-        )
-        ORDER BY created_at ASC
-      `).all(sessionId) as Record<string, unknown>[];
-
-    for (const tc of failedToolCalls) {
+    const toolFailure = readToolFailureEvidence(db, sessionId, workspaceDir);
+    for (const entry of toolFailure.entries) {
       if (evidence.length >= MAX_EVIDENCE_ENTRIES) break;
-      const toolName = typeof tc.tool_name === 'string' ? tc.tool_name : 'unknown';
-      const errorType = typeof tc.error_type === 'string' ? tc.error_type : 'unknown';
-      const exitCode = tc.exit_code != null ? String(tc.exit_code) : 'N/A';
-      // Enhanced: append resultPreview when available
-      const resultPreview = typeof tc.result_preview === 'string' ? tc.result_preview : null;
-      const previewSuffix = resultPreview ? ` | ${resultPreview.slice(0, 200)}` : '';
-      const note = `Tool ${toolName} failed: ${errorType} (exitCode: ${exitCode})${previewSuffix}`;
-      evidence.push({
-        sourceRef: `tool_call_failure:${String(tc.created_at ?? 'unknown')}`,
-        note: sanitizeString(note.slice(0, MAX_EVIDENCE_NOTE_CHARS), workspaceDir),
-      });
+      evidence.push(entry);
+    }
+    if (toolFailure.readFailed) {
+      readFailed = true;
+      // tool_calls table may not exist — degrade gracefully (only when no other evidence)
+      if (evidence.length === 0) {
+        evidence.push({
+          sourceRef: 'tool_call_failure:unavailable',
+          note: 'trajectory_tool_calls_unavailable',
+        });
+      }
     }
   } catch {
+    // defensive: readToolFailureEvidence never throws (internally caught)
     readFailed = true;
-    // tool_calls table may not exist — degrade gracefully (only when no other evidence)
     if (evidence.length === 0) {
       evidence.push({
         sourceRef: 'tool_call_failure:unavailable',
@@ -197,6 +232,7 @@ function collectEvidenceFromDb(
   );
   return { entries: bounded, realEntryCount, readFailed };
 }
+
 
 /**
  * PRI-642 Scope A typed acquisition from trajectory.db (SPEC §7.3).
@@ -292,6 +328,78 @@ export function acquireTrajectoryEvidenceFromDb(
       detail: 'session_present_but_no_usable_evidence',
       binding: sessionVerified ? 'verified' : 'unverified',
     };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * PRI-941 Option A (Owner-approved) — Codex-scoped evidence acquisition for
+ * `pd pain record --host codex`.
+ *
+ * Boundary discipline (PRI-940/941 audits): this function reads ONLY the
+ * `tool_calls` failure rows (the already-authorized PRI-624 tool-governance
+ * evidence surface) for the caller-supplied Codex root session. Conversation
+ * tables (`user_turns` / `assistant_turns`) are NEVER queried here — they
+ * remain ingestion-exclusive behind the G2A consent boundary — and rollout
+ * transcript files are never opened. Binding authority stays with the
+ * caller-supplied PRI-743 lineage tuple: no sessions-table check runs, so an
+ * `unavailable` result never carries a binding claim.
+ *
+ * Outcomes:
+ *  - `available`            — ≥1 failure row → real behavior-trace entries;
+ *  - `trajectory_unavailable` — no trajectory.db in this workspace;
+ *  - `evidence_read_failed` — the DB exists but cannot be opened/read;
+ *  - `empty_trajectory`     — DB readable, zero failure rows for the session
+ *                             (detail: `codex_tool_calls_empty`).
+ */
+export function acquireCodexToolFailureEvidenceFromDb(
+  stateDir: string,
+  sessionId: string | undefined,
+  workspaceDir?: string,
+): TrajectoryEvidenceAcquisition {
+  if (!sessionId || sessionId === 'cli' || sessionId === 'unknown') {
+    return {
+      status: 'unavailable',
+      reasonCode: 'session_not_found',
+      detail: sessionId ? `sentinel_session_id:${sessionId}` : 'missing_session_id',
+      binding: 'unverified',
+    };
+  }
+
+  const dbPath = path.join(stateDir, 'trajectory.db');
+  if (!fs.existsSync(dbPath)) {
+    return {
+      status: 'unavailable',
+      reasonCode: 'trajectory_unavailable',
+      detail: 'trajectory_db_missing',
+      binding: 'unverified',
+    };
+  }
+
+  let db: Database.Database;
+  try {
+    db = new Database(dbPath, { readonly: true });
+  } catch (err) {
+    return {
+      status: 'unavailable',
+      reasonCode: 'evidence_read_failed',
+      detail: `trajectory_db_unreadable: ${err instanceof Error ? err.message : String(err)}`,
+      binding: 'unverified',
+    };
+  }
+
+  try {
+    const toolFailure = readToolFailureEvidence(db, sessionId, workspaceDir);
+    if (toolFailure.entries.length === 0) {
+      return {
+        status: 'unavailable',
+        reasonCode: 'empty_trajectory',
+        detail: 'codex_tool_calls_empty',
+        binding: 'unverified',
+      };
+    }
+    return { status: 'available', entries: toolFailure.entries };
   } finally {
     db.close();
   }
