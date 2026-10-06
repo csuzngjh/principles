@@ -297,6 +297,150 @@ describe('environment detection utilities', () => {
     });
   });
 
+  /**
+   * PRI-944: a failed `gateway stop` is a statement about the COMMAND; whether
+   * the gateway actually released the extension dir is a separate fact, and the
+   * old code conflated them (a signed-channel update died at `verified` on
+   * `cmd.exe ETIMEDOUT` read as "the gateway refused to stop").
+   *
+   * Port truth comes from a REAL TCP listener (checkPortListening is not
+   * mocked); pid-liveness and the poll wait are injected because the host
+   * process table is not deterministic in tests.
+   */
+  describe('stopOpenClawGateway effect verification (PRI-944)', () => {
+    const noWait = async () => {};
+
+    async function openListener(): Promise<{ port: number; close: () => Promise<void> }> {
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      return { port: addr.port, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+    }
+
+    /** The stop command itself fails — every case below starts from there. */
+    function stopCommandFails() {
+      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+        routeByCommand(binary, args, { 'gateway stop': 'throw' })
+      );
+    }
+
+    // EP-09#2 negative control: RED before this fix (exit code alone returned
+    // ok:false and voided the transaction), GREEN after.
+    it('reports ok:true when the command failed but the gateway verifiably stopped', async () => {
+      const gw = await openListener();
+      await gw.close();
+      stopCommandFails();
+
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port },
+        { sleep: noWait, processAlive: () => false, confirmTimeoutMs: 50, pollIntervalMs: 1 },
+      );
+
+      expect(res).toEqual({ ok: true });
+      expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports gateway_still_running when a listener survives the whole window', async () => {
+      const gw = await openListener();
+      stopCommandFails();
+      try {
+        const res = await stopOpenClawGateway(
+          { isRunning: true, port: gw.port, pid: 4242 },
+          { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+        );
+
+        expect(res.ok).toBe(false);
+        expect(res.reason).toBe('gateway_still_running');
+        expect(res.error).toContain('still listening');
+        expect(res.error).toContain(`port ${gw.port} (pid 4242)`);
+      } finally {
+        await gw.close();
+      }
+    });
+
+    it('reports stop_confirmation_timeout — not a refusal — when the port cleared but the process lingered', async () => {
+      const gw = await openListener();
+      await gw.close();
+      stopCommandFails();
+
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port, pid: 4242 },
+        { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+      );
+
+      expect(res.ok).toBe(false);
+      expect(res.reason).toBe('stop_confirmation_timeout');
+      expect(res.error).toContain('statement about time, not a refusal');
+    });
+
+    it('accepts port-clear alone when the pre-flight never resolved a PID (backup rename is the terminal judge)', async () => {
+      const gw = await openListener();
+      await gw.close();
+      stopCommandFails();
+
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port },
+        { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+      );
+
+      expect(res).toEqual({ ok: true });
+    });
+
+    it('refuses with verification_unavailable instead of assuming success when nothing was observed', async () => {
+      stopCommandFails();
+
+      const res = await stopOpenClawGateway(undefined, { sleep: noWait });
+
+      expect(res.ok).toBe(false);
+      expect(res.reason).toBe('verification_unavailable');
+      expect(res.error).toContain('openclaw gateway stop failed');
+      expect(res.error).toContain('could not be verified');
+    });
+
+    // rc-1: the observed status crosses a trust boundary — a junk port must not
+    // turn into an infinite/absurd wait or a fabricated verdict.
+    it('refuses with verification_unavailable for a non-integer or out-of-range observed port', async () => {
+      stopCommandFails();
+
+      for (const port of [0, 70000, 1.5, Number.NaN]) {
+        const res = await stopOpenClawGateway(
+          { isRunning: true, port },
+          { sleep: noWait, processAlive: () => false },
+        );
+        expect(res.ok).toBe(false);
+        expect(res.reason).toBe('verification_unavailable');
+      }
+    });
+
+    // rc-9: a broken probe degrades loudly, never crashes the install.
+    it('never throws when the verification probe itself fails', async () => {
+      const gw = await openListener();
+      await gw.close();
+      stopCommandFails();
+
+      const res = await stopOpenClawGateway(
+        { isRunning: true, port: gw.port, pid: 4242 },
+        { sleep: noWait, processAlive: () => { throw new Error('probe exploded'); } },
+      );
+
+      expect(res.ok).toBe(false);
+      expect(res.reason).toBe('verification_unavailable');
+      expect(res.error).toContain('verification itself failed');
+    });
+
+    it('never runs the effect check on the success path (no new wait on healthy hosts)', async () => {
+      const gw = await openListener();
+      mockExecFileSync.mockImplementation(() => '');
+
+      const res = await stopOpenClawGateway({ isRunning: true, port: gw.port, pid: 4242 });
+
+      expect(res).toEqual({ ok: true });
+      expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+      await gw.close();
+    });
+  });
+
   describe('checkOpenClawGateway', () => {
     it('returns isRunning:false when openclaw.json is missing', async () => {
       mockExistsSync.mockReturnValue(false);
@@ -380,6 +524,17 @@ describe('environment detection utilities', () => {
       vi.resetModules();
     });
 
+    /** An ephemeral port that is provably NOT listening (bound, then released). */
+    async function bindAndRelease(): Promise<number> {
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      return port;
+    }
+
     // PRI-605: win32 上 python.org 安装常只提供 python.exe，python3 不在 PATH。
     it('falls back to python when python3 is absent on win32', async () => {
       await loadWin32Env();
@@ -446,6 +601,71 @@ describe('environment detection utilities', () => {
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
+    });
+
+    // PRI-944: win32 asks the SCM read-only via tasklist, because a medium-IL
+    // installer that signals the high-IL gateway task gets EPERM — and
+    // process.kill-based probes read that as "dead", which would confirm a stop
+    // that never happened.
+    it('confirms a stop via tasklist when the port cleared and the PID is gone', async () => {
+      await loadWin32Env();
+      const port = await bindAndRelease();
+
+      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+        routeByCommand(binary, args, {
+          'gateway stop': 'throw',
+          'tasklist.exe': 'INFO: No tasks are running which match the specified criteria.',
+        })
+      );
+
+      const res = await win32Env.stopOpenClawGateway(
+        { isRunning: true, port, pid: 4242 },
+        { sleep: async () => {}, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+      );
+
+      expect(res).toEqual({ ok: true });
+      const tasklistCall = win32ExecFileSync.mock.calls.find((c) => joinedCall(c).includes('tasklist.exe'));
+      expect(tasklistCall).toBeDefined();
+      // ERR-045: the pid is an argv element, never interpolated into a shell string.
+      expect(tasklistCall?.[1]).toContain('PID eq 4242');
+      expect(tasklistCall?.[2]).toMatchObject({ windowsHide: true });
+    });
+
+    it('treats an unreadable tasklist probe as still-running, never as a confirmed stop', async () => {
+      await loadWin32Env();
+      const port = await bindAndRelease();
+
+      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+        routeByCommand(binary, args, { 'gateway stop': 'throw', 'tasklist.exe': 'throw' })
+      );
+
+      const res = await win32Env.stopOpenClawGateway(
+        { isRunning: true, port, pid: 4242 },
+        { sleep: async () => {}, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+      );
+
+      expect(res.ok).toBe(false);
+      expect(res.reason).toBe('stop_confirmation_timeout');
+    });
+
+    it('refuses the stop when tasklist still lists the PID', async () => {
+      await loadWin32Env();
+      const port = await bindAndRelease();
+
+      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+        routeByCommand(binary, args, {
+          'gateway stop': 'throw',
+          'tasklist.exe': 'node.exe  4242 Console  1  12,340 K',
+        })
+      );
+
+      const res = await win32Env.stopOpenClawGateway(
+        { isRunning: true, port, pid: 4242 },
+        { sleep: async () => {}, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+      );
+
+      expect(res.ok).toBe(false);
+      expect(res.reason).toBe('stop_confirmation_timeout');
     });
   });
 });

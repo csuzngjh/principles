@@ -3661,12 +3661,17 @@ export async function install(
     }
     if (action === 'stop') {
       if (!quiet) logger.info(t('gateway_stopping'));
-      const stopRes = await stopOpenClawGateway();
+      const stopRes = await stopOpenClawGateway(gatewayStatus);
       if (!stopRes.ok) {
         logger.error(`${t('gateway_stop_failed')} ${stopRes.error ?? ''}`);
         return buildGatewayRefusalResult(options, {
           reason: `gateway_stop_failed: ${t('gateway_stop_failed_reason')}${stopRes.error ? ` — ${stopRes.error}` : ''}`,
-          nextAction: t('gateway_stop_failed_next'),
+          // PRI-944: only a verified still-running gateway warrants "go stop it
+          // by hand". An unconfirmed stop is a slow exit, and telling the Owner
+          // to fight a process that is already leaving is a false instruction.
+          nextAction: stopRes.reason === 'gateway_still_running'
+            ? t('gateway_stop_failed_next')
+            : t('gateway_stop_unconfirmed_next'),
           error: stopRes.error,
         });
       }
