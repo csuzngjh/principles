@@ -106,7 +106,7 @@ Complexity Delta = 全 NO。改动面：core 4 文件（全部为可选字段/�
 | pd-cli：e2e reuse-evaluation-prod-validation（含新块，13 tests）+ wiring guard（7 tests） | ✅ 20/20 |
 | pd-cli：pain-record/pain-retry/health/candidate-review/candidate-intake/config-doctor 回归 | ✅ 174/174 |
 | eslint（11 个改动源文件） | ✅ 0 problem |
-| `npm run verify:merge`（merge gate 全链） | 见 §10 |
+| `npm run verify:merge`（merge gate 全链） | ✅ **PASS，exit 0**（第 3 次运行；第 1 次缺 changeset 被发布意图守卫拦截 → 补 `@principles/core\|host-runtime\|pd-cli` patch 三包声明；第 2 次 pd-cli strict 构建暴露 health.ts `noUncheckedIndexedAccess` → 已修。两处均为门按设计工作） |
 
 ## 8. Risks
 
@@ -122,7 +122,7 @@ Complexity Delta = 全 NO。改动面：core 4 文件（全部为可选字段/�
 
 ## 10. Merge Gate
 
-`npm run verify:merge` 在本 worktree 执行，结果记录于提交信息与 Linear 评论（exit code 见提交时点输出）。
+`npm run verify:merge` 于本 worktree 三次运行后 **PASS（exit 0）**：发布意图守卫（changeset）、全部 check 守卫、三包构建、六项 typecheck、pipeline-contract、runtime-writers 全绿。分支提交：`d1d76a8d`（实施）→ `c514a0fe`（changeset）→ `43b30062`（health 类型守卫修复）。
 
 ## 11. Stop
 
