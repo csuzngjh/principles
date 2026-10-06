@@ -87,9 +87,14 @@ function readToolFailureEvidence(
       const resultPreview = typeof tc.result_preview === 'string' ? tc.result_preview : null;
       const previewSuffix = resultPreview ? ` | ${resultPreview.slice(0, 200)}` : '';
       const note = `Tool ${toolName} failed: ${errorType} (exitCode: ${exitCode})${previewSuffix}`;
+      // PRI-941 review (Codex P2): sanitize the COMPLETE composed note BEFORE
+      // any truncation — pre-slicing could cut a token across the sanitizer's
+      // pattern threshold and let the fragment through unredacted.
+      // sanitizeString itself applies the output bound (with a ___TRUNCATED___
+      // marker) after redacting the full text.
       entries.push({
         sourceRef: `tool_call_failure:${String(tc.created_at ?? 'unknown')}`,
-        note: sanitizeString(note.slice(0, MAX_EVIDENCE_NOTE_CHARS), workspaceDir),
+        note: sanitizeString(note, workspaceDir),
       });
     }
   } catch {

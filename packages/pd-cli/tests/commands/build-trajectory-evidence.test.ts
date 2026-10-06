@@ -537,6 +537,31 @@ describe('acquireCodexToolFailureEvidenceFromDb (PRI-941 Option A)', () => {
     }
   });
 
+  it('review (Codex P2): a token crossing the 200-char note boundary is redacted BEFORE truncation', () => {
+    createStateDir();
+    const db = createTrajectoryDb();
+    try {
+      // Pad the preview so the sk- token starts just before the legacy
+      // 200-char slice boundary — the old slice-then-sanitize order let the
+      // truncated fragment escape redaction.
+      const padding = 'x'.repeat(190);
+      const secretToken = 'sk-TEST1234567890abcdefGHIJKLMNOPQRSTUVWXYZ123456';
+      insertToolCall(
+        db, 'sess-tok', 'bash', 'failure', 'EACCES', 1, '2026-10-06T00:00:06Z',
+        `${padding}curl -H "Authorization: Bearer ${secretToken}" https://api.example.com`,
+      );
+
+      const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-tok');
+      expect(result.status).toBe('available');
+      if (result.status !== 'available') return;
+      const note = result.entries[0]!.note;
+      expect(note).not.toContain(secretToken);
+      expect(note).not.toMatch(/sk-[A-Za-z0-9_-]{20,}/);
+    } finally {
+      db.close();
+    }
+  });
+
   it('T2a: zero failure rows → unavailable empty_trajectory (codex_tool_calls_empty)', () => {
     createStateDir();
     const db = createTrajectoryDb();

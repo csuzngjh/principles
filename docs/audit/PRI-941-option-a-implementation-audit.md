@@ -79,3 +79,13 @@ revert 单提交即回退（codex 分支恢复诚实空证据降级）；无数�
 - result_preview 截断先于读取侧 token redact 的微缝隙（需 DB 被未脱敏第三方写入才成立）；
 - CLI T4 的字符串缺席断言实质由 G3 guard 承担；`mockReturnValueOnce` 跨用例残留为潜伏风险；
 - G1 切片断言对精确实参文本/函数后追加代码有误报脆弱性（漂移时均响亮失败，无假通过路径）。
+
+## 8. PR #1942 机器人评审轮（2026-10-07）
+
+三条行内意见逐条核验与处置：
+
+| 来源 | 意见 | 核验 | 处置 |
+| --- | --- | --- | --- |
+| CodeRabbit（Minor） | readFailed 应先于空判断区分 → `evidence_read_failed` | 属实——与三维评审轮 F2 为同一发现 | **已修复**（评审轮提交，与该建议 diff 一致） |
+| Codex（P1） | session 级失败证据与 pain 所绑 turn 无权威关联，可能"他处失败"撑起 evidence | 粒度观察属实，**修复建议不采纳**：session 级上下文是共享 acquisition contract（PRI-341）既有语义，OpenClaw 同构且本 PR 明确不改契约；turn 级关联需 tool_calls 加列 = schema 演进，超出已批边界；"绕过空证据门"即 Option A 设计目的；LIMIT 3+时间倒序已限幅 | 已在 PR 行内回复裁定理由 + 记 follow-up（tool_calls 演进出 turn 列后可收紧） |
+| Codex（P2） | note 先 slice(200) 后 sanitize，跨界 token 残段可逃过 redact | 属实——本 PR 的共享 reader 使**双宿主同时**暴露该缝隙 | **已修复**：`sanitizeString` 先 redact 完整 note 再自截断（附跨界 sk- token 用例，断言残段不逃逸） |
