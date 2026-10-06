@@ -1,5 +1,39 @@
 # principles-disciple
 
+## 2.0.10
+
+### Patch Changes
+
+- 34ba089: Console approval cards no longer render the internal `unlinked:<artifactId>`
+  machine id as the card title on the second path that still produced it
+  (PRI-941). PRI-940 closed the case where the pinned draft artifact has left the
+  artifact store; an artifact row that still exists can degrade the same way — its
+  content yields no extractable description and its lineage resolves to nothing,
+  so the grouping key becomes `unlinked:<artifactId>` while `artifactUnavailable`
+  stays unset, and that machine id was used as the Owner-visible title. The UI
+  title rule now refuses any title shaped like the synthesized grouping key, and a
+  card whose title actually degraded states both reasons ("lineage cannot be
+  resolved to a principle, and no readable title could be extracted from its
+  stored content") instead of going blank without explanation — a candidate that
+  does have a readable title gets no warning. `artifactUnavailable` keeps its
+  original meaning: the PRI-940 wire contract still asserts that an existing
+  artifact carries no such flag. Approve/edit/reject behavior, the `unlinked:`
+  grouping key and the ledger itself are unchanged.
+- c66c956: Two "view the full evidence chain" links in the console now open a page instead
+  of a blank screen (PRI-942). Both pointed at `/evidence`, a route that has never
+  been registered: the console's inner route table has no wildcard fallback, so the
+  sidebar stayed put while `<main>` rendered nothing — the link looked like a
+  failure of the evidence chain rather than a dead address. They now point at
+  `/pain`, the only page in the product that actually fetches and renders the
+  evidence chain, and it needs no id, so it cannot 404 and never puts a machine
+  identifier in the URL. A new static guard in the navigation test walks every
+  in-app link the console UI writes with a visible path: literal `to` targets in
+  all their quote forms, plus the static part of a target that only becomes dynamic
+  after an interpolation marker. Each must resolve against the route table App.tsx
+  already publishes, so the next dead link fails CI instead of showing up as an
+  empty panel. Landing is not anchored to the individual candidate yet (it opens
+  the top of the chain list); per-candidate anchoring is tracked separately.
+
 ## 2.0.9
 
 ### Patch Changes
