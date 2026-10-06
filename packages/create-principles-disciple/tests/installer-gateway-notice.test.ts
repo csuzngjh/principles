@@ -82,7 +82,9 @@ vi.mock('../src/update/transaction-journal.js', async (importOriginal) => {
 const baseInstallOptions: InstallOptions = {
   language: 'en',
   mode: 'smart',
-  workspaceDir: '/tmp/pd-gateway-notice-ws',
+  // os.tmpdir(), not a literal '/tmp/...': install() refuses a POSIX-rooted
+  // workspace pointer on win32 before the gateway notice under test is reached.
+  workspaceDir: path.join(os.tmpdir(), 'pd-gateway-notice-ws'),
   channels: [],
   overwriteConfig: false,
   host: 'openclaw',
