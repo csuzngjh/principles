@@ -69,5 +69,17 @@ describe('internationalization utilities', () => {
       expect(t('uninstall_failed')).toBe('Uninstall failed');
       expect(t('uninstall_cancelled')).toBe('Uninstall cancelled');
     });
+
+    // Guards PRI-893: the post-uninstall hint must never tell the user to delete
+    // the just-promised-preserved governance data (.principles/.state).
+    it('uninstall cleanup hint does not invite deleting preserved data', () => {
+      setLanguage('zh');
+      expect(t('manual_cleanup_hint')).toBe('这些是您主动保留的个人数据，重装可复用；无需手动删除。');
+      expect(t('manual_cleanup_hint')).not.toMatch(/彻底清理|删除上述目录|手动删除上述/);
+
+      setLanguage('en');
+      expect(t('manual_cleanup_hint')).toBe('These files are intentionally preserved for reuse on reinstall — no need to delete them.');
+      expect(t('manual_cleanup_hint')).not.toMatch(/completely clean up|delete the above/i);
+    });
   });
 });
