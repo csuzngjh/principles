@@ -3304,6 +3304,13 @@ export interface InstallerJournal {
   readonly releaseId: string;
   readonly productVersion: string;
   /**
+   * PRI-926: the version the update started FROM. ReleaseManager apply only —
+   * the active record's productVersion at plan time, journaled once on the
+   * planned transition. Absent for installer-initiated (install-*)
+   * transactions, which are not Owner-facing update history.
+   */
+  readonly preUpdateProductVersion?: string;
+  /**
    * Embedded product identity (SPEC §12): the payload's stamped source commit.
    * Null = the payload carries no embedded identity (legacy shape) — provenance
    * is then visibly unavailable in journal/active.json, never faked.
