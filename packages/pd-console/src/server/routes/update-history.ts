@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'fs';
 import * as path from 'path';
+import { isReleaseManagerTransactionId } from 'create-principles-disciple/update-console';
 import { sendSuccess, sendMethodNotAllowed } from '../utils/response.js';
 /** Historical authority values remain readable; only ReleaseManager writes new attempts. */
 export const UPDATE_HISTORY_AUTHORITIES = ['release-manager', 'legacy-console-updater'] as const;
@@ -137,12 +138,33 @@ export function appendUpdateHistory(
  * executor, the initiating Console may be dead when an update reaches a
  * terminal state — the journal is the durable fact, and this derives any
  * missing history entries from it (idempotent by transactionId; append-only).
+ *
+ * PRI-926 truthfulness rules:
+ * - Only journals in the ReleaseManager update domain
+ *   (`isReleaseManagerTransactionId`) are Owner-facing update facts —
+ *   installer/test transactions sharing ~/.pd/transactions/ never synthesize
+ *   rows, and rows previously projected from outside the domain are dropped
+ *   (a wrongly-projected row of this read model, not Owner data).
+ * - A synthesized row carries the journal's own truth: fromVersion from the
+ *   planned line's `preUpdateProductVersion` (absence stays 'unknown' — the
+ *   honest gap for pre-PRI-926 journals, rc-9), and the timestamp of the
+ *   journal's first line, never the scan moment.
+ * - The synthesized id is deterministic (`reconciled-<transactionId>`), so a
+ *   row evicted by the 50-entry cap cannot resurrect under a fresh id; merged
+ *   rows are ordered by fact time.
  */
 export function reconcileUpdateHistoryFromJournals(workspaceDir: string, pdHome: string): void {
   const transactionsDir = path.join(pdHome, 'transactions');
   if (!fs.existsSync(transactionsDir)) return;
   const historyPath = getHistoryPath(workspaceDir);
-  const history = loadHistory(historyPath);
+  const loaded = loadHistory(historyPath);
+  // A row WITHOUT a transactionId has no domain evidence either way — realtime
+  // and legacy records stay untouched. A transactionId OUTSIDE the update
+  // domain proves the row was projected from a non-update journal.
+  const history = loaded.filter((entry) =>
+    entry.transactionId === undefined || isReleaseManagerTransactionId(entry.transactionId),
+  );
+  const changedByCleanup = history.length !== loaded.length;
   const journaledIds = new Set(
     history
       .filter((entry) => typeof entry.transactionId === 'string' && entry.transactionId.length > 0)
@@ -154,40 +176,57 @@ export function reconcileUpdateHistoryFromJournals(workspaceDir: string, pdHome:
     failed: { kind: 'failure', success: false, toVersion: 'failed' },
     refused: { kind: 'refusal', success: false, toVersion: '' },
   };
-  let changed = false;
+  let added = 0;
   for (const entry of fs.readdirSync(transactionsDir)) {
     if (!entry.endsWith('.jsonl')) continue;
     const transactionId = entry.slice(0, -'.jsonl'.length);
+    if (!isReleaseManagerTransactionId(transactionId)) continue;
     if (journaledIds.has(transactionId)) continue;
     let lastState: string | null = null;
     let productVersion: string | null = null;
+    let fromVersion: string | null = null;
+    let firstAt: string | null = null;
     try {
       const raw = fs.readFileSync(path.join(transactionsDir, entry), 'utf-8');
       for (const line of raw.split('\n')) {
         if (line.trim().length === 0) continue;
-        const { to: transitionTo, productVersion: transitionProductVersion } = JSON.parse(line) as { to?: unknown; productVersion?: unknown };
+        const parsed = JSON.parse(line) as { to?: unknown; productVersion?: unknown; at?: unknown; preUpdateProductVersion?: unknown };
+        const { to: transitionTo, productVersion: transitionProductVersion } = parsed;
         if (typeof transitionTo === 'string') lastState = transitionTo;
         if (typeof transitionProductVersion === 'string') productVersion = transitionProductVersion;
+        // First-line truth: the planned transition carries the transaction's
+        // moment and the version the update started FROM (PRI-926).
+        if (firstAt === null && typeof parsed.at === 'string' && parsed.at.length > 0) firstAt = parsed.at;
+        if (fromVersion === null && typeof parsed.preUpdateProductVersion === 'string' && parsed.preUpdateProductVersion.length > 0) {
+          fromVersion = parsed.preUpdateProductVersion;
+        }
       }
     } catch {
       // unreadable journal — recovery diagnostics own that; skip for history
       continue;
     }
-    const mapping = lastState !== null ? terminalKind[lastState] : undefined;
+    // External input indexes a plain-object table — guard with Object.hasOwn
+    // before the lookup (ERR-013: '__proto__' must not resolve a mapping).
+    let mapping: (typeof terminalKind)[string] | undefined;
+    if (lastState !== null && Object.hasOwn(terminalKind, lastState)) {
+      mapping = terminalKind[lastState];
+    }
     if (mapping === undefined) continue;
     history.push({
-      fromVersion: 'unknown',
+      fromVersion: fromVersion ?? 'unknown',
       toVersion: mapping.toVersion === '' ? (productVersion ?? 'unknown') : mapping.toVersion,
       success: mapping.success,
       kind: mapping.kind,
       authority: 'release-manager',
       transactionId,
-      id: `update-${Date.now()}-${transactionId.slice(-8)}`,
-      timestamp: new Date().toISOString(),
+      id: `reconciled-${transactionId}`,
+      timestamp: firstAt ?? new Date().toISOString(),
     });
-    changed = true;
+    added += 1;
   }
-  if (changed) {
+  if (added > 0 || changedByCleanup) {
+    // Order by fact time (stable for equal timestamps), then keep the newest 50.
+    history.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     if (history.length > 50) {
       history.splice(0, history.length - 50);
     }

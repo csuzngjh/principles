@@ -22,6 +22,7 @@ import * as os from 'os';
 import {
   handleUpdateHistoryRoute,
   appendUpdateHistory,
+  reconcileUpdateHistoryFromJournals,
 } from '../../../src/server/routes/update-history.js';
 
 // ---------------------------------------------------------------------------
@@ -416,6 +417,136 @@ describe('Update History API route', () => {
       const data = (body as { success: boolean; data: Record<string, unknown>[] }).data;
       expect(data).toHaveLength(1);
       expect(data[0]?.authority).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // PRI-926: journal-derived history rows must tell the truth — the version
+  // the update started FROM, the moment the transaction actually ran, only
+  // for journals in the ReleaseManager update domain, and never duplicate.
+  // -------------------------------------------------------------------------
+  describe('reconcileUpdateHistoryFromJournals (PRI-926)', () => {
+    let pdHome: string;
+
+    beforeEach(() => {
+      pdHome = path.join(tempDir, 'pd-home');
+    });
+
+    function writeJournal(transactionId: string, lines: Array<Record<string, unknown>>): void {
+      const dir = path.join(pdHome, 'transactions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, `${transactionId}.jsonl`),
+        lines.map((line) => JSON.stringify(line)).join('\n') + '\n',
+        'utf8',
+      );
+    }
+
+    /** Minimal journal line — only the fields the reconcile loosely reads matter. */
+    function journalLine(transactionId: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+      return {
+        at: '2026-10-05T10:00:00.000Z',
+        from: null,
+        to: 'planned',
+        transactionId,
+        releaseId: 'r-new',
+        productVersion: '2.3.0',
+        releaseMetadataDigest: 'a'.repeat(64),
+        generation: 3,
+        ...overrides,
+      };
+    }
+
+    function confirmedJournal(transactionId: string, preUpdateProductVersion?: string): void {
+      writeJournal(transactionId, [
+        journalLine(transactionId, preUpdateProductVersion !== undefined ? { preUpdateProductVersion } : {}),
+        journalLine(transactionId, { from: 'planned', to: 'downloaded' }),
+        journalLine(transactionId, { from: 'downloaded', to: 'confirmed' }),
+      ]);
+    }
+
+    function readHistoryFile(): Record<string, unknown>[] {
+      return JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Record<string, unknown>[];
+    }
+
+    it('synthesizes 旧版本→新版本 with the journal-first timestamp and a deterministic id', () => {
+      const transactionId = 'update-1791000000000-abcdef01';
+      confirmedJournal(transactionId, '2.2.0');
+
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+
+      const parsed = readHistoryFile();
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0]).toMatchObject({
+        fromVersion: '2.2.0',
+        toVersion: '2.3.0',
+        success: true,
+        kind: 'update',
+        authority: 'release-manager',
+        transactionId,
+        id: `reconciled-${transactionId}`,
+        // The transaction's own first journal moment, not the scan moment.
+        timestamp: '2026-10-05T10:00:00.000Z',
+      });
+    });
+
+    it('keeps fromVersion unknown when the journal predates preUpdateProductVersion (honest gap)', () => {
+      const transactionId = 'update-1791000000001-abcdef02';
+      confirmedJournal(transactionId);
+
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+
+      expect(readHistoryFile()[0]).toMatchObject({ fromVersion: 'unknown', toVersion: '2.3.0' });
+    });
+
+    it('skips journals outside the update domain, drops wrongly-projected rows, keeps rows without a transactionId', () => {
+      // Installer/test-domain journal: never a user-facing update row.
+      writeJournal('install-1791000000000-fedcba09', [
+        journalLine('install-1791000000000-fedcba09', { to: 'confirmed' }),
+      ]);
+      const updateId = 'update-1792000000000-12345678';
+      confirmedJournal(updateId, '2.2.0');
+      fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify([
+        // Pre-PRI-926 pollution: a row synthesized from an install-* journal.
+        {
+          id: 'polluted', timestamp: '2026-09-25T11:43:00.000Z',
+          fromVersion: 'unknown', toVersion: '1.74.1', success: true, kind: 'update',
+          authority: 'release-manager', transactionId: 'install-1791000000000-fedcba09',
+        },
+        // A realtime-authored row without a transaction pointer: no domain
+        // evidence either way — stays.
+        { id: 'manual-1', timestamp: '2026-10-05T12:00:00.000Z', fromVersion: '2.2.0', toVersion: '2.3.0', success: true },
+      ]), 'utf8');
+
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+
+      const parsed = readHistoryFile();
+      expect(parsed).toHaveLength(2);
+      expect(parsed.map((entry) => entry.id)).toEqual([`reconciled-${updateId}`, 'manual-1']);
+    });
+
+    it('is idempotent: a second reconcile leaves the file byte-identical', () => {
+      confirmedJournal('update-1791000000002-abcdef03', '2.2.0');
+
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+      const afterFirst = fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8');
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+      const afterSecond = fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8');
+
+      expect(afterSecond).toBe(afterFirst);
+    });
+
+    it('merges synthesized rows chronologically by fact time, not append order', () => {
+      confirmedJournal('update-1791000000003-abcdef04', '2.2.0');
+      // An existing row dated AFTER the journal's moment.
+      fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify([
+        { id: 'manual-later', timestamp: '2026-10-05T12:00:00.000Z', fromVersion: '2.2.0', toVersion: '2.3.0', success: true },
+      ]), 'utf8');
+
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+
+      const parsed = readHistoryFile();
+      expect(parsed.map((entry) => entry.id)).toEqual(['reconciled-update-1791000000003-abcdef04', 'manual-later']);
     });
   });
 });

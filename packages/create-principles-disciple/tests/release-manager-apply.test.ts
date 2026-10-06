@@ -168,6 +168,13 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       // Generation continuity: the fixture's active record sits at 2.
       expect(t.generation).toBe(3);
     }
+    // PRI-926: the planned transition records the version the update started
+    // FROM — the active record's productVersion read during preflight. This is
+    // the fromVersion truth for Owner-facing history reconciliation. Later
+    // transitions carry target identity only (the installer's writer never
+    // re-states it).
+    expect(transitions[0].preUpdateProductVersion).toBe('1.222.0');
+    expect(transitions.slice(1).every((t) => t.preUpdateProductVersion === undefined)).toBe(true);
   });
 
   it('PRI-726: a degraded success (installer gatewayNotice) propagates verbatim onto the applied outcome', async () => {

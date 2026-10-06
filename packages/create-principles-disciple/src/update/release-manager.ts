@@ -143,6 +143,18 @@ const APPLY_TERMINAL_STATES: ReadonlySet<TransactionState> = new Set<Transaction
 ]);
 
 /**
+ * PRI-926: the transaction-id shape ReleaseManager generates (and the only
+ * caller-supplied shape it accepts) — THE update-domain marker. Owner-facing
+ * history reconciliation uses it to tell user updates apart from installer and
+ * test transactions sharing ~/.pd/transactions/.
+ */
+export const RELEASE_MANAGER_TRANSACTION_ID = /^update-[0-9]+-[a-z0-9]{8}$/;
+
+export function isReleaseManagerTransactionId(transactionId: string): boolean {
+  return RELEASE_MANAGER_TRANSACTION_ID.test(transactionId);
+}
+
+/**
  * Append one transition to the apply transaction's journal file (journal-first
  * append+fsync, same discipline and format as the installer's writer — one
  * JSONL file per transaction under ~/.pd/transactions/, ADR-0024 D-2/D-6).
@@ -156,6 +168,12 @@ function appendApplyTransition(journal: InstallerJournal, to: TransactionState, 
     transactionId: journal.transactionId,
     releaseId: journal.releaseId,
     productVersion: journal.productVersion,
+    // PRI-926: exactly once, on the first (planned) transition, the version
+    // the update started FROM. The installer's continuation lines keep target
+    // identity only, so the field stays a planned-line fact.
+    ...(journal.lastState === null && journal.preUpdateProductVersion !== undefined
+      ? { preUpdateProductVersion: journal.preUpdateProductVersion }
+      : {}),
     releaseMetadataDigest: journal.releaseMetadataDigest,
     releaseMetadataDigestSource: journal.releaseMetadataDigestSource,
     generation: journal.generation,
@@ -418,7 +436,7 @@ export class ReleaseManager {
     // ids; anything malformed falls back to a generated id (never a guessed
     // journal file name).
     const callerTransactionId = options.transactionId;
-    const transactionId = callerTransactionId !== undefined && /^update-[0-9]+-[a-z0-9]{8}$/.test(callerTransactionId)
+    const transactionId = callerTransactionId !== undefined && isReleaseManagerTransactionId(callerTransactionId)
       ? callerTransactionId
       : `update-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const journalPath = path.join(this.paths.transactionsDir, `${transactionId}.jsonl`);
@@ -427,6 +445,11 @@ export class ReleaseManager {
       journalPath,
       releaseId: releaseMetadata.releaseId,
       productVersion: releaseMetadata.productVersion,
+      // PRI-926: the version this update started FROM — the active record's
+      // productVersion read during the preflight above (the journal-committed
+      // fact, PRI-922). Journaled once on the planned transition so Owner
+      // history can state 旧版本 → 新版本 truthfully.
+      preUpdateProductVersion: activeIdentityForCompat.productVersion,
       // The signed release metadata is the ReleaseManager's identity authority;
       // its validated sourceCommit becomes the journal/active provenance.
       sourceCommit: releaseMetadata.sourceCommit,

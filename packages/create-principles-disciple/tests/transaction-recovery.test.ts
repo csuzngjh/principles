@@ -133,6 +133,32 @@ describe('transaction journal', () => {
     expect(() => readTransactionJournal(journalPath)).toThrow(/claims from/i);
   });
 
+  it('PRI-926: preUpdateProductVersion round-trips when present, absence stays legal, malformed fails loud', () => {
+    const root = tempRoot();
+    const journalPath = path.join(root, 'pri-926.jsonl');
+
+    // Absence is the legacy shape and stays valid — old journals never carry it.
+    appendJournalTransition(journalPath, transition(null, 'planned', 6, NEW_RELEASE, NEW_DIGEST));
+    const [legacy] = readTransactionJournal(journalPath);
+    expect(legacy?.preUpdateProductVersion).toBeUndefined();
+
+    // Present: preserved verbatim on the round-trip.
+    appendJournalTransition(journalPath, {
+      ...transition('planned', 'downloaded', 6, NEW_RELEASE, NEW_DIGEST),
+      preUpdateProductVersion: '1.222.0',
+    });
+    const transitions = readTransactionJournal(journalPath);
+    expect(transitions[1]?.preUpdateProductVersion).toBe('1.222.0');
+
+    // A complete write with a malformed value is corruption, not a legacy
+    // shape — fail loud with a field-naming reason (rc-2/rc-3).
+    fs.writeFileSync(journalPath, `${JSON.stringify({
+      ...transition(null, 'planned', 6, NEW_RELEASE, NEW_DIGEST),
+      preUpdateProductVersion: 42,
+    })}\n`);
+    expect(() => readTransactionJournal(journalPath)).toThrow(/preUpdateProductVersion/);
+  });
+
   it('round-trips the active record strictly', () => {
     const root = tempRoot();
     const recordPath = path.join(root, 'active.json');

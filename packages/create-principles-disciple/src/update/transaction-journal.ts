@@ -57,6 +57,14 @@ export interface JournalTransition {
   readonly releaseId: string;
   readonly productVersion: string;
   /**
+   * PRI-926: the product version this update started FROM, recorded once on
+   * the transaction's first (planned) transition from the active record.
+   * Absent on journals written before PRI-926 and on later transitions —
+   * absence is the visible fromVersion-unavailable marker for Owner-facing
+   * history reconciliation, never a placeholder value.
+   */
+  readonly preUpdateProductVersion?: string;
+  /**
    * Embedded product identity provenance (SPEC §12): the source commit stamped
    * into the installed payload. Absent on legacy payloads/journals without an
    * embedded stamp — absence is the visible provenance-unavailable marker and
@@ -151,6 +159,15 @@ function parseTransition(line: string, lineNumber: number): JournalTransition {
       `Journal line ${lineNumber}: sourceCommit must be a 40-char git commit sha when present.`,
     );
   }
+  // PRI-926: same optional-field discipline — strict when present (rc-2/rc-3),
+  // absence is the legacy shape and stays valid.
+  const { preUpdateProductVersion } = parsed;
+  if (preUpdateProductVersion !== undefined && (typeof preUpdateProductVersion !== 'string' || preUpdateProductVersion.length === 0)) {
+    throw new TransactionJournalError(
+      'journal_field_invalid',
+      `Journal line ${lineNumber}: preUpdateProductVersion must be a non-empty string when present.`,
+    );
+  }
   return {
     at: parsed.at as string,
     from: fromValue as TransactionState | null,
@@ -158,6 +175,7 @@ function parseTransition(line: string, lineNumber: number): JournalTransition {
     transactionId: parsed.transactionId as string,
     releaseId: parsed.releaseId as string,
     productVersion: parsed.productVersion as string,
+    ...(preUpdateProductVersion !== undefined ? { preUpdateProductVersion } : {}),
     ...(sourceCommit !== undefined ? { sourceCommit: sourceCommit } : {}),
     releaseMetadataDigest: parsed.releaseMetadataDigest,
     ...(digestSource !== undefined ? { releaseMetadataDigestSource: digestSource as ReleaseMetadataDigestSource } : {}),

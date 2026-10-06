@@ -40,4 +40,7 @@ export {
   type PdHomePaths,
 } from './install-layout.js';
 
-export { ReleaseManagerError } from './release-manager.js';
+export {
+  isReleaseManagerTransactionId,
+  ReleaseManagerError,
+} from './release-manager.js';
