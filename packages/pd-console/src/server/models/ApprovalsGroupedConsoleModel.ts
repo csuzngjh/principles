@@ -39,6 +39,15 @@ export interface ApprovalGroup {
    * (the client has no access to the escaped, serialized size).
    */
   fitsPromptBudget?: boolean;
+  /**
+   * PRI-940: the pinned artifact no longer exists in pi_artifacts (typically
+   * superseded by a newer scribe revision). There is no contentJson, so
+   * `candidateDescription` is unavailable and `principleTitle` degrades to the
+   * synthesized `unlinked:<artifactId>` grouping key — a machine id that must
+   * never be rendered as a title. Absent when the artifact is readable. rc-9:
+   * the UI shows a visible degradation note instead of going silently blank.
+   */
+  artifactUnavailable?: boolean;
   records: {
     id: string;
     artifactId: string;
@@ -220,6 +229,10 @@ export class ApprovalsGroupedConsoleModel {
       // the pre-approval badge never promises rotation for an entry that is
       // oversized (rotation cannot rescue a per-entry overflow).
       const artifactFitsBudgetMap = new Map<string, boolean>();
+      // PRI-940: which approval artifacts are MISSING from the store (superseded
+      // or pruned) — those cards have no contentJson, so the UI must degrade
+      // visibly instead of rendering the `unlinked:` machine id as a title.
+      const artifactUnavailableMap = new Map<string, boolean>();
       const stateDir = path.join(this.workspaceDir, '.state');
       const resolutionDeps = createArtifactPrincipleResolutionDeps(conn, artifactStore, this.workspaceDir);
       for (const approval of allApprovals) {
@@ -234,11 +247,13 @@ export class ApprovalsGroupedConsoleModel {
               artifactDescriptionMap.set(approval.artifactId, null);
             }
             artifactFitsBudgetMap.set(approval.artifactId, candidateFitsPromptBudget(artifact));
+            artifactUnavailableMap.set(approval.artifactId, artifact === null);
           } catch (err) {
             if (isMissingTableError(err)) {
               artifactPrincipleMap.set(approval.artifactId, null);
               artifactDescriptionMap.set(approval.artifactId, null);
               artifactFitsBudgetMap.set(approval.artifactId, false);
+              artifactUnavailableMap.set(approval.artifactId, true);
             } else {
               throw err;
             }
@@ -314,6 +329,12 @@ export class ApprovalsGroupedConsoleModel {
           // read, which the UI treats as "do not promise rotation".
           ...(firstArtifactId !== undefined && artifactFitsBudgetMap.has(firstArtifactId)
             ? { fitsPromptBudget: artifactFitsBudgetMap.get(firstArtifactId) === true }
+            : {}),
+          // PRI-940: absent when the pinned artifact is readable — same
+          // spread style as fitsPromptBudget so the wire contract stays
+          // unchanged for healthy cards.
+          ...(firstArtifactId !== undefined && artifactUnavailableMap.get(firstArtifactId) === true
+            ? { artifactUnavailable: true }
             : {}),
           records,
         });

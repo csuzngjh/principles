@@ -1943,6 +1943,12 @@ export interface ApprovalGroupData {
    * "do not promise rotation".
    */
   fitsPromptBudget?: boolean;
+  /**
+   * PRI-940: the pinned artifact is missing from the store, so the card has no
+   * human-readable payload and `principleTitle` carries the synthesized
+   * `unlinked:<artifactId>` machine id, which must never render as a title.
+   */
+  artifactUnavailable?: boolean;
   status: string;
   records: ApprovalGroupRecordData[];
 }
@@ -1965,6 +1971,12 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   // copy that promises nothing rather than rendering an unverified claim.
   if (Object.hasOwn(v, 'fitsPromptBudget') && typeof v.fitsPromptBudget === 'boolean') {
     result.fitsPromptBudget = v.fitsPromptBudget;
+  }
+  // PRI-940: optional artifactUnavailable. Only a real boolean is propagated; a
+  // present-but-wrong value is dropped so the card keeps its plain untitled
+  // fallback rather than rendering an unverified claim.
+  if (Object.hasOwn(v, 'artifactUnavailable') && typeof v.artifactUnavailable === 'boolean') {
+    result.artifactUnavailable = v.artifactUnavailable;
   }
   return result;
 }

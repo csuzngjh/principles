@@ -26,7 +26,7 @@ import type {
 } from "../../api.js";
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
 import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
-import { validateApprovalsGroupedData } from "./focus-validation.js";
+import { selectApprovalGroupDisplayTitle, validateApprovalsGroupedData } from "./focus-validation.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
 import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
 
@@ -381,8 +381,11 @@ function PendingReviewCard({
 
   // Display title: prefer candidateDescription (human-readable) over principleTitle
   // (which falls back to a fabricated principleId when the principle isn't in ledger).
-  const displayTitle = group.candidateDescription
-    ?? group.principleTitle
+  // PRI-940: the selection rule lives in focus-validation (contract-tested) —
+  // when the pinned artifact is missing, principleTitle IS the machine id
+  // (`unlinked:<artifactId>`) and must fall through to the untitled copy; the
+  // degradation note below explains why there is no content.
+  const displayTitle = selectApprovalGroupDisplayTitle(group)
     ?? t("pages.focus.untitledCandidate", { defaultValue: "待命名候选原则" });
 
   async function applyDecisionToAllRecords(
@@ -551,6 +554,18 @@ function PendingReviewCard({
       <div className="mt-[14px] mb-2 font-semibold text-ink leading-snug">
         {displayTitle}
       </div>
+
+      {/* PRI-940: the pinned artifact is gone — degradation must be visible (rc-9),
+          not a silently blank card; the raw artifact ID stays reachable via the
+          full-chain view for traceability. */}
+      {group.artifactUnavailable === true && (
+        <div
+          className="mb-2 text-[12.5px] leading-relaxed text-amber"
+          data-testid={`artifact-unavailable-${group.principleId}`}
+        >
+          {t("pages.focus.artifactUnavailableNote")}
+        </div>
+      )}
 
       {/* Evidence summary (inset well) */}
       <div className="mt-2 px-3 py-2 bg-surface/60 border-l-2 border-gov text-ink-3 text-[13px] leading-snug">
