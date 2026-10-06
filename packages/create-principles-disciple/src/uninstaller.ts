@@ -15,7 +15,7 @@
  * HostInstaller.uninstall() implementations. Workspace user data is always
  * preserved regardless of host target.
  */
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, lstatSync, readFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
@@ -46,6 +46,24 @@ interface SharedRuntimeUninstallPlan {
   remainingHosts: ('codex' | 'openclaw')[];
   manifestHasTarget: boolean;
   warning?: string;
+}
+
+/**
+ * PRI-945: does a filesystem ENTRY exist at p — including a dangling
+ * symlink/junction whose target is missing? existsSync follows the link and
+ * returns false for a dangling one, so a removal gate silently strands it.
+ * lstat checks the link itself. True for any dirent; false on ENOENT/other
+ * stat error (fail-safe: absent → nothing to remove). Removal itself is
+ * already dangling-safe (fse.remove → fs.rm {recursive,force} unlinks without
+ * following the target), so this only fixes the "should I delete" decision.
+ */
+function pathEntryExists(p: string): boolean {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function planSharedRuntimeUninstall(host: HostTarget): SharedRuntimeUninstallPlan {
@@ -178,7 +196,7 @@ async function removeGlobalPdShim(): Promise<{ removed: string[]; skipped: strin
   }
 
   for (const shimPath of shimPaths) {
-    if (!existsSync(shimPath)) {
+    if (!pathEntryExists(shimPath)) {
       skipped.push(shimPath);
       continue;
     }
@@ -419,6 +437,8 @@ async function reclaimSharedRuntimeResidue(params: {
 
   // Read the pointer before touching its targets, so we can decide whether
   // releasing it is safe. Absent → null; unreadable/malformed → throw.
+  // existsSync (follow) is correct HERE: a dangling pointer has no readable
+  // content, so it stays null and is reclaimed later as a bare link entry.
   let active: ActiveRecord | null = null;
   let activeCorruptReason: string | null = null;
   if (existsSync(paths.activeRecordPath)) {
@@ -431,7 +451,9 @@ async function reclaimSharedRuntimeResidue(params: {
   }
 
   const removeDir = async (dir: string, name: string): Promise<void> => {
-    if (!existsSync(dir)) return;
+    // PRI-945: lstat, not existsSync — a dangling staging/releases/backups
+    // junction (interrupted release swap) must still be reclaimed, not skipped.
+    if (!pathEntryExists(dir)) return;
     try {
       await removeWithRetry(dir, 'dir');
       params.removedDirs.push(dir);
@@ -446,7 +468,10 @@ async function reclaimSharedRuntimeResidue(params: {
   await removeDir(paths.releasesDir, 'PD update releases');
   await removeDir(backupsDir, 'PD update backups');
 
-  if (existsSync(paths.activeRecordPath)) {
+  // PRI-945: lstat, not existsSync — a dangling active.json pointer is still a
+  // leftover ENTRY to reclaim; the else branch below unlinks it (never following
+  // the missing target).
+  if (pathEntryExists(paths.activeRecordPath)) {
     if (activeCorruptReason !== null) {
       // §18 default-preservation: never delete an unreadable pointer. This is
       // intentional (reclaimFailed stays false so install.json is still
@@ -454,6 +479,9 @@ async function reclaimSharedRuntimeResidue(params: {
       // hand only if the operator is sure.
       preserved.push(`active.json is unreadable (${activeCorruptReason}) — kept for diagnosis; remove it manually only if you are sure`);
     } else if (active !== null && existsSync(path.join(paths.releasesDir, active.releaseId))) {
+      // existsSync (follow) is correct HERE: this asks whether the release
+      // TARGET still resolves (releases/ removal failed), so the pointer and
+      // its target must be kept together — not whether the entry exists.
       // releases/ removal failed, so the pointer still resolves — keep pointer
       // and target together so a re-run can reclaim both.
       preserved.push(`active.json still points at releases/${active.releaseId} — kept with its target; re-run to reclaim both`);
@@ -561,7 +589,10 @@ export async function uninstall(
     // 3. Show what will be deleted
     logger.info(t('plugin_files_will_delete'));
     for (const p of status.paths) {
-      if (p.exists) {
+      // PRI-945: p.exists is follow-based (via checkInstallStatus, which the
+      // CLI --check consumer relies on). List a dangling entry too so this
+      // preview matches what the deletion loop below actually reclaims.
+      if (p.exists || pathEntryExists(p.path)) {
         const icon = p.type === 'dir' ? '📁' : '📄';
         console.log(`  ${icon} ${p.name}: ${p.path}`);
       }
@@ -595,7 +626,12 @@ export async function uninstall(
     // 5. Execute deletion (only plugin system files)
     const deleteErrors: { name: string; error: string }[] = [];
     for (const p of status.paths) {
-      if (!p.exists) continue;
+      // PRI-945 (稳妥 B): do NOT change checkInstallStatus.exists (the CLI
+      // --check consumer must still see a dangling link as "missing"). Instead
+      // reclaim a dangling entry at the deletion site: proceed when either the
+      // resolved target exists OR the link entry itself exists (lstat); the
+      // remover unlinks it without following a missing target.
+      if (!p.exists && !pathEntryExists(p.path)) continue;
 
       try {
         await removeWithRetry(p.path, p.type);
@@ -657,7 +693,7 @@ export async function uninstall(
 
     // Shared runtime is removed only after the final host is uninstalled.
     let sharedRuntimeRemovalFailed = false;
-    if (runtimePlan.removeSharedRuntime && existsSync(getPdRuntimeDir())) {
+    if (runtimePlan.removeSharedRuntime && pathEntryExists(getPdRuntimeDir())) {
       try {
         await removeWithRetry(getPdRuntimeDir(), 'dir');
         result.removedDirs.push(getPdRuntimeDir());
@@ -686,7 +722,7 @@ export async function uninstall(
       logger.warn(`Kept update residue for safety: ${residueReclaim.preservedNote}`);
     }
 
-    if (runtimePlan.removeSharedRuntime && !sharedRuntimeRemovalFailed && !residueReclaim.reclaimFailed && existsSync(getInstallManifestPath())) {
+    if (runtimePlan.removeSharedRuntime && !sharedRuntimeRemovalFailed && !residueReclaim.reclaimFailed && pathEntryExists(getInstallManifestPath())) {
       try {
         await removeWithRetry(getInstallManifestPath(), 'file');
         result.removedFiles.push(getInstallManifestPath());

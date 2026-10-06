@@ -24,7 +24,8 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(() => ''),
 }));
 
-import { uninstall } from '../src/uninstaller.js';
+import { uninstall, checkInstallStatus } from '../src/uninstaller.js';
+import { getPluginExtDir } from '../src/utils/env.js';
 import { logger } from '../src/utils/logger.js';
 
 const REAL_DIG = 'a'.repeat(64);
@@ -63,6 +64,17 @@ function seedPdHome(pdHome: string, opts: { hosts: string[]; active?: string | n
   fs.mkdirSync(path.join(pdHome, 'codex'), { recursive: true });
   fs.writeFileSync(path.join(pdHome, 'codex', 'pd-hooks.marker'), 'owned');
   fs.writeFileSync(path.join(pdHome, 'codex', 'pd-hook-entry.cjs'), 'entry');
+}
+
+// PRI-945: replace linkPath (if present) with a symlink/junction whose target
+// does not exist. existsSync follows it and returns false; a lstat gate sees the
+// entry and reclaims it. 'junction' needs no admin on Windows; the target must
+// be absolute for a junction.
+const LINK_TYPE: 'junction' | 'dir' = process.platform === 'win32' ? 'junction' : 'dir';
+function makeDangling(linkPath: string, missingTarget: string): void {
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  fs.rmSync(linkPath, { recursive: true, force: true });
+  fs.symlinkSync(missingTarget, linkPath, LINK_TYPE);
 }
 
 describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', () => {
@@ -197,5 +209,72 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
     for (const keep of ['transactions', 'logs', 'trust', 'channels', 'bootstrap']) {
       expect(fs.existsSync(path.join(pdHome, keep, 'data'))).toBe(true);
     }
+  });
+
+  // PRI-945 — the deletion gates must reclaim a dangling symlink/junction, not
+  // silently skip it (existsSync follows to a missing target → false → strand).
+  // Each test turns RED before the lstat gate change and GREEN after; every
+  // removal must unlink the LINK and never touch (or create) the missing target.
+
+  it('PRI-945 Gate E: reclaims a dangling releases/ junction instead of stranding it', async () => {
+    seedPdHome(pdHome, { hosts: ['codex'], active: null });
+    const releasesDir = path.join(pdHome, 'releases');
+    const missingTarget = path.join(pdHome, 'missing-release-xyz');
+    makeDangling(releasesDir, missingTarget);
+
+    const result = await uninstall({ host: 'codex', force: true });
+
+    expect(result.success).toBe(true);
+    expect(result.removedDirs).toContain(releasesDir);
+    expect(() => fs.lstatSync(releasesDir)).toThrow();
+    expect(fs.existsSync(missingTarget)).toBe(false);
+  });
+
+  it('PRI-945 Gate B: reclaims a dangling ~/.pd/runtime junction', async () => {
+    seedPdHome(pdHome, { hosts: ['codex'] });
+    const runtimeDir = path.join(pdHome, 'runtime');
+    const missingTarget = path.join(pdHome, 'missing-runtime-xyz');
+    makeDangling(runtimeDir, missingTarget);
+
+    const result = await uninstall({ host: 'codex', force: true });
+
+    expect(result.success).toBe(true);
+    expect(result.removedDirs).toContain(runtimeDir);
+    expect(() => fs.lstatSync(runtimeDir)).toThrow();
+    expect(fs.existsSync(missingTarget)).toBe(false);
+  });
+
+  it('PRI-945 Gate F: reclaims a dangling active.json pointer', async () => {
+    seedPdHome(pdHome, { hosts: ['codex'], active: null });
+    const activePath = path.join(pdHome, 'active.json');
+    const missingTarget = path.join(pdHome, 'missing-pointer-target');
+    makeDangling(activePath, missingTarget);
+
+    const result = await uninstall({ host: 'codex', force: true });
+
+    expect(result.success).toBe(true);
+    expect(result.removedFiles).toContain(activePath);
+    expect(() => fs.lstatSync(activePath)).toThrow();
+    expect(fs.existsSync(missingTarget)).toBe(false);
+  });
+
+  it('PRI-945 Gate A (稳妥 B): reclaims a dangling plugin ext junction while status still reports it missing', async () => {
+    seedPdHome(pdHome, { hosts: ['codex'] });
+    const extDir = getPluginExtDir();
+    const missingTarget = path.join(pdHome, 'missing-installed-plugin');
+    makeDangling(extDir, missingTarget);
+
+    // The public decision under 稳妥 B: the CLI --check consumer must STILL see a
+    // dangling link as "not installed" (checkInstallStatus.exists stays follow-based).
+    const status = checkInstallStatus('all');
+    expect(status.paths.find(p => p.path === extDir)?.exists).toBe(false);
+
+    // Yet uninstall reclaims the dangling entry at the deletion site.
+    const result = await uninstall({ host: 'all', force: true });
+
+    expect(result.success).toBe(true);
+    expect(result.removedDirs).toContain(extDir);
+    expect(() => fs.lstatSync(extDir)).toThrow();
+    expect(fs.existsSync(missingTarget)).toBe(false);
   });
 });
