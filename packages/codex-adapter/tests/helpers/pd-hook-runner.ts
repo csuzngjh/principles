@@ -48,7 +48,7 @@ export async function runHookExecutable(
   const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   const entry = path.resolve(packageRoot, 'dist', 'pd-hook.js');
   if (!entry.startsWith(`${packageRoot}${path.sep}`) || !fs.statSync(entry).isFile()) {
-    throw new Error(`hook entry not found or outside the package: ${entry}`);
+    throw new Error(`hook entry not found or outside the package: ${entry} (run npm run build in packages/codex-adapter)`);
   }
   const previous = process.env.CODEX_HOME;
   process.env.CODEX_HOME = codexHome;
