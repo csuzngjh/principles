@@ -97,6 +97,7 @@
       "evidenceSummary": "Evidence: {{count}} record(s)",
       "untitledCandidate": "Untitled candidate principle",
       "artifactUnavailableNote": "The draft artifact this approval points to is no longer in the artifact store (likely superseded by a newer revision), so its content cannot be shown. If in doubt, reject it; the raw artifact ID is shown in the edit section's current-artifact field.",
+      "unlinkedCandidateNote": "No principle name is available for this card: its lineage cannot be resolved to a principle, and no readable title could be extracted from its stored content. Judge it from the evidence summary below; if you cannot decide, you can reject it.",
       "approveAction": "Approve",
       "rejectAction": "Reject",
       "editAction": "Edit",
