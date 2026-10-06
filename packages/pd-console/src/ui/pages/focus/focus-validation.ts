@@ -125,6 +125,18 @@ export function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData
 }
 
 /**
+ * The server synthesizes this grouping key when an approval's lineage cannot be
+ * resolved (`ApprovalsGroupedConsoleModel`: `unlinked:${artifactId}`). It is an
+ * internal identifier, never Owner copy.
+ */
+const UNLINKED_GROUPING_KEY_PREFIX = "unlinked:";
+
+/** True when a title is the synthesized grouping key rather than a real name. */
+export function isUnlinkedSyntheticPrincipleTitle(title: string): boolean {
+  return title.startsWith(UNLINKED_GROUPING_KEY_PREFIX);
+}
+
+/**
  * PRI-940: which string may the pending-review card render as its title.
  *
  * `principleTitle` degrades to the synthesized `unlinked:<artifactId>` grouping
@@ -133,6 +145,14 @@ export function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData
  * revision rendered `unlinked:pi-art-scribe-…` on the card). Returns undefined
  * for that case so the caller falls back to the localized untitled copy; the
  * degradation itself is explained by the artifactUnavailable note, not here.
+ *
+ * PRI-941 closes the second path to the same key: the artifact row is readable,
+ * so `artifactUnavailable` is never set, yet its content carries no extractable
+ * description and lineage cannot be resolved. The grouping key — and therefore
+ * `principleTitle` — is still the machine id, so the prefix check guards the
+ * render rule itself rather than relying on one flag. A ledger read failure that
+ * empties the title map makes EVERY unmapped group reach this branch, which is
+ * why the format check, not the flag, is the authority here.
  */
 export function selectApprovalGroupDisplayTitle(
   group: Pick<ApprovalGroup, "candidateDescription" | "principleTitle" | "artifactUnavailable">,
@@ -141,5 +161,18 @@ export function selectApprovalGroupDisplayTitle(
     return group.candidateDescription;
   }
   if (group.artifactUnavailable === true) return undefined;
-  return group.principleTitle;
+  return isUnlinkedSyntheticPrincipleTitle(group.principleTitle) ? undefined : group.principleTitle;
+}
+
+/**
+ * PRI-941: an untitled card must say why (rc-9 — degradation may not be silent).
+ * The artifactUnavailable copy already covers "the draft artifact is gone"; this
+ * is the other reason the title is empty: the artifact is readable but its
+ * candidate was never mapped into the principle ledger. The two are mutually
+ * exclusive by construction, so one card can never claim both causes.
+ */
+export function showsUnlinkedCandidateNote(
+  group: Pick<ApprovalGroup, "principleTitle" | "artifactUnavailable">,
+): boolean {
+  return group.artifactUnavailable !== true && isUnlinkedSyntheticPrincipleTitle(group.principleTitle);
 }

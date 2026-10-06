@@ -17,7 +17,9 @@ import * as nodePath from "node:path";
 // it and only cover legacy shapes). focus-validation.ts imports api.js as
 // types only, so loading it here never pulls in React.
 import {
+  isUnlinkedSyntheticPrincipleTitle,
   selectApprovalGroupDisplayTitle,
+  showsUnlinkedCandidateNote,
   validateApprovalsGroupedData as validateApprovalsGroupedDataReal,
 } from "../../src/ui/pages/focus/focus-validation.js";
 
@@ -390,6 +392,57 @@ describe("FocusPage: artifactUnavailable validator contract (PRI-940)", () => {
         artifactUnavailable: undefined,
       }),
     ).toBe(description);
+  });
+});
+
+describe("FocusPage: unlinked machine-id title (PRI-941)", () => {
+  // PRI-940 (#1922) closed the "pinned artifact is missing" path. A second path
+  // stays open: the artifact row EXISTS and is readable, but its contentJson
+  // yields no description and lineage cannot be resolved, so the grouping key
+  // degrades to `unlinked:<artifactId>` and artifactUnavailable is never set —
+  // the selector fell through to the machine id as the Owner-visible title.
+  // (Same shape the PRI-940 cr8 case seeds: content_json = '{}'.)
+  const readableUnlinkedGroup = {
+    candidateDescription: undefined,
+    principleTitle: "unlinked:pi-art-scribe-x_prompt_3",
+    artifactUnavailable: undefined,
+  };
+
+  it("detects only the synthesized grouping key", () => {
+    expect(isUnlinkedSyntheticPrincipleTitle("unlinked:pi-art-scribe-x_prompt_3")).toBe(true);
+    expect(isUnlinkedSyntheticPrincipleTitle("「我未找到」不等于「它不存在」")).toBe(false);
+    expect(isUnlinkedSyntheticPrincipleTitle("unlinked")).toBe(false);
+  });
+
+  it("title selection declines the machine id for a READABLE artifact (negative control: fails against the pre-fix chain)", () => {
+    expect(selectApprovalGroupDisplayTitle(readableUnlinkedGroup)).toBeUndefined();
+  });
+
+  it("title selection still returns a real ledger title", () => {
+    expect(
+      selectApprovalGroupDisplayTitle({
+        ...readableUnlinkedGroup,
+        principleTitle: "先核验全集，再下否定性断言",
+      }),
+    ).toBe("先核验全集，再下否定性断言");
+  });
+
+  it("untitled is explained, never silent (rc-9) — the unlinked note shows for a readable artifact", () => {
+    expect(showsUnlinkedCandidateNote(readableUnlinkedGroup)).toBe(true);
+  });
+
+  it("the two degradation notes are mutually exclusive — artifactUnavailable keeps its own copy", () => {
+    expect(showsUnlinkedCandidateNote({ ...readableUnlinkedGroup, artifactUnavailable: true })).toBe(false);
+  });
+
+  it("healthy group shows no degradation note", () => {
+    expect(
+      showsUnlinkedCandidateNote({
+        candidateDescription: "有内容的候选",
+        principleTitle: "先核验全集，再下否定性断言",
+        artifactUnavailable: undefined,
+      }),
+    ).toBe(false);
   });
 });
 

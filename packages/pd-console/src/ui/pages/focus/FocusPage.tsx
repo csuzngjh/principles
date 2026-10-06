@@ -26,7 +26,7 @@ import type {
 } from "../../api.js";
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
 import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
-import { selectApprovalGroupDisplayTitle, validateApprovalsGroupedData } from "./focus-validation.js";
+import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
 import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
 
@@ -385,8 +385,12 @@ function PendingReviewCard({
   // when the pinned artifact is missing, principleTitle IS the machine id
   // (`unlinked:<artifactId>`) and must fall through to the untitled copy; the
   // degradation note below explains why there is no content.
+  // PRI-941: the same machine id also arrives with a READABLE artifact (no
+  // description extractable + lineage unresolved), so the untitled copy needs
+  // its own visible reason instead of an unexplained blank title.
   const displayTitle = selectApprovalGroupDisplayTitle(group)
     ?? t("pages.focus.untitledCandidate", { defaultValue: "待命名候选原则" });
+  const unlinkedCandidateNote = showsUnlinkedCandidateNote(group);
 
   async function applyDecisionToAllRecords(
     action: "approve" | "reject",
@@ -557,13 +561,25 @@ function PendingReviewCard({
 
       {/* PRI-940: the pinned artifact is gone — degradation must be visible (rc-9),
           not a silently blank card; the raw artifact ID stays reachable via the
-          full-chain view for traceability. */}
+          edit section's current-artifact field for traceability. */}
       {group.artifactUnavailable === true && (
         <div
           className="mb-2 text-[12.5px] leading-relaxed text-amber"
           data-testid={`artifact-unavailable-${group.principleId}`}
         >
           {t("pages.focus.artifactUnavailableNote")}
+        </div>
+      )}
+
+      {/* PRI-941: readable artifact, no extractable description, lineage
+          unresolved — the title is empty for a different reason, so say which
+          one. Mutually exclusive with the note above by construction. */}
+      {unlinkedCandidateNote && (
+        <div
+          className="mb-2 text-[12.5px] leading-relaxed text-amber"
+          data-testid={`unlinked-candidate-${group.principleId}`}
+        >
+          {t("pages.focus.unlinkedCandidateNote")}
         </div>
       )}
 
