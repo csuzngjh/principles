@@ -223,11 +223,15 @@ describe('check-repo-hygiene', () => {
       }
     });
 
-    it('exempts local-only root tool state, which is never junk', () => {
+    it('exempts every entry of ROOT_LOCAL_FILES, which is never junk', () => {
+      // Data-driven over the set itself: adding an exemption silently changes
+      // what the gate lets through, so the contract is asserted, not assumed.
+      expect(ROOT_LOCAL_FILES.size).toBeGreaterThan(0);
       const dir = makeSeededRepo();
       try {
-        writeFileSync(join(dir, '.gitignore'), '*.log\n');
-        writeFileSync(join(dir, '.zcodeignore'), '*.log\n');
+        for (const entry of ROOT_LOCAL_FILES) {
+          writeFileSync(join(dir, entry), 'local tool state\n');
+        }
         expect(checkRootScruffFiles({ cwd: dir }).scruffFiles).toEqual([]);
       } finally {
         rmSync(dir, { recursive: true, force: true });
