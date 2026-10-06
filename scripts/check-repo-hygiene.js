@@ -7,10 +7,17 @@
  * - Linear comment drafts (*linear-comment*.md)
  * - PD runtime databases/state artifacts
  *
+ * In `all`/merge mode it additionally checks the working tree itself:
+ * - tracked files that vanished from disk
+ * - untracked real files piled up at the checkout root
+ *
  * ERR-002: Fail loud with reason and nextAction.
  */
 
 import { execFileSync } from 'node:child_process';
+import { readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { LEASE_FILENAME } from './dev/lib/workspace-lease.mjs';
 
 // Denylist patterns that should never be committed
 // Order matters: more specific patterns first
@@ -213,6 +220,80 @@ export function checkWorktreeIntegrity({ cwd } = {}) {
 }
 
 /**
+ * Root entries that are legitimately real files but never tracked.
+ * REQUIRE: a comment explaining why each one is local-only.
+ */
+export const ROOT_LOCAL_FILES = new Set([
+  // Conventional per-worktree ignore file; a local dev worktree may carry
+  // private ignores that must not be committed.
+  '.gitignore',
+  // ZCode CLI tool state, auto-synced from .gitignore by that tool on every
+  // run. Deleting it only makes the tool rewrite it, so it is exempt, not junk.
+  '.zcodeignore',
+  // The git-9 workspace write lease: PD's own multi-agent coordination state,
+  // created at the checkout root by `npm run dev:lease` / worktree claim.
+  // Name imported from the lease module so the two can never drift apart.
+  LEASE_FILENAME,
+]);
+
+/**
+ * Root-scruff check — the working-tree hole the other two rules cannot see.
+ *
+ * `ls-files` (mode all) and `diff --cached` (mode staged) only ever look at
+ * files git tracks, so an agent's redirected run output (`npm run … > some.log`)
+ * lands at the checkout root, matches a `*.log` ignore rule, and passes every
+ * existing gate forever. Four such PRI-923 publish logs (8 MB) accumulated this
+ * way before anyone noticed.
+ *
+ * The invariant: the checkout root may only contain files this repository
+ * actually tracks. A real file there that git does not track is somebody's
+ * scratch output, no matter what .gitignore says about it.
+ *
+ * Directories are out of scope — local scratch/state roots (`.tmp/`,
+ * `node_modules/`, `.pd/`) legitimately live at the root and are policed by
+ * their own rules. Entries in ROOT_LOCAL_FILES are exempt: real local-only
+ * tool state, not junk.
+ *
+ * Returns `{ scruffFiles: [{ file, reason }] }`; an empty array means healthy.
+ * A failed git query throws (rc-9: no silent fallback — swallowing it would
+ * make the merge gate pass in exactly the state being guarded against).
+ */
+export function checkRootScruffFiles({ cwd } = {}) {
+  const gitOpts = { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024, ...(cwd ? { cwd } : {}) };
+  const run = (args) => execFileSync('git', args, gitOpts);
+
+  // Fail loudly if this is not a queryable repo; empty output means "no files",
+  // which must never be produced by a broken query.
+  const toplevel = run(['rev-parse', '--show-toplevel']).trim();
+  if (toplevel.length === 0) {
+    throw new Error('git rev-parse --show-toplevel returned no path');
+  }
+
+  const tracked = new Set(
+    run(['ls-files'])
+      .split(/\r?\n/u)
+      .filter((line) => line.length > 0 && !line.includes('/')),
+  );
+
+  const scruffFiles = [];
+  for (const entry of readdirSync(toplevel)) {
+    // In a linked worktree `.git` is a gitdir POINTER FILE, not a directory;
+    // the directory skip below would never see it and statSync would read the
+    // pointer. It is git's own metadata and can never be somebody's scratch.
+    if (entry === '.git') continue;
+    if (tracked.has(entry) || ROOT_LOCAL_FILES.has(entry)) continue;
+    if (statSync(join(toplevel, entry)).isDirectory()) continue;
+    scruffFiles.push({
+      file: entry,
+      reason:
+        'Untracked real file at the checkout root. Run output and scratch files are invisible to the tracked-file rules because .gitignore hides them; they must not pile up here.',
+    });
+  }
+
+  return { scruffFiles };
+}
+
+/**
  * Main entry point.
  */
 function main() {
@@ -262,6 +343,35 @@ function main() {
       console.error('  git restore <path>        # restore specific paths');
       console.error('  git restore -- packages/  # restore a whole tree');
       console.error('\nFull diagnosis entrypoint: npm run doctor');
+      process.exit(1);
+    }
+  }
+
+  // 4. Root scruff — untracked real files at the checkout root (all/merge mode).
+  //    Catches agent run output that .gitignore hides from every other rule.
+  if (mode === 'all') {
+    let scruffFiles;
+    try {
+      ({ scruffFiles } = checkRootScruffFiles());
+    } catch (error) {
+      console.error('[REPO HYGIENE] Failed - root scruff query did not complete\n');
+      console.error(`Reason: ${error.message}`);
+      console.error('\nNext action: verify git works in this checkout (git status), then re-run.');
+      process.exit(1);
+    }
+    if (scruffFiles.length > 0) {
+      console.error(`[REPO HYGIENE] Failed - ${scruffFiles.length} untracked file(s) at the checkout root\n`);
+      console.error('Reason: The repository root may only contain tracked files.');
+      for (const { file } of scruffFiles) {
+        console.error(`  - ${file}`);
+      }
+      console.error('\nNext action (never deletes anything you did not author this session):');
+      console.error('  1. Confirm what produced the file (run header/tail, check your own task).');
+      console.error('  2. If it is yours: move it into the gitignored scratch root and re-run from there:');
+      console.error('       mkdir -p .tmp && mv <file> .tmp/');
+      console.error('     Redirect future run output the same way: `npm run <x> > .tmp/<name>.log 2>&1`.');
+      console.error('  3. If it is meant to be committed: git add <file> && git commit.');
+      console.error('  4. If it is someone else\'s work or its origin is unknown: stop and ask the Owner.');
       process.exit(1);
     }
   }
