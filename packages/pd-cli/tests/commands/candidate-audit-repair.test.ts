@@ -80,7 +80,8 @@ const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mock
   };
 });
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   CandidateIntakeService: MockCandidateIntakeService,
   CandidateIntakeError: class CandidateIntakeError extends Error {
     code: string;

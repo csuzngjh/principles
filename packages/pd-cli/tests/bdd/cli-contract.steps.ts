@@ -103,8 +103,9 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => {
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
   return {
+    ...(await importOriginal<object>()),
     RuntimeStateManager: vi.fn().mockImplementation(function () {
       return new MockRuntimeStateManager();
     }),
@@ -120,7 +121,6 @@ vi.mock('@principles/core/runtime-v2', () => {
       return { getByPainId: vi.fn().mockReturnValue(null) };
     }),
     PainSignalBridge: vi.fn().mockImplementation(function () { return {}; }),
-    StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
     DiagRootCauseRunner: vi.fn().mockImplementation(function () { return {}; }),

@@ -28,7 +28,8 @@ const { mockStateManager, MockRuntimeStateManager } = vi.hoisted(() => {
   return { mockStateManager, MockRuntimeStateManager };
 });
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   RuntimeStateManager: MockRuntimeStateManager,
   decideInternalizationRoute: vi.fn(),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),

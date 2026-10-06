@@ -728,7 +728,8 @@ describe('PRI-939 Option A — Owner visibility for semantic reuse degradation',
     await handleCandidateReview({ candidateId: candidateA, workspace: workspaceDir, json: true });
 
     // Workspace B — an independently seeded second workspace (the Codex workspace).
-    const wsB = join(os.tmpdir(), `pd-reuse-prodval-b-${randomUUID()}`);
+    // mkdtempSync: atomically-created unique dir (CodeQL insecure-temporary-file).
+    const wsB = fs.mkdtempSync(join(os.tmpdir(), 'pd-reuse-prodval-b-'));
     fs.mkdirSync(join(wsB, '.pd'), { recursive: true });
     const smB = new RuntimeStateManager({ workspaceDir: wsB });
     try {

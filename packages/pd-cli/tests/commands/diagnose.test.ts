@@ -93,8 +93,9 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => {
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
   return {
+    ...(await importOriginal<object>()),
     RuntimeStateManager: vi.fn().mockImplementation(function () {
       return new MockRuntimeStateManager();
     }),
@@ -103,7 +104,6 @@ vi.mock('@principles/core/runtime-v2', () => {
     SqliteDiagnosticianCommitter: vi.fn().mockImplementation(function () { return {}; }),
     SqliteTrajectoryLocator: vi.fn().mockImplementation(function () { return {}; }),
     SqliteSourceTraceLocator: vi.fn().mockImplementation(function () { return {}; }),
-    StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
     DiagRootCauseRunner: diagRootCauseRunnerCtor,
