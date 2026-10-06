@@ -1062,6 +1062,22 @@ export class PainSignalBridge {
           `(${autoRecommendation.reason.slice(0, 200)}) — learning proceeded without duplicate protection (Rule 4); ` +
           `nextAction: pd candidate review --candidate-id ${candidate.candidateId} to resolve manually`,
         );
+        // PRI-939 review fix (Codex P1 / CodeRabbit): the degradation must also
+        // REACH THE DURABLE WORKSPACE SINK on the automatic path — before this
+        // emission the event existed only on the review surface, so auto-path
+        // degradations never landed in critical-events.jsonl nor pd health.
+        // The mapped emitter forwards this type verbatim (see
+        // mapBridgeTelemetryToStoreEvent); without an injected sink it
+        // degrades to the pre-Option-A in-process singleton (unchanged).
+        this.eventEmitter?.emitTelemetry({
+          eventType: 'reuse_evaluation_unavailable',
+          traceId: candidate.candidateId,
+          timestamp: new Date().toISOString(),
+          payload: {
+            candidateId: candidate.candidateId,
+            reason: autoRecommendation.reason.slice(0, 200),
+          },
+        });
       }
     }
 

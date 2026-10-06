@@ -665,6 +665,20 @@ export class CandidateIntakeService {
                 reuseRecommendation: recommendationOutcome,
               };
             }
+            // PRI-939 review fix (CodeRabbit): SPEC v0.3.3 treats a reuse
+            // verdict whose selection is outside the proposal as unavailable
+            // ("a hallucinated id is treated as unavailable", Rules 2-4). The
+            // CREATE still proceeds below, but the observability projection
+            // must report the degradation — a bare `recommended` would hide
+            // why duplicate protection did not run.
+            if (verdict === 'reuse') {
+              autoRecommendation = {
+                status: 'unavailable',
+                reason:
+                  `reuse selection ${selectedPrincipleId === undefined ? '(absent)' : selectedPrincipleId} ` +
+                  'is not in the proposal (hallucinated id treated as unavailable per SPEC v0.3.3)',
+              };
+            }
           }
           // create / uncertain / unavailable / hallucinated id → Rules 2/3/4:
           // CREATE proceeds (uncertain keeps creating in phase 1; evaluation

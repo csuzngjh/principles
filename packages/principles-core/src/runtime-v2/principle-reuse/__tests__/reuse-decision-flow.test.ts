@@ -844,6 +844,10 @@ describe('v0.3.3 T10 — evaluation failure degrades to CREATE (Rule 4)', () => 
     expect(result.outcome).toBe('ledger_entry');
     if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
     expect(result.reuseCheck).toBe('recommended_create');
+    // PRI-939 review fix (CodeRabbit): SPEC v0.3.3 treats a hallucinated id as
+    // unavailable — the observability projection must say so, not `recommended`.
+    expect(result.reuseRecommendation).toMatchObject({ status: 'unavailable' });
+    expect((result.reuseRecommendation as { reason: string }).reason).toContain('not in the proposal');
   });
 });
 
@@ -1193,7 +1197,18 @@ describe('PRI-939 Option A — unavailable evaluation is visible on the CREATE r
       const longReason = 'x'.repeat(500);
       const intake = service({ recommendation: async () => ({ status: 'unavailable', reason: longReason }) });
       const runner = { run: async (): Promise<never> => { throw new Error('degradation replay must not diagnose again'); } };
-      const bridge = new PainSignalBridge({ stateManager, runner, intakeService: intake, ledgerAdapter: adapter, autoIntakeEnabled: true });
+      // PRI-939 review fix (Codex P1): capture the mapped bridge telemetry —
+      // the degradation must be EMITTED so an injected workspace sink can
+      // persist it (before this fix the auto path never produced the event).
+      const emittedEvents: { eventType: string; traceId: string; payload: Record<string, unknown> }[] = [];
+      const bridge = new PainSignalBridge({
+        stateManager, runner, intakeService: intake, ledgerAdapter: adapter, autoIntakeEnabled: true,
+        eventEmitter: {
+          emitTelemetry: (event) => {
+            emittedEvents.push({ eventType: event.eventType, traceId: event.traceId, payload: event.payload });
+          },
+        },
+      });
       const result = await bridge.onDiagnosisComplete({ taskId: topId, painId: 'pain-degradation', diagnosticianOutput: output, provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 1 });
       const outcome = result.candidateOutcomes?.[0];
       // Rule 4 held: CREATE proceeded.
@@ -1203,6 +1218,13 @@ describe('PRI-939 Option A — unavailable evaluation is visible on the CREATE r
       expect(result.observabilityWarnings).toHaveLength(1);
       expect(result.observabilityWarnings?.[0]).toContain('semantic reuse evaluation unavailable');
       expect(result.observabilityWarnings?.[0]).toContain('Rule 4');
+      // The degradation event is emitted (mapper forwards it verbatim; an
+      // injected WorkspaceTelemetryEmitter would persist it to
+      // critical-events.jsonl — see workspace-telemetry-reuse-events.test.ts).
+      const unavailableEvent = emittedEvents.find((e) => e.eventType === 'reuse_evaluation_unavailable');
+      expect(unavailableEvent).toBeDefined();
+      expect(unavailableEvent?.traceId).toBe(outcome?.candidateId);
+      expect(unavailableEvent?.payload).toMatchObject({ candidateId: outcome?.candidateId, reason: 'x'.repeat(200) });
     } finally {
       connection.close();
     }

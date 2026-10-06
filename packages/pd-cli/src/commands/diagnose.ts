@@ -553,13 +553,18 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // skipped, not fabricated. 'attempted' reports dispatch, not landing —
     // persistPainDiagnosis degrades observably via pain_diagnosis_persist_*
     // telemetry (rc-9) instead of throwing.
+    // PRI-939 Option A + review fix (Codex P1): ONE workspace-scoped mapped
+    // emitter shared by persistPainDiagnosis AND the direct intake loop, so
+    // reuse-gate degradation/park events reach the durable sink here too (the
+    // bridge path emits its own; this loop bypasses the bridge).
+    const diagnoseBridgeTelemetry = createBridgeTelemetryEventEmitter(diagnoseTelemetry);
     let painDiagnosisLedgerWrite: 'attempted' | 'disabled' | 'skipped_no_pain_lineage' = 'disabled';
     if (diagnosisPersistenceEnabled && result.output) {
       const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, { taskId: opts.taskId });
       if (sourcePainId) {
         await persistPainDiagnosis(
           // Single rc-9 mapping authority shared with the production factory.
-          { stateManager, eventEmitter: createBridgeTelemetryEventEmitter(diagnoseTelemetry) },
+          { stateManager, eventEmitter: diagnoseBridgeTelemetry },
           {
             painId: sourcePainId,
             taskId: opts.taskId,
@@ -626,6 +631,20 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
             const recommended =
               intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
+            // PRI-939 review fix (CodeRabbit): the park observation reaches the
+            // durable sink on this direct-intake path too, mirroring the bridge.
+            diagnoseBridgeTelemetry.emitTelemetry({
+              eventType: 'reuse_gate_triggered',
+              traceId: candidate.candidateId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                candidateId: candidate.candidateId,
+                ...(recommended?.selectedPrincipleId !== undefined
+                  ? { selectedPrincipleId: recommended.selectedPrincipleId }
+                  : {}),
+                ...(recommended ? { confidence: recommended.confidence, recommendation: recommended.recommendation } : {}),
+              },
+            });
             intakeResults.push({
               candidateId: candidate.candidateId,
               status: 'review_required',
@@ -643,6 +662,19 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
           }
           if (intakeResult.outcome === 'ledger_entry') {
+            // PRI-939 review fix (Codex P1): an unavailable degradation on this
+            // direct-intake path must reach the durable sink, mirroring bridge.
+            if (intakeResult.reuseRecommendation?.status === 'unavailable') {
+              diagnoseBridgeTelemetry.emitTelemetry({
+                eventType: 'reuse_evaluation_unavailable',
+                traceId: candidate.candidateId,
+                timestamp: new Date().toISOString(),
+                payload: {
+                  candidateId: candidate.candidateId,
+                  reason: intakeResult.reuseRecommendation.reason.slice(0, 200),
+                },
+              });
+            }
             intakeResults.push({
               candidateId: candidate.candidateId,
               ledgerEntryId: intakeResult.entry.id,
@@ -822,6 +854,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             console.log(ir.ledgerEntryId
               ? `    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`
               : `    ${ir.candidateId}: consumed (Principle Ledger write refused: ${ir.ledgerWriteRefused})`);
+          }
+          // PRI-939 review fix (Codex P1): text-mode operators must also see
+          // the degradation — previously only `--json` carried it.
+          if (ir.reuseRecommendation?.status === 'unavailable') {
+            console.warn(`      ⚠️  semantic reuse evaluation unavailable: ${ir.reuseRecommendation.reason} — learning proceeded without duplicate protection (Rule 4)`);
           }
         } else if (ir.status === 'skipped') {
           console.log(`    ${ir.candidateId}: skipped (--no-intake)`);

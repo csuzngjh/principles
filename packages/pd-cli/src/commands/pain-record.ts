@@ -587,6 +587,12 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       for (const w of cliWarnings) {
         console.warn(`   ⚠️  ${w}`);
       }
+      // PRI-939 review fix (Codex P1): text-mode operators must also see the
+      // bridge's degradation notes (semantic reuse evaluation unavailable) —
+      // previously only `--json` carried them.
+      for (const w of result.observabilityWarnings ?? []) {
+        console.warn(`   ⚠️  ${w}`);
+      }
       console.log(`\nDiagnostician pipeline running. Check progress with:`);
       console.log(`   pd task show ${result.taskId} --workspace "${workspaceDir}"`);
     } else if (result.status === 'submitted') {

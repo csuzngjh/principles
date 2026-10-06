@@ -673,7 +673,13 @@ const BRIDGE_DEGRADATION_EVENT_TYPES: ReadonlySet<string> = new Set([
  * Returns null for bridge events that were not emitted in production before
  * the persistence feature (they keep their pre-main dormant status).
  */
-const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set(['reuse_gate_triggered']);
+const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'reuse_gate_triggered',
+  // PRI-939 review fix (Codex P1 / CodeRabbit): the auto-path degradation
+  // signal must survive the mapping so an injected workspace sink can persist
+  // it (observation only — never decision storage, SPEC v0.3.2 §11).
+  'reuse_evaluation_unavailable',
+]);
 
 export function mapBridgeTelemetryToStoreEvent(event: {
   eventType: string;

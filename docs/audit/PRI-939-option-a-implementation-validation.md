@@ -39,26 +39,40 @@
 - **依赖方向不变**：pd-cli 已依赖 host-runtime 与 core；core 侧只新增"可选 sink 注入口"（core 不感知 host-runtime，符合 io-seam/依赖规则；无新增注册 seam——sink 是既有 telemetry 流的宿主注入，不是新 I/O 能力）。
 - **数据流不变量**：telemetry 仍是 observation-only（SPEC v0.3.2 §11）；`unavailable` 永不自动 reuse；CREATE 在 Rule 4 下照常。allowlist 仍是封闭集（7 项）。
 
-## 3. Telemetry Flow（实施后）
+## 3. Telemetry Flow（实施后；经评审修正）
+
+> ⚠️ 本节初版将自动路径的 `reuse_evaluation_unavailable` 画成了已通到 sink——评审（Codex P1 / CodeRabbit）指出该事件在自动路径**从未被发射**、mapper 也会将其过滤。下图为评审修复后的真实状态，历史错误在此留痕。
 
 ```
 auto 路径（pain record / pain retry / diagnose）
-  bridge → mapBridgeTelemetryToStoreEvent → WorkspaceTelemetryEmitter(sink)
-      ├─ allowlist 命中（reuse_gate_triggered / reuse_evaluation_unavailable）
-      │     → <workspace>/.pd/telemetry/critical-events.jsonl 持久化（新增能力）
-      └─ 其余 → 原样转发 storeEmitter 单例（行为不变）
+  bridge 检测到 unavailable（观测收集循环）
+      → 发射 reuse_evaluation_unavailable（评审修复新增；此前缺失）
+      → mapBridgeTelemetryToStoreEvent passthrough（评审修复新增；此前 return null）
+      → WorkspaceTelemetryEmitter(sink)
+            ├─ allowlist 命中 → critical-events.jsonl 持久化
+            └─ 其余 → storeEmitter 单例（行为不变）
+  pain-retry / diagnose 直接 intake 循环（不经 bridge）
+      → 挂起发射 reuse_gate_triggered、不可用发射 reuse_evaluation_unavailable
+        （评审修复新增；经同一 mapped emitter）
 
 Owner review（pd candidate review）
   reuse_evaluation_recommended/unavailable → workspace emitter
-      ├─ unavailable → 落盘（新增）
+      ├─ unavailable → 落盘
       └─ recommended → 只转发（刻意不落盘：无第二决策日志）
 
-Owner 输出面（同一时刻）
-  candidateOutcomes[i].reuseRecommendation = {status, reason?}（reason≤200，仅 unavailable）
-  observabilityWarnings += "semantic reuse evaluation unavailable for candidate <id> (<reason>) — learning proceeded without duplicate protection (Rule 4); nextAction: pd candidate review ..."
+Owner 输出面
+  JSON：candidateOutcomes[i].reuseRecommendation / intake.candidates[i].reuseRecommendation /
+        observabilityWarnings / pain record 顶层 observabilityWarnings（spread 携带）
+  文本：diagnose / pain-retry consumed 行附 ⚠️ 降级行；pain-record 成功分支打印
+        observabilityWarnings（评审修复新增；此前文本用户看不到降级）
 
 pd health（只读摘要）
   health.reuseEvaluation.lastUnavailable ← critical-events.jsonl 尾部扫描
+  （评审修复：缺 timestamp/reason 的截断/畸形行跳过，不再以空字段上报）
+
+hallucinated selection（评审修复，CodeRabbit Minor）
+  hook 推荐 reuse 但 selectedPrincipleId 不在 proposal → CREATE 照常（Rule 4），
+  投影按 SPEC 语义报 {status:'unavailable', reason:'...not in the proposal...'}
 ```
 
 ## 4. Owner Visibility Before/After
@@ -122,7 +136,18 @@ Complexity Delta = 全 NO。改动面：core 4 文件（全部为可选字段/�
 
 ## 10. Merge Gate
 
-`npm run verify:merge` 于本 worktree 三次运行后 **PASS（exit 0）**：发布意图守卫（changeset）、全部 check 守卫、三包构建、六项 typecheck、pipeline-contract、runtime-writers 全绿。分支提交：`d1d76a8d`（实施）→ `c514a0fe`（changeset）→ `43b30062`（health 类型守卫修复）。
+`npm run verify:merge` 于本 worktree 三次运行后 **PASS（exit 0）**：发布意图守卫（changeset）、全部 check 守卫、三包构建、六项 typecheck、pipeline-contract、runtime-writers 全绿。分支提交：`d1d76a8d`（实施）→ `c514a0fe`（changeset）→ `43b30062`（health 类型守卫修复）→ `662b2117`（报告）→ `49054bee`（CI 修复：4 个窄 mock importOriginal / StoreEventEmitter stub / CodeQL mkdtempSync）→ 评审修复轮（见 §12）。
+
+## 12. 评审修复轮（2026-10-06，CodeRabbit ×3 + Codex ×3 全部属实）
+
+评审核验结论：六条意见全部属实（CodeQL 行内批注为已修复的陈旧告警）。修复：
+
+1. **自动路径 sink 断链（Codex P1 / CodeRabbit Major）**：bridge 观测循环发射 `reuse_evaluation_unavailable`（此前自动路径从未产生该事件）；mapper passthrough 增该类型（此前 `return null`）；pain-retry / diagnose 直接 intake 循环经共享 mapped emitter 发射挂起与不可用事件。测试：bridge 发射断言 + mapper passthrough 用例。
+2. **文本输出无降级（Codex P1 / CodeRabbit Major）**：diagnose / pain-retry 的 consumed 文本行附 `⚠️ semantic reuse evaluation unavailable: ...`；pain-record 文本成功分支打印 `observabilityWarnings`。此前文本用户只看到 "consumed"。
+3. **hallucinated selection 报 recommended（CodeRabbit Minor）**：SPEC v0.3.3 语义（"a hallucinated id is treated as unavailable"）落到投影——CREATE 照常、投影报 unavailable + "not in the proposal" reason。测试：T10 hallucinated 断言扩展。
+4. **health 对畸形记录不设防（Codex P1）**：扫描跳过缺 timestamp/reason 的截断/损坏行（rc-1/rc-3），只上报完整记录。测试：畸形行跳过 + 取最新有效记录用例。
+
+报告 §3 初版流程图对自动路径 sink 链的夸大即评审所抓事实，已在本文件留痕更正。
 
 ## 11. Stop
 

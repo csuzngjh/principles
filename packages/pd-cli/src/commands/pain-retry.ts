@@ -874,12 +874,16 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // depend on admission outcome). 'attempted' is honest: persistPainDiagnosis
     // degrades observably via pain_diagnosis_persist_* telemetry (rc-9) rather
     // than throwing, so this field reports "dispatched", not "row landed".
+    // PRI-939 Option A + review fix (Codex P1): ONE workspace-scoped mapped
+    // emitter shared by persistPainDiagnosis AND the direct intake loop, so
+    // reuse-gate degradation/park events reach the durable sink here too (the
+    // bridge path emits its own; this loop bypasses the bridge).
+    const retryBridgeTelemetry = createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir));
     let painDiagnosisLedgerWrite: 'attempted' | 'disabled' = 'disabled';
     if (diagnosisPersistenceEnabled && result.output) {
       await persistPainDiagnosis(
         // Single rc-9 mapping authority shared with the production factory.
-        // PRI-939 Option A: workspace-scoped sink for allowlisted events.
-        { stateManager, eventEmitter: createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir)) },
+        { stateManager, eventEmitter: retryBridgeTelemetry },
         {
           // rc-6: same canonical lineage the bridge uses (task.inputRef),
           // not the CLI-supplied painId — they are equal by the
@@ -939,6 +943,20 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
           const recommended =
             intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
+          // PRI-939 review fix (CodeRabbit): the park observation reaches the
+          // durable sink on this direct-intake path too, mirroring the bridge.
+          retryBridgeTelemetry.emitTelemetry({
+            eventType: 'reuse_gate_triggered',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: {
+              candidateId: candidate.candidateId,
+              ...(recommended?.selectedPrincipleId !== undefined
+                ? { selectedPrincipleId: recommended.selectedPrincipleId }
+                : {}),
+              ...(recommended ? { confidence: recommended.confidence, recommendation: recommended.recommendation } : {}),
+            },
+          });
           intakeResults.push({
             candidateId: candidate.candidateId,
             status: 'review_required',
@@ -954,6 +972,19 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
         if (intakeResult.outcome === 'ledger_entry') {
+          // PRI-939 review fix (Codex P1): an unavailable degradation on this
+          // direct-intake path must reach the durable sink, mirroring bridge.
+          if (intakeResult.reuseRecommendation?.status === 'unavailable') {
+            retryBridgeTelemetry.emitTelemetry({
+              eventType: 'reuse_evaluation_unavailable',
+              traceId: candidate.candidateId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                candidateId: candidate.candidateId,
+                reason: intakeResult.reuseRecommendation.reason.slice(0, 200),
+              },
+            });
+          }
           intakeResults.push({
             candidateId: candidate.candidateId,
             ledgerEntryId: intakeResult.entry.id,
@@ -1071,6 +1102,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             console.log(ir.ledgerEntryId
               ? `    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`
               : `    ${ir.candidateId}: consumed (Principle Ledger write refused: ${ir.ledgerWriteRefused})`);
+          }
+          // PRI-939 review fix (Codex P1): text-mode operators must also see
+          // the degradation — previously only `--json` carried it.
+          if (ir.reuseRecommendation?.status === 'unavailable') {
+            console.warn(`      ⚠️  semantic reuse evaluation unavailable: ${ir.reuseRecommendation.reason} — learning proceeded without duplicate protection (Rule 4)`);
           }
         } else if (ir.status === 'intake_failed') {
           console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);

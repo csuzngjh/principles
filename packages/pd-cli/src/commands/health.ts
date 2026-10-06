@@ -127,16 +127,21 @@ function assessReuseEvaluationTelemetry(workspaceDir: string): ReuseEvaluationHe
         evt && typeof evt === 'object'
         && (evt as { eventType?: unknown }).eventType === 'reuse_evaluation_unavailable'
       ) {
-        const { payload } = evt as { payload?: Record<string, unknown> };
+        // rc-1/rc-3 (PRI-939 review fix, Codex P1): the JSONL is append-only
+        // runtime data — a truncated/corrupt record must be SKIPPED, never
+        // reported as an incident with empty fields. Require the fields the
+        // only producer (the reuse gate) always writes.
+        const { timestamp: rawTimestamp, payload } = evt as { timestamp?: unknown; payload?: Record<string, unknown> };
         const { candidateId: rawCandidateId, reason: rawReason } = payload ?? {};
+        if (typeof rawTimestamp !== 'string' || rawTimestamp === '') continue;
+        if (typeof rawReason !== 'string' || rawReason === '') continue;
         const candidateId = typeof rawCandidateId === 'string' ? rawCandidateId : undefined;
-        const reason = typeof rawReason === 'string' ? rawReason.slice(0, 200) : '';
         return {
           criticalEventsFile,
           lastUnavailable: {
-            at: String((evt as { timestamp?: unknown }).timestamp ?? ''),
+            at: rawTimestamp,
             ...(candidateId !== undefined ? { candidateId } : {}),
-            reason,
+            reason: rawReason.slice(0, 200),
           },
         };
       }

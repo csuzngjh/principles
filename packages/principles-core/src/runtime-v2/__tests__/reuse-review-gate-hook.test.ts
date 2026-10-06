@@ -50,6 +50,18 @@ describe('PRI-917 v0.3.3 — reuse_gate_triggered telemetry passthrough', () => 
       }),
     ).toBeNull();
   });
+
+  it('PRI-939 review fix: the unavailable degradation passes through verbatim so the workspace sink can persist it', () => {
+    const mapped = mapBridgeTelemetryToStoreEvent({
+      eventType: 'reuse_evaluation_unavailable',
+      traceId: 'cand-degraded-1',
+      timestamp: '2026-10-06T00:00:00.000Z',
+      payload: { candidateId: 'cand-degraded-1', reason: 'LLM execution failed: 404' },
+    });
+    expect(mapped).not.toBeNull();
+    expect(mapped?.eventType).toBe('reuse_evaluation_unavailable');
+    expect(mapped?.payload).toMatchObject({ candidateId: 'cand-degraded-1', reason: 'LLM execution failed: 404' });
+  });
 });
 
 function workspace(): { dir: string; stateDir: string; cleanup: () => void } {
