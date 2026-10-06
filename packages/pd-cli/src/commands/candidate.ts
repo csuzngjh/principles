@@ -37,13 +37,13 @@ import {
   defaultOwnerIdentityHomeDir,
   ReuseEvaluationRunner,
   ReuseEvaluationError,
-  storeEmitter,
   type LedgerPrincipleEntry,
   type ReuseDecision,
   type CandidateIntakeResult,
 } from '@principles/core/runtime-v2';
 import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig } from '../services/pd-config-loader.js';
 import { resolveRuntimeAdapterFromConfig } from '../services/runtime-adapter-resolver.js';
 import { resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
@@ -1142,10 +1142,13 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
     // Owner's verdict lives exclusively in Principle.reuseEvidence[]) and
     // no intake outcome reads them. Emitted only when the capability
     // actually ran (disabled or nothing-to-evaluate emits nothing).
+    // PRI-939 Option A: persist allowlisted events (reuse_evaluation_unavailable)
+    // to the workspace sink instead of the unsubscribed singleton.
+    const workspaceTelemetry = createWorkspaceTelemetryEmitter(workspaceDir);
     if (evaluation !== null) {
       const timestamp = new Date().toISOString();
       if (evaluation.status === 'recommended') {
-        storeEmitter.emitTelemetry({
+        workspaceTelemetry.emitTelemetry({
           eventType: 'reuse_evaluation_recommended',
           traceId: opts.candidateId,
           timestamp,
@@ -1159,7 +1162,7 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
           },
         });
       } else {
-        storeEmitter.emitTelemetry({
+        workspaceTelemetry.emitTelemetry({
           eventType: 'reuse_evaluation_unavailable',
           traceId: opts.candidateId,
           timestamp,

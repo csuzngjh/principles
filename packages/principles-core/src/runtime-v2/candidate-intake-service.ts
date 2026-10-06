@@ -116,6 +116,16 @@ export type CandidateIntakeResult =
        * Optional so every existing producer of this variant stays valid.
        */
       readonly reuseCheck?: ReuseCheckOutcome;
+      /**
+       * PRI-939 Option A — present ONLY when the auto-path recommendation hook
+       * ran and the write proceeded under Rules 2-4 (reuseCheck
+       * `recommended_create`): `unavailable` is the observable degradation
+       * (evaluation failed — Owner can see why no duplicate protection ran),
+       * `recommended` means the hook answered create/uncertain. The park shape
+       * carries its own outcome on the refused variant; a recorded reuse
+       * resolution (replay) never runs the hook and stays undefined.
+       */
+      readonly reuseRecommendation?: ReuseRecommendationOutcome;
     }
   | {
       readonly outcome: 'refused';
@@ -582,6 +592,11 @@ export class CandidateIntakeService {
     }
 
     let reuseCheck: ReuseCheckOutcome = 'not_configured';
+    // PRI-939 Option A — outcome of the auto-path recommendation hook when it
+    // ran and the write proceeded (Rules 2-4). Undefined for not_configured /
+    // no_candidates / Owner-decision shapes. Returned on the ledger_entry
+    // result so the degradation reason survives past the gate.
+    let autoRecommendation: ReuseRecommendationOutcome | undefined;
     if ((this.#reuseDecision || this.#reuseRecommendation) && this.#reuseStateDir) {
       const reuseClaim = {
         text: recommendation.text || candidate.description || '',
@@ -623,6 +638,11 @@ export class CandidateIntakeService {
         // never block learning; a hallucinated id is treated as unavailable).
         if (this.#reuseRecommendation && !this.#reuseDecision) {
           const recommendationOutcome = await this.#runReuseRecommendation(reuseClaim, proposal);
+          // PRI-939 Option A: carry the hook outcome out on the CREATE path so
+          // callers (bridge / pain-retry / diagnose) can surface the degradation
+          // instead of dropping the reason at the gate. Reassigned below when
+          // the gate proceeds past the park branch (Rules 2-4).
+          autoRecommendation = recommendationOutcome;
           if (recommendationOutcome.status === 'recommended') {
             const { recommendation: verdict, selectedPrincipleId, confidence } = recommendationOutcome;
             if (
@@ -643,6 +663,20 @@ export class CandidateIntakeService {
                   `nextAction: pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
                 reuseProposal: proposal,
                 reuseRecommendation: recommendationOutcome,
+              };
+            }
+            // PRI-939 review fix (CodeRabbit): SPEC v0.3.3 treats a reuse
+            // verdict whose selection is outside the proposal as unavailable
+            // ("a hallucinated id is treated as unavailable", Rules 2-4). The
+            // CREATE still proceeds below, but the observability projection
+            // must report the degradation — a bare `recommended` would hide
+            // why duplicate protection did not run.
+            if (verdict === 'reuse') {
+              autoRecommendation = {
+                status: 'unavailable',
+                reason:
+                  `reuse selection ${selectedPrincipleId === undefined ? '(absent)' : selectedPrincipleId} ` +
+                  'is not in the proposal (hallucinated id treated as unavailable per SPEC v0.3.3)',
               };
             }
           }
@@ -774,7 +808,16 @@ export class CandidateIntakeService {
     // 6. Write to ledger via adapter (E-01, D-09)
     try {
       const written = this.#ledgerAdapter.writeProbationEntry(entry);
-      return { outcome: 'ledger_entry', written: true, entry: written, reuseCheck };
+      return {
+        outcome: 'ledger_entry',
+        written: true,
+        entry: written,
+        reuseCheck,
+        // PRI-939 Option A: the hook outcome rides out on the CREATE result so
+        // the degradation (unavailable) reason reaches the Owner's output
+        // instead of dying at the gate. Undefined unless the auto-shape hook ran.
+        ...(autoRecommendation !== undefined ? { reuseRecommendation: autoRecommendation } : {}),
+      };
     } catch (err: unknown) {
       if (err instanceof CandidateIntakeError) {
         throw err;

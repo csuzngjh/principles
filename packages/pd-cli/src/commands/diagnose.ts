@@ -13,7 +13,6 @@ import {
   SqliteTrajectoryLocator,
   SqliteSourceTraceLocator,
   StoreEventEmitter,
-  storeEmitter,
   SplitDiagnosticianRunner,
   DiagRootCauseRunner,
   DiagDistillerRunner,
@@ -41,6 +40,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, resolveDiagnosticianCapability } from '@principles/core/runtime-v2';
@@ -288,6 +288,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
 
+    // PRI-939 Option A: workspace-scoped sink — allowlisted critical events
+    // (persisted to critical-events.jsonl) must not emit into the bare singleton.
+    const diagnoseTelemetry = createWorkspaceTelemetryEmitter(workspaceDir);
     // Select runtime adapter based on --runtime flag (CLI-02)
     // PRI-431: migrated to shared resolveRuntimeAdapterFromConfig
     let runtimeAdapter: PDRuntimeAdapter;
@@ -321,7 +324,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           },
         });
         // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime
-        storeEmitter.emitTelemetry({
+        diagnoseTelemetry.emitTelemetry({
           eventType: 'runtime_adapter_selected',
           traceId: opts.taskId,
           timestamp: new Date().toISOString(),
@@ -359,7 +362,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         // TELE: runtime_adapter_selected telemetry
         const telemetryProvider = opts.provider ?? telemetryConfig.provider;
         const telemetryModel = opts.model ?? telemetryConfig.model;
-        storeEmitter.emitTelemetry({
+        diagnoseTelemetry.emitTelemetry({
           eventType: 'runtime_adapter_selected',
           traceId: opts.taskId,
           timestamp: new Date().toISOString(),
@@ -550,13 +553,18 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // skipped, not fabricated. 'attempted' reports dispatch, not landing —
     // persistPainDiagnosis degrades observably via pain_diagnosis_persist_*
     // telemetry (rc-9) instead of throwing.
+    // PRI-939 Option A + review fix (Codex P1): ONE workspace-scoped mapped
+    // emitter shared by persistPainDiagnosis AND the direct intake loop, so
+    // reuse-gate degradation/park events reach the durable sink here too (the
+    // bridge path emits its own; this loop bypasses the bridge).
+    const diagnoseBridgeTelemetry = createBridgeTelemetryEventEmitter(diagnoseTelemetry);
     let painDiagnosisLedgerWrite: 'attempted' | 'disabled' | 'skipped_no_pain_lineage' = 'disabled';
     if (diagnosisPersistenceEnabled && result.output) {
       const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, { taskId: opts.taskId });
       if (sourcePainId) {
         await persistPainDiagnosis(
           // Single rc-9 mapping authority shared with the production factory.
-          { stateManager, eventEmitter: createBridgeTelemetryEventEmitter() },
+          { stateManager, eventEmitter: diagnoseBridgeTelemetry },
           {
             painId: sourcePainId,
             taskId: opts.taskId,
@@ -570,7 +578,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     }
 
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string; reuseRecommendation?: { status: 'recommended' } | { status: 'unavailable'; reason: string } }[] = [];
     let intakeFailed = false;
 
     if (opts.intake === false) {
@@ -623,6 +631,20 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
             const recommended =
               intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
+            // PRI-939 review fix (CodeRabbit): the park observation reaches the
+            // durable sink on this direct-intake path too, mirroring the bridge.
+            diagnoseBridgeTelemetry.emitTelemetry({
+              eventType: 'reuse_gate_triggered',
+              traceId: candidate.candidateId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                candidateId: candidate.candidateId,
+                ...(recommended?.selectedPrincipleId !== undefined
+                  ? { selectedPrincipleId: recommended.selectedPrincipleId }
+                  : {}),
+                ...(recommended ? { confidence: recommended.confidence, recommendation: recommended.recommendation } : {}),
+              },
+            });
             intakeResults.push({
               candidateId: candidate.candidateId,
               status: 'review_required',
@@ -640,10 +662,32 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
           }
           if (intakeResult.outcome === 'ledger_entry') {
+            // PRI-939 review fix (Codex P1): an unavailable degradation on this
+            // direct-intake path must reach the durable sink, mirroring bridge.
+            if (intakeResult.reuseRecommendation?.status === 'unavailable') {
+              diagnoseBridgeTelemetry.emitTelemetry({
+                eventType: 'reuse_evaluation_unavailable',
+                traceId: candidate.candidateId,
+                timestamp: new Date().toISOString(),
+                payload: {
+                  candidateId: candidate.candidateId,
+                  reason: intakeResult.reuseRecommendation.reason.slice(0, 200),
+                },
+              });
+            }
             intakeResults.push({
               candidateId: candidate.candidateId,
               ledgerEntryId: intakeResult.entry.id,
               status: 'consumed',
+              // PRI-939 Option A: surface the auto-path evaluation outcome so an
+              // unavailable degradation is visible instead of a bare consumed.
+              ...(intakeResult.reuseRecommendation !== undefined
+                ? {
+                    reuseRecommendation: intakeResult.reuseRecommendation.status === 'unavailable'
+                      ? { status: 'unavailable' as const, reason: intakeResult.reuseRecommendation.reason.slice(0, 200) }
+                      : { status: 'recommended' as const },
+                  }
+                : {}),
             });
           } else if (intakeResult.reason === 'reuse_selected') {
             // PRI-917 PR3A (C3): a reuse resolution is a success with its own
@@ -810,6 +854,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             console.log(ir.ledgerEntryId
               ? `    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`
               : `    ${ir.candidateId}: consumed (Principle Ledger write refused: ${ir.ledgerWriteRefused})`);
+          }
+          // PRI-939 review fix (Codex P1): text-mode operators must also see
+          // the degradation — previously only `--json` carried it.
+          if (ir.reuseRecommendation?.status === 'unavailable') {
+            console.warn(`      ⚠️  semantic reuse evaluation unavailable: ${ir.reuseRecommendation.reason} — learning proceeded without duplicate protection (Rule 4)`);
           }
         } else if (ir.status === 'skipped') {
           console.log(`    ${ir.candidateId}: skipped (--no-intake)`);

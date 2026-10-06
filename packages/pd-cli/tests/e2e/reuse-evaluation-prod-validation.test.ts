@@ -608,3 +608,144 @@ describe('T6 — telemetry: observation only, never decision storage', () => {
     expect(fired[0]?.eventType).toBe('degradation_triggered');
   });
 });
+
+// ── PRI-939 Option A — degradation reaches the durable workspace sink ────────
+
+/** Workspace-parameterized candidate seeder for the isolation test (review only needs task/run/artifact/candidate rows). */
+async function seedPrincipleCandidateInto(
+  wsDir: string,
+  sm: RuntimeStateManager,
+): Promise<string> {
+  const candidateId = randomUUID();
+  const artifactId = randomUUID();
+  const now = new Date().toISOString();
+  const taskId = randomUUID();
+  await sm.taskStore.createTask({
+    taskId, taskKind: 'diagnostician', status: 'pending', attemptCount: 0, maxAttempts: 3,
+    leaseOwner: undefined, leaseExpiresAt: undefined, lastError: undefined, inputRef: '', resultRef: '', diagnosticJson: undefined,
+  });
+  const runId = randomUUID();
+  await sm.runStore.createRun({
+    runId, taskId, runtimeKind: 'openclaw', attemptNumber: 1, executionStatus: 'succeeded', startedAt: now, endedAt: now,
+  });
+  const db = new Database(join(wsDir, '.pd', 'state.db'));
+  try {
+    db.prepare(`
+      INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(artifactId, runId, taskId, 'principle', JSON.stringify({ text: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }), now);
+    db.prepare(`
+      INSERT INTO principle_candidates
+        (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence,
+         source_recommendation_json, idempotency_key, status, created_at, recommendation_kind)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 'principle')
+    `).run(candidateId, artifactId, taskId, runId, '测试候选', CANDIDATE_TEXT, 0.9,
+      JSON.stringify({ text: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }),
+      `${artifactId}::prompt`, now);
+  } finally {
+    db.close();
+  }
+  return candidateId;
+}
+
+function readSinkEvents(sinkPath: string): TelemetryEvent[] {
+  if (!fs.existsSync(sinkPath)) return [];
+  return fs.readFileSync(sinkPath, 'utf8').trim().split('\n')
+    .map((l) => JSON.parse(l) as TelemetryEvent);
+}
+
+describe('PRI-939 Option A — Owner visibility for semantic reuse degradation', () => {
+  it('review with unavailable evaluation persists the degradation event to the workspace sink (T2)', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-939-sink' });
+    writeWorkspaceConfig({ enabled: true, runtimeProfile: 'pd.custom' });
+    makeResolverThrow();
+
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+
+    // The singleton still forwards (pre-Option-A observability unchanged)...
+    const events = reuseEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]?.eventType).toBe('reuse_evaluation_unavailable');
+    // ...AND the workspace sink now persists it durably (before: lost with the process).
+    const sink = join(workspaceDir, '.pd', 'telemetry', 'critical-events.jsonl');
+    expect(fs.existsSync(sink)).toBe(true);
+    const persisted = readSinkEvents(sink);
+    const unavailable = persisted.find((e) => e.eventType === 'reuse_evaluation_unavailable');
+    expect(unavailable).toBeDefined();
+    expect((unavailable?.payload as { candidateId: string }).candidateId).toBe(candidateId);
+    expect(String((unavailable?.payload as { reason: string }).reason)).toContain('auth_missing');
+    // recommended events must NOT land in the sink (no second decision log).
+    expect(persisted.some((e) => e.eventType === 'reuse_evaluation_recommended')).toBe(false);
+  });
+
+  it('recommended evaluation does NOT create a sink line (allowlist excludes it, T1)', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    const candidateId = await seedPrincipleCandidate({ painId: 'pain-939-rec' });
+    writeWorkspaceConfig({ enabled: true, runtimeProfile: 'pd.custom', timeoutMs: 5000 });
+    scriptEvaluation([
+      { payload: { recommendation: 'reuse', selectedPrincipleId: existing.id, rationale: 'r', confidence: 0.9 } },
+    ]);
+
+    await handleCandidateReview({ candidateId, workspace: workspaceDir, json: true });
+
+    expect(readSinkEvents(join(workspaceDir, '.pd', 'telemetry', 'critical-events.jsonl'))
+      .some((e) => e.eventType.startsWith('reuse_evaluation'))).toBe(false);
+    expect(reuseEvents()[0]?.eventType).toBe('reuse_evaluation_recommended');
+  });
+
+  it('T4: with the semantic evaluation unavailable, --decide create and --decide reuse both still work', async () => {
+    const existing = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), existing);
+    writeWorkspaceConfig({ enabled: true, runtimeProfile: 'pd.custom' });
+    makeResolverThrow();
+
+    // Owner create on an unavailable evaluation.
+    const candidateA = await seedPrincipleCandidate({ painId: 'pain-939-create' });
+    await handleCandidateReview({ candidateId: candidateA, workspace: workspaceDir, decide: 'create', reason: 'genuinely new', json: true });
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(candidateStatus(candidateA)).toBe('consumed');
+
+    // Owner reuse on an unavailable evaluation (a second pending candidate).
+    const candidateB = await seedPrincipleCandidate({ painId: 'pain-939-reuse' });
+    await handleCandidateReview({
+      candidateId: candidateB, workspace: workspaceDir, decide: 'reuse', principleId: existing.id, reason: 'covers it', json: true,
+    });
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(candidateStatus(candidateB)).toBe('consumed');
+    expect(loadLedger(join(workspaceDir, '.state')).tree.principles[existing.id]?.reuseEvidence).toHaveLength(1);
+  });
+
+  it('T5: two workspaces keep their degradation events isolated (multi-host workspace attribution)', async () => {
+    writeWorkspaceConfig({ enabled: true, runtimeProfile: 'pd.custom' });
+    makeResolverThrow();
+
+    // Workspace A — the harness default (OpenClaw-side workspace, in production terms).
+    addPrincipleToLedger(join(workspaceDir, '.state'), makePrinciple());
+    const candidateA = await seedPrincipleCandidate({ painId: 'pain-939-wsA' });
+    await handleCandidateReview({ candidateId: candidateA, workspace: workspaceDir, json: true });
+
+    // Workspace B — an independently seeded second workspace (the Codex workspace).
+    // mkdtempSync: atomically-created unique dir (CodeQL insecure-temporary-file).
+    const wsB = fs.mkdtempSync(join(os.tmpdir(), 'pd-reuse-prodval-b-'));
+    fs.mkdirSync(join(wsB, '.pd'), { recursive: true });
+    const smB = new RuntimeStateManager({ workspaceDir: wsB });
+    try {
+      await smB.initialize();
+      writeFileSync(join(wsB, '.pd', 'config.yaml'), fs.readFileSync(join(workspaceDir, '.pd', 'config.yaml')), 'utf8');
+      addPrincipleToLedger(join(wsB, '.state'), makePrinciple());
+      const candidateB = await seedPrincipleCandidateInto(wsB, smB);
+
+      await handleCandidateReview({ candidateId: candidateB, workspace: wsB, json: true });
+
+      const idsIn = (p: string) => readSinkEvents(p).map((e) => (e.payload as { candidateId?: string }).candidateId);
+      expect(idsIn(join(workspaceDir, '.pd', 'telemetry', 'critical-events.jsonl'))).toEqual([candidateA]);
+      expect(idsIn(join(wsB, '.pd', 'telemetry', 'critical-events.jsonl'))).toEqual([candidateB]);
+    } finally {
+      try { smB.close(); } catch { /* best effort */ }
+      try { fs.rmSync(wsB, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  });
+});

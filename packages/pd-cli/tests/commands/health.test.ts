@@ -14,6 +14,7 @@ const {
   mockGetLastSuccessfulChain,
   mockPainChainClose,
   mockExistsSync,
+  mockReadFileSync,
   mockDbPrepare,
   mockDbAll,
   mockDbClose,
@@ -24,6 +25,7 @@ const {
     mockGetLastSuccessfulChain: vi.fn(),
     mockPainChainClose: vi.fn().mockResolvedValue(undefined),
     mockExistsSync: vi.fn(),
+    mockReadFileSync: vi.fn(),
     mockDbPrepare: vi.fn(),
     mockDbAll: vi.fn(),
     mockDbClose: vi.fn(),
@@ -84,6 +86,7 @@ vi.mock('@principles/host-runtime', () => ({
 
 vi.mock('fs', () => ({
   existsSync: mockExistsSync,
+  readFileSync: mockReadFileSync,
 }));
 
 vi.mock('better-sqlite3', () => {
@@ -408,6 +411,57 @@ describe('handleHealth', () => {
       expect(allOutput).toContain('lastSuccessfulChain:');
       expect(allOutput).toContain('taskId:');
       expect(allOutput).toContain('diagnosis_pain_001');
+    });
+  });
+});
+
+describe('reuseEvaluation telemetry section (PRI-939 Option A review fix)', () => {
+  const sinkPath = path.resolve(WS, '.pd', 'telemetry', 'critical-events.jsonl');
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+  });
+
+  it('reports only the file path when no critical-events file exists', async () => {
+    mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+    mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+    // mockExistsSync stays false (default from beforeEach)
+
+    await handleHealth({ workspace: WS, json: true });
+
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput.reuseEvaluation).toEqual({ criticalEventsFile: sinkPath });
+    expect(jsonOutput.reuseEvaluation.lastUnavailable).toBeUndefined();
+  });
+
+  it('skips truncated/malformed records and reports the newest VALID unavailable event (rc-1/rc-3)', async () => {
+    mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+    mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+    mockExistsSync.mockImplementation((p: unknown) => p === sinkPath);
+    mockReadFileSync.mockReturnValue([
+      // Missing reason — the gate always writes one; a record without it is
+      // corrupt and must be skipped, never reported with empty fields.
+      '{"eventType":"reuse_evaluation_unavailable","timestamp":"2026-10-06T00:00:01.000Z","payload":{"candidateId":"c-truncated"}}',
+      // Unparseable (crash mid-append) — skipped.
+      '{truncated',
+      // Newest VALID record (older than the corrupt one — proves the scan continues).
+      JSON.stringify({ eventType: 'reuse_evaluation_unavailable', timestamp: '2026-10-06T00:00:00.000Z', payload: { candidateId: 'c-good', reason: '404 no endpoints' } }),
+      // Other event types never match.
+      JSON.stringify({ eventType: 'runtime_adapter_selected', timestamp: '2026-10-06T00:00:02.000Z', payload: {} }),
+    ].join('\n'));
+
+    await handleHealth({ workspace: WS, json: true });
+
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput.reuseEvaluation.lastUnavailable).toEqual({
+      at: '2026-10-06T00:00:00.000Z',
+      candidateId: 'c-good',
+      reason: '404 no endpoints',
     });
   });
 });

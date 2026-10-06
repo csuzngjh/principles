@@ -80,6 +80,15 @@ export interface PainSignalRuntimeFactoryOptions {
    */
   intentDocReader?: IntentDocReader;
   trajectoryTurnReader?: TrajectoryTurnReader;
+  /**
+   * PRI-939 Option A: optional workspace-scoped telemetry sink (host-runtime
+   * WorkspaceTelemetryEmitter) for short-lived CLI processes. Bridge telemetry
+   * mapped by createBridgeTelemetryEventEmitter forwards here instead of the
+   * unsubscribed storeEmitter singleton, so allowlisted events
+   * (reuse_gate_triggered / reuse_evaluation_unavailable) persist to
+   * critical-events.jsonl. Absent = pre-Option-A behavior (singleton).
+   */
+  telemetrySink?: { emitTelemetry: (event: TelemetryEvent) => void };
 }
 
 /** Funnel name for the Runtime v2 diagnosis path. */
@@ -664,7 +673,13 @@ const BRIDGE_DEGRADATION_EVENT_TYPES: ReadonlySet<string> = new Set([
  * Returns null for bridge events that were not emitted in production before
  * the persistence feature (they keep their pre-main dormant status).
  */
-const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set(['reuse_gate_triggered']);
+const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'reuse_gate_triggered',
+  // PRI-939 review fix (Codex P1 / CodeRabbit): the auto-path degradation
+  // signal must survive the mapping so an injected workspace sink can persist
+  // it (observation only — never decision storage, SPEC v0.3.2 §11).
+  'reuse_evaluation_unavailable',
+]);
 
 export function mapBridgeTelemetryToStoreEvent(event: {
   eventType: string;
@@ -700,13 +715,20 @@ export function mapBridgeTelemetryToStoreEvent(event: {
  * rule: only persistence-degradation events reach the store emitter, so
  * rc-9 observability stays identical wherever the bridge runs.
  */
-export function createBridgeTelemetryEventEmitter(): {
+export function createBridgeTelemetryEventEmitter(sink?: {
+  emitTelemetry: (event: TelemetryEvent) => void;
+}): {
   emitTelemetry: (event: Parameters<typeof mapBridgeTelemetryToStoreEvent>[0]) => void;
 } {
   return {
     emitTelemetry: (event) => {
       const mapped = mapBridgeTelemetryToStoreEvent(event);
-      if (mapped) storeEmitter.emitTelemetry(mapped);
+      // PRI-939 Option A: an injected workspace-scoped sink (host-runtime
+      // WorkspaceTelemetryEmitter) lets short-lived CLI processes persist the
+      // allowlisted events instead of emitting into the unsubscribed
+      // singleton. Default stays the bare singleton — zero behavior change
+      // for callers that do not opt in.
+      if (mapped) (sink ?? storeEmitter).emitTelemetry(mapped);
     },
   };
 }
@@ -838,7 +860,9 @@ async function constructBridge(
     // rc-9: the persistence path must degrade observably in production. Only
     // the persistence degradation events are forwarded (see
     // createBridgeTelemetryEventEmitter); other bridge events stay dormant as on main.
-    eventEmitter: createBridgeTelemetryEventEmitter(),
+    // PRI-939 Option A: forward into the caller's workspace-scoped sink when
+    // provided (CLI short processes) so allowlisted events persist.
+    eventEmitter: createBridgeTelemetryEventEmitter(opts.telemetrySink),
     // PRI-624: the factory opens one extra connection (history/committer/
     // context assemblers) beyond the state manager — dispose() releases both.
     ownedResources: [connection],

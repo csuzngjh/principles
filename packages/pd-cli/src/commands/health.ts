@@ -93,7 +93,65 @@ interface WorkspaceHealth {
   tasks: { total: number; byStatus: Record<string, number> };
   candidateLedgerConsistency: { status: 'ok' | 'degraded'; missing: number };
   reliability: ReliabilityHealth;
+  /**
+   * PRI-939 Option A: last semantic reuse evaluation degradation read from the
+   * workspace's own critical-events.jsonl (same durable sink the gate writes).
+   * Read-only summary — the authority stays the event file itself.
+   */
+  reuseEvaluation: ReuseEvaluationHealth;
   lastSuccessfulChain?: LastSuccessfulChain;
+}
+
+interface ReuseEvaluationHealth {
+  criticalEventsFile: string;
+  lastUnavailable?: { at: string; candidateId?: string; reason: string };
+}
+
+function assessReuseEvaluationTelemetry(workspaceDir: string): ReuseEvaluationHealth {
+  const criticalEventsFile = path.join(workspaceDir, '.pd', 'telemetry', 'critical-events.jsonl');
+  try {
+    if (!fs.existsSync(criticalEventsFile)) return { criticalEventsFile };
+    const lines = fs.readFileSync(criticalEventsFile, 'utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const raw = lines[i];
+      if (raw === undefined) continue;
+      const line = raw.trim();
+      if (line === '') continue;
+      let evt: unknown;
+      try {
+        evt = JSON.parse(line);
+      } catch {
+        continue; // skip malformed lines — the sink appends best-effort
+      }
+      if (
+        evt && typeof evt === 'object'
+        && (evt as { eventType?: unknown }).eventType === 'reuse_evaluation_unavailable'
+      ) {
+        // rc-1/rc-3 (PRI-939 review fix, Codex P1): the JSONL is append-only
+        // runtime data — a truncated/corrupt record must be SKIPPED, never
+        // reported as an incident with empty fields. Require the fields the
+        // only producer (the reuse gate) always writes.
+        const { timestamp: rawTimestamp, payload } = evt as { timestamp?: unknown; payload?: Record<string, unknown> };
+        const { candidateId: rawCandidateId, reason: rawReason } = payload ?? {};
+        if (typeof rawTimestamp !== 'string' || rawTimestamp === '') continue;
+        if (typeof rawReason !== 'string' || rawReason === '') continue;
+        const candidateId = typeof rawCandidateId === 'string' ? rawCandidateId : undefined;
+        return {
+          criticalEventsFile,
+          lastUnavailable: {
+            at: rawTimestamp,
+            ...(candidateId !== undefined ? { candidateId } : {}),
+            reason: rawReason.slice(0, 200),
+          },
+        };
+      }
+    }
+    return { criticalEventsFile };
+  } catch {
+    // Non-fatal: health must not fail because an optional telemetry file is
+    // unreadable; the section reports the path so the Owner can inspect it.
+    return { criticalEventsFile };
+  }
 }
 
 interface HealthOptions {
@@ -162,6 +220,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
         missing: missingLedgerCount,
       },
       reliability,
+      reuseEvaluation: assessReuseEvaluationTelemetry(workspaceDir),
       lastSuccessfulChain,
     };
   }
@@ -198,6 +257,15 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
     if (health.reliability.reason) {
       console.log(`reliability.reason: ${health.reliability.reason}`);
       console.log(`reliability.nextAction: ${health.reliability.nextAction}`);
+    }
+    console.log(`reuseEvaluation.criticalEventsFile: ${health.reuseEvaluation.criticalEventsFile}`);
+    if (health.reuseEvaluation.lastUnavailable) {
+      console.log('reuseEvaluation.lastUnavailable:');
+      console.log(`  at:          ${health.reuseEvaluation.lastUnavailable.at}`);
+      if (health.reuseEvaluation.lastUnavailable.candidateId !== undefined) {
+        console.log(`  candidateId: ${health.reuseEvaluation.lastUnavailable.candidateId}`);
+      }
+      console.log(`  reason:      ${health.reuseEvaluation.lastUnavailable.reason}`);
     }
     if (health.lastSuccessfulChain) {
       console.log('lastSuccessfulChain:');

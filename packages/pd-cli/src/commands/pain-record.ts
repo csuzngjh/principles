@@ -37,6 +37,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { acquireTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
 
@@ -398,6 +399,9 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     effectiveConfig,
     getEnvVar: (name: string) => process.env[name],
     asyncMode,
+    // PRI-939 Option A: persist allowlisted critical events (reuse gate /
+    // evaluation degradation) to <workspace>/.pd/telemetry/critical-events.jsonl.
+    telemetrySink: createWorkspaceTelemetryEmitter(workspaceDir),
   });
 
   const result = await service.recordPain({
@@ -581,6 +585,12 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       }
       if (result.latencyMs !== undefined) console.log(`   Latency: ${result.latencyMs}ms`);
       for (const w of cliWarnings) {
+        console.warn(`   ⚠️  ${w}`);
+      }
+      // PRI-939 review fix (Codex P1): text-mode operators must also see the
+      // bridge's degradation notes (semantic reuse evaluation unavailable) —
+      // previously only `--json` carried them.
+      for (const w of result.observabilityWarnings ?? []) {
         console.warn(`   ⚠️  ${w}`);
       }
       console.log(`\nDiagnostician pipeline running. Check progress with:`);

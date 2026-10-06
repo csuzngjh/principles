@@ -1,5 +1,5 @@
 import type { RuntimeStateManager, CandidateRecord } from './store/runtime-state-manager.js';
-import type { CandidateIntakeService } from './candidate-intake-service.js';
+import type { CandidateIntakeService, ReuseRecommendationOutcome } from './candidate-intake-service.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 import type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js';
 import type { PDErrorCategory } from './error-categories.js';
@@ -149,6 +149,28 @@ export interface PainCandidateOutcome {
   seededTaskId?: string;
   reason: string;
   nextAction: string;
+  /**
+   * PRI-939 Option A — narrow Owner-visible projection of the auto-path reuse
+   * evaluation outcome on a CREATE disposition. `reason` is present ONLY when
+   * the evaluation was `unavailable` (bounded to 200 chars): that is the
+   * "duplicate protection did not run" signal. A `recommended` outcome that
+   * still created means the hook answered create/uncertain. Never persisted —
+   * observation only (SPEC v0.3.2 §11), the Owner's verdict stays in
+   * reuseEvidence[].
+   */
+  reuseRecommendation?: ReuseEvaluationOutcomeSignal;
+}
+
+/**
+ * PRI-939 Option A — bounded projection of the reuse evaluation outcome for
+ * Owner-facing result surfaces. Deliberately narrow (status + bounded reason):
+ * the full recommendation payload is carried internally by the intake result
+ * and surfaced by `pd candidate review`; results here only need to answer
+ * "did the semantic gate run, and if not, why".
+ */
+export interface ReuseEvaluationOutcomeSignal {
+  status: 'recommended' | 'unavailable';
+  reason?: string;
 }
 
 export interface PainSignalBridgeResult {
@@ -167,6 +189,13 @@ export interface PainSignalBridgeResult {
   progress?: PainProgressReport;
   /** PRI-642 §10: per-candidate disposition — the authority for mixed results. */
   candidateOutcomes?: PainCandidateOutcome[];
+  /**
+   * PRI-939 Option A — degradation/observability notes produced while shaping
+   * this result (currently: semantic reuse evaluation unavailable on a CREATE
+   * path). Merged into the CLI output by PainToPrincipleService; empty/absent
+   * when everything ran clean. Observation only — never decision storage.
+   */
+  observabilityWarnings?: string[];
   errorCategory?: PDErrorCategory;
   message?: string;
   /**
@@ -812,6 +841,9 @@ export class PainSignalBridge {
     // PRI-917 v0.3.3: candidates parked by the Reuse Review Gate (suspected
     // duplicates awaiting the Owner) — kept OUT of seeding/consumption.
     const reuseReviewRequiredByCandidate = new Map<string, { selectedPrincipleId?: string; confidence?: number }>();
+    // PRI-939 Option A: auto-path hook outcomes for CREATE dispositions —
+    // `unavailable` must reach the Owner's output, not die at the gate.
+    const reuseRecommendationByCandidate = new Map<string, ReuseRecommendationOutcome>();
 
     if (this.autoIntakeEnabled) {
       for (let i = 0; i < candidates.length; i++) {
@@ -847,6 +879,12 @@ export class PainSignalBridge {
         if (intakeResult.outcome === 'ledger_entry') {
           ledgerEntryIds.push(intakeResult.entry.id);
           ledgerEntryByCandidate.set(candidate.candidateId, intakeResult.entry.id);
+          // PRI-939 Option A: keep the auto-path hook outcome (if any) so the
+          // outcome loop can surface an `unavailable` degradation on the
+          // CREATE disposition instead of silently dropping the reason here.
+          if (intakeResult.reuseRecommendation !== undefined) {
+            reuseRecommendationByCandidate.set(candidate.candidateId, intakeResult.reuseRecommendation);
+          }
         }
 
         // PRI-917 v0.3.3 — Reuse Review Gate: a parked candidate is a suspected
@@ -1000,8 +1038,48 @@ export class PainSignalBridge {
         outcome.reason = 'reuse_review_required';
         outcome.nextAction = `pd candidate review --candidate-id ${candidate.candidateId} --decide reuse|create --reason "..."`;
       }
+      // PRI-939 Option A — surface the auto-path evaluation outcome on the
+      // CREATE disposition (status + bounded reason only; the park shape
+      // already carries its own recommendation fields via reason/nextAction).
+      const autoRecommendation = reuseRecommendationByCandidate.get(candidate.candidateId);
+      if (autoRecommendation !== undefined) {
+        outcome.reuseRecommendation = autoRecommendation.status === 'unavailable'
+          ? { status: 'unavailable', reason: autoRecommendation.reason.slice(0, 200) }
+          : { status: 'recommended' };
+      }
       return outcome;
     });
+
+    // PRI-939 Option A — collect the degradation notes so the CLI envelope can
+    // carry them in observabilityWarnings (rc-9: degraded reuse protection
+    // must be visible, not silent; learning still proceeds under Rule 4).
+    const observabilityWarnings: string[] = [];
+    for (const candidate of candidates) {
+      const autoRecommendation = reuseRecommendationByCandidate.get(candidate.candidateId);
+      if (autoRecommendation?.status === 'unavailable') {
+        observabilityWarnings.push(
+          `semantic reuse evaluation unavailable for candidate ${candidate.candidateId} ` +
+          `(${autoRecommendation.reason.slice(0, 200)}) — learning proceeded without duplicate protection (Rule 4); ` +
+          `nextAction: pd candidate review --candidate-id ${candidate.candidateId} to resolve manually`,
+        );
+        // PRI-939 review fix (Codex P1 / CodeRabbit): the degradation must also
+        // REACH THE DURABLE WORKSPACE SINK on the automatic path — before this
+        // emission the event existed only on the review surface, so auto-path
+        // degradations never landed in critical-events.jsonl nor pd health.
+        // The mapped emitter forwards this type verbatim (see
+        // mapBridgeTelemetryToStoreEvent); without an injected sink it
+        // degrades to the pre-Option-A in-process singleton (unchanged).
+        this.eventEmitter?.emitTelemetry({
+          eventType: 'reuse_evaluation_unavailable',
+          traceId: candidate.candidateId,
+          timestamp: new Date().toISOString(),
+          payload: {
+            candidateId: candidate.candidateId,
+            reason: autoRecommendation.reason.slice(0, 200),
+          },
+        });
+      }
+    }
 
     const admittedCandidateIds = candidateOutcomes
       .filter((o) => o.decision === 'admitted')
@@ -1046,6 +1124,11 @@ export class PainSignalBridge {
       seededTaskIds,
     };
     shaped.candidateOutcomes = candidateOutcomes;
+    // PRI-939 Option A: degradation notes ride on the bridge result so every
+    // consumer (CLI envelope, workers) sees them, not just the outcomes array.
+    if (observabilityWarnings.length > 0) {
+      shaped.observabilityWarnings = observabilityWarnings;
+    }
     return shaped;
   }
 

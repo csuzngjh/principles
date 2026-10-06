@@ -54,6 +54,7 @@ import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import * as path from 'path';
 
@@ -653,7 +654,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         diagnosisPersistenceEnabled,
         // rc-9: same production degradation-telemetry wiring as the factory —
         // only persistence events reach the store emitter.
-        eventEmitter: createBridgeTelemetryEventEmitter(),
+        // PRI-939 Option A: workspace-scoped sink persists allowlisted events
+        // (reuse_gate_triggered) that the bare singleton would drop.
+        eventEmitter: createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir)),
         // PRI-720: honor the Owner's full-prompt-pipeline switch on replay seeds.
         fullPipelinePromptSeeds: resolvePromptFullPipelineSeedMode(workspaceDir) === 'full_chain',
       });
@@ -871,11 +874,16 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // depend on admission outcome). 'attempted' is honest: persistPainDiagnosis
     // degrades observably via pain_diagnosis_persist_* telemetry (rc-9) rather
     // than throwing, so this field reports "dispatched", not "row landed".
+    // PRI-939 Option A + review fix (Codex P1): ONE workspace-scoped mapped
+    // emitter shared by persistPainDiagnosis AND the direct intake loop, so
+    // reuse-gate degradation/park events reach the durable sink here too (the
+    // bridge path emits its own; this loop bypasses the bridge).
+    const retryBridgeTelemetry = createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir));
     let painDiagnosisLedgerWrite: 'attempted' | 'disabled' = 'disabled';
     if (diagnosisPersistenceEnabled && result.output) {
       await persistPainDiagnosis(
         // Single rc-9 mapping authority shared with the production factory.
-        { stateManager, eventEmitter: createBridgeTelemetryEventEmitter() },
+        { stateManager, eventEmitter: retryBridgeTelemetry },
         {
           // rc-6: same canonical lineage the bridge uses (task.inputRef),
           // not the CLI-supplied painId — they are equal by the
@@ -891,7 +899,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       painDiagnosisLedgerWrite = 'attempted';
     }
 
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string; reuseRecommendation?: { status: 'recommended' } | { status: 'unavailable'; reason: string } }[] = [];
     let intakeFailed = false;
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
@@ -935,6 +943,20 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
           const recommended =
             intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
+          // PRI-939 review fix (CodeRabbit): the park observation reaches the
+          // durable sink on this direct-intake path too, mirroring the bridge.
+          retryBridgeTelemetry.emitTelemetry({
+            eventType: 'reuse_gate_triggered',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: {
+              candidateId: candidate.candidateId,
+              ...(recommended?.selectedPrincipleId !== undefined
+                ? { selectedPrincipleId: recommended.selectedPrincipleId }
+                : {}),
+              ...(recommended ? { confidence: recommended.confidence, recommendation: recommended.recommendation } : {}),
+            },
+          });
           intakeResults.push({
             candidateId: candidate.candidateId,
             status: 'review_required',
@@ -950,10 +972,32 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
         if (intakeResult.outcome === 'ledger_entry') {
+          // PRI-939 review fix (Codex P1): an unavailable degradation on this
+          // direct-intake path must reach the durable sink, mirroring bridge.
+          if (intakeResult.reuseRecommendation?.status === 'unavailable') {
+            retryBridgeTelemetry.emitTelemetry({
+              eventType: 'reuse_evaluation_unavailable',
+              traceId: candidate.candidateId,
+              timestamp: new Date().toISOString(),
+              payload: {
+                candidateId: candidate.candidateId,
+                reason: intakeResult.reuseRecommendation.reason.slice(0, 200),
+              },
+            });
+          }
           intakeResults.push({
             candidateId: candidate.candidateId,
             ledgerEntryId: intakeResult.entry.id,
             status: 'consumed',
+            // PRI-939 Option A: surface the auto-path evaluation outcome so an
+            // `unavailable` degradation is visible instead of a bare consumed.
+            ...(intakeResult.reuseRecommendation !== undefined
+              ? {
+                  reuseRecommendation: intakeResult.reuseRecommendation.status === 'unavailable'
+                    ? { status: 'unavailable' as const, reason: intakeResult.reuseRecommendation.reason.slice(0, 200) }
+                    : { status: 'recommended' as const },
+                }
+              : {}),
           });
         } else if (intakeResult.reason === 'reuse_selected') {
           // PRI-917 PR3A (C3): a reuse resolution is a success with its own
@@ -1058,6 +1102,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             console.log(ir.ledgerEntryId
               ? `    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`
               : `    ${ir.candidateId}: consumed (Principle Ledger write refused: ${ir.ledgerWriteRefused})`);
+          }
+          // PRI-939 review fix (Codex P1): text-mode operators must also see
+          // the degradation — previously only `--json` carried it.
+          if (ir.reuseRecommendation?.status === 'unavailable') {
+            console.warn(`      ⚠️  semantic reuse evaluation unavailable: ${ir.reuseRecommendation.reason} — learning proceeded without duplicate protection (Rule 4)`);
           }
         } else if (ir.status === 'intake_failed') {
           console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);
