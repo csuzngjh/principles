@@ -660,8 +660,9 @@ function PendingReviewCard({
         >
           {t("pages.focus.rejectAction", { defaultValue: "拒绝" })}
         </button>
+        {/* PRI-942: /pain is the only page rendering the evidence chain. */}
         <Link
-          to="/evidence"
+          to="/pain"
           className="inline-flex items-center text-gov text-[12.5px] hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
           {t("pages.focus.viewFullChain")}
