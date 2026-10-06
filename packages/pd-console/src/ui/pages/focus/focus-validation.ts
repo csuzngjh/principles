@@ -75,12 +75,22 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     if (typeof fits !== "boolean") return null;
     fitsPromptBudget = fits;
   }
+  // PRI-940: artifactUnavailable is optional. ERR-009 discipline — present but
+  // wrong type fails loud (return null); absent stays undefined, which keeps
+  // the card title rendering exactly as before.
+  let artifactUnavailable: boolean | undefined;
+  if (Object.hasOwn(raw, "artifactUnavailable")) {
+    const { artifactUnavailable: unavailable } = raw;
+    if (typeof unavailable !== "boolean") return null;
+    artifactUnavailable = unavailable;
+  }
   return {
     principleId,
     principleTitle,
     candidateDescription,
     status,
     fitsPromptBudget,
+    artifactUnavailable,
     records: validRecords,
   };
 }
@@ -112,4 +122,24 @@ export function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData
     // to undefined (badge absent) rather than rejecting the payload.
     promptInjection: validatePromptInjectionBudgetStatus(raw.promptInjection) ?? undefined,
   };
+}
+
+/**
+ * PRI-940: which string may the pending-review card render as its title.
+ *
+ * `principleTitle` degrades to the synthesized `unlinked:<artifactId>` grouping
+ * key when the pinned artifact is missing — a machine id that must never reach
+ * the Owner as a title (real case: an approval pinned to a superseded scribe
+ * revision rendered `unlinked:pi-art-scribe-…` on the card). Returns undefined
+ * for that case so the caller falls back to the localized untitled copy; the
+ * degradation itself is explained by the artifactUnavailable note, not here.
+ */
+export function selectApprovalGroupDisplayTitle(
+  group: Pick<ApprovalGroup, "candidateDescription" | "principleTitle" | "artifactUnavailable">,
+): string | undefined {
+  if (group.candidateDescription !== undefined && group.candidateDescription !== "") {
+    return group.candidateDescription;
+  }
+  if (group.artifactUnavailable === true) return undefined;
+  return group.principleTitle;
 }
