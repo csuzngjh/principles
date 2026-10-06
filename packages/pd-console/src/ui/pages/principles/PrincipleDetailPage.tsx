@@ -954,9 +954,10 @@ export function PrincipleDetailPage() {
               >
                 {t("principles.detail.expandTechDetails", { defaultValue: "展开技术细节" })}
               </button>
-              {/* Wave 7: link to evidence chain page so Owner knows where to use the copied ID */}
+              {/* Wave 7: link to evidence chain page so Owner knows where to use the copied ID.
+                  PRI-942: that page is /pain — /evidence was never a route. */}
               <Link
-                to="/evidence"
+                to="/pain"
                 className="font-mono text-[11px] text-gov hover:underline transition-colors"
               >
                 {t("principles.detail.viewEvidenceChain", { defaultValue: "在证据链页查看 →" })}

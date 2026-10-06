@@ -34,6 +34,47 @@ function extractAppRoutes(src: string): Map<string, string> {
   return routes;
 }
 
+/**
+ * PRI-942: literal navigation targets found anywhere in the console UI.
+ * Only quoted literals are collected — a `to={`/principles/${id}`}` target is
+ * dynamic by definition and cannot be resolved without running the app, so
+ * scanning it would flood the guard with false positives.
+ */
+function collectLiteralLinkTargets(dir: string): { file: string; to: string }[] {
+  const found: { file: string; to: string }[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...collectLiteralLinkTargets(full));
+      continue;
+    }
+    if (!/\.(tsx|ts)$/.test(entry.name)) continue;
+    const src = fs.readFileSync(full, 'utf-8');
+    const literalRegex = /\bto="([^"]+)"/g;
+    let m;
+    while ((m = literalRegex.exec(src)) !== null) {
+      // strip query string / hash fragment: they never participate in routing
+      const target = m[1].split(/[?#]/)[0];
+      if (target.startsWith('/')) {
+        found.push({ file: path.relative(UI_SRC, full).replace(/\\/g, '/'), to: target });
+      }
+    }
+  }
+  return found;
+}
+
+/** Route-table matching: a `:param` segment accepts any single non-empty segment. */
+function isRegisteredRoute(target: string, routes: Map<string, string>): boolean {
+  if (routes.has(target)) return true;
+  const parts = target.split('/').filter(Boolean);
+  for (const pattern of routes.keys()) {
+    const patternParts = pattern.split('/').filter(Boolean);
+    if (patternParts.length !== parts.length) continue;
+    if (patternParts.every((seg, i) => seg.startsWith(':') || seg === parts[i])) return true;
+  }
+  return false;
+}
+
 describe('Console Rebuild Navigation — CR2', () => {
   describe('Sidebar primary navigation', () => {
     let sidebarSrc: string;
@@ -145,6 +186,42 @@ describe('Console Rebuild Navigation — CR2', () => {
 
     it('/debt renders DebtPage', () => {
       expect(appRoutes.get('/debt')).toBe('DebtPage');
+    });
+  });
+
+  describe('Literal link targets (PRI-942)', () => {
+    let routes: Map<string, string>;
+    let targets: { file: string; to: string }[];
+
+    beforeAll(() => {
+      routes = extractAppRoutes(readFile(APP_PATH));
+      targets = collectLiteralLinkTargets(UI_SRC);
+    });
+
+    it('the scanner sees the in-product links, not an empty set', () => {
+      const unique = new Set(targets.map((t) => `${t.file} -> ${t.to}`));
+      expect(unique.has('pages/focus/FocusPage.tsx -> /pain')).toBe(true);
+      expect(
+        unique.has('pages/principles/PrincipleDetailPage.tsx -> /pain'),
+      ).toBe(true);
+      expect(targets.length).toBeGreaterThanOrEqual(10);
+    });
+
+    it('every literal link target resolves to a registered route (negative control: /evidence fails here)', () => {
+      const dead = targets.filter((t) => !isRegisteredRoute(t.to, routes));
+      expect(
+        dead.map((d) => `${d.file}: to="${d.to}"`),
+        'unregistered literal navigation target',
+      ).toEqual([]);
+    });
+
+    it('the guard is not carried by the outer /* fallback route', () => {
+      // App.tsx wraps the console in <Route path="/*">, and the inner <Routes>
+      // has no wildcard of its own, so an unmatched path renders chrome with an
+      // empty <main>. If the inner table ever claims "/*", this guard would pass
+      // every dead link, so the absence is asserted rather than assumed.
+      expect(routes.has('/*')).toBe(false);
+      expect(routes.has('*')).toBe(false);
     });
   });
 
