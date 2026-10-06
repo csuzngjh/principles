@@ -36,10 +36,18 @@ function extractAppRoutes(src: string): Map<string, string> {
 
 /**
  * PRI-942: literal navigation targets found anywhere in the console UI.
- * Only quoted literals are collected — a `to={`/principles/${id}`}` target is
- * dynamic by definition and cannot be resolved without running the app, so
- * scanning it would flood the guard with false positives.
+ *
+ * Covers every way the console writes a literal today — `to="/x"`,
+ * `to={"/x"}`, `to={'/x'}` and `to={`/x`}` — because the backtick form is
+ * already in use (`FocusPage.tsx` `/activation`), and a guard that read only
+ * double quotes would keep promising coverage it does not have.
+ *
+ * Interpolation (`${`) is excluded: a `to={`/principles/${id}`}` target is
+ * dynamic and cannot be resolved without running the app, so scanning it would
+ * flood the guard with false positives.
  */
+const LINK_TARGET_REGEX = /\bto=\s*\{?\s*(["'`])([^"'`]*)\1/g;
+
 function collectLiteralLinkTargets(dir: string): { file: string; to: string }[] {
   const found: { file: string; to: string }[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -50,12 +58,13 @@ function collectLiteralLinkTargets(dir: string): { file: string; to: string }[] 
     }
     if (!/\.(tsx|ts)$/.test(entry.name)) continue;
     const src = fs.readFileSync(full, 'utf-8');
-    const literalRegex = /\bto="([^"]+)"/g;
     let m;
-    while ((m = literalRegex.exec(src)) !== null) {
+    while ((m = LINK_TARGET_REGEX.exec(src)) !== null) {
+      if (m[2].includes('${')) continue;
       // strip query string / hash fragment: they never participate in routing
-      const target = m[1].split(/[?#]/)[0];
-      if (target.startsWith('/')) {
+      const target = m[2].split(/[?#]/)[0];
+      // in-app route only — a protocol-relative `//host` is not one
+      if (target.startsWith('/') && !target.startsWith('//')) {
         found.push({ file: path.relative(UI_SRC, full).replace(/\\/g, '/'), to: target });
       }
     }
@@ -205,6 +214,16 @@ describe('Console Rebuild Navigation — CR2', () => {
         unique.has('pages/principles/PrincipleDetailPage.tsx -> /pain'),
       ).toBe(true);
       expect(targets.length).toBeGreaterThanOrEqual(10);
+    });
+
+    it('covers the backtick form, not just double quotes (negative control: fails against a double-quote-only scanner)', () => {
+      // FocusPage.tsx writes this one in `to={`/activation`}`, so a scanner that
+      // read only to="…" would silently exempt half the codebase's idiom.
+      expect(
+        new Set(targets.map((t) => `${t.file} -> ${t.to}`)).has(
+          'pages/focus/FocusPage.tsx -> /activation',
+        ),
+      ).toBe(true);
     });
 
     it('every literal link target resolves to a registered route (negative control: /evidence fails here)', () => {
