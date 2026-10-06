@@ -3,7 +3,7 @@
 - 日期：2026-10-06
 - 分支：`ai/PRI-941-codex-tool-evidence`（worktree，base = origin/main `ac46818e`）
 - 授权链：PRI-940 / PRI-941 审计（Owner 批准 Option A）→ 本实现
-- 状态：实现 + 测试 + 门禁全绿；**未建 PR**（任务要求），等 Owner review
+- 状态：实现 + 测试 + 门禁全绿；分支已推送，PR #1942 已创建（Owner 指令），等 Owner review
 
 ---
 
@@ -14,7 +14,7 @@
 | `packages/pd-cli/src/commands/build-trajectory-evidence.ts` | ①从 `collectEvidenceFromDb` 提取单一 SQL 读取器 `readToolFailureEvidence`（OpenClaw 路径改调它，行为零变化）；②新导出 `acquireCodexToolFailureEvidenceFromDb(stateDir, sessionId, workspaceDir?)`——只读 `tool_calls` 失败行（不触 sessions/user_turns/assistant_turns、不开 rollout），复用既有 `TrajectoryEvidenceAcquisition` union 与脱敏管道 |
 | `packages/pd-cli/src/commands/pain-record.ts` | codex 分支：硬编码 `evidence:{status:'unavailable',reason:'trajectory_unavailable'}` → 调用新 acquisition；available 时 evidence/`legacy.evidence` 非空（admission `inputEvidenceCount>0` 链闭合）；unavailable 时保持诚实降级、reason 精确化（`empty_trajectory` 等）；设计注释按审计收窄（"只读已授权工具失败证据；对话表 ingestion 独占"） |
 | `packages/pd-cli/tests/commands/build-trajectory-evidence.test.ts` | T1（失败行→available+内容断言+对话内容零混入）、T2a/T2b（空表/缺库）、边界（对话行存在但零失败仍 empty_trajectory）、sentinel |
-| `packages/pd-cli/tests/commands/pain-record.test.ts` | T1b（available → recordPain evidence 非空 + evidenceClass available）、T2c（empty_trajectory 降级逐字段保持）、T4（consent not_present 行为不变）；既有 PRI-743 用例增补 acquisition 调用断言 |
+| `packages/pd-cli/tests/commands/pain-record.test.ts` | T1（available → recordPain evidence 非空 + evidenceClass available）、T2（empty_trajectory 降级逐字段保持）、T4（consent not_present 行为不变）；既有 PRI-743 用例增补 acquisition 调用断言 |
 | `packages/pd-cli/tests/commands/codex-tool-evidence-boundary.test.ts` | 新增源码级边界 guard：G1（codex 函数与共享 reader 无对话表 SQL）、G2（codex 分支只走 scoped acquisition）、G3（pain-record 零 consent/ingestion import） |
 | `.changeset/pri-941-option-a-codex-tool-evidence.md` | `@principles/pd-cli` patch 发布意图 |
 
@@ -40,13 +40,13 @@ New external/network capability: NO
 - 允许面：只读 `tool_calls`、仅 `outcome='failure'`、复用 acquisition contract ✓
 - 禁止面：未读 user_turns/assistant_turns（G1 guard 锁死）、未读 rollout/reasoning、未执行 `pd codex setup`、未开 ingestion、consent 零变化、G2A 披露未动 ✓
 - PainProvenance / painIngress.v1 / admission gate 零改动 ✓
-- **未创建 PR** ✓；完成后停止等 Owner review。
+- 完成后停止等 Owner review；PR #1942 经 Owner 指令创建。
 
 ## 4. Verification Results
 
 | 套件 | 结果 |
 | --- | --- |
-| T1-T5 定向（build-trajectory-evidence 26 + pain-record 35 + boundary guard 3） | ✅ 64/64 |
+| T1-T5（T1/T2 直测于 acquisition+CLI 两层；T3 由 boundary guard + 对话表边界用例；T4 由 CLI 用例 + G3 guard；T5 由既有 OpenClaw 套件承担） | ✅ 64/64（评审轮后 66/66） |
 | pd-cli 全量 | ✅ 1808 passed（3 个 spawn 类 5s 超时为负载 flake，单独重跑 19/19 绿） |
 | principles-core 全量 | ✅ 8080 passed（Exit 0） |
 | eslint（改动文件） | ✅ 0 problem |
@@ -62,3 +62,20 @@ New external/network capability: NO
 ## 6. Rollback
 
 revert 单提交即回退（codex 分支恢复诚实空证据降级）；无数据迁移、无配置、无 flag。
+
+## 7. 三维子代理评审轮（2026-10-06/07）
+
+三个独立评审代理（正确性/边界、安全隐私授权、测试质量合规）对 PR #1942 diff 的结论：**三维全部 APPROVE WITH FINDINGS，零 P0，授权边界零违例**（无对话表/rollout/reasoning 访问、consent/ingestion/G2A 零触碰、数据外发面为 OpenClaw 严格子集）。
+
+已修复（评审后追加提交）：
+- **P1（正确性维度）**：codex 分支回填 acquisitionReason/Detail 会在 refuse 路径劫持 operator-facing reason（`--logical-key` lineage mismatch 场景被错报为 trajectory 措辞、nextAction 自相矛盾）→ 恢复 null/null + 忠实 reason 回归测试。
+- **P2（双代理交叉发现）**：tool_calls 表损坏/缺失被错报 `empty_trajectory` → 区分 `readFailed` → `evidence_read_failed`/`codex_tool_calls_unreadable`（与 OpenClaw 兄弟函数语义对齐）+ 用例。
+- **P2-1**：新 describe 补 afterEach tmpdir 清理（对齐同文件模式）。
+- **P2-5**：本文档三处表述更正（PR 状态/T 用例名/T3、T5 的间接覆盖映射）。
+
+记录为 follow-up（不阻塞合并，均非本 PR 引入或属精度加固）：
+- sentinel 检查结果在 CLI 层被 bound-无条件降级吞没（PRI-743 既有语义；acquisition 单测可能造成保护错觉）；
+- `sourceRef` 无长度界（OpenClaw 路径既有同款模式，建议统一 ≤300）；
+- result_preview 截断先于读取侧 token redact 的微缝隙（需 DB 被未脱敏第三方写入才成立）；
+- CLI T4 的字符串缺席断言实质由 G3 guard 承担；`mockReturnValueOnce` 跨用例残留为潜伏风险；
+- G1 切片断言对精确实参文本/函数后追加代码有误报脆弱性（漂移时均响亮失败，无假通过路径）。

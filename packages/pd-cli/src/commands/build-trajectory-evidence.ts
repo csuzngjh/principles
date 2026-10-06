@@ -391,6 +391,17 @@ export function acquireCodexToolFailureEvidenceFromDb(
 
   try {
     const toolFailure = readToolFailureEvidence(db, sessionId, workspaceDir);
+    // PRI-941 review F2 (rc-9 precision): a missing/unreadable tool_calls
+    // table is a DIFFERENT fact from "zero failure rows" — report it as
+    // evidence_read_failed, mirroring the sibling OpenClaw acquisition.
+    if (toolFailure.readFailed) {
+      return {
+        status: 'unavailable',
+        reasonCode: 'evidence_read_failed',
+        detail: 'codex_tool_calls_unreadable',
+        binding: 'unverified',
+      };
+    }
     if (toolFailure.entries.length === 0) {
       return {
         status: 'unavailable',

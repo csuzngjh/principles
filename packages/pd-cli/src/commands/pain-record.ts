@@ -172,8 +172,16 @@ function resolveIngressDecision(
     });
     return {
       decision,
-      acquisitionDetail: acquisition.status === 'unavailable' ? acquisition.detail : null,
-      acquisitionReason: acquisition.status === 'unavailable' ? acquisition.reasonCode : null,
+      // PRI-941 review P1 fix: acquisitionReason/Detail stay null on this
+      // branch. The only downstream consumer is the refuse path's reason
+      // override, and a codex refuse (e.g. logical-key lineage mismatch) is
+      // NEVER caused by the acquisition — backfilling here would hijack the
+      // operator-facing reason/nextAction with trajectory wording while the
+      // warning text says lineage mismatch (review finding F1, with
+      // regression test). Degradation wording flows through the evaluator's
+      // own evidenceClass instead.
+      acquisitionDetail: null,
+      acquisitionReason: null,
     };
   }
 

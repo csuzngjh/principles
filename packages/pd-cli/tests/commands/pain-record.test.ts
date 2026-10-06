@@ -958,5 +958,38 @@ describe('PRI-941 Option A — --host codex consumes authorized tool_calls failu
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it('review F1 regression: a codex refuse (logical-key lineage mismatch) keeps its faithful reason even when the acquisition is unavailable', async () => {
+    // Default mock: acquisition unavailable (empty_trajectory). The custom
+    // --logical-key does not embed the rollout id → the evaluator refuses on
+    // lineage_mismatch. The refuse output must carry the FAITHFUL reason —
+    // before the fix, acquisitionReason backfill hijacked it with
+    // trajectory wording and a contradictory nextAction.
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({
+      reason: 'codex mistake',
+      session: 'codex-root-sess',
+      host: 'codex',
+      rolloutId: 'rollout-abc',
+      hostTurnId: 'turn-7',
+      logicalKey: 'custom-key-not-embedding-rollout',
+      json: true,
+    });
+
+    expect(lastRecordPainInput).toBeNull();
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('lineage_mismatch');
+    expect(String(jsonOutput.message)).toMatch(/lineage/i);
+    expect(jsonOutput.nextAction).not.toContain('trajectory_unavailable');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 });

@@ -554,6 +554,24 @@ describe('acquireCodexToolFailureEvidenceFromDb (PRI-941 Option A)', () => {
     }
   });
 
+  it('review F2: unreadable tool_calls table → evidence_read_failed (not misreported as empty)', () => {
+    createStateDir();
+    const db = createTrajectoryDb();
+    try {
+      insertToolCall(db, 'sess-e', 'bash', 'failure', 'EACCES', 1, '2026-10-06T00:00:01Z');
+      db.exec('DROP TABLE tool_calls');
+      const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-e');
+      expect(result).toEqual({
+        status: 'unavailable',
+        reasonCode: 'evidence_read_failed',
+        detail: 'codex_tool_calls_unreadable',
+        binding: 'unverified',
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it('T2b: trajectory.db missing → trajectory_unavailable', () => {
     createStateDir();
     const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-c');
@@ -583,5 +601,9 @@ describe('acquireCodexToolFailureEvidenceFromDb (PRI-941 Option A)', () => {
     expect(result.status).toBe('unavailable');
     if (result.status !== 'unavailable') return;
     expect(result.reasonCode).toBe('session_not_found');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
