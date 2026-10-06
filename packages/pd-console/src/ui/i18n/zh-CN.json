@@ -96,6 +96,7 @@
       "deviationCount": "条偏差",
       "evidenceSummary": "证据：{{count}} 条记录",
       "untitledCandidate": "待命名候选原则",
+      "artifactUnavailableNote": "该审批指向的草稿原件已不在工件库中（可能已被新版本取代），内容无法显示。如无法判断，可选择拒绝；原始工件编号可点「编辑」后在「当前工件」一栏查看。",
       "approveAction": "批准",
       "rejectAction": "拒绝",
       "editAction": "编辑",

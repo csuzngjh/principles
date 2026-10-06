@@ -500,6 +500,57 @@ describe('CR8 Backend Data Contract Routes', () => {
       expect(usedChars as number).toBeGreaterThanOrEqual(0);
       expect(typeof promptInjection!['truncated']).toBe('boolean');
     });
+
+    it('PRI-940: flags artifactUnavailable when the pinned artifact is missing from the store', async () => {
+      // Real case (2026-10-06, live 2.2.0): an approval pinned to
+      // `pi-art-scribe-…_prompt_3` whose row was superseded by `_4`. The store
+      // has no contentJson to describe, so the grouping key degrades to
+      // `unlinked:<artifactId>`. Contract: the key stays a stable grouping id,
+      // and the payload carries `artifactUnavailable` so the UI degrades
+      // visibly (rc-9) instead of rendering the machine id as a card title.
+      const missingArtifactId = `artifact-gone-${Date.now()}`;
+      seedApproval('prompt', 'pending', missingArtifactId);
+
+      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      expect(status).toBe(200);
+
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      const groups = data!.groups;
+      expect(Array.isArray(groups)).toBe(true);
+
+      const group = (groups as unknown[]).find(
+        (g): g is Record<string, unknown> =>
+          isRecord(g) && getStringField(g, 'principleId') === `unlinked:${missingArtifactId}`,
+      );
+      expect(group).toBeDefined();
+      expect(group!['artifactUnavailable']).toBe(true);
+      // No artifact row → no human-readable description either; the UI note
+      // must explain the gap instead of going silently blank.
+      expect(group!['candidateDescription']).toBeUndefined();
+    });
+
+    it('PRI-940: readable artifact keeps the wire contract — no artifactUnavailable field', async () => {
+      // An existing-but-unresolved artifact still groups under `unlinked:<id>`,
+      // but the artifact row is readable, so the card must NOT be flagged
+      // unavailable — its description/title path is unchanged.
+      const artifactId = `artifact-present-${Date.now()}`;
+      seedArtifact(artifactId, null);
+      seedApproval('prompt', 'pending', artifactId);
+
+      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      expect(status).toBe(200);
+
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      const groups = data!.groups;
+      const group = (groups as unknown[]).find(
+        (g): g is Record<string, unknown> =>
+          isRecord(g) && getStringField(g, 'principleId') === `unlinked:${artifactId}`,
+      );
+      expect(group).toBeDefined();
+      expect(Object.hasOwn(group!, 'artifactUnavailable')).toBe(false);
+    });
   });
 
   // ── 6. Governance queue returns required fields ───────────────────────────

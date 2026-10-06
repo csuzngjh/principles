@@ -13,6 +13,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
+// PRI-940: exercise the REAL page validator (the local replicas below predate
+// it and only cover legacy shapes). focus-validation.ts imports api.js as
+// types only, so loading it here never pulls in React.
+import {
+  selectApprovalGroupDisplayTitle,
+  validateApprovalsGroupedData as validateApprovalsGroupedDataReal,
+} from "../../src/ui/pages/focus/focus-validation.js";
 
 // ── Mock the API module ──────────────────────────────────────────────────────
 
@@ -323,6 +330,66 @@ describe("FocusPage: validateApprovalsGroupedData edge cases", () => {
     const result = validateApprovalsGroupedData(raw);
     expect(result).not.toBeNull();
     expect(result!.note).toBe("test");
+  });
+});
+
+describe("FocusPage: artifactUnavailable validator contract (PRI-940)", () => {
+  // Real leak (2026-10-06, live 2.2.0): a pending approval pinned to a
+  // superseded scribe artifact rendered the machine id `unlinked:<artifactId>`
+  // as the card title. The page validator must carry the server's structured
+  // artifactUnavailable flag through so the UI can degrade honestly (rc-9)
+  // instead of rendering a machine id or going silently blank.
+  const machineIdGroup = {
+    principleId: "unlinked:pi-art-scribe-x_prompt_3",
+    principleTitle: "unlinked:pi-art-scribe-x_prompt_3",
+    status: "pending",
+    records: [
+      { id: "a-1", artifactId: "pi-art-scribe-x_prompt_3", channel: "prompt", createdAt: "2026-09-28T02:48:31.208Z", status: "pending" },
+    ],
+  };
+
+  it("absent artifactUnavailable stays undefined — healthy cards unchanged", () => {
+    const result = validateApprovalsGroupedDataReal({ groups: [machineIdGroup], generatedAt: "2026-01-01" });
+    expect(result).not.toBeNull();
+    expect(result!.groups[0]?.artifactUnavailable).toBeUndefined();
+  });
+
+  it("true survives validation so the card can degrade visibly", () => {
+    const result = validateApprovalsGroupedDataReal({
+      groups: [{ ...machineIdGroup, artifactUnavailable: true }],
+      generatedAt: "2026-01-01",
+    });
+    expect(result).not.toBeNull();
+    expect(result!.groups[0]?.artifactUnavailable).toBe(true);
+  });
+
+  it("present-but-wrong type fails loud (ERR-009)", () => {
+    const result = validateApprovalsGroupedDataReal({
+      groups: [{ ...machineIdGroup, artifactUnavailable: "yes" }],
+      generatedAt: "2026-01-01",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("title selection never returns the machine id for an unavailable artifact (negative control: fails against the pre-fix chain)", () => {
+    expect(
+      selectApprovalGroupDisplayTitle({
+        candidateDescription: undefined,
+        principleTitle: "unlinked:pi-art-scribe-x_prompt_3",
+        artifactUnavailable: true,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("title selection still prefers the human-readable description", () => {
+    const description = "「我未找到」不等于「它不存在」：下达否定性断言前必须先以权威来源核验全集。";
+    expect(
+      selectApprovalGroupDisplayTitle({
+        candidateDescription: description,
+        principleTitle: "some ledger text",
+        artifactUnavailable: undefined,
+      }),
+    ).toBe(description);
   });
 });
 
