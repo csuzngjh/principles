@@ -11,8 +11,9 @@ failure of the evidence chain rather than a dead address. They now point at
 `/pain`, the only page in the product that actually fetches and renders the
 evidence chain, and it needs no id, so it cannot 404 and never puts a machine
 identifier in the URL. A new static guard in the navigation test walks every
-literal `to="/…"` target in the console UI and requires it to resolve against
-the route table App.tsx already publishes, so the next dead link fails CI instead
-of showing up as an empty panel. Landing is not anchored to the individual
-candidate yet (it opens the top of the chain list); per-candidate anchoring is
-tracked separately.
+in-app link the console UI writes with a visible path: literal `to` targets in
+all their quote forms, plus the static part of a target that only becomes dynamic
+after an interpolation marker. Each must resolve against the route table App.tsx
+already publishes, so the next dead link fails CI instead of showing up as an
+empty panel. Landing is not anchored to the individual candidate yet (it opens
+the top of the chain list); per-candidate anchoring is tracked separately.
