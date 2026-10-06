@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import fse from 'fs-extra';
 
 vi.mock('child_process', () => ({
   execSync: vi.fn(() => ''),
@@ -68,6 +69,7 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
   let savedEnv: Record<string, string | undefined>;
   let sandboxRoot: string;
   let pdHome: string;
+  let warnLines: string[];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -78,7 +80,8 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
     // agree on the sandbox as "~".
     process.env.HOME = sandboxRoot;
     process.env.USERPROFILE = sandboxRoot;
-    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    warnLines = [];
+    vi.spyOn(logger, 'warn').mockImplementation((msg: string) => { warnLines.push(String(msg)); });
     vi.spyOn(logger, 'info').mockImplementation(() => undefined);
     vi.spyOn(logger, 'success').mockImplementation(() => undefined);
     vi.spyOn(logger, 'error').mockImplementation(() => undefined);
@@ -112,12 +115,42 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
 
     const result = await uninstall({ host: 'codex', force: true });
 
+    // Intentional preservation is NOT a failure: install.json is still cleaned
+    // (reclaimFailed stays false), so the re-run advice must NOT be promised.
     expect(result.success).toBe(true);
-    // residue dirs are still reclaimed; only the unreadable pointer is kept.
     expect(fs.existsSync(path.join(pdHome, 'staging'))).toBe(false);
     expect(fs.existsSync(path.join(pdHome, 'releases'))).toBe(false);
     expect(fs.existsSync(path.join(pdHome, 'backups'))).toBe(false);
     expect(fs.existsSync(path.join(pdHome, 'active.json'))).toBe(true);
+    expect(warnLines.join('\n')).toMatch(/active\.json is unreadable/);
+    expect(warnLines.join('\n')).not.toMatch(/re-run to reclaim both/i);
+  });
+
+  it('is failure-open: a locked releases/ keeps install.json and preserves the pointer with its target', async () => {
+    seedPdHome(pdHome, { hosts: ['codex'] });
+    const releasesDir = path.join(pdHome, 'releases');
+    const originalRemove = fse.remove.bind(fse);
+    vi.spyOn(fse, 'remove').mockImplementation(async (p: string) => {
+      if (p === releasesDir) throw new Error('simulated removal failure');
+      return originalRemove(p);
+    });
+
+    const result = await uninstall({ host: 'codex', force: true });
+
+    // releases/ removal threw → reclaimFailed → success false, manifest kept.
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/PD update releases/);
+    // staging + backups are independent removes and still reclaim.
+    expect(fs.existsSync(path.join(pdHome, 'staging'))).toBe(false);
+    expect(fs.existsSync(path.join(pdHome, 'backups'))).toBe(false);
+    // releases survived, so the pointer must survive with it (never a pointer
+    // deleted while its target is present, nor a stranded un-reclaimable state).
+    expect(fs.existsSync(releasesDir)).toBe(true);
+    expect(fs.existsSync(path.join(pdHome, 'active.json'))).toBe(true);
+    expect(result.removedFiles).not.toContain(path.join(pdHome, 'active.json'));
+    // install.json is kept so a re-run can retry the stranded residue.
+    expect(fs.existsSync(path.join(pdHome, 'install.json'))).toBe(true);
+    expect(warnLines.join('\n')).toMatch(/still points at releases\/rel-1/);
   });
 
   it('partial (single-host) uninstall preserves every residue path', async () => {

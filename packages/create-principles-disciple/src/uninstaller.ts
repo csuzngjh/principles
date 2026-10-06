@@ -386,26 +386,19 @@ async function removeWithRetry(targetPath: string, _type: 'dir' | 'file'): Promi
 }
 
 /**
- * PRI-894 / PRI-895: reclaim the shared runtime's update residue under ~/.pd
- * when the LAST host is uninstalled. Before this, `uninstall --force` removed
- * the runtime, manifest, plugins, host configs and shim but left staging/,
- * releases/ and backups/ (a GB-scale disk leak) plus a dangling active.json
- * still pointing at a release that no longer exists.
+ * PRI-894 / PRI-895: on a full shared-runtime teardown (the last host being
+ * uninstalled), reclaim the update residue under ~/.pd that the old flow left
+ * behind: staging/, releases/ and backups/ (a GB-scale disk leak) plus a
+ * dangling active.json pointing at a release that no longer exists.
  *
- * Guardrails (this is a destructive path under §18 — deletion happens only
- * when it can be PROVEN safe):
- * - Runs only for a full shared-runtime teardown, and only after the runtime
- *   directory itself was removed. A partial (single-host) uninstall or a
- *   locked runtime preserves every residue path.
- * - Removes exactly the three hardcoded update directories, never a glob of
- *   ~/.pd/*, so transactions/ logs/ bootstrap/ trust/ channels/ are provably
- *   untouched.
- * - active.json is removed LAST — a pointer must not vanish before its target.
- *   It is deleted only when it is readable and its release no longer exists on
- *   disk; a corrupt pointer is preserved with an observable note.
- * - Failure-open: each removal routes through removeWithRetry and a locked path
- *   is recorded in deleteErrors, so result.success flips false and a re-run
- *   retries idempotently while install.json is kept (gated by reclaimFailed).
+ * This is a §18 destructive path, so deletion is bounded to what can be PROVEN
+ * safe: it runs only for a full teardown after the runtime dir itself is gone
+ * (a partial uninstall or a locked runtime preserves everything); it removes
+ * exactly those three hardcoded directories and never a glob of ~/.pd/* (so
+ * transactions/ logs/ trust/ channels/ bootstrap/ stay untouched); it deletes
+ * active.json last and only when readable with a target that is already gone;
+ * and every removal is failure-open — a locked path lands in deleteErrors
+ * (result.success=false) and install.json is kept so a re-run can retry.
  */
 async function reclaimSharedRuntimeResidue(params: {
   removeSharedRuntime: boolean;
@@ -424,14 +417,15 @@ async function reclaimSharedRuntimeResidue(params: {
   const preserved: string[] = [];
 
   // Read the pointer before touching its targets, so we can decide whether
-  // releasing it is safe. Absent → null; unreadable/malformed → throw (preserve).
+  // releasing it is safe. Absent → null; unreadable/malformed → throw.
   let active: ActiveRecord | null = null;
-  let activeCorrupt = false;
+  let activeCorruptReason: string | null = null;
   if (existsSync(paths.activeRecordPath)) {
     try {
       active = readActiveRecord(paths.activeRecordPath);
-    } catch {
-      activeCorrupt = true;
+    } catch (err) {
+      // rc-9: keep WHY the pointer is unreadable so the operator sees it.
+      activeCorruptReason = err instanceof Error ? err.message : String(err);
     }
   }
 
@@ -446,18 +440,21 @@ async function reclaimSharedRuntimeResidue(params: {
     }
   };
 
-  // staging → releases → backups; the pointer is handled last, below.
   await removeDir(paths.stagingDir, 'PD update staging');
   await removeDir(paths.releasesDir, 'PD update releases');
   await removeDir(backupsDir, 'PD update backups');
 
   if (existsSync(paths.activeRecordPath)) {
-    if (activeCorrupt) {
-      preserved.push('active.json (unreadable — kept for diagnosis)');
+    if (activeCorruptReason !== null) {
+      // §18 default-preservation: never delete an unreadable pointer. This is
+      // intentional (reclaimFailed stays false so install.json is still
+      // cleaned), so do NOT promise a retry — the file is evidence to remove by
+      // hand only if the operator is sure.
+      preserved.push(`active.json is unreadable (${activeCorruptReason}) — kept for diagnosis; remove it manually only if you are sure`);
     } else if (active !== null && existsSync(path.join(paths.releasesDir, active.releaseId))) {
-      // releases/ removal failed, so the pointer still resolves — keep it and
-      // its target together and let a re-run reclaim both.
-      preserved.push(`active.json (still points at releases/${active.releaseId})`);
+      // releases/ removal failed, so the pointer still resolves — keep pointer
+      // and target together so a re-run can reclaim both.
+      preserved.push(`active.json still points at releases/${active.releaseId} — kept with its target; re-run to reclaim both`);
     } else {
       try {
         await removeWithRetry(paths.activeRecordPath, 'file');
@@ -676,7 +673,7 @@ export async function uninstall(
       removedFiles: result.removedFiles,
     });
     if (residueReclaim.preservedNote) {
-      logger.warn(`Kept update residue for safety: ${residueReclaim.preservedNote}. Re-run uninstall to retry.`);
+      logger.warn(`Kept update residue for safety: ${residueReclaim.preservedNote}`);
     }
 
     if (runtimePlan.removeSharedRuntime && !sharedRuntimeRemovalFailed && !residueReclaim.reclaimFailed && existsSync(getInstallManifestPath())) {
