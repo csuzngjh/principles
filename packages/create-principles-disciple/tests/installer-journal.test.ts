@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { install } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
 import { setLanguage } from '../src/i18n.js';
@@ -43,7 +44,9 @@ vi.mock('../src/update/transaction-journal.js', async (importOriginal) => {
 const baseInstallOptions: InstallOptions = {
   language: 'en',
   mode: 'smart',
-  workspaceDir: '/tmp/pd-journal-test-ws',
+  // os.tmpdir(), not a literal '/tmp/...': install() refuses a POSIX-rooted
+  // workspace pointer on win32 before the journalled step under test runs.
+  workspaceDir: path.join(os.tmpdir(), 'pd-journal-test-ws'),
   channels: [],
   overwriteConfig: false,
   host: 'openclaw',

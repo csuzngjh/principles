@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { install, decideInstallPayloadMode, installGlobalPdShim, tryUpgradePdCliFromNpm } from '../src/installer.js';
 import { setLanguage } from '../src/i18n.js';
 import { logger } from '../src/utils/logger.js';
@@ -30,7 +31,9 @@ vi.mock('../src/utils/env.js', async (importOriginal) => {
 const baseInstallOptions: InstallOptions = {
   language: 'en',
   mode: 'smart',
-  workspaceDir: '/tmp/pd-test-ws',
+  // Not a literal '/tmp/...': install() refuses a POSIX-rooted workspace
+  // pointer on win32 (isUsableWorkspacePointer) before the form gate is reached.
+  workspaceDir: path.join(os.tmpdir(), 'pd-test-ws'),
   channels: [],
   overwriteConfig: false,
   host: 'openclaw',

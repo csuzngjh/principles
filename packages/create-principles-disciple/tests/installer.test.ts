@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import * as childProcess from 'child_process';
 import { validateWorkspacePath, verifyNativeModules, checkBuiltPlugin, ensureConversationAccess, install, resolveConsolePortBase } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
@@ -258,22 +259,13 @@ describe('ensureConversationAccess — PRI-343', () => {
 const baseInstallOptions: InstallOptions = {
   language: 'en',
   mode: 'smart',
-  workspaceDir: '/tmp/pd-test-ws',
+  // Not a literal '/tmp/...': install() refuses a POSIX-rooted workspace
+  // pointer on win32 (isUsableWorkspacePointer) before any step under test.
+  workspaceDir: path.join(os.tmpdir(), 'pd-test-ws'),
   channels: [],
   overwriteConfig: false,
   host: 'openclaw',
   stopGateway: false,
-};
-
-/**
- * The gateway cluster's shared fixture is a POSIX-shaped pointer, so on win32
- * the install entry refuses it BEFORE the gateway gate is reached. PRI-944's
- * real incident is a Windows one, so the stop-refusal tests below use a
- * workspace pointer usable on the running platform.
- */
-const gatewayInstallOptions: InstallOptions = {
-  ...baseInstallOptions,
-  workspaceDir: process.platform === 'win32' ? 'C:\\pd-test-ws' : '/tmp/pd-test-ws',
 };
 
 describe('install() gateway lock pre-flight', () => {
@@ -491,7 +483,7 @@ describe('install() gateway lock pre-flight', () => {
       error: 'openclaw gateway stop failed: x — verified for 30s: gateway port 18789 (pid 33584) is still listening, so the gateway did not stop',
     });
 
-    const result = await install({ ...gatewayInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+    const result = await install({ ...baseInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
 
     expect(result.success).toBe(false);
     expect(result.reason).toMatch(/^gateway_stop_failed:/);
@@ -509,7 +501,7 @@ describe('install() gateway lock pre-flight', () => {
       error: 'openclaw gateway stop failed: ETIMEDOUT — verified for 30s: the process was still running when the window expired',
     });
 
-    const result = await install({ ...gatewayInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+    const result = await install({ ...baseInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
 
     expect(result.success).toBe(false);
     expect(result.reason).toMatch(/^gateway_stop_failed:/);
@@ -528,7 +520,7 @@ describe('install() gateway lock pre-flight', () => {
       error: 'openclaw gateway stop failed: x — the gateway port was not observable, so its stopped state could not be verified',
     });
 
-    const result = await install({ ...gatewayInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+    const result = await install({ ...baseInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
 
     expect(result.success).toBe(false);
     expect(result.reason).toMatch(/^gateway_stop_failed:/);
@@ -544,7 +536,7 @@ describe('install() gateway lock pre-flight', () => {
     vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
     vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: true });
 
-    await install({ ...gatewayInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+    await install({ ...baseInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
 
     expect(stopOpenClawGateway).toHaveBeenCalledWith({ isRunning: true, port: 18789, pid: 33584 });
   });
