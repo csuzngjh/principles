@@ -334,7 +334,7 @@ describe('environment detection utilities', () => {
 
       const res = await stopOpenClawGateway(
         { isRunning: true, port: gw.port },
-        { sleep: noWait, processAlive: () => false, confirmTimeoutMs: 50, pollIntervalMs: 1 },
+        { sleep: noWait, processAlive: () => false, confirmTimeoutMs: 50 },
       );
 
       expect(res).toEqual({ ok: true });
@@ -347,7 +347,7 @@ describe('environment detection utilities', () => {
       try {
         const res = await stopOpenClawGateway(
           { isRunning: true, port: gw.port, pid: 4242 },
-          { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+          { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20 },
         );
 
         expect(res.ok).toBe(false);
@@ -366,7 +366,7 @@ describe('environment detection utilities', () => {
 
       const res = await stopOpenClawGateway(
         { isRunning: true, port: gw.port, pid: 4242 },
-        { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+        { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20 },
       );
 
       expect(res.ok).toBe(false);
@@ -381,7 +381,7 @@ describe('environment detection utilities', () => {
 
       const res = await stopOpenClawGateway(
         { isRunning: true, port: gw.port },
-        { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+        { sleep: noWait, processAlive: () => true, confirmTimeoutMs: 20 },
       );
 
       expect(res).toEqual({ ok: true });
@@ -620,7 +620,7 @@ describe('environment detection utilities', () => {
 
       const res = await win32Env.stopOpenClawGateway(
         { isRunning: true, port, pid: 4242 },
-        { sleep: async () => {}, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+        { sleep: async () => {}, confirmTimeoutMs: 20 },
       );
 
       expect(res).toEqual({ ok: true });
@@ -641,7 +641,7 @@ describe('environment detection utilities', () => {
 
       const res = await win32Env.stopOpenClawGateway(
         { isRunning: true, port, pid: 4242 },
-        { sleep: async () => {}, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+        { sleep: async () => {}, confirmTimeoutMs: 20 },
       );
 
       expect(res.ok).toBe(false);
@@ -661,7 +661,7 @@ describe('environment detection utilities', () => {
 
       const res = await win32Env.stopOpenClawGateway(
         { isRunning: true, port, pid: 4242 },
-        { sleep: async () => {}, confirmTimeoutMs: 20, pollIntervalMs: 1 },
+        { sleep: async () => {}, confirmTimeoutMs: 20 },
       );
 
       expect(res.ok).toBe(false);

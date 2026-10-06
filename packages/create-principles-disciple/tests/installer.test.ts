@@ -517,6 +517,25 @@ describe('install() gateway lock pre-flight', () => {
     expect(result.components).toEqual({ plugin: 'skipped', cli: 'skipped', console: 'skipped' });
   });
 
+  // An effect that could not be measured must NOT come back as "the gateway is
+  // probably still exiting" — that is a claim about a state we just said we
+  // could not observe. It keeps the manual-stop advice.
+  it('refuses with the manual-stop next action when the stopped effect could not be measured', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({
+      ok: false,
+      reason: 'verification_unavailable',
+      error: 'openclaw gateway stop failed: x — the gateway port was not observable, so its stopped state could not be verified',
+    });
+
+    const result = await install({ ...gatewayInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^gateway_stop_failed:/);
+    expect(result.nextAction).toBe(t('gateway_stop_failed_next'));
+    expect(result.components).toEqual({ plugin: 'skipped', cli: 'skipped', console: 'skipped' });
+  });
+
   // The refusal must be able to say WHERE it measured: the gate hands the
   // stop leg the pre-flight status it already paid for (port + pid), so the
   // effect check verifies against the gateway we saw, not a re-read config.

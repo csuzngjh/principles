@@ -3666,12 +3666,14 @@ export async function install(
         logger.error(`${t('gateway_stop_failed')} ${stopRes.error ?? ''}`);
         return buildGatewayRefusalResult(options, {
           reason: `gateway_stop_failed: ${t('gateway_stop_failed_reason')}${stopRes.error ? ` — ${stopRes.error}` : ''}`,
-          // PRI-944: only a verified still-running gateway warrants "go stop it
-          // by hand". An unconfirmed stop is a slow exit, and telling the Owner
-          // to fight a process that is already leaving is a false instruction.
-          nextAction: stopRes.reason === 'gateway_still_running'
-            ? t('gateway_stop_failed_next')
-            : t('gateway_stop_unconfirmed_next'),
+          // PRI-944: the instruction must match what was actually measured.
+          // A port that cleared while the process lingered is a slow exit, and
+          // telling the Owner to fight a process that is already leaving is a
+          // false instruction. Everything else — verified still running, or an
+          // effect we could not measure at all — keeps the manual-stop advice.
+          nextAction: stopRes.reason === 'stop_confirmation_timeout'
+            ? t('gateway_stop_unconfirmed_next')
+            : t('gateway_stop_failed_next'),
           error: stopRes.error,
         });
       }

@@ -362,9 +362,10 @@ function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlR
  * a `cmd.exe /c` wrapper whose 15s kill says nothing about the gateway, and the
  * service manager may keep shutting the process down after the wrapper dies.
  * The window is bounded and short because this gate already spent 15s on the
- * command; the timeout knob itself is deliberately NOT configurable (Owner
- * call on PRI-944: with the effect check in place the number loses decision
- * power, so a knob would only add governance cost).
+ * command. Neither number has an operator or config surface (Owner call on
+ * PRI-944: with the effect check in place the value loses decision power, so a
+ * knob would only add governance cost) — `GatewayStopConfirmationDeps` is a
+ * test seam, not a configuration channel.
  */
 const GATEWAY_STOP_CONFIRM_TIMEOUT_MS = 30_000;
 const GATEWAY_STOP_POLL_INTERVAL_MS = 1_000;
@@ -372,16 +373,17 @@ const GATEWAY_STOP_POLL_INTERVAL_MS = 1_000;
 /**
  * Is this PID still a live process?
  *
- * Deliberately NOT a copy of the two sibling probes
- * (`openclaw-plugin/src/utils/file-lock.ts`,
+ * Deliberately NOT a copy of the two sibling liveness probes
+ * (`openclaw-plugin/src/utils/file-lock.ts` and
  * `principles-core/src/principle-tree-ledger.ts`), which read ANY
- * `process.kill` failure as "dead". The OpenClaw gateway is a high-integrity
+ * `process.kill` failure as "dead". The sibling stop leg in
+ * `pd-console/src/server/utils/gateway.ts` decides by exit code alone and has
+ * no liveness probe to reuse. The OpenClaw gateway is a high-integrity
  * scheduled task on Windows, and a medium-IL installer that signals it gets
  * EPERM — which means ALIVE. A false "dead" here would confirm a stop that
  * never happened, so win32 asks the SCM read-only via tasklist and POSIX
  * separates ESRCH (gone) from every other error (exists, just not ours to
- * signal). Converging the three implementations belongs to its own ticket,
- * not to this fix.
+ * signal). Converging these probes belongs to its own ticket, not to this fix.
  */
 function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return true;
@@ -416,8 +418,8 @@ export interface GatewayStopConfirmationDeps {
   sleep?: (ms: number) => Promise<void>;
   /** Test seam: PID liveness — the host PID space is not deterministic in tests. */
   processAlive?: (pid: number) => boolean;
+  /** Test seam: the bounded window, so a refusal case costs milliseconds. */
   confirmTimeoutMs?: number;
-  pollIntervalMs?: number;
 }
 
 /**
@@ -432,7 +434,9 @@ export interface GatewayStopConfirmationDeps {
  * has a listener, and the process that held it has exited. When the pre-flight
  * could not resolve a PID, port-clear is the accepted truth and the backup
  * rename stays the terminal judge of handles (its EPERM path already refuses
- * with a structured reason and mutates nothing).
+ * with a structured reason and mutates nothing). Reaching this function at all
+ * means the pre-flight's loopback probe succeeded, so a gateway bound only to
+ * a non-loopback interface can never be misread as stopped from here.
  */
 async function confirmGatewayStopped(
   commandFailure: GatewayControlResult,
@@ -442,7 +446,6 @@ async function confirmGatewayStopped(
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const processAlive = deps.processAlive ?? isProcessAlive;
   const confirmTimeoutMs = deps.confirmTimeoutMs ?? GATEWAY_STOP_CONFIRM_TIMEOUT_MS;
-  const pollIntervalMs = deps.pollIntervalMs ?? GATEWAY_STOP_POLL_INTERVAL_MS;
 
   const rawError = commandFailure.error ?? 'openclaw gateway stop failed';
   const port = observed?.port;
@@ -462,7 +465,7 @@ async function confirmGatewayStopped(
       holderAlive = !listening && pid !== undefined && processAlive(pid);
       if (!listening && !holderAlive) return { ok: true };
       if (Date.now() >= deadline) break;
-      await sleep(pollIntervalMs);
+      await sleep(GATEWAY_STOP_POLL_INTERVAL_MS);
     }
     // ERR-144: classify from the LAST observation and say what was waited for.
     const waited = `${Math.round(confirmTimeoutMs / 1000)}s`;
