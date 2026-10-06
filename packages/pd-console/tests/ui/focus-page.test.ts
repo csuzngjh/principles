@@ -396,12 +396,12 @@ describe("FocusPage: artifactUnavailable validator contract (PRI-940)", () => {
 
 describe("FocusPage: unlinked machine-id title (PRI-941)", () => {
   // PRI-940 (#1922) closed the "pinned artifact is missing" path. A second path
-  // stays open: the artifact row EXISTS and is readable, but its contentJson
-  // yields no description and lineage cannot be resolved, so the grouping key
-  // degrades to `unlinked:<artifactId>` and artifactUnavailable is never set —
-  // the selector fell through to the machine id as the Owner-visible title.
+  // stays open: the artifact row EXISTS, so artifactUnavailable is never set,
+  // but it yields no description and lineage cannot be resolved, so the grouping
+  // key degrades to `unlinked:<artifactId>` and the selector fell through to the
+  // machine id as the Owner-visible title.
   // (Same shape the PRI-940 cr8 case seeds: content_json = '{}'.)
-  const readableUnlinkedGroup = {
+  const unlinkedGroupWithoutTitle = {
     candidateDescription: undefined,
     principleTitle: "unlinked:pi-art-scribe-x_prompt_3",
     artifactUnavailable: undefined,
@@ -411,25 +411,25 @@ describe("FocusPage: unlinked machine-id title (PRI-941)", () => {
     // The bare "unlinked" sentinel is written by a different model
     // (ActivationsConsoleModel) and surfaces on a different page; widening this
     // rule to cover it would change that page's visible text, so it stays out.
-    expect(selectApprovalGroupDisplayTitle({ ...readableUnlinkedGroup, principleTitle: "unlinked" }))
+    expect(selectApprovalGroupDisplayTitle({ ...unlinkedGroupWithoutTitle, principleTitle: "unlinked" }))
       .toBe("unlinked");
   });
 
-  it("title selection declines the machine id for a READABLE artifact (negative control: fails against the pre-fix chain)", () => {
-    expect(selectApprovalGroupDisplayTitle(readableUnlinkedGroup)).toBeUndefined();
+  it("title selection declines the machine id when the artifact row exists (negative control: fails against the pre-fix chain)", () => {
+    expect(selectApprovalGroupDisplayTitle(unlinkedGroupWithoutTitle)).toBeUndefined();
   });
 
   it("title selection still returns a real ledger title", () => {
     expect(
       selectApprovalGroupDisplayTitle({
-        ...readableUnlinkedGroup,
+        ...unlinkedGroupWithoutTitle,
         principleTitle: "先核验全集，再下否定性断言",
       }),
     ).toBe("先核验全集，再下否定性断言");
   });
 
-  it("untitled is explained, never silent (rc-9) — the unlinked note shows for a readable artifact", () => {
-    expect(showsUnlinkedCandidateNote(readableUnlinkedGroup)).toBe(true);
+  it("untitled is explained, never silent (rc-9) — the unlinked note shows when the artifact row exists", () => {
+    expect(showsUnlinkedCandidateNote(unlinkedGroupWithoutTitle)).toBe(true);
   });
 
   it("a candidate that did get a title is never warned about (negative control: fails against the first fix)", () => {
@@ -437,7 +437,7 @@ describe("FocusPage: unlinked machine-id title (PRI-941)", () => {
     // readable description. The card then shows that description as its title,
     // so the "no principle name" note would contradict it.
     const titledDespiteUnlinked = {
-      ...readableUnlinkedGroup,
+      ...unlinkedGroupWithoutTitle,
       candidateDescription: "先核验全集，再下否定性断言",
     };
     expect(selectApprovalGroupDisplayTitle(titledDespiteUnlinked))
@@ -446,7 +446,7 @@ describe("FocusPage: unlinked machine-id title (PRI-941)", () => {
   });
 
   it("the two degradation notes are mutually exclusive — artifactUnavailable keeps its own copy", () => {
-    expect(showsUnlinkedCandidateNote({ ...readableUnlinkedGroup, artifactUnavailable: true })).toBe(false);
+    expect(showsUnlinkedCandidateNote({ ...unlinkedGroupWithoutTitle, artifactUnavailable: true })).toBe(false);
   });
 
   it("healthy group shows no degradation note", () => {
@@ -457,6 +457,44 @@ describe("FocusPage: unlinked machine-id title (PRI-941)", () => {
         artifactUnavailable: undefined,
       }),
     ).toBe(false);
+  });
+});
+
+// ── PRI-941: the note arm's wiring, asserted the way this suite can ─────────
+// No jsdom here, but the suite already pins render sites by reading the page
+// source (PRI-889/PRI-787 above, PRI-447 in approval-edit-action.test.ts). The
+// selector unit tests above stay green even if the page stops calling the
+// helper or misspells the copy key, so those two facts get their own assertions.
+
+describe("FocusPage: unlinked note wiring contract (PRI-941)", () => {
+  it("renders the note through the derived flag, not a one-off condition", () => {
+    const src = fs.readFileSync(
+      nodePath.resolve(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"), "utf-8");
+    expect(src).toContain("const unlinkedCandidateNote = showsUnlinkedCandidateNote(group);");
+    expect(src).toContain("{unlinkedCandidateNote && (");
+  });
+
+  it("resolves the note copy through a key that exists in both languages", () => {
+    const src = fs.readFileSync(
+      nodePath.resolve(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"), "utf-8");
+    expect(src).toContain('t("pages.focus.unlinkedCandidateNote")');
+    for (const file of ["../../src/ui/i18n/en.json", "../../src/ui/i18n/zh-CN.json"]) {
+      const value = getOwnString(loadFocusI18n(file), "unlinkedCandidateNote");
+      expect(typeof value, file).toBe("string");
+      expect((value ?? "").length, file).toBeGreaterThan(10);
+    }
+  });
+
+  it("renders the title only through the display rule, never the grouping key", () => {
+    const src = fs.readFileSync(
+      nodePath.resolve(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"), "utf-8");
+    // Regression guard for the render site, not a pre-fix negative control: the
+    // leak itself was inside the selector (see the control above, which does go
+    // red against origin/main). A direct `group.principleTitle` render here
+    // would bypass that rule entirely and put `unlinked:pi-art-…` back on the
+    // card, so this pins that the title comes from the selector only.
+    expect(src).not.toMatch(/\{\s*group\.principleTitle\s*\}/);
+    expect(src).toContain("{displayTitle}");
   });
 });
 

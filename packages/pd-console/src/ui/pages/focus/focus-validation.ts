@@ -146,13 +146,16 @@ function isUnlinkedSyntheticPrincipleTitle(title: string): boolean {
  * for that case so the caller falls back to the localized untitled copy; the
  * degradation itself is explained by the artifactUnavailable note, not here.
  *
- * PRI-941 closes the second path to the same key: the artifact row is readable,
- * so `artifactUnavailable` is never set, yet its content carries no extractable
- * description and lineage cannot be resolved. The grouping key — and therefore
- * `principleTitle` — is still the machine id, so the prefix check guards the
- * render rule itself rather than relying on one flag. A ledger read failure that
- * empties the title map makes EVERY unmapped group reach this branch, which is
- * why the format check, not the flag, is the authority here.
+ * PRI-941 closes the second path to the same key: the artifact row exists, so
+ * `artifactUnavailable` is never set, yet it yields no description and its
+ * lineage still cannot be resolved. The grouping key — and therefore
+ * `principleTitle` — is the machine id either way, so the prefix check guards
+ * the render rule itself instead of relying on one producer's flag.
+ *
+ * What this predicate cannot catch: the prefix only marks unresolved lineage.
+ * When the ledger read fails, groups whose lineage DID resolve fall back to a
+ * bare principle UUID (`principleTitles.get(id) ?? id`), which renders as a
+ * machine id with no note — recorded as a follow-up, not papered over here.
  */
 export function selectApprovalGroupDisplayTitle(
   group: Pick<ApprovalGroup, "candidateDescription" | "principleTitle" | "artifactUnavailable">,
@@ -167,11 +170,11 @@ export function selectApprovalGroupDisplayTitle(
 /**
  * PRI-941: an untitled card must say why (rc-9 — degradation may not be silent).
  * The artifactUnavailable copy already covers "the draft artifact is gone"; this
- * is the other reason the title ends up empty: the artifact is readable, but its
- * grouping key never resolved to a principle. Derived from the title rule itself
- * so the note can never contradict a title the card actually managed to show —
- * a readable candidate whose description extracted fine keeps its title and gets
- * no warning.
+ * is the other reason the title ends up empty: the artifact row exists but
+ * yields no description, and its grouping key never resolved to a principle.
+ * Derived from the title rule itself so the note can never contradict a title
+ * the card actually managed to show — a candidate whose description extracted
+ * fine keeps its title and gets no warning.
  */
 export function showsUnlinkedCandidateNote(
   group: Pick<ApprovalGroup, "candidateDescription" | "principleTitle" | "artifactUnavailable">,

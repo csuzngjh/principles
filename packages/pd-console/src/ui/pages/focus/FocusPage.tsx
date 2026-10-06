@@ -567,8 +567,8 @@ function PendingReviewCard({
         </div>
       )}
 
-      {/* PRI-941: readable artifact, no extractable description, lineage
-          unresolved — the title is empty for a different reason, so say which
+      {/* PRI-941: the artifact exists but yields no description and its lineage
+          is unresolved — the title is empty for a different reason, so say which
           one. Mutually exclusive with the note above by construction. */}
       {unlinkedCandidateNote && (
         <div

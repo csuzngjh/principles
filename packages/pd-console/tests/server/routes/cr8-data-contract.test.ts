@@ -15,6 +15,14 @@ import { handleActivationsRoute, disposeActivationsModels } from '../../../src/s
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from '../../../src/server/routes/approvals-grouped.js';
 import { handleGovernanceRoute, disposeGovernanceModels } from '../../../src/server/routes/governance.js';
 import { sendJson, sendNotFound } from '../../../src/server/utils/response.js';
+// PRI-941: the consumer end of the grouped payload. This module is deliberately
+// React-free ("contract tests need not load the page"), so the route contract
+// can assert what the card actually displays.
+import {
+  selectApprovalGroupDisplayTitle,
+  showsUnlinkedCandidateNote,
+  validateApprovalsGroupedData,
+} from '../../../src/ui/pages/focus/focus-validation.js';
 
 // ── Runtime guards (no `as` on untrusted data) ─────────────────────────────
 
@@ -550,6 +558,34 @@ describe('CR8 Backend Data Contract Routes', () => {
       );
       expect(group).toBeDefined();
       expect(Object.hasOwn(group!, 'artifactUnavailable')).toBe(false);
+    });
+
+    it('PRI-941: the card title rule declines the synthesized key from the REAL payload', async () => {
+      // The two cases above prove what the server SENDS. They cannot prove the
+      // Owner-facing card refuses to render it: the display rule matches the
+      // `unlinked:` prefix, and if the producer's format ever changed, both
+      // wire assertions would still pass while the machine id reappeared as a
+      // title. So run the actual production chain — seeded rows → route →
+      // page-local validator → page display selectors — and assert the leak
+      // path is closed at the consumer end.
+      const artifactId = `artifact-unlinked-display-${Date.now()}`;
+      seedArtifact(artifactId, null);
+      seedApproval('prompt', 'pending', artifactId);
+
+      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      expect(status).toBe(200);
+
+      const validated = validateApprovalsGroupedData(getDataObject(body));
+      expect(validated).not.toBeNull();
+
+      const group = validated!.groups.find(
+        (g) => g.principleId === `unlinked:${artifactId}`,
+      );
+      expect(group).toBeDefined();
+      // No Owner-visible string may be the grouping key…
+      expect(selectApprovalGroupDisplayTitle(group!)).toBeUndefined();
+      // …and the gap is explained instead of silent (rc-9).
+      expect(showsUnlinkedCandidateNote(group!)).toBe(true);
     });
   });
 
