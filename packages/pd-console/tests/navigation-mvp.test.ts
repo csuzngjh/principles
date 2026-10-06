@@ -34,6 +34,76 @@ function extractAppRoutes(src: string): Map<string, string> {
   return routes;
 }
 
+/**
+ * PRI-942: literal navigation targets found anywhere in the console UI.
+ *
+ * Read forms: `to="/x"`, `to={"/x"}`, `to={'/x'}`, `to={`/x`}` — the backtick
+ * form is already in use (`FocusPage.tsx` `/activation`), so a guard that read
+ * only double quotes would keep promising coverage it does not have. The capture
+ * stops at the matching quote, so the other two quote characters are legal
+ * inside a target.
+ *
+ * An interpolated target is read down to its STATIC PREFIX: `to={`/x/${id}`}`
+ * still says "this link lives under /x", and /x is precisely the part a typo can
+ * corrupt. Exempting such a link wholesale is how `to={`/failed-taskz?taskId=${x}`}`
+ * would read as "dynamic, nothing to check".
+ *
+ * NOT read: a `to=` whose value is an expression that merely CONTAINS a literal —
+ * the ternary in `OwnerDecisionCard.tsx:377-381` (`to={cond ? `/x` : "/principles"}`)
+ * is skipped along with its literal arm, because separating arms from a JSX
+ * expression is parsing, not scanning. Every link the console writes today other
+ * than that one puts its path directly after `to=`, which is what this guard sees.
+ */
+const LINK_TARGET_REGEX = /\bto=\s*\{?\s*(["'`])(.*?)\1/g;
+
+function collectLiteralLinkTargets(dir: string): { file: string; to: string; dynamic: boolean }[] {
+  const found: { file: string; to: string; dynamic: boolean }[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...collectLiteralLinkTargets(full));
+      continue;
+    }
+    if (!/\.(tsx|ts)$/.test(entry.name)) continue;
+    const src = fs.readFileSync(full, 'utf-8');
+    let m;
+    while ((m = LINK_TARGET_REGEX.exec(src)) !== null) {
+      const dollar = m[2].indexOf('${');
+      const dynamic = dollar !== -1;
+      const staticPart = dynamic ? m[2].slice(0, dollar) : m[2];
+      // strip query string / hash fragment: they never participate in routing
+      const target = staticPart.split(/[?#]/)[0];
+      // in-app route only — a protocol-relative `//host` is not one
+      if (target.startsWith('/') && !target.startsWith('//')) {
+        found.push({ file: path.relative(UI_SRC, full).replace(/\\/g, '/'), to: target, dynamic });
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Route-table matching.
+ *
+ * Static target: must line up with a registered route one segment at a time,
+ * where a `:param` accepts any single non-empty segment.
+ *
+ * Interpolated prefix (`dynamic`): only the part before the first `${` is known,
+ * so it is matched as a PREFIX — the link is dead only when NO registered route
+ * could ever begin with it. A prefix ending in `/` contributes no segment of its
+ * own (the interpolation supplies it), which is why `/principles/` has to line up
+ * with `/principles/:id` and must not be failed for lack of a bare `/principles/`.
+ */
+function isRegisteredRoute(target: string, routes: Map<string, string>, dynamic: boolean): boolean {
+  const parts = target.split('/').filter(Boolean);
+  for (const pattern of routes.keys()) {
+    const patternParts = pattern.split('/').filter(Boolean);
+    if (patternParts.length < parts.length || (!dynamic && patternParts.length !== parts.length)) continue;
+    if (patternParts.slice(0, parts.length).every((seg, i) => seg.startsWith(':') || seg === parts[i])) return true;
+  }
+  return false;
+}
+
 describe('Console Rebuild Navigation — CR2', () => {
   describe('Sidebar primary navigation', () => {
     let sidebarSrc: string;
@@ -145,6 +215,74 @@ describe('Console Rebuild Navigation — CR2', () => {
 
     it('/debt renders DebtPage', () => {
       expect(appRoutes.get('/debt')).toBe('DebtPage');
+    });
+  });
+
+  describe('Literal link targets (PRI-942)', () => {
+    let routes: Map<string, string>;
+    let targets: { file: string; to: string; dynamic: boolean }[];
+
+    beforeAll(() => {
+      routes = extractAppRoutes(readFile(APP_PATH));
+      targets = collectLiteralLinkTargets(UI_SRC);
+    });
+
+    it('the scanner sees the in-product links, not an empty set', () => {
+      const unique = new Set(targets.map((t) => `${t.file} -> ${t.to}`));
+      expect(unique.has('pages/focus/FocusPage.tsx -> /pain')).toBe(true);
+      expect(
+        unique.has('pages/principles/PrincipleDetailPage.tsx -> /pain'),
+      ).toBe(true);
+      expect(targets.length).toBeGreaterThanOrEqual(10);
+    });
+
+    it('covers the backtick form, not just double quotes (negative control: fails against a double-quote-only scanner)', () => {
+      // FocusPage.tsx writes this one in `to={`/activation`}`, so a scanner that
+      // read only to="…" would silently exempt half the codebase's idiom.
+      expect(
+        new Set(targets.map((t) => `${t.file} -> ${t.to}`)).has(
+          'pages/focus/FocusPage.tsx -> /activation',
+        ),
+      ).toBe(true);
+    });
+
+    it('covers the static prefix of an interpolated link (negative control: fails when such a link is skipped as dynamic)', () => {
+      // OwnerDecisionCard.tsx:236 writes this one as
+      // `to={`/failed-tasks?taskId=${…}`}`. A scanner that exempted anything with
+      // `${` would never look at that path, so a typo in it — /failed-taskz —
+      // would stay invisible to the guard below.
+      expect(
+        new Set(targets.map((t) => `${t.file} -> ${t.to}`)).has(
+          'pages/focus/OwnerDecisionCard.tsx -> /failed-tasks',
+        ),
+      ).toBe(true);
+    });
+
+    it('every literal link target resolves to a registered route (negative control: /evidence fails here)', () => {
+      const dead = targets.filter((t) => !isRegisteredRoute(t.to, routes, t.dynamic));
+      expect(
+        dead.map((d) => `${d.file}: to="${d.to}"`),
+        'unregistered literal navigation target',
+      ).toEqual([]);
+    });
+
+    it('the prefix rule rejects an unknown static prefix instead of waving it through', () => {
+      // The two halves of the rule above, pinned with synthetic paths so the
+      // repo-wide assertion cannot be satisfied by "dynamic ⇒ skip": an
+      // interpolated link whose prefix matches nothing must still be dead, and a
+      // trailing `/` before the interpolation must not be read as a segment.
+      expect(isRegisteredRoute('/failed-taskz/', routes, true)).toBe(false);
+      expect(isRegisteredRoute('/principles/', routes, true)).toBe(true);
+    });
+
+    it('the guard is not carried by the outer /* fallback route', () => {
+      // App.tsx wraps the console in <Route path="/*"> whose element is a
+      // conditional, so extractAppRoutes never records it; the inner <Routes> has
+      // no wildcard of its own, which is why an unmatched path renders chrome with
+      // an empty <main>. If a wildcard that carries an element ever entered the
+      // table, this guard would pass every dead link — so its absence is asserted.
+      expect(routes.has('/*')).toBe(false);
+      expect(routes.has('*')).toBe(false);
     });
   });
 

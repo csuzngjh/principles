@@ -26,7 +26,7 @@ import type {
 } from "../../api.js";
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
 import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
-import { selectApprovalGroupDisplayTitle, validateApprovalsGroupedData } from "./focus-validation.js";
+import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
 import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
 
@@ -381,12 +381,12 @@ function PendingReviewCard({
 
   // Display title: prefer candidateDescription (human-readable) over principleTitle
   // (which falls back to a fabricated principleId when the principle isn't in ledger).
-  // PRI-940: the selection rule lives in focus-validation (contract-tested) —
-  // when the pinned artifact is missing, principleTitle IS the machine id
-  // (`unlinked:<artifactId>`) and must fall through to the untitled copy; the
-  // degradation note below explains why there is no content.
+  // The selection rule and each degradation reason live in focus-validation
+  // (PRI-940 / PRI-941, contract-tested); the mutually exclusive notes below say
+  // why a particular card has no title.
   const displayTitle = selectApprovalGroupDisplayTitle(group)
     ?? t("pages.focus.untitledCandidate", { defaultValue: "待命名候选原则" });
+  const unlinkedCandidateNote = showsUnlinkedCandidateNote(group);
 
   async function applyDecisionToAllRecords(
     action: "approve" | "reject",
@@ -557,13 +557,25 @@ function PendingReviewCard({
 
       {/* PRI-940: the pinned artifact is gone — degradation must be visible (rc-9),
           not a silently blank card; the raw artifact ID stays reachable via the
-          full-chain view for traceability. */}
+          edit section's current-artifact field for traceability. */}
       {group.artifactUnavailable === true && (
         <div
           className="mb-2 text-[12.5px] leading-relaxed text-amber"
           data-testid={`artifact-unavailable-${group.principleId}`}
         >
           {t("pages.focus.artifactUnavailableNote")}
+        </div>
+      )}
+
+      {/* PRI-941: the artifact exists but yields no description and its lineage
+          is unresolved — the title is empty for a different reason, so say which
+          one. Mutually exclusive with the note above by construction. */}
+      {unlinkedCandidateNote && (
+        <div
+          className="mb-2 text-[12.5px] leading-relaxed text-amber"
+          data-testid={`unlinked-candidate-${group.principleId}`}
+        >
+          {t("pages.focus.unlinkedCandidateNote")}
         </div>
       )}
 
@@ -648,8 +660,9 @@ function PendingReviewCard({
         >
           {t("pages.focus.rejectAction", { defaultValue: "拒绝" })}
         </button>
+        {/* PRI-942: /pain is the only page rendering the evidence chain. */}
         <Link
-          to="/evidence"
+          to="/pain"
           className="inline-flex items-center text-gov text-[12.5px] hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
           {t("pages.focus.viewFullChain")}
