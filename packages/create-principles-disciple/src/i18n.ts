@@ -102,6 +102,7 @@ const translations: Record<Language, Record<string, string>> = {
     gateway_aborted_next: 'Stop it (openclaw gateway stop) or re-run with --stop-gateway.',
     gateway_stop_failed_reason: 'Could not auto-stop the OpenClaw gateway.',
     gateway_stop_failed_next: 'Stop it manually (openclaw gateway stop) and re-run, or re-run with --stop-gateway.',
+    gateway_stop_unconfirmed_next: 'The gateway may still be exiting — wait a moment and re-run; the existing install was not modified.',
     gateway_proceed_warn: 'Proceeding anyway — file-lock failure (EPERM) is likely. Stop the gateway and re-run if it fails.',
     // Install failure / rollback result strings (catch block). EP-11.
     rollback_no_changes: 'No changes were made — the existing install was not modified (no backup was created).',
@@ -221,6 +222,7 @@ const translations: Record<Language, Record<string, string>> = {
     gateway_aborted_next: '请停止它（openclaw gateway stop）或用 --stop-gateway 重新运行。',
     gateway_stop_failed_reason: '无法自动停止 OpenClaw gateway。',
     gateway_stop_failed_next: '请手动停止（openclaw gateway stop）后重新运行，或用 --stop-gateway 重新运行。',
+    gateway_stop_unconfirmed_next: '网关可能正在退出中 —— 请稍候片刻后重新运行；现有安装未被修改。',
     gateway_proceed_warn: '强行继续 —— 很可能因文件锁失败 (EPERM)。若失败请停止 gateway 后重新运行。',
     // 安装失败 / 回滚结果字符串（catch 块）。EP-11。
     rollback_no_changes: '未做任何改动 —— 现有安装未被修改（未创建备份）。',

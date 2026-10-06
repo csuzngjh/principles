@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as childProcess from 'child_process';
 import { validateWorkspacePath, verifyNativeModules, checkBuiltPlugin, ensureConversationAccess, install, resolveConsolePortBase } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
-import { setLanguage } from '../src/i18n.js';
+import { setLanguage, t } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
 import { productIdentityStampJson } from './helpers/payload-identity.js';
 
@@ -265,6 +265,17 @@ const baseInstallOptions: InstallOptions = {
   stopGateway: false,
 };
 
+/**
+ * The gateway cluster's shared fixture is a POSIX-shaped pointer, so on win32
+ * the install entry refuses it BEFORE the gateway gate is reached. PRI-944's
+ * real incident is a Windows one, so the stop-refusal tests below use a
+ * workspace pointer usable on the running platform.
+ */
+const gatewayInstallOptions: InstallOptions = {
+  ...baseInstallOptions,
+  workspaceDir: process.platform === 'win32' ? 'C:\\pd-test-ws' : '/tmp/pd-test-ws',
+};
+
 describe('install() gateway lock pre-flight', () => {
   // Pin English so string assertions on operator-visible failure text are
   // deterministic (the catch block now routes through t()).
@@ -464,6 +475,78 @@ describe('install() gateway lock pre-flight', () => {
     expect(result.success).toBe(false);
     expect(result.gatewayNotice).toBeUndefined();
     expect(restartOpenClawGateway).toHaveBeenCalledTimes(1);
+  });
+
+  // PRI-944 cli-7 gap: this refusal branch had NO installer-level test at all
+  // (every gateway test mocked ok:true). The stop now comes back classified, and
+  // the operator instruction must follow the class: a verified-still-running
+  // gateway means "go stop it by hand"; an unconfirmed stop means "wait and
+  // retry" — telling the Owner to manually stop a gateway that already exited
+  // is a lie about their machine.
+  it('refuses with the manual-stop next action when the gateway is verified still running', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({
+      ok: false,
+      reason: 'gateway_still_running',
+      error: 'openclaw gateway stop failed: x — verified for 30s: gateway port 18789 (pid 33584) is still listening, so the gateway did not stop',
+    });
+
+    const result = await install({ ...gatewayInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^gateway_stop_failed:/);
+    expect(result.nextAction).toBe(t('gateway_stop_failed_next'));
+    // cli-5: refused before mutating anything.
+    expect(result.components).toEqual({ plugin: 'skipped', cli: 'skipped', console: 'skipped' });
+    expect(fs.renameSync).not.toHaveBeenCalled();
+  });
+
+  it('refuses with a retry (not manual-stop) next action when the stop is merely unconfirmed', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({
+      ok: false,
+      reason: 'stop_confirmation_timeout',
+      error: 'openclaw gateway stop failed: ETIMEDOUT — verified for 30s: the process was still running when the window expired',
+    });
+
+    const result = await install({ ...gatewayInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^gateway_stop_failed:/);
+    expect(result.nextAction).toBe(t('gateway_stop_unconfirmed_next'));
+    expect(result.components).toEqual({ plugin: 'skipped', cli: 'skipped', console: 'skipped' });
+  });
+
+  // An effect that could not be measured must NOT come back as "the gateway is
+  // probably still exiting" — that is a claim about a state we just said we
+  // could not observe. It keeps the manual-stop advice.
+  it('refuses with the manual-stop next action when the stopped effect could not be measured', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({
+      ok: false,
+      reason: 'verification_unavailable',
+      error: 'openclaw gateway stop failed: x — the gateway port was not observable, so its stopped state could not be verified',
+    });
+
+    const result = await install({ ...gatewayInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^gateway_stop_failed:/);
+    expect(result.nextAction).toBe(t('gateway_stop_failed_next'));
+    expect(result.components).toEqual({ plugin: 'skipped', cli: 'skipped', console: 'skipped' });
+  });
+
+  // The refusal must be able to say WHERE it measured: the gate hands the
+  // stop leg the pre-flight status it already paid for (port + pid), so the
+  // effect check verifies against the gateway we saw, not a re-read config.
+  it('passes the observed gateway status to the stop leg', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
+    vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: true });
+
+    await install({ ...gatewayInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
+
+    expect(stopOpenClawGateway).toHaveBeenCalledWith({ isRunning: true, port: 18789, pid: 33584 });
   });
 
   // ERR-046 / rc-9: when install fails before a backup is created, the result

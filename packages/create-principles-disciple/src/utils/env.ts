@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
+import { errnoCode } from './config-file-io.js';
 
 export interface EnvCheckResult {
   hasOpenClaw: boolean;
@@ -294,9 +295,25 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
   return { isRunning: true, port, pid };
 }
 
+/**
+ * PRI-944: the classified truth behind a failed `gateway stop`. A command
+ * failure and an unproven effect are different statements and must not share
+ * one operator instruction (ERR-144: a bounded wait says something about TIME,
+ * never about the data; ERR-03-family rc-9: degradation carries a reason).
+ */
+export type GatewayStopFailure =
+  /** The listener survived the window: the gateway did not stop. */
+  | 'gateway_still_running'
+  /** The port cleared but the observed process did not exit in time. */
+  | 'stop_confirmation_timeout'
+  /** The effect could not be measured at all — refused rather than assumed. */
+  | 'verification_unavailable';
+
 export interface GatewayControlResult {
   ok: boolean;
   error?: string;
+  /** Set on the stop leg whenever ok=false. */
+  reason?: GatewayStopFailure;
 }
 
 /**
@@ -340,16 +357,166 @@ function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlR
 }
 
 /**
+ * PRI-944 effect-verification budget for the stop leg. A failed or timed-out
+ * `gateway stop` is not the end of the story: on Windows the command runs under
+ * a `cmd.exe /c` wrapper whose 15s kill says nothing about the gateway, and the
+ * service manager may keep shutting the process down after the wrapper dies.
+ * The window is bounded and short because this gate already spent 15s on the
+ * command. Neither number has an operator or config surface (Owner call on
+ * PRI-944: with the effect check in place the value loses decision power, so a
+ * knob would only add governance cost) — `GatewayStopConfirmationDeps` is a
+ * test seam, not a configuration channel.
+ */
+const GATEWAY_STOP_CONFIRM_TIMEOUT_MS = 30_000;
+const GATEWAY_STOP_POLL_INTERVAL_MS = 1_000;
+
+/**
+ * Is this PID still a live process?
+ *
+ * Deliberately NOT a copy of the two sibling liveness probes
+ * (`openclaw-plugin/src/utils/file-lock.ts` and
+ * `principles-core/src/principle-tree-ledger.ts`), which read ANY
+ * `process.kill` failure as "dead". The sibling stop leg in
+ * `pd-console/src/server/utils/gateway.ts` decides by exit code alone and has
+ * no liveness probe to reuse. The OpenClaw gateway is a high-integrity
+ * scheduled task on Windows, and a medium-IL installer that signals it gets
+ * EPERM — which means ALIVE. A false "dead" here would confirm a stop that
+ * never happened, so win32 asks the SCM read-only via tasklist and POSIX
+ * separates ESRCH (gone) from every other error (exists, just not ours to
+ * signal). Converging these probes belongs to its own ticket, not to this fix.
+ */
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  if (IS_WIN32) {
+    try {
+      // ERR-045: the validated integer pid travels as an argv element, never
+      // inside a shell string.
+      const output = execFileSync('tasklist.exe', ['/NH', '/FI', `PID eq ${pid}`], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        windowsHide: true,
+      });
+      // Column-order-agnostic: an image name can contain spaces, so match the
+      // pid as one whitespace-delimited field rather than trusting a position.
+      return output.split(/\r?\n/).some((line) => line.split(/\s+/).includes(String(pid)));
+    } catch {
+      return true; // an unreadable probe never reads as "the gateway exited"
+    }
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // ERR-126: reuses the package's existing errno reader (config-file-io)
+    // rather than a third inline cast. Only ESRCH means "gone".
+    return errnoCode(error) !== 'ESRCH';
+  }
+}
+
+export interface GatewayStopConfirmationDeps {
+  /** Test seam: backoff between effect probes (PRI-924 apply-payload precedent). */
+  sleep?: (ms: number) => Promise<void>;
+  /** Test seam: PID liveness — the host PID space is not deterministic in tests. */
+  processAlive?: (pid: number) => boolean;
+  /** Test seam: the bounded window, so a refusal case costs milliseconds. */
+  confirmTimeoutMs?: number;
+}
+
+/**
+ * Decide the stop by its EFFECT instead of by the wrapper's exit code
+ * (PRI-944, real incident: a signed-channel update was voided at `verified`
+ * because `spawnSync cmd.exe ETIMEDOUT` was read as "the gateway refused to
+ * stop" — a verdict the wrapper is not entitled to give, and the same gate
+ * passed minutes later on a retry without anyone touching the gateway).
+ *
+ * The goal of stopping is that nothing holds the extension directory any more,
+ * so the two things that must both be true are: the observed port no longer
+ * has a listener, and the process that held it has exited. When the pre-flight
+ * could not resolve a PID, port-clear is the accepted truth and the backup
+ * rename stays the terminal judge of handles (its EPERM path already refuses
+ * with a structured reason and mutates nothing). Reaching this function at all
+ * means the pre-flight's loopback probe succeeded, so a gateway bound only to
+ * a non-loopback interface can never be misread as stopped from here.
+ */
+async function confirmGatewayStopped(
+  commandFailure: GatewayControlResult,
+  observed: OpenClawGatewayStatus | undefined,
+  deps: GatewayStopConfirmationDeps = {},
+): Promise<GatewayControlResult> {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const processAlive = deps.processAlive ?? isProcessAlive;
+  const confirmTimeoutMs = deps.confirmTimeoutMs ?? GATEWAY_STOP_CONFIRM_TIMEOUT_MS;
+
+  const rawError = commandFailure.error ?? 'openclaw gateway stop failed';
+  const port = observed?.port;
+  if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0 || port >= 65536) {
+    // No observable to verify against: keep the command's own error and refuse.
+    // Assuming "stopped" here would be the fail-open this ticket exists to kill.
+    return { ok: false, reason: 'verification_unavailable', error: `${rawError} — the gateway port was not observable, so its stopped state could not be verified` };
+  }
+  const pid = observed?.pid;
+
+  try {
+    let listening = true;
+    let holderAlive = false;
+    const deadline = Date.now() + confirmTimeoutMs;
+    for (;;) {
+      listening = await checkPortListening(port);
+      holderAlive = !listening && pid !== undefined && processAlive(pid);
+      if (!listening && !holderAlive) return { ok: true };
+      if (Date.now() >= deadline) break;
+      await sleep(GATEWAY_STOP_POLL_INTERVAL_MS);
+    }
+    // ERR-144: classify from the LAST observation and say what was waited for.
+    const waited = `${Math.round(confirmTimeoutMs / 1000)}s`;
+    const subject = `gateway port ${port}${pid !== undefined ? ` (pid ${pid})` : ''}`;
+    if (listening) {
+      return {
+        ok: false,
+        reason: 'gateway_still_running',
+        error: `${rawError} — verified for ${waited}: ${subject} is still listening, so the gateway did not stop`,
+      };
+    }
+    return {
+      ok: false,
+      reason: 'stop_confirmation_timeout',
+      error: `${rawError} — verified for ${waited}: ${subject} stopped accepting connections but its process was still running when the window expired. This is a statement about time, not a refusal; the gateway may still be exiting`,
+    };
+  } catch (error) {
+    // rc-9: a broken probe degrades to an explicit refusal, never to a crash
+    // and never to an assumed success.
+    const msg = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: 'verification_unavailable', error: `${rawError} — stopped-state verification itself failed: ${msg}` };
+  }
+}
+
+/**
  * Stop the OpenClaw gateway service. Call before mutating the plugin ext dir
  * to release file locks held on native modules (EPERM on backup rename).
+ *
+ * `observed` is the pre-flight state the caller already measured
+ * (`checkOpenClawGateway()`), and it is what makes the effect check honest:
+ * verifying against the port we just saw listening cannot be fooled by an
+ * unreadable `openclaw.json`, which `checkOpenClawGateway()` itself reports as
+ * `isRunning:false`.
  */
-export async function stopOpenClawGateway(): Promise<GatewayControlResult> {
-  return runGatewayServiceCommand('stop');
+export async function stopOpenClawGateway(
+  observed?: OpenClawGatewayStatus,
+  deps?: GatewayStopConfirmationDeps,
+): Promise<GatewayControlResult> {
+  const command = runGatewayServiceCommand('stop');
+  if (command.ok) return command;
+  return confirmGatewayStopped(command, observed, deps);
 }
 
 /**
  * Start the OpenClaw gateway service (inverse of stopOpenClawGateway). Called
  * after install completes (success or failure) to leave the gateway running.
+ *
+ * Left on the exit-code contract on purpose (PRI-944 scope): its failure is a
+ * notification, not a gate, and a cold start here measures in minutes on real
+ * machines — a bounded effect check would turn a slow boot into a new false
+ * alarm while blocking the install's finally path.
  */
 export async function restartOpenClawGateway(): Promise<GatewayControlResult> {
   return runGatewayServiceCommand('start');
