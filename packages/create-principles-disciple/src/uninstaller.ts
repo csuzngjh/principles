@@ -23,9 +23,10 @@ import { execFileSync } from 'child_process';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
-import { getGlobalShimPaths, getInstalledBinDir, getPdRuntimeDir, getInstallManifestPath, isWindows } from './mvp-config.js';
+import { getGlobalShimPaths, getInstalledBinDir, getPdRuntimeDir, getPdDir, getPdRuntimeBackupsDir, getInstallManifestPath, isWindows } from './mvp-config.js';
 import { parseInstallManifest } from '@principles/install-layout';
-import { mergeIntoInstallJson } from './update/install-layout.js';
+import { mergeIntoInstallJson, resolvePdHomePaths } from './update/install-layout.js';
+import { readActiveRecord, type ActiveRecord } from './update/transaction-journal.js';
 import { setLanguage, t, getLanguage } from './i18n.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostUninstallContext, HostUninstallResult } from '@principles/core/host';
@@ -384,6 +385,97 @@ async function removeWithRetry(targetPath: string, _type: 'dir' | 'file'): Promi
   }
 }
 
+/**
+ * PRI-894 / PRI-895: on a full shared-runtime teardown (the last host being
+ * uninstalled), reclaim the update residue under ~/.pd that the old flow left
+ * behind: staging/, releases/ and backups/ (a GB-scale disk leak) plus a
+ * dangling active.json pointing at a release that no longer exists.
+ *
+ * This is a §18 destructive path, so deletion is bounded to what can be PROVEN
+ * safe: it runs only for a full teardown after the runtime dir itself is gone
+ * (a partial uninstall or a locked runtime preserves everything); it removes
+ * exactly those three hardcoded directories and never a glob of ~/.pd/* (so
+ * transactions/ logs/ trust/ channels/ bootstrap/ stay untouched); it deletes
+ * active.json last and only when readable with a target that is already gone;
+ * and every removal is failure-open — a locked path lands in deleteErrors
+ * (result.success=false) and install.json is kept so a re-run can retry.
+ */
+async function reclaimSharedRuntimeResidue(params: {
+  removeSharedRuntime: boolean;
+  sharedRuntimeRemovalFailed: boolean;
+  deleteErrors: { name: string; error: string }[];
+  removedDirs: string[];
+  removedFiles: string[];
+}): Promise<{ reclaimFailed: boolean; reclaimedNote?: string; preservedNote?: string }> {
+  if (!params.removeSharedRuntime || params.sharedRuntimeRemovalFailed) {
+    return { reclaimFailed: false };
+  }
+
+  const paths = resolvePdHomePaths(getPdDir());
+  const backupsDir = getPdRuntimeBackupsDir();
+  let reclaimFailed = false;
+  const reclaimed: string[] = [];
+  const preserved: string[] = [];
+
+  // Read the pointer before touching its targets, so we can decide whether
+  // releasing it is safe. Absent → null; unreadable/malformed → throw.
+  let active: ActiveRecord | null = null;
+  let activeCorruptReason: string | null = null;
+  if (existsSync(paths.activeRecordPath)) {
+    try {
+      active = readActiveRecord(paths.activeRecordPath);
+    } catch (err) {
+      // rc-9: keep WHY the pointer is unreadable so the operator sees it.
+      activeCorruptReason = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const removeDir = async (dir: string, name: string): Promise<void> => {
+    if (!existsSync(dir)) return;
+    try {
+      await removeWithRetry(dir, 'dir');
+      params.removedDirs.push(dir);
+      reclaimed.push(`${path.basename(dir)}/`);
+    } catch (err) {
+      reclaimFailed = true;
+      params.deleteErrors.push({ name, error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  await removeDir(paths.stagingDir, 'PD update staging');
+  await removeDir(paths.releasesDir, 'PD update releases');
+  await removeDir(backupsDir, 'PD update backups');
+
+  if (existsSync(paths.activeRecordPath)) {
+    if (activeCorruptReason !== null) {
+      // §18 default-preservation: never delete an unreadable pointer. This is
+      // intentional (reclaimFailed stays false so install.json is still
+      // cleaned), so do NOT promise a retry — the file is evidence to remove by
+      // hand only if the operator is sure.
+      preserved.push(`active.json is unreadable (${activeCorruptReason}) — kept for diagnosis; remove it manually only if you are sure`);
+    } else if (active !== null && existsSync(path.join(paths.releasesDir, active.releaseId))) {
+      // releases/ removal failed, so the pointer still resolves — keep pointer
+      // and target together so a re-run can reclaim both.
+      preserved.push(`active.json still points at releases/${active.releaseId} — kept with its target; re-run to reclaim both`);
+    } else {
+      try {
+        await removeWithRetry(paths.activeRecordPath, 'file');
+        params.removedFiles.push(paths.activeRecordPath);
+        reclaimed.push('active.json');
+      } catch (err) {
+        reclaimFailed = true;
+        params.deleteErrors.push({ name: 'PD active record', error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  }
+
+  return {
+    reclaimFailed,
+    reclaimedNote: reclaimed.length > 0 ? reclaimed.join(', ') : undefined,
+    preservedNote: preserved.length > 0 ? preserved.join('; ') : undefined,
+  };
+}
+
 export async function uninstall(
   options: {
     force?: boolean;
@@ -574,7 +666,27 @@ export async function uninstall(
         deleteErrors.push({ name: 'PD shared runtime', error: err instanceof Error ? err.message : String(err) });
       }
     }
-    if (runtimePlan.removeSharedRuntime && !sharedRuntimeRemovalFailed && existsSync(getInstallManifestPath())) {
+
+    // PRI-894 / PRI-895: reclaim update residue (staging/, releases/, backups/
+    // and a dangling active.json) while the manifest is still present. It runs
+    // BEFORE install.json is deleted on purpose: if reclaim fails we keep
+    // install.json so a re-run still plans a full teardown and retries the
+    // residue instead of stranding it under a now-missing manifest.
+    const residueReclaim = await reclaimSharedRuntimeResidue({
+      removeSharedRuntime: runtimePlan.removeSharedRuntime,
+      sharedRuntimeRemovalFailed,
+      deleteErrors,
+      removedDirs: result.removedDirs,
+      removedFiles: result.removedFiles,
+    });
+    if (residueReclaim.reclaimedNote) {
+      logger.success(`Reclaimed update residue: ${residueReclaim.reclaimedNote}`);
+    }
+    if (residueReclaim.preservedNote) {
+      logger.warn(`Kept update residue for safety: ${residueReclaim.preservedNote}`);
+    }
+
+    if (runtimePlan.removeSharedRuntime && !sharedRuntimeRemovalFailed && !residueReclaim.reclaimFailed && existsSync(getInstallManifestPath())) {
       try {
         await removeWithRetry(getInstallManifestPath(), 'file');
         result.removedFiles.push(getInstallManifestPath());
