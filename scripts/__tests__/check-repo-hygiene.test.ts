@@ -169,7 +169,7 @@ describe('check-repo-hygiene', () => {
       try {
         writeFileSync(join(dir, 'pri923-publish2.log'), 'run output\n');
         const result = checkRootScruffFiles({ cwd: dir });
-        expect(result.scruffFiles.map((v) => v.file)).toContain('pri923-publish2.log');
+        expect(result.scruffFiles).toContain('pri923-publish2.log');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -181,7 +181,7 @@ describe('check-repo-hygiene', () => {
         writeFileSync(join(dir, '.gitignore'), '*.log\n');
         writeFileSync(join(dir, 'train.log'), 'ignored but still on disk\n');
         const result = checkRootScruffFiles({ cwd: dir });
-        expect(result.scruffFiles.map((v) => v.file)).toContain('train.log');
+        expect(result.scruffFiles).toContain('train.log');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -193,7 +193,22 @@ describe('check-repo-hygiene', () => {
         mkdirSync(join(dir, 'scratch-dir'), { recursive: true });
         writeFileSync(join(dir, 'scratch-dir', 'x.log'), 'nested scratch is not root scruff\n');
         const result = checkRootScruffFiles({ cwd: dir });
-        expect(result.scruffFiles.map((v) => v.file)).toEqual([]);
+        expect(result.scruffFiles).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('compares against the toplevel index when invoked from a subdirectory', () => {
+      const dir = makeSeededRepo();
+      try {
+        const sub = join(dir, 'packages', 'sub');
+        mkdirSync(sub, { recursive: true });
+        writeFileSync(join(sub, 'nested.md'), '# nested\n');
+        execFileSync('git', ['add', 'packages/sub/nested.md'], { cwd: dir, stdio: 'ignore' });
+        // Run from the subdir: the tracked set must still describe the root,
+        // otherwise root files git knows about get reported as scratch.
+        expect(checkRootScruffFiles({ cwd: sub }).scruffFiles).toEqual([]);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -248,9 +263,15 @@ describe('check-repo-hygiene', () => {
 
     it('throws when the git query cannot run (no silent pass)', () => {
       const dir = mkdtempSync(join(tmpdir(), 'pd-rootscruff-nogit-'));
+      // Ceiling the discovery at the temp dir so the test still means "not a
+      // repo" on a machine whose TMPDIR happens to sit inside a working tree.
+      const prevCeiling = process.env.GIT_CEILING_DIRECTORIES;
+      process.env.GIT_CEILING_DIRECTORIES = dir;
       try {
         expect(() => checkRootScruffFiles({ cwd: dir })).toThrow();
       } finally {
+        if (prevCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+        else process.env.GIT_CEILING_DIRECTORIES = prevCeiling;
         rmSync(dir, { recursive: true, force: true });
       }
     });
