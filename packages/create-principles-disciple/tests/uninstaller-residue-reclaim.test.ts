@@ -70,6 +70,7 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
   let sandboxRoot: string;
   let pdHome: string;
   let warnLines: string[];
+  let successLines: string[];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -81,9 +82,10 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
     process.env.HOME = sandboxRoot;
     process.env.USERPROFILE = sandboxRoot;
     warnLines = [];
+    successLines = [];
     vi.spyOn(logger, 'warn').mockImplementation((msg: string) => { warnLines.push(String(msg)); });
     vi.spyOn(logger, 'info').mockImplementation(() => undefined);
-    vi.spyOn(logger, 'success').mockImplementation(() => undefined);
+    vi.spyOn(logger, 'success').mockImplementation((msg: string) => { successLines.push(String(msg)); });
     vi.spyOn(logger, 'error').mockImplementation(() => undefined);
   });
 
@@ -108,6 +110,12 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
     expect(result.removedDirs).toContain(path.join(pdHome, 'releases'));
     expect(result.removedDirs).toContain(path.join(pdHome, 'staging'));
     expect(result.removedDirs).toContain(path.join(pdHome, 'backups'));
+    // PRI-895 observability: the reclaimed GB-scale residue is surfaced to the
+    // operator, not just recorded in the returned result.
+    const reclaimLog = successLines.join('\n');
+    expect(reclaimLog).toMatch(/Reclaimed update residue/);
+    expect(reclaimLog).toContain('releases/');
+    expect(reclaimLog).toContain('active.json');
   });
 
   it('preserves a corrupt active.json instead of deleting evidence', async () => {

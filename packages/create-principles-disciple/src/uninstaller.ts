@@ -406,7 +406,7 @@ async function reclaimSharedRuntimeResidue(params: {
   deleteErrors: { name: string; error: string }[];
   removedDirs: string[];
   removedFiles: string[];
-}): Promise<{ reclaimFailed: boolean; preservedNote?: string }> {
+}): Promise<{ reclaimFailed: boolean; reclaimedNote?: string; preservedNote?: string }> {
   if (!params.removeSharedRuntime || params.sharedRuntimeRemovalFailed) {
     return { reclaimFailed: false };
   }
@@ -414,6 +414,7 @@ async function reclaimSharedRuntimeResidue(params: {
   const paths = resolvePdHomePaths(getPdDir());
   const backupsDir = getPdRuntimeBackupsDir();
   let reclaimFailed = false;
+  const reclaimed: string[] = [];
   const preserved: string[] = [];
 
   // Read the pointer before touching its targets, so we can decide whether
@@ -434,6 +435,7 @@ async function reclaimSharedRuntimeResidue(params: {
     try {
       await removeWithRetry(dir, 'dir');
       params.removedDirs.push(dir);
+      reclaimed.push(`${path.basename(dir)}/`);
     } catch (err) {
       reclaimFailed = true;
       params.deleteErrors.push({ name, error: err instanceof Error ? err.message : String(err) });
@@ -459,6 +461,7 @@ async function reclaimSharedRuntimeResidue(params: {
       try {
         await removeWithRetry(paths.activeRecordPath, 'file');
         params.removedFiles.push(paths.activeRecordPath);
+        reclaimed.push('active.json');
       } catch (err) {
         reclaimFailed = true;
         params.deleteErrors.push({ name: 'PD active record', error: err instanceof Error ? err.message : String(err) });
@@ -466,7 +469,11 @@ async function reclaimSharedRuntimeResidue(params: {
     }
   }
 
-  return { reclaimFailed, preservedNote: preserved.length > 0 ? preserved.join('; ') : undefined };
+  return {
+    reclaimFailed,
+    reclaimedNote: reclaimed.length > 0 ? reclaimed.join(', ') : undefined,
+    preservedNote: preserved.length > 0 ? preserved.join('; ') : undefined,
+  };
 }
 
 export async function uninstall(
@@ -672,6 +679,9 @@ export async function uninstall(
       removedDirs: result.removedDirs,
       removedFiles: result.removedFiles,
     });
+    if (residueReclaim.reclaimedNote) {
+      logger.success(`Reclaimed update residue: ${residueReclaim.reclaimedNote}`);
+    }
     if (residueReclaim.preservedNote) {
       logger.warn(`Kept update residue for safety: ${residueReclaim.preservedNote}`);
     }
