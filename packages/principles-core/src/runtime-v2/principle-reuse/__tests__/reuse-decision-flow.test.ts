@@ -1123,3 +1123,88 @@ describe('v0.3.3 T15 — router-subtask candidates resolve their painId through 
     expect(decided.reuseEvidence?.candidateId).toBe(candidateId);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PRI-939 Option A — the degradation reason rides out of the gate on the
+// CREATE result instead of dying at the intake boundary.
+// ---------------------------------------------------------------------------
+
+describe('PRI-939 Option A — unavailable evaluation is visible on the CREATE result', () => {
+  it('unavailable → CREATE proceeds AND the result carries the degradation reason; ledger semantics unchanged', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+    const reason = 'LLM execution failed: 404 No endpoints found';
+
+    const result = await service({
+      recommendation: async () => ({ status: 'unavailable', reason }),
+    }).intake(candidateId);
+
+    expect(result.outcome).toBe('ledger_entry');
+    if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
+    expect(result.reuseCheck).toBe('recommended_create');
+    // Before Option A the reason was silently dropped here.
+    expect(result.reuseRecommendation).toEqual({ status: 'unavailable', reason });
+    // Ledger semantics unchanged: the create is exactly the pre-Option-A write.
+    expect(ledgerEntryCount()).toBe(2); // seeded principle + the created one
+    const store = loadLedger(join(workspaceDir, '.state'));
+    const created = Object.values(store.tree.principles).find((p) => p.id !== principle.id);
+    expect(created?.text).toBe(CANDIDATE_TEXT);
+  });
+
+  it('recommended→create verdict carries {status: recommended} on the CREATE result', async () => {
+    const principle = makePrinciple();
+    addPrincipleToLedger(join(workspaceDir, '.state'), principle);
+    const candidateId = await seedPrincipleCandidate();
+
+    const result = await service({
+      recommendation: async () => ({ status: 'recommended', recommendation: 'create', rationale: 'new experience', confidence: 0.8 }),
+    }).intake(candidateId);
+
+    expect(result.outcome).toBe('ledger_entry');
+    if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
+    // The intake result carries the full hook outcome; the CLI/bridge output layers narrow it to {status, reason?}.
+    expect(result.reuseRecommendation).toEqual({ status: 'recommended', recommendation: 'create', rationale: 'new experience', confidence: 0.8 });
+  });
+
+  it('gate-not-configured keeps reuseRecommendation undefined (flag-off = zero effective surface, T11)', async () => {
+    const candidateId = await seedPrincipleCandidate();
+    const result = await service({}).intake(candidateId);
+    expect(result.outcome).toBe('ledger_entry');
+    if (result.outcome !== 'ledger_entry') throw new Error('expected a ledger write');
+    expect(result.reuseCheck).toBe('not_configured');
+    expect(result.reuseRecommendation).toBeUndefined();
+  });
+
+  it('bridge: the unavailable outcome lands on candidateOutcomes and observabilityWarnings (reason bounded)', async () => {
+    // Seed the corpus: an empty ledger means no_candidates (the hook never runs).
+    addPrincipleToLedger(join(workspaceDir, '.state'), makePrinciple());
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir: join(workspaceDir, '.state') });
+    const topId = randomUUID();
+    const routerId = randomUUID();
+    const runId = randomUUID();
+    await stateManager.createTask({ taskId: topId, taskKind: 'diagnostician', status: 'succeeded', inputRef: 'pain-degradation', attemptCount: 1, maxAttempts: 3, diagnosticJson: JSON.stringify({ provenance: 'owner_reported_no_host_trace', evidence: [{ sourceRef: 'input', note: 'Owner evidence' }] }) });
+    await stateManager.createTask({ taskId: routerId, taskKind: 'diag_router', status: 'succeeded', inputRef: topId, attemptCount: 1, maxAttempts: 3 });
+    const output: DiagnosticianOutputV1 = { valid: true, diagnosisId: topId, summary: 'Degradation visibility', rootCause: 'People: evidence was ignored', violatedPrinciples: [], evidence: [{ sourceRef: 'input', note: 'Owner evidence' }], confidence: 0.9, recommendations: [{ kind: 'principle', description: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }] };
+    await stateManager.runStore.createRun({ runId, taskId: routerId, runtimeKind: 'openclaw', attemptNumber: 1, executionStatus: 'succeeded', startedAt: new Date().toISOString(), outputPayload: JSON.stringify(output) });
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      await new SqliteDiagnosticianCommitter(connection).commit({ runId, taskId: routerId, output, idempotencyKey: runId });
+      const longReason = 'x'.repeat(500);
+      const intake = service({ recommendation: async () => ({ status: 'unavailable', reason: longReason }) });
+      const runner = { run: async (): Promise<never> => { throw new Error('degradation replay must not diagnose again'); } };
+      const bridge = new PainSignalBridge({ stateManager, runner, intakeService: intake, ledgerAdapter: adapter, autoIntakeEnabled: true });
+      const result = await bridge.onDiagnosisComplete({ taskId: topId, painId: 'pain-degradation', diagnosticianOutput: output, provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 1 });
+      const outcome = result.candidateOutcomes?.[0];
+      // Rule 4 held: CREATE proceeded.
+      expect(outcome?.ledgerEntryId).toBeDefined();
+      // The degradation is visible on the outcome, reason bounded to 200.
+      expect(outcome?.reuseRecommendation).toEqual({ status: 'unavailable', reason: 'x'.repeat(200) });
+      expect(result.observabilityWarnings).toHaveLength(1);
+      expect(result.observabilityWarnings?.[0]).toContain('semantic reuse evaluation unavailable');
+      expect(result.observabilityWarnings?.[0]).toContain('Rule 4');
+    } finally {
+      connection.close();
+    }
+  });
+});

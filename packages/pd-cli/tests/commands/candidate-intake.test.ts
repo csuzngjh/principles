@@ -66,7 +66,8 @@ const { mockStateManager, mockAdapter, mockService, MockRuntimeStateManager, Moc
 });
 
 // Mock modules
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   CandidateIntakeService: MockCandidateIntakeService,
   CandidateIntakeError: MockCandidateIntakeError,
   RuntimeStateManager: MockRuntimeStateManager,

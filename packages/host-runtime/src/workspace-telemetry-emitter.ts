@@ -26,6 +26,12 @@ import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime
  *   - artificer_l2_complete（PRI-795 review P1：Artificer L2 的 completion
  *     证据 — abortOwner/budgetMs/elapsedMs/stopReason/tokenUsage — 必须
  *     crash 前落盘，否则 EP002-R3 的「失败后什么都查不到」重演）
+ *   - reuse_gate_triggered（PRI-939 Option A：Reuse Review Gate 挂起观察，
+ *     Owner 复用闭环的入口证据）
+ *   - reuse_evaluation_unavailable（PRI-939 Option A：语义评估降级信号 —
+ *     Rule 4 降级放行 CREATE 时 Owner 必须能事后取证「复用保护为何没拦」。
+ *     注意 reuse_evaluation_recommended 刻意不入列：recommended 已由
+ *     candidateOutcomes / reuseEvidence 持久承载，落盘会形成第二决策日志）
  *
  * 落点 `<workspaceDir>/.pd/telemetry/critical-events.jsonl`（JSONL，一行一
  * 事件，含完整 TelemetryEvent）。同步 append：事件量小（allowlist 限流），
@@ -39,6 +45,8 @@ const CRITICAL_EVENT_ALLOWLIST: ReadonlySet<string> = new Set([
   'evaluator_rule_assembled',
   'evaluator_rule_assembly_failed',
   'artificer_l2_complete',
+  'reuse_gate_triggered',
+  'reuse_evaluation_unavailable',
 ]);
 
 export type WorkspaceTelemetryPersistFailureSink = (detailJson: string) => void;

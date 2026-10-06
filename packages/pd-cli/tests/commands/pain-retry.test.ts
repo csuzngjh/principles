@@ -147,8 +147,9 @@ const { MockSqliteDeadLetterStore, mockDeadLetterGetByPainId } = vi.hoisted(() =
   return { MockSqliteDeadLetterStore, mockDeadLetterGetByPainId };
 });
 
-vi.mock('@principles/core/runtime-v2', () => {
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
   return {
+    ...(await importOriginal<object>()),
     RuntimeStateManager: vi.fn().mockImplementation(function () {
       return new MockRuntimeStateManager();
     }),

@@ -13,7 +13,6 @@ import {
   SqliteTrajectoryLocator,
   SqliteSourceTraceLocator,
   StoreEventEmitter,
-  storeEmitter,
   SplitDiagnosticianRunner,
   DiagRootCauseRunner,
   DiagDistillerRunner,
@@ -41,6 +40,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, resolveDiagnosticianCapability } from '@principles/core/runtime-v2';
@@ -288,6 +288,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
 
+    // PRI-939 Option A: workspace-scoped sink — allowlisted critical events
+    // (persisted to critical-events.jsonl) must not emit into the bare singleton.
+    const diagnoseTelemetry = createWorkspaceTelemetryEmitter(workspaceDir);
     // Select runtime adapter based on --runtime flag (CLI-02)
     // PRI-431: migrated to shared resolveRuntimeAdapterFromConfig
     let runtimeAdapter: PDRuntimeAdapter;
@@ -321,7 +324,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           },
         });
         // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime
-        storeEmitter.emitTelemetry({
+        diagnoseTelemetry.emitTelemetry({
           eventType: 'runtime_adapter_selected',
           traceId: opts.taskId,
           timestamp: new Date().toISOString(),
@@ -359,7 +362,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         // TELE: runtime_adapter_selected telemetry
         const telemetryProvider = opts.provider ?? telemetryConfig.provider;
         const telemetryModel = opts.model ?? telemetryConfig.model;
-        storeEmitter.emitTelemetry({
+        diagnoseTelemetry.emitTelemetry({
           eventType: 'runtime_adapter_selected',
           traceId: opts.taskId,
           timestamp: new Date().toISOString(),
@@ -556,7 +559,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       if (sourcePainId) {
         await persistPainDiagnosis(
           // Single rc-9 mapping authority shared with the production factory.
-          { stateManager, eventEmitter: createBridgeTelemetryEventEmitter() },
+          { stateManager, eventEmitter: createBridgeTelemetryEventEmitter(diagnoseTelemetry) },
           {
             painId: sourcePainId,
             taskId: opts.taskId,
@@ -570,7 +573,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     }
 
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string; reuseRecommendation?: { status: 'recommended' } | { status: 'unavailable'; reason: string } }[] = [];
     let intakeFailed = false;
 
     if (opts.intake === false) {
@@ -644,6 +647,15 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
               candidateId: candidate.candidateId,
               ledgerEntryId: intakeResult.entry.id,
               status: 'consumed',
+              // PRI-939 Option A: surface the auto-path evaluation outcome so an
+              // unavailable degradation is visible instead of a bare consumed.
+              ...(intakeResult.reuseRecommendation !== undefined
+                ? {
+                    reuseRecommendation: intakeResult.reuseRecommendation.status === 'unavailable'
+                      ? { status: 'unavailable' as const, reason: intakeResult.reuseRecommendation.reason.slice(0, 200) }
+                      : { status: 'recommended' as const },
+                  }
+                : {}),
             });
           } else if (intakeResult.reason === 'reuse_selected') {
             // PRI-917 PR3A (C3): a reuse resolution is a success with its own

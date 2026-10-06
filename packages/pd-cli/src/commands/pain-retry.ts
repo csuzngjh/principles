@@ -54,6 +54,7 @@ import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import * as path from 'path';
 
@@ -653,7 +654,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         diagnosisPersistenceEnabled,
         // rc-9: same production degradation-telemetry wiring as the factory —
         // only persistence events reach the store emitter.
-        eventEmitter: createBridgeTelemetryEventEmitter(),
+        // PRI-939 Option A: workspace-scoped sink persists allowlisted events
+        // (reuse_gate_triggered) that the bare singleton would drop.
+        eventEmitter: createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir)),
         // PRI-720: honor the Owner's full-prompt-pipeline switch on replay seeds.
         fullPipelinePromptSeeds: resolvePromptFullPipelineSeedMode(workspaceDir) === 'full_chain',
       });
@@ -875,7 +878,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     if (diagnosisPersistenceEnabled && result.output) {
       await persistPainDiagnosis(
         // Single rc-9 mapping authority shared with the production factory.
-        { stateManager, eventEmitter: createBridgeTelemetryEventEmitter() },
+        // PRI-939 Option A: workspace-scoped sink for allowlisted events.
+        { stateManager, eventEmitter: createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir)) },
         {
           // rc-6: same canonical lineage the bridge uses (task.inputRef),
           // not the CLI-supplied painId — they are equal by the
@@ -891,7 +895,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       painDiagnosisLedgerWrite = 'attempted';
     }
 
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string; ledgerWriteRefused?: string; reusedPrincipleId?: string; reuseRecommendation?: { status: 'recommended' } | { status: 'unavailable'; reason: string } }[] = [];
     let intakeFailed = false;
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
@@ -954,6 +958,15 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             candidateId: candidate.candidateId,
             ledgerEntryId: intakeResult.entry.id,
             status: 'consumed',
+            // PRI-939 Option A: surface the auto-path evaluation outcome so an
+            // `unavailable` degradation is visible instead of a bare consumed.
+            ...(intakeResult.reuseRecommendation !== undefined
+              ? {
+                  reuseRecommendation: intakeResult.reuseRecommendation.status === 'unavailable'
+                    ? { status: 'unavailable' as const, reason: intakeResult.reuseRecommendation.reason.slice(0, 200) }
+                    : { status: 'recommended' as const },
+                }
+              : {}),
           });
         } else if (intakeResult.reason === 'reuse_selected') {
           // PRI-917 PR3A (C3): a reuse resolution is a success with its own
