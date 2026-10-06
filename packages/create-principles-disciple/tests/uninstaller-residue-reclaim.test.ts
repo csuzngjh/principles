@@ -90,8 +90,14 @@ describe('PRI-894 + PRI-895: uninstall reclaims shared-runtime update residue', 
   });
 
   afterEach(() => {
-    process.env.HOME = savedEnv.HOME;
-    process.env.USERPROFILE = savedEnv.USERPROFILE;
+    // Restore each saved var ONLY if it was originally present; deleting when
+    // absent avoids leaving the string "undefined" (HOME is unset on Windows,
+    // and getHomeDir() reads HOME first, so a stale "undefined" would leak a
+    // bogus home dir into the next test file sharing this worker).
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     vi.restoreAllMocks();
     fs.rmSync(sandboxRoot, { recursive: true, force: true });
   });
