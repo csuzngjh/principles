@@ -12,5 +12,5 @@ model now reports `artifactUnavailable` for such cards; the UI replaces the
 machine id with the localized untitled copy and shows a visible note
 explaining that the draft original is gone (likely superseded), that
 rejecting is a safe choice, and where the raw artifact ID remains reachable
-(full-chain view). Approve/edit/reject behavior and the `unlinked:` grouping
-key are unchanged.
+(the edit section's current-artifact field). Approve/edit/reject behavior
+and the `unlinked:` grouping key are unchanged.
