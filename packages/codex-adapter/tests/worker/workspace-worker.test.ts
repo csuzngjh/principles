@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
 import {
   createPainSignalBridge,
@@ -23,6 +21,7 @@ import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { runCodexWorkspaceWorkerCycle } from '../../src/worker/workspace-worker.js';
 import { setCodexTranscriptPortForTest } from '../../src/ingestion/ingestion.js';
 import type { CodexCatchUpResult } from '../../src/ingestion/catch-up.js';
+import { runHookExecutable, type HookRunResult } from '../helpers/pd-hook-runner.js';
 
 /**
  * PRI-624 Slice C worker-cycle matrix: the production hook (built dist,
@@ -88,26 +87,8 @@ function makeWorkspace(overrides: { ingestion?: boolean; consumer?: boolean; hos
   return ws;
 }
 
-async function runHook(ws: WorkerWorkspace, payload: Record<string, unknown>): Promise<{ status: number; stdout: string; stderr: string }> {
-  const { execFile } = await import('node:child_process');
-  const execFileAsync = promisify(execFile);
-  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const entry = path.resolve(packageRoot, 'dist', 'pd-hook.js');
-  if (!fs.statSync(entry).isFile()) throw new Error(`hook entry not built: ${entry} (run npm run build in packages/codex-adapter)`);
-  const previous = process.env.CODEX_HOME;
-  process.env.CODEX_HOME = ws.codexHome;
-  try {
-    const running = execFileAsync(process.execPath, [entry], { encoding: 'utf8', windowsHide: true, timeout: 20_000 });
-    running.child.stdin?.end(JSON.stringify(payload));
-    const { stdout, stderr } = await running;
-    return { status: 0, stdout, stderr };
-  } catch (error) {
-    const failure = error as { code?: number; stdout?: string; stderr?: string; message?: string };
-    return { status: failure.code ?? 1, stdout: failure.stdout ?? '', stderr: failure.stderr ?? failure.message ?? '' };
-  } finally {
-    if (previous === undefined) delete process.env.CODEX_HOME;
-    else process.env.CODEX_HOME = previous;
-  }
+async function runHook(ws: WorkerWorkspace, payload: Record<string, unknown>): Promise<HookRunResult> {
+  return runHookExecutable(ws.codexHome, JSON.stringify(payload), { timeoutMs: 20_000 });
 }
 
 function correctionPayload(ws: WorkerWorkspace, turnId = TURN_1): Record<string, unknown> {
