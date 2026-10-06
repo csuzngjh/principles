@@ -1,8 +1,6 @@
 import { afterEach, expect } from 'vitest';import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
 import { getDefaultPdConfig } from '@principles/core/runtime-v2';
 import {
@@ -18,6 +16,7 @@ import {
 } from '@principles/host-runtime';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../principles-core/tests/bdd/support/repo-root.js';
+import { runHookExecutable, type HookRunResult } from './helpers/pd-hook-runner.js';
 
 /**
  * Codex Governance Closure Slice D (PRI-625): owner-loop BDD steps for SPEC
@@ -43,32 +42,6 @@ const BASELINE_DDL = [
 ];
 
 const dirs: string[] = [];
-
-interface HookRunResult { status: number; stdout: string; stderr: string }
-
-async function runHookExecutable(codexHome: string, payloadJson: string): Promise<HookRunResult> {
-  const { execFile } = await import('node:child_process');
-  const execFileAsync = promisify(execFile);
-  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const entry = path.resolve(packageRoot, 'dist', 'pd-hook.js');
-  if (!entry.startsWith(`${packageRoot}${path.sep}`) || !fs.statSync(entry).isFile()) {
-    throw new Error(`hook entry not found or outside the package: ${entry}`);
-  }
-  const previous = process.env.CODEX_HOME;
-  process.env.CODEX_HOME = codexHome;
-  try {
-    const running = execFileAsync(process.execPath, [entry], { encoding: 'utf8', windowsHide: true, timeout: 15_000 });
-    running.child.stdin?.end(payloadJson);
-    const { stdout, stderr } = await running;
-    return { status: 0, stdout, stderr };
-  } catch (error) {
-    const failure = error as { code?: number; stdout?: string; stderr?: string; message?: string };
-    return { status: failure.code ?? 1, stdout: failure.stdout ?? '', stderr: failure.stderr ?? failure.message ?? '' };
-  } finally {
-    if (previous === undefined) delete process.env.CODEX_HOME;
-    else process.env.CODEX_HOME = previous;
-  }
-}
 
 interface Workspace { root: string; codexHome: string; sessions: string; transcriptPath: string }
 
