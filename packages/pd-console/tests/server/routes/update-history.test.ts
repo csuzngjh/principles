@@ -513,6 +513,20 @@ describe('Update History API route', () => {
           fromVersion: 'unknown', toVersion: '1.74.1', success: true, kind: 'update',
           authority: 'release-manager', transactionId: 'install-1791000000000-fedcba09',
         },
+        // Malformed 'update-' id outside the domain shape: an implementation
+        // that keeps any 'update-' prefix would wrongly retain this row.
+        {
+          id: 'malformed-domain', timestamp: '2026-10-04T08:00:00.000Z',
+          fromVersion: 'unknown', toVersion: '1.233.0', success: true, kind: 'update',
+          authority: 'release-manager', transactionId: 'update-1-abc',
+        },
+        // A pre-existing row with a VALID update-domain id: passes the filter
+        // and stays (guards against keeping only freshly synthesized rows).
+        {
+          id: 'existing-update', timestamp: '2026-10-04T09:00:00.000Z',
+          fromVersion: '2.1.0', toVersion: '2.2.0', success: true, kind: 'update',
+          authority: 'release-manager', transactionId: 'update-1790000000000-abcdef09',
+        },
         // A realtime-authored row without a transaction pointer: no domain
         // evidence either way — stays.
         { id: 'manual-1', timestamp: '2026-10-05T12:00:00.000Z', fromVersion: '2.2.0', toVersion: '2.3.0', success: true },
@@ -521,8 +535,11 @@ describe('Update History API route', () => {
       reconcileUpdateHistoryFromJournals(tempDir, pdHome);
 
       const parsed = readHistoryFile();
-      expect(parsed).toHaveLength(2);
-      expect(parsed.map((entry) => entry.id)).toEqual([`reconciled-${updateId}`, 'manual-1']);
+      expect(parsed.map((entry) => entry.id)).toEqual([
+        'existing-update',
+        `reconciled-${updateId}`,
+        'manual-1',
+      ]);
     });
 
     it('is idempotent: a second reconcile leaves the file byte-identical', () => {
@@ -538,15 +555,38 @@ describe('Update History API route', () => {
 
     it('merges synthesized rows chronologically by fact time, not append order', () => {
       confirmedJournal('update-1791000000003-abcdef04', '2.2.0');
-      // An existing row dated AFTER the journal's moment.
+      // Two existing rows whose STRING order differs from their FACT order:
+      // '+09:00' row is 2026-10-05T23:00Z (fact-before 23:30Z, but its string
+      // sorts after '2026-10-05T…'). Parsed comparison must win.
       fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify([
-        { id: 'manual-later', timestamp: '2026-10-05T12:00:00.000Z', fromVersion: '2.2.0', toVersion: '2.3.0', success: true },
+        { id: 'manual-offset-a', timestamp: '2026-10-06T08:00:00+09:00', fromVersion: '2.2.0', toVersion: '2.3.0', success: true },
+        { id: 'manual-utc-b', timestamp: '2026-10-05T23:30:00.000Z', fromVersion: '2.2.0', toVersion: '2.3.0', success: true },
       ]), 'utf8');
 
       reconcileUpdateHistoryFromJournals(tempDir, pdHome);
 
       const parsed = readHistoryFile();
-      expect(parsed.map((entry) => entry.id)).toEqual(['reconciled-update-1791000000003-abcdef04', 'manual-later']);
+      expect(parsed.map((entry) => entry.id)).toEqual([
+        'reconciled-update-1791000000003-abcdef04',
+        'manual-offset-a',
+        'manual-utc-b',
+      ]);
+    });
+
+    it('sorts unparseable timestamps at a stable oldest position instead of dropping them', () => {
+      confirmedJournal('update-1791000000005-abcdef06', '2.2.0');
+      fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify([
+        { id: 'legacy-bad-time', timestamp: 'not-a-date', fromVersion: '1.0.0', toVersion: '1.1.0', success: true },
+      ]), 'utf8');
+
+      reconcileUpdateHistoryFromJournals(tempDir, pdHome);
+
+      const parsed = readHistoryFile();
+      expect(parsed.map((entry) => entry.id)).toEqual([
+        'legacy-bad-time',
+        'reconciled-update-1791000000005-abcdef06',
+      ]);
+      expect(parsed[0]?.timestamp).toBe('not-a-date');
     });
   });
 });

@@ -90,6 +90,18 @@ function getHistoryPath(workspaceDir: string): string {
   return path.join(workspaceDir, '.pd', 'update-history.json');
 }
 
+/**
+ * PRI-926: sort key for fact-time ordering. History rows span eras and
+ * formats (legacy records, journal `at` values are loosely read), so string
+ * comparison would mis-order mixed shapes like '…00Z' vs '…00.000Z' or
+ * non-UTC offsets — compare parsed instants instead. Unparseable values take
+ * a stable epoch fallback (sort oldest); they are never dropped.
+ */
+function factTimeMs(timestamp: string): number {
+  const ms = Date.parse(timestamp);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
 function loadHistory(historyPath: string): UpdateHistoryEntry[] {
   if (fs.existsSync(historyPath)) {
     try {
@@ -225,8 +237,8 @@ export function reconcileUpdateHistoryFromJournals(workspaceDir: string, pdHome:
     added += 1;
   }
   if (added > 0 || changedByCleanup) {
-    // Order by fact time (stable for equal timestamps), then keep the newest 50.
-    history.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    // Order by fact time (stable for equal instants), then keep the newest 50.
+    history.sort((a, b) => factTimeMs(a.timestamp) - factTimeMs(b.timestamp));
     if (history.length > 50) {
       history.splice(0, history.length - 50);
     }
