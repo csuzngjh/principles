@@ -16,7 +16,6 @@ import { randomUUID } from 'crypto';
 import * as path from 'path';
 import {
   RuntimeStateManager,
-  SqliteConnection,
   candidateList,
   candidateShow,
   CandidateIntakeService,
@@ -38,6 +37,7 @@ import {
   ReuseEvaluationRunner,
   ReuseEvaluationError,
   createBridgeTelemetryEventEmitter,
+  auditCandidateLedgerConsistency,
   type LedgerPrincipleEntry,
   type ReuseDecision,
   type CandidateIntakeResult,
@@ -89,6 +89,10 @@ interface AuditResult {
   status: 'ok' | 'degraded';
   consumedCount: number;
   missingLedgerEntryIds: string[];
+  /** PRI-917 / R7: consumed candidates resolved into an existing principle via reuseEvidence. */
+  reusedResolvedCount: number;
+  /** Consumed candidates whose recommendation_kind never targets the Principle Ledger. */
+  nonLedgerKindCount: number;
   checkedLedgerPath: string;
   checkedDbPath: string;
 }
@@ -1351,47 +1355,36 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
 /**
  * pd candidate audit --workspace <path> [--json]
  *
- * Reads workspace/.pd/state.db principle_candidates and
- * the workspace ledger (same file used by OpenClaw plugin).
- * Checks each consumed candidate has a ledger entry.
- * Exits non-zero if any consumed candidate is missing from ledger.
+ * Delegates the judgment to the core auditCandidateLedgerConsistency so every
+ * surface (pd candidate audit, pd health, operator health) applies the SAME
+ * reuse-aware rules (PRI-917 / R7): reuse resolutions and non-Principle-Ledger
+ * kinds are not "missing"; only a consumed principle-kind candidate with no
+ * resolution anywhere is true drift.
+ * Exits non-zero if any consumed candidate is truly missing from the ledger.
  */
 export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-   
-  let conn: SqliteConnection | undefined;
 
   try {
     const dbPath = path.join(workspaceDir, '.pd', 'state.db');
     const ledgerStateDir = path.join(workspaceDir, '.state');
     const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
 
-    conn = new SqliteConnection({ workspaceDir, readonly: true });
-    const db = conn.getDb();
+    const audit = await auditCandidateLedgerConsistency(workspaceDir);
 
-    const consumedRows = db.prepare(
-      "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'"
-    ).all() as { candidate_id: string }[];
-
-    const consumedIds = consumedRows.map(r => r.candidate_id);
-
-    const ledger = loadLedger(ledgerStateDir);
-    const ledgerPrinciples = ledger.tree.principles;
-
-    const missingLedgerEntryIds: string[] = [];
-    for (const candidateId of consumedIds) {
-      const found = Object.values(ledgerPrinciples).some((p) =>
-        p.derivedFromPainIds.includes(candidateId),
-      );
-      if (!found) {
-        missingLedgerEntryIds.push(candidateId);
-      }
+    if (audit.status === 'error') {
+      console.error(`Audit failed: ${audit.reason ?? 'could not read candidate/ledger state'}`);
+      console.error('Next action: open this workspace once with the PD runtime to create/migrate state.db, then retry the audit.');
+      process.exit(1);
+      return;
     }
 
     const result: AuditResult = {
-      status: missingLedgerEntryIds.length === 0 ? 'ok' : 'degraded',
-      consumedCount: consumedIds.length,
-      missingLedgerEntryIds,
+      status: audit.status,
+      consumedCount: audit.consumedCount,
+      missingLedgerEntryIds: audit.missingLedgerEntryIds ?? [],
+      reusedResolvedCount: audit.reusedResolvedCount ?? 0,
+      nonLedgerKindCount: audit.nonLedgerKindCount ?? 0,
       checkedLedgerPath: ledgerPath,
       checkedDbPath: dbPath,
     };
@@ -1401,6 +1394,8 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
     } else {
       console.log(`\nCandidate Audit Results\n`);
       console.log(`  consumedCount: ${result.consumedCount}`);
+      console.log(`  reusedResolvedCount: ${result.reusedResolvedCount}`);
+      console.log(`  nonLedgerKindCount: ${result.nonLedgerKindCount}`);
       console.log(`  checkedLedgerPath: ${result.checkedLedgerPath}`);
       console.log(`  checkedDbPath: ${result.checkedDbPath}`);
       console.log(`  status: ${result.status}`);
@@ -1408,7 +1403,7 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
         console.log(`\n  MISSING LEDGER ENTRIES (${result.missingLedgerEntryIds.length}):`);
         result.missingLedgerEntryIds.forEach(id => console.log(`    - ${id}`));
       } else {
-        console.log(`\n  All consumed candidates have ledger entries.`);
+        console.log(`\n  All consumed candidates have ledger resolutions.`);
       }
       console.log('');
     }
@@ -1419,8 +1414,6 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
   } catch (err) {
     console.error(`Audit failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
-  } finally {
-    try { conn?.close(); } catch { /* best-effort close */ }
   }
 }
 

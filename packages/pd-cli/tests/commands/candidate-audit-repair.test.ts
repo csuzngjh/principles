@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleCandidateAudit, handleCandidateRepair } from '../../src/commands/candidate.js';
 
 // Use vi.hoisted to define mocks
-const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mockGetLedgerFilePath, MockRuntimeStateManager, MockCandidateIntakeService, MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
+const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mockGetLedgerFilePath, mockAuditCandidateLedgerConsistency, MockRuntimeStateManager, MockCandidateIntakeService, MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
   const mockDbRows: Record<string, unknown[]> = {};
   // Track all run() calls: { sql, args }[]
   const runCalls: { sql: string; args: unknown[] }[] = [];
@@ -66,6 +66,7 @@ const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mock
 
   const mockLoadLedger = vi.fn();
   const mockGetLedgerFilePath = vi.fn().mockReturnValue('/tmp/test-workspace/.state/principle_training_state.json');
+  const mockAuditCandidateLedgerConsistency = vi.fn();
 
   return {
     mockStateManager,
@@ -74,6 +75,7 @@ const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mock
     mockDb,
     mockLoadLedger,
     mockGetLedgerFilePath,
+    mockAuditCandidateLedgerConsistency,
     MockRuntimeStateManager,
     MockCandidateIntakeService,
     MockPrincipleTreeLedgerAdapter,
@@ -95,6 +97,10 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
   SqliteConnection: vi.fn().mockImplementation(function() {
     return mockDb;
   }),
+  // R7 reuse-aware audit: the CLI delegates the judgment to the core
+  // function; tests mock it here (the judgment itself is unit-tested in
+  // principles-core candidate-audit tests).
+  auditCandidateLedgerConsistency: mockAuditCandidateLedgerConsistency,
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
   evaluateCandidateAdmissionFromRecord: vi.fn((candidate: { recommendationKind: string; confidence: number | null }) => {
@@ -133,6 +139,7 @@ describe('pd candidate audit', () => {
     mockStateManager.close.mockResolvedValue(undefined);
     mockLoadLedger.mockReset();
     mockGetLedgerFilePath.mockReturnValue('/tmp/test-workspace/.state/principle_training_state.json');
+    mockAuditCandidateLedgerConsistency.mockReset();
     mockDb.clearRows();
 
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -146,20 +153,17 @@ describe('pd candidate audit', () => {
     exitSpy.mockRestore();
   });
 
-  it('audit ok: all consumed candidates have ledger entries', async () => {
-    // DB returns one consumed candidate
-    mockDb.setRows(
-      "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'",
-      [{ candidate_id: 'c1' }],
-    );
-
-    // Ledger contains a principle with derivedFromPainIds matching c1
-    mockLoadLedger.mockReturnValue({
-      tree: {
-        principles: {
-          p1: { id: 'p1', derivedFromPainIds: ['c1'] },
-        },
-      },
+  it('audit ok: all consumed candidates have ledger resolutions', async () => {
+    // Core audit: one consumed candidate, resolved into an existing principle
+    // via reuseEvidence (PRI-917 / R7 — zero ledger growth is success).
+    mockAuditCandidateLedgerConsistency.mockResolvedValue({
+      status: 'ok',
+      consumedCount: 1,
+      orphanCandidateCount: 0,
+      missingLedgerCount: 0,
+      reusedResolvedCount: 1,
+      nonLedgerKindCount: 0,
+      missingLedgerEntryIds: [],
     });
 
     await handleCandidateAudit({ workspace: '/tmp/test-workspace', json: true });
@@ -177,24 +181,22 @@ describe('pd candidate audit', () => {
     expect(parsed.status).toBe('ok');
     expect(parsed.consumedCount).toBe(1);
     expect(parsed.missingLedgerEntryIds).toEqual([]);
+    expect(parsed.reusedResolvedCount).toBe(1);
+    expect(parsed.nonLedgerKindCount).toBe(0);
 
     // ok audit should NOT call process.exit(1)
     expect(exitSpy).not.toHaveBeenCalledWith(1);
   });
 
-  it('audit degraded: consumed candidate missing from ledger exits 1', async () => {
-    mockDb.setRows(
-      "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'",
-      [{ candidate_id: 'c1' }],
-    );
-
-    // Ledger has no matching derivedFromPainIds
-    mockLoadLedger.mockReturnValue({
-      tree: {
-        principles: {
-          p1: { id: 'p1', derivedFromPainIds: ['other-candidate'] },
-        },
-      },
+  it('audit degraded: true-missing consumed candidate exits 1', async () => {
+    mockAuditCandidateLedgerConsistency.mockResolvedValue({
+      status: 'degraded',
+      consumedCount: 1,
+      orphanCandidateCount: 1,
+      missingLedgerCount: 1,
+      reusedResolvedCount: 0,
+      nonLedgerKindCount: 0,
+      missingLedgerEntryIds: ['c1'],
     });
 
     await handleCandidateAudit({ workspace: '/tmp/test-workspace', json: true });
@@ -214,6 +216,34 @@ describe('pd candidate audit', () => {
 
     // degraded audit must exit 1
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('audit error: unreadable state exits 1, surfaces reason + next action, and stops (no result output)', async () => {
+    mockAuditCandidateLedgerConsistency.mockResolvedValue({
+      status: 'error',
+      consumedCount: 0,
+      orphanCandidateCount: 0,
+      missingLedgerCount: 0,
+      reason: 'no such column: recommendation_kind',
+    });
+
+    await handleCandidateAudit({ workspace: '/tmp/test-workspace', json: true });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Audit failed: no such column: recommendation_kind'),
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Next action'));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    // cli-2-exit-stops: no audit result JSON was printed after the exit path
+    const jsonOutput = consoleLogSpy.mock.calls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0] as string);
+        return parsed.status !== undefined;
+      } catch {
+        return false;
+      }
+    });
+    expect(jsonOutput).toBeUndefined();
   });
 });
 
