@@ -2221,3 +2221,12 @@ export type {
   InterventionSourceKind,
   NormalizedInterventionRecord,
 } from './types/intervention-evidence-contract.js';
+export {
+  SqliteInterventionEvidenceStore,
+} from './store/sqlite-intervention-evidence-store.js';
+export type {
+  AppendObservationBatchResult,
+  InterventionAuditRead,
+  InterventionAuditReadOptions,
+  InterventionSourceConflict,
+} from './store/sqlite-intervention-evidence-store.js';
