@@ -133,4 +133,82 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
     };
     expect(trajectoryBody.success).toBe(true);
   });
+
+  // PRI-947 回归：「批准」是两步确认，第一步只负责把确认面板展开在 Owner 眼前。
+  // 曾经面板渲染在整页最后一个节点，Owner 点完看不到任何变化，误判为审批链路故障。
+  // 必须断言视口相交 —— toBeVisible 只校验 CSS 可见性，测不出"渲染在屏幕外"。
+  test('点「批准」就地展开二次确认面板：面板落进视口，且第一步不产生任何写入', async ({ page }) => {
+    // ── 钉住 seed 里唯一带完整 Scribe 素材、后端判定「可批准」的那条 ──────────
+    // 不扫描"第一条可批准的"：e2e 是 workers:1 串行共享同一 workspace，扫描会把
+    // 断言对象交给运行时数据顺序，本测试可能在错误的 subject 上通过。
+    // 这里的 owner-decision-view 调用只负责把 fixture 失效变成明确报错，不负责挑选。
+    const principleId = 'e2e00000-0000-4000-8000-000000000008';
+    const viewResp = await apiGet(`/api/v1/principles/${encodeURIComponent(principleId)}/owner-decision-view`);
+    expect(viewResp.status, `seed fixture ${principleId} 的 owner-decision-view 返回 ${viewResp.status}`).toBe(200);
+    const viewBody = viewResp.body as {
+      data?: { availableActions?: Array<{ semantic?: string }> };
+    };
+    expect(
+      viewBody.data?.availableActions?.some((action) => action.semantic === 'approve'),
+      `seed fixture ${principleId} 已不再提供 approve 动作（决策素材缺失或审批门 blocked）`,
+    ).toBe(true);
+
+    // ── 记录任何非 GET 请求：第一步点击绝不允许提交 ──────────────────────────
+    const writes: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() !== 'GET') writes.push(`${req.method()} ${req.url()}`);
+    });
+
+    await page.goto(`/#/principles/${encodeURIComponent(principleId)}`);
+    await page.waitForLoadState('networkidle');
+
+    const approveButton = page.locator('[data-action-semantic="approve"]').first();
+    await expect(approveButton, '决策区没有渲染「批准」按钮').toBeVisible();
+
+    // 把按钮顶到视口上沿：这是"页面根节点最后一块"旧布局下最苛刻的偏移——面板离视口
+    // 最远，同时让面板落点变成确定量而非滚动位置的随机结果。
+    await approveButton.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await approveButton.click();
+
+    const panel = page.locator('[data-testid="owner-decision-actions"] [data-testid="owner-decision-confirm"]');
+    // 契约本体：第二步必须落在 Owner 正在操作的决策区内，而不是整页末尾的孤立节点。
+    await expect(panel, '点「批准」后确认面板没有展开在决策区内').toHaveCount(1);
+    await expect(panel).toBeVisible();
+
+    // 面板不是"出现即合格"：Owner 抱怨的是读不到后果，所以必须断言 seed 里那条
+    // intentContract.targetBehavior 真的走完了 view model → 面板这一段渲染链。
+    await expect(panel).toContainText('【拟议行为】提交确认面板前，Owner 能在决策区读到本条后果说明。');
+
+    const geometry = await panel.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const confirm = Array.from(el.querySelectorAll('button'))
+        .find((btn) => btn.textContent?.trim() === '确认')
+        ?.getBoundingClientRect();
+      return {
+        top: Math.round(rect.top),
+        bottom: Math.round(rect.bottom),
+        confirmTop: confirm === undefined ? null : Math.round(confirm.top),
+        confirmBottom: confirm === undefined ? null : Math.round(confirm.bottom),
+        viewportHeight: window.innerHeight,
+        documentHeight: document.documentElement.scrollHeight,
+      };
+    });
+    const outside = `（面板 top=${geometry.top} bottom=${geometry.bottom}，「确认」top=${geometry.confirmTop} bottom=${geometry.confirmBottom}，视口高=${geometry.viewportHeight}，整页高=${geometry.documentHeight}）`;
+
+    // 视口相交（下沿）：Owner 不滚动就能看见面板开始的地方，否则等同"点了没反应"。
+    expect(geometry.top, `确认面板落在视口下方${outside}`).toBeLessThan(geometry.viewportHeight);
+    // 视口相交（上沿）：SPEC 范围 2 要求包围盒"在视口内"，只断言下沿测不出面板翻到头顶之上。
+    expect(geometry.bottom, `确认面板落在视口上方${outside}`).toBeGreaterThan(0);
+    // Owner 必须真正够得到的那一步：第二步的「确认」按钮本身完整落在视口内。
+    expect(geometry.confirmTop, `决策区里没有「确认」按钮${outside}`).not.toBeNull();
+    expect(geometry.confirmTop!, `「确认」按钮顶出视口上沿${outside}`).toBeGreaterThanOrEqual(0);
+    expect(geometry.confirmBottom!, `「确认」按钮落在视口下方，Owner 须滚动才能提交${outside}`).toBeLessThanOrEqual(geometry.viewportHeight);
+
+    expect(writes, `第一步点击不应触发写入，实际发生：${writes.join(', ')}`).toEqual([]);
+
+    // ── 取消：面板收起，仍然没有任何写入 ─────────────────────────────────────
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    expect(writes, '取消同样不得产生写入').toEqual([]);
+  });
 });
