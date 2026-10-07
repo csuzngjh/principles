@@ -33,8 +33,14 @@ interface JournalFact {
   readonly reason?: string;
 }
 
-function readJournalFact(journal: JournalModule, journalPath: string, transactionId: string): JournalFact {
-  const { transitions, tornTailDetected } = journal.readTransactionJournalForRecovery(journalPath);
+type JournalRead = ReturnType<JournalModule['readTransactionJournalForRecovery']>;
+
+function factFromTransitions(
+  journal: JournalModule,
+  transactionId: string,
+  read: JournalRead,
+): JournalFact {
+  const {transitions} = read;
   const last = transitions[transitions.length - 1];
   const [first] = transitions;
   return {
@@ -42,7 +48,7 @@ function readJournalFact(journal: JournalModule, journalPath: string, transactio
     exists: true,
     lastState: last?.to ?? null,
     terminal: last !== undefined && journal.isTerminalTransactionState(last.to),
-    tornTailDetected,
+    tornTailDetected: read.tornTailDetected,
     startedAt: first?.at ?? null,
     lastAt: last?.at ?? null,
     productVersion: last?.productVersion ?? first?.productVersion ?? null,
@@ -53,6 +59,10 @@ function readJournalFact(journal: JournalModule, journalPath: string, transactio
       ...(typeof transition.detail === 'string' ? { detail: transition.detail } : {}),
     })),
   };
+}
+
+function readJournalFact(journal: JournalModule, journalPath: string, transactionId: string): JournalFact {
+  return factFromTransitions(journal, transactionId, journal.readTransactionJournalForRecovery(journalPath));
 }
 
 async function transactionStatus(res: ServerResponse, transactionId: string): Promise<void> {
@@ -105,20 +115,46 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
           }
         });
     } catch {
-      sendSuccess(res, { needsRecovery: false, unfinished: [], broken: [] });
+      sendSuccess(res, { needsRecovery: false, unfinished: [], superseded: [], broken: [] });
       return null;
     }
   })();
   if (entries === null) return;
 
   const unfinished: JournalFact[] = [];
+  const superseded: { transactionId: string; reason: string }[] = [];
   const broken: { transactionId: string; reason: string }[] = [];
+  // PRI-896: a non-terminal journal is only an ALARM if the product's own
+  // recovery decision cannot explain it away. The live release record is the
+  // evidence for that, so a missing/corrupt active record means NO evidence —
+  // the alarm then stays, which is the conservative direction.
+  const activeRecord = (() => {
+    try {
+      return journal.readActiveRecord(paths.activeRecordPath);
+    } catch {
+      return null;
+    }
+  })();
   for (const entry of entries) {
     const transactionId = entry.name.slice(0, -'.jsonl'.length);
     if (!TRANSACTION_ID_PATTERN.test(transactionId)) continue;
     try {
-      const fact = readJournalFact(journal, path.join(paths.transactionsDir, entry.name), transactionId);
-      if (!fact.terminal) unfinished.push(fact);
+      const read = journal.readTransactionJournalForRecovery(path.join(paths.transactionsDir, entry.name));
+      const fact = factFromTransitions(journal, transactionId, read);
+      if (fact.terminal) continue;
+      const outcome = journal.recoverUnfinishedTransaction({
+        transitions: read.transitions,
+        activeRecord,
+        transactionId,
+      });
+      if (activeRecord !== null && outcome.kind === 'old_confirmed') {
+        // Benign residue a killed run left behind, already replaced by the
+        // live generation. Reported separately (rc-9: never a silent drop),
+        // but it must not hold the Owner's attention forever.
+        superseded.push({ transactionId, reason: outcome.reason });
+        continue;
+      }
+      unfinished.push(fact);
     } catch (error) {
       broken.push({ transactionId, reason: error instanceof Error ? error.message : String(error) });
     }
@@ -127,6 +163,7 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
   sendSuccess(res, {
     needsRecovery: unfinished.length > 0 || broken.length > 0,
     unfinished,
+    superseded,
     broken,
     // SPEC §12.1: exact next step, never a vague failure.
     nextAction: unfinished.length > 0 || broken.length > 0

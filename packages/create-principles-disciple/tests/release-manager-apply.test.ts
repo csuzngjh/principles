@@ -358,4 +358,48 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
       expect(fs.existsSync(path.join(fixture.pdHome, 'staging', stagingDirs[0], 'release-asset.tar.gz'))).toBe(true);
     });
   });
+
+  it('PRI-897: refuses to append a second attempt onto a journal that already carries this transactionId', async () => {
+    // The detached bootstrap executor can be re-run with a stale request file,
+    // handing back the SAME transactionId. Appending a fresh `planned` after a
+    // sealed chain breaks the whole volume's validation (journal_sequence_broken),
+    // so the previously CONFIRMED history inside that file reads as corrupt
+    // forever. One transactionId = one lifecycle = one file.
+    const payloadRoot = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-apply-payload-')));
+    const artifact = buildReleaseAssetPayload(payloadRoot);
+    const fixture = await createShadowFixture({
+      candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+      artifact: () => artifact,
+    });
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    const transactionsDir = path.join(fixture.pdHome, 'transactions');
+    fs.mkdirSync(transactionsDir, { recursive: true });
+    const transactionId = 'update-1789834726884-3d7b7f81';
+    const sealedPath = path.join(transactionsDir, `${transactionId}.jsonl`);
+    const sealed = [
+      { at: '2026-09-19T16:24:00.000Z', from: null, to: 'planned' },
+      { at: '2026-09-19T16:25:01.612Z', from: 'planned', to: 'failed' },
+    ].map((line) => JSON.stringify({
+      ...line,
+      transactionId,
+      releaseId: fixture.releaseId,
+      productVersion: '1.222.0',
+      generation: 1,
+      releaseMetadataDigest: 'a'.repeat(64),
+    })).join('\n') + '\n';
+    fs.writeFileSync(sealedPath, sealed, 'utf8');
+
+    const error: ReleaseManagerError = await manager
+      .apply({ workspaceDir: fixture.pdHome, transactionId })
+      .then(() => { throw new Error('apply must refuse a journal that already exists'); }, (e: unknown) => e as ReleaseManagerError);
+
+    expect(error.reason).toBe('journal_sealed');
+    expect(error.transactionOpened).toBe(false);
+    expect(error.nextAction).toMatch(/new transaction|start/i);
+
+    // Refusal happens BEFORE any side effect: the sealed volume is byte-for-byte
+    // unchanged and no deployment was attempted.
+    expect(fs.readFileSync(sealedPath, 'utf8')).toBe(sealed);
+    expect(installMock).not.toHaveBeenCalled();
+  });
 });

@@ -262,4 +262,54 @@ describe('PRI-848 update state contract', () => {
     expect(quiet.data.needsRecovery).toBe(false);
     expect(quiet.data.unfinished).toHaveLength(0);
   });
+
+  it('PRI-896: a never-activated orphan superseded by the live release does not alarm', async () => {
+    // Exactly the stranded residue a killed install leaves behind: one
+    // `planned` line, no terminal state, generation long since replaced.
+    writeJournal(mocks.fakeHome, 'install-1790046654982-450b61dc', [
+      { at: '2026-09-20T00:00:00.000Z', from: null, to: 'planned', transactionId: 'install-1790046654982-450b61dc', releaseId: 'a'.repeat(64), productVersion: '1.2.0', generation: 2 },
+    ]);
+    const liveRelease = 'e'.repeat(64);
+    fs.writeFileSync(path.join(mocks.fakeHome, '.pd', 'active.json'), JSON.stringify({
+      schemaVersion: 1, generation: 29, releaseId: liveRelease,
+      releaseMetadataDigest: '4'.repeat(64), previousReleaseId: null,
+      transactionId: 'update-live', productVersion: '2.2.1',
+    }), 'utf8');
+
+    const body = await (await fetch(`${transactionBase}/api/update/recovery`)).json();
+    // The banner must go quiet: the product's OWN verdict already calls this a
+    // harmless superseded orphan (PRI-853 `old_confirmed`), so alarming forever
+    // with no official way to converge is the defect.
+    expect(body.data.needsRecovery).toBe(false);
+    expect(body.data.unfinished).toHaveLength(0);
+    // rc-9: the demotion is observable, never a silent drop.
+    expect(body.data.superseded).toMatchObject([{ transactionId: 'install-1790046654982-450b61dc' }]);
+    expect(body.data.superseded[0].reason).toMatch(/activation was never journaled/);
+    // Still pure: nothing was written to the journal.
+    expect(fs.readFileSync(path.join(mocks.fakeHome, '.pd', 'transactions', 'install-1790046654982-450b61dc.jsonl'), 'utf8'))
+      .toContain('"to":"planned"');
+  });
+
+  it('PRI-896: an interrupted activation still alarms — demotion is not a blanket mute', async () => {
+    // Pointer landed for THIS transaction but host verification never ran:
+    // the verdict is `explicit_refusal`, so the alarm is real and must stay.
+    writeJournal(mocks.fakeHome, 'update-3-halfway', [
+      { at: '2026-09-20T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-3-halfway', releaseId: 'r'.repeat(64), productVersion: '1.3.0', generation: 4 },
+      { at: '2026-09-20T00:01:00.000Z', from: 'planned', to: 'staged', transactionId: 'update-3-halfway', releaseId: 'r'.repeat(64), productVersion: '1.3.0', generation: 4 },
+      { at: '2026-09-20T00:02:00.000Z', from: 'staged', to: 'probed', transactionId: 'update-3-halfway', releaseId: 'r'.repeat(64), productVersion: '1.3.0', generation: 4 },
+      { at: '2026-09-20T00:03:00.000Z', from: 'probed', to: 'activated', transactionId: 'update-3-halfway', releaseId: 'r'.repeat(64), productVersion: '1.3.0', generation: 4 },
+    ]);
+    fs.writeFileSync(path.join(mocks.fakeHome, '.pd', 'active.json'), JSON.stringify({
+      schemaVersion: 1, generation: 4, releaseId: 'r'.repeat(64),
+      releaseMetadataDigest: '4'.repeat(64), previousReleaseId: null,
+      transactionId: 'update-3-halfway', productVersion: '1.3.0',
+    }), 'utf8');
+
+    const body = await (await fetch(`${transactionBase}/api/update/recovery`)).json();
+    expect(body.data.needsRecovery).toBe(true);
+    expect(body.data.unfinished.map((item: { transactionId: string }) => item.transactionId))
+      .toEqual(['update-3-halfway']);
+    expect(body.data.superseded).toHaveLength(0);
+    expect(body.data.nextAction).toBeTruthy();
+  });
 });

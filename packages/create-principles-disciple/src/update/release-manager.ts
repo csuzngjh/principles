@@ -54,6 +54,7 @@ export type ReleaseManagerReason =
   | 'active_record_corrupt'
   | 'legacy_layout_not_supported'
   | 'journal_unavailable'
+  | 'journal_sealed'
   | 'apply_failed';
 
 export class ReleaseManagerError extends Error {
@@ -440,6 +441,19 @@ export class ReleaseManager {
       ? callerTransactionId
       : `update-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const journalPath = path.join(this.paths.transactionsDir, `${transactionId}.jsonl`);
+    // PRI-897: one transactionId is one lifecycle, and its journal is a closed
+    // volume once written. Appending a second attempt to the same file puts a
+    // `from=null` planned line after a terminal one, which breaks the
+    // WHOLE-FILE sequence validation (journal_sequence_broken) — the recovery
+    // surface then reads the entire history, including an earlier confirmed
+    // update, as corrupt forever. Refuse before any side effect instead.
+    if (fs.existsSync(journalPath)) {
+      throw new ReleaseManagerError(
+        'journal_sealed',
+        `Transaction ${transactionId} already has a journal at ${journalPath}; refusing to append a second attempt onto a closed volume.`,
+        'Start the update again without a transactionId so a fresh journal opens, or resolve the existing transaction through the recovery surface first.',
+      );
+    }
     const journal: InstallerJournal = {
       transactionId,
       journalPath,
