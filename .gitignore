@@ -231,8 +231,18 @@ packages/website/.wrangler/
 # ===== Workspace housekeeping (2026-09-27) =====
 # Owner-private live-data audit snapshot (2026-09-22): copies of the live
 # state/trajectory DBs, memory carriers (MEMORY.md etc.), session event logs
-# and case samples with real conversation content. Never publish. The
-# derived reports that belong in the repo live under docs/audit/PRI-904_*.
+# and case samples with real conversation content. Never publish. Reports
+# derived from them are local-only as well (see the 2026-10-07 rule below).
 /pd-data-audit/
 # ZCode CLI tool state (auto-synced from .gitignore; local-only)
 /.zcodeignore
+
+# ===== Audit material stays out of the repository (2026-10-07 Owner ruling) =====
+# A reality audit is the working output of an investigation; the published
+# record of a change is its PR plus Linear evidence, not a committed report.
+# Both patterns are root-anchored. Paths already tracked under docs/audit/
+# stay as history — .gitignore has no effect on tracked files — but nothing
+# new enters from either directory; a deliberate exception takes `git add -f`
+# plus a stated reason.
+/docs/audit/
+/artifacts/
