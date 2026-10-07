@@ -2172,3 +2172,52 @@ export type {
   ClassifierPayloadPath,
   SignalClassificationOutputV1,
 } from './signal-collector/index.js';
+
+// Intervention Evidence — PD v2 Phase 1 Evidence Foundation (ADR-0027).
+// Deterministic normalization + contract; persistence lives in the SQLite
+// intervention-evidence store (same runtime-v2 store seam as activations).
+export {
+  normalizeInterventionEvidenceBatch,
+  canonicalJson,
+  computeEvidenceId,
+  computeRecordDigest,
+  mintObservationKey,
+} from './intervention-evidence-normalizer.js';
+export type {
+  NormalizedInterventionBatch,
+  InterventionNormalization,
+} from './intervention-evidence-normalizer.js';
+export {
+  DELIVERED_CONFIRMATIONS,
+  DELIVERY_CONFIRMATIONS,
+  INTERVENTION_CAPABILITIES,
+  INTERVENTION_RECORD_KINDS,
+  INTERVENTION_SOURCE_KINDS,
+  INTERVENTION_TEXT_BOUNDS,
+} from './types/intervention-evidence-contract.js';
+export type {
+  DeliveryConfirmation,
+  InterventionActivationOccurrenceRef,
+  InterventionApplicationAction,
+  InterventionApplicationProof,
+  InterventionAuditRecordSummary,
+  InterventionAuditRelations,
+  InterventionAuditSelector,
+  InterventionCapability,
+  InterventionCapabilityDeclaration,
+  InterventionCapabilityStatus,
+  InterventionContentRef,
+  InterventionDeliveryOutcome,
+  InterventionDeliveryPayload,
+  InterventionDeliveryTarget,
+  InterventionEffectPayload,
+  InterventionEpisodePayload,
+  InterventionEvidenceBatchInput,
+  InterventionNativeRefs,
+  InterventionObservationInput,
+  InterventionOutcomePayload,
+  InterventionPayload,
+  InterventionRecordKind,
+  InterventionSourceKind,
+  NormalizedInterventionRecord,
+} from './types/intervention-evidence-contract.js';
