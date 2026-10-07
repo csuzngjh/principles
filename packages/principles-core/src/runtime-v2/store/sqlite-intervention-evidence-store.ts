@@ -165,9 +165,8 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
     requirePayloadField(payload, 'outcomeSource', evidenceId);
     requirePayloadField(payload, 'observationSummary', evidenceId);
   }
-  // runtime-contract-exempt: ERR-001 the union payload type cannot be
-  // reconstructed without a cast; every member was presence-checked per kind
-  // above, so this narrows VALIDATED data, it does not bypass validation.
+  // Every payload member was presence-checked per kind above; this narrows VALIDATED data (the union type has no guard form).
+  // runtime-contract-exempt: ERR-001 payload-union narrowing after per-kind field validation — see the checks immediately above
   const typedPayload = payload as unknown as InterventionAuditRecordSummary['payload'];
 
   const deliveryKey = strOrNullColumn(row, 'delivery_key');
