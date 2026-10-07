@@ -218,17 +218,21 @@ describe('pd candidate audit', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
-  it('audit error: unreadable state exits 1 and stops (no result output)', async () => {
+  it('audit error: unreadable state exits 1, surfaces reason + next action, and stops (no result output)', async () => {
     mockAuditCandidateLedgerConsistency.mockResolvedValue({
       status: 'error',
       consumedCount: 0,
       orphanCandidateCount: 0,
       missingLedgerCount: 0,
+      reason: 'no such column: recommendation_kind',
     });
 
     await handleCandidateAudit({ workspace: '/tmp/test-workspace', json: true });
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Audit failed'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Audit failed: no such column: recommendation_kind'),
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Next action'));
     expect(exitSpy).toHaveBeenCalledWith(1);
     // cli-2-exit-stops: no audit result JSON was printed after the exit path
     const jsonOutput = consoleLogSpy.mock.calls.find((call) => {

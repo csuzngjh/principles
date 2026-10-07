@@ -18,3 +18,6 @@ implementation / prompt / defer; fail-closed unknown kinds) are counted in
 anywhere remains true drift (`missingLedgerEntryIds` lists them). On the R7
 production workspace this drops the audit from 63 missing (52+ kind/reuse false
 positives masking real drift) to 5 true-drift entries. No write path changes.
+Audit error results additionally surface the bounded underlying failure reason
+(e.g. a stale state.db schema) with a concrete next action instead of a generic
+refusal, on `pd candidate audit` and every surface sharing the judgment.

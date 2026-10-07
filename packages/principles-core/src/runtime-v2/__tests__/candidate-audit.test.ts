@@ -68,9 +68,14 @@ function reuseEvidenceFor(candidateId: string, painId = 'pain-001') {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('auditCandidateLedgerConsistency', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    // Re-pin the mocked fs default: vi.restoreAllMocks does not reliably undo
+    // vi.spyOn on module-mock exports, so a test that flips existsSync to
+    // false would otherwise leak into later tests (order dependence).
+    const fs = await import('fs');
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
   });
 
   it('returns ok when all consumed candidates have ledger entries', async () => {
@@ -224,14 +229,62 @@ describe('auditCandidateLedgerConsistency', () => {
     expect(result.status).toBe('error');
   });
 
-  it('returns error when DB throws', async () => {
+  it('returns error when DB throws, propagating the failure reason', async () => {
     const Database = (await import('better-sqlite3')).default;
-    vi.mocked(Database).mockImplementation(() => {
+    // Must be a regular function: an arrow implementation cannot be
+    // constructed with `new` (vitest then throws the arrow itself).
+    vi.mocked(Database).mockImplementation(function () {
       throw new Error('Cannot open database');
     });
 
     const result = await auditCandidateLedgerConsistency(WS);
 
     expect(result.status).toBe('error');
+    expect(result.reason).toBe('Cannot open database');
+  });
+
+  it('propagates the underlying failure reason when the audit query fails (stale schema)', async () => {
+    // Review finding F1 regression: a stale state.db schema (missing column)
+    // used to collapse into a generic error with no reason, so operators
+    // could not tell WHY the audit refused to read state.
+    // Re-establish a working constructor (mock implementations leak across
+    // tests: clearAllMocks does not reset them).
+    const Database = (await import('better-sqlite3')).default;
+    vi.mocked(Database).mockImplementation(function () {
+      return mockDb;
+    });
+    mockDb.prepare.mockImplementation(() => {
+      throw new Error('no such column: recommendation_kind');
+    });
+
+    const result = await auditCandidateLedgerConsistency(WS);
+
+    expect(result.status).toBe('error');
+    expect(result.reason).toBe('no such column: recommendation_kind');
+  });
+
+  it('propagates a reason when state.db is missing', async () => {
+    const fs = await import('fs');
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+    const result = await auditCandidateLedgerConsistency(WS);
+
+    expect(result.status).toBe('error');
+    expect(result.reason).toContain('state.db not found');
+  });
+
+  it('bounds the propagated reason length (rc-8)', async () => {
+    const Database = (await import('better-sqlite3')).default;
+    vi.mocked(Database).mockImplementation(function () {
+      return mockDb;
+    });
+    mockDb.prepare.mockImplementation(() => {
+      throw new Error('x'.repeat(2000));
+    });
+
+    const result = await auditCandidateLedgerConsistency(WS);
+
+    expect(result.status).toBe('error');
+    expect(result.reason?.length).toBeLessThanOrEqual(500);
   });
 });

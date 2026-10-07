@@ -39,9 +39,19 @@ export interface CandidateAuditResult {
   nonLedgerKindCount?: number;
   /** The true-missing candidate ids (principle-kind, consumed, no resolution). */
   missingLedgerEntryIds?: string[];
+  /**
+   * When status='error': bounded description of the underlying failure
+   * (e.g. a stale-schema SQLite error such as a missing column), so
+   * operators see WHY state could not be read instead of a generic
+   * refusal (rc-3 fail-loud, rc-8 bounded).
+   */
+  reason?: string;
 }
 
-function errorResult(): CandidateAuditResult {
+/** rc-8: keep the propagated failure description bounded. */
+const MAX_AUDIT_REASON_LENGTH = 500;
+
+function errorResult(reason?: string): CandidateAuditResult {
   return {
     status: 'error',
     consumedCount: 0,
@@ -50,6 +60,7 @@ function errorResult(): CandidateAuditResult {
     reusedResolvedCount: 0,
     nonLedgerKindCount: 0,
     missingLedgerEntryIds: [],
+    reason: reason?.slice(0, MAX_AUDIT_REASON_LENGTH),
   };
 }
 
@@ -58,7 +69,7 @@ export async function auditCandidateLedgerConsistency(workspaceDir: string): Pro
   const stateDir = path.join(workspaceDir, '.state');
 
   if (!fs.existsSync(pdDbPath)) {
-    return errorResult();
+    return errorResult(`state.db not found at ${pdDbPath}`);
   }
 
   try {
@@ -125,7 +136,7 @@ export async function auditCandidateLedgerConsistency(workspaceDir: string): Pro
     } finally {
       db.close();
     }
-  } catch {
-    return errorResult();
+  } catch (err) {
+    return errorResult(err instanceof Error ? err.message : String(err));
   }
 }

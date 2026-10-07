@@ -1284,7 +1284,8 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
     const audit = await auditCandidateLedgerConsistency(workspaceDir);
 
     if (audit.status === 'error') {
-      console.error('Audit failed: could not read candidate/ledger state');
+      console.error(`Audit failed: ${audit.reason ?? 'could not read candidate/ledger state'}`);
+      console.error('Next action: open this workspace once with the PD runtime to create/migrate state.db, then retry the audit.');
       process.exit(1);
       return;
     }
