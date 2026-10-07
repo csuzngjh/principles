@@ -197,8 +197,22 @@ export function computeEvidenceId(sourceKind: string, sourceLocator: string, obs
   return `sha256:${sha256Hex(`${sourceKind}|${sourceLocator}|${observationKey}`)}`;
 }
 
+/**
+ * Record content fingerprint. Deliberately EXCLUDES evidenceId (derived from
+ * the identity triple), evidenceScopeId (rewritten by the ingress to the
+ * workspace scope) and recordedAt (batch record time): two observations of
+ * the SAME fact recorded at different times or through different producer
+ * scope placeholders are the same content — only a change in the observed
+ * fact itself is a source conflict.
+ */
+const DIGEST_EXCLUDED_KEYS: ReadonlySet<string> = new Set(['evidenceId', 'evidenceScopeId', 'recordedAt']);
+
 export function computeRecordDigest(record: Omit<NormalizedInterventionRecord, 'recordDigest'>): string {
-  return `sha256:${sha256Hex(canonicalJson(record))}`;
+  const factView: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (!DIGEST_EXCLUDED_KEYS.has(key)) factView[key] = value;
+  }
+  return `sha256:${sha256Hex(canonicalJson(factView))}`;
 }
 
 function normalizeNativeRefs(raw: unknown): { value?: InterventionNativeRefs; error?: string } {

@@ -17,6 +17,7 @@ import Database from 'better-sqlite3';
 import * as nodePath from 'node:path';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
 import { getInjectedPrincipleIds, getInjectedActivationIds } from './session-tracker.js';
+import { recordSelfReportEvidence } from './intervention-evidence-recorder.js';
 
 export type PrincipleApplicationLevel = 'effect' | 'presence';
 export type PrincipleApplicationKind =
@@ -274,6 +275,20 @@ export function recordSelfReportFromText(
         ? ((result as { changes?: number }).changes ?? 0)
         : 0;
       written += changes > 0 ? 1 : 0;
+      // PD v2 Phase 1: mirror the NEW claim into the normalized evidence
+      // ledger as agent_claimed (never runtime_verified). Only on a fresh row
+      // — the deduped replay is already recorded (the idempotent batch makes
+      // the mirror safe either way). Best-effort, never throws.
+      if (changes > 0) {
+        recordSelfReportEvidence({
+          workspaceDir,
+          sessionId,
+          principleId,
+          ...(activationId !== null ? { activationId } : {}),
+          claimText: digest,
+          logger,
+        });
+      }
     } catch (ledgerErr) {
       logger?.warn?.(`[PD:ReceiptLedger] self_report row write failed for principle ${safeLogField(principleId)}: ${String(ledgerErr)}`);
     }

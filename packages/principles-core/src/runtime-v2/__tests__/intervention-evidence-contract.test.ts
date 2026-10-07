@@ -106,4 +106,17 @@ describe('deterministic identity helpers', () => {
     const mutated = { ...recordA, payload: { ...recordA.payload, claimText: 'changed' } };
     expect(computeRecordDigest(mutated)).not.toBe(computeRecordDigest(recordA));
   });
+
+  it('digests the FACT, not the record metadata: recordedAt and scope differences stay idempotent', () => {
+    const base: Omit<NormalizedInterventionRecord, 'recordDigest'> = {
+      evidenceId: 'sha256:x', evidenceScopeId: 'scope-a', sourceKind: 'openclaw_plugin_event_log',
+      observationKey: 'k', sourceLocator: 'loc', kind: 'delivery',
+      recordedAt: '2026-10-07T00:00:00Z', nativeRefs: { hostKind: 'openclaw' },
+      payload: { targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' },
+    };
+    const reRecorded = { ...base, recordedAt: '2026-10-08T09:00:00Z', evidenceScopeId: 'scope-b' };
+    expect(computeRecordDigest(reRecorded)).toBe(computeRecordDigest(base));
+    const factChanged = { ...base, payload: { ...base.payload, outcome: 'failed' as const, failureReason: 'x' } };
+    expect(computeRecordDigest(factChanged)).not.toBe(computeRecordDigest(base));
+  });
 });
