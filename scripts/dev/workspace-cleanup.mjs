@@ -181,7 +181,7 @@ async function runResidueMode(args) {
 
   const preflight = scanReparsePoints(entry.path);
   const lines = ['[workspace-cleanup] residue target: ' + entry.path];
-  lines.push('  class: ' + entry.residueClass);
+  lines.push('  class: ' + entry.residueClass + '  shape: ' + entry.residueShape);
   for (const e of entry.evidence) lines.push('  evidence: ' + e);
   lines.push(
     '  contents: ' + preflight.files + ' files, ' + preflight.dirs + ' dirs, ' + preflight.links.length + ' reparse points'
@@ -205,6 +205,7 @@ async function runResidueMode(args) {
         mode: 'dry-run',
         target: entry.path,
         residueClass: entry.residueClass,
+        residueShape: entry.residueShape,
         reparsePoints: preflight.links,
         counts: { files: preflight.files, dirs: preflight.dirs },
       },
@@ -302,7 +303,7 @@ async function main() {
       lines.push('');
       lines.push('UNKNOWN residue (never swept automatically): ' + state.residue.length);
       for (const r of state.residue) {
-        lines.push('  ' + r.path + '  [' + r.residueClass + ']');
+        lines.push('  ' + r.path + '  [' + r.residueClass + ' / ' + r.residueShape + ']');
         if (r.recoveredBranch) lines.push('    task branch (recovered from lease): ' + r.recoveredBranch);
         for (const reason of r.reasons) lines.push('    note: ' + reason);
         lines.push('    to remove explicitly: npm run dev:workspace:cleanup -- --residue "' + r.path + '" --ack-unknown --apply');
@@ -405,7 +406,7 @@ async function main() {
     applied: applied.length,
     refused,
     skipped: plan.skipped,
-    residueReported: state.residue.map((r) => ({ path: r.path, residueClass: r.residueClass })),
+    residueReported: state.residue.map((r) => ({ path: r.path, residueClass: r.residueClass, residueShape: r.residueShape })),
     pruned,
     notes,
     actions: applied,
