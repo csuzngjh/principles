@@ -1,11 +1,21 @@
 # ADR-0014: MVP-First Strategy and Product Pivot to Behavior Character Internalization
 
+> **2026-10-07 integration amendment (Proposed)**: The Owner authorized integration of the PD v2 freeze in two documentation PRs. [ADR-0027](0027-principle-intervention-evidence-and-delivery-contract.md) defines the bounded Evidence Foundation contract; [ADR-0028](0028-owner-principle-assets-and-evolution.md) defines later asset/evolution targets. This amendment is subject to the existing ADR review process. It does not replace MVP-First or turn all later targets into current implementation scope.
+
 > **Status**: Accepted
 > **Date**: 2026-05-24
 > **Supersedes**: ADR-0013 (Attribution Pipeline) — deferred, not abandoned. See §6.
 > **Reframes**: ADR-0006 (5-channel activation) priorities. See §4.
 > **Defers**: ADR-0008 (BALM), ADR-0009 (LRAS), ADR-0010 (GAP), ADR-0011 (MissionScheduler) — see post-mvp-conditional-roadmap.md
 > **Drives**: docs/plans/2026-05-roadmap/07-mvp-first-pivot.md (execution)
+
+## Amendment scope — 2026-10-07 Evidence Foundation integration
+
+The documentation integration retains current Pain, Diagnosis, Candidate, Approval, Activation, workspace ledger and task completion meanings. The next bounded implementation SPEC covers evidence identities, exact content/activation references, Delivery Attempt/Result, source-distinguished Application, minimal Episodes/Effects/Outcome observations, host capability disclosure and audit queries.
+
+The Phase 1 contract is observation, not effectiveness scoring, automatic evolution, causal attribution or expanded delivery scheduling. Owner Asset Migration, cross-machine synchronization, merge/split, model training and general memory remain excluded. Accepting the target ADRs does not automatically release these deferred areas or certify new runtime behavior.
+
+The existing Principle Receipt design is the Phase 1 SPEC integration point. Its alignment and navigation follow in the second documentation PR. Existing Owner approval, host trust, consent and rollback mechanisms remain in force.
 
 ## 1. Context
 
