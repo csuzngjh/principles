@@ -412,6 +412,30 @@ export class SqliteInterventionEvidenceStore {
         break;
     }
 
+    // Transitive chain visibility: outcomes reference episodes (SPEC §13.3 —
+    // effect is optional on an outcome), so a principle/effect view reaches
+    // its outcomes THROUGH the shared episode key. Exact-reference traversal
+    // only; never time proximity or text similarity.
+    const episodesSeen = new Set<string>();
+    for (const rawRow of rows) {
+      if (isRecord(rawRow) && typeof rawRow.episode_key === 'string' && rawRow.episode_key.length > 0) {
+        episodesSeen.add(rawRow.episode_key);
+      }
+    }
+    if ((selector.type === 'principle' || selector.type === 'effect') && episodesSeen.size > 0) {
+      const episodeKeys = [...episodesSeen].slice(0, limit);
+      const placeholders = episodeKeys.map(() => '?').join(', ');
+      const outcomeRows = db.prepare(
+        `${baseSelect} WHERE record_kind = 'outcome' AND episode_key IN (${placeholders})${orderBy}`,
+      ).all(...episodeKeys, limit);
+      const seenIds = new Set(rows.flatMap((r) => (isRecord(r) && typeof r.evidence_id === 'string' ? [r.evidence_id] : [])));
+      for (const outcomeRow of outcomeRows) {
+        if (isRecord(outcomeRow) && typeof outcomeRow.evidence_id === 'string' && !seenIds.has(outcomeRow.evidence_id)) {
+          rows.push(outcomeRow);
+        }
+      }
+    }
+
     const keyExists = db.prepare('SELECT 1 FROM intervention_evidence_records WHERE observation_key = ? LIMIT 1');
     const existingKeys = new Set<string>();
     const summaries: (InterventionAuditRecordSummary & { pendingFields: { field: string; missingKey: string }[] })[] = [];

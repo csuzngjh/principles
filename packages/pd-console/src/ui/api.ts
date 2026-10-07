@@ -513,6 +513,183 @@ async function fetchReceiptCounts(): Promise<ApiResponse<ReceiptCountsData>> {
   return request<ReceiptCountsData>("/api/v1/receipts/counts", undefined, validateReceiptCounts);
 }
 
+// ── Intervention Evidence Audit (PD v2 Phase 1, ADR-0027) ────────────────────
+
+export interface EvidenceAuditRecordData {
+  evidenceId: string;
+  kind: "delivery" | "application" | "behavior_episode" | "effect" | "outcome";
+  observationKey: string;
+  recordedAt: string;
+  occurredAt?: string;
+  principleId?: string;
+  activationId?: string;
+  episodeKey?: string;
+  effectKey?: string;
+  associationStatus: "linked" | "pending_association";
+  summary: string;
+  detail: string;
+}
+
+export interface EvidenceAuditCapabilityData {
+  hostKind: "openclaw" | "codex";
+  capability: string;
+  status: "supported" | "unsupported" | "unknown";
+  adapterVersion: string;
+  channel: string;
+  note?: string;
+}
+
+export interface EvidenceAuditData {
+  status: "ok" | "degraded";
+  reason?: string;
+  nextAction?: string;
+  deliveries: EvidenceAuditRecordData[];
+  applications: EvidenceAuditRecordData[];
+  episodes: EvidenceAuditRecordData[];
+  effects: EvidenceAuditRecordData[];
+  outcomes: EvidenceAuditRecordData[];
+  unresolvedReferences: { evidenceId: string; missingKey: string; field: string }[];
+  capabilityDeclarations: EvidenceAuditCapabilityData[];
+  coverage: ReceiptEvidenceCoverageData;
+}
+
+const EVIDENCE_RECORD_KINDS = new Set(["delivery", "application", "behavior_episode", "effect", "outcome"]);
+
+/**
+ * Human-readable one-liner per record — derived from the payload union on the
+ * client WITHOUT importing the server contract (the wire format is validated
+ * field-by-field here, rc-1 style).
+ */
+function evidenceRecordSummary(record: Record<string, unknown>): { summary: string; detail: string } | null {
+  const payload = typeof record.payload === "object" && record.payload !== null
+    ? record.payload as Record<string, unknown>
+    : null;
+  if (payload === null) return null;
+  const { kind } = record;
+  if (kind === "delivery") {
+    return {
+      summary: `${String(payload.confirmation ?? "?")} / ${String(payload.outcome ?? "?")}`,
+      detail: `target: ${String(payload.targetKind ?? "?")}${typeof payload.failureReason === "string" ? ` — ${payload.failureReason}` : ""}`,
+    };
+  }
+  if (kind === "application") {
+    return {
+      summary: String(payload.proofMethod ?? "?"),
+      detail: String(payload.action ?? "?") + (typeof payload.claimText === "string" ? ` — ${payload.claimText}` : ""),
+    };
+  }
+  if (kind === "behavior_episode") {
+    return {
+      summary: String(payload.status ?? "?"),
+      detail: String(payload.actionSummary ?? "?") + (typeof payload.resultSummary === "string" ? ` → ${payload.resultSummary}` : ""),
+    };
+  }
+  if (kind === "effect") {
+    return {
+      summary: String(payload.status ?? "?"),
+      detail: String(payload.observationSummary ?? "?"),
+    };
+  }
+  return {
+    summary: String(payload.outcomeSource ?? "?"),
+    detail: String(payload.observationSummary ?? "?"),
+  };
+}
+
+function validateEvidenceAuditRecord(value: unknown): EvidenceAuditRecordData | null {
+  if (typeof value !== "object" || value === null) return null;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.evidenceId !== "string") return null;
+  if (typeof rec.kind !== "string" || !EVIDENCE_RECORD_KINDS.has(rec.kind)) return null;
+  if (typeof rec.observationKey !== "string" || typeof rec.recordedAt !== "string") return null;
+  const summaryPair = evidenceRecordSummary(rec);
+  if (summaryPair === null) return null;
+  return {
+    evidenceId: rec.evidenceId,
+    kind: rec.kind as EvidenceAuditRecordData["kind"],
+    observationKey: rec.observationKey,
+    recordedAt: rec.recordedAt,
+    occurredAt: typeof rec.occurredAt === "string" ? rec.occurredAt : undefined,
+    principleId: typeof rec.principleId === "string" ? rec.principleId : undefined,
+    activationId: typeof rec.activationId === "string" ? rec.activationId : undefined,
+    episodeKey: typeof rec.episodeKey === "string" ? rec.episodeKey : undefined,
+    effectKey: typeof rec.effectKey === "string" ? rec.effectKey : undefined,
+    associationStatus: rec.associationStatus === "pending_association" ? "pending_association" : "linked",
+    summary: summaryPair.summary,
+    detail: summaryPair.detail,
+  };
+}
+
+function validateEvidenceAudit(data: unknown): EvidenceAuditData | null {
+  if (typeof data !== "object" || data === null) return null;
+  const rec = data as Record<string, unknown>;
+  const coverage = validateReceiptCoverage(rec.coverage);
+  if (coverage === null) return null;
+  const sections = {} as Record<string, EvidenceAuditRecordData[]>;
+  for (const field of ["deliveries", "applications", "episodes", "effects", "outcomes"] as const) {
+    const list: EvidenceAuditRecordData[] = [];
+    if (Array.isArray(rec[field])) {
+      for (const item of rec[field]) {
+        const record = validateEvidenceAuditRecord(item);
+        if (record) list.push(record);
+      }
+    }
+    sections[field] = list;
+  }
+  const unresolved: EvidenceAuditData["unresolvedReferences"] = [];
+  if (Array.isArray(rec.unresolvedReferences)) {
+    for (const item of rec.unresolvedReferences) {
+      if (typeof item !== "object" || item === null) continue;
+      const entry = item as Record<string, unknown>;
+      if (typeof entry.evidenceId === "string" && typeof entry.missingKey === "string" && typeof entry.field === "string") {
+        unresolved.push({ evidenceId: entry.evidenceId, missingKey: entry.missingKey, field: entry.field });
+      }
+    }
+  }
+  const capabilities: EvidenceAuditCapabilityData[] = [];
+  if (Array.isArray(rec.capabilityDeclarations)) {
+    for (const item of rec.capabilityDeclarations) {
+      if (typeof item !== "object" || item === null) continue;
+      const cap = item as Record<string, unknown>;
+      if (cap.hostKind !== "openclaw" && cap.hostKind !== "codex") continue;
+      if (cap.status !== "supported" && cap.status !== "unsupported" && cap.status !== "unknown") continue;
+      if (typeof cap.capability !== "string" || typeof cap.adapterVersion !== "string" || typeof cap.channel !== "string") continue;
+      capabilities.push({
+        hostKind: cap.hostKind,
+        capability: cap.capability,
+        status: cap.status,
+        adapterVersion: cap.adapterVersion,
+        channel: cap.channel,
+        ...(typeof cap.note === "string" ? { note: cap.note } : {}),
+      });
+    }
+  }
+  return {
+    status: rec.status === "ok" ? "ok" : "degraded",
+    reason: typeof rec.reason === "string" ? rec.reason : undefined,
+    nextAction: typeof rec.nextAction === "string" ? rec.nextAction : undefined,
+    deliveries: sections.deliveries ?? [],
+    applications: sections.applications ?? [],
+    episodes: sections.episodes ?? [],
+    effects: sections.effects ?? [],
+    outcomes: sections.outcomes ?? [],
+    unresolvedReferences: unresolved,
+    capabilityDeclarations: capabilities,
+    coverage,
+  };
+}
+
+async function fetchEvidenceAudit(
+  selectorType: "principle" | "activation" | "episode" | "effect",
+  id: string,
+): Promise<ApiResponse<EvidenceAuditData>> {
+  return request<EvidenceAuditData>(
+    `/api/v1/receipts/evidence-audit?type=${encodeURIComponent(selectorType)}&id=${encodeURIComponent(id)}`,
+    undefined,
+    validateEvidenceAudit,
+  );
+}
+
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
 async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecordData>> {
@@ -1097,6 +1274,7 @@ export {
   fetchPrincipleTrajectory,
   fetchPrincipleReceipts,
   fetchReceiptCounts,
+  fetchEvidenceAudit,
   archivePrinciple,
   unarchivePrinciple,
   createFeedbackReport,

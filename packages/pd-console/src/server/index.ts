@@ -33,6 +33,7 @@ import { handleReceiptsRoute, disposeReceiptsModels } from './routes/receipts.js
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
 import { handleGovernanceRoute, handleGovernanceExperienceRoute, resolveOwnerConfigSnapshot, disposeGovernanceModels } from './routes/governance.js';
 import { handleOwnerDecisionsRoute } from './routes/owner-decisions.js';
+import { handleEvidenceOutcomesRoute } from './routes/evidence-outcomes.js';
 import { handleOwnerDecisionInboxRoute, handleOwnerDecisionViewRoute, handleOwnerDecisionLibraryRoute, parseOwnerDecisionViewSubPath } from './routes/owner-decision.js';
 import { handleOwnerIdentityRoute } from './routes/owner-identity.js';
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
@@ -613,6 +614,24 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // PRI-331: GET /api/v1/evidence-chain
       if (urlPath === '/api/v1/evidence-chain') {
         asyncHandler(() => handleEvidenceChainRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
+
+      // PD v2 Phase 1: POST /api/v1/evidence/outcomes — Owner outcome feedback
+      // into the normalized evidence ledger. Identity derived server-side,
+      // same rule as owner-decisions (configured owner or authenticated
+      // console operator; never a body-supplied identity).
+      if (urlPath === '/api/v1/evidence/outcomes') {
+        const eoIdentity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
+        const { ownerId, credentialId } = eoIdentity;
+        const authEnabledForOwner = services.authConfig.isEnabled()
+          && ownerId !== null && credentialId !== null;
+        asyncHandler(() => handleEvidenceOutcomesRoute(req, res, {
+          workspaceDir: services.workspaceDir,
+          ownerIdentity: authEnabledForOwner
+            ? { ownerId, credentialId }
+            : null,
+        }))(req, res);
         return;
       }
 
