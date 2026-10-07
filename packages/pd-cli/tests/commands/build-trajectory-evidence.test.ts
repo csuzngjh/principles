@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { MAX_EVIDENCE_ENTRIES } from '@principles/core/runtime-v2';
-import { acquireTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
+import { acquireCodexToolFailureEvidenceFromDb, acquireTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -504,5 +504,140 @@ describe('acquisition binding fact (PRI-783 review P1)', () => {
     // assistant_turns/tool_calls tables missing → readFailed → evidence_read_failed
     expect(result.reasonCode).toBe('evidence_read_failed');
     expect(result.binding).toBe('unverified');
+  });
+});
+
+// ── PRI-941 Option A — acquireCodexToolFailureEvidenceFromDb ───────────────
+
+describe('acquireCodexToolFailureEvidenceFromDb (PRI-941 Option A)', () => {
+  it('T1: failure rows → available with tool_call_failure entries (only failures consumed)', () => {
+    createStateDir();
+    const db = createTrajectoryDb();
+    try {
+      // success rows and conversation rows must NOT be consumed
+      insertToolCall(db, 'sess-a', 'bash', 'success', null, 0, '2026-10-06T00:00:01Z');
+      insertUserTurn(db, 'sess-a', 'please fix this', true, '2026-10-06T00:00:02Z');
+      insertAssistantTurn(db, 'sess-a', 'assistant reply', '2026-10-06T00:00:03Z');
+      insertToolCall(db, 'sess-a', 'write_file', 'failure', 'EACCES', 1, '2026-10-06T00:00:04Z', 'permission denied');
+      insertToolCall(db, 'sess-a', 'bash', 'failure', 'ENOENT', 2, '2026-10-06T00:00:05Z');
+
+      const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-a');
+      expect(result.status).toBe('available');
+      if (result.status !== 'available') return;
+      expect(result.entries.length).toBe(2);
+      expect(result.entries[0]!.sourceRef).toContain('tool_call_failure:');
+      expect(result.entries[0]!.note).toContain('Tool write_file failed: EACCES');
+      expect(result.entries[0]!.note).toContain('permission denied');
+      expect(result.entries[1]!.note).toContain('Tool bash failed: ENOENT');
+      // boundary proof: no conversation-table content in the evidence
+      expect(JSON.stringify(result.entries)).not.toContain('please fix this');
+      expect(JSON.stringify(result.entries)).not.toContain('assistant reply');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('review (Codex P2 / Owner): a token straddling the legacy preview-slice(200) boundary is redacted BEFORE truncation', () => {
+    createStateDir();
+    const db = createTrajectoryDb();
+    try {
+      // The token STARTS at preview char ~191 and runs past char 200 — under
+      // the old order (preview.slice(0,200) BEFORE sanitize) it was cut to a
+      // 9-char fragment that no longer matches the sk-{20,} token pattern and
+      // escaped redaction. The unsliced composition lets the sanitizer see
+      // and redact the FULL token, then apply its own output bound.
+      const padding = 'x'.repeat(160);
+      const prefix = 'curl -H "Authorization: Bearer ';
+      const secretToken = 'sk-TEST1234567890abcdefGHIJKLMNOPQRSTUVWXYZ123456';
+      insertToolCall(
+        db, 'sess-tok', 'bash', 'failure', 'EACCES', 1, '2026-10-06T00:00:06Z',
+        `${padding}${prefix}${secretToken} https://api.example.com`,
+      );
+      expect((`${padding}${prefix}`).length).toBeLessThan(200);
+      expect((`${padding}${prefix}${secretToken}`).length).toBeGreaterThan(200);
+
+      const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-tok');
+      expect(result.status).toBe('available');
+      if (result.status !== 'available') return;
+      const note = result.entries[0]!.note;
+      expect(note).not.toContain(secretToken);
+      expect(note).not.toMatch(/sk-[A-Za-z0-9_-]{20,}/);
+      // The token was REDACTED (not silently dropped) and the sanitizer owns
+      // the output bound.
+      expect(note).toContain('___REDACTED___');
+      expect(note.length).toBeLessThanOrEqual(215); // 200 + ___TRUNCATED___ marker
+    } finally {
+      db.close();
+    }
+  });
+
+  it('T2a: zero failure rows → unavailable empty_trajectory (codex_tool_calls_empty)', () => {
+    createStateDir();
+    const db = createTrajectoryDb();
+    try {
+      insertToolCall(db, 'sess-b', 'bash', 'success', null, 0, '2026-10-06T00:00:01Z');
+      const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-b');
+      expect(result).toEqual({
+        status: 'unavailable',
+        reasonCode: 'empty_trajectory',
+        detail: 'codex_tool_calls_empty',
+        binding: 'unverified',
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('review F2: unreadable tool_calls table → evidence_read_failed (not misreported as empty)', () => {
+    createStateDir();
+    const db = createTrajectoryDb();
+    try {
+      insertToolCall(db, 'sess-e', 'bash', 'failure', 'EACCES', 1, '2026-10-06T00:00:01Z');
+      db.exec('DROP TABLE tool_calls');
+      const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-e');
+      expect(result).toEqual({
+        status: 'unavailable',
+        reasonCode: 'evidence_read_failed',
+        detail: 'codex_tool_calls_unreadable',
+        binding: 'unverified',
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('T2b: trajectory.db missing → trajectory_unavailable', () => {
+    createStateDir();
+    const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-c');
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('trajectory_unavailable');
+  });
+
+  it('boundary: conversation rows present but zero failures still → empty_trajectory (conversation tables not a fallback)', () => {
+    createStateDir();
+    const db = createTrajectoryDb();
+    try {
+      insertUserTurn(db, 'sess-d', 'user correction text', true, '2026-10-06T00:00:01Z');
+      insertAssistantTurn(db, 'sess-d', 'assistant text', '2026-10-06T00:00:02Z');
+      const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-d');
+      expect(result.status).toBe('unavailable');
+      if (result.status !== 'unavailable') return;
+      expect(result.reasonCode).toBe('empty_trajectory');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('sentinel session id → session_not_found', () => {
+    createStateDir();
+    const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'cli');
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('session_not_found');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
