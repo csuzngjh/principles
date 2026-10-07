@@ -182,6 +182,9 @@ evidence/*
 .vscode/
 .codex/
 .opencode/
+# opencode CLI project config: local-only, it points at .opencode/plugins/,
+# which this repository never tracks.
+/opencode.json
 .plan/
 
 # Project-specific local tool outputs
