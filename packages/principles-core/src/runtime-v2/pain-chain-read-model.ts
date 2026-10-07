@@ -5,6 +5,12 @@
  * so CLI commands (trace, health) do not duplicate SQL/ledger logic.
  *
  * PRI-14: Extract shared Runtime V2 pain-chain read model.
+ *
+ * Reuse-aware ledger linkage (PRI-917 / R7): a consumed candidate may resolve
+ * into an EXISTING principle via a reuse decision (appendReuseEvidence) instead
+ * of creating a new ledger entry. Such chains are successes with zero ledger
+ * growth — the reuse target principle is reported in `ledgerEntryIds`, and the
+ * chain must not be classified as `ledger_write_failed`.
  */
 import * as path from 'path';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
@@ -44,6 +50,41 @@ function parseTaskErrorCategory(task: { lastError?: string | null }): string | n
   } catch {
     return null;
   }
+}
+
+/**
+ * Build the candidateId → ledger principle id linkage from BOTH ledger
+ * expressions of a resolved candidate:
+ *
+ *  1. `derivedFromPainIds` — the candidate created the principle (the field
+ *     stores candidate ids despite its legacy pain-oriented name);
+ *  2. `reuseEvidence[]` — the candidate was resolved into an EXISTING
+ *     principle by a reuse decision (zero ledger growth by design,
+ *     PRI-917 / R7).
+ *
+ * The ledger file is only shape-validated at its write boundaries, so every
+ * value read here is guarded before use (rc-1/rc-4).
+ */
+function buildCandidateToLedgerEntryMap(principleEntries: unknown[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const entry of principleEntries) {
+    const e = entry as { id?: unknown; derivedFromPainIds?: unknown; reuseEvidence?: unknown };
+    if (typeof e.id !== 'string' || e.id === '') continue;
+    if (Array.isArray(e.derivedFromPainIds)) {
+      for (const cid of e.derivedFromPainIds) {
+        if (typeof cid === 'string' && cid !== '') map.set(cid, e.id);
+      }
+    }
+    if (Array.isArray(e.reuseEvidence)) {
+      for (const ev of e.reuseEvidence) {
+        const candidateId = (ev as { candidateId?: unknown } | null)?.candidateId;
+        if (typeof candidateId === 'string' && candidateId !== '') {
+          map.set(candidateId, e.id);
+        }
+      }
+    }
+  }
+  return map;
 }
 
 export interface PainChainReadModelOptions {
@@ -136,14 +177,10 @@ export class PainChainReadModel {
       const ledgerStateDir = path.join(this.workspaceDir, '.state');
       const ledger = loadLedger(ledgerStateDir);
       const principleEntries = Object.values(ledger.tree.principles);
-
-      const candidateToLedgerEntry = new Map<string, string>();
-      for (const entry of principleEntries) {
-        const e = entry as { id: string; derivedFromPainIds?: string[] };
-        for (const cid of e.derivedFromPainIds ?? []) {
-          candidateToLedgerEntry.set(cid, e.id);
-        }
-      }
+      // Reuse-aware (PRI-917 / R7): includes both created-entry linkage and
+      // reuseEvidence resolutions, so a successful reuse chain is not
+      // misclassified as ledger_write_failed.
+      const candidateToLedgerEntry = buildCandidateToLedgerEntryMap(principleEntries);
 
       const candidateIds = candidates.map(c => c.candidateId);
       const ledgerEntryIds: string[] = [];
@@ -265,13 +302,8 @@ export class PainChainReadModel {
       const ledgerStateDir = path.join(this.workspaceDir, '.state');
       const ledger = loadLedger(ledgerStateDir);
       const principleEntries = Object.values(ledger.tree.principles);
-      const candidateToLedgerEntry = new Map<string, string>();
-      for (const entry of principleEntries) {
-        const e = entry as { id: string; derivedFromPainIds?: string[] };
-        for (const cid of e.derivedFromPainIds ?? []) {
-          candidateToLedgerEntry.set(cid, e.id);
-        }
-      }
+      // Reuse-aware (PRI-917 / R7): same linkage rules as traceByPainId.
+      const candidateToLedgerEntry = buildCandidateToLedgerEntryMap(principleEntries);
 
       const candidateIds = candidates.map(c => c.candidateId);
       const ledgerEntryIds: string[] = [];
