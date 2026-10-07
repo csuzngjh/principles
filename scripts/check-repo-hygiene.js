@@ -230,6 +230,11 @@ export const ROOT_LOCAL_FILES = new Set([
   // ZCode CLI tool state, auto-synced from .gitignore by that tool on every
   // run. Deleting it only makes the tool rewrite it, so it is exempt, not junk.
   '.zcodeignore',
+  // opencode CLI project config. Untracked on purpose: its `plugin` entry
+  // points at `.opencode/plugins/`, which is ignored, so a tracked copy is a
+  // dangling config for anyone cloning the repo. Existing checkouts that still
+  // have a local copy must not be punished for it.
+  'opencode.json',
   // The git-9 workspace write lease: PD's own multi-agent coordination state,
   // created at the checkout root by `npm run dev:lease` / worktree claim.
   // Name imported from the lease module so the two can never drift apart.
