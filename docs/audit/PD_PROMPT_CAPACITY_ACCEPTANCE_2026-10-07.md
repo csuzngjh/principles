@@ -32,7 +32,12 @@
 ## 既有失败（非本任务回归，证据）
 
 - `core/src/runtime-v2/adapter/__tests__/pi-ai-http-transport.test.ts` 1 例（google provider fetch 选择）：在 pristine main（f330acb3 主 checkout）同样失败——环境性既有失败。
-- `pd-cli` 全量并行跑时 `candidate-intake-e2e` / `runtime-recovery-failed-tasks` 偶发 flake：单独重跑全绿（19/19）；本 diff 不触及 intake/recovery；`verify:merge`（串行门）见最终记录。
+- `pd-cli` 全量并行跑时 `candidate-intake-e2e` / `runtime-recovery-failed-tasks` 偶发 flake：单独重跑全绿（19/19）；本 diff 不触及 intake/recovery；`verify:merge`（串行门）见下。
+
+## 最终门记录
+
+- `npm run verify:merge`（真实退出码，非管道）在 head `97814bcf`：**exit 0**。
+- `node scripts/release/check-pr-release-intent.mjs`：**PASS**（intent=@principles/core:minor, @principles/host-runtime:minor, @principles/pd-cli:minor, create-principles-disciple:patch）。
 
 ## Complexity Delta（按实际 diff）
 
