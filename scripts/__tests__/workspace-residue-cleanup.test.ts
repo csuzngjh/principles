@@ -7,7 +7,14 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { normalizeGitPath } from '../dev/lib/git.mjs';
 import { classifyResidue, scanResidue, toOwnerState } from '../dev/lib/workspace-lifecycle.mjs';
-import { git, removeFixture, runDevScript, setupOriginFixture } from './dev-worktree-test-utils';
+import {
+  git,
+  poolRootFor,
+  removeFixture,
+  runDevScript,
+  setupOriginFixture,
+  worktreeList,
+} from './dev-worktree-test-utils';
 
 let root: string;
 let primary: string;
@@ -25,6 +32,29 @@ afterAll(() => {
 const BRANCH = 'ai/PRI-777-lost';
 
 /**
+ * Write the lease file a real shell often keeps — usually the ONLY surviving
+ * record of which task the directory belonged to.
+ */
+function writeExpiredLease(dir: string, branch = BRANCH, owner = 'zcode:' + BRANCH): void {
+  fs.writeFileSync(
+    path.join(dir, '.workspace-lease.json'),
+    JSON.stringify(
+      {
+        schema: 'pd-workspace-lease/1',
+        workspace: dir,
+        owner,
+        branch,
+        createdAt: '2026-09-01T00:00:00.000Z',
+        expiresAt: '2026-09-01T04:00:00.000Z',
+      },
+      null,
+      2
+    ),
+    'utf-8'
+  );
+}
+
+/**
  * Build a worktree shell the way the real incident produces one: a working tree
  * whose `.git` file points at an admin directory that no longer exists.
  */
@@ -33,26 +63,26 @@ function makeResidueShell(name: string, opts: { branch?: string | null; leaseOwn
   fs.mkdirSync(path.join(dir, 'packages'), { recursive: true });
   fs.writeFileSync(path.join(dir, '.git'), 'gitdir: ' + path.join(primary, '.git', 'worktrees', name) + '\n', 'utf-8');
   fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"residue"}\n', 'utf-8');
-  if (opts.branch !== null) {
-    fs.writeFileSync(
-      path.join(dir, '.workspace-lease.json'),
-      JSON.stringify(
-        {
-          schema: 'pd-workspace-lease/1',
-          workspace: dir,
-          owner: opts.leaseOwner || 'zcode:' + BRANCH,
-          branch: opts.branch || BRANCH,
-          createdAt: '2026-09-01T00:00:00.000Z',
-          expiresAt: '2026-09-01T04:00:00.000Z',
-        },
-        null,
-        2
-      ),
-      'utf-8'
-    );
-  }
+  if (opts.branch !== null) writeExpiredLease(dir, opts.branch || BRANCH, opts.leaseOwner || 'zcode:' + BRANCH);
   return dir;
 }
+
+/**
+ * The OTHER shell shape, and the one a real `git worktree remove` failure leaves
+ * on Windows: the marker is gone entirely (git deleted it while unregistering),
+ * so the directory is absent from `git worktree list` and unreadable to git.
+ */
+function makeHalfDeletedShell(name: string, opts: { branch?: string | null } = {}): string {
+  const dir = path.join(poolRootFor(primary), name);
+  fs.mkdirSync(path.join(dir, 'packages'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"half-deleted"}\n', 'utf-8');
+  fs.writeFileSync(path.join(dir, 'packages', 'left-behind.md'), '# never removed\n', 'utf-8');
+  if (opts.branch !== null) writeExpiredLease(dir, opts.branch || BRANCH);
+  return dir;
+}
+
+/** Pool-scoped scan options — a function, because `primary` only exists after beforeAll. */
+const residueOpts = (registeredPaths: string[] = []) => ({ poolRoot: poolRootFor(primary), registeredPaths });
 
 describe('residue scanning', () => {
   it('finds a worktree shell whose admin metadata is gone, and recovers its branch from the lease', async () => {
@@ -64,6 +94,106 @@ describe('residue scanning', () => {
     expect(entry?.recoveredBranch).toBe(BRANCH);
     expect(entry?.leasePhase).toBe('expired');
   }, 60_000);
+});
+
+describe('half-deleted shell discovery (the shape a failed removal leaves)', () => {
+  it('finds a pool directory whose .git marker is gone, and recovers its task from the lease', () => {
+    const dir = makeHalfDeletedShell('PRI-908-halfgone');
+    const found = scanResidue(primary, residueOpts());
+    const entry = found.find((r) => r.path === dir);
+    expect(entry).toBeDefined();
+    expect(entry?.residueShape).toBe('NO_GIT_MARKER');
+    expect(entry?.gitdirTarget).toBeNull();
+    expect(entry?.reason).toContain('no .git marker');
+    expect(entry?.recoveredBranch).toBe(BRANCH);
+  });
+
+  it('says so in Owner-readable evidence, and still calls the dirtiness UNPROVABLE', () => {
+    const entry = scanResidue(primary, residueOpts()).find((r) => r.path.includes('PRI-908-halfgone'));
+    const verdict = classifyResidue({ ...entry, completion: 'pr-merged', pr: { number: 1501, state: 'MERGED' } });
+    expect(verdict.residueClass).toBe('RESIDUE_KNOWN');
+    expect(verdict.evidence.join(' ')).toContain('no .git marker at all');
+    expect(verdict.evidence.join(' ')).not.toContain('dead gitdir');
+    expect(verdict.reasons.join(' ')).toContain('UNPROVABLE');
+  });
+
+  it('is pool-only: the primary’s own siblings are Owner space, not residue', () => {
+    const sibling = path.join(root, path.basename(primary) + '-not-a-worktree');
+    fs.mkdirSync(sibling, { recursive: true });
+    fs.writeFileSync(path.join(sibling, 'package.json'), '{"name":"owner-folder"}\n', 'utf-8');
+    const found = scanResidue(primary, { poolRoot: poolRootFor(primary), registeredPaths: [] });
+    expect(found.find((r) => r.path === sibling)).toBeUndefined();
+  });
+
+  it('ignores a pool directory that is not a checkout of any kind', () => {
+    const stray = path.join(poolRootFor(primary), 'just-a-note');
+    fs.mkdirSync(stray, { recursive: true });
+    fs.writeFileSync(path.join(stray, 'readme.txt'), 'keep\n', 'utf-8');
+    const found = scanResidue(primary, residueOpts());
+    expect(found.find((r) => r.path === stray)).toBeUndefined();
+  });
+
+  it('refuses to call a LIVE worktree residue just because its marker is missing — that state is repairable', async () => {
+    const created = await runDevScript('create-task-worktree.mjs', ['PRI-909', 'marker-gone', '--skip-bootstrap', '--json'], {
+      cwd: primary,
+    });
+    expect(created.code).toBe(0);
+    const { worktree } = JSON.parse(created.stdout) as { worktree: string };
+    // A pool checkout the precondition recognizes.
+    fs.writeFileSync(path.join(worktree, 'package.json'), '{"name":"live"}\n', 'utf-8');
+    const marker = path.join(worktree, '.git');
+    const markerContent = fs.readFileSync(marker, 'utf-8');
+    fs.rmSync(marker);
+
+    try {
+      const listed = await worktreeList(primary);
+      const samePath = (p: string) => normalizeGitPath(p, primary) === normalizeGitPath(worktree, primary);
+      // git still lists it: the admin entry is intact, so `git worktree repair` is the answer.
+      expect(listed.some((w) => samePath(w.path))).toBe(true);
+      expect(scanResidue(primary, { poolRoot: poolRootFor(primary), registeredPaths: listed.map((w) => w.path) }).find((r) => samePath(r.path))).toBeUndefined();
+      // Negative control: the registered list is exactly what protects it.
+      expect(scanResidue(primary, { poolRoot: poolRootFor(primary), registeredPaths: [] }).some((r) => samePath(r.path))).toBe(true);
+    } finally {
+      fs.writeFileSync(marker, markerContent, 'utf-8');
+    }
+  }, 120_000);
+
+  it('is deletable ONLY through the same acked gate, and the sweep never schedules it', async () => {
+    const dir = makeHalfDeletedShell('PRI-910-gate');
+
+    const refused = await runDevScript('workspace-cleanup.mjs', ['--residue', dir, '--skip-gh', '--json'], { cwd: primary });
+    expect(refused.code).toBe(1);
+    expect(JSON.parse(refused.stdout).error).toContain('--ack-unknown');
+    expect(fs.existsSync(dir)).toBe(true);
+
+    const swept = await runDevScript('workspace-cleanup.mjs', ['--skip-gh', '--json'], { cwd: primary });
+    const sweepOut = JSON.parse(swept.stdout) as { actions: Array<{ path?: string }>; residue: Array<{ path: string }> };
+    expect(sweepOut.residue.map((r) => r.path)).toContain(dir);
+    for (const action of sweepOut.actions) expect(action.path).not.toBe(dir);
+
+    const applied = await runDevScript('workspace-cleanup.mjs', ['--residue', dir, '--ack-unknown', '--apply', '--skip-gh', '--json'], {
+      cwd: primary,
+    });
+    expect(applied.code).toBe(0);
+    expect(fs.existsSync(dir)).toBe(false);
+  }, 180_000);
+
+  it('surfaces as an UNKNOWN row in the snapshot, with the exact command to finish the job', async () => {
+    const dir = makeHalfDeletedShell('PRI-911-snapshot');
+    const r = await runDevScript('worktree-snapshot.mjs', ['--skip-gh', '--json'], { cwd: primary });
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout) as {
+      unknownResidue: Array<{ task: string; state: string; cleanup: string; evidence: string[]; residueShape: string; path: string }>;
+    };
+    const row = out.unknownResidue.find((x) => normalizeGitPath(x.path) === normalizeGitPath(dir));
+    expect(row).toBeDefined();
+    expect(row?.state).toBe('UNKNOWN');
+    expect(row?.cleanup).toBe('REVIEW');
+    expect(row?.evidence.join(' ')).toContain('no .git marker at all');
+    // The two residue shapes must be told apart in the output: for a half-deleted
+    // shell the branch is often unrecoverable, so the Owner's forensics differ.
+    expect(row?.residueShape).toBe('NO_GIT_MARKER');
+  }, 120_000);
 });
 
 describe('residue classification (SPEC §15)', () => {
@@ -174,13 +304,14 @@ describe('residue is outside the automatic sweep', () => {
     const r = await runDevScript('worktree-snapshot.mjs', ['--skip-gh', '--json'], { cwd: primary });
     expect(r.code).toBe(0);
     const out = JSON.parse(r.stdout) as {
-      unknownResidue: Array<{ task: string; state: string; cleanup: string; residueClass: string; path: string }>;
+      unknownResidue: Array<{ task: string; state: string; cleanup: string; residueClass: string; residueShape: string; path: string }>;
       poolRoot: string;
     };
     const row = out.unknownResidue.find((x) => normalizeGitPath(x.path) === normalizeGitPath(dir));
     expect(row).toBeDefined();
     expect(row?.state).toBe('UNKNOWN');
     expect(row?.cleanup).toBe('REVIEW');
+    expect(row?.residueShape).toBe('DEAD_GITDIR');
     // The pool the snapshot reports must be the derived one, not a literal.
     // (normalizeGitPath on both sides: os.tmpdir() may report an 8.3 short name
     // while the tool reports the expanded path — the ERR-090 class.)

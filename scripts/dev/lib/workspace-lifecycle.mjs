@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { listWorktrees, runGit, sameGitPath } from './git.mjs';
+import { listWorktrees, normalizeGitPath, runGit, sameGitPath } from './git.mjs';
 import { leasePhase, readLease } from './workspace-lease.mjs';
 import { resolveWorktreeRoot } from './worktree-root.mjs';
 
@@ -217,8 +217,19 @@ export async function collectPrIndex(cwd) {
 }
 
 /**
- * Scan for deregistered worktree shells: a `.git` FILE whose gitdir admin target
- * no longer exists (the ERR-098 / metadata-incident residue class).
+ * Scan for deregistered worktree shells — the ERR-098 / metadata-incident residue
+ * class. Two shapes are found, and the second one is what a REAL failed removal
+ * leaves behind:
+ *
+ *   A. dead gitdir  — a `.git` FILE whose gitdir admin target no longer exists.
+ *   B. no marker    — a pool directory with NO `.git` entry at all, produced when
+ *      `git worktree remove` dies partway (Windows `Filename too long` on a deep
+ *      node_modules tree): git unregisters the admin entry and deletes the
+ *      marker, then gives up on the tree. Such a shell is absent from
+ *      `git worktree list`, so the automatic sweep cannot see it EITHER — and
+ *      before this scan knew about it, `--residue` refused it too ("not a
+ *      discovered residue shell"), leaving `rmdir /s /q` — which follows
+ *      junctions into the primary — as the only apparent way out.
  *
  * PRI-796 additions, both driven by the real incident on the Owner's machine
  * (Reality Audit §2.4 — `git worktree repair` CANNOT recover a fully deleted
@@ -231,12 +242,20 @@ export async function collectPrIndex(cwd) {
  *     admin metadata held HEAD/branch/index, and the lease is owner-authored
  *     evidence that a `git worktree repair` cannot reconstruct.
  *
- * Still report-only: nothing here deletes, moves, or repairs.
+ * Class B is deliberately scoped to the POOL: the pool holds task worktrees and
+ * nothing else by construction, while the primary's siblings are Owner space
+ * (`principles-private` is one of them). Still report-only: nothing here
+ * deletes, moves, or repairs, and both classes keep the same
+ * `--residue <path> --ack-unknown --apply` gate.
  *
  * @param {string} primaryPath
- * @param {{poolRoot?: string|null, now?: number}} [opts]
+ * @param {{poolRoot?: string|null, registeredPaths?: string[], now?: number}} [opts]
+ *   `registeredPaths` must be the paths of the current `git worktree list`: class B
+ *   has no marker to read, so only that list separates a half-deleted shell from a
+ *   live task's checkout whose marker was deleted by hand.
+ * @returns {Array<{path: string, residueShape: 'DEAD_GITDIR'|'NO_GIT_MARKER', gitdirTarget: string|null, reason: string, leasePhase: string, leaseOwner: string|null, recoveredBranch: string|null}>}
  */
-export function scanResidue(primaryPath, { poolRoot = null, now = Date.now() } = {}) {
+export function scanResidue(primaryPath, { poolRoot = null, registeredPaths = [], now = Date.now() } = {}) {
   const base = path.basename(primaryPath);
   const candidates = [];
 
@@ -245,7 +264,7 @@ export function scanResidue(primaryPath, { poolRoot = null, now = Date.now() } =
   try {
     for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith(base + '-')) continue;
-      candidates.push(path.join(parent, entry.name));
+      candidates.push({ dir: path.join(parent, entry.name), fromPool: false });
     }
   } catch {
     /* parent unreadable — nothing to report from here */
@@ -256,28 +275,51 @@ export function scanResidue(primaryPath, { poolRoot = null, now = Date.now() } =
     try {
       for (const entry of fs.readdirSync(poolRoot, { withFileTypes: true })) {
         if (!entry.isDirectory()) continue;
-        candidates.push(path.join(poolRoot, entry.name));
+        candidates.push({ dir: path.join(poolRoot, entry.name), fromPool: true });
       }
     } catch {
       /* pool does not exist yet — that is the normal fresh state */
     }
   }
 
+  // A path git still lists is a live (or repairable) worktree, never residue —
+  // class B must not turn a missing marker into a licence to delete an
+  // active task's checkout.
+  const registered = new Set(registeredPaths.map((p) => normalizeGitPath(p, primaryPath)));
+
   const found = [];
-  for (const dir of candidates) {
+  for (const { dir, fromPool } of candidates) {
     if (fs.existsSync(path.join(dir, 'package.json')) === false && !fs.existsSync(path.join(dir, '.git'))) {
       continue; // not a checkout of any kind
     }
     const gitFile = path.join(dir, '.git');
     let raw;
+    let markerAbsent = false;
     try {
       // Read directly with no stat pre-check (CodeQL file-system-race): a
       // worktree shell has a .git FILE (readable), while a plain repo checkout
       // has a .git DIRECTORY (readFileSync throws EISDIR) and a plain dir has
-      // none (ENOENT) — both land in the catch below.
+      // none (ENOENT).
       raw = fs.readFileSync(gitFile, 'utf-8');
-    } catch {
-      continue; // no readable .git file → not a worktree shell — out of scope
+    } catch (err) {
+      // ENOENT is the only proof that the marker is GONE; EISDIR (an
+      // independent clone) and anything unreadable stay out of scope.
+      markerAbsent = err.code === 'ENOENT';
+      if (!markerAbsent) continue;
+    }
+    if (markerAbsent) {
+      if (!fromPool || registered.has(normalizeGitPath(dir, primaryPath))) continue;
+      const lease = readLeaseState(dir, now);
+      found.push({
+        path: dir,
+        residueShape: 'NO_GIT_MARKER',
+        gitdirTarget: null,
+        reason: 'no .git marker — worktree removal died partway',
+        leasePhase: lease.phase,
+        leaseOwner: lease.owner,
+        recoveredBranch: readLeaseBranch(dir),
+      });
+      continue;
     }
     const match = /^\s*gitdir:\s*(.+)\s*$/m.exec(raw);
     if (!match) continue;
@@ -287,6 +329,7 @@ export function scanResidue(primaryPath, { poolRoot = null, now = Date.now() } =
     const lease = readLeaseState(dir, now);
     found.push({
       path: dir,
+      residueShape: 'DEAD_GITDIR',
       gitdirTarget: target,
       reason: 'worktree admin entry missing',
       // Recovered evidence — NOT authoritative identity; git's branch is, and for
@@ -331,7 +374,11 @@ export function classifyResidue(entry) {
   const reasons = [];
   const branch = entry.recoveredBranch || null;
 
-  evidence.push('worktree admin metadata is missing — git cannot read this directory');
+  evidence.push(
+    entry.gitdirTarget
+      ? 'worktree admin metadata is missing — git cannot read this directory'
+      : 'no .git marker at all — the removal died partway, and `git worktree list` no longer knows this directory exists'
+  );
   if (entry.gitdirTarget) evidence.push('dead gitdir: ' + entry.gitdirTarget);
   if (branch) evidence.push('task branch recovered from the lease file: ' + branch);
 
@@ -495,7 +542,7 @@ export async function collectWorkspaceState(opts = {}) {
   const { root: poolRoot } = resolveWorktreeRoot({ primaryPath: primary.path, env: process.env });
   let residue = [];
   if (opts.includeResidue !== false) {
-    residue = scanResidue(primary.path, { poolRoot, now });
+    residue = scanResidue(primary.path, { poolRoot, now, registeredPaths: worktrees.map((w) => w.path) });
     for (const entry of residue) {
       const branch = entry.recoveredBranch;
       if (!branch) continue;
