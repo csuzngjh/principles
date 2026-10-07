@@ -40,6 +40,7 @@ import {
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { LedgerPrincipleEntry } from '@principles/core/runtime-v2';
+import { saveHostToolDeclaration } from '@principles/host-runtime';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from '../../src/server/routes/approvals-grouped.js';
 import { handleActivationsRoute, disposeActivationsModels } from '../../src/server/routes/activations.js';
@@ -151,6 +152,19 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gov-approve-act-'));
     const stateDir = path.join(tmpDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
+
+    // PD_PROMPT_CAPACITY_V1 R-B2: prompt-channel approvals now pass the
+    // route-aware capacity precheck. This fixture workspace is operated by
+    // OpenClaw (its forecasts and copy expectations are the legacy list
+    // route), so persist that declaration exactly like a real host would —
+    // explicit host facts, unchanged observable expectations.
+    const declared = saveHostToolDeclaration(tmpDir, {
+      version: 1,
+      hostKind: 'openclaw',
+      mappings: [{ rawToolName: 'bash', canonicalKind: 'execute' }],
+      declaredAt: new Date().toISOString(),
+    });
+    if (!declared.ok) throw new Error(`host declaration save failed: ${declared.reason}`);
 
     sqliteConn = new SqliteConnection({ workspaceDir: tmpDir });
 
@@ -763,6 +777,12 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   // key, so selectionPolicy is legacy_fifo_prefix_v1 while production rotates;
   // rendering that value as the production policy reintroduces the exact lie
   // this PR removes.
+  //
+  // PD_PROMPT_CAPACITY_V1 R-B2 supersedes the old expectation: an oversized
+  // candidate can no longer be APPROVED at all (the pre-write gate refuses
+  // with the reason + modification entry), so the post-commit starvation
+  // warning for a just-approved oversized entry is unreachable by design.
+  // The test now locks the stronger contract: the refusal itself.
   it('approve never reports legacy FIFO as the production policy on a rotating route', async () => {
     // Fresh workspace: only oversized entries, so the new activation is
     // unreachable and the starvation branch is taken with productionRotates=true.
@@ -805,15 +825,19 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const res = await fetchJson(`/api/v1/approvals/${newApproval}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ note: 'PR-1894 oversized on rotating route' }),
+      body: JSON.stringify({ note: 'oversized on rotating route is refused pre-write' }),
     });
-    expect(res.status).toBe(200);
-
-    const warning = getStringField(getDataObject(res.body), 'warning');
-    expect(warning).toBeDefined();
-    // The claim under test: the production policy must read fair_rotation_v1.
-    expect(warning).toContain('production selection policy fair_rotation_v1');
-    expect(warning).not.toContain('legacy_fifo_prefix_v1');
+    // R-B2: the oversized candidate is refused BEFORE any governance write —
+    // no activation exists, so no starvation warning (FIFO-labeled or
+    // otherwise) can be produced for it.
+    expect(res.status).toBe(422);
+    const body = res.body as { error?: string; message?: string };
+    expect(body.error).toBe('prompt_capacity_refused');
+    expect(typeof body.message === 'string' && body.message.includes('single_item_exceeds_budget')).toBe(true);
+    const activationRow = db
+      .prepare('SELECT COUNT(*) AS n FROM activations WHERE artifact_id = ?')
+      .get(newArtifact) as { n: number };
+    expect(activationRow.n).toBe(0);
   });
 
   it('approve stays warning-free for a prompt activation when the budget has room (PRI-890 positive path)', async () => {
@@ -886,5 +910,174 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const warning = getStringField(approveData, 'warning') ?? '';
     expect(warning).not.toContain('injection_budget_excluded');
     expect(warning).not.toContain('injection_excluded_non_budget');
+  });
+
+  // ── PD_PROMPT_CAPACITY_V1 B1: 写入前容量预检（R-B2 / AC-07 / AC-08 / AC-09）──
+
+  it('AC-07: approving an undeliverable prompt principle is refused BEFORE any write (422, approval stays pending, no activation, ledger stays candidate)', async () => {
+    const base = Date.now();
+    const artifactId = `art-oversized-${base}`;
+    const approvalId = `apr-oversized-${base}`;
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId, 'O'.repeat(2000));
+    await seedPrincipleArtifact(artifactId, {
+      sourcePrincipleId: principleId,
+      contentJson: { principleId, text: 'O'.repeat(2000) },
+    });
+    await seedPendingApproval(approvalId, artifactId, 'prompt');
+
+    const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'undeliverable single item' }),
+    });
+    expect(res.status).toBe(422);
+    const body = res.body as { error?: string; message?: string; nextAction?: unknown };
+    expect(body.error).toBe('prompt_capacity_refused');
+    expect(typeof body.message === 'string' && body.message.includes('single_item_exceeds_budget')).toBe(true);
+
+    // 无非法写入：审批仍 pending、无激活行、账本仍是 candidate。
+    const detail = await fetchJson(`/api/v1/approvals/${approvalId}`);
+    const detailStatus = getStringField(getDataObject(detail.body), 'status');
+    expect(detailStatus).toBe('pending');
+    const activationRow = sqliteConn.getDb()
+      .prepare('SELECT COUNT(*) AS n FROM activations WHERE artifact_id = ?')
+      .get(artifactId) as { n: number };
+    expect(activationRow.n).toBe(0);
+    const ledgerEntry = loadLedger(path.join(tmpDir, '.state')).tree.principles[principleId];
+    // writeProbationEntry normalizes to 'candidate' — 未升级为 active 即为未发生账本写入。
+    expect(ledgerEntry?.status).toBe('candidate');
+  });
+
+  it('AC-08: the submit-time precheck re-reads the artifact — a longer statement edited after the preview refuses the write', async () => {
+    const base = Date.now();
+    const artifactId = `art-preview-drift-${base}`;
+    const approvalId = `apr-preview-drift-${base}`;
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId, 'short text');
+    await seedPrincipleArtifact(artifactId, {
+      sourcePrincipleId: principleId,
+      contentJson: { principleId, text: 'short text' },
+    });
+    await seedPendingApproval(approvalId, artifactId, 'prompt');
+
+    // 预览：分组接口此时判定可装入（fitsPromptBudget=true，随后的断言只在
+    // 预检行为上，不依赖该字段的展示）。
+    const groupedPreview = await fetchJson('/api/v1/approvals/grouped');
+    expect(groupedPreview.status).toBe(200);
+
+    // 提交前工件被改长（模拟 Owner 在别处编辑/新版本就位）。
+    const store = new SqlitePIArtifactStore(sqliteConn);
+    await store.upsertArtifact({
+      artifactId,
+      artifactKind: 'principle',
+      sourceTaskId: `task-${artifactId}`,
+      sourcePrincipleId: principleId,
+      sourceRuleId: undefined,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ principleId, text: 'L'.repeat(2100) }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'stale preview' }),
+    });
+    // 提交按新事实预检——旧预览不放行。
+    expect(res.status).toBe(422);
+    expect((res.body as { error?: string }).error).toBe('prompt_capacity_refused');
+  });
+
+  it('AC-07: an unconfirmed route (declaration removed, flag off) refuses with a structured reason and nextAction', async () => {
+    const base = Date.now();
+    const artifactId = `art-unconfirmed-${base}`;
+    const approvalId = `apr-unconfirmed-${base}`;
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId, 'unconfirmed route principle');
+    await seedPrincipleArtifact(artifactId, {
+      sourcePrincipleId: principleId,
+      contentJson: { principleId, text: 'unconfirmed route principle' },
+    });
+    await seedPendingApproval(approvalId, artifactId, 'prompt');
+
+    const declarationPath = path.join(tmpDir, '.pd', 'host-tool-semantics', 'openclaw.json');
+    const declarationBackup = fs.existsSync(declarationPath) ? fs.readFileSync(declarationPath, 'utf8') : null;
+    fs.rmSync(declarationPath, { force: true });
+    try {
+      const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'no host facts' }),
+      });
+      expect(res.status).toBe(422);
+      const body = res.body as { error?: string; message?: string };
+      expect(body.error).toBe('prompt_capacity_refused');
+      expect(typeof body.message === 'string' && body.message.includes('route_unconfirmed')).toBe(true);
+      // 审批未被写。
+      const detail = await fetchJson(`/api/v1/approvals/${approvalId}`);
+      expect(getStringField(getDataObject(detail.body), 'status')).toBe('pending');
+    } finally {
+      if (declarationBackup !== null) fs.writeFileSync(declarationPath, declarationBackup, 'utf8');
+    }
+    // 声明恢复后同一审批可通过（请求级目标宿主或事实齐备均可）。
+    const res2 = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'host facts restored' }),
+    });
+    expect(res2.status).toBe(200);
+  });
+
+  it('AC-09: window full but single item deliverable → activation proceeds with the queued (rotation) explanation, not a global admission gate', async () => {
+    const base = Date.now();
+    // 预算接近占满：一条恰好装满列表预算的已激活原则。
+    const header = 'Runtime V2 activated principles:';
+    const fillerLen = 2000 - header.length - 1 - `- [${'F'.repeat(0)}] `.length - 60 - 1; // leave ~60 chars room: single new entry still fits alone
+    const fillerPrinciple = newPrincipleId();
+    seedLedgerPrinciple(fillerPrinciple, 'F'.repeat(fillerLen));
+    const fillerArtifact = `art-window-filler-${base}`;
+    await seedPrincipleArtifact(fillerArtifact, {
+      sourcePrincipleId: fillerPrinciple,
+      contentJson: { principleId: fillerPrinciple, text: 'F'.repeat(fillerLen) },
+    });
+    sqliteConn.getDb().prepare(
+      `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+       VALUES (?, ?, ?, 'prompt', 'prompt_activate', ?, ?, NULL, NULL)`,
+    ).run(`act_prompt_${fillerPrinciple}`, `${fillerArtifact}::prompt`, fillerArtifact, `ledger://${fillerPrinciple}`, new Date(base - 60_000).toISOString());
+
+    const newPrinciple = newPrincipleId();
+    seedLedgerPrinciple(newPrinciple, 'N'.repeat(100));
+    const artifactId = `art-window-new-${base}`;
+    const approvalId = `apr-window-new-${base}`;
+    await seedPrincipleArtifact(artifactId, {
+      sourcePrincipleId: newPrinciple,
+      contentJson: { principleId: newPrinciple, text: 'N'.repeat(100) },
+    });
+    await seedPendingApproval(approvalId, artifactId, 'prompt');
+
+    const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'window full, single deliverable' }),
+    });
+    // 现有激活合同继续：写入成功（422 只属于单条不可交付/事实无法确认）。
+    expect(res.status).toBe(200);
+    const approveData = getDataObject(res.body);
+    const activation = approveData?.activation;
+    expect(isRecord(activation)).toBe(true);
+    if (isRecord(activation)) expect(getStringField(activation, 'decision')).toBe('activated');
+    // 轮转路由下的真实说明：排队而非饿死。
+    const warning = getStringField(approveData, 'warning') ?? '';
+    expect(warning).toContain('injection_budget_queued');
+    // 清理：回收该轮注入行,避免污染后续断言。
+    sqliteConn.getDb()
+      .prepare('UPDATE activations SET deactivated_at = ? WHERE artifact_id = ?')
+      .run(new Date().toISOString(), artifactId);
+    sqliteConn.getDb()
+      .prepare('UPDATE activations SET deactivated_at = ? WHERE artifact_id = ?')
+      .run(new Date().toISOString(), fillerArtifact);
   });
 });

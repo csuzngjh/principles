@@ -40,7 +40,7 @@ import type {
 export type { FeedbackChannelId, FeedbackChannelStatus, FeedbackChannelsData, FeedbackSubmitResult };
 
 // PRI-908: the injection-budget forecast shape has one authority in shared/, too.
-import type { PromptInjectionBudgetStatus } from '../../shared/prompt-injection-contract.js';
+import type { PromptInjectionBudgetStatus, PromptInjectionPerHostForecast, PromptActivationInjectionStatusWire, PromptInjectionRouteSummaryWire } from '../../shared/prompt-injection-contract.js';
 export type { PromptInjectionBudgetStatus };
 
 // ── Primitive guards ──────────────────────────────────────────────────────────
@@ -1270,6 +1270,36 @@ export interface ActivationRecordData {
   enforcement?: 'eligible' | 'safety_isolated';
   legacyDecisionUnknown?: boolean;
   ownerReviewDueAt?: string;
+  /** PD_PROMPT_CAPACITY_V1 R-A3: injection status for live prompt activations. */
+  promptInjection?: PromptActivationInjectionStatusWire;
+}
+
+const PROMPT_INJECTION_STATUS_KINDS: ReadonlySet<string> = new Set([
+  'injectable', 'oversized', 'window_excluded', 'resolution_failed', 'route_unconfirmed',
+]);
+
+/** rc-1..rc-4: validate the per-activation injection status as untrusted input. */
+function validatePromptActivationInjectionStatus(v: unknown): PromptActivationInjectionStatusWire | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'activationId') || !isString(v.activationId)) return null;
+  if (!Object.hasOwn(v, 'status') || !isString(v.status) || !PROMPT_INJECTION_STATUS_KINDS.has(v.status)) return null;
+  const result: PromptActivationInjectionStatusWire = { activationId: v.activationId, status: v.status as PromptActivationInjectionStatusWire['status'] };
+  if (Object.hasOwn(v, 'inCurrentWindow') && typeof v.inCurrentWindow === 'boolean') result.inCurrentWindow = v.inCurrentWindow;
+  if (Object.hasOwn(v, 'costChars') && typeof v.costChars === 'number' && Number.isInteger(v.costChars) && v.costChars >= 0) result.costChars = v.costChars;
+  if (Object.hasOwn(v, 'budget') && typeof v.budget === 'number' && Number.isInteger(v.budget) && v.budget > 0) result.budget = v.budget;
+  if (Object.hasOwn(v, 'budgetScope') && (v.budgetScope === 'selected_lines' || v.budgetScope === 'full_directive_context')) result.budgetScope = v.budgetScope;
+  if (Object.hasOwn(v, 'route') && (v.route === 'legacy_trim' || v.route === 'shared_render')) result.route = v.route;
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
+  if (Object.hasOwn(v, 'perHostFits') && Array.isArray(v.perHostFits)) {
+    const perHostFits: { hostKind: 'openclaw' | 'codex'; fits: boolean }[] = [];
+    for (const entry of v.perHostFits) {
+      if (!isObject(entry)) return null;
+      if ((entry.hostKind !== 'openclaw' && entry.hostKind !== 'codex') || typeof entry.fits !== 'boolean') return null;
+      perHostFits.push({ hostKind: entry.hostKind, fits: entry.fits });
+    }
+    result.perHostFits = perHostFits;
+  }
+  return result;
 }
 
 function validateActivationRecord(v: unknown): ActivationRecordData | null {
@@ -1294,6 +1324,9 @@ function validateActivationRecord(v: unknown): ActivationRecordData | null {
     ...(enforcement ? { enforcement } : {}),
     ...(Object.hasOwn(v, 'legacyDecisionUnknown') && v.legacyDecisionUnknown === true ? { legacyDecisionUnknown: true } : {}),
     ...(Object.hasOwn(v, 'ownerReviewDueAt') && isString(v.ownerReviewDueAt) ? { ownerReviewDueAt: v.ownerReviewDueAt } : {}),
+    ...(Object.hasOwn(v, 'promptInjection')
+      ? (() => { const s = validatePromptActivationInjectionStatus(v.promptInjection); return s !== null ? { promptInjection: s } : {}; })()
+      : {}),
   };
 }
 
@@ -1302,6 +1335,7 @@ export interface ActivationsData {
   status: string;
   reason?: string;
   nextAction?: string;
+  promptInjectionRoute?: PromptInjectionRouteSummaryWire;
 }
 
 export function validateActivations(v: unknown): ActivationsData | null {
@@ -1313,6 +1347,18 @@ export function validateActivations(v: unknown): ActivationsData | null {
   const result: ActivationsData = { activations, status: v.status };
   if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
+  if (Object.hasOwn(v, 'promptInjectionRoute') && isObject(v.promptInjectionRoute)) {
+    const route = v.promptInjectionRoute;
+    if ((route.status === 'confirmed' || route.status === 'unconfirmed') && typeof route.flagEnabled === 'boolean') {
+      const summary: PromptInjectionRouteSummaryWire = { status: route.status, flagEnabled: route.flagEnabled };
+      if (Object.hasOwn(route, 'hostKind') && (route.hostKind === 'openclaw' || route.hostKind === 'codex')) summary.hostKind = route.hostKind;
+      if (Object.hasOwn(route, 'route') && (route.route === 'legacy_trim' || route.route === 'shared_render')) summary.route = route.route;
+      if (Object.hasOwn(route, 'unconfirmedReason') && isString(route.unconfirmedReason)) summary.unconfirmedReason = route.unconfirmedReason;
+      if (Object.hasOwn(route, 'nextAction') && isString(route.nextAction)) summary.nextAction = route.nextAction;
+      if (Object.hasOwn(route, 'globalReason') && isString(route.globalReason)) summary.globalReason = route.globalReason;
+      result.promptInjectionRoute = summary;
+    }
+  }
   return result;
 }
 
@@ -2010,6 +2056,55 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
   }
   if (Object.hasOwn(v, 'eligibleCount') && typeof v.eligibleCount === 'number' && Number.isInteger(v.eligibleCount) && v.eligibleCount >= 0) {
     result.eligibleCount = v.eligibleCount;
+  }
+  // PD_PROMPT_CAPACITY_V1 (R-A1/R-A2/R-A3): additive optional fields, same
+  // drop-on-invalid rule. capacityStatus drives the 未确认 badge; without it
+  // the payload behaves as 'confirmed' (pre-SPEC server compat).
+  if (Object.hasOwn(v, 'capacityStatus') && (v.capacityStatus === 'confirmed' || v.capacityStatus === 'unconfirmed')) {
+    result.capacityStatus = v.capacityStatus;
+  }
+  if (Object.hasOwn(v, 'hostKind') && (v.hostKind === 'openclaw' || v.hostKind === 'codex')) {
+    result.hostKind = v.hostKind;
+  }
+  if (Object.hasOwn(v, 'route') && (v.route === 'legacy_trim' || v.route === 'shared_render')) {
+    result.route = v.route;
+  }
+  if (Object.hasOwn(v, 'unit') && v.unit === 'utf16_code_units') {
+    result.unit = v.unit;
+  }
+  if (Object.hasOwn(v, 'budgetScope') && (v.budgetScope === 'selected_lines' || v.budgetScope === 'full_directive_context')) {
+    result.budgetScope = v.budgetScope;
+  }
+  if (Object.hasOwn(v, 'fullRenderChars') && typeof v.fullRenderChars === 'number' && Number.isInteger(v.fullRenderChars) && v.fullRenderChars >= 0) {
+    result.fullRenderChars = v.fullRenderChars;
+  }
+  if (Object.hasOwn(v, 'oversizedActivationIds') && Array.isArray(v.oversizedActivationIds) && v.oversizedActivationIds.every(isString)) {
+    result.oversizedActivationIds = v.oversizedActivationIds;
+  }
+  if (Object.hasOwn(v, 'oversizedDiagnosticTruncated') && typeof v.oversizedDiagnosticTruncated === 'boolean') {
+    result.oversizedDiagnosticTruncated = v.oversizedDiagnosticTruncated;
+  }
+  if (Object.hasOwn(v, 'unconfirmedReason') && isString(v.unconfirmedReason)) {
+    result.unconfirmedReason = v.unconfirmedReason;
+  }
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) {
+    result.nextAction = v.nextAction;
+  }
+  if (Object.hasOwn(v, 'perHost') && Array.isArray(v.perHost)) {
+    // rc-4: validate every element, not just "is array".
+    const perHost: PromptInjectionPerHostForecast[] = [];
+    for (const entry of v.perHost) {
+      if (!isObject(entry)) return null;
+      const { hostKind, route, usedChars: hostUsed, truncated: hostTruncated } = entry;
+      if ((hostKind !== 'openclaw' && hostKind !== 'codex')
+        || (route !== 'legacy_trim' && route !== 'shared_render')
+        || typeof hostUsed !== 'number' || !Number.isInteger(hostUsed) || hostUsed < 0
+        || typeof hostTruncated !== 'boolean') {
+        return null;
+      }
+      perHost.push({ hostKind, route, usedChars: hostUsed, truncated: hostTruncated });
+    }
+    result.perHost = perHost;
   }
   return result;
 }

@@ -36,6 +36,14 @@ export interface ApprovalCompletionInput {
   approvalId: string;
   actor: ActivationActor;
   now: string;
+  /**
+   * PD_PROMPT_CAPACITY_V1 R-B3: when the approved artifact is a revision of a
+   * live prompt activation (detected by the entry point via
+   * detectPromptReplacementTarget), pass the supersede target so the
+   * activation commit replaces the old version atomically.
+   */
+  supersedeActivationId?: string;
+  supersedeDecidedBy?: string;
 }
 
 export type ApprovalCompletionResult =
@@ -160,6 +168,8 @@ export class ApprovalCompletionService {
         actor: input.actor,
         now: input.now,
         confirm: true,
+        ...(input.supersedeActivationId !== undefined ? { supersedeActivationId: input.supersedeActivationId } : {}),
+        ...(input.supersedeDecidedBy !== undefined ? { supersedeDecidedBy: input.supersedeDecidedBy } : {}),
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

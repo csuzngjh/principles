@@ -25,8 +25,10 @@ import {
   collectOpenClawPromotionChecks,
   summarizeRuleCodeShadowEvents,
   buildPromotionEvidenceSnapshot,
+  detectPromptReplacementTarget,
 } from '@principles/core/runtime-v2';
 import type { LedgerIdentityLookupDeps, SqliteConnection } from '@principles/core/runtime-v2';
+import { checkPromptArtifactDeliverabilityById } from '@principles/host-runtime';
 
 /**
  * I3 upgrade (Owner review of PR #1856, P1): ledger-aware identity deps for
@@ -1276,6 +1278,8 @@ interface ActivationApproveOptions {
   decidedBy?: string;
   note?: string;
   json?: boolean;
+  /** PD_PROMPT_CAPACITY_V1 R-A1/R-B2: request-level target host for the prompt capacity precheck. */
+  targetHost?: 'openclaw' | 'codex';
 }
 
 interface ApproveResult {
@@ -1307,6 +1311,24 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
   }
 
   const decidedBy = opts.decidedBy ?? 'cli-operator';
+  // PD_PROMPT_CAPACITY_V1 R-A1: request-level target host must be a known
+  // host kind — validated before ANY read or write (cli-2/cli-5).
+  if (opts.targetHost !== undefined && opts.targetHost !== 'openclaw' && opts.targetHost !== 'codex') {
+    const result: ApproveResult = {
+      ok: false,
+      approvalId: opts.approvalId,
+      reason: `invalid_target_host: ${opts.targetHost}`,
+      nextAction: 'Pass --target-host openclaw or --target-host codex, or omit it to use workspace host facts.',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`Error: ${result.reason}`);
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
   // CodeRabbit review fix (cli-1-strict-json): declare stateManager outside
   // try so the finally block can close it, but resolve workspace INSIDE try
   // so resolveWorkspaceDir() failures are caught and routed through --json.
@@ -1345,6 +1367,84 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
       return;
     }
     const workspaceToolSemantics = approveToolSemantics.ok ? approveToolSemantics.registry : undefined;
+    // R-B3: set when the approved artifact is a revision of a live prompt
+    // activation (version replacement); consumed by the completion service.
+    let supersedeActivationId: string | undefined;
+
+    // PD_PROMPT_CAPACITY_V1 R-B2: prompt-channel approvals pass the SAME
+    // route-aware single-artifact capacity precheck as the Console (one
+    // shared host-runtime implementation), BEFORE any governance write. The
+    // precheck re-reads the CURRENT approval artifact and route/config at
+    // submit time; refusal keeps the approval pending with a structured
+    // reason + nextAction (cli-5: failed validation performs no mutation).
+    if (approvalChannel === 'prompt' && pendingApproval?.status === 'pending') {
+      let deliverability;
+      try {
+        deliverability = await checkPromptArtifactDeliverabilityById({
+          workspaceDir,
+          artifactId: pendingApproval.artifactId,
+          ...(opts.targetHost !== undefined ? { targetHost: opts.targetHost } : {}),
+        });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        deliverability = { status: 'unconfirmed' as const, reason: `prompt_capacity_precheck_failed: ${errMsg}`, nextAction: 'check the workspace .pd/state.db readability and retry the approval' };
+      }
+      if (deliverability.status !== 'deliverable') {
+        const detail = deliverability.status === 'undeliverable'
+          ? `single_item_exceeds_budget: this principle's own serialized entry is ${deliverability.costChars} chars > the ${deliverability.budget}-char budget on the ${deliverability.route === 'shared_render' ? 'shared full-render' : 'list-entry'} route${deliverability.hostKind !== undefined ? ` (host ${deliverability.hostKind})` : ''} — approving it could never inject it`
+          : deliverability.reason;
+        const perHostNote = deliverability.status === 'unconfirmed' && deliverability.perHost !== undefined
+          ? ` per-host fit: ${deliverability.perHost.map((entry) => `${entry.hostKind}=${entry.fits ? 'fits' : 'oversized'}(${entry.costChars}c)`).join(', ')}`
+          : '';
+        const result: ApproveResult = {
+          ok: false,
+          approvalId: opts.approvalId,
+          reason: `prompt_capacity_refused: ${detail}${perHostNote}`,
+          nextAction: deliverability.nextAction,
+        };
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`approvalId: ${result.approvalId}`);
+          console.log(`  reason:    ${result.reason}`);
+          console.log(`  nextAction: ${result.nextAction}`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+
+      // PD_PROMPT_CAPACITY_V1 R-B3: approving a REVISION of a live prompt
+      // activation means version replacement — detect the supersede target
+      // through the same core helper the Console uses (fails closed on
+      // ambiguity) and pass it into the completion service so the commit is
+      // atomic (new activation + supersede decision + old deactivation).
+      const detection = await detectPromptReplacementTarget({
+        approvalArtifactId: pendingApproval.artifactId,
+        getArtifactById: async (artifactId) => {
+          const rec = await new SqlitePIArtifactStore(sqliteConn).getArtifactById(artifactId);
+          return rec ? toSnapshot(rec) : null;
+        },
+        listPromptActivations: async () => new SqliteActivationStateStore(sqliteConn).listPromptActivations(),
+      });
+      if (!detection.ok) {
+        const result: ApproveResult = {
+          ok: false,
+          approvalId: opts.approvalId,
+          reason: `prompt_replacement_refused: ${detection.error}`,
+          nextAction: detection.nextAction,
+        };
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`approvalId: ${result.approvalId}`);
+          console.log(`  reason:    ${result.reason}`);
+          console.log(`  nextAction: ${result.nextAction}`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+      supersedeActivationId = detection.target?.supersededActivationId;
+    }
 
     // Step 1: approve the pending approval record.
     let approvalResult: ApprovalDecisionResult;
@@ -1451,6 +1551,7 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
         approvalId: opts.approvalId,
         actor: { kind: 'human', userId: decidedBy },
         now: new Date().toISOString(),
+        ...(supersedeActivationId !== undefined ? { supersedeActivationId, supersedeDecidedBy: decidedBy } : {}),
       });
     } catch (err) {
       // CodeRabbit review fix (cli-5-failure-no-mutation): approval was
@@ -1657,6 +1758,7 @@ export function registerRuntimeActivationApproveCommand(parent: Command): Comman
     .option('--note <text>', 'Optional approval note')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--json', 'Output raw JSON')
+    .option('--target-host <host>', 'Request-level target host for the prompt capacity precheck (openclaw|codex); omit to use workspace host facts')
     .action(async (opts) => {
       await handleActivationApprove({
         approvalId: opts.approvalId,
@@ -1664,6 +1766,7 @@ export function registerRuntimeActivationApproveCommand(parent: Command): Comman
         note: opts.note,
         workspace: opts.workspace,
         json: opts.json,
+        ...(typeof opts.targetHost === 'string' && opts.targetHost.length > 0 ? { targetHost: opts.targetHost } : {}),
       });
     });
 }

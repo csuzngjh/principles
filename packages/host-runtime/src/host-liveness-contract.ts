@@ -100,6 +100,65 @@ function promotionHostFailure(reason: Extract<PromotionHostLivenessResolution, {
 }
 
 /**
+ * Workspace host-kind facts shared by every host-aware projection (prompt
+ * injection route resolution reuses the same two durable provenance sources
+ * as promotion liveness — one truth, no second registry):
+ * - `declaredKinds`: host-authored declarations under
+ *   `.pd/host-tool-semantics/<hostKind>.json` (each host writes its own file
+ *   on startup);
+ * - `evidenceKinds`: distinct `pain_events.host_kind` values in
+ *   trajectory.db (which hosts actually produced governance evidence here —
+ *   survives declaration deletion); pre-column tables carry no evidence by
+ *   construction;
+ * - `effectiveKinds`: union of both, sorted, deduplicated.
+ */
+export type WorkspaceHostKindFacts =
+  | {
+    readonly ok: true;
+    readonly declaredKinds: readonly string[];
+    readonly evidenceKinds: readonly string[];
+    readonly effectiveKinds: readonly string[];
+  }
+  | {
+    readonly ok: false;
+    readonly reason: 'host_declarations_unreadable' | 'workspace_provenance_unreadable';
+    /** Declarations that DID parse before the failure (empty when declarations themselves failed). */
+    readonly declaredKinds: readonly string[];
+    readonly detail: string;
+    readonly nextAction: string;
+  };
+
+export function readWorkspaceHostKindFacts(workspaceDir: string): WorkspaceHostKindFacts {
+  const loaded = loadHostToolDeclarations(workspaceDir);
+  if (!loaded.ok && loaded.reason !== 'host_tool_declaration_missing') {
+    return {
+      ok: false,
+      reason: 'host_declarations_unreadable',
+      declaredKinds: [],
+      detail: `${loaded.reason} (${loaded.nextAction})`,
+      nextAction: `repair the host tool declarations before relying on host facts: ${loaded.reason} (${loaded.nextAction})`,
+    };
+  }
+  const declaredKinds = loaded.ok
+    ? [...new Set(loaded.declarations.map((declaration) => declaration.hostKind))].sort()
+    : [];
+
+  const provenance = readWorkspaceHostProvenance(workspaceDir);
+  if (!provenance.ok) {
+    return {
+      ok: false,
+      reason: 'workspace_provenance_unreadable',
+      declaredKinds,
+      detail: provenance.nextAction,
+      nextAction: provenance.nextAction,
+    };
+  }
+  const evidenceKinds = provenance.kinds.filter((kind) => kind === 'openclaw' || kind === 'codex');
+  const effectiveKinds = [...new Set([...declaredKinds, ...evidenceKinds])].sort();
+  return { ok: true, declaredKinds, evidenceKinds, effectiveKinds };
+}
+
+/**
  * PRI-813: resolve the promotion host-liveness contract from the workspace's
  * REAL host state instead of unconditionally inheriting the OpenClaw
  * contract (which made Codex workspaces report runtime_compatibility /
@@ -134,24 +193,21 @@ function promotionHostFailure(reason: Extract<PromotionHostLivenessResolution, {
  * truthfully over state that already exists.
  */
 export function resolvePromotionHostLiveness(workspaceDir: string): PromotionHostLivenessResolution {
-  const loaded = loadHostToolDeclarations(workspaceDir);
-  if (!loaded.ok && loaded.reason !== 'host_tool_declaration_missing') {
+  // Same two provenance sources and failure semantics as before, now via the
+  // shared facts reader (readWorkspaceHostKindFacts) so prompt-injection
+  // route resolution and promotion liveness cannot drift apart.
+  const facts = readWorkspaceHostKindFacts(workspaceDir);
+  if (!facts.ok) {
     return promotionHostFailure(
-      'host_declarations_unreadable',
-      [],
-      `repair the host tool declarations before promoting: ${loaded.reason} (${loaded.nextAction})`,
+      facts.reason,
+      facts.declaredKinds,
+      facts.reason === 'host_declarations_unreadable'
+        ? `repair the host tool declarations before promoting: ${facts.detail}`
+        : facts.nextAction,
     );
   }
-  const declaredKinds = loaded.ok
-    ? [...new Set(loaded.declarations.map(declaration => declaration.hostKind))].sort()
-    : [];
-
-  const provenance = readWorkspaceHostProvenance(workspaceDir);
-  if (!provenance.ok) {
-    return promotionHostFailure('workspace_provenance_unreadable', declaredKinds, provenance.nextAction);
-  }
-  const provenanceKinds = provenance.kinds.filter(kind => kind === 'openclaw' || kind === 'codex');
-  const effectiveKinds = [...new Set([...declaredKinds, ...provenanceKinds])].sort();
+  const {declaredKinds} = facts;
+  const {effectiveKinds} = facts;
 
   // The promotion host can only be the OpenClaw contract when nothing on the
   // workspace — neither a declaration nor behavioral evidence — says Codex.

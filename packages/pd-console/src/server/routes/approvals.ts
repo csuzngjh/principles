@@ -141,9 +141,23 @@ export async function handleApprovalsRoute(
         sendBadRequest(res, 'note must be a string');
         return;
       }
+      // PD_PROMPT_CAPACITY_V1 R-A1/R-B2: optional request-level target host
+      // for the prompt-capacity precheck — the request-scoped selection entry
+      // when the workspace's applicable hosts would take different routes.
+      let targetHost: 'openclaw' | 'codex' | undefined;
+      if (Object.hasOwn(parsed, 'host')) {
+        if (parsed.host !== 'openclaw' && parsed.host !== 'codex') {
+          sendBadRequest(res, 'host must be one of: openclaw, codex');
+          return;
+        }
+        targetHost = parsed.host;
+      }
 
       const note = typeof parsed.note === 'string' ? parsed.note : undefined;
-      const result: ApproveWithActivationResult = await model.approve(approvalId, 'operator', note);
+      const result: ApproveWithActivationResult = await model.approve(approvalId, 'operator', {
+        ...(note !== undefined ? { note } : {}),
+        ...(targetHost !== undefined ? { targetHost } : {}),
+      });
       if (!result.ok) {
         if (result.error === 'not_found') {
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
@@ -156,6 +170,17 @@ export async function handleApprovalsRoute(
             'activation_failed',
             `Approval was ${result.approvalRolledBack ? 'rolled back to pending' : 'approved but activation failed'}. Reason: ${result.reason}`,
             { nextAction: 'Inspect or regenerate the rule artifact, verify it is validated, then retry approval.' },
+          );
+        } else if (result.error === 'prompt_capacity_refused') {
+          // R-B2: refused BEFORE any governance write — the approval stays
+          // pending. 422: the request is well-formed but the artifact cannot
+          // be delivered under the current route facts.
+          sendError(
+            res,
+            422,
+            'prompt_capacity_refused',
+            `Approval refused before any write; the approval remains pending. ${result.reason}`,
+            { nextAction: result.nextAction, capacity: result.capacity },
           );
         } else {
           sendError(res, 409, 'conflict', 'Approval already decided: ' + (result.status ?? 'unknown'));

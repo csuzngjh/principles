@@ -49,12 +49,24 @@ export interface DispatchInput {
    * This prevents callers from bypassing the owner approval boundary.
    */
   approvalId?: string;
+  /**
+   * PD_PROMPT_CAPACITY_V1 R-B3: prompt-channel version replacement. When set,
+   * committing the NEW activation atomically deactivates this live prompt
+   * activation of a prior artifact version (same principle) and appends an
+   * immutable `supersede` decision row — one transaction, no stop-old-then-
+   * start-new window. Detected by the approve entry points via
+   * `detectPromptReplacementTarget`; the dispatcher keeps its own artifact /
+   * approval / identity verification unchanged.
+   */
+  supersedeActivationId?: string;
+  /** R-B3: the Owner actor recorded on the supersede decision row. */
+  supersedeDecidedBy?: string;
 }
 
 export type ActivationDecision =
   | { decision: 'would_activate'; activationId: string; action: string; targetRef: string }
-  | { decision: 'activated'; activationId: string; action: string; targetRef: string }
-  | { decision: 'already_activated'; activationId: string; action: string; targetRef: string }
+  | { decision: 'activated'; activationId: string; action: string; targetRef: string; supersededActivationId?: string }
+  | { decision: 'already_activated'; activationId: string; action: string; targetRef: string; supersededActivationId?: string }
   | { decision: 'queued_for_approval'; approvalId: string; queuedAt: string; channel: InternalizationChannel; riskLevel: ActivationRiskLevel }
   | { decision: 'refused'; reason: string; nextAction?: string; riskLevel?: ActivationRiskLevel; channel?: InternalizationChannel; details?: { originalError: string; errorCategory: string }; /** PRI-634-F R2: structured reliability failure (layer/reasonCode/evidence/nextAction) preserved from the writer's gate/reliability result. */ failure?: RuleReliabilityFailure }
   | { decision: 'invalid_artifact'; reason: string; nextAction?: string };
@@ -95,7 +107,33 @@ export interface ActivationStateReadModel {
   listCodeToolHookActivations(includeDeactivated?: boolean): Promise<ActivationStatusRecord[]>;
   listAllActivations(): Promise<ActivationStatusRecord[]>;
   deactivateActivation(activationId: string, deactivatedAt: string): Promise<boolean>;
+  /**
+   * PD_PROMPT_CAPACITY_V1 R-B3 (optional seam — real variation: prompt-channel
+   * version replacement): commit the new activation, deactivate the superseded
+   * one, and append the immutable supersede decision in ONE transaction.
+   * Absent on stores without the capability (memory fakes in tests).
+   */
+  replacePromptActivation?(input: PromptReplacementCommit): Promise<PromptReplacementOutcome>;
 }
+
+/** R-B3: one-shot atomic replacement commit (see replacePromptActivation). */
+export interface PromptReplacementCommit {
+  /** The new activation row exactly as the PromptWriter produced it. */
+  newRecord: ActivationStatusRecord;
+  /** Live prompt activation of the PRIOR artifact version being replaced. */
+  supersededActivationId: string;
+  supersededArtifactId: string;
+  /** Owner identity recorded on the immutable supersede decision row. */
+  decidedBy: string;
+  decidedAt: string;
+  reasonCode: string;
+  note: string;
+}
+
+export type PromptReplacementOutcome =
+  | { status: 'replaced'; newActivationId: string; supersededActivationId: string; supersedeDecisionId: string }
+  /** Replay / recovery: new version already live; old deactivation completed if needed. */
+  | { status: 'already_replaced'; newActivationId: string; supersededActivationId: string; supersedeDecisionId: string };
 
 export interface WriterInput {
   artifactId: string;

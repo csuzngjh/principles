@@ -289,6 +289,7 @@ function PendingReviewCard({
   actionsLockedReason,
   onDecisionApplied,
   promptInjection,
+  promptTargetHost,
 }: {
   group: ApprovalGroup;
   /** PRI-889: 与 OwnerDecisionCard 同一治理就绪门（PRI-787）——锁定时禁用动作并给出可见原因。 */
@@ -296,6 +297,8 @@ function PendingReviewCard({
   onDecisionApplied: () => void;
   /** PRI-908: 提示词注入预算现状（批准前预告"批了是否会生效"）。 */
   promptInjection?: PromptInjectionBudgetStatus;
+  /** PD_PROMPT_CAPACITY_V1 R-A1/R-B2: 请求级目标宿主（未确认横幅中选择），随批准请求发送给写入前预检。 */
+  promptTargetHost?: "openclaw" | "codex";
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -399,7 +402,7 @@ function PendingReviewCard({
     for (const record of pendingRecords) {
       const result =
         action === "approve"
-          ? await approveApproval(record.id)
+          ? await approveApproval(record.id, undefined, promptTargetHost)
           : await rejectApproval(record.id, reason ?? "");
       // PRI-890: preserve non-fatal server warnings (e.g. prompt injection
       // budget exclusion) on successful decisions.
@@ -605,7 +608,10 @@ function PendingReviewCard({
           让 Owner 在决策前就知道，而不是事后道歉。
           PR-1894: 两层条件都要满足才承诺轮转——(1) 生产路由确实轮转；
           (2) 这条候选自身的序列化内容能装进预算。超预算的条目在任何一轮都
-          塞不进去，轮转救不了它，此时不得承诺"会自行轮到"。 */}
+          塞不进去，轮转救不了它，此时不得承诺"会自行轮到"。
+          PD_PROMPT_CAPACITY_V1 R-A2: 预测窗口（Console 无真实轮次键），并标注
+          计费范围——列表路由按选中行计费、共享路由按完整注入块计费，两个
+          数字不能混称为同一个"占用"。 */}
       {decidedOutcome === null && primaryChannel === "prompt" && promptInjection?.truncated === true && (
         <div
           className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] text-amber"
@@ -628,6 +634,16 @@ function PendingReviewCard({
                   used: promptInjection.usedChars,
                   budget: promptInjection.budget,
                 })}
+          <div className="mt-1 text-ink-3 text-[11.5px]" data-testid={`approve-queue-badge-scope-${group.principleId}`}>
+            {promptInjection.route === "shared_render"
+              ? t("pages.focus.promptScopeShared")
+              : t("pages.focus.promptScopeList", {
+                  full: promptInjection.fullRenderChars !== undefined
+                    ? t("pages.focus.promptScopeFullRender", { count: promptInjection.fullRenderChars })
+                    : "",
+                })}
+            {promptInjection.hostKind !== undefined ? ` · ${promptInjection.hostKind === "openclaw" ? "OpenClaw" : "Codex"}` : ""}
+          </div>
         </div>
       )}
 
@@ -1067,6 +1083,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // historical notice). Display-only; degradation is observable, never silent.
   const [ownerInbox, setOwnerInbox] = useState<OwnerDecisionInboxData | null>(null);
   const [ownerInboxError, setOwnerInboxError] = useState<string | null>(null);
+  // PD_PROMPT_CAPACITY_V1 R-A1: request-level target host for the prompt
+  // capacity forecast + approve precheck. Set from the 未确认 banner when the
+  // workspace's applicable hosts would take different routes; request-scoped
+  // only — no persisted host configuration is created here.
+  const [promptTargetHost, setPromptTargetHost] = useState<"openclaw" | "codex" | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -1077,8 +1098,8 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     const [experienceResult, queueResult, groupedResult, activationsResult] = await Promise.all([
       experienceMode ? fetchGovernanceExperience() : Promise.resolve(null),
       experienceMode ? Promise.resolve(null) : fetchGovernanceQueue(),
-      fetchApprovalsGrouped(),
-      fetchAllActivations(),
+      fetchApprovalsGrouped(promptTargetHost ?? undefined),
+      fetchAllActivations(promptTargetHost ?? undefined),
     ]);
 
     if (experienceMode) {
@@ -1145,7 +1166,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     }
 
     setLoadingState("loaded");
-  }, [experienceMode, t]);
+  }, [experienceMode, t, promptTargetHost]);
 
   useEffect(() => {
     if (!flagsResolved) return;
@@ -1317,12 +1338,71 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           />
         ))}
         {/* 分组数据不可用时 OwnerDecisionCard 保持原渲染（含降级 CTA），决策不静默消失（rc-9）——见 selectDecisionSurfaceItems。 */}
+        {/* PD_PROMPT_CAPACITY_V1 R-A1: 适用宿主会走不同路由且未选择目标宿主时，
+            明确标注"当前宿主容量未确认"并分别展示各宿主的能力——不猜测 FIFO 或轮转。 */}
+        {(() => {
+          const unconfirmed = groupedData?.promptInjection;
+          if (unconfirmed === undefined || unconfirmed.capacityStatus !== "unconfirmed") return null;
+          return (
+          <div
+            className="mb-4 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] leading-relaxed text-amber"
+            data-testid="prompt-capacity-unconfirmed-banner"
+          >
+            <p>
+              {t("pages.focus.promptCapacityUnconfirmed", {
+                defaultValue: "当前宿主容量未确认：本工作区适用的宿主会走不同的注入路由，以下数字未绑定具体宿主。",
+              })}
+            </p>
+            <ul className="mt-1 list-disc pl-5">
+              {(unconfirmed.perHost ?? []).map((entry) => (
+                <li key={entry.hostKind} data-testid={`prompt-capacity-perhost-${entry.hostKind}`}>
+                  {entry.hostKind === "openclaw" ? "OpenClaw" : "Codex"}
+                  {"："}
+                  {entry.route === "shared_render"
+                    ? t("pages.focus.promptCapacitySharedRoute", { defaultValue: "共享注入（按完整注入块计费）" })
+                    : t("pages.focus.promptCapacityListRoute", { defaultValue: "列表注入（按选中行计费）" })}
+                  {` — ${entry.usedChars}/${unconfirmed.budget} 字符${entry.truncated ? "（已满）" : ""}`}
+                </li>
+              ))}
+            </ul>
+            {unconfirmed.nextAction !== undefined && (
+              <p className="mt-1 text-ink-2">{unconfirmed.nextAction}</p>
+            )}
+            <div className="mt-2 flex gap-2">
+              {(["openclaw", "codex"] as const).map((host) => (
+                <button
+                  key={host}
+                  type="button"
+                  onClick={() => setPromptTargetHost(host)}
+                  data-testid={`prompt-capacity-pick-${host}`}
+                  className={`inline-flex items-center border rounded-[3px] px-[10px] py-[4px] transition-colors ${
+                    promptTargetHost === host ? "border-amber bg-amber/10" : "border-line hover:border-line-2"
+                  }`}
+                >
+                  {host === "openclaw" ? "按 OpenClaw 查看" : "按 Codex 查看"}
+                </button>
+              ))}
+              {promptTargetHost !== null && (
+                <button
+                  type="button"
+                  onClick={() => setPromptTargetHost(null)}
+                  data-testid="prompt-capacity-pick-clear"
+                  className="inline-flex items-center border border-line rounded-[3px] px-[10px] py-[4px] hover:border-line-2"
+                >
+                  {t("pages.focus.promptCapacityClearHost", { defaultValue: "清除选择" })}
+                </button>
+              )}
+            </div>
+          </div>
+          );
+        })()}
         {groupedAvailable && pendingGroups.map((group) => (
           <PendingReviewCard
             key={group.principleId}
             group={group}
             actionsLockedReason={ownerActionsLockedReason ?? undefined}
             promptInjection={groupedData.promptInjection}
+            promptTargetHost={promptTargetHost ?? undefined}
             onDecisionApplied={() => { void loadData(); }}
           />
         ))}

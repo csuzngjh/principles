@@ -1,5 +1,6 @@
-import type { ActivationStateReadModel, ActivationStatusRecord } from './activation-types.js';
+import type { ActivationStateReadModel, ActivationStatusRecord, PromptReplacementCommit, PromptReplacementOutcome } from './activation-types.js';
 import type { SqliteConnection } from '../store/sqlite-connection.js';
+import { createHash } from 'node:crypto';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -168,6 +169,126 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
       WHERE activation_id = ? AND deactivated_at IS NULL
     `).run(deactivatedAt, activationId);
     return result.changes > 0;
+  }
+
+  /**
+   * PD_PROMPT_CAPACITY_V1 R-B3: atomic prompt-version replacement — the
+   * prompt-channel sibling of the RuleCode promotion commit's supersede
+   * (sqlite-activation-safety-store.ts). ONE BEGIN IMMEDIATE transaction
+   * commits, in order: (validations) → new activation row → immutable
+   * `supersede` decision row → deactivation of the prior live activation.
+   * A failure anywhere rolls back to the OLD-ONLY state (the Owner never
+   * loses the working version); there is no stop-old-then-start-new window.
+   *
+   * Idempotent by construction: replaying after success takes the
+   * `already_replaced` branch (new row already live; old deactivation and
+   * decision row are INSERT OR IGNORE / idempotent UPDATE). It also RECOVERS
+   * the rare "new artifact activated normally earlier" state by completing
+   * the supersede inside the same transaction instead of failing.
+   */
+  async replacePromptActivation(input: PromptReplacementCommit): Promise<PromptReplacementOutcome> {
+    const db = this.connection.getDb();
+    const supersedeKey = `supersede-prompt:${input.newRecord.activationId}:${input.supersededActivationId}`;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const newRow = db.prepare(`
+        SELECT activation_id FROM activations
+        WHERE idempotency_key = ? AND deactivated_at IS NULL
+      `).get(input.newRecord.idempotencyKey);
+      if (newRow !== undefined) {
+        // Replay / recovery path: the new version is already live. Complete
+        // the supersede (decision + deactivation are idempotent) and report.
+        const oldArtifact = db.prepare(`
+          SELECT artifact_id, content_json FROM pi_artifacts WHERE artifact_id = ?
+        `).get(input.supersededArtifactId) as { artifact_id: string; content_json: string } | undefined;
+        const digest = oldArtifact !== undefined
+          ? `sha256:${createHash('sha256').update(JSON.stringify(oldArtifact), 'utf8').digest('hex')}`
+          : null;        db.prepare(`
+          INSERT OR IGNORE INTO activation_decisions
+            (decision_id, idempotency_key, subject_kind, activation_id, artifact_id, artifact_digest,
+             decision, principal_kind, owner_id, authentication_method, credential_id,
+             reason_code, note, decided_at)
+          VALUES (?, ?, 'activation', ?, ?, ?, 'supersede', 'configured_owner', ?, 'system', NULL, ?, ?, ?)
+        `).run(
+          supersedeKey, supersedeKey, input.supersededActivationId, input.supersededArtifactId, digest,
+          input.decidedBy, input.reasonCode, input.note, input.decidedAt,
+        );
+        db.prepare(`
+          UPDATE activations SET deactivated_at = ?
+          WHERE activation_id = ? AND deactivated_at IS NULL
+        `).run(input.decidedAt, input.supersededActivationId);
+        db.exec('COMMIT');
+        return {
+          status: 'already_replaced',
+          newActivationId: input.newRecord.activationId,
+          supersededActivationId: input.supersededActivationId,
+          supersedeDecisionId: supersedeKey,
+        };
+      }
+
+      // Validations BEFORE any mutation (fail loud, keep old-only state).
+      const artifactExists = db.prepare('SELECT 1 FROM pi_artifacts WHERE artifact_id = ?').get(input.newRecord.artifactId);
+      if (!artifactExists) {
+        throw new Error(`replacePromptActivation: activations.artifact_id references non-existent pi_artifacts: ${input.newRecord.artifactId}`);
+      }
+      // Same {artifact_id, content_json} digest shape as the replay branch —
+      // one digest definition for one supersede fact.
+      const oldRow = db.prepare(`
+        SELECT p.artifact_id AS artifact_id, p.content_json AS content_json
+        FROM activations a JOIN pi_artifacts p ON p.artifact_id = a.artifact_id
+        WHERE a.activation_id = ? AND a.channel = 'prompt' AND a.deactivated_at IS NULL
+      `).get(input.supersededActivationId) as { artifact_id: string; content_json: string } | undefined;
+      if (oldRow === undefined || oldRow.artifact_id !== input.supersededArtifactId) {
+        throw new Error(`replacePromptActivation: superseded activation ${input.supersededActivationId} is not a live prompt activation of artifact ${input.supersededArtifactId}`);
+      }
+      const digest = `sha256:${createHash('sha256').update(JSON.stringify(oldRow), 'utf8').digest('hex')}`;
+
+      // 1. new activation row (same shape as recordActivation; prompt channel
+      //    seeds no control states).
+      db.prepare(`
+        INSERT OR REPLACE INTO activations
+          (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.newRecord.activationId, input.newRecord.idempotencyKey, input.newRecord.artifactId,
+        input.newRecord.channel, input.newRecord.action, input.newRecord.targetRef,
+        input.newRecord.activatedAt, input.newRecord.promotedAt ?? null, null,
+      );
+      // 2. immutable supersede decision (append-only; UNIQUE idempotency_key).
+      // principal/auth semantics: configured_owner + owner_id = the deciding
+      // Owner (supersedeDecidedBy); authentication_method is schema-bound to
+      // 'system' because this path carries no operator credential (the CHECK
+      // constraint only admits credential-bearing methods or system) — the
+      // Owner attribution itself lives in owner_id and the note.
+      db.prepare(`
+        INSERT INTO activation_decisions
+          (decision_id, idempotency_key, subject_kind, activation_id, artifact_id, artifact_digest,
+           decision, principal_kind, owner_id, authentication_method, credential_id,
+           reason_code, note, decided_at)
+        VALUES (?, ?, 'activation', ?, ?, ?, 'supersede', 'configured_owner', ?, 'system', NULL, ?, ?, ?)
+      `).run(
+        supersedeKey, supersedeKey, input.supersededActivationId, input.supersededArtifactId, digest,
+        input.decidedBy, input.reasonCode,
+        `${input.note} Approved by ${input.decidedBy} via prompt approval.`,
+        input.decidedAt,
+      );
+      // 3. deactivate the prior version — last, inside the same transaction.
+      db.prepare(`
+        UPDATE activations SET deactivated_at = ?
+        WHERE activation_id = ? AND deactivated_at IS NULL
+      `).run(input.decidedAt, input.supersededActivationId);
+
+      db.exec('COMMIT');
+      return {
+        status: 'replaced',
+        newActivationId: input.newRecord.activationId,
+        supersededActivationId: input.supersededActivationId,
+        supersedeDecisionId: supersedeKey,
+      };
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch { /* best effort */ }
+      throw error;
+    }
   }
 
   async promoteActivation(activationId: string, promotedAt: string): Promise<boolean> {

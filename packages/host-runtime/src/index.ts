@@ -14,6 +14,15 @@ import type { GovernanceHostKind, ToolSemanticRegistry } from '@principles/core/
 
 export * from './active-principle-prompt.js';
 export * from './prompt-injection-projection.js';
+// SPEC PD_PROMPT_CAPACITY_V1: route-aware single-artifact deliverability
+// precheck (B1 write gate + A candidate fit) and the per-live-activation
+// injection status reader (A activation list). ONE implementation shared by
+// Console and CLI — no per-entry cost logic in either consumer.
+export * from './prompt-activation-deliverability.js';
+export * from './prompt-injection-status.js';
+// SPEC PD_PROMPT_CAPACITY_V1 Phase C (AC-12): honest read-model over the
+// existing injection-event JSONL — unknown vs proven-zero never conflated.
+export * from './prompt-injection-event-evidence.js';
 export * from './pd-config.js';
 export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';

@@ -106,8 +106,24 @@ describe('ScribePromptBuilder — PRI-838 formation evidence', () => {
     truncationNotes: [],
   };
 
-  it('promptContractVersion was bumped to v4', () => {
-    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v4');
+  it('promptContractVersion was bumped to v5', () => {
+    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v5');
+  });
+
+  // PD_PROMPT_CAPACITY_V1 R-B1: the statement is the only budget-capped
+  // injected text, so the prompt demands the shortest sufficient wording that
+  // keeps trigger / action / exception — without a hard cap or truncation.
+  it('carries the statement-brevity requirement (R-B1) in the system prompt', () => {
+    const { systemPrompt } = builder.buildPrompt(baseInput);
+    expect(systemPrompt).toContain('PD_PROMPT_CAPACITY_V1 R-B1');
+    expect(systemPrompt).toContain('SHORTEST wording that stays sufficient');
+    expect(systemPrompt).toContain('trigger condition');
+    expect(systemPrompt).toContain('required action');
+    expect(systemPrompt).toContain('necessary exception');
+    expect(systemPrompt).toContain('rationale, evidence, and history belong in principleDraft.rationale');
+    // 不引入硬性字数上限或静默截断（内容验证与宿主容量预检分离）。
+    expect(systemPrompt).not.toMatch(/statement MUST be less than \d+ chars/i);
+    expect(systemPrompt).not.toContain('truncate the statement');
   });
 
   it('carries formationContext in the payload when provided', () => {

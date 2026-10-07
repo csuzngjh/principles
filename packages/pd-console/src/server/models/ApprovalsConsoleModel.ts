@@ -21,13 +21,21 @@ import {
   ApprovalQueue,
   mapConfidenceToLabel,
   isArtifactRevisionOf,
+  detectPromptReplacementTarget,
+  buildOwnerRevisionArtifact,
   PrincipleTreeLedgerAdapter,
   MVP_CHANNELS,
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
 import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
-import { resolveWorkspaceHostToolSemantics, buildLivePromptInjectionProjection } from '@principles/host-runtime';
+import {
+  resolveWorkspaceHostToolSemantics,
+  checkPromptArtifactDeliverabilityById,
+  resolveLivePromptInjectionProjection,
+  type PromptArtifactDeliverability,
+  type PromptInjectionTargetHost,
+} from '@principles/host-runtime';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
@@ -45,12 +53,56 @@ function isActivationSuccess(activation: ActivationDecision): boolean {
 type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; channel: string };
 type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelResult;
 
+/** R-B3 propose-revision result: reviewable diff + queued approval, or a structured refusal. */
+export type ProposePromptRevisionResult =
+  | {
+    ok: true;
+    /** true = an equivalent pending revision approval already existed (idempotent replay). */
+    alreadyPending: boolean;
+    newArtifactId: string;
+    approvalId: string;
+    supersededActivationId: string;
+    oldStatement: string;
+    newStatement: string;
+    title: string;
+    diff: { intentContract?: unknown; note?: string };
+    deliverability?: { status: string; reason?: string; costChars?: number; budget?: number; route?: string };
+  }
+  | {
+    ok: false;
+    error: 'not_found' | 'activation_not_live_prompt' | 'artifact_unavailable' | 'revision_validation_failed' | 'revision_enqueue_failed';
+    reason?: string;
+    nextAction?: string;
+    activationId?: string;
+    artifactId?: string;
+  };
+
 export type ApproveWithActivationResult =
   | { ok: true; record: ApprovalRecord; activation?: ActivationDecision; warning?: string }
   | { ok: false, error: 'already_decided'; status: ApprovalStatus }
   | { ok: false; error: 'not_found' }
   | { ok: false; error: 'unsupported_channel'; channel: string }
-  | { ok: false; error: 'activation_failed'; reason: string; approvalRolledBack: boolean };
+  | { ok: false; error: 'activation_failed'; reason: string; approvalRolledBack: boolean }
+  /**
+   * PD_PROMPT_CAPACITY_V1 R-B2: the prompt-channel write gate refused BEFORE
+   * any governance write. The approval stays pending, the artifact stays
+   * untouched, no live activation and no ledger upgrade happens.
+   */
+  | {
+    ok: false;
+    error: 'prompt_capacity_refused';
+    reason: string;
+    nextAction: string;
+    capacity: {
+      category: 'single_item_exceeds_budget' | 'route_unconfirmed' | 'content_unconfirmed';
+      route?: 'legacy_trim' | 'shared_render';
+      hostKind?: 'openclaw' | 'codex';
+      budget?: number;
+      costChars?: number;
+      overByChars?: number;
+      perHost?: { hostKind: 'openclaw' | 'codex'; fits: boolean; costChars: number }[];
+    };
+  };
 
 export type ReopenApprovalResult =
   | { ok: true; record: ApprovalRecord; alreadyPending: boolean }
@@ -125,7 +177,13 @@ export class ApprovalsConsoleModel {
     };
   }
 
-  async approve(approvalId: string, decidedBy: string, note?: string): Promise<ApproveWithActivationResult> {
+  async approve(
+    approvalId: string,
+    decidedBy: string,
+    options?: { note?: string; targetHost?: PromptInjectionTargetHost },
+  ): Promise<ApproveWithActivationResult> {
+    const note = options?.note;
+    const targetHost = options?.targetHost;
     if (!stateDbExists(this.workspaceDir)) {
       return { ok: false, error: 'not_found' };
     }
@@ -133,6 +191,42 @@ export class ApprovalsConsoleModel {
     if (!existing) return { ok: false, error: 'not_found' };
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
+    }
+    // PD_PROMPT_CAPACITY_V1 R-B2/R-B3: for a PENDING prompt approval —
+    // (1) the route-aware single-artifact capacity precheck BEFORE any
+    // governance write (re-reads the CURRENT artifact and route/config at
+    // submit time — a stale preview never authorizes the write, AC-08;
+    // refusal keeps the approval pending, the artifact, no activation, no
+    // ledger upgrade), then (2) replacement detection: approving an artifact
+    // that is a REVISION of a live prompt activation means version
+    // replacement — pass the single supersede target through so the
+    // activation commit replaces the old version atomically (detection fails
+    // closed on ambiguity). Already-decided rows reach their terminal-state
+    // error (409) untouched by both gates.
+    let supersedeActivationId: string | undefined;
+    if (existing.channel === 'prompt' && existing.status === 'pending') {
+      const precheck = await this.precheckPromptCapacity(existing.artifactId, targetHost);
+      if (precheck !== undefined) return precheck;
+      const { connection } = this.createReadContext();
+      try {
+        const piArtifactStore = new SqlitePIArtifactStore(connection);
+        const detection = await detectPromptReplacementTarget({
+          approvalArtifactId: existing.artifactId,
+          getArtifactById: async (id) => piArtifactStore.getArtifactById(id),
+          listPromptActivations: async () => new SqliteActivationStateStore(connection).listPromptActivations(),
+        });
+        if (!detection.ok) {
+          return {
+            ok: false,
+            error: 'activation_failed',
+            reason: `prompt_replacement_refused: ${detection.error} (${detection.nextAction})`,
+            approvalRolledBack: false,
+          };
+        }
+        supersedeActivationId = detection.target?.supersededActivationId;
+      } finally {
+        try { connection.close(); } catch { /* best-effort */ }
+      }
     }
     const { queue: writeQueue, connection: writeConnection } = this.createWriteContext();
     let approvalResult: ApprovalDecisionResult;
@@ -148,7 +242,7 @@ export class ApprovalsConsoleModel {
       return { ok: false, error: 'not_found' };
     }
 
-    const activation = await this.dispatchActivationAfterApproval(existing, decidedBy);
+    const activation = await this.dispatchActivationAfterApproval(existing, decidedBy, supersedeActivationId);
 
     // If activation failed, roll back approval to pending so the user can retry.
     if (activation && !isActivationSuccess(activation)) {
@@ -209,7 +303,7 @@ export class ApprovalsConsoleModel {
       // isActivationSuccess is not a type predicate; the success variants all
       // carry activationId (activation-types.ts) — narrow with `in` (rc-2).
       if ('activationId' in activation) {
-        injectionWarning = await this.checkPromptInjectionBudget(activation.activationId);
+        injectionWarning = await this.checkPromptInjectionBudget(activation.activationId, targetHost);
       }
     }
 
@@ -218,39 +312,102 @@ export class ApprovalsConsoleModel {
   }
 
   /**
+   * PD_PROMPT_CAPACITY_V1 R-B2: run the shared host-runtime deliverability
+   * precheck for a prompt-channel approval artifact. Returns the refusal
+   * result when the single item cannot be delivered or the facts cannot be
+   * confirmed; returns undefined when the write may proceed.
+   */
+  private async precheckPromptCapacity(
+    artifactId: string,
+    targetHost?: PromptInjectionTargetHost,
+  ): Promise<Extract<ApproveWithActivationResult, { ok: false; error: 'prompt_capacity_refused' }> | undefined> {
+    let deliverability: PromptArtifactDeliverability;
+    try {
+      deliverability = await checkPromptArtifactDeliverabilityById({
+        workspaceDir: this.workspaceDir,
+        artifactId,
+        targetHost,
+      });
+    } catch (error) {
+      // rc-9: a crashed precheck is NOT a pass — refuse with the reason.
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        error: 'prompt_capacity_refused',
+        reason: `prompt_capacity_precheck_failed: ${message}`,
+        nextAction: 'check the workspace .pd/state.db readability and retry the approval',
+        capacity: { category: 'content_unconfirmed' },
+      };
+    }
+    if (deliverability.status === 'deliverable') return undefined;
+    if (deliverability.status === 'undeliverable') {
+      return {
+        ok: false,
+        error: 'prompt_capacity_refused',
+        reason: `single_item_exceeds_budget: this principle's own serialized entry is ${deliverability.costChars} chars > the ${deliverability.budget}-char budget on the ${deliverability.route === 'shared_render' ? 'shared full-render' : 'list-entry'} route${deliverability.hostKind !== undefined ? ` (host ${deliverability.hostKind})` : ''} — approving it could never inject it`,
+        nextAction: deliverability.nextAction,
+        capacity: {
+          category: 'single_item_exceeds_budget',
+          route: deliverability.route,
+          ...(deliverability.hostKind !== undefined ? { hostKind: deliverability.hostKind } : {}),
+          budget: deliverability.budget,
+          costChars: deliverability.costChars,
+          overByChars: deliverability.overByChars,
+        },
+      };
+    }
+    return {
+      ok: false,
+      error: 'prompt_capacity_refused',
+      reason: deliverability.reason,
+      nextAction: deliverability.nextAction,
+      capacity: {
+        category: deliverability.reason.startsWith('route_unconfirmed') ? 'route_unconfirmed' : 'content_unconfirmed',
+        ...(deliverability.perHost !== undefined
+          ? { perHost: deliverability.perHost.map((entry) => ({ hostKind: entry.hostKind, fits: entry.fits, costChars: entry.costChars })) }
+          : {}),
+      },
+    };
+  }
+
+  /**
    * PRI-890 (PRI-768 v6-02): recompute the production prompt injection
    * projection and report whether `activationId` made it into the injected
-   * set. PR #1844 follow-up: the projection comes from
-   * `buildLivePromptInjectionProjection`, which follows the SAME route the
-   * real agent injection takes (legacy trimToBudget vs shared render, chosen
-   * by the abstraction_layer_v1 flag) instead of always forecasting with the
-   * shared-path renderer. Budget exclusion is a warning, never a failure —
-   * the activation is committed and the Owner decides whether to retire older
-   * principles. A projection error is also surfaced (never silent) but must
-   * not fail the approve.
-   *
-   * PR-1894 — the console holds no session, so it cannot supply the production
-   * round key and the projection runs `legacy_fifo_prefix_v1`. That is NOT a
-   * conservative forecast: FIFO structurally drops the newest activation from
-   * every truncated selection, while the live plugin route rotates and injects
-   * it within N user turns (PRI-904). Reporting that as "will NOT enter agent
-   * behavior until older ones are deactivated" told the Owner a falsehood and
-   * pushed them to deactivate healthy principles. The console now reports the
-   * policy it actually ran and, when the activation is merely rotated out of
-   * the current window, says so instead of claiming starvation.
+   * set. PD_PROMPT_CAPACITY_V1: the projection follows the host-fact-bound
+   * route (resolveLivePromptInjectionProjection), an oversized activation is
+   * explained as OVERSIZED rather than folded into generic budget exclusion
+   * (AC-02), and an unconfirmed route yields an explicit
+   * `injection_capacity_unconfirmed` warning instead of a guessed FIFO or
+   * rotation story (AC-01). Budget exclusion remains a warning, never a
+   * failure — the activation is committed and the Owner decides whether to
+   * retire older principles.
    */
-  private async checkPromptInjectionBudget(activationId: string): Promise<string | undefined> {
-    let projection;
+  private async checkPromptInjectionBudget(activationId: string, targetHost?: PromptInjectionTargetHost): Promise<string | undefined> {
+    let resolution;
     try {
-      projection = await buildLivePromptInjectionProjection({ workspaceDir: this.workspaceDir });
+      resolution = await resolveLivePromptInjectionProjection({
+        workspaceDir: this.workspaceDir,
+        targetHost,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return `injection_budget_check_failed: could not recompute the prompt injection projection (${message}); the activation is committed but its injection status is unverified. nextAction=check .pd/state.db readability and re-run pd runtime activation list`;
     }
+    if (resolution.status === 'unconfirmed') {
+      return `injection_capacity_unconfirmed: the activation is committed but this workspace's effective injection route cannot be confirmed (${resolution.decision.unconfirmedReason ?? 'unknown reason'}); per-host forecasts: ${resolution.perHost.map((entry) => `${entry.hostKind}=${entry.projection.route} (${entry.projection.usedChars}c${entry.projection.truncated ? ', truncated' : ''})`).join('; ')}. nextAction=${resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex)'}`;
+    }
+    const {projection} = resolution;
     if (projection.injectedActivationIds.includes(activationId)) {
       return undefined;
     }
     const projectionDetail = projection.warnings.length > 0 ? ` projection warnings: ${projection.warnings.join(' | ')}` : '';
+    // AC-02/R-A3: oversized is independent of `truncated` — say WHY first.
+    if (projection.oversizedActivationIds.includes(activationId)) {
+      const scopeNote = projection.route === 'shared_render'
+        ? 'the full directive render of this single principle exceeds the cap'
+        : 'its own list entry exceeds the cap';
+      return `injection_oversized: the activation is committed but ${scopeNote} (${projection.budget} chars, measured in UTF-16 units on the ${projection.route} route) — it can never enter the prompt as written, regardless of rotation or free capacity. nextAction=shorten the statement via the activations page "modify to injectable version" entry, or deactivate this activation`;
+    }
     if (!projection.truncated) {
       // Not included and the budget did NOT truncate — the projection skipped
       // this activation for another reason (e.g. artifact resolution). Report
@@ -427,6 +584,7 @@ export class ApprovalsConsoleModel {
   private async dispatchActivationAfterApproval(
     existing: ApprovalRecord,
     decidedBy: string,
+    supersedeActivationId?: string,
   ): Promise<ActivationDecision | undefined> {
     // Feature flag gate (Contract F): when story_a_approval_completion is disabled,
     // the new orchestrator is deactivated without damaging existing data.
@@ -539,6 +697,7 @@ export class ApprovalsConsoleModel {
         approvalId: existing.approvalId,
         actor: { kind: 'human', userId: decidedBy },
         now: new Date().toISOString(),
+        ...(supersedeActivationId !== undefined ? { supersedeActivationId, supersedeDecidedBy: decidedBy } : {}),
       });
 
       if (!completionResult.ok) {
@@ -647,6 +806,206 @@ export class ApprovalsConsoleModel {
     } catch (err) {
       if (isMissingTableError(err)) return null;
       throw err;
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
+    }
+  }
+
+  /**
+   * PD_PROMPT_CAPACITY_V1 R-B3: Owner-initiated "modify to injectable version"
+   * entry on a LIVE prompt activation. Produces a NEW artifact version (the
+   * old approved artifact stays immutable), re-validates through the real
+   * scribe content contract, enqueues a NORMAL pending approval for it (the
+   * Owner reviews the diff + intent fields on the focus page and approves —
+   * the approve path then performs the atomic replacement). Duplicate requests
+   * are idempotent: an existing pending revision approval is returned as-is.
+   */
+  async proposePromptRevision(input: {
+    activationId: string;
+    statement: string;
+    editedBy: string;
+    targetHost?: PromptInjectionTargetHost;
+  }): Promise<ProposePromptRevisionResult> {
+    if (!stateDbExists(this.workspaceDir)) {
+      return { ok: false, error: 'not_found' };
+    }
+    const now = new Date().toISOString();
+    const { connection } = this.createWriteContext();
+    try {
+      const activationStore = new SqliteActivationStateStore(connection);
+      const artifactStore = new SqlitePIArtifactStore(connection);
+      const livePrompt = (await activationStore.listPromptActivations())
+        .find((activation) => activation.activationId === input.activationId && activation.deactivatedAt === null);
+      if (!livePrompt) {
+        return { ok: false, error: 'activation_not_live_prompt', activationId: input.activationId };
+      }
+      const oldArtifact = await artifactStore.getArtifactById(livePrompt.artifactId);
+      if (!oldArtifact) {
+        return { ok: false, error: 'artifact_unavailable', artifactId: livePrompt.artifactId };
+      }
+      const oldSnapshot: PIArtifactSnapshot = {
+        artifactId: oldArtifact.artifactId,
+        artifactKind: oldArtifact.artifactKind,
+        sourceTaskId: oldArtifact.sourceTaskId,
+        ...(oldArtifact.sourcePrincipleId !== null && oldArtifact.sourcePrincipleId !== undefined ? { sourcePrincipleId: oldArtifact.sourcePrincipleId } : {}),
+        ...(oldArtifact.sourceRuleId !== null && oldArtifact.sourceRuleId !== undefined ? { sourceRuleId: oldArtifact.sourceRuleId } : {}),
+        lineageArtifactIds: oldArtifact.lineageArtifactIds,
+        validationStatus: oldArtifact.validationStatus,
+        contentJson: oldArtifact.contentJson,
+        createdAt: oldArtifact.createdAt,
+        updatedAt: oldArtifact.updatedAt,
+      };
+
+      // Idempotency: a PENDING approval for another artifact version of this
+      // same principle already exists → return it (no second artifact, no
+      // second approval). Rejected/approved history does not block a new try.
+      const queueStore = new SqliteApprovalQueueStore(connection);
+      const pendingApprovals = (await new ApprovalQueue(queueStore).listAll({ status: 'pending', channel: 'prompt' }));
+      for (const pending of pendingApprovals) {
+        if (pending.artifactId === oldSnapshot.artifactId) continue;
+        const pendingArtifact = await artifactStore.getArtifactById(pending.artifactId);
+        if (!pendingArtifact) continue;
+        const pendingSnapshot: PIArtifactSnapshot = {
+          artifactId: pendingArtifact.artifactId,
+          artifactKind: pendingArtifact.artifactKind,
+          sourceTaskId: pendingArtifact.sourceTaskId,
+          ...(pendingArtifact.sourcePrincipleId !== null && pendingArtifact.sourcePrincipleId !== undefined ? { sourcePrincipleId: pendingArtifact.sourcePrincipleId } : {}),
+          ...(pendingArtifact.sourceRuleId !== null && pendingArtifact.sourceRuleId !== undefined ? { sourceRuleId: pendingArtifact.sourceRuleId } : {}),
+          lineageArtifactIds: pendingArtifact.lineageArtifactIds,
+          validationStatus: pendingArtifact.validationStatus,
+          contentJson: pendingArtifact.contentJson,
+          createdAt: pendingArtifact.createdAt,
+          updatedAt: pendingArtifact.updatedAt,
+        };
+        if (isArtifactRevisionOf(pendingSnapshot, oldSnapshot)) {
+          return {
+            ok: true,
+            alreadyPending: true,
+            newArtifactId: pending.artifactId,
+            approvalId: pending.approvalId,
+            supersededActivationId: livePrompt.activationId,
+            oldStatement: '',
+            newStatement: '',
+            title: '',
+            diff: { note: 'a pending revision approval already exists for this principle' },
+          };
+        }
+      }
+
+      // Build + validate the new version through the REAL content contract.
+      const build = await buildOwnerRevisionArtifact({
+        oldArtifact: oldSnapshot,
+        newStatement: input.statement,
+        editedBy: input.editedBy,
+        now,
+      });
+      if (!build.ok) {
+        return { ok: false, error: 'revision_validation_failed', reason: build.error, nextAction: build.nextAction };
+      }
+      await artifactStore.upsertArtifact({
+        artifactId: build.draft.artifactId,
+        artifactKind: 'principle',
+        sourceTaskId: build.draft.sourceTaskId,
+        ...(build.draft.sourcePrincipleId !== undefined ? { sourcePrincipleId: build.draft.sourcePrincipleId } : {}),
+        sourceRuleId: undefined,
+        lineageArtifactIds: build.draft.lineageArtifactIds,
+        validationStatus: 'pending',
+        contentJson: build.draft.contentJson,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const validated = await artifactStore.updateValidationStatus(build.draft.artifactId, 'validated');
+      if (!validated) {
+        return { ok: false, error: 'revision_validation_failed', reason: 'updateValidationStatus returned false', nextAction: 'check pi_artifacts store integrity' };
+      }
+
+      // Enqueue the NORMAL approval through the dispatcher (identity gate +
+      // writer canActivate — same authority as every other prompt approval).
+      const dispatcher = new ActivationDispatcher(
+        {
+          getArtifactById: async (id: string): Promise<PIArtifactSnapshot | null> => {
+            const rec = await artifactStore.getArtifactById(id);
+            if (!rec) return null;
+            return {
+              artifactId: rec.artifactId,
+              artifactKind: rec.artifactKind,
+              sourceTaskId: rec.sourceTaskId,
+              ...(rec.sourcePrincipleId !== null && rec.sourcePrincipleId !== undefined ? { sourcePrincipleId: rec.sourcePrincipleId } : {}),
+              ...(rec.sourceRuleId !== null && rec.sourceRuleId !== undefined ? { sourceRuleId: rec.sourceRuleId } : {}),
+              lineageArtifactIds: rec.lineageArtifactIds,
+              validationStatus: rec.validationStatus,
+              contentJson: rec.contentJson,
+              createdAt: rec.createdAt,
+              updatedAt: rec.updatedAt,
+            };
+          },
+        },
+        activationStore,
+        {
+          writers: [new PromptWriter()],
+          approvalQueueStore: queueStore,
+          ledgerIdentity: {
+            ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${this.workspaceDir}/.state` }),
+            getArtifactById: async (id: string) => {
+              const rec = await artifactStore.getArtifactById(id);
+              return rec
+                ? {
+                  artifactId: rec.artifactId,
+                  artifactKind: rec.artifactKind,
+                  sourceTaskId: rec.sourceTaskId,
+                  ...(rec.sourcePrincipleId !== null && rec.sourcePrincipleId !== undefined ? { sourcePrincipleId: rec.sourcePrincipleId } : {}),
+                  ...(rec.sourceRuleId !== null && rec.sourceRuleId !== undefined ? { sourceRuleId: rec.sourceRuleId } : {}),
+                  lineageArtifactIds: rec.lineageArtifactIds,
+                  validationStatus: rec.validationStatus,
+                  contentJson: rec.contentJson,
+                  createdAt: rec.createdAt,
+                  updatedAt: rec.updatedAt,
+                }
+                : null;
+            },
+          },
+        },
+      );
+      const enqueued = await dispatcher.dispatch({
+        artifactId: build.draft.artifactId,
+        channel: 'prompt',
+        rolloutDecision: 'require_approval',
+        actor: { kind: 'human', userId: input.editedBy },
+        now,
+        confirm: true,
+      });
+      if (enqueued.decision !== 'queued_for_approval') {
+        // rc-9: the artifact stays (pending approval never happened); report why.
+        const reason = 'reason' in enqueued ? enqueued.reason : enqueued.decision;
+        return { ok: false, error: 'revision_enqueue_failed', reason: String(reason), nextAction: 'check the ledger membership of this principle, then retry' };
+      }
+
+      // Route-aware capacity prediction for the NEW statement (review aid).
+      let deliverability: Awaited<ReturnType<typeof checkPromptArtifactDeliverabilityById>> | undefined;
+      try {
+        deliverability = await checkPromptArtifactDeliverabilityById({
+          workspaceDir: this.workspaceDir,
+          artifactId: build.draft.artifactId,
+          ...(input.targetHost !== undefined ? { targetHost: input.targetHost } : {}),
+        });
+      } catch {
+        deliverability = undefined;
+      }
+
+      return {
+        ok: true,
+        alreadyPending: false,
+        newArtifactId: build.draft.artifactId,
+        approvalId: enqueued.approvalId,
+        supersededActivationId: livePrompt.activationId,
+        oldStatement: build.oldStatement,
+        newStatement: input.statement.trim(),
+        title: build.title,
+        diff: {
+          intentContract: build.intentContract,
+        },
+        ...(deliverability !== undefined ? { deliverability } : {}),
+      };
     } finally {
       try { connection.close(); } catch { /* best-effort */ }
     }

@@ -1,6 +1,7 @@
 import type { InternalizationChannel } from '../internalization/peer-runner-contracts.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type {
+  ActivationActor,
   ActivationArtifactReadModel,
   ActivationDecision,
   ActivationStateReadModel,
@@ -161,6 +162,11 @@ export interface DispatcherConfig {
   ledgerIdentity?: LedgerIdentityLookupDeps;
 }
 
+/** R-B3: owner identity recorded on supersede decision rows (system actors are named, never blank). */
+function decidedByOf(actor: ActivationActor): string {
+  return actor.kind === 'human' ? actor.userId : `system:${'source' in actor ? actor.source : actor.kind}`;
+}
+
 export class ActivationDispatcher {
   private readonly writers: Map<InternalizationChannel, ChannelWriter>;
   private readonly approvalQueueStore?: ApprovalQueueStore;
@@ -227,7 +233,55 @@ export class ActivationDispatcher {
     const idempotencyKey = input.idempotencyKey ?? makeIdempotencyKey(input.artifactId, input.channel);
 
     const existingResult = await this.checkIdempotency(idempotencyKey, input.artifactId);
-    if (existingResult.decision) return existingResult.decision;
+    if (existingResult.decision) {
+      // PD_PROMPT_CAPACITY_V1 R-B3 recovery: the new artifact is already live
+      // (e.g. it was activated earlier through a non-replacement path) but the
+      // supersede has not completed. Finish it atomically instead of returning
+      // a half-replaced state as plain already_activated.
+      if (existingResult.decision.decision === 'already_activated'
+        && input.supersedeActivationId !== undefined
+        && input.channel === 'prompt'
+        && typeof this.stateReadModel.replacePromptActivation === 'function') {
+        const recoveryArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId);
+        if (recoveryArtifactId === null) {
+          return {
+            decision: 'refused',
+            reason: `prompt_replacement_target_unreadable: cannot resolve artifact of activation ${input.supersedeActivationId}`,
+            nextAction: 'check activations/pi_artifacts consistency for the superseded version, then retry',
+            channel: input.channel,
+          };
+        }
+        try {
+          const outcome = await this.stateReadModel.replacePromptActivation({
+            newRecord: {
+              activationId: existingResult.decision.activationId,
+              idempotencyKey,
+              artifactId: input.artifactId,
+              channel: input.channel,
+              action: existingResult.decision.action,
+              targetRef: existingResult.decision.targetRef,
+              activatedAt: input.now,
+              deactivatedAt: null,
+            },
+            supersededActivationId: input.supersedeActivationId,
+            supersededArtifactId: recoveryArtifactId,
+            decidedBy: input.supersedeDecidedBy ?? decidedByOf(input.actor),
+            decidedAt: input.now,
+            reasonCode: 'prompt_revision_replacement',
+            note: `Superseded by ${existingResult.decision.activationId} (artifact ${input.artifactId}).`,
+          });
+          return { ...existingResult.decision, supersededActivationId: outcome.supersededActivationId };
+        } catch {
+          return {
+            decision: 'refused',
+            reason: `prompt_replacement_recovery_failed: new activation ${existingResult.decision.activationId} is live but superseding ${input.supersedeActivationId} failed`,
+            nextAction: 'inspect activation_decisions/activations consistency, then re-run the approval',
+            channel: input.channel,
+          };
+        }
+      }
+      return existingResult.decision;
+    }
 
     if (input.rolloutDecision === 'reject') {
       return { decision: 'refused', reason: 'rollout_rejected', channel: input.channel };
@@ -443,6 +497,49 @@ export class ActivationDispatcher {
     }
 
     try {
+      // PD_PROMPT_CAPACITY_V1 R-B3: prompt-channel version replacement — one
+      // transaction commits the new activation, the immutable supersede
+      // decision, and the old version's deactivation (no stop-old-start-new
+      // window). Falls through to plain recordActivation when no supersede
+      // target was detected or the store lacks the seam.
+      if (input.channel === 'prompt'
+        && input.supersedeActivationId !== undefined
+        && typeof this.stateReadModel.replacePromptActivation === 'function') {
+        const supersededArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId);
+        if (supersededArtifactId === null) {
+          return {
+            decision: 'refused',
+            reason: `prompt_replacement_target_unreadable: cannot resolve artifact of activation ${input.supersedeActivationId}`,
+            nextAction: 'check activations/pi_artifacts consistency for the superseded version, then retry',
+            channel: input.channel,
+          };
+        }
+        const outcome = await this.stateReadModel.replacePromptActivation({
+          newRecord: {
+            activationId: writerResult.activationId,
+            idempotencyKey,
+            artifactId: input.artifactId,
+            channel: input.channel,
+            action: writerResult.action,
+            targetRef: writerResult.targetRef,
+            activatedAt: input.now,
+            deactivatedAt: null,
+          },
+          supersededActivationId: input.supersedeActivationId,
+          supersededArtifactId,
+          decidedBy: input.supersedeDecidedBy ?? decidedByOf(input.actor),
+          decidedAt: input.now,
+          reasonCode: 'prompt_revision_replacement',
+          note: `Superseded by ${writerResult.activationId} (artifact ${input.artifactId}).`,
+        });
+        return {
+          decision: 'activated',
+          activationId: writerResult.activationId,
+          action: writerResult.action,
+          targetRef: writerResult.targetRef,
+          supersededActivationId: outcome.supersededActivationId,
+        };
+      }
       await this.stateReadModel.recordActivation({
         activationId: writerResult.activationId,
         idempotencyKey,
@@ -465,6 +562,16 @@ export class ActivationDispatcher {
     };
   }
 
+  /** R-B3: resolve the artifact of a live prompt activation (supersede target). */
+  private async readSupersededArtifactId(activationId: string): Promise<string | null> {
+    try {
+      const activations = await this.stateReadModel.listPromptActivations();
+      const match = activations.find((activation) => activation.activationId === activationId);
+      return match?.artifactId ?? null;
+    } catch {
+      return null;
+    }
+  }
   private async readArtifact(artifactId: string): Promise<{ artifact: PIArtifactSnapshot; decision: null } | { artifact: null; decision: ActivationDecision }> {
     try {
       const result = await this.artifactReadModel.getArtifactById(artifactId);

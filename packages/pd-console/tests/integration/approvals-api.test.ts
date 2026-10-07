@@ -12,6 +12,7 @@ import {
   ApprovalQueue,
   PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
+import { saveHostToolDeclaration } from '@principles/host-runtime';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { sendJson, sendNotFound } from '../../src/server/utils/response.js';
 
@@ -191,6 +192,17 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-approval-test-'));
     const stateDir = path.join(tmpDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
+
+    // PD_PROMPT_CAPACITY_V1 R-B2: prompt-channel approvals pass the
+    // route-aware capacity precheck; declare the fixture workspace's host
+    // (OpenClaw, legacy list route) exactly like a real host would.
+    const declared = saveHostToolDeclaration(tmpDir, {
+      version: 1,
+      hostKind: 'openclaw',
+      mappings: [{ rawToolName: 'bash', canonicalKind: 'execute' }],
+      declaredAt: new Date().toISOString(),
+    });
+    if (!declared.ok) throw new Error(`host declaration save failed: ${declared.reason}`);
 
     sqliteConn = new SqliteConnection({ workspaceDir: tmpDir });
     const store = new SqliteApprovalQueueStore(sqliteConn);
@@ -462,7 +474,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
   // ── 7. Proven channel record can be approved and rejected ─────────────────
 
   describe('Proven channel approve/reject flow', () => {
-    it('approve returns activation_failed when artifact is missing, and rolls back approval to pending', async () => {
+    it('approve refuses BEFORE any write when the artifact is missing (capacity gate), keeping the approval pending', async () => {
       const approvalId = seedApproval('prompt', 'pending', {
         summary: 'Approvable prompt record (no artifact)',
       });
@@ -472,11 +484,15 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test approval' }),
       });
-      // Artifact does not exist → dispatch fails → activation_failed
-      expect(status).toBe(500);
-      const rec = requireRecord(body, 'activation_failed response');
-      expect(getStringField(rec, 'error')).toBe('activation_failed');
-      expect(getStringField(rec, 'message')).toContain('rolled back to pending');
+      // PD_PROMPT_CAPACITY_V1 R-B2: a prompt approval whose artifact is
+      // unreadable is refused by the pre-write capacity gate BEFORE any
+      // governance write — stronger than the old write-then-rollback. (The
+      // activation_failed 500 shape is still exercised by code_tool_hook /
+      // ledger-membership scenarios.)
+      expect(status).toBe(422);
+      const rec = requireRecord(body, 'capacity refusal response');
+      expect(getStringField(rec, 'error')).toBe('prompt_capacity_refused');
+      expect(getStringField(rec, 'message')).toMatch(/refused before any write|remains pending/);
       expect(getStringField(rec, 'nextAction')).toContain('artifact');
     });
 
@@ -485,13 +501,13 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Re-approvable after rollback',
       });
 
-      // First approve: will fail because artifact is missing
+      // First approve: refused by the capacity gate because artifact is missing
       const { status: firstStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'First attempt' }),
       });
-      expect(firstStatus).toBe(500);
+      expect(firstStatus).toBe(422);
 
       // Verify approval is back to pending (not stuck in approved)
       const { status: detailStatus, body: detailBody } = await fetchJson(`/api/v1/approvals/${approvalId}`);
@@ -506,7 +522,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Retry attempt' }),
       });
-      expect(retryStatus).toBe(500); // still fails (no artifact) but NOT 409 already_decided
+      expect(retryStatus).toBe(422); // still refused (no artifact) but NOT 409 already_decided
     });
 
     it('can reject a pending proven-channel record', async () => {
@@ -1495,6 +1511,15 @@ describe('Approvals API — reopen a terminal approval (EP002-R4)', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-approval-reopen-'));
     const stateDir = path.join(tmpDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
+    // PD_PROMPT_CAPACITY_V1 R-B2: prompt approvals pass the route-aware
+    // precheck — declare this fixture workspace's host like a real host would.
+    const declared = saveHostToolDeclaration(tmpDir, {
+      version: 1,
+      hostKind: 'openclaw',
+      mappings: [{ rawToolName: 'bash', canonicalKind: 'execute' }],
+      declaredAt: new Date().toISOString(),
+    });
+    if (!declared.ok) throw new Error(`host declaration save failed: ${declared.reason}`);
     sqliteConn = new SqliteConnection({ workspaceDir: tmpDir });
 
     seedArtifact('reopen-art-approved');

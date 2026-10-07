@@ -15,8 +15,9 @@ import {
   buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
-import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
+import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, type PromptInjectionTargetHost } from '@principles/host-runtime';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
+import type { PromptActivationInjectionStatusWire, PromptInjectionRouteSummaryWire } from '../../shared/prompt-injection-contract.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -82,6 +83,14 @@ export interface ActivationRecord {
   enforcement?: 'eligible' | 'safety_isolated';
   legacyDecisionUnknown?: boolean;
   ownerReviewDueAt?: string;
+  /**
+   * PD_PROMPT_CAPACITY_V1 R-A3: current injection status for LIVE prompt
+   * activations — positive single-item evidence per row (oversized carries
+   * its own reason, window_excluded means it fits but the window is full).
+   * Absent for non-prompt channels, deactivated rows, and when the status
+   * reader itself degrades (see ActivationsResponse.promptInjectionRoute).
+   */
+  promptInjection?: PromptActivationInjectionStatusWire;
 }
 
 export interface ActivationsResponse {
@@ -92,6 +101,8 @@ export interface ActivationsResponse {
   reason?: string;
   /** Present when status is 'degraded' — next operator action. */
   nextAction?: string;
+  /** R-A3/AC-01: route context for the per-activation injection statuses. */
+  promptInjectionRoute?: PromptInjectionRouteSummaryWire;
 }
 
 export interface RuleCodeOwnerReview {
@@ -255,7 +266,7 @@ export class ActivationsConsoleModel {
     this.governanceAuditWriter = governanceAuditWriter;
   }
 
-  async getActivations(): Promise<ActivationsResponse> {
+  async getActivations(targetHost?: PromptInjectionTargetHost): Promise<ActivationsResponse> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
       return { activations: [], status: 'degraded', reason: 'state.db not found — workspace may not be initialized', nextAction: 'Run pd runtime diagnostics to check workspace state' };
@@ -408,6 +419,55 @@ export class ActivationsConsoleModel {
         return enriched;
       });
 
+      // PD_PROMPT_CAPACITY_V1 R-A3: per-live-prompt-activation injection
+      // status with positive single-item evidence. Degradation is observable
+      // (route summary carries the reason) and never turns a row "healthy"
+      // by omission (rc-9 / AC-06).
+      let promptInjectionRoute: PromptInjectionRouteSummaryWire | undefined;
+      let statusByActivation: Map<string, PromptActivationInjectionStatusWire> | undefined;
+      try {
+        const report = await readPromptActivationInjectionStatuses({ workspaceDir: this.workspaceDir, targetHost });
+        promptInjectionRoute = {
+          status: report.route.status,
+          ...(report.route.hostKind !== undefined ? { hostKind: report.route.hostKind } : {}),
+          ...(report.route.route !== undefined ? { route: report.route.route } : {}),
+          flagEnabled: report.route.flagEnabled,
+          ...(report.route.unconfirmedReason !== undefined ? { unconfirmedReason: report.route.unconfirmedReason } : {}),
+          ...(report.route.nextAction !== undefined ? { nextAction: report.route.nextAction } : {}),
+          ...(report.globalReason !== undefined ? { globalReason: report.globalReason } : {}),
+        };
+        statusByActivation = new Map(report.statuses.map((entry): [string, PromptActivationInjectionStatusWire] => [
+          entry.activationId,
+          {
+            activationId: entry.activationId,
+            status: entry.status,
+            ...(entry.inCurrentWindow !== undefined ? { inCurrentWindow: entry.inCurrentWindow } : {}),
+            ...(entry.costChars !== undefined ? { costChars: entry.costChars } : {}),
+            ...(entry.budget !== undefined ? { budget: entry.budget } : {}),
+            ...(entry.budgetScope !== undefined ? { budgetScope: entry.budgetScope } : {}),
+            ...(entry.route !== undefined ? { route: entry.route } : {}),
+            ...(entry.reason !== undefined ? { reason: entry.reason } : {}),
+            ...(entry.perHostFits !== undefined
+              ? { perHostFits: entry.perHostFits.map((fit) => ({ hostKind: fit.hostKind, fits: fit.fits })) }
+              : {}),
+          },
+        ]));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        promptInjectionRoute = {
+          status: 'unconfirmed',
+          flagEnabled: false,
+          unconfirmedReason: `injection_status_reader_failed: ${message}`,
+          nextAction: 'check workspace .pd/state.db readability and the host declarations',
+        };
+      }
+      for (const fact of facts) {
+        if (fact.channel === 'prompt' && fact.status !== 'deactivated') {
+          const entry = statusByActivation?.get(fact.activationId);
+          if (entry !== undefined) fact.promptInjection = entry;
+        }
+      }
+
       // rc-9: surface dangling references instead of silently returning a degraded list.
       if (danglingArtifactIds.size > 0) {
         return {
@@ -415,12 +475,14 @@ export class ActivationsConsoleModel {
           status: 'degraded',
           reason: `${danglingArtifactIds.size} activation(s) reference non-existent artifact_id(s): ${Array.from(danglingArtifactIds).join(', ')}`,
           nextAction: 'Run pd runtime internalization integrity to check for orphaned activations',
+          promptInjectionRoute,
         };
       }
 
       return {
         activations: facts,
         status: 'ok',
+        promptInjectionRoute,
       };
     } finally {
       try { conn.close(); } catch { /* best-effort */ }
