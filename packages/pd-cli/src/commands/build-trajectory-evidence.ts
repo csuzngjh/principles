@@ -83,15 +83,14 @@ function readToolFailureEvidence(
       const toolName = typeof tc.tool_name === 'string' ? tc.tool_name : 'unknown';
       const errorType = typeof tc.error_type === 'string' ? tc.error_type : 'unknown';
       const exitCode = tc.exit_code != null ? String(tc.exit_code) : 'N/A';
-      // Enhanced: append resultPreview when available
+      // Enhanced: append resultPreview when available. PRI-941 Owner review:
+      // the preview enters UNSLICED — every truncation (redact-then-bound)
+      // is owned by sanitizeString on the COMPLETE composed note. Pre-slicing
+      // here could cut a credential across the sanitizer's token-pattern
+      // threshold and let the fragment escape redaction.
       const resultPreview = typeof tc.result_preview === 'string' ? tc.result_preview : null;
-      const previewSuffix = resultPreview ? ` | ${resultPreview.slice(0, 200)}` : '';
+      const previewSuffix = resultPreview ? ` | ${resultPreview}` : '';
       const note = `Tool ${toolName} failed: ${errorType} (exitCode: ${exitCode})${previewSuffix}`;
-      // PRI-941 review (Codex P2): sanitize the COMPLETE composed note BEFORE
-      // any truncation — pre-slicing could cut a token across the sanitizer's
-      // pattern threshold and let the fragment through unredacted.
-      // sanitizeString itself applies the output bound (with a ___TRUNCATED___
-      // marker) after redacting the full text.
       entries.push({
         sourceRef: `tool_call_failure:${String(tc.created_at ?? 'unknown')}`,
         note: sanitizeString(note, workspaceDir),

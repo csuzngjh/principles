@@ -89,3 +89,11 @@ revert 单提交即回退（codex 分支恢复诚实空证据降级）；无数�
 | CodeRabbit（Minor） | readFailed 应先于空判断区分 → `evidence_read_failed` | 属实——与三维评审轮 F2 为同一发现 | **已修复**（评审轮提交，与该建议 diff 一致） |
 | Codex（P1） | session 级失败证据与 pain 所绑 turn 无权威关联，可能"他处失败"撑起 evidence | 粒度观察属实，**修复建议不采纳**：session 级上下文是共享 acquisition contract（PRI-341）既有语义，OpenClaw 同构且本 PR 明确不改契约；turn 级关联需 tool_calls 加列 = schema 演进，超出已批边界；"绕过空证据门"即 Option A 设计目的；LIMIT 3+时间倒序已限幅 | 已在 PR 行内回复裁定理由 + 记 follow-up（tool_calls 演进出 turn 列后可收紧） |
 | Codex（P2） | note 先 slice(200) 后 sanitize，跨界 token 残段可逃过 redact | 属实——本 PR 的共享 reader 使**双宿主同时**暴露该缝隙 | **已修复**：`sanitizeString` 先 redact 完整 note 再自截断（附跨界 sk- token 用例，断言残段不逃逸） |
+
+## 8.1 Owner review 轮（review 5435830966，2026-10-07）
+
+Owner 判定"整体架构方向通过"，仅余一项安全边界细节：`resultPreview.slice(0, 200)` 仍是 sanitize 之前的**早期截断点**（上轮修复只移除了 note 级截断，preview 级预切还在——一个横跨 preview 第 200 字符的凭据会先被切成低于 token 模式阈值的残段）。
+
+**修复（Owner 建议方案 1）**：preview 进入 sanitizer 前**零切片**——组成完整 note，redact → truncate → 输出限长全部由 `sanitizeString` 统一负责（其内部先全量 redact 再自截 200 + `___TRUNCATED___` 标记）。写入侧 `result_preview` 本身有界（≤500），无 DoS 面。
+
+**测试强化**：跨界用例改为 token 真正横跨旧 slice(0,200) 边界（起始 ~字符 191），断言：token 字面量零残留、不匹配 token 模式、**`___REDACTED___` 存在**（redact 发生而非静默丢弃）、note 长度 ≤215（sanitizer 拥有截断权）。该用例在旧顺序下必然失败。

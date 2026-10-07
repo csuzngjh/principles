@@ -537,19 +537,24 @@ describe('acquireCodexToolFailureEvidenceFromDb (PRI-941 Option A)', () => {
     }
   });
 
-  it('review (Codex P2): a token crossing the 200-char note boundary is redacted BEFORE truncation', () => {
+  it('review (Codex P2 / Owner): a token straddling the legacy preview-slice(200) boundary is redacted BEFORE truncation', () => {
     createStateDir();
     const db = createTrajectoryDb();
     try {
-      // Pad the preview so the sk- token starts just before the legacy
-      // 200-char slice boundary — the old slice-then-sanitize order let the
-      // truncated fragment escape redaction.
-      const padding = 'x'.repeat(190);
+      // The token STARTS at preview char ~191 and runs past char 200 — under
+      // the old order (preview.slice(0,200) BEFORE sanitize) it was cut to a
+      // 9-char fragment that no longer matches the sk-{20,} token pattern and
+      // escaped redaction. The unsliced composition lets the sanitizer see
+      // and redact the FULL token, then apply its own output bound.
+      const padding = 'x'.repeat(160);
+      const prefix = 'curl -H "Authorization: Bearer ';
       const secretToken = 'sk-TEST1234567890abcdefGHIJKLMNOPQRSTUVWXYZ123456';
       insertToolCall(
         db, 'sess-tok', 'bash', 'failure', 'EACCES', 1, '2026-10-06T00:00:06Z',
-        `${padding}curl -H "Authorization: Bearer ${secretToken}" https://api.example.com`,
+        `${padding}${prefix}${secretToken} https://api.example.com`,
       );
+      expect((`${padding}${prefix}`).length).toBeLessThan(200);
+      expect((`${padding}${prefix}${secretToken}`).length).toBeGreaterThan(200);
 
       const result = acquireCodexToolFailureEvidenceFromDb(stateDir, 'sess-tok');
       expect(result.status).toBe('available');
@@ -557,6 +562,10 @@ describe('acquireCodexToolFailureEvidenceFromDb (PRI-941 Option A)', () => {
       const note = result.entries[0]!.note;
       expect(note).not.toContain(secretToken);
       expect(note).not.toMatch(/sk-[A-Za-z0-9_-]{20,}/);
+      // The token was REDACTED (not silently dropped) and the sanitizer owns
+      // the output bound.
+      expect(note).toContain('___REDACTED___');
+      expect(note.length).toBeLessThanOrEqual(215); // 200 + ___TRUNCATED___ marker
     } finally {
       db.close();
     }
