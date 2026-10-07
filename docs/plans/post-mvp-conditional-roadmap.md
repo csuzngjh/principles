@@ -1,5 +1,7 @@
 # Post-MVP Conditional Roadmap
 
+> **2026-10-07 alignment (pending review)**: [ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md) replaces the historical attribution design upon acceptance, without activating its scheduler/automatic governance. [Phase 1 SPEC §13](../superpowers/specs/2026-08-principle-receipt-design.md#13-pd-v2-phase-1--evidence-foundation-spec) is bounded observation, not scores, causal evaluation or delivery tier scheduling. [ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md) is the future asset/evolution direction; migration and later learning require separate authorization. Existing deferred items do not become active merely because these documents are linked.
+
 > **Status**: Active
 > **Date**: 2026-05-24
 > **Owner**: ADR-0014 (MVP-First Strategy)

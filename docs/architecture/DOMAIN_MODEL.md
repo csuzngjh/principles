@@ -1,5 +1,19 @@
 # PD 核心领域模型与通用语言（Ubiquitous Language）
 
+## PD v2 阅读分层（2026-10-07，待既有 ontology 评审）
+
+本增补不把目标架构改写为当前实现。决定见 [ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md)、[ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md)，状态以 ADR 为准；本节是阅读投影。
+
+| 层次 | 模型与状态 |
+| --- | --- |
+| Current Implementation | 既有 workspace ledger、批准、Activation、receipt、trajectory、task completion 原义及存储权威保留；具体事实以代码为准 |
+| Phase 1 Added Concepts | Delivery Attempt/Result、来源区分的 Application、Episode、Effect、Outcome、内容/激活发生引用；待实施，不是效果评分或自动治理 |
+| Future Target Model | Owner → Principle → immutable Revision；Binding 授权确切版本；Activation 固定配置；Evaluation 建议，Owner 决定；未迁移 |
+
+Effect 是观察，Evaluation 是解释，Owner Decision 是治理。自述不等于 Runtime 执行。Candidate 仍是提案，不自动成为正式 Revision。目标生命周期分别为 Principle 在用/退役、Revision 内容不可变而授权可撤销、Binding 配置有历史、Activation 启用/暂停/结束。新版本不自动替换旧 Activation。
+
+本节不改写旧字段，也不证明后文当前/历史模型已经逐项重新验收。新增语义遵守 LOCKED-ONTOLOGY 原有评审要求。实施规格见 [回执 SPEC §13](../superpowers/specs/2026-08-principle-receipt-design.md#13-pd-v2-phase-1--evidence-foundation-spec)。
+
 > **状态**: LOCKED-ONTOLOGY（强制执行）
 > **最后更新**: 2026-05-23（与 ADR-0005 / ADR-0006 / ADR-0007 / ADR-0012 对齐）
 

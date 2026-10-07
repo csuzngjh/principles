@@ -1,5 +1,7 @@
 # ADR-0013: Attribution Pipeline and Decision Observability
 
+> **2026-10-07 integration notice (Proposed)**: [ADR-0027](0027-principle-intervention-evidence-and-delivery-contract.md) replaces the proposed attribution architecture and its automatic archive/probation consequences upon ADR acceptance. The ADR-0014 deferral below remains historical authority for why this proposal was not implemented. This notice does not reactivate the original scheduler, scoring, automatic governance or restart conditions. Phase 1 is a bounded evidence contract, not implementation of this historical pipeline.
+
 > **Status**: ⚠️ **Superseded by ADR-0014 — Deferred**（2026-05-24）
 > **Date**: 2026-05-24（initial Proposed → Deferred 同日）
 > **Reason for Defer**: PD 进入 MVP-First 阶段（ADR-0014）。Attribution Pipeline 的实施依赖真实种子客户的使用数据；在零外部用户的情况下构建会变成基于推演的 mock。

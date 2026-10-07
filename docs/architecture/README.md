@@ -3,6 +3,8 @@
 > **最后更新**: 2026-05-15
 > **维护**: 由架构维护组负责
 
+> **2026-10-07 PD v2 阅读路径**：[ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md) → [ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md) → [Phase 1 SPEC §13](../superpowers/specs/2026-08-principle-receipt-design.md#13-pd-v2-phase-1--evidence-foundation-spec) → 工程实现与真实宿主验收。公开仓库 `docs/adr/` 是本轮正式 ADR 唯一入口；私库历史材料保持只读，不维护第二份。ADR 为 Proposed，SPEC 为 Draft，目标不等于已实现。
+
 本目录包含 Principles Disciple（PD）项目的**全部架构文档**。它是项目设计意图、决策、契约的权威来源。
 
 ---
@@ -147,11 +149,19 @@
 | ADR-0011 | Accepted | Three-Tier Task Model and MissionScheduler |
 | [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) | Accepted | Runtime V2 独立调度与 legacy execution 退役；取代 IdleTrigger 保留决策 |
 | [ADR-0026](../adr/0026-cnb-token-injection-boundary.md) | Proposed | CNB_TOKEN 注入边界不可由 imports 配置消除（P0-01 归因修正）|
+| [ADR-0013](../adr/0013-attribution-pipeline-and-decision-observability.md) | Superseded by ADR-0014 / Deferred | 原 attribution 提案；ADR-0027 接受后替代旧设计路径 |
+| [ADR-0014](../adr/0014-mvp-first-strategy-and-product-pivot.md) | Accepted；新增修订 Proposed | MVP-first 与有限 Evidence Foundation 范围 |
+| [ADR-0017](../adr/0017-principle-ledger-single-implementation.md) | Accepted | 单一 ledger 实现保留 |
+| [ADR-0020](../adr/0020-codex-cli-host-adapter.md) | Accepted；新增引用 Proposed | 双宿主边界与能力差异 |
+| [ADR-0022](../adr/0022-owner-identity-registration.md) | Accepted | 复用 Owner 身份解析，不重建身份体系 |
+| [ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md) | Proposed | Intervention Evidence 与 Delivery Contract |
+| [ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md) | Proposed | Owner Principle Assets 与版本演进 |
 
-> 注：ADR-0013 ~ ADR-0025 未在本表登记（表格最后更新于 ADR-0012）。
-> 补齐属独立的文档治理动作，本次仅登记本决策相关的 ADR-0026。
+> 本次登记 PD v2 所需相关 ADR，其他历史遗漏未在本次批量修复。状态与 Amendment 以对应 ADR 原文为准。
 
 ### 架构治理（Governance）
+
+> 导航核验：下表 `architecture-governance/` 链接目前没有可读取目标，保留为历史引用，不作为已读取的治理依据。本次不重建目录；现行要求读取本页「文档贡献规范」、架构总览 §8 和 AGENTS.md。
 
 | 文档 | 描述 |
 |------|------|

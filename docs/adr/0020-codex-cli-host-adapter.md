@@ -1,5 +1,7 @@
 # ADR-0020: Codex CLI Host Adapter and Multi-Platform Host Abstraction Layer
 
+> **2026-10-07 evidence reference (Proposed)**: [ADR-0027](0027-principle-intervention-evidence-and-delivery-contract.md) defines shared evidence and delivery semantics. Host-specific proof capability remains distinct: a durable Codex receipt is not automatically confirmed context receipt, verified application or effectiveness. The contract preserves the shared runtime owner, host codecs/trust, conversation consent and existing kill switches in §§10–11; it adds no host, autonomous governance or outbound task execution.
+
 > **Status**: Accepted
 > **Date**: 2026-08-11
 > **Decider**: Owner

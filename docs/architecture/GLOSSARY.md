@@ -1,5 +1,22 @@
 # PD 标准术语词典（Glossary）
 
+## PD v2 术语增补（2026-10-07，待既有 ontology 评审）
+
+决定见 [ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md)、[ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md)。阶段见 [DOMAIN_MODEL](DOMAIN_MODEL.md)，术语登记不证明已实现。
+
+| 层次 | 术语 | 含义 |
+| --- | --- | --- |
+| Current Implementation | Principle identity / task_outcomes | 既有账本身份 / 任务完成观察，原义保留 |
+| Phase 1 Added Concepts | Delivery Evidence | 投递尝试、结果、确认程度；不是应用证明 |
+| Phase 1 Added Concepts | Application Evidence | 自述与 Runtime 实际执行分开 |
+| Phase 1 Added Concepts | Behavior Episode | 有来源、有边界的行为片段，proposal 不是事实 |
+| Phase 1 Added Concepts | Effect Evidence | 关联版本及 Episode 的观察，不是有效性结论 |
+| Phase 1 Added Concepts | Outcome Observation | 后续结果或 Owner 反馈，不是自动价值判断 |
+| Future Target Model | Revision / Binding | 不可变正式版本 / 显式授权；观察引用不等于新正式版本 |
+| Future Target Model | Evaluation / Owner Asset Layer | 可复核解释 / Owner 资产权威；本期不建设 |
+
+实体身份、内容身份与修复过程 RevisionIdentity 分开。Unknown 是证据不足；Failed 是运行失败；Invalidated 是证据作废。没有“无记录即原则无效”的推断。
+
 > **状态**: LOCKED-ONTOLOGY（强制执行）
 > **最后更新**: 2026-05-15
 > **定位**: PD 项目的**唯一权威术语表**。所有代码、Schema、ADR、设计文档、Linear Issue 必须使用本表中的标准词。

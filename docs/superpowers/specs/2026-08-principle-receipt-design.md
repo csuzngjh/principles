@@ -1,5 +1,7 @@
 # 原则回执 (Principle Receipt) — 设计文档
 
+> **2026-10-07 对齐状态**：Draft — PD v2 Phase 1 SPEC，待既有评审流程通过。架构依据：[ADR-0027](../../adr/0027-principle-intervention-evidence-and-delivery-contract.md)、[ADR-0028](../../adr/0028-owner-principle-assets-and-evolution.md)。实施入口是本文 §13；原 §1–12 及其 P0/P1/P2 是旧回执方案的历史阶段编号，不等同于 PD v2 Phase 1。旧字段和既有 BDD 语义保持原样；新增审计按 §13 区分来源与证明强度。
+
 - **日期**: 2026-08-15
 - **状态**: Draft — 待 Owner 审阅
 - **来源**: brainstorm 会话（方向已定：现场回执 + 沉淀闭环组合）
@@ -239,3 +241,142 @@ CREATE INDEX IF NOT EXISTS idx_pa_principle_time ON principle_applications(princ
 | P2 | Companion 通知 + Codex 补齐 | 另行细化 |
 
 **范围声明**：P0+P1 仅 OpenClaw 路径（Owner 已拍板）。
+
+## 13. PD v2 Phase 1 — Evidence Foundation SPEC
+
+### 13.1 Goal / Scope / Non-goals
+
+目标：证明一次真实 Principle Intervention 发生到了哪一步，以及观察到了什么行为和结果。这里只记录事实，不判断原则是否有效。
+
+Included：稳定来源身份；Delivery Attempt/Result；来源区分的 Application；最小 Behavior Episode、Effect Evidence、Outcome Observation；OpenClaw/Codex 能力披露；四类审计查询；幂等摄取、更正和来源保留。
+
+Excluded：Owner Asset Migration、自动创建正式 Revision、扩大 Binding、自动停用原则、effectiveness score、成功率、自动排序、自动因果判断、完整 Normal/Priority/Critical、复杂预算/调度、merge/split、跨机器同步、云服务、模型训练、通用插件平台和任意历史对话扫描。
+
+“不可伪造”限定为模型不能冒充事实来源、不能猜测补链；本期不提供抵抗本地文件写权限者的防篡改系统。全链证明观察基础设施，不证明模型已经内化原则。
+
+### 13.2 Current Implementation / Phase 1 Added Concepts / Future Target
+
+| 层次 | 内容与边界 |
+| --- | --- |
+| Current Implementation | 既有 workspace ledger、Principle UUID、批准、Activation、receipt、trajectory 和 task_outcomes，权威及含义保持原样 |
+| Phase 1 Added Concepts | 来源标识与内容/激活快照引用、规范化证据、Episode、Effect、Outcome、能力状态和只读审计；以下均为待实施要求 |
+| Future Target Model | ADR-0028 的 Owner Asset Layer、不可变正式 Revision、显式 Binding；没有在本期迁移或实现 |
+
+已有来源足够时先接通，不能为了模型外观重建 Principle、批准或激活。源码入口不自动证明发布版能力；实施前按实际适配版本核对契约。
+
+### 13.3 Domain Model / Identity / Relationship
+
+证据主键不可变。通用记录包含 evidence identity、稳定 evidence scope、source_ref/source_event_key、recorded_at、来源可提供的 occurred_at、runtime/adapter version、原生 session/run/tool 引用及已知 Principle/Revision/Activation 引用。目录路径、标题、正文相似度和时间接近都不能作为身份或可靠关联依据。
+
+已有 Principle UUID 不变。已有正式内容版本可复用；没有正式版本时记录证据侧的既有制品/批准来源、固定内容摘要及解析状态。该观察快照不是新 Principle Revision，也不能补授历史批准。修复过程 RevisionIdentity 不当作内容版本。实际载荷摘要与批准内容摘要分别记录；不能确认一致时返回 revision_reference_unresolved。
+
+Activation 引用必须保存当时的来源记录及发生快照，不仅是可重复使用的 activation_id。源行后续更新不得改变过去证据。
+
+同来源键与同内容幂等；同来源键、不同内容报告冲突。新来源事件键首次生成后持久化；历史来源没有可靠事件键时只能使用稳定源记录定位。无可靠来源的记录拒绝规范入账并给出原因。乱序记录可以 pending association，后续仅通过确切引用接通。
+
+| Entity | 新增/复用 | 最小内容与关系 |
+| --- | --- | --- |
+| Principle / content reference | 复用身份，新增证据引用 | 既有 UUID、确切内容、批准来源与解析状态 |
+| Activation reference | 复用并保存发生快照 | 当前权威记录引用、原激活时间、内容和配置来源 |
+| Delivery | 规范化既有来源 | 一个版本、一次激活发生、一个 Runtime 目标；Attempt 与 Result |
+| Application | 规范化既有来源 | agent_claimed 或 runtime_verified，来源、具体动作及已知 Delivery/Episode |
+| Behavior Episode | 新增 | 一次边界明确的真实行为，context、actor、runtime、time_window、source_refs、related_revision_refs |
+| Effect Evidence | 新增 | 一个 Episode、相关版本、来源、观察内容、时间和证据状态 |
+| Outcome Observation | 新增 | 来源、时间、实际结果/Owner 原始反馈、Episode 与可选 Effect/Task 引用 |
+
+Episode 从真实工具请求及结果、明确 assistant 输出、或 Owner 的边界明确观察产生。模型/Evaluator 的 episode proposal 保持提案身份；回到真实来源才能入事实账本。本期不自动将整场对话切成模型叙事。
+
+关联链不是强制时序：Activation → Delivery → Application → Episode → Effect → Outcome。Application 可缺失；必须如实说明。Effect 必须有 Episode 和版本引用及其解析状态；结果可以尚未出现。Golden Journey 的完整链必须没有未解析版本/激活关系。
+
+### 13.4 Lifecycle / Authority
+
+| 记录 | 状态或证明方式 | 谁能提供事实 |
+| --- | --- | --- |
+| Delivery | attempted / delivered / failed / unsupported | 可信宿主入口 |
+| Application | agent_claimed / runtime_verified | 真实 Agent 输出 / Runtime 实际执行来源 |
+| Episode | open / closed / interrupted | 授权行为入口，或标为 Owner report 的明确观察 |
+| Effect | observed / disputed / invalidated | 可信观察入口、Owner；模型仅建议疑点 |
+| Outcome | 已记录，可追加更正 | 授权结果入口或 Owner 明确反馈 |
+
+统一入口校验来源、字段与关系后写入。来源校验通过不等于原则有效；不引入混淆这一点的 Verified 效果状态。争议/作废必须带来源和理由，原事实保留。Agent 自述从不升级为 Runtime 执行事实；Owner 报告首先证明 Owner 给出了该反馈。
+
+规则匹配、shadow evaluation 和 auto_correct_proposed 不等于实际应用。runtime_verified 必须证明具体阻止、实际修正或受支持的执行动作。旧 principle_applications.level=effect 按 kind 与来源解释，不整体升级为新 Effect 或 verified Application。
+
+### 13.5 Basic Delivery Contract
+
+每次 Attempt 针对一个确切内容引用、一个激活发生和一个 Runtime 目标。多原则批次共享批次来源，但各自保留关联。Result 追加，不覆盖 Attempt；同来源重复补录不增加独立样本。
+
+确认程度区分 prepared、submitted、host_accepted、context_present、runtime_loaded。prepared/submitted 不能升级为 delivered；无后续确认时显示“已尝试，送达未知”。failed 必须有明确失败来源；unsupported 表示确实不支持该目标边界，不执行投递。
+
+delivery_target 必须区分 Agent context 与 Runtime enforcement。runtime_loaded 可证明确切规则进入执行 Runtime，不能证明 Agent 阅读/理解。自述不是接收确认来源。
+
+Activation 开启不自动产生 delivered。现有预算选择不变；预算排除等已知原因记录为非尝试原因，不伪造成 Runtime 失败。本期不实现三级调度、重要原则准入或新的阻止政策。
+
+### 13.6 Runtime Integration / Capability Contract
+
+能力逐项为 Supported / Unsupported / Unknown，附适配版本、事件/通道、最高证明程度和验收引用。启用及健康状态单独记录。Supported 需要真实证明；未验证为 Unknown，确认不能提供才是 Unsupported。Application 能力至少区分自述采集和 Runtime 执行观察。
+
+| 能力 | OpenClaw 接入 | Codex 接入 |
+| --- | --- | --- |
+| Delivery | 既有 prompt/presence 与 RuleHost 来源；补逐次身份与确认程度 | 既有 durable runtime receipt 与共享 prompt 入口；接入规范关系，不推定已收到 |
+| Application | 自述、rule_blocked、实际修正来源分别接入 | 从共享 gate/执行事件接入明确动作；shadow/evaluation 不表示执行 |
+| Behavior | 工具和 assistant trajectory 来源产生 Episode | 优先工具 Episode；输出只能来自既有授权的会话观察入口 |
+| Outcome | task_outcomes 保持原义；增加结果引用或 Owner 反馈 | 不假定有统一结果链；允许 Owner 结果反馈，不从 turn 完成推定收益 |
+
+上表指定接入点，不能代替真实安装验证。OpenClaw 的采集断点必须被健康状态揭示；session 去重历史不能还原逐次事件。Codex 自述/会话观察关闭时返回 Unknown，不扫描会话目录、不猜最近会话。所有来源保留宿主信任、consent 与既有开关。
+
+### 13.7 Local Ledger / Privacy / Failure
+
+复用 selected governance workspace 的 state.db 存储新证据与关联，既有原则/批准/激活/原始来源各保其权威。原始 receipt/trajectory 保留 source reference，规范化不产生第二个原始事实 writer。Console 是派生读侧；Owner 结果输入经既有身份验证与受控入口进入证据写侧。
+
+同批证据及关系原子提交。拒收、冲突、未关联、写失败均有结构化原因与 nextAction。已持久化来源可幂等重放；原始来源也丢失时报告不可恢复缺口，不新建后台平台。
+
+证据持久化失败不得改变已经计算的工具允许/阻止结果。关闭观察不能修改原则、扩大授权或停止治理。输入从 unknown 开始校验，摘要脱敏且有界。
+
+新增证据复用现有 receipt retention policy；敏感正文还受来源更严格的 consent/保留限制，不能复制正文绕过来源过期。来源过期后标明不可复核，不自动判定观察有误。可追溯承诺限定在披露的保留/来源可用范围内。
+
+### 13.8 Audit Query
+
+| 查询 | 返回内容 |
+| --- | --- |
+| 某 Principle 是否投递 | Attempt、Result、目标、确认程度与失败/非尝试原因 |
+| 某次 Activation 是否有 Application | 自述与 Runtime 事实分别列出；显示确切内容/发生关联 |
+| 某 Episode 有哪些 Effect | 来源、观察、证据状态和版本关系 |
+| 某 Effect 是否有 Outcome | 已关联结果、待关联/缺失原因和来源状态 |
+
+所有查询限于当前授权 workspace，带 as-of、时间覆盖、Runtime/版本过滤、来源健康、未解析关系、截断/分页和原始引用。空结果区分范围内未观察到、采集关闭、不支持、来源不可用和尚未关联。不得据此回答“从未发生”。Unknown 是信息不足；Failed 是运行失败；Invalidated 是证据作废。本期没有“原则无效”判定。
+
+### 13.9 Golden Journey — real host acceptance
+
+GJ-01 前置：Owner 选择已有已批准、能在安全隔离测试目录触发的 RuleHost 原则；确切内容与批准可定位，宿主配置和版本记录齐全。若缺少合适原则，由 Owner 走既有流程准备，本期不能自动创建。
+
+1. Owner 激活，真实 Agent 发起安全测试操作。
+2. Runtime 证明加载确切规则，Delivery 为 runtime_loaded，目标为 enforcement。
+3. Runtime 实际阻止操作，写 runtime_verified Application。
+4. 请求及阻止结果构成 Episode；Effect 引用真实事件。
+5. Owner 或授权检查入口独立观察测试文件结果，记录 Outcome。
+6. Console 从 Principle/Activation 追到完整来源；重放不重复，重启后仍可查询。
+
+OpenClaw、Codex 都执行真实接入验证。至少一宿主完成全链，另一宿主证明其支持范围并明确缺口；人工插表不能替代宿主验收。全链证明 Runtime 介入，不证明 Agent 形成习惯。
+
+GJ-02：真实输出自述只生成 agent_claimed；没有自述不补写，采集不可用为 Unknown。错误版本/未知原则不能连成完整链。submitted 无确认不能为 delivered。明确失败与 Unsupported 分开；写失败不把工具 deny 改成 allow；争议、更正和重复摄取不改变任何治理决定。
+
+工程回归包括入口契约、SQLite round-trip、乱序/冲突/重复、更正、权限关闭、失败路径、Console 查询及关联 BDD。不得降低旧 .feature 的可观察期待。回归绿不能代替 GJ-01/02 实宿主报告。
+
+### 13.10 Migration Boundary / Engineering Breakdown
+
+旧 Pain、Diagnosis、Candidate、UUID、审批、Activation、workspace 权威、task_outcomes 和现有预算保持原样。历史映射只有可靠来源时才补；不回填治理决定或提升证明等级。新观察不成为另一套治理权威。
+
+停止新增采集/查询即可回退；保留证据，不做破坏性降级。完整 Owner Asset 切换依 ADR-0028 单独授权，不能在本期实施。
+
+| Feature | Task boundary | Exit evidence |
+| --- | --- | --- |
+| Identity | 来源键、确切内容、激活发生引用与校验 | 错配拒收，幂等，缺口可见 |
+| Persistence | 最小实体、关系、争议/更正、保留 | 原子 round-trip，失败可见，旧字段不变 |
+| Host integration | 分别连接两个宿主现有授权来源 | 实际入口证据，证明强度不混淆 |
+| Audit / Owner result | 四查询、覆盖健康与最小获授权反馈 | 能追源，未知与零记录分开 |
+| Acceptance | 两宿主运行 GJ-01/02 和既有工程检查 | 一条真实全链、诚实部分链、重放与重启证据 |
+
+顺序为 Identity → Persistence → Host integration → Audit → Acceptance。Core 复用既有注册存储 seam；共享 host-runtime 承担规范摄取；宿主适配器承担协议与来源；不新增未注册 core I/O、独立服务或新宿主。
+
+Exit：PD 能说明投递确认程度、Agent 是否声称使用、实际行为、结果证据是否存在；区分未知/失败/证据作废；所有观察操作都不改变 Owner 最终治理权。真正的 Effectiveness/Evaluation 和 Revision 学习循环留在后续阶段。

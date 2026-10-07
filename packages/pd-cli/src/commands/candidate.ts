@@ -16,7 +16,6 @@ import { randomUUID } from 'crypto';
 import * as path from 'path';
 import {
   RuntimeStateManager,
-  SqliteConnection,
   candidateList,
   candidateShow,
   CandidateIntakeService,
@@ -37,6 +36,8 @@ import {
   defaultOwnerIdentityHomeDir,
   ReuseEvaluationRunner,
   ReuseEvaluationError,
+  createBridgeTelemetryEventEmitter,
+  auditCandidateLedgerConsistency,
   type LedgerPrincipleEntry,
   type ReuseDecision,
   type CandidateIntakeResult,
@@ -45,6 +46,7 @@ import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig } from '../services/pd-config-loader.js';
+import { createReuseGatedIntakeService } from '../services/reuse-gated-intake.js';
 import { resolveRuntimeAdapterFromConfig } from '../services/runtime-adapter-resolver.js';
 import { resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
@@ -87,6 +89,10 @@ interface AuditResult {
   status: 'ok' | 'degraded';
   consumedCount: number;
   missingLedgerEntryIds: string[];
+  /** PRI-917 / R7: consumed candidates resolved into an existing principle via reuseEvidence. */
+  reusedResolvedCount: number;
+  /** Consumed candidates whose recommendation_kind never targets the Principle Ledger. */
+  nonLedgerKindCount: number;
   checkedLedgerPath: string;
   checkedDbPath: string;
 }
@@ -608,6 +614,74 @@ async function reportReuseResolution(opts: {
   console.log('  Evidence:          recorded on the Principle\'s reuseEvidence (append-only)\n');
 }
 
+// ── Shared park reporting (R7 gate-bypass fix, adhoc-20261007) ────────────────
+
+/**
+ * Emit the park observation (`reuse_gate_triggered`) on the durable
+ * workspace telemetry sink, mirroring the bridge / diagnose / pain-retry
+ * paths (PRI-939 Option A). A manual-command park must be observable in the
+ * same place the automatic ones are — telemetry is how parked candidates are
+ * audited (R7 Wave-2 gate audit).
+ */
+function emitReuseGateParkedTelemetry(
+  workspaceDir: string,
+  candidateId: string,
+  recommended: { selectedPrincipleId?: string; confidence: number; recommendation: string } | undefined,
+): void {
+  createBridgeTelemetryEventEmitter(createWorkspaceTelemetryEmitter(workspaceDir)).emitTelemetry({
+    eventType: 'reuse_gate_triggered',
+    traceId: candidateId,
+    timestamp: new Date().toISOString(),
+    payload: {
+      candidateId,
+      ...(recommended?.selectedPrincipleId !== undefined ? { selectedPrincipleId: recommended.selectedPrincipleId } : {}),
+      ...(recommended ? { confidence: recommended.confidence, recommendation: recommended.recommendation } : {}),
+    },
+  });
+}
+
+/**
+ * Report a `reuse_pending_owner` intake result from the MANUAL paths
+ * (`pd candidate intake` / `pd candidate repair`): the gate suspects a
+ * semantic duplicate, so nothing was written and the candidate awaits the
+ * Owner. Exit code stays 0 — a park is the gate working, not a command
+ * failure (same posture as diagnose / pain-retry / the bridge: park is not
+ * counted as intake failure). cli-6: the result carries a structured reason
+ * and the executable next action (`pd candidate review --decide`).
+ */
+function reportReusePark(opts: {
+  workspaceDir: string;
+  candidateId: string;
+  result: Extract<CandidateIntakeResult, { outcome: 'refused' }>;
+  json: boolean;
+  commandLabel: string;
+}): void {
+  const recommended =
+    opts.result.reuseRecommendation?.status === 'recommended' ? opts.result.reuseRecommendation : undefined;
+  emitReuseGateParkedTelemetry(opts.workspaceDir, opts.candidateId, recommended);
+  const review = {
+    candidateId: opts.candidateId,
+    status: 'review_required',
+    reason: 'reuse_review_required',
+    reusedPrincipleId: recommended?.selectedPrincipleId,
+    ...(recommended ? { confidence: recommended.confidence } : {}),
+    message: opts.result.message,
+    nextAction: `pd candidate review --candidate-id ${opts.candidateId} --decide reuse|create --reason "..."`,
+  };
+  if (opts.json) {
+    console.log(JSON.stringify(review, null, 2));
+    return;
+  }
+  console.log(`\nPrinciple Candidate ${opts.commandLabel}: ${opts.candidateId} — reuse review required\n`);
+  console.log(`  Candidate:         ${opts.candidateId}`);
+  if (recommended?.selectedPrincipleId !== undefined) {
+    console.log(`  Suspected Duplicate Of: ${recommended.selectedPrincipleId} (confidence ${recommended.confidence})`);
+  }
+  console.log(`  Status:            review_required (no Principle was created)`);
+  console.log(`  Message:           ${review.message}`);
+  console.log(`  Next Action:       ${review.nextAction}\n`);
+}
+
 /**
  * PRI-917 v0.3.2 (Phase 3C-4): run the Semantic Reuse Evaluation Capability
  * against the lexical proposal and return a DISPLAY object.
@@ -846,7 +920,12 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
     await stateManager.initialize();
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-    const service = new CandidateIntakeService({ stateManager, ledgerAdapter });
+    // R7 gate-bypass fix (adhoc-20261007): construct through the shared gated
+    // assembly so the manual intake path runs the Reuse Review Gate exactly
+    // like diagnose / pain-retry / the bridge. A bare construction left
+    // reuseCheck='not_configured' and let semantic duplicates go straight to
+    // CREATE (R7 Wave-2 audit D-1, P0).
+    const service = createReuseGatedIntakeService({ stateManager, ledgerAdapter, workspaceDir });
 
     // Fetch candidate once for admission gate check and downstream paths.
     const candidate = await stateManager.getCandidate(opts.candidateId);
@@ -926,6 +1005,20 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       // the gate-less intake command). Report the resolution, unify the
       // candidate terminal state with the automatic paths (SPEC §13), exit 0.
       await reportReuseResolution({ stateManager, candidateId: opts.candidateId, result: intakeResult, json: opts.json === true });
+      return;
+    }
+    if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
+      // R7 gate-bypass fix: the Reuse Review Gate parked this candidate as a
+      // suspected duplicate. No ledger entry was written and the candidate
+      // stays pending for the Owner — do NOT mark it consumed. cli-5: this
+      // path performs no state mutation at all.
+      reportReusePark({
+        workspaceDir,
+        candidateId: opts.candidateId,
+        result: intakeResult,
+        json: opts.json === true,
+        commandLabel: 'Intake',
+      });
       return;
     }
     if (intakeResult.outcome === 'refused') {
@@ -1262,47 +1355,36 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
 /**
  * pd candidate audit --workspace <path> [--json]
  *
- * Reads workspace/.pd/state.db principle_candidates and
- * the workspace ledger (same file used by OpenClaw plugin).
- * Checks each consumed candidate has a ledger entry.
- * Exits non-zero if any consumed candidate is missing from ledger.
+ * Delegates the judgment to the core auditCandidateLedgerConsistency so every
+ * surface (pd candidate audit, pd health, operator health) applies the SAME
+ * reuse-aware rules (PRI-917 / R7): reuse resolutions and non-Principle-Ledger
+ * kinds are not "missing"; only a consumed principle-kind candidate with no
+ * resolution anywhere is true drift.
+ * Exits non-zero if any consumed candidate is truly missing from the ledger.
  */
 export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-   
-  let conn: SqliteConnection | undefined;
 
   try {
     const dbPath = path.join(workspaceDir, '.pd', 'state.db');
     const ledgerStateDir = path.join(workspaceDir, '.state');
     const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
 
-    conn = new SqliteConnection({ workspaceDir, readonly: true });
-    const db = conn.getDb();
+    const audit = await auditCandidateLedgerConsistency(workspaceDir);
 
-    const consumedRows = db.prepare(
-      "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'"
-    ).all() as { candidate_id: string }[];
-
-    const consumedIds = consumedRows.map(r => r.candidate_id);
-
-    const ledger = loadLedger(ledgerStateDir);
-    const ledgerPrinciples = ledger.tree.principles;
-
-    const missingLedgerEntryIds: string[] = [];
-    for (const candidateId of consumedIds) {
-      const found = Object.values(ledgerPrinciples).some((p) =>
-        p.derivedFromPainIds.includes(candidateId),
-      );
-      if (!found) {
-        missingLedgerEntryIds.push(candidateId);
-      }
+    if (audit.status === 'error') {
+      console.error(`Audit failed: ${audit.reason ?? 'could not read candidate/ledger state'}`);
+      console.error('Next action: open this workspace once with the PD runtime to create/migrate state.db, then retry the audit.');
+      process.exit(1);
+      return;
     }
 
     const result: AuditResult = {
-      status: missingLedgerEntryIds.length === 0 ? 'ok' : 'degraded',
-      consumedCount: consumedIds.length,
-      missingLedgerEntryIds,
+      status: audit.status,
+      consumedCount: audit.consumedCount,
+      missingLedgerEntryIds: audit.missingLedgerEntryIds ?? [],
+      reusedResolvedCount: audit.reusedResolvedCount ?? 0,
+      nonLedgerKindCount: audit.nonLedgerKindCount ?? 0,
       checkedLedgerPath: ledgerPath,
       checkedDbPath: dbPath,
     };
@@ -1312,6 +1394,8 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
     } else {
       console.log(`\nCandidate Audit Results\n`);
       console.log(`  consumedCount: ${result.consumedCount}`);
+      console.log(`  reusedResolvedCount: ${result.reusedResolvedCount}`);
+      console.log(`  nonLedgerKindCount: ${result.nonLedgerKindCount}`);
       console.log(`  checkedLedgerPath: ${result.checkedLedgerPath}`);
       console.log(`  checkedDbPath: ${result.checkedDbPath}`);
       console.log(`  status: ${result.status}`);
@@ -1319,7 +1403,7 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
         console.log(`\n  MISSING LEDGER ENTRIES (${result.missingLedgerEntryIds.length}):`);
         result.missingLedgerEntryIds.forEach(id => console.log(`    - ${id}`));
       } else {
-        console.log(`\n  All consumed candidates have ledger entries.`);
+        console.log(`\n  All consumed candidates have ledger resolutions.`);
       }
       console.log('');
     }
@@ -1330,8 +1414,6 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
   } catch (err) {
     console.error(`Audit failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
-  } finally {
-    try { conn?.close(); } catch { /* best-effort close */ }
   }
 }
 
@@ -1388,7 +1470,11 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
     }
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-    const service = new CandidateIntakeService({ stateManager, ledgerAdapter });
+    // R7 gate-bypass fix (adhoc-20261007): repair re-intakes through the same
+    // gated assembly — otherwise "restore the missing ledger entry" became an
+    // unconditional duplicate-CREATE for orphaned cleanup candidates (R7
+    // Wave-2 audit D-1 §3.3).
+    const service = createReuseGatedIntakeService({ stateManager, ledgerAdapter, workspaceDir });
 
     // Check if already in ledger
     const existing = ledgerAdapter.existsForCandidate(opts.candidateId);
@@ -1415,6 +1501,20 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
     // a write-boundary refusal means the candidate is not principle-eligible —
     // fail loud rather than reporting a "repaired" entry that does not exist.
     const intakeResult = await service.intake(opts.candidateId);
+    if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
+      // R7 gate-bypass fix: the gate suspects a semantic duplicate — restoring
+      // the entry would recreate a near-duplicate Principle. No write happened;
+      // the Owner resolves it via the review channel. cli-5: no mutation on
+      // this path (candidate stays consumed, ledger untouched).
+      reportReusePark({
+        workspaceDir,
+        candidateId: opts.candidateId,
+        result: intakeResult,
+        json: opts.json === true,
+        commandLabel: 'Repair',
+      });
+      return;
+    }
     if (intakeResult.outcome === 'refused') {
       throw new CandidateIntakeError(
         INTAKE_ERROR_CODES.INPUT_INVALID,
@@ -1665,7 +1765,11 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
     }
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
-    const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+    // R7 gate-bypass fix (adhoc-20261007): --include-pending intakes parked
+    // (reuse_review_required) candidates too — the worst bypass, because it
+    // consumed the very state the gate created to await the Owner (R7 Wave-2
+    // audit D-1 §3.4). Same gated assembly as every other intake path.
+    const intakeService = createReuseGatedIntakeService({ stateManager, ledgerAdapter, workspaceDir });
 
     for (const row of pendingRows) {
       const candidateId = row.candidate_id;
@@ -1739,6 +1843,30 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       // Statuses are deliberately reused from the existing model (SPEC v2.1 §7
       // "禁止执行者自行创造新状态"): 'deferred' + 'skipped' rather than a new
       // status value.
+      //
+      // R7 gate-bypass fix: a park (reuse_pending_owner) is a DIFFERENT
+      // refusal — the candidate is a suspected duplicate awaiting the Owner.
+      // It must NOT be reported as "no action required" and must NOT be
+      // counted as an intake failure: the gate worked. The candidate stays
+      // pending; only `pd candidate review --decide` resolves it (cli-6).
+      if (intakeResult.outcome === 'refused' && intakeResult.reason === 'reuse_pending_owner') {
+        const recommended =
+          intakeResult.reuseRecommendation?.status === 'recommended' ? intakeResult.reuseRecommendation : undefined;
+        emitReuseGateParkedTelemetry(workspaceDir, candidateId, recommended);
+        output.deferred++;
+        output.results.push({
+          candidateId,
+          route: decision.route,
+          status: 'deferred',
+          reason: `reuse_review_required: candidate is a suspected duplicate${recommended?.selectedPrincipleId !== undefined ? ` of Principle ${recommended.selectedPrincipleId}` : ''} — parked for Owner review`,
+          statusBefore: 'pending',
+          statusAfter: 'pending',
+          intakeDecision: 'skipped',
+          seedDecision: 'skipped',
+          nextAction: `pd candidate review --candidate-id ${candidateId} --decide reuse|create --reason "..."`,
+        });
+        continue;
+      }
       if (intakeResult.outcome === 'refused') {
         output.results.push({ candidateId, route: decision.route, status: 'deferred', reason: intakeResult.message, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: 'No action required: this candidate kind does not target the Principle Ledger.' });
         continue;
