@@ -1,5 +1,7 @@
 # ADR-0017: Principle Ledger Single Implementation (core/plugin convergence)
 
+> **2026-10-07 related target (Proposed)**: [ADR-0028](0028-owner-principle-assets-and-evolution.md) defines Owner asset ownership and immutable version evolution. It does not supersede this ADR's single codec/mutator/lock authority, migrate the workspace ledger in Phase 1, or claim that the target layer exists. Current storage and future ownership are separate reading layers.
+
 > **Status**: Accepted
 > **Date**: 2026-06-25
 > **Drives**: PRI-459 (follows PRI-413 / PRI-443)
