@@ -21,6 +21,12 @@ vi.mock('fs', () => ({
 }));
 
 vi.mock('../../src/commands/build-trajectory-evidence.js', () => ({
+  acquireCodexToolFailureEvidenceFromDb: vi.fn().mockReturnValue({
+    status: 'unavailable',
+    reasonCode: 'empty_trajectory',
+    detail: 'codex_tool_calls_empty',
+    binding: 'unverified',
+  }),
   acquireTrajectoryEvidenceFromDb: vi.fn().mockReturnValue({
     status: 'available',
     entries: [
@@ -90,7 +96,7 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
 import { handlePainRecord } from '../../src/commands/pain-record.js';
 import { isBuiltinPiAiProvider, type PainToPrincipleOutput, type PainToPrincipleInput } from '@principles/core/runtime-v2';
 import type { FailureCategory } from '@principles/core/runtime-v2';
-import { acquireTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
+import { acquireCodexToolFailureEvidenceFromDb, acquireTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -440,6 +446,13 @@ describe('pd pain record', () => {
     expect(lastRecordPainInput!.recordObservability).toBe(true);
     // The CLI must NOT read the OpenClaw trajectory for a Codex attribution.
     expect(acquireTrajectoryEvidenceFromDb).not.toHaveBeenCalled();
+    // PRI-941 Option A: the ONLY trajectory consumption on this path is the
+    // authorized tool_calls failure acquisition (never conversation tables).
+    expect(acquireCodexToolFailureEvidenceFromDb).toHaveBeenCalledWith(
+      expect.stringContaining('.state'),
+      'codex-root-sess',
+      '/tmp/fake-workspace',
+    );
     // Codex lineage is retained unflattened in the versioned payload (SPEC §8.1);
     // the derived key mirrors the ingestion rule (codex|<rollout>|<turn>|user).
     expect(lastRecordPainInput!.painIngress.correlation).toEqual({
@@ -848,4 +861,135 @@ describe('pd pain record', () => {
     errorSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+// ── PRI-941 Option A — Codex authorized tool-failure evidence consumption ───
+
+describe('PRI-941 Option A — --host codex consumes authorized tool_calls failure evidence', () => {
+  it('T1: failure rows available → pain carries real evidence and ingress is available', async () => {
+    vi.mocked(acquireCodexToolFailureEvidenceFromDb).mockReturnValueOnce({
+      status: 'available',
+      entries: [
+        { sourceRef: 'tool_call_failure:2026-10-06T00:00:04Z', note: 'Tool write_file failed: EACCES (exitCode: 1) | permission denied' },
+      ],
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({
+      reason: 'codex mistake',
+      session: 'codex-root-sess',
+      host: 'codex',
+      rolloutId: 'rollout-abc',
+      hostTurnId: 'turn-7',
+      json: true,
+    });
+
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    // The evidence rides into recordPain — this is what makes the admission
+    // gate inputEvidenceCount > 0 (bridge derives it from evidence.length).
+    expect(lastRecordPainInput).toBeTruthy();
+    expect(lastRecordPainInput!.evidence).toEqual([
+      { kind: 'behavior_trace', sourceRef: 'tool_call_failure:2026-10-06T00:00:04Z', note: 'Tool write_file failed: EACCES (exitCode: 1) | permission denied' },
+    ]);
+    expect(lastRecordPainInput!.painIngress.evidenceClass).toMatchObject({ status: 'available' });
+    expect(lastRecordPainInput!.painIngress.correlation).toMatchObject({ hostKind: 'codex', status: 'bound' });
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('T2: zero failure rows → the honest unavailable degradation is preserved (reason empty_trajectory)', async () => {
+    // default mock: { status:'unavailable', reasonCode:'empty_trajectory', ... }
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({
+      reason: 'codex mistake',
+      session: 'codex-root-sess',
+      host: 'codex',
+      rolloutId: 'rollout-abc',
+      hostTurnId: 'turn-7',
+      json: true,
+    });
+
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(lastRecordPainInput).toBeTruthy();
+    // Degraded-but-honest: submitted with real lineage and empty evidence —
+    // never fabricated placeholders, never a refusal (PRI-783 directive).
+    expect(lastRecordPainInput!.evidence).toEqual([]);
+    expect(lastRecordPainInput!.painIngress.evidenceClass).toEqual({
+      status: 'unavailable',
+      reason: 'empty_trajectory',
+    });
+
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('T4: consent not_present (no consent file anywhere) → identical behavior, zero ingestion surface', async () => {
+    // The test env has no codex-ingestion-consent.json and no ingestion flag —
+    // the record must behave exactly as above and the module must not touch
+    // any ingestion/consent machinery (source-level guard: T4-guard).
+    vi.mocked(acquireCodexToolFailureEvidenceFromDb).mockReturnValueOnce({
+      status: 'available',
+      entries: [{ sourceRef: 'tool_call_failure:2026-10-06T00:00:09Z', note: 'Tool bash failed: EACCES (exitCode: 1)' }],
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({
+      reason: 'codex mistake',
+      session: 'codex-root-sess',
+      host: 'codex',
+      rolloutId: 'rollout-abc',
+      hostTurnId: 'turn-7',
+      json: true,
+    });
+
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(lastRecordPainInput!.painIngress.evidenceClass).toMatchObject({ status: 'available' });
+    // Consent state never appears in the ingress decision — Option A consumes
+    // the PRI-624 tool surface, which sits OUTSIDE the G2A consent scope.
+    expect(JSON.stringify(lastRecordPainInput!.painIngress)).not.toContain('consent');
+    expect(JSON.stringify(lastRecordPainInput!.painIngress)).not.toContain('ingestion');
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('review F1 regression: a codex refuse (logical-key lineage mismatch) keeps its faithful reason even when the acquisition is unavailable', async () => {
+    // Default mock: acquisition unavailable (empty_trajectory). The custom
+    // --logical-key does not embed the rollout id → the evaluator refuses on
+    // lineage_mismatch. The refuse output must carry the FAITHFUL reason —
+    // before the fix, acquisitionReason backfill hijacked it with
+    // trajectory wording and a contradictory nextAction.
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({
+      reason: 'codex mistake',
+      session: 'codex-root-sess',
+      host: 'codex',
+      rolloutId: 'rollout-abc',
+      hostTurnId: 'turn-7',
+      logicalKey: 'custom-key-not-embedding-rollout',
+      json: true,
+    });
+
+    expect(lastRecordPainInput).toBeNull();
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('lineage_mismatch');
+    expect(String(jsonOutput.message)).toMatch(/lineage/i);
+    expect(jsonOutput.nextAction).not.toContain('trajectory_unavailable');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
 });
