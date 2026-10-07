@@ -581,11 +581,12 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
     // ADR-0022 (PRI-578): single resolver — env > ~/.pd/owner.json > none
     const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
     const { ownerId, credentialId } = identity;
-    // Deliberately env-only: unlike owner identity above, this local activation
-    // path never falls back to ~/.pd/owner.json or companion-held encrypted
-    // tokens. An absent env token intentionally degrades to break_glass below
-    // rather than silently inheriting a token from another source (Owner
-    // decision, PRI-946).
+    // Deliberately reads env only: unlike owner identity above (which adds its
+    // own ~/.pd/owner.json fallback), this path adds no second fallback and
+    // trusts whatever PD_CONSOLE_TOKEN the caller already placed in env — the
+    // companion, for example, decrypts its stored token into env before spawning
+    // the CLI. An env with no token intentionally degrades to break_glass below
+    // rather than this command reaching for another source (Owner decision, PRI-946).
     const consoleToken = process.env.PD_CONSOLE_TOKEN?.trim();
     const operatorId = process.env.USERNAME?.trim() || process.env.USER?.trim();
     const actor = ownerId && credentialId && consoleToken
