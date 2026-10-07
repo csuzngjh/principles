@@ -133,4 +133,71 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
     };
     expect(trajectoryBody.success).toBe(true);
   });
+
+  // PRI-947 回归：「批准」是两步确认，第一步只负责把确认面板展开在 Owner 眼前。
+  // 曾经面板渲染在整页最后一个节点，Owner 点完看不到任何变化，误判为审批链路故障。
+  // 必须断言视口相交 —— toBeVisible 只校验 CSS 可见性，测不出"渲染在屏幕外"。
+  test('点「批准」就地展开二次确认面板：面板落进视口，且第一步不产生任何写入', async ({ page }) => {
+    // ── 找到一条后端判定「可批准」的 principle（走 UI 用的同一端点）──────────
+    const listResp = await apiGet('/api/principles?filter=all');
+    const listBody = listResp.body as {
+      success: boolean;
+      data: { principles: Array<{ id: string }> };
+    };
+    let principleId: string | null = null;
+    for (const candidate of listBody.data.principles) {
+      const viewResp = await apiGet(`/api/v1/principles/${encodeURIComponent(candidate.id)}/owner-decision-view`);
+      if (viewResp.status !== 200) continue;
+      const viewBody = viewResp.body as {
+        data?: { availableActions?: Array<{ semantic?: string }> };
+      };
+      if (viewBody.data?.availableActions?.some((action) => action.semantic === 'approve')) {
+        principleId = candidate.id;
+        break;
+      }
+    }
+    expect(principleId, `seed 中没有可批准的 principle（共 ${listBody.data.principles.length} 条）`).toBeTruthy();
+
+    // ── 记录任何非 GET 请求：第一步点击绝不允许提交 ──────────────────────────
+    const writes: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() !== 'GET') writes.push(`${req.method()} ${req.url()}`);
+    });
+
+    await page.goto(`/#/principles/${encodeURIComponent(principleId!)}`);
+    await page.waitForLoadState('networkidle');
+
+    const approveButton = page.locator('[data-action-semantic="approve"]').first();
+    await expect(approveButton, '决策区没有渲染「批准」按钮').toBeVisible();
+
+    // 把按钮顶到视口上沿，让"面板是否落在视线内"变成确定量而非滚动位置的随机结果
+    await approveButton.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await approveButton.click();
+
+    const panel = page.locator('[data-testid="owner-decision-actions"] [data-testid="owner-decision-confirm"]');
+    // 契约本体：第二步必须落在 Owner 正在操作的决策区内，而不是整页末尾的孤立节点。
+    await expect(panel, '点「批准」后确认面板没有展开在决策区内').toHaveCount(1);
+    await expect(panel).toBeVisible();
+
+    const geometry = await panel.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      return {
+        top: Math.round(rect.top),
+        viewportHeight: window.innerHeight,
+        documentHeight: document.documentElement.scrollHeight,
+      };
+    });
+    expect(
+      geometry.top,
+      `确认面板落在视口之外（面板 top=${geometry.top}，视口高=${geometry.viewportHeight}，整页高=${geometry.documentHeight}）`
+      + '：Owner 视角等同"点了没反应"',
+    ).toBeLessThan(geometry.viewportHeight);
+
+    expect(writes, `第一步点击不应触发写入，实际发生：${writes.join(', ')}`).toEqual([]);
+
+    // ── 取消：面板收起，仍然没有任何写入 ─────────────────────────────────────
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    expect(writes, '取消同样不得产生写入').toEqual([]);
+  });
 });

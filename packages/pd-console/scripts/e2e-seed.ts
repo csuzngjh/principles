@@ -9,7 +9,7 @@
  * - principle-detail-flow: principles ledger JSON + approvals + pi_artifacts
  * - pain-intent-flow: trajectory.db pain_events + state.db tasks + candidates
  */
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -352,9 +352,33 @@ stateDb.prepare(`
 // focus-governance-clicks.spec.ts tests never mutate records owned by other
 // specs (focus-approve-flow / BDD). All are prompt channel (MVP-reversible)
 // so approve produces a real activation and deactivate is available.
+//
+// PRI-947: the approve fixture is a real Scribe formal draft. Owner Decision
+// v1 gates approve on per-subject decision material
+// (runtime-v2/owner-decision/owner-decision-view.ts: subjectReadableSatisfied
+// ← a bound scribe artifact carrying principleDraft.statement). The plain
+// `{principleId,title}` content left that fixture with only 拒绝, so no spec
+// could ever reach the confirmation panel a real Owner sees. Row shape mirrors
+// the proven ai-user seed (tests/ai-user/seeds.ts).
+const scribeTaskDiagnosticJson = createPITaskDiagnosticJson({
+  dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000,
+  inputArtifactRefs: [], outputArtifactRefs: [],
+});
+stateDb.prepare(`
+  INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+  VALUES ('task-click-approve', 'scribe', 'succeeded', ?, ?, 0, 3, ?)
+`).run(eightDaysAgo, eightDaysAgo, scribeTaskDiagnosticJson);
+const clickApproveScribeContent = JSON.stringify({
+  principleId: PRINCIPLE_IDS.clickApprove,
+  title: '点击批准测试原则',
+  principleDraft: {
+    statement: '高代价的共享状态写入必须先给出可读的后果说明，再由 Owner 决定。',
+    rationale: '没有可读后果说明时，批准决定无法被复核。',
+  },
+});
 insertPiArtifact.run(
   'artifact-click-approve', 'principle', 'task-click-approve', PRINCIPLE_IDS.clickApprove,
-  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickApprove, title: '点击批准测试原则' }), now, now,
+  '[]', 'validated', clickApproveScribeContent, now, now,
 );
 insertPiArtifact.run(
   'artifact-click-reject', 'principle', 'task-click-reject', PRINCIPLE_IDS.clickReject,
