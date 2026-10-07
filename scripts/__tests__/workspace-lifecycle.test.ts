@@ -14,6 +14,8 @@ import {
   classifyRecord,
   classifyRecords,
   conflictCodes,
+  indexPrs,
+  parsePrPages,
   planCleanup,
 } from '../dev/lib/workspace-lifecycle.mjs';
 import { normalizeGitPath } from '../dev/lib/git.mjs';
@@ -164,6 +166,88 @@ describe('planCleanup (pure)', () => {
     const plan = planCleanup(classifyRecords(records, CLASSIFY_OPTS));
     expect(plan.actions).toEqual([{ kind: 'delete-branch', branch: 'ai/PRI-800-old', evidence: expect.any(Array) }]);
     expect(plan.skipped[0].reasons.join(' ')).toContain('outside task namespace');
+  });
+});
+
+describe('parsePrPages (pure — the paginated gh wire shape)', () => {
+  it('accepts a single JSON document, which is what an unpaginated answer is', () => {
+    const rows = parsePrPages('[{"number":1,"headRefName":"ai/a","state":"open"}]');
+    expect(rows).toEqual([{ number: 1, headRefName: 'ai/a', state: 'open' }]);
+  });
+
+  it('accepts one document PER PAGE — `gh api --paginate` never emits one array', () => {
+    const stdout =
+      '[{"number":3,"headRefName":"ai/c","state":"closed","mergedAt":"2026-01-02T00:00:00Z"}]\n' +
+      '[{"number":1,"headRefName":"ai/a","state":"open","mergedAt":null}]\n';
+    expect(parsePrPages(stdout).map((r) => r.number)).toEqual([3, 1]);
+  });
+
+  it('drops progress noise and rows the index cannot key on', () => {
+    const rows = parsePrPages(
+      'not-json\n{"number":7,"headRefName":"ai/d","state":"closed","mergedAt":null}\n' +
+        '[{"number":null,"headRefName":"ai/e"},{"number":8,"headRefName":42},{"number":9,"state":"open"}]'
+    );
+    expect(rows).toEqual([{ number: 7, headRefName: 'ai/d', state: 'closed', mergedAt: null }]);
+  });
+
+  it('returns nothing for empty output rather than throwing', () => {
+    expect(parsePrPages('')).toEqual([]);
+    expect(parsePrPages(undefined)).toEqual([]);
+  });
+});
+
+describe('indexPrs (pure — REST states in, classifier states out)', () => {
+  it('normalizes REST open/closed+mergedAt onto the classifier tokens', () => {
+    const gh = indexPrs(
+      parsePrPages(
+        '[{"number":11,"headRefName":"ai/live","state":"open","mergedAt":null,"url":"https://gh/11"},' +
+          '{"number":12,"headRefName":"ai/done","state":"closed","mergedAt":"2026-09-01T00:00:00Z","url":"https://gh/12"}]'
+      )
+    );
+    expect(gh.open.get('ai/live')).toEqual({
+      number: 11,
+      headRefName: 'ai/live',
+      state: 'OPEN',
+      url: 'https://gh/11',
+      mergedAt: null,
+    });
+    expect(gh.merged.get('ai/done').state).toBe('MERGED');
+    expect(gh.merged.get('ai/done').mergedAt).toBe('2026-09-01T00:00:00Z');
+  });
+
+  it('leaves closed-without-merge out of both maps — it proves nothing', () => {
+    const gh = indexPrs([{ number: 13, headRefName: 'ai/wontfix', state: 'closed', mergedAt: null }]);
+    expect(gh.open.size).toBe(0);
+    expect(gh.merged.size).toBe(0);
+  });
+
+  it('keeps the newest PR per branch, so the grace period measures the landing merge', () => {
+    const gh = indexPrs([
+      { number: 20, headRefName: 'ai/reused', state: 'closed', mergedAt: '2026-01-01T00:00:00Z' },
+      { number: 91, headRefName: 'ai/reused', state: 'closed', mergedAt: '2026-06-06T00:00:00Z' },
+      { number: 45, headRefName: 'ai/reused', state: 'closed', mergedAt: '2026-03-03T00:00:00Z' },
+    ]);
+    expect(gh.merged.get('ai/reused')).toMatchObject({ number: 91, mergedAt: '2026-06-06T00:00:00Z' });
+  });
+
+  it('indexes a branch that has both an open follow-up and an older merge — OPEN still wins at lookup', () => {
+    const gh = indexPrs([
+      { number: 30, headRefName: 'ai/reopened', state: 'closed', mergedAt: '2026-02-02T00:00:00Z' },
+      { number: 40, headRefName: 'ai/reopened', state: 'open', mergedAt: null },
+    ]);
+    const pr = gh.open.get('ai/reopened') || gh.merged.get('ai/reopened');
+    expect(classifyRecord(wtRecord({ branch: 'ai/reopened', pr, ancestry: false, tipDate: daysAgo(1) }), CLASSIFY_OPTS).status).toBe(
+      'ACTIVE'
+    );
+  });
+
+  it('a merged PR older than any fixed window still yields CLEANUP_READY — the regression this exists for', () => {
+    const gh = indexPrs([
+      { number: 1500, headRefName: 'ai/PRI-800-ancient', state: 'closed', mergedAt: daysAgo(14), url: 'https://gh/1500' },
+    ]);
+    const pr = gh.open.get('ai/PRI-800-ancient') || gh.merged.get('ai/PRI-800-ancient') || null;
+    const r = classifyRecord(wtRecord({ branch: 'ai/PRI-800-ancient', pr, ancestry: false, tipDate: daysAgo(20) }), CLASSIFY_OPTS);
+    expect(r.status).toBe('CLEANUP_READY');
   });
 });
 
