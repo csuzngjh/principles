@@ -1,5 +1,13 @@
 # Behavioral Learning MVP Acceptance Specification
 
+## PD v2 Phase 1 验收子集（2026-10-07，Draft alignment）
+
+依据 [ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md)、[Phase 1 SPEC §13](../superpowers/specs/2026-08-principle-receipt-design.md#13-pd-v2-phase-1--evidence-foundation-spec)。原 v3/PRI-836 的 before/after 与行为变化标准保留，不以更小子集替代。
+
+Phase 1 验收事实基础设施：至少一真实宿主完成确切内容/Activation → confirmed Runtime-boundary Delivery → runtime_verified Application → Episode → Effect → Outcome；两个宿主都提供真实接入及诚实缺口。自述只证明声明；未知、失败、unsupported、作废分开；重放不增加样本。
+
+子集通过不表示完整 Behavioral Learning 验收通过、因果有效或资产迁移完成。GJ-01/GJ-02 见实施 SPEC；运行报告由工程实施产生，本次文档 PR 不伪造验收。
+
 ## Version
 
 Draft v3
