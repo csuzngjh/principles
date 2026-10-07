@@ -24,6 +24,7 @@ import type { SqliteConnection } from './sqlite-connection.js';
 import {
   INTERVENTION_EVIDENCE_TABLES,
 } from './intervention-evidence-schema.js';
+import { INTERVENTION_RECORD_KINDS, INTERVENTION_SOURCE_KINDS } from '../types/intervention-evidence-contract.js';
 import type { NormalizedInterventionBatch } from '../intervention-evidence-normalizer.js';
 import type {
   InterventionAuditRecordSummary,
@@ -57,29 +58,6 @@ export interface InterventionAuditReadOptions {
 export type InterventionAuditRead =
   | { available: true; relations: InterventionAuditRelations }
   | { available: false; reason: string; nextAction?: string };
-
-interface EvidenceRow {
-  evidence_id: string;
-  scope_id: string;
-  source_kind: string;
-  observation_key: string;
-  source_locator: string;
-  record_kind: string;
-  principle_id: string | null;
-  activation_id: string | null;
-  delivery_key: string | null;
-  episode_key: string | null;
-  effect_key: string | null;
-  correction_of: string | null;
-  correction_reason: string | null;
-  occurred_at: string | null;
-  recorded_at: string;
-  native_refs_json: string;
-  content_ref_json: string | null;
-  activation_ref_json: string | null;
-  payload_json: string;
-  record_digest: string;
-}
 
 const AUDIT_DEFAULT_LIMIT = 50;
 const AUDIT_MAX_LIMIT = 200;
@@ -120,36 +98,88 @@ function requirePayloadField(payload: Record<string, unknown>, field: string, ro
   return payload[field];
 }
 
-function mapRowToSummary(row: EvidenceRow, existingKeys: ReadonlySet<string>): InterventionAuditRecordSummary & { pendingFields: { field: string; missingKey: string }[] } {
-  const payload = parseJsonColumn(row.payload_json, row.evidence_id);
+const RECORD_KIND_SET: ReadonlySet<string> = new Set(INTERVENTION_RECORD_KINDS);
+const SOURCE_KIND_SET: ReadonlySet<string> = new Set(INTERVENTION_SOURCE_KINDS);
+
+/** rc-2: narrow a stored enum column through a real guard, never a cast. */
+function narrowEnumColumn<T extends string>(spec: { value: unknown; allowed: ReadonlySet<string>; column: string; rowId: string }): T {
+  const { value, allowed, column, rowId } = spec;
+  if (typeof value !== 'string' || !allowed.has(value)) {
+    throw new PDRuntimeError(
+      'storage_unavailable',
+      `Malformed intervention evidence row ${rowId}: ${column} is outside the closed vocabulary (${String(value)})`,
+      { nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.' },
+    );
+  }
+  return value as T;
+}
+
+function strColumn(row: Record<string, unknown>, column: string): string {
+  const value = row[column];
+  if (typeof value !== 'string') {
+    throw new PDRuntimeError(
+      'storage_unavailable',
+      `Malformed intervention evidence row ${column}: expected a string column`,
+      { nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.' },
+    );
+  }
+  return value;
+}
+
+function strOrNullColumn(row: Record<string, unknown>, column: string): string | null {
+  const value = row[column];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): InterventionAuditRecordSummary & { pendingFields: { field: string; missingKey: string }[] } {
+  // rc-1: SELECT rows arrive as unknown; every column is narrowed through a
+  // guard before use, and out-of-vocabulary values fail loud as corruption.
+  if (!isRecord(row)) {
+    throw new PDRuntimeError(
+      'storage_unavailable',
+      'Malformed intervention evidence row: not an object',
+      { nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.' },
+    );
+  }
+  const evidenceId = strColumn(row, 'evidence_id');
+  const recordKind = narrowEnumColumn<InterventionRecordKind>({ value: row.record_kind, allowed: RECORD_KIND_SET, column: 'record_kind', rowId: evidenceId });
+  const sourceKind = narrowEnumColumn<InterventionAuditRecordSummary['sourceKind']>({ value: row.source_kind, allowed: SOURCE_KIND_SET, column: 'source_kind', rowId: evidenceId });
+  const payload = parseJsonColumn(strColumn(row, 'payload_json'), evidenceId);
   // Minimal per-kind structural check before the typed read: full validation
   // happened at ingress time; this only fails loud on ledger corruption
   // instead of trusting stored JSON blind (rc-2).
-  if (row.record_kind === 'delivery') {
-    requirePayloadField(payload, 'targetKind', row.evidence_id);
-    requirePayloadField(payload, 'confirmation', row.evidence_id);
-    requirePayloadField(payload, 'outcome', row.evidence_id);
-  } else if (row.record_kind === 'application') {
-    requirePayloadField(payload, 'proofMethod', row.evidence_id);
-    requirePayloadField(payload, 'action', row.evidence_id);
-  } else if (row.record_kind === 'behavior_episode') {
-    requirePayloadField(payload, 'status', row.evidence_id);
-    requirePayloadField(payload, 'actionSummary', row.evidence_id);
-  } else if (row.record_kind === 'effect') {
-    requirePayloadField(payload, 'status', row.evidence_id);
-    requirePayloadField(payload, 'observationSummary', row.evidence_id);
-  } else if (row.record_kind === 'outcome') {
-    requirePayloadField(payload, 'outcomeSource', row.evidence_id);
-    requirePayloadField(payload, 'observationSummary', row.evidence_id);
+  if (recordKind === 'delivery') {
+    requirePayloadField(payload, 'targetKind', evidenceId);
+    requirePayloadField(payload, 'confirmation', evidenceId);
+    requirePayloadField(payload, 'outcome', evidenceId);
+  } else if (recordKind === 'application') {
+    requirePayloadField(payload, 'proofMethod', evidenceId);
+    requirePayloadField(payload, 'action', evidenceId);
+  } else if (recordKind === 'behavior_episode') {
+    requirePayloadField(payload, 'status', evidenceId);
+    requirePayloadField(payload, 'actionSummary', evidenceId);
+  } else if (recordKind === 'effect') {
+    requirePayloadField(payload, 'status', evidenceId);
+    requirePayloadField(payload, 'observationSummary', evidenceId);
+  } else if (recordKind === 'outcome') {
+    requirePayloadField(payload, 'outcomeSource', evidenceId);
+    requirePayloadField(payload, 'observationSummary', evidenceId);
   }
+  // runtime-contract-exempt: ERR-001 the union payload type cannot be
+  // reconstructed without a cast; every member was presence-checked per kind
+  // above, so this narrows VALIDATED data, it does not bypass validation.
   const typedPayload = payload as unknown as InterventionAuditRecordSummary['payload'];
 
+  const deliveryKey = strOrNullColumn(row, 'delivery_key');
+  const episodeKey = strOrNullColumn(row, 'episode_key');
+  const effectKey = strOrNullColumn(row, 'effect_key');
+  const correctionOf = strOrNullColumn(row, 'correction_of');
   const pendingFields: { field: string; missingKey: string }[] = [];
   for (const [field, key] of [
-    ['deliveryKey', row.delivery_key],
-    ['episodeKey', row.episode_key],
-    ['effectKey', row.effect_key],
-    ['correctionOf', row.correction_of],
+    ['deliveryKey', deliveryKey],
+    ['episodeKey', episodeKey],
+    ['effectKey', effectKey],
+    ['correctionOf', correctionOf],
   ] as const) {
     if (key !== null && !existingKeys.has(key)) {
       pendingFields.push({ field, missingKey: key });
@@ -157,21 +187,21 @@ function mapRowToSummary(row: EvidenceRow, existingKeys: ReadonlySet<string>): I
   }
 
   return {
-    evidenceId: row.evidence_id,
-    kind: row.record_kind as InterventionRecordKind,
-    observationKey: row.observation_key,
-    sourceKind: row.source_kind as InterventionAuditRecordSummary['sourceKind'],
-    sourceLocator: row.source_locator,
-    recordedAt: row.recorded_at,
-    occurredAt: row.occurred_at ?? undefined,
-    principleId: row.principle_id ?? undefined,
-    activationId: row.activation_id ?? undefined,
-    deliveryKey: row.delivery_key ?? undefined,
-    episodeKey: row.episode_key ?? undefined,
-    effectKey: row.effect_key ?? undefined,
-    correctionOf: row.correction_of ?? undefined,
+    evidenceId,
+    kind: recordKind,
+    observationKey: strColumn(row, 'observation_key'),
+    sourceKind,
+    sourceLocator: strColumn(row, 'source_locator'),
+    recordedAt: strColumn(row, 'recorded_at'),
+    occurredAt: strOrNullColumn(row, 'occurred_at') ?? undefined,
+    principleId: strOrNullColumn(row, 'principle_id') ?? undefined,
+    activationId: strOrNullColumn(row, 'activation_id') ?? undefined,
+    deliveryKey: deliveryKey ?? undefined,
+    episodeKey: episodeKey ?? undefined,
+    effectKey: effectKey ?? undefined,
+    correctionOf: correctionOf ?? undefined,
     payload: typedPayload,
-    recordDigest: row.record_digest,
+    recordDigest: strColumn(row, 'record_digest'),
     associationStatus: pendingFields.length === 0 ? 'linked' : 'pending_association',
     pendingFields,
   };
@@ -441,14 +471,14 @@ export class SqliteInterventionEvidenceStore {
     const summaries: (InterventionAuditRecordSummary & { pendingFields: { field: string; missingKey: string }[] })[] = [];
     for (const rawRow of rows) {
       if (!isRecord(rawRow)) continue;
-      const row = rawRow as unknown as EvidenceRow;
-      for (const key of [row.delivery_key, row.episode_key, row.effect_key, row.correction_of]) {
-        if (key !== null && !existingKeys.has(key)) {
+      for (const column of ['delivery_key', 'episode_key', 'effect_key', 'correction_of'] as const) {
+        const key = rawRow[column];
+        if (typeof key === 'string' && key.length > 0 && !existingKeys.has(key)) {
           const hit = keyExists.get(key);
           if (isRecord(hit)) existingKeys.add(key);
         }
       }
-      summaries.push(mapRowToSummary(row, existingKeys));
+      summaries.push(mapRowToSummary(rawRow, existingKeys));
     }
 
     const deliveries: InterventionAuditRecordSummary[] = [];
