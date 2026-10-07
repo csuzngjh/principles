@@ -358,8 +358,13 @@ stateDb.prepare(`
 // (runtime-v2/owner-decision/owner-decision-view.ts: subjectReadableSatisfied
 // ← a bound scribe artifact carrying principleDraft.statement). The plain
 // `{principleId,title}` content left that fixture with only 拒绝, so no spec
-// could ever reach the confirmation panel a real Owner sees. Row shape mirrors
-// the proven ai-user seed (tests/ai-user/seeds.ts).
+// could ever reach the confirmation panel a real Owner sees.
+// `intentContract.targetBehavior` is not decoration: owner-decision-view.ts:404
+// only emits the 【拟议行为】 consequence item when the scribe material carries
+// it, and that item is the readable consequence the panel is supposed to show.
+// The `tasks` row shape mirrors the proven ai-user seed
+// (tests/ai-user/seeds.ts); the `content_json` field set is deliberately
+// smaller here — this fixture only needs to satisfy the approve gate.
 const scribeTaskDiagnosticJson = createPITaskDiagnosticJson({
   dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000,
   inputArtifactRefs: [], outputArtifactRefs: [],
@@ -375,6 +380,7 @@ const clickApproveScribeContent = JSON.stringify({
     statement: '高代价的共享状态写入必须先给出可读的后果说明，再由 Owner 决定。',
     rationale: '没有可读后果说明时，批准决定无法被复核。',
   },
+  intentContract: { targetBehavior: '提交确认面板前，Owner 能在决策区读到本条后果说明。' },
 });
 insertPiArtifact.run(
   'artifact-click-approve', 'principle', 'task-click-approve', PRINCIPLE_IDS.clickApprove,
