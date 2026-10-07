@@ -224,8 +224,23 @@ worktree.
 ## 5. Residue and UNKNOWN
 
 A **residue shell** is a directory whose worktree admin metadata
-(`.git/worktrees/<name>/`) is gone. Its `.git` file points at a path that no
-longer exists; git cannot read its status, HEAD, or branch.
+(`.git/worktrees/<name>/`) is gone, so git cannot read its status, HEAD, or branch.
+`scanResidue` finds two shapes and labels them in every row it emits
+(`residueShape`):
+
+* `DEAD_GITDIR` — the `.git` file still exists and points at an admin directory
+  that no longer does;
+* `NO_GIT_MARKER` (PRI-949) — the `.git` file is gone as well. This is what a real
+  failed removal leaves: `git worktree remove` unregisters the admin entry and
+  deletes the marker, then dies partway on the tree (Windows `Filename too long`
+  on a deep `node_modules`), so the directory survives while git forgets it ever
+  existed. Such a row is scoped to the pool by construction — the primary's
+  siblings are Owner space, not task slots.
+
+Before the second shape was known, it was invisible to discovery, to the snapshot,
+and therefore to the `--residue` gate as well: the gate accepts only a path its own
+scan classified as residue, so an Owner-authorized deletion had no sanctioned
+channel. Discovery widened; the gate did not.
 
 Established empirically during Phase 0 (see the Reality Audit §2.4):
 **`git worktree repair` cannot recover this class.** It repairs the *pointer*

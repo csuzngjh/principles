@@ -760,6 +760,72 @@ export function PrincipleDetailPage() {
                   ))}
                 </ul>
               )}
+              {/* ── Action confirmation (SPEC §8.4) ───────────────────────────
+                  Rendered inside the decision region, not at the page root: a
+                  click that only changes visibility must land where the Owner
+                  is looking (PRI-947). */}
+              {pendingAction !== null && (
+                <div className="border-t border-line pt-6 mt-6" data-testid="owner-decision-confirm">
+                  <SectionTitle>{pendingAction.label}</SectionTitle>
+                  <div className="mt-2 p-3 bg-gov/5 border border-gov/20 rounded-[var(--radius-md)]">
+                    {pendingAction.expectedConsequence.status === 'known' && (
+                      <div className="mb-3">
+                        {pendingAction.expectedConsequence.value.map((item, index) => (
+                          <p key={`exp-${index}`} className="text-ink-2 text-[13px] leading-relaxed mb-1">{item.text}</p>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-ink-2 text-[13px] mb-3">{pendingAction.confirmation.text}</p>
+                    {pendingAction.requirements.some((req) => req.name === 'newArtifactId') && (
+                      <>
+                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                          {t("principles.detail.editNewArtifactLabel", { defaultValue: "新的已验证工件 ID" })}
+                        </label>
+                        <input
+                          type="text"
+                          value={newArtifactId}
+                          onChange={(e) => setNewArtifactId(e.target.value)}
+                          placeholder={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 font-mono focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                          aria-label={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+                        />
+                      </>
+                    )}
+                    {pendingAction.requirements.some((req) => req.name === 'reason') && (
+                      <>
+                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                          {t("principles.detail.rejectReasonLabel", { defaultValue: "拒绝原因" })}
+                        </label>
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder={t("principles.detail.rejectReasonPlaceholder")}
+                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                          aria-label={t("principles.detail.rejectReasonPlaceholder")}
+                        />
+                      </>
+                    )}
+                    <div className="flex gap-2 mt-3">
+                      <Button
+                        variant={pendingAction.semantic === 'reject' ? 'destructive' : 'default'}
+                        size="sm"
+                        disabled={actionLoading
+                          || (pendingAction.requirements.some((req) => req.name === 'reason') && !rejectReason.trim())
+                          || (pendingAction.requirements.some((req) => req.name === 'newArtifactId') && !newArtifactId.trim())}
+                        onClick={() => {
+                          const action = pendingAction;
+                          void submitOwnerAction(action, rejectReason.trim() === '' ? undefined : rejectReason.trim());
+                        }}
+                      >
+                        {t("principles.detail.confirm", { defaultValue: "确认" })}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => { setPendingAction(null); setRejectReason(""); setNewArtifactId(""); }}>
+                        {t("principles.detail.cancel")}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -1238,70 +1304,6 @@ export function PrincipleDetailPage() {
           )}
         </div>
       </details>
-
-      {/* ── Action confirmation (SPEC §8.4) ─────────────────────────────── */}
-      {pendingAction !== null && (
-        <div className="border-t border-line pt-6 mt-6" data-testid="owner-decision-confirm">
-          <SectionTitle>{pendingAction.label}</SectionTitle>
-          <div className="mt-2 p-3 bg-gov/5 border border-gov/20 rounded-[var(--radius-md)]">
-            {pendingAction.expectedConsequence.status === 'known' && (
-              <div className="mb-3">
-                {pendingAction.expectedConsequence.value.map((item, index) => (
-                  <p key={`exp-${index}`} className="text-ink-2 text-[13px] leading-relaxed mb-1">{item.text}</p>
-                ))}
-              </div>
-            )}
-            <p className="text-ink-2 text-[13px] mb-3">{pendingAction.confirmation.text}</p>
-            {pendingAction.requirements.some((req) => req.name === 'newArtifactId') && (
-              <>
-                <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-                  {t("principles.detail.editNewArtifactLabel", { defaultValue: "新的已验证工件 ID" })}
-                </label>
-                <input
-                  type="text"
-                  value={newArtifactId}
-                  onChange={(e) => setNewArtifactId(e.target.value)}
-                  placeholder={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
-                  className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 font-mono focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-                  aria-label={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
-                />
-              </>
-            )}
-            {pendingAction.requirements.some((req) => req.name === 'reason') && (
-              <>
-                <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-                  {t("principles.detail.rejectReasonLabel", { defaultValue: "拒绝原因" })}
-                </label>
-                <textarea
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  placeholder={t("principles.detail.rejectReasonPlaceholder")}
-                  className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-                  aria-label={t("principles.detail.rejectReasonPlaceholder")}
-                />
-              </>
-            )}
-            <div className="flex gap-2 mt-3">
-              <Button
-                variant={pendingAction.semantic === 'reject' ? 'destructive' : 'default'}
-                size="sm"
-                disabled={actionLoading
-                  || (pendingAction.requirements.some((req) => req.name === 'reason') && !rejectReason.trim())
-                  || (pendingAction.requirements.some((req) => req.name === 'newArtifactId') && !newArtifactId.trim())}
-                onClick={() => {
-                  const action = pendingAction;
-                  void submitOwnerAction(action, rejectReason.trim() === '' ? undefined : rejectReason.trim());
-                }}
-              >
-                {t("principles.detail.confirm", { defaultValue: "确认" })}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => { setPendingAction(null); setRejectReason(""); setNewArtifactId(""); }}>
-                {t("principles.detail.cancel")}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
       </div>
     </PageShell>
   );

@@ -184,6 +184,7 @@ async function main() {
       writer: entry.leaseOwner ? parseWriterOwner(entry.leaseOwner)?.writer || entry.leaseOwner : '-',
       state: 'UNKNOWN',
       residueClass: entry.residueClass,
+      residueShape: entry.residueShape,
       dirty: '?',
       pr: entry.pr ? '#' + entry.pr.number + ' ' + entry.pr.state : '-',
       lock: '?',
@@ -251,7 +252,7 @@ async function main() {
   if (residueRows.length > 0) {
     lines.push('UNKNOWN residue — report only, never removed automatically (' + residueRows.length + ')');
     for (const r of residueRows) {
-      lines.push('  ' + r.task + '  [' + r.residueClass + ']');
+      lines.push('  ' + r.task + '  [' + r.residueClass + ' / ' + r.residueShape + ']');
       lines.push('    path: ' + r.path);
       if (r.branch) lines.push('    branch (recovered from lease): ' + r.branch);
       for (const e of r.evidence) lines.push('    evidence: ' + e);
