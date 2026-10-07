@@ -420,7 +420,10 @@ describe('capability declarations (SPEC §13.6)', () => {
   });
 
   it('rejects a capability outside the closed vocabulary (rc-2, no as-cast past validation)', () => {
-    const result = normalizeInterventionEvidenceBatch(validBatch({
+    // Simulates an untrusted producer payload (rc-1): the type would forbid
+    // the forged value, but the RUNTIME must reject it regardless.
+    const forged = {
+      ...validBatch(),
       capabilityDeclarations: [{
         hostKind: 'openclaw',
         capability: 'effectiveness_score',
@@ -429,7 +432,8 @@ describe('capability declarations (SPEC §13.6)', () => {
         channel: 'code_tool_hook',
         note: 'a forged capability must never reach the ledger',
       }],
-    }));
+    } as unknown as InterventionEvidenceBatchInput;
+    const result = normalizeInterventionEvidenceBatch(forged);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain('capability_invalid');
   });
