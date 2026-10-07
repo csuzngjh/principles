@@ -499,7 +499,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Security audit run-1: Added degraded-enforcement-marker.ts (96 → 97) —
     // plugin I/O boundary for ~/.pd/enforcement-health/ degraded-enforcement
     // markers (LOCKSTEP twin of the host-runtime gate's marker module).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
+    // PD v2 Phase 1: +1 intervention-evidence-recorder.ts (98) — plugin I/O source adapter for the shared evidence ingress.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
   });
 });
 
