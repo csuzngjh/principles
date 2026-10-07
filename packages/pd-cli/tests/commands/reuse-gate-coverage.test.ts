@@ -395,6 +395,23 @@ describe('R7 gate-bypass fix: wiring (the P0 itself)', () => {
     expect((telemetryEvents[0].payload as Record<string, unknown>).candidateId).toBe('cand-park');
   });
 
+  it('RG-5t: intake park text mode prints the refusal message (parity with JSON output)', async () => {
+    const sentinelHook = async () => ({ status: 'unavailable' as const, reason: 'test stub' });
+    mockCreateReuseRecommendationHook.mockReturnValue(sentinelHook);
+    mockStateManager.getCandidate.mockResolvedValue(pendingCandidate('cand-park'));
+    mockService.intake.mockResolvedValue(parkedIntakeResult('cand-park'));
+
+    await handleCandidateIntake({ candidateId: 'cand-park' });
+
+    const text = consoleLogSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(text).toContain('reuse review required');
+    // F6: the human-readable refusal reason must reach text mode too, not
+    // only the --json payload.
+    expect(text).toContain('Message:           Candidate cand-park is a suspected duplicate of existing Principle existing-p1');
+    expect(text).toContain('pd candidate review --candidate-id cand-park --decide reuse|create');
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+  });
+
   it('RG-6: repair parks a suspected duplicate orphan — no ledger rebuild, review guidance', async () => {
     const sentinelHook = async () => ({ status: 'unavailable' as const, reason: 'test stub' });
     mockCreateReuseRecommendationHook.mockReturnValue(sentinelHook);

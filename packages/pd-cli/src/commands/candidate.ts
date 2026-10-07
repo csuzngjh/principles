@@ -674,9 +674,9 @@ function reportReusePark(opts: {
     console.log(`  Suspected Duplicate Of: ${recommended.selectedPrincipleId} (confidence ${recommended.confidence})`);
   }
   console.log(`  Status:            review_required (no Principle was created)`);
+  console.log(`  Message:           ${review.message}`);
   console.log(`  Next Action:       ${review.nextAction}\n`);
 }
-
 
 /**
  * PRI-917 v0.3.2 (Phase 3C-4): run the Semantic Reuse Evaluation Capability
