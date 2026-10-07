@@ -1,5 +1,43 @@
 # @principles/pd-cli
 
+## 1.154.2
+
+### Patch Changes
+
+- df2a1fb: R7 gate-bypass fix — `pd candidate intake`, `pd candidate repair` and
+  `pd candidate internalization backfill` now construct their
+  CandidateIntakeService through the same Reuse Review Gate assembly as
+  `pd diagnose` / `pd pain retry` / the automatic bridge. Previously the three
+  manual commands ran with `reuseCheck='not_configured'`, so a semantic
+  duplicate the gate had parked (`reuse_review_required`) could be written into
+  the Principle Ledger as a duplicate Principle with exit 0 (P0 bypass proven on
+  shipped 2.2.0/2.2.1). A parked candidate now surfaces
+  `status: review_required` (intake/repair) or a deferred result with a
+  `pd candidate review --decide` next action (backfill), mutates nothing, and
+  emits the `reuse_gate_triggered` telemetry event like every other path.
+  `reuseEvaluation.enabled=false` still restores the exact pre-fix behavior.
+- 4b18048: PRI-941 Option A — Codex CLI pain record consumes the already-authorized tool_calls failure evidence (PRI-624 tool-governance surface) from the workspace trajectory via a new scoped acquisition that NEVER queries conversation tables (user_turns / assistant_turns remain ingestion-exclusive) and never opens rollout transcripts. An empty failure set keeps the honest unavailable degradation with an accurate reason (empty_trajectory). PainProvenance, painIngress.v1, the admission gate, consent and the G2A disclosure are untouched.
+- 6365e2e: R7: the two candidate→ledger read/audit surfaces are now reuse-aware. `pd trace`
+  (`PainChainReadModel`) resolves a consumed candidate into the ledger through BOTH
+  expressions — `derivedFromPainIds` (created) and `Principle.reuseEvidence[]`
+  (resolved into an existing principle by a reuse decision, zero ledger growth by
+  design) — so a successful reuse chain traces as `succeeded` with the reuse target
+  in `ledgerEntryIds` instead of the false `degraded/ledger_write_failed`.
+  `auditCandidateLedgerConsistency` (pd health / pd candidate audit, now one shared
+  judgment) no longer flags by-design-absent candidates as missing: reuse-resolved
+  candidates are counted in the new additive `reusedResolvedCount`, and consumed
+  candidates whose `recommendation_kind` never targets the Principle Ledger (rule /
+  implementation / prompt / defer; fail-closed unknown kinds) are counted in
+  `nonLedgerKindCount`. Only a consumed principle-kind candidate with no resolution
+  anywhere remains true drift (`missingLedgerEntryIds` lists them). On the R7
+  production workspace this drops the audit from 63 missing (52+ kind/reuse false
+  positives masking real drift) to 5 true-drift entries. No write path changes.
+  Audit error results additionally surface the bounded underlying failure reason
+  (e.g. a stale state.db schema) with a concrete next action instead of a generic
+  refusal, on `pd candidate audit` and every surface sharing the judgment.
+- Updated dependencies [6365e2e]
+  - @principles/core@1.289.2
+
 ## 1.154.1
 
 ### Patch Changes
