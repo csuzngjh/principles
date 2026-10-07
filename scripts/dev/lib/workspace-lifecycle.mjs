@@ -250,6 +250,9 @@ export async function collectPrIndex(cwd) {
  *
  * @param {string} primaryPath
  * @param {{poolRoot?: string|null, registeredPaths?: string[], now?: number}} [opts]
+ *   `registeredPaths` must be the paths of the current `git worktree list`: class B
+ *   has no marker to read, so only that list separates a half-deleted shell from a
+ *   live task's checkout whose marker was deleted by hand.
  * @returns {Array<{path: string, residueShape: 'DEAD_GITDIR'|'NO_GIT_MARKER', gitdirTarget: string|null, reason: string, leasePhase: string, leaseOwner: string|null, recoveredBranch: string|null}>}
  */
 export function scanResidue(primaryPath, { poolRoot = null, registeredPaths = [], now = Date.now() } = {}) {
@@ -301,7 +304,7 @@ export function scanResidue(primaryPath, { poolRoot = null, registeredPaths = []
     } catch (err) {
       // ENOENT is the only proof that the marker is GONE; EISDIR (an
       // independent clone) and anything unreadable stay out of scope.
-      markerAbsent = Boolean(err) && err.code === 'ENOENT';
+      markerAbsent = err.code === 'ENOENT';
       if (!markerAbsent) continue;
     }
     if (markerAbsent) {
