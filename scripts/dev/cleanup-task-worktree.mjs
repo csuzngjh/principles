@@ -174,9 +174,7 @@ async function main() {
   }
 
   const gh = args.skipGh ? { available: false, merged: new Map(), open: new Map() } : await collectPrIndex(cwd);
-  if (!gh.available) {
-    notes.push('GitHub PR evidence unavailable — completion proof uses git ancestry only' + (gh.error ? ': ' + gh.error : ''));
-  }
+  if (!gh.available) notes.push('GitHub PR evidence unavailable — completion proof uses git ancestry only');
 
   const pr = gh.open.get(branchName) || gh.merged.get(branchName) || null;
   if (pr && pr.state === 'OPEN') {

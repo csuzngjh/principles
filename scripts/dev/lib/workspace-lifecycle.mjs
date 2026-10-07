@@ -30,13 +30,7 @@ const execFileAsync = promisify(execFile);
 
 export const GRACE_DAYS_DEFAULT = 7;
 export const TASK_BRANCH_PREFIX = 'ai/';
-// GitHub answers at most 100 PRs per page, so complete coverage is a PAGINATED
-// walk, never a bigger `--limit`. A fixed window looks like a tuning knob but is
-// a correctness switch: every merged PR older than the window is simply absent,
-// and an absent PR record is what makes a finished slot report ORPHAN.
-export const GITHUB_PR_PAGE_SIZE = 100;
-export const GITHUB_PR_FETCH_ATTEMPTS = 2;
-const GITHUB_PR_FETCH_TIMEOUT_MS = 180_000;
+export const GITHUB_PR_LIMIT = 300;
 const DAY_MS = 24 * 60 * 60 * 1000;
 // `git status --porcelain` XY codes that mean an unresolved merge conflict.
 const CONFLICT_CODES = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);
@@ -195,105 +189,31 @@ export function readLeaseState(root, now = Date.now()) {
 }
 
 /**
- * Parse `gh api --paginate` output into PR rows.
- *
- * Pagination means the stream is NOT one JSON document: gh emits one document
- * PER PAGE. A single document is accepted too, because an unpaginated answer is
- * exactly the one-page case. Rows missing the two fields the index keys on are
- * dropped rather than guessed at.
- */
-export function parsePrPages(stdout) {
-  const text = String(stdout ?? '').trim();
-  if (!text) return [];
-  const documents = [];
-  try {
-    documents.push(JSON.parse(text));
-  } catch {
-    for (const line of text.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        documents.push(JSON.parse(trimmed));
-      } catch {
-        /* not a document line — never part of the index */
-      }
-    }
-  }
-  const rows = [];
-  for (const document of documents) {
-    for (const row of Array.isArray(document) ? document : [document]) {
-      if (row && typeof row === 'object' && typeof row.headRefName === 'string' && Number.isFinite(row.number)) {
-        rows.push(row);
-      }
-    }
-  }
-  return rows;
-}
-
-/**
- * Index PR rows by head branch into the two maps the classifiers read.
- *
- * Rows come from `state=all`, so they mix open, merged and closed PRs. REST
- * reports a merged PR as `state: 'closed'` plus a non-null `mergedAt`, and the
- * classifier keys on MERGED / OPEN, so the normalization happens here. A closed
- * PR that was never merged contributes nothing — it changes no verdict (both
- * paths land in ORPHAN), exactly as before.
- *
- * One branch can carry several PRs (a re-opened follow-up). The newest wins so
- * the grace period is measured from the merge that actually landed the work.
- */
-export function indexPrs(rows) {
-  const open = new Map();
-  const merged = new Map();
-  const keep = (map, branch, row, state) => {
-    const previous = map.get(branch);
-    if (previous && previous.number >= row.number) return;
-    map.set(branch, {
-      number: row.number,
-      headRefName: branch,
-      state,
-      url: typeof row.url === 'string' ? row.url : null,
-      mergedAt: typeof row.mergedAt === 'string' ? row.mergedAt : null,
-    });
-  };
-  for (const row of rows) {
-    if (row.state === 'open') keep(open, row.headRefName, row, 'OPEN');
-    else if (row.mergedAt) keep(merged, row.headRefName, row, 'MERGED');
-  }
-  return { open, merged };
-}
-
-/**
- * Index PRs by head branch over the FULL PR history. Never throws: on any
- * failure returns { available: false } and callers degrade to git-only evidence.
- *
- * The fetch is retried because a paginated walk is ~20 round trips, and this
- * platform's route to api.github.com resets connections often enough that a
- * single-attempt index would fall back to git-only evidence on most runs —
- * which, since origin/main's history was compacted, means reporting every
- * squash-merged slot as ORPHAN.
+ * Index PRs by head branch via `gh pr list`. Never throws: on any failure
+ * returns { available: false } and callers degrade to git-only evidence.
  */
 export async function collectPrIndex(cwd) {
-  let lastError;
-  for (let attempt = 0; attempt < GITHUB_PR_FETCH_ATTEMPTS; attempt++) {
-    try {
-      const { stdout } = await execFileAsync(
-        'gh',
-        [
-          'api',
-          '--paginate',
-          `repos/{owner}/{repo}/pulls?state=all&per_page=${GITHUB_PR_PAGE_SIZE}`,
-          '--jq',
-          '[.[] | {number, headRefName: .head.ref, state, mergedAt: .merged_at, url: .html_url}]',
-        ],
-        { cwd, encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024, timeout: GITHUB_PR_FETCH_TIMEOUT_MS }
-      );
-      return { available: true, ...indexPrs(parsePrPages(stdout)) };
-    } catch (err) {
-      lastError = err;
+  const open = new Map();
+  const merged = new Map();
+  const run = async (state, fields) => {
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['pr', 'list', '--state', state, '--limit', String(GITHUB_PR_LIMIT), '--json', fields],
+      { cwd, encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024, timeout: 60_000 }
+    );
+    return JSON.parse(stdout);
+  };
+  try {
+    for (const pr of await run('open', 'number,headRefName,state,url')) {
+      open.set(pr.headRefName, pr);
     }
+    for (const pr of await run('merged', 'number,headRefName,state,url,mergedAt')) {
+      merged.set(pr.headRefName, pr);
+    }
+  } catch {
+    return { available: false, open, merged };
   }
-  return { available: false, open: new Map(), merged: new Map(), error: lastError ? String(lastError.message || lastError) : null };
+  return { available: true, open, merged };
 }
 
 /**
@@ -543,9 +463,7 @@ export async function collectWorkspaceState(opts = {}) {
   }
 
   const gh = opts.skipGh ? { available: false, open: new Map(), merged: new Map() } : await collectPrIndex(cwd);
-  if (!gh.available) {
-    notes.push('GitHub PR evidence unavailable — classification uses git ancestry only' + (gh.error ? ': ' + gh.error : ''));
-  }
+  if (!gh.available) notes.push('GitHub PR evidence unavailable — classification uses git ancestry only');
 
   const worktrees = await listWorktrees(cwd);
   const primary = worktrees.find((w) => !w.bare);
