@@ -1,9 +1,9 @@
-# PD Core Value Pipeline Contract & Governance SPEC v0.4
+# PD Core Value Pipeline Contract & Governance SPEC v0.5
 ## Owner-Governed Intervention Lifecycle × Core Value Pipeline × Causal Evidence
 
 > **Status**: Owner-aligned architecture SPEC  
-> **Version**: v0.4  
-> **Date**: 2026-09-24  
+> **Version**: v0.5 — ADR integration alignment, pending review
+> **Date**: 2026-10-07; v0.4 identity integration retained from 2026-09-24
 > **Primary long-term purpose**: 定义 PD 核心价值系统未来 12–24 个月应长期保护的稳定契约  
 > **Primary current use**: 为 Principle Identity 治理与后续历史 reconciliation 提供稳定标准（v0.3 时代 PRI-803 用法已移至 audit snapshot）  
 > **Evidence basis**: PR #1707 / #1710 / #1717 + GPT-6 independent architecture review；v0.4 增补：PR #1851 / #1856 已验证的实现事实 + Phase 3 Principle Identity design audit  
@@ -12,6 +12,10 @@
 ---
 
 # v0.4 变更摘要（2026-09-24）
+
+> **v0.5 阅读规则**：[ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md)、[ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md) 承载本轮决定，状态以原文为准。既有 INV/章节编号保持不变。长期因果契约不当作 Phase 1 已成立；本期仅建事实链，见 [回执 SPEC §13](../superpowers/specs/2026-08-principle-receipt-design.md#13-pd-v2-phase-1--evidence-foundation-spec)。
+
+三层分开：Current Implementation 保留 workspace 账本与字段；Phase 1 Added Concepts 是证据关联、Episode/Effect/Outcome 和基础 Delivery；Future Target Model 才是 Owner Asset、正式不可变 Revision/Binding 与 Evaluation 学习闭环。UUID 不变，摘要不授予批准，新版本不自动替换 Activation。Observation、Evaluation、Owner Decision 分开；模型不创建正式版本、不扩大范围、不停用原则。
 
 v0.4 将 **Principle Identity** 正式收编为长期治理对象。触发证据：PR #1851（Candidate → Principle Ledger 类型写入边界）与 PR #1856（激活身份 UUID-only fail-closed）已把实现真理推进到规范之前，本次为漂移收编，不改变任何运行时行为。
 

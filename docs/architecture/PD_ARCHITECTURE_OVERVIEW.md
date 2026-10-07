@@ -1,5 +1,13 @@
 # PD 架构总览（PD Architecture Overview）
 
+## PD v2 决策入口（2026-10-07，目标对齐待评审）
+
+阅读路径：[ADR-0027：证据与投递](../adr/0027-principle-intervention-evidence-and-delivery-contract.md) → [ADR-0028：资产与演进](../adr/0028-owner-principle-assets-and-evolution.md) → [Phase 1 实施 SPEC §13](../superpowers/specs/2026-08-principle-receipt-design.md#13-pd-v2-phase-1--evidence-foundation-spec)。ADR 状态以原文为准；目录位置不表示已接受或已实现。
+
+Current Implementation 保留 workspace ledger 与既有管线；Phase 1 Added Concepts 增量连接事实记录；Future Target Model 才涉及 Owner Asset、版本/Binding 迁移和学习 Evaluation。原总览不因此变成已迁移的实现说明。数据与术语分别见 DATA_ARCHITECTURE、DOMAIN_MODEL、GLOSSARY 的分层增补。
+
+新旧关系：ADR-0013 的自动归因/治理设计由 ADR-0027 接受后替代；ADR-0014 的 MVP-first 继续有效；ADR-0017 的单一实现和 ADR-0020 的宿主信任/关闭边界保留。安装 ADR-0023/0024 不变。私库旧同名文档是历史材料，不是第二份本轮 ADR。
+
 > **状态**: Active / SSoT-ENTRY-POINT
 > **最后更新**: 2026-05-24（ADR-0014 / PRI-252 MVP-First 对齐）
 > **定位**: 整个 PD 项目的**唯一架构入口文档**。任何架构相关的疑问，先来这里。

@@ -1,5 +1,19 @@
 # PD 数据架构（Data Architecture）
 
+## 2026-10-07 PD v2 数据阅读边界
+
+依据 [ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md)、[ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md)，接受状态以 ADR 为准；本节不是数据库迁移完成证明。
+
+| 层次 | 数据权威与关系 |
+| --- | --- |
+| Current Implementation | 既有 workspace ledger、state.db 治理表及各原始观测来源保留；旧路径不是 Owner Asset Layer |
+| Phase 1 Added Concepts | selected governance workspace 的本地 SQLite 增量承载证据、Episode/Effect/Outcome 与关系；原始来源不复制为第二权威；待实施 |
+| Future Target Model | Owner 账本持有资产/版本/决定/Binding，workspace 保管隔离证据；逐项切换单一 writer，不长期双写；未迁移 |
+
+发生快照保留旧内容引用，不读最新行改写历史。task_outcomes、旧 effect 字段保留原义。写证据失败不能改变工具决定。敏感正文不得通过复制绕过来源 consent 或更短保留期。
+
+字段、故障和迁移要求见 [Phase 1 SPEC §13](../superpowers/specs/2026-08-principle-receipt-design.md#13-pd-v2-phase-1--evidence-foundation-spec)。
+
 > **状态**: Active（2026-05-15 修订版）
 > **最后更新**: 2026-06-26（P1-5 实现状态标注，与 ADR-0014 MVP-First 对齐）
 > **前次更新**: 2026-05-23（与 ADR-0005 / ADR-0006 / ADR-0007 / ADR-0012 对齐）

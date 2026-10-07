@@ -1,5 +1,9 @@
 # Principles Disciple 文档索引
 
+## PD v2 决策与实施入口（待评审）
+
+[架构决策索引](architecture/README.md) → [证据与投递 ADR-0027](adr/0027-principle-intervention-evidence-and-delivery-contract.md) / [资产与演进 ADR-0028](adr/0028-owner-principle-assets-and-evolution.md) → [Phase 1 SPEC §13](superpowers/specs/2026-08-principle-receipt-design.md#13-pd-v2-phase-1--evidence-foundation-spec)。当前实现、Phase 1 待实施概念和未来目标分层阅读；文档不是运行验收。
+
 > 本文件是 docs/ 目录的导航索引。公开 docs 全部被 git 跟踪;私人 docs 在独立仓库,通过 `$PD_PRIVATE_DOCS_DIR`(环境变量,默认 `~/principles-private/docs`)直接访问。
 
 ## 公开文档(本仓库)
