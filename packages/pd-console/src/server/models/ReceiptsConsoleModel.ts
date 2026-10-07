@@ -432,8 +432,22 @@ export class ReceiptsConsoleModel {
           retentionPolicyDays: RECEIPT_RETENTION_POLICY_DAYS,
         },
       };
+    } catch (err) {
+      // Beyond a missing table: an unreadable state.db (permissions,
+      // corruption) or a drifted partial schema must ALSO degrade here —
+      // the route contract promises degraded-over-500 and the UI needs a
+      // visible evidence section with a reason, not a vanished block.
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        status: 'degraded',
+        reason: `intervention evidence read failed: ${message}`,
+        nextAction: 'Run pd runtime diagnostics to check state.db health',
+        selector,
+        ...empty,
+        coverage: unreadCoverage('unavailable', 'evidence_read_failed', 'run_runtime_diagnostics'),
+      };
     } finally {
-      conn.close();
+      try { conn.close(); } catch { /* best-effort: read path must not throw */ }
     }
   }
 

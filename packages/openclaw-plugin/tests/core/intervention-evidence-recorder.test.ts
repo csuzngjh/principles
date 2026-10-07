@@ -185,4 +185,25 @@ describe('intervention evidence recorder (openclaw adapter)', () => {
     const enforcement = caps.find((c) => c.capability === 'enforcement_delivery');
     expect(enforcement?.status).toBe('supported');
   });
+
+  it('skips the enforcement chain without toolCallId/runId — no hash fallback, no partial batch', () => {
+    // Without a native event key the episode would be rejected by the
+    // normalizer (episode_requires_native_event_key) and drop the WHOLE
+    // batch — skipping with a warn preserves the other three chain links'
+    // silence contract instead of losing everything.
+    seedActivation('act-nk', 'art-nk');
+    const warn: string[] = [];
+    recordGateEnforcementEvidence({
+      workspaceDir,
+      sessionId: 'sess-1',
+      toolName: 'write_file',
+      filePath: 'a.ts',
+      activationId: 'act-nk',
+      principleId: 'T-01',
+      decision: 'block',
+      logger: { warn: (m: string) => warn.push(m) },
+    });
+    expect(evidenceRows()).toHaveLength(0);
+    expect(warn.join(' ')).toContain('toolCallId/runId');
+  });
 });

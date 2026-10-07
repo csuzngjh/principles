@@ -15,6 +15,7 @@ import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime-v
 import { processHookInvocation } from '../src/pd-hook.js';
 import {
   recordCodexPromptDeliveryEvidence,
+  recordCodexDenyEvidence,
   codexCapabilityDeclarations,
 } from '../src/codex-evidence-recorder.js';
 
@@ -111,6 +112,26 @@ describe('codex evidence recorder', () => {
     expect(byCapability.get('application_runtime_verified')?.status).toBe('unknown');
     expect(byCapability.get('agent_context_delivery')?.status).toBe('supported');
     expect(byCapability.get('agent_context_delivery')?.maxConfirmation).toBe('submitted');
+  });
+
+  it('skips the deny chain without toolUseId — no hash fallback, no rows', () => {
+    // A hash fallback would mint an episode with no native event key, which
+    // the normalizer rejects (episode_requires_native_event_key) and drops
+    // the WHOLE batch. Skipping with a warn is the honest degradation.
+    const root = workspace();
+    seedPromptActivation(root);
+    const warnings: string[] = [];
+    recordCodexDenyEvidence({
+      workspaceDir: root,
+      sessionId: 'sess-cx',
+      toolName: 'write_file',
+      activationId: 'act-cx',
+      principleId: 'princ-cx',
+      evidenceEnabled: true,
+      warn: (line) => warnings.push(line),
+    });
+    expect(evidenceRows(root)).toHaveLength(0);
+    expect(warnings.join(' ')).toContain('toolUseId');
   });
 });
 

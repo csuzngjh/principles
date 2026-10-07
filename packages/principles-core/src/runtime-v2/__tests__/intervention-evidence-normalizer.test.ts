@@ -418,4 +418,19 @@ describe('capability declarations (SPEC §13.6)', () => {
     }));
     expect(result.ok).toBe(true);
   });
+
+  it('rejects a capability outside the closed vocabulary (rc-2, no as-cast past validation)', () => {
+    const result = normalizeInterventionEvidenceBatch(validBatch({
+      capabilityDeclarations: [{
+        hostKind: 'openclaw',
+        capability: 'effectiveness_score',
+        status: 'supported',
+        adapterVersion: 'openclaw-plugin@2.2.2',
+        channel: 'code_tool_hook',
+        note: 'a forged capability must never reach the ledger',
+      }],
+    }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain('capability_invalid');
+  });
 });

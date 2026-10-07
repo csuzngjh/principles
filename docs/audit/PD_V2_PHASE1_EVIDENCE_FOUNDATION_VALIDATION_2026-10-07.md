@@ -80,9 +80,11 @@ Outcome      owner|outcome|openclaw|episode|sess-gj|tool-gj
 | 关联 BDD 场景 | Deferred | 未新增 .feature 场景（未删/未降任何既有场景）；四问与链路由 model/route/UI/集成测试覆盖 |
 | Learning/Evaluation | 明确排除 | 无 effectiveness/score/ranking 字段，无自动原则变更（ADR-0027 §2.5） |
 
-## 5. 开发期事故披露（已清理）
+## 5. 开发期事故披露（已清理，未经独立验证）
 
 PR4 开发中，全路径测试未隔离 `CODEX_HOME`，用户 workspace 解析采纳了本机真实 `~/.codex/pd-workspace`，导致 2 条 evidence 行 + 6 条 capability 行 + 10 行事件日志被测试写入真实 Owner workspace。已按 §18 流程处理：先备份（`state.db.backup-before-evtest-cleanup`、`events_2026-10-07.jsonl.backup-before-evtest-cleanup`，与原文件同目录，Owner 可择期删除），再有界删除恰好该批测试行；测试已改为隔离 `CODEX_HOME` 并复验零泄漏。此事故不影响任何治理数据（无 Principle/Approval/Activation 行被触碰）。
+
+> 诚实声明：上述精确删除范围（2/6/10）与“未触碰治理数据”结论来自开发期手工核对，**未经独立可复核证据支撑**（无脱敏的前后表行数、抽样 ID 与可重跑命令输出）。按 `docs/process/DATA_CLEANUP_GUIDELINES.md` 应补充清理核对结果；本报告暂将其标记为**未经独立验证**，follow-up 补齐。
 
 ## 6. 自动化测试汇总（本次六段提交）
 

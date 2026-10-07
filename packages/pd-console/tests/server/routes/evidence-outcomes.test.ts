@@ -160,6 +160,53 @@ describe('POST /api/v1/evidence/outcomes', () => {
     expect(data.insertedCount).toBe(0);
     expect(data.duplicateCount).toBe(1);
   });
+
+  it('appends a correction as a new row when the content changes (same episode)', async () => {
+    seedEpisode();
+    const episodeKey = 'openclaw|episode|sess-1|tool-1';
+    const first = await callOutcome('POST', { episodeKey, observationSummary: '测试文件未被创建' }, OWNER);
+    expect(first.statusCode).toBe(200);
+    // Previously this returned 503 (source_conflict on the episode-only key),
+    // contradicting "corrections append" — the content digest must mint a new key.
+    const second = await callOutcome('POST', { episodeKey, observationSummary: '测试文件已被创建但内容为空' }, OWNER);
+    expect(second.statusCode).toBe(200);
+    const data = parse(second).data ?? {};
+    expect(data.insertedCount).toBe(1);
+    expect(data.duplicateCount).toBe(0);
+    const count = (conn.getDb()
+      .prepare("SELECT COUNT(*) AS n FROM intervention_evidence_records WHERE record_kind = 'outcome'")
+      .get() as { n: number }).n;
+    expect(count).toBe(2);
+  });
+
+  it('attributes the outcome hostKind to the owning episode host (codex episode → codex)', async () => {
+    // Seed a CODEX episode directly through the ingress, then submit an
+    // Owner outcome — the record must read hostKind=codex from the episode
+    // row instead of the hardcoded openclaw default.
+    const codexEpisodeKey = 'codex|episode|sess-c|tool-c';
+    const seed = getInterventionEvidenceIngress().appendObservationBatch({
+      workspaceDir,
+      batch: {
+        evidenceScopeId: getInterventionEvidenceIngress().evidenceScopeIdFor(workspaceDir),
+        sourceKind: 'codex_pd_hook_event_log',
+        adapterVersion: 'test@1', recordedAt: '2026-10-07T08:00:00Z',
+        observations: [{
+          observationKey: codexEpisodeKey, sourceLocator: 'log:c',
+          kind: 'behavior_episode',
+          nativeRefs: { hostKind: 'codex', sessionId: 'sess-c', toolCallId: 'tool-c' },
+          payload: { status: 'closed', actionSummary: 'codex tool denied' },
+        }],
+      },
+    });
+    expect(seed.ok).toBe(true);
+    const res = await callOutcome('POST', { episodeKey: codexEpisodeKey, observationSummary: 'observed' }, OWNER);
+    expect(res.statusCode).toBe(200);
+    const row = conn.getDb()
+      .prepare("SELECT native_refs_json FROM intervention_evidence_records WHERE record_kind = 'outcome'")
+      .get() as { native_refs_json: string } | undefined;
+    expect(row).toBeDefined();
+    expect(JSON.parse(row!.native_refs_json).hostKind).toBe('codex');
+  });
 });
 
 describe('GET /api/v1/receipts/evidence-audit', () => {

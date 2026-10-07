@@ -19,7 +19,8 @@
  * ledger's scope, never a Principle entity.
  */
 import { createHash } from 'node:crypto';
-import { isAbsolute, resolve } from 'path';
+import { isAbsolute, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
 import {
   normalizeInterventionEvidenceBatch,
   SqliteConnection,
@@ -65,7 +66,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function createInterventionEvidenceIngress(): InterventionEvidenceIngress {
   function evidenceScopeIdFor(workspaceDir: string): string {
-    const resolved = isAbsolute(workspaceDir) ? resolve(workspaceDir) : resolve(process.cwd(), workspaceDir);
+    const absolute = isAbsolute(workspaceDir) ? resolve(workspaceDir) : resolve(process.cwd(), workspaceDir);
+    // Same workspace reached through a symlink alias or a renamed parent must
+    // map to one scope — resolve to the canonical path before hashing
+    // (falls back to the absolute path when the dir does not exist yet).
+    let resolved = absolute;
+    try { resolved = realpathSync(absolute); } catch { /* keep absolute */ }
     const cached = scopeIdCache.get(resolved);
     if (cached) return cached;
     const scopeId = `pd-evidence-scope:sha256:${createHash('sha256').update(resolved, 'utf8').digest('hex').slice(0, 32)}`;

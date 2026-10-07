@@ -196,6 +196,42 @@ describe('SqliteInterventionEvidenceStore', () => {
     expect(read.relations.unresolvedReferences).toHaveLength(0);
   });
 
+  it('resolves correction_of against evidence_id (not observation_key)', () => {
+    // correctionOf cites an evidenceId per the contract; the audit-summary
+    // reference probe must use the evidence_id column for that field only.
+    store.appendObservationBatch(normalized(deliveryBatch()));
+    const first = store.readAuditRelations({ type: 'principle', principleId: 'T-01' });
+    expect(first.available).toBe(true);
+    if (!first.available) return;
+    const delivery = first.relations.deliveries[0]!;
+    const correction = {
+      observationKey: 'openclaw|delivery|correction|1',
+      sourceLocator: 'logs/events_2026-10-07.jsonl',
+      kind: 'delivery' as const,
+      nativeRefs: { hostKind: 'openclaw' as const, sessionId: 'sess-1', runId: 'run-1' },
+      principleId: 'T-01',
+      contentRef: { principleId: 'T-01', payloadDigest: 'sha256:aa', resolution: 'resolved' as const },
+      activationRef: { activationId: 'act-1', sourceSnapshotDigest: 'sha256:bb' },
+      correctionOf: delivery.evidenceId,
+      correctionReason: 'payload digest revised',
+      payload: { targetKind: 'agent_context' as const, confirmation: 'submitted' as const, outcome: 'attempted' as const },
+    };
+    store.appendObservationBatch(normalized(deliveryBatch({ observations: [correction] })));
+    const read = store.readAuditRelations({ type: 'principle', principleId: 'T-01' });
+    expect(read.available).toBe(true);
+    if (!read.available) return;
+    const correctionSummary = read.relations.deliveries.find((r) => r.observationKey === correction.observationKey)!;
+    expect(correctionSummary).toBeDefined();
+    expect(correctionSummary.associationStatus).toBe('linked');
+    expect(read.relations.unresolvedReferences.filter((u) => u.evidenceId === correctionSummary.evidenceId)).toHaveLength(0);
+  });
+
+  it('resolves episode host attribution from the episode row native refs', () => {
+    store.appendObservationBatch(normalized(deliveryBatch()));
+    expect(store.findEpisodeHostKind('openclaw|episode|sess-1|tool-9')).toBe('openclaw');
+    expect(store.findEpisodeHostKind('missing|episode|none')).toBeNull();
+  });
+
   it('enforces append-only immutability at the DB level', () => {
     store.appendObservationBatch(normalized(deliveryBatch()));
     const db = conn.getDb();

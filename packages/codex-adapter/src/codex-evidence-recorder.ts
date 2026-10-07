@@ -152,9 +152,19 @@ export interface CodexDenyEvidenceInput {  workspaceDir: string;
  * permissionDecision — PD does not claim the host executed anything broader.
  * Currently dormant while v2 rule enforcement is suspended (PRI-780), but
  * wired so an attributed deny is recorded honestly if one ever occurs.
+ *
+ * Episode identity requires the per-call toolUseId. Without it the chain is
+ * skipped: a hash fallback would mint an episode with NO native event key,
+ * which the normalizer rejects (episode_requires_native_event_key) and drops
+ * the WHOLE batch. (Codex deny episodes only ever carry toolCallId — unlike
+ * OpenClaw they never see a runId — so there is no legitimate fallback here.)
  */
 export function recordCodexDenyEvidence(input: CodexDenyEvidenceInput): void {
   if (!input.activationId || !input.principleId) return;
+  if (!input.toolUseId) {
+    input.warn('[PD:Evidence] codex deny chain skipped: no toolUseId — episode identity would lack a native event key');
+    return;
+  }
   if (!input.evidenceEnabled) return;
   const ingress = getInterventionEvidenceIngress();
   const activationRef = ingress.resolveActivationOccurrenceRef(input.workspaceDir, input.activationId);
@@ -162,7 +172,7 @@ export function recordCodexDenyEvidence(input: CodexDenyEvidenceInput): void {
     input.warn(`[PD:Evidence] codex deny chain skipped for activation ${input.activationId}: occurrence snapshot unresolvable`);
     return;
   }
-  const toolKey = input.toolUseId ?? `hash:${activationRef.sourceSnapshotDigest.slice(7, 23)}`;
+  const toolKey = input.toolUseId;
   const sessionPart = input.sessionId ?? '-';
   const episodeKey = `codex|episode|${sessionPart}|${toolKey}`;
   const contentRef = {

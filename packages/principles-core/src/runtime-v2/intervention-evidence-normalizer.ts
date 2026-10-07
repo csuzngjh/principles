@@ -23,6 +23,7 @@
 import { createHash } from 'node:crypto';
 import {
   DELIVERED_CONFIRMATIONS,
+  INTERVENTION_CAPABILITIES,
   INTERVENTION_RECORD_KINDS,
   INTERVENTION_SOURCE_KINDS,
   INTERVENTION_TEXT_BOUNDS,
@@ -69,6 +70,7 @@ const EPISODE_STATUSES = new Set<string>(['open', 'closed', 'interrupted']);
 const EFFECT_STATUSES = new Set<string>(['observed', 'disputed', 'invalidated']);
 const OUTCOME_SOURCES = new Set<string>(['authorized_result_observation', 'owner_feedback']);
 const CAPABILITY_STATUSES = new Set<string>(['supported', 'unsupported', 'unknown']);
+const CAPABILITY_SET = new Set<string>(INTERVENTION_CAPABILITIES);
 const HOST_KINDS = new Set<string>(['openclaw', 'codex']);
 
 const BATCH_KEYS = new Set([
@@ -516,7 +518,7 @@ function normalizeCapabilityDeclaration(raw: unknown): { value?: InterventionCap
   const enums = enumChecks('capability');
   const hostKind = enums.require<'openclaw' | 'codex'>(raw, 'hostKind', HOST_KINDS);
   if (hostKind.error) return { error: hostKind.error };
-  const capability = strings.require(raw, 'capability', 64);
+  const capability = enums.require<InterventionCapabilityDeclaration['capability']>(raw, 'capability', CAPABILITY_SET);
   if (capability.error) return { error: capability.error };
   const status = enums.require<'supported' | 'unsupported' | 'unknown'>(raw, 'status', CAPABILITY_STATUSES);
   if (status.error) return { error: status.error };
@@ -526,7 +528,7 @@ function normalizeCapabilityDeclaration(raw: unknown): { value?: InterventionCap
   if (channel.error) return { error: channel.error };
   const value: InterventionCapabilityDeclaration = {
     hostKind: hostKind.value,
-    capability: capability.value as InterventionCapabilityDeclaration['capability'],
+    capability: capability.value,
     status: status.value,
     adapterVersion: adapterVersion.value,
     channel: channel.value,

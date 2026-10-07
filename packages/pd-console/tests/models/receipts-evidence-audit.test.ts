@@ -184,4 +184,22 @@ describe('ReceiptsConsoleModel.getEvidenceAudit (SPEC §13.8 four queries)', () 
     expect(result.coverage.sourceStatus).toBe('available');
     expect(JSON.stringify(result)).not.toMatch(/successRate|effectiveness|score/i);
   });
+
+  it('degrades (never throws) when the evidence read hits a corrupted row', async () => {
+    // A malformed payload row makes the store throw PDRuntimeError — the
+    // model must convert it into a structured degraded response so the
+    // route stays 200-with-reason and the UI keeps a visible section.
+    seedChain();
+    const db = conn.getDb();
+    db.prepare('DROP TRIGGER IF EXISTS intervention_evidence_records_no_update').run();
+    db.prepare(`UPDATE intervention_evidence_records SET payload_json = 'not-json{'`).run();
+    conn.close();
+    conn = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false });
+    const model = new ReceiptsConsoleModel(workspaceDir);
+    const result = await model.getEvidenceAudit({ type: 'principle', principleId: 'princ-A' });
+    expect(result.status).toBe('degraded');
+    expect(result.reason).toContain('intervention evidence read failed');
+    expect(result.nextAction).toContain('diagnostics');
+    expect(result.coverage.sourceStatus).toBe('unavailable');
+  });
 });

@@ -243,20 +243,27 @@ export function handleBeforeToolCall(
 
       // PD v2 Phase 1: normalized enforcement evidence (delivery runtime_loaded
       // + runtime_verified application + episode + effect, one atomic batch).
-      // Best-effort; never affects the block being returned.
-      recordGateEnforcementEvidence({
-        workspaceDir: wctx.workspaceDir,
-        sessionId: ctx.sessionId,
-        ...evidenceToolIds(event),
-        toolName: event.toolName,
-        filePath: relPath,
-        activationId: report.liveDecisionActivationId,
-        principleId: hostResult.principleId,
-        ruleId: hostResult.ruleId,
-        reason: hostResult.reason,
-        decision: 'block',
-        logger,
-      });
+      // Best-effort; never affects the block being returned — the recorder is
+      // ingress-guarded (never throws) but the call-site try/catch keeps the
+      // gate decision independent of ANY evidence-path surprise (a throw here
+      // would otherwise skip recordGateBlockAndReturn and flip block→allow).
+      try {
+        recordGateEnforcementEvidence({
+          workspaceDir: wctx.workspaceDir,
+          sessionId: ctx.sessionId,
+          ...evidenceToolIds(event),
+          toolName: event.toolName,
+          filePath: relPath,
+          activationId: report.liveDecisionActivationId,
+          principleId: hostResult.principleId,
+          ruleId: hostResult.ruleId,
+          reason: hostResult.reason,
+          decision: 'block',
+          logger,
+        });
+      } catch (evidenceErr) {
+        logger?.warn?.(`[PD_GATE] Evidence recording threw (block decision unaffected): ${String(evidenceErr)}`);
+      }
 
       return recordGateBlockAndReturn(wctx, {
         filePath: relPath,
@@ -432,19 +439,25 @@ export function handleBeforeToolCall(
             }
             // PD v2 Phase 1: normalized enforcement evidence for the applied
             // correction (delivery/application/episode/effect batch).
-            recordGateEnforcementEvidence({
-              workspaceDir: wctx.workspaceDir,
-              sessionId: ctx.sessionId,
-              ...evidenceToolIds(event),
-              toolName: event.toolName,
-              filePath: relPath,
-              activationId: report.liveDecisionActivationId,
-              principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
-              ruleId: String(proposal.ruleId ?? 'unknown'),
-              reason: hostResult.reason,
-              decision: 'auto_correct',
-              logger,
-            });
+            // Call-site guarded: a throw here would otherwise land in the
+            // applyError branch below and REVERT the already-applied correction.
+            try {
+              recordGateEnforcementEvidence({
+                workspaceDir: wctx.workspaceDir,
+                sessionId: ctx.sessionId,
+                ...evidenceToolIds(event),
+                toolName: event.toolName,
+                filePath: relPath,
+                activationId: report.liveDecisionActivationId,
+                principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
+                ruleId: String(proposal.ruleId ?? 'unknown'),
+                reason: hostResult.reason,
+                decision: 'auto_correct',
+                logger,
+              });
+            } catch (evidenceErr) {
+              logger?.warn?.(`[PD_GATE] Evidence recording threw (correction unaffected): ${String(evidenceErr)}`);
+            }
             // PRI-529 (SPEC §6-D2): the host merges ONLY `params` from the hook
             // result (hook-before-tool-call-result.ts). The previous return shape
             // (`toolArgs`/`skipToolCall`/`_pdAutoCorrectWarning`) was ignored by
@@ -810,20 +823,26 @@ export function accountSharedDeny(
     logger.warn?.(`[PD_GATE] Receipt ledger write threw (rule_blocked, shared): ${String(ledgerErr)}`);
   }
   // PD v2 Phase 1: normalized enforcement evidence for the shared-path deny.
-  recordGateEnforcementEvidence({
-    workspaceDir: wctx.workspaceDir,
-    sessionId: accounting.sessionId,
-    ...(accounting.toolCallId !== undefined ? { toolCallId: accounting.toolCallId } : {}),
-    ...(accounting.runId !== undefined ? { runId: accounting.runId } : {}),
-    toolName: accounting.toolName,
-    filePath: accounting.filePath ?? undefined,
-    activationId: accounting.activationId,
-    principleId: accounting.principleId,
-    ruleId: accounting.ruleId,
-    reason: accounting.reason,
-    decision: 'block',
-    logger,
-  });
+  // Call-site guarded: a throw here would otherwise skip persistGateBlock
+  // below and lose the block accounting.
+  try {
+    recordGateEnforcementEvidence({
+      workspaceDir: wctx.workspaceDir,
+      sessionId: accounting.sessionId,
+      ...(accounting.toolCallId !== undefined ? { toolCallId: accounting.toolCallId } : {}),
+      ...(accounting.runId !== undefined ? { runId: accounting.runId } : {}),
+      toolName: accounting.toolName,
+      filePath: accounting.filePath ?? undefined,
+      activationId: accounting.activationId,
+      principleId: accounting.principleId,
+      ruleId: accounting.ruleId,
+      reason: accounting.reason,
+      decision: 'block',
+      logger,
+    });
+  } catch (evidenceErr) {
+    logger.warn?.(`[PD_GATE] Evidence recording threw (shared deny accounting continues): ${String(evidenceErr)}`);
+  }
   persistGateBlock(wctx, {
     filePath: accounting.filePath,
     reason: accounting.reason,

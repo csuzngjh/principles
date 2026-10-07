@@ -115,6 +115,22 @@ describe('intervention evidence ingress', () => {
     }
   });
 
+  it('maps a symlink alias of the same workspace to the same scope id', () => {
+    // realpath normalization: the same state.db reached through two path
+    // spellings must not fork the ledger into evidence_scope_mismatch.
+    const link = `${workspaceDir}-link`;
+    try {
+      fs.symlinkSync(workspaceDir, link, 'junction');
+    } catch {
+      return; // symlink privileges unavailable on this runner — skip, not fail
+    }
+    try {
+      expect(ingress.evidenceScopeIdFor(link)).toBe(ingress.evidenceScopeIdFor(workspaceDir));
+    } finally {
+      fs.rmSync(link, { recursive: true, force: true });
+    }
+  });
+
   it('overrides the batch scope with the workspace-derived scope so the ledger stays single-scope', () => {
     seedActivation(workspaceDir, 'act-1');
     const first = ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch() });

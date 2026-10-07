@@ -256,6 +256,31 @@ export class SqliteInterventionEvidenceStore {
   }
 
   /**
+   * Resolve the host that owns a behavior episode: the episode row's own
+   * native_refs hostKind (an episode IS observed by exactly one host).
+   * Returns null when the episode is absent or its stored refs are corrupt —
+   * callers fall back to an explicit Unknown/derived marker, never a guess.
+   */
+  findEpisodeHostKind(episodeKey: string): 'openclaw' | 'codex' | null {
+    const db = this.connection.getDb();
+    if (!interventionEvidenceTablesExist(db)) return null;
+    const row = db.prepare(
+      `SELECT native_refs_json FROM intervention_evidence_records
+       WHERE record_kind = 'behavior_episode' AND observation_key = ?
+       ORDER BY recorded_at DESC, evidence_id DESC LIMIT 1`,
+    ).get(episodeKey);
+    if (!isRecord(row) || typeof row.native_refs_json !== 'string') return null;
+    let refs: unknown;
+    try {
+      refs = JSON.parse(row.native_refs_json);
+    } catch {
+      return null;
+    }
+    if (!isRecord(refs)) return null;
+    return refs.hostKind === 'openclaw' || refs.hostKind === 'codex' ? refs.hostKind : null;
+  }
+
+  /**
    * Append one normalized batch atomically. Scope is established on first
    * append; a batch from a different scope is rejected without writes.
    * Conflicting payloads under an existing natural key are reported — the
@@ -304,7 +329,7 @@ export class SqliteInterventionEvidenceStore {
             duplicates,
             conflicts,
             reason: `evidence_scope_mismatch:${scopeRow.scope_id}`,
-            nextAction: `This state.db evidence ledger belongs to scope ${scopeRow.scope_id}; resolve the workspace resolution that produced ${batch.evidenceScopeId}.`,
+            nextAction: `This state.db evidence ledger belongs to scope ${scopeRow.scope_id}; re-resolve the workspace to its canonical path (check symlinks, renames or bind mounts — evidenceScopeIdFor uses realpath) and replay the same batch, or inspect .pd/state.db ownership when two workspaces share one db file.`,
           };
         }
       } else {
@@ -466,6 +491,9 @@ export class SqliteInterventionEvidenceStore {
     }
 
     const keyExists = db.prepare('SELECT 1 FROM intervention_evidence_records WHERE observation_key = ? LIMIT 1');
+    // correctionOf cites an evidenceId, not an observation_key (contract
+    // §correctionOf) — it needs its own existence probe.
+    const evidenceExists = db.prepare('SELECT 1 FROM intervention_evidence_records WHERE evidence_id = ? LIMIT 1');
     const existingKeys = new Set<string>();
     const summaries: (InterventionAuditRecordSummary & { pendingFields: { field: string; missingKey: string }[] })[] = [];
     for (const rawRow of rows) {
@@ -473,7 +501,7 @@ export class SqliteInterventionEvidenceStore {
       for (const column of ['delivery_key', 'episode_key', 'effect_key', 'correction_of'] as const) {
         const key = rawRow[column];
         if (typeof key === 'string' && key.length > 0 && !existingKeys.has(key)) {
-          const hit = keyExists.get(key);
+          const hit = column === 'correction_of' ? evidenceExists.get(key) : keyExists.get(key);
           if (isRecord(hit)) existingKeys.add(key);
         }
       }

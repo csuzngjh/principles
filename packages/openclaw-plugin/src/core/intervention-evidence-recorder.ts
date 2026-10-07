@@ -175,12 +175,22 @@ export interface GateEnforcementEvidenceInput {
  * Record the enforcement chain for one gated tool intervention: enforcement
  * delivery (runtime_loaded), runtime_verified application, behavior episode
  * and effect — one atomic batch with exact cross-references.
+ *
+ * Episode identity requires a per-call native event key (toolCallId, else
+ * runId). Without either the chain is skipped with a warn: a hash fallback
+ * would mint an episode with NO native event key, which the normalizer
+ * rejects (episode_requires_native_event_key) and drops the WHOLE batch —
+ * exactly the silent-chain-loss the fallback pretends to avoid.
  */
 export function recordGateEnforcementEvidence(input: GateEnforcementEvidenceInput): void {
   if (!input.activationId || !input.principleId) {
     // Without attribution the chain cannot be recorded honestly; the gap is
     // observable at the call site (legacy PRI-573 warning covers the block row).
     input.logger?.info?.('[PD:Evidence] gate enforcement skipped: decision carries no activation/principle attribution');
+    return;
+  }
+  if (!input.toolCallId && !input.runId) {
+    input.logger?.warn?.('[PD:Evidence] gate enforcement skipped: no toolCallId/runId — episode identity would lack a native event key');
     return;
   }
   if (!isEvidenceEnabled(input.workspaceDir, input.logger)) return;
@@ -190,7 +200,9 @@ export function recordGateEnforcementEvidence(input: GateEnforcementEvidenceInpu
     input.logger?.warn?.(`[PD:Evidence] gate enforcement skipped for activation ${input.activationId}: occurrence snapshot unresolvable`);
     return;
   }
-  const toolKey = input.toolCallId ?? input.runId ?? `hash:${activationRef.sourceSnapshotDigest.slice(7, 23)}`;
+  // toolCallId preferred, runId fallback — both are real native event keys
+  // accepted by the normalizer (toolCallId/turnId/runId/rolloutIdentity).
+  const toolKey = input.toolCallId ?? input.runId!;
   const sessionPart = input.sessionId ?? '-';
   const episodeKey = `openclaw|episode|${sessionPart}|${toolKey}`;
   const summaryPath = input.filePath ?? '(no-path)';

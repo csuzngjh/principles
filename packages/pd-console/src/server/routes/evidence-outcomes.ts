@@ -18,7 +18,8 @@
  * （不调用 ActivationDispatcher / intake / 生命周期服务）。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { mintObservationKey } from '@principles/core/runtime-v2';
+import { createHash } from 'node:crypto';
+import { mintObservationKey, SqliteConnection, SqliteInterventionEvidenceStore } from '@principles/core/runtime-v2';
 import { getInterventionEvidenceIngress } from '@principles/host-runtime';
 import { sendSuccess, sendError, sendMethodNotAllowed, sendBadRequest } from '../utils/response.js';
 import { readBody } from '../utils/request.js';
@@ -71,6 +72,24 @@ export interface EvidenceOutcomeRouteContext {
   ownerIdentity: { ownerId: string; credentialId: string } | null;
 }
 
+/**
+ * Best-effort episode host attribution: read the episode row's own
+ * native_refs hostKind through the store. Never throws — an unreadable
+ * store or a missing episode yields null and the caller falls back to the
+ * openclaw writer default (the pre-existing behavior for unresolvable refs).
+ */
+function resolveEpisodeHostKind(workspaceDir: string, episodeKey: string): 'openclaw' | 'codex' | null {
+  let conn: SqliteConnection | null = null;
+  try {
+    conn = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false });
+    return new SqliteInterventionEvidenceStore(conn).findEpisodeHostKind(episodeKey);
+  } catch {
+    return null;
+  } finally {
+    try { conn?.close(); } catch { /* best-effort */ }
+  }
+}
+
 export async function handleEvidenceOutcomesRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -102,10 +121,20 @@ export async function handleEvidenceOutcomesRoute(
   }
   const ingress = getInterventionEvidenceIngress();
   const { ownerId } = ctx.ownerIdentity;
-  // Episode-key-scoped counter: the Owner console can submit a corrected
-  // observation for the same episode — corrections append (idempotent per
-  // identical content), history is preserved (ADR-0027 §2.2).
-  const observationKey = mintObservationKey(['owner', 'outcome', parsed.body.episodeKey]);
+  // Episode-key-scoped identity with a content digest: the Owner console can
+  // submit a corrected observation for the same episode — identical content
+  // replays idempotently, changed content appends a NEW row (ADR-0027 §2.2).
+  // The previous episode-only key turned every correction into a
+  // source_conflict → 503, contradicting "corrections append".
+  const contentDigest = createHash('sha256')
+    .update(JSON.stringify([parsed.body.observationSummary, parsed.body.feedbackText ?? '']))
+    .digest('hex').slice(0, 16);
+  const observationKey = mintObservationKey(['owner', 'outcome', parsed.body.episodeKey, contentDigest]);
+  // Attribute the outcome to the host that owns the referenced episode
+  // (episode row's own native_refs). When the episode cannot be resolved the
+  // record keeps the pre-existing openclaw writer default — an explicit
+  // honest gap (episode association stays pending), never a guessed host.
+  const episodeHostKind = resolveEpisodeHostKind(ctx.workspaceDir, parsed.body.episodeKey);
   const result = ingress.appendObservationBatch({
     workspaceDir: ctx.workspaceDir,
     batch: {
@@ -118,7 +147,7 @@ export async function handleEvidenceOutcomesRoute(
           observationKey,
           sourceLocator: 'console:evidence-outcomes',
           kind: 'outcome',
-          nativeRefs: { hostKind: 'openclaw' },
+          nativeRefs: { hostKind: episodeHostKind ?? 'openclaw' },
           episodeKey: parsed.body.episodeKey,
           payload: {
             outcomeSource: 'owner_feedback',
