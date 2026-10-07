@@ -35,7 +35,8 @@ function initMinimalDb(pdDir: string): void {
       confidence REAL,
       source_recommendation_json TEXT NOT NULL,
       status TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      recommendation_kind TEXT NOT NULL DEFAULT 'principle'
     );
   `);
   db.close();

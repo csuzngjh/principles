@@ -91,6 +91,29 @@ const LEDGER_WITH_ENTRY = {
   },
 };
 
+// A successful reuse decision (PRI-917 / R7): the consumed candidate resolves
+// into an EXISTING principle via reuseEvidence with zero ledger growth —
+// no derivedFromPainIds entry is ever written. This is the OC-02 / CX-02
+// false-positive reproduction shape (was: degraded / ledger_write_failed).
+const LEDGER_WITH_REUSE_ONLY = {
+  tree: {
+    principles: {
+      'l-target': {
+        id: 'l-target',
+        createdAt: '2025-12-01T00:00:00.000Z',
+        reuseEvidence: [{
+          painId: 'pain-001',
+          candidateId: 'c1',
+          decision: 'reuse',
+          actor: { kind: 'owner', id: 'owner-1' },
+          reason: 'duplicate of existing principle',
+          decidedAt: '2026-01-01T00:07:00.000Z',
+        }],
+      },
+    },
+  },
+};
+
 describe('PainChainReadModel', () => {
    
   let model: PainChainReadModel;
@@ -217,6 +240,47 @@ describe('PainChainReadModel', () => {
     await model.close();
   });
 
+  it('traceByPainId: reuse-resolved chain (zero ledger growth) → succeeded, not ledger_write_failed (PRI-917 / R7)', async () => {
+    setLedgerData(LEDGER_WITH_REUSE_ONLY);
+    const mgr = makeMockManager({
+      task: TASK_SUCCEEDED,
+      runs: [RUN_SUCCEEDED],
+      artifactRow: ARTIFACT_ROW,
+      candidates: [CANDIDATE_CONSUMED],
+    });
+    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
+    const trace = await model.traceByPainId('pain-001');
+    expect(trace.status).toBe('succeeded');
+    expect(trace.failureCategory).toBeNull();
+    expect(trace.ledgerEntryIds).toEqual(['l-target']);
+    expect(trace.missingLinks).toEqual([]);
+    await model.close();
+  });
+
+  it('traceByPainId: malformed reuseEvidence is not trusted as resolution', async () => {
+    setLedgerData({
+      tree: {
+        principles: {
+          'l-bad': {
+            id: 'l-bad',
+            reuseEvidence: ['not-an-object', { candidateId: 42 }, null],
+          },
+        },
+      },
+    });
+    const mgr = makeMockManager({
+      task: TASK_SUCCEEDED,
+      runs: [RUN_SUCCEEDED],
+      artifactRow: ARTIFACT_ROW,
+      candidates: [CANDIDATE_CONSUMED],
+    });
+    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
+    const trace = await model.traceByPainId('pain-001');
+    expect(trace.status).toBe('degraded');
+    expect(trace.failureCategory).toBe('ledger_write_failed');
+    await model.close();
+  });
+
   // ── getLastSuccessfulChain ─────────────────────────────────────────────
 
   it('getLastSuccessfulChain: init failure returns undefined', async () => {
@@ -270,6 +334,25 @@ describe('PainChainReadModel', () => {
     model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
     const chain = await model.getLastSuccessfulChain();
     expect(chain).toBeUndefined();
+    await model.close();
+  });
+
+  it('getLastSuccessfulChain: reuse-resolved candidate links to the target principle (PRI-917 / R7)', async () => {
+    setLedgerData(LEDGER_WITH_REUSE_ONLY);
+    const mgr = makeMockManager({
+      candidates: [CANDIDATE_CONSUMED],
+      dbQueries: {
+        lastSucceeded: { task_id: 'diagnosis_pain-001', input_ref: 'pain-001', created_at: '2026-01-01T00:00:00.000Z' },
+        run: { run_id: 'run-001', started_at: '2026-01-01T00:01:00.000Z', ended_at: '2026-01-01T00:05:00.000Z' },
+        artifact: { artifact_id: 'art-001', created_at: '2026-01-01T00:05:30.000Z' },
+      },
+    });
+    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
+    const chain = await model.getLastSuccessfulChain();
+    expect(chain).toBeDefined();
+    if (!chain) return;
+    expect(chain.status).toBe('succeeded');
+    expect(chain.ledgerEntryIds).toEqual(['l-target']);
     await model.close();
   });
 
