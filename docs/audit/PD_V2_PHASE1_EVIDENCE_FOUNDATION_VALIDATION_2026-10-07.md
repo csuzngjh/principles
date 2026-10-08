@@ -113,3 +113,37 @@ PR4 开发中，全路径测试未隔离 `CODEX_HOME`，用户 workspace 解析�
 | 相邻回归（barrel 冻结/architecture-regression/pragma/readonly/schema-version/receipt 系列/pd-hook 系列/ingestion） | — | 全绿 |
 
 已知存量环境问题（与本次改动无关，主检出复现一致）：openclaw-plugin `tests/bdd/principle-application-ledger.steps.test.ts` 2 个场景在 Windows 上 afterEach `rmSync` EPERM（断言本身通过）。
+
+## 7. 2026-10-08 评审修复与独立复验
+
+结论：实现问题已修复，工程验证通过；真实宿主 Golden Journey 仍为 **NOT RUN**。本节不把自动化回归、生产入口集成或直接调用 ingress 当作真实 Agent / Owner 旅程验收。
+
+复验基线：原 PR head `b20b31c1b1eb8882511d3c7bcd8bcf3cd1d19da5`；已同步 main `0b981bbedd2f7831153a6bc5f3c92c7622658d90`；代码修复 head `5ebe0284`。GPT6 luna 子代理在独立工作区实施，主代理在独立集成工作区复验；没有修改安装运行时、ADR 或真实 Owner 治理数据。
+
+修复范围：
+
+- 工作区搬迁后复用 SQLite 已持久化 scope；错误 scope 显式拒收，不改写源身份。首次并发写入、临时读取失败恢复均有回归。
+- 原则正文 digest 与激活元数据 snapshot digest 分开。缺少正文或历史正文无法证明时，版本保持未解析，不填造出的 digest。
+- 四问按记录类型分页，保留 native、content、activation 引用。旧 Application 不会被新 Delivery 遮蔽；未解析关系、截断和损坏数据分别披露。
+- 过期正文与独立 correction reason 在首次摄取、只读查询和有界清理中均受控脱敏。原 identity、digest、关系和治理事实保留；任意改写和 DELETE 仍被拒绝。
+- 真实 OpenClaw event log 与 Codex 短期来源正文最多保留 7 天。自述的真实来源 `openclaw_application_ledger`、旧 event-log 标签下的 application-ledger locator，以及 Owner Console feedback 均沿用 90 天。按来源决定期限，不按 native host 决定。Codex 32-turn 来源可用性没有被推定为已确认。
+- 自述镜像失败后从原始持久行重试，保留原 claim、激活编号和发生时间。新旧来源标签兼容，健康旧镜像复用；矛盾镜像明确降级，不自动合并或删除。
+- 原事件在激活停用后可重放；唯一历史元数据可读时保留原发生关系，不能证明历史正文时保留版本缺口。已写入的原引用按完整来源三元组复用，改变来源内容仍触发冲突；重放不重新激活原则。
+- 保留期常量通过 core 纯叶子入口共享，避免把模型 SDK 图引入审计卫星。包体积预算和安全检查没有放宽。
+
+| 复验范围 | 结果 |
+| --- | --- |
+| core 契约、normalizer、SQLite store、架构与叶子导出合同 | 586/586 PASS |
+| OpenClaw 自述账本、recorder、gate、注入配对 | 33/33 PASS |
+| host-runtime ingress | 15/15 PASS |
+| Codex recorder / hook 消费者 | 11/11 PASS |
+| Console 新审计与既有收据 model、Owner outcome route、API 客户端 | 51/51 PASS |
+| 合计 | **696/696 PASS**，所列套件没有跳过测试 |
+| `npm run verify:merge` | **PASS**，exit 0；本机使用 `NODE_OPTIONS=--max-old-space-size=8192`，默认 4GB 检查进程曾内存不足 |
+| 真实 satellite bundle | PASS；禁止模型依赖数 0；governance-audit 703831 bytes，低于 866390 上限 |
+| GPT6 luna 独立只读复核 | PASS；已修复复核发现的保留期、来源分类及历史重放边界 |
+| 实宿主 GJ-01 / GJ-02 | **NOT RUN**；安全前置与执行路径见 §4.1 |
+
+696 项是本次明确选取的五包测试，不是全仓所有测试。子代理工作区曾出现 TypeBox 安装缺文件，相关测试未收集；上述结果来自依赖完整的独立集成工作区。额外 core 包级全量 lint 包含未修改测试文件的错误，首个错误文件在提交基线复现 9 errors；项目规定的根级 lint 与完整合并检查已通过。本次没有重新执行前述 Windows EPERM 的两项旧 BDD 场景。
+
+后续验收仍需要 Owner 选定安全测试原则，经合法 installer 与真实宿主 / Agent session 执行，并从真实 Console 提交结果。完成之前，不应把本报告作为“Phase 1 真实闭环已验收”的证据。
