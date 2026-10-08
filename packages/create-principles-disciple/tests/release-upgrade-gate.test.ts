@@ -49,6 +49,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { extract as extractTar } from 'tar';
 import { buildReleasePublication, gzipReleaseArchive, type PublicationFile } from '../src/update/release-metadata-publisher.js';
 import { buildSignedRoot, FAR_EXPIRY, makeTrustMaterial } from './helpers/trust-material.js';
+import { previousReleaseVersion } from './helpers/n1-baseline.js';
 // @ts-expect-error - JSDoc-typed .mjs helper; the interface intent lives in the module
 import {
   gateBuildPublicationInternal,
@@ -194,15 +195,6 @@ function writePackageVersion(filePath: string, version: string): void {
   const pkg: Record<string, unknown> = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   pkg.version = version;
   fs.writeFileSync(filePath, `${JSON.stringify(pkg, null, 2)}\n`);
-}
-
-function decrementPatch(version: string): string {
-  const parts = version.split('.');
-  if (parts.length !== 3 || Number.isNaN(Number(parts[2])) || parts[2] === '0') {
-    throw new Error(`Cannot decrement patch of version ${version} — pick a different baseline`);
-  }
-  parts[2] = String(Number(parts[2]) - 1);
-  return parts.join('.');
 }
 
 function bumpPatch(version: string): string {
@@ -582,7 +574,7 @@ beforeAll(async () => {
   // payload carries its own identity (unstamped payloads are refused).
   phase('extract-n1', () => extractAsset(archivePath, payloadN1Dir));
   writePackageVersion(path.join(payloadN1Dir, 'pd-cli', 'package.json'), baselineVersion);
-  writePackageVersion(path.join(payloadN1Dir, 'plugin', 'package.json'), decrementPatch(readPackageVersion(path.join(payloadN1Dir, 'plugin', 'package.json'))));
+  writePackageVersion(path.join(payloadN1Dir, 'plugin', 'package.json'), previousReleaseVersion(readPackageVersion(path.join(payloadN1Dir, 'plugin', 'package.json'))));
   fs.mkdirSync(path.join(payloadN1Dir, 'trust'), { recursive: true });
   fs.writeFileSync(path.join(payloadN1Dir, 'trust', 'root.json'), buildSignedRoot(candidateTrust, FAR_EXPIRY));
   await phaseAsync('restamp-n1', () => gateRestampPayload(gateContext, payloadN1Dir, baselineVersion, candidateSourceCommit));
