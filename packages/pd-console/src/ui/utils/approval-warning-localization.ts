@@ -127,7 +127,8 @@ export function localizeApprovalWarning(warning: string, t: TranslateFn): Locali
   // PD_PROMPT_CAPACITY_V1 AC-02/R-A3: 超长是与 truncated 无关的独立事实——
   // 批准后反馈必须直接说"这条本身装不下"，而不是笼统的预算排除。
   if (code === 'injection_oversized') {
-    const costDigits = captureDigitsAfter(message, 'is ', ' chars');
+    // server text: "... exceeds the cap (2000 chars, measured in UTF-16 ..."
+    const costDigits = captureDigitsAfter(message, '(', ' chars');
     return {
       ...base,
       title: t('pages.focus.approveWarning.oversizedTitle'),
