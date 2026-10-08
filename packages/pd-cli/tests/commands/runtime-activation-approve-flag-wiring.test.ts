@@ -201,6 +201,32 @@ describe('pd activation approve — flag wiring (CLI gate rule 7)', () => {
     expect(captured.opts?.workspace).toBe('/tmp/test');
   });
 
+  // PD_PROMPT_CAPACITY_V1 R-A1/R-B2 (cli-3/cli-7): request-level target host
+  // for the prompt capacity precheck — registered AND parsed by the real
+  // Commander program. No --no-* negation exists for it.
+  it('registers --target-host flag', () => {
+    const program = freshProgram();
+    const activationCmd = program.command('activation');
+    const approveCmd = registerRuntimeActivationApproveCommand(activationCmd);
+
+    const opt = approveCmd.options.find((o) => o.long === '--target-host');
+    expect(opt).toBeDefined();
+    expect(approveCmd.options.find((o) => o.long === '--no-target-host')).toBeUndefined();
+  });
+
+  it('parses --target-host with value', async () => {
+    const program = freshProgram();
+    const activationCmd = program.command('activation');
+    const approveCmd = registerRuntimeActivationApproveCommand(activationCmd);
+    const captured: CapturedAction = { opts: null };
+    attachCapture(approveCmd, captured);
+
+    await program.parseAsync(['node', 'pd', 'activation', 'approve', '--approval-id', 'apr-1', '--target-host', 'codex']);
+
+    expect(captured.opts).not.toBeNull();
+    expect(captured.opts?.targetHost).toBe('codex');
+  });
+
   it('rejects missing --approval-id (required option)', async () => {
     const program = freshProgram();
     const activationCmd = program.command('activation');

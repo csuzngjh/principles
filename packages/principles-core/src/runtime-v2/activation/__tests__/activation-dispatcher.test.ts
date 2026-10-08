@@ -130,12 +130,12 @@ describe('ActivationDispatcher', () => {
     }));
     expect(result.decision).toBe('activated');
     if (result.decision === 'activated') {
-      expect(result.activationId).toBe(`act_prompt_${PID_A}`);
+      expect(result.activationId).toMatch(new RegExp(`^act_prompt_${PID_A}_[0-9a-f]{64}$`));
       expect(result.action).toBe('prompt_activate');
       expect(result.targetRef).toBe(`ledger://${PID_A}`);
     }
     const status = await stateStore.getActivationStatus(makeIdempotencyKey('art-001', 'prompt'));
-    expect(status?.activationId).toBe(`act_prompt_${PID_A}`);
+    expect(status?.activationId).toMatch(new RegExp(`^act_prompt_${PID_A}_[0-9a-f]{64}$`));
   });
 
   it('repeat approved dispatch → already_activated', async () => {
@@ -157,7 +157,7 @@ describe('ActivationDispatcher', () => {
     const result = await dispatcher.dispatch(input);
     expect(result.decision).toBe('already_activated');
     if (result.decision === 'already_activated') {
-      expect(result.activationId).toBe(`act_prompt_${PID_A}`);
+      expect(result.activationId).toMatch(new RegExp(`^act_prompt_${PID_A}_[0-9a-f]{64}$`));
     }
   });
 
@@ -300,7 +300,7 @@ describe('ActivationDispatcher', () => {
     const status = await stateStore.getActivationStatus(key);
     expect(status).not.toBeNull();
     if (status) {
-      expect(status.activationId).toBe(`act_prompt_${PID_A}`);
+      expect(status.activationId).toMatch(new RegExp(`^act_prompt_${PID_A}_[0-9a-f]{64}$`));
       expect(status.action).toBe('prompt_activate');
       expect(status.targetRef).toBe(`ledger://${PID_A}`);
     }
@@ -772,7 +772,7 @@ describe('PromptWriter', () => {
       idempotencyKey: 'art-001::prompt',
       now: '2026-05-17T00:00:00.000Z',
     }, makePrincipleArtifact());
-    expect(result.activationId).toBe(`act_prompt_${PID_A}`);
+    expect(result.activationId).toMatch(new RegExp(`^act_prompt_${PID_A}_[0-9a-f]{64}$`));
     expect(result.action).toBe('prompt_activate');
     expect(result.targetRef).toBe(`ledger://${PID_A}`);
   });

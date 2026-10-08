@@ -1,17 +1,28 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ActivationsConsoleModel } from '../models/ActivationsConsoleModel.js';
+import { ApprovalsConsoleModel } from '../models/ApprovalsConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 import type { OwnerPromotionActor } from '@principles/core/runtime-v2';
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
 
 const models = new Map<string, ActivationsConsoleModel>();
+const approvalsModels = new Map<string, ApprovalsConsoleModel>();
 
 function getModel(workspaceDir: string): ActivationsConsoleModel {
   let model = models.get(workspaceDir);
   if (!model) {
     model = new ActivationsConsoleModel(workspaceDir);
     models.set(workspaceDir, model);
+  }
+  return model;
+}
+
+function getApprovalsModel(workspaceDir: string): ApprovalsConsoleModel {
+  let model = approvalsModels.get(workspaceDir);
+  if (!model) {
+    model = new ApprovalsConsoleModel(workspaceDir);
+    approvalsModels.set(workspaceDir, model);
   }
   return model;
 }
@@ -76,9 +87,21 @@ export async function handleActivationsRoute(
 ): Promise<void> {
   // GET /api/v1/activations
   if (req.method === 'GET' && (subPath === '' || subPath === '/')) {
+    // PD_PROMPT_CAPACITY_V1 R-A1: request-level target host for the
+    // per-activation injection statuses (route-unconfirmed rows otherwise).
+    const url = new URL(req.url ?? '/api/v1/activations', 'http://localhost');
+    let targetHost: 'openclaw' | 'codex' | undefined;
+    const rawHost = url.searchParams.get('host');
+    if (rawHost !== null) {
+      if (rawHost !== 'openclaw' && rawHost !== 'codex') {
+        sendError(res, 400, 'validation_error', 'host must be one of: openclaw, codex');
+        return;
+      }
+      targetHost = rawHost;
+    }
     const model = getModel(workspaceDir);
     try {
-      const result = await model.getActivations();
+      const result = await model.getActivations(targetHost);
       sendSuccess(res, result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -131,6 +154,61 @@ export async function handleActivationsRoute(
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('requires exactly one') || message.includes('not found')) sendNotFound(res, message);
       else sendError(res, 500, 'owner_review_error', message, { nextAction: 'Keep the rule in shadow and inspect workspace integrity.' });
+    }
+    return;
+  }
+
+  // POST /api/v1/activations/:id/propose-revision
+  // PD_PROMPT_CAPACITY_V1 R-B3: Owner-initiated "modify to injectable version"
+  // on a live prompt activation — new validated artifact version + a NORMAL
+  // pending approval (the atomic replacement happens on approve).
+  const PROPOSE_REVISION_SUFFIX = '/propose-revision';
+  if (req.method === 'POST' && subPath.endsWith(PROPOSE_REVISION_SUFFIX) && subPath.length > PROPOSE_REVISION_SUFFIX.length) {
+    const rawId = subPath.slice(0, subPath.length - PROPOSE_REVISION_SUFFIX.length).replace(/^\//, '');
+    if (rawId.length === 0) { sendError(res, 400, 'invalid_id', 'Activation ID is missing'); return; }
+    let revisionActivationId: string;
+    try { revisionActivationId = decodeURIComponent(rawId); }
+    catch { sendError(res, 400, 'invalid_id', 'Activation ID contains invalid URI encoding'); return; }
+    let body: unknown;
+    try { body = await readJson(req); }
+    catch (err: unknown) { const message = err instanceof Error ? err.message : String(err); sendError(res, message === 'payload_too_large' ? 413 : 400, 'validation_error', message); return; }
+    if (!isRecord(body) || !Object.hasOwn(body, 'statement') || typeof body.statement !== 'string' || body.statement.trim().length === 0) {
+      sendError(res, 400, 'validation_error', 'statement is required and must be a non-empty string');
+      return;
+    }
+    let targetHost: 'openclaw' | 'codex' | undefined;
+    if (Object.hasOwn(body, 'host')) {
+      if (body.host !== 'openclaw' && body.host !== 'codex') {
+        sendError(res, 400, 'validation_error', 'host must be one of: openclaw, codex');
+        return;
+      }
+      targetHost = body.host;
+    }
+    const editedBy = Object.hasOwn(body, 'editedBy') && typeof body.editedBy === 'string' && body.editedBy.trim().length > 0
+      ? body.editedBy
+      : 'operator';
+    try {
+      const result = await getApprovalsModel(workspaceDir).proposePromptRevision({
+        activationId: revisionActivationId,
+        statement: body.statement,
+        editedBy,
+        ...(targetHost !== undefined ? { targetHost } : {}),
+      });
+      if (!result.ok) {
+        if (result.error === 'not_found' || result.error === 'activation_not_live_prompt' || result.error === 'artifact_unavailable') {
+          sendError(res, 404, result.error, `Cannot propose a revision for activation ${revisionActivationId}: ${result.error}`, { nextAction: 'Refresh the activations page and use a live prompt activation.' });
+          return;
+        }
+        sendError(res, 422, result.error, result.reason ?? result.error, { nextAction: result.nextAction ?? 'Fix the revision content and resubmit.' });
+        return;
+      }
+      sendSuccess(res, result);
+    } catch (err: unknown) {
+      // CodeQL information-exposure: the raw error may carry stack/internal
+      // details — log it server-side, return a fixed client message.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[activations] propose-revision failed: ${JSON.stringify({ activationId: revisionActivationId.slice(0, 256), message: message.slice(0, 1024) })}`);
+      sendError(res, 500, 'propose_revision_error', 'Failed to propose a revision due to an internal error.', { nextAction: 'Check the console server logs and retry; the old activation remains in effect.' });
     }
     return;
   }
@@ -202,4 +280,8 @@ export function disposeActivationsModels(): void {
     model.dispose();
   }
   models.clear();
+  for (const model of approvalsModels.values()) {
+    model.dispose();
+  }
+  approvalsModels.clear();
 }

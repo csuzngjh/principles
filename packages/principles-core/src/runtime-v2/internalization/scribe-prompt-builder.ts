@@ -156,13 +156,14 @@ CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
 - principleDraft.title MUST be a non-empty string (concise, <=100 chars)
 - principleDraft.statement MUST be a non-empty string describing the principle
+- PD_PROMPT_CAPACITY_V1 R-B1 (prompt.v5): principleDraft.statement is the ONLY text injected into the agent prompt, and that prompt surface has a hard character budget. Write it in the SHORTEST wording that stays sufficient: keep the trigger condition (when it applies), the required action (what must be done), and any necessary exception (when it does not apply) — nothing else. Do NOT move explanatory detail into the statement; rationale, evidence, and history belong in principleDraft.rationale / risks / intentContract, which are NOT injected and have no such pressure. Never pad, never add examples inside the statement, and never trade a necessary trigger/exception for brevity — if any of the three parts disappears, the statement is wrong, not shorter
 - principleDraft.rationale MUST be a non-empty string
 - principleDraft.applicability MUST be an array of strings (at least one recommended)
 - principleDraft.antiPatterns MUST be an array of strings (can be empty)
 - principleDraft.confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
 - intentContract is REQUIRED and every one of its five fields MUST be a non-empty string (no placeholders, no "TBD")
 - intentContract itself MUST be a nested JSON OBJECT — never a JSON-encoded string (do not double-encode it as a string containing JSON)
-- intentContract.ownerIntent / targetBehavior / forbiddenBehavior MUST stay consistent with principleDraft.statement and antiPatterns — they express the SAME intent at different precision, never a different one
+- intentContract.ownerIntent / targetBehavior / forbiddenBehavior MUST stay consistent with principleDraft.statement and antiPatterns — they express the SAME intent at different precision, never a different one; shortening the statement MUST NOT drop or weaken any of these anchors
 - sourcePhilosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId (non-empty string)
 - sourceTrace.philosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId
 - sourceTrace.dreamerArtifactId: when input.sourceDreamerArtifactId is provided, it MUST be copied exactly from input.sourceDreamerArtifactId (non-empty string); omit the field only when the input does not carry one. Never scrape artifact content for ids — use the input field
@@ -195,7 +196,19 @@ ${formationEvidenceBlock}${languageDirective}`;
  * unchanged, and a run without formation evidence emits exactly the v3 wire
  * shape plus the new version string.
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v4';
+/**
+ * PD_PROMPT_CAPACITY_V1 R-B1: bumped v4 → v5. The CONSTRAINTS gained the
+ * statement-brevity requirement: the statement is the only text injected into
+ * the budget-capped agent prompt, so it must be the shortest sufficient
+ * wording that preserves the trigger condition, required action, and
+ * necessary exception — rationale/evidence/history stay in their own
+ * (uninjected) fields. Additive wire shape: the OUTPUT FORMAT, the validator,
+ * and `ScribeOutputV1` are unchanged (deliberately NO hard char cap and no
+ * silent truncation — content validation stays separate from host-capacity
+ * prechecks), and a run on v5 emits exactly the v4 shape plus the new
+ * version string.
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v5';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;

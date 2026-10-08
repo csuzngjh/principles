@@ -4,10 +4,14 @@ import {
   SqlitePIArtifactStore,
   ApprovalQueue,
   RUNTIME_V2_PRINCIPLE_BUDGET,
-  resolvePrincipleFromArtifact,
+  detectPromptReplacementTarget,
+  SqliteActivationStateStore,
 } from '@principles/core/runtime-v2';
-import { buildLivePromptInjectionProjection } from '@principles/host-runtime';
-import { escapeXml } from '@principles/core/prompt-builder';
+import {
+  checkPromptArtifactDeliverability,
+  resolveLivePromptInjectionProjection,
+  type PromptInjectionTargetHost,
+} from '@principles/host-runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
 import {
@@ -21,6 +25,16 @@ import * as path from 'node:path';
 /** Type guard: non-null object (not array). Replaces `as Record<string, unknown>` assertions. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseContent(contentJson: string): unknown {
+  try { return JSON.parse(contentJson); } catch { return null; }
+}
+
+function readStatement(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  if (isRecord(value.principleDraft) && typeof value.principleDraft.statement === 'string') return value.principleDraft.statement;
+  return typeof value.text === 'string' ? value.text : null;
 }
 
 export interface ApprovalGroup {
@@ -39,6 +53,8 @@ export interface ApprovalGroup {
    * (the client has no access to the escaped, serialized size).
    */
   fitsPromptBudget?: boolean;
+  revisionReviewUnavailable?: boolean;
+  revisionReview?: { oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   /**
    * PRI-940: the pinned artifact no longer exists in pi_artifacts (typically
    * superseded by a newer scribe revision). There is no contentJson, so
@@ -143,47 +159,43 @@ function extractCandidateDescription(contentJson: string): string | null {
 }
 
 /**
- * PR-1894: would this candidate's own prompt entry fit the injection budget if
- * it were the ONLY entry?
+ * PR-1894 → PD_PROMPT_CAPACITY_V1 R-A2: would this candidate's own prompt
+ * entry fit the injection budget if it were the ONLY entry?
  *
- * Uses the production text resolver and the production entry format/escaping
- * (`- [<id>] <text>` via escapeXml, plus the section header `trimToBudget`
- * charges before any entry) so the answer matches what the real selector
- * computes rather than an approximation. An entry that cannot fit alone is
- * "oversized" in the core selector and is skipped in EVERY rotation round, so
- * fair rotation cannot deliver it.
- *
- * Degrades to `false` (do not promise rotation) whenever the real size cannot be
- * determined �?an unknown size must never become a promise (rc-9).
+ * The judgment now comes from the ONE shared host-runtime precheck
+ * (`checkPromptArtifactDeliverability`): the REAL resolved principle id (not a
+ * fixed 36-char UUID allowance — a title-derived id can only be longer), the
+ * effective route's own serializer (list entry vs full directive render incl.
+ * the self-report footer), and an honest `unconfirmed` verdict when the route
+ * or the artifact content cannot be confirmed. `false` is also the
+ * conservative answer for unconfirmed candidates — an unknown size must
+ * never become a rotation promise (rc-9).
  */
-function candidateFitsPromptBudget(artifact: PIArtifactRecord | null): boolean {
-  if (!artifact?.contentJson) return false;
-  // The pending candidate has no activation row yet, but the resolver only
-  // needs the artifact plus an id pair �?this mirrors what approve will do.
-  const resolved = resolvePrincipleFromArtifact(
-    {
-      artifact_id: artifact.artifactId,
-      artifact_kind: artifact.artifactKind,
-      content_json: artifact.contentJson,
-      validation_status: artifact.validationStatus,
-    },
-    {
-      activationId: `pending:${artifact.artifactId}`,
-      idempotencyKey: `pending:${artifact.artifactId}::prompt`,
-      artifactId: artifact.artifactId,
-      channel: 'prompt',
-      action: 'prompt_activate',
-      targetRef: `pending://${artifact.artifactId}`,
-      activatedAt: new Date(0).toISOString(),
-      deactivatedAt: null,
-    },
-  );
-  if (!resolved.ok) return false;
-  // The real principle id is unknown pre-approval; a UUID allowance is the
-  // worst case, and the actual id can only make the entry smaller.
-  const entry = `- [${escapeXml('00000000-0000-0000-0000-000000000000')}] ${escapeXml(resolved.principle.text)}`;
-  const header = 'Runtime V2 activated principles:';
-  return entry.length + 1 + header.length <= RUNTIME_V2_PRINCIPLE_BUDGET;
+async function candidateFitsPromptBudget(
+  workspaceDir: string,
+  artifact: PIArtifactRecord | null,
+  targetHost?: PromptInjectionTargetHost,
+): Promise<boolean> {
+  const deliverability = await checkPromptArtifactDeliverability({
+    workspaceDir,
+    targetHost,
+    artifact: artifact
+      ? {
+        artifactId: artifact.artifactId,
+        artifactKind: artifact.artifactKind,
+        contentJson: artifact.contentJson,
+        validationStatus: artifact.validationStatus,
+      }
+      : null,
+  });
+  if (deliverability.status === 'deliverable') return true;
+  if (deliverability.status === 'undeliverable') return false;
+  // Unconfirmed: with per-host facts, only promise when EVERY applicable host
+  // can deliver; without them, do not promise at all.
+  if (deliverability.perHost && deliverability.perHost.length > 0) {
+    return deliverability.perHost.every((entry) => entry.fits);
+  }
+  return false;
 }
 
 export class ApprovalsGroupedConsoleModel {
@@ -193,7 +205,7 @@ export class ApprovalsGroupedConsoleModel {
     this.workspaceDir = workspaceDir;
   }
 
-  async getApprovalsGrouped(): Promise<ApprovalsGroupedResponse> {
+  async getApprovalsGrouped(targetHost?: PromptInjectionTargetHost): Promise<ApprovalsGroupedResponse> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
       return { groups: [], generatedAt: new Date().toISOString(), note: 'state.db not found �?workspace may not be initialized' };
@@ -229,6 +241,8 @@ export class ApprovalsGroupedConsoleModel {
       // the pre-approval badge never promises rotation for an entry that is
       // oversized (rotation cannot rescue a per-entry overflow).
       const artifactFitsBudgetMap = new Map<string, boolean>();
+      const revisionReviewUnavailable = new Set<string>();
+      const revisionReviews = new Map<string, NonNullable<ApprovalGroup['revisionReview']>>();
       // PRI-940: which approval artifacts are MISSING from the store (superseded
       // or pruned) — those cards have no contentJson, so the UI must degrade
       // visibly instead of rendering the `unlinked:` machine id as a title.
@@ -246,7 +260,35 @@ export class ApprovalsGroupedConsoleModel {
             } else {
               artifactDescriptionMap.set(approval.artifactId, null);
             }
-            artifactFitsBudgetMap.set(approval.artifactId, candidateFitsPromptBudget(artifact));
+            if (artifact?.artifactKind === 'principle' && approval.channel === 'prompt' && approval.status === 'pending') {
+              const detection = await detectPromptReplacementTarget({
+                approvalArtifactId: artifact.artifactId,
+                getArtifactById: (id) => artifactStore.getArtifactById(id),
+                listPromptActivations: () => new SqliteActivationStateStore(conn).listPromptActivations(),
+              });
+              const current = parseContent(artifact.contentJson);
+              const newStatement = readStatement(current);
+              if (isRecord(current) && newStatement !== null) {
+                for (const parentId of detection.ok && detection.target ? [detection.target.supersededArtifactId] : []) {
+                  const prior = await artifactStore.getArtifactById(parentId);
+                  if (prior?.artifactKind !== 'principle') continue;
+                  const parent = parseContent(prior.contentJson);
+                  const oldStatement = readStatement(parent);
+                  if (oldStatement === null) continue;
+                  const intentFields: Record<string, string> = {};
+                  if (isRecord(current.intentContract)) {
+                    for (const key of ['ownerIntent', 'targetBehavior', 'forbiddenBehavior', 'evidenceSource', 'validationExpectation']) {
+                      const value = current.intentContract[key];
+                      if (typeof value === 'string') intentFields[key] = value;
+                    }
+                  }
+                  revisionReviews.set(artifact.artifactId, { oldStatement, newStatement, intentFields });
+                  break;
+                }
+              }
+              if (!detection.ok || (detection.target !== null && !revisionReviews.has(artifact.artifactId))) revisionReviewUnavailable.add(artifact.artifactId);
+            }
+            artifactFitsBudgetMap.set(approval.artifactId, await candidateFitsPromptBudget(this.workspaceDir, artifact, targetHost));
             artifactUnavailableMap.set(approval.artifactId, artifact === null);
           } catch (err) {
             if (isMissingTableError(err)) {
@@ -315,7 +357,7 @@ export class ApprovalsGroupedConsoleModel {
         }
 
         const principleTitle = principleTitles.get(principleId) ?? principleId;
-        const firstArtifactId = records[0]?.artifactId;
+        const firstArtifactId = records.find((record) => record.status === 'pending')?.artifactId ?? records[0]?.artifactId;
         const candidateDescription = firstArtifactId
           ? (artifactDescriptionMap.get(firstArtifactId) ?? undefined)
           : undefined;
@@ -336,6 +378,10 @@ export class ApprovalsGroupedConsoleModel {
           ...(firstArtifactId !== undefined && artifactUnavailableMap.get(firstArtifactId) === true
             ? { artifactUnavailable: true }
             : {}),
+          ...(firstArtifactId === undefined ? {} : { revisionReview: revisionReviews.get(firstArtifactId) }),
+          ...(records.some((record) => record.status === 'pending' && revisionReviewUnavailable.has(record.artifactId))
+            || (new Set(records.filter((record) => record.status === 'pending').map((record) => record.artifactId)).size > 1 && records.some((record) => revisionReviews.has(record.artifactId)))
+            ? { revisionReviewUnavailable: true } : {}),
           records,
         });
       }
@@ -343,7 +389,7 @@ export class ApprovalsGroupedConsoleModel {
       return {
         groups,
         generatedAt: new Date().toISOString(),
-        ...(await this.readPromptInjectionBudgetStatus()),
+        ...(await this.readPromptInjectionBudgetStatus(targetHost)),
       };
     } finally {
       try { conn.close(); } catch { /* best-effort */ }
@@ -352,17 +398,45 @@ export class ApprovalsGroupedConsoleModel {
 
   /**
    * PRI-908: recompute the production prompt injection projection so the
-   * focus page can forecast "approved �?effective" BEFORE the Owner decides.
+   * focus page can forecast "approved → effective" BEFORE the Owner decides.
    * PR #1844 follow-up: the forecast follows the workspace's REAL injection
-   * route (`buildLivePromptInjectionProjection` �?legacy trimToBudget vs
-   * shared render via abstraction_layer_v1), matching the PRI-890 approve-time
-   * check. Advisory only: a projection failure omits the field �?the
-   * approve-time warning remains the fail-loud exclusion report (rc-9), so
-   * this must never fail the grouped read.
+   * route; PD_PROMPT_CAPACITY_V1 AC-01 additionally binds that route to host
+   * facts (declarations ∪ pain evidence) or an explicit request-level target
+   * host — a Codex workspace is never forecast on the list route, and when
+   * the applicable hosts disagree the payload says `capacityStatus:
+   * 'unconfirmed'` with per-host forecasts instead of guessing. Advisory
+   * only: a projection failure omits the field — the approve-time precheck
+   * (B1) remains the fail-loud gate (rc-9), so this must never fail the
+   * grouped read.
    */
-  private async readPromptInjectionBudgetStatus(): Promise<{ promptInjection?: PromptInjectionBudgetStatus }> {
+  private async readPromptInjectionBudgetStatus(targetHost?: PromptInjectionTargetHost): Promise<{ promptInjection?: PromptInjectionBudgetStatus }> {
     try {
-      const projection = await buildLivePromptInjectionProjection({ workspaceDir: this.workspaceDir });
+      const resolution = await resolveLivePromptInjectionProjection({
+        workspaceDir: this.workspaceDir,
+        targetHost,
+      });
+      if (resolution.status === 'unconfirmed') {
+        // The numbers still come from the flag-based view so the badge can
+        // show SOMETHING, but capacityStatus marks them not authoritative.
+        const reference = resolution.perHost[0]?.projection;
+        return {
+          promptInjection: {
+            budget: reference?.budget ?? RUNTIME_V2_PRINCIPLE_BUDGET,
+            usedChars: reference?.usedChars ?? 0,
+            truncated: reference?.truncated ?? false,
+            capacityStatus: 'unconfirmed',
+            unconfirmedReason: resolution.decision.unconfirmedReason ?? 'effective injection route cannot be confirmed',
+            nextAction: resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex)',
+            perHost: resolution.perHost.map((entry) => ({
+              hostKind: entry.hostKind,
+              route: entry.projection.route,
+              usedChars: entry.projection.usedChars,
+              truncated: entry.projection.truncated,
+            })),
+          },
+        };
+      }
+      const {projection} = resolution;
       return {
         promptInjection: {
           budget: projection.budget,
@@ -370,11 +444,16 @@ export class ApprovalsGroupedConsoleModel {
           truncated: projection.truncated,
           // PR-1894: the badge must describe what the PRODUCTION route will do,
           // not which policy this session-less forecast happened to run.
-          // Without it the UI can only say "will queue", which under fair
-          // rotation reads as permanent starvation and pushes the Owner to
-          // deactivate healthy principles.
           productionRotates: projection.productionRotates,
           eligibleCount: projection.eligibleCount,
+          capacityStatus: 'confirmed',
+          ...(resolution.decision.hostKind !== undefined ? { hostKind: resolution.decision.hostKind } : {}),
+          route: projection.route,
+          unit: projection.unit,
+          budgetScope: projection.budgetScope,
+          ...(projection.fullRenderChars !== undefined ? { fullRenderChars: projection.fullRenderChars } : {}),
+          oversizedActivationIds: projection.oversizedActivationIds,
+          oversizedDiagnosticTruncated: projection.oversizedDiagnosticTruncated,
         },
       };
     } catch (err: unknown) {

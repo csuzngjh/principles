@@ -13,10 +13,12 @@ import {
   fetchLifecycleMetrics,
   fetchReceiptCounts,
   fetchRuleCodeOwnerReview,
+  proposePromptRevision,
   ruleCodeDecision,
   pauseAllRuleCode,
   releaseRuleCodePause,
 } from "../../api.js";
+import type { ProposeRevisionData } from "../../api.js";
 import type {
   ActivationRecord,
   ActivationsData,
@@ -151,6 +153,50 @@ function ActivationFactCard({
   const neverActivated = record.activatedAt === null;
   const channelLabel = getChannelLabel(record.channel, t);
   const reversible = isReversibleChannel(record.channel);
+  // PD_PROMPT_CAPACITY_V1 R-B3: “修改为可注入版本”入口——只对 live prompt 激活开放。
+  const canProposeRevision = record.channel === "prompt" && record.status === "active";
+  const [showRevisionInput, setShowRevisionInput] = useState(false);
+  const [revisionText, setRevisionText] = useState("");
+  const [revisionSubmitting, setRevisionSubmitting] = useState(false);
+  const [revisionResult, setRevisionResult] = useState<ProposeRevisionData | null>(null);
+
+  const handleProposeRevision = async () => {
+    if (!revisionText.trim() || revisionSubmitting) return;
+    setRevisionSubmitting(true);
+    try {
+      const res = await proposePromptRevision(record.activationId, revisionText.trim());
+      if (res.success) {
+        if (res.data?.ok === true) {
+          setRevisionResult(res.data);
+          setShowRevisionInput(false);
+          toast.success(
+            res.data.alreadyPending
+              ? t("pages.activation.revisionAlreadyPending", { defaultValue: "该原则已有一个待审批的修改版本" })
+              : t("pages.activation.revisionQueued", { defaultValue: "新版本已创建并进入待审批，批准后将自动替换当前版本" }),
+          );
+          onChanged();
+        } else {
+          toast.error(
+            t("pages.activation.revisionFailed", {
+              defaultValue: "创建修改版本失败：{{reason}}",
+              reason: res.data?.reason ?? res.data?.error ?? "unknown",
+            }),
+          );
+        }
+      } else {
+        toast.error(
+          t("pages.activation.revisionFailed", {
+            defaultValue: "创建修改版本失败：{{reason}}",
+            reason: res.reason ?? res.error ?? "unknown",
+          }),
+        );
+      }
+    } catch {
+      toast.error(t("pages.activation.revisionFailedNetwork", { defaultValue: "创建修改版本失败，请稍后重试。" }));
+    } finally {
+      setRevisionSubmitting(false);
+    }
+  };
 
   return (
     <article
@@ -251,6 +297,129 @@ function ActivationFactCard({
             </span>
           )}
         </div>
+        {/* PD_PROMPT_CAPACITY_V1 R-A3: 当前宿主下的注入状态（正面单条证据）。
+            超长/窗口排除/路由未确认各自说明原因；不渲染任何"遵守次数"——
+            没有实际日志 ≠ 零次遵守（AC-12 边界）。 */}
+        {record.promptInjection !== undefined && (
+          <div
+            className="flex items-start gap-2"
+            data-testid={`activation-injection-${record.activationId}`}
+          >
+            <span className="text-ink-4 font-mono text-[11px] uppercase">
+              {t("pages.activation.injectionLabel", { defaultValue: "注入状态" })}
+            </span>
+            <span
+              className={`text-[12.5px] leading-relaxed ${
+                record.promptInjection.status === "injectable"
+                  ? "text-ink-2"
+                  : record.promptInjection.status === "window_excluded"
+                    ? "text-amber"
+                    : "text-danger"
+              }`}
+            >
+              {record.promptInjection.status === "injectable" &&
+                t("pages.activation.injectionInjectable", {
+                  defaultValue: "可注入（当前窗口内，{{cost}}/{{budget}} 字符）",
+                  cost: record.promptInjection.costChars ?? 0,
+                  budget: record.promptInjection.budget ?? 0,
+                })}
+              {record.promptInjection.status === "window_excluded" &&
+                (record.promptInjection.route === "legacy_trim"
+                  ? t("pages.activation.injectionWindowRotates", {
+                      defaultValue: "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符），后续轮次会轮到（预测）",
+                      cost: record.promptInjection.costChars ?? 0,
+                      budget: record.promptInjection.budget ?? 0,
+                    })
+                  : t("pages.activation.injectionWindowFifo", {
+                      defaultValue: "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符），当前路由不轮转，需腾出容量才会注入",
+                      cost: record.promptInjection.costChars ?? 0,
+                      budget: record.promptInjection.budget ?? 0,
+                    }))}
+              {record.promptInjection.status === "oversized" &&
+                t("pages.activation.injectionOversized", {
+                  defaultValue: "超长不可注入：单条已 {{cost}} 字符 > 上限 {{budget}} 字符，轮转也救不了——需精简正文",
+                  cost: record.promptInjection.costChars ?? 0,
+                  budget: record.promptInjection.budget ?? 0,
+                })}
+              {record.promptInjection.status === "resolution_failed" &&
+                t("pages.activation.injectionResolutionFailed", {
+                  defaultValue: "无法判定：{{reason}}",
+                  reason: record.promptInjection.reason ?? "unknown",
+                })}
+              {record.promptInjection.status === "route_unconfirmed" && (
+                <>
+                  {t("pages.activation.injectionRouteUnconfirmed", {
+                    defaultValue: "当前宿主容量未确认：OpenClaw {{oc}} / Codex {{cx}}",
+                    oc: record.promptInjection.perHostFits?.find((f) => f.hostKind === "openclaw")?.fits === undefined ? t("pages.activation.fitUnknown", { defaultValue: "未知" }) : record.promptInjection.perHostFits?.find((f) => f.hostKind === "openclaw")?.fits ? t("pages.activation.fitYes", { defaultValue: "可装入" }) : t("pages.activation.fitNo", { defaultValue: "超长" }),
+                    cx: record.promptInjection.perHostFits?.find((f) => f.hostKind === "codex")?.fits === undefined ? t("pages.activation.fitUnknown", { defaultValue: "未知" }) : record.promptInjection.perHostFits?.find((f) => f.hostKind === "codex")?.fits ? t("pages.activation.fitYes", { defaultValue: "可装入" }) : t("pages.activation.fitNo", { defaultValue: "超长" }),
+                  })}
+                  {record.promptInjection.reason !== undefined && (
+                    <span className="block text-ink-4 text-[11.5px]">{record.promptInjection.reason}</span>
+                  )}
+                </>
+              )}
+            </span>
+          </div>
+        )}
+
+        {/* PD_PROMPT_CAPACITY_V1 R-B3: 修改为可注入版本——创建新工件版本并进入
+            正常审批队列；批准后由替换事务原子换版（旧版本停用、账本一致）。 */}
+        {canProposeRevision && (
+          <div className="mt-2" data-testid={`activation-revision-${record.activationId}`}>
+            {!showRevisionInput && revisionResult === null && (
+              <button
+                type="button"
+                onClick={() => { setShowRevisionInput(true); setRevisionText(""); }}
+                data-testid={`activation-revision-open-${record.activationId}`}
+                className="inline-flex items-center border border-line rounded-[3px] px-[10px] py-[4px] text-[12px] hover:border-line-2"
+              >
+                {t("pages.activation.revisionOpen", { defaultValue: "修改为可注入版本" })}
+              </button>
+            )}
+            {showRevisionInput && (
+              <div className="rounded-[3px] border border-line bg-surface/60 p-2">
+                <textarea
+                  value={revisionText}
+                  onChange={(e) => setRevisionText(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-[2px] border border-line bg-panel px-2 py-1 text-[12.5px]"
+                  placeholder={t("pages.activation.revisionPlaceholder", { defaultValue: "输入新的原则正文（保留触发条件、必须动作和必要例外，尽量精简）" })}
+                  data-testid={`activation-revision-input-${record.activationId}`}
+                />
+                <div className="mt-1 flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={handleProposeRevision} disabled={revisionSubmitting || revisionText.trim().length === 0} data-testid={`activation-revision-submit-${record.activationId}`}>
+                    {revisionSubmitting ? t("common.loading") + "…" : t("pages.activation.revisionSubmit", { defaultValue: "创建待审批的新版本" })}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setShowRevisionInput(false)}>
+                    {t("common.cancel", { defaultValue: "取消" })}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {revisionResult !== null && (
+              <div className="rounded-[3px] border border-gov/40 bg-gov/5 p-2 text-[12px] leading-relaxed" data-testid={`activation-revision-result-${record.activationId}`}>
+                <p>
+                  {t("pages.activation.revisionResultNote", {
+                    defaultValue: "新版本已进入待审批（审批号 {{approvalId}}）。批准后旧版本自动停用并由新版本替换；拒绝则旧版本继续生效。",
+                    approvalId: revisionResult.approvalId ?? "",
+                  })}
+                </p>
+                {typeof revisionResult.oldStatement === "string" && revisionResult.oldStatement.length > 0 && (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-ink-3">{t("pages.activation.revisionDiff", { defaultValue: "查看正文差异" })}</summary>
+                    <div className="mt-1 grid gap-1">
+                      <div className="rounded-[2px] bg-amber/5 p-1 text-ink-2 line-through">{revisionResult.oldStatement}</div>
+                      <div className="rounded-[2px] bg-green/5 p-1 text-ink">{revisionResult.newStatement}</div>
+                    </div>
+                  </details>
+                )}
+                <Link to="/" className="mt-1 inline-block text-gov hover:underline" data-testid={`activation-revision-goto-approve-${record.activationId}`}>
+                  {t("pages.activation.revisionGoApprove", { defaultValue: "前往治理焦点审批新版本" })}
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
         {/* PRI-533: receipt counts row — rendered only when the counts API is
             reachable (undefined = unavailable → page-level degraded note). */}
         {receiptCount !== undefined && (

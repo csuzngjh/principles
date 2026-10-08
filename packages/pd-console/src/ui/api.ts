@@ -515,10 +515,10 @@ async function fetchReceiptCounts(): Promise<ApiResponse<ReceiptCountsData>> {
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
-async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecordData>> {
+async function approveApproval(approvalId: string, note?: string, options?: { targetHost?: 'openclaw' | 'codex'; intentReviewed?: boolean; reviewedArtifactId?: string }): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
     method: 'POST',
-    body: JSON.stringify({ note }),
+    body: JSON.stringify({ note, ...(options?.targetHost !== undefined ? { host: options.targetHost } : {}), ...(options?.intentReviewed !== undefined ? { intentReviewed: options.intentReviewed, reviewedArtifactId: options.reviewedArtifactId } : {}) }),
   }, validateApprovalRecordDirect);
 }
 
@@ -854,12 +854,14 @@ async function resolveOwnerDecision(taskId: string, body: {
   );
 }
 
-async function fetchApprovalsGrouped(): Promise<ApiResponse<ApprovalsGroupedData>> {
-  return request<ApprovalsGroupedData>('/api/v1/approvals/grouped', undefined, validateApprovalsGrouped);
+async function fetchApprovalsGrouped(targetHost?: 'openclaw' | 'codex'): Promise<ApiResponse<ApprovalsGroupedData>> {
+  const query = targetHost !== undefined ? `?host=${targetHost}` : '';
+  return request<ApprovalsGroupedData>(`/api/v1/approvals/grouped${query}`, undefined, validateApprovalsGrouped);
 }
 
-async function fetchAllActivations(): Promise<ApiResponse<ActivationsData>> {
-  return request<ActivationsData>('/api/v1/activations', undefined, validateActivations);
+async function fetchAllActivations(targetHost?: 'openclaw' | 'codex'): Promise<ApiResponse<ActivationsData>> {
+  const query = targetHost !== undefined ? `?host=${targetHost}` : '';
+  return request<ActivationsData>(`/api/v1/activations${query}`, undefined, validateActivations);
 }
 
 async function disableActivation(activationId: string): Promise<ApiResponse<DisableActivationData>> {
@@ -875,6 +877,53 @@ async function disableActivation(activationId: string): Promise<ApiResponse<Disa
 
 async function fetchRuleCodeOwnerReview(activationId: string): Promise<ApiResponse<RuleCodeOwnerReviewData>> {
   return request(`/api/v1/activations/${encodeURIComponent(activationId)}/owner-review`, undefined, validateRuleCodeOwnerReview);
+}
+
+// PD_PROMPT_CAPACITY_V1 R-B3: Owner-initiated "modify to injectable version" —
+// raw JSON payload (rc-1: the UI validates the fields it renders).
+export interface ProposeRevisionData {
+  ok: boolean;
+  alreadyPending?: boolean;
+  newArtifactId?: string;
+  approvalId?: string;
+  supersededActivationId?: string;
+  oldStatement?: string;
+  newStatement?: string;
+  title?: string;
+  reason?: string;
+  nextAction?: string;
+  error?: string;
+}
+
+async function proposePromptRevision(
+  activationId: string,
+  statement: string,
+  targetHost?: 'openclaw' | 'codex',
+): Promise<ApiResponse<ProposeRevisionData>> {
+  return request<ProposeRevisionData>(
+    `/api/v1/activations/${encodeURIComponent(activationId)}/propose-revision`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ statement, ...(targetHost !== undefined ? { host: targetHost } : {}) }),
+    },
+    (v: unknown): ProposeRevisionData | null => {
+      if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+      const rec = v as Record<string, unknown>;
+      if (rec.ok !== true && rec.ok !== false) return null;
+      const result: ProposeRevisionData = { ok: rec.ok };
+      if (typeof rec.alreadyPending === 'boolean') result.alreadyPending = rec.alreadyPending;
+      if (typeof rec.newArtifactId === 'string') result.newArtifactId = rec.newArtifactId;
+      if (typeof rec.approvalId === 'string') result.approvalId = rec.approvalId;
+      if (typeof rec.supersededActivationId === 'string') result.supersededActivationId = rec.supersededActivationId;
+      if (typeof rec.oldStatement === 'string') result.oldStatement = rec.oldStatement;
+      if (typeof rec.newStatement === 'string') result.newStatement = rec.newStatement;
+      if (typeof rec.title === 'string') result.title = rec.title;
+      if (typeof rec.reason === 'string') result.reason = rec.reason;
+      if (typeof rec.nextAction === 'string') result.nextAction = rec.nextAction;
+      if (typeof rec.error === 'string') result.error = rec.error;
+      return result;
+    },
+  );
 }
 
 async function mutateRuleCode(path: string, body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> {
@@ -1131,6 +1180,7 @@ export {
   fetchApprovalsGrouped,
   fetchAllActivations,
   disableActivation,
+  proposePromptRevision,
   fetchRuleCodeOwnerReview,
   ruleCodeDecision,
   pauseAllRuleCode,
