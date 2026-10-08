@@ -111,6 +111,7 @@ export function recordCodexPromptDeliveryEvidence(input: CodexPromptDeliveryEvid
       input.warn(`[PD:Evidence] codex prompt delivery skipped for activation ${entry.activationId}: occurrence snapshot unresolvable`);
       continue;
     }
+    const contentRef = ingress.resolveInterventionContentRef(input.workspaceDir, activationRef, entry.principleId);
     observations.push({
       observationKey: `codex|delivery|agent_context|${input.sessionId}|${input.turnId ?? '-'}|${entry.activationId}`,
       sourceLocator: `codex-pd-hook-event-log:${input.sessionId}`,
@@ -123,9 +124,9 @@ export function recordCodexPromptDeliveryEvidence(input: CodexPromptDeliveryEvid
       principleId: entry.principleId,
       contentRef: {
         principleId: entry.principleId,
-        ...(entry.artifactId ? { artifactId: entry.artifactId } : {}),
-        payloadDigest: activationRef.sourceSnapshotDigest,
-        resolution: 'resolved',
+        ...(activationRef.artifactId ? { artifactId: activationRef.artifactId } : {}),
+        ...(contentRef ? { payloadDigest: contentRef.payloadDigest } : {}),
+        resolution: contentRef ? 'resolved' : 'revision_reference_unresolved',
       },
       activationRef,
       payload: { targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' },
@@ -175,11 +176,12 @@ export function recordCodexDenyEvidence(input: CodexDenyEvidenceInput): void {
   const toolKey = input.toolUseId;
   const sessionPart = input.sessionId ?? '-';
   const episodeKey = `codex|episode|${sessionPart}|${toolKey}`;
+  const content = ingress.resolveInterventionContentRef(input.workspaceDir, activationRef, input.principleId);
   const contentRef = {
     principleId: input.principleId,
     ...(activationRef.artifactId ? { artifactId: activationRef.artifactId } : {}),
-    payloadDigest: activationRef.sourceSnapshotDigest,
-    resolution: 'resolved' as const,
+    ...(content ? { payloadDigest: content.payloadDigest } : {}),
+    resolution: content ? 'resolved' as const : 'revision_reference_unresolved' as const,
   };
   const observations: InterventionObservationInput[] = [
     {

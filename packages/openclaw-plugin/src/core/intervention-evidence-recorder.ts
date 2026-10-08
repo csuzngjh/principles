@@ -133,6 +133,7 @@ export function recordPromptDeliveryEvidence(input: PromptInjectionEvidenceInput
       input.logger?.warn?.(`[PD:Evidence] prompt delivery skipped for activation ${entry.activationId}: occurrence snapshot unresolvable`);
       continue;
     }
+    const contentRef = ingress.resolveInterventionContentRef(input.workspaceDir, activationRef, entry.principleId);
     observations.push({
       observationKey: `openclaw|delivery|agent_context|${input.sessionId ?? '-'}|${input.runId ?? '-'}|${entry.activationId}`,
       sourceLocator: `openclaw-plugin-event-log:${input.sessionId ?? 'no-session'}`,
@@ -145,9 +146,9 @@ export function recordPromptDeliveryEvidence(input: PromptInjectionEvidenceInput
       principleId: entry.principleId,
       contentRef: {
         principleId: entry.principleId,
-        ...(entry.artifactId ? { artifactId: entry.artifactId } : {}),
-        payloadDigest: activationRef.sourceSnapshotDigest,
-        resolution: 'resolved',
+        ...(activationRef.artifactId ? { artifactId: activationRef.artifactId } : {}),
+        ...(contentRef ? { payloadDigest: contentRef.payloadDigest } : {}),
+        resolution: contentRef ? 'resolved' : 'revision_reference_unresolved',
       },
       activationRef,
       payload: { targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' },
@@ -206,11 +207,12 @@ export function recordGateEnforcementEvidence(input: GateEnforcementEvidenceInpu
   const sessionPart = input.sessionId ?? '-';
   const episodeKey = `openclaw|episode|${sessionPart}|${toolKey}`;
   const summaryPath = input.filePath ?? '(no-path)';
+  const content = ingress.resolveInterventionContentRef(input.workspaceDir, activationRef, input.principleId);
   const contentRef = {
     principleId: input.principleId,
     ...(activationRef.artifactId ? { artifactId: activationRef.artifactId } : {}),
-    payloadDigest: activationRef.sourceSnapshotDigest,
-    resolution: 'resolved' as const,
+    ...(content ? { payloadDigest: content.payloadDigest } : {}),
+    resolution: content ? 'resolved' as const : 'revision_reference_unresolved' as const,
   };
   const observations: InterventionObservationInput[] = [
     {
@@ -297,6 +299,7 @@ export interface SelfReportEvidenceInput {
   principleId: string;
   activationId?: string;
   claimText: string;
+  occurredAt?: string;
   logger?: RecorderLogger;
 }
 
@@ -319,6 +322,7 @@ export function recordSelfReportEvidence(input: SelfReportEvidenceInput): void {
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     },
     principleId: input.principleId,
+    ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
     ...(activationRef ? { activationRef } : {}),
     payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: input.claimText.slice(0, 200) },
   };

@@ -14,9 +14,9 @@
  * contended state.db lock surfaces immediately as storage_unavailable
  * instead of delaying a hook.
  *
- * Scope identity (SPEC §13.3): evidence_scope_id is derived once per
- * governance workspace and cached per process — it identifies the local
- * ledger's scope, never a Principle entity.
+ * Scope identity (SPEC §13.3): evidence_scope_id is persisted in the local
+ * evidence ledger and reused after workspace relocation. A canonical path
+ * only provides a deterministic candidate when a ledger has no scope yet.
  */
 import { createHash } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
@@ -26,6 +26,7 @@ import {
   SqliteConnection,
   SqliteInterventionEvidenceStore,
   type InterventionActivationOccurrenceRef,
+  type InterventionContentRef,
   type InterventionEvidenceBatchInput,
 } from '@principles/core/runtime-v2';
 
@@ -46,11 +47,16 @@ export interface InterventionEvidenceIngress {
   }): InterventionIngressAppendResult;
   /** Evidence scope id for a governance workspace (stable per workspace). */
   evidenceScopeIdFor(workspaceDir: string): string;
+  /** Digest the actual governed artifact content, not activation metadata. */
+  resolveInterventionContentRef(
+    workspaceDir: string,
+    activationRef: InterventionActivationOccurrenceRef,
+    principleId: string,
+  ): InterventionContentRef | null;
   /**
-   * Resolve the observed activation occurrence snapshot (activations row +
-   * governed artifact digest) for evidence references. Returns null when the
-   * activation or artifact cannot be resolved — the caller records an honest
-   * gap, never a guessed reference.
+   * Resolve the activation occurrence metadata snapshot. The snapshot digest
+   * is not a Principle content digest; use resolveInterventionContentRef for
+   * the artifact's actual bytes.
    */
   resolveActivationOccurrenceRef(
     workspaceDir: string,
@@ -58,25 +64,62 @@ export interface InterventionEvidenceIngress {
   ): InterventionActivationOccurrenceRef | null;
 }
 
-const scopeIdCache = new Map<string, string>();
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function createInterventionEvidenceIngress(): InterventionEvidenceIngress {
-  function evidenceScopeIdFor(workspaceDir: string): string {
+  function scopeIdCandidateFor(workspaceDir: string): string {
     const absolute = isAbsolute(workspaceDir) ? resolve(workspaceDir) : resolve(process.cwd(), workspaceDir);
-    // Same workspace reached through a symlink alias or a renamed parent must
-    // map to one scope — resolve to the canonical path before hashing
-    // (falls back to the absolute path when the dir does not exist yet).
+    // Resolve aliases before using the path as a first-append candidate. Once
+    // persisted, the database scope remains authoritative across relocations.
     let resolved = absolute;
     try { resolved = realpathSync(absolute); } catch { /* keep absolute */ }
-    const cached = scopeIdCache.get(resolved);
-    if (cached) return cached;
-    const scopeId = `pd-evidence-scope:sha256:${createHash('sha256').update(resolved, 'utf8').digest('hex').slice(0, 32)}`;
-    scopeIdCache.set(resolved, scopeId);
-    return scopeId;
+    return `pd-evidence-scope:sha256:${createHash('sha256').update(resolved, 'utf8').digest('hex').slice(0, 32)}`;
+  }
+
+  function evidenceScopeIdFor(workspaceDir: string): string {
+    const candidate = scopeIdCandidateFor(workspaceDir);
+    let connection: SqliteConnection | null = null;
+    try {
+      connection = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false });
+      const established = new SqliteInterventionEvidenceStore(connection).getEvidenceScope();
+      if (established) return established.scopeId;
+    } catch {
+      // A missing or unreadable read-only database cannot confirm a persisted
+      // scope; return an uncached candidate and let the writer recheck.
+    } finally {
+      try { connection?.close(); } catch { /* best-effort */ }
+    }
+    return candidate;
+  }
+
+  function resolveInterventionContentRef(
+    workspaceDir: string,
+    activationRef: InterventionActivationOccurrenceRef,
+    principleId: string,
+  ): InterventionContentRef | null {
+    if (!activationRef.artifactId) return null;
+    let connection: SqliteConnection | null = null;
+    try {
+      connection = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false });
+      const row = connection.getDb().prepare(
+        'SELECT content_json, source_principle_id FROM pi_artifacts WHERE artifact_id = ?',
+      ).get(activationRef.artifactId);
+      if (!isRecord(row)
+        || typeof row.content_json !== 'string'
+        || row.source_principle_id !== principleId) return null;
+      return {
+        principleId,
+        artifactId: activationRef.artifactId,
+        payloadDigest: `sha256:${createHash('sha256').update(row.content_json, 'utf8').digest('hex')}`,
+        resolution: 'resolved',
+      };
+    } catch {
+      return null;
+    } finally {
+      try { connection?.close(); } catch { /* best-effort */ }
+    }
   }
 
   function appendObservationBatch(input: {
@@ -91,15 +134,19 @@ export function createInterventionEvidenceIngress(): InterventionEvidenceIngress
         nextAction: 'Fix the producer payload; nothing was written. The raw source remains durable.',
       };
     }
-    const scopeId = evidenceScopeIdFor(input.workspaceDir);
     let connection: SqliteConnection | null = null;
     try {
       connection = new SqliteConnection({ workspaceDir: input.workspaceDir, busyTimeoutMs: 0 });
       const store = new SqliteInterventionEvidenceStore(connection);
-      const result = store.appendObservationBatch({
-        ...normalization.batch,
-        evidenceScopeId: scopeId,
-      });
+      const expectedScope = store.getEvidenceScope()?.scopeId ?? scopeIdCandidateFor(input.workspaceDir);
+      if (input.batch.evidenceScopeId !== expectedScope) {
+        return {
+          ok: false,
+          reason: `evidence_scope_mismatch:${input.batch.evidenceScopeId}`,
+          nextAction: 'Resolve the evidence scope for this workspace and rebuild the batch before replay; no records were written.',
+        };
+      }
+      const result = store.appendObservationBatch(normalization.batch);
       return {
         ok: result.ok,
         insertedCount: result.insertedCount,
@@ -159,6 +206,8 @@ export function createInterventionEvidenceIngress(): InterventionEvidenceIngress
         activatedAt: activationRow.activated_at ?? null,
         artifactDigest,
       };
+      // An activation row can survive after its artifact has been removed.
+      // Its metadata snapshot remains useful, but it is not a content digest.
       return {
         activationId,
         ...(typeof activationRow.idempotency_key === 'string' ? { idempotencyKey: activationRow.idempotency_key } : {}),
@@ -176,10 +225,10 @@ export function createInterventionEvidenceIngress(): InterventionEvidenceIngress
     }
   }
 
-  return { appendObservationBatch, evidenceScopeIdFor, resolveActivationOccurrenceRef };
+  return { appendObservationBatch, evidenceScopeIdFor, resolveInterventionContentRef, resolveActivationOccurrenceRef };
 }
 
-/** Process-wide default ingress (stateless apart from the scope-id cache). */
+/** Process-wide default ingress. */
 let defaultIngress: InterventionEvidenceIngress | null = null;
 
 export function getInterventionEvidenceIngress(): InterventionEvidenceIngress {

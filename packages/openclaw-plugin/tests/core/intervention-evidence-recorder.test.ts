@@ -10,6 +10,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import * as yaml from 'js-yaml';
 import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime-v2';
 import {
@@ -33,9 +34,9 @@ function seedActivation(activationId: string, artifactId: string): void {
     .run(activationId, `idem-${activationId}`, artifactId, now);
 }
 
-function evidenceRows(): { record_kind: string; observation_key: string; payload_json: string; episode_key: string | null; principle_id: string | null }[] {
+function evidenceRows(): { record_kind: string; observation_key: string; payload_json: string; content_ref_json: string | null; occurred_at: string | null; episode_key: string | null; principle_id: string | null }[] {
   return conn.getDb()
-    .prepare('SELECT record_kind, observation_key, payload_json, episode_key, principle_id FROM intervention_evidence_records')
+    .prepare('SELECT record_kind, observation_key, payload_json, content_ref_json, occurred_at, episode_key, principle_id FROM intervention_evidence_records')
     .all() as never;
 }
 
@@ -63,6 +64,35 @@ describe('intervention evidence recorder (openclaw adapter)', () => {
     const payload = JSON.parse(rows[0]!.payload_json);
     expect(payload).toMatchObject({ targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' });
     expect(payload.outcome).not.toBe('delivered');
+    const contentRef = JSON.parse(rows[0]!.content_ref_json ?? '{}');
+    const contentJson = JSON.stringify({ principleId: 'T-01', text: '删除类操作必须先确认目标' });
+    expect(contentRef).toMatchObject({
+      artifactId: 'art-p1',
+      payloadDigest: `sha256:${createHash('sha256').update(contentJson).digest('hex')}`,
+      resolution: 'resolved',
+    });
+    const activationRow = conn.getDb()
+      .prepare('SELECT activation_ref_json FROM intervention_evidence_records WHERE record_kind = ?')
+      .get('delivery') as { activation_ref_json: string };
+    expect(contentRef.payloadDigest).not.toBe(JSON.parse(activationRow.activation_ref_json).sourceSnapshotDigest);
+  });
+
+  it('keeps prompt content unresolved when the activation artifact is missing', () => {
+    conn.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                          VALUES ('act-orphan', 'idem-orphan', 'art-missing', 'prompt', 'prompt_activate', 'ref', '2026-10-01T00:00:00Z')`).run();
+    const warn: string[] = [];
+    recordPromptDeliveryEvidence({
+      workspaceDir,
+      sessionId: 'sess-1',
+      injected: [{ principleId: 'T-01', activationId: 'act-orphan', artifactId: 'art-missing' }],
+      logger: { warn: (line) => warn.push(line) },
+    });
+    const delivery = evidenceRows().find((row) => row.record_kind === 'delivery');
+    expect(warn).toEqual([]);
+    expect(delivery).toBeDefined();
+    expect(JSON.parse(delivery!.content_ref_json ?? '{}')).toEqual({
+      principleId: 'T-01', artifactId: 'art-missing', resolution: 'revision_reference_unresolved',
+    });
   });
 
   it('skips prompt delivery for unresolvable activations with an honest gap (no row)', () => {
@@ -146,6 +176,21 @@ describe('intervention evidence recorder (openclaw adapter)', () => {
     expect(JSON.parse(rows[0]!.payload_json)).toMatchObject({
       proofMethod: 'agent_claimed', action: 'self_reported',
     });
+  });
+
+  it('preserves the original occurredAt supplied by a durable self-report source', () => {
+    seedActivation('act-s2', 'art-s2');
+    const sourceTime = '2026-10-02T03:04:05.000Z';
+    recordSelfReportEvidence({
+      workspaceDir,
+      sessionId: 'sess-2',
+      principleId: 'T-01',
+      activationId: 'act-s2',
+      claimText: '删除前确认了目标',
+      occurredAt: sourceTime,
+    });
+    const row = evidenceRows().find((item) => item.record_kind === 'application');
+    expect(row?.occurred_at).toBe(sourceTime);
   });
 
   it('writes nothing when principle_receipt_ledger is disabled', () => {

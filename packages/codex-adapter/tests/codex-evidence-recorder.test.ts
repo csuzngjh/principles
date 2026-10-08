@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime-v2';
 import { processHookInvocation } from '../src/pd-hook.js';
 import {
@@ -56,11 +57,11 @@ function seedPromptActivation(root: string): void {
   conn.close();
 }
 
-function evidenceRows(root: string): { record_kind: string; observation_key: string; payload_json: string }[] {
+function evidenceRows(root: string): { record_kind: string; observation_key: string; payload_json: string; content_ref_json: string | null; activation_ref_json: string | null }[] {
   const conn = new SqliteConnection({ workspaceDir: root, readonly: true, bootstrapIfMissing: false });
   try {
     return conn.getDb()
-      .prepare('SELECT record_kind, observation_key, payload_json FROM intervention_evidence_records')
+      .prepare('SELECT record_kind, observation_key, payload_json, content_ref_json, activation_ref_json FROM intervention_evidence_records')
       .all() as never;
   } finally {
     conn.close();
@@ -89,6 +90,36 @@ describe('codex evidence recorder', () => {
       targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted',
     });
     expect(rows[0]!.observation_key).toContain('turn-1');
+    const contentRef = JSON.parse(rows[0]!.content_ref_json ?? '{}');
+    const contentJson = JSON.stringify({ principleId: 'princ-cx', text: '删除类操作必须先确认目标' });
+    expect(contentRef).toMatchObject({
+      artifactId: 'art-cx',
+      payloadDigest: `sha256:${createHash('sha256').update(contentJson).digest('hex')}`,
+      resolution: 'resolved',
+    });
+    expect(contentRef.payloadDigest).not.toBe(JSON.parse(rows[0]!.activation_ref_json ?? '{}').sourceSnapshotDigest);
+  });
+
+  it('keeps prompt content unresolved when the activation artifact is missing', () => {
+    const root = workspace();
+    const conn = new SqliteConnection(root);
+    conn.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                          VALUES ('act-orphan', 'idem-orphan', 'art-missing', 'prompt', 'prompt_activate', 'ref', '2026-10-01T00:00:00Z')`).run();
+    conn.close();
+    const warnings: string[] = [];
+    recordCodexPromptDeliveryEvidence({
+      workspaceDir: root,
+      sessionId: 'sess-cx',
+      injected: [{ principleId: 'princ-cx', activationId: 'act-orphan', artifactId: 'art-missing' }],
+      evidenceEnabled: true,
+      warn: (line) => warnings.push(line),
+    });
+    const delivery = evidenceRows(root).find((row) => row.record_kind === 'delivery');
+    expect(delivery).toBeDefined();
+    expect(JSON.parse(delivery!.content_ref_json ?? '{}')).toEqual({
+      principleId: 'princ-cx', artifactId: 'art-missing', resolution: 'revision_reference_unresolved',
+    });
+    expect(warnings).toHaveLength(0);
   });
 
   it('writes nothing when evidence is flag-disabled', () => {

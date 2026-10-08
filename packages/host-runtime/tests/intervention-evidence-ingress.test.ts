@@ -10,9 +10,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import { SqliteConnection } from '@principles/core/runtime-v2';
 import {
   createInterventionEvidenceIngress,
+  type InterventionIngressAppendResult,
 } from '../src/intervention-evidence-ingress.js';
 
 const ingress = createInterventionEvidenceIngress();
@@ -20,9 +23,9 @@ const ingress = createInterventionEvidenceIngress();
 let workspaceDir = '';
 let conn: SqliteConnection;
 
-function validDeliveryBatch() {
+function validDeliveryBatch(evidenceScopeId = 'placeholder-overridden-by-ingress') {
   return {
-    evidenceScopeId: 'placeholder-overridden-by-ingress',
+    evidenceScopeId,
     sourceKind: 'openclaw_plugin_event_log' as const,
     adapterVersion: 'test-adapter@1',
     recordedAt: new Date().toISOString(),
@@ -68,7 +71,7 @@ afterEach(() => {
 describe('intervention evidence ingress', () => {
   it('appends a normalized batch into the workspace state.db evidence ledger', () => {
     seedActivation(workspaceDir, 'act-1');
-    const result = ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch() });
+    const result = ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)) });
     expect(result.ok).toBe(true);
     expect(result.insertedCount).toBe(1);
 
@@ -83,7 +86,7 @@ describe('intervention evidence ingress', () => {
   it('never throws on a malformed batch — returns a structured rejection', () => {
     const result = ingress.appendObservationBatch({
       workspaceDir,
-      batch: { ...validDeliveryBatch(), observations: [{ ...validDeliveryBatch().observations[0]!, payload: { targetKind: 'agent_context' } }] },
+      batch: { ...validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)), observations: [{ ...validDeliveryBatch().observations[0]!, payload: { targetKind: 'agent_context' } }] },
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('evidence_batch_rejected');
@@ -97,7 +100,7 @@ describe('intervention evidence ingress', () => {
     const blocker = path.join(workspaceDir, 'blocker.txt');
     fs.writeFileSync(blocker, 'x');
     const badWorkspace = path.join(blocker, 'nested');
-    const result = ingress.appendObservationBatch({ workspaceDir: badWorkspace, batch: validDeliveryBatch() });
+    const result = ingress.appendObservationBatch({ workspaceDir: badWorkspace, batch: validDeliveryBatch(ingress.evidenceScopeIdFor(badWorkspace)) });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('evidence_storage_failed');
     expect(result.nextAction).toContain('replay');
@@ -131,15 +134,120 @@ describe('intervention evidence ingress', () => {
     }
   });
 
-  it('overrides the batch scope with the workspace-derived scope so the ledger stays single-scope', () => {
-    seedActivation(workspaceDir, 'act-1');
-    const first = ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch() });
+  it('reuses the persisted scope after moving the workspace and accepts further writes', () => {
+    const firstScope = ingress.evidenceScopeIdFor(workspaceDir);
+    const first = ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)) });
     expect(first.ok).toBe(true);
-    // Same producer batch replayed — scope id differs in the payload but the
-    // ingress rewrites it to the workspace scope, so replay stays idempotent.
+
+    conn.close();
+    const movedDir = `${workspaceDir}-moved`;
+    fs.renameSync(workspaceDir, movedDir);
+    workspaceDir = movedDir;
+    conn = new SqliteConnection(workspaceDir);
+
+    expect(ingress.evidenceScopeIdFor(workspaceDir)).toBe(firstScope);
     const second = ingress.appendObservationBatch({
       workspaceDir,
+      batch: {
+        ...validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)),
+        observations: [{ ...validDeliveryBatch().observations[0]!, observationKey: 'relocated-write' }],
+      },
+    });
+    expect(second.ok).toBe(true);
+    expect(second.insertedCount).toBe(1);
+  });
+
+  it('keeps first-scope creation consistent across simultaneous ingress workers', async () => {
+    const workerSource = `
+      const { parentPort, workerData } = require('node:worker_threads');
+      (async () => {
+        const { getInterventionEvidenceIngress } = await import('@principles/host-runtime');
+        const ingress = getInterventionEvidenceIngress();
+        const evidenceScopeId = ingress.evidenceScopeIdFor(workerData.workspaceDir);
+        parentPort.postMessage({ ready: true, evidenceScopeId });
+        await new Promise((resolve) => parentPort.once('message', resolve));
+        const batch = JSON.parse(workerData.batchJson);
+        batch.evidenceScopeId = evidenceScopeId;
+        batch.observations[0].observationKey = workerData.observationKey;
+        parentPort.postMessage({ done: true, evidenceScopeId, observationKey: workerData.observationKey, result: ingress.appendObservationBatch({ workspaceDir: workerData.workspaceDir, batch }) });
+      })().catch((error) => parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) }));
+    `;
+    const workerData = (observationKey: string) => ({
+      workspaceDir,
+      batchJson: JSON.stringify(validDeliveryBatch()),
+      observationKey,
+    });
+    const workers = [
+      new Worker(workerSource, { eval: true, workerData: workerData('concurrent-first-a') }),
+      new Worker(workerSource, { eval: true, workerData: workerData('concurrent-first-b') }),
+    ];
+    const nextMessage = (worker: Worker) => new Promise<Record<string, unknown>>((resolve, reject) => {
+      worker.once('message', resolve);
+      worker.once('error', reject);
+      worker.once('exit', (code) => { if (code !== 0) reject(new Error(`worker exited with ${code}`)); });
+    });
+    try {
+      const ready = await Promise.all(workers.map(nextMessage));
+      expect(ready.map((message) => message.evidenceScopeId)).toEqual([ready[0]?.evidenceScopeId, ready[0]?.evidenceScopeId]);
+      workers.forEach((worker) => worker.postMessage('append'));
+      const completed = await Promise.all(workers.map(nextMessage));
+      expect(completed.every((message) => message.done === true)).toBe(true);
+      const results = completed.map((message) => message.result as InterventionIngressAppendResult);
+      for (const [index, result] of results.entries()) {
+        if (result.ok) {
+          expect(result.insertedCount).toBe(1);
+          continue;
+        }
+        expect(result.reason).toContain('evidence_storage_failed');
+        const retryBatch = validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir));
+        retryBatch.observations[0]!.observationKey = String(completed[index]?.observationKey);
+        const retry = createInterventionEvidenceIngress().appendObservationBatch({
+          workspaceDir,
+          batch: retryBatch,
+        });
+        expect(retry.ok).toBe(true);
+      }
+      const scopeRows = conn.getDb().prepare('SELECT scope_id FROM intervention_evidence_scope').all();
+      expect(scopeRows).toHaveLength(1);
+      const recordCount = (conn.getDb().prepare('SELECT COUNT(*) AS n FROM intervention_evidence_records').get() as { n: number }).n;
+      expect(recordCount).toBe(2);
+    } finally {
+      for (const worker of workers) await worker.terminate();
+    }
+  });
+
+  it('does not cache a path candidate when reading an existing ledger temporarily fails', () => {
+    conn.getDb().prepare('INSERT INTO intervention_evidence_scope (scope_id, established_at) VALUES (?, ?)')
+      .run('persisted-scope-after-retry', '2026-10-01T00:00:00Z');
+    conn.close();
+    const stateDb = path.join(workspaceDir, '.pd', 'state.db');
+    const backupDb = `${stateDb}.backup`;
+    fs.renameSync(stateDb, backupDb);
+    fs.writeFileSync(stateDb, 'temporarily unreadable database');
+    try {
+      const fallback = ingress.evidenceScopeIdFor(workspaceDir);
+      expect(fallback).not.toBe('persisted-scope-after-retry');
+    } finally {
+      fs.rmSync(stateDb, { force: true });
+      fs.renameSync(backupDb, stateDb);
+    }
+    expect(ingress.evidenceScopeIdFor(workspaceDir)).toBe('persisted-scope-after-retry');
+    conn = new SqliteConnection(workspaceDir);
+  });
+
+  it('overrides the batch scope with the workspace-derived scope so the ledger stays single-scope', () => {
+    seedActivation(workspaceDir, 'act-1');
+    const first = ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)) });
+    expect(first.ok).toBe(true);
+    const mismatchedScope = ingress.appendObservationBatch({
+      workspaceDir,
       batch: { ...validDeliveryBatch(), evidenceScopeId: 'producer-local-scope' },
+    });
+    expect(mismatchedScope.ok).toBe(false);
+    expect(mismatchedScope.reason).toContain('evidence_scope_mismatch');
+    const second = ingress.appendObservationBatch({
+      workspaceDir,
+      batch: validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)),
     });
     expect(second.ok).toBe(true);
     expect(second.duplicateCount).toBe(1);
@@ -154,6 +262,24 @@ describe('intervention evidence ingress', () => {
     expect(ref?.channel).toBe('prompt');
     expect(ref?.activatedAt).toBe('2026-10-01T00:00:00Z');
     expect(ref?.sourceSnapshotDigest.startsWith('sha256:')).toBe(true);
+    const contentRef = ingress.resolveInterventionContentRef(workspaceDir, ref!, 'T-01');
+    expect(contentRef).toMatchObject({
+      principleId: 'T-01', artifactId: 'art-1',
+      payloadDigest: `sha256:${createHash('sha256').update(JSON.stringify({ text: '原则内容' })).digest('hex')}`,
+      resolution: 'resolved',
+    });
+    expect(contentRef?.payloadDigest).not.toBe(ref?.sourceSnapshotDigest);
+  });
+
+  it('does not resolve content for an activation that references a missing artifact', () => {
+    const c = new SqliteConnection(workspaceDir);
+    c.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                       VALUES ('act-orphan', 'idem-orphan', 'art-missing', 'prompt', 'prompt_activate', 'ref', '2026-10-01T00:00:00Z')`).run();
+    c.close();
+    const activationRef = ingress.resolveActivationOccurrenceRef(workspaceDir, 'act-orphan');
+    expect(activationRef).not.toBeNull();
+    expect(activationRef?.sourceSnapshotDigest.startsWith('sha256:')).toBe(true);
+    expect(ingress.resolveInterventionContentRef(workspaceDir, activationRef!, 'T-01')).toBeNull();
   });
 
   it('returns null (honest gap) for an unresolvable activation', () => {
@@ -162,10 +288,10 @@ describe('intervention evidence ingress', () => {
 
   it('replaying the same batch after connection recycle is idempotent', () => {
     seedActivation(workspaceDir, 'act-1');
-    ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch() });
+    ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)) });
     conn.close();
     conn = new SqliteConnection(workspaceDir);
-    const replay = ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch() });
+    const replay = ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)) });
     expect(replay.ok).toBe(true);
     expect(replay.insertedCount).toBe(0);
     expect(replay.duplicateCount).toBe(1);
