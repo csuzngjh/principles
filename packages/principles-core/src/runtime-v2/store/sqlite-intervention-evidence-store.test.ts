@@ -55,7 +55,7 @@ function deliveryBatch(overrides: Partial<InterventionEvidenceBatchInput> = {}):
 
 function normalized(input: InterventionEvidenceBatchInput) {
   const result = normalizeInterventionEvidenceBatch(input);
-  expect(result.ok).toBe(true);
+  expect(result.ok, result.ok ? undefined : result.reason).toBe(true);
   if (!result.ok) throw new Error(result.reason);
   return result.batch;
 }
@@ -398,7 +398,7 @@ describe('SqliteInterventionEvidenceStore', () => {
       observationKey: 'oc|application|sensitive', sourceLocator: 'loc:sensitive', kind: 'application' as const,
       nativeRefs: { hostKind: 'openclaw' as const }, principleId: 'T-01',
       correctionOf: 'prior-application', correctionReason: 'private correction reason',
-      payload: { proofMethod: 'agent_claimed' as const, action: 'self_reported' as const },
+      payload: { proofMethod: 'agent_claimed' as const, action: 'self_reported' as const, claimText: 'legacy claim text' },
     };
     for (let start = 0; start < oldDeliveries.length; start += 50) {
       store.appendObservationBatch(normalized(deliveryBatch({ recordedAt: oldAt, observations: oldDeliveries.slice(start, start + 50) })));
@@ -413,8 +413,8 @@ describe('SqliteInterventionEvidenceStore', () => {
         evidence_id, scope_id, source_kind, observation_key, source_locator, record_kind,
         principle_id, activation_id, delivery_key, episode_key, effect_key,
         correction_of, correction_reason, occurred_at, recorded_at,
-        native_refs_json, content_ref_json, activation_ref_json, payload_json, record_digest
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        native_refs_json, content_ref_json, activation_ref_json, payload_json, record_digest, content_redacted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       historicalRecord.evidenceId, historicalRecord.evidenceScopeId, historicalRecord.sourceKind,
       historicalRecord.observationKey, historicalRecord.sourceLocator, historicalRecord.kind,
@@ -424,7 +424,8 @@ describe('SqliteInterventionEvidenceStore', () => {
       historicalRecord.occurredAt ?? null, historicalRecord.recordedAt,
       JSON.stringify(historicalRecord.nativeRefs), historicalRecord.contentRef ? JSON.stringify(historicalRecord.contentRef) : null,
       historicalRecord.activationRef ? JSON.stringify(historicalRecord.activationRef) : null,
-      JSON.stringify(historicalRecord.payload), historicalRecord.recordDigest,
+      JSON.stringify({ proofMethod: 'agent_claimed', action: 'self_reported' }), historicalRecord.recordDigest,
+      oldAt,
     );
     const readonlyAudit = store.readAuditRelations({ type: 'principle', principleId: 'T-01' });
     expect(readonlyAudit.available).toBe(true);
@@ -433,15 +434,15 @@ describe('SqliteInterventionEvidenceStore', () => {
       expect(oldSummary?.payload).not.toHaveProperty('claimText');
       expect(oldSummary?.contentRedactedAt).toBeTruthy();
     }
-    const before = conn.getDb().prepare(`SELECT record_digest, principle_id, native_refs_json, correction_of, correction_reason, payload_json FROM intervention_evidence_records WHERE observation_key = ?`).get(oldApplication.observationKey);
-    expect(before).toMatchObject({ principle_id: 'T-01', correction_of: 'prior-application', correction_reason: 'private correction reason' });
+    const before = conn.getDb().prepare(`SELECT record_digest, principle_id, native_refs_json, correction_of, correction_reason, payload_json, content_redacted_at FROM intervention_evidence_records WHERE observation_key = ?`).get(oldApplication.observationKey);
+    expect(before).toMatchObject({ principle_id: 'T-01', correction_of: 'prior-application', correction_reason: 'private correction reason', content_redacted_at: oldAt });
     store.appendObservationBatch(normalized(deliveryBatch())); // triggers bounded expiry sweep
     const db = conn.getDb();
     const after = db.prepare(`SELECT record_digest, principle_id, native_refs_json, correction_of, correction_reason, payload_json, content_redacted_at FROM intervention_evidence_records WHERE observation_key = ?`).get(oldApplication.observationKey);
     expect(after).toMatchObject({
       record_digest: record(before).record_digest,
       principle_id: 'T-01', native_refs_json: record(before).native_refs_json,
-      correction_of: 'prior-application', correction_reason: '[expired]',
+      correction_of: 'prior-application', correction_reason: '[expired]', content_redacted_at: oldAt,
     });
     expect(JSON.parse(String(record(after).payload_json))).not.toHaveProperty('claimText');
     expect(record(after).content_redacted_at).toBeTruthy();
@@ -498,7 +499,7 @@ describe('SqliteInterventionEvidenceStore', () => {
       recordedAt: '2001-01-01T00:00:00Z',
       observations: [{
         observationKey: 'oc|episode|expired-placeholder', sourceLocator: 'loc:expired-placeholder',
-        kind: 'behavior_episode', nativeRefs: { hostKind: 'openclaw' },
+        kind: 'behavior_episode', nativeRefs: { hostKind: 'openclaw', toolCallId: 'tool-expired', toolName: 'test_tool' },
         payload: { status: 'closed', actionSummary: '[expired]' },
       }],
     })));
