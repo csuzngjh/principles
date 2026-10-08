@@ -204,8 +204,11 @@ export async function handleActivationsRoute(
       }
       sendSuccess(res, result);
     } catch (err: unknown) {
+      // CodeQL information-exposure: the raw error may carry stack/internal
+      // details — log it server-side, return a fixed client message.
       const message = err instanceof Error ? err.message : String(err);
-      sendError(res, 500, 'propose_revision_error', message);
+      console.error(`[activations] propose-revision failed for ${revisionActivationId}: ${message}`);
+      sendError(res, 500, 'propose_revision_error', 'Failed to propose a revision due to an internal error.', { nextAction: 'Check the console server logs and retry; the old activation remains in effect.' });
     }
     return;
   }

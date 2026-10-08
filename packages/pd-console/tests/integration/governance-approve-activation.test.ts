@@ -707,7 +707,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   it('approve reports true starvation (not queued) when the production route does not rotate', async () => {
     const configPath = path.join(tmpDir, '.pd', 'config.yaml');
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    const originalConfig = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+    // CodeQL file-system-race: no existsSync probe — try/catch the read.
+    let originalConfig: string | null = null;
+    try { originalConfig = fs.readFileSync(configPath, 'utf8'); } catch { /* absent */ }
     // Build from the real default config: the validator requires version /
     // runtimeProfiles / internalAgents, so a hand-written fragment is rejected
     // as malformed and the flag silently stays off.
@@ -1008,7 +1010,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     const declarationPath = path.join(tmpDir, '.pd', 'host-tool-semantics', 'openclaw.json');
-    const declarationBackup = fs.existsSync(declarationPath) ? fs.readFileSync(declarationPath, 'utf8') : null;
+    // CodeQL file-system-race: no existsSync probe — try/catch the read.
+    let declarationBackup: string | null = null;
+    try { declarationBackup = fs.readFileSync(declarationPath, 'utf8'); } catch { /* absent */ }
     fs.rmSync(declarationPath, { force: true });
     try {
       const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {

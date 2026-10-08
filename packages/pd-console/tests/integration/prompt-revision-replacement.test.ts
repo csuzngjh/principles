@@ -8,7 +8,6 @@ import {
   SqliteConnection,
   PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
-import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { handleActivationsRoute, disposeActivationsModels } from '../../src/server/routes/activations.js';
