@@ -500,9 +500,6 @@ function normalizeObservation(
   if (record.contentRef && record.principleId !== undefined && record.contentRef.principleId !== record.principleId) {
     return { error: 'content_reference_principle_mismatch' };
   }
-  if (record.activationRef && record.activationId !== undefined && record.activationRef.activationId !== record.activationId) {
-    return { error: 'activation_reference_id_mismatch' };
-  }
   if (record.activationRef?.activatedAt && record.occurredAt && Date.parse(record.activationRef.activatedAt) > Date.parse(record.occurredAt)) {
     return { error: 'activation_reference_occurs_after_evidence' };
   }

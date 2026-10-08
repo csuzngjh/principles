@@ -109,6 +109,18 @@ describe('normalizeInterventionEvidenceBatch — happy paths', () => {
     expect(malformed).toEqual({ ok: false, reason: 'observation_contentRef_payloadDigest_not_sha256' });
   });
 
+  it('rejects an activation occurrence that is later than the referenced evidence event', () => {
+    const result = normalizeInterventionEvidenceBatch(validBatch({ observations: [{
+      ...baseObservation(),
+      activationRef: {
+        activationId: 'act-1', sourceSnapshotDigest: `sha256:${'b'.repeat(64)}`,
+        activatedAt: '2026-10-08T00:00:00Z',
+      },
+      occurredAt: '2026-10-07T07:59:59Z',
+    }] }));
+    expect(result).toEqual({ ok: false, reason: 'activation_reference_occurs_after_evidence' });
+  });
+
   it('does not copy claim or input text from the short-lived Codex hook source', () => {
     const result = normalizeInterventionEvidenceBatch(validBatch({
       sourceKind: 'codex_pd_hook_event_log',

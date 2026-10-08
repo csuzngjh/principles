@@ -316,6 +316,8 @@ describe('SqliteInterventionEvidenceStore', () => {
     const newerDeliveries = Array.from({ length: 55 }, (_, i) => ({
       observationKey: `oc|delivery|${i}`, sourceLocator: `loc:${i}`, kind: 'delivery' as const,
       nativeRefs: { hostKind: 'openclaw' as const }, principleId: 'T-01',
+      contentRef: { principleId: 'T-01', resolution: 'resolved' as const, payloadDigest: `sha256:${'a'.repeat(64)}` },
+      activationRef: { activationId: 'act-1', sourceSnapshotDigest: `sha256:${'b'.repeat(64)}` },
       payload: { targetKind: 'agent_context' as const, confirmation: 'submitted' as const, outcome: 'attempted' as const },
     }));
     store.appendObservationBatch(normalized(deliveryBatch({ observations: newerDeliveries })));
@@ -358,6 +360,8 @@ describe('SqliteInterventionEvidenceStore', () => {
       observationKey: `oc|delivery|metadata-${index}`, sourceLocator: `loc:metadata-${index}`,
       kind: 'delivery' as const, nativeRefs: { hostKind: 'openclaw' as const },
       principleId: 'T-01', payload: { targetKind: 'agent_context' as const, confirmation: 'submitted' as const, outcome: 'attempted' as const },
+      contentRef: { principleId: 'T-01', resolution: 'resolved' as const, payloadDigest: `sha256:${'a'.repeat(64)}` },
+      activationRef: { activationId: 'act-1', sourceSnapshotDigest: `sha256:${'b'.repeat(64)}` },
     }));
     const oldApplication = {
       observationKey: 'oc|application|sensitive', sourceLocator: 'loc:sensitive', kind: 'application' as const,
