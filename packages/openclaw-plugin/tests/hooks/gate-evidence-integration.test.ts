@@ -179,7 +179,7 @@ describe('PD v2 Phase 1: gate hook writes normalized enforcement evidence', () =
     expect(evidenceRows()).toHaveLength(0);
   });
 
-  it('evidence storage failure never flips the block (scope-mismatch injection)', () => {
+  it('evidence storage failure never flips the block (SQLite write-failure injection)', () => {
     seedLiveActivation();
     _mockEvaluate = vi.fn().mockReturnValue({
       liveDecision: { decision: 'block', matched: true, reason: '删除类操作必须先确认目标', ruleId: 'R-ev', principleId: 'princ-ev' },
@@ -188,13 +188,12 @@ describe('PD v2 Phase 1: gate hook writes normalized enforcement evidence', () =
       evaluationStatus: 'ok',
       liveDecisionActivationId: 'act-ev',
     });
-    // Sabotage the evidence ledger with a foreign scope: the ingress append
-    // must fail (scope mismatch) and degrade to a warn — while the block
-    // decision itself stands unchanged. (Dropping tables does NOT work as an
-    // injection: initSchema re-creates them idempotently.)
-    conn.getDb()
-      .prepare("INSERT INTO intervention_evidence_scope (scope_id, established_at) VALUES ('foreign-scope', '2026-01-01T00:00:00Z')")
-      .run();
+    // Inject a real persistence failure at the database boundary. The
+    // evidence write must degrade to a warning while the computed block
+    // decision stands unchanged.
+    conn.getDb().exec(`CREATE TRIGGER fail_intervention_evidence_insert
+      BEFORE INSERT ON intervention_evidence_records
+      BEGIN SELECT RAISE(ABORT, 'injected evidence write failure'); END;`);
 
     const warn = vi.fn();
     const result = handleBeforeToolCall(
@@ -204,6 +203,7 @@ describe('PD v2 Phase 1: gate hook writes normalized enforcement evidence', () =
 
     expect(result.block).toBe(true);
     expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join(' ')).toContain('injected evidence write failure');
     expect(evidenceRows()).toHaveLength(0);
   });
 });
