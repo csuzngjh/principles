@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime-v2/index.ts",
- "count": 1859,
+"count": 1861,
  "names": [
   "ADMISSION_CONFIDENCE_THRESHOLD",
   "AGENT_IDS",
@@ -622,6 +622,8 @@
   "InterventionApplicationProof",
   "InterventionAuditRead",
   "InterventionAuditReadOptions",
+  "InterventionAuditCursor",
+  "InterventionAuditKindPage",
   "InterventionAuditRecordSummary",
   "InterventionAuditRelations",
   "InterventionAuditSelector",

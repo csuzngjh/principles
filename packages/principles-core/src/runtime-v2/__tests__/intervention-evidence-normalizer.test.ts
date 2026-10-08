@@ -26,7 +26,7 @@ function baseObservation(): InterventionObservationInput {
     contentRef: {
       principleId: 'T-01',
       artifactId: 'art-1',
-      payloadDigest: 'sha256:aa',
+      payloadDigest: 'sha256:aa00000000000000000000000000000000000000000000000000000000000000',
       resolution: 'resolved',
     },
     activationRef: {
@@ -34,7 +34,7 @@ function baseObservation(): InterventionObservationInput {
       artifactId: 'art-1',
       channel: 'prompt',
       activatedAt: '2026-10-01T00:00:00Z',
-      sourceSnapshotDigest: 'sha256:bb',
+      sourceSnapshotDigest: 'sha256:bb00000000000000000000000000000000000000000000000000000000000000',
     },
     payload: {
       targetKind: 'agent_context',
@@ -99,6 +99,29 @@ describe('normalizeInterventionEvidenceBatch — happy paths', () => {
       }],
     }));
     expect(resolved).toEqual({ ok: false, reason: 'observation_contentRef_resolved_requires_payloadDigest' });
+
+    const malformed = normalizeInterventionEvidenceBatch(validBatch({
+      observations: [{
+        ...baseObservation(),
+        contentRef: { principleId: 'T-01', payloadDigest: 'sha256:not-a-digest', resolution: 'resolved' },
+      }],
+    }));
+    expect(malformed).toEqual({ ok: false, reason: 'observation_contentRef_payloadDigest_not_sha256' });
+  });
+
+  it('does not copy claim or input text from the short-lived Codex hook source', () => {
+    const result = normalizeInterventionEvidenceBatch(validBatch({
+      sourceKind: 'codex_pd_hook_event_log',
+      observations: [{
+        observationKey: 'codex|application|claim|session|tool',
+        sourceLocator: 'codex-pd-hook-event-log:session',
+        kind: 'application',
+        nativeRefs: { hostKind: 'codex', sessionId: 'session', toolCallId: 'tool' },
+        principleId: 'T-01',
+        payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: 'private task text' },
+      }],
+    }));
+    expect(result).toEqual({ ok: false, reason: 'codex_hook_evidence_forbids_source_content:claimText' });
   });
 
   it('accepts a runtime_verified application with activation ref and boundary', () => {
@@ -111,7 +134,7 @@ describe('normalizeInterventionEvidenceBatch — happy paths', () => {
         principleId: 'T-01',
         activationRef: {
           activationId: 'act-1',
-          sourceSnapshotDigest: 'sha256:bb',
+          sourceSnapshotDigest: 'sha256:bb00000000000000000000000000000000000000000000000000000000000000',
         },
         payload: {
           proofMethod: 'runtime_verified',
@@ -230,7 +253,7 @@ describe('application proof boundary (ADR-0027 §2.3)', () => {
       observations: [{
         observationKey: 'k', sourceLocator: 'l', kind: 'application',
         nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01',
-        activationRef: { activationId: 'act-1', sourceSnapshotDigest: 'sha256:b' },
+        activationRef: { activationId: 'act-1', sourceSnapshotDigest: 'sha256:b000000000000000000000000000000000000000000000000000000000000000' },
         payload: { proofMethod: 'runtime_verified', action: 'tool_blocked' },
       }],
     }));
@@ -243,7 +266,7 @@ describe('application proof boundary (ADR-0027 §2.3)', () => {
       observations: [{
         observationKey: 'k', sourceLocator: 'l', kind: 'application',
         nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01',
-        activationRef: { activationId: 'act-1', sourceSnapshotDigest: 'sha256:b' },
+        activationRef: { activationId: 'act-1', sourceSnapshotDigest: 'sha256:b000000000000000000000000000000000000000000000000000000000000000' },
         payload: { proofMethod: 'runtime_verified', action: 'shadow_evaluated', enforcementBoundary: 'x' },
       }],
     });
@@ -282,7 +305,7 @@ describe('episode / effect / outcome relations (SPEC §13.3)', () => {
         observationKey: 'k', sourceLocator: 'l', kind: 'effect',
         nativeRefs: { hostKind: 'openclaw', toolCallId: 'tool-9' },
         principleId: 'T-01',
-        contentRef: { principleId: 'T-01', payloadDigest: 'sha256:a', resolution: 'resolved' },
+        contentRef: { principleId: 'T-01', payloadDigest: 'sha256:a000000000000000000000000000000000000000000000000000000000000000', resolution: 'resolved' },
         payload: { status: 'observed', observationSummary: 'tool blocked by rule' },
       }],
     }));
@@ -294,7 +317,7 @@ describe('episode / effect / outcome relations (SPEC §13.3)', () => {
       observationKey: 'k', sourceLocator: 'l', kind: 'effect',
       nativeRefs: { hostKind: 'openclaw', toolCallId: 't' },
       principleId: 'T-01', episodeKey: 'ep-1',
-      contentRef: { principleId: 'T-01', payloadDigest: 'sha256:a', resolution: 'resolved' },
+      contentRef: { principleId: 'T-01', payloadDigest: 'sha256:a000000000000000000000000000000000000000000000000000000000000000', resolution: 'resolved' },
       payload: { status, observationSummary: 's' },
     });
     expect(normalizeInterventionEvidenceBatch(validBatch({ observations: [mkEffect('disputed')] })))
@@ -376,6 +399,8 @@ describe('untrusted-input hardening (rc-1..rc-5)', () => {
   it('rejects non-ISO timestamps', () => {
     const result = normalizeInterventionEvidenceBatch(validBatch({ recordedAt: '2026-10-07 08:00:00' }));
     expect(result).toEqual({ ok: false, reason: 'batch_recordedAt_missing_or_not_iso_utc' });
+    const impossibleDate = normalizeInterventionEvidenceBatch(validBatch({ recordedAt: '2026-99-99T08:00:00Z' }));
+    expect(impossibleDate).toEqual({ ok: false, reason: 'batch_recordedAt_missing_or_not_iso_utc' });
   });
 
   it('rejects over-long free text at the documented bounds', () => {

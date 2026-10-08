@@ -37,10 +37,20 @@ function coverage(): Record<string, unknown> {
 function deliveryRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     evidenceId: 'sha256:d1', kind: 'delivery', observationKey: 'openclaw|delivery|x',
+    principleId: 'princ-A', activationId: 'act-a1',
     recordedAt: '2026-10-07T08:00:00Z', associationStatus: 'linked',
+    nativeRefs: { hostKind: 'openclaw', sessionId: 's-1' },
+    contentRef: { principleId: 'princ-A', resolution: 'resolved', payloadDigest: `sha256:${'a'.repeat(64)}` },
+    activationRef: { activationId: 'act-a1', sourceSnapshotDigest: `sha256:${'b'.repeat(64)}`, activatedAt: '2026-10-01T00:00:00Z' },
     payload: { targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' },
     ...overrides,
   };
+}
+
+function pages(withDeliveryCursor = false): Record<string, unknown> {
+  return Object.fromEntries(['delivery', 'application', 'behavior_episode', 'effect', 'outcome'].map((kind) => [kind, kind === 'delivery' && withDeliveryCursor
+    ? { hasMore: true, nextCursor: { recordedAt: '2026-10-06T00:00:00Z', evidenceId: 'sha256:cursor' } }
+    : { hasMore: false, nextCursor: null }]));
 }
 
 afterEach(() => {
@@ -57,36 +67,50 @@ describe('fetchEvidenceAudit', () => {
       episodes: [],
       effects: [],
       outcomes: [],
+      pages: pages(true),
       unresolvedReferences: [],
       capabilityDeclarations: [
         { hostKind: 'openclaw', capability: 'enforcement_delivery', status: 'supported', adapterVersion: 'v', channel: 'code_tool_hook' },
       ],
       coverage: coverage(),
     }));
-    const result = await fetchEvidenceAudit('principle', 'princ-A');
+    const result = await fetchEvidenceAudit('principle', 'princ-A', {
+      kind: 'delivery', after: { recordedAt: '2026-10-06T00:00:00Z', evidenceId: 'sha256:cursor' },
+    });
     expect(result.success).toBe(true);
     if (!result.success || !result.data) return;
     expect(result.data.deliveries).toHaveLength(1);
     expect(result.data.deliveries[0]!.summary).toBe('submitted / attempted');
+    expect(result.data.deliveries[0]!.contentReference?.resolution).toBe('resolved');
+    expect(result.data.deliveries[0]!.activationReference?.activationId).toBe('act-a1');
+    expect(result.data.deliveries[0]!.nativeLineage).toContain('sessionId=s-1');
+    expect(result.data.pages.delivery.hasMore).toBe(true);
+    expect(result.data.pages.delivery.nextCursor?.evidenceId).toBe('sha256:cursor');
     expect(result.data.capabilityDeclarations[0]!.status).toBe('supported');
     const url = vi.mocked(fetch).mock.calls[0]?.[0];
     expect(String(url)).toContain('/api/v1/receipts/evidence-audit?type=principle&id=princ-A');
+    expect(String(url)).toContain('afterKind=delivery');
   });
 
-  it('filters malformed record elements element-wise and requires coverage', async () => {
+  it('rejects a malformed record instead of silently presenting an incomplete chain', async () => {
     vi.mocked(fetch).mockResolvedValue(okEnvelope({
       status: 'ok',
       deliveries: [deliveryRecord(), { evidenceId: 'x' /* malformed */ }, deliveryRecord({ kind: 'nonsense' })],
-      applications: [], episodes: [], effects: [], outcomes: [],
+      applications: [], episodes: [], effects: [], outcomes: [], pages: pages(),
       unresolvedReferences: [], capabilityDeclarations: [],
       coverage: coverage(),
     }));
     const result = await fetchEvidenceAudit('episode', 'k');
-    expect(result.success).toBe(true);
-    if (!result.success || !result.data) return;
-    expect(result.data.deliveries).toHaveLength(1);
+    expect(result.success).toBe(false);
 
-    const noCoverage = okEnvelope({ status: 'ok', deliveries: [], applications: [], episodes: [], effects: [], outcomes: [], unresolvedReferences: [], capabilityDeclarations: [] });
+    vi.mocked(fetch).mockReset();
+    vi.mocked(fetch).mockResolvedValue(okEnvelope({
+      status: 'ok', deliveries: [deliveryRecord({ contentRef: null })], applications: [], episodes: [], effects: [], outcomes: [],
+      pages: pages(), unresolvedReferences: [], capabilityDeclarations: [], coverage: coverage(),
+    }));
+    expect((await fetchEvidenceAudit('episode', 'k')).success).toBe(false);
+
+    const noCoverage = okEnvelope({ status: 'ok', deliveries: [], applications: [], episodes: [], effects: [], outcomes: [], pages: pages(), unresolvedReferences: [], capabilityDeclarations: [] });
     vi.mocked(fetch).mockReset();
     vi.mocked(fetch).mockResolvedValue(noCoverage);
     const rejected = await fetchEvidenceAudit('effect', 'k');
@@ -98,7 +122,7 @@ describe('fetchEvidenceAudit', () => {
       status: 'degraded',
       reason: 'state.db not found',
       nextAction: 'Run pd runtime diagnostics',
-      deliveries: [], applications: [], episodes: [], effects: [], outcomes: [],
+      deliveries: [], applications: [], episodes: [], effects: [], outcomes: [], pages: pages(),
       unresolvedReferences: [], capabilityDeclarations: [],
       coverage: { ...coverage(), sourceStatus: 'unavailable' },
     }));

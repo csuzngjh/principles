@@ -251,6 +251,7 @@ export function PrincipleDetailPage() {
   // PD v2 Phase 1: normalized intervention evidence audit (ADR-0027) — the
   // four-query read stays a separate surface from the legacy receipt history.
   const [evidenceAudit, setEvidenceAudit] = useState<EvidenceAuditData | null>(null);
+  const [loadingEvidenceKind, setLoadingEvidenceKind] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -356,6 +357,36 @@ export function PrincipleDetailPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const loadOlderEvidence = async (kind: EvidenceAuditData["deliveries"][number]["kind"]): Promise<void> => {
+    if (!id || !evidenceAudit || loadingEvidenceKind) return;
+    const page = evidenceAudit.pages[kind];
+    if (!page.hasMore || !page.nextCursor) return;
+    setLoadingEvidenceKind(kind);
+    try {
+      const result = await fetchEvidenceAudit('principle', id, { kind, after: page.nextCursor });
+      if (!result.success || !result.data) return;
+      if (result.data.status !== 'ok') {
+        toast.error(result.data.reason ?? '读取更早的干预证据失败');
+        return;
+      }
+      const section = kind === 'delivery' ? 'deliveries'
+        : kind === 'application' ? 'applications'
+        : kind === 'behavior_episode' ? 'episodes'
+        : kind === 'effect' ? 'effects' : 'outcomes';
+      setEvidenceAudit((current) => current === null ? current : ({
+        ...current,
+        [section]: [...current[section], ...result.data[section]],
+        pages: { ...current.pages, [kind]: result.data.pages[kind] },
+        unresolvedReferences: [...new Map([...current.unresolvedReferences, ...result.data.unresolvedReferences]
+          .map((entry) => [`${entry.evidenceId}:${entry.field}:${entry.missingKey}`, entry])).values()],
+      }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '读取更早的干预证据失败');
+    } finally {
+      setLoadingEvidenceKind(null);
+    }
+  };
 
   // ── Owner decision actions (SPEC §8.4: mutation service is the authority) ─
   // The view's actions are advisory; every submission goes through the real
@@ -989,12 +1020,12 @@ export function PrincipleDetailPage() {
               )}
               <dl className="mt-3 space-y-2 text-[13px]">
                 {([
-                  ['delivery', '投递（Delivery）', evidenceAudit.deliveries],
-                  ['application', '应用（Application）', evidenceAudit.applications],
-                  ['episode', '行为（Episode）', evidenceAudit.episodes],
-                  ['effect', '效果（Effect）', evidenceAudit.effects],
-                  ['outcome', '结果（Outcome）', evidenceAudit.outcomes],
-                ] as const).map(([key, label, list]) => (
+                  ['delivery', '投递（Delivery）', evidenceAudit.deliveries, 'delivery'],
+                  ['application', '应用（Application）', evidenceAudit.applications, 'application'],
+                  ['episode', '行为（Episode）', evidenceAudit.episodes, 'behavior_episode'],
+                  ['effect', '效果（Effect）', evidenceAudit.effects, 'effect'],
+                  ['outcome', '结果（Outcome）', evidenceAudit.outcomes, 'outcome'],
+                ] as const).map(([key, label, list, recordKind]) => (
                   <div key={key} className="border-t border-line pt-2">
                     <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{label}</dt>
                     <dd className="mt-1">
@@ -1009,6 +1040,11 @@ export function PrincipleDetailPage() {
                               <span className="font-mono text-[11px] text-ink-4">{record.recordedAt.slice(0, 16).replace('T', ' ')}</span>
                               <span className="font-mono text-[11px]">{record.summary}</span>
                               <span className="min-w-0 flex-1 truncate" title={`${record.observationKey}\n${record.detail}`}>{record.detail}</span>
+                              {record.sourceStatus === 'unknown' && <span className="text-[10px] text-amber">源可复核性未知</span>}
+                              {record.contentRedactedAt && <span className="text-[10px] text-ink-4">正文已于 {record.contentRedactedAt.slice(0, 10)} 清除</span>}
+                              {record.contentReference && <span className="text-[10px] text-ink-4" title={record.contentReference.payloadDigest ?? '无载荷摘要'}>内容引用：{record.contentReference.resolution === 'resolved' ? 'resolved' : 'revision 未解析'} · {record.contentReference.principleId}{record.contentReference.artifactId ? ` · ${record.contentReference.artifactId}` : ''}</span>}
+                              {record.activationReference && <span className="text-[10px] text-ink-4" title={`snapshot ${record.activationReference.sourceSnapshotDigest}`}>激活发生：{record.activationReference.activationId}{record.activationReference.activatedAt ? ` · ${record.activationReference.activatedAt}` : ''}</span>}
+                              {record.nativeLineage.length > 0 && <span className="text-[10px] text-ink-4">原生线索：{record.nativeLineage.join(' · ')}</span>}
                               {record.associationStatus === 'pending_association' && (
                                 <span className="font-mono text-[10px] rounded bg-amber/15 px-1.5 py-0.5 text-amber">
                                   {t('principles.detail.evidenceAudit.pending', { defaultValue: '待关联' })}
@@ -1019,6 +1055,11 @@ export function PrincipleDetailPage() {
                         </ul>
                       )}
                     </dd>
+                    {evidenceAudit.pages[recordKind].hasMore && (
+                      <Button variant="ghost" size="sm" disabled={loadingEvidenceKind !== null} onClick={() => void loadOlderEvidence(recordKind)}>
+                        {loadingEvidenceKind === recordKind ? '读取中…' : '读取更早记录'}
+                      </Button>
+                    )}
                   </div>
                 ))}
               </dl>

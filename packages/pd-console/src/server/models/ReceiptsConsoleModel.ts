@@ -24,6 +24,7 @@ import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS } from '@principles/cor
 import { SqliteInterventionEvidenceStore } from '@principles/core/runtime-v2';
 import type {
   InterventionAuditRecordSummary,
+  InterventionAuditKindPage,
   InterventionAuditSelector,
   InterventionCapabilityDeclaration,
   ReceiptEvidenceCoverage,
@@ -88,6 +89,7 @@ export interface EvidenceAuditResponse {
   episodes: InterventionAuditRecordSummary[];
   effects: InterventionAuditRecordSummary[];
   outcomes: InterventionAuditRecordSummary[];
+  pages: Record<InterventionAuditRecordSummary['kind'], InterventionAuditKindPage>;
   unresolvedReferences: { evidenceId: string; missingKey: string; field: string }[];
   capabilityDeclarations: InterventionCapabilityDeclaration[];
   asOf: string | null;
@@ -369,13 +371,23 @@ export class ReceiptsConsoleModel {
    * (missing DB, flag off, pre-evidence schema) is structured, never thrown
    * to the route.
    */
-  async getEvidenceAudit(selector: InterventionAuditSelector): Promise<EvidenceAuditResponse> {
+  async getEvidenceAudit(
+    selector: InterventionAuditSelector,
+    cursor?: { kind: InterventionAuditRecordSummary['kind']; after: { recordedAt: string; evidenceId: string } },
+  ): Promise<EvidenceAuditResponse> {
     const empty: Omit<EvidenceAuditResponse, 'status' | 'reason' | 'nextAction' | 'selector' | 'coverage'> = {
       deliveries: [],
       applications: [],
       episodes: [],
       effects: [],
       outcomes: [],
+      pages: {
+        delivery: { hasMore: false, nextCursor: null },
+        application: { hasMore: false, nextCursor: null },
+        behavior_episode: { hasMore: false, nextCursor: null },
+        effect: { hasMore: false, nextCursor: null },
+        outcome: { hasMore: false, nextCursor: null },
+      },
       unresolvedReferences: [],
       capabilityDeclarations: [],
       asOf: null,
@@ -394,7 +406,7 @@ export class ReceiptsConsoleModel {
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true, bootstrapIfMissing: false });
     try {
       const store = new SqliteInterventionEvidenceStore(conn);
-      const read = store.readAuditRelations(selector, { limit: 50 });
+      const read = store.readAuditRelations(selector, { limit: 50, ...(cursor ? { cursor } : {}) });
       if (!read.available) {
         // A state.db that predates the evidence tables: nothing was created
         // by this GET (the store never bootstraps) — an honest unavailable.
@@ -421,6 +433,7 @@ export class ReceiptsConsoleModel {
         episodes: relations.episodes,
         effects: relations.effects,
         outcomes: relations.outcomes,
+        pages: relations.pages,
         unresolvedReferences: relations.unresolvedReferences,
         capabilityDeclarations: relations.capabilityDeclarations,
         asOf: relations.asOf,

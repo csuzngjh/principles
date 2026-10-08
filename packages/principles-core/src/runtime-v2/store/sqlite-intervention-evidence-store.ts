@@ -27,12 +27,16 @@ import {
 import { INTERVENTION_RECORD_KINDS, INTERVENTION_SOURCE_KINDS } from '../types/intervention-evidence-contract.js';
 import type { NormalizedInterventionBatch } from '../intervention-evidence-normalizer.js';
 import type {
+  InterventionActivationOccurrenceRef,
   InterventionAuditRecordSummary,
+  InterventionContentRef,
+  InterventionNativeRefs,
   InterventionAuditRelations,
   InterventionAuditSelector,
   InterventionCapabilityDeclaration,
   InterventionRecordKind,
 } from '../types/intervention-evidence-contract.js';
+import { RECEIPT_RETENTION_POLICY_DAYS } from '../receipt-coverage.js';
 
 export interface InterventionSourceConflict {
   observationKey: string;
@@ -53,6 +57,8 @@ export interface AppendObservationBatchResult {
 export interface InterventionAuditReadOptions {
   /** Max records per kind section. Default 50, clamped to [1, 200]. */
   limit?: number;
+  /** Resume one kind from the cursor returned in relations.pages. */
+  cursor?: { kind: InterventionRecordKind; after: { recordedAt: string; evidenceId: string } };
 }
 
 export type InterventionAuditRead =
@@ -61,6 +67,13 @@ export type InterventionAuditRead =
 
 const AUDIT_DEFAULT_LIMIT = 50;
 const AUDIT_MAX_LIMIT = 200;
+const SHA256_RE = /^sha256:[a-f0-9]{64}$/;
+function isValidAuditTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?Z$/.exec(value);
+  return match !== null && Number.isFinite(Date.parse(value))
+    && new Date(Date.parse(value)).toISOString() === `${match[1]}.${(match[2] ?? '').padEnd(3, '0')}Z`;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -131,6 +144,163 @@ function strOrNullColumn(row: Record<string, unknown>, column: string): string |
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+function parseOptionalJsonColumn(column: unknown, rowId: string): Record<string, unknown> | undefined {
+  if (column === null || column === undefined) return undefined;
+  if (typeof column !== 'string') {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${rowId}: JSON reference is not text`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
+  return parseJsonColumn(column, rowId);
+}
+
+function parseNativeRefs(column: unknown, rowId: string): InterventionNativeRefs {
+  const raw = parseJsonColumn(typeof column === 'string' ? column : '', rowId);
+  if (raw.hostKind !== 'openclaw' && raw.hostKind !== 'codex') {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${rowId}: native host is invalid`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
+  const refs: InterventionNativeRefs = { hostKind: raw.hostKind };
+  for (const key of ['sessionId', 'runId', 'turnId', 'toolCallId', 'toolName', 'rolloutIdentity'] as const) {
+    const value = raw[key];
+    if (value !== undefined) {
+      if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
+        throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${rowId}: native ${key} is invalid`, {
+          nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+        });
+      }
+      refs[key] = value;
+    }
+  }
+  return refs;
+}
+
+function parseContentRef(column: unknown, rowId: string): InterventionContentRef | undefined {
+  const raw = parseOptionalJsonColumn(column, rowId);
+  if (!raw) return undefined;
+  if (typeof raw.principleId !== 'string' || raw.principleId.length === 0 || raw.principleId.length > 256
+    || (raw.resolution !== 'resolved' && raw.resolution !== 'revision_reference_unresolved')
+    || (raw.payloadDigest !== undefined && (typeof raw.payloadDigest !== 'string' || !SHA256_RE.test(raw.payloadDigest)))
+    || (raw.resolution === 'resolved' && (typeof raw.payloadDigest !== 'string' || !SHA256_RE.test(raw.payloadDigest)))) {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${rowId}: content reference is invalid`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
+  const ref: InterventionContentRef = { principleId: raw.principleId, resolution: raw.resolution };
+  if (typeof raw.payloadDigest === 'string') ref.payloadDigest = raw.payloadDigest;
+  for (const key of ['artifactId', 'version', 'approvalRef'] as const) {
+    const value = raw[key];
+    if (value !== undefined) {
+      if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
+        throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${rowId}: content ${key} is invalid`, {
+          nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+        });
+      }
+      ref[key] = value;
+    }
+  }
+  return ref;
+}
+
+function parseActivationRef(column: unknown, rowId: string): InterventionActivationOccurrenceRef | undefined {
+  const raw = parseOptionalJsonColumn(column, rowId);
+  if (!raw) return undefined;
+  if (typeof raw.activationId !== 'string' || raw.activationId.length === 0 || raw.activationId.length > 256
+    || typeof raw.sourceSnapshotDigest !== 'string' || !SHA256_RE.test(raw.sourceSnapshotDigest)
+    || (raw.activatedAt !== undefined && !isValidAuditTimestamp(raw.activatedAt))) {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${rowId}: activation reference is invalid`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
+  const ref: InterventionActivationOccurrenceRef = { activationId: raw.activationId, sourceSnapshotDigest: raw.sourceSnapshotDigest };
+  for (const key of ['idempotencyKey', 'artifactId', 'channel', 'activatedAt'] as const) {
+    const value = raw[key];
+    if (value !== undefined) {
+      if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
+        throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${rowId}: activation ${key} is invalid`, {
+          nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+        });
+      }
+      ref[key] = value;
+    }
+  }
+  return ref;
+}
+
+function redactPayloadText(recordKind: unknown, rawPayload: unknown, evidenceId: string): string | null {
+  if (typeof recordKind !== 'string') return null;
+  const payload = parseJsonColumn(typeof rawPayload === 'string' ? rawPayload : '', evidenceId);
+  let changed = false;
+  const remove = (key: string): void => {
+    if (Object.hasOwn(payload, key)) {
+      delete payload[key];
+      changed = true;
+    }
+  };
+  const replace = (key: string): void => {
+    if (Object.hasOwn(payload, key) && payload[key] !== '[expired]') {
+      payload[key] = '[expired]';
+      changed = true;
+    }
+  };
+  switch (recordKind) {
+    case 'delivery':
+      remove('failureReason'); remove('nonAttemptReason'); remove('unsupportedNote');
+      break;
+    case 'application':
+      remove('claimText');
+      break;
+    case 'behavior_episode':
+      remove('inputPreview'); remove('resultSummary'); replace('actionSummary');
+      break;
+    case 'effect':
+      remove('disputeReason'); replace('observationSummary');
+      break;
+    case 'outcome':
+      remove('feedbackText'); remove('actorId'); replace('observationSummary');
+      break;
+    default:
+      throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${evidenceId}: record kind is invalid during retention`, {
+        nextAction: 'Inspect the evidence ledger schema and preserve its raw source before retrying retention.',
+      });
+  }
+  return changed ? JSON.stringify(payload) : null;
+}
+
+function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): number {
+  const receiptCutoff = new Date(asOf.getTime() - RECEIPT_RETENTION_POLICY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const codexCutoff = new Date(asOf.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const rows = db.prepare(`SELECT evidence_id, record_kind, payload_json
+    FROM intervention_evidence_records
+    WHERE ((source_kind IN ('codex_pd_hook_event_log', 'codex_governance_observation') AND
+            (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))) OR
+           (source_kind NOT IN ('codex_pd_hook_event_log', 'codex_governance_observation') AND
+            (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))))
+      AND content_redacted_at IS NULL
+      AND ((record_kind = 'delivery' AND (json_type(payload_json, '$.failureReason') IS NOT NULL OR json_type(payload_json, '$.nonAttemptReason') IS NOT NULL OR json_type(payload_json, '$.unsupportedNote') IS NOT NULL)) OR
+           (record_kind = 'application' AND json_type(payload_json, '$.claimText') IS NOT NULL) OR
+           (record_kind = 'behavior_episode' AND (json_type(payload_json, '$.inputPreview') IS NOT NULL OR json_type(payload_json, '$.resultSummary') IS NOT NULL OR json_type(payload_json, '$.actionSummary') IS NOT NULL)) OR
+           (record_kind = 'effect' AND (json_type(payload_json, '$.disputeReason') IS NOT NULL OR json_type(payload_json, '$.observationSummary') IS NOT NULL)) OR
+           (record_kind = 'outcome' AND (json_type(payload_json, '$.feedbackText') IS NOT NULL OR json_type(payload_json, '$.actorId') IS NOT NULL OR json_type(payload_json, '$.observationSummary') IS NOT NULL)))
+    ORDER BY recorded_at ASC, evidence_id ASC LIMIT 200`).all(codexCutoff, codexCutoff, receiptCutoff, receiptCutoff);
+  const redact = db.prepare(`UPDATE intervention_evidence_records
+    SET payload_json = ?, content_redacted_at = ?
+    WHERE evidence_id = ? AND content_redacted_at IS NULL`);
+  let count = 0;
+  const redactedAt = asOf.toISOString();
+  for (const row of rows) {
+    if (!isRecord(row) || typeof row.evidence_id !== 'string') {
+      throw new PDRuntimeError('storage_unavailable', 'Malformed intervention evidence row during retention sweep', {
+        nextAction: 'Inspect the evidence ledger schema and preserve its raw source before retrying retention.',
+      });
+    }
+    const payload = redactPayloadText(row.record_kind, row.payload_json, row.evidence_id);
+    if (payload !== null) count += redact.run(payload, redactedAt, row.evidence_id).changes;
+  }
+  return count;
+}
+
 function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): InterventionAuditRecordSummary & { pendingFields: { field: string; missingKey: string }[] } {
   // rc-1: SELECT rows arrive as unknown; every column is narrowed through a
   // guard before use, and out-of-vocabulary values fail loud as corruption.
@@ -144,7 +314,68 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
   const evidenceId = strColumn(row, 'evidence_id');
   const recordKind = narrowEnumColumn<InterventionRecordKind>({ value: row.record_kind, allowed: RECORD_KIND_SET, column: 'record_kind', rowId: evidenceId });
   const sourceKind = narrowEnumColumn<InterventionAuditRecordSummary['sourceKind']>({ value: row.source_kind, allowed: SOURCE_KIND_SET, column: 'source_kind', rowId: evidenceId });
-  const payload = parseJsonColumn(strColumn(row, 'payload_json'), evidenceId);
+  let payload = parseJsonColumn(strColumn(row, 'payload_json'), evidenceId);
+  const nativeRefs = parseNativeRefs(row.native_refs_json, evidenceId);
+  const contentRef = parseContentRef(row.content_ref_json, evidenceId);
+  const activationRef = parseActivationRef(row.activation_ref_json, evidenceId);
+  let contentRedactedAt = strOrNullColumn(row, 'content_redacted_at') ?? undefined;
+  const recordedAt = strColumn(row, 'recorded_at');
+  const occurredAt = strOrNullColumn(row, 'occurred_at') ?? undefined;
+  if (!isValidAuditTimestamp(recordedAt) || (occurredAt !== undefined && !isValidAuditTimestamp(occurredAt))) {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${evidenceId}: source timestamp is invalid`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
+  if (Date.parse(recordedAt) > Date.now() + 5 * 60 * 1000 || (occurredAt !== undefined && Date.parse(occurredAt) > Date.parse(recordedAt) + 5 * 60 * 1000)) {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${evidenceId}: future source timestamp cannot extend retention`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
+  const sourceTime = occurredAt && Date.parse(occurredAt) < Date.parse(recordedAt) ? occurredAt : recordedAt;
+  const retentionDays = sourceKind.startsWith('codex_') ? 7 : RECEIPT_RETENTION_POLICY_DAYS;
+  const expiresAt = Date.parse(sourceTime) + retentionDays * 24 * 60 * 60 * 1000;
+  if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+    const redactedPayload = redactPayloadText(recordKind, JSON.stringify(payload), evidenceId);
+    if (redactedPayload !== null) {
+      payload = parseJsonColumn(redactedPayload, evidenceId);
+      contentRedactedAt ??= new Date(expiresAt).toISOString();
+    }
+  }
+  if (contentRedactedAt !== undefined) {
+    if (!isValidAuditTimestamp(contentRedactedAt) || Date.parse(contentRedactedAt) > Date.now() + 5 * 60 * 1000) {
+      throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${evidenceId}: redaction timestamp is invalid`, {
+        nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+      });
+    }
+    const stillSensitive = redactPayloadText(recordKind, JSON.stringify(payload), evidenceId);
+    if (stillSensitive !== null) {
+      throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${evidenceId}: redacted row still contains sensitive text`, {
+        nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+      });
+    }
+  }
+  const principleId = strOrNullColumn(row, 'principle_id') ?? undefined;
+  const activationId = strOrNullColumn(row, 'activation_id') ?? undefined;
+  if (contentRef && principleId !== undefined && contentRef.principleId !== principleId) {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${evidenceId}: content reference principle does not match record`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
+  if (activationRef && activationRef.activationId !== activationId) {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${evidenceId}: activation occurrence does not match record`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
+  if (activationRef?.activatedAt && occurredAt !== undefined && Date.parse(activationRef.activatedAt) > Date.parse(occurredAt)) {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${evidenceId}: activation occurs after referenced evidence`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
+  if (contentRef?.artifactId && activationRef?.artifactId && contentRef.artifactId !== activationRef.artifactId) {
+    throw new PDRuntimeError('storage_unavailable', `Malformed intervention evidence row ${evidenceId}: content and activation artifacts differ`, {
+      nextAction: 'The ledger row is corrupted; preserve the raw source, then quarantine and re-record from the durable source batch.',
+    });
+  }
   // Minimal per-kind structural check before the typed read: full validation
   // happened at ingress time; this only fails loud on ledger corruption
   // instead of trusting stored JSON blind (rc-2).
@@ -174,6 +405,9 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
   const effectKey = strOrNullColumn(row, 'effect_key');
   const correctionOf = strOrNullColumn(row, 'correction_of');
   const pendingFields: { field: string; missingKey: string }[] = [];
+  if (contentRef?.resolution === 'revision_reference_unresolved') {
+    pendingFields.push({ field: 'contentRef', missingKey: `revision:${contentRef.principleId}` });
+  }
   for (const [field, key] of [
     ['deliveryKey', deliveryKey],
     ['episodeKey', episodeKey],
@@ -191,14 +425,19 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
     observationKey: strColumn(row, 'observation_key'),
     sourceKind,
     sourceLocator: strColumn(row, 'source_locator'),
-    recordedAt: strColumn(row, 'recorded_at'),
-    occurredAt: strOrNullColumn(row, 'occurred_at') ?? undefined,
-    principleId: strOrNullColumn(row, 'principle_id') ?? undefined,
-    activationId: strOrNullColumn(row, 'activation_id') ?? undefined,
+    recordedAt,
+    occurredAt,
+    principleId,
+    activationId,
     deliveryKey: deliveryKey ?? undefined,
     episodeKey: episodeKey ?? undefined,
     effectKey: effectKey ?? undefined,
     correctionOf: correctionOf ?? undefined,
+    nativeRefs,
+    ...(contentRef ? { contentRef } : {}),
+    ...(activationRef ? { activationRef } : {}),
+    ...(contentRedactedAt ? { contentRedactedAt } : {}),
+    ...(sourceKind.startsWith('codex_') ? { sourceStatus: 'unknown' as const } : {}),
     payload: typedPayload,
     recordDigest: strColumn(row, 'record_digest'),
     associationStatus: pendingFields.length === 0 ? 'linked' : 'pending_association',
@@ -337,6 +576,11 @@ export class SqliteInterventionEvidenceStore {
           .run(batch.evidenceScopeId, batch.recordedAt);
       }
 
+      // Reuse the existing receipt horizon at the evidence writer boundary.
+      // Redaction is bounded and preserves the immutable identity/provenance
+      // columns; there is no background process or caller-controlled bypass.
+      redactExpiredSensitivePayloads(db, new Date());
+
       for (const record of batch.records) {
         const existing = findExisting.get(record.sourceKind, record.sourceLocator, record.observationKey);
         if (isRecord(existing)) {
@@ -440,55 +684,78 @@ export class SqliteInterventionEvidenceStore {
       };
     }
     const limit = Math.min(Math.max(options.limit ?? AUDIT_DEFAULT_LIMIT, 1), AUDIT_MAX_LIMIT);
+    const evidenceColumns = db.prepare('PRAGMA table_info(intervention_evidence_records)').all();
+    const hasRedactionColumn = evidenceColumns.some((column) => isRecord(column) && column.name === 'content_redacted_at');
+    const redactedAtSelect = hasRedactionColumn ? 'content_redacted_at' : 'NULL AS content_redacted_at';
     const baseSelect = `
       SELECT evidence_id, scope_id, source_kind, observation_key, source_locator, record_kind,
              principle_id, activation_id, delivery_key, episode_key, effect_key,
              correction_of, correction_reason, occurred_at, recorded_at,
-             native_refs_json, content_ref_json, activation_ref_json, payload_json, record_digest
+             native_refs_json, content_ref_json, activation_ref_json, payload_json, record_digest,
+             ${redactedAtSelect}
       FROM intervention_evidence_records`;
-    const orderBy = ' ORDER BY recorded_at DESC, evidence_id DESC LIMIT ?';
-
-    let rows: unknown[];
+    let selectorWhere: string;
+    let selectorArgs: (string | number)[];
     switch (selector.type) {
       case 'principle':
-        rows = db.prepare(`${baseSelect} WHERE principle_id = ?${orderBy}`).all(selector.principleId, limit);
+        selectorWhere = 'principle_id = ?';
+        selectorArgs = [selector.principleId];
         break;
       case 'activation':
-        rows = db.prepare(`${baseSelect} WHERE activation_id = ?${orderBy}`).all(selector.activationId, limit);
+        selectorWhere = 'activation_id = ?';
+        selectorArgs = [selector.activationId];
         break;
       case 'episode':
-        rows = db.prepare(`${baseSelect} WHERE observation_key = ? OR episode_key = ?${orderBy}`)
-          .all(selector.observationKey, selector.observationKey, limit);
+        selectorWhere = '(observation_key = ? OR episode_key = ?)';
+        selectorArgs = [selector.observationKey, selector.observationKey];
         break;
       case 'effect':
-        rows = db.prepare(`${baseSelect} WHERE observation_key = ? OR effect_key = ?${orderBy}`)
-          .all(selector.observationKey, selector.observationKey, limit);
+        selectorWhere = '(observation_key = ? OR effect_key = ?)';
+        selectorArgs = [selector.observationKey, selector.observationKey];
         break;
     }
-
-    // Transitive chain visibility: outcomes reference episodes (SPEC §13.3 —
-    // effect is optional on an outcome), so a principle/effect view reaches
-    // its outcomes THROUGH the shared episode key. Exact-reference traversal
-    // only; never time proximity or text similarity.
-    const episodesSeen = new Set<string>();
-    for (const rawRow of rows) {
-      if (isRecord(rawRow) && typeof rawRow.episode_key === 'string' && rawRow.episode_key.length > 0) {
-        episodesSeen.add(rawRow.episode_key);
+    const kinds: InterventionRecordKind[] = ['delivery', 'application', 'behavior_episode', 'effect', 'outcome'];
+    const kindRows = new Map<InterventionRecordKind, unknown[]>();
+    const pages: InterventionAuditRelations['pages'] = {
+      delivery: { hasMore: false, nextCursor: null },
+      application: { hasMore: false, nextCursor: null },
+      behavior_episode: { hasMore: false, nextCursor: null },
+      effect: { hasMore: false, nextCursor: null },
+      outcome: { hasMore: false, nextCursor: null },
+    };
+    const selectorKind = (kind: InterventionRecordKind): string => {
+      if (selector.type !== 'principle' && selector.type !== 'effect') return selectorWhere;
+      if (kind !== 'outcome') return selectorWhere;
+      // Outcome rows commonly have no principle/effect id of their own. Reach
+      // them through exact episode references selected by the same query.
+      return `(${selectorWhere} OR (record_kind = 'outcome' AND episode_key IN (
+        SELECT episode_key FROM intervention_evidence_records WHERE ${selectorWhere} AND episode_key IS NOT NULL
+      )))`;
+    };
+    for (const kind of kinds) {
+      const cursor = options.cursor?.kind === kind ? options.cursor.after : undefined;
+      const where = `record_kind = ? AND ${selectorKind(kind)}`;
+      const cursorClause = cursor ? ' AND (recorded_at < ? OR (recorded_at = ? AND evidence_id < ?))' : '';
+      const args: (string | number)[] = [kind, ...selectorArgs];
+      if (kind === 'outcome' && (selector.type === 'principle' || selector.type === 'effect')) {
+        args.push(...selectorArgs);
       }
+      if (cursor) args.push(cursor.recordedAt, cursor.recordedAt, cursor.evidenceId);
+      args.push(limit + 1);
+      const fetched = db.prepare(`${baseSelect} WHERE ${where}${cursorClause} ORDER BY recorded_at DESC, evidence_id DESC LIMIT ?`).all(...args);
+      const hasMore = fetched.length > limit;
+      const pageRows = fetched.slice(0, limit);
+      const last = pageRows.at(-1);
+      pages[kind] = {
+        hasMore,
+        nextCursor: hasMore && isRecord(last)
+          && typeof last.recorded_at === 'string' && typeof last.evidence_id === 'string'
+          ? { recordedAt: last.recorded_at, evidenceId: last.evidence_id }
+          : null,
+      };
+      kindRows.set(kind, pageRows);
     }
-    if ((selector.type === 'principle' || selector.type === 'effect') && episodesSeen.size > 0) {
-      const episodeKeys = [...episodesSeen].slice(0, limit);
-      const placeholders = episodeKeys.map(() => '?').join(', ');
-      const outcomeRows = db.prepare(
-        `${baseSelect} WHERE record_kind = 'outcome' AND episode_key IN (${placeholders})${orderBy}`,
-      ).all(...episodeKeys, limit);
-      const seenIds = new Set(rows.flatMap((r) => (isRecord(r) && typeof r.evidence_id === 'string' ? [r.evidence_id] : [])));
-      for (const outcomeRow of outcomeRows) {
-        if (isRecord(outcomeRow) && typeof outcomeRow.evidence_id === 'string' && !seenIds.has(outcomeRow.evidence_id)) {
-          rows.push(outcomeRow);
-        }
-      }
-    }
+    const rows = kinds.flatMap((kind) => kindRows.get(kind) ?? []);
 
     const keyExists = db.prepare('SELECT 1 FROM intervention_evidence_records WHERE observation_key = ? LIMIT 1');
     // correctionOf cites an evidenceId, not an observation_key (contract
@@ -537,6 +804,7 @@ export class SqliteInterventionEvidenceStore {
         episodes,
         effects,
         outcomes,
+        pages,
         unresolvedReferences,
         capabilityDeclarations: readCapabilityDeclarations(db),
         asOf: new Date().toISOString(),

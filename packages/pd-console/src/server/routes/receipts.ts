@@ -5,7 +5,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ReceiptsConsoleModel } from '../models/ReceiptsConsoleModel.js';
-import type { InterventionAuditSelector } from '@principles/core/runtime-v2';
+import type { InterventionAuditSelector, InterventionRecordKind } from '@principles/core/runtime-v2';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
 const models = new Map<string, ReceiptsConsoleModel>();
@@ -88,9 +88,31 @@ export async function handleReceiptsRoute(
       sendError(res, 400, 'invalid_selector_type', 'Query parameter type must be one of principle, activation, episode, effect');
       return;
     }
+    const afterKind = url.searchParams.get('afterKind');
+    const afterAt = url.searchParams.get('afterRecordedAt');
+    const afterId = url.searchParams.get('afterEvidenceId');
+    const cursorFieldsPresent = afterKind !== null || afterAt !== null || afterId !== null;
+    let cursor: { kind: InterventionRecordKind; after: { recordedAt: string; evidenceId: string } } | undefined;
+    if (cursorFieldsPresent) {
+      const isRecordKind = (value: string | null): value is InterventionRecordKind =>
+        value === 'delivery' || value === 'application' || value === 'behavior_episode' || value === 'effect' || value === 'outcome';
+      const isValidUtcCursor = (value: string | null): value is string => {
+        if (value === null) return false;
+        const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?Z$/.exec(value);
+        return match !== null && Number.isFinite(Date.parse(value))
+          && new Date(Date.parse(value)).toISOString() === `${match[1]}.${(match[2] ?? '').padEnd(3, '0')}Z`;
+      };
+      if (!isRecordKind(afterKind)
+        || !isValidUtcCursor(afterAt)
+        || afterId === null || afterId.length === 0 || afterId.length > 256) {
+        sendError(res, 400, 'invalid_cursor', 'Pagination requires a valid afterKind, UTC afterRecordedAt, and afterEvidenceId');
+        return;
+      }
+      cursor = { kind: afterKind, after: { recordedAt: afterAt, evidenceId: afterId } };
+    }
     const model = getModel(workspaceDir);
     try {
-      const result = await model.getEvidenceAudit(selector);
+      const result = await model.getEvidenceAudit(selector, cursor);
       sendSuccess(res, result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

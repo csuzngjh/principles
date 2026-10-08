@@ -526,6 +526,11 @@ export interface EvidenceAuditRecordData {
   episodeKey?: string;
   effectKey?: string;
   associationStatus: "linked" | "pending_association";
+  sourceStatus?: "unknown";
+  contentRedactedAt?: string;
+  contentReference?: { principleId: string; resolution: "resolved" | "revision_reference_unresolved"; payloadDigest?: string; artifactId?: string; version?: string; approvalRef?: string };
+  activationReference?: { activationId: string; sourceSnapshotDigest: string; activatedAt?: string; idempotencyKey?: string; artifactId?: string; channel?: string };
+  nativeLineage: string[];
   summary: string;
   detail: string;
 }
@@ -548,12 +553,19 @@ export interface EvidenceAuditData {
   episodes: EvidenceAuditRecordData[];
   effects: EvidenceAuditRecordData[];
   outcomes: EvidenceAuditRecordData[];
+  pages: Record<"delivery" | "application" | "behavior_episode" | "effect" | "outcome", { hasMore: boolean; nextCursor: { recordedAt: string; evidenceId: string } | null }>;
   unresolvedReferences: { evidenceId: string; missingKey: string; field: string }[];
   capabilityDeclarations: EvidenceAuditCapabilityData[];
   coverage: ReceiptEvidenceCoverageData;
 }
 
 const EVIDENCE_RECORD_KINDS = new Set(["delivery", "application", "behavior_episode", "effect", "outcome"]);
+
+function isValidEvidenceDate(value: string): boolean {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?Z$/.exec(value);
+  return match !== null && Number.isFinite(Date.parse(value))
+    && new Date(Date.parse(value)).toISOString() === `${match[1]}.${(match[2] ?? '').padEnd(3, '0')}Z`;
+}
 
 /**
  * Human-readable one-liner per record — derived from the payload union on the
@@ -599,9 +611,43 @@ function evidenceRecordSummary(record: Record<string, unknown>): { summary: stri
 function validateEvidenceAuditRecord(value: unknown): EvidenceAuditRecordData | null {
   if (typeof value !== "object" || value === null) return null;
   const rec = value as Record<string, unknown>;
-  if (typeof rec.evidenceId !== "string") return null;
+  if (typeof rec.evidenceId !== "string" || rec.evidenceId.length === 0 || rec.evidenceId.length > 256) return null;
   if (typeof rec.kind !== "string" || !EVIDENCE_RECORD_KINDS.has(rec.kind)) return null;
-  if (typeof rec.observationKey !== "string" || typeof rec.recordedAt !== "string") return null;
+  if (typeof rec.observationKey !== "string" || rec.observationKey.length === 0 || rec.observationKey.length > 256
+    || typeof rec.recordedAt !== "string" || !isValidEvidenceDate(rec.recordedAt)
+    || (rec.occurredAt !== undefined && (typeof rec.occurredAt !== "string" || !isValidEvidenceDate(rec.occurredAt)))
+    || (rec.associationStatus !== "linked" && rec.associationStatus !== "pending_association")
+    || (rec.sourceStatus !== undefined && rec.sourceStatus !== "unknown")
+    || (rec.contentRedactedAt !== undefined && (typeof rec.contentRedactedAt !== "string" || !isValidEvidenceDate(rec.contentRedactedAt)))) return null;
+  const native = typeof rec.nativeRefs === "object" && rec.nativeRefs !== null ? rec.nativeRefs as Record<string, unknown> : null;
+  if (!native || (native.hostKind !== "openclaw" && native.hostKind !== "codex")
+    || ["sessionId", "runId", "turnId", "toolCallId", "toolName", "rolloutIdentity"].some((key) => Object.hasOwn(native, key)
+      && (typeof native[key] !== "string" || native[key].length === 0 || native[key].length > 256))) return null;
+  const hasContentRef = Object.hasOwn(rec, "contentRef");
+  const contentRef = typeof rec.contentRef === "object" && rec.contentRef !== null && !Array.isArray(rec.contentRef) ? rec.contentRef as Record<string, unknown> : null;
+  if (hasContentRef && contentRef === null) return null;
+  if (contentRef && (typeof contentRef.principleId !== "string" || contentRef.principleId.length === 0 || contentRef.principleId.length > 256
+    || (contentRef.resolution !== "resolved" && contentRef.resolution !== "revision_reference_unresolved")
+    || (contentRef.payloadDigest !== undefined && (typeof contentRef.payloadDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(contentRef.payloadDigest)))
+    || (contentRef.resolution === "resolved" && typeof contentRef.payloadDigest !== "string")
+    || (typeof rec.principleId === "string" && contentRef.principleId !== rec.principleId)
+    || ["artifactId", "version", "approvalRef"].some((key) => Object.hasOwn(contentRef, key)
+      && (typeof contentRef[key] !== "string" || contentRef[key].length === 0 || contentRef[key].length > 256)))) return null;
+  const hasActivationRef = Object.hasOwn(rec, "activationRef");
+  const activationRef = typeof rec.activationRef === "object" && rec.activationRef !== null && !Array.isArray(rec.activationRef) ? rec.activationRef as Record<string, unknown> : null;
+  if (hasActivationRef && activationRef === null) return null;
+  if (activationRef && (typeof activationRef.activationId !== "string"
+    || activationRef.activationId.length === 0 || activationRef.activationId.length > 256
+    || typeof activationRef.sourceSnapshotDigest !== "string"
+    || !/^sha256:[a-f0-9]{64}$/.test(activationRef.sourceSnapshotDigest)
+    || activationRef.activationId !== rec.activationId
+    || (activationRef.activatedAt !== undefined && (typeof activationRef.activatedAt !== "string" || !isValidEvidenceDate(activationRef.activatedAt)))
+    || ["idempotencyKey", "artifactId", "channel"].some((key) => Object.hasOwn(activationRef, key)
+      && (typeof activationRef[key] !== "string" || activationRef[key].length === 0 || activationRef[key].length > 256)))) return null;
+  if (contentRef && activationRef && typeof contentRef.artifactId === "string" && typeof activationRef.artifactId === "string"
+    && contentRef.artifactId !== activationRef.artifactId) return null;
+  if (contentRef && activationRef && typeof rec.occurredAt === "string" && typeof activationRef.activatedAt === "string"
+    && Date.parse(activationRef.activatedAt) > Date.parse(rec.occurredAt)) return null;
   const summaryPair = evidenceRecordSummary(rec);
   if (summaryPair === null) return null;
   return {
@@ -614,7 +660,24 @@ function validateEvidenceAuditRecord(value: unknown): EvidenceAuditRecordData | 
     activationId: typeof rec.activationId === "string" ? rec.activationId : undefined,
     episodeKey: typeof rec.episodeKey === "string" ? rec.episodeKey : undefined,
     effectKey: typeof rec.effectKey === "string" ? rec.effectKey : undefined,
-    associationStatus: rec.associationStatus === "pending_association" ? "pending_association" : "linked",
+    associationStatus: rec.associationStatus,
+    ...(rec.sourceStatus === "unknown" ? { sourceStatus: "unknown" as const } : {}),
+    ...(typeof rec.contentRedactedAt === "string" ? { contentRedactedAt: rec.contentRedactedAt } : {}),
+    ...(contentRef ? { contentReference: {
+      principleId: String(contentRef.principleId), resolution: contentRef.resolution as "resolved" | "revision_reference_unresolved",
+      ...(typeof contentRef.payloadDigest === "string" ? { payloadDigest: contentRef.payloadDigest } : {}),
+      ...(typeof contentRef.artifactId === "string" ? { artifactId: contentRef.artifactId } : {}),
+      ...(typeof contentRef.version === "string" ? { version: contentRef.version } : {}),
+      ...(typeof contentRef.approvalRef === "string" ? { approvalRef: contentRef.approvalRef } : {}),
+    } } : {}),
+    ...(activationRef ? { activationReference: {
+      activationId: String(activationRef.activationId), sourceSnapshotDigest: String(activationRef.sourceSnapshotDigest),
+      ...(typeof activationRef.activatedAt === "string" ? { activatedAt: activationRef.activatedAt } : {}),
+      ...(typeof activationRef.idempotencyKey === "string" ? { idempotencyKey: activationRef.idempotencyKey } : {}),
+      ...(typeof activationRef.artifactId === "string" ? { artifactId: activationRef.artifactId } : {}),
+      ...(typeof activationRef.channel === "string" ? { channel: activationRef.channel } : {}),
+    } } : {}),
+    nativeLineage: [`hostKind=${native.hostKind}`, ...Object.entries(native).filter(([key, entry]) => key !== "hostKind" && typeof entry === "string").map(([key, entry]) => `${key}=${String(entry)}`)].slice(0, 7),
     summary: summaryPair.summary,
     detail: summaryPair.detail,
   };
@@ -625,14 +688,32 @@ function validateEvidenceAudit(data: unknown): EvidenceAuditData | null {
   const rec = data as Record<string, unknown>;
   const coverage = validateReceiptCoverage(rec.coverage);
   if (coverage === null) return null;
+  const pageKinds = ["delivery", "application", "behavior_episode", "effect", "outcome"] as const;
+  const pages = {} as EvidenceAuditData["pages"];
+  if (typeof rec.pages !== "object" || rec.pages === null) return null;
+  const rawPages = rec.pages as Record<string, unknown>;
+  for (const kind of pageKinds) {
+    const raw = rawPages[kind];
+    if (typeof raw !== "object" || raw === null) return null;
+    const page = raw as Record<string, unknown>;
+    if (typeof page.hasMore !== "boolean") return null;
+    let nextCursor: EvidenceAuditData["pages"][typeof kind]["nextCursor"] = null;
+    if (page.nextCursor !== null) {
+      if (typeof page.nextCursor !== "object" || page.nextCursor === null) return null;
+      const cursor = page.nextCursor as Record<string, unknown>;
+      if (typeof cursor.recordedAt !== "string" || typeof cursor.evidenceId !== "string") return null;
+      nextCursor = { recordedAt: cursor.recordedAt, evidenceId: cursor.evidenceId };
+    }
+    pages[kind] = { hasMore: page.hasMore, nextCursor };
+  }
   const sections = {} as Record<string, EvidenceAuditRecordData[]>;
   for (const field of ["deliveries", "applications", "episodes", "effects", "outcomes"] as const) {
     const list: EvidenceAuditRecordData[] = [];
-    if (Array.isArray(rec[field])) {
-      for (const item of rec[field]) {
-        const record = validateEvidenceAuditRecord(item);
-        if (record) list.push(record);
-      }
+    if (!Array.isArray(rec[field])) return null;
+    for (const item of rec[field]) {
+      const record = validateEvidenceAuditRecord(item);
+      if (!record) return null;
+      list.push(record);
     }
     sections[field] = list;
   }
@@ -673,6 +754,7 @@ function validateEvidenceAudit(data: unknown): EvidenceAuditData | null {
     episodes: sections.episodes ?? [],
     effects: sections.effects ?? [],
     outcomes: sections.outcomes ?? [],
+    pages,
     unresolvedReferences: unresolved,
     capabilityDeclarations: capabilities,
     coverage,
@@ -682,9 +764,16 @@ function validateEvidenceAudit(data: unknown): EvidenceAuditData | null {
 async function fetchEvidenceAudit(
   selectorType: "principle" | "activation" | "episode" | "effect",
   id: string,
+  cursor?: { kind: EvidenceAuditRecordData["kind"]; after: { recordedAt: string; evidenceId: string } },
 ): Promise<ApiResponse<EvidenceAuditData>> {
+  const query = new URLSearchParams({ type: selectorType, id });
+  if (cursor) {
+    query.set("afterKind", cursor.kind);
+    query.set("afterRecordedAt", cursor.after.recordedAt);
+    query.set("afterEvidenceId", cursor.after.evidenceId);
+  }
   return request<EvidenceAuditData>(
-    `/api/v1/receipts/evidence-audit?type=${encodeURIComponent(selectorType)}&id=${encodeURIComponent(id)}`,
+    `/api/v1/receipts/evidence-audit?${query.toString()}`,
     undefined,
     validateEvidenceAudit,
   );

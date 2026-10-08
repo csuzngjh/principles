@@ -217,6 +217,15 @@ describe('GET /api/v1/receipts/evidence-audit', () => {
     expect(noId.statusCode).toBe(400);
   });
 
+  it('validates cursor timestamps and accepts a typed per-kind cursor', async () => {
+    const invalid = await callAudit('?type=principle&id=p&afterKind=delivery&afterRecordedAt=2026-99-99T00%3A00%3A00Z&afterEvidenceId=e');
+    expect(invalid.statusCode).toBe(400);
+    const valid = await callAudit('?type=principle&id=p&afterKind=application&afterRecordedAt=2026-10-06T00%3A00%3A00Z&afterEvidenceId=e');
+    expect(valid.statusCode).toBe(200);
+    const data = parse(valid).data ?? {};
+    expect(data.pages).toBeDefined();
+  });
+
   it('serves the episode selector with linked outcome visibility', async () => {
     seedEpisode();
     await callOutcome('POST', { episodeKey: 'openclaw|episode|sess-1|tool-1', observationSummary: 'observed' }, OWNER);

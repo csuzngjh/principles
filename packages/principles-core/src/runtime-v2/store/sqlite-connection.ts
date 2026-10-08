@@ -16,7 +16,10 @@ import { join } from 'path';
 import * as fs from 'fs';
 import { PDRuntimeError } from '../error-categories.js';
 import { guardWorkspaceLeak } from './workspace-leak-guard.js';
-import { INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS } from './intervention-evidence-schema.js';
+import {
+  INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS,
+  INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS,
+} from './intervention-evidence-schema.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -753,6 +756,42 @@ export class SqliteConnection {
     // statement here.
     for (const statement of INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS) {
       db.prepare(statement).run();
+    }
+    const [updateTriggerStatement, deleteTriggerStatement] = INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS;
+    if (typeof updateTriggerStatement !== 'string' || typeof deleteTriggerStatement !== 'string') {
+      throw new Error('Intervention evidence immutability trigger definitions are incomplete');
+    }
+    const readEvidenceColumns = (): unknown[] => db.prepare('PRAGMA table_info(intervention_evidence_records)').all();
+    const hasRedactionColumn = (columns: readonly unknown[]): boolean =>
+      columns.some((column) => isRecord(column) && column.name === 'content_redacted_at');
+    const readTriggerSql = (name: string): unknown => db.prepare(
+      'SELECT sql FROM sqlite_master WHERE type = ? AND name = ?',
+    ).get('trigger', name);
+    const triggerSqlContains = (row: unknown, marker: string): boolean =>
+      isRecord(row) && typeof row.sql === 'string' && row.sql.includes(marker);
+    const updateTriggerCurrent = triggerSqlContains(readTriggerSql('intervention_evidence_records_no_update'), 'authorized payload redaction');
+    const deleteTriggerCurrent = triggerSqlContains(readTriggerSql('intervention_evidence_records_no_delete'), 'intervention evidence records are immutable');
+    if (!hasRedactionColumn(readEvidenceColumns()) || !updateTriggerCurrent || !deleteTriggerCurrent) {
+      // Column and trigger changes are one bounded migration. Recheck under
+      // the write lock so concurrent opens cannot leave protection absent.
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (!hasRedactionColumn(readEvidenceColumns())) {
+          db.prepare('ALTER TABLE intervention_evidence_records ADD COLUMN content_redacted_at TEXT').run();
+        }
+        if (!triggerSqlContains(readTriggerSql('intervention_evidence_records_no_update'), 'authorized payload redaction')) {
+          db.prepare('DROP TRIGGER IF EXISTS intervention_evidence_records_no_update').run();
+          db.prepare(updateTriggerStatement).run();
+        }
+        if (!triggerSqlContains(readTriggerSql('intervention_evidence_records_no_delete'), 'intervention evidence records are immutable')) {
+          db.prepare('DROP TRIGGER IF EXISTS intervention_evidence_records_no_delete').run();
+          db.prepare(deleteTriggerStatement).run();
+        }
+        db.exec('COMMIT');
+      } catch (error) {
+        try { db.exec('ROLLBACK'); } catch { /* migration tx may already be rolled back */ }
+        throw error;
+      }
     }
   }
 

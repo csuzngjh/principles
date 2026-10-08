@@ -34,10 +34,10 @@ function deliveryBatch(overrides: Partial<InterventionEvidenceBatchInput> = {}):
         occurredAt: '2026-10-07T07:59:59Z',
         nativeRefs: { hostKind: 'openclaw', sessionId: 'sess-1', runId: 'run-1' },
         principleId: 'T-01',
-        contentRef: { principleId: 'T-01', artifactId: 'art-1', payloadDigest: 'sha256:aa', resolution: 'resolved' },
+        contentRef: { principleId: 'T-01', artifactId: 'art-1', payloadDigest: 'sha256:aa00000000000000000000000000000000000000000000000000000000000000', resolution: 'resolved' },
         activationRef: {
           activationId: 'act-1', artifactId: 'art-1', channel: 'prompt',
-          activatedAt: '2026-10-01T00:00:00Z', sourceSnapshotDigest: 'sha256:bb',
+          activatedAt: '2026-10-01T00:00:00Z', sourceSnapshotDigest: 'sha256:bb00000000000000000000000000000000000000000000000000000000000000',
         },
         payload: { targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' },
       },
@@ -58,6 +58,15 @@ function normalized(input: InterventionEvidenceBatchInput) {
   expect(result.ok).toBe(true);
   if (!result.ok) throw new Error(result.reason);
   return result.batch;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('Expected a persisted row');
+  return value as Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 describe('SqliteInterventionEvidenceStore', () => {
@@ -174,7 +183,7 @@ describe('SqliteInterventionEvidenceStore', () => {
       nativeRefs: { hostKind: 'openclaw' as const, sessionId: 'sess-1', toolCallId: 'tool-9' },
       principleId: 'T-01',
       episodeKey: episode.observationKey,
-      contentRef: { principleId: 'T-01', payloadDigest: 'sha256:aa', resolution: 'resolved' as const },
+      contentRef: { principleId: 'T-01', payloadDigest: 'sha256:aa00000000000000000000000000000000000000000000000000000000000000', resolution: 'resolved' as const },
       payload: { status: 'observed' as const, observationSummary: 'write_file blocked by rule' },
     };
     store.appendObservationBatch(normalized({ ...base, observations: [effect] }));
@@ -210,8 +219,8 @@ describe('SqliteInterventionEvidenceStore', () => {
       kind: 'delivery' as const,
       nativeRefs: { hostKind: 'openclaw' as const, sessionId: 'sess-1', runId: 'run-1' },
       principleId: 'T-01',
-      contentRef: { principleId: 'T-01', payloadDigest: 'sha256:aa', resolution: 'resolved' as const },
-      activationRef: { activationId: 'act-1', sourceSnapshotDigest: 'sha256:bb' },
+      contentRef: { principleId: 'T-01', payloadDigest: 'sha256:aa00000000000000000000000000000000000000000000000000000000000000', resolution: 'resolved' as const },
+      activationRef: { activationId: 'act-1', sourceSnapshotDigest: 'sha256:bb00000000000000000000000000000000000000000000000000000000000000' },
       correctionOf: delivery.evidenceId,
       correctionReason: 'payload digest revised',
       payload: { targetKind: 'agent_context' as const, confirmation: 'submitted' as const, outcome: 'attempted' as const },
@@ -298,6 +307,148 @@ describe('SqliteInterventionEvidenceStore', () => {
     expect(store.readAuditRelations({ type: 'effect', observationKey: 'none' }).available).toBe(true);
   });
 
+  it('bounds each kind independently so newer deliveries cannot hide an older application', () => {
+    store.appendObservationBatch(normalized(deliveryBatch({ recordedAt: '2026-09-01T00:00:00Z', observations: [{
+      observationKey: 'oc|application|older', sourceLocator: 'loc:application', kind: 'application',
+      nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01',
+      payload: { proofMethod: 'runtime_verified', action: 'tool_blocked', enforcementBoundary: 'host_gate' },
+    }] })));
+    const newerDeliveries = Array.from({ length: 55 }, (_, i) => ({
+      observationKey: `oc|delivery|${i}`, sourceLocator: `loc:${i}`, kind: 'delivery' as const,
+      nativeRefs: { hostKind: 'openclaw' as const }, principleId: 'T-01',
+      payload: { targetKind: 'agent_context' as const, confirmation: 'submitted' as const, outcome: 'attempted' as const },
+    }));
+    store.appendObservationBatch(normalized(deliveryBatch({ observations: newerDeliveries })));
+    const read = store.readAuditRelations({ type: 'principle', principleId: 'T-01' }, { limit: 50 });
+    expect(read.available).toBe(true);
+    if (!read.available) return;
+    expect(read.relations.deliveries).toHaveLength(50);
+    expect(read.relations.pages.delivery.hasMore).toBe(true);
+    expect(read.relations.applications).toHaveLength(1);
+    expect(read.relations.applications[0]!.observationKey).toBe('oc|application|older');
+    expect(read.relations.pages.application.hasMore).toBe(false);
+    const deliveryCursor = read.relations.pages.delivery.nextCursor;
+    expect(deliveryCursor).toBeTruthy();
+    if (!deliveryCursor) return;
+    const next = store.readAuditRelations({ type: 'principle', principleId: 'T-01' }, {
+      limit: 50, cursor: { kind: 'delivery', after: deliveryCursor },
+    });
+    expect(next.available).toBe(true);
+    if (!next.available) return;
+    expect(next.relations.deliveries).toHaveLength(5);
+    expect(next.relations.pages.delivery.hasMore).toBe(false);
+  });
+
+  it('marks unresolved content references as explicit gaps rather than linked evidence', () => {
+    store.appendObservationBatch(normalized(deliveryBatch({ observations: [{
+      ...deliveryBatch().observations[0]!,
+      contentRef: { principleId: 'T-01', resolution: 'revision_reference_unresolved' },
+    }] })));
+    const read = store.readAuditRelations({ type: 'principle', principleId: 'T-01' });
+    expect(read.available).toBe(true);
+    if (!read.available) return;
+    expect(read.relations.unresolvedReferences).toEqual([
+      { evidenceId: read.relations.deliveries[0]!.evidenceId, missingKey: 'revision:T-01', field: 'contentRef' },
+    ]);
+  });
+
+  it('expires sensitive text without starving later rows, while preserving metadata and immutability', () => {
+    const oldAt = '2001-01-01T00:00:00Z';
+    const oldDeliveries = Array.from({ length: 200 }, (_, index) => ({
+      observationKey: `oc|delivery|metadata-${index}`, sourceLocator: `loc:metadata-${index}`,
+      kind: 'delivery' as const, nativeRefs: { hostKind: 'openclaw' as const },
+      principleId: 'T-01', payload: { targetKind: 'agent_context' as const, confirmation: 'submitted' as const, outcome: 'attempted' as const },
+    }));
+    const oldApplication = {
+      observationKey: 'oc|application|sensitive', sourceLocator: 'loc:sensitive', kind: 'application' as const,
+      nativeRefs: { hostKind: 'openclaw' as const }, principleId: 'T-01',
+      payload: { proofMethod: 'agent_claimed' as const, action: 'self_reported' as const, claimText: 'private claim text' },
+    };
+    for (let start = 0; start < oldDeliveries.length; start += 50) {
+      store.appendObservationBatch(normalized(deliveryBatch({ recordedAt: oldAt, observations: oldDeliveries.slice(start, start + 50) })));
+    }
+    store.appendObservationBatch(normalized(deliveryBatch({ recordedAt: oldAt, observations: [oldApplication] })));
+    const readonlyAudit = store.readAuditRelations({ type: 'principle', principleId: 'T-01' });
+    expect(readonlyAudit.available).toBe(true);
+    if (readonlyAudit.available) {
+      const oldSummary = readonlyAudit.relations.applications.find((item) => item.observationKey === oldApplication.observationKey);
+      expect(oldSummary?.payload).not.toHaveProperty('claimText');
+      expect(oldSummary?.contentRedactedAt).toBeTruthy();
+    }
+    const before = conn.getDb().prepare(`SELECT record_digest, principle_id, native_refs_json, payload_json FROM intervention_evidence_records WHERE observation_key = ?`).get(oldApplication.observationKey);
+    expect(before).toMatchObject({ principle_id: 'T-01' });
+    store.appendObservationBatch(normalized(deliveryBatch())); // triggers bounded expiry sweep
+    const db = conn.getDb();
+    const after = db.prepare(`SELECT record_digest, principle_id, native_refs_json, payload_json, content_redacted_at FROM intervention_evidence_records WHERE observation_key = ?`).get(oldApplication.observationKey);
+    expect(after).toMatchObject({
+      record_digest: record(before).record_digest,
+      principle_id: 'T-01', native_refs_json: record(before).native_refs_json,
+    });
+    expect(JSON.parse(String(record(after).payload_json))).not.toHaveProperty('claimText');
+    expect(record(after).content_redacted_at).toBeTruthy();
+    expect(() => db.prepare(`UPDATE intervention_evidence_records SET principle_id = 'rewritten' WHERE observation_key = ?`).run(oldApplication.observationKey)).toThrow(/immutable/);
+    expect(() => db.prepare(`DELETE FROM intervention_evidence_records WHERE observation_key = ?`).run(oldApplication.observationKey)).toThrow(/immutable/);
+    const fresh = normalized(deliveryBatch({ observations: [{
+      ...oldApplication, observationKey: 'oc|application|fresh', sourceLocator: 'loc:fresh',
+    }] }));
+    store.appendObservationBatch(fresh);
+    const recent = db.prepare(`SELECT payload_json FROM intervention_evidence_records WHERE observation_key = 'oc|application|fresh'`).get();
+    expect(JSON.parse(String(record(recent).payload_json)).claimText).toBe('private claim text');
+  });
+
+  it('hides expired Codex summaries on read and marks their source availability unknown', () => {
+    const batch = normalized(deliveryBatch({
+      recordedAt: '2001-01-01T00:00:00Z',
+      sourceKind: 'codex_pd_hook_event_log',
+      observations: [{
+        observationKey: 'codex|episode|rollout-old', sourceLocator: 'codex:old', kind: 'behavior_episode',
+        nativeRefs: { hostKind: 'codex', rolloutIdentity: 'rollout-old' },
+        payload: { status: 'closed', actionSummary: 'private Codex summary' },
+      }],
+    }));
+    store.appendObservationBatch(batch);
+    const read = store.readAuditRelations({ type: 'episode', observationKey: 'codex|episode|rollout-old' });
+    expect(read.available).toBe(true);
+    if (!read.available) return;
+    expect(read.relations.episodes[0]!.sourceStatus).toBe('unknown');
+    expect(read.relations.episodes[0]!.payload).toMatchObject({ actionSummary: '[expired]' });
+    expect(read.relations.episodes[0]!.contentRedactedAt).toBeTruthy();
+  });
+
+  it('keeps Owner feedback on its 90-day policy even when native host is Codex', () => {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const batch = normalized(deliveryBatch({
+      recordedAt: thirtyDaysAgo,
+      sourceKind: 'owner_console_input',
+      observations: [{
+        observationKey: 'owner|outcome|episode-1', sourceLocator: 'console:feedback-1', kind: 'outcome',
+        nativeRefs: { hostKind: 'codex' }, episodeKey: 'episode-1',
+        payload: { outcomeSource: 'owner_feedback', observationSummary: 'still within Owner retention', feedbackText: 'keep this feedback', actorId: 'owner-1' },
+      }],
+    }));
+    store.appendObservationBatch(batch);
+    const read = store.readAuditRelations({ type: 'episode', observationKey: 'episode-1' });
+    expect(read.available).toBe(true);
+    if (!read.available) return;
+    expect(read.relations.outcomes[0]!.sourceStatus).toBeUndefined();
+    expect(read.relations.outcomes[0]!.payload).toMatchObject({ feedbackText: 'keep this feedback' });
+  });
+
+  it('upgrades a legacy evidence table and restores both immutability triggers atomically', () => {
+    store.appendObservationBatch(normalized(deliveryBatch()));
+    const db = conn.getDb();
+    db.prepare('DROP TRIGGER intervention_evidence_records_no_update').run();
+    db.prepare('DROP TRIGGER intervention_evidence_records_no_delete').run();
+    db.prepare('ALTER TABLE intervention_evidence_records DROP COLUMN content_redacted_at').run();
+    conn.close();
+    conn = new SqliteConnection(workspaceDir);
+    store = new SqliteInterventionEvidenceStore(conn);
+    const columns = conn.getDb().prepare('PRAGMA table_info(intervention_evidence_records)').all();
+    expect(columns.some((column) => isRecord(column) && Object.hasOwn(column, 'name') && column.name === 'content_redacted_at')).toBe(true);
+    expect(() => conn.getDb().prepare('DELETE FROM intervention_evidence_records').run()).toThrow(/immutable/);
+    expect(() => conn.getDb().prepare(`UPDATE intervention_evidence_records SET principle_id = 'X'`).run()).toThrow(/immutable/);
+  });
+
   it('reports unavailable (never bootstraps) on a pre-evidence database read via readonly connection', () => {
     // Simulate an old workspace: create state.db WITHOUT the evidence tables.
     const oldWorkspace = path.join(tmpRoot, `old-${Date.now()}`);
@@ -335,6 +486,21 @@ describe('SqliteInterventionEvidenceStore', () => {
         'T-01', '2026-10-07T08:00:00Z', '{}', 'not-json{', 'sha256:x')
     `).run();
     expect(() => store.readAuditRelations({ type: 'principle', principleId: 'T-01' })).toThrow(/Malformed/);
+  });
+
+  it('fails loud on a malformed persisted reference instead of presenting it as linked', () => {
+    const db = conn.getDb();
+    db.prepare(`INSERT INTO intervention_evidence_records (
+      evidence_id, scope_id, source_kind, observation_key, source_locator, record_kind,
+      principle_id, recorded_at, native_refs_json, content_ref_json, activation_ref_json, payload_json, record_digest
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      'sha256:bad-ref', 'scope-ws-1', 'openclaw_plugin_event_log', 'bad-ref', 'loc:bad-ref', 'delivery',
+      'T-01', '2026-10-07T08:00:00Z', JSON.stringify({ hostKind: 'openclaw' }),
+      JSON.stringify({ principleId: 'T-01', resolution: 'resolved', payloadDigest: 'sha256:fake' }),
+      JSON.stringify({ activationId: 'act-1', sourceSnapshotDigest: 'sha256:fake' }),
+      JSON.stringify({ targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' }), 'sha256:record',
+    );
+    expect(() => store.readAuditRelations({ type: 'principle', principleId: 'T-01' })).toThrow(/content reference is invalid/);
   });
 });
 

@@ -112,7 +112,15 @@ function rejectUnknownFields(obj: Record<string, unknown>, allowed: ReadonlySet<
 }
 
 function isIsoTimestamp(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(value);
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?Z$/.exec(value);
+  if (!match) return false;
+  const milliseconds = (match[2] ?? '').padEnd(3, '0');
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === `${match[1]}.${milliseconds}Z`;
+}
+
+function isSha256Digest(value: string): boolean {
+  return /^sha256:[a-f0-9]{64}$/.test(value);
 }
 
 /**
@@ -251,6 +259,9 @@ function normalizeContentRef(raw: unknown): { value?: InterventionContentRef; er
   if (resolution.value === 'resolved' && payloadDigest.value === undefined) {
     return { error: 'observation_contentRef_resolved_requires_payloadDigest' };
   }
+  if (payloadDigest.value !== undefined && !isSha256Digest(payloadDigest.value)) {
+    return { error: 'observation_contentRef_payloadDigest_not_sha256' };
+  }
   const value: InterventionContentRef = {
     principleId: principleId.value,
     resolution: resolution.value,
@@ -273,6 +284,9 @@ function normalizeActivationRef(raw: unknown): { value?: InterventionActivationO
   if (activationId.error) return { error: activationId.error };
   const sourceSnapshotDigest = strings.require(raw, 'sourceSnapshotDigest', 256);
   if (sourceSnapshotDigest.error) return { error: sourceSnapshotDigest.error };
+  if (!isSha256Digest(sourceSnapshotDigest.value)) {
+    return { error: 'observation_activationRef_sourceSnapshotDigest_not_sha256' };
+  }
   const value: InterventionActivationOccurrenceRef = {
     activationId: activationId.value,
     sourceSnapshotDigest: sourceSnapshotDigest.value,
@@ -432,6 +446,13 @@ function normalizeObservation(
 
   const payload = normalizePayload(kind.value, raw.payload);
   if (payload.error || !payload.value) return { error: payload.error ?? 'observation_payload_missing' };
+  if (ctx.sourceKind === 'codex_pd_hook_event_log' && isRecord(raw.payload)) {
+    for (const sensitiveField of ['claimText', 'inputPreview', 'feedbackText'] as const) {
+      if (Object.hasOwn(raw.payload, sensitiveField)) {
+        return { error: `codex_hook_evidence_forbids_source_content:${sensitiveField}` };
+      }
+    }
+  }
 
   const record: Omit<NormalizedInterventionRecord, 'recordDigest'> = {
     evidenceId: computeEvidenceId(ctx.sourceKind, sourceLocator.value, observationKey.value),
@@ -448,6 +469,9 @@ function normalizeObservation(
   if (Object.hasOwn(raw, 'occurredAt') && raw.occurredAt !== undefined) {
     if (typeof raw.occurredAt !== 'string' || !isIsoTimestamp(raw.occurredAt)) {
       return { error: 'observation_occurredAt_not_iso_utc' };
+    }
+    if (Date.parse(raw.occurredAt) > Date.parse(ctx.recordedAt) + 5 * 60 * 1000) {
+      return { error: 'observation_occurredAt_after_recordedAt' };
     }
     record.occurredAt = raw.occurredAt;
   }
@@ -471,6 +495,16 @@ function normalizeObservation(
     const activationRef = normalizeActivationRef(raw.activationRef);
     if (activationRef.error || !activationRef.value) return { error: activationRef.error ?? 'observation_activationRef_invalid' };
     record.activationRef = activationRef.value;
+  }
+
+  if (record.contentRef && record.principleId !== undefined && record.contentRef.principleId !== record.principleId) {
+    return { error: 'content_reference_principle_mismatch' };
+  }
+  if (record.activationRef && record.activationId !== undefined && record.activationRef.activationId !== record.activationId) {
+    return { error: 'activation_reference_id_mismatch' };
+  }
+  if (record.activationRef?.activatedAt && record.occurredAt && Date.parse(record.activationRef.activatedAt) > Date.parse(record.occurredAt)) {
+    return { error: 'activation_reference_occurs_after_evidence' };
   }
 
   // ── Cross-field relationship rules (SPEC §13.3) ──
@@ -573,6 +607,9 @@ export function normalizeInterventionEvidenceBatch(raw: unknown): InterventionNo
   if (adapterVersion.error) return { ok: false, reason: adapterVersion.error };
   if (!Object.hasOwn(raw, 'recordedAt') || typeof raw.recordedAt !== 'string' || !isIsoTimestamp(raw.recordedAt)) {
     return { ok: false, reason: 'batch_recordedAt_missing_or_not_iso_utc' };
+  }
+  if (Date.parse(raw.recordedAt) > Date.now() + 5 * 60 * 1000) {
+    return { ok: false, reason: 'batch_recordedAt_in_future' };
   }
 
   if (!Array.isArray(raw.observations)) return { ok: false, reason: 'batch_observations_not_an_array' };

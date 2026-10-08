@@ -2205,6 +2205,8 @@ export type {
   InterventionApplicationAction,
   InterventionApplicationProof,
   InterventionAuditRecordSummary,
+  InterventionAuditCursor,
+  InterventionAuditKindPage,
   InterventionAuditRelations,
   InterventionAuditSelector,
   InterventionCapability,

@@ -312,10 +312,26 @@ export interface InterventionAuditRecordSummary {
   episodeKey?: string;
   effectKey?: string;
   correctionOf?: string;
+  /** Exact source-time references; their resolution is not inferred from linked peer rows. */
+  nativeRefs: InterventionNativeRefs;
+  contentRef?: InterventionContentRef;
+  activationRef?: InterventionActivationOccurrenceRef;
+  /** Sensitive text fields were removed under the existing receipt retention boundary. */
+  contentRedactedAt?: string;
   payload: InterventionPayload;
   recordDigest: string;
   /** Whether referenced peer records exist in the ledger at read time. */
   associationStatus: 'linked' | 'pending_association';
+}
+
+export interface InterventionAuditCursor {
+  recordedAt: string;
+  evidenceId: string;
+}
+
+export interface InterventionAuditKindPage {
+  hasMore: boolean;
+  nextCursor: InterventionAuditCursor | null;
 }
 
 export interface InterventionAuditRelations {
@@ -325,6 +341,8 @@ export interface InterventionAuditRelations {
   episodes: InterventionAuditRecordSummary[];
   effects: InterventionAuditRecordSummary[];
   outcomes: InterventionAuditRecordSummary[];
+  /** Independent per-kind bounds prevent a busy kind from starving another. */
+  pages: Record<InterventionRecordKind, InterventionAuditKindPage>;
   /** Records whose references point at keys not (yet) present — explicit gaps. */
   unresolvedReferences: { evidenceId: string; missingKey: string; field: string }[];
   capabilityDeclarations: InterventionCapabilityDeclaration[];
