@@ -284,7 +284,7 @@ export function recordSelfReportFromText(
         WHERE kind = 'self_reported' AND principle_id = ? AND session_id IS ?
       `).get(principleId, sessionId ?? null);
       if (isSelfReportSourceRow(source)) {
-        const mirrorState = getSelfReportMirrorState(db, sessionId, principleId, source.activation_id);
+        const mirrorState = getSelfReportMirrorState(db, sessionId, principleId, source);
         if (mirrorState === 'missing') {
           recordSelfReportEvidence({
             workspaceDir,
@@ -296,7 +296,7 @@ export function recordSelfReportFromText(
             logger,
           });
         } else if (mirrorState === 'invalid') {
-          logger?.warn?.(`[PD:ReceiptLedger] self_report replay skipped: normalized mirror identity is malformed for principle ${safeLogField(principleId)}; next: inspect the existing evidence row before replay`);
+          logger?.warn?.(`[PD:ReceiptLedger] self_report replay skipped: normalized mirror identity is conflicting or malformed for principle ${safeLogField(principleId)}; next: inspect the existing evidence rows before replay`);
         }
       } else {
         logger?.warn?.(`[PD:ReceiptLedger] self_report replay skipped: durable source row unavailable for principle ${safeLogField(principleId)}`);
@@ -312,7 +312,7 @@ function getSelfReportMirrorState(
   db: Database.Database,
   sessionId: string | undefined,
   principleId: string,
-  activationId: string | null,
+  source: { activation_id: string | null; digest: string; created_at: string },
 ): 'missing' | 'present' | 'invalid' {
   try {
     const table: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'intervention_evidence_records'").get();
@@ -320,26 +320,37 @@ function getSelfReportMirrorState(
     if (!isRecord(table) || !Object.hasOwn(table, 'name') || table.name !== 'intervention_evidence_records') return 'invalid';
     const sourceLocator = `openclaw-application-ledger:${sessionId ?? 'no-session'}`;
     const observationKey = `openclaw|application|agent_claimed|${sessionId ?? '-'}|${principleId}`;
-    const row: unknown = db.prepare(`
-      SELECT evidence_id, source_kind, source_locator, observation_key, record_kind, activation_id, record_digest
+    const rows: unknown[] = db.prepare(`
+      SELECT evidence_id, source_kind, source_locator, observation_key, record_kind, activation_id,
+             record_digest, occurred_at, payload_json
       FROM intervention_evidence_records
-      WHERE source_kind = 'openclaw_plugin_event_log' AND source_locator = ? AND observation_key = ?
-    `).get(sourceLocator, observationKey);
-    if (row === undefined) return 'missing';
+      WHERE source_kind IN ('openclaw_plugin_event_log', 'openclaw_application_ledger')
+        AND source_locator = ? AND observation_key = ?
+    `).all(sourceLocator, observationKey);
+    if (rows.length === 0) return 'missing';
+    // Old and new source kinds are different natural keys. If both exist,
+    // don't silently select one or create another mirror.
+    if (rows.length !== 1) return 'invalid';
+    const row: unknown = rows[0];
     if (!isRecord(row)
-    || !['evidence_id', 'source_kind', 'source_locator', 'observation_key', 'record_kind', 'activation_id', 'record_digest']
+    || !['evidence_id', 'source_kind', 'source_locator', 'observation_key', 'record_kind', 'activation_id', 'record_digest', 'occurred_at', 'payload_json']
       .every((key) => Object.hasOwn(row, key))
-    || row.source_kind !== 'openclaw_plugin_event_log'
+    || (row.source_kind !== 'openclaw_plugin_event_log' && row.source_kind !== 'openclaw_application_ledger')
     || row.source_locator !== sourceLocator
     || row.observation_key !== observationKey
     || row.record_kind !== 'application'
-    || row.activation_id !== activationId
+    || row.activation_id !== source.activation_id
     || typeof row.evidence_id !== 'string'
     || !/^sha256:[a-f0-9]{64}$/.test(row.evidence_id)
     || typeof row.record_digest !== 'string'
-    || !/^sha256:[a-f0-9]{64}$/.test(row.record_digest)) {
+    || !/^sha256:[a-f0-9]{64}$/.test(row.record_digest)
+    || row.occurred_at !== source.created_at
+    || typeof row.payload_json !== 'string') {
       return 'invalid';
     }
+    const payload: unknown = JSON.parse(row.payload_json);
+    if (!isRecord(payload) || payload.proofMethod !== 'agent_claimed'
+      || payload.action !== 'self_reported' || payload.claimText !== source.digest) return 'invalid';
     return 'present';
   } catch {
     return 'invalid';

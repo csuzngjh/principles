@@ -90,12 +90,13 @@ function appendBatch(
   workspaceDir: string,
   observations: InterventionObservationInput[],
   logger: RecorderLogger,
+  sourceKind: InterventionEvidenceBatchInput['sourceKind'] = 'openclaw_plugin_event_log',
 ): void {
   if (observations.length === 0) return;
   const ingress = getInterventionEvidenceIngress();
   const batch: InterventionEvidenceBatchInput = {
     evidenceScopeId: ingress.evidenceScopeIdFor(workspaceDir),
-    sourceKind: 'openclaw_plugin_event_log',
+    sourceKind,
     adapterVersion: OPENCLAW_EVIDENCE_ADAPTER_VERSION,
     recordedAt: new Date().toISOString(),
     observations,
@@ -345,5 +346,5 @@ export function recordSelfReportEvidence(input: SelfReportEvidenceInput): void {
     ...(activationRef ? { activationRef } : {}),
     payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: input.claimText.slice(0, 200) },
   };
-  appendBatch(input.workspaceDir, [observation], input.logger);
+  appendBatch(input.workspaceDir, [observation], input.logger, 'openclaw_application_ledger');
 }

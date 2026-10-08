@@ -14,6 +14,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { SqliteConnection, SqliteInterventionEvidenceStore, getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getInterventionEvidenceIngress } from '@principles/host-runtime';
 import {
   alignActivationIds,
   recordSelfReportFromText,
@@ -63,6 +64,38 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
     (readerConn!.getDb()
       .prepare("SELECT COUNT(*) AS n FROM principle_applications WHERE kind='self_reported'")
       .get() as { n: number }).n;
+
+  const seedNormalizedSelfReport = (input: {
+    sourceKind: 'openclaw_plugin_event_log' | 'openclaw_application_ledger';
+    sessionId: string;
+    activationId: string;
+    occurredAt: string;
+    claimText: string;
+  }): void => {
+    const ingress = getInterventionEvidenceIngress();
+    const activationRef = ingress.resolveActivationOccurrenceRef(workspaceDir, input.activationId);
+    if (!activationRef) throw new Error(`test fixture activation unavailable: ${input.activationId}`);
+    const result = ingress.appendObservationBatch({
+      workspaceDir,
+      batch: {
+        evidenceScopeId: ingress.evidenceScopeIdFor(workspaceDir),
+        sourceKind: input.sourceKind,
+        adapterVersion: 'test-self-report',
+        recordedAt: new Date().toISOString(),
+        observations: [{
+          observationKey: `openclaw|application|agent_claimed|${input.sessionId}|T-01`,
+          sourceLocator: `openclaw-application-ledger:${input.sessionId}`,
+          kind: 'application',
+          nativeRefs: { hostKind: 'openclaw', sessionId: input.sessionId },
+          principleId: 'T-01',
+          occurredAt: input.occurredAt,
+          activationRef,
+          payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: input.claimText },
+        }],
+      },
+    });
+    if (!result.ok) throw new Error(`test fixture normalized mirror failed: ${result.reason}`);
+  };
 
   beforeEach(() => {
     clearPrincipleApplicationLedgerCache();
@@ -195,7 +228,7 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
       `).get(sessionId) as { activation_id: string; digest: string; created_at: string };
       const normalized = readerConn!.getDb().prepare(`
         SELECT activation_id, activation_ref_json, content_ref_json, occurred_at, payload_json FROM intervention_evidence_records
-        WHERE source_kind = 'openclaw_plugin_event_log'
+        WHERE source_kind = 'openclaw_application_ledger'
           AND source_locator = ?
           AND observation_key = ?
       `).get(
@@ -284,7 +317,7 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
       `).get(sessionId) as { activation_id: string | null; digest: string; created_at: string };
       const normalized = readerConn!.getDb().prepare(`
         SELECT activation_id, activation_ref_json, occurred_at, payload_json FROM intervention_evidence_records
-        WHERE source_kind = 'openclaw_plugin_event_log'
+        WHERE source_kind = 'openclaw_application_ledger'
           AND source_locator = ? AND observation_key = ?
       `).get(
         `openclaw-application-ledger:${sessionId}`,
@@ -339,12 +372,13 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
       setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-stable']);
       recordSelfReportFromText(workspaceDir, '📌 应用了你的原则「T-01」：持久声明', sessionId, logger);
       const before = readerConn!.getDb().prepare(`
-        SELECT activation_id, activation_ref_json, record_digest FROM intervention_evidence_records
-        WHERE source_locator = ? AND observation_key = ?
+        SELECT source_kind, activation_id, activation_ref_json, record_digest FROM intervention_evidence_records
+        WHERE source_kind = 'openclaw_application_ledger' AND source_locator = ? AND observation_key = ?
       `).get(
         `openclaw-application-ledger:${sessionId}`,
         `openclaw|application|agent_claimed|${sessionId}|T-01`,
-      ) as { activation_id: string; activation_ref_json: string; record_digest: string };
+      ) as { source_kind: string; activation_id: string; activation_ref_json: string; record_digest: string };
+      expect(before.source_kind).toBe('openclaw_application_ledger');
       expect(before.activation_id).toBe('act-stable');
       expect(before.activation_ref_json).toContain('sourceSnapshotDigest');
 
@@ -356,14 +390,110 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
       recordSelfReportFromText(workspaceDir, '📌 应用了你的原则「T-01」：持久声明', sessionId, logger);
 
       const after = readerConn!.getDb().prepare(`
-        SELECT activation_id, activation_ref_json, record_digest FROM intervention_evidence_records
-        WHERE source_locator = ? AND observation_key = ?
+        SELECT source_kind, activation_id, activation_ref_json, record_digest FROM intervention_evidence_records
+        WHERE source_kind = 'openclaw_application_ledger' AND source_locator = ? AND observation_key = ?
       `).get(
         `openclaw-application-ledger:${sessionId}`,
         `openclaw|application|agent_claimed|${sessionId}|T-01`,
-      ) as { activation_id: string; activation_ref_json: string; record_digest: string };
+      ) as { source_kind: string; activation_id: string; activation_ref_json: string; record_digest: string };
       expect(after).toEqual(before);
       expect(warnings.some((message) => message.includes('source_conflict'))).toBe(false);
+    } finally {
+      clearSession(sessionId);
+    }
+  });
+
+  it('reuses a healthy legacy OpenClaw event-log mirror without creating a new-source row', () => {
+    const cfg = getDefaultPdConfig() as unknown as {
+      features: Record<string, { category?: string; enabled: boolean }>;
+    };
+    cfg.features.principle_receipt_ledger = { category: 'quiet', enabled: false };
+    cfg.features.principle_receipt_self_report = { category: 'quiet', enabled: true };
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
+    const activationTime = '2026-10-01T00:00:00.000Z';
+    const setup = new SqliteConnection(workspaceDir);
+    setup.getDb().prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id,
+                content_json, created_at, updated_at) VALUES ('art-legacy', 'principle', 'task-legacy', 'T-01', ?, ?, ?)`)
+      .run(JSON.stringify({ principleId: 'T-01', text: 'legacy content' }), activationTime, activationTime);
+    setup.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                VALUES ('act-legacy', 'idem-legacy', 'art-legacy', 'prompt', 'prompt_activate', 'ref', ?)`)
+      .run(activationTime);
+    setup.close();
+
+    const sessionId = 'sess-legacy-mirror';
+    const claimText = '原始持久化声明';
+    try {
+      setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-legacy']);
+      recordSelfReportFromText(workspaceDir, `📌 应用了你的原则「T-01」：${claimText}`, sessionId, logger);
+      const source = readerConn!.getDb().prepare(`SELECT created_at FROM principle_applications
+        WHERE kind = 'self_reported' AND principle_id = 'T-01' AND session_id = ?`).get(sessionId) as { created_at: string };
+
+      cfg.features.principle_receipt_ledger.enabled = true;
+      fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
+      seedNormalizedSelfReport({
+        sourceKind: 'openclaw_plugin_event_log', sessionId, activationId: 'act-legacy',
+        occurredAt: source.created_at, claimText,
+      });
+      recordSelfReportFromText(workspaceDir, `📌 应用了你的原则「T-01」：${claimText}`, sessionId, logger);
+
+      const rows = readerConn!.getDb().prepare(`SELECT source_kind, evidence_id FROM intervention_evidence_records
+        WHERE source_locator = ? AND observation_key = ?`).all(
+        `openclaw-application-ledger:${sessionId}`,
+        `openclaw|application|agent_claimed|${sessionId}|T-01`,
+      ) as { source_kind: string; evidence_id: string }[];
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.source_kind).toBe('openclaw_plugin_event_log');
+      expect(warnings).toHaveLength(0);
+    } finally {
+      clearSession(sessionId);
+    }
+  });
+
+  it('degrades on conflicting legacy and new self-report mirrors without merging or deleting either row', () => {
+    const cfg = getDefaultPdConfig() as unknown as {
+      features: Record<string, { category?: string; enabled: boolean }>;
+    };
+    cfg.features.principle_receipt_ledger = { category: 'quiet', enabled: false };
+    cfg.features.principle_receipt_self_report = { category: 'quiet', enabled: true };
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
+    const activationTime = '2026-10-01T00:00:00.000Z';
+    const setup = new SqliteConnection(workspaceDir);
+    setup.getDb().prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id,
+                content_json, created_at, updated_at) VALUES ('art-conflict', 'principle', 'task-conflict', 'T-01', ?, ?, ?)`)
+      .run(JSON.stringify({ principleId: 'T-01', text: 'content' }), activationTime, activationTime);
+    setup.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                VALUES ('act-conflict', 'idem-conflict', 'art-conflict', 'prompt', 'prompt_activate', 'ref', ?)`)
+      .run(activationTime);
+    setup.close();
+
+    const sessionId = 'sess-conflict-mirror';
+    const claimText = '原始持久化声明';
+    try {
+      setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-conflict']);
+      recordSelfReportFromText(workspaceDir, `📌 应用了你的原则「T-01」：${claimText}`, sessionId, logger);
+      const source = readerConn!.getDb().prepare(`SELECT created_at FROM principle_applications
+        WHERE kind = 'self_reported' AND principle_id = 'T-01' AND session_id = ?`).get(sessionId) as { created_at: string };
+      cfg.features.principle_receipt_ledger.enabled = true;
+      fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
+      seedNormalizedSelfReport({
+        sourceKind: 'openclaw_plugin_event_log', sessionId, activationId: 'act-conflict',
+        occurredAt: source.created_at, claimText,
+      });
+      seedNormalizedSelfReport({
+        sourceKind: 'openclaw_application_ledger', sessionId, activationId: 'act-conflict',
+        occurredAt: source.created_at, claimText: 'conflicting mirror claim',
+      });
+
+      recordSelfReportFromText(workspaceDir, `📌 应用了你的原则「T-01」：${claimText}`, sessionId, logger);
+      const rows = readerConn!.getDb().prepare(`SELECT source_kind FROM intervention_evidence_records
+        WHERE source_locator = ? AND observation_key = ?`).all(
+        `openclaw-application-ledger:${sessionId}`,
+        `openclaw|application|agent_claimed|${sessionId}|T-01`,
+      ) as { source_kind: string }[];
+      expect(rows.map((row) => row.source_kind).sort()).toEqual([
+        'openclaw_application_ledger', 'openclaw_plugin_event_log',
+      ]);
+      expect(warnings.some((message) => message.includes('conflicting or malformed'))).toBe(true);
     } finally {
       clearSession(sessionId);
     }
