@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   isHostEvent,
   isHostEventResult,
@@ -295,6 +296,8 @@ export function createProductionHostRuntime(
           skippedWarnings: prompt.warnings,
           injectedCharCount: prompt.additionalContext.length,
           budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+          ...(options.hostKind === 'openclaw' || options.hostKind === 'codex' ? { hostKind: options.hostKind } : {}),
+          eventId: randomUUID(),
           ...(prompt.truncated !== undefined ? { v2Truncated: prompt.truncated } : {}),
           ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
           // PRI-904: selection diagnostics (bounded, optional). On this route

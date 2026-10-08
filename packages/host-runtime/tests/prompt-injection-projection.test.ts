@@ -18,6 +18,7 @@ import { escapeXml } from '@principles/core/prompt-builder';
 import {
   buildActivePrinciplePromptContext,
   buildLivePromptInjectionProjection,
+  resolvePromptInjectionRouteDecision,
 } from '../src/index.js';
 
 const tempDirs: string[] = [];
@@ -108,6 +109,36 @@ const FIFO_11 = Array.from({ length: 11 }, (_, i) => ({
 }));
 
 describe('buildLivePromptInjectionProjection (PR #1844 production path alignment)', () => {
+  it('fails route preflight closed when config is unreadable, even with an explicit host', () => {
+    const workspaceDir = tempWorkspace();
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), 'features: [broken', 'utf8');
+    const decision = resolvePromptInjectionRouteDecision({ workspaceDir, targetHost: 'openclaw' });
+    expect(decision.status).toBe('unconfirmed');
+    expect(decision.unconfirmedReason).toContain('config_unreadable');
+    expect(decision.nextAction).toBeTruthy();
+  });
+
+  it('allows explicit host binding when unrelated host facts cannot be read', () => {
+    const workspaceDir = tempWorkspace();
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDir, '.state', 'trajectory.db'), 'not sqlite', 'utf8');
+    const decision = resolvePromptInjectionRouteDecision({ workspaceDir, targetHost: 'codex' });
+    expect(decision.status).toBe('confirmed');
+    expect(decision.hostKind).toBe('codex');
+    expect(decision.basis).toBe('explicit_target');
+    expect(decision.hostFactsStatus).toBe('unreadable');
+  });
+
+  it('rejects route confirmation when the prompt feature is disabled', () => {
+    const workspaceDir = tempWorkspace();
+    const config = getDefaultPdConfig();
+    config.features.prompt = { ...config.features.prompt, enabled: false };
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
+    const decision = resolvePromptInjectionRouteDecision({ workspaceDir, targetHost: 'openclaw' });
+    expect(decision.status).toBe('unconfirmed');
+    expect(decision.unconfirmedReason).toContain('prompt_feature_disabled');
+  });
+
   it('Case 1a — legacy route: ids/usedChars/truncated match the live PromptActivationReader→trimToBudget chain', async () => {
     const workspaceDir = tempWorkspace();
     await seedPromptActivations(workspaceDir, FIFO_11);

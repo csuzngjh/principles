@@ -29,6 +29,9 @@ import path from 'node:path';
 export interface InjectionEvidenceRow {
   workspaceDir: string;
   activationId: string;
+  hostKind: 'openclaw' | 'codex' | 'unknown';
+  hostIdentityComplete: boolean;
+  eventIdentityComplete: boolean;
   /** Deduplicated injection facts: this activation appeared in the injected set. */
   provenInjections: number;
   /** Raw matching events before dedupe. */
@@ -74,7 +77,8 @@ export function readInjectionEventEvidence(input: { stateDir: string }): Injecti
     .sort();
   let lines = 0;
   let parseFailures = 0;
-  // key: workspaceDir + ' ' + activationId; payload-dedupe set per row.
+  // Rows are separated by workspace, host, and activation. Old hostless events
+  // remain in an explicit unknown bucket and cannot merge with either host.
   const rows = new Map<string, InjectionEvidenceRow & { seen: Set<string> }>();
   for (const name of files) {
     // Containment guard: only bare event filenames inside the resolved logs
@@ -107,6 +111,9 @@ export function readInjectionEventEvidence(input: { stateDir: string }): Injecti
       const workspaceDir = nonEmptyString(data.workspaceDir);
       const sessionId = nonEmptyString(data.sessionId) ?? nonEmptyString(parsed.sessionId);
       const runId = nonEmptyString(data.runId);
+      const eventId = nonEmptyString(data.eventId);
+      const rawHostKind = data.hostKind;
+      const hostKind = rawHostKind === 'openclaw' || rawHostKind === 'codex' ? rawHostKind : 'unknown';
       const {activationIds} = data;
       if (workspaceDir === undefined || sessionId === undefined || !Array.isArray(activationIds)
         || !activationIds.every((id): id is string => typeof id === 'string')) {
@@ -114,14 +121,19 @@ export function readInjectionEventEvidence(input: { stateDir: string }): Injecti
         parseFailures += 1;
         continue;
       }
-      const dedupeKey = JSON.stringify([workspaceDir, sessionId, runId ?? null, ts, activationIds.join(','), data.injectedCharCount, data.selectionPolicy ?? null, data.rotationStartIndex ?? null]);
+      const dedupeKey = eventId !== undefined
+        ? JSON.stringify(['event', hostKind, eventId])
+        : JSON.stringify(['legacy', hostKind, workspaceDir, sessionId, runId ?? null, ts, activationIds.join(','), data.injectedCharCount, data.selectionPolicy ?? null, data.rotationStartIndex ?? null]);
       for (const activationId of activationIds) {
-        const rowKey = `${workspaceDir} ${activationId}`;
+        const rowKey = JSON.stringify([workspaceDir, hostKind, activationId]);
         let row = rows.get(rowKey);
         if (row === undefined) {
           row = {
             workspaceDir,
             activationId,
+            hostKind,
+            hostIdentityComplete: hostKind !== 'unknown',
+            eventIdentityComplete: true,
             provenInjections: 0,
             rawEventCount: 0,
             duplicateEventsDeduped: 0,
@@ -134,6 +146,8 @@ export function readInjectionEventEvidence(input: { stateDir: string }): Injecti
           rows.set(rowKey, row);
         }
         row.rawEventCount += 1;
+        if (hostKind === 'unknown') row.hostIdentityComplete = false;
+        if (eventId === undefined) row.eventIdentityComplete = false;
         if (!row.seen.has(dedupeKey)) {
           row.seen.add(dedupeKey);
           row.provenInjections += 1;
@@ -154,6 +168,9 @@ export function readInjectionEventEvidence(input: { stateDir: string }): Injecti
     rows: [...rows.values()].map((row) => ({
       workspaceDir: row.workspaceDir,
       activationId: row.activationId,
+      hostKind: row.hostKind,
+      hostIdentityComplete: row.hostIdentityComplete,
+      eventIdentityComplete: row.eventIdentityComplete,
       provenInjections: row.provenInjections,
       rawEventCount: row.rawEventCount,
       duplicateEventsDeduped: row.duplicateEventsDeduped,

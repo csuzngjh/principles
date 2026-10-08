@@ -91,13 +91,20 @@ function seedCandidates(workspaceDir, mix) {
   }
 }
 
+function countOversizedCandidates(principles) {
+  // Selector diagnostics are bounded and may stop scanning after a FIFO
+  // prefix fills. Measure each candidate alone for a corpus-wide count.
+  return principles.filter((principle) =>
+    trimToBudget([principle], RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml).oversizedActivationIds.includes(principle.activationId),
+  ).length;
+}
+
 async function listRouteScenario(mix, selfReport, rounds) {
   const dir = makeWorkspace({ selfReport });
   seedCandidates(dir, mix);
   const { principles, aborted } = await readPromptActivationCandidates({ workspaceDir: dir });
-  const results = { route: 'list', selfReport, candidates: principles.length, aborted, avgInjected: 0, avgUsedChars: 0, avgFullRenderChars: 0, oversized: 0, policy: 'fair_rotation_v1' };
+  const results = { route: 'list', selfReport, candidates: principles.length, aborted, avgInjected: 0, avgUsedChars: 0, avgFullRenderChars: 0, oversized: 0, policy: 'fair_rotation_v1', roundKeySource: 'controlled_simulation' };
   let injectedSum = 0, usedSum = 0, fullSum = 0;
-  const oversizedSeen = new Set();
   for (let k = 0; k < rounds; k += 1) {
     const trimmed = trimToBudget(principles, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, k % Math.max(principles.length, 1));
     const injected = principles.filter((p) => trimmed.injectedIds.has(p.principleId));
@@ -105,12 +112,11 @@ async function listRouteScenario(mix, selfReport, rounds) {
     injectedSum += injected.length;
     usedSum += trimmed.lines.join('\n').length;
     fullSum += full.length;
-    for (const id of trimmed.oversizedActivationIds) oversizedSeen.add(id);
   }
   results.avgInjected = +(injectedSum / rounds).toFixed(2);
   results.avgUsedChars = Math.round(usedSum / rounds);
   results.avgFullRenderChars = Math.round(fullSum / rounds);
-  results.oversized = oversizedSeen.size;
+  results.oversized = countOversizedCandidates(principles);
   results.templateOverheadChars = results.avgFullRenderChars - results.avgUsedChars;
   fs.rmSync(dir, { recursive: true, force: true });
   return results;
@@ -128,18 +134,19 @@ async function listRouteFifoDegraded(mix) {
     candidates: principles.length,
     injected: principles.filter((p) => trimmed.injectedIds.has(p.principleId)).length,
     usedChars: trimmed.lines.join('\n').length,
-    oversized: trimmed.oversizedActivationIds.length,
+    oversized: countOversizedCandidates(principles),
   };
 }
 
 async function sharedRouteScenario(mix, selfReport, forcedRotationRounds) {
   const dir = makeWorkspace({ sharedFlag: true, selfReport });
   const activationIds = seedCandidates(dir, mix);
-  const results = { route: 'shared', selfReport, candidates: activationIds.length, fifoInjected: 0, fifoUsedChars: 0, oversized: 0, avgInjectedForcedRotation: null, evidenceRows: null };
+  const { principles } = await readPromptActivationCandidates({ workspaceDir: dir });
+  const results = { route: 'shared', selfReport, candidates: activationIds.length, fifoInjected: 0, fifoUsedChars: 0, oversized: 0, avgInjectedForcedRotation: null, evidenceRows: null, forcedRoundKeySource: 'controlled_simulation' };
   const fifo = await buildActivePrinciplePromptContext({ workspaceDir: dir });
   results.fifoInjected = fifo.principleIds.length;
   results.fifoUsedChars = fifo.additionalContext.length;
-  results.oversized = (fifo.oversizedActivationIds ?? []).length;
+  results.oversized = countOversizedCandidates(principles);
   results.fifoPolicy = fifo.selectionPolicy;
   if (forcedRotationRounds > 0) {
     let sum = 0;
@@ -159,6 +166,7 @@ async function sharedPathWithEvents(mix) {
   seedCandidates(dir, mix);
   const events = [];
   const runtime = createProductionHostRuntime({
+    hostKind: 'codex',
     events: {
       recordRuntimeV2ActivationsInjected: (data) => {
         events.push(data);
@@ -167,7 +175,7 @@ async function sharedPathWithEvents(mix) {
           type: 'runtime_v2_prompt_activations_injected',
           category: 'injected',
           sessionId: data.sessionId,
-          data: { ...data, runId: `turn-${events.length}` },
+          data,
         });
       },
       recordToolCall: () => { /* not exercised by the prompt route */ },
@@ -179,53 +187,53 @@ async function sharedPathWithEvents(mix) {
       kind: 'before_prompt_build',
       source: 'codex:measurement',
       rawPayload: { note: 'measurement drive' },
-      context: { workspaceDir: dir, sessionId: 'measure-session', turnId: `turn-${turn}` },
+      context: { workspaceDir: dir, sessionId: 'measure-session' },
     });
     injectedCounts.push(result.additionalContext?.length ?? 0);
   }
   const evidence = readInjectionEventEvidence({ stateDir: path.join(dir, '.state') });
-  const rows = evidence.rows.map((r) => ({ activationId: r.activationId, provenInjections: r.provenInjections, runIdComplete: r.runIdComplete }));
+  const rows = evidence.rows.map((r) => ({ activationId: r.activationId, hostKind: r.hostKind, provenInjections: r.provenInjections, runIdComplete: r.runIdComplete, eventIdentityComplete: r.eventIdentityComplete }));
   fs.rmSync(dir, { recursive: true, force: true });
   return {
-    turnsDriven: 5,
+    promptBuildsDriven: 5,
     eventsEmitted: events.length,
-    turnsWithInjection: injectedCounts.filter((n) => n > 0).length,
+    promptBuildsWithInjection: injectedCounts.filter((n) => n > 0).length,
     evidenceRows: rows.length,
     evidenceAllRunBound: rows.every((r) => r.runIdComplete),
+    evidenceAllHostBound: rows.every((r) => r.hostKind === 'codex'),
+    evidenceAllEventBound: rows.every((r) => r.eventIdentityComplete),
+    runIdentityFixture: 'controlled measurement has no host run id; missing stays unknown',
     evidenceNote: evidence.note,
   };
 }
 
 async function budgetCandidateReplay() {
-  // Scenario equivalent of the SPEC §2 snapshot: 16 fixed candidates
-  // (short×14 + long×2), 40 round keys, three selection/billing regimes.
-  const candidates = [];
-  for (let i = 0; i < 14; i += 1) candidates.push({ principleId: `S-${i}`, text: '短'.repeat(60), artifactId: `a${i}`, activationId: `act-S-${i}` });
-  for (let i = 0; i < 2; i += 1) candidates.push({ principleId: `L-${i}`, text: '长'.repeat(600), artifactId: `l${i}`, activationId: `act-L-${i}` });
+  // Simulation only: both serializers use the same persisted candidates,
+  // text and FIFO order (14 × 60 chars, 2 × 1200 chars).
+  const replayWorkspace = makeWorkspace({ sharedFlag: true });
+  seedCandidates(replayWorkspace, { short: 14, long: 2, oversized: 0 });
+  const { principles: candidates } = await readPromptActivationCandidates({ workspaceDir: replayWorkspace });
   const rounds = 40;
   let listSum = 0, sharedRotationSum = 0, sharedFifoSum = 0;
   for (let k = 0; k < rounds; k += 1) {
     const t = trimToBudget(candidates, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, k % candidates.length);
     listSum += [...t.injectedIds].length;
-    const shared = await buildActivePrinciplePromptContext({ workspaceDir: SHARED_REPLAY_WS, roundKey: k });
+    const shared = await buildActivePrinciplePromptContext({ workspaceDir: replayWorkspace, roundKey: k });
     sharedRotationSum += shared.principleIds.length;
   }
-  const fifo = await buildActivePrinciplePromptContext({ workspaceDir: SHARED_REPLAY_WS });
+  const fifo = await buildActivePrinciplePromptContext({ workspaceDir: replayWorkspace });
   sharedFifoSum = fifo.principleIds.length;
+  fs.rmSync(replayWorkspace, { recursive: true, force: true });
   return {
-    scenario: '16 fixed candidates (14 short + 2 long), 40 rounds — synthetic equivalent of the SPEC §2 snapshot (7.95 / 2.4 figures are snapshot-sourced, not re-measured history)',
+    scenario: 'controlled simulation only: same persisted 16 candidates (14 × 60 chars, 2 × 1200 chars), same FIFO order, 40 forced round keys',
     listRouteAvgInjected: +(listSum / rounds).toFixed(2),
     sharedForcedRotationAvgInjected: +(sharedRotationSum / rounds).toFixed(2),
     sharedFifoInjected: sharedFifoSum,
   };
 }
 
-let SHARED_REPLAY_WS = '';
-
 async function main() {
   console.log('[measure] building replay workspace…');
-  SHARED_REPLAY_WS = makeWorkspace({ sharedFlag: true });
-  seedCandidates(SHARED_REPLAY_WS, { short: 14, long: 2, oversized: 0 });
 
   const scenarios = [];
   const mixes = [
@@ -242,7 +250,6 @@ async function main() {
   }
   const withEvents = await sharedPathWithEvents({ short: 6, long: 2, oversized: 1 });
   const replay = await budgetCandidateReplay();
-  fs.rmSync(SHARED_REPLAY_WS, { recursive: true, force: true });
 
   const sanityWs = makeWorkspace({});
   const routeSanity = resolvePromptInjectionRouteDecision({ workspaceDir: sanityWs, targetHost: undefined });
@@ -271,6 +278,8 @@ async function main() {
   lines.push('');
   lines.push('## 场景对照（40 轮）');
   lines.push('');
+  lines.push('轮转行使用连续 round keys 做受控模拟；这些轮次不代表真实用户 turn。列表与共享路由的对照使用相同长度、顺序和文本的候选集。');
+  lines.push('');
   lines.push('| 场景 | 路由 | 自报 | 候选 | 平均注入条数 | 列表口径字符 | 完整注入块字符 | 模板开销 | 超长 |');
   lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
   for (const s of scenarios) {
@@ -279,7 +288,7 @@ async function main() {
     } else if (s.route === 'list') {
       lines.push(`| ${s.name} | 列表(轮转) | ${s.selfReport} | ${s.candidates} | ${s.avgInjected} | ${s.avgUsedChars} | ${s.avgFullRenderChars} | ${s.templateOverheadChars} | ${s.oversized} |`);
     } else {
-      const avg = s.avgInjectedForcedRotation === null ? s.fifoInjected : `${s.fifoInjected}(FIFO) / ${s.avgInjectedForcedRotation}(强制轮转均值)`;
+      const avg = s.avgInjectedForcedRotation === null ? s.fifoInjected : `${s.fifoInjected}(FIFO) / ${s.avgInjectedForcedRotation}(强制轮转模拟均值)`;
       lines.push(`| ${s.name} | 共享 | ${s.selfReport} | ${s.candidates} | ${avg} | –(按完整块计费) | ${s.fifoUsedChars} | 0(口径即完整块) | ${s.oversized} |`);
     }
   }
@@ -289,13 +298,13 @@ async function main() {
   lines.push('- `list-fifo-degraded` = 轮次来源丢失（会话重启/无 user_turn）时插件的真实降级路径：FIFO 前缀打包，尾部候选结构性饥饿——这就是 AC-03 要求区分“轮转机会”与“FIFO 不承诺”的实证。');
   lines.push('- 超长候选（2100 字符正文）在两种路由下都不可单独装入，与轮转无关（AC-02/AC-05 实证）。');
   lines.push('');
-  lines.push('## 真实共享路径 + 事件证据（AC-12 接线证明）');
+  lines.push('## 受控共享路径 + 事件证据（AC-12 接线证明）');
   lines.push('');
   lines.push('```json');
   lines.push(JSON.stringify(withEvents, null, 2));
   lines.push('```');
   lines.push('');
-  lines.push('## 预算候选对照（AC-13）');
+  lines.push('## 预算候选对照（AC-13；同一数据集的受控模拟）');
   lines.push('');
   lines.push('```json');
   lines.push(JSON.stringify(replay, null, 2));
@@ -303,7 +312,7 @@ async function main() {
   lines.push('');
   lines.push('结论（本任务固定决策，未发起迁移确认）：');
   lines.push(`- 保持两条路由各自的 2000 计费口径、serializer 与选择器不变。`);
-  lines.push(`- 若改为“统一完整渲染 2000”：本合成场景平均注入条数从 ${replay.listRouteAvgInjected} 降到 ${replay.sharedForcedRotationAvgInjected}（SPEC §2 快照口径为 7.95 → 2.4，趋势一致）——覆盖骤降，且长原则在共享口径+自报脚注下更易越界。`);
+  lines.push(`- 受控模拟中完整渲染口径平均注入 ${replay.sharedForcedRotationAvgInjected} 条，列表口径平均 ${replay.listRouteAvgInjected} 条；两条路使用相同 16 个持久化候选，forced round keys 是模拟输入，不代表真实用户轮次。`);
   lines.push('- 模板收益：共享口径把包装/脚注计入预算，计量更诚实，但等价于隐性降预算；回退成本：路由口径迁移影响所有已激活原则的装入性判定，需要独立迁移任务与真实行为数据。');
   lines.push('- 未验证行为改善：本报告只有注入/字符事实；模型遵守率、历史真实注入率、最佳预算均未知（unknown），不得以“平均选中更多/更少”当作行为改善。');
   lines.push('');

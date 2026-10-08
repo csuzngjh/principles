@@ -46,6 +46,8 @@ export interface PromptInjectionRouteDecision {
   /** Present when status === 'confirmed'. */
   route?: PromptInjectionRouteName;
   basis?: 'explicit_target' | 'workspace_host_facts' | 'flag_shared_all_hosts';
+  /** Present when explicit binding succeeds while workspace-wide host facts are unreadable. */
+  hostFactsStatus?: 'unreadable';
   /** Raw `abstraction_layer_v1` flag state (context for the OpenClaw branch). */
   flagEnabled: boolean;
   declaredHostKinds: readonly string[];
@@ -84,23 +86,38 @@ export function resolvePromptInjectionRouteDecision(input: {
   workspaceDir: string;
   targetHost?: PromptInjectionTargetHost;
 }): PromptInjectionRouteDecision {
-  const flagEnabled = computeFeatureFlagsFromConfig(
-    loadPdConfigForPlugin(input.workspaceDir).effective,
-  ).flags.abstraction_layer_v1?.enabled === true;
-
+  const config = loadPdConfigForPlugin(input.workspaceDir);
+  const {flags} = computeFeatureFlagsFromConfig(config.effective);
+  const flagEnabled = flags.abstraction_layer_v1?.enabled === true;
   const facts = readWorkspaceHostKindFacts(input.workspaceDir);
-  if (!facts.ok) {
+  if (!config.ok) {
+    const [error] = config.errors;
     return {
       status: 'unconfirmed',
       flagEnabled,
-      declaredHostKinds: facts.declaredKinds,
-      effectiveHostKinds: [],
-      unconfirmedReason: `host_facts_unreadable: ${facts.detail}`,
-      nextAction: facts.nextAction,
+      declaredHostKinds: facts.ok ? facts.declaredKinds : [],
+      effectiveHostKinds: facts.ok ? facts.effectiveKinds : [],
+      ...(!facts.ok ? { hostFactsStatus: 'unreadable' as const } : {}),
+      unconfirmedReason: `config_unreadable: ${error?.reason ?? 'workspace config is invalid'}`,
+      nextAction: error?.nextAction ?? 'repair .pd/config.yaml before measuring prompt injection',
       perHost: standardHostRoutes(flagEnabled),
     };
   }
-
+  if (!flags.prompt?.enabled) {
+    return {
+      status: 'unconfirmed',
+      flagEnabled,
+      declaredHostKinds: facts.ok ? facts.declaredKinds : [],
+      effectiveHostKinds: facts.ok ? facts.effectiveKinds : [],
+      ...(!facts.ok ? { hostFactsStatus: 'unreadable' as const } : {}),
+      unconfirmedReason: 'prompt_feature_disabled: the prompt injection surface is off',
+      nextAction: 'set features.prompt.enabled=true in .pd/config.yaml',
+      perHost: standardHostRoutes(flagEnabled),
+    };
+  }
+  // Explicit request-level host is sufficient to bind the route even when
+  // workspace-wide host provenance is unreadable. Config and prompt state
+  // above remain mandatory preflight gates.
   if (input.targetHost !== undefined) {
     return {
       status: 'confirmed',
@@ -109,7 +126,20 @@ export function resolvePromptInjectionRouteDecision(input: {
       basis: 'explicit_target',
       flagEnabled,
       declaredHostKinds: facts.declaredKinds,
-      effectiveHostKinds: facts.effectiveKinds,
+      effectiveHostKinds: facts.ok ? facts.effectiveKinds : [],
+      ...(!facts.ok ? { hostFactsStatus: 'unreadable' as const } : {}),
+    };
+  }
+  if (!facts.ok) {
+    return {
+      status: 'unconfirmed',
+      flagEnabled,
+      declaredHostKinds: facts.declaredKinds,
+      effectiveHostKinds: [],
+      hostFactsStatus: 'unreadable',
+      unconfirmedReason: `host_facts_unreadable: ${facts.detail}`,
+      nextAction: facts.nextAction,
+      perHost: standardHostRoutes(flagEnabled),
     };
   }
 

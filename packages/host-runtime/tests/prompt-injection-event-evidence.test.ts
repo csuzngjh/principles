@@ -85,6 +85,32 @@ describe('AC-12: readInjectionEventEvidence', () => {
     expect(report.rows[0].runIds).toEqual([]);
   });
 
+  it('keeps host identity in the row key and treats missing host as an unknown bucket', () => {
+    const dir = tempStateDir();
+    const base = { sessionId: 's-1', workspaceDir: 'ws-a', activationIds: ['act-1'], injectedCharCount: 240 };
+    writeEvents(dir, '2026-10-07', [
+      injectedEvent({ data: { ...base, hostKind: 'openclaw', eventId: 'evt-1' } }),
+      injectedEvent({ data: { ...base, hostKind: 'codex', eventId: 'evt-2' } }),
+      injectedEvent({ data: base }),
+    ]);
+    const report = readInjectionEventEvidence({ stateDir: dir });
+    expect(report.rows.map((row) => row.hostKind).sort()).toEqual(['codex', 'openclaw', 'unknown']);
+    expect(report.rows.find((row) => row.hostKind === 'unknown')).toMatchObject({ hostIdentityComplete: false, eventIdentityComplete: false });
+    expect(report.rows.find((row) => row.hostKind === 'openclaw')).toMatchObject({ hostIdentityComplete: true, eventIdentityComplete: true });
+  });
+
+  it('counts same-run same-time payload events separately when their event ids differ', () => {
+    const dir = tempStateDir();
+    const base = { sessionId: 's-1', workspaceDir: 'ws-a', activationIds: ['act-1'], runId: 'r1', hostKind: 'codex', injectedCharCount: 240 };
+    writeEvents(dir, '2026-10-07', [
+      injectedEvent({ data: { ...base, eventId: 'evt-1' } }),
+      injectedEvent({ data: { ...base, eventId: 'evt-2' } }),
+      injectedEvent({ data: { ...base, eventId: 'evt-2' } }),
+    ]);
+    const row = readInjectionEventEvidence({ stateDir: dir }).rows[0];
+    expect(row).toMatchObject({ provenInjections: 2, rawEventCount: 3, duplicateEventsDeduped: 1, eventIdentityComplete: true });
+  });
+
   it('structurally invalid lines are skipped loudly (parseFailures), never guessed into counts', () => {
     const dir = tempStateDir();
     fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });

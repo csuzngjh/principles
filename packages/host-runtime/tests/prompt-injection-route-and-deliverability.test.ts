@@ -240,6 +240,21 @@ describe('AC-01: resolveLivePromptInjectionProjection follows the resolved route
 });
 
 describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, route serializer, boundaries', () => {
+  it('write precheck refuses malformed config and prompt flag off, even with explicit host', async () => {
+    const artifact = { artifactId: 'art-precheck', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'PRECHECK', text: 'short' }), validationStatus: 'validated' };
+    const malformed = tempWorkspace();
+    fs.writeFileSync(path.join(malformed, '.pd', 'config.yaml'), 'features: [broken', 'utf8');
+    const malformedResult = await checkPromptArtifactDeliverability({ workspaceDir: malformed, targetHost: 'openclaw', artifact });
+    expect(malformedResult.status).toBe('unconfirmed');
+    expect(malformedResult.reason).toContain('config_unreadable');
+    expect(malformedResult.nextAction).toBeTruthy();
+
+    const disabled = tempWorkspace({ promptFlagOff: true });
+    const disabledResult = await checkPromptArtifactDeliverability({ workspaceDir: disabled, targetHost: 'openclaw', artifact });
+    expect(disabledResult.status).toBe('unconfirmed');
+    expect(disabledResult.reason).toContain('prompt_feature_disabled');
+  });
+
   it('list route: an entry exactly filling the budget is deliverable; two chars over the joined-line boundary is refused by exactly 1', async () => {
     const dir = tempWorkspace({ declare: ['openclaw'] });
     const header = 'Runtime V2 activated principles:';

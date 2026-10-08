@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-07T12:17:03.763Z",
+  "generatedAt": "2026-10-08T02:41:57.015Z",
   "budget": 2000,
   "unit": "utf16_code_units (String.prototype.length — NOT model tokens)",
   "pdTokenCost": null,
@@ -20,6 +20,7 @@
       "avgFullRenderChars": 1518,
       "oversized": 0,
       "policy": "fair_rotation_v1",
+      "roundKeySource": "controlled_simulation",
       "templateOverheadChars": 1182
     },
     {
@@ -32,6 +33,7 @@
       "oversized": 0,
       "avgInjectedForcedRotation": 4,
       "evidenceRows": null,
+      "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
     },
     {
@@ -45,6 +47,7 @@
       "avgFullRenderChars": 1873,
       "oversized": 0,
       "policy": "fair_rotation_v1",
+      "roundKeySource": "controlled_simulation",
       "templateOverheadChars": 1537
     },
     {
@@ -57,6 +60,7 @@
       "oversized": 0,
       "avgInjectedForcedRotation": 4,
       "evidenceRows": null,
+      "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
     },
     {
@@ -79,6 +83,7 @@
       "avgFullRenderChars": 3812,
       "oversized": 0,
       "policy": "fair_rotation_v1",
+      "roundKeySource": "controlled_simulation",
       "templateOverheadChars": 1957
     },
     {
@@ -91,6 +96,7 @@
       "oversized": 0,
       "avgInjectedForcedRotation": 4.5,
       "evidenceRows": null,
+      "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
     },
     {
@@ -104,6 +110,7 @@
       "avgFullRenderChars": 4167,
       "oversized": 0,
       "policy": "fair_rotation_v1",
+      "roundKeySource": "controlled_simulation",
       "templateOverheadChars": 2312
     },
     {
@@ -116,6 +123,7 @@
       "oversized": 0,
       "avgInjectedForcedRotation": 4,
       "evidenceRows": null,
+      "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
     },
     {
@@ -138,6 +146,7 @@
       "avgFullRenderChars": 5248,
       "oversized": 8,
       "policy": "fair_rotation_v1",
+      "roundKeySource": "controlled_simulation",
       "templateOverheadChars": 3360
     },
     {
@@ -147,9 +156,10 @@
       "candidates": 40,
       "fifoInjected": 6,
       "fifoUsedChars": 1980,
-      "oversized": 0,
+      "oversized": 8,
       "avgInjectedForcedRotation": 5,
       "evidenceRows": null,
+      "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
     },
     {
@@ -163,6 +173,7 @@
       "avgFullRenderChars": 5603,
       "oversized": 8,
       "policy": "fair_rotation_v1",
+      "roundKeySource": "controlled_simulation",
       "templateOverheadChars": 3715
     },
     {
@@ -172,9 +183,10 @@
       "candidates": 40,
       "fifoInjected": 4,
       "fifoUsedChars": 1873,
-      "oversized": 0,
+      "oversized": 8,
       "avgInjectedForcedRotation": 4,
       "evidenceRows": null,
+      "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
     },
     {
@@ -184,20 +196,23 @@
       "candidates": 40,
       "injected": 24,
       "usedChars": 1856,
-      "oversized": 0
+      "oversized": 8
     }
   ],
   "sharedPathWithEvents": {
-    "turnsDriven": 5,
+    "promptBuildsDriven": 5,
     "eventsEmitted": 5,
-    "turnsWithInjection": 5,
+    "promptBuildsWithInjection": 5,
     "evidenceRows": 6,
-    "evidenceAllRunBound": true,
+    "evidenceAllRunBound": false,
+    "evidenceAllHostBound": true,
+    "evidenceAllEventBound": true,
+    "runIdentityFixture": "controlled measurement has no host run id; missing stays unknown",
     "evidenceNote": "absence from rows means UNKNOWN (no logs), never zero; self-report is a separate signal and is not compliance evidence; rows never merge workspaces"
   },
   "budgetCandidateReplay": {
-    "scenario": "16 fixed candidates (14 short + 2 long), 40 rounds — synthetic equivalent of the SPEC §2 snapshot (7.95 / 2.4 figures are snapshot-sourced, not re-measured history)",
-    "listRouteAvgInjected": 13.05,
+    "scenario": "controlled simulation only: same persisted 16 candidates (14 × 60 chars, 2 × 1200 chars), same FIFO order, 40 forced round keys",
+    "listRouteAvgInjected": 11.5,
     "sharedForcedRotationAvgInjected": 5.5,
     "sharedFifoInjected": 6
   },
