@@ -122,6 +122,109 @@ describe('codex evidence recorder', () => {
     expect(warnings).toHaveLength(0);
   });
 
+  it('does not attribute a source artifact that conflicts with the activation occurrence', () => {
+    const root = workspace();
+    seedPromptActivation(root);
+    const warnings: string[] = [];
+    recordCodexPromptDeliveryEvidence({
+      workspaceDir: root,
+      sessionId: 'sess-mismatch',
+      injected: [{ principleId: 'princ-cx', activationId: 'act-cx', artifactId: 'art-other' }],
+      evidenceEnabled: true,
+      warn: (line) => warnings.push(line),
+    });
+    expect(evidenceRows(root)).toHaveLength(0);
+    expect(warnings.join(' ')).toContain('source artifact does not match occurrence');
+  });
+
+  it('reuses the originally stored refs when an already mirrored source is replayed after deactivation', () => {
+    const root = workspace();
+    seedPromptActivation(root);
+    const conn = new SqliteConnection(root);
+    const input = {
+      workspaceDir: root,
+      sessionId: 'sess-replay',
+      turnId: 'turn-replay',
+      injected: [{ principleId: 'princ-cx', activationId: 'act-cx', artifactId: 'art-cx' }],
+      evidenceEnabled: true,
+      warn: () => undefined,
+    };
+    try {
+      recordCodexPromptDeliveryEvidence(input);
+      const original = evidenceRows(root).find((row) => row.record_kind === 'delivery')!;
+      const originalContentRef = JSON.parse(original.content_ref_json ?? '{}');
+      conn.getDb().prepare("UPDATE activations SET deactivated_at = '2026-10-02T00:00:00Z' WHERE activation_id = ?").run('act-cx');
+      conn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+        .run(JSON.stringify({ principleId: 'princ-cx', text: 'later body' }), 'art-cx');
+      recordCodexPromptDeliveryEvidence(input);
+      const rows = evidenceRows(root).filter((row) => row.record_kind === 'delivery');
+      expect(rows).toHaveLength(1);
+      expect(JSON.parse(rows[0]!.content_ref_json ?? '{}')).toEqual(originalContentRef);
+    } finally {
+      conn.close();
+    }
+  });
+
+  it('replays the original prompt and deny event after storage failure and deactivation as partial historical evidence', () => {
+    const root = workspace();
+    seedPromptActivation(root);
+    const conn = new SqliteConnection(root);
+    const warnings: string[] = [];
+    const prompt = {
+      workspaceDir: root,
+      sessionId: 'sess-replay',
+      turnId: 'turn-replay',
+      injected: [{ principleId: 'princ-cx', activationId: 'act-cx', artifactId: 'art-cx' }],
+      evidenceEnabled: true,
+      warn: (line: string) => warnings.push(line),
+    };
+    const deny = {
+      workspaceDir: root,
+      sessionId: 'sess-replay',
+      toolUseId: 'tool-replay',
+      toolName: 'write_file',
+      activationId: 'act-cx',
+      principleId: 'princ-cx',
+      ruleId: 'R-1',
+      decision: 'deny' as const,
+      evidenceEnabled: true,
+      warn: (line: string) => warnings.push(line),
+    };
+    try {
+      conn.getDb().exec(`CREATE TRIGGER fail_evidence_insert BEFORE INSERT ON intervention_evidence_records
+        BEGIN SELECT RAISE(ABORT, 'simulated first append failure'); END`);
+      recordCodexPromptDeliveryEvidence(prompt);
+      recordCodexDenyEvidence(deny);
+      expect(evidenceRows(root)).toHaveLength(0);
+      conn.getDb().exec('DROP TRIGGER fail_evidence_insert');
+      conn.getDb().prepare("UPDATE activations SET deactivated_at = '2026-10-02T00:00:00Z' WHERE activation_id = ?")
+        .run('act-cx');
+
+      recordCodexPromptDeliveryEvidence(prompt);
+      recordCodexDenyEvidence(deny);
+      expect(warnings.join(' ')).toContain('evidence_storage_failed');
+      const rows = evidenceRows(root);
+      expect(rows.map((row) => row.record_kind).sort())
+        .toEqual(['application', 'behavior_episode', 'delivery', 'delivery', 'effect']);
+      for (const row of rows) {
+        if (row.record_kind === 'delivery' || row.record_kind === 'application') {
+          expect(JSON.parse(row.activation_ref_json ?? '{}').activationId).toBe('act-cx');
+          if (row.content_ref_json) {
+            const contentRef = JSON.parse(row.content_ref_json);
+            expect(contentRef.resolution).toBe('revision_reference_unresolved');
+            expect(contentRef.payloadDigest).toBeUndefined();
+          }
+        }
+      }
+      const application = rows.find((row) => row.record_kind === 'application')!;
+      expect(JSON.parse(application.payload_json)).toMatchObject({ proofMethod: 'runtime_verified' });
+      expect(conn.getDb().prepare('SELECT deactivated_at FROM activations WHERE activation_id = ?')
+        .get('act-cx')?.deactivated_at).toBe('2026-10-02T00:00:00Z');
+    } finally {
+      conn.close();
+    }
+  });
+
   it('writes nothing when evidence is flag-disabled', () => {
     const root = workspace();
     seedPromptActivation(root);

@@ -39,6 +39,15 @@ export interface InterventionIngressAppendResult {
   nextAction?: string;
 }
 
+export interface ExistingInterventionObservationSource {
+  sourceKind: 'openclaw_plugin_event_log' | 'codex_pd_hook_event_log';
+  sourceLocator: string;
+  observationKey: string;
+  principleId: string;
+  activationId: string;
+  artifactId?: string;
+}
+
 export interface InterventionEvidenceIngress {
   /** Best-effort normalized append. Never throws. */
   appendObservationBatch(input: {
@@ -62,6 +71,11 @@ export interface InterventionEvidenceIngress {
     workspaceDir: string,
     activationId: string,
   ): InterventionActivationOccurrenceRef | null;
+  /** Reuse the exact references already persisted for an idempotent source key. */
+  existingObservationRefs(
+    workspaceDir: string,
+    source: ExistingInterventionObservationSource,
+  ): { activationRef: InterventionActivationOccurrenceRef; contentRef: InterventionContentRef } | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,7 +117,16 @@ export function createInterventionEvidenceIngress(): InterventionEvidenceIngress
     let connection: SqliteConnection | null = null;
     try {
       connection = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false });
-      const row = connection.getDb().prepare(
+      const db = connection.getDb();
+      // A replay may refer to a deactivated occurrence. Its current artifact
+      // bytes cannot prove what was injected at the historical event time.
+      // Resolve content only while the exact activation occurrence is live.
+      const occurrence = db.prepare(`
+        SELECT 1 FROM activations
+        WHERE activation_id = ? AND idempotency_key = ? AND deactivated_at IS NULL
+      `).get(activationRef.activationId, activationRef.idempotencyKey ?? '');
+      if (!occurrence) return null;
+      const row = db.prepare(
         'SELECT content_json, source_principle_id FROM pi_artifacts WHERE artifact_id = ?',
       ).get(activationRef.artifactId);
       if (!isRecord(row)
@@ -175,17 +198,22 @@ export function createInterventionEvidenceIngress(): InterventionEvidenceIngress
     try {
       connection = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false });
       const db = connection.getDb();
-      const activationRow = db.prepare(`
-        SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at
+      const activationRows: unknown[] = db.prepare(`
+        SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at
         FROM activations
-        WHERE activation_id = ? AND deactivated_at IS NULL
+        WHERE activation_id = ?
         ORDER BY activated_at DESC
-        LIMIT 1
-      `).get(activationId);
+      `).all(activationId);
+      // Without the source's activation-time snapshot, reused ids cannot be
+      // matched to one historical row safely. Keep this as an explicit gap.
+      if (activationRows.length !== 1) return null;
+      const activationRow: unknown = activationRows[0];
       if (!isRecord(activationRow)) return null;
       const artifactId = typeof activationRow.artifact_id === 'string' ? activationRow.artifact_id : null;
       let artifactDigest: string | null = null;
-      if (artifactId) {
+      // A deactivated activation row proves occurrence metadata, but the
+      // artifact table only exposes current content, not an as-activated copy.
+      if (artifactId && activationRow.deactivated_at == null) {
         const artifactRow = db.prepare(`
           SELECT artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id,
                  lineage_artifact_ids, validation_status, content_json, created_at, updated_at
@@ -225,7 +253,56 @@ export function createInterventionEvidenceIngress(): InterventionEvidenceIngress
     }
   }
 
-  return { appendObservationBatch, evidenceScopeIdFor, resolveInterventionContentRef, resolveActivationOccurrenceRef };
+  function existingObservationRefs(
+    workspaceDir: string,
+    source: ExistingInterventionObservationSource,
+  ): { activationRef: InterventionActivationOccurrenceRef; contentRef: InterventionContentRef } | null {
+    let connection: SqliteConnection | null = null;
+    try {
+      connection = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false });
+      const row = connection.getDb().prepare(`
+        SELECT activation_ref_json, content_ref_json
+        FROM intervention_evidence_records WHERE source_kind = ? AND source_locator = ? AND observation_key = ?
+      `).get(source.sourceKind, source.sourceLocator, source.observationKey);
+      if (!isRecord(row) || typeof row.activation_ref_json !== 'string' || typeof row.content_ref_json !== 'string') return null;
+      const activationRaw: unknown = JSON.parse(row.activation_ref_json);
+      const contentRaw: unknown = JSON.parse(row.content_ref_json);
+      const validDigest = (value: unknown): value is string => typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value);
+      if (!isRecord(activationRaw) || typeof activationRaw.activationId !== 'string'
+        || !validDigest(activationRaw.sourceSnapshotDigest)
+        || !isRecord(contentRaw) || typeof contentRaw.principleId !== 'string'
+        || (contentRaw.resolution !== 'resolved' && contentRaw.resolution !== 'revision_reference_unresolved')
+        || (contentRaw.resolution === 'resolved' && !validDigest(contentRaw.payloadDigest))
+        || (contentRaw.resolution === 'revision_reference_unresolved' && contentRaw.payloadDigest !== undefined)) return null;
+      if (activationRaw.activationId !== source.activationId || contentRaw.principleId !== source.principleId
+        || (typeof activationRaw.artifactId === 'string' && contentRaw.artifactId !== activationRaw.artifactId)
+        || (source.artifactId !== undefined && (activationRaw.artifactId !== source.artifactId
+          || contentRaw.artifactId !== source.artifactId))) return null;
+      const activationRef: InterventionActivationOccurrenceRef = {
+        activationId: activationRaw.activationId,
+        sourceSnapshotDigest: activationRaw.sourceSnapshotDigest,
+        ...(typeof activationRaw.idempotencyKey === 'string' ? { idempotencyKey: activationRaw.idempotencyKey } : {}),
+        ...(typeof activationRaw.artifactId === 'string' ? { artifactId: activationRaw.artifactId } : {}),
+        ...(typeof activationRaw.channel === 'string' ? { channel: activationRaw.channel } : {}),
+        ...(typeof activationRaw.activatedAt === 'string' ? { activatedAt: activationRaw.activatedAt } : {}),
+      };
+      const contentRef: InterventionContentRef = {
+        principleId: contentRaw.principleId,
+        resolution: contentRaw.resolution,
+        ...(typeof contentRaw.artifactId === 'string' ? { artifactId: contentRaw.artifactId } : {}),
+        ...(typeof contentRaw.version === 'string' ? { version: contentRaw.version } : {}),
+        ...(typeof contentRaw.payloadDigest === 'string' ? { payloadDigest: contentRaw.payloadDigest } : {}),
+        ...(typeof contentRaw.approvalRef === 'string' ? { approvalRef: contentRaw.approvalRef } : {}),
+      };
+      return { activationRef, contentRef };
+    } catch {
+      return null;
+    } finally {
+      try { connection?.close(); } catch { /* best-effort */ }
+    }
+  }
+
+  return { appendObservationBatch, evidenceScopeIdFor, resolveInterventionContentRef, resolveActivationOccurrenceRef, existingObservationRefs };
 }
 
 /** Process-wide default ingress. */

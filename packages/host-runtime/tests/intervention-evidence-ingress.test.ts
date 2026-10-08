@@ -282,6 +282,22 @@ describe('intervention evidence ingress', () => {
     expect(ingress.resolveInterventionContentRef(workspaceDir, activationRef!, 'T-01')).toBeNull();
   });
 
+  it('resolves a deactivated historical occurrence without treating current artifact bytes as historical content', () => {
+    seedActivation(workspaceDir, 'act-deactivated');
+    conn.getDb().prepare("UPDATE activations SET deactivated_at = '2026-10-02T00:00:00Z' WHERE activation_id = ?")
+      .run('act-deactivated');
+    const ref = ingress.resolveActivationOccurrenceRef(workspaceDir, 'act-deactivated');
+    expect(ref).toMatchObject({ activationId: 'act-deactivated', artifactId: 'art-1' });
+    expect(ingress.resolveInterventionContentRef(workspaceDir, ref!, 'T-01')).toBeNull();
+  });
+
+  it('leaves a repeated activation id unresolved when the source has no occurrence discriminator', () => {
+    seedActivation(workspaceDir, 'act-reused');
+    conn.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+                          VALUES ('act-reused', 'idem-reused-second', 'art-1', 'prompt', 'prompt_activate', 'ref', '2026-10-02T00:00:00Z', '2026-10-03T00:00:00Z')`).run();
+    expect(ingress.resolveActivationOccurrenceRef(workspaceDir, 'act-reused')).toBeNull();
+  });
+
   it('returns null (honest gap) for an unresolvable activation', () => {
     expect(ingress.resolveActivationOccurrenceRef(workspaceDir, 'act-missing')).toBeNull();
   });

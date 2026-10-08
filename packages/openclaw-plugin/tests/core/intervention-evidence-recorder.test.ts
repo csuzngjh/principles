@@ -95,6 +95,62 @@ describe('intervention evidence recorder (openclaw adapter)', () => {
     });
   });
 
+  it('replays the original prompt and gate event after storage failure and deactivation as partial historical evidence', () => {
+    seedActivation('act-replay', 'art-replay');
+    const warn: string[] = [];
+    const prompt = {
+      workspaceDir,
+      sessionId: 'sess-replay',
+      runId: 'run-replay',
+      injected: [{ principleId: 'T-01', activationId: 'act-replay', artifactId: 'art-replay' }],
+      logger: { warn: (line: string) => warn.push(line) },
+    };
+    const gate = {
+      workspaceDir,
+      sessionId: 'sess-replay',
+      runId: 'run-replay',
+      toolCallId: 'tool-replay',
+      toolName: 'write_file',
+      activationId: 'act-replay',
+      principleId: 'T-01',
+      ruleId: 'R-1',
+      decision: 'block' as const,
+      logger: { warn: (line: string) => warn.push(line) },
+    };
+    conn.getDb().exec(`CREATE TRIGGER fail_evidence_insert BEFORE INSERT ON intervention_evidence_records
+      BEGIN SELECT RAISE(ABORT, 'simulated first append failure'); END`);
+    recordPromptDeliveryEvidence(prompt);
+    recordGateEnforcementEvidence(gate);
+    expect(evidenceRows()).toHaveLength(0);
+    conn.getDb().exec('DROP TRIGGER fail_evidence_insert');
+    conn.getDb().prepare("UPDATE activations SET deactivated_at = '2026-10-02T00:00:00Z' WHERE activation_id = ?")
+      .run('act-replay');
+
+    recordPromptDeliveryEvidence(prompt);
+    recordGateEnforcementEvidence(gate);
+    expect(warn.join(' ')).toContain('evidence_storage_failed');
+    const rows = evidenceRows();
+    expect(rows.map((row) => row.record_kind).sort())
+      .toEqual(['application', 'behavior_episode', 'delivery', 'delivery', 'effect']);
+    for (const row of rows) {
+      if (row.record_kind === 'delivery' || row.record_kind === 'application') {
+        const activationRef = JSON.parse(conn.getDb()
+          .prepare('SELECT activation_ref_json FROM intervention_evidence_records WHERE observation_key = ?')
+          .get(row.observation_key)?.activation_ref_json as string);
+        expect(activationRef.activationId).toBe('act-replay');
+      }
+      if (row.content_ref_json) {
+        const contentRef = JSON.parse(row.content_ref_json);
+        expect(contentRef.resolution).toBe('revision_reference_unresolved');
+        expect(contentRef.payloadDigest).toBeUndefined();
+      }
+    }
+    const application = rows.find((row) => row.record_kind === 'application')!;
+    expect(JSON.parse(application.payload_json)).toMatchObject({ proofMethod: 'runtime_verified' });
+    expect(conn.getDb().prepare('SELECT deactivated_at FROM activations WHERE activation_id = ?')
+      .get('act-replay')?.deactivated_at).toBe('2026-10-02T00:00:00Z');
+  });
+
   it('skips prompt delivery for unresolvable activations with an honest gap (no row)', () => {
     const warn = [];
     recordPromptDeliveryEvidence({
@@ -105,6 +161,19 @@ describe('intervention evidence recorder (openclaw adapter)', () => {
     });
     expect(evidenceRows()).toHaveLength(0);
     expect(warn.join(' ')).toContain('act-missing');
+  });
+
+  it('does not attribute a source artifact that conflicts with the activation occurrence', () => {
+    seedActivation('act-mismatch', 'art-actual');
+    const warn: string[] = [];
+    recordPromptDeliveryEvidence({
+      workspaceDir,
+      sessionId: 'sess-mismatch',
+      injected: [{ principleId: 'T-01', activationId: 'act-mismatch', artifactId: 'art-other' }],
+      logger: { warn: (line: string) => warn.push(line) },
+    });
+    expect(evidenceRows()).toHaveLength(0);
+    expect(warn.join(' ')).toContain('source artifact does not match occurrence');
   });
 
   it('records the full enforcement chain with exact cross-references', () => {
@@ -145,6 +214,7 @@ describe('intervention evidence recorder (openclaw adapter)', () => {
 
   it('replaying the same enforcement chain is idempotent (no duplicate rows)', () => {
     seedActivation('act-g1', 'art-g1');
+    const warn: string[] = [];
     const input = {
       workspaceDir,
       sessionId: 'sess-1' as const,
@@ -156,10 +226,18 @@ describe('intervention evidence recorder (openclaw adapter)', () => {
       principleId: 'T-01',
       ruleId: 'R-1',
       decision: 'block' as const,
+      logger: { warn: (line: string) => warn.push(line) },
     };
     recordGateEnforcementEvidence(input);
+    const originalContentRef = JSON.parse(evidenceRows().find((row) => row.record_kind === 'delivery')!.content_ref_json ?? '{}');
+    conn.getDb().prepare("UPDATE activations SET deactivated_at = '2026-10-02T00:00:00Z' WHERE activation_id = ?").run('act-g1');
+    conn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+      .run(JSON.stringify({ principleId: 'T-01', text: 'later body' }), 'art-g1');
     recordGateEnforcementEvidence(input);
     expect(evidenceRows()).toHaveLength(4);
+    expect(warn).toEqual([]);
+    expect(JSON.parse(evidenceRows().find((row) => row.record_kind === 'delivery')!.content_ref_json ?? '{}'))
+      .toEqual(originalContentRef);
   });
 
   it('records self-reports as agent_claimed only', () => {

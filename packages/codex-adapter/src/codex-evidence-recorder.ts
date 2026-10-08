@@ -106,15 +106,25 @@ export function recordCodexPromptDeliveryEvidence(input: CodexPromptDeliveryEvid
   const ingress = getInterventionEvidenceIngress();
   const observations: InterventionObservationInput[] = [];
   for (const entry of input.injected) {
-    const activationRef = ingress.resolveActivationOccurrenceRef(input.workspaceDir, entry.activationId);
+    const observationKey = `codex|delivery|agent_context|${input.sessionId}|${input.turnId ?? '-'}|${entry.activationId}`;
+    const sourceLocator = `codex-pd-hook-event-log:${input.sessionId}`;
+    const existing = ingress.existingObservationRefs(input.workspaceDir, {
+      sourceKind: 'codex_pd_hook_event_log', sourceLocator, observationKey,
+      principleId: entry.principleId, activationId: entry.activationId, ...(entry.artifactId ? { artifactId: entry.artifactId } : {}),
+    });
+    const activationRef = existing?.activationRef ?? ingress.resolveActivationOccurrenceRef(input.workspaceDir, entry.activationId);
     if (!activationRef) {
       input.warn(`[PD:Evidence] codex prompt delivery skipped for activation ${entry.activationId}: occurrence snapshot unresolvable`);
       continue;
     }
-    const contentRef = ingress.resolveInterventionContentRef(input.workspaceDir, activationRef, entry.principleId);
+    if (entry.artifactId !== undefined && activationRef.artifactId !== entry.artifactId) {
+      input.warn(`[PD:Evidence] codex prompt delivery skipped for activation ${entry.activationId}: source artifact does not match occurrence`);
+      continue;
+    }
+    const contentRef = existing?.contentRef ?? ingress.resolveInterventionContentRef(input.workspaceDir, activationRef, entry.principleId);
     observations.push({
-      observationKey: `codex|delivery|agent_context|${input.sessionId}|${input.turnId ?? '-'}|${entry.activationId}`,
-      sourceLocator: `codex-pd-hook-event-log:${input.sessionId}`,
+      observationKey,
+      sourceLocator,
       kind: 'delivery',
       nativeRefs: {
         hostKind: 'codex',
@@ -168,15 +178,21 @@ export function recordCodexDenyEvidence(input: CodexDenyEvidenceInput): void {
   }
   if (!input.evidenceEnabled) return;
   const ingress = getInterventionEvidenceIngress();
-  const activationRef = ingress.resolveActivationOccurrenceRef(input.workspaceDir, input.activationId);
+  const toolKey = input.toolUseId;
+  const sessionPart = input.sessionId ?? '-';
+  const deliveryKey = `codex|delivery|enforcement|${sessionPart}|${toolKey}|${input.activationId}`;
+  const sourceLocator = `codex-pd-hook-event-log:${sessionPart}`;
+  const existing = ingress.existingObservationRefs(input.workspaceDir, {
+    sourceKind: 'codex_pd_hook_event_log', sourceLocator, observationKey: deliveryKey,
+    principleId: input.principleId, activationId: input.activationId,
+  });
+  const activationRef = existing?.activationRef ?? ingress.resolveActivationOccurrenceRef(input.workspaceDir, input.activationId);
   if (!activationRef) {
     input.warn(`[PD:Evidence] codex deny chain skipped for activation ${input.activationId}: occurrence snapshot unresolvable`);
     return;
   }
-  const toolKey = input.toolUseId;
-  const sessionPart = input.sessionId ?? '-';
   const episodeKey = `codex|episode|${sessionPart}|${toolKey}`;
-  const content = ingress.resolveInterventionContentRef(input.workspaceDir, activationRef, input.principleId);
+  const content = existing?.contentRef ?? ingress.resolveInterventionContentRef(input.workspaceDir, activationRef, input.principleId);
   const contentRef = {
     principleId: input.principleId,
     ...(activationRef.artifactId ? { artifactId: activationRef.artifactId } : {}),
@@ -185,8 +201,8 @@ export function recordCodexDenyEvidence(input: CodexDenyEvidenceInput): void {
   };
   const observations: InterventionObservationInput[] = [
     {
-      observationKey: `codex|delivery|enforcement|${sessionPart}|${toolKey}|${input.activationId}`,
-      sourceLocator: `codex-pd-hook-event-log:${sessionPart}`,
+      observationKey: deliveryKey,
+      sourceLocator,
       kind: 'delivery',
       nativeRefs: {
         hostKind: 'codex',
