@@ -1,7 +1,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { INTERVENTION_SHORT_SOURCE_RETENTION_DAYS } from '@principles/core/runtime-v2';
+import { INTERVENTION_SHORT_SOURCE_RETENTION_DAYS } from '@principles/core/runtime-v2/receipt-coverage';
 import { guardWorkspaceLeak } from '@principles/core/runtime-v2/store/workspace-leak-guard';
 import type {
   EventLogEntry,

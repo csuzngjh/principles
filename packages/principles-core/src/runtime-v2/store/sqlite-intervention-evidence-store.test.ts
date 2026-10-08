@@ -646,7 +646,7 @@ describe('SqliteInterventionEvidenceStore', () => {
   });
 
   it('keeps legacy application-ledger mirrors on the 90-day owner evidence horizon', () => {
-    expect(interventionEvidenceSourcePolicy('agent_self_report').retentionDays).toBe(90);
+    expect(interventionEvidenceSourcePolicy('openclaw_application_ledger').retentionDays).toBe(90);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const ninetyOneDaysAgo = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString();
     const currentEvidence = normalized(deliveryBatch({
@@ -660,6 +660,18 @@ describe('SqliteInterventionEvidenceStore', () => {
     const [currentRecord] = currentEvidence.records;
     if (!currentRecord) throw new Error('Expected recent legacy self-report');
     store.appendObservationBatch(currentEvidence);
+
+    const directLedgerEvidence = normalized(deliveryBatch({
+      sourceKind: 'openclaw_application_ledger', recordedAt: thirtyDaysAgo,
+      observations: [{
+        observationKey: 'openclaw|application-ledger|thirty-days', sourceLocator: 'openclaw-application-ledger:session-new-30d',
+        kind: 'application', nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01',
+        payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: 'new ledger self-report' },
+      }],
+    }));
+    const [directLedgerRecord] = directLedgerEvidence.records;
+    if (!directLedgerRecord) throw new Error('Expected recent application-ledger self-report');
+    store.appendObservationBatch(directLedgerEvidence);
 
     const expiredEvidence = normalized(deliveryBatch({
       sourceKind: 'openclaw_plugin_event_log', recordedAt: ninetyOneDaysAgo,
@@ -677,6 +689,9 @@ describe('SqliteInterventionEvidenceStore', () => {
     const currentRow = record(db.prepare('SELECT payload_json, content_redacted_at FROM intervention_evidence_records WHERE evidence_id = ?').get(currentRecord.evidenceId));
     expect(JSON.parse(String(currentRow.payload_json)).claimText).toBe('recent self-report');
     expect(currentRow.content_redacted_at).toBeNull();
+    const directLedgerRow = record(db.prepare('SELECT payload_json, content_redacted_at FROM intervention_evidence_records WHERE evidence_id = ?').get(directLedgerRecord.evidenceId));
+    expect(JSON.parse(String(directLedgerRow.payload_json)).claimText).toBe('new ledger self-report');
+    expect(directLedgerRow.content_redacted_at).toBeNull();
     const expiredRow = record(db.prepare('SELECT payload_json, content_redacted_at, record_digest FROM intervention_evidence_records WHERE evidence_id = ?').get(expiredRecord.evidenceId));
     expect(JSON.parse(String(expiredRow.payload_json))).not.toHaveProperty('claimText');
     expect(expiredRow.content_redacted_at).toBeTruthy();
@@ -686,9 +701,12 @@ describe('SqliteInterventionEvidenceStore', () => {
     expect(audit.available).toBe(true);
     if (audit.available) {
       const currentSummary = audit.relations.applications.find((item) => item.evidenceId === currentRecord.evidenceId);
+      const directLedgerSummary = audit.relations.applications.find((item) => item.evidenceId === directLedgerRecord.evidenceId);
       const expiredSummary = audit.relations.applications.find((item) => item.evidenceId === expiredRecord.evidenceId);
       expect(currentSummary?.payload).toMatchObject({ claimText: 'recent self-report' });
       expect(currentSummary?.sourceStatus).toBe('unknown');
+      expect(directLedgerSummary?.payload).toMatchObject({ claimText: 'new ledger self-report' });
+      expect(directLedgerSummary?.sourceStatus).toBeUndefined();
       expect(expiredSummary?.payload).not.toHaveProperty('claimText');
       expect(expiredSummary?.sourceStatus).toBe('unknown');
     }

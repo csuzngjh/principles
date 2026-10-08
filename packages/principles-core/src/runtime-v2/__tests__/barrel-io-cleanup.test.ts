@@ -49,4 +49,28 @@ describe('PRI-443 Phase 5: runtime-v2 barrel I/O cleanup', () => {
     }
     expect(Object.hasOwn(pkgExports, './principle-tree-ledger')).toBe(true);
   });
+
+  it('package.json exposes receipt coverage as a pure leaf subpath', () => {
+    const pkgPath = resolve(CORE_SRC, '..', 'package.json');
+    const parsed: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object' || !Object.hasOwn(parsed, 'exports')) {
+      throw new Error('package.json 缺少 exports 字段');
+    }
+    const pkgExports = Reflect.get(parsed, 'exports');
+    if (!pkgExports || typeof pkgExports !== 'object' || Array.isArray(pkgExports)) {
+      throw new Error('package.json exports 字段格式非法');
+    }
+    const coverageExport = Reflect.get(pkgExports, './runtime-v2/receipt-coverage');
+    expect(coverageExport).toEqual({
+      types: './dist/runtime-v2/receipt-coverage.d.ts',
+      default: './dist/runtime-v2/receipt-coverage.js',
+    });
+  });
+
+  it('OpenClaw event log consumes retention through the receipt coverage leaf', () => {
+    const eventLogPath = resolve(CORE_SRC, '..', '..', 'openclaw-plugin', 'src', 'core', 'event-log.ts');
+    const content = readFileSync(eventLogPath, 'utf-8');
+    expect(content).toContain("from '@principles/core/runtime-v2/receipt-coverage'");
+    expect(content).not.toContain("from '@principles/core/runtime-v2'");
+  });
 });

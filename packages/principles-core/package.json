@@ -34,6 +34,10 @@
       "types": "./dist/runtime-v2/index.d.ts",
       "default": "./dist/runtime-v2/index.js"
     },
+    "./runtime-v2/receipt-coverage": {
+      "types": "./dist/runtime-v2/receipt-coverage.d.ts",
+      "default": "./dist/runtime-v2/receipt-coverage.js"
+    },
     "./runtime-v2/intent-browser": {
       "types": "./dist/runtime-v2/intent/intent-browser.d.ts",
       "default": "./dist/runtime-v2/intent/intent-browser.js"
