@@ -127,7 +127,7 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
     expect(countSelfReports()).toBe(1);
   });
 
-  it('replays a failed normalized mirror from the durable row without replacing its claim or activation lineage', () => {
+  it('replays the original activation metadata after deactivation without resolving current artifact content', () => {
     const cfg = getDefaultPdConfig() as unknown as {
       features: Record<string, { category?: string; enabled: boolean }>;
     };
@@ -194,18 +194,24 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
         WHERE kind = 'self_reported' AND principle_id = 'T-01' AND session_id = ?
       `).get(sessionId) as { activation_id: string; digest: string; created_at: string };
       const normalized = readerConn!.getDb().prepare(`
-        SELECT activation_id, activation_ref_json, occurred_at, payload_json FROM intervention_evidence_records
+        SELECT activation_id, activation_ref_json, content_ref_json, occurred_at, payload_json FROM intervention_evidence_records
         WHERE source_kind = 'openclaw_plugin_event_log'
           AND source_locator = ?
           AND observation_key = ?
       `).get(
         `openclaw-application-ledger:${sessionId}`,
         `openclaw|application|agent_claimed|${sessionId}|T-01`,
-      ) as { activation_id: string | null; activation_ref_json: string | null; occurred_at: string | null; payload_json: string };
+      ) as { activation_id: string | null; activation_ref_json: string | null; content_ref_json: string | null; occurred_at: string | null; payload_json: string };
       expect(countNormalizedRows()).toBe(1);
       expect(source).toMatchObject({ activation_id: 'act-original', digest: '原始持久化声明' });
       expect(normalized.activation_id).toBe('act-original');
-      expect(normalized.activation_ref_json).toBeNull();
+      expect(JSON.parse(normalized.activation_ref_json ?? '{}')).toMatchObject({
+        activationId: 'act-original',
+        idempotencyKey: 'idem-act-original',
+        artifactId: 'art-original',
+        activatedAt: now,
+      });
+      expect(normalized.content_ref_json).toBeNull();
       expect(normalized.occurred_at).toBe(source.created_at);
       expect(JSON.parse(normalized.payload_json)).toMatchObject({ claimText: '原始持久化声明' });
       expect(JSON.parse(normalized.payload_json).claimText).not.toBe('重放时的新声明');
@@ -214,10 +220,92 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
       });
       expect(audit.available).toBe(true);
       if (audit.available) {
+        expect(audit.relations.applications[0]?.associationStatus).toBe('linked');
+        expect(audit.relations.unresolvedReferences).toHaveLength(0);
+      }
+    } finally {
+      clearSession(sessionId);
+    }
+  });
+
+  it('keeps a missing original activation as a partial reference during durable self-report replay', () => {
+    const cfg = getDefaultPdConfig() as unknown as {
+      features: Record<string, { category?: string; enabled: boolean }>;
+    };
+    cfg.features.principle_receipt_ledger = { category: 'quiet', enabled: true };
+    cfg.features.principle_receipt_self_report = { category: 'quiet', enabled: true };
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
+
+    const setup = new SqliteConnection(workspaceDir);
+    const db = setup.getDb();
+    const now = '2026-10-01T00:00:00.000Z';
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id,
+                content_json, created_at, updated_at)
+                VALUES ('art-current', 'principle', 'task-current', 'T-01', ?, ?, ?)`)
+      .run(JSON.stringify({ principleId: 'T-01', text: 'current principle' }), now, now);
+    db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                VALUES ('act-current', 'idem-current', 'art-current', 'prompt', 'prompt_activate', 'ref', ?)`)
+      .run(now);
+    setup.close();
+
+    const sessionId = 'sess-self-report-missing-activation';
+    try {
+      const faultDb = new SqliteConnection(workspaceDir);
+      faultDb.getDb().exec(`
+        CREATE TRIGGER fail_missing_activation_mirror
+        BEFORE INSERT ON intervention_evidence_records
+        BEGIN SELECT RAISE(ABORT, 'injected missing-activation mirror failure'); END;
+      `);
+      faultDb.close();
+      setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-original-missing']);
+      recordSelfReportFromText(
+        workspaceDir,
+        '📌 应用了你的原则「T-01」：原始声明缺少activation行',
+        sessionId,
+        logger,
+      );
+      const clearFaultDb = new SqliteConnection(workspaceDir);
+      clearFaultDb.getDb().exec('DROP TRIGGER fail_missing_activation_mirror');
+      clearFaultDb.close();
+
+      // Replay sees a different current injection, but must use the durable
+      // source activation id instead of silently attributing today's one.
+      setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-current']);
+      recordSelfReportFromText(
+        workspaceDir,
+        '📌 应用了你的原则「T-01」：重放时的声明',
+        sessionId,
+        logger,
+      );
+
+      const source = readerConn!.getDb().prepare(`
+        SELECT activation_id, digest, created_at FROM principle_applications
+        WHERE kind = 'self_reported' AND principle_id = 'T-01' AND session_id = ?
+      `).get(sessionId) as { activation_id: string | null; digest: string; created_at: string };
+      const normalized = readerConn!.getDb().prepare(`
+        SELECT activation_id, activation_ref_json, occurred_at, payload_json FROM intervention_evidence_records
+        WHERE source_kind = 'openclaw_plugin_event_log'
+          AND source_locator = ? AND observation_key = ?
+      `).get(
+        `openclaw-application-ledger:${sessionId}`,
+        `openclaw|application|agent_claimed|${sessionId}|T-01`,
+      ) as { activation_id: string | null; activation_ref_json: string | null; occurred_at: string | null; payload_json: string };
+      expect(source).toMatchObject({ activation_id: 'act-original-missing', digest: '原始声明缺少activation行' });
+      expect(normalized.activation_id).toBe('act-original-missing');
+      expect(normalized.activation_ref_json).toBeNull();
+      expect(normalized.occurred_at).toBe(source.created_at);
+      expect(JSON.parse(normalized.payload_json)).toMatchObject({ claimText: '原始声明缺少activation行' });
+
+      const audit = new SqliteInterventionEvidenceStore(readerConn!).readAuditRelations({
+        type: 'activation', activationId: 'act-original-missing',
+      });
+      expect(audit.available).toBe(true);
+      if (audit.available) {
+        expect(audit.relations.applications[0]?.activationRef).toBeUndefined();
         expect(audit.relations.applications[0]?.associationStatus).toBe('pending_association');
         expect(audit.relations.unresolvedReferences).toContainEqual({
           evidenceId: audit.relations.applications[0]!.evidenceId,
-          missingKey: 'act-original',
+          missingKey: 'act-original-missing',
           field: 'activationRef',
         });
       }
