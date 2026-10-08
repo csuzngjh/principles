@@ -83,6 +83,24 @@ describe('normalizeInterventionEvidenceBatch — happy paths', () => {
     expect(first.recordDigest).toBe(second.recordDigest);
   });
 
+  it('preserves an unresolved content reference without inventing a digest, while resolved references still require one', () => {
+    const unresolved = firstRecord(normalizeInterventionEvidenceBatch(validBatch({
+      observations: [{
+        ...baseObservation(),
+        contentRef: { principleId: 'T-01', resolution: 'revision_reference_unresolved' },
+      }],
+    })));
+    expect(unresolved.contentRef).toEqual({ principleId: 'T-01', resolution: 'revision_reference_unresolved' });
+
+    const resolved = normalizeInterventionEvidenceBatch(validBatch({
+      observations: [{
+        ...baseObservation(),
+        contentRef: { principleId: 'T-01', resolution: 'resolved' },
+      }],
+    }));
+    expect(resolved).toEqual({ ok: false, reason: 'observation_contentRef_resolved_requires_payloadDigest' });
+  });
+
   it('accepts a runtime_verified application with activation ref and boundary', () => {
     const result = normalizeInterventionEvidenceBatch(validBatch({
       observations: [{

@@ -122,7 +122,8 @@ export interface InterventionContentRef {
   principleId: string;
   artifactId?: string;
   version?: string;
-  payloadDigest: string;
+  /** Missing only when resolution is revision_reference_unresolved. */
+  payloadDigest?: string;
   approvalRef?: string;
   resolution: 'resolved' | 'revision_reference_unresolved';
 }

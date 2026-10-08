@@ -242,17 +242,20 @@ function normalizeContentRef(raw: unknown): { value?: InterventionContentRef; er
   const enums = enumChecks('observation_contentRef');
   const principleId = strings.require(raw, 'principleId', 256);
   if (principleId.error) return { error: principleId.error };
-  const payloadDigest = strings.require(raw, 'payloadDigest', 256);
-  if (payloadDigest.error) return { error: payloadDigest.error };
   const resolution = enums.require<'resolved' | 'revision_reference_unresolved'>(
     raw, 'resolution', new Set(['resolved', 'revision_reference_unresolved']),
   );
   if (resolution.error) return { error: resolution.error };
+  const payloadDigest = strings.read(raw, 'payloadDigest', 256);
+  if (payloadDigest.error) return { error: payloadDigest.error };
+  if (resolution.value === 'resolved' && payloadDigest.value === undefined) {
+    return { error: 'observation_contentRef_resolved_requires_payloadDigest' };
+  }
   const value: InterventionContentRef = {
     principleId: principleId.value,
-    payloadDigest: payloadDigest.value,
     resolution: resolution.value,
   };
+  if (payloadDigest.value !== undefined) value.payloadDigest = payloadDigest.value;
   for (const key of ['artifactId', 'version', 'approvalRef'] as const) {
     const field = strings.read(raw, key, 256);
     if (field.error) return { error: field.error };
