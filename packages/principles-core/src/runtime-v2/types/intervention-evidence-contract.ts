@@ -322,6 +322,8 @@ export interface InterventionAuditRecordSummary {
   activationRef?: InterventionActivationOccurrenceRef;
   /** Sensitive text fields were removed under the existing receipt retention boundary. */
   contentRedactedAt?: string;
+  /** Source availability cannot be confirmed against the 32-turn Codex horizon. */
+  sourceStatus?: 'unknown';
   payload: InterventionPayload;
   recordDigest: string;
   /** Whether referenced peer records exist in the ledger at read time. */
