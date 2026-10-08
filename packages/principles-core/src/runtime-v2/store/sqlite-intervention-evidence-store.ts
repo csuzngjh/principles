@@ -268,25 +268,29 @@ function redactPayloadText(recordKind: unknown, rawPayload: unknown, evidenceId:
   return changed ? JSON.stringify(payload) : null;
 }
 
+function redactCorrectionReason(value: unknown): string | null {
+  return value !== null && value !== undefined && value !== '[expired]' ? '[expired]' : null;
+}
+
 function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): number {
   const receiptCutoff = new Date(asOf.getTime() - RECEIPT_RETENTION_POLICY_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const codexCutoff = new Date(asOf.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const rows = db.prepare(`SELECT evidence_id, record_kind, payload_json
+  const rows = db.prepare(`SELECT evidence_id, record_kind, payload_json, correction_reason
     FROM intervention_evidence_records
     WHERE ((source_kind IN ('codex_pd_hook_event_log', 'codex_governance_observation') AND
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))) OR
            (source_kind NOT IN ('codex_pd_hook_event_log', 'codex_governance_observation') AND
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))))
-      AND content_redacted_at IS NULL
-      AND ((record_kind = 'delivery' AND (json_type(payload_json, '$.failureReason') IS NOT NULL OR json_type(payload_json, '$.nonAttemptReason') IS NOT NULL OR json_type(payload_json, '$.unsupportedNote') IS NOT NULL)) OR
+      AND ((content_redacted_at IS NULL AND ((record_kind = 'delivery' AND (json_type(payload_json, '$.failureReason') IS NOT NULL OR json_type(payload_json, '$.nonAttemptReason') IS NOT NULL OR json_type(payload_json, '$.unsupportedNote') IS NOT NULL)) OR
            (record_kind = 'application' AND json_type(payload_json, '$.claimText') IS NOT NULL) OR
            (record_kind = 'behavior_episode' AND (json_type(payload_json, '$.inputPreview') IS NOT NULL OR json_type(payload_json, '$.resultSummary') IS NOT NULL OR json_type(payload_json, '$.actionSummary') IS NOT NULL)) OR
            (record_kind = 'effect' AND (json_type(payload_json, '$.disputeReason') IS NOT NULL OR json_type(payload_json, '$.observationSummary') IS NOT NULL)) OR
-           (record_kind = 'outcome' AND (json_type(payload_json, '$.feedbackText') IS NOT NULL OR json_type(payload_json, '$.actorId') IS NOT NULL OR json_type(payload_json, '$.observationSummary') IS NOT NULL)))
+           (record_kind = 'outcome' AND (json_type(payload_json, '$.feedbackText') IS NOT NULL OR json_type(payload_json, '$.actorId') IS NOT NULL OR json_type(payload_json, '$.observationSummary') IS NOT NULL)) OR (correction_reason IS NOT NULL AND correction_reason <> '[expired]')) OR
+           (content_redacted_at IS NOT NULL AND correction_reason IS NOT NULL AND correction_reason <> '[expired]'))
     ORDER BY recorded_at ASC, evidence_id ASC LIMIT 200`).all(codexCutoff, codexCutoff, receiptCutoff, receiptCutoff);
   const redact = db.prepare(`UPDATE intervention_evidence_records
-    SET payload_json = ?, content_redacted_at = ?
-    WHERE evidence_id = ? AND content_redacted_at IS NULL`);
+    SET payload_json = ?, correction_reason = ?, content_redacted_at = COALESCE(content_redacted_at, ?)
+    WHERE evidence_id = ? AND (content_redacted_at IS NULL OR (correction_reason IS NOT NULL AND correction_reason <> '[expired]'))`);
   let count = 0;
   const redactedAt = asOf.toISOString();
   for (const row of rows) {
@@ -296,7 +300,10 @@ function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): numb
       });
     }
     const payload = redactPayloadText(row.record_kind, row.payload_json, row.evidence_id);
-    if (payload !== null) count += redact.run(payload, redactedAt, row.evidence_id).changes;
+    const correctionReason = redactCorrectionReason(row.correction_reason);
+    if (payload !== null || correctionReason !== null) {
+      count += redact.run(payload ?? String(row.payload_json), correctionReason ?? row.correction_reason ?? null, redactedAt, row.evidence_id).changes;
+    }
   }
   return count;
 }
@@ -336,10 +343,11 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
   const expiresAt = Date.parse(sourceTime) + retentionDays * 24 * 60 * 60 * 1000;
   if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
     const redactedPayload = redactPayloadText(recordKind, JSON.stringify(payload), evidenceId);
+    const redactedCorrectionReason = redactCorrectionReason(row.correction_reason);
     if (redactedPayload !== null) {
       payload = parseJsonColumn(redactedPayload, evidenceId);
-      contentRedactedAt ??= new Date(expiresAt).toISOString();
     }
+    if (redactedPayload !== null || redactedCorrectionReason !== null) contentRedactedAt ??= new Date(expiresAt).toISOString();
   }
   if (contentRedactedAt !== undefined) {
     if (!isValidAuditTimestamp(contentRedactedAt) || Date.parse(contentRedactedAt) > Date.now() + 5 * 60 * 1000) {
@@ -605,12 +613,15 @@ export class SqliteInterventionEvidenceStore {
         const retentionDays = record.sourceKind.startsWith('codex_') ? 7 : RECEIPT_RETENTION_POLICY_DAYS;
         const expiresAt = Date.parse(recordTime) + retentionDays * 24 * 60 * 60 * 1000;
         let payloadJson = JSON.stringify(record.payload);
+        let correctionReason: string | null = record.correctionReason ?? null;
         let contentRedactedAt: string | null = null;
         const insertedAt = new Date();
         if (Number.isFinite(expiresAt) && expiresAt <= insertedAt.getTime()) {
           const redactedPayload = redactPayloadText(record.kind, payloadJson, record.evidenceId);
-          if (redactedPayload !== null) {
-            payloadJson = redactedPayload;
+          const redactedCorrectionReason = redactCorrectionReason(correctionReason);
+          if (redactedPayload !== null || redactedCorrectionReason !== null) {
+            payloadJson = redactedPayload ?? payloadJson;
+            correctionReason = redactedCorrectionReason ?? correctionReason;
             contentRedactedAt = insertedAt.toISOString();
           }
         }
@@ -627,7 +638,7 @@ export class SqliteInterventionEvidenceStore {
           record.episodeKey ?? null,
           record.effectKey ?? null,
           record.correctionOf ?? null,
-          record.correctionReason ?? null,
+          correctionReason,
           record.occurredAt ?? null,
           record.recordedAt,
           JSON.stringify(record.nativeRefs),

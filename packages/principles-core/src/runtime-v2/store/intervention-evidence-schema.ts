@@ -71,8 +71,9 @@ export const INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS: readonly string[] = 
   `CREATE TRIGGER IF NOT EXISTS intervention_evidence_records_no_update
     BEFORE UPDATE ON intervention_evidence_records
     WHEN NOT (
-      OLD.content_redacted_at IS NULL
-      AND NEW.content_redacted_at IS NOT NULL
+      ((OLD.content_redacted_at IS NULL AND NEW.content_redacted_at IS NOT NULL) OR
+       (OLD.content_redacted_at IS NOT NULL AND NEW.content_redacted_at IS OLD.content_redacted_at
+        AND OLD.correction_reason IS NOT NULL AND OLD.correction_reason <> '[expired]' AND NEW.correction_reason = '[expired]'))
       AND julianday(CASE WHEN OLD.occurred_at IS NOT NULL AND OLD.occurred_at < OLD.recorded_at THEN OLD.occurred_at ELSE OLD.recorded_at END) <= julianday('now', CASE WHEN OLD.source_kind IN ('codex_pd_hook_event_log', 'codex_governance_observation') THEN '-7 days' ELSE '-${RECEIPT_RETENTION_POLICY_DAYS} days' END)
       AND NEW.evidence_id IS OLD.evidence_id
       AND NEW.scope_id IS OLD.scope_id
@@ -86,7 +87,8 @@ export const INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS: readonly string[] = 
       AND NEW.episode_key IS OLD.episode_key
       AND NEW.effect_key IS OLD.effect_key
       AND NEW.correction_of IS OLD.correction_of
-      AND NEW.correction_reason IS OLD.correction_reason
+      AND (NEW.correction_reason IS OLD.correction_reason OR
+           (OLD.correction_reason IS NOT NULL AND NEW.correction_reason = '[expired]'))
       AND NEW.occurred_at IS OLD.occurred_at
       AND NEW.recorded_at IS OLD.recorded_at
       AND NEW.native_refs_json IS OLD.native_refs_json
@@ -101,10 +103,10 @@ export const INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS: readonly string[] = 
         WHEN 'outcome' THEN json_remove(json_set(OLD.payload_json, '$.observationSummary', '[expired]'), '$.feedbackText', '$.actorId')
         ELSE NULL
       END
-      AND json(NEW.payload_json) <> json(OLD.payload_json)
+      AND (json(NEW.payload_json) <> json(OLD.payload_json) OR NEW.correction_reason IS NOT OLD.correction_reason)
     )
     BEGIN
-      SELECT RAISE(ABORT, 'intervention evidence records are immutable except authorized payload redaction');
+      SELECT RAISE(ABORT, 'intervention evidence records are immutable except authorized evidence text redaction');
     END`,
   `CREATE TRIGGER IF NOT EXISTS intervention_evidence_records_no_delete
     BEFORE DELETE ON intervention_evidence_records

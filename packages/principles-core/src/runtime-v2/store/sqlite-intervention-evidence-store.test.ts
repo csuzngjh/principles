@@ -397,7 +397,8 @@ describe('SqliteInterventionEvidenceStore', () => {
     const oldApplication = {
       observationKey: 'oc|application|sensitive', sourceLocator: 'loc:sensitive', kind: 'application' as const,
       nativeRefs: { hostKind: 'openclaw' as const }, principleId: 'T-01',
-      payload: { proofMethod: 'agent_claimed' as const, action: 'self_reported' as const, claimText: 'private claim text' },
+      correctionOf: 'prior-application', correctionReason: 'private correction reason',
+      payload: { proofMethod: 'agent_claimed' as const, action: 'self_reported' as const },
     };
     for (let start = 0; start < oldDeliveries.length; start += 50) {
       store.appendObservationBatch(normalized(deliveryBatch({ recordedAt: oldAt, observations: oldDeliveries.slice(start, start + 50) })));
@@ -432,25 +433,64 @@ describe('SqliteInterventionEvidenceStore', () => {
       expect(oldSummary?.payload).not.toHaveProperty('claimText');
       expect(oldSummary?.contentRedactedAt).toBeTruthy();
     }
-    const before = conn.getDb().prepare(`SELECT record_digest, principle_id, native_refs_json, payload_json FROM intervention_evidence_records WHERE observation_key = ?`).get(oldApplication.observationKey);
-    expect(before).toMatchObject({ principle_id: 'T-01' });
+    const before = conn.getDb().prepare(`SELECT record_digest, principle_id, native_refs_json, correction_of, correction_reason, payload_json FROM intervention_evidence_records WHERE observation_key = ?`).get(oldApplication.observationKey);
+    expect(before).toMatchObject({ principle_id: 'T-01', correction_of: 'prior-application', correction_reason: 'private correction reason' });
     store.appendObservationBatch(normalized(deliveryBatch())); // triggers bounded expiry sweep
     const db = conn.getDb();
-    const after = db.prepare(`SELECT record_digest, principle_id, native_refs_json, payload_json, content_redacted_at FROM intervention_evidence_records WHERE observation_key = ?`).get(oldApplication.observationKey);
+    const after = db.prepare(`SELECT record_digest, principle_id, native_refs_json, correction_of, correction_reason, payload_json, content_redacted_at FROM intervention_evidence_records WHERE observation_key = ?`).get(oldApplication.observationKey);
     expect(after).toMatchObject({
       record_digest: record(before).record_digest,
       principle_id: 'T-01', native_refs_json: record(before).native_refs_json,
+      correction_of: 'prior-application', correction_reason: '[expired]',
     });
     expect(JSON.parse(String(record(after).payload_json))).not.toHaveProperty('claimText');
     expect(record(after).content_redacted_at).toBeTruthy();
+    expect(record(after).payload_json).toBe(record(before).payload_json);
     expect(() => db.prepare(`UPDATE intervention_evidence_records SET principle_id = 'rewritten' WHERE observation_key = ?`).run(oldApplication.observationKey)).toThrow(/immutable/);
+    expect(() => db.prepare(`UPDATE intervention_evidence_records SET correction_of = 'rewritten' WHERE observation_key = ?`).run(oldApplication.observationKey)).toThrow(/immutable/);
+    expect(() => db.prepare(`UPDATE intervention_evidence_records SET correction_reason = 'forged' WHERE observation_key = ?`).run(oldApplication.observationKey)).toThrow(/immutable/);
     expect(() => db.prepare(`DELETE FROM intervention_evidence_records WHERE observation_key = ?`).run(oldApplication.observationKey)).toThrow(/immutable/);
     const fresh = normalized(deliveryBatch({ observations: [{
       ...oldApplication, observationKey: 'oc|application|fresh', sourceLocator: 'loc:fresh',
+      payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: 'private claim text' },
     }] }));
     store.appendObservationBatch(fresh);
     const recent = db.prepare(`SELECT payload_json FROM intervention_evidence_records WHERE observation_key = 'oc|application|fresh'`).get();
     expect(JSON.parse(String(record(recent).payload_json)).claimText).toBe('private claim text');
+    expect(record(db.prepare(`SELECT correction_reason FROM intervention_evidence_records WHERE observation_key = 'oc|application|fresh'`).get()).correction_reason).toBe('private correction reason');
+  });
+
+  it('redacts correction-only text on first insert while preserving correction lineage', () => {
+    const batch = normalized(deliveryBatch({ recordedAt: '2001-01-01T00:00:00Z', observations: [{
+      observationKey: 'oc|delivery|expired-correction-only', sourceLocator: 'loc:expired-correction-only',
+      kind: 'delivery', nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01',
+      correctionOf: 'prior-delivery', correctionReason: 'private correction rationale',
+      contentRef: { principleId: 'T-01', payloadDigest: `sha256:${'a'.repeat(64)}`, resolution: 'resolved' },
+      activationRef: { activationId: 'act-1', sourceSnapshotDigest: `sha256:${'b'.repeat(64)}` },
+      payload: { targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' },
+    }] }));
+    const [incoming] = batch.records;
+    if (!incoming) throw new Error('Expected expired correction record');
+    store.appendObservationBatch(batch);
+
+    const persisted = record(conn.getDb().prepare(`
+      SELECT correction_of, correction_reason, record_digest, payload_json, content_redacted_at
+      FROM intervention_evidence_records WHERE evidence_id = ?
+    `).get(incoming.evidenceId));
+    expect(persisted.correction_of).toBe('prior-delivery');
+    expect(persisted.correction_reason).toBe('[expired]');
+    expect(persisted.record_digest).toBe(incoming.recordDigest);
+    expect(persisted.content_redacted_at).toBeTruthy();
+    expect(String(persisted.payload_json)).not.toContain('private correction rationale');
+    const audit = store.readAuditRelations({ type: 'principle', principleId: 'T-01' });
+    expect(audit.available).toBe(true);
+    if (audit.available) {
+      const summary = audit.relations.deliveries.find((item) => item.evidenceId === incoming.evidenceId);
+      expect(summary?.contentRedactedAt).toBeTruthy();
+      expect(summary).not.toHaveProperty('correctionReason');
+    }
+    expect(() => conn.getDb().prepare(`UPDATE intervention_evidence_records SET correction_of = 'forged' WHERE evidence_id = ?`).run(incoming.evidenceId)).toThrow(/immutable/);
+    expect(() => conn.getDb().prepare(`UPDATE intervention_evidence_records SET correction_reason = 'forged' WHERE evidence_id = ?`).run(incoming.evidenceId)).toThrow(/immutable/);
   });
 
   it('hides expired Codex summaries on read and marks their source availability unknown', () => {
