@@ -158,9 +158,10 @@ describe('ActivationDispatcher supersede seam (R-B3)', () => {
       expect(decision.supersededActivationId).toBe('act-old');
     }
     expect(state.replaceCalls).toHaveLength(1);
-    expect(state.replaceCalls[0].supersededActivationId).toBe('act-old');
-    expect(state.replaceCalls[0].supersededArtifactId).toBe('art-old');
-    expect(state.replaceCalls[0].decidedBy).toBe('owner-1');
+    const [commit] = state.replaceCalls;
+    expect(commit?.supersededActivationId).toBe('act-old');
+    expect(commit?.supersededArtifactId).toBe('art-old');
+    expect(commit?.decidedBy).toBe('owner-1');
     expect(state.recordCalls).toHaveLength(0);
   });
 
@@ -191,7 +192,8 @@ describe('ActivationDispatcher supersede seam (R-B3)', () => {
       expect(decision.supersededActivationId).toBe('act-old');
     }
     expect(state.replaceCalls).toHaveLength(1);
-    expect(state.replaceCalls[0].newRecord.activationId).toBe('act-new');
+    const [recoveryCommit] = state.replaceCalls;
+    expect(recoveryCommit?.newRecord.activationId).toBe('act-new');
   });
 
   it('refuses when the recovery supersede throws (never a silent half state)', async () => {
