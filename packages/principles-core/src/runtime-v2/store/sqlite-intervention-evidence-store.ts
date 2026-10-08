@@ -281,12 +281,15 @@ function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): numb
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))) OR
            (source_kind NOT IN ('codex_pd_hook_event_log', 'codex_governance_observation') AND
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))))
-      AND ((content_redacted_at IS NULL AND ((record_kind = 'delivery' AND (json_type(payload_json, '$.failureReason') IS NOT NULL OR json_type(payload_json, '$.nonAttemptReason') IS NOT NULL OR json_type(payload_json, '$.unsupportedNote') IS NOT NULL)) OR
-           (record_kind = 'application' AND json_type(payload_json, '$.claimText') IS NOT NULL) OR
-           (record_kind = 'behavior_episode' AND (json_type(payload_json, '$.inputPreview') IS NOT NULL OR json_type(payload_json, '$.resultSummary') IS NOT NULL OR json_type(payload_json, '$.actionSummary') IS NOT NULL)) OR
-           (record_kind = 'effect' AND (json_type(payload_json, '$.disputeReason') IS NOT NULL OR json_type(payload_json, '$.observationSummary') IS NOT NULL)) OR
-           (record_kind = 'outcome' AND (json_type(payload_json, '$.feedbackText') IS NOT NULL OR json_type(payload_json, '$.actorId') IS NOT NULL OR json_type(payload_json, '$.observationSummary') IS NOT NULL)) OR (correction_reason IS NOT NULL AND correction_reason <> '[expired]')) OR
-           (content_redacted_at IS NOT NULL AND correction_reason IS NOT NULL AND correction_reason <> '[expired]'))
+      AND (
+        (content_redacted_at IS NULL AND (
+          (record_kind = 'delivery' AND (json_type(payload_json, '$.failureReason') IS NOT NULL OR json_type(payload_json, '$.nonAttemptReason') IS NOT NULL OR json_type(payload_json, '$.unsupportedNote') IS NOT NULL)) OR
+          (record_kind = 'application' AND json_type(payload_json, '$.claimText') IS NOT NULL) OR
+          (record_kind = 'behavior_episode' AND (json_type(payload_json, '$.inputPreview') IS NOT NULL OR json_type(payload_json, '$.resultSummary') IS NOT NULL OR (json_type(payload_json, '$.actionSummary') IS NOT NULL AND json_extract(payload_json, '$.actionSummary') <> '[expired]'))) OR
+          (record_kind = 'effect' AND (json_type(payload_json, '$.disputeReason') IS NOT NULL OR (json_type(payload_json, '$.observationSummary') IS NOT NULL AND json_extract(payload_json, '$.observationSummary') <> '[expired]'))) OR
+          (record_kind = 'outcome' AND (json_type(payload_json, '$.feedbackText') IS NOT NULL OR json_type(payload_json, '$.actorId') IS NOT NULL OR (json_type(payload_json, '$.observationSummary') IS NOT NULL AND json_extract(payload_json, '$.observationSummary') <> '[expired]')))
+        )) OR (correction_reason IS NOT NULL AND correction_reason <> '[expired]')
+      )
     ORDER BY recorded_at ASC, evidence_id ASC LIMIT 200`).all(codexCutoff, codexCutoff, receiptCutoff, receiptCutoff);
   const redact = db.prepare(`UPDATE intervention_evidence_records
     SET payload_json = ?, correction_reason = ?, content_redacted_at = COALESCE(content_redacted_at, ?)

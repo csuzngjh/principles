@@ -493,6 +493,21 @@ describe('SqliteInterventionEvidenceStore', () => {
     expect(() => conn.getDb().prepare(`UPDATE intervention_evidence_records SET correction_reason = 'forged' WHERE evidence_id = ?`).run(incoming.evidenceId)).toThrow(/immutable/);
   });
 
+  it('does not let an already-expired placeholder block a fresh append', () => {
+    store.appendObservationBatch(normalized(deliveryBatch({
+      recordedAt: '2001-01-01T00:00:00Z',
+      observations: [{
+        observationKey: 'oc|episode|expired-placeholder', sourceLocator: 'loc:expired-placeholder',
+        kind: 'behavior_episode', nativeRefs: { hostKind: 'openclaw' },
+        payload: { status: 'closed', actionSummary: '[expired]' },
+      }],
+    })));
+
+    const appended = store.appendObservationBatch(normalized(deliveryBatch()));
+    expect(appended.ok).toBe(true);
+    expect(conn.getDb().prepare(`SELECT payload_json FROM intervention_evidence_records WHERE observation_key = 'oc|episode|expired-placeholder'`).get()).toBeTruthy();
+  });
+
   it('hides expired Codex summaries on read and marks their source availability unknown', () => {
     const batch = normalized(deliveryBatch({
       recordedAt: '2001-01-01T00:00:00Z',
