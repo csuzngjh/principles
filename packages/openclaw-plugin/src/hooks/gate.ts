@@ -21,6 +21,7 @@ import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordPrincipleApplication } from '../core/principle-application-ledger.js';
+import { recordGateEnforcementEvidence } from '../core/intervention-evidence-recorder.js';
 import { buildProductionRuleContext } from '../core/rule-context-assembler.js';
 import type { HostEventResult } from '@principles/core/host';
 import { observeRuleCodeSafety } from '../core/rulecode-safety-circuit.js';
@@ -240,6 +241,30 @@ export function handleBeforeToolCall(
         logger?.warn?.(`[PD_GATE] Receipt ledger write threw (rule_blocked): ${String(ledgerErr)}`);
       }
 
+      // PD v2 Phase 1: normalized enforcement evidence (delivery runtime_loaded
+      // + runtime_verified application + episode + effect, one atomic batch).
+      // Best-effort; never affects the block being returned — the recorder is
+      // ingress-guarded (never throws) but the call-site try/catch keeps the
+      // gate decision independent of ANY evidence-path surprise (a throw here
+      // would otherwise skip recordGateBlockAndReturn and flip block→allow).
+      try {
+        recordGateEnforcementEvidence({
+          workspaceDir: wctx.workspaceDir,
+          sessionId: ctx.sessionId,
+          ...evidenceToolIds(event),
+          toolName: event.toolName,
+          filePath: relPath,
+          activationId: report.liveDecisionActivationId,
+          principleId: hostResult.principleId,
+          ruleId: hostResult.ruleId,
+          reason: hostResult.reason,
+          decision: 'block',
+          logger,
+        });
+      } catch (evidenceErr) {
+        logger?.warn?.(`[PD_GATE] Evidence recording threw (block decision unaffected): ${String(evidenceErr)}`);
+      }
+
       return recordGateBlockAndReturn(wctx, {
         filePath: relPath,
         reason: hostResult.reason,
@@ -412,6 +437,27 @@ export function handleBeforeToolCall(
             } catch (ledgerErr) {
               logger?.warn?.(`[PD_GATE] Receipt ledger write threw (auto_correct_applied): ${String(ledgerErr)}`);
             }
+            // PD v2 Phase 1: normalized enforcement evidence for the applied
+            // correction (delivery/application/episode/effect batch).
+            // Call-site guarded: a throw here would otherwise land in the
+            // applyError branch below and REVERT the already-applied correction.
+            try {
+              recordGateEnforcementEvidence({
+                workspaceDir: wctx.workspaceDir,
+                sessionId: ctx.sessionId,
+                ...evidenceToolIds(event),
+                toolName: event.toolName,
+                filePath: relPath,
+                activationId: report.liveDecisionActivationId,
+                principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
+                ruleId: String(proposal.ruleId ?? 'unknown'),
+                reason: hostResult.reason,
+                decision: 'auto_correct',
+                logger,
+              });
+            } catch (evidenceErr) {
+              logger?.warn?.(`[PD_GATE] Evidence recording threw (correction unaffected): ${String(evidenceErr)}`);
+            }
             // PRI-529 (SPEC §6-D2): the host merges ONLY `params` from the hook
             // result (hook-before-tool-call-result.ts). The previous return shape
             // (`toolArgs`/`skipToolCall`/`_pdAutoCorrectWarning`) was ignored by
@@ -480,6 +526,25 @@ export function handleBeforeToolCall(
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * PD v2 Phase 1: narrow the host-supplied tool-call identity fields (rc-1).
+ * `toolUseId` is the preferred event identifier, `toolCallId` the fallback
+ * (same precedence as the pain pipeline). Used for evidence native refs.
+ */
+function evidenceToolIds(event: PluginHookBeforeToolCallEvent): { toolCallId?: string; runId?: string } {
+  const pick = (key: string): string | undefined => {
+    if (!Object.hasOwn(event, key)) return undefined;
+    const value = event[key];
+    return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+  };
+  const toolCallId = pick('toolUseId') ?? pick('toolCallId');
+  const runId = pick('runId');
+  return {
+    ...(toolCallId !== undefined ? { toolCallId } : {}),
+    ...(runId !== undefined ? { runId } : {}),
+  };
+}
 
 function _getCurrentGfi(sessionId?: string): number {
   if (!sessionId) return 0;
@@ -626,6 +691,7 @@ export function handleSharedRuleHostResult(
         ruleId,
         principleId,
         activationId: liveActivationId,
+        ...evidenceToolIds(event),
       }, logger);
     }
     return;
@@ -688,6 +754,7 @@ export function handleSharedRuleHostResult(
       ruleId,
       principleId,
       activationId: liveActivationId,
+      ...evidenceToolIds(event),
     }, logger);
   }
 }
@@ -719,6 +786,9 @@ export function accountSharedDeny(
      * never silent, the reason code is logged by the caller).
      */
     activationId?: string;
+    /** PD v2 Phase 1: host tool-call identity for evidence native refs. */
+    toolCallId?: string;
+    runId?: string;
   },
   logger: { warn?: (_message: string) => void; error?: (_message: string) => void },
 ): void {
@@ -751,6 +821,27 @@ export function accountSharedDeny(
     }
   } catch (ledgerErr) {
     logger.warn?.(`[PD_GATE] Receipt ledger write threw (rule_blocked, shared): ${String(ledgerErr)}`);
+  }
+  // PD v2 Phase 1: normalized enforcement evidence for the shared-path deny.
+  // Call-site guarded: a throw here would otherwise skip persistGateBlock
+  // below and lose the block accounting.
+  try {
+    recordGateEnforcementEvidence({
+      workspaceDir: wctx.workspaceDir,
+      sessionId: accounting.sessionId,
+      ...(accounting.toolCallId !== undefined ? { toolCallId: accounting.toolCallId } : {}),
+      ...(accounting.runId !== undefined ? { runId: accounting.runId } : {}),
+      toolName: accounting.toolName,
+      filePath: accounting.filePath ?? undefined,
+      activationId: accounting.activationId,
+      principleId: accounting.principleId,
+      ruleId: accounting.ruleId,
+      reason: accounting.reason,
+      decision: 'block',
+      logger,
+    });
+  } catch (evidenceErr) {
+    logger.warn?.(`[PD_GATE] Evidence recording threw (shared deny accounting continues): ${String(evidenceErr)}`);
   }
   persistGateBlock(wctx, {
     filePath: accounting.filePath,

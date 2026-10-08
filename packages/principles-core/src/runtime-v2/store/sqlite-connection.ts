@@ -16,6 +16,10 @@ import { join } from 'path';
 import * as fs from 'fs';
 import { PDRuntimeError } from '../error-categories.js';
 import { guardWorkspaceLeak } from './workspace-leak-guard.js';
+import {
+  INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS,
+  INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS,
+} from './intervention-evidence-schema.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -26,6 +30,13 @@ export interface SqliteConnectionOptions {
   readonly?: boolean;
   /** Keep read-only access side-effect free when state.db has not been initialized. */
   bootstrapIfMissing?: boolean;
+  /**
+   * Write-connection busy timeout in ms (default 5000). Evidence-writer
+   * connections pass 0 so a contended lock never delays a hook: the raw
+   * source stays durable and the batch replays later. Must be a non-negative
+   * integer; effective from the first getDb() and unchanged afterwards.
+   */
+  busyTimeoutMs?: number;
 }
 
 export interface SqlitePragmaReport {
@@ -42,6 +53,7 @@ export class SqliteConnection {
   private readonly dbPath: string;
   private readonly readonlyMode: boolean;
   private readonly bootstrapIfMissing: boolean;
+  private readonly busyTimeoutMs: number;
   /**
    * Schema initialization warnings collected during getDb(). Populated when initSchema()
    * or migrateSchema() fails (rc-9: no silent fallback — callers can read these warnings
@@ -59,6 +71,18 @@ export class SqliteConnection {
     const pdDir = join(workspaceDir, '.pd');
     this.readonlyMode = opts.readonly ?? false;
     this.bootstrapIfMissing = opts.bootstrapIfMissing ?? true;
+    if (opts.busyTimeoutMs !== undefined) {
+      if (!Number.isInteger(opts.busyTimeoutMs) || opts.busyTimeoutMs < 0) {
+        throw new PDRuntimeError(
+          'input_invalid',
+          `busyTimeoutMs must be a non-negative integer (got: ${opts.busyTimeoutMs})`,
+          { nextAction: 'Pass a non-negative integer, or omit it to keep the 5000ms default.' },
+        );
+      }
+      this.busyTimeoutMs = opts.busyTimeoutMs;
+    } else {
+      this.busyTimeoutMs = 5000;
+    }
     if (!this.readonlyMode && !fs.existsSync(pdDir)) {
       fs.mkdirSync(pdDir, { recursive: true });
     }
@@ -104,7 +128,7 @@ export class SqliteConnection {
       try {
         // Set the pragmas
         this.db.pragma('journal_mode = WAL');
-        this.db.pragma('busy_timeout = 5000');
+        this.db.pragma(`busy_timeout = ${this.busyTimeoutMs}`);
         this.db.pragma('synchronous = NORMAL');
         this.db.pragma('foreign_keys = ON');
 
@@ -114,6 +138,14 @@ export class SqliteConnection {
           throw new PDRuntimeError(
             'storage_unavailable',
             `Failed to set WAL journal mode (got: ${journalMode})`,
+          );
+        }
+
+        const busyTimeout = Number(this.db.pragma('busy_timeout', { simple: true }));
+        if (busyTimeout !== this.busyTimeoutMs) {
+          throw new PDRuntimeError(
+            'storage_unavailable',
+            `Failed to set busy_timeout (got: ${busyTimeout}, expected: ${this.busyTimeoutMs})`,
           );
         }
 
@@ -187,7 +219,9 @@ export class SqliteConnection {
       const foreignKeys = Boolean(this.db.pragma('foreign_keys', { simple: true }));
 
       if (journalMode !== 'wal') issues.push(`journal_mode is ${journalMode}, expected wal`);
-      if (busyTimeout < 5000) issues.push(`busy_timeout is ${busyTimeout}, expected >= 5000`);
+      // Health is per-connection configuration: an evidence-writer connection
+      // intentionally configures 0, which is healthy for THAT connection.
+      if (busyTimeout < this.busyTimeoutMs) issues.push(`busy_timeout is ${busyTimeout}, expected >= ${this.busyTimeoutMs}`);
       if (!foreignKeys) issues.push('foreign_keys is OFF, expected ON');
       if (synchronous !== '1') issues.push(`synchronous is ${synchronous}, expected NORMAL`);
 
@@ -716,6 +750,49 @@ export class SqliteConnection {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_agent_drafts_task_unconsumed
         ON pending_agent_drafts(task_id) WHERE consumed_at IS NULL;
     `);
+
+    // PD v2 Phase 1 Evidence Foundation (ADR-0027): see
+    // intervention-evidence-schema.ts for the ledger DDL, applied statement by
+    // statement here.
+    for (const statement of INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS) {
+      db.prepare(statement).run();
+    }
+    const [updateTriggerStatement, deleteTriggerStatement] = INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS;
+    if (typeof updateTriggerStatement !== 'string' || typeof deleteTriggerStatement !== 'string') {
+      throw new Error('Intervention evidence immutability trigger definitions are incomplete');
+    }
+    const readEvidenceColumns = (): unknown[] => db.prepare('PRAGMA table_info(intervention_evidence_records)').all();
+    const hasRedactionColumn = (columns: readonly unknown[]): boolean =>
+      columns.some((column) => isRecord(column) && column.name === 'content_redacted_at');
+    const readTriggerSql = (name: string): unknown => db.prepare(
+      'SELECT sql FROM sqlite_master WHERE type = ? AND name = ?',
+    ).get('trigger', name);
+    const triggerSqlContains = (row: unknown, marker: string): boolean =>
+      isRecord(row) && typeof row.sql === 'string' && row.sql.includes(marker);
+    const updateTriggerCurrent = triggerSqlContains(readTriggerSql('intervention_evidence_records_no_update'), 'authorized source retention text redaction');
+    const deleteTriggerCurrent = triggerSqlContains(readTriggerSql('intervention_evidence_records_no_delete'), 'intervention evidence records are immutable');
+    if (!hasRedactionColumn(readEvidenceColumns()) || !updateTriggerCurrent || !deleteTriggerCurrent) {
+      // Column and trigger changes are one bounded migration. Recheck under
+      // the write lock so concurrent opens cannot leave protection absent.
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (!hasRedactionColumn(readEvidenceColumns())) {
+          db.prepare('ALTER TABLE intervention_evidence_records ADD COLUMN content_redacted_at TEXT').run();
+        }
+        if (!triggerSqlContains(readTriggerSql('intervention_evidence_records_no_update'), 'authorized source retention text redaction')) {
+          db.prepare('DROP TRIGGER IF EXISTS intervention_evidence_records_no_update').run();
+          db.prepare(updateTriggerStatement).run();
+        }
+        if (!triggerSqlContains(readTriggerSql('intervention_evidence_records_no_delete'), 'intervention evidence records are immutable')) {
+          db.prepare('DROP TRIGGER IF EXISTS intervention_evidence_records_no_delete').run();
+          db.prepare(deleteTriggerStatement).run();
+        }
+        db.exec('COMMIT');
+      } catch (error) {
+        try { db.exec('ROLLBACK'); } catch { /* migration tx may already be rolled back */ }
+        throw error;
+      }
+    }
   }
 
   private migrateSchema(): void {

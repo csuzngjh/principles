@@ -17,6 +17,7 @@ import Database from 'better-sqlite3';
 import * as nodePath from 'node:path';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
 import { getInjectedPrincipleIds, getInjectedActivationIds } from './session-tracker.js';
+import { recordSelfReportEvidence } from './intervention-evidence-recorder.js';
 
 export type PrincipleApplicationLevel = 'effect' | 'presence';
 export type PrincipleApplicationKind =
@@ -274,11 +275,106 @@ export function recordSelfReportFromText(
         ? ((result as { changes?: number }).changes ?? 0)
         : 0;
       written += changes > 0 ? 1 : 0;
+      // Replay the durable source row even when INSERT OR IGNORE deduplicates:
+      // its normalized mirror may have failed on the first attempt. Read the
+      // persisted values so a later prompt/activation cannot rewrite lineage.
+      const source: unknown = db.prepare(`
+        SELECT activation_id, digest, created_at
+        FROM principle_applications
+        WHERE kind = 'self_reported' AND principle_id = ? AND session_id IS ?
+      `).get(principleId, sessionId ?? null);
+      if (isSelfReportSourceRow(source)) {
+        const mirrorState = getSelfReportMirrorState(db, sessionId, principleId, source);
+        if (mirrorState === 'missing') {
+          recordSelfReportEvidence({
+            workspaceDir,
+            sessionId,
+            principleId,
+            ...(source.activation_id !== null ? { activationId: source.activation_id } : {}),
+            claimText: source.digest,
+            occurredAt: source.created_at,
+            logger,
+          });
+        } else if (mirrorState === 'invalid') {
+          logger?.warn?.(`[PD:ReceiptLedger] self_report replay skipped: normalized mirror identity is conflicting or malformed for principle ${safeLogField(principleId)}; next: inspect the existing evidence rows before replay`);
+        }
+      } else {
+        logger?.warn?.(`[PD:ReceiptLedger] self_report replay skipped: durable source row unavailable for principle ${safeLogField(principleId)}`);
+      }
     } catch (ledgerErr) {
       logger?.warn?.(`[PD:ReceiptLedger] self_report row write failed for principle ${safeLogField(principleId)}: ${String(ledgerErr)}`);
     }
   }
   return written;
+}
+
+function getSelfReportMirrorState(
+  db: Database.Database,
+  sessionId: string | undefined,
+  principleId: string,
+  source: { activation_id: string | null; digest: string; created_at: string },
+): 'missing' | 'present' | 'invalid' {
+  try {
+    const table: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'intervention_evidence_records'").get();
+    if (table === undefined) return 'missing';
+    if (!isRecord(table) || !Object.hasOwn(table, 'name') || table.name !== 'intervention_evidence_records') return 'invalid';
+    const sourceLocator = `openclaw-application-ledger:${sessionId ?? 'no-session'}`;
+    const observationKey = `openclaw|application|agent_claimed|${sessionId ?? '-'}|${principleId}`;
+    const rows: unknown[] = db.prepare(`
+      SELECT evidence_id, source_kind, source_locator, observation_key, record_kind, activation_id,
+             record_digest, occurred_at, payload_json
+      FROM intervention_evidence_records
+      WHERE source_kind IN ('openclaw_plugin_event_log', 'openclaw_application_ledger')
+        AND source_locator = ? AND observation_key = ?
+    `).all(sourceLocator, observationKey);
+    if (rows.length === 0) return 'missing';
+    // Old and new source kinds are different natural keys. If both exist,
+    // don't silently select one or create another mirror.
+    if (rows.length !== 1) return 'invalid';
+    const row: unknown = rows[0];
+    if (!isRecord(row)
+    || !['evidence_id', 'source_kind', 'source_locator', 'observation_key', 'record_kind', 'activation_id', 'record_digest', 'occurred_at', 'payload_json']
+      .every((key) => Object.hasOwn(row, key))
+    || (row.source_kind !== 'openclaw_plugin_event_log' && row.source_kind !== 'openclaw_application_ledger')
+    || row.source_locator !== sourceLocator
+    || row.observation_key !== observationKey
+    || row.record_kind !== 'application'
+    || row.activation_id !== source.activation_id
+    || typeof row.evidence_id !== 'string'
+    || !/^sha256:[a-f0-9]{64}$/.test(row.evidence_id)
+    || typeof row.record_digest !== 'string'
+    || !/^sha256:[a-f0-9]{64}$/.test(row.record_digest)
+    || row.occurred_at !== source.created_at
+    || typeof row.payload_json !== 'string') {
+      return 'invalid';
+    }
+    const payload: unknown = JSON.parse(row.payload_json);
+    if (!isRecord(payload) || payload.proofMethod !== 'agent_claimed'
+      || payload.action !== 'self_reported' || payload.claimText !== source.digest) return 'invalid';
+    return 'present';
+  } catch {
+    return 'invalid';
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSelfReportSourceRow(value: unknown): value is Record<string, unknown> & {
+  activation_id: string | null;
+  digest: string;
+  created_at: string;
+} {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  if (!Object.hasOwn(value, 'activation_id') || !Object.hasOwn(value, 'digest') || !Object.hasOwn(value, 'created_at')) return false;
+  const activationId: unknown = Reflect.get(value, 'activation_id');
+  const digest: unknown = Reflect.get(value, 'digest');
+  const createdAt: unknown = Reflect.get(value, 'created_at');
+  return (typeof activationId === 'string' || activationId === null)
+    && typeof digest === 'string'
+    && typeof createdAt === 'string'
+    && createdAt.length > 0;
 }
 
 /**

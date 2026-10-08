@@ -1,0 +1,332 @@
+/**
+ * Intervention Evidence Recorder tests (PD v2 Phase 1, OpenClaw adapter).
+ *
+ * Real temp workspaces, real ingress + state.db — no mocks. Covers the
+ * recorder's honesty boundaries (submitted-not-delivered prompt attempts,
+ * runtime_verified enforcement chains, agent_claimed self-reports) and the
+ * flag gate (principle_receipt_ledger off → zero evidence rows).
+ */
+import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import * as yaml from 'js-yaml';
+import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime-v2';
+import {
+  recordPromptDeliveryEvidence,
+  recordGateEnforcementEvidence,
+  recordSelfReportEvidence,
+} from '../../src/core/intervention-evidence-recorder.js';
+
+let workspaceDir = '';
+let conn: SqliteConnection;
+
+function seedActivation(activationId: string, artifactId: string): void {
+  const now = '2026-10-01T00:00:00Z';
+  const db = conn.getDb();
+  db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id,
+              content_json, created_at, updated_at)
+              VALUES (?, 'principle', 'task-1', 'T-01', ?, ?, ?)`)
+    .run(artifactId, JSON.stringify({ principleId: 'T-01', text: '删除类操作必须先确认目标' }), now, now);
+  db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+              VALUES (?, ?, ?, 'code_tool_hook', 'code_tool_hook_live_activate', 'ref', ?)`)
+    .run(activationId, `idem-${activationId}`, artifactId, now);
+}
+
+function evidenceRows(): { record_kind: string; observation_key: string; payload_json: string; content_ref_json: string | null; occurred_at: string | null; episode_key: string | null; principle_id: string | null }[] {
+  return conn.getDb()
+    .prepare('SELECT record_kind, observation_key, payload_json, content_ref_json, occurred_at, episode_key, principle_id FROM intervention_evidence_records')
+    .all() as never;
+}
+
+beforeEach(() => {
+  workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-iev-recorder-'));
+  conn = new SqliteConnection(workspaceDir);
+});
+
+afterEach(() => {
+  conn.close();
+  fs.rmSync(workspaceDir, { recursive: true, force: true });
+});
+
+describe('intervention evidence recorder (openclaw adapter)', () => {
+  it('records prompt delivery attempts as submitted/attempted — never delivered', () => {
+    seedActivation('act-p1', 'art-p1');
+    recordPromptDeliveryEvidence({
+      workspaceDir,
+      sessionId: 'sess-1',
+      runId: 'run-1',
+      injected: [{ principleId: 'T-01', activationId: 'act-p1', artifactId: 'art-p1' }],
+    });
+    const rows = evidenceRows().filter((r) => r.record_kind === 'delivery');
+    expect(rows).toHaveLength(1);
+    const payload = JSON.parse(rows[0]!.payload_json);
+    expect(payload).toMatchObject({ targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' });
+    expect(payload.outcome).not.toBe('delivered');
+    const contentRef = JSON.parse(rows[0]!.content_ref_json ?? '{}');
+    const contentJson = JSON.stringify({ principleId: 'T-01', text: '删除类操作必须先确认目标' });
+    expect(contentRef).toMatchObject({
+      artifactId: 'art-p1',
+      payloadDigest: `sha256:${createHash('sha256').update(contentJson).digest('hex')}`,
+      resolution: 'resolved',
+    });
+    const activationRow = conn.getDb()
+      .prepare('SELECT activation_ref_json FROM intervention_evidence_records WHERE record_kind = ?')
+      .get('delivery') as { activation_ref_json: string };
+    expect(contentRef.payloadDigest).not.toBe(JSON.parse(activationRow.activation_ref_json).sourceSnapshotDigest);
+  });
+
+  it('keeps prompt content unresolved when the activation artifact is missing', () => {
+    conn.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                          VALUES ('act-orphan', 'idem-orphan', 'art-missing', 'prompt', 'prompt_activate', 'ref', '2026-10-01T00:00:00Z')`).run();
+    const warn: string[] = [];
+    recordPromptDeliveryEvidence({
+      workspaceDir,
+      sessionId: 'sess-1',
+      injected: [{ principleId: 'T-01', activationId: 'act-orphan', artifactId: 'art-missing' }],
+      logger: { warn: (line) => warn.push(line) },
+    });
+    const delivery = evidenceRows().find((row) => row.record_kind === 'delivery');
+    expect(warn).toEqual([]);
+    expect(delivery).toBeDefined();
+    expect(JSON.parse(delivery!.content_ref_json ?? '{}')).toEqual({
+      principleId: 'T-01', artifactId: 'art-missing', resolution: 'revision_reference_unresolved',
+    });
+  });
+
+  it('replays the original prompt and gate event after storage failure and deactivation as partial historical evidence', () => {
+    seedActivation('act-replay', 'art-replay');
+    const warn: string[] = [];
+    const prompt = {
+      workspaceDir,
+      sessionId: 'sess-replay',
+      runId: 'run-replay',
+      injected: [{ principleId: 'T-01', activationId: 'act-replay', artifactId: 'art-replay' }],
+      logger: { warn: (line: string) => warn.push(line) },
+    };
+    const gate = {
+      workspaceDir,
+      sessionId: 'sess-replay',
+      runId: 'run-replay',
+      toolCallId: 'tool-replay',
+      toolName: 'write_file',
+      activationId: 'act-replay',
+      principleId: 'T-01',
+      ruleId: 'R-1',
+      decision: 'block' as const,
+      logger: { warn: (line: string) => warn.push(line) },
+    };
+    conn.getDb().exec(`CREATE TRIGGER fail_evidence_insert BEFORE INSERT ON intervention_evidence_records
+      BEGIN SELECT RAISE(ABORT, 'simulated first append failure'); END`);
+    recordPromptDeliveryEvidence(prompt);
+    recordGateEnforcementEvidence(gate);
+    expect(evidenceRows()).toHaveLength(0);
+    conn.getDb().exec('DROP TRIGGER fail_evidence_insert');
+    conn.getDb().prepare("UPDATE activations SET deactivated_at = '2026-10-02T00:00:00Z' WHERE activation_id = ?")
+      .run('act-replay');
+
+    recordPromptDeliveryEvidence(prompt);
+    recordGateEnforcementEvidence(gate);
+    expect(warn.join(' ')).toContain('evidence_storage_failed');
+    const rows = evidenceRows();
+    expect(rows.map((row) => row.record_kind).sort())
+      .toEqual(['application', 'behavior_episode', 'delivery', 'delivery', 'effect']);
+    for (const row of rows) {
+      if (row.record_kind === 'delivery' || row.record_kind === 'application') {
+        const activationRef = JSON.parse(conn.getDb()
+          .prepare('SELECT activation_ref_json FROM intervention_evidence_records WHERE observation_key = ?')
+          .get(row.observation_key)?.activation_ref_json as string);
+        expect(activationRef.activationId).toBe('act-replay');
+      }
+      if (row.content_ref_json) {
+        const contentRef = JSON.parse(row.content_ref_json);
+        expect(contentRef.resolution).toBe('revision_reference_unresolved');
+        expect(contentRef.payloadDigest).toBeUndefined();
+      }
+    }
+    const application = rows.find((row) => row.record_kind === 'application')!;
+    expect(JSON.parse(application.payload_json)).toMatchObject({ proofMethod: 'runtime_verified' });
+    expect(conn.getDb().prepare('SELECT deactivated_at FROM activations WHERE activation_id = ?')
+      .get('act-replay')?.deactivated_at).toBe('2026-10-02T00:00:00Z');
+  });
+
+  it('skips prompt delivery for unresolvable activations with an honest gap (no row)', () => {
+    const warn = [];
+    recordPromptDeliveryEvidence({
+      workspaceDir,
+      sessionId: 'sess-1',
+      injected: [{ principleId: 'T-01', activationId: 'act-missing' }],
+      logger: { warn: (m: string) => warn.push(m) },
+    });
+    expect(evidenceRows()).toHaveLength(0);
+    expect(warn.join(' ')).toContain('act-missing');
+  });
+
+  it('does not attribute a source artifact that conflicts with the activation occurrence', () => {
+    seedActivation('act-mismatch', 'art-actual');
+    const warn: string[] = [];
+    recordPromptDeliveryEvidence({
+      workspaceDir,
+      sessionId: 'sess-mismatch',
+      injected: [{ principleId: 'T-01', activationId: 'act-mismatch', artifactId: 'art-other' }],
+      logger: { warn: (line: string) => warn.push(line) },
+    });
+    expect(evidenceRows()).toHaveLength(0);
+    expect(warn.join(' ')).toContain('source artifact does not match occurrence');
+  });
+
+  it('records the full enforcement chain with exact cross-references', () => {
+    seedActivation('act-g1', 'art-g1');
+    recordGateEnforcementEvidence({
+      workspaceDir,
+      sessionId: 'sess-1',
+      runId: 'run-9',
+      toolCallId: 'tool-9',
+      toolName: 'write_file',
+      filePath: 'src/x.ts',
+      activationId: 'act-g1',
+      principleId: 'T-01',
+      ruleId: 'R-1',
+      reason: '删除类操作必须先确认目标',
+      decision: 'block',
+    });
+
+    const rows = evidenceRows();
+    expect(rows.map((r) => r.record_kind).sort()).toEqual(['application', 'behavior_episode', 'delivery', 'effect']);
+
+    const delivery = rows.find((r) => r.record_kind === 'delivery')!;
+    expect(JSON.parse(delivery.payload_json)).toMatchObject({
+      targetKind: 'runtime_enforcement', confirmation: 'runtime_loaded', outcome: 'delivered',
+    });
+
+    const application = rows.find((r) => r.record_kind === 'application')!;
+    expect(JSON.parse(application.payload_json)).toMatchObject({
+      proofMethod: 'runtime_verified', action: 'tool_blocked', enforcementBoundary: 'pd_gate_block_returned_to_host',
+    });
+
+    const episode = rows.find((r) => r.record_kind === 'behavior_episode')!;
+    const effect = rows.find((r) => r.record_kind === 'effect')!;
+    expect(application.episode_key).toBe(episode.observation_key);
+    expect(effect.episode_key).toBe(episode.observation_key);
+    expect(effect.principle_id).toBe('T-01');
+  });
+
+  it('replaying the same enforcement chain is idempotent (no duplicate rows)', () => {
+    seedActivation('act-g1', 'art-g1');
+    const warn: string[] = [];
+    const input = {
+      workspaceDir,
+      sessionId: 'sess-1' as const,
+      runId: 'run-9',
+      toolCallId: 'tool-9',
+      toolName: 'write_file',
+      filePath: 'src/x.ts',
+      activationId: 'act-g1',
+      principleId: 'T-01',
+      ruleId: 'R-1',
+      decision: 'block' as const,
+      logger: { warn: (line: string) => warn.push(line) },
+    };
+    recordGateEnforcementEvidence(input);
+    const originalContentRef = JSON.parse(evidenceRows().find((row) => row.record_kind === 'delivery')!.content_ref_json ?? '{}');
+    conn.getDb().prepare("UPDATE activations SET deactivated_at = '2026-10-02T00:00:00Z' WHERE activation_id = ?").run('act-g1');
+    conn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+      .run(JSON.stringify({ principleId: 'T-01', text: 'later body' }), 'art-g1');
+    recordGateEnforcementEvidence(input);
+    expect(evidenceRows()).toHaveLength(4);
+    expect(warn).toEqual([]);
+    expect(JSON.parse(evidenceRows().find((row) => row.record_kind === 'delivery')!.content_ref_json ?? '{}'))
+      .toEqual(originalContentRef);
+  });
+
+  it('records self-reports as agent_claimed only', () => {
+    seedActivation('act-s1', 'art-s1');
+    recordSelfReportEvidence({
+      workspaceDir,
+      sessionId: 'sess-1',
+      principleId: 'T-01',
+      activationId: 'act-s1',
+      claimText: '删除前确认了目标',
+    });
+    const rows = evidenceRows();
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0]!.payload_json)).toMatchObject({
+      proofMethod: 'agent_claimed', action: 'self_reported',
+    });
+  });
+
+  it('preserves the original occurredAt supplied by a durable self-report source', () => {
+    seedActivation('act-s2', 'art-s2');
+    const sourceTime = '2026-10-02T03:04:05.000Z';
+    recordSelfReportEvidence({
+      workspaceDir,
+      sessionId: 'sess-2',
+      principleId: 'T-01',
+      activationId: 'act-s2',
+      claimText: '删除前确认了目标',
+      occurredAt: sourceTime,
+    });
+    const row = evidenceRows().find((item) => item.record_kind === 'application');
+    expect(row?.occurred_at).toBe(sourceTime);
+  });
+
+  it('writes nothing when principle_receipt_ledger is disabled', () => {
+    const cfg = getDefaultPdConfig() as unknown as {
+      features: Record<string, { category?: string; enabled: boolean }>;
+    };
+    cfg.features.principle_receipt_ledger = { category: 'quiet', enabled: false };
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
+    // Re-open so the config read sees the fresh file (config loader reads per call).
+    conn.close();
+    conn = new SqliteConnection(workspaceDir);
+    seedActivation('act-x', 'art-x');
+
+    recordPromptDeliveryEvidence({
+      workspaceDir,
+      sessionId: 'sess-1',
+      injected: [{ principleId: 'T-01', activationId: 'act-x' }],
+    });
+    recordGateEnforcementEvidence({
+      workspaceDir, sessionId: 'sess-1', toolName: 'write_file', filePath: 'a.ts',
+      activationId: 'act-x', principleId: 'T-01', decision: 'block',
+    });
+    recordSelfReportEvidence({ workspaceDir, sessionId: 'sess-1', principleId: 'T-01', claimText: 'x' });
+    expect(evidenceRows()).toHaveLength(0);
+  });
+
+  it('declares the OpenClaw capability matrix on every append', () => {
+    seedActivation('act-s1', 'art-s1');
+    recordSelfReportEvidence({ workspaceDir, sessionId: 'sess-1', principleId: 'T-01', claimText: 'x' });
+    const caps = conn.getDb()
+      .prepare('SELECT host_kind, capability, status FROM intervention_capability_declarations')
+      .all() as { host_kind: string; capability: string; status: string }[];
+    expect(caps.length).toBeGreaterThanOrEqual(6);
+    const outcome = caps.find((c) => c.capability === 'outcome_observation');
+    expect(outcome?.status).toBe('unknown');
+    const enforcement = caps.find((c) => c.capability === 'enforcement_delivery');
+    expect(enforcement?.status).toBe('supported');
+  });
+
+  it('skips the enforcement chain without toolCallId/runId — no hash fallback, no partial batch', () => {
+    // Without a native event key the episode would be rejected by the
+    // normalizer (episode_requires_native_event_key) and drop the WHOLE
+    // batch — skipping with a warn preserves the other three chain links'
+    // silence contract instead of losing everything.
+    seedActivation('act-nk', 'art-nk');
+    const warn: string[] = [];
+    recordGateEnforcementEvidence({
+      workspaceDir,
+      sessionId: 'sess-1',
+      toolName: 'write_file',
+      filePath: 'a.ts',
+      activationId: 'act-nk',
+      principleId: 'T-01',
+      decision: 'block',
+      logger: { warn: (m: string) => warn.push(m) },
+    });
+    expect(evidenceRows()).toHaveLength(0);
+    expect(warn.join(' ')).toContain('toolCallId/runId');
+  });
+});

@@ -13,9 +13,29 @@ import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
 import { runGovernanceAdmission } from './ingestion/admission.js';
+import { recordCodexPromptDeliveryEvidence, recordCodexDenyEvidence } from './codex-evidence-recorder.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface PdHookResult { stdout: unknown; exitCode: number; stderr: string[] }
+
+/** PD v2 Phase 1: evidence context the emitter needs (subprocess-local). */
+export interface CodexEvidenceContext {
+  workspaceDir: string;
+  evidenceEnabled: boolean;
+  warn: (diagnosticLine: string) => void;
+}
+
+const MAX_DIAGNOSTIC = 500;
+
+function diagnostic(reason: string, nextAction: string): string {
+  const boundedReason = reason.replace(/\s+/g, ' ').trim().slice(0, MAX_DIAGNOSTIC);
+  const boundedNextAction = nextAction.replace(/\s+/g, ' ').trim().slice(0, MAX_DIAGNOSTIC);
+  return `[PD] status=degraded reason=${boundedReason} nextAction=${boundedNextAction}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message.slice(0, MAX_DIAGNOSTIC) : 'unknown_error';
+}
 
 function redactStringFields(data: object): Record<string, unknown> {
   // rc-8: telemetry is redacted string-field by string field (same policy as
@@ -33,7 +53,7 @@ function redactStringFields(data: object): Record<string, unknown> {
  * writer, so the Codex host path stays independent of the OpenClaw plugin
  * (codex-adapter must not depend on principles-disciple — bundle guard).
  */
-function codexEventEmitter(stateDir: string): HostEventEmitter {
+function codexEventEmitter(stateDir: string, evidence?: CodexEvidenceContext): HostEventEmitter {
   return {
     recordRuntimeV2ActivationsInjected(data) {
       appendEventLogLine(stateDir, {
@@ -43,6 +63,30 @@ function codexEventEmitter(stateDir: string): HostEventEmitter {
         sessionId: data.sessionId,
         data,
       });
+      // PD v2 Phase 1: the durable source line is appended — now record the
+      // normalized agent-context delivery attempts (submitted, not delivered).
+      // Degrades to a bounded diagnostic; never affects the hook result.
+      if (evidence) {
+        try {
+          const injected = data.principleIds
+            .map((principleId, index) => ({
+              principleId,
+              activationId: data.activationIds[index] ?? '',
+              artifactId: data.artifactIds[index],
+            }))
+            .filter((entry) => entry.activationId.length > 0);
+          recordCodexPromptDeliveryEvidence({
+            workspaceDir: evidence.workspaceDir,
+            sessionId: data.sessionId,
+            ...(data.runId ? { turnId: data.runId } : {}),
+            injected,
+            evidenceEnabled: evidence.evidenceEnabled,
+            warn: evidence.warn,
+          });
+        } catch (error: unknown) {
+          evidence.warn(diagnostic(`codex_evidence_delivery_failed:${errorMessage(error)}`, 'The raw injected event is durable; replay is safe. The hook result is unaffected.'));
+        }
+      }
     },
     recordToolCall(sessionId, data) {
       appendEventLogLine(stateDir, {
@@ -54,17 +98,6 @@ function codexEventEmitter(stateDir: string): HostEventEmitter {
       });
     },
   };
-}
-const MAX_DIAGNOSTIC = 500;
-
-function diagnostic(reason: string, nextAction: string): string {
-  const boundedReason = reason.replace(/\s+/g, ' ').trim().slice(0, MAX_DIAGNOSTIC);
-  const boundedNextAction = nextAction.replace(/\s+/g, ' ').trim().slice(0, MAX_DIAGNOSTIC);
-  return `[PD] status=degraded reason=${boundedReason} nextAction=${boundedNextAction}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message.slice(0, MAX_DIAGNOSTIC) : 'unknown_error';
 }
 
 /**
@@ -255,6 +288,15 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     const ingestionDiagnostics = ingestionEnabled
       ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
       : [];
+    // PD v2 Phase 1: evidence context for this subprocess invocation. The
+    // ledger flag follows the OpenClaw convention (principle_receipt_ledger
+    // gates normalized evidence writes).
+    const evidenceDiagnostics: string[] = [];
+    const evidenceContext: CodexEvidenceContext = {
+      workspaceDir: resolution.workspaceDir,
+      evidenceEnabled: flags.principle_receipt_ledger?.enabled === true,
+      warn: (line) => evidenceDiagnostics.push(diagnostic(line.replace(/^\[PD:Evidence\] /, 'codex_evidence:'), 'Inspect workspace state.db evidence ledger; the durable raw source allows safe replay.')),
+    };
     // PRI-750: emit shared-path injection/tool events with the host's natural
     // turn/tool ids (turn_id → runId, tool_use_id → toolCallId) through the core
     // event-JSONL writer (same events_*.jsonl format as the OpenClaw EventLog;
@@ -264,7 +306,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       projectDir: requestedCwd,
       hostKind: 'codex',
       toolSemantics: CODEX_TOOL_SEMANTICS,
-      events: codexEventEmitter(path.join(resolution.workspaceDir, '.state')),
+      events: codexEventEmitter(path.join(resolution.workspaceDir, '.state'), evidenceContext),
       // PRI-780 (revised after Codex review round 2 P1): NO context provider —
       // v2 rules stay SUSPENDED on Codex (never loaded context-blind). See
       // annotateContextWarnings for the structured unsupported declaration.
@@ -279,8 +321,54 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       event.context.sessionId,
       result.metadata?.evaluations,
     );
-    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...ingestionDiagnostics];
-    return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
+    // PD v2 Phase 1: encode BEFORE recording an attributed deny — a
+    // runtime_verified application claims only what reached the stdout
+    // channel (codex_permission_decision_encoded boundary). Dormant while
+    // v2 enforcement is suspended (PRI-780); wired honestly for the day it
+    // is not.
+    const encoded = adapter.encodeOutput(result, event.kind);
+    if (result.decision === 'deny') {
+      try {
+        let liveActivationId: string | undefined;
+        const evaluations = result.metadata?.evaluations;
+        if (Array.isArray(evaluations)) {
+          for (const entry of evaluations) {
+            if (typeof entry !== 'object' || entry === null) continue;
+            const record = entry as { activationMode?: unknown; activationId?: unknown };
+            if (record.activationMode === 'live' && typeof record.activationId === 'string' && record.activationId.length > 0) {
+              ({ activationId: liveActivationId } = record);
+              break;
+            }
+          }
+        }
+        const { metadata } = result;
+        const principleId = typeof metadata?.principleId === 'string' ? metadata.principleId : undefined;
+        const ruleId = typeof metadata?.ruleId === 'string' ? metadata.ruleId : undefined;
+        const rawPayload = parsed as Record<string, unknown>;
+        const toolName = typeof rawPayload?.tool_name === 'string'
+          ? String(rawPayload.tool_name)
+          : 'unknown-tool';
+        const toolUseId = typeof rawPayload?.tool_use_id === 'string'
+          ? String(rawPayload.tool_use_id)
+          : undefined;
+        recordCodexDenyEvidence({
+          workspaceDir: resolution.workspaceDir,
+          sessionId: event.context.sessionId,
+          ...(toolUseId ? { toolUseId } : {}),
+          toolName,
+          activationId: liveActivationId,
+          principleId,
+          ruleId,
+          reason: result.reason,
+          evidenceEnabled: evidenceContext.evidenceEnabled,
+          warn: evidenceContext.warn,
+        });
+      } catch (error: unknown) {
+        evidenceDiagnostics.push(diagnostic(`codex_evidence_deny_failed:${errorMessage(error)}`, 'The deny decision was already encoded; evidence replay from the durable source is safe.'));
+      }
+    }
+    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics];
+    return { stdout: encoded, exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;
     const nextAction = error instanceof CodexEncoderError ? error.nextAction : 'Inspect PD Workspace state and retry; the hook failed open.';

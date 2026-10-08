@@ -68,6 +68,10 @@ export * from './codex-legacy-registration.js';
 // PRI-625 Slice D: transcript locator moved here so the §15 health service
 // computes per-rollout lag with the SAME locator the catch-up path uses.
 export * from './codex-transcript-locate.js';
+// PD v2 Phase 1: shared intervention evidence ingress — the ONE validated
+// entry point every host source (OpenClaw hooks, Codex pd-hook) uses to
+// append normalized evidence. Never throws; never delays a hook.
+export * from './intervention-evidence-ingress.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',
