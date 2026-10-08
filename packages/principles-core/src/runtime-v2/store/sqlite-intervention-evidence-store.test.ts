@@ -205,6 +205,35 @@ describe('SqliteInterventionEvidenceStore', () => {
     expect(read.relations.unresolvedReferences).toHaveLength(0);
   });
 
+  it('keeps a source-known activation id queryable while marking the missing occurrence snapshot unresolved', () => {
+    const application = {
+      observationKey: 'openclaw|application|selfreport|sess-1|T-01',
+      sourceLocator: 'principle_applications:17',
+      kind: 'application' as const,
+      nativeRefs: { hostKind: 'openclaw' as const, sessionId: 'sess-1' },
+      principleId: 'T-01',
+      activationId: 'act-deactivated',
+      payload: { proofMethod: 'agent_claimed' as const, action: 'self_reported' as const, claimText: 'I followed T-01' },
+    };
+    const result = store.appendObservationBatch(normalized(deliveryBatch({ observations: [application] })));
+    expect(result.ok).toBe(true);
+    expect(result.insertedCount).toBe(1);
+
+    const read = store.readAuditRelations({ type: 'activation', activationId: 'act-deactivated' });
+    expect(read.available).toBe(true);
+    if (!read.available) return;
+    expect(read.relations.applications).toHaveLength(1);
+    expect(read.relations.applications[0]).toMatchObject({
+      activationId: 'act-deactivated',
+      associationStatus: 'pending_association',
+    });
+    expect(read.relations.unresolvedReferences).toEqual([{
+      evidenceId: read.relations.applications[0]!.evidenceId,
+      missingKey: 'act-deactivated',
+      field: 'activationRef',
+    }]);
+  });
+
   it('resolves correction_of against evidence_id (not observation_key)', () => {
     // correctionOf cites an evidenceId per the contract; the audit-summary
     // reference probe must use the evidence_id column for that field only.

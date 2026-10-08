@@ -418,6 +418,9 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
       pendingFields.push({ field, missingKey: key });
     }
   }
+  if (activationId !== undefined && activationRef === undefined) {
+    pendingFields.push({ field: 'activationRef', missingKey: activationId });
+  }
 
   return {
     evidenceId,
@@ -619,7 +622,7 @@ export class SqliteInterventionEvidenceStore {
           record.sourceLocator,
           record.kind,
           record.principleId ?? null,
-          record.activationRef?.activationId ?? null,
+          record.activationRef?.activationId ?? record.activationId ?? null,
           record.deliveryKey ?? null,
           record.episodeKey ?? null,
           record.effectKey ?? null,

@@ -230,6 +230,8 @@ export interface InterventionObservationInput {
   nativeRefs: InterventionNativeRefs;
   principleId?: string;
   contentRef?: InterventionContentRef;
+  /** Source-known activation ID; this alone does not claim the occurrence is resolved. */
+  activationId?: string;
   activationRef?: InterventionActivationOccurrenceRef;
   /** observationKey of the related record, when known — exact references only. */
   deliveryKey?: string;
@@ -279,6 +281,8 @@ export interface NormalizedInterventionRecord {
   nativeRefs: InterventionNativeRefs;
   principleId?: string;
   contentRef?: InterventionContentRef;
+  /** Source-known activation ID; this alone does not claim the occurrence is resolved. */
+  activationId?: string;
   activationRef?: InterventionActivationOccurrenceRef;
   deliveryKey?: string;
   episodeKey?: string;

@@ -79,7 +79,7 @@ const BATCH_KEYS = new Set([
 ]);
 const OBSERVATION_KEYS = new Set([
   'observationKey', 'sourceLocator', 'kind', 'occurredAt', 'nativeRefs',
-  'principleId', 'contentRef', 'activationRef', 'deliveryKey', 'episodeKey',
+  'principleId', 'contentRef', 'activationId', 'activationRef', 'deliveryKey', 'episodeKey',
   'effectKey', 'correctionOf', 'correctionReason', 'payload',
 ]);
 const NATIVE_REF_KEYS = new Set([
@@ -495,6 +495,15 @@ function normalizeObservation(
     const activationRef = normalizeActivationRef(raw.activationRef);
     if (activationRef.error || !activationRef.value) return { error: activationRef.error ?? 'observation_activationRef_invalid' };
     record.activationRef = activationRef.value;
+  }
+  const activationId = strings.read(raw, 'activationId', 256);
+  if (activationId.error) return { error: activationId.error };
+  if (activationId.value !== undefined && record.activationRef
+    && activationId.value !== record.activationRef.activationId) {
+    return { error: 'observation_activation_id_mismatch' };
+  }
+  if (activationId.value !== undefined && !record.activationRef) {
+    record.activationId = activationId.value;
   }
 
   if (record.contentRef && record.principleId !== undefined && record.contentRef.principleId !== record.principleId) {

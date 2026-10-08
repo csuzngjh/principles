@@ -235,6 +235,42 @@ describe('application proof boundary (ADR-0027 §2.3)', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('keeps a source-known activation id without treating it as a resolved occurrence', () => {
+    const result = normalizeInterventionEvidenceBatch(validBatch({
+      observations: [{ ...agentClaim, activationId: 'act-original' }],
+    }));
+    const record = firstRecord(result);
+    expect(record.activationId).toBe('act-original');
+    expect(record.activationRef).toBeUndefined();
+  });
+
+  it('rejects a source activation id that disagrees with its resolved occurrence', () => {
+    const result = normalizeInterventionEvidenceBatch(validBatch({
+      observations: [{ ...agentClaim, activationId: 'act-other', activationRef: {
+        activationId: 'act-original', sourceSnapshotDigest: 'sha256:bb00000000000000000000000000000000000000000000000000000000000000',
+      } }],
+    }));
+    expect(result).toEqual({ ok: false, reason: 'observation_activation_id_mismatch' });
+  });
+
+  it('bounds a source-known activation id', () => {
+    const result = normalizeInterventionEvidenceBatch(validBatch({
+      observations: [{ ...agentClaim, activationId: 'a'.repeat(257) }],
+    }));
+    expect(result).toEqual({ ok: false, reason: 'observation_activationId_too_long:257>256' });
+  });
+
+  it('does not allow a source-known id to satisfy runtime_verified activation proof', () => {
+    const result = normalizeInterventionEvidenceBatch(validBatch({
+      observations: [{
+        observationKey: 'k', sourceLocator: 'l', kind: 'application',
+        nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01', activationId: 'act-original',
+        payload: { proofMethod: 'runtime_verified', action: 'tool_blocked', enforcementBoundary: 'pd_gate_block_returned' },
+      }],
+    }));
+    expect(result).toEqual({ ok: false, reason: 'runtime_verified_application_requires_activation_reference' });
+  });
+
   it('rejects agent_claimed that smuggles an enforcement boundary', () => {
     const result = normalizeInterventionEvidenceBatch(validBatch({
       observations: [{ ...agentClaim, payload: { ...agentClaim.payload, enforcementBoundary: 'runtime' } }],

@@ -323,6 +323,7 @@ export function recordSelfReportEvidence(input: SelfReportEvidenceInput): void {
     },
     principleId: input.principleId,
     ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
+    ...(input.activationId && !activationRef ? { activationId: input.activationId } : {}),
     ...(activationRef ? { activationRef } : {}),
     payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: input.claimText.slice(0, 200) },
   };

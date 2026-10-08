@@ -13,7 +13,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteInterventionEvidenceStore, getDefaultPdConfig } from '@principles/core/runtime-v2';
 import {
   alignActivationIds,
   recordSelfReportFromText,
@@ -178,6 +178,8 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
 
       const clearFaultDb = new SqliteConnection(workspaceDir);
       clearFaultDb.getDb().exec('DROP TRIGGER fail_first_normalized_mirror');
+      clearFaultDb.getDb().prepare('UPDATE activations SET deactivated_at = ? WHERE activation_id = ?')
+        .run('2026-10-02T00:00:00.000Z', 'act-original');
       clearFaultDb.close();
       setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-current']);
       recordSelfReportFromText(
@@ -192,20 +194,88 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
         WHERE kind = 'self_reported' AND principle_id = 'T-01' AND session_id = ?
       `).get(sessionId) as { activation_id: string; digest: string; created_at: string };
       const normalized = readerConn!.getDb().prepare(`
-        SELECT activation_id, occurred_at, payload_json FROM intervention_evidence_records
+        SELECT activation_id, activation_ref_json, occurred_at, payload_json FROM intervention_evidence_records
         WHERE source_kind = 'openclaw_plugin_event_log'
           AND source_locator = ?
           AND observation_key = ?
       `).get(
         `openclaw-application-ledger:${sessionId}`,
         `openclaw|application|agent_claimed|${sessionId}|T-01`,
-      ) as { activation_id: string | null; occurred_at: string | null; payload_json: string };
+      ) as { activation_id: string | null; activation_ref_json: string | null; occurred_at: string | null; payload_json: string };
       expect(countNormalizedRows()).toBe(1);
       expect(source).toMatchObject({ activation_id: 'act-original', digest: '原始持久化声明' });
       expect(normalized.activation_id).toBe('act-original');
+      expect(normalized.activation_ref_json).toBeNull();
       expect(normalized.occurred_at).toBe(source.created_at);
       expect(JSON.parse(normalized.payload_json)).toMatchObject({ claimText: '原始持久化声明' });
       expect(JSON.parse(normalized.payload_json).claimText).not.toBe('重放时的新声明');
+      const audit = new SqliteInterventionEvidenceStore(readerConn!).readAuditRelations({
+        type: 'activation', activationId: 'act-original',
+      });
+      expect(audit.available).toBe(true);
+      if (audit.available) {
+        expect(audit.relations.applications[0]?.associationStatus).toBe('pending_association');
+        expect(audit.relations.unresolvedReferences).toContainEqual({
+          evidenceId: audit.relations.applications[0]!.evidenceId,
+          missingKey: 'act-original',
+          field: 'activationRef',
+        });
+      }
+    } finally {
+      clearSession(sessionId);
+    }
+  });
+
+  it('keeps an already-resolved normalized mirror immutable when its activation is later deactivated', () => {
+    const cfg = getDefaultPdConfig() as unknown as {
+      features: Record<string, { category?: string; enabled: boolean }>;
+    };
+    cfg.features.principle_receipt_ledger = { category: 'quiet', enabled: true };
+    cfg.features.principle_receipt_self_report = { category: 'quiet', enabled: true };
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
+
+    const setup = new SqliteConnection(workspaceDir);
+    const db = setup.getDb();
+    const timestamp = '2026-10-01T00:00:00.000Z';
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id,
+                content_json, created_at, updated_at)
+                VALUES ('art-stable', 'principle', 'task-stable', 'T-01', ?, ?, ?)`)
+      .run(JSON.stringify({ principleId: 'T-01', text: 'original' }), timestamp, timestamp);
+    db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                VALUES ('act-stable', 'idem-stable', 'art-stable', 'prompt', 'prompt_activate', 'ref', ?)`)
+      .run(timestamp);
+    setup.close();
+
+    const sessionId = 'sess-self-report-stable-mirror';
+    try {
+      setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-stable']);
+      recordSelfReportFromText(workspaceDir, '📌 应用了你的原则「T-01」：持久声明', sessionId, logger);
+      const before = readerConn!.getDb().prepare(`
+        SELECT activation_id, activation_ref_json, record_digest FROM intervention_evidence_records
+        WHERE source_locator = ? AND observation_key = ?
+      `).get(
+        `openclaw-application-ledger:${sessionId}`,
+        `openclaw|application|agent_claimed|${sessionId}|T-01`,
+      ) as { activation_id: string; activation_ref_json: string; record_digest: string };
+      expect(before.activation_id).toBe('act-stable');
+      expect(before.activation_ref_json).toContain('sourceSnapshotDigest');
+
+      const deactivate = new SqliteConnection(workspaceDir);
+      deactivate.getDb().prepare('UPDATE activations SET deactivated_at = ? WHERE activation_id = ?')
+        .run('2026-10-02T00:00:00.000Z', 'act-stable');
+      deactivate.close();
+      setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-stable']);
+      recordSelfReportFromText(workspaceDir, '📌 应用了你的原则「T-01」：持久声明', sessionId, logger);
+
+      const after = readerConn!.getDb().prepare(`
+        SELECT activation_id, activation_ref_json, record_digest FROM intervention_evidence_records
+        WHERE source_locator = ? AND observation_key = ?
+      `).get(
+        `openclaw-application-ledger:${sessionId}`,
+        `openclaw|application|agent_claimed|${sessionId}|T-01`,
+      ) as { activation_id: string; activation_ref_json: string; record_digest: string };
+      expect(after).toEqual(before);
+      expect(warnings.some((message) => message.includes('source_conflict'))).toBe(false);
     } finally {
       clearSession(sessionId);
     }

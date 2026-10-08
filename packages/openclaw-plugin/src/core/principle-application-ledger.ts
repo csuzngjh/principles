@@ -284,15 +284,20 @@ export function recordSelfReportFromText(
         WHERE kind = 'self_reported' AND principle_id = ? AND session_id IS ?
       `).get(principleId, sessionId ?? null);
       if (isSelfReportSourceRow(source)) {
-        recordSelfReportEvidence({
-          workspaceDir,
-          sessionId,
-          principleId,
-          ...(source.activation_id !== null ? { activationId: source.activation_id } : {}),
-          claimText: source.digest,
-          occurredAt: source.created_at,
-          logger,
-        });
+        const mirrorState = getSelfReportMirrorState(db, sessionId, principleId, source.activation_id);
+        if (mirrorState === 'missing') {
+          recordSelfReportEvidence({
+            workspaceDir,
+            sessionId,
+            principleId,
+            ...(source.activation_id !== null ? { activationId: source.activation_id } : {}),
+            claimText: source.digest,
+            occurredAt: source.created_at,
+            logger,
+          });
+        } else if (mirrorState === 'invalid') {
+          logger?.warn?.(`[PD:ReceiptLedger] self_report replay skipped: normalized mirror identity is malformed for principle ${safeLogField(principleId)}; next: inspect the existing evidence row before replay`);
+        }
       } else {
         logger?.warn?.(`[PD:ReceiptLedger] self_report replay skipped: durable source row unavailable for principle ${safeLogField(principleId)}`);
       }
@@ -301,6 +306,48 @@ export function recordSelfReportFromText(
     }
   }
   return written;
+}
+
+function getSelfReportMirrorState(
+  db: Database.Database,
+  sessionId: string | undefined,
+  principleId: string,
+  activationId: string | null,
+): 'missing' | 'present' | 'invalid' {
+  try {
+    const table: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'intervention_evidence_records'").get();
+    if (table === undefined) return 'missing';
+    if (!isRecord(table) || !Object.hasOwn(table, 'name') || table.name !== 'intervention_evidence_records') return 'invalid';
+    const sourceLocator = `openclaw-application-ledger:${sessionId ?? 'no-session'}`;
+    const observationKey = `openclaw|application|agent_claimed|${sessionId ?? '-'}|${principleId}`;
+    const row: unknown = db.prepare(`
+      SELECT evidence_id, source_kind, source_locator, observation_key, record_kind, activation_id, record_digest
+      FROM intervention_evidence_records
+      WHERE source_kind = 'openclaw_plugin_event_log' AND source_locator = ? AND observation_key = ?
+    `).get(sourceLocator, observationKey);
+    if (row === undefined) return 'missing';
+    if (!isRecord(row)
+    || !['evidence_id', 'source_kind', 'source_locator', 'observation_key', 'record_kind', 'activation_id', 'record_digest']
+      .every((key) => Object.hasOwn(row, key))
+    || row.source_kind !== 'openclaw_plugin_event_log'
+    || row.source_locator !== sourceLocator
+    || row.observation_key !== observationKey
+    || row.record_kind !== 'application'
+    || row.activation_id !== activationId
+    || typeof row.evidence_id !== 'string'
+    || !/^sha256:[a-f0-9]{64}$/.test(row.evidence_id)
+    || typeof row.record_digest !== 'string'
+    || !/^sha256:[a-f0-9]{64}$/.test(row.record_digest)) {
+      return 'invalid';
+    }
+    return 'present';
+  } catch {
+    return 'invalid';
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isSelfReportSourceRow(value: unknown): value is Record<string, unknown> & {
