@@ -205,9 +205,19 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
     // Injection itself still works on the shared route.
     expect(JSON.stringify(result)).toContain('PROD_1');
 
+    await runtime.dispatch({
+      kind: 'before_prompt_build',
+      source: 'codex:user_prompt_submit',
+      rawPayload: {},
+      context: { sessionId: 'codex-session-1', workspaceDir, turnId: 'codex-turn-1' },
+    } as unknown as HostEvent);
+
     // But it must not claim a fair rotation it does not have.
-    expect(emitted).toHaveLength(1);
+    expect(emitted).toHaveLength(2);
     const data = emitted[0]!;
+    expect(data.hostKind).toBe('codex');
+    expect(data.eventId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(emitted[1]!.eventId).not.toBe(data.eventId);
     expect(data.selectionPolicy).toBe('legacy_fifo_prefix_v1');
     expect(data.rotationStartIndex).toBeUndefined();
     expect(data.selectionRoundOrdinal).toBeUndefined();

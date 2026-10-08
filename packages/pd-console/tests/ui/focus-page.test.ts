@@ -691,7 +691,7 @@ describe("FocusPage: PRI-889 PendingReviewCard wiring contract", () => {
     expect(focusSrc).toContain(
       "const decisionDisabled = !isActionable || actionLoading || actionsLocked || decidedOutcome !== null;",
     );
-    const gated = focusSrc.match(/disabled=\{decisionDisabled\}/g) ?? [];
+    const gated = focusSrc.match(/disabled=\{decisionDisabled(?: \|\|[^}]+)?\}/g) ?? [];
     expect(gated.length).toBe(3);
   });
 });

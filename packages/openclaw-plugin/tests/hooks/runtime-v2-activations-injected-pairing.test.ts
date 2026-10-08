@@ -137,6 +137,9 @@ describe('PRI-537: activations-injected event pairs source arrays with the injec
     expect(injectionEvents).toHaveLength(1);
     const d = injectionEvents[0]!.data;
 
+    expect(d['hostKind']).toBe('openclaw');
+    expect(d['eventId']).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+
     // Truncation must have engaged — otherwise this test proves nothing
     // about the pairing contract (ERR-088 vacuous-pass guard).
     expect(d['v2Truncated']).toBe(true);

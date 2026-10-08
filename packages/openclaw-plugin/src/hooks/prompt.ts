@@ -1,6 +1,7 @@
  
  
 import * as fs from 'fs';
+import { randomUUID } from 'node:crypto';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -703,6 +704,8 @@ export async function handleBeforePromptBuild(
       // same aligned list so index alignment cannot drift between them.
       const alignedPrinciples = alignInjectedPrinciples(dedupedV2, runtimeV2PrincipleIds);
       eventLog.recordRuntimeV2ActivationsInjected({
+        hostKind: 'openclaw',
+        eventId: randomUUID(),
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
         // PRI-750: host run/turn id from the OpenClaw hook context — DIRECT

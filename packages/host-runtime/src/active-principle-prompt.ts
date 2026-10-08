@@ -16,7 +16,7 @@ import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
 
 /** PRI-904 SPEC §10: bounded diagnostic id lists (mirrors the core selector's cap of 16). */
-const MAX_SHARED_DIAGNOSTIC_IDS = 16;
+export const MAX_SHARED_DIAGNOSTIC_IDS = 16;
 
 export interface ActivePrinciplePromptResult {
   additionalContext: string;

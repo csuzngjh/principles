@@ -136,7 +136,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
 
   // ── 1. activation_failed includes nextAction field ────────────────────────
 
-  describe('activation_failed error response', () => {
+  describe('capacity-refused error response (prompt pre-write gate)', () => {
     it('includes nextAction field when artifact is missing', async () => {
       const approvalId = seedApproval('prompt', 'pending', {
         summary: 'Approvable prompt record (no artifact)',
@@ -148,16 +148,21 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         body: JSON.stringify({ note: 'Test approval' }),
       });
 
-      // Artifact does not exist → dispatch fails → activation_failed
-      expect(status).toBe(500);
-      const rec = requireRecord(body, 'activation_failed response');
-      expect(getStringField(rec, 'error')).toBe('activation_failed');
+      // PD_PROMPT_CAPACITY_V1 R-B2: a prompt approval whose artifact is
+      // unreadable is refused by the pre-write capacity gate (content
+      // unconfirmed) — BEFORE any governance write, with a structured
+      // reason and nextAction. (The activation_failed 500 shape for
+      // post-write failures is still covered by the code_tool_hook case
+      // below and the ledger-membership case in
+      // governance-approve-activation.test.ts.)
+      expect(status).toBe(422);
+      const rec = requireRecord(body, 'capacity refusal response');
+      expect(getStringField(rec, 'error')).toBe('prompt_capacity_refused');
 
       // Verify nextAction field is present
       const nextAction = getStringField(rec, 'nextAction');
       expect(nextAction).toBeDefined();
       expect(nextAction).toContain('artifact');
-      expect(nextAction).toContain('regenerate');
     });
 
     it('includes structured reason in message', async () => {
@@ -190,12 +195,13 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         body: JSON.stringify({ note: 'Test approval' }),
       });
 
-      expect(status).toBe(500);
-      const rec = requireRecord(body, 'activation_failed response');
+      // R-B2: nothing was written, so the refusal states the approval remains
+      // pending (the stronger predecessor of "rolled back to pending").
+      expect(status).toBe(422);
+      const rec = requireRecord(body, 'capacity refusal response');
       const message = getStringField(rec, 'message');
       expect(message).toBeDefined();
-      // Message should indicate rollback status
-      expect(message).toMatch(/rolled back|approved but activation failed/);
+      expect(message).toMatch(/refused before any write|remains pending/);
     });
   });
 
@@ -207,13 +213,13 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         summary: 'Re-approvable after rollback',
       });
 
-      // First approve: will fail because artifact is missing
+      // First approve: refused by the capacity gate because artifact is missing
       const { status: firstStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'First attempt' }),
       });
-      expect(firstStatus).toBe(500);
+      expect(firstStatus).toBe(422);
 
       // Verify approval is back to pending (not stuck in approved)
       const { status: detailStatus, body: detailBody } = await fetchJson(`/api/v1/approvals/${approvalId}`);
@@ -229,7 +235,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Retry attempt' }),
       });
-      expect(retryStatus).toBe(500); // still fails (no artifact) but NOT 409 already_decided
+      expect(retryStatus).toBe(422); // still refused (no artifact) but NOT 409 already_decided
     });
 
     it('does not return 409 conflict after activation_failed rollback', async () => {
@@ -251,7 +257,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         body: JSON.stringify({ note: 'Second' }),
       });
       expect(status).not.toBe(409);
-      expect(status).toBe(500); // activation_failed again
+      expect(status).toBe(422); // capacity refusal again
     });
   });
 
@@ -368,8 +374,8 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         }),
       ]);
 
-      expect(result1.status).toBe(500);
-      expect(result2.status).toBe(500);
+      expect(result1.status).toBe(422);
+      expect(result2.status).toBe(422);
 
       const rec1 = requireRecord(result1.body, 'error 1');
       const rec2 = requireRecord(result2.body, 'error 2');

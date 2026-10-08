@@ -27,6 +27,8 @@ export type {
   ArtifactLineageIdentity,
   ApprovalStats,
   ApprovalListResult,
+  PromptReplacementCommit,
+  PromptReplacementOutcome,
 } from './activation-types.js';
 
 export {
@@ -100,12 +102,27 @@ export { createProductionGateDeps, compileHardenedRuleEvaluator } from './produc
 export { ApprovalCompletionService } from './approval-completion-service.js';
 export type { ApprovalCompletionInput, ApprovalCompletionResult } from './approval-completion-service.js';
 
+// PD_PROMPT_CAPACITY_V1 R-B3: prompt-channel version replacement — detection,
+// owner-revision artifact assembly, and the atomic commit types.
+export {
+  detectPromptReplacementTarget,
+  buildOwnerRevisionArtifact,
+  revisionDigest,
+} from './prompt-replacement.js';
+export type {
+  PromptReplacementTarget,
+  PromptReplacementDetection,
+  OwnerRevisionArtifactDraft,
+  OwnerRevisionBuildResult,
+} from './prompt-replacement.js';
+
 export {
   RUNTIME_V2_PRINCIPLE_BUDGET,
   isRecord as isArtifactRecord,
   filterPromptActivations,
   resolvePrincipleFromArtifact,
   trimToBudget,
+  listEntryLine,
   renderPrinciplesToDirectives,
 } from './prompt-activation-reader-contract.js';
 

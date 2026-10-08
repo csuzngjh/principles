@@ -29,6 +29,7 @@ describe('PRI-750 receipt chain event fields (runId / toolCallId)', () => {
     };
     expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, { ...base, runId: 'turn-1' })).toBe(true);
     expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, base)).toBe(true);
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, { ...base, hostKind: 'codex', eventId: 'evt-1' })).toBe(true);
   });
 
   it('PRI-904: accepts the fair-rotation observability fields and stays compatible without them', () => {

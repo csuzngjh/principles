@@ -54,6 +54,18 @@ function intAfterPrefix(message: string, prefix: string): number | null {
   return Number(message.slice(valueStart, end));
 }
 
+/** Digit run between `startMarker` and `endMarker` (first occurrence) — else null. */
+function captureDigitsAfter(message: string, startMarker: string, endMarker: string): number | null {
+  const start = message.indexOf(startMarker);
+  if (start === -1) return null;
+  const valueStart = start + startMarker.length;
+  let end = valueStart;
+  while (end < message.length && message.charCodeAt(end) >= 48 && message.charCodeAt(end) <= 57) end += 1;
+  if (end === valueStart) return null;
+  if (message.indexOf(endMarker, end) !== end) return null;
+  return Number(message.slice(valueStart, end));
+}
+
 /**
  * Localize one server warning. Unknown codes degrade to the raw server text
  * verbatim (title === detail) — never a placeholder, never dropped (rc-9).
@@ -109,6 +121,30 @@ export function localizeApprovalWarning(warning: string, t: TranslateFn): Locali
       ...base,
       title: t('pages.focus.approveWarning.checkFailedTitle'),
       body: t('pages.focus.approveWarning.checkFailedBody'),
+      activationAction: true,
+    };
+  }
+  // PD_PROMPT_CAPACITY_V1 AC-02/R-A3: 超长是与 truncated 无关的独立事实——
+  // 批准后反馈必须直接说"这条本身装不下"，而不是笼统的预算排除。
+  if (code === 'injection_oversized') {
+    // server text: "... exceeds the cap (2000 chars, measured in UTF-16 ..."
+    const costDigits = captureDigitsAfter(message, '(', ' chars');
+    return {
+      ...base,
+      title: t('pages.focus.approveWarning.oversizedTitle'),
+      body: costDigits !== null
+        ? t('pages.focus.approveWarning.oversizedBody', { cost: costDigits })
+        : t('pages.focus.approveWarning.oversizedBodySimple'),
+      activationAction: true,
+    };
+  }
+  // AC-01: 路由事实无法确认时，批准后反馈明说"未确认"并列出各宿主预测，
+  // 不猜测 FIFO 或轮转。
+  if (code === 'injection_capacity_unconfirmed') {
+    return {
+      ...base,
+      title: t('pages.focus.approveWarning.capacityUnconfirmedTitle'),
+      body: t('pages.focus.approveWarning.capacityUnconfirmedBody'),
       activationAction: true,
     };
   }

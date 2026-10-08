@@ -88,6 +88,36 @@ describe('localizeApprovalWarning (PRI-908)', () => {
     expect(result.detail).toBe(raw);
     expect(result.activationAction).toBe(false);
   });
+
+  // PD_PROMPT_CAPACITY_V1 AC-02/R-A3: oversized is an independent fact — its
+  // own code, its own copy, with the cost parsed when present.
+  it('maps injection_oversized to oversized copy with the parsed cost', () => {
+    const raw = 'injection_oversized: the activation is committed but its own list entry exceeds the cap (2000 chars, measured in UTF-16 units on the legacy_trim route) — it can never enter the prompt as written, regardless of rotation or free capacity. nextAction=shorten the statement';
+    const result = localizeApprovalWarning(raw, fakeT);
+    expect(result.code).toBe('injection_oversized');
+    expect(result.title).toBe('pages.focus.approveWarning.oversizedTitle');
+    expect(result.body).toBe(
+      `pages.focus.approveWarning.oversizedBody?${JSON.stringify({ cost: 2000 })}`,
+    );
+    expect(result.activationAction).toBe(true);
+    expect(result.detail).toBe(raw);
+  });
+
+  it('degrades injection_oversized to placeholder-free copy when the cost is unparseable', () => {
+    const result = localizeApprovalWarning('injection_oversized: this principle alone is oversized', fakeT);
+    expect(result.code).toBe('injection_oversized');
+    expect(result.body).toBe('pages.focus.approveWarning.oversizedBodySimple');
+  });
+
+  it('maps injection_capacity_unconfirmed to the unconfirmed copy (AC-01)', () => {
+    const raw = 'injection_capacity_unconfirmed: the activation is committed but this workspace\'s effective injection route cannot be confirmed (multi_host_routes_differ); per-host forecasts: openclaw=legacy_trim (1855c, truncated); codex=shared_render (1980c, truncated). nextAction=pass an explicit target host (openclaw|codex)';
+    const result = localizeApprovalWarning(raw, fakeT);
+    expect(result.code).toBe('injection_capacity_unconfirmed');
+    expect(result.title).toBe('pages.focus.approveWarning.capacityUnconfirmedTitle');
+    expect(result.body).toBe('pages.focus.approveWarning.capacityUnconfirmedBody');
+    expect(result.activationAction).toBe(true);
+    expect(result.detail).toBe(raw);
+  });
 });
 
 describe('validateApprovalsGrouped promptInjection (PRI-908)', () => {
