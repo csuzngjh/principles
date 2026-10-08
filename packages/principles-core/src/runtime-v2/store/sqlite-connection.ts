@@ -769,7 +769,7 @@ export class SqliteConnection {
     ).get('trigger', name);
     const triggerSqlContains = (row: unknown, marker: string): boolean =>
       isRecord(row) && typeof row.sql === 'string' && row.sql.includes(marker);
-    const updateTriggerCurrent = triggerSqlContains(readTriggerSql('intervention_evidence_records_no_update'), 'authorized evidence text redaction');
+    const updateTriggerCurrent = triggerSqlContains(readTriggerSql('intervention_evidence_records_no_update'), 'authorized source expiry text redaction');
     const deleteTriggerCurrent = triggerSqlContains(readTriggerSql('intervention_evidence_records_no_delete'), 'intervention evidence records are immutable');
     if (!hasRedactionColumn(readEvidenceColumns()) || !updateTriggerCurrent || !deleteTriggerCurrent) {
       // Column and trigger changes are one bounded migration. Recheck under
@@ -779,7 +779,7 @@ export class SqliteConnection {
         if (!hasRedactionColumn(readEvidenceColumns())) {
           db.prepare('ALTER TABLE intervention_evidence_records ADD COLUMN content_redacted_at TEXT').run();
         }
-        if (!triggerSqlContains(readTriggerSql('intervention_evidence_records_no_update'), 'authorized evidence text redaction')) {
+        if (!triggerSqlContains(readTriggerSql('intervention_evidence_records_no_update'), 'authorized source expiry text redaction')) {
           db.prepare('DROP TRIGGER IF EXISTS intervention_evidence_records_no_update').run();
           db.prepare(updateTriggerStatement).run();
         }

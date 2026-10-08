@@ -558,14 +558,14 @@ describe('SqliteInterventionEvidenceStore', () => {
     }
   });
 
-  it('keeps Owner feedback on its 90-day policy even when native host is Codex', () => {
+  it('keeps Owner feedback on its 90-day policy when native host is OpenClaw', () => {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const batch = normalized(deliveryBatch({
       recordedAt: thirtyDaysAgo,
       sourceKind: 'owner_console_input',
       observations: [{
         observationKey: 'owner|outcome|episode-1', sourceLocator: 'console:feedback-1', kind: 'outcome',
-        nativeRefs: { hostKind: 'codex' }, episodeKey: 'episode-1',
+        nativeRefs: { hostKind: 'openclaw' }, episodeKey: 'episode-1',
         payload: { outcomeSource: 'owner_feedback', observationSummary: 'still within Owner retention', feedbackText: 'keep this feedback', actorId: 'owner-1' },
       }],
     }));
@@ -575,6 +575,73 @@ describe('SqliteInterventionEvidenceStore', () => {
     if (!read.available) return;
     expect(read.relations.outcomes[0]!.sourceStatus).toBeUndefined();
     expect(read.relations.outcomes[0]!.payload).toMatchObject({ feedbackText: 'keep this feedback' });
+  });
+
+  it('applies the seven-day OpenClaw event-log horizon at write, read and sweep', () => {
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    const firstInput = deliveryBatch({
+      sourceKind: 'openclaw_plugin_event_log', recordedAt: eightDaysAgo,
+      observations: [{
+        observationKey: 'oc|episode|openclaw-expired-first', sourceLocator: 'loc:openclaw-expired-first',
+        kind: 'behavior_episode', occurredAt: eightDaysAgo,
+        nativeRefs: { hostKind: 'openclaw', toolCallId: 'tool-first', toolName: 'test_tool' },
+        payload: { status: 'closed', actionSummary: 'private eight-day summary' },
+      }],
+    });
+    const firstBatch = normalized(firstInput);
+    const [firstRecord] = firstBatch.records;
+    if (!firstRecord) throw new Error('Expected stale OpenClaw evidence');
+    store.appendObservationBatch(firstBatch);
+
+    const firstRow = record(conn.getDb().prepare(`
+      SELECT payload_json, content_redacted_at, record_digest, native_refs_json
+      FROM intervention_evidence_records WHERE evidence_id = ?
+    `).get(firstRecord.evidenceId));
+    expect(String(firstRow.payload_json)).not.toContain('private eight-day summary');
+    expect(firstRow.content_redacted_at).toBeTruthy();
+    expect(firstRow.record_digest).toBe(firstRecord.recordDigest);
+    expect(firstRow.native_refs_json).toBe(JSON.stringify(firstRecord.nativeRefs));
+    const firstAudit = store.readAuditRelations({ type: 'episode', observationKey: 'oc|episode|openclaw-expired-first' });
+    expect(firstAudit.available).toBe(true);
+    if (firstAudit.available) {
+      expect(firstAudit.relations.episodes[0]!.payload).toMatchObject({ actionSummary: '[expired]' });
+      expect(firstAudit.relations.episodes[0]!.contentRedactedAt).toBeTruthy();
+      expect(firstAudit.relations.episodes[0]!.sourceStatus).toBe('unknown');
+    }
+
+    const legacyBatch = normalized(deliveryBatch({
+      sourceKind: 'openclaw_plugin_event_log', recordedAt: eightDaysAgo,
+      observations: [{
+        observationKey: 'oc|episode|openclaw-expired-legacy', sourceLocator: 'loc:openclaw-expired-legacy',
+        kind: 'behavior_episode', occurredAt: eightDaysAgo,
+        nativeRefs: { hostKind: 'openclaw', toolCallId: 'tool-legacy', toolName: 'test_tool' },
+        payload: { status: 'closed', actionSummary: 'private legacy summary' },
+      }],
+    }));
+    const [legacyRecord] = legacyBatch.records;
+    if (!legacyRecord) throw new Error('Expected legacy OpenClaw evidence');
+    conn.getDb().prepare(`
+      INSERT INTO intervention_evidence_records (
+        evidence_id, scope_id, source_kind, observation_key, source_locator, record_kind,
+        principle_id, activation_id, delivery_key, episode_key, effect_key,
+        correction_of, correction_reason, occurred_at, recorded_at,
+        native_refs_json, content_ref_json, activation_ref_json, payload_json, record_digest
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      legacyRecord.evidenceId, legacyRecord.evidenceScopeId, legacyRecord.sourceKind,
+      legacyRecord.observationKey, legacyRecord.sourceLocator, legacyRecord.kind,
+      legacyRecord.principleId ?? null, legacyRecord.activationRef?.activationId ?? null,
+      legacyRecord.deliveryKey ?? null, legacyRecord.episodeKey ?? null, legacyRecord.effectKey ?? null,
+      legacyRecord.correctionOf ?? null, legacyRecord.correctionReason ?? null,
+      legacyRecord.occurredAt ?? null, legacyRecord.recordedAt, JSON.stringify(legacyRecord.nativeRefs),
+      legacyRecord.contentRef ? JSON.stringify(legacyRecord.contentRef) : null,
+      legacyRecord.activationRef ? JSON.stringify(legacyRecord.activationRef) : null,
+      JSON.stringify(legacyRecord.payload), legacyRecord.recordDigest,
+    );
+    store.appendObservationBatch(normalized(deliveryBatch()));
+    const legacyRow = record(conn.getDb().prepare('SELECT payload_json, content_redacted_at FROM intervention_evidence_records WHERE evidence_id = ?').get(legacyRecord.evidenceId));
+    expect(String(legacyRow.payload_json)).not.toContain('private legacy summary');
+    expect(legacyRow.content_redacted_at).toBeTruthy();
   });
 
   it('upgrades a legacy evidence table and restores both immutability triggers atomically', () => {

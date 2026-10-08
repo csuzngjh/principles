@@ -36,7 +36,12 @@ import type {
   InterventionCapabilityDeclaration,
   InterventionRecordKind,
 } from '../types/intervention-evidence-contract.js';
-import { RECEIPT_RETENTION_POLICY_DAYS } from '../receipt-coverage.js';
+import {
+  INTERVENTION_SHORT_RETENTION_SOURCE_KINDS,
+  INTERVENTION_SHORT_SOURCE_RETENTION_DAYS,
+  RECEIPT_RETENTION_POLICY_DAYS,
+  interventionEvidenceSourcePolicy,
+} from '../receipt-coverage.js';
 
 export interface InterventionSourceConflict {
   observationKey: string;
@@ -68,6 +73,7 @@ export type InterventionAuditRead =
 const AUDIT_DEFAULT_LIMIT = 50;
 const AUDIT_MAX_LIMIT = 200;
 const SHA256_RE = /^sha256:[a-f0-9]{64}$/;
+const SHORT_RETENTION_SOURCE_KINDS_SQL = INTERVENTION_SHORT_RETENTION_SOURCE_KINDS.map((kind) => `'${kind}'`).join(', ');
 function isValidAuditTimestamp(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?Z$/.exec(value);
@@ -274,12 +280,12 @@ function redactCorrectionReason(value: unknown): string | null {
 
 function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): number {
   const receiptCutoff = new Date(asOf.getTime() - RECEIPT_RETENTION_POLICY_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const codexCutoff = new Date(asOf.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const shortSourceCutoff = new Date(asOf.getTime() - INTERVENTION_SHORT_SOURCE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const rows = db.prepare(`SELECT evidence_id, record_kind, payload_json, correction_reason
     FROM intervention_evidence_records
-    WHERE ((source_kind IN ('codex_pd_hook_event_log', 'codex_governance_observation') AND
+    WHERE ((source_kind IN (${SHORT_RETENTION_SOURCE_KINDS_SQL}) AND
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))) OR
-           (source_kind NOT IN ('codex_pd_hook_event_log', 'codex_governance_observation') AND
+           (source_kind NOT IN (${SHORT_RETENTION_SOURCE_KINDS_SQL}) AND
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))))
       AND (
         (content_redacted_at IS NULL AND (
@@ -290,7 +296,7 @@ function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): numb
           (record_kind = 'outcome' AND (json_type(payload_json, '$.feedbackText') IS NOT NULL OR json_type(payload_json, '$.actorId') IS NOT NULL OR (json_type(payload_json, '$.observationSummary') IS NOT NULL AND json_extract(payload_json, '$.observationSummary') <> '[expired]')))
         )) OR (correction_reason IS NOT NULL AND correction_reason <> '[expired]')
       )
-    ORDER BY recorded_at ASC, evidence_id ASC LIMIT 200`).all(codexCutoff, codexCutoff, receiptCutoff, receiptCutoff);
+    ORDER BY recorded_at ASC, evidence_id ASC LIMIT 200`).all(shortSourceCutoff, shortSourceCutoff, receiptCutoff, receiptCutoff);
   const redact = db.prepare(`UPDATE intervention_evidence_records
     SET payload_json = ?, correction_reason = ?, content_redacted_at = COALESCE(content_redacted_at, ?)
     WHERE evidence_id = ? AND (content_redacted_at IS NULL OR (correction_reason IS NOT NULL AND correction_reason <> '[expired]'))`);
@@ -342,7 +348,7 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
     });
   }
   const sourceTime = occurredAt && Date.parse(occurredAt) < Date.parse(recordedAt) ? occurredAt : recordedAt;
-  const retentionDays = sourceKind.startsWith('codex_') ? 7 : RECEIPT_RETENTION_POLICY_DAYS;
+  const { retentionDays, sourceStatus } = interventionEvidenceSourcePolicy(sourceKind);
   const expiresAt = Date.parse(sourceTime) + retentionDays * 24 * 60 * 60 * 1000;
   if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
     const redactedPayload = redactPayloadText(recordKind, JSON.stringify(payload), evidenceId);
@@ -451,7 +457,7 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
     ...(contentRef ? { contentRef } : {}),
     ...(activationRef ? { activationRef } : {}),
     ...(contentRedactedAt ? { contentRedactedAt } : {}),
-    ...(sourceKind.startsWith('codex_') ? { sourceStatus: 'unknown' as const } : {}),
+    ...(sourceStatus ? { sourceStatus } : {}),
     payload: typedPayload,
     recordDigest: strColumn(row, 'record_digest'),
     associationStatus: pendingFields.length === 0 ? 'linked' : 'pending_association',
@@ -613,7 +619,7 @@ export class SqliteInterventionEvidenceStore {
         const recordTime = record.occurredAt && Date.parse(record.occurredAt) < Date.parse(record.recordedAt)
           ? record.occurredAt
           : record.recordedAt;
-        const retentionDays = record.sourceKind.startsWith('codex_') ? 7 : RECEIPT_RETENTION_POLICY_DAYS;
+        const { retentionDays } = interventionEvidenceSourcePolicy(record.sourceKind);
         const expiresAt = Date.parse(recordTime) + retentionDays * 24 * 60 * 60 * 1000;
         let payloadJson = JSON.stringify(record.payload);
         let correctionReason: string | null = record.correctionReason ?? null;

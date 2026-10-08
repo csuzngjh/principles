@@ -62,7 +62,7 @@ export type {
 } from './governance-experience-contract.js';
 export { GOVERNANCE_EXPERIENCE_ITEMS_LIMIT, GOVERNANCE_EXPERIENCE_ISSUE_GROUPS_LIMIT, deriveGovernanceExperienceSnapshot } from './governance-experience.js';
 // Receipt evidence coverage disclosure contract (PRI-590)
-export { RECEIPT_RETENTION_POLICY_DAYS } from './receipt-coverage.js';
+export { INTERVENTION_SHORT_SOURCE_RETENTION_DAYS, RECEIPT_RETENTION_POLICY_DAYS } from './receipt-coverage.js';
 export type { ReceiptSourceStatus, ReceiptValidationStatus, ReceiptEvidenceCoverage } from './receipt-coverage.js';
 // Owner identity registration (ADR-0022, PRI-578) — env > ~/.pd/owner.json > none
 export {

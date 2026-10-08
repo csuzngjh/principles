@@ -18,6 +18,23 @@
  */
 export const RECEIPT_RETENTION_POLICY_DAYS = 90;
 
+/** Maximum text lifetime for raw host event-log evidence mirrored into the audit ledger. */
+export const INTERVENTION_SHORT_SOURCE_RETENTION_DAYS = 7;
+
+export const INTERVENTION_SHORT_RETENTION_SOURCE_KINDS = [
+  'openclaw_plugin_event_log',
+  'codex_pd_hook_event_log',
+  'codex_governance_observation',
+] as const;
+
+export function interventionEvidenceSourcePolicy(sourceKind: string): { retentionDays: number; sourceStatus?: 'unknown' } {
+  const shortRetention = INTERVENTION_SHORT_RETENTION_SOURCE_KINDS.some((kind) => kind === sourceKind);
+  return {
+    retentionDays: shortRetention ? INTERVENTION_SHORT_SOURCE_RETENTION_DAYS : RECEIPT_RETENTION_POLICY_DAYS,
+    ...(shortRetention ? { sourceStatus: 'unknown' as const } : {}),
+  };
+}
+
 /**
  * Whether the receipt fact source (state.db principle_applications) can be
  * read right now.

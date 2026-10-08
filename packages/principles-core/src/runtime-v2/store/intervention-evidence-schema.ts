@@ -18,7 +18,13 @@
  *   - The capability matrix is declarative adapter state (latest declaration
  *     wins per host × capability), not observed fact history.
  */
-import { RECEIPT_RETENTION_POLICY_DAYS } from '../receipt-coverage.js';
+import {
+  INTERVENTION_SHORT_RETENTION_SOURCE_KINDS,
+  INTERVENTION_SHORT_SOURCE_RETENTION_DAYS,
+  RECEIPT_RETENTION_POLICY_DAYS,
+} from '../receipt-coverage.js';
+
+const SHORT_RETENTION_SOURCE_KINDS_SQL = INTERVENTION_SHORT_RETENTION_SOURCE_KINDS.map((kind) => `'${kind}'`).join(', ');
 
 export const INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS intervention_evidence_scope (
@@ -74,7 +80,7 @@ export const INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS: readonly string[] = 
       ((OLD.content_redacted_at IS NULL AND NEW.content_redacted_at IS NOT NULL) OR
        (OLD.content_redacted_at IS NOT NULL AND NEW.content_redacted_at IS OLD.content_redacted_at
         AND OLD.correction_reason IS NOT NULL AND OLD.correction_reason <> '[expired]' AND NEW.correction_reason = '[expired]'))
-      AND julianday(CASE WHEN OLD.occurred_at IS NOT NULL AND OLD.occurred_at < OLD.recorded_at THEN OLD.occurred_at ELSE OLD.recorded_at END) <= julianday('now', CASE WHEN OLD.source_kind IN ('codex_pd_hook_event_log', 'codex_governance_observation') THEN '-7 days' ELSE '-${RECEIPT_RETENTION_POLICY_DAYS} days' END)
+      AND julianday(CASE WHEN OLD.occurred_at IS NOT NULL AND OLD.occurred_at < OLD.recorded_at THEN OLD.occurred_at ELSE OLD.recorded_at END) <= julianday('now', CASE WHEN OLD.source_kind IN (${SHORT_RETENTION_SOURCE_KINDS_SQL}) THEN '-${INTERVENTION_SHORT_SOURCE_RETENTION_DAYS} days' ELSE '-${RECEIPT_RETENTION_POLICY_DAYS} days' END)
       AND NEW.evidence_id IS OLD.evidence_id
       AND NEW.scope_id IS OLD.scope_id
       AND NEW.source_kind IS OLD.source_kind
@@ -106,7 +112,7 @@ export const INTERVENTION_EVIDENCE_IMMUTABILITY_STATEMENTS: readonly string[] = 
       AND (json(NEW.payload_json) <> json(OLD.payload_json) OR NEW.correction_reason IS NOT OLD.correction_reason)
     )
     BEGIN
-      SELECT RAISE(ABORT, 'intervention evidence records are immutable except authorized evidence text redaction');
+      SELECT RAISE(ABORT, 'intervention evidence records are immutable except authorized source expiry text redaction');
     END`,
   `CREATE TRIGGER IF NOT EXISTS intervention_evidence_records_no_delete
     BEFORE DELETE ON intervention_evidence_records
