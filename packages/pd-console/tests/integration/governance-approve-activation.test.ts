@@ -783,7 +783,11 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   // with the reason + modification entry), so the post-commit starvation
   // warning for a just-approved oversized entry is unreachable by design.
   // The test now locks the stronger contract: the refusal itself.
-  it('approve never reports legacy FIFO as the production policy on a rotating route', async () => {
+  // PR-1894's FIFO-labeling invariant, restated for the new contract: an
+  // OVERSIZED candidate can no longer be approved at all (pre-write 422), so
+  // the old post-commit starvation warning is unreachable. The queued-path
+  // policy wording (fair rotation, never legacy FIFO) is asserted on AC-09.
+  it('approve refuses an oversized candidate pre-write on a rotating route (no activation, no FIFO-labeled warning possible)', async () => {
     // Fresh workspace: only oversized entries, so the new activation is
     // unreachable and the starvation branch is taken with productionRotates=true.
     sqliteConn.getDb()
@@ -1069,9 +1073,13 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const activation = approveData?.activation;
     expect(isRecord(activation)).toBe(true);
     if (isRecord(activation)) expect(getStringField(activation, 'decision')).toBe('activated');
-    // 轮转路由下的真实说明：排队而非饿死。
+    // 轮转路由下的真实说明：排队而非饿死，且生产策略必须标注为公平轮转——
+    // 这是 PR-1894 的 FIFO 标注不变量在新合同下的存续点（原 oversized 用例
+    // 已被写入前拒绝取代）。
     const warning = getStringField(approveData, 'warning') ?? '';
     expect(warning).toContain('injection_budget_queued');
+    expect(warning).toContain('production selection policy fair_rotation_v1');
+    expect(warning).not.toContain('legacy_fifo_prefix_v1');
     // 清理：回收该轮注入行,避免污染后续断言。
     sqliteConn.getDb()
       .prepare('UPDATE activations SET deactivated_at = ? WHERE artifact_id = ?')

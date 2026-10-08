@@ -1356,12 +1356,15 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             <ul className="mt-1 list-disc pl-5">
               {(unconfirmed.perHost ?? []).map((entry) => (
                 <li key={entry.hostKind} data-testid={`prompt-capacity-perhost-${entry.hostKind}`}>
-                  {entry.hostKind === "openclaw" ? "OpenClaw" : "Codex"}
-                  {"："}
-                  {entry.route === "shared_render"
-                    ? t("pages.focus.promptCapacitySharedRoute", { defaultValue: "共享注入（按完整注入块计费）" })
-                    : t("pages.focus.promptCapacityListRoute", { defaultValue: "列表注入（按选中行计费）" })}
-                  {` — ${entry.usedChars}/${unconfirmed.budget} 字符${entry.truncated ? "（已满）" : ""}`}
+                  {t("pages.focus.promptCapacityPerHostEntry", {
+                    host: entry.hostKind === "openclaw" ? "OpenClaw" : "Codex",
+                    billing: entry.route === "shared_render"
+                      ? t("pages.focus.promptCapacitySharedRoute")
+                      : t("pages.focus.promptCapacityListRoute"),
+                    used: entry.usedChars,
+                    budget: unconfirmed.budget,
+                    full: entry.truncated ? t("pages.focus.promptCapacityPerHostFull") : "",
+                  })}
                 </li>
               ))}
             </ul>
@@ -1379,7 +1382,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
                     promptTargetHost === host ? "border-amber bg-amber/10" : "border-line hover:border-line-2"
                   }`}
                 >
-                  {host === "openclaw" ? "按 OpenClaw 查看" : "按 Codex 查看"}
+                  {t("pages.focus.promptCapacityViewAsHost", { host: host === "openclaw" ? "OpenClaw" : "Codex" })}
                 </button>
               ))}
               {promptTargetHost !== null && (
