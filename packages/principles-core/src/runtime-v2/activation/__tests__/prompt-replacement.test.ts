@@ -428,6 +428,31 @@ describe('legacy activation aliases', () => {
   });
 });
 
+describe('Owner revisions refuse damaged source content without rewriting history', () => {
+  it.each([
+    ['broken JSON', '{', 'old_artifact_content_unparseable'],
+    ['non-object JSON', '[]', 'old_artifact_content_malformed'],
+    ['missing draft', '{}', 'old_artifact_missing_statement'],
+    ['missing statement', '{"principleDraft":{"title":"old"}}', 'old_artifact_missing_statement'],
+    ['invalid retained contract', '{"principleDraft":{"statement":"old"}}', 'revision_validation_failed'],
+  ])('refuses %s and preserves the persisted old artifact', async (_label, contentJson, error) => {
+    const connection = new SqliteConnection({ workspaceDir: tempWorkspace() });
+    try {
+      seedArtifact(connection, { artifactId: 'art-old', taskId: 'task-old', statement: 'old' });
+      const store = new SqlitePIArtifactStore(connection);
+      const old = await snapshotOf(store, 'art-old');
+      if (!old) throw new Error('old fixture missing');
+      const result = await buildOwnerRevisionArtifact({ oldArtifact: { ...old, contentJson }, newStatement: 'new', editedBy: 'Alice', now: '2026-10-08T04:00:00Z' });
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('damaged source must not produce a revision');
+      expect(result.error).toContain(error);
+      expect(result.nextAction.length).toBeGreaterThan(0);
+      expect(await snapshotOf(store, 'art-old')).toEqual(old);
+      expect(connection.getDb().prepare('SELECT * FROM pi_artifacts').all()).toHaveLength(1);
+    } finally { connection.close(); }
+  });
+});
+
 describe('legacy text alias and single executed statement', () => {
   it('removes an identical top-level text alias only in the new version and refuses contradictory aliases', async () => {
     const connection = new SqliteConnection({ workspaceDir: tempWorkspace() });
