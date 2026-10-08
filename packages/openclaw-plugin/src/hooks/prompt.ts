@@ -1,6 +1,7 @@
  
  
 import * as fs from 'fs';
+import { randomUUID } from 'node:crypto';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -18,6 +19,7 @@ import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-rea
 import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordInjectionPresence, alignActivationIds, alignInjectedPrinciples } from '../core/principle-application-ledger.js';
+import { recordPromptDeliveryEvidence } from '../core/intervention-evidence-recorder.js';
 import { setInjectedPrincipleIds } from '../core/session-tracker.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
@@ -702,6 +704,8 @@ export async function handleBeforePromptBuild(
       // same aligned list so index alignment cannot drift between them.
       const alignedPrinciples = alignInjectedPrinciples(dedupedV2, runtimeV2PrincipleIds);
       eventLog.recordRuntimeV2ActivationsInjected({
+        hostKind: 'openclaw',
+        eventId: randomUUID(),
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
         // PRI-750: host run/turn id from the OpenClaw hook context — DIRECT
@@ -794,6 +798,35 @@ export async function handleBeforePromptBuild(
       }
     } catch (ledgerErr) {
       logger?.warn?.(`[PD:RuntimeV2] Receipt ledger presence write failed: ${String(ledgerErr)}`);
+    }
+
+    // PD v2 Phase 1: normalized delivery evidence for this injection (one
+    // agent-context attempt per principle, confirmation 'submitted' — the
+    // host's consumption is NOT claimed). Best-effort: never affects the
+    // prompt being returned (ADR-0027 §2.4).
+    try {
+      const evidenceInjected = sharedActivePrinciplePrompt
+        ? sharedActivePrinciplePrompt.principleIds
+            .map((principleId, index) => ({
+              principleId,
+              activationId: sharedActivePrinciplePrompt.activationIds[index] ?? '',
+              artifactId: sharedActivePrinciplePrompt.artifactIds[index],
+            }))
+            .filter((entry) => entry.activationId.length > 0)
+        : alignInjectedPrinciples(dedupedV2, runtimeV2PrincipleIds)
+            .filter((entry) => entry.activationId.length > 0)
+            .map((entry) => ({ principleId: entry.principleId, activationId: entry.activationId, artifactId: entry.artifactId }));
+      if (evidenceInjected.length > 0) {
+        recordPromptDeliveryEvidence({
+          workspaceDir,
+          sessionId,
+          ...(runId ? { runId } : {}),
+          injected: evidenceInjected,
+          logger,
+        });
+      }
+    } catch (evidenceErr) {
+      logger?.warn?.(`[PD:RuntimeV2] Evidence delivery recording failed: ${String(evidenceErr)}`);
     }
   } catch (e) {
     logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);

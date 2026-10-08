@@ -513,12 +513,278 @@ async function fetchReceiptCounts(): Promise<ApiResponse<ReceiptCountsData>> {
   return request<ReceiptCountsData>("/api/v1/receipts/counts", undefined, validateReceiptCounts);
 }
 
+// ── Intervention Evidence Audit (PD v2 Phase 1, ADR-0027) ────────────────────
+
+export interface EvidenceAuditRecordData {
+  evidenceId: string;
+  kind: "delivery" | "application" | "behavior_episode" | "effect" | "outcome";
+  observationKey: string;
+  recordedAt: string;
+  occurredAt?: string;
+  principleId?: string;
+  activationId?: string;
+  episodeKey?: string;
+  effectKey?: string;
+  associationStatus: "linked" | "pending_association";
+  sourceStatus?: "unknown";
+  contentRedactedAt?: string;
+  contentReference?: { principleId: string; resolution: "resolved" | "revision_reference_unresolved"; payloadDigest?: string; artifactId?: string; version?: string; approvalRef?: string };
+  activationReference?: { activationId: string; sourceSnapshotDigest: string; activatedAt?: string; idempotencyKey?: string; artifactId?: string; channel?: string };
+  nativeLineage: string[];
+  summary: string;
+  detail: string;
+}
+
+export interface EvidenceAuditCapabilityData {
+  hostKind: "openclaw" | "codex";
+  capability: string;
+  status: "supported" | "unsupported" | "unknown";
+  adapterVersion: string;
+  channel: string;
+  note?: string;
+}
+
+export interface EvidenceAuditData {
+  status: "ok" | "degraded";
+  reason?: string;
+  nextAction?: string;
+  deliveries: EvidenceAuditRecordData[];
+  applications: EvidenceAuditRecordData[];
+  episodes: EvidenceAuditRecordData[];
+  effects: EvidenceAuditRecordData[];
+  outcomes: EvidenceAuditRecordData[];
+  pages: Record<"delivery" | "application" | "behavior_episode" | "effect" | "outcome", { hasMore: boolean; nextCursor: { recordedAt: string; evidenceId: string } | null }>;
+  unresolvedReferences: { evidenceId: string; missingKey: string; field: string }[];
+  capabilityDeclarations: EvidenceAuditCapabilityData[];
+  coverage: ReceiptEvidenceCoverageData;
+}
+
+const EVIDENCE_RECORD_KINDS = new Set(["delivery", "application", "behavior_episode", "effect", "outcome"]);
+
+function isValidEvidenceDate(value: string): boolean {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?Z$/.exec(value);
+  return match !== null && Number.isFinite(Date.parse(value))
+    && new Date(Date.parse(value)).toISOString() === `${match[1]}.${(match[2] ?? '').padEnd(3, '0')}Z`;
+}
+
+/**
+ * Human-readable one-liner per record — derived from the payload union on the
+ * client WITHOUT importing the server contract (the wire format is validated
+ * field-by-field here, rc-1 style).
+ */
+function evidenceRecordSummary(record: Record<string, unknown>): { summary: string; detail: string } | null {
+  const payload = typeof record.payload === "object" && record.payload !== null
+    ? record.payload as Record<string, unknown>
+    : null;
+  if (payload === null) return null;
+  const { kind } = record;
+  if (kind === "delivery") {
+    return {
+      summary: `${String(payload.confirmation ?? "?")} / ${String(payload.outcome ?? "?")}`,
+      detail: `target: ${String(payload.targetKind ?? "?")}${typeof payload.failureReason === "string" ? ` — ${payload.failureReason}` : ""}`,
+    };
+  }
+  if (kind === "application") {
+    return {
+      summary: String(payload.proofMethod ?? "?"),
+      detail: String(payload.action ?? "?") + (typeof payload.claimText === "string" ? ` — ${payload.claimText}` : ""),
+    };
+  }
+  if (kind === "behavior_episode") {
+    return {
+      summary: String(payload.status ?? "?"),
+      detail: String(payload.actionSummary ?? "?") + (typeof payload.resultSummary === "string" ? ` → ${payload.resultSummary}` : ""),
+    };
+  }
+  if (kind === "effect") {
+    return {
+      summary: String(payload.status ?? "?"),
+      detail: String(payload.observationSummary ?? "?"),
+    };
+  }
+  return {
+    summary: String(payload.outcomeSource ?? "?"),
+    detail: String(payload.observationSummary ?? "?"),
+  };
+}
+
+function validateEvidenceAuditRecord(value: unknown): EvidenceAuditRecordData | null {
+  if (typeof value !== "object" || value === null) return null;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.evidenceId !== "string" || rec.evidenceId.length === 0 || rec.evidenceId.length > 256) return null;
+  if (typeof rec.kind !== "string" || !EVIDENCE_RECORD_KINDS.has(rec.kind)) return null;
+  if (typeof rec.observationKey !== "string" || rec.observationKey.length === 0 || rec.observationKey.length > 256
+    || typeof rec.recordedAt !== "string" || !isValidEvidenceDate(rec.recordedAt)
+    || (rec.occurredAt !== undefined && (typeof rec.occurredAt !== "string" || !isValidEvidenceDate(rec.occurredAt)))
+    || (rec.associationStatus !== "linked" && rec.associationStatus !== "pending_association")
+    || (rec.sourceStatus !== undefined && rec.sourceStatus !== "unknown")
+    || (rec.contentRedactedAt !== undefined && (typeof rec.contentRedactedAt !== "string" || !isValidEvidenceDate(rec.contentRedactedAt)))) return null;
+  const native = typeof rec.nativeRefs === "object" && rec.nativeRefs !== null ? rec.nativeRefs as Record<string, unknown> : null;
+  if (!native || (native.hostKind !== "openclaw" && native.hostKind !== "codex")
+    || ["sessionId", "runId", "turnId", "toolCallId", "toolName", "rolloutIdentity"].some((key) => Object.hasOwn(native, key)
+      && (typeof native[key] !== "string" || native[key].length === 0 || native[key].length > 256))) return null;
+  const hasContentRef = Object.hasOwn(rec, "contentRef");
+  const contentRef = typeof rec.contentRef === "object" && rec.contentRef !== null && !Array.isArray(rec.contentRef) ? rec.contentRef as Record<string, unknown> : null;
+  if (hasContentRef && contentRef === null) return null;
+  if (contentRef && (typeof contentRef.principleId !== "string" || contentRef.principleId.length === 0 || contentRef.principleId.length > 256
+    || (contentRef.resolution !== "resolved" && contentRef.resolution !== "revision_reference_unresolved")
+    || (contentRef.payloadDigest !== undefined && (typeof contentRef.payloadDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(contentRef.payloadDigest)))
+    || (contentRef.resolution === "resolved" && typeof contentRef.payloadDigest !== "string")
+    || (typeof rec.principleId === "string" && contentRef.principleId !== rec.principleId)
+    || ["artifactId", "version", "approvalRef"].some((key) => Object.hasOwn(contentRef, key)
+      && (typeof contentRef[key] !== "string" || contentRef[key].length === 0 || contentRef[key].length > 256)))) return null;
+  const hasActivationRef = Object.hasOwn(rec, "activationRef");
+  const activationRef = typeof rec.activationRef === "object" && rec.activationRef !== null && !Array.isArray(rec.activationRef) ? rec.activationRef as Record<string, unknown> : null;
+  if (hasActivationRef && activationRef === null) return null;
+  if (activationRef && (typeof activationRef.activationId !== "string"
+    || activationRef.activationId.length === 0 || activationRef.activationId.length > 256
+    || typeof activationRef.sourceSnapshotDigest !== "string"
+    || !/^sha256:[a-f0-9]{64}$/.test(activationRef.sourceSnapshotDigest)
+    || activationRef.activationId !== rec.activationId
+    || (activationRef.activatedAt !== undefined && (typeof activationRef.activatedAt !== "string" || !isValidEvidenceDate(activationRef.activatedAt)))
+    || ["idempotencyKey", "artifactId", "channel"].some((key) => Object.hasOwn(activationRef, key)
+      && (typeof activationRef[key] !== "string" || activationRef[key].length === 0 || activationRef[key].length > 256)))) return null;
+  if (contentRef && activationRef && typeof contentRef.artifactId === "string" && typeof activationRef.artifactId === "string"
+    && contentRef.artifactId !== activationRef.artifactId) return null;
+  if (contentRef && activationRef && typeof rec.occurredAt === "string" && typeof activationRef.activatedAt === "string"
+    && Date.parse(activationRef.activatedAt) > Date.parse(rec.occurredAt)) return null;
+  const summaryPair = evidenceRecordSummary(rec);
+  if (summaryPair === null) return null;
+  return {
+    evidenceId: rec.evidenceId,
+    kind: rec.kind as EvidenceAuditRecordData["kind"],
+    observationKey: rec.observationKey,
+    recordedAt: rec.recordedAt,
+    occurredAt: typeof rec.occurredAt === "string" ? rec.occurredAt : undefined,
+    principleId: typeof rec.principleId === "string" ? rec.principleId : undefined,
+    activationId: typeof rec.activationId === "string" ? rec.activationId : undefined,
+    episodeKey: typeof rec.episodeKey === "string" ? rec.episodeKey : undefined,
+    effectKey: typeof rec.effectKey === "string" ? rec.effectKey : undefined,
+    associationStatus: rec.associationStatus,
+    ...(rec.sourceStatus === "unknown" ? { sourceStatus: "unknown" as const } : {}),
+    ...(typeof rec.contentRedactedAt === "string" ? { contentRedactedAt: rec.contentRedactedAt } : {}),
+    ...(contentRef ? { contentReference: {
+      principleId: String(contentRef.principleId), resolution: contentRef.resolution as "resolved" | "revision_reference_unresolved",
+      ...(typeof contentRef.payloadDigest === "string" ? { payloadDigest: contentRef.payloadDigest } : {}),
+      ...(typeof contentRef.artifactId === "string" ? { artifactId: contentRef.artifactId } : {}),
+      ...(typeof contentRef.version === "string" ? { version: contentRef.version } : {}),
+      ...(typeof contentRef.approvalRef === "string" ? { approvalRef: contentRef.approvalRef } : {}),
+    } } : {}),
+    ...(activationRef ? { activationReference: {
+      activationId: String(activationRef.activationId), sourceSnapshotDigest: String(activationRef.sourceSnapshotDigest),
+      ...(typeof activationRef.activatedAt === "string" ? { activatedAt: activationRef.activatedAt } : {}),
+      ...(typeof activationRef.idempotencyKey === "string" ? { idempotencyKey: activationRef.idempotencyKey } : {}),
+      ...(typeof activationRef.artifactId === "string" ? { artifactId: activationRef.artifactId } : {}),
+      ...(typeof activationRef.channel === "string" ? { channel: activationRef.channel } : {}),
+    } } : {}),
+    nativeLineage: [`hostKind=${native.hostKind}`, ...Object.entries(native).filter(([key, entry]) => key !== "hostKind" && typeof entry === "string").map(([key, entry]) => `${key}=${String(entry)}`)].slice(0, 7),
+    summary: summaryPair.summary,
+    detail: summaryPair.detail,
+  };
+}
+
+function validateEvidenceAudit(data: unknown): EvidenceAuditData | null {
+  if (typeof data !== "object" || data === null) return null;
+  const rec = data as Record<string, unknown>;
+  const coverage = validateReceiptCoverage(rec.coverage);
+  if (coverage === null) return null;
+  const pageKinds = ["delivery", "application", "behavior_episode", "effect", "outcome"] as const;
+  const pages = {} as EvidenceAuditData["pages"];
+  if (typeof rec.pages !== "object" || rec.pages === null) return null;
+  const rawPages = rec.pages as Record<string, unknown>;
+  for (const kind of pageKinds) {
+    const raw = rawPages[kind];
+    if (typeof raw !== "object" || raw === null) return null;
+    const page = raw as Record<string, unknown>;
+    if (typeof page.hasMore !== "boolean") return null;
+    let nextCursor: EvidenceAuditData["pages"][typeof kind]["nextCursor"] = null;
+    if (page.nextCursor !== null) {
+      if (typeof page.nextCursor !== "object" || page.nextCursor === null) return null;
+      const cursor = page.nextCursor as Record<string, unknown>;
+      if (typeof cursor.recordedAt !== "string" || typeof cursor.evidenceId !== "string") return null;
+      nextCursor = { recordedAt: cursor.recordedAt, evidenceId: cursor.evidenceId };
+    }
+    pages[kind] = { hasMore: page.hasMore, nextCursor };
+  }
+  const sections = {} as Record<string, EvidenceAuditRecordData[]>;
+  for (const field of ["deliveries", "applications", "episodes", "effects", "outcomes"] as const) {
+    const list: EvidenceAuditRecordData[] = [];
+    if (!Array.isArray(rec[field])) return null;
+    for (const item of rec[field]) {
+      const record = validateEvidenceAuditRecord(item);
+      if (!record) return null;
+      list.push(record);
+    }
+    sections[field] = list;
+  }
+  const unresolved: EvidenceAuditData["unresolvedReferences"] = [];
+  if (Array.isArray(rec.unresolvedReferences)) {
+    for (const item of rec.unresolvedReferences) {
+      if (typeof item !== "object" || item === null) continue;
+      const entry = item as Record<string, unknown>;
+      if (typeof entry.evidenceId === "string" && typeof entry.missingKey === "string" && typeof entry.field === "string") {
+        unresolved.push({ evidenceId: entry.evidenceId, missingKey: entry.missingKey, field: entry.field });
+      }
+    }
+  }
+  const capabilities: EvidenceAuditCapabilityData[] = [];
+  if (Array.isArray(rec.capabilityDeclarations)) {
+    for (const item of rec.capabilityDeclarations) {
+      if (typeof item !== "object" || item === null) continue;
+      const cap = item as Record<string, unknown>;
+      if (cap.hostKind !== "openclaw" && cap.hostKind !== "codex") continue;
+      if (cap.status !== "supported" && cap.status !== "unsupported" && cap.status !== "unknown") continue;
+      if (typeof cap.capability !== "string" || typeof cap.adapterVersion !== "string" || typeof cap.channel !== "string") continue;
+      capabilities.push({
+        hostKind: cap.hostKind,
+        capability: cap.capability,
+        status: cap.status,
+        adapterVersion: cap.adapterVersion,
+        channel: cap.channel,
+        ...(typeof cap.note === "string" ? { note: cap.note } : {}),
+      });
+    }
+  }
+  return {
+    status: rec.status === "ok" ? "ok" : "degraded",
+    reason: typeof rec.reason === "string" ? rec.reason : undefined,
+    nextAction: typeof rec.nextAction === "string" ? rec.nextAction : undefined,
+    deliveries: sections.deliveries ?? [],
+    applications: sections.applications ?? [],
+    episodes: sections.episodes ?? [],
+    effects: sections.effects ?? [],
+    outcomes: sections.outcomes ?? [],
+    pages,
+    unresolvedReferences: unresolved,
+    capabilityDeclarations: capabilities,
+    coverage,
+  };
+}
+
+async function fetchEvidenceAudit(
+  selectorType: "principle" | "activation" | "episode" | "effect",
+  id: string,
+  cursor?: { kind: EvidenceAuditRecordData["kind"]; after: { recordedAt: string; evidenceId: string } },
+): Promise<ApiResponse<EvidenceAuditData>> {
+  const query = new URLSearchParams({ type: selectorType, id });
+  if (cursor) {
+    query.set("afterKind", cursor.kind);
+    query.set("afterRecordedAt", cursor.after.recordedAt);
+    query.set("afterEvidenceId", cursor.after.evidenceId);
+  }
+  return request<EvidenceAuditData>(
+    `/api/v1/receipts/evidence-audit?${query.toString()}`,
+    undefined,
+    validateEvidenceAudit,
+  );
+}
+
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
-async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecordData>> {
+async function approveApproval(approvalId: string, note?: string, options?: { targetHost?: 'openclaw' | 'codex'; intentReviewed?: boolean; reviewedArtifactId?: string }): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
     method: 'POST',
-    body: JSON.stringify({ note }),
+    body: JSON.stringify({ note, ...(options?.targetHost !== undefined ? { host: options.targetHost } : {}), ...(options?.intentReviewed !== undefined ? { intentReviewed: options.intentReviewed, reviewedArtifactId: options.reviewedArtifactId } : {}) }),
   }, validateApprovalRecordDirect);
 }
 
@@ -854,12 +1120,14 @@ async function resolveOwnerDecision(taskId: string, body: {
   );
 }
 
-async function fetchApprovalsGrouped(): Promise<ApiResponse<ApprovalsGroupedData>> {
-  return request<ApprovalsGroupedData>('/api/v1/approvals/grouped', undefined, validateApprovalsGrouped);
+async function fetchApprovalsGrouped(targetHost?: 'openclaw' | 'codex'): Promise<ApiResponse<ApprovalsGroupedData>> {
+  const query = targetHost !== undefined ? `?host=${targetHost}` : '';
+  return request<ApprovalsGroupedData>(`/api/v1/approvals/grouped${query}`, undefined, validateApprovalsGrouped);
 }
 
-async function fetchAllActivations(): Promise<ApiResponse<ActivationsData>> {
-  return request<ActivationsData>('/api/v1/activations', undefined, validateActivations);
+async function fetchAllActivations(targetHost?: 'openclaw' | 'codex'): Promise<ApiResponse<ActivationsData>> {
+  const query = targetHost !== undefined ? `?host=${targetHost}` : '';
+  return request<ActivationsData>(`/api/v1/activations${query}`, undefined, validateActivations);
 }
 
 async function disableActivation(activationId: string): Promise<ApiResponse<DisableActivationData>> {
@@ -875,6 +1143,53 @@ async function disableActivation(activationId: string): Promise<ApiResponse<Disa
 
 async function fetchRuleCodeOwnerReview(activationId: string): Promise<ApiResponse<RuleCodeOwnerReviewData>> {
   return request(`/api/v1/activations/${encodeURIComponent(activationId)}/owner-review`, undefined, validateRuleCodeOwnerReview);
+}
+
+// PD_PROMPT_CAPACITY_V1 R-B3: Owner-initiated "modify to injectable version" —
+// raw JSON payload (rc-1: the UI validates the fields it renders).
+export interface ProposeRevisionData {
+  ok: boolean;
+  alreadyPending?: boolean;
+  newArtifactId?: string;
+  approvalId?: string;
+  supersededActivationId?: string;
+  oldStatement?: string;
+  newStatement?: string;
+  title?: string;
+  reason?: string;
+  nextAction?: string;
+  error?: string;
+}
+
+async function proposePromptRevision(
+  activationId: string,
+  statement: string,
+  targetHost?: 'openclaw' | 'codex',
+): Promise<ApiResponse<ProposeRevisionData>> {
+  return request<ProposeRevisionData>(
+    `/api/v1/activations/${encodeURIComponent(activationId)}/propose-revision`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ statement, ...(targetHost !== undefined ? { host: targetHost } : {}) }),
+    },
+    (v: unknown): ProposeRevisionData | null => {
+      if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+      const rec = v as Record<string, unknown>;
+      if (rec.ok !== true && rec.ok !== false) return null;
+      const result: ProposeRevisionData = { ok: rec.ok };
+      if (typeof rec.alreadyPending === 'boolean') result.alreadyPending = rec.alreadyPending;
+      if (typeof rec.newArtifactId === 'string') result.newArtifactId = rec.newArtifactId;
+      if (typeof rec.approvalId === 'string') result.approvalId = rec.approvalId;
+      if (typeof rec.supersededActivationId === 'string') result.supersededActivationId = rec.supersededActivationId;
+      if (typeof rec.oldStatement === 'string') result.oldStatement = rec.oldStatement;
+      if (typeof rec.newStatement === 'string') result.newStatement = rec.newStatement;
+      if (typeof rec.title === 'string') result.title = rec.title;
+      if (typeof rec.reason === 'string') result.reason = rec.reason;
+      if (typeof rec.nextAction === 'string') result.nextAction = rec.nextAction;
+      if (typeof rec.error === 'string') result.error = rec.error;
+      return result;
+    },
+  );
 }
 
 async function mutateRuleCode(path: string, body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> {
@@ -1097,6 +1412,7 @@ export {
   fetchPrincipleTrajectory,
   fetchPrincipleReceipts,
   fetchReceiptCounts,
+  fetchEvidenceAudit,
   archivePrinciple,
   unarchivePrinciple,
   createFeedbackReport,
@@ -1131,6 +1447,7 @@ export {
   fetchApprovalsGrouped,
   fetchAllActivations,
   disableActivation,
+  proposePromptRevision,
   fetchRuleCodeOwnerReview,
   ruleCodeDecision,
   pauseAllRuleCode,

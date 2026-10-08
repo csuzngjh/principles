@@ -10,6 +10,7 @@
  * - pain-intent-flow: trajectory.db pain_events + state.db tasks + candidates
  */
 import { SqliteConnection, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
+import { saveHostToolDeclaration } from '@principles/host-runtime';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -145,11 +146,14 @@ const insertPiArtifact = stateDb.prepare(`
 `);
 insertPiArtifact.run(
   'artifact-prompt-1', 'principle', 'task-diag-1', PRINCIPLE_IDS.promptConfig,
-  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.promptConfig, title: '配置变更需确认' }), now, now,
+  // PD_PROMPT_CAPACITY_V1: principle artifacts must carry injectable text —
+  // the approve precheck (and the real injection reader) resolve the statement
+  // from `text`/`principleDraft.statement`; title-only content is unresolvable.
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.promptConfig, title: '配置变更需确认', text: '配置变更需确认：先给出后果说明，再由 Owner 决定。' }), now, now,
 );
 insertPiArtifact.run(
   'artifact-prompt-bdd', 'principle', 'task-diag-bdd', PRINCIPLE_IDS.promptBdd,
-  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.promptBdd, title: 'BDD 审批隔离原则' }), now, now,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.promptBdd, title: 'BDD 审批隔离原则', text: 'BDD 审批隔离原则：每条流程使用专属种子审批，避免互相争用。' }), now, now,
 );
 // PRI-586: isolated artifact+approval pair for governance-experience.spec.ts
 // (nothing else consumes it, so the spec is deterministic in a full serial run).
@@ -157,11 +161,11 @@ insertPiArtifact.run(
 // source task id.
 insertPiArtifact.run(
   'artifact-experience-1', 'principle', 'task-diag-exp', PRINCIPLE_IDS.experience,
-  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.experience, title: '治理体验快照验证原则' }), now, now,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.experience, title: '治理体验快照验证原则', text: '治理体验快照验证原则：快照单独成对，保证串行运行确定性。' }), now, now,
 );
 insertPiArtifact.run(
   'artifact-hook-1', 'principle', 'task-diag-2', PRINCIPLE_IDS.hookRootCause,
-  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.hookRootCause, title: '错误后必须分析根因' }), now, now,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.hookRootCause, title: '错误后必须分析根因', text: '错误后必须分析根因：先定位根因，再做修复。' }), now, now,
 );
 
 // Regression fixture for PR #1079: a rule artifact with an illegal
@@ -388,18 +392,18 @@ insertPiArtifact.run(
 );
 insertPiArtifact.run(
   'artifact-click-reject', 'principle', 'task-click-reject', PRINCIPLE_IDS.clickReject,
-  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickReject, title: '点击拒绝测试原则' }), now, now,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickReject, title: '点击拒绝测试原则', text: '点击拒绝测试原则：拒绝理由必须可读。' }), now, now,
 );
 insertPiArtifact.run(
   'artifact-click-edit', 'principle', 'task-click-edit', PRINCIPLE_IDS.clickEdit,
-  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickEdit, title: '点击编辑测试原则' }), now, now,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickEdit, title: '点击编辑测试原则', text: '点击编辑测试原则：编辑需说明理由。' }), now, now,
 );
 // Edit replacement artifact (pre-validated, so editApproval can point at it).
 // NOTE: pi_artifacts has a UNIQUE(source_task_id, artifact_kind) constraint, so
 // this artifact needs its own source_task_id distinct from artifact-click-edit.
 insertPiArtifact.run(
   'artifact-click-edit-new', 'principle', 'task-click-edit-new', PRINCIPLE_IDS.clickEdit,
-  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickEdit, title: '编辑后新原则' }), now, now,
+  '[]', 'validated', JSON.stringify({ principleId: PRINCIPLE_IDS.clickEdit, title: '编辑后新原则', text: '编辑后新原则：修订后仍是可注入的最短表述。' }), now, now,
 );
 const insertClickApproval = stateDb.prepare(`
   INSERT INTO approvals (
@@ -600,5 +604,25 @@ const minimalConfig = {
 };
 fs.writeFileSync(configPath, yaml.dump(minimalConfig), 'utf8');
 console.log('[e2e-seed] .pd/config.yaml written: intent_engineering=false (flag-off default)');
+
+// PD_PROMPT_CAPACITY_V1 R-B2: prompt-channel approvals pass the route-aware
+// capacity precheck. This workspace is OpenClaw-hosted (flag-off → legacy list
+// route), so persist the host declaration exactly like a real host startup —
+// the seeded prompt approvals are short statements and stay deliverable.
+const declared = saveHostToolDeclaration(workspaceDir, {
+  version: 1,
+  hostKind: 'openclaw',
+  // Match the llm-dogfood host surface: the seeded RuleCode rules dispatch
+  // bash/write_file/edit_file through the RuleHost gate, and the promotion
+  // readiness checks validate affectedTools against THIS declaration.
+  mappings: [
+    { rawToolName: 'bash', canonicalKind: 'execute' },
+    { rawToolName: 'write_file', canonicalKind: 'write' },
+    { rawToolName: 'edit_file', canonicalKind: 'write' },
+  ],
+  declaredAt: new Date().toISOString(),
+});
+if (!declared.ok) throw new Error(`[e2e-seed] host declaration save failed: ${declared.reason}`);
+console.log('[e2e-seed] .pd/host-tool-semantics/openclaw.json written (route facts for the approve precheck)');
 
 console.log('[e2e-seed] done — workspace ready for E2E tests');

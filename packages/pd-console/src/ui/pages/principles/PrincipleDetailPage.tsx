@@ -13,13 +13,14 @@ import {
   fetchPrincipleTrajectory,
   fetchPrincipleGovernance,
   fetchPrincipleReceipts,
+  fetchEvidenceAudit,
   fetchOwnerDecisionView,
   approveApproval,
   rejectApproval,
   editApproval,
   disableActivation,
 } from "../../api.js";
-import type { PrincipleReceiptsData } from "../../api.js";
+import type { PrincipleReceiptsData, EvidenceAuditData } from "../../api.js";
 import type { OwnerDecisionViewCore, Action as OwnerAction } from "@principles/core/runtime-v2";
 import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import { formatDate } from "../../utils/format-date.js";
@@ -247,6 +248,10 @@ export function PrincipleDetailPage() {
   const [ownerDecision, setOwnerDecision] = useState<OwnerDecisionViewCore | null>(null);
   const [ownerDecisionUnavailable, setOwnerDecisionUnavailable] = useState<{ reason: string } | null>(null);
   const [receipts, setReceipts] = useState<PrincipleReceiptsData | null>(null);
+  // PD v2 Phase 1: normalized intervention evidence audit (ADR-0027) — the
+  // four-query read stays a separate surface from the legacy receipt history.
+  const [evidenceAudit, setEvidenceAudit] = useState<EvidenceAuditData | null>(null);
+  const [loadingEvidenceKind, setLoadingEvidenceKind] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -271,8 +276,9 @@ export function PrincipleDetailPage() {
     setOwnerDecision(null);
     setOwnerDecisionUnavailable(null);
     setReceipts(null);
+    setEvidenceAudit(null);
     try {
-      const [pResult, aResult, lResult, tResult, gResult, dResult, rResult] = await Promise.all([
+      const [pResult, aResult, lResult, tResult, gResult, dResult, rResult, eResult] = await Promise.all([
         fetchPrincipleDetail(id),
         fetchApprovalsGrouped(),
         fetchLifecycleMetrics(id),
@@ -280,6 +286,7 @@ export function PrincipleDetailPage() {
         fetchPrincipleGovernance(id),
         fetchOwnerDecisionView(id),
         fetchPrincipleReceipts(id),
+        fetchEvidenceAudit('principle', id),
       ]);
 
       if (!pResult.success) {
@@ -332,6 +339,13 @@ export function PrincipleDetailPage() {
       } else {
         setReceipts(null);
       }
+
+      // PD v2 Phase 1: evidence audit (degraded carries reason + nextAction)
+      if (eResult.success && eResult.data) {
+        setEvidenceAudit(eResult.data);
+      } else {
+        setEvidenceAudit(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setApprovalGroup(null);
@@ -343,6 +357,36 @@ export function PrincipleDetailPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const loadOlderEvidence = async (kind: EvidenceAuditData["deliveries"][number]["kind"]): Promise<void> => {
+    if (!id || !evidenceAudit || loadingEvidenceKind) return;
+    const page = evidenceAudit.pages[kind];
+    if (!page.hasMore || !page.nextCursor) return;
+    setLoadingEvidenceKind(kind);
+    try {
+      const result = await fetchEvidenceAudit('principle', id, { kind, after: page.nextCursor });
+      if (!result.success || !result.data) return;
+      if (result.data.status !== 'ok') {
+        toast.error(result.data.reason ?? '读取更早的干预证据失败');
+        return;
+      }
+      const section = kind === 'delivery' ? 'deliveries'
+        : kind === 'application' ? 'applications'
+        : kind === 'behavior_episode' ? 'episodes'
+        : kind === 'effect' ? 'effects' : 'outcomes';
+      setEvidenceAudit((current) => current === null ? current : ({
+        ...current,
+        [section]: [...current[section], ...result.data[section]],
+        pages: { ...current.pages, [kind]: result.data.pages[kind] },
+        unresolvedReferences: [...new Map([...current.unresolvedReferences, ...result.data.unresolvedReferences]
+          .map((entry) => [`${entry.evidenceId}:${entry.field}:${entry.missingKey}`, entry])).values()],
+      }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '读取更早的干预证据失败');
+    } finally {
+      setLoadingEvidenceKind(null);
+    }
+  };
 
   // ── Owner decision actions (SPEC §8.4: mutation service is the authority) ─
   // The view's actions are advisory; every submission goes through the real
@@ -945,6 +989,108 @@ export function PrincipleDetailPage() {
               <h3 className="text-[13px] font-semibold text-ink">{i18n.t(getReceiptSourceStatusLabelKey(receipts.coverage.sourceStatus))}</h3>
               <p className="mt-1 text-[13px] text-ink-2">{receipts.reason ?? t('principles.detail.receipts.unavailableReason')}</p>
               {receipts.nextAction && <p className="mt-1 text-[12px] text-ink-3">{receipts.nextAction}</p>}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── PD v2 Phase 1: Intervention Evidence Audit (证据链四问) ─────── */}
+      {evidenceAudit !== null && (
+        <section className="mb-8" aria-labelledby="evidence-audit-title">
+          <SectionTitle>{t('principles.detail.evidenceAudit.title', { defaultValue: '干预证据链（Phase 1）' })}</SectionTitle>
+          {evidenceAudit.status === 'ok' ? (
+            <div data-testid="evidence-audit" className="rounded-[var(--radius-md)] border border-line p-4">
+              <h2 id="evidence-audit-title" className="text-[15px] font-semibold text-ink">
+                {t('principles.detail.evidenceAudit.headline', {
+                  defaultValue: '投递 {{d}} · 应用 {{a}} · 行为 {{e}} · 效果 {{f}} · 结果 {{o}}',
+                  d: evidenceAudit.deliveries.length,
+                  a: evidenceAudit.applications.length,
+                  e: evidenceAudit.episodes.length,
+                  f: evidenceAudit.effects.length,
+                  o: evidenceAudit.outcomes.length,
+                })}
+              </h2>
+              {evidenceAudit.unresolvedReferences.length > 0 && (
+                <p data-testid="evidence-audit-unresolved" className="mt-2 text-[12px] text-amber">
+                  {t('principles.detail.evidenceAudit.unresolved', {
+                    defaultValue: '{{count}} 条记录的关联对象尚未到达（pending association，非"未发生"）',
+                    count: evidenceAudit.unresolvedReferences.length,
+                  })}
+                </p>
+              )}
+              <dl className="mt-3 space-y-2 text-[13px]">
+                {([
+                  ['delivery', '投递（Delivery）', evidenceAudit.deliveries, 'delivery'],
+                  ['application', '应用（Application）', evidenceAudit.applications, 'application'],
+                  ['episode', '行为（Episode）', evidenceAudit.episodes, 'behavior_episode'],
+                  ['effect', '效果（Effect）', evidenceAudit.effects, 'effect'],
+                  ['outcome', '结果（Outcome）', evidenceAudit.outcomes, 'outcome'],
+                ] as const).map(([key, label, list, recordKind]) => (
+                  <div key={key} className="border-t border-line pt-2">
+                    <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{label}</dt>
+                    <dd className="mt-1">
+                      {list.length === 0 ? (
+                        <span className="text-[13px] text-ink-3">
+                          {t('principles.detail.evidenceAudit.emptySection', { defaultValue: '本范围内未观察到（≠ 从未发生）' })}
+                        </span>
+                      ) : (
+                        <ul className="space-y-1">
+                          {list.map((record) => (
+                            <li key={record.evidenceId} className="flex flex-wrap items-baseline gap-2 text-[13px] text-ink-2">
+                              <span className="font-mono text-[11px] text-ink-4">{record.recordedAt.slice(0, 16).replace('T', ' ')}</span>
+                              <span className="font-mono text-[11px]">{record.summary}</span>
+                              <span className="min-w-0 flex-1 truncate" title={`${record.observationKey}\n${record.detail}`}>{record.detail}</span>
+                              {record.sourceStatus === 'unknown' && <span className="text-[10px] text-amber">源可复核性未知</span>}
+                              {record.contentRedactedAt && <span className="text-[10px] text-ink-4">正文已于 {record.contentRedactedAt.slice(0, 10)} 清除</span>}
+                              {record.contentReference && <span className="text-[10px] text-ink-4" title={record.contentReference.payloadDigest ?? '无载荷摘要'}>内容引用：{record.contentReference.resolution === 'resolved' ? 'resolved' : 'revision 未解析'} · {record.contentReference.principleId}{record.contentReference.artifactId ? ` · ${record.contentReference.artifactId}` : ''}</span>}
+                              {record.activationReference && <span className="text-[10px] text-ink-4" title={`snapshot ${record.activationReference.sourceSnapshotDigest}`}>激活发生：{record.activationReference.activationId}{record.activationReference.activatedAt ? ` · ${record.activationReference.activatedAt}` : ''}</span>}
+                              {record.nativeLineage.length > 0 && <span className="text-[10px] text-ink-4">原生线索：{record.nativeLineage.join(' · ')}</span>}
+                              {record.associationStatus === 'pending_association' && (
+                                <span className="font-mono text-[10px] rounded bg-amber/15 px-1.5 py-0.5 text-amber">
+                                  {t('principles.detail.evidenceAudit.pending', { defaultValue: '待关联' })}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </dd>
+                    {evidenceAudit.pages[recordKind].hasMore && (
+                      <Button variant="ghost" size="sm" disabled={loadingEvidenceKind !== null} onClick={() => void loadOlderEvidence(recordKind)}>
+                        {loadingEvidenceKind === recordKind ? '读取中…' : '读取更早记录'}
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </dl>
+              {evidenceAudit.capabilityDeclarations.length > 0 && (
+                <details className="mt-3 border-t border-line pt-3">
+                  <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                    {t('principles.detail.evidenceAudit.capabilities', { defaultValue: '宿主能力声明（Supported / Unsupported / Unknown）' })}
+                  </summary>
+                  <ul className="mt-2 space-y-1">
+                    {evidenceAudit.capabilityDeclarations.map((cap) => (
+                      <li key={`${cap.hostKind}-${cap.capability}`} className="text-[12px] text-ink-3">
+                        <span className="font-mono">{cap.hostKind} · {cap.capability} · {cap.status}</span>
+                        {cap.note && <span> — {cap.note}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <p className="mt-3 text-[11px] leading-relaxed text-ink-4">
+                {t('principles.detail.evidenceAudit.note', {
+                  defaultValue: '本区只记录事实：投递确认程度、Agent 自述与 Runtime 事实分开列出，缺失=未知而非无效。不提供成功率或有效性评分。',
+                })}
+              </p>
+            </div>
+          ) : (
+            <div data-testid="evidence-audit-degraded" className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
+              <h3 className="text-[13px] font-semibold text-ink">
+                {t('principles.detail.evidenceAudit.unavailable', { defaultValue: '干预证据链暂不可用' })}
+              </h3>
+              <p className="mt-1 text-[13px] text-ink-2">{evidenceAudit.reason ?? '—'}</p>
+              {evidenceAudit.nextAction && <p className="mt-1 text-[12px] text-ink-3">{evidenceAudit.nextAction}</p>}
             </div>
           )}
         </section>

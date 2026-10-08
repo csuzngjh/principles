@@ -178,7 +178,8 @@ describe('Bug-Q: re-dispatch after deactivation', () => {
       expect(second.decision).toBe('already_activated');
 
       // Now deactivate the activation
-      const deactivated = await stateStore.deactivateActivation('act_prompt_a0000000-0000-4000-8000-000000000001', '2026-06-01T00:00:00.000Z');
+      if (first.decision !== 'activated') throw new Error('first dispatch did not activate');
+      const deactivated = await stateStore.deactivateActivation(first.activationId, '2026-06-01T00:00:00.000Z');
       expect(deactivated).toBe(true);
 
       // Bug-Q fix: re-dispatching the approved record should succeed (not
@@ -187,7 +188,7 @@ describe('Bug-Q: re-dispatch after deactivation', () => {
       expect(third.decision).toBe('activated');
       if (third.decision === 'activated') {
         // New activation record has a new activatedAt (re-activation timestamp).
-        expect(third.activationId).toBe('act_prompt_a0000000-0000-4000-8000-000000000001');
+        expect(third.activationId).toBe(first.activationId);
       }
 
       // Verify that getActivationStatus now returns the new active record (not null).

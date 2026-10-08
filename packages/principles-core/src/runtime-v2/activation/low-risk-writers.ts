@@ -1,4 +1,5 @@
 import type { PIArtifactSnapshot, CanActivateResult, ChannelWriter, WriterInput, WriterResult } from './activation-types.js';
+import { createHash } from 'node:crypto';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -114,7 +115,7 @@ export class PromptWriter implements ChannelWriter {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async activate(input: WriterInput, _artifact: PIArtifactSnapshot): Promise<WriterResult> {
     return {
-      activationId: `act_prompt_${input.principleId}`,
+      activationId: `act_prompt_${input.principleId}_${createHash('sha256').update(input.artifactId, 'utf8').digest('hex')}`,
       action: 'prompt_activate',
       targetRef: `ledger://${input.principleId}`,
     };

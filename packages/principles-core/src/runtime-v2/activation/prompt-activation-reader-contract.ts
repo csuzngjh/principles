@@ -158,6 +158,20 @@ const MAX_INJECTION_DIAGNOSTIC_IDS = 16;
  * statistical one. Both injection routes read the same fact, so their
  * fairness semantics are identical.
  */
+/**
+ * The single authority for the list route's serialized entry line format.
+ * `trimToBudget` measures entries through this helper; capacity prechecks and
+ * status projections must measure through it too instead of re-typing the
+ * format (PD_PROMPT_CAPACITY_V1 R-A2: costs come from the production
+ * serializer, not an approximation).
+ */
+export function listEntryLine(
+  principle: { principleId: string; text: string },
+  escapeFn: (s: string) => string = (s) => s,
+): string {
+  return `- [${escapeFn(principle.principleId)}] ${escapeFn(principle.text)}`;
+}
+
 // PRI-904: the optional roundKey extends the frozen 3-param public surface
 // positionally rather than via an options bag — existing callers (plugin hook,
 // console projection, tests) pass (principles, budget, escapeFn?) and must not
@@ -188,7 +202,7 @@ export function trimToBudget(
     // legacy_fifo_prefix_v1 — byte-identical to the pre-PRI-904 loop: greedy
     // prefix packing, first non-fit breaks. Rollback = omit the round key.
     for (const p of principles) {
-      const entry = `- [${escapeFn(p.principleId)}] ${escapeFn(p.text)}`;
+      const entry = listEntryLine(p, escapeFn);
       if (remaining < entry.length + 1) {
         truncated = true;
         // The loop breaks here, so both lists hold at most this one entry —
@@ -215,7 +229,7 @@ export function trimToBudget(
   const rotationStartIndex = ((roundKey % n) + n) % n;
   const ring = principles.slice(rotationStartIndex).concat(principles.slice(0, rotationStartIndex));
   for (const p of ring) {
-    const entry = `- [${escapeFn(p.principleId)}] ${escapeFn(p.text)}`;
+    const entry = listEntryLine(p, escapeFn);
     const cost = entry.length + 1;
     if (cost > emptyPayloadRemaining) {
       // Cannot fit even in an empty payload — oversize, not starvation.

@@ -21,7 +21,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS } from '@principles/core/runtime-v2';
-import type { ReceiptEvidenceCoverage, ReceiptValidationStatus } from '@principles/core/runtime-v2';
+import { SqliteInterventionEvidenceStore } from '@principles/core/runtime-v2';
+import type {
+  InterventionAuditRecordSummary,
+  InterventionAuditKindPage,
+  InterventionAuditSelector,
+  InterventionCapabilityDeclaration,
+  ReceiptEvidenceCoverage,
+  ReceiptValidationStatus,
+} from '@principles/core/runtime-v2';
 import { computeFlagsFromLoadResult, loadPdConfig } from '../config/pd-config-store.js';
 
 export interface ReceiptEvent {
@@ -58,6 +66,33 @@ export interface ReceiptCounts {
   reason?: string;
   nextAction?: string;
   counts: ReceiptCountEntry[];
+  coverage: ReceiptEvidenceCoverage;
+}
+
+/**
+ * PD v2 Phase 1 evidence audit (ADR-0027 / SPEC §13.8 four queries).
+ * Read-only projection of the normalized intervention evidence ledger —
+ * answers WHERE a principle was delivered, WHETHER application evidence
+ * exists (claimed vs runtime-verified listed separately), WHAT behavior
+ * episodes happened and WHAT outcomes were observed. Explicit gaps
+ * (unresolvedReferences) distinguish "not associated yet" from
+ * "not observed". No success rate, no effectiveness verdict — an empty
+ * section is an observation statement, never a "never happened" claim.
+ */
+export interface EvidenceAuditResponse {
+  status: 'ok' | 'degraded';
+  reason?: string;
+  nextAction?: string;
+  selector: InterventionAuditSelector;
+  deliveries: InterventionAuditRecordSummary[];
+  applications: InterventionAuditRecordSummary[];
+  episodes: InterventionAuditRecordSummary[];
+  effects: InterventionAuditRecordSummary[];
+  outcomes: InterventionAuditRecordSummary[];
+  pages: Record<InterventionAuditRecordSummary['kind'], InterventionAuditKindPage>;
+  unresolvedReferences: { evidenceId: string; missingKey: string; field: string }[];
+  capabilityDeclarations: InterventionCapabilityDeclaration[];
+  asOf: string | null;
   coverage: ReceiptEvidenceCoverage;
 }
 
@@ -327,6 +362,105 @@ export class ReceiptsConsoleModel {
       throw err;
     } finally {
       conn.close();
+    }
+  }
+
+  /**
+   * PD v2 Phase 1: the four audit queries (SPEC §13.8). Read-only; never
+   * bootstraps state.db (readonly + bootstrapIfMissing:false); degradation
+   * (missing DB, flag off, pre-evidence schema) is structured, never thrown
+   * to the route.
+   */
+  async getEvidenceAudit(
+    selector: InterventionAuditSelector,
+    cursor?: { kind: InterventionAuditRecordSummary['kind']; after: { recordedAt: string; evidenceId: string } },
+  ): Promise<EvidenceAuditResponse> {
+    const empty: Omit<EvidenceAuditResponse, 'status' | 'reason' | 'nextAction' | 'selector' | 'coverage'> = {
+      deliveries: [],
+      applications: [],
+      episodes: [],
+      effects: [],
+      outcomes: [],
+      pages: {
+        delivery: { hasMore: false, nextCursor: null },
+        application: { hasMore: false, nextCursor: null },
+        behavior_episode: { hasMore: false, nextCursor: null },
+        effect: { hasMore: false, nextCursor: null },
+        outcome: { hasMore: false, nextCursor: null },
+      },
+      unresolvedReferences: [],
+      capabilityDeclarations: [],
+      asOf: null,
+    };
+    const guard = this.precheck();
+    if (guard) {
+      return {
+        status: guard.status,
+        reason: guard.reason,
+        nextAction: guard.nextAction,
+        selector,
+        ...empty,
+        coverage: guard.coverage,
+      };
+    }
+    const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true, bootstrapIfMissing: false });
+    try {
+      const store = new SqliteInterventionEvidenceStore(conn);
+      const read = store.readAuditRelations(selector, { limit: 50, ...(cursor ? { cursor } : {}) });
+      if (!read.available) {
+        // A state.db that predates the evidence tables: nothing was created
+        // by this GET (the store never bootstraps) — an honest unavailable.
+        return {
+          status: 'degraded',
+          reason: `intervention evidence not available: ${read.reason}`,
+          nextAction: read.nextAction ?? 'Inspect workspace evidence ledger state',
+          selector,
+          ...empty,
+          coverage: unreadCoverage('unavailable', read.reason, 'inspect_evidence_ledger'),
+        };
+      }
+      const { relations } = read;
+      let observedFrom: string | null = null;
+      for (const record of [...relations.deliveries, ...relations.applications, ...relations.episodes, ...relations.effects, ...relations.outcomes]) {
+        const at = record.occurredAt ?? record.recordedAt;
+        if (observedFrom === null || at < observedFrom) observedFrom = at;
+      }
+      return {
+        status: 'ok',
+        selector,
+        deliveries: relations.deliveries,
+        applications: relations.applications,
+        episodes: relations.episodes,
+        effects: relations.effects,
+        outcomes: relations.outcomes,
+        pages: relations.pages,
+        unresolvedReferences: relations.unresolvedReferences,
+        capabilityDeclarations: relations.capabilityDeclarations,
+        asOf: relations.asOf,
+        coverage: {
+          sourceStatus: 'available',
+          validationStatus: 'valid',
+          observedFrom,
+          asOf: relations.asOf,
+          retentionPolicyDays: RECEIPT_RETENTION_POLICY_DAYS,
+        },
+      };
+    } catch (err) {
+      // Beyond a missing table: an unreadable state.db (permissions,
+      // corruption) or a drifted partial schema must ALSO degrade here —
+      // the route contract promises degraded-over-500 and the UI needs a
+      // visible evidence section with a reason, not a vanished block.
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        status: 'degraded',
+        reason: `intervention evidence read failed: ${message}`,
+        nextAction: 'Run pd runtime diagnostics to check state.db health',
+        selector,
+        ...empty,
+        coverage: unreadCoverage('unavailable', 'evidence_read_failed', 'run_runtime_diagnostics'),
+      };
+    } finally {
+      try { conn.close(); } catch { /* best-effort: read path must not throw */ }
     }
   }
 

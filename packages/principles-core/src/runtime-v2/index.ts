@@ -62,7 +62,7 @@ export type {
 } from './governance-experience-contract.js';
 export { GOVERNANCE_EXPERIENCE_ITEMS_LIMIT, GOVERNANCE_EXPERIENCE_ISSUE_GROUPS_LIMIT, deriveGovernanceExperienceSnapshot } from './governance-experience.js';
 // Receipt evidence coverage disclosure contract (PRI-590)
-export { RECEIPT_RETENTION_POLICY_DAYS } from './receipt-coverage.js';
+export { INTERVENTION_SHORT_SOURCE_RETENTION_DAYS, RECEIPT_RETENTION_POLICY_DAYS } from './receipt-coverage.js';
 export type { ReceiptSourceStatus, ReceiptValidationStatus, ReceiptEvidenceCoverage } from './receipt-coverage.js';
 // Owner identity registration (ADR-0022, PRI-578) — env > ~/.pd/owner.json > none
 export {
@@ -1510,10 +1510,14 @@ export {
   filterPromptActivations,
   resolvePrincipleFromArtifact,
   trimToBudget,
+  listEntryLine,
   renderPrinciplesToDirectives,
   createProductionGateDeps,
   compileHardenedRuleEvaluator,
   ApprovalCompletionService,
+  detectPromptReplacementTarget,
+  buildOwnerRevisionArtifact,
+  revisionDigest,
   buildPromotionEvidenceSnapshot,
   computeArtifactDigest,
   normalizeOwnerIdentity,
@@ -2172,3 +2176,63 @@ export type {
   ClassifierPayloadPath,
   SignalClassificationOutputV1,
 } from './signal-collector/index.js';
+
+// Intervention Evidence — PD v2 Phase 1 Evidence Foundation (ADR-0027).
+// Deterministic normalization + contract; persistence lives in the SQLite
+// intervention-evidence store (same runtime-v2 store seam as activations).
+export {
+  normalizeInterventionEvidenceBatch,
+  canonicalJson,
+  computeEvidenceId,
+  computeRecordDigest,
+  mintObservationKey,
+} from './intervention-evidence-normalizer.js';
+export type {
+  NormalizedInterventionBatch,
+  InterventionNormalization,
+} from './intervention-evidence-normalizer.js';
+export {
+  DELIVERED_CONFIRMATIONS,
+  DELIVERY_CONFIRMATIONS,
+  INTERVENTION_CAPABILITIES,
+  INTERVENTION_RECORD_KINDS,
+  INTERVENTION_SOURCE_KINDS,
+  INTERVENTION_TEXT_BOUNDS,
+} from './types/intervention-evidence-contract.js';
+export type {
+  DeliveryConfirmation,
+  InterventionActivationOccurrenceRef,
+  InterventionApplicationAction,
+  InterventionApplicationProof,
+  InterventionAuditRecordSummary,
+  InterventionAuditCursor,
+  InterventionAuditKindPage,
+  InterventionAuditRelations,
+  InterventionAuditSelector,
+  InterventionCapability,
+  InterventionCapabilityDeclaration,
+  InterventionCapabilityStatus,
+  InterventionContentRef,
+  InterventionDeliveryOutcome,
+  InterventionDeliveryPayload,
+  InterventionDeliveryTarget,
+  InterventionEffectPayload,
+  InterventionEpisodePayload,
+  InterventionEvidenceBatchInput,
+  InterventionNativeRefs,
+  InterventionObservationInput,
+  InterventionOutcomePayload,
+  InterventionPayload,
+  InterventionRecordKind,
+  InterventionSourceKind,
+  NormalizedInterventionRecord,
+} from './types/intervention-evidence-contract.js';
+export {
+  SqliteInterventionEvidenceStore,
+} from './store/sqlite-intervention-evidence-store.js';
+export type {
+  AppendObservationBatchResult,
+  InterventionAuditRead,
+  InterventionAuditReadOptions,
+  InterventionSourceConflict,
+} from './store/sqlite-intervention-evidence-store.js';

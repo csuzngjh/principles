@@ -22,10 +22,11 @@
     },
     {
       "name": "sqlite-state-store",
-      "description": "Runtime V2 state.db connection factory and the RuntimeStateManager integration layer that wires all SQLite stores. Owns the DB lifecycle (open, pragma, close) for task/run/candidate/commit/artifact stores.",
+      "description": "Runtime V2 state.db connection factory and the RuntimeStateManager integration layer that wires all SQLite stores. Owns the DB lifecycle (open, pragma, close) for task/run/candidate/commit/artifact stores. PD v2 Phase 1: the intervention evidence ledger store joins this seam as a leaf store (all access through SqliteConnection; no direct fs/path).",
       "files": [
         "runtime-v2/store/sqlite-connection.ts",
-        "runtime-v2/store/runtime-state-manager.ts"
+        "runtime-v2/store/runtime-state-manager.ts",
+        "runtime-v2/store/sqlite-intervention-evidence-store.ts"
       ]
     },
     {

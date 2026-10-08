@@ -357,6 +357,10 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // PRI-531: Plugin I/O boundary — durable receipt ledger writes (state.db
   // principle_applications inserts + 90-day retention sweep).
   'principle-application-ledger.ts',
+  // PD v2 Phase 1 (ADR-0027): plugin evidence source adapter — builds OpenClaw
+  // observation batches and appends through the shared @principles/host-runtime
+  // ingress (no direct evidence-table writes; flag-gated, failure-degrading).
+  'intervention-evidence-recorder.ts',
   'pain-lifecycle.ts',
   'session-tracker.ts',
   // PRI-459: now a thin re-export adapter over @principles/core/principle-tree-ledger.
@@ -495,7 +499,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Security audit run-1: Added degraded-enforcement-marker.ts (96 → 97) —
     // plugin I/O boundary for ~/.pd/enforcement-health/ degraded-enforcement
     // markers (LOCKSTEP twin of the host-runtime gate's marker module).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
+    // PD v2 Phase 1: +1 intervention-evidence-recorder.ts (98) — plugin I/O source adapter for the shared evidence ingress.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
   });
 });
 
