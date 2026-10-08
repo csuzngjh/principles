@@ -73,7 +73,6 @@ export type InterventionAuditRead =
 const AUDIT_DEFAULT_LIMIT = 50;
 const AUDIT_MAX_LIMIT = 200;
 const SHA256_RE = /^sha256:[a-f0-9]{64}$/;
-const SHORT_RETENTION_SOURCE_KINDS_SQL = INTERVENTION_SHORT_RETENTION_SOURCE_KINDS.map((kind) => `'${kind}'`).join(', ');
 function isValidAuditTimestamp(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?Z$/.exec(value);
@@ -283,9 +282,9 @@ function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): numb
   const shortSourceCutoff = new Date(asOf.getTime() - INTERVENTION_SHORT_SOURCE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const rows = db.prepare(`SELECT evidence_id, record_kind, payload_json, correction_reason
     FROM intervention_evidence_records
-    WHERE ((source_kind IN (${SHORT_RETENTION_SOURCE_KINDS_SQL}) AND
+    WHERE ((source_kind IN (?, ?, ?) AND
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))) OR
-           (source_kind NOT IN (${SHORT_RETENTION_SOURCE_KINDS_SQL}) AND
+           (source_kind NOT IN (?, ?, ?) AND
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))))
       AND (
         (content_redacted_at IS NULL AND (
@@ -296,7 +295,14 @@ function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): numb
           (record_kind = 'outcome' AND (json_type(payload_json, '$.feedbackText') IS NOT NULL OR json_type(payload_json, '$.actorId') IS NOT NULL OR (json_type(payload_json, '$.observationSummary') IS NOT NULL AND json_extract(payload_json, '$.observationSummary') <> '[expired]')))
         )) OR (correction_reason IS NOT NULL AND correction_reason <> '[expired]')
       )
-    ORDER BY recorded_at ASC, evidence_id ASC LIMIT 200`).all(shortSourceCutoff, shortSourceCutoff, receiptCutoff, receiptCutoff);
+    ORDER BY recorded_at ASC, evidence_id ASC LIMIT 200`).all(
+      ...INTERVENTION_SHORT_RETENTION_SOURCE_KINDS,
+      shortSourceCutoff,
+      shortSourceCutoff,
+      ...INTERVENTION_SHORT_RETENTION_SOURCE_KINDS,
+      receiptCutoff,
+      receiptCutoff,
+    );
   const redact = db.prepare(`UPDATE intervention_evidence_records
     SET payload_json = ?, correction_reason = ?, content_redacted_at = COALESCE(content_redacted_at, ?)
     WHERE evidence_id = ? AND (content_redacted_at IS NULL OR (correction_reason IS NOT NULL AND correction_reason <> '[expired]'))`);
