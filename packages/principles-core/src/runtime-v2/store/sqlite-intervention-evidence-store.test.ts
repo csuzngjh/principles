@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { SqliteConnection } from './sqlite-connection.js';
 import { SqliteInterventionEvidenceStore } from './sqlite-intervention-evidence-store.js';
+import { interventionEvidenceSourcePolicy } from '../receipt-coverage.js';
 import { normalizeInterventionEvidenceBatch } from '../intervention-evidence-normalizer.js';
 import type { InterventionEvidenceBatchInput } from '../types/intervention-evidence-contract.js';
 
@@ -642,6 +643,55 @@ describe('SqliteInterventionEvidenceStore', () => {
     const legacyRow = record(conn.getDb().prepare('SELECT payload_json, content_redacted_at FROM intervention_evidence_records WHERE evidence_id = ?').get(legacyRecord.evidenceId));
     expect(String(legacyRow.payload_json)).not.toContain('private legacy summary');
     expect(legacyRow.content_redacted_at).toBeTruthy();
+  });
+
+  it('keeps legacy application-ledger mirrors on the 90-day owner evidence horizon', () => {
+    expect(interventionEvidenceSourcePolicy('agent_self_report').retentionDays).toBe(90);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const ninetyOneDaysAgo = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString();
+    const currentEvidence = normalized(deliveryBatch({
+      sourceKind: 'openclaw_plugin_event_log', recordedAt: thirtyDaysAgo,
+      observations: [{
+        observationKey: 'openclaw|self-report|thirty-days', sourceLocator: 'openclaw-application-ledger:session-30d',
+        kind: 'application', nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01',
+        payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: 'recent self-report' },
+      }],
+    }));
+    const [currentRecord] = currentEvidence.records;
+    if (!currentRecord) throw new Error('Expected recent legacy self-report');
+    store.appendObservationBatch(currentEvidence);
+
+    const expiredEvidence = normalized(deliveryBatch({
+      sourceKind: 'openclaw_plugin_event_log', recordedAt: ninetyOneDaysAgo,
+      observations: [{
+        observationKey: 'openclaw|self-report|ninety-one-days', sourceLocator: 'openclaw-application-ledger:session-91d',
+        kind: 'application', nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01',
+        payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: 'expired self-report' },
+      }],
+    }));
+    const [expiredRecord] = expiredEvidence.records;
+    if (!expiredRecord) throw new Error('Expected expired legacy self-report');
+    store.appendObservationBatch(expiredEvidence);
+
+    const db = conn.getDb();
+    const currentRow = record(db.prepare('SELECT payload_json, content_redacted_at FROM intervention_evidence_records WHERE evidence_id = ?').get(currentRecord.evidenceId));
+    expect(JSON.parse(String(currentRow.payload_json)).claimText).toBe('recent self-report');
+    expect(currentRow.content_redacted_at).toBeNull();
+    const expiredRow = record(db.prepare('SELECT payload_json, content_redacted_at, record_digest FROM intervention_evidence_records WHERE evidence_id = ?').get(expiredRecord.evidenceId));
+    expect(JSON.parse(String(expiredRow.payload_json))).not.toHaveProperty('claimText');
+    expect(expiredRow.content_redacted_at).toBeTruthy();
+    expect(expiredRow.record_digest).toBe(expiredRecord.recordDigest);
+
+    const audit = store.readAuditRelations({ type: 'principle', principleId: 'T-01' });
+    expect(audit.available).toBe(true);
+    if (audit.available) {
+      const currentSummary = audit.relations.applications.find((item) => item.evidenceId === currentRecord.evidenceId);
+      const expiredSummary = audit.relations.applications.find((item) => item.evidenceId === expiredRecord.evidenceId);
+      expect(currentSummary?.payload).toMatchObject({ claimText: 'recent self-report' });
+      expect(currentSummary?.sourceStatus).toBe('unknown');
+      expect(expiredSummary?.payload).not.toHaveProperty('claimText');
+      expect(expiredSummary?.sourceStatus).toBe('unknown');
+    }
   });
 
   it('upgrades a legacy evidence table and restores both immutability triggers atomically', () => {

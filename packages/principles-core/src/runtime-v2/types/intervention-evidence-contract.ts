@@ -322,7 +322,7 @@ export interface InterventionAuditRecordSummary {
   activationRef?: InterventionActivationOccurrenceRef;
   /** Sensitive text fields were removed under the existing receipt retention boundary. */
   contentRedactedAt?: string;
-  /** Host source is unverified; Codex 32-turn and event-log retention horizons may have expired. */
+  /** Host source is unverified; Codex 32-turn and legacy OpenClaw ledger horizons may have expired. */
   sourceStatus?: 'unknown';
   payload: InterventionPayload;
   recordDigest: string;

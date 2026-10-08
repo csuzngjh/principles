@@ -39,6 +39,7 @@ import type {
 import {
   INTERVENTION_SHORT_RETENTION_SOURCE_KINDS,
   INTERVENTION_SHORT_SOURCE_RETENTION_DAYS,
+  LEGACY_OPENCLAW_APPLICATION_LEDGER_LOCATOR_PREFIX,
   RECEIPT_RETENTION_POLICY_DAYS,
   interventionEvidenceSourcePolicy,
 } from '../receipt-coverage.js';
@@ -282,9 +283,9 @@ function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): numb
   const shortSourceCutoff = new Date(asOf.getTime() - INTERVENTION_SHORT_SOURCE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const rows = db.prepare(`SELECT evidence_id, record_kind, payload_json, correction_reason
     FROM intervention_evidence_records
-    WHERE ((source_kind IN (?, ?, ?) AND
+    WHERE ((source_kind IN (?, ?, ?) AND NOT (source_kind = ? AND source_locator LIKE ?) AND
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))) OR
-           (source_kind NOT IN (?, ?, ?) AND
+           ((source_kind NOT IN (?, ?, ?) OR (source_kind = ? AND source_locator LIKE ?)) AND
             (recorded_at < ? OR (occurred_at < ? AND occurred_at < recorded_at))))
       AND (
         (content_redacted_at IS NULL AND (
@@ -297,9 +298,13 @@ function redactExpiredSensitivePayloads(db: Database.Database, asOf: Date): numb
       )
     ORDER BY recorded_at ASC, evidence_id ASC LIMIT 200`).all(
       ...INTERVENTION_SHORT_RETENTION_SOURCE_KINDS,
+      'openclaw_plugin_event_log',
+      `${LEGACY_OPENCLAW_APPLICATION_LEDGER_LOCATOR_PREFIX}%`,
       shortSourceCutoff,
       shortSourceCutoff,
       ...INTERVENTION_SHORT_RETENTION_SOURCE_KINDS,
+      'openclaw_plugin_event_log',
+      `${LEGACY_OPENCLAW_APPLICATION_LEDGER_LOCATOR_PREFIX}%`,
       receiptCutoff,
       receiptCutoff,
     );
@@ -336,6 +341,7 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
   const evidenceId = strColumn(row, 'evidence_id');
   const recordKind = narrowEnumColumn<InterventionRecordKind>({ value: row.record_kind, allowed: RECORD_KIND_SET, column: 'record_kind', rowId: evidenceId });
   const sourceKind = narrowEnumColumn<InterventionAuditRecordSummary['sourceKind']>({ value: row.source_kind, allowed: SOURCE_KIND_SET, column: 'source_kind', rowId: evidenceId });
+  const sourceLocator = strColumn(row, 'source_locator');
   let payload = parseJsonColumn(strColumn(row, 'payload_json'), evidenceId);
   const nativeRefs = parseNativeRefs(row.native_refs_json, evidenceId);
   const contentRef = parseContentRef(row.content_ref_json, evidenceId);
@@ -354,7 +360,7 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
     });
   }
   const sourceTime = occurredAt && Date.parse(occurredAt) < Date.parse(recordedAt) ? occurredAt : recordedAt;
-  const { retentionDays, sourceStatus } = interventionEvidenceSourcePolicy(sourceKind);
+  const { retentionDays, sourceStatus } = interventionEvidenceSourcePolicy(sourceKind, sourceLocator);
   const expiresAt = Date.parse(sourceTime) + retentionDays * 24 * 60 * 60 * 1000;
   if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
     const redactedPayload = redactPayloadText(recordKind, JSON.stringify(payload), evidenceId);
@@ -450,7 +456,7 @@ function mapRowToSummary(row: unknown, existingKeys: ReadonlySet<string>): Inter
     kind: recordKind,
     observationKey: strColumn(row, 'observation_key'),
     sourceKind,
-    sourceLocator: strColumn(row, 'source_locator'),
+    sourceLocator,
     recordedAt,
     occurredAt,
     principleId,
@@ -625,7 +631,7 @@ export class SqliteInterventionEvidenceStore {
         const recordTime = record.occurredAt && Date.parse(record.occurredAt) < Date.parse(record.recordedAt)
           ? record.occurredAt
           : record.recordedAt;
-        const { retentionDays } = interventionEvidenceSourcePolicy(record.sourceKind);
+        const { retentionDays } = interventionEvidenceSourcePolicy(record.sourceKind, record.sourceLocator);
         const expiresAt = Date.parse(recordTime) + retentionDays * 24 * 60 * 60 * 1000;
         let payloadJson = JSON.stringify(record.payload);
         let correctionReason: string | null = record.correctionReason ?? null;

@@ -27,11 +27,16 @@ export const INTERVENTION_SHORT_RETENTION_SOURCE_KINDS = [
   'codex_governance_observation',
 ] as const;
 
-export function interventionEvidenceSourcePolicy(sourceKind: string): { retentionDays: number; sourceStatus?: 'unknown' } {
-  const shortRetention = INTERVENTION_SHORT_RETENTION_SOURCE_KINDS.some((kind) => kind === sourceKind);
+export const LEGACY_OPENCLAW_APPLICATION_LEDGER_LOCATOR_PREFIX = 'openclaw-application-ledger:';
+
+export function interventionEvidenceSourcePolicy(sourceKind: string, sourceLocator?: string): { retentionDays: number; sourceStatus?: 'unknown' } {
+  const shortSourceKind = INTERVENTION_SHORT_RETENTION_SOURCE_KINDS.some((kind) => kind === sourceKind);
+  const mirroredOwnerLedger = sourceKind === 'openclaw_plugin_event_log'
+    && sourceLocator?.startsWith(LEGACY_OPENCLAW_APPLICATION_LEDGER_LOCATOR_PREFIX) === true;
+  const shortRetention = shortSourceKind && !mirroredOwnerLedger;
   return {
     retentionDays: shortRetention ? INTERVENTION_SHORT_SOURCE_RETENTION_DAYS : RECEIPT_RETENTION_POLICY_DAYS,
-    ...(shortRetention ? { sourceStatus: 'unknown' as const } : {}),
+    ...(shortSourceKind ? { sourceStatus: 'unknown' as const } : {}),
   };
 }
 
