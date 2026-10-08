@@ -311,6 +311,8 @@ describe('SqliteInterventionEvidenceStore', () => {
     store.appendObservationBatch(normalized(deliveryBatch({ recordedAt: '2026-09-01T00:00:00Z', observations: [{
       observationKey: 'oc|application|older', sourceLocator: 'loc:application', kind: 'application',
       nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01',
+      contentRef: { principleId: 'T-01', resolution: 'resolved', payloadDigest: `sha256:${'a'.repeat(64)}` },
+      activationRef: { activationId: 'act-1', sourceSnapshotDigest: `sha256:${'b'.repeat(64)}` },
       payload: { proofMethod: 'runtime_verified', action: 'tool_blocked', enforcementBoundary: 'host_gate' },
     }] })));
     const newerDeliveries = Array.from({ length: 55 }, (_, i) => ({
