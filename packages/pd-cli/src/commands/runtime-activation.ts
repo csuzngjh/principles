@@ -1280,6 +1280,8 @@ interface ActivationApproveOptions {
   json?: boolean;
   /** PD_PROMPT_CAPACITY_V1 R-A1/R-B2: request-level target host for the prompt capacity precheck. */
   targetHost?: 'openclaw' | 'codex';
+  retryActivation?: boolean;
+  confirmIntent?: boolean;
 }
 
 interface ApproveResult {
@@ -1370,6 +1372,7 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
     // R-B3: set when the approved artifact is a revision of a live prompt
     // activation (version replacement); consumed by the completion service.
     let supersedeActivationId: string | undefined;
+    let supersedeArtifactId: string | undefined;
 
     // PD_PROMPT_CAPACITY_V1 R-B2: prompt-channel approvals pass the SAME
     // route-aware single-artifact capacity precheck as the Console (one
@@ -1377,7 +1380,7 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
     // precheck re-reads the CURRENT approval artifact and route/config at
     // submit time; refusal keeps the approval pending with a structured
     // reason + nextAction (cli-5: failed validation performs no mutation).
-    if (approvalChannel === 'prompt' && pendingApproval?.status === 'pending') {
+    if (approvalChannel === 'prompt' && (pendingApproval?.status === 'pending' || (pendingApproval?.status === 'approved' && opts.retryActivation === true))) {
       let deliverability;
       try {
         deliverability = await checkPromptArtifactDeliverabilityById({
@@ -1444,12 +1447,22 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
         return;
       }
       supersedeActivationId = detection.target?.supersededActivationId;
+        supersedeArtifactId = detection.target?.supersededArtifactId;
+      if (pendingApproval.status === 'pending' && detection.target !== null && opts.confirmIntent !== true) {
+        const result: ApproveResult = { ok: false, approvalId: opts.approvalId, reason: 'revision_intent_review_required', nextAction: `Review the complete old/new statement and intent fields with pd artifact show ${detection.target.supersededArtifactId} --workspace ${JSON.stringify(workspaceDir)} --json and pd artifact show ${pendingApproval.artifactId} --workspace ${JSON.stringify(workspaceDir)} --json (or Console Focus), then pass --confirm-intent with this approval.` };
+        if (opts.json) console.log(JSON.stringify(result, null, 2));
+        else console.error(`Error: ${result.reason}; nextAction=${result.nextAction}`);
+        process.exitCode = 1;
+        return;
+      }
     }
 
     // Step 1: approve the pending approval record.
     let approvalResult: ApprovalDecisionResult;
     try {
-      approvalResult = await queue.approve(opts.approvalId, decidedBy, opts.note);
+      approvalResult = pendingApproval?.status === 'approved' && opts.retryActivation === true
+        ? { ok: true, record: pendingApproval }
+        : await queue.approve(opts.approvalId, decidedBy, opts.note);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const result: ApproveResult = {
@@ -1551,26 +1564,26 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
         approvalId: opts.approvalId,
         actor: { kind: 'human', userId: decidedBy },
         now: new Date().toISOString(),
-        ...(supersedeActivationId !== undefined ? { supersedeActivationId, supersedeDecidedBy: decidedBy } : {}),
+        ...(supersedeActivationId !== undefined ? { supersedeActivationId, supersedeArtifactId, supersedeDecidedBy: approvalResult.record.decidedBy ?? 'unknown' } : {}),
       });
     } catch (err) {
-      // CodeRabbit review fix (cli-5-failure-no-mutation): approval was
-      // written but completion threw unexpectedly. Roll back the approval to
-      // 'pending' so the operator can retry without a stale 'approved' record
-      // that has no activation. Mirrors ApprovalsConsoleModel.approve() L168-182.
+      // Prompt failures preserve the approved Owner decision; retry runs the
+      // current capacity gate again. Other channels keep their existing rollback.
       const errMsg = err instanceof Error ? err.message : String(err);
       let approvalRolledBack = false;
-      try {
-        const rollbackResult = await queue.resetToPending(opts.approvalId);
-        approvalRolledBack = rollbackResult.ok;
-      } catch { /* best-effort rollback */ }
+      if (approvalChannel !== 'prompt') {
+        try {
+          const rollbackResult = await queue.resetToPending(opts.approvalId);
+          approvalRolledBack = rollbackResult.ok;
+        } catch { /* best-effort rollback */ }
+      }
       const result: ApproveResult = {
         ok: false,
         approvalId: opts.approvalId,
         reason: `activation_completion_failed: ${errMsg}`,
         nextAction: approvalRolledBack
           ? 'Approval rolled back to pending. Fix the issue and re-run `pd activation approve --approval-id <id>`.'
-          : `Approval remains 'approved'. Run \`pd activation dispatch --artifact-id ${approvalResult.record.artifactId} --confirm\` to retry activation.`,
+          : `Approval remains 'approved'. Run \`pd runtime activation approve --approval-id ${opts.approvalId} --retry-activation\` to retry activation.`,
         approvalRolledBack,
       };
       if (opts.json) {
@@ -1583,23 +1596,23 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
       return;
     }
 
-    if (!completionResult.ok) {
-      // CodeRabbit review fix (cli-5-failure-no-mutation): activation
-      // returned !ok. Roll back the approval to 'pending' so the operator
-      // can retry without a stale 'approved' record. Mirrors
-      // ApprovalsConsoleModel.approve() L168-182.
+    if (!completionResult.ok || (completionResult.decision.decision !== 'activated' && completionResult.decision.decision !== 'already_activated')) {
+      // Service orchestration success is not activation success: refusals
+      // must be failed CLI results, with the prompt Owner decision retained.
       let approvalRolledBack = false;
-      try {
-        const rollbackResult = await queue.resetToPending(opts.approvalId);
-        approvalRolledBack = rollbackResult.ok;
-      } catch { /* best-effort rollback */ }
+      if (approvalChannel !== 'prompt') {
+        try {
+          const rollbackResult = await queue.resetToPending(opts.approvalId);
+          approvalRolledBack = rollbackResult.ok;
+        } catch { /* best-effort rollback */ }
+      }
       const result: ApproveResult = {
         ok: false,
         approvalId: opts.approvalId,
-        reason: `activation_failed: ${completionResult.reason}`,
+        reason: `activation_failed: ${!completionResult.ok ? completionResult.reason : completionResult.decision.decision}`,
         nextAction: approvalRolledBack
-          ? `Approval rolled back to pending. ${completionResult.nextAction ?? 'Fix the issue and re-run `pd activation approve --approval-id <id>`.'}`
-          : `Approval remains 'approved'. ${completionResult.nextAction ?? 'Check the artifact validation status and retry.'}`,
+          ? `Approval rolled back to pending. ${!completionResult.ok ? completionResult.nextAction : 'Inspect the activation refusal and retry.'}`
+          : `Approval remains 'approved'. Retry with pd runtime activation approve --approval-id ${opts.approvalId} --retry-activation${opts.targetHost === undefined ? '' : ` --target-host ${opts.targetHost}`}.`,
         approvalRolledBack,
       };
       if (opts.json) {
@@ -1759,6 +1772,8 @@ export function registerRuntimeActivationApproveCommand(parent: Command): Comman
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--json', 'Output raw JSON')
     .option('--target-host <host>', 'Request-level target host for the prompt capacity precheck (openclaw|codex); omit to use workspace host facts')
+    .option('--retry-activation', 'Retry activation of an already approved record without changing its Owner decision')
+    .option('--confirm-intent', 'Confirm that the revised statement preserves the reviewed Owner intent')
     .action(async (opts) => {
       await handleActivationApprove({
         approvalId: opts.approvalId,
@@ -1767,6 +1782,8 @@ export function registerRuntimeActivationApproveCommand(parent: Command): Comman
         workspace: opts.workspace,
         json: opts.json,
         ...(typeof opts.targetHost === 'string' && opts.targetHost.length > 0 ? { targetHost: opts.targetHost } : {}),
+        retryActivation: opts.retryActivation === true,
+        confirmIntent: opts.confirmIntent === true,
       });
     });
 }

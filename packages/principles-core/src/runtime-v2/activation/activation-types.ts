@@ -59,6 +59,7 @@ export interface DispatchInput {
    * approval / identity verification unchanged.
    */
   supersedeActivationId?: string;
+  supersedeArtifactId?: string;
   /** R-B3: the Owner actor recorded on the supersede decision row. */
   supersedeDecidedBy?: string;
 }

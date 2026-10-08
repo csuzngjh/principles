@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ActivationDispatcher } from '../activation-dispatcher.js';
 import { PromptWriter } from '../low-risk-writers.js';
+import { ApprovalCompletionService } from '../approval-completion-service.js';
 import type {
   ActivationStateReadModel,
   ActivationStatusRecord,
@@ -165,12 +166,12 @@ describe('ActivationDispatcher supersede seam (R-B3)', () => {
     expect(state.recordCalls).toHaveLength(0);
   });
 
-  it('falls back to plain recordActivation when the store has no seam', async () => {
+  it('refuses unsupported replacement instead of leaving two versions live', async () => {
     const state = fakeStateStore({ withSeam: false });
     const decision = await dispatcherWith(state).dispatch(dispatchInput({ supersedeActivationId: 'act-old' }));
-    expect(decision.decision).toBe('activated');
-    if (decision.decision === 'activated') expect(decision.supersededActivationId).toBeUndefined();
-    expect(state.recordCalls).toHaveLength(1);
+    expect(decision.decision).toBe('refused');
+    if (decision.decision === 'refused') expect(decision.reason).toBe('prompt_replacement_not_supported');
+    expect(state.recordCalls).toHaveLength(0);
     expect(state.replaceCalls).toHaveLength(0);
   });
 
@@ -245,5 +246,30 @@ describe('ActivationDispatcher supersede seam (R-B3)', () => {
     expect(decision.decision).toBe('already_activated');
     if (decision.decision === 'already_activated') expect(decision.supersededActivationId).toBeUndefined();
     expect(state.replaceCalls).toHaveLength(0);
+  });
+});
+
+describe('replacement recovery through the public approval completion service', () => {
+  it('finishes superseding instead of returning success with both versions live', async () => {
+    const state = fakeStateStore({ withSeam: true, existingLive: { ...liveOldActivation(), activationId: 'act-new', artifactId: 'art-new', idempotencyKey: 'art-new::prompt' } });
+    const service = new ApprovalCompletionService(fakeApprovalStore(), dispatcherWith(state), state);
+    const result = await service.completeApproval({ approvalId: 'apr-1', actor: { kind: 'human', userId: 'owner-1' }, now: '2026-10-08T02:00:00.000Z', supersedeActivationId: 'act-old' });
+    expect(result.ok).toBe(true);
+    expect(state.replaceCalls).toHaveLength(1);
+    expect(state.replaceCalls[0]?.supersededActivationId).toBe('act-old');
+  });
+});
+
+describe('Writer version identity contract', () => {
+  it('separates versions even without replacement context and keeps replays stable', async () => {
+    const writer = new PromptWriter();
+    const base = { artifactId: 'art-new', channel: 'prompt' as const, principleId: PRINCIPLE_ID, idempotencyKey: 'art-new::prompt', now: '2026-10-08T02:00:00.000Z' };
+    const first = await writer.activate(base, artifactSnapshot());
+    const replay = await writer.activate(base, artifactSnapshot());
+    const next = await writer.activate({ ...base, artifactId: 'art-next', idempotencyKey: 'art-next::prompt' }, { ...artifactSnapshot(), artifactId: 'art-next' });
+    expect(first.activationId).not.toBe(`act_prompt_${PRINCIPLE_ID}`);
+    expect(replay.activationId).toBe(first.activationId);
+    expect(next.activationId).not.toBe(first.activationId);
+    expect(next.targetRef).toBe(first.targetRef);
   });
 });

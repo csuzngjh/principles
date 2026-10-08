@@ -309,6 +309,8 @@ function PendingReviewCard({
 
   // Inline review state (Wave 7: no more 404 jump to /principles/<fake-id>)
   const [actionLoading, setActionLoading] = useState(false);
+  const [intentReviewed, setIntentReviewed] = useState(false);
+    useEffect(() => setIntentReviewed(false), [group]);
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showEditInput, setShowEditInput] = useState(false);
@@ -402,7 +404,7 @@ function PendingReviewCard({
     for (const record of pendingRecords) {
       const result =
         action === "approve"
-          ? await approveApproval(record.id, undefined, promptTargetHost)
+          ? await approveApproval(record.id, undefined, { targetHost: promptTargetHost, intentReviewed: group.revisionReview === undefined ? undefined : intentReviewed, reviewedArtifactId: record.artifactId })
           : await rejectApproval(record.id, reason ?? "");
       // PRI-890: preserve non-fatal server warnings (e.g. prompt injection
       // budget exclusion) on successful decisions.
@@ -416,7 +418,7 @@ function PendingReviewCard({
   }
 
   const handleApprove = async () => {
-    if (!isActionable || actionLoading || decidedOutcome !== null) return;
+    if (!isActionable || actionLoading || decidedOutcome !== null || (group.revisionReviewUnavailable === true || (group.revisionReview !== undefined && !intentReviewed))) return;
     setActionLoading(true);
     try {
       const { allSucceeded, failedCount, totalCount, failureReason, successWarnings } = await applyDecisionToAllRecords("approve");
@@ -647,12 +649,27 @@ function PendingReviewCard({
         </div>
       )}
 
+      {group.revisionReviewUnavailable === true && <p role="alert" className="mt-3 text-danger">{t("pages.focus.revisionReviewUnavailable")}</p>}
+      {group.revisionReview !== undefined && (
+        <div className="mt-3 border border-line p-3 text-[12.5px]" data-testid={`revision-intent-review-${group.principleId}`}>
+          <p>{t("pages.focus.revisionIntentReview", { defaultValue: "修订复核：确认新正文保留触发条件、行动要求和必要例外，并与沿用意图一致。" })}</p>
+          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap">{group.revisionReview.oldStatement}</pre>
+          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap">{group.revisionReview.newStatement}</pre>
+          <dl className="mt-2">
+            {Object.entries(group.revisionReview.intentFields).map(([key, value]) => <div key={key}><dt>{t(`pages.focus.intentField.${key}`, { defaultValue: key })}</dt><dd>{value}</dd></div>)}
+          </dl>
+          <label className="mt-2 flex gap-2">
+            <input type="checkbox" checked={intentReviewed} onChange={(event) => setIntentReviewed(event.target.checked)} />
+            {t("pages.focus.revisionIntentConfirmed", { defaultValue: "我已核对上述意图与新正文一致" })}
+          </label>
+        </div>
+      )}
       {/* Inline review actions (Wave 7: no more 404 jump) */}
       <div className="flex gap-2 mt-4 flex-wrap items-center">
         <button
           type="button"
           onClick={handleApprove}
-          disabled={decisionDisabled}
+          disabled={decisionDisabled || (group.revisionReviewUnavailable === true || (group.revisionReview !== undefined && !intentReviewed))}
           data-testid={`approve-btn-${group.principleId}`}
           className="inline-flex items-center border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >

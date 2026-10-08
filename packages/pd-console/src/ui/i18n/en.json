@@ -311,8 +311,12 @@
       "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here.",
       "evidenceInProgress": "{{count}} behavior evidence item(s) recorded, being diagnosed and processed.",
       "ownerInbox": {
-        "group": { "subjectMaterial": "Material for this decision (scoped to its own revision — no text borrowed from other revisions)",
-          "decision": "Needs decision", "blocked": "Blocked", "recovery": "Needs recovery" },
+        "group": {
+          "subjectMaterial": "Material for this decision (scoped to its own revision — no text borrowed from other revisions)",
+          "decision": "Needs decision",
+          "blocked": "Blocked",
+          "recovery": "Needs recovery"
+        },
         "sectionTitle": "Principle decisions",
         "loadError": "Principle decision updates are temporarily unavailable.",
         "empty": "No confirmed pending, blocked, or recovery-needed principle items right now.",
@@ -381,6 +385,16 @@
         "formationRootCauseLabel": "Root cause",
         "formationEvidenceLabel": "Supporting evidence",
         "formationUnavailableNote": "The source diagnosis is currently unreadable; this principle is still decided on the evidence shown."
+      },
+      "revisionReviewUnavailable": "Revision review is incomplete or multiple versions are pending. Check the artifacts and prior version before approval; rejection remains available.",
+      "revisionIntentReview": "Review the revised statement against the retained intent, including triggers, required actions, and exceptions.",
+      "revisionIntentConfirmed": "I reviewed the retained intent and the revised statement for consistency",
+      "intentField": {
+        "ownerIntent": "Owner intent",
+        "targetBehavior": "Expected behavior",
+        "forbiddenBehavior": "Forbidden behavior",
+        "evidenceSource": "Evidence source",
+        "validationExpectation": "Validation expectation"
       }
     },
     "pain": {
@@ -774,10 +788,31 @@
           "fact": "Fact",
           "derived": "Derived",
           "actionsNotAuthorized": "No current Owner decision is required.",
-          "confidence": { "strong": "Source-backed", "degraded": "Incomplete evidence" },
-          "state": { "candidate": "Candidate", "active": "Active", "archived": "Archived", "deprecated": "Deprecated", "probation": "Probation" },
-          "stage": { "generating": "Generating", "reviewing": "Reviewing", "revising": "Revising", "approval": "Approval", "activation": "Activation" },
-          "automationState": { "idle": "Idle", "queued": "Queued", "running": "Running", "retry_scheduled": "Retry scheduled", "stalled": "Stalled" },
+          "confidence": {
+            "strong": "Source-backed",
+            "degraded": "Incomplete evidence"
+          },
+          "state": {
+            "candidate": "Candidate",
+            "active": "Active",
+            "archived": "Archived",
+            "deprecated": "Deprecated",
+            "probation": "Probation"
+          },
+          "stage": {
+            "generating": "Generating",
+            "reviewing": "Reviewing",
+            "revising": "Revising",
+            "approval": "Approval",
+            "activation": "Activation"
+          },
+          "automationState": {
+            "idle": "Idle",
+            "queued": "Queued",
+            "running": "Running",
+            "retry_scheduled": "Retry scheduled",
+            "stalled": "Stalled"
+          },
           "headline": {
             "owner_decision": "Your decision is needed",
             "recovery": "Recovery processing is needed",
@@ -857,7 +892,12 @@
           "applicability": "When it applies",
           "expected": "What changes if approved (proposed, not deployed)",
           "enforcementLabel": "Current enforcement",
-          "tier": { "scribe": "Formal draft (Scribe)", "distiller": "Abstracted principle (Distiller)", "philosopher": "Candidate principle (Philosopher)", "candidate_principle": "Original recommendation" },
+          "tier": {
+            "scribe": "Formal draft (Scribe)",
+            "distiller": "Abstracted principle (Distiller)",
+            "philosopher": "Candidate principle (Philosopher)",
+            "candidate_principle": "Original recommendation"
+          },
           "enforcement": {
             "active": "An enforcement method is currently active (see details below).",
             "deactivated": "The previous enforcement method is deactivated; nothing is enforcing right now.",
@@ -872,11 +912,36 @@
           "rollback": "How to stop its influence",
           "decision": "Your decision",
           "history": "Decision history",
-          "historyState": { "approved": "Approved", "rejected": "Rejected", "cancelled": "Cancelled", "pending": "Pending" },
-          "channel": { "prompt": "context guidance channel", "code_tool_hook": "RuleCode enforcement channel", "defer_archive": "archive channel" },
-          "actionLabel": { "approve": "Approve", "reject": "Reject", "edit_approval": "Replace approval artifact", "disable": "Stop this enforcement going forward" },
-          "next": { "review": "A decision is waiting for your review: read the material above, then approve or reject.", "wait": "The system is processing this proposal; please wait.", "inspect_data": "The system cannot establish a complete governance judgment yet.", "inspect_recovery": "This processing has a historical issue; recovery info can be inspected.", "monitor": "This proposal already has a completed decision. Review its enforcement and behavior records.", "none": "Nothing needs your decision right now." },
-          "blocker": { "decision_material_missing": "This subject lacks the information needed for a safe approval; rejection can still be evaluated separately.", "lineage_not_available": "Governance identity is not established yet, so the system cannot tell whether your decision is needed.", "historical_processing_issue": "{{n}} historical processing issue(s) exist (e.g. failed or retry-waiting tasks); their relation to the current action is unconfirmed." },
+          "historyState": {
+            "approved": "Approved",
+            "rejected": "Rejected",
+            "cancelled": "Cancelled",
+            "pending": "Pending"
+          },
+          "channel": {
+            "prompt": "context guidance channel",
+            "code_tool_hook": "RuleCode enforcement channel",
+            "defer_archive": "archive channel"
+          },
+          "actionLabel": {
+            "approve": "Approve",
+            "reject": "Reject",
+            "edit_approval": "Replace approval artifact",
+            "disable": "Stop this enforcement going forward"
+          },
+          "next": {
+            "review": "A decision is waiting for your review: read the material above, then approve or reject.",
+            "wait": "The system is processing this proposal; please wait.",
+            "inspect_data": "The system cannot establish a complete governance judgment yet.",
+            "inspect_recovery": "This processing has a historical issue; recovery info can be inspected.",
+            "monitor": "This proposal already has a completed decision. Review its enforcement and behavior records.",
+            "none": "Nothing needs your decision right now."
+          },
+          "blocker": {
+            "decision_material_missing": "This subject lacks the information needed for a safe approval; rejection can still be evaluated separately.",
+            "lineage_not_available": "Governance identity is not established yet, so the system cannot tell whether your decision is needed.",
+            "historical_processing_issue": "{{n}} historical processing issue(s) exist (e.g. failed or retry-waiting tasks); their relation to the current action is unconfirmed."
+          },
           "noActions": "No action is currently available.",
           "unavailable": "The decision view is temporarily unavailable; do not decide based on this page alone.",
           "invalidTarget": "Action target missing; cannot submit.",
@@ -1049,7 +1114,10 @@
       "safetyAlertsDescription": "These rules are isolated and fail-open; they never return live automatically.",
       "legacyUnknown": "Historical live activation / decision maker unknown. Review by {{due}}; PD will not fabricate Owner identity.",
       "sevenDays": "within 7 days",
-      "footer": "This page shows activation facts — which principles are in effect and through which channels."
+      "footer": "This page shows activation facts — which principles are in effect and through which channels.",
+      "fitUnknown": "unknown",
+      "fitYes": "fits",
+      "fitNo": "oversized"
     },
     "approvals": {
       "title": "Approval",

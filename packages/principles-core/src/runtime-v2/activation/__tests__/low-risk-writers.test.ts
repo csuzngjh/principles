@@ -401,7 +401,7 @@ describe('PromptWriter', () => {
         now: '2026-05-17T00:00:00Z',
       };
       const result = await writer.activate(input, artifact);
-      expect(result.activationId).toBe('act_prompt_PRI-001');
+      expect(result.activationId).toMatch(/^act_prompt_PRI-001_[0-9a-f]{64}$/);
       expect(result.action).toBe('prompt_activate');
       expect(result.targetRef).toBe('ledger://PRI-001');
     });
@@ -416,7 +416,7 @@ describe('PromptWriter', () => {
         now: '2026-05-17T00:00:00Z',
       };
       const result = await writer.activate(input, artifact);
-      expect(result.activationId).toBe('act_prompt_PRI-002');
+      expect(result.activationId).toMatch(/^act_prompt_PRI-002_[0-9a-f]{64}$/);
     });
 
     it('creates unique activationId per principleId', async () => {
@@ -557,7 +557,7 @@ describe('DeferArchiveWriter', () => {
       };
       const promptResult = await promptWriter.activate(promptInput, artifact);
       const archiveResult = await writer.activate(archiveInput, artifact);
-      expect(promptResult.activationId).toBe('act_prompt_PRI-001');
+      expect(promptResult.activationId).toMatch(/^act_prompt_PRI-001_[0-9a-f]{64}$/);
       expect(archiveResult.activationId).toBe('act_archive_PRI-001');
       expect(promptResult.action).toBe('prompt_activate');
       expect(archiveResult.action).toBe('defer_archive');

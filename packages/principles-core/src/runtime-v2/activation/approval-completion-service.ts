@@ -43,6 +43,7 @@ export interface ApprovalCompletionInput {
    * activation commit replaces the old version atomically.
    */
   supersedeActivationId?: string;
+  supersedeArtifactId?: string;
   supersedeDecidedBy?: string;
 }
 
@@ -142,7 +143,7 @@ export class ApprovalCompletionService {
       existingActivation = null;
     }
 
-    if (existingActivation) {
+    if (existingActivation && input.supersedeActivationId === undefined && record.channel !== 'prompt') {
       return {
         ok: true,
         decision: {
@@ -169,7 +170,8 @@ export class ApprovalCompletionService {
         now: input.now,
         confirm: true,
         ...(input.supersedeActivationId !== undefined ? { supersedeActivationId: input.supersedeActivationId } : {}),
-        ...(input.supersedeDecidedBy !== undefined ? { supersedeDecidedBy: input.supersedeDecidedBy } : {}),
+        ...(input.supersedeArtifactId !== undefined ? { supersedeArtifactId: input.supersedeArtifactId } : {}),
+        ...(input.supersedeActivationId !== undefined ? { supersedeDecidedBy: record.decidedBy ?? 'unknown' } : {}),
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

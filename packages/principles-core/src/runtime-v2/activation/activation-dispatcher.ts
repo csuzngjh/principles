@@ -1,7 +1,6 @@
 import type { InternalizationChannel } from '../internalization/peer-runner-contracts.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type {
-  ActivationActor,
   ActivationArtifactReadModel,
   ActivationDecision,
   ActivationStateReadModel,
@@ -22,6 +21,7 @@ import {
 } from './activation-types.js';
 import { resolveActivationPrincipleId } from './low-risk-writers.js';
 import { resolveLedgerActivationId, type LedgerIdentityLookupDeps } from './ledger-identity.js';
+import { detectPromptReplacementTarget } from './prompt-replacement.js';
 
 /**
  * rc-2 type guard: narrow unknown to Record<string, unknown> without `as`.
@@ -162,11 +162,6 @@ export interface DispatcherConfig {
   ledgerIdentity?: LedgerIdentityLookupDeps;
 }
 
-/** R-B3: owner identity recorded on supersede decision rows (system actors are named, never blank). */
-function decidedByOf(actor: ActivationActor): string {
-  return actor.kind === 'human' ? actor.userId : `system:${'source' in actor ? actor.source : actor.kind}`;
-}
-
 export class ActivationDispatcher {
   private readonly writers: Map<InternalizationChannel, ChannelWriter>;
   private readonly approvalQueueStore?: ApprovalQueueStore;
@@ -232,8 +227,26 @@ export class ActivationDispatcher {
 
     const idempotencyKey = input.idempotencyKey ?? makeIdempotencyKey(input.artifactId, input.channel);
 
+    if (input.channel === 'prompt' && input.supersedeActivationId !== undefined
+      && typeof this.stateReadModel.replacePromptActivation !== 'function') {
+      return { decision: 'refused', channel: input.channel, reason: 'prompt_replacement_not_supported', nextAction: 'use a store supporting atomic prompt replacement' };
+    }
     const existingResult = await this.checkIdempotency(idempotencyKey, input.artifactId);
     if (existingResult.decision) {
+      if (existingResult.decision.decision === 'already_activated' && input.channel === 'prompt'
+        && input.supersedeActivationId === undefined && artifact.lineageArtifactIds.length > 0) {
+        const detection = await detectPromptReplacementTarget({
+          approvalArtifactId: artifact.artifactId,
+          getArtifactById: (id) => this.artifactReadModel.getArtifactById(id),
+          listPromptActivations: () => this.stateReadModel.listPromptActivations(true),
+          includeHistoricalTargets: true,
+        });
+        if (!detection.ok) return { decision: 'refused', channel: input.channel, reason: detection.error, nextAction: detection.nextAction };
+        if (detection.target !== null) {
+          input = { ...input, supersedeActivationId: detection.target.supersededActivationId, supersedeArtifactId: detection.target.supersededArtifactId };
+          if (typeof this.stateReadModel.replacePromptActivation !== 'function') return { decision: 'refused', channel: input.channel, reason: 'prompt_replacement_not_supported', nextAction: 'use a store supporting atomic prompt replacement' };
+        }
+      }
       // PD_PROMPT_CAPACITY_V1 R-B3 recovery: the new artifact is already live
       // (e.g. it was activated earlier through a non-replacement path) but the
       // supersede has not completed. Finish it atomically instead of returning
@@ -242,7 +255,12 @@ export class ActivationDispatcher {
         && input.supersedeActivationId !== undefined
         && input.channel === 'prompt'
         && typeof this.stateReadModel.replacePromptActivation === 'function') {
-        const recoveryArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId);
+        if (input.rolloutDecision !== 'approved') {
+          return { decision: 'refused', channel: input.channel, reason: 'prompt_replacement_requires_approved_dispatch', nextAction: 'complete replacement through the approved artifact workflow' };
+        }
+        const refusal = await this.verifyApprovedDispatch(input);
+        if (refusal !== null) return refusal;
+        const recoveryArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId, input.supersedeArtifactId);
         if (recoveryArtifactId === null) {
           return {
             decision: 'refused',
@@ -265,7 +283,7 @@ export class ActivationDispatcher {
             },
             supersededActivationId: input.supersedeActivationId,
             supersededArtifactId: recoveryArtifactId,
-            decidedBy: input.supersedeDecidedBy ?? decidedByOf(input.actor),
+            decidedBy: await this.readSupersedeApprovalOwner(input),
             decidedAt: input.now,
             reasonCode: 'prompt_revision_replacement',
             note: `Superseded by ${existingResult.decision.activationId} (artifact ${input.artifactId}).`,
@@ -297,67 +315,8 @@ export class ActivationDispatcher {
     // approvalId that resolves to an approved record matching the artifact
     // and channel. This prevents bypassing the owner approval boundary.
     if (input.rolloutDecision === 'approved') {
-      if (!input.approvalId) {
-        return {
-          decision: 'refused',
-          reason: 'approved_dispatch_requires_approval_id',
-          nextAction: 'provide approvalId from a verified owner approval record',
-          channel: input.channel,
-        };
-      }
-      if (!this.approvalQueueStore) {
-        return {
-          decision: 'refused',
-          reason: 'approved_dispatch_without_approval_store',
-          nextAction: 'configure dispatcher with approvalQueueStore to verify approvals',
-          channel: input.channel,
-        };
-      }
-      let approvalRecord: ApprovalRecord | null;
-      try {
-        approvalRecord = await this.approvalQueueStore.getById(input.approvalId);
-      } catch {
-        return {
-          decision: 'refused',
-          reason: 'approval_record_read_failed',
-          nextAction: 'check_approval_store_availability',
-          channel: input.channel,
-        };
-      }
-      if (!approvalRecord) {
-        return {
-          decision: 'refused',
-          reason: `approval_record_not_found: ${input.approvalId}`,
-          nextAction: 'verify_approval_id',
-          channel: input.channel,
-        };
-      }
-      if (approvalRecord.status !== 'approved') {
-        return {
-          decision: 'refused',
-          reason: `approval_status_is_${approvalRecord.status}_expected_approved`,
-          nextAction: approvalRecord.status === 'pending'
-            ? 'owner_must_approve_before_dispatch'
-            : 'rejected_or_expired_approvals_cannot_be_activated',
-          channel: input.channel,
-        };
-      }
-      if (approvalRecord.artifactId !== input.artifactId) {
-        return {
-          decision: 'refused',
-          reason: `approval_artifact_mismatch: approval=${approvalRecord.artifactId} dispatch=${input.artifactId}`,
-          nextAction: 'ensure_dispatch_artifact_matches_approved_artifact',
-          channel: input.channel,
-        };
-      }
-      if (approvalRecord.channel !== input.channel) {
-        return {
-          decision: 'refused',
-          reason: `approval_channel_mismatch: approval=${approvalRecord.channel} dispatch=${input.channel}`,
-          nextAction: 'ensure_dispatch_channel_matches_approved_channel',
-          channel: input.channel,
-        };
-      }
+      const refusal = await this.verifyApprovedDispatch(input);
+      if (refusal !== null) return refusal;
       return this.activateArtifact(input, artifact, idempotencyKey);
     }
 
@@ -505,7 +464,7 @@ export class ActivationDispatcher {
       if (input.channel === 'prompt'
         && input.supersedeActivationId !== undefined
         && typeof this.stateReadModel.replacePromptActivation === 'function') {
-        const supersededArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId);
+        const supersededArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId, input.supersedeArtifactId);
         if (supersededArtifactId === null) {
           return {
             decision: 'refused',
@@ -514,7 +473,9 @@ export class ActivationDispatcher {
             channel: input.channel,
           };
         }
-        const outcome = await this.stateReadModel.replacePromptActivation({
+        let outcome;
+        try {
+          outcome = await this.stateReadModel.replacePromptActivation({
           newRecord: {
             activationId: writerResult.activationId,
             idempotencyKey,
@@ -527,11 +488,14 @@ export class ActivationDispatcher {
           },
           supersededActivationId: input.supersedeActivationId,
           supersededArtifactId,
-          decidedBy: input.supersedeDecidedBy ?? decidedByOf(input.actor),
+          decidedBy: await this.readSupersedeApprovalOwner(input),
           decidedAt: input.now,
           reasonCode: 'prompt_revision_replacement',
           note: `Superseded by ${writerResult.activationId} (artifact ${input.artifactId}).`,
-        });
+          });
+        } catch {
+          return { decision: 'refused', channel: input.channel, reason: 'prompt_replacement_failed', nextAction: 'inspect activations and version lineage, then retry completion; the prior activation is preserved' };
+        }
         return {
           decision: 'activated',
           activationId: writerResult.activationId,
@@ -563,11 +527,87 @@ export class ActivationDispatcher {
   }
 
   /** R-B3: resolve the artifact of a live prompt activation (supersede target). */
-  private async readSupersededArtifactId(activationId: string): Promise<string | null> {
+
+  private async verifyApprovedDispatch(input: DispatchInput): Promise<ActivationDecision | null> {
+    if (!input.approvalId) {
+      return {
+        decision: 'refused',
+        reason: 'approved_dispatch_requires_approval_id',
+        nextAction: 'provide approvalId from a verified owner approval record',
+        channel: input.channel,
+      };
+    }
+    if (!this.approvalQueueStore) {
+      return {
+        decision: 'refused',
+        reason: 'approved_dispatch_without_approval_store',
+        nextAction: 'configure dispatcher with approvalQueueStore to verify approvals',
+        channel: input.channel,
+      };
+    }
+    let approvalRecord: ApprovalRecord | null;
     try {
-      const activations = await this.stateReadModel.listPromptActivations();
-      const match = activations.find((activation) => activation.activationId === activationId);
-      return match?.artifactId ?? null;
+      approvalRecord = await this.approvalQueueStore.getById(input.approvalId);
+    } catch {
+      return {
+        decision: 'refused',
+        reason: 'approval_record_read_failed',
+        nextAction: 'check_approval_store_availability',
+        channel: input.channel,
+      };
+    }
+    if (!approvalRecord) {
+      return {
+        decision: 'refused',
+        reason: `approval_record_not_found: ${input.approvalId}`,
+        nextAction: 'verify_approval_id',
+        channel: input.channel,
+      };
+    }
+    if (approvalRecord.status !== 'approved') {
+      return {
+        decision: 'refused',
+        reason: `approval_status_is_${approvalRecord.status}_expected_approved`,
+        nextAction: approvalRecord.status === 'pending'
+          ? 'owner_must_approve_before_dispatch'
+          : 'rejected_or_expired_approvals_cannot_be_activated',
+        channel: input.channel,
+      };
+    }
+    if (approvalRecord.artifactId !== input.artifactId) {
+      return {
+        decision: 'refused',
+        reason: `approval_artifact_mismatch: approval=${approvalRecord.artifactId} dispatch=${input.artifactId}`,
+        nextAction: 'ensure_dispatch_artifact_matches_approved_artifact',
+        channel: input.channel,
+      };
+    }
+    if (approvalRecord.channel !== input.channel) {
+      return {
+        decision: 'refused',
+        reason: `approval_channel_mismatch: approval=${approvalRecord.channel} dispatch=${input.channel}`,
+        nextAction: 'ensure_dispatch_channel_matches_approved_channel',
+        channel: input.channel,
+      };
+    }
+    return null;
+  }
+  private async readSupersedeApprovalOwner(input: DispatchInput): Promise<string> {
+    const record = input.approvalId === undefined ? null : await this.approvalQueueStore?.getById(input.approvalId);
+    if (!record || record.status !== 'approved' || record.artifactId !== input.artifactId || record.channel !== 'prompt') {
+      throw new Error('prompt replacement requires the matching approved decision');
+    }
+    return record.decidedBy ?? 'unknown';
+  }
+  private async readSupersededArtifactId(activationId: string, artifactId?: string): Promise<string | null> {
+    try {
+      const activations = await this.stateReadModel.listPromptActivations(true);
+      const matchingId = activations.filter((activation) => activation.activationId === activationId);
+      const liveMatches = matchingId.filter((activation) => activation.deactivatedAt === null);
+      const matches = artifactId !== undefined
+        ? matchingId.filter((activation) => activation.artifactId === artifactId)
+        : liveMatches.length > 0 ? liveMatches : matchingId;
+      return matches.length === 1 ? matches[0]?.artifactId ?? null : null;
     } catch {
       return null;
     }

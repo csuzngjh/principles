@@ -311,8 +311,12 @@
       "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",
       "evidenceInProgress": "{{count}} 条行为证据已记录，正在诊断和处理中。",
       "ownerInbox": {
-        "group": { "subjectMaterial": "这项决定的材料（按修订隔离，不含其他修订的文本）",
-          "decision": "待决定", "blocked": "被阻塞", "recovery": "需要恢复" },
+        "group": {
+          "subjectMaterial": "这项决定的材料（按修订隔离，不含其他修订的文本）",
+          "decision": "待决定",
+          "blocked": "被阻塞",
+          "recovery": "需要恢复"
+        },
         "sectionTitle": "原则决定动态",
         "loadError": "决定动态暂时不可用。",
         "empty": "当前没有已确认的待决定、被阻塞或需要恢复的原则事项。",
@@ -381,6 +385,16 @@
         "formationRootCauseLabel": "根因",
         "formationEvidenceLabel": "支撑证据",
         "formationUnavailableNote": "来源诊断当前不可读；这条原则仍按现有证据供你裁决。"
+      },
+      "revisionReviewUnavailable": "修订对照信息不完整或同时存在多个待审版本，请先核对工件与旧版本；仍可拒绝本次修订。",
+      "revisionIntentReview": "修订复核：确认新正文保留触发条件、行动要求和必要例外，并与沿用意图一致。",
+      "revisionIntentConfirmed": "我已核对上述意图与新正文一致",
+      "intentField": {
+        "ownerIntent": "拥有者原意图",
+        "targetBehavior": "期望行为",
+        "forbiddenBehavior": "禁止行为",
+        "evidenceSource": "证据来源",
+        "validationExpectation": "验收要求"
       }
     },
     "pain": {
@@ -774,10 +788,31 @@
           "fact": "事实",
           "derived": "推导",
           "actionsNotAuthorized": "当前不需要拥有者决策。",
-          "confidence": { "strong": "有来源支撑", "degraded": "证据不完整" },
-          "state": { "candidate": "候选", "active": "已批准", "archived": "已归档", "deprecated": "已弃用", "probation": "观察中" },
-          "stage": { "generating": "生成中", "reviewing": "审查中", "revising": "修订中", "approval": "待审批", "activation": "激活中" },
-          "automationState": { "idle": "空闲", "queued": "已排队", "running": "运行中", "retry_scheduled": "已安排重试", "stalled": "已停滞" },
+          "confidence": {
+            "strong": "有来源支撑",
+            "degraded": "证据不完整"
+          },
+          "state": {
+            "candidate": "候选",
+            "active": "已批准",
+            "archived": "已归档",
+            "deprecated": "已弃用",
+            "probation": "观察中"
+          },
+          "stage": {
+            "generating": "生成中",
+            "reviewing": "审查中",
+            "revising": "修订中",
+            "approval": "待审批",
+            "activation": "激活中"
+          },
+          "automationState": {
+            "idle": "空闲",
+            "queued": "已排队",
+            "running": "运行中",
+            "retry_scheduled": "已安排重试",
+            "stalled": "已停滞"
+          },
           "headline": {
             "owner_decision": "需要你的决策",
             "recovery": "存在待恢复的处理",
@@ -857,7 +892,12 @@
           "applicability": "什么时候适用",
           "expected": "批准后会怎样（拟议行为，未部署）",
           "enforcementLabel": "当前实际执行",
-          "tier": { "scribe": "正式原则草案（Scribe）", "distiller": "抽象原则（Distiller）", "philosopher": "候选原则（Philosopher）", "candidate_principle": "原始原则建议" },
+          "tier": {
+            "scribe": "正式原则草案（Scribe）",
+            "distiller": "抽象原则（Distiller）",
+            "philosopher": "候选原则（Philosopher）",
+            "candidate_principle": "原始原则建议"
+          },
           "enforcement": {
             "active": "当前有正在执行的生效方式（见下方明细）。",
             "deactivated": "此前的执行方式已停用；当前没有正在执行的生效方式。",
@@ -872,11 +912,36 @@
           "rollback": "如何停止影响",
           "decision": "你的决定",
           "history": "决定历史",
-          "historyState": { "approved": "已批准", "rejected": "已拒绝", "cancelled": "已取消", "pending": "待决定" },
-          "channel": { "prompt": "上下文提示通道", "code_tool_hook": "RuleCode 执行通道", "defer_archive": "归档通道" },
-          "actionLabel": { "approve": "批准", "reject": "拒绝", "edit_approval": "替换审批工件", "disable": "停止此执行方式今后的影响" },
-          "next": { "review": "有一项决定需要你审阅：请阅读上方说明后选择批准或拒绝。", "wait": "系统正在处理这项提案，请等待处理完成。", "inspect_data": "系统暂时无法建立完整的治理判断。", "inspect_recovery": "这项处理存在历史遗留问题；可查看恢复信息。", "monitor": "此提案已有完成的决定。可查看执行状态与行为记录。", "none": "目前没有需要你决定的事项。" },
-          "blocker": { "decision_material_missing": "这个对象缺少足够的信息让你安全地批准；拒绝仍可单独评估。", "lineage_not_available": "治理身份尚未建立，系统暂时无法判断是否需要你决定。", "historical_processing_issue": "存在 {{n}} 个历史处理问题（如失败或等待重试的任务），其与当前操作的关系尚未确认。" },
+          "historyState": {
+            "approved": "已批准",
+            "rejected": "已拒绝",
+            "cancelled": "已取消",
+            "pending": "待决定"
+          },
+          "channel": {
+            "prompt": "上下文提示通道",
+            "code_tool_hook": "RuleCode 执行通道",
+            "defer_archive": "归档通道"
+          },
+          "actionLabel": {
+            "approve": "批准",
+            "reject": "拒绝",
+            "edit_approval": "替换审批工件",
+            "disable": "停止此执行方式今后的影响"
+          },
+          "next": {
+            "review": "有一项决定需要你审阅：请阅读上方说明后选择批准或拒绝。",
+            "wait": "系统正在处理这项提案，请等待处理完成。",
+            "inspect_data": "系统暂时无法建立完整的治理判断。",
+            "inspect_recovery": "这项处理存在历史遗留问题；可查看恢复信息。",
+            "monitor": "此提案已有完成的决定。可查看执行状态与行为记录。",
+            "none": "目前没有需要你决定的事项。"
+          },
+          "blocker": {
+            "decision_material_missing": "这个对象缺少足够的信息让你安全地批准；拒绝仍可单独评估。",
+            "lineage_not_available": "治理身份尚未建立，系统暂时无法判断是否需要你决定。",
+            "historical_processing_issue": "存在 {{n}} 个历史处理问题（如失败或等待重试的任务），其与当前操作的关系尚未确认。"
+          },
           "noActions": "当前没有可以执行的操作。",
           "unavailable": "决策视图暂时不可用，无法据此做决定。",
           "invalidTarget": "动作目标缺失，无法提交。",
@@ -1049,7 +1114,10 @@
       "safetyAlertsDescription": "这些规则已隔离并 fail-open；它们不会自动恢复上线。",
       "legacyUnknown": "历史上线 / 决策人未知。请在 {{due}} 完成复核；PD 不会伪造拥有者身份。",
       "sevenDays": "7 天内",
-      "footer": "本页展示激活事实——哪些原则在生效、通过哪些通道。"
+      "footer": "本页展示激活事实——哪些原则在生效、通过哪些通道。",
+      "fitUnknown": "未知",
+      "fitYes": "可装入",
+      "fitNo": "超长"
     },
     "approvals": {
       "title": "审批",

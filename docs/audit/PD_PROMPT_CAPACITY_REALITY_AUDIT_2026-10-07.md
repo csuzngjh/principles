@@ -55,3 +55,11 @@ live prompt 激活唯一物理写点：`activation-dispatcher.ts:446 recordActiv
 - `.feature` 契约：`openclaw-shared-host-runtime-parity.feature`、`codex-owner-loop.feature`（改投影前读）。
 - demo-story-a-runner / proven-channel-baseline 是否需要宿主声明种子（预检门波及面）。
 - 真实工作区声明覆盖率（生产影响评估；pain_events 兜底）。
+
+## 2026-10-08 生产身份与恢复复核
+
+原报告为2026-10-07调查/意图快照。PR1958 head789bf618的helper测试与CI没有证明真实版本身份和公开恢复接线正确。新工件现在有稳定版本activation身份；旧ID不迁移；同ID遗留记录按明确artifact绑定。替换事务验证source/lineage、幂等键、live新记录与不可变supersede决策，缺失或冲突拒绝。
+
+已批准prompt激活失败保留Owner事实，通过既有批准流程retry当前容量，不回滚成pending。修订内容的结构验证与人工意图审阅分开；复核呈现完整旧新正文及保留意图，确认绑定当前artifact，多个不同待审版本不批量批准。
+
+有效配置坏/禁用prompt时写入预检明确unconfirmed；显式目标仅绕过无关宿主来源不确定，不绕过配置门。发射端host/event身份补齐；旧日志无来源保持unknown。最新测量使用相同16候选（11.5 vs5.5），不保留13.05 vs5.5的不同数据集结论。详见更新验收矩阵。

@@ -82,7 +82,8 @@ export type ApproveWithActivationResult =
   | { ok: false, error: 'already_decided'; status: ApprovalStatus }
   | { ok: false; error: 'not_found' }
   | { ok: false; error: 'unsupported_channel'; channel: string }
-  | { ok: false; error: 'activation_failed'; reason: string; approvalRolledBack: boolean }
+  | { ok: false; error: 'activation_failed'; reason: string; approvalRolledBack: boolean; nextAction?: string }
+  | { ok: false; error: 'prompt_replacement_refused'; reason: string; nextAction: string }
   /**
    * PD_PROMPT_CAPACITY_V1 R-B2: the prompt-channel write gate refused BEFORE
    * any governance write. The approval stays pending, the artifact stays
@@ -180,7 +181,7 @@ export class ApprovalsConsoleModel {
   async approve(
     approvalId: string,
     decidedBy: string,
-    options?: { note?: string; targetHost?: PromptInjectionTargetHost },
+    options?: { note?: string; targetHost?: PromptInjectionTargetHost; intentReviewed?: boolean; reviewedArtifactId?: string; retryActivation?: boolean },
   ): Promise<ApproveWithActivationResult> {
     const note = options?.note;
     const targetHost = options?.targetHost;
@@ -204,7 +205,8 @@ export class ApprovalsConsoleModel {
     // closed on ambiguity). Already-decided rows reach their terminal-state
     // error (409) untouched by both gates.
     let supersedeActivationId: string | undefined;
-    if (existing.channel === 'prompt' && existing.status === 'pending') {
+    let supersedeArtifactId: string | undefined;
+    if (existing.channel === 'prompt' && (existing.status === 'pending' || (existing.status === 'approved' && options?.retryActivation === true))) {
       const precheck = await this.precheckPromptCapacity(existing.artifactId, targetHost);
       if (precheck !== undefined) return precheck;
       const { connection } = this.createReadContext();
@@ -218,12 +220,16 @@ export class ApprovalsConsoleModel {
         if (!detection.ok) {
           return {
             ok: false,
-            error: 'activation_failed',
-            reason: `prompt_replacement_refused: ${detection.error} (${detection.nextAction})`,
-            approvalRolledBack: false,
+            error: 'prompt_replacement_refused',
+            reason: detection.error,
+            nextAction: detection.nextAction,
           };
         }
         supersedeActivationId = detection.target?.supersededActivationId;
+        supersedeArtifactId = detection.target?.supersededArtifactId;
+        if (existing.status === 'pending' && detection.target !== null && (options?.intentReviewed !== true || options.reviewedArtifactId !== existing.artifactId)) {
+          return { ok: false, error: 'prompt_replacement_refused', reason: 'revision_intent_review_required', nextAction: 'review the old and new statements and retained intent fields, then confirm intent review on the existing approval action' };
+        }
       } finally {
         try { connection.close(); } catch { /* best-effort */ }
       }
@@ -231,7 +237,9 @@ export class ApprovalsConsoleModel {
     const { queue: writeQueue, connection: writeConnection } = this.createWriteContext();
     let approvalResult: ApprovalDecisionResult;
     try {
-      approvalResult = await writeQueue.approve(approvalId, decidedBy, note);
+      approvalResult = existing.channel === 'prompt' && existing.status === 'approved' && options?.retryActivation === true
+        ? { ok: true, record: existing }
+        : await writeQueue.approve(approvalId, decidedBy, note);
     } finally {
       try { writeConnection.close(); } catch { /* best-effort */ }
     }
@@ -242,12 +250,16 @@ export class ApprovalsConsoleModel {
       return { ok: false, error: 'not_found' };
     }
 
-    const activation = await this.dispatchActivationAfterApproval(existing, decidedBy, supersedeActivationId);
+    const activation = await this.dispatchActivationAfterApproval(approvalResult.record, approvalResult.record.decidedBy ?? 'unknown', { supersedeActivationId, supersedeArtifactId });
 
-    // If activation failed, roll back approval to pending so the user can retry.
+    // Prompt failures retain the Owner decision; other channels preserve their existing rollback contract.
     if (activation && !isActivationSuccess(activation)) {
       // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (ActivationDecision)
       const detail = 'reason' in activation ? activation.reason : activation.decision;
+      if (existing.channel === 'prompt') {
+        return { ok: false, error: 'activation_failed', reason: detail, approvalRolledBack: false,
+          nextAction: `Approval remains approved. Retry with pd runtime activation approve --approval-id ${approvalId} --retry-activation${targetHost === undefined ? '' : ` --target-host ${targetHost}`}.` };
+      }
       let approvalRolledBack = false;
       try {
         const { queue: rollbackQueue, connection: rollbackConnection } = this.createWriteContext();
@@ -584,7 +596,7 @@ export class ApprovalsConsoleModel {
   private async dispatchActivationAfterApproval(
     existing: ApprovalRecord,
     decidedBy: string,
-    supersedeActivationId?: string,
+    replacement?: { supersedeActivationId?: string; supersedeArtifactId?: string },
   ): Promise<ActivationDecision | undefined> {
     // Feature flag gate (Contract F): when story_a_approval_completion is disabled,
     // the new orchestrator is deactivated without damaging existing data.
@@ -697,7 +709,7 @@ export class ApprovalsConsoleModel {
         approvalId: existing.approvalId,
         actor: { kind: 'human', userId: decidedBy },
         now: new Date().toISOString(),
-        ...(supersedeActivationId !== undefined ? { supersedeActivationId, supersedeDecidedBy: decidedBy } : {}),
+        ...(replacement?.supersedeActivationId !== undefined ? { ...replacement, supersedeDecidedBy: decidedBy } : {}),
       });
 
       if (!completionResult.ok) {

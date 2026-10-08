@@ -1,6 +1,6 @@
 # PD 提示词容量测量报告（PD_PROMPT_CAPACITY_V1 Phase C / AC-13）
 
-生成时间：2026-10-08T02:41:57.015Z　测量入口：`packages/pd-cli/scripts/prompt-capacity-measurement.mjs`（可复现；合成样本 + 临时受控工作区 + 真实生产构建器）。
+生成时间：2026-10-08T03:29:58.281Z　测量入口：`packages/pd-cli/scripts/prompt-capacity-measurement.mjs`（可复现；合成样本 + 临时受控工作区 + 真实生产构建器）。
 
 预算 = 2000 UTF-16 字符（`String.prototype.length`），**不是模型 token**。PD token 成本 = null（无 tokenizer/模型绑定；整请求 usage 不可归属为 PD 输出）。
 

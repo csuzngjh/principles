@@ -1988,6 +1988,8 @@ export interface ApprovalGroupData {
    * injection budget alone. Absent = unknown, which the badge treats as
    * "do not promise rotation".
    */
+  revisionReviewUnavailable?: boolean;
+  revisionReview?: { oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   fitsPromptBudget?: boolean;
   /**
    * PRI-940: the pinned artifact is missing from the store, so the card has no
@@ -2008,6 +2010,21 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   const records = validateArray(v.records, validateApprovalGroupRecord);
   if (records === null) return null;
   const result: ApprovalGroupData = { principleId: v.principleId, principleTitle: v.principleTitle, status: v.status, records };
+  if (Object.hasOwn(v, 'revisionReviewUnavailable')) {
+    if (typeof v.revisionReviewUnavailable !== 'boolean') return null;
+    result.revisionReviewUnavailable = v.revisionReviewUnavailable;
+  }
+  if (Object.hasOwn(v, 'revisionReview')) {
+    const review = v.revisionReview;
+    if (!isObject(review) || typeof review.oldStatement !== 'string' || typeof review.newStatement !== 'string' || !isObject(review.intentFields)) return null;
+    const intentFields: Record<string, string> = {};
+    for (const key of ['ownerIntent', 'targetBehavior', 'forbiddenBehavior', 'evidenceSource', 'validationExpectation']) {
+      const value = review.intentFields[key];
+      if (value !== undefined && typeof value !== 'string') return null;
+      if (typeof value === 'string') intentFields[key] = value;
+    }
+    result.revisionReview = { oldStatement: review.oldStatement, newStatement: review.newStatement, intentFields };
+  }
   // Wave 7: optional candidateDescription from artifact contentJson
   if (Object.hasOwn(v, 'candidateDescription') && isString(v.candidateDescription) && v.candidateDescription.length > 0) {
     result.candidateDescription = v.candidateDescription;

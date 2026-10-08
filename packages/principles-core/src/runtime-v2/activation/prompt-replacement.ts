@@ -42,6 +42,7 @@ export async function detectPromptReplacementTarget(input: {
   approvalArtifactId: string;
   getArtifactById: (artifactId: string) => Promise<PIArtifactSnapshot | null>;
   listPromptActivations: () => Promise<ActivationStatusRecord[]>;
+  includeHistoricalTargets?: boolean;
 }): Promise<PromptReplacementDetection> {
   const approvalArtifact = await input.getArtifactById(input.approvalArtifactId);
   if (approvalArtifact === null) {
@@ -52,13 +53,30 @@ export async function detectPromptReplacementTarget(input: {
     };
   }
   const matches: PromptReplacementTarget[] = [];
-  for (const activation of await input.listPromptActivations()) {
+  const activations = await input.listPromptActivations();
+  for (const activation of activations) {
     if (activation.deactivatedAt !== null) continue;
     if (activation.artifactId === input.approvalArtifactId) continue;
     const artifact = await input.getArtifactById(activation.artifactId);
     if (artifact === null) continue;
     if (isArtifactRevisionOf(approvalArtifact, artifact)) {
+      if (approvalArtifact.sourcePrincipleId && artifact.sourcePrincipleId
+        && approvalArtifact.sourcePrincipleId !== artifact.sourcePrincipleId) {
+        return { ok: false, error: 'prompt_replacement_source_principle_mismatch', nextAction: 'review the artifact lineage and source principle before approval' };
+      }
       matches.push({ supersededActivationId: activation.activationId, supersededArtifactId: activation.artifactId });
+    }
+  }
+  if (matches.length === 0 && input.includeHistoricalTargets === true) {
+    // Recovery of an already live revision must bind the nearest explicit
+    // lineage artifact, even when its old activation is now inactive.
+    for (const artifactId of [...approvalArtifact.lineageArtifactIds].reverse()) {
+      const historical = activations.filter((activation) => activation.artifactId === artifactId);
+      if (historical.length === 0) continue;
+      if (historical.length !== 1) return { ok: false, error: 'ambiguous_prompt_replacement_history', nextAction: 'inspect the bound historical artifact and activation before retrying' };
+      const [target] = historical;
+      if (target !== undefined) matches.push({ supersededActivationId: target.activationId, supersededArtifactId: target.artifactId });
+      break;
     }
   }
   if (matches.length > 1) {
@@ -120,6 +138,9 @@ export async function buildOwnerRevisionArtifact(input: {
   if (oldStatement === '') {
     return { ok: false, error: 'old_artifact_missing_statement', nextAction: 'the old artifact has no principleDraft.statement to replace' };
   }
+  if (typeof parsed.text === 'string' && parsed.text.length > 0 && parsed.text !== oldStatement) {
+    return { ok: false, error: 'old_artifact_ambiguous_statement', nextAction: 'review the conflicting text and principleDraft.statement; the old artifact remains unchanged' };
+  }
   if (trimmed === oldStatement.trim()) {
     return { ok: false, error: 'statement_unchanged', nextAction: 'the replacement statement must differ from the current one' };
   }
@@ -128,11 +149,14 @@ export async function buildOwnerRevisionArtifact(input: {
   // same-task upsert an OVERWRITE of the old approved artifact — forbidden.
   // The suffix must stay URL-safe: artifact ids flow into approval ids
   // (`apr_prompt_<artifactId>`) and from there into Console route paths.
-  const revisionSuffix = `ownerrev-${randomUUID().slice(0, 8)}`;
+  const revisionSuffix = `ownerrev-${randomUUID()}`;
   const sourceTaskId = `${oldArtifact.sourceTaskId}-${revisionSuffix}`;
   const artifactId = `pi-art-${sourceTaskId}`;
 
   const revisedContent: Record<string, unknown> = { ...parsed };
+  // The production reader prefers top-level text. Remove an identical legacy
+  // alias only in the new version so statement remains the execution authority.
+  delete revisedContent.text;
   revisedContent.principleDraft = {
     ...(oldDraft ?? {}),
     statement: trimmed,

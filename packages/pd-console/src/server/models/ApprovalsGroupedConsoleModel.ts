@@ -4,6 +4,8 @@ import {
   SqlitePIArtifactStore,
   ApprovalQueue,
   RUNTIME_V2_PRINCIPLE_BUDGET,
+  detectPromptReplacementTarget,
+  SqliteActivationStateStore,
 } from '@principles/core/runtime-v2';
 import {
   checkPromptArtifactDeliverability,
@@ -25,6 +27,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function parseContent(contentJson: string): unknown {
+  try { return JSON.parse(contentJson); } catch { return null; }
+}
+
+function readStatement(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  if (isRecord(value.principleDraft) && typeof value.principleDraft.statement === 'string') return value.principleDraft.statement;
+  return typeof value.text === 'string' ? value.text : null;
+}
+
 export interface ApprovalGroup {
   principleId: string;
   principleTitle: string;
@@ -41,6 +53,8 @@ export interface ApprovalGroup {
    * (the client has no access to the escaped, serialized size).
    */
   fitsPromptBudget?: boolean;
+  revisionReviewUnavailable?: boolean;
+  revisionReview?: { oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   /**
    * PRI-940: the pinned artifact no longer exists in pi_artifacts (typically
    * superseded by a newer scribe revision). There is no contentJson, so
@@ -227,6 +241,8 @@ export class ApprovalsGroupedConsoleModel {
       // the pre-approval badge never promises rotation for an entry that is
       // oversized (rotation cannot rescue a per-entry overflow).
       const artifactFitsBudgetMap = new Map<string, boolean>();
+      const revisionReviewUnavailable = new Set<string>();
+      const revisionReviews = new Map<string, NonNullable<ApprovalGroup['revisionReview']>>();
       // PRI-940: which approval artifacts are MISSING from the store (superseded
       // or pruned) — those cards have no contentJson, so the UI must degrade
       // visibly instead of rendering the `unlinked:` machine id as a title.
@@ -243,6 +259,34 @@ export class ApprovalsGroupedConsoleModel {
               artifactDescriptionMap.set(approval.artifactId, extractCandidateDescription(artifact.contentJson));
             } else {
               artifactDescriptionMap.set(approval.artifactId, null);
+            }
+            if (artifact?.artifactKind === 'principle' && approval.channel === 'prompt' && approval.status === 'pending') {
+              const detection = await detectPromptReplacementTarget({
+                approvalArtifactId: artifact.artifactId,
+                getArtifactById: (id) => artifactStore.getArtifactById(id),
+                listPromptActivations: () => new SqliteActivationStateStore(conn).listPromptActivations(),
+              });
+              const current = parseContent(artifact.contentJson);
+              const newStatement = readStatement(current);
+              if (isRecord(current) && newStatement !== null) {
+                for (const parentId of detection.ok && detection.target ? [detection.target.supersededArtifactId] : []) {
+                  const prior = await artifactStore.getArtifactById(parentId);
+                  if (prior?.artifactKind !== 'principle') continue;
+                  const parent = parseContent(prior.contentJson);
+                  const oldStatement = readStatement(parent);
+                  if (oldStatement === null) continue;
+                  const intentFields: Record<string, string> = {};
+                  if (isRecord(current.intentContract)) {
+                    for (const key of ['ownerIntent', 'targetBehavior', 'forbiddenBehavior', 'evidenceSource', 'validationExpectation']) {
+                      const value = current.intentContract[key];
+                      if (typeof value === 'string') intentFields[key] = value;
+                    }
+                  }
+                  revisionReviews.set(artifact.artifactId, { oldStatement, newStatement, intentFields });
+                  break;
+                }
+              }
+              if (!detection.ok || (detection.target !== null && !revisionReviews.has(artifact.artifactId))) revisionReviewUnavailable.add(artifact.artifactId);
             }
             artifactFitsBudgetMap.set(approval.artifactId, await candidateFitsPromptBudget(this.workspaceDir, artifact, targetHost));
             artifactUnavailableMap.set(approval.artifactId, artifact === null);
@@ -313,7 +357,7 @@ export class ApprovalsGroupedConsoleModel {
         }
 
         const principleTitle = principleTitles.get(principleId) ?? principleId;
-        const firstArtifactId = records[0]?.artifactId;
+        const firstArtifactId = records.find((record) => record.status === 'pending')?.artifactId ?? records[0]?.artifactId;
         const candidateDescription = firstArtifactId
           ? (artifactDescriptionMap.get(firstArtifactId) ?? undefined)
           : undefined;
@@ -334,6 +378,10 @@ export class ApprovalsGroupedConsoleModel {
           ...(firstArtifactId !== undefined && artifactUnavailableMap.get(firstArtifactId) === true
             ? { artifactUnavailable: true }
             : {}),
+          ...(firstArtifactId === undefined ? {} : { revisionReview: revisionReviews.get(firstArtifactId) }),
+          ...(records.some((record) => record.status === 'pending' && revisionReviewUnavailable.has(record.artifactId))
+            || (new Set(records.filter((record) => record.status === 'pending').map((record) => record.artifactId)).size > 1 && records.some((record) => revisionReviews.has(record.artifactId)))
+            ? { revisionReviewUnavailable: true } : {}),
           records,
         });
       }

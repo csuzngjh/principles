@@ -78,7 +78,7 @@ function seedArtifact(
     sourceTaskId: taskId,
     ...(spec.sourcePrincipleId !== undefined ? { sourcePrincipleId: spec.sourcePrincipleId } : {}),
     sourceRuleId: undefined,
-    lineageArtifactIds: spec.lineage ?? [],
+    lineageArtifactIds: spec.lineage ?? (artifactId == 'art-new' ? ['art-old'] : []),
     validationStatus: 'validated',
     contentJson: scribeContent(taskId, statement),
     createdAt: now,
@@ -361,5 +361,89 @@ describe('R-B3: buildOwnerRevisionArtifact (real content contract)', () => {
     } finally {
       connection.close();
     }
+  });
+});
+
+describe('replacement identity guards preserve working versions and history', () => {
+  it('refuses a same-ID replacement before overwriting the working version', async () => {
+    const connection = new SqliteConnection({ workspaceDir: tempWorkspace() });
+    try {
+      seedArtifact(connection, { artifactId: 'art-old', taskId: 'task-old', statement: 'old' });
+      seedArtifact(connection, { artifactId: 'art-new', taskId: 'task-new', statement: 'new' });
+      const store = new SqliteActivationStateStore(connection);
+      await seedLiveActivation(store, 'same-id', 'art-old');
+      await expect(store.replacePromptActivation({ newRecord: { activationId: 'same-id', artifactId: 'art-new', idempotencyKey: 'art-new::prompt', channel: 'prompt', action: 'prompt_activate', targetRef: 'ledger://p', activatedAt: '2026-10-08T02:00:00.000Z', deactivatedAt: null }, supersededActivationId: 'same-id', supersededArtifactId: 'art-old', decidedBy: 'owner', decidedAt: '2026-10-08T02:00:00.000Z', reasonCode: 'prompt_revision_replacement', note: 'must preserve old version' })).rejects.toThrow(/distinct/);
+      expect((await store.getActivationStatus('art-old::prompt'))?.artifactId).toBe('art-old');
+      expect(connection.getDb().prepare('SELECT * FROM activation_decisions').all()).toHaveLength(0);
+    } finally { connection.close(); }
+  });
+  it('refuses replay with a target belonging to a different artifact without deactivating it', async () => {
+    const connection = new SqliteConnection({ workspaceDir: tempWorkspace() });
+    try {
+      for (const name of ['old', 'new', 'other']) seedArtifact(connection, { artifactId: `art-${name}`, taskId: `task-${name}`, statement: name });
+      const store = new SqliteActivationStateStore(connection);
+      await seedLiveActivation(store, 'act-new', 'art-new');
+      await seedLiveActivation(store, 'act-other', 'art-other');
+      await expect(store.replacePromptActivation({ newRecord: { activationId: 'act-new', artifactId: 'art-new', idempotencyKey: 'art-new::prompt', channel: 'prompt', action: 'prompt_activate', targetRef: 'ledger://act-new', activatedAt: '2026-10-08T02:00:00.000Z', deactivatedAt: null }, supersededActivationId: 'act-other', supersededArtifactId: 'art-old', decidedBy: 'owner', decidedAt: '2026-10-08T02:00:00.000Z', reasonCode: 'prompt_revision_replacement', note: 'must refuse mismatched target' })).rejects.toThrow(/superseded/);
+      expect((await store.getActivationStatus('art-other::prompt'))?.deactivatedAt).toBeNull();
+      expect(connection.getDb().prepare('SELECT * FROM activation_decisions').all()).toHaveLength(0);
+    } finally { connection.close(); }
+  });
+});
+
+describe('source identity at the transaction boundary', () => {
+  it('refuses known cross-principle lineage and preserves both records', async () => {
+    const connection = new SqliteConnection({ workspaceDir: tempWorkspace() });
+    try {
+      seedArtifact(connection, { artifactId: 'art-old', taskId: 'task-old', statement: 'old', sourcePrincipleId: randomUUID() });
+      seedArtifact(connection, { artifactId: 'art-new', taskId: 'task-new', statement: 'new', sourcePrincipleId: randomUUID(), lineage: ['art-old'] });
+      const store = new SqliteActivationStateStore(connection);
+      await seedLiveActivation(store, 'act-old', 'art-old');
+      await expect(store.replacePromptActivation({ newRecord: { activationId: 'act-new', artifactId: 'art-new', idempotencyKey: 'art-new::prompt', channel: 'prompt', action: 'prompt_activate', targetRef: 'ledger://new', activatedAt: '2026-10-08T02:00:00Z', deactivatedAt: null }, supersededActivationId: 'act-old', supersededArtifactId: 'art-old', decidedBy: 'Alice', decidedAt: '2026-10-08T02:00:00Z', reasonCode: 'prompt_revision_replacement', note: 'must refuse cross principle' })).rejects.toThrow(/different principles/);
+      expect((await store.getActivationStatus('art-old::prompt'))?.deactivatedAt).toBeNull();
+      expect(await store.getActivationStatus('art-new::prompt')).toBeNull();
+      expect(connection.getDb().prepare('SELECT * FROM activation_decisions').all()).toHaveLength(0);
+    } finally { connection.close(); }
+  });
+});
+
+describe('legacy activation aliases', () => {
+  it('replaces the known live artifact when an inactive historical artifact shares its ID, then replays the same bound decision', async () => {
+    const connection = new SqliteConnection({ workspaceDir: tempWorkspace() });
+    try {
+      for (const name of ['historical', 'old', 'new']) seedArtifact(connection, { artifactId: `art-${name}`, taskId: `task-${name}`, statement: name });
+      const store = new SqliteActivationStateStore(connection);
+      await seedLiveActivation(store, 'legacy-alias', 'art-historical');
+      await store.deactivateActivation('legacy-alias', '2026-10-07T08:30:00Z');
+      await seedLiveActivation(store, 'legacy-alias', 'art-old');
+      const commit = { newRecord: { activationId: 'act-new', artifactId: 'art-new', idempotencyKey: 'art-new::prompt', channel: 'prompt' as const, action: 'prompt_activate', targetRef: 'ledger://new', activatedAt: '2026-10-08T02:00:00Z', deactivatedAt: null }, supersededActivationId: 'legacy-alias', supersededArtifactId: 'art-old', decidedBy: 'Alice', decidedAt: '2026-10-08T02:00:00Z', reasonCode: 'prompt_revision_replacement', note: 'known artifact target' };
+      expect((await store.replacePromptActivation(commit)).status).toBe('replaced');
+      expect((await store.replacePromptActivation(commit)).status).toBe('already_replaced');
+      expect((await store.listPromptActivations(true)).find((record) => record.artifactId === 'art-historical')?.deactivatedAt).toBe('2026-10-07T08:30:00Z');
+      expect((await store.getActivationStatus('art-new::prompt'))?.deactivatedAt).toBeNull();
+      await expect(store.replacePromptActivation({ ...commit, newRecord: { ...commit.newRecord, targetRef: 'ledger://wrong' } })).rejects.toThrow(/identity conflicts/);
+      expect(connection.getDb().prepare('SELECT * FROM activations').all()).toHaveLength(3);
+      expect(connection.getDb().prepare('SELECT * FROM activation_decisions').all()).toHaveLength(1);
+    } finally { connection.close(); }
+  });
+});
+
+describe('legacy text alias and single executed statement', () => {
+  it('removes an identical top-level text alias only in the new version and refuses contradictory aliases', async () => {
+    const connection = new SqliteConnection({ workspaceDir: tempWorkspace() });
+    try {
+      seedArtifact(connection, { artifactId: 'art-old', taskId: 'task-old', statement: 'Before edits, check callers.' });
+      const old = await snapshotOf(new SqlitePIArtifactStore(connection), 'art-old');
+      if (!old) throw new Error('old fixture missing');
+      const same = { ...old, contentJson: JSON.stringify({ ...JSON.parse(old.contentJson), text: 'Before edits, check callers.' }) };
+      const built = await buildOwnerRevisionArtifact({ oldArtifact: same, newStatement: 'Before changes, inspect callers.', editedBy: 'Alice', now: '2026-10-08T04:00:00Z' });
+      expect(built.ok).toBe(true);
+      if (!built.ok) throw new Error('build failed');
+      expect(JSON.parse(built.draft.contentJson).text).toBeUndefined();
+      expect(JSON.parse(built.draft.contentJson).principleDraft.statement).toBe('Before changes, inspect callers.');
+      expect(JSON.parse(same.contentJson).text).toBe('Before edits, check callers.');
+      const ambiguous = await buildOwnerRevisionArtifact({ oldArtifact: { ...old, contentJson: JSON.stringify({ ...JSON.parse(old.contentJson), text: 'Skip checks.' }) }, newStatement: 'Before changes, inspect callers.', editedBy: 'Alice', now: '2026-10-08T04:00:00Z' });
+      expect(ambiguous).toMatchObject({ ok: false, error: 'old_artifact_ambiguous_statement' });
+    } finally { connection.close(); }
   });
 });

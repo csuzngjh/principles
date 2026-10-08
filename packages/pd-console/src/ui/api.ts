@@ -515,10 +515,10 @@ async function fetchReceiptCounts(): Promise<ApiResponse<ReceiptCountsData>> {
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
-async function approveApproval(approvalId: string, note?: string, targetHost?: 'openclaw' | 'codex'): Promise<ApiResponse<ApprovalRecordData>> {
+async function approveApproval(approvalId: string, note?: string, options?: { targetHost?: 'openclaw' | 'codex'; intentReviewed?: boolean; reviewedArtifactId?: string }): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
     method: 'POST',
-    body: JSON.stringify({ note, ...(targetHost !== undefined ? { host: targetHost } : {}) }),
+    body: JSON.stringify({ note, ...(options?.targetHost !== undefined ? { host: options.targetHost } : {}), ...(options?.intentReviewed !== undefined ? { intentReviewed: options.intentReviewed, reviewedArtifactId: options.reviewedArtifactId } : {}) }),
   }, validateApprovalRecordDirect);
 }
 

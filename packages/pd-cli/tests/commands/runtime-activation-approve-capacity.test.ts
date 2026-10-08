@@ -11,7 +11,8 @@ import {
   PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
-import { handleActivationApprove } from '../../src/commands/runtime-activation.js';
+import { Command } from 'commander';
+import { registerRuntimeActivationApproveCommand, handleActivationApprove } from '../../src/commands/runtime-activation.js';
 
 /**
  * PD_PROMPT_CAPACITY_V1 B1 / AC-07 (CLI side, real workspace, real stores):
@@ -210,5 +211,70 @@ describe('pd activation approve — prompt capacity write gate (B1/AC-07, real w
     expect(output.ok).toBe(true);
     expect(output.decision).toBe('activated');
     expect(process.exitCode).toBe(0);
+  });
+});
+
+async function parseApprove(...args: string[]): Promise<void> {
+  const program = new Command().exitOverride();
+  registerRuntimeActivationApproveCommand(program.command('activation'));
+  await program.parseAsync(['node', 'pd', 'activation', 'approve', '--workspace', tmpDir, '--json', ...args]);
+}
+
+describe('real parser approved retry contract', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-retry-'));
+    fs.mkdirSync(path.join(tmpDir, '.state'), { recursive: true });
+    sqliteConn = new SqliteConnection({ workspaceDir: tmpDir });
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks(); process.exitCode = 0; sqliteConn.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+  it('preserves Alice approval after commit failure, retries with current capacity, and attributes the decision to Alice rather than Bob', async () => {
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId, 'Before coding, verify the production callers.');
+    await seedArtifact('old', principleId, 'Before coding, verify the production callers.');
+    await seedArtifact('new', principleId, 'Before edits, verify callers.');
+    sqliteConn.getDb().prepare("INSERT INTO activations (activation_id,idempotency_key,artifact_id,channel,action,target_ref,activated_at) VALUES (?,?,?,'prompt','prompt_activate',?,?)").run(`act_prompt_${principleId}`, 'old::prompt', 'old', `ledger://${principleId}`, '2026-10-08T03:00:00Z');
+    await seedPendingApproval('apr-new', 'new');
+    await parseApprove('--approval-id', 'apr-new', '--target-host', 'codex');
+    expect(JSON.parse(consoleLogSpy.mock.calls[0][0]).reason).toBe('revision_intent_review_required');
+    expect(JSON.parse(consoleLogSpy.mock.calls[0][0]).nextAction).toContain('pd artifact show old');
+    expect(JSON.parse(consoleLogSpy.mock.calls[0][0]).nextAction).toContain('pd artifact show new');
+    expect(sqliteConn.getDb().prepare('SELECT status FROM approvals WHERE approval_id = ?').get('apr-new')).toEqual({ status: 'pending' });
+    consoleLogSpy.mockClear(); process.exitCode = 0;
+    sqliteConn.getDb().exec("CREATE TRIGGER fail_supersede BEFORE INSERT ON activation_decisions WHEN NEW.decision = 'supersede' BEGIN SELECT RAISE(ABORT, 'test replacement failure'); END");
+    await parseApprove('--approval-id', 'apr-new', '--target-host', 'codex', '--confirm-intent', '--decided-by', 'Alice');
+    expect(JSON.parse(consoleLogSpy.mock.calls[0][0]).ok).toBe(false);
+    expect(process.exitCode).toBe(1);
+    expect(sqliteConn.getDb().prepare('SELECT status, decided_by FROM approvals WHERE approval_id = ?').get('apr-new')).toEqual({ status: 'approved', decided_by: 'Alice' });
+    expect(sqliteConn.getDb().prepare('SELECT deactivated_at FROM activations WHERE artifact_id = ?').get('old')).toEqual({ deactivated_at: null });
+    sqliteConn.getDb().exec('DROP TRIGGER fail_supersede');
+    consoleLogSpy.mockClear(); process.exitCode = 0;
+    // A failed attempt cannot authorize stale capacity on a later retry.
+    fs.writeFileSync(path.join(tmpDir, '.pd', 'config.yaml'), 'features: [');
+    await parseApprove('--approval-id', 'apr-new', '--target-host', 'codex', '--retry-activation', '--decided-by', 'Bob');
+    expect(JSON.parse(consoleLogSpy.mock.calls[0][0]).ok).toBe(false);
+    expect(sqliteConn.getDb().prepare('SELECT status, decided_by FROM approvals WHERE approval_id = ?').get('apr-new')).toEqual({ status: 'approved', decided_by: 'Alice' });
+    fs.unlinkSync(path.join(tmpDir, '.pd', 'config.yaml'));
+    consoleLogSpy.mockClear(); process.exitCode = 0;
+    await parseApprove('--approval-id', 'apr-new', '--target-host', 'codex', '--retry-activation', '--decided-by', 'Bob');
+    expect(JSON.parse(consoleLogSpy.mock.calls[0][0]).ok).toBe(true);
+    expect(sqliteConn.getDb().prepare("SELECT owner_id FROM activation_decisions WHERE decision = 'supersede'").get()).toEqual({ owner_id: 'Alice' });
+    await seedArtifact('next', principleId, 'Before edits, check callers.');
+    sqliteConn.getDb().prepare('UPDATE pi_artifacts SET lineage_artifact_ids = ? WHERE artifact_id = ?').run(JSON.stringify(['old', 'new']), 'next');
+    await seedPendingApproval('apr-next', 'next');
+    consoleLogSpy.mockClear();
+    await parseApprove('--approval-id', 'apr-next', '--target-host', 'codex', '--confirm-intent', '--decided-by', 'Alice');
+    expect(JSON.parse(consoleLogSpy.mock.calls[0][0]).ok).toBe(true);
+    consoleLogSpy.mockClear();
+    await parseApprove('--approval-id', 'apr-next', '--target-host', 'codex', '--retry-activation', '--decided-by', 'Bob');
+    expect(JSON.parse(consoleLogSpy.mock.calls[0][0]).ok).toBe(true);
+    expect(sqliteConn.getDb().prepare('SELECT artifact_id FROM activations WHERE deactivated_at IS NULL').all()).toEqual([{ artifact_id: 'next' }]);
+    expect(sqliteConn.getDb().prepare("SELECT artifact_id FROM activation_decisions WHERE decision = 'supersede' ORDER BY artifact_id").all()).toEqual([{ artifact_id: 'new' }, { artifact_id: 'old' }]);
+
+    expect(sqliteConn.getDb().prepare('SELECT status, decided_by FROM approvals WHERE approval_id = ?').get('apr-new')).toEqual({ status: 'approved', decided_by: 'Alice' });
   });
 });

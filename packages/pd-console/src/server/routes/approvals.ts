@@ -154,22 +154,39 @@ export async function handleApprovalsRoute(
       }
 
       const note = typeof parsed.note === 'string' ? parsed.note : undefined;
+      if (Object.hasOwn(parsed, 'intentReviewed') && typeof parsed.intentReviewed !== 'boolean') {
+        sendBadRequest(res, 'intentReviewed must be a boolean');
+        return;
+      }
+      if (Object.hasOwn(parsed, 'retryActivation') && typeof parsed.retryActivation !== 'boolean') {
+        sendBadRequest(res, 'retryActivation must be a boolean');
+        return;
+      }
+      if (Object.hasOwn(parsed, 'reviewedArtifactId') && typeof parsed.reviewedArtifactId !== 'string') {
+        sendBadRequest(res, 'reviewedArtifactId must be a string');
+        return;
+      }
       const result: ApproveWithActivationResult = await model.approve(approvalId, 'operator', {
         ...(note !== undefined ? { note } : {}),
         ...(targetHost !== undefined ? { targetHost } : {}),
+        intentReviewed: parsed.intentReviewed === true,
+        ...(typeof parsed.reviewedArtifactId === 'string' ? { reviewedArtifactId: parsed.reviewedArtifactId } : {}),
+        retryActivation: parsed.retryActivation === true,
       });
       if (!result.ok) {
         if (result.error === 'not_found') {
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
         } else if (result.error === 'unsupported_channel') {
           sendError(res, 403, 'unsupported_channel', `Cannot approve unsupported channel. Only MVP proven channels (${MVP_CHANNEL_LIST}) can be approved.`);
+        } else if (result.error === 'prompt_replacement_refused') {
+          sendError(res, 409, result.error, result.reason, { nextAction: result.nextAction });
         } else if (result.error === 'activation_failed') {
           sendError(
             res,
             500,
             'activation_failed',
             `Approval was ${result.approvalRolledBack ? 'rolled back to pending' : 'approved but activation failed'}. Reason: ${result.reason}`,
-            { nextAction: 'Inspect or regenerate the rule artifact, verify it is validated, then retry approval.' },
+            { nextAction: result.nextAction ?? 'Inspect or regenerate the rule artifact, verify it is validated, then retry approval.' },
           );
         } else if (result.error === 'prompt_capacity_refused') {
           // R-B2: refused BEFORE any governance write — the approval stays
