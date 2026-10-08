@@ -373,7 +373,29 @@ describe('SqliteInterventionEvidenceStore', () => {
     for (let start = 0; start < oldDeliveries.length; start += 50) {
       store.appendObservationBatch(normalized(deliveryBatch({ recordedAt: oldAt, observations: oldDeliveries.slice(start, start + 50) })));
     }
-    store.appendObservationBatch(normalized(deliveryBatch({ recordedAt: oldAt, observations: [oldApplication] })));
+    const historicalBatch = normalized(deliveryBatch({ recordedAt: oldAt, observations: [oldApplication] }));
+    const [historicalRecord] = historicalBatch.records;
+    if (!historicalRecord) throw new Error('Expected historical application record');
+    // Simulate a legacy row that predates write-time redaction. The 200
+    // metadata-only rows ahead of it must not starve the bounded expiry sweep.
+    conn.getDb().prepare(`
+      INSERT INTO intervention_evidence_records (
+        evidence_id, scope_id, source_kind, observation_key, source_locator, record_kind,
+        principle_id, activation_id, delivery_key, episode_key, effect_key,
+        correction_of, correction_reason, occurred_at, recorded_at,
+        native_refs_json, content_ref_json, activation_ref_json, payload_json, record_digest
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      historicalRecord.evidenceId, historicalRecord.evidenceScopeId, historicalRecord.sourceKind,
+      historicalRecord.observationKey, historicalRecord.sourceLocator, historicalRecord.kind,
+      historicalRecord.principleId ?? null, historicalRecord.activationRef?.activationId ?? null,
+      historicalRecord.deliveryKey ?? null, historicalRecord.episodeKey ?? null, historicalRecord.effectKey ?? null,
+      historicalRecord.correctionOf ?? null, historicalRecord.correctionReason ?? null,
+      historicalRecord.occurredAt ?? null, historicalRecord.recordedAt,
+      JSON.stringify(historicalRecord.nativeRefs), historicalRecord.contentRef ? JSON.stringify(historicalRecord.contentRef) : null,
+      historicalRecord.activationRef ? JSON.stringify(historicalRecord.activationRef) : null,
+      JSON.stringify(historicalRecord.payload), historicalRecord.recordDigest,
+    );
     const readonlyAudit = store.readAuditRelations({ type: 'principle', principleId: 'T-01' });
     expect(readonlyAudit.available).toBe(true);
     if (readonlyAudit.available) {
@@ -419,6 +441,36 @@ describe('SqliteInterventionEvidenceStore', () => {
     expect(read.relations.episodes[0]!.sourceStatus).toBe('unknown');
     expect(read.relations.episodes[0]!.payload).toMatchObject({ actionSummary: '[expired]' });
     expect(read.relations.episodes[0]!.contentRedactedAt).toBeTruthy();
+  });
+
+  it('redacts an expired application before its first database write', () => {
+    const oldAt = '2001-01-01T00:00:00Z';
+    const batch = normalized(deliveryBatch({ recordedAt: oldAt, observations: [{
+      observationKey: 'oc|application|expired-first-write', sourceLocator: 'loc:expired-first-write',
+      kind: 'application', nativeRefs: { hostKind: 'openclaw' }, principleId: 'T-01',
+      payload: { proofMethod: 'agent_claimed', action: 'self_reported', claimText: 'private-expired-source' },
+    }] }));
+    const [incoming] = batch.records;
+    if (!incoming) throw new Error('Expected expired application record');
+    store.appendObservationBatch(batch);
+
+    const persisted = record(conn.getDb().prepare(`
+      SELECT payload_json, content_redacted_at, record_digest, principle_id, native_refs_json
+      FROM intervention_evidence_records WHERE evidence_id = ?
+    `).get(incoming.evidenceId));
+    expect(String(persisted.payload_json)).not.toContain('private-expired-source');
+    expect(persisted.content_redacted_at).toBeTruthy();
+    expect(persisted.record_digest).toBe(incoming.recordDigest);
+    expect(persisted.principle_id).toBe('T-01');
+    expect(persisted.native_refs_json).toBe(JSON.stringify(incoming.nativeRefs));
+
+    const audit = store.readAuditRelations({ type: 'principle', principleId: 'T-01' });
+    expect(audit.available).toBe(true);
+    if (audit.available) {
+      const summary = audit.relations.applications.find((item) => item.evidenceId === incoming.evidenceId);
+      expect(summary?.payload).not.toHaveProperty('claimText');
+      expect(summary?.contentRedactedAt).toBeTruthy();
+    }
   });
 
   it('keeps Owner feedback on its 90-day policy even when native host is Codex', () => {

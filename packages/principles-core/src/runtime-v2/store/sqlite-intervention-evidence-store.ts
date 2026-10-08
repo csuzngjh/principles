@@ -532,8 +532,8 @@ export class SqliteInterventionEvidenceStore {
         evidence_id, scope_id, source_kind, observation_key, source_locator, record_kind,
         principle_id, activation_id, delivery_key, episode_key, effect_key,
         correction_of, correction_reason, occurred_at, recorded_at,
-        native_refs_json, content_ref_json, activation_ref_json, payload_json, record_digest
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        native_refs_json, content_ref_json, activation_ref_json, payload_json, record_digest, content_redacted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const findExisting = db.prepare(`
       SELECT evidence_id, record_digest FROM intervention_evidence_records
@@ -596,6 +596,21 @@ export class SqliteInterventionEvidenceStore {
           }
           continue;
         }
+        const recordTime = record.occurredAt && Date.parse(record.occurredAt) < Date.parse(record.recordedAt)
+          ? record.occurredAt
+          : record.recordedAt;
+        const retentionDays = record.sourceKind.startsWith('codex_') ? 7 : RECEIPT_RETENTION_POLICY_DAYS;
+        const expiresAt = Date.parse(recordTime) + retentionDays * 24 * 60 * 60 * 1000;
+        let payloadJson = JSON.stringify(record.payload);
+        let contentRedactedAt: string | null = null;
+        const insertedAt = new Date();
+        if (Number.isFinite(expiresAt) && expiresAt <= insertedAt.getTime()) {
+          const redactedPayload = redactPayloadText(record.kind, payloadJson, record.evidenceId);
+          if (redactedPayload !== null) {
+            payloadJson = redactedPayload;
+            contentRedactedAt = insertedAt.toISOString();
+          }
+        }
         insertRecord.run(
           record.evidenceId,
           record.evidenceScopeId,
@@ -615,8 +630,9 @@ export class SqliteInterventionEvidenceStore {
           JSON.stringify(record.nativeRefs),
           record.contentRef ? JSON.stringify(record.contentRef) : null,
           record.activationRef ? JSON.stringify(record.activationRef) : null,
-          JSON.stringify(record.payload),
+          payloadJson,
           record.recordDigest,
+          contentRedactedAt,
         );
         insertedCount += 1;
       }
