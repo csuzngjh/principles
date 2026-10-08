@@ -20,6 +20,7 @@ import {
   clearPrincipleApplicationLedgerCache,
 } from '../../src/core/principle-application-ledger.js';
 import { setInjectedPrincipleIds, clearSession } from '../../src/core/session-tracker.js';
+import { loadFeatureFlagFromConfig } from '@principles/host-runtime';
 
 describe('alignActivationIds (review fix: injected-subset pairing)', () => {
   const principles = [
@@ -124,6 +125,90 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
     recordSelfReportFromText(workspaceDir, '📌 应用了你的原则「T-01」：第一次', 'sess-valid', logger);
     recordSelfReportFromText(workspaceDir, '📌 应用了你的原则「T-01」：第二次', 'sess-valid', logger);
     expect(countSelfReports()).toBe(1);
+  });
+
+  it('replays a failed normalized mirror from the durable row without replacing its claim or activation lineage', () => {
+    const cfg = getDefaultPdConfig() as unknown as {
+      features: Record<string, { category?: string; enabled: boolean }>;
+    };
+    cfg.features.principle_receipt_ledger = { category: 'quiet', enabled: true };
+    cfg.features.principle_receipt_self_report = { category: 'quiet', enabled: true };
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
+    expect(loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_ledger').enabled).toBe(true);
+
+    const setup = new SqliteConnection(workspaceDir);
+    const db = setup.getDb();
+    const now = '2026-10-01T00:00:00.000Z';
+    for (const [activationId, artifactId, text] of [
+      ['act-original', 'art-original', 'original activation'],
+      ['act-current', 'art-current', 'current activation'],
+    ]) {
+      db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id,
+                  content_json, created_at, updated_at)
+                  VALUES (?, 'principle', ?, 'T-01', ?, ?, ?)`)
+        .run(artifactId, `task-${activationId}`, JSON.stringify({ principleId: 'T-01', text }), now, now);
+      db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                  VALUES (?, ?, ?, 'prompt', 'prompt_activate', 'ref', ?)`)
+        .run(activationId, `idem-${activationId}`, artifactId, now);
+    }
+    setup.close();
+
+    const sessionId = 'sess-self-report-retry';
+    try {
+      const faultDb = new SqliteConnection(workspaceDir);
+      faultDb.getDb().exec(`
+        CREATE TRIGGER fail_first_normalized_mirror
+        BEFORE INSERT ON intervention_evidence_records
+        BEGIN SELECT RAISE(ABORT, 'injected first-mirror failure'); END;
+      `);
+      faultDb.close();
+      setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-original']);
+      recordSelfReportFromText(
+        workspaceDir,
+        '📌 应用了你的原则「T-01」：原始持久化声明',
+        sessionId,
+        logger,
+      );
+      expect(countSelfReports()).toBe(1);
+      const countNormalizedRows = (): number => (readerConn!.getDb()
+        .prepare('SELECT COUNT(*) AS n FROM intervention_evidence_records')
+        .get() as { n: number }).n;
+      expect(countNormalizedRows()).toBe(0);
+      expect(warnings).toEqual(expect.arrayContaining([expect.stringContaining('injected first-mirror failure')]));
+
+      const clearFaultDb = new SqliteConnection(workspaceDir);
+      clearFaultDb.getDb().exec('DROP TRIGGER fail_first_normalized_mirror');
+      clearFaultDb.close();
+      setInjectedPrincipleIds(sessionId, ['T-01'], undefined, ['act-current']);
+      recordSelfReportFromText(
+        workspaceDir,
+        '📌 应用了你的原则「T-01」：重放时的新声明',
+        sessionId,
+        logger,
+      );
+
+      const source = readerConn!.getDb().prepare(`
+        SELECT activation_id, digest, created_at FROM principle_applications
+        WHERE kind = 'self_reported' AND principle_id = 'T-01' AND session_id = ?
+      `).get(sessionId) as { activation_id: string; digest: string; created_at: string };
+      const normalized = readerConn!.getDb().prepare(`
+        SELECT activation_id, occurred_at, payload_json FROM intervention_evidence_records
+        WHERE source_kind = 'openclaw_plugin_event_log'
+          AND source_locator = ?
+          AND observation_key = ?
+      `).get(
+        `openclaw-application-ledger:${sessionId}`,
+        `openclaw|application|agent_claimed|${sessionId}|T-01`,
+      ) as { activation_id: string | null; occurred_at: string | null; payload_json: string };
+      expect(countNormalizedRows()).toBe(1);
+      expect(source).toMatchObject({ activation_id: 'act-original', digest: '原始持久化声明' });
+      expect(normalized.activation_id).toBe('act-original');
+      expect(normalized.occurred_at).toBe(source.created_at);
+      expect(JSON.parse(normalized.payload_json)).toMatchObject({ claimText: '原始持久化声明' });
+      expect(JSON.parse(normalized.payload_json).claimText).not.toBe('重放时的新声明');
+    } finally {
+      clearSession(sessionId);
+    }
   });
 
   it('no marker line → zero writes, no warnings (no-footer regression)', () => {

@@ -1,16 +1,16 @@
-# PD v2 Phase 1 Evidence Foundation — Runtime Validation Report
+# PD v2 Phase 1 Evidence Foundation — Engineering Integration Validation
 
 > 日期：2026-10-07（Asia/Shanghai）
 > 分支：`ai/adhoc-20261007-pdv2-evidence-7a49dd`（基线 f330acb3）
 > 架构依据：ADR-0027 / ADR-0028 / receipt-design SPEC §13
-> 本报告为 Phase 1 六段实施（PR1–PR6）的运行时验收记录。验证驱动脚本为一次性脚本（未入库）；以下记录其构造、命令与结果，供复核者按同样步骤重建。
+> 本报告记录 Phase 1 六段实施（PR1–PR6）的工程集成验证，不构成真实宿主/Agent Runtime Acceptance。验证驱动脚本为一次性脚本（未入库）；以下记录其构造、命令与结果，供复核者按同样步骤重建。16/16 指本报告列出的集成断言通过，不代表 ADR-0027 §6 的真实宿主旅程已通过。
 
 ## 1. 验证方法
 
-- **OpenClaw 链**：隔离临时 workspace（`.pd/config.yaml` + state.db）内播种完整治理事实（tasks/runs/pi_artifacts(kind=rule, validated)/approvals(approved)/activations(live)/activation_control_states(eligible)），随后以**无 mock** 的生产入口 `handleBeforeToolCall`（openclaw-plugin `src/hooks/gate.ts`）驱动一次对 `protected/critical.txt` 的 `write` 调用：真实 RuleHost 加载并执行真实 RuleCode（`implementationCode` 内联 JS 规则）、真实 event-log JSONL、真实 state.db、真实证据 recorder。
-- **Codex 链**：`packages/codex-adapter/dist/pd-hook.js`（真实 tsc 构建产物）以真实子进程运行（stdin JSON → stdout JSON），隔离 `CODEX_HOME`（空 pd-workspace → 项目目录解析），workspace 播种 prompt 渠道激活。
-- **Console 四问**：通过 `SqliteInterventionEvidenceStore.readAuditRelations`（PR5 路由/模型同一读路径）在连接重启后查询。
-- **Owner 结果**：经共享 ingress 以 `owner_console_input` 来源写入（PR5 POST /api/v1/evidence/outcomes 的同一写路径）。
+- **OpenClaw 工程集成链**：隔离临时 workspace（`.pd/config.yaml` + state.db）内由验证脚本直接播种治理事实（tasks/runs/pi_artifacts/approvals/activations/activation_control_states），随后直接调用生产入口 `handleBeforeToolCall`（openclaw-plugin `src/hooks/gate.ts`）处理 `protected/critical.txt` 的 `write`。无 mock 的 RuleHost、RuleCode、event-log、state.db 和 recorder 均参与；但没有由 OpenClaw 宿主进程启动 Agent session 或从宿主发出工具调用。
+- **Codex hook 子进程集成**：`packages/codex-adapter/dist/pd-hook.js`（tsc 构建产物）以真实子进程运行（stdin JSON → stdout JSON），隔离 `CODEX_HOME`；这没有启动 Codex Agent/CLI 会话。
+- **审计读路径**：直接调用 `SqliteInterventionEvidenceStore.readAuditRelations`，不代表真实 Console 页面/API 用户旅程。
+- **Owner outcome ingress 集成**：验证脚本直接通过共享 ingress 以 `owner_console_input` 来源写入；未调用 POST `/api/v1/evidence/outcomes` 路由，也没有由真实 Console Owner 操作提交。
 
 运行命令（worktree 根）：
 
@@ -22,26 +22,26 @@ npm run build -w packages/codex-adapter
 npx tsx validate-phase1-runtime.mts   # → RESULT: 16/16 checks passed
 ```
 
-## 2. 检查结果（16/16 PASS）
+## 2. 工程集成检查结果（16/16 PASS；不等于宿主验收通过）
 
 | # | 检查 | 结果 |
 |---|---|---|
-| 1 | 治理事实播种（approved rule artifact + live activation + eligible control state） | PASS |
-| 2 | 真实 gate hook 拦截受保护写入（blockReason 含「princ-gj」原则署名） | PASS |
+| 1 | 隔离 SQLite 直接播种治理事实（approved rule artifact + live activation + eligible control state） | PASS（fixture setup） |
+| 2 | 直接调用生产 gate hook 拦截受保护写入（blockReason 含「princ-gj」原则署名） | PASS（非宿主发起） |
 | 3 | 证据链四类记录落库（delivery/application/behavior_episode/effect，单批原子） | PASS |
 | 4 | delivery = runtime_enforcement / **runtime_loaded / delivered** | PASS |
 | 5 | application = **runtime_verified / tool_blocked** + 显式 proof boundary（pd_gate_block_returned_to_host） | PASS |
 | 6 | application + effect 以**精确 episode key** 关联 | PASS |
-| 7 | Owner outcome 落库（owner_console_input 来源） | PASS |
+| 7 | 直接通过共享 ingress 写入 owner_console_input outcome | PASS（非 Console 路由/Owner 操作） |
 | 8 | Q1 principle → delivery+application+effect+outcome 可见 | PASS |
 | 9 | Q2 activation → runtime_verified application 单列 | PASS |
 | 10 | Q3 episode → 关联 effect | PASS |
 | 11 | Q4 effect → 关联 outcome | PASS |
 | 12 | openclaw 能力矩阵声明（含诚实的 outcome_observation=unknown） | PASS |
 | 13 | 同一 hook 重放：拦截不变、证据零新增（5 行 = 4 链 + 1 outcome） | PASS |
-| 14 | codex 真实 hook 子进程：stdout 恰一个 JSON 对象（UserPromptSubmit 形状） | PASS |
-| 15 | codex 证据落库（delivery attempted/submitted + 6 条能力声明） | PASS |
-| 16 | codex hook 重放：行数不变（幂等） | PASS |
+| 14 | codex hook 子进程：stdout 恰一个 JSON 对象（UserPromptSubmit 形状） | PASS（非 Agent session） |
+| 15 | codex hook 子进程证据落库（delivery attempted/submitted + 6 条能力声明） | PASS（hook 集成） |
+| 16 | codex hook 子进程重放：行数不变（幂等） | PASS（hook 集成） |
 
 ## 3. Evidence Chain Demo（本次运行的观察键链）
 
@@ -71,6 +71,7 @@ Outcome      owner|outcome|openclaw|episode|sess-gj|tool-gj
 | 项 | 状态 | 说明 |
 |---|---|---|
 | 真实 OpenClaw **宿主进程** session（OpenClaw 主体加载插件跑一轮真实 agent 会话） | **未执行** | 需经 installer 发布候选构建（AGENTS §1.1 禁止改 `~/.openclaw`/`~/.pd`）；本次以真实插件 hook 生产入口 + 真实 RuleCode/RuleHost/store 代替（工程全链），宿主进程层验证留待发布后 GJ 复跑 |
+| ADR-0027 §6 的真实 OpenClaw Owner → Agent → 宿主工具调用 → Console/Owner outcome journey | **未验收 / 不可由 16/16 推导** | 当前材料只有隔离 SQLite fixture、直接生产 hook 调用、直接 ingress 写入；没有真实宿主启动的 Agent session、宿主自身发出的工具事件或 Owner 在 Console 的 outcome 操作。发布候选需由受支持 installer 流程进入隔离测试安装与隔离 workspace 后执行；不得直接改写 `~/.openclaw`、`~/.pd/runtime`、扩展目录或 workspace `.pd/`。Installer 与宿主/Agent 环境未在本次审计中运行，因此具体命令、版本和安全可执行性仍需 Owner/操作者在隔离环境核实。 |
 | Codex enforcement_delivery / application_runtime_verified / behavior_observation | **Unknown** | PRI-780：Codex 未注入 V2 rule context provider，live 规则挂起；能力矩阵如实声明 Unknown，不伪造 deny 链 |
 | Codex application_self_report | **Unsupported** | Codex 无自述采集通道（能力矩阵声明） |
 | Codex agent-context delivery 确认程度 | 最高 **submitted** | stdout hookSpecificOutput 为提交通道；宿主消费不可确认 |
@@ -79,6 +80,19 @@ Outcome      owner|outcome|openclaw|episode|sess-gj|tool-gj
 | Episode 的 assistant 输出来源 | Deferred | 本期 episode 仅覆盖工具干预链；llm_output→episode 留待后续 |
 | 关联 BDD 场景 | Deferred | 未新增 .feature 场景（未删/未降任何既有场景）；四问与链路由 model/route/UI/集成测试覆盖 |
 | Learning/Evaluation | 明确排除 | 无 effectiveness/score/ranking 字段，无自动原则变更（ADR-0027 §2.5） |
+
+### 4.1 真实宿主验收的安全前提与执行路径（本次未执行）
+
+真实宿主验收必须先有 Owner 选定并经正式 Owner 流程批准、激活的安全测试原则。AI 不得从 fixture 或用户 state.db 手写 approval/activation，也不得复制 Owner 治理记录到另一 workspace。对当前 `D:\.openclaw\workspace\.pd\state.db` 的只读元数据检查发现有已批准且仍激活的 prompt principles，但没有已批准且仍激活的 Rule artifact；这些记录属于真实 Owner workspace，不能据此直接触发运行或把它们搬入测试库。此次未选定或激活任何记录。
+
+满足上述 Owner 前提后，最小可执行路径为：
+
+1. 用独立临时 OS home、OpenClaw config/state 和 PD workspace 建隔离测试环境。仓库 installer 按 `HOME` / `USERPROFILE` 解析安装根；OpenClaw 支持独立 `OPENCLAW_HOME`、`OPENCLAW_STATE_DIR`、`OPENCLAW_CONFIG_PATH` 和 workspace 配置。所有值须指向 disposable profile/workspace，不能落回 Owner 的真实 home 或 `.pd/`。
+2. 通过正式候选 installer 安装目标构建并验证产品身份与插件运行时注册；不得手工覆盖已安装文件。当前 PR 分支尚不是已发布候选，正式 installer artifact 是否可用于隔离验收需要操作者确认。
+3. 在隔离 Gateway 中启动插件，再由真实 OpenClaw Agent session 发出一项由 Owner 批准原则覆盖的安全工具操作；保留实际 host/session/tool identities、Agent transcript、宿主响应和 PD 原始/规范化记录。
+4. 经真实 Console 路由，由 Owner 提交 outcome；重新打开审计读模型核对 exact content/activation references、delivery proof boundary、execution/Episode/Effect/Outcome 与相同 source 的幂等重放。任何缺失或 unsupported 链路都记为 Unknown/partial，不以直接 ingress 调用补成通过。
+
+2026-10-08 的环境可行性探测中，OpenClaw CLI `--help` 通过两种直接 launcher 方式（含禁用 compile cache）均约 60 秒无 stdout 后中止；没有启动 Gateway、安装插件或改动宿主配置。该 CLI 环境阻塞和缺少 Owner 选定的隔离测试原则，使真实宿主 GJ 继续保持 **NOT RUN**。
 
 ## 5. 开发期事故披露（已清理，未经独立验证）
 

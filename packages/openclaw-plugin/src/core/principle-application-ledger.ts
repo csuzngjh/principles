@@ -275,25 +275,48 @@ export function recordSelfReportFromText(
         ? ((result as { changes?: number }).changes ?? 0)
         : 0;
       written += changes > 0 ? 1 : 0;
-      // PD v2 Phase 1: mirror the NEW claim into the normalized evidence
-      // ledger as agent_claimed (never runtime_verified). Only on a fresh row
-      // — the deduped replay is already recorded (the idempotent batch makes
-      // the mirror safe either way). Best-effort, never throws.
-      if (changes > 0) {
+      // Replay the durable source row even when INSERT OR IGNORE deduplicates:
+      // its normalized mirror may have failed on the first attempt. Read the
+      // persisted values so a later prompt/activation cannot rewrite lineage.
+      const source: unknown = db.prepare(`
+        SELECT activation_id, digest, created_at
+        FROM principle_applications
+        WHERE kind = 'self_reported' AND principle_id = ? AND session_id IS ?
+      `).get(principleId, sessionId ?? null);
+      if (isSelfReportSourceRow(source)) {
         recordSelfReportEvidence({
           workspaceDir,
           sessionId,
           principleId,
-          ...(activationId !== null ? { activationId } : {}),
-          claimText: digest,
+          ...(source.activation_id !== null ? { activationId: source.activation_id } : {}),
+          claimText: source.digest,
+          occurredAt: source.created_at,
           logger,
         });
+      } else {
+        logger?.warn?.(`[PD:ReceiptLedger] self_report replay skipped: durable source row unavailable for principle ${safeLogField(principleId)}`);
       }
     } catch (ledgerErr) {
       logger?.warn?.(`[PD:ReceiptLedger] self_report row write failed for principle ${safeLogField(principleId)}: ${String(ledgerErr)}`);
     }
   }
   return written;
+}
+
+function isSelfReportSourceRow(value: unknown): value is Record<string, unknown> & {
+  activation_id: string | null;
+  digest: string;
+  created_at: string;
+} {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  if (!Object.hasOwn(value, 'activation_id') || !Object.hasOwn(value, 'digest') || !Object.hasOwn(value, 'created_at')) return false;
+  const activationId: unknown = Reflect.get(value, 'activation_id');
+  const digest: unknown = Reflect.get(value, 'digest');
+  const createdAt: unknown = Reflect.get(value, 'created_at');
+  return (typeof activationId === 'string' || activationId === null)
+    && typeof digest === 'string'
+    && typeof createdAt === 'string'
+    && createdAt.length > 0;
 }
 
 /**
