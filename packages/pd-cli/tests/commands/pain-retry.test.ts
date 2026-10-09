@@ -1475,7 +1475,7 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.status).toBe('succeeded');
-    // JSON path: the operator can tell a normal reset from a budget +3 reset.
+    // JSON path: the operator can tell a normal reset from a budget-extended reset.
     expect(output.recoveredTasks).toEqual([
       { taskId: 'diagnosis_test-pain-mixed', forceApplied: false },
       { taskId: 'diag_rootcause-diagnosis_test-pain-mixed', forceApplied: true },
@@ -1493,7 +1493,7 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
     });
     const textOutput = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
     expect(textOutput).toMatch(/: diagnosis_test-pain-mixed, /);
-    expect(textOutput).toContain('diag_rootcause-diagnosis_test-pain-mixed (budget +3)');
+    expect(textOutput).toContain('diag_rootcause-diagnosis_test-pain-mixed (budget extended)');
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

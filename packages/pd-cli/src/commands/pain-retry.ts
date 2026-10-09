@@ -804,10 +804,16 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       for (const familyTaskId of diagFamily) {
         const recovered = await recoverFailedTask(stateManager, familyTaskId, true);
         // PRI-936: forceApplied must survive to the operator — a silent
-        // budget +3 is observable grace, not a hidden mutation (rc-9).
+        // budget extension is observable grace, not a hidden mutation (rc-9).
         if (recovered) recoveredTasks.push({ taskId: recovered.taskId, forceApplied: recovered.forceApplied });
       }
     }
+
+    // Neutral by design: the extension size is core-owned and attemptCount-
+    // dependent (Math.max), so the CLI names no number (P4). One local
+    // formatter keeps both text branches same-source (P3/P6).
+    const formatRecoveredTasks = (tasks: typeof recoveredTasks): string =>
+      tasks.map((r) => (r.forceApplied ? `${r.taskId} (budget extended)` : r.taskId)).join(', ');
 
     const result = await diagnoseRun({
       taskId,
@@ -848,7 +854,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         if (recoveredTasks.length > 0) {
           // Failure is exactly where the operator needs to know which tasks
           // were reset before the runner died (85273fa1 review §3).
-          console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.map((r) => (r.forceApplied ? `${r.taskId} (budget +3)` : r.taskId)).join(', ')}`);
+          console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${formatRecoveredTasks(recoveredTasks)}`);
         }
         if (result.errorCategory) {
           console.log(`  Error Category: ${result.errorCategory}`);
@@ -1082,7 +1088,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     console.log(`  Previous Status: ${previousTaskStatus}${previousLastError ? ` (${previousLastError})` : ''}`);
     console.log(`  New Status:      succeeded`);
     if (recoveredTasks.length > 0) {
-      console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.map((r) => (r.forceApplied ? `${r.taskId} (budget +3)` : r.taskId)).join(', ')}`);
+      console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${formatRecoveredTasks(recoveredTasks)}`);
     }
     if (painDiagnosisLedgerWrite === 'attempted') {
       console.log(`  Diagnosis Ledger: pain_diagnoses write dispatched (skips/failures surface as pain_diagnosis_persist_* events)`);
