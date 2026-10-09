@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 export interface HookRunResult {
@@ -17,6 +17,32 @@ export interface RunHookOptions {
    * therefore reported as an abnormal kill — before vitest preempts the test.
    */
   timeoutMs?: number;
+  /**
+   * JS injected into the child BEFORE the hook module is imported, and JS run
+   * in the child AFTER the import resolves. These exist for one reason: the
+   * fail-open contract is a property of the PROCESS, so a test must be able to
+   * damage a stream or a global serializer and observe the exit code, which the
+   * in-process `processHookInvocation` return value cannot show.
+   *
+   * Passing either one switches the child from `node dist/pd-hook.js` to
+   * `node -e <script>` that imports the same entry with `argv[1]` pointing at
+   * it, so the real entry guard still fires. The direct invocation (and every
+   * existing caller) is unchanged when both are omitted.
+   */
+  childPrelude?: string;
+  childPostlude?: string;
+}
+
+/** Build the `node -e` script for the damaged-environment cases. The entry path
+ * is interpolated through JSON.stringify (a JS literal, never a shell string). */
+function buildInjectedScript(entry: string, entryUrl: string, prelude?: string, postlude?: string): string {
+  return [
+    `process.argv[1] = ${JSON.stringify(entry)};`,
+    prelude ?? '',
+    `import(${JSON.stringify(entryUrl)})`,
+    `.then(() => { ${postlude ?? ''} })`,
+    `.catch((error) => { console.error('IMPORT_FAILED', error && error.message); process.exit(9); });`,
+  ].join('\n');
 }
 
 /**
@@ -50,10 +76,14 @@ export async function runHookExecutable(
   if (!entry.startsWith(`${packageRoot}${path.sep}`) || !fs.statSync(entry).isFile()) {
     throw new Error(`hook entry not found or outside the package: ${entry} (run npm run build in packages/codex-adapter)`);
   }
+  const injected = options.childPrelude !== undefined || options.childPostlude !== undefined;
+  const argv = injected
+    ? ['-e', buildInjectedScript(entry, pathToFileURL(entry).href, options.childPrelude, options.childPostlude)]
+    : [entry];
   const previous = process.env.CODEX_HOME;
   process.env.CODEX_HOME = codexHome;
   try {
-    const running = execFileAsync(process.execPath, [entry], { encoding: 'utf8', windowsHide: true, timeout });
+    const running = execFileAsync(process.execPath, argv, { encoding: 'utf8', windowsHide: true, timeout });
     // execFile has no `input` option — feed the JSON payload on stdin.
     running.child.stdin?.end(payloadJson);
     const { stdout, stderr } = await running;
