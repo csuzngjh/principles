@@ -777,6 +777,7 @@ export function PrincipleDetailPage() {
                     data-action-semantic={action.semantic}
                     onClick={() => {
                       setRejectReason("");
+                      setApproveNote("");
                       setPendingAction(action);
                     }}
                   >
