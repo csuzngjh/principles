@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getNestedString, parseJsonRecord } from './i18n-test-helper.js';
 
 // PRI-572: presence ≠ effect. Source-contract tests for the Receipt UI
 // semantics (mirrors principle-governance-projection.test.ts pattern —
 // vitest runs in node env, no jsdom mounting).
 
-const page = fs.readFileSync(path.resolve('src/ui/pages/principles/PrincipleDetailPage.tsx'), 'utf8');
-const activationPage = fs.readFileSync(path.resolve('src/ui/pages/activation/ActivationPage.tsx'), 'utf8');
-const coverageComponent = fs.readFileSync(path.resolve('src/ui/components/receipts/ReceiptCoverageDisclosure.tsx'), 'utf8');
-const en = parseJsonRecord(fs.readFileSync(path.resolve('src/ui/i18n/en.json'), 'utf8'));
-const zh = parseJsonRecord(fs.readFileSync(path.resolve('src/ui/i18n/zh-CN.json'), 'utf8'));
+// Resolve from this test file, not process.cwd(): vitest may run from the
+// repo root, where cwd-relative 'src/...' paths do not exist (PRI-937).
+const SRC_UI_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'ui');
+
+const page = fs.readFileSync(path.join(SRC_UI_ROOT, 'pages/principles/PrincipleDetailPage.tsx'), 'utf8');
+const activationPage = fs.readFileSync(path.join(SRC_UI_ROOT, 'pages/activation/ActivationPage.tsx'), 'utf8');
+const coverageComponent = fs.readFileSync(path.join(SRC_UI_ROOT, 'components/receipts/ReceiptCoverageDisclosure.tsx'), 'utf8');
+const en = parseJsonRecord(fs.readFileSync(path.join(SRC_UI_ROOT, 'i18n/en.json'), 'utf8'));
+const zh = parseJsonRecord(fs.readFileSync(path.join(SRC_UI_ROOT, 'i18n/zh-CN.json'), 'utf8'));
 
 describe('PRI-572 receipt presence/effect semantic separation', () => {
   it('selects the owner-visible receipt presentation from effect evidence', async () => {
