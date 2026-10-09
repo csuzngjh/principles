@@ -377,13 +377,16 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
 }
 
 // PRI-943: process-boundary fail-open belt. Every resolved path sets exitCode 0,
-// so nothing may let an unwritable stream or an escaping rejection reach node's
-// default handling, which terminates the hook with exit 1. Two distinct failure
-// modes, both reproduced in tests/pd-hook-entry-belt.test.ts:
+// so nothing may let an unwritable stream, an unserializable result, or an
+// escaping rejection reach node's default handling, which terminates the hook
+// with exit 1. Three distinct failure modes, each reproduced from a spawned
+// process in tests/pd-hook-entry-belt.test.ts:
 //   * a write that THROWS synchronously — caught per write below;
 //   * a host closing the pipe, which raises an ASYNC 'error' event on the
 //     Socket. try/catch cannot reach that one, so a listener is required
 //     (armStreamBelts) or node aborts with "Unhandled 'error' event".
+//   * the stdout JSON object failing to SERIALIZE — guarded separately because
+//     the object is the contract (serializeStdout).
 // stdout must stay exactly one JSON object, so a belt diagnostic goes to stderr
 // only; when stderr itself is the dead stream nothing is reported rather than
 // written into the machine channel.
@@ -411,6 +414,9 @@ function reportStreamFailure(error: unknown): void {
 function writeStream(stream: 'stdout' | 'stderr', line: string): boolean {
   try {
     process[stream].write(`${line}\n`);
+    // Tracked here rather than at each call site so no future stdout write can
+    // make the entry belt believe nothing was delivered yet.
+    if (stream === 'stdout') stdoutJsonDelivered = true;
     return true;
   } catch (error) {
     reportStreamFailure(error);
@@ -421,6 +427,21 @@ function writeStream(stream: 'stdout' | 'stderr', line: string): boolean {
 function armStreamBelts(): void {
   process.stdout.on('error', reportStreamFailure);
   process.stderr.on('error', reportStreamFailure);
+}
+
+/** rc-8: the stdout JSON object is the contract itself, so serializing it is a
+ * failure path of the belt rather than of the encoder — degrade to `{}` and
+ * report, never let the throw escape into the entry belt's last-resort branch. */
+function serializeStdout(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? '{}';
+  } catch (error) {
+    writeBeltDiagnostic(
+      `hook_stdout_serialize_failed:${errorMessage(error)}`,
+      'Retry the tool call; the hook failed open with an empty JSON object.',
+    );
+    return '{}';
+  }
 }
 
 async function main(): Promise<void> {
@@ -446,7 +467,7 @@ async function main(): Promise<void> {
   for (const line of result.stderr) {
     if (!writeStream('stderr', line)) break;
   }
-  stdoutJsonDelivered = writeStream('stdout', JSON.stringify(result.stdout));
+  writeStream('stdout', serializeStdout(result.stdout));
   process.exitCode = result.exitCode;
 }
 

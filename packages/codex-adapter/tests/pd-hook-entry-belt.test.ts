@@ -1,7 +1,8 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import process from 'node:process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { runHookExecutable } from './helpers/pd-hook-runner.js';
 
 // PRI-943: the pd-hook fail-open contract must hold at the PROCESS boundary, not
 // only inside main(). Two escape paths were unprotected, and both turn a
@@ -16,81 +17,91 @@ import { describe, expect, it } from 'vitest';
 //      the write can contain it — only an 'error' listener prevents the
 //      "Unhandled 'error' event" crash.
 //
-// Each case spawns the BUILT executable the way Codex does (one JSON object on
-// stdin), because the contract is about the process, not about
-// processHookInvocation's return value.
+// Every case goes through the shared `runHookExecutable` harness because the
+// contract is about the process, not about processHookInvocation's return value:
+// a non-zero exit makes the harness throw with its fail-open attribution, and a
+// harness-timeout kill is reported as environmental rather than as a regression.
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const hookEntry = path.resolve(packageRoot, 'dist', 'pd-hook.js');
+/** Truncated payload: keeps main() on its documented degraded path so the fault
+ * under test stays the damaged stream/serializer, not the governance outcome. */
+const DEGRADED_PAYLOAD = '{"hook_event_name":"PreToolUse"';
 
-type BrokenStream = 'stdout' | 'stderr';
-
-/**
- * Spawn the hook with one output stream made unusable, the way a host that
- * closes the pipe early would: either every synchronous `write()` on it throws
- * (case 1), or it emits an async 'error' event after the hook has run (case 2).
- * The hook is loaded through `import()` with argv[1] pointing at it so the real
- * entry guard fires.
- */
-async function spawnHookWithBrokenStream(broken: BrokenStream, mode: 'sync-throw' | 'async-error') {
-  const { spawn } = await import('node:child_process');
-  const script = mode === 'sync-throw'
-    ? `process.argv[1] = ${JSON.stringify(hookEntry)};`
-      + `process.${broken}.write = () => { throw Object.assign(new Error('EPIPE: broken pipe, write'), { code: 'EPIPE', syscall: 'write' }); };`
-      + ` import(${JSON.stringify(pathToFileURL(hookEntry).href)})`
-      + `.catch((error) => { console.error('IMPORT_FAILED', error && error.message); process.exit(9); });`
-    : `process.argv[1] = ${JSON.stringify(hookEntry)};`
-      + ` import(${JSON.stringify(pathToFileURL(hookEntry).href)})`
-      + `.then(() => { setTimeout(() => process.${broken}.emit('error',`
-      + `   Object.assign(new Error('EPIPE: broken pipe, write'), { code: 'EPIPE', syscall: 'write' })), 25); })`
-      + `.catch((error) => { console.error('IMPORT_FAILED', error && error.message); process.exit(9); });`;
-
-  return await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, ['-e', script], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
-    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-    child.on('error', reject);
-    child.on('close', (code) => resolve({ status: code, stdout, stderr }));
-    // A malformed payload keeps main() on its documented degraded path: the
-    // fault under test is the broken stream, not the governance outcome.
-    child.stdin?.end('{"hook_event_name":"PreToolUse"');
-  });
+function epipeDetail(stream: 'stdout' | 'stderr', syscall: string): string {
+  return `Object.assign(new Error('EPIPE: broken pipe, ${syscall}'), { code: 'EPIPE', syscall: '${syscall}' })`;
 }
 
+let codexHome: string;
+
+beforeAll(() => {
+  codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-hook-belt-'));
+});
+
+afterAll(() => {
+  fs.rmSync(codexHome, { recursive: true, force: true });
+});
+
 describe('pd-hook process-boundary fail-open belt (PRI-943)', () => {
-  for (const broken of ['stderr', 'stdout'] satisfies BrokenStream[]) {
-    it(`exits 0 with one JSON object on stdout when a ${broken} write throws during the write-out tail`, async () => {
-      const result = await spawnHookWithBrokenStream(broken, 'sync-throw');
+  for (const broken of ['stderr', 'stdout'] as const) {
+    it(`exits 0 when a ${broken} write throws synchronously during the write-out tail`, async () => {
+      const result = await runHookExecutable(codexHome, DEGRADED_PAYLOAD, {
+        childPrelude: `process.${broken}.write = () => { throw ${epipeDetail(broken, 'write')}; };`,
+      });
 
       // A broken stderr must not stop stdout from carrying the contract; a
       // broken stdout is the one case where the JSON object cannot be delivered,
       // and even then the process stays fail-open.
-      expect(result.status, `stderr dump: ${result.stderr}`).toBe(0);
+      expect(result.status).toBe(0);
       if (broken === 'stderr') {
         expect(result.stdout.trim().split(/\r?\n/)).toEqual(['{}']);
         expect(() => JSON.parse(result.stdout)).not.toThrow();
       }
-    }, 60_000);
+    });
   }
 
-  it('exits 0 when the host closes the pipe and stdout emits an async EPIPE error', async () => {
-    const result = await spawnHookWithBrokenStream('stdout', 'async-error');
+  for (const broken of ['stdout', 'stderr'] as const) {
+    it(`exits 0 when the host closes the pipe and ${broken} emits an async EPIPE error`, async () => {
+      const result = await runHookExecutable(codexHome, DEGRADED_PAYLOAD, {
+        childPostlude: `setTimeout(() => process.${broken}.emit('error', ${epipeDetail(broken, 'write')}), 25);`,
+      });
 
-    // Node raises "Unhandled 'error' event" and exits 1 unless the hook owns an
-    // 'error' listener — try/catch around the write cannot reach this path.
-    expect(result.stderr).not.toMatch(/Unhandled 'error' event/);
-    expect(result.status, `stderr dump: ${result.stderr}`).toBe(0);
+      // Node raises "Unhandled 'error' event" and exits 1 unless the hook owns an
+      // 'error' listener — try/catch around the write cannot reach this path.
+      expect(result.stderr).not.toMatch(/Unhandled 'error' event/);
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual(['{}']);
+    });
+  }
+
+  it('belts a throw escaping main() at the write-out tail: exit 0, one JSON object, bounded diagnostic', async () => {
+    const result = await runHookExecutable(codexHome, DEGRADED_PAYLOAD, {
+      // The tail serializes stdout AFTER the stderr diagnostics have been
+      // written, so the breaker is armed on the first stderr write. Arming
+      // there (rather than in the prelude) keeps Node's own module-loading use
+      // of JSON.stringify out of the blast radius — the fault under test is the
+      // hook's serialization, not the loader's.
+      childPrelude: `(() => {`
+        + `  const stringify = JSON.stringify.bind(JSON);`
+        + `  const write = process.stderr.write.bind(process.stderr);`
+        + `  process.stderr.write = (...args) => {`
+        + `    process.stderr.write = write;`
+        + `    JSON.stringify = () => { throw new Error('forced serialize failure'); };`
+        + `    return write(...args);`
+        + `  };`
+        + `})();`,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toMatch(/reason=hook_stdout_serialize_failed:forced serialize failure/);
+    // The fallback keeps the machine channel intact: stdout still carries
+    // exactly one JSON object, not a partial serialization and not a second one.
     expect(result.stdout.trim().split(/\r?\n/)).toEqual(['{}']);
-  }, 60_000);
+  });
 
-  it('keeps the healthy resolved path unchanged: exit 0, one JSON object, bounded diagnostic', async () => {
-    const { spawnSync } = await import('node:child_process');
-    const result = spawnSync(process.execPath, [hookEntry], { input: '{"hook_event_name":"PreToolUse"', encoding: 'utf8' });
+  it('keeps the degraded path unchanged: exit 0, one JSON object, bounded diagnostic', async () => {
+    const result = await runHookExecutable(codexHome, DEGRADED_PAYLOAD);
 
     expect(result.status).toBe(0);
     expect(result.stdout.trim().split(/\r?\n/)).toEqual(['{}']);
     expect(result.stderr).toMatch(/reason=.*nextAction=/);
-  }, 60_000);
+  });
 });
