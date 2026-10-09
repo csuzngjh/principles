@@ -2842,10 +2842,27 @@ export interface UpdateRecoveryItem {
   tornTailDetected: boolean;
 }
 
+export interface UpdateRecoverySuperseded {
+  transactionId: string;
+  reason: string;
+}
+
 export interface UpdateRecoveryData {
   needsRecovery: boolean;
   unfinished: UpdateRecoveryItem[];
   broken: { transactionId: string; reason: string }[];
+  /**
+   * PRI-896: non-terminal journals the live release has already superseded.
+   * Reported separately (rc-9: never a silent drop) but never hold the alarm.
+   */
+  superseded: UpdateRecoverySuperseded[];
+  /**
+   * rc-9 (PRI-896/CR-2): active.json could not be read, so recovery had no
+   * live-release evidence and every non-terminal journal is conservatively an
+   * alarm. When true the alarm is retained for lack of a readable active
+   * record — repair active.json rather than the journals.
+   */
+  activeRecordUnreadable?: boolean;
   nextAction?: string;
 }
 
@@ -2873,7 +2890,18 @@ export function validateUpdateRecovery(v: unknown): UpdateRecoveryData | null {
       broken.push({ transactionId: item.transactionId, reason: item.reason });
     }
   }
-  const result: UpdateRecoveryData = { needsRecovery: v.needsRecovery, unfinished, broken };
+  const superseded: UpdateRecoverySuperseded[] = [];
+  if (Object.hasOwn(v, 'superseded') && Array.isArray(v.superseded)) {
+    for (const item of v.superseded) {
+      if (!isObject(item) || !Object.hasOwn(item, 'transactionId') || !isString(item.transactionId)) continue;
+      if (!Object.hasOwn(item, 'reason') || !isString(item.reason)) continue;
+      superseded.push({ transactionId: item.transactionId, reason: item.reason });
+    }
+  }
+  const result: UpdateRecoveryData = { needsRecovery: v.needsRecovery, unfinished, broken, superseded };
+  if (Object.hasOwn(v, 'activeRecordUnreadable') && typeof v.activeRecordUnreadable === 'boolean') {
+    result.activeRecordUnreadable = v.activeRecordUnreadable;
+  }
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
   return result;
 }

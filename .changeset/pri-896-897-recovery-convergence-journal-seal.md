@@ -1,0 +1,5 @@
+---
+"create-principles-disciple": patch
+---
+
+PRI-896, PRI-897: the update recovery surface stops alarming forever on residue that the product has already outlived, and a sealed transaction journal can no longer be overwritten by a retry. `GET /api/update/recovery` now consults the product's own verdict (`recoverUnfinishedTransaction`, PRI-853) before labelling a non-terminal journal as needing recovery: a crash orphan that the live `active.json` generation proves was superseded (`old_confirmed`) is reported separately in the new `superseded` field instead of holding the Owner's attention, while a missing/corrupt active record or an interrupted activation (`explicit_refusal`) keeps alarming — demotion is evidence-gated, never a blanket mute. `ReleaseManager.apply()` now refuses to append a second attempt onto an existing journal file (new `journal_sealed` refusal, raised before any side effect), which previously broke whole-file sequence validation and marked even an earlier `confirmed` update in that file as corrupt forever. Ships the pd-console fix inside the installer package (pd-console is private).

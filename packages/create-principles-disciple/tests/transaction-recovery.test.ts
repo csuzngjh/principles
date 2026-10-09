@@ -117,6 +117,36 @@ describe('transaction journal', () => {
     expect(() => readTransactionJournal(journalPath)).toThrow(/terminal/i);
   });
 
+  it('PRI-897 (CR-1): an exclusive first append creates the volume once; a second exclusive open fails with EEXIST', () => {
+    // The O_EXCL seal is what makes the journal one-transactionId-one-file
+    // guarantee ATOMIC: two writers racing past an existsSync pre-check cannot
+    // both append a `planned` line. The second exclusive open must fail at the
+    // OS level (EEXIST) rather than silently appending into the existing file.
+    const root = tempRoot();
+    const journalPath = path.join(root, 'transactions', `${TRANSACTION_ID}.jsonl`);
+
+    appendJournalTransition(journalPath, transition(null, 'planned', 6, NEW_RELEASE, NEW_DIGEST), { exclusive: true });
+    // The volume now holds exactly the planned line.
+    expect(readTransactionJournal(journalPath)).toHaveLength(1);
+
+    // A second exclusive open of the SAME path is the losing writer in a race:
+    // it must throw EEXIST and leave the existing volume untouched.
+    let thrown: unknown;
+    try {
+      appendJournalTransition(journalPath, transition(null, 'planned', 6, NEW_RELEASE, NEW_DIGEST), { exclusive: true });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as { code?: unknown }).code).toBe('EEXIST');
+    // No duplicate planned line was appended by the loser.
+    expect(readTransactionJournal(journalPath)).toHaveLength(1);
+
+    // Non-exclusive continuation appends still work on the owned volume.
+    appendJournalTransition(journalPath, transition('planned', 'downloaded', 6, NEW_RELEASE, NEW_DIGEST));
+    expect(readTransactionJournal(journalPath).map((item) => item.to)).toEqual(['planned', 'downloaded']);
+  });
+
   it('rejects torn lines, unknown states, and broken chains loudly (rc-3)', () => {
     const root = tempRoot();
     const journalPath = path.join(root, 't.jsonl');

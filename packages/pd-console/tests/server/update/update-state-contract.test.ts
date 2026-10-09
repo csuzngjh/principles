@@ -262,4 +262,133 @@ describe('PRI-848 update state contract', () => {
     expect(quiet.data.needsRecovery).toBe(false);
     expect(quiet.data.unfinished).toHaveLength(0);
   });
+
+  it('PRI-896: a never-activated orphan superseded by the live release does not alarm', async () => {
+    // Exactly the stranded residue a killed install leaves behind: one
+    // `planned` line, no terminal state, generation long since replaced.
+    writeJournal(mocks.fakeHome, 'install-1790046654982-450b61dc', [
+      { at: '2026-09-20T00:00:00.000Z', from: null, to: 'planned', transactionId: 'install-1790046654982-450b61dc', releaseId: 'a'.repeat(64), productVersion: '1.2.0', generation: 2 },
+    ]);
+    const liveRelease = 'e'.repeat(64);
+    fs.writeFileSync(path.join(mocks.fakeHome, '.pd', 'active.json'), JSON.stringify({
+      schemaVersion: 1, generation: 29, releaseId: liveRelease,
+      releaseMetadataDigest: '4'.repeat(64), previousReleaseId: null,
+      transactionId: 'update-live', productVersion: '2.2.1',
+    }), 'utf8');
+
+    const body = await (await fetch(`${transactionBase}/api/update/recovery`)).json();
+    // The banner must go quiet: the product's OWN verdict already calls this a
+    // harmless superseded orphan (PRI-853 `old_confirmed`), so alarming forever
+    // with no official way to converge is the defect.
+    expect(body.data.needsRecovery).toBe(false);
+    expect(body.data.unfinished).toHaveLength(0);
+    // rc-9: the demotion is observable, never a silent drop.
+    expect(body.data.superseded).toMatchObject([{ transactionId: 'install-1790046654982-450b61dc' }]);
+    expect(body.data.superseded[0].reason).toMatch(/activation was never journaled/);
+    // Still pure: nothing was written to the journal.
+    expect(fs.readFileSync(path.join(mocks.fakeHome, '.pd', 'transactions', 'install-1790046654982-450b61dc.jsonl'), 'utf8'))
+      .toContain('"to":"planned"');
+  });
+
+  it('PRI-896: an interrupted activation still alarms — demotion is not a blanket mute', async () => {
+    // Pointer landed for THIS transaction but host verification never ran:
+    // the verdict is `explicit_refusal`, so the alarm is real and must stay.
+    writeJournal(mocks.fakeHome, 'update-3-halfway', [
+      { at: '2026-09-20T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-3-halfway', releaseId: 'r'.repeat(64), productVersion: '1.3.0', generation: 4 },
+      { at: '2026-09-20T00:01:00.000Z', from: 'planned', to: 'staged', transactionId: 'update-3-halfway', releaseId: 'r'.repeat(64), productVersion: '1.3.0', generation: 4 },
+      { at: '2026-09-20T00:02:00.000Z', from: 'staged', to: 'probed', transactionId: 'update-3-halfway', releaseId: 'r'.repeat(64), productVersion: '1.3.0', generation: 4 },
+      { at: '2026-09-20T00:03:00.000Z', from: 'probed', to: 'activated', transactionId: 'update-3-halfway', releaseId: 'r'.repeat(64), productVersion: '1.3.0', generation: 4 },
+    ]);
+    fs.writeFileSync(path.join(mocks.fakeHome, '.pd', 'active.json'), JSON.stringify({
+      schemaVersion: 1, generation: 4, releaseId: 'r'.repeat(64),
+      releaseMetadataDigest: '4'.repeat(64), previousReleaseId: null,
+      transactionId: 'update-3-halfway', productVersion: '1.3.0',
+    }), 'utf8');
+
+    const body = await (await fetch(`${transactionBase}/api/update/recovery`)).json();
+    expect(body.data.needsRecovery).toBe(true);
+    expect(body.data.unfinished.map((item: { transactionId: string }) => item.transactionId))
+      .toEqual(['update-3-halfway']);
+    expect(body.data.superseded).toHaveLength(0);
+    expect(body.data.nextAction).toBeTruthy();
+  });
+
+  it('PRI-896 (CR-2): a corrupt active.json is surfaced as activeRecordUnreadable, never silently swallowed (rc-9)', async () => {
+    // The conservative direction keeps alarming when active.json cannot be
+    // read — but silence would hide WHY. This asserts the failure is observable
+    // in the recovery payload instead of masquerading as "no active record".
+    writeJournal(mocks.fakeHome, 'update-4-corrupt-active', [
+      { at: '2026-09-20T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-4-corrupt-active', releaseId: 'c'.repeat(64), productVersion: '1.4.0', generation: 5 },
+    ]);
+    // active.json exists but is not valid JSON: readActiveRecord throws
+    // (active_record_corrupt) rather than returning null.
+    fs.writeFileSync(path.join(mocks.fakeHome, '.pd', 'active.json'), '{ not valid json', 'utf8');
+
+    const body = await (await fetch(`${transactionBase}/api/update/recovery`)).json();
+    // The unfinished transaction is still flagged (conservative, unmuted).
+    expect(body.data.unfinished.map((item: { transactionId: string }) => item.transactionId))
+      .toContain('update-4-corrupt-active');
+    // rc-9: the read failure is now explicit in the payload, and the next
+    // action points the Owner at repairing active.json rather than the journal.
+    expect(body.data.activeRecordUnreadable).toBe(true);
+    expect(body.data.nextAction).toMatch(/active\.json/i);
+  });
+
+  it('PRI-896 (CR-2): a healthy active.json reports activeRecordUnreadable=false', async () => {
+    // Companion to the corrupt case: the flag must default false when the sole
+    // active pointer is readable, so the field is a genuine signal not an alarm.
+    writeJournal(mocks.fakeHome, 'update-5-healthy', [
+      { at: '2026-09-20T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-5-healthy', releaseId: 'd'.repeat(64), productVersion: '1.5.0', generation: 6 },
+    ]);
+    fs.writeFileSync(path.join(mocks.fakeHome, '.pd', 'active.json'), JSON.stringify({
+      schemaVersion: 1, generation: 6, releaseId: 'd'.repeat(64),
+      releaseMetadataDigest: '4'.repeat(64), previousReleaseId: null,
+      transactionId: 'update-live', productVersion: '1.5.0',
+    }), 'utf8');
+
+    const body = await (await fetch(`${transactionBase}/api/update/recovery`)).json();
+    expect(body.data.activeRecordUnreadable).toBe(false);
+  });
+
+  it('PRI-896 (CR-2): a corrupt active.json flags activeRecordUnreadable and keeps non-terminal journals as alarms (rc-9)', async () => {
+    // A non-terminal journal whose "superseded" verdict depends on comparing
+    // against the live release record. With active.json corrupt there is NO
+    // live-release evidence, so the journal must stay an alarm (unfinished),
+    // NOT be demoted to superseded — and the response must say WHY via
+    // activeRecordUnreadable instead of collapsing "absent" and "unreadable"
+    // into one silent null (rc-9 no-silent-fallback).
+    writeJournal(mocks.fakeHome, 'update-4-cant-decide', [
+      { at: '2026-09-20T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-4-cant-decide', releaseId: 'r'.repeat(64), productVersion: '1.4.0', generation: 5 },
+    ]);
+    // Corrupt active.json: valid path, unparseable bytes. readActiveRecord throws
+    // active_record_corrupt rather than returning null.
+    fs.writeFileSync(path.join(mocks.fakeHome, '.pd', 'active.json'), '{"schemaVersion":1,', 'utf8');
+
+    const body = await (await fetch(`${transactionBase}/api/update/recovery`)).json();
+    expect(body.data.needsRecovery).toBe(true);
+    expect(body.data.activeRecordUnreadable).toBe(true);
+    // No live-release evidence ⇒ the journal is conservatively an alarm, never demoted.
+    expect(body.data.unfinished.map((item: { transactionId: string }) => item.transactionId))
+      .toEqual(['update-4-cant-decide']);
+    expect(body.data.superseded).toHaveLength(0);
+    // rc-9: the next action points at repairing active.json, not the journals.
+    expect(body.data.nextAction).toMatch(/active\.json/i);
+  });
+
+  it('PRI-896 (CR-2): an ABSENT active.json is not flagged unreadable (absent ≠ unreadable)', async () => {
+    // Distinguishing fact for the CR-2 contract: "file absent" must NOT set
+    // activeRecordUnreadable — only a present-but-unreadable file does. This is
+    // exactly the two states the pre-fix catch collapsed.
+    writeJournal(mocks.fakeHome, 'update-5-no-active', [
+      { at: '2026-09-20T00:00:00.000Z', from: null, to: 'planned', transactionId: 'update-5-no-active', releaseId: 'r'.repeat(64), productVersion: '1.5.0', generation: 6 },
+    ]);
+    // No active.json written at all: readActiveRecord returns null.
+    const body = await (await fetch(`${transactionBase}/api/update/recovery`)).json();
+    expect(body.data.needsRecovery).toBe(true);
+    expect(body.data.activeRecordUnreadable).toBe(false);
+    // Absent evidence also keeps the alarm (conservative), but for the OTHER reason.
+    expect(body.data.unfinished.map((item: { transactionId: string }) => item.transactionId))
+      .toEqual(['update-5-no-active']);
+    expect(body.data.nextAction).not.toMatch(/active\.json/i);
+  });
 });
