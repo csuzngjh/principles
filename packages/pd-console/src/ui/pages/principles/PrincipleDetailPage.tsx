@@ -259,6 +259,7 @@ export function PrincipleDetailPage() {
   const [pendingAction, setPendingAction] = useState<OwnerAction | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [newArtifactId, setNewArtifactId] = useState("");
+  const [approveNote, setApproveNote] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
   // Evidence ID copy state (Wave 6: stop showing raw UUIDs as primary content)
@@ -392,7 +393,7 @@ export function PrincipleDetailPage() {
   // The view's actions are advisory; every submission goes through the real
   // mutation service. On failure: show the service reason, invalidate stale
   // actions, re-GET the view. Never auto-retry a mutation.
-  const submitOwnerAction = async (action: OwnerAction, reason?: string): Promise<void> => {
+  const submitOwnerAction = async (action: OwnerAction, reason?: string, note?: string): Promise<void> => {
     if (actionLoading) return;
     setActionLoading(true);
     try {
@@ -410,7 +411,7 @@ export function PrincipleDetailPage() {
           toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
           return;
         }
-        const approveResult = await approveApproval(approvalId);
+        const approveResult = await approveApproval(approvalId, note);
         settle(approveResult);
         // PRI-890: non-fatal server warnings (e.g. prompt injection budget
         // exclusion) must reach the Owner on this path too, not vanish.
@@ -458,6 +459,7 @@ export function PrincipleDetailPage() {
       setPendingAction(null);
       setRejectReason("");
       setNewArtifactId("");
+      setApproveNote("");
       // Invalidate the stale action list and re-derive from a fresh GET.
       await loadData();
     }
@@ -775,6 +777,7 @@ export function PrincipleDetailPage() {
                     data-action-semantic={action.semantic}
                     onClick={() => {
                       setRejectReason("");
+                      setApproveNote("");
                       setPendingAction(action);
                     }}
                   >
@@ -836,6 +839,22 @@ export function PrincipleDetailPage() {
                         />
                       </>
                     )}
+                    {pendingAction.requirements.some((req) => req.name === 'note') && (
+                      <>
+                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                          {t("principles.detail.approveNoteLabel", { defaultValue: "批准备注（可选）" })}
+                        </label>
+                        <textarea
+                          data-testid="owner-decision-note"
+                          value={approveNote}
+                          onChange={(e) => setApproveNote(e.target.value)}
+                          placeholder={pendingAction.requirements.find((req) => req.name === 'note')?.ownerText
+                            ?? t("principles.detail.approveNotePlaceholder", { defaultValue: "写下批准的理由（可留空）" })}
+                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                          aria-label={t("principles.detail.approveNoteLabel", { defaultValue: "批准备注（可选）" })}
+                        />
+                      </>
+                    )}
                     <div className="flex gap-2 mt-3">
                       <Button
                         variant={pendingAction.semantic === 'reject' ? 'destructive' : 'default'}
@@ -845,12 +864,16 @@ export function PrincipleDetailPage() {
                           || (pendingAction.requirements.some((req) => req.name === 'newArtifactId') && !newArtifactId.trim())}
                         onClick={() => {
                           const action = pendingAction;
-                          void submitOwnerAction(action, rejectReason.trim() === '' ? undefined : rejectReason.trim());
+                          void submitOwnerAction(
+                            action,
+                            rejectReason.trim() === '' ? undefined : rejectReason.trim(),
+                            approveNote.trim() === '' ? undefined : approveNote.trim(),
+                          );
                         }}
                       >
                         {t("principles.detail.confirm", { defaultValue: "确认" })}
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => { setPendingAction(null); setRejectReason(""); setNewArtifactId(""); }}>
+                      <Button variant="outline" size="sm" onClick={() => { setPendingAction(null); setRejectReason(""); setNewArtifactId(""); setApproveNote(""); }}>
                         {t("principles.detail.cancel")}
                       </Button>
                     </div>
