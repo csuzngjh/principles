@@ -394,10 +394,10 @@ describe("Approval note rendered and submitted (PRI-948)", () => {
   });
 
   it("switching the pending action clears the abandoned approval note", () => {
-    // Necessary regex rationale: switching actions must reset the note as Cancel
-    // does, so a note typed during an abandoned attempt cannot pre-fill a later
-    // approve panel. The pattern pins THIS onClick and the reset order, so a
-    // setApproveNote("") elsewhere in the file would not satisfy it.
+    // Switching actions must reset the note as Cancel does, so a note typed
+    // during an abandoned attempt cannot pre-fill a later approve panel. The
+    // pattern pins THIS onClick and the reset order, so a setApproveNote("")
+    // elsewhere in the file would not satisfy it.
     expect(principleDetailSrc).toMatch(
       /onClick=\{\(\) => \{\s*setRejectReason\(""\);\s*setApproveNote\(""\);\s*setPendingAction\(action\);\s*\}\}/,
     );
