@@ -745,6 +745,8 @@
         "confirm": "Confirm",
         "cancel": "Cancel",
         "rejectReasonPlaceholder": "Please explain why you reject (required)",
+        "approveNoteLabel": "Approval note (optional)",
+        "approveNotePlaceholder": "Why you approve — recorded as the decision note (may be left blank)",
         "editReasonLabel": "Edit reason (required)",
         "editReasonPlaceholder": "Explain why the wording or scope needs to change",
         "editNewArtifactPlaceholder": "Enter validated revision artifact ID",

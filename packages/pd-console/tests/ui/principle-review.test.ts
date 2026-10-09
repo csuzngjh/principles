@@ -352,6 +352,49 @@ describe("Rejection reason required", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// 8b. Approval note rendered and submitted (PRI-948)
+// ════════════════════════════════════════════════════════════════════════════
+describe("Approval note rendered and submitted (PRI-948)", () => {
+  it("confirm panel renders the optional note field when the action declares it", () => {
+    // Requirement-driven rendering: the approve action's note requirement from
+    // the owner-decision view must reach the Owner as an input, not vanish.
+    expect(principleDetailSrc).toMatch(/req\.name === 'note'/);
+    expect(principleDetailSrc).toMatch(/data-testid="owner-decision-note"/);
+  });
+
+  it("note is optional — confirm is not gated on it", () => {
+    // The disabled expression gates reason/newArtifactId only; a 'note' gate
+    // would silently block approval when the Owner leaves the note blank.
+    const disabled = principleDetailSrc.match(/disabled=\{actionLoading[\s\S]*?\}\}/);
+    expect(disabled).toBeTruthy();
+    expect(disabled![0]).not.toMatch(/note/);
+  });
+
+  it("confirm click passes the trimmed note (undefined when blank) into submitOwnerAction", () => {
+    expect(principleDetailSrc).toMatch(
+      /approveNote\.trim\(\) === '' \? undefined : approveNote\.trim\(\)/,
+    );
+  });
+
+  it("approve branch forwards the note to approveApproval", () => {
+    expect(principleDetailSrc).toMatch(/approveApproval\(approvalId, note\)/);
+  });
+
+  it("api.ts serializes note into the approve request body", () => {
+    const approveFn = apiSrc.match(/async function approveApproval[\s\S]*?\n\}/);
+    expect(approveFn).toBeTruthy();
+    expect(approveFn![0]).toMatch(/JSON\.stringify\(\{ note/);
+  });
+
+  it("approve note label and placeholder exist in both languages", () => {
+    expect(getPagesKey("principles.detail.approveNoteLabel")).toBeTruthy();
+    expect(getPagesKeyZh("principles.detail.approveNoteLabel")).toBeTruthy();
+    expect(getPagesKey("principles.detail.approveNotePlaceholder")).toBeTruthy();
+    expect(getPagesKeyZh("principles.detail.approveNotePlaceholder")).toBeTruthy();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // 9. Modify wording disabled
 // ════════════════════════════════════════════════════════════════════════════
 describe("Modify wording disabled", () => {
