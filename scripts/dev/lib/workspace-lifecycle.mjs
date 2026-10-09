@@ -31,6 +31,10 @@ const execFileAsync = promisify(execFile);
 export const GRACE_DAYS_DEFAULT = 7;
 export const TASK_BRANCH_PREFIX = 'ai/';
 export const GITHUB_PR_LIMIT = 300;
+// Page window for collectPrIndex's pagination loop (PRI-950). The cap bounds
+// a pathological sweep; older PRs beyond LIMIT*PAGES fall out conservatively
+// (UNKNOWN, never a false delete).
+export const GITHUB_PR_MAX_PAGES = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
 // `git status --porcelain` XY codes that mean an unresolved merge conflict.
 const CONFLICT_CODES = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);
@@ -189,19 +193,32 @@ export function readLeaseState(root, now = Date.now()) {
 }
 
 /**
- * Index PRs by head branch via `gh pr list`. Never throws: on any failure
- * returns { available: false } and callers degrade to git-only evidence.
+ * Index PRs by head branch via `gh pr list`, paginating until a short page.
+ * PRI-950: a single `--limit` window was blind past the newest N PRs, and
+ * after the 2026-09-23 history compression the git-ancestry fallback is dead
+ * for pre-squash branches — the window alone decided completion, so long-
+ * merged slots were mis-reported ORPHAN. `gh` lists newest-first, so only
+ * PRs older than GITHUB_PR_LIMIT * GITHUB_PR_MAX_PAGES can fall out of the
+ * index, and a fall-out stays conservative (UNKNOWN, never a false delete).
+ * Never throws: on any failure returns { available: false } and callers
+ * degrade to git-only evidence.
  */
-export async function collectPrIndex(cwd) {
+export async function collectPrIndex(cwd, { runGh = defaultRunGhPrList } = {}) {
   const open = new Map();
   const merged = new Map();
   const run = async (state, fields) => {
-    const { stdout } = await execFileAsync(
-      'gh',
-      ['pr', 'list', '--state', state, '--limit', String(GITHUB_PR_LIMIT), '--json', fields],
-      { cwd, encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024, timeout: 60_000 }
-    );
-    return JSON.parse(stdout);
+    const all = [];
+    for (let page = 1; page <= GITHUB_PR_MAX_PAGES; page++) {
+      const stdout = await runGh(
+        ['pr', 'list', '--state', state, '--limit', String(GITHUB_PR_LIMIT),
+         '--page', String(page), '--json', fields],
+        { cwd, encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024, timeout: 60_000 }
+      );
+      const batch = JSON.parse(stdout);
+      all.push(...batch);
+      if (batch.length < GITHUB_PR_LIMIT) break;
+    }
+    return all;
   };
   try {
     for (const pr of await run('open', 'number,headRefName,state,url')) {
@@ -214,6 +231,11 @@ export async function collectPrIndex(cwd) {
     return { available: false, open, merged };
   }
   return { available: true, open, merged };
+}
+
+async function defaultRunGhPrList(args, options) {
+  const { stdout } = await execFileAsync('gh', args, options);
+  return stdout;
 }
 
 /**

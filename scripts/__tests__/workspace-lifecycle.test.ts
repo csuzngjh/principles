@@ -15,6 +15,9 @@ import {
   classifyRecords,
   conflictCodes,
   planCleanup,
+  collectPrIndex,
+  GITHUB_PR_LIMIT,
+  GITHUB_PR_MAX_PAGES,
 } from '../dev/lib/workspace-lifecycle.mjs';
 import { normalizeGitPath } from '../dev/lib/git.mjs';
 import {
@@ -199,6 +202,56 @@ async function mergeIntoMain(primary: string, branch: string): Promise<void> {
   await git(primary, 'merge', '--no-ff', '-m', 'Merge task ' + branch, branch);
   await git(primary, 'push', 'origin', 'main');
 }
+
+describe('collectPrIndex (PRI-950 pagination)', () => {
+  const pr = (n: number, headRefName: string) => ({
+    number: n, headRefName, state: 'MERGED', url: `https://example/${n}`, mergedAt: '2026-01-01T00:00:00Z',
+  });
+  const pageOf = (args: string[]) => args[args.indexOf('--page') + 1];
+  const stateOf = (args: string[]) => args[args.indexOf('--state') + 1];
+
+  it('pages past the single-window limit until a short page', async () => {
+    const calls: string[][] = [];
+    const runGh = async (args: string[]) => {
+      calls.push(args);
+      if (stateOf(args) === 'open') return JSON.stringify([pr(1, 'ai/open-branch')]);
+      if (pageOf(args) === '1') {
+        return JSON.stringify(Array.from({ length: GITHUB_PR_LIMIT }, (_, i) => pr(i + 2, `ai/batch1-${i}`)));
+      }
+      if (pageOf(args) === '2') return JSON.stringify([pr(999, 'ai/old-merged-branch')]);
+      return JSON.stringify([]);
+    };
+
+    const idx = await collectPrIndex('.', { runGh });
+    expect(idx.available).toBe(true);
+    // The pre-window-limit merged branch (the class PRI-950 mis-reported as
+    // ORPHAN) is now in the index.
+    expect(idx.merged.get('ai/old-merged-branch')?.number).toBe(999);
+    expect(idx.open.get('ai/open-branch')).toBeTruthy();
+    const mergedPages = calls.filter((c) => stateOf(c) === 'merged').map(pageOf);
+    expect(mergedPages).toEqual(['1', '2']);
+  });
+
+  it('bounds the sweep at GITHUB_PR_MAX_PAGES even when every page is full', async () => {
+    let mergedCalls = 0;
+    const runGh = async (args: string[]) => {
+      if (stateOf(args) === 'merged') mergedCalls++;
+      if (stateOf(args) === 'open') return JSON.stringify([]);
+      return JSON.stringify(Array.from({ length: GITHUB_PR_LIMIT }, (_, i) => pr(i, `ai/b-${i}`)));
+    };
+
+    await collectPrIndex('.', { runGh });
+    expect(mergedCalls).toBe(GITHUB_PR_MAX_PAGES);
+  });
+
+  it('a failing page keeps the conservative contract: available=false', async () => {
+    const runGh = async () => {
+      throw new Error('gh unavailable');
+    };
+    const idx = await collectPrIndex('.', { runGh });
+    expect(idx.available).toBe(false);
+  });
+});
 
 describe('workspace-cleanup (integration)', () => {
   const fixture = { root: '', primary: '' };
