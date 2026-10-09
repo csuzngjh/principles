@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const page = fs.readFileSync(path.resolve('src/ui/pages/principles/PrincipleDetailPage.tsx'), 'utf8');
-const attentionPresentation = fs.readFileSync(path.resolve('src/ui/utils/attention-presentation.ts'), 'utf8');
-const playwrightConfig = fs.readFileSync(path.resolve('playwright.config.ts'), 'utf8');
-const e2eStart = fs.readFileSync(path.resolve('scripts/e2e-start.mjs'), 'utf8');
-const en = JSON.parse(fs.readFileSync(path.resolve('src/ui/i18n/en.json'), 'utf8')) as unknown;
-const zh = JSON.parse(fs.readFileSync(path.resolve('src/ui/i18n/zh-CN.json'), 'utf8')) as unknown;
+// Resolve from this test file, not process.cwd(): vitest may run from the
+// repo root, where cwd-relative 'src/...' paths do not exist (PRI-937).
+const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+const page = fs.readFileSync(path.join(PKG_ROOT, 'src/ui/pages/principles/PrincipleDetailPage.tsx'), 'utf8');
+const attentionPresentation = fs.readFileSync(path.join(PKG_ROOT, 'src/ui/utils/attention-presentation.ts'), 'utf8');
+const playwrightConfig = fs.readFileSync(path.join(PKG_ROOT, 'playwright.config.ts'), 'utf8');
+const e2eStart = fs.readFileSync(path.join(PKG_ROOT, 'scripts/e2e-start.mjs'), 'utf8');
+const en = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, 'src/ui/i18n/en.json'), 'utf8')) as unknown;
+const zh = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, 'src/ui/i18n/zh-CN.json'), 'utf8')) as unknown;
 
 function governanceKeys(locale: unknown): unknown {
   if (typeof locale !== 'object' || locale === null || !Object.hasOwn(locale, 'pages')) return undefined;
