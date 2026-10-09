@@ -376,12 +376,59 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   }
 }
 
+// PRI-943: process-boundary fail-open belt. Every resolved path sets exitCode 0,
+// so nothing may let an unwritable stream or an escaping rejection reach node's
+// default handling, which terminates the hook with exit 1. Two distinct failure
+// modes, both reproduced in tests/pd-hook-entry-belt.test.ts:
+//   * a write that THROWS synchronously — caught per write below;
+//   * a host closing the pipe, which raises an ASYNC 'error' event on the
+//     Socket. try/catch cannot reach that one, so a listener is required
+//     (armStreamBelts) or node aborts with "Unhandled 'error' event".
+// stdout must stay exactly one JSON object, so a belt diagnostic goes to stderr
+// only; when stderr itself is the dead stream nothing is reported rather than
+// written into the machine channel.
+let beltReported = false;
+let stdoutJsonDelivered = false;
+
+function writeBeltDiagnostic(reason: string, nextAction: string): void {
+  if (beltReported) return;
+  beltReported = true;
+  try {
+    process.stderr.write(`${diagnostic(reason, nextAction)}\n`);
+  } catch {
+    // Both streams are gone: there is no channel left inside the fail-open
+    // contract, and adding I/O here would widen the belt itself.
+  }
+}
+
+function reportStreamFailure(error: unknown): void {
+  writeBeltDiagnostic(
+    `hook_stream_failed:${errorMessage(error)}`,
+    'The host closed the pipe; retry the tool call — the hook failed open.',
+  );
+}
+
+function writeStream(stream: 'stdout' | 'stderr', line: string): boolean {
+  try {
+    process[stream].write(`${line}\n`);
+    return true;
+  } catch (error) {
+    reportStreamFailure(error);
+    return false;
+  }
+}
+
+function armStreamBelts(): void {
+  process.stdout.on('error', reportStreamFailure);
+  process.stderr.on('error', reportStreamFailure);
+}
+
 async function main(): Promise<void> {
   let raw: string;
   try { raw = readFileSync(0, 'utf8'); }
   catch (error) {
-    process.stderr.write(`${diagnostic(`stdin_read_failed:${errorMessage(error)}`, 'Run the hook from Codex with JSON stdin.')}\n`);
-    process.stdout.write('{}\n');
+    writeStream('stderr', diagnostic(`stdin_read_failed:${errorMessage(error)}`, 'Run the hook from Codex with JSON stdin.'));
+    writeStream('stdout', '{}');
     return;
   }
   let result: PdHookResult;
@@ -391,11 +438,15 @@ async function main(): Promise<void> {
     // Fail-open belt for an unexpected pre-dispatch throw (e.g. a workspace
     // resolution race): Codex must still receive exactly one JSON object on
     // stdout and a bounded diagnostic on stderr — never a bare crash.
-    process.stderr.write(`${diagnostic(`hook_pipeline_unexpected:${errorMessage(error)}`, 'Retry the tool call; if it repeats, inspect PD stderr and the Workspace .pd/config.yaml state.')}\n`);
+    writeStream('stderr', diagnostic(`hook_pipeline_unexpected:${errorMessage(error)}`, 'Retry the tool call; if it repeats, inspect PD stderr and the Workspace .pd/config.yaml state.'));
     result = { stdout: {}, exitCode: 0, stderr: [] };
   }
-  for (const line of result.stderr) process.stderr.write(`${line}\n`);
-  process.stdout.write(`${JSON.stringify(result.stdout)}\n`);
+  // Each write is guarded on its own: with stderr dead the stdout JSON object
+  // is still what Codex needs to fail open, so one stream must not abort the other.
+  for (const line of result.stderr) {
+    if (!writeStream('stderr', line)) break;
+  }
+  stdoutJsonDelivered = writeStream('stdout', JSON.stringify(result.stdout));
   process.exitCode = result.exitCode;
 }
 
@@ -418,11 +469,25 @@ function isMainModuleEntry(): boolean {
     // exists to remove. A test runner that merely imports this module never
     // satisfies it, because its argv[1] is the runner, not pd-hook.
     if (path.basename(entry) !== path.basename(fileURLToPath(import.meta.url))) return false;
-    process.stderr.write(
-      `${diagnostic(`entry_identity_unverified:${errorMessage(error)}`, 'Reinstall the Codex adapter; if it repeats, report this line together with the command that invoked the hook.')}\n`,
-    );
+    writeStream('stderr', diagnostic(
+      `entry_identity_unverified:${errorMessage(error)}`,
+      'Reinstall the Codex adapter; if it repeats, report this line together with the command that invoked the hook.',
+    ));
     return true;
   }
 }
 
-if (isMainModuleEntry()) void main();
+if (isMainModuleEntry()) {
+  armStreamBelts();
+  void main().catch((error: unknown) => {
+    // Last-resort belt: a rejection escaping main's own guards must still leave
+    // Codex with exit 0 and, when nothing reached stdout yet, an empty JSON
+    // object instead of a bare crash.
+    writeBeltDiagnostic(
+      `hook_fatal:${errorMessage(error)}`,
+      'Retry the tool call; if it repeats, report this line together with the command that invoked the hook.',
+    );
+    if (!stdoutJsonDelivered) writeStream('stdout', '{}');
+    process.exitCode = 0;
+  });
+}
