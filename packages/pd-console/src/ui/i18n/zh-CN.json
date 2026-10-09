@@ -745,6 +745,8 @@
         "confirm": "确认",
         "cancel": "取消",
         "rejectReasonPlaceholder": "请说明拒绝原因（必填）",
+        "approveNoteLabel": "批准备注（可选）",
+        "approveNotePlaceholder": "写下批准的理由，将作为裁决记录保存（可留空）",
         "editReasonLabel": "编辑原因（必填）",
         "editReasonPlaceholder": "请说明为什么需要调整措辞或范围",
         "editNewArtifactPlaceholder": "输入新的已验证工件 ID",

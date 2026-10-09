@@ -175,6 +175,12 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
     await expect(panel, '点「批准」后确认面板没有展开在决策区内').toHaveCount(1);
     await expect(panel).toBeVisible();
 
+    // PRI-948：契约声明的可选批准备注必须出现在面板里并可输入——否则
+    // decision_note 恒空，Owner 的裁决理由永远没有存档。
+    const noteField = panel.locator('[data-testid="owner-decision-note"]');
+    await expect(noteField, '确认面板没有渲染契约声明的批准备注输入框').toBeVisible();
+    await expect(noteField).toBeEditable();
+
     // 面板不是"出现即合格"：Owner 抱怨的是读不到后果，所以必须断言 seed 里那条
     // intentContract.targetBehavior 真的走完了 view model → 面板这一段渲染链。
     await expect(panel).toContainText('【拟议行为】提交确认面板前，Owner 能在决策区读到本条后果说明。');
