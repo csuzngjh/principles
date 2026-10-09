@@ -9,12 +9,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   classifyRecord,
   classifyRecords,
   conflictCodes,
   planCleanup,
+  collectPrIndex,
 } from '../dev/lib/workspace-lifecycle.mjs';
 import { normalizeGitPath } from '../dev/lib/git.mjs';
 import {
@@ -199,6 +201,109 @@ async function mergeIntoMain(primary: string, branch: string): Promise<void> {
   await git(primary, 'merge', '--no-ff', '-m', 'Merge task ' + branch, branch);
   await git(primary, 'push', 'origin', 'main');
 }
+
+// ---------------------------------------------------------------------------
+// collectPrIndex — request shape, indexing, conservative degradation.
+//
+// `runGh` is the module's only injection seam: exactly two implementations
+// exist (the real `defaultRunGhPrList` and the fake below), which is the P7
+// "real seam" heuristic. The price of a fake dependency is that CI never
+// exercises the real `gh` invocation, so an unsupported flag (the PRI-950
+// `--page` bug) can hide indefinitely. The flag-whitelist test at the end of
+// this block is the mitigation for exactly that blind spot.
+// ---------------------------------------------------------------------------
+describe('collectPrIndex (full-history --limit)', () => {
+  const pr = (n: number, headRefName: string, state = 'MERGED') => ({
+    number: n, headRefName, state, url: `https://example/${n}`, mergedAt: '2026-01-01T00:00:00Z',
+  });
+  const stateOf = (args: string[]) => args[args.indexOf('--state') + 1];
+
+  it('issues exactly one gh pr list call per state, with no --page and a full-history --limit', async () => {
+    const calls: string[][] = [];
+    const runGh = async (args: string[]) => {
+      calls.push(args);
+      return JSON.stringify([]);
+    };
+
+    const idx = await collectPrIndex('.', { runGh });
+    expect(idx.available).toBe(true);
+
+    // One call for open + one for merged — no pagination loop.
+    expect(calls.map(stateOf).sort()).toEqual(['merged', 'open']);
+
+    for (const args of calls) {
+      // Regression guard for PRI-950: `gh pr list` has no `--page` flag; the
+      // old loop passed it and threw on the first REAL invocation, silently
+      // degrading every consumer to git-only evidence.
+      expect(args).not.toContain('--page');
+      // `--limit` is a TOTAL count and must cover the full merged history
+      // (1709 merged PRs measured against gh 2.86.0 on 2026-10-09). 2000 is
+      // the verified working floor.
+      const limit = Number(args[args.indexOf('--limit') + 1]);
+      expect(limit).toBeGreaterThanOrEqual(2000);
+    }
+  });
+
+  it('indexes open and merged PRs by headRefName, including a branch outside the old 300-item window', async () => {
+    const runGh = async (args: string[]) => {
+      if (stateOf(args) === 'open') {
+        return JSON.stringify([pr(4242, 'ai/open-branch', 'OPEN')]);
+      }
+      // A recent PR plus #7 — far older than any 300-item window. The whole
+      // merged response is indexed, not just its head.
+      return JSON.stringify([pr(1966, 'ai/recent-merged'), pr(7, 'ai/old-merged-branch')]);
+    };
+
+    const idx = await collectPrIndex('.', { runGh });
+    expect(idx.available).toBe(true);
+    expect(idx.open.get('ai/open-branch')?.number).toBe(4242);
+    expect(idx.merged.get('ai/recent-merged')?.number).toBe(1966);
+    expect(idx.merged.get('ai/old-merged-branch')?.number).toBe(7);
+  });
+
+  it('keeps the conservative contract: a failing gh call yields available=false', async () => {
+    const runGh = async () => {
+      throw new Error('gh unavailable');
+    };
+    const idx = await collectPrIndex('.', { runGh });
+    expect(idx.available).toBe(false);
+  });
+
+  // Read the real binary's advertised flags once. null ⇒ gh missing or
+  // `--help` failed; the test then carries no signal and is skipped (not the
+  // suite) so machines without gh/auth stay green.
+  const ghListHelp = (() => {
+    try {
+      return execFileSync('gh', ['pr', 'list', '--help'], { encoding: 'utf-8' });
+    } catch {
+      return null;
+    }
+  })();
+
+  it.skipIf(ghListHelp === null)(
+    'every long flag this module passes to gh is advertised by the real `gh pr list --help`',
+    async () => {
+      // Why this exists: `runGh` is injected in every test above, so CI only
+      // ever exercises the fake — the seam that hid PRI-950, where an
+      // unsupported `--page` flag made the real call throw on first use. This
+      // test drives the same arg-building code against the real binary's flag
+      // list. It is a mitigation, not proof: it validates the flag surface,
+      // not that a successful call returns the expected data.
+      const passed = new Set<string>();
+      const runGh = async (args: string[]) => {
+        for (const a of args) if (a.startsWith('--')) passed.add(a);
+        return '[]';
+      };
+      await collectPrIndex('.', { runGh });
+
+      const advertised = new Set<string>(ghListHelp!.match(/--[a-z][a-z-]*/g) ?? []);
+      expect(passed.size).toBeGreaterThan(0);
+      for (const flag of passed) {
+        expect(advertised.has(flag), `gh pr list does not advertise ${flag}`).toBe(true);
+      }
+    }
+  );
+});
 
 describe('workspace-cleanup (integration)', () => {
   const fixture = { root: '', primary: '' };
