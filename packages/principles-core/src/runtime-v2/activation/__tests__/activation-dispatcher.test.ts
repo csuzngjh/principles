@@ -946,7 +946,7 @@ describe('ActivationDispatcher — ledger-aware identity gate (ledgerIdentity de
     knownPrinciples: Set<string>;
   }
 
-  function makeLedgerDispatcher(opts: { candidateMatches?: number; seedCandidateId?: string | null } = {}): LedgerHarness {
+  function makeLedgerDispatcher(opts: { candidateMatches?: number; seedCandidateId?: string | null; ledgerAvailable?: boolean } = {}): LedgerHarness {
     const artifactStore = new MemoryArtifactReadModel();
     const stateStore = new MemoryActivationStateStore();
     const approvalStore = new MemoryApprovalQueueStore();
@@ -960,6 +960,7 @@ describe('ActivationDispatcher — ledger-aware identity gate (ledgerIdentity de
         approvalQueueStore: approvalStore,
         ledgerIdentity: {
           ledger: {
+            isAvailable: () => opts.ledgerAvailable ?? true,
             hasPrinciple: (id) => knownPrinciples.has(id),
             listForCandidate: (cid) =>
               cid === CANDIDATE_ID
@@ -1014,6 +1015,22 @@ describe('ActivationDispatcher — ledger-aware identity gate (ledgerIdentity de
       expect(result.nextAction).toBe('check_pi_artifacts_source_principle_id_against_ledger_or_run_identity_reconciliation');
     }
     // The gate runs BEFORE the enqueue — no poisoned approval entry.
+    expect(await approvalStore.listPending()).toHaveLength(0);
+  });
+
+  // PRI-915: an unreadable ledger is not drift — the Operator-facing
+  // nextAction must point at repairing the ledger file, not at re-minting via
+  // intake (which would not help).
+  it('ledger_unavailable: unreadable ledger → invalid_artifact with ledger-repair nextAction, NO approval row', async () => {
+    const { artifactStore, dispatcher, approvalStore } = makeLedgerDispatcher({ ledgerAvailable: false });
+    artifactStore.addArtifact(makePrincipleArtifact({ sourcePrincipleId: LEDGER_PID }));
+
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(result.decision).toBe('invalid_artifact');
+    if (result.decision === 'invalid_artifact') {
+      expect(result.reason).toContain('ledger_unavailable');
+      expect(result.nextAction).toBe('repair_or_restore_the_principle_ledger_then_retry_activation');
+    }
     expect(await approvalStore.listPending()).toHaveLength(0);
   });
 

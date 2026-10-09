@@ -239,3 +239,28 @@ describe('PrincipleTreeLedgerAdapter — findReuseResolutionForCandidate / appen
     expect(adapter.findReuseResolutionForCandidate('candidate-P_test_001')?.evidence.reason).toBe('first verdict');
   });
 });
+
+// ── PRI-915: ledger availability ───────────────────────────────────────────
+
+describe('PrincipleTreeLedgerAdapter.isAvailable (PRI-915)', () => {
+  it('is true on a fresh workspace with no ledger file (a true empty ledger)', () => {
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    expect(adapter.isAvailable()).toBe(true);
+    expect(adapter.hasPrinciple('P_test_001')).toBe(false);
+  });
+
+  it('is true when the ledger reads back, false when the file is corrupt', () => {
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    adapter.writeProbationEntry(makeProbationEntry());
+    expect(adapter.isAvailable()).toBe(true);
+
+    // Simulate a truncated/corrupted ledger file (e.g. mid-write disk failure).
+    const ledgerPath = path.join(stateDir, 'principle_training_state.json');
+    fs.writeFileSync(ledgerPath, '{ truncated', 'utf-8');
+
+    expect(adapter.isAvailable()).toBe(false);
+    // Documented collapse (PRI-915): membership answers are meaningless while
+    // unavailable — callers MUST consult isAvailable first.
+    expect(adapter.hasPrinciple('P_test_001')).toBe(false);
+  });
+});

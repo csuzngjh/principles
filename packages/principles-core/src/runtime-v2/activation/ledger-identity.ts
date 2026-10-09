@@ -25,6 +25,12 @@ import { resolveActivationPrincipleId } from './low-risk-writers.js';
 
 /** The subset of PrincipleTreeLedgerAdapter the boundary needs. */
 export interface LedgerIdentityChecker {
+  /**
+   * PRI-915: whether the ledger backing store is readable right now. When
+   * `false`, the membership answers below collapse to an empty ledger, so a
+   * `false`/`[]` result means "cannot read" — never data drift.
+   */
+  isAvailable(): boolean;
   hasPrinciple(principleId: string): boolean;
   listForCandidate(candidateId: string): { id: string }[];
 }
@@ -105,9 +111,12 @@ export function candidateIdFromDreamerSeed(diagnosticJson: string | null | undef
 /**
  * Resolve the ledger principle identity for an activation artifact.
  *
- * Order: direct UUID (ledger-validated) → candidate lineage. Direct ids that
- * fail ledger membership do NOT fall through to the lineage — a stamped id
- * that the ledger does not know is data drift and must surface as such.
+ * Order: ledger availability → direct UUID (ledger-validated) → candidate
+ * lineage. Direct ids that fail ledger membership do NOT fall through to the
+ * lineage — a stamped id that a READABLE ledger does not know is data drift
+ * and must surface as such. An UNREADABLE ledger is not drift: it is
+ * reported as `ledger_unavailable` so the caller can retry after repair
+ * (PRI-915) instead of misattributing a transient outage.
  */
 export async function resolveLedgerActivationId(
   artifact: PIArtifactSnapshot,
@@ -115,6 +124,12 @@ export async function resolveLedgerActivationId(
 ): Promise<LedgerActivationResolution> {
   const direct = resolveActivationPrincipleId(artifact);
   if (direct) {
+    if (!deps.ledger.isAvailable()) {
+      return {
+        status: 'unresolved',
+        reason: `ledger_unavailable: principle ledger cannot be read; membership of ${direct} is not decidable`,
+      };
+    }
     if (deps.ledger.hasPrinciple(direct)) {
       return { status: 'resolved', principleId: direct, how: 'direct_validated' };
     }
@@ -142,6 +157,12 @@ export async function resolveLedgerActivationId(
     return { status: 'unresolved', reason: 'no_principle_id_in_artifact: dreamer lineage carries no candidate id' };
   }
 
+  if (!deps.ledger.isAvailable()) {
+    return {
+      status: 'unresolved',
+      reason: 'ledger_unavailable: principle ledger cannot be read; candidate lineage is not decidable',
+    };
+  }
   const matches = deps.ledger.listForCandidate(candidateId);
   if (matches.length === 1) {
     const [entry] = matches;

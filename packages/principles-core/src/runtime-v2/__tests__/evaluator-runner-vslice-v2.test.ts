@@ -325,7 +325,10 @@ interface CreateMockDepsOptions {
   readonly artifactStore?: PIArtifactStore;
   readonly output?: EvaluatorOutputV1;
   /** PRI-911A: ledger membership authority for the rule identity stamp. */
-  readonly ledgerIdentity?: { readonly hasPrinciple: (principleId: string) => boolean };
+  readonly ledgerIdentity?: {
+    readonly isAvailable: () => boolean;
+    readonly hasPrinciple: (principleId: string) => boolean;
+  };
 }
 
 function createMockDeps(options: CreateMockDepsOptions = {}): EvaluatorRunnerDeps {
@@ -1184,6 +1187,7 @@ describe('EvaluatorRunner — identity writer boundary (PRI-911A)', () => {
   async function assembleAgainstBearer(
     stampedId: string | undefined,
     ledgerIds: readonly string[],
+    opts: { readonly ledgerAvailable?: boolean } = {},
   ): Promise<{ deps: EvaluatorRunnerDeps; store: MemoryPIArtifactStore }> {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makeV2ArtificerArtifact());
@@ -1192,7 +1196,10 @@ describe('EvaluatorRunner — identity writer boundary (PRI-911A)', () => {
     ));
     const deps = createMockDeps({
       artifactStore: store,
-      ledgerIdentity: { hasPrinciple: (id: string) => ledgerIds.includes(id) },
+      ledgerIdentity: {
+        isAvailable: () => opts.ledgerAvailable ?? true,
+        hasPrinciple: (id: string) => ledgerIds.includes(id),
+      },
     });
     await makeRunner(deps, passingGate()).run(EVALUATOR_TASK_ID);
     return { deps, store };
@@ -1233,6 +1240,24 @@ describe('EvaluatorRunner — identity writer boundary (PRI-911A)', () => {
     const failed = telemetryOf(deps).find((e) => e.eventType === 'evaluator_identity_stamp_failed');
     expect(failed).toBeDefined();
     expect(failed?.payload.reason).toBe('invalid_identity');
+  });
+
+  // Case 2.5 — PRI-915: the ledger backing file exists but cannot be read.
+  // Membership is NOT decidable, so even a genuinely-minted UUID must not be
+  // misreported as data drift; the downstream contract (rule survives with a
+  // NULL identity column) is intentionally unchanged — only the reason is
+  // honest now.
+  it('reports identity_source_unavailable instead of invalid_identity when the ledger is unreadable', async () => {
+    const realId = STAMPED_LEDGER_PRINCIPLE_ID;
+    const { deps, store } = await assembleAgainstBearer(realId, [realId], { ledgerAvailable: false });
+
+    const rules = await ruleArtifacts(store);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]?.sourcePrincipleId).toBeUndefined();
+    const failed = telemetryOf(deps).find((e) => e.eventType === 'evaluator_identity_stamp_failed');
+    expect(failed).toBeDefined();
+    expect(failed?.payload.reason).toBe('identity_source_unavailable');
+    expect(telemetryOf(deps).some((e) => e.eventType === 'evaluator_identity_stamp_success')).toBe(false);
   });
 
   // Case 3 — the historic pollution: a philosopher title used as identity.

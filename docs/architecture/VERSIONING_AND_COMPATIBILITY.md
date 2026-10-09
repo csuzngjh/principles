@@ -273,7 +273,7 @@ interface LedgerFile {
 }
 
 function loadLedger(stateDir: string): HybridLedgerStore {
-  const raw = readLedgerFromFile(...);
+  const raw = readLedgerFileState(...).ledger;
   const version = raw.schemaVersion ?? 'ledger-v0';
 
   switch (version) {

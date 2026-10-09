@@ -9,6 +9,7 @@ import {
   addPrincipleToLedger,
   appendReuseEvidence as appendReuseEvidenceToLedger,
   loadLedger,
+  readLedgerFileState,
   updatePrinciple,
 } from '../../principle-tree-ledger.js';
 import { isRecord } from '../principle-tree/ledger-codec.js';
@@ -162,6 +163,17 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
   hasPrinciple(principleId: string): boolean {
     const ledger = loadLedger(this.#stateDir);
     return Object.hasOwn(ledger.tree.principles, principleId);
+  }
+
+  /**
+   * PRI-915: whether the ledger backing store is decidable right now. When
+   * `false`, `hasPrinciple`/`listForCandidate` collapse the unreadable file to
+   * an empty ledger, so their `false`/`[]` answers mean "cannot read", not
+   * "non-member" — callers that would report data drift MUST consult this
+   * first. A missing file is `true` (a true empty ledger), not an outage.
+   */
+  isAvailable(): boolean {
+    return readLedgerFileState(this.#stateDir).availability.status !== 'unreadable';
   }
 
   /**

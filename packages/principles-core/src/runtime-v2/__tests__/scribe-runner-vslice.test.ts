@@ -1363,6 +1363,7 @@ describe('I2: ScribeRunner ledger identity chain stamping', () => {
     withDreamerArtifact?: boolean;
     withDreamerLineage?: boolean; // false → philosopher artifact carries no sourceDreamerArtifactId
     withLedgerDeps?: boolean; // false → legacy caller without ledgerIdentity (no stamping at all)
+    ledgerAvailable?: boolean; // PRI-915: false → ledger backing store unreadable
   }) {
     const artifactStore = new MemoryPIArtifactStore();
     const philosopherContent: Record<string, unknown> = {
@@ -1450,6 +1451,7 @@ describe('I2: ScribeRunner ledger identity chain stamping', () => {
         ? {}
         : {
             ledgerIdentity: {
+              isAvailable: () => params.ledgerAvailable ?? true,
               listForCandidate: (candidateId: string) => {
                 const wanted = params.seedCandidateId ?? UUID_CANDIDATE;
                 return candidateId === wanted
@@ -1512,6 +1514,23 @@ describe('I2: ScribeRunner ledger identity chain stamping', () => {
     expect(result.status).toBe('succeeded');
     expect(stampedArtifact?.sourcePrincipleId).toBeUndefined();
     expect(stampEvents(emitTelemetry, 'identity_stamp_skipped')).toHaveLength(1);
+  });
+
+  // PRI-915: an unreadable ledger collapses listForCandidate to `[]` — the
+  // skip event must say "cannot read", not the generic unresolved-chain copy.
+  it('reports ledger_unavailable in the skip reason when the ledger is unreadable', async () => {
+    const { result, stampedArtifact, emitTelemetry } = await runStampingScribe({
+      seedCandidateId: SEED_CANDIDATE,
+      candidateMatches: 1,
+      ledgerAvailable: false,
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(stampedArtifact?.sourcePrincipleId).toBeUndefined();
+    const skipped = stampEvents(emitTelemetry, 'identity_stamp_skipped');
+    expect(skipped).toHaveLength(1);
+    expect(String(skipped[0]?.reason)).toContain('ledger_unavailable');
+    expect(String(skipped[0]?.reason)).not.toContain('0/>1 ledger matches');
   });
 
   it('writes the artifact unstamped + identity_stamp_skipped when the candidate is ambiguous (>1 matches)', async () => {

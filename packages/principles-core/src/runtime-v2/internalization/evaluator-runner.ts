@@ -421,8 +421,13 @@ export interface EvaluatorRunnerDeps extends PeerRunnerDeps {
    * shape as ScribeRunner's `ledgerIdentity` (PR #1856): core stays free of any
    * ledger I/O (D5), and when absent the shape gate still holds — the check is
    * what turns "UUID-shaped" into "UUID the ledger actually knows".
+   *
+   * PRI-915: `isAvailable` lets the stamp distinguish "a readable ledger does
+   * not know this id" (invalid_identity, drift) from "the ledger cannot be
+   * read right now" (identity_source_unavailable, transient).
    */
   readonly ledgerIdentity?: {
+    readonly isAvailable: () => boolean;
     readonly hasPrinciple: (principleId: string) => boolean;
   };
 }
@@ -436,8 +441,14 @@ export interface EvaluatorRunnerDeps extends PeerRunnerDeps {
  *                              (its `source_principle_id` column is empty).
  * - `non_canonical_identity` — a value exists but it is content masquerading as
  *                              identity (philosopher title, `T-NN`, any text).
- * - `invalid_identity`       — UUID-shaped, but the ledger does not know it
- *                              (data drift; never upgraded to a guess).
+ * - `invalid_identity`       — UUID-shaped, but a READABLE ledger does not know
+ *                              it (data drift; never upgraded to a guess).
+ * - `identity_source_unavailable` — the ledger backing file exists but cannot
+ *                              be read/parsed, so membership is not decidable
+ *                              right now. Transient outage, NOT drift (PRI-915):
+ *                              the id may be perfectly real; retry after the
+ *                              ledger is repaired instead of treating it as
+ *                              drift.
  * - `ambiguous_identity`     — more than one plausible identity (reported by
  *                              the bearer/lineage resolvers, which own that
  *                              comparison).
@@ -446,6 +457,7 @@ export type IdentityStampFailureReason =
   | 'missing_identity'
   | 'non_canonical_identity'
   | 'invalid_identity'
+  | 'identity_source_unavailable'
   | 'ambiguous_identity';
 
 // ── EvaluatorRunner ───────────────────────────────────────────────────────────
@@ -479,7 +491,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    */
   private readonly outputLanguage: OutputLanguage | undefined;
   /** PRI-911A: ledger membership authority for the rule-assembly identity stamp; null = shape gate only. */
-  private readonly ledgerIdentity: { readonly hasPrinciple: (principleId: string) => boolean } | null;
+  private readonly ledgerIdentity:
+    | { readonly isAvailable: () => boolean; readonly hasPrinciple: (principleId: string) => boolean }
+    | null;
 
   constructor(deps: EvaluatorRunnerDeps, options: EvaluatorRunnerOptions) {
     super(deps, options, {
@@ -2847,8 +2861,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     if (principleId === null) {
       return { ok: false, reason: 'non_canonical_identity' };
     }
-    if (this.ledgerIdentity && !this.ledgerIdentity.hasPrinciple(principleId)) {
-      return { ok: false, reason: 'invalid_identity' };
+    if (this.ledgerIdentity) {
+      // PRI-915: an unreadable ledger collapses hasPrinciple to `false`; that
+      // answer is "cannot read", not drift. Availability is decided FIRST so a
+      // transient outage surfaces as identity_source_unavailable.
+      if (!this.ledgerIdentity.isAvailable()) {
+        return { ok: false, reason: 'identity_source_unavailable' };
+      }
+      if (!this.ledgerIdentity.hasPrinciple(principleId)) {
+        return { ok: false, reason: 'invalid_identity' };
+      }
     }
     return { ok: true, principleId };
   }
