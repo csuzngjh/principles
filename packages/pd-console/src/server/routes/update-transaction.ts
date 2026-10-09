@@ -128,10 +128,18 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
   // recovery decision cannot explain it away. The live release record is the
   // evidence for that, so a missing/corrupt active record means NO evidence —
   // the alarm then stays, which is the conservative direction.
+  //
+  // rc-9 (no silent fallback): "file absent" (readActiveRecord returns null) and
+  // "file present but unreadable/corrupt" are different facts. The conservative
+  // outcome is the same (null → keep the alarm), but collapsing them hides WHY
+  // the alarm persists. Track unreadability explicitly so the response can say
+  // the alarm is retained for lack of a readable active record.
+  let activeRecordUnreadable = false;
   const activeRecord = (() => {
     try {
       return journal.readActiveRecord(paths.activeRecordPath);
     } catch {
+      activeRecordUnreadable = true;
       return null;
     }
   })();
@@ -165,9 +173,16 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
     unfinished,
     superseded,
     broken,
+    // rc-9: when the active record could not be read, the recovery decision had
+    // no live-release evidence, so every non-terminal journal is conservatively
+    // treated as an alarm. Surfacing this explains WHY the alarm persists and
+    // points the Owner at repairing active.json rather than the journals.
+    activeRecordUnreadable,
     // SPEC §12.1: exact next step, never a vague failure.
     nextAction: unfinished.length > 0 || broken.length > 0
-      ? 'An update transaction did not reach a terminal state. Review its phase, then continue, roll back, or repair through the official installer before starting a new update.'
+      ? activeRecordUnreadable
+        ? 'The active release record (active.json) could not be read, so no transaction can be proven superseded and every unfinished one is reported. Repair active.json (re-run the official installer recovery), then re-check recovery before starting a new update.'
+        : 'An update transaction did not reach a terminal state. Review its phase, then continue, roll back, or repair through the official installer before starting a new update.'
       : undefined,
   });
 }

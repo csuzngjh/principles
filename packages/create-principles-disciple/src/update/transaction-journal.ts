@@ -273,18 +273,34 @@ export function readTransactionJournalForRecovery(journalPath: string): Recovery
   return readJournalLines(journalPath, { recoveryAware: true });
 }
 
+export interface AppendJournalTransitionOptions {
+  /**
+   * O_EXCL create: fail with EEXIST if the journal file already exists. Used
+   * for the FIRST transition of a transaction so two concurrent writers cannot
+   * both open the same journal volume and each append a `planned` line — that
+   * duplicate would break whole-file sequence validation forever
+   * (journal_sequence_broken). This closes the TOCTOU window an `existsSync`
+   * pre-check cannot: the create-or-fail is atomic at the OS level.
+   */
+  readonly exclusive?: boolean;
+}
+
 /**
  * Appends one transition durably (append + fsync) BEFORE the caller performs
  * the side effect the transition describes. Journal-first ordering is what
  * makes crash recovery sound.
  */
-export function appendJournalTransition(journalPath: string, transition: JournalTransition): void {
+export function appendJournalTransition(
+  journalPath: string,
+  transition: JournalTransition,
+  options: AppendJournalTransitionOptions = {},
+): void {
   const line = `${JSON.stringify(transition)}\n`;
   const directory = dirname(journalPath);
   mkdirSync(directory, { recursive: true });
   let descriptor: number | undefined;
   try {
-    descriptor = openSync(journalPath, 'a');
+    descriptor = openSync(journalPath, options.exclusive === true ? 'wx' : 'a');
     appendFileSync(descriptor, line);
     fsyncSync(descriptor);
   } finally {

@@ -162,25 +162,43 @@ export function isReleaseManagerTransactionId(transactionId: string): boolean {
  * The installer continues THIS file when it takes over deployment.
  */
 function appendApplyTransition(journal: InstallerJournal, to: TransactionState, detail: string): void {
-  appendJournalTransition(journal.journalPath, {
-    at: new Date().toISOString(),
-    from: journal.lastState,
-    to,
-    transactionId: journal.transactionId,
-    releaseId: journal.releaseId,
-    productVersion: journal.productVersion,
-    // PRI-926: exactly once, on the first (planned) transition, the version
-    // the update started FROM. The installer's continuation lines keep target
-    // identity only, so the field stays a planned-line fact.
-    ...(journal.lastState === null && journal.preUpdateProductVersion !== undefined
-      ? { preUpdateProductVersion: journal.preUpdateProductVersion }
-      : {}),
-    releaseMetadataDigest: journal.releaseMetadataDigest,
-    releaseMetadataDigestSource: journal.releaseMetadataDigestSource,
-    generation: journal.generation,
-    detail,
-  });
+  appendJournalTransition(
+    journal.journalPath,
+    {
+      at: new Date().toISOString(),
+      from: journal.lastState,
+      to,
+      transactionId: journal.transactionId,
+      releaseId: journal.releaseId,
+      productVersion: journal.productVersion,
+      // PRI-926: exactly once, on the first (planned) transition, the version
+      // the update started FROM. The installer's continuation lines keep target
+      // identity only, so the field stays a planned-line fact.
+      ...(journal.lastState === null && journal.preUpdateProductVersion !== undefined
+        ? { preUpdateProductVersion: journal.preUpdateProductVersion }
+        : {}),
+      releaseMetadataDigest: journal.releaseMetadataDigest,
+      releaseMetadataDigestSource: journal.releaseMetadataDigestSource,
+      generation: journal.generation,
+      detail,
+    },
+    // PRI-897 (CR-1): the FIRST transition (planned, lastState === null) must
+    // create the journal volume with O_EXCL, so two concurrent writers cannot
+    // both pass the existsSync seal and each append a `planned` line. That
+    // duplicate would break whole-file sequence validation forever. This is the
+    // atomic seal the existsSync pre-check cannot provide. Continuation lines
+    // (downloaded/verified/staged/…) append into the volume this writer already
+    // owns, so only the first line is exclusive.
+    journal.lastState === null ? { exclusive: true } : {},
+  );
   journal.lastState = to;
+}
+
+/** True when a Node filesystem error is EEXIST — the O_EXCL seal refusing a race. */
+function isEexistError(error: unknown): boolean {
+  return error instanceof Error
+    && Object.hasOwn(error, 'code')
+    && (error as { code?: unknown }).code === 'EEXIST';
 }
 
 /**
@@ -481,6 +499,18 @@ export class ReleaseManager {
     try {
       appendApplyTransition(journal, 'planned', `host=${options.host ?? 'openclaw'} mode=smart source=release-manager`);
     } catch (error) {
+      // PRI-897 (CR-1): the O_EXCL create is the ATOMIC seal. If two writers
+      // race past the existsSync pre-check above, exactly one wins the create;
+      // the loser gets EEXIST here. That is the same "one transactionId = one
+      // lifecycle = one file" refusal the pre-check expresses, reported before
+      // any side effect — so it maps to journal_sealed, not journal_unavailable.
+      if (isEexistError(error)) {
+        throw new ReleaseManagerError(
+          'journal_sealed',
+          `Transaction ${transactionId} already has a journal at ${journalPath}; refusing to append a second attempt onto a closed volume.`,
+          'Start the update again without a transactionId so a fresh journal opens, or resolve the existing transaction through the recovery surface first.',
+        );
+      }
       throw new ReleaseManagerError(
         'journal_unavailable',
         `The transaction journal could not be written — refusing to update unjournaled (ADR-0024 D-2): ${error instanceof Error ? error.message : String(error)}`,
