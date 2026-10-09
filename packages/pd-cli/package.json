@@ -1,6 +1,6 @@
 {
   "name": "@principles/pd-cli",
-  "version": "1.155.0",
+  "version": "1.155.1",
   "description": "PD CLI — Pain recording, sample management, and governance tasks for Principles Disciple",
   "type": "module",
   "bin": {
