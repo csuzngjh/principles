@@ -1,6 +1,6 @@
 {
   "name": "@principles/codex-adapter",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Codex CLI host adapter for Principles Disciple — implements HostAdapter interface for OpenAI Codex CLI's stdin/stdout JSON hook model (ADR-0020).",
   "type": "module",
   "main": "./dist/index.js",
