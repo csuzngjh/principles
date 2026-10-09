@@ -1276,10 +1276,10 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.status).toBe('succeeded');
     expect(output.recoveredTasks).toEqual([
-      'diagnosis_test-pain-failed',
-      'diag_rootcause-diagnosis_test-pain-failed',
-      'diag_distiller-diagnosis_test-pain-failed',
-      'diag_router-diagnosis_test-pain-failed',
+      { taskId: 'diagnosis_test-pain-failed', forceApplied: true },
+      { taskId: 'diag_rootcause-diagnosis_test-pain-failed', forceApplied: true },
+      { taskId: 'diag_distiller-diagnosis_test-pain-failed', forceApplied: true },
+      { taskId: 'diag_router-diagnosis_test-pain-failed', forceApplied: true },
     ]);
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
@@ -1345,9 +1345,9 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
     // Only the three failed stages are reported — the retry_wait parent is
     // not reset (recoverFailedTask returns null for non-failed statuses).
     expect(output.recoveredTasks).toEqual([
-      'diag_rootcause-diagnosis_test-pain-rw',
-      'diag_distiller-diagnosis_test-pain-rw',
-      'diag_router-diagnosis_test-pain-rw',
+      { taskId: 'diag_rootcause-diagnosis_test-pain-rw', forceApplied: true },
+      { taskId: 'diag_distiller-diagnosis_test-pain-rw', forceApplied: true },
+      { taskId: 'diag_router-diagnosis_test-pain-rw', forceApplied: true },
     ]);
 
     logSpy.mockRestore();
@@ -1449,6 +1449,51 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
     // ...printed once, not duplicated (F1).
     expect(allOutput.match(/Recovered:/g)).toHaveLength(1);
     expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('REC-06: recoveredTasks distinguishes plain resets from budget-extended ones (PRI-936 F4)', async () => {
+    mockGetTask.mockResolvedValue({ ...FAILED_TASK, taskId: 'diagnosis_test-pain-mixed' });
+    mockRecoverFailedTask.mockImplementation(async (_sm: unknown, taskId: string) => ({
+      taskId, previousStatus: 'failed', newStatus: 'pending',
+      attemptCount: 0,
+      maxAttempts: taskId === 'diagnosis_test-pain-mixed' ? 3 : 6,
+      forceApplied: taskId !== 'diagnosis_test-pain-mixed',
+    }));
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-mixed',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(output.status).toBe('succeeded');
+    // JSON path: the operator can tell a normal reset from a budget +3 reset.
+    expect(output.recoveredTasks).toEqual([
+      { taskId: 'diagnosis_test-pain-mixed', forceApplied: false },
+      { taskId: 'diag_rootcause-diagnosis_test-pain-mixed', forceApplied: true },
+      { taskId: 'diag_distiller-diagnosis_test-pain-mixed', forceApplied: true },
+      { taskId: 'diag_router-diagnosis_test-pain-mixed', forceApplied: true },
+    ]);
+
+    // Text path is same-source (cli-1): annotated only where the budget moved.
+    logSpy.mockClear();
+    await handlePainRetry({
+      painId: 'test-pain-mixed',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    });
+    const textOutput = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(textOutput).toMatch(/: diagnosis_test-pain-mixed, /);
+    expect(textOutput).toContain('diag_rootcause-diagnosis_test-pain-mixed (budget +3)');
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

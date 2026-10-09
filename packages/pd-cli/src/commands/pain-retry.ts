@@ -793,7 +793,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // stages while no-op'ing the retry_wait parent. needs_human_review /
     // live-lease states are deliberately NOT reset — the lease_conflict
     // nextAction below routes those to `pd runtime recovery`.
-    const recoveredTasks: string[] = [];
+    const recoveredTasks: { taskId: string; forceApplied: boolean }[] = [];
     if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
       const diagFamily = [
         taskId,
@@ -803,7 +803,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       ];
       for (const familyTaskId of diagFamily) {
         const recovered = await recoverFailedTask(stateManager, familyTaskId, true);
-        if (recovered) recoveredTasks.push(recovered.taskId);
+        // PRI-936: forceApplied must survive to the operator — a silent
+        // budget +3 is observable grace, not a hidden mutation (rc-9).
+        if (recovered) recoveredTasks.push({ taskId: recovered.taskId, forceApplied: recovered.forceApplied });
       }
     }
 
@@ -846,7 +848,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         if (recoveredTasks.length > 0) {
           // Failure is exactly where the operator needs to know which tasks
           // were reset before the runner died (85273fa1 review §3).
-          console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.join(', ')}`);
+          console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.map((r) => (r.forceApplied ? `${r.taskId} (budget +3)` : r.taskId)).join(', ')}`);
         }
         if (result.errorCategory) {
           console.log(`  Error Category: ${result.errorCategory}`);
@@ -1080,7 +1082,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     console.log(`  Previous Status: ${previousTaskStatus}${previousLastError ? ` (${previousLastError})` : ''}`);
     console.log(`  New Status:      succeeded`);
     if (recoveredTasks.length > 0) {
-      console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.join(', ')}`);
+      console.log(`  Recovered:       ${recoveredTasks.length} failed task(s) reset to pending: ${recoveredTasks.map((r) => (r.forceApplied ? `${r.taskId} (budget +3)` : r.taskId)).join(', ')}`);
     }
     if (painDiagnosisLedgerWrite === 'attempted') {
       console.log(`  Diagnosis Ledger: pain_diagnoses write dispatched (skips/failures surface as pain_diagnosis_persist_* events)`);
