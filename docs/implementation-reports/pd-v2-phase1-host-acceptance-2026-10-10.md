@@ -207,6 +207,8 @@ for (const c of generateV2ContextAdversarialCases({ toolName: "ls", targetPath: 
 
 验证：见 PR 描述（`npm run verify:merge`、`error:record validate`、`check:error-handbook`、`error:context` diff 模式逐项数字）。
 
+门跑实况（如实记录，不粉饰为一次通过）：`npm run verify:merge` 在本 worktree 18:04 全量 exit 0；18:16 pre-push 重跑时，`npm run lint` 里的 eslint 进程在默认 4 GB V8 堆上限处崩溃（`FATAL ERROR: Ineffective mark-compacts near heap limit`，约 61 s 处，heap ≈4030 MB），这不是 lint 判定失败。单独复跑同一条 `npm run lint` 可重复该 OOM；加 `NODE_OPTIONS=--max-old-space-size=8192` 后同一命令 **0 errors / 36 warnings（均为既有告警）、exit 0**，未跳过任何规则或文件。定性：本机内存边际的环境问题（同一 worktree 同一 diff 在两小时前绿），未在本轮修复，记为 follow-up。
+
 ### 7.5 六条完成标准 r2 重判
 
 | # | 标准 | r1 | r2 | 依据 |
