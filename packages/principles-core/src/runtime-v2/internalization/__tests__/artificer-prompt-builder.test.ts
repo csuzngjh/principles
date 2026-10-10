@@ -70,8 +70,13 @@ describe('ArtificerPromptBuilder', () => {
     // validator-legal ruleContext object literal, and the CONTEXT MODE
     // position reference is corrected (below); PRI-839 — bumped v7 → v8: the
     // dreamerContext input became a bounded candidate SET and the system
-    // prompt gained the DREAMER_CANDIDATE_SET_INSTRUCTION block.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v8');
+    // prompt gained the DREAMER_CANDIDATE_SET_INSTRUCTION block; PD v2 Phase 1
+    // host acceptance (2026-10-10) — bumped v8 → v9: CONTEXT MODE now states
+    // the Owner-labelled echo obligation (exact pack caseId) that
+    // validateV2OutputContract enforces; r3 — bumped v9 → v10: that clause no
+    // longer promises the `was rewritten` message, which EP002-R4 pack
+    // restoration makes unreachable for same-caseId Owner-labelled entries.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v10');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -233,8 +238,38 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
     expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → … → v8 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v8');
+  it('declares the contract version bump history v1 → … → v10 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v10');
+  });
+
+  // PD v2 Phase 1 host acceptance (2026-10-10): validateV2OutputContract rejects
+  // an output that drops an Owner-labelled case (matched by exact pack caseId),
+  // so the prompt MUST state that obligation — otherwise the model is guessing
+  // at a rule the gate applies (live evidence: 4 identical `was omitted` run
+  // failures while the example demonstrated invented placeholder caseIds).
+  //
+  // r3 correction, in the opposite direction: fetchAndParseOutput (EP002-R4)
+  // restores every same-caseId entry from the authoritative pack BEFORE
+  // validation, so `<field> was rewritten` is unreachable for Owner-labelled
+  // cases while a pack is present. The prompt must not promise that message,
+  // and must name the vector that actually rejects (dropped OR renamed caseId).
+  it('states the Owner-labelled echo obligation the v2 output gate enforces', () => {
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
+      taskId: 'task',
+      contextHash: 'hash',
+      sourceScribeArtifactId: 'scribe',
+      scribeArtifact: {},
+      behaviorExamplePack: validBehaviorExamplePack,
+    });
+    expect(systemPrompt).toMatch(/one entry for behaviorExamplePack\.sourceNegativeCase/i);
+    expect(systemPrompt).toMatch(/caseId EXACTLY as the pack states it/);
+    expect(systemPrompt).toMatch(/dropping a case and renaming it both report as "Owner-labelled example <caseId> was omitted"/);
+    expect(systemPrompt).toMatch(/restored from the authoritative pack/i);
+    expect(systemPrompt).not.toContain('was rewritten');
+  });
+
+  it('marks the OUTPUT FORMAT example caseIds as placeholders, not real ids', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/caseIds and paths inside the example are PLACEHOLDERS/i);
   });
 
   it('still references input.action', () => {
