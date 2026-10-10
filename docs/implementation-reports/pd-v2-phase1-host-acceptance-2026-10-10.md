@@ -66,7 +66,7 @@
 
 > r2 修订见 §7.1：失败根因由"模型反复省略 v2 校验契约"改判为"确定性 gate oracle × 同 run 意图契约的冲突"；省略类失败已通过补提示词义务消除。r3 再修订见 §7.1：该冲突的生产复现改用真实 run 输入 × `generateV2CasesFromArtificer`，冲突面收窄为"模板写目标取自一条 `ls` 观测"，且"是否违背 Owner 意图"改记 Unknown。本节保留为 r1 当时的判定记录。
 >
-> **r3 对本节"恢复步骤 ①"的修正**：换更强指令遵循模型或重启本地引擎**不能**解除 B-1。省略类失败已消除（4 个 artificer run succeeded），剩下的失败在同一条**确定性模板**用例上，与模型无关；同一组证据重跑仍会落在同一个 block/allow 不匹配上。真正的解除路径是 §7.1 的三条候选（取证状态见该表），需 Owner 决策。
+> **r3 对本节"恢复步骤 ①"的修正**：换更强指令遵循模型或重启本地引擎**不能**解除 B-1。省略类失败已消除（4 个 artificer run succeeded），剩下的失败在同一条**确定性模板**用例上，与模型无关；同一组证据重跑仍会落在同一个 block/allow 不匹配上。解除路径见 §7.1 的三条候选（取证状态见该表，且不构成穷尽集）：**派生行为已证实，责任边界（实现缺口 vs 治理决策）尚待核查**——本轮不据此要求 Owner 改变政策。
 
 
 - **事实陈述**：当前只能确认阻塞发生在**规则内化阶段**（run-rulehost 对抗循环 6 次真实尝试失败）。强制证据链（gate 拦截之后的全部写入路径）**尚未执行过**——因此不能对"强制证据链基础设施无缺陷"作出任何断言；其真实缺陷（如有）只会在 B-1 解除后暴露。
@@ -126,6 +126,8 @@
 ## 7. r2/r3 复核（2026-10-10 第二、三轮）：三条缺口的重新取证与改判
 
 > r3（同日第三轮，按 Owner 复核意见）只做三件事：把 §7.1 的"生产复现"换成**真实 run 输入 × 生产方法**的取证；删除 helper 豁免里的 `backup`（未经生产验证的扩写）；把"Owner 必须三选一"降级为**待取证的候选路径**。oracle、gate、生产生成器、Owner 意图均未改动，判定仍为 PARTIAL。
+>
+> **r3 独立复核后的文本修正（同日，纯文档、零代码改动）**：① §7.1 三方一致性结论不再断言"这不是实现缺口而是治理缺口"——真实生成流程同时收到 Owner pack 与 Scribe intent（`artificer-runner.ts:819-851`、`artificer-prompt-builder.ts:535-559`），"写工具选用了 `ls` 正例路径"这一实现缺口**尚未被排除**；② 09:09:55 那条 `ls` 链不再推断"整轮 gate 未跑"，改标为**未确认**（§7.1）。B-1 仍未解除，Phase 1 仍为 PARTIAL。
 
 ### 7.1 B-1：根因改判链——"模型不稳定" → "gate × 意图契约冲突" → r3：**模板目标路径取自一条 `ls` 观测**（仍 BLOCKED）
 
@@ -156,11 +158,13 @@ r3 改为按生产顺序调用真实方法：加载未改动的编译产物 `pac
 | Artificer 工件（真实） | affectedTools[0] | 生产分支 | 生成的 v2 用例 | 消费它的 evaluator run |
 |---|---|---|---|---|
 | 08:54:51（链 A r1） | `write` | write-template | 5 条；`v2-path-boundary` = `{"path":"..bak"}` → **block** | 09:02:01 失败于该用例 |
-| 09:03:02（链 A r2） | `ls` | **skipped**（canonicalKind=`other`） | `[]` | 09:09:55 输出**没有 adversarialResult**——gate 整轮未跑 |
+| 09:03:02（链 A r2） | `ls` | **skipped**（canonicalKind=`other`） | `[]` | 09:09:55 输出**没有 adversarialResult**：v2 模板未生成，消费者未持久化 replay 结果，**整轮 gate 执行情况尚未确认** |
 | 09:24:26（链 B r1） | `write` | write-template | 同上 5 条 | 09:33:13 失败于同一用例 |
 | 09:35:31（链 B r2） | `write` | write-template | 同上 5 条 | 09:42:42 失败于同一用例 |
 
 三个失败 run 的输出里 `adversarialCases` 字段**均缺失**（生产 `:2637` 因此取 `llmCases=[]`），合并集只剩模板 + PRI-741 host-alias 用例；失败用例 `v2-path-boundary` 只可能来自确定性模板，这一点现在由生产方法本身证实。
+
+对 09:09:55 那条 `ls` 链只能证明两点：**该 run 的 v2 模板未生成**（生产方法实测 `[]`）与**消费者输出里没有 `adversarialResult`**。`executeDeterministicReplay` 还会合并 host-alias 与 LLM 用例，本轮没有该 run 的明确 skip reason，也没有它的完整合并用例集，因此**不能推断整轮 gate 未执行**——该结论记为未确认。
 
 **目标路径从哪来（r3 新证，也是更硬的根因）。** 模板的 `targetPath` 取 `positiveCases[0].params.path`（`resolveCasePathParam` 同时接受 `path` 与 `file_path`）。沙箱 6 个成功的 Artificer 工件里，正例**第一条永远是 Owner 标注的 `case-positive-6`**，而它是 `ls {"path":"."}`——来自 trajectory `tool_calls` id=6（session 402c0f59，"列出工作目录"这一步）。模型自写的写动作正例（`workspace/readme.md`、`src/app.js`、`workspace/notes.txt`、`workspace/file.txt`）永远排在其后，**从不参与派生**。于是 oracle 把"写 `.`+`.bak`（字符串拼接出的 `..bak`）"当作被测目标并要求 block。
 
@@ -191,7 +195,7 @@ plain    D:/pd-work/src/app.mjs            → block
 | `intentContract`（5 个字段） | Scribe 的 LLM 产物，Artificer 任务的 `dependencyTaskIds` 逐条指向对应 scribe 任务（链 A `…-scribe-mv25qonf`、链 B `…-scribe-mv26q38u`，取自 `tasks.diagnostic_payload.pi_metadata`） | **不是 Owner 原文**。链 B 末句把"不干预域"写成了断言，Owner pack 里并无此断言 → 属派生层自行添加，一致性 = **Unknown**（无 Owner 文本可比对） |
 | v2 模板用例（`v2-path-boundary`） | 确定性代码，`targetPath = positiveCases[0].params.path`（`extractPositiveCases` 保序，Owner 正例恒在首位） | 与 pack **一致**（用的就是 Owner 标注证据），但与链 B 的 intent 断言**逐字冲突** |
 
-结论：三层之间**没有任何互相引用的机制**——pack 来自 Owner 手工输入，intent 来自 Scribe 生成，模板只读 pack。所以冲突不可能由现有代码自动消解，这不是实现缺口而是治理缺口；但"该由哪一侧消解"仍是 Owner 决策，本轮不代裁。
+结论：**已证实该链将 `write` 工具与 `ls` 正例路径组合派生模板；这是否属于实现缺口，以及是否需要治理决策，尚待核查。现有三条候选路径不构成穷尽集。** 需要说明的是"三方互不引用"这句 r3 措辞过强：真实生成流程把 Owner pack 与 Scribe intent **一起**送进同一次生成（`artificer-runner.ts:819-851` 把 `intentContract` 与 `behaviorExamplePack` 同时传给 `buildPrompt`；`artificer-prompt-builder.ts:535-559` 再一起组装进 `promptInput`），模板随后从 Artificer 输出派生。因此"写工具选用 `ls` 样本路径"可能涉及**样本选择、工具匹配、模板适用域**的实现缺口，本轮证据只排除了"模型省略/质量"一类原因，**没有排除这些实现层可能**，也不能据此要求 Owner 改变政策。后续任务应独立核查真实样本的工具匹配与模板适用范围。
 
 **停止依据（按任务纪律）**：两次完整链路、同一条确定性用例、3 次同因失败——相同失败重复出现即先定位原因，不再无界重试。全程未删引用要求、未降低校验、未延长超时/预算制造绿灯，未改 gate，未代 Owner 批准或激活任何原则。
 
@@ -203,7 +207,7 @@ plain    D:/pd-work/src/app.mjs            → block
 | (b) 改意图契约侧 | Scribe 在 `validationExpectation` 中对 `.bak` 兄弟路径明确"须确认" | **部分** — 冲突文本已逐字定位（仅链 B）；但 `intentContract` 是 LLM 产物，改上游提示能否稳定产出该句 = Unknown | 不动 gate；需重跑整条内化链 |
 | (c) 换证据 | 用真实宿主新采集一组正例，其路径落在**已证的** helper 段（`tmp`/`temp`/`draft`；**不含 `backup`/`backups`**）内重跑 Golden Journey | **机制已证** — 生产方法实测该分支下 `v2-path-boundary` expectedDecision=allow | gate 与校验一字不动；被演示的行为断言随之变化 |
 
-明确排除的取巧法：把 `affectedTools` 首位排成非 write 工具（链 A r2 的 `ls` 就是这样）会让模板整批跳过、evaluator 输出连 `adversarialResult` 都没有——那是**没有证据**，不是通过；本轮不把它当作任何缺口的解除，也不得为制造绿灯而重排。
+明确排除的取巧法：把 `affectedTools` 首位排成非 write 工具（链 A r2 的 `ls` 就是这样）会让 v2 模板整批跳过，消费者输出里也没有 `adversarialResult`（该 run 的整轮 gate 执行情况**尚未确认**，见上文）——那是**没有证据**，不是通过；本轮不把它当作任何缺口的解除，也不得为制造绿灯而重排。
 
 **顺带发现（未实现，作 follow-up 候选）**：① run B 的规则把 `context.version !== 2 → allow` 放在 `isRiskPath()` 之前，违反提示词已陈述的 ADVERSARIAL GUARD CONTRACT（风险路径无论如何 block）——现有 5 条模板没有"context 不可用 + 风险路径"用例，故 gate 抓不到；② 失败 run 不落 `output_payload`（诊断不可见）；③ `trajectory.db pain_events.text` 存在 GBK 乱码。①②已作为 **ERR-157**（`docs/process/error-management/records/patterns/P-20261010T092439Z-x4r7na.md`，提示词↔校验器义务不对称）入库并在 EP-03 卡片加 Must-check。
 
