@@ -612,6 +612,10 @@ export async function runInternalizationConsumerCycle(
             // identity on the live production chain. listForCandidate reads
             // the ledger from disk per call — no cross-cycle staleness.
             ledgerIdentity: {
+              // PRI-915: availability first — an unreadable ledger must not
+              // read as an unresolved chain.
+              isAvailable: (): boolean =>
+                new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).isAvailable(),
               listForCandidate: (candidateId: string) =>
                 new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).listForCandidate(candidateId),
             },
@@ -649,7 +653,11 @@ export async function runInternalizationConsumerCycle(
             // "UUID the ledger actually mints", so a shaped-but-unknown id is
             // refused as invalid_identity instead of being carried forward.
             // Same per-call disk read as the scribe wiring above.
+            // PRI-915: availability first — an unreadable ledger must surface
+            // as identity_source_unavailable, not as invalid_identity drift.
             ledgerIdentity: {
+              isAvailable: (): boolean =>
+                new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).isAvailable(),
               hasPrinciple: (principleId: string) =>
                 new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).hasPrinciple(principleId),
             },

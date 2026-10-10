@@ -45,6 +45,8 @@ const { storeEmitter } = await import(dist('store/event-emitter.js'));
 const J11_PRINCIPLE_ID = 'e4920000-0000-4000-8000-000000000492';
 const j11LedgerIdentity = {
   ledger: {
+    // PRI-915: availability precedes membership in the identity resolution.
+    isAvailable: () => true,
     hasPrinciple: (principleId) => principleId === J11_PRINCIPLE_ID,
     listForCandidate: (candidateId) => (candidateId === 'j11-candidate' ? [{ id: J11_PRINCIPLE_ID }] : []),
   },

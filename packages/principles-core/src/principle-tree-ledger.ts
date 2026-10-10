@@ -137,19 +137,39 @@ function getLedgerFilePath(stateDir: string): string {
   return path.join(stateDir, PRINCIPLE_TRAINING_FILE);
 }
 
-function readLedgerFromFile(filePath: string): HybridLedgerStore {
+/**
+ * PRI-915: why a ledger read produced the store it produced. `empty` is a
+ * design-legal TRUE empty ledger (no file yet — fresh workspace — or a
+ * zero-byte file): membership answers against it are real "non-member"
+ * verdicts. `unreadable` is a transient outage (the file exists but cannot be
+ * read/parsed): membership answers against it are NOT decidable, and callers
+ * that would report "data drift" must consult availability first.
+ */
+export type LedgerFileAvailability =
+  | { status: 'ok' }
+  | { status: 'empty' }
+  | { status: 'unreadable'; problem: string };
+
+export function readLedgerFileState(stateDir: string): {
+  ledger: HybridLedgerStore;
+  availability: LedgerFileAvailability;
+} {
+  const filePath = getLedgerFilePath(stateDir);
   if (!fs.existsSync(filePath)) {
-    return { trainingStore: {}, tree: createEmptyTree() };
+    return { ledger: { trainingStore: {}, tree: createEmptyTree() }, availability: { status: 'empty' } };
   }
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     if (!content || content.trim() === '') {
-      return { trainingStore: {}, tree: createEmptyTree() };
+      return { ledger: { trainingStore: {}, tree: createEmptyTree() }, availability: { status: 'empty' } };
     }
     const parsed = JSON.parse(content) as unknown;
-    return parseHybridLedger(parsed);
-  } catch {
-    return { trainingStore: {}, tree: createEmptyTree() };
+    return { ledger: parseHybridLedger(parsed), availability: { status: 'ok' } };
+  } catch (err: unknown) {
+    return {
+      ledger: { trainingStore: {}, tree: createEmptyTree() },
+      availability: { status: 'unreadable', problem: err instanceof Error ? err.message : String(err) },
+    };
   }
 }
 
@@ -399,7 +419,7 @@ async function withLockAsync<T>(filePath: string, fn: () => Promise<T>, options?
 function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) => T): T {
   const filePath = getLedgerFilePath(stateDir);
   return withLock(filePath, () => {
-    const store = readLedgerFromFile(filePath);
+    const store = readLedgerFileState(stateDir).ledger;
     const result = mutate(store);
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -417,7 +437,7 @@ async function mutateLedgerAsync<T>(
 ): Promise<T> {
   const filePath = getLedgerFilePath(stateDir);
   return withLockAsync(filePath, async () => {
-    const store = readLedgerFromFile(filePath);
+    const store = readLedgerFileState(stateDir).ledger;
     const result = await mutate(store);
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -431,7 +451,7 @@ async function mutateLedgerAsync<T>(
 // ---------------------------------------------------------------------------
 
 export function loadLedger(stateDir: string): HybridLedgerStore {
-  return readLedgerFromFile(getLedgerFilePath(stateDir));
+  return readLedgerFileState(stateDir).ledger;
 }
 
 export function saveLedger(stateDir: string, store: HybridLedgerStore): void {

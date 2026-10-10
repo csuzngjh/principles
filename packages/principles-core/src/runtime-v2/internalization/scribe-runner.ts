@@ -164,8 +164,12 @@ export interface ScribeRunnerDeps extends PeerRunnerDeps {
    * writes the artifact unstamped and emits an observable event; the
    * activation boundary then either resolves the identity from lineage or
    * refuses. Ambiguity (0 or >1 ledger matches) is never guessed.
+   *
+   * PRI-915: `isAvailable` separates an unreadable ledger (transient outage,
+   * surfaced in the skip event reason) from a genuinely unresolved chain.
    */
   readonly ledgerIdentity?: {
+    readonly isAvailable: () => boolean;
     readonly listForCandidate: (candidateId: string) => readonly { readonly id: string }[];
   };
 }
@@ -441,9 +445,15 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
         });
       }
       if (stampedPrincipleId === null) {
+        // PRI-915: an unreadable ledger collapses listForCandidate to `[]`;
+        // that skip is a transient outage, not an unresolvable chain — say so
+        // instead of reporting the generic skip reason.
+        const ledgerUnavailable = !this.ledgerIdentity.isAvailable();
         this.emitEvent('identity_stamp_skipped', taskId, {
           runId,
-          reason: 'ledger principle id unresolved from scribe chain (missing dreamer lineage, unreadable seed, or 0/>1 ledger matches)',
+          reason: ledgerUnavailable
+            ? 'ledger_unavailable: the principle ledger exists but cannot be read; stamping is not decidable right now'
+            : 'ledger principle id unresolved from scribe chain (missing dreamer lineage, unreadable seed, or 0/>1 ledger matches)',
         });
       }
     }
@@ -521,6 +531,12 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
   private async resolveLedgerStampPrincipleId(context: ScribeContext): Promise<string | null> {
     const ledger = this.ledgerIdentity;
     if (!ledger) return null;
+
+    // PRI-915: an unreadable ledger collapses listForCandidate to `[]`, but
+    // the stamp must not rely on that collapse — while unavailable, the
+    // resolution is not decidable, full stop. The caller's skip event then
+    // reports ledger_unavailable instead of the generic chain reason.
+    if (!ledger.isAvailable()) return null;
 
     const dreamerArtifactId = context.sourceDreamerArtifactId;
     if (!dreamerArtifactId) return null;

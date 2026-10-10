@@ -588,6 +588,8 @@ beforeAll(async () => {
       // I2 — chain stamping: the scribe resolves dreamer lineage → candidateId
       // → ledger principle and stamps sourcePrincipleId at write time.
       ledgerIdentity: {
+        // PRI-915: availability precedes membership in the stamp resolver.
+        isAvailable: (): boolean => new PrincipleTreeLedgerAdapter({ stateDir }).isAvailable(),
         listForCandidate: (candidateId: string) =>
           new PrincipleTreeLedgerAdapter({ stateDir }).listForCandidate(candidateId),
       },

@@ -364,6 +364,10 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
         // structured binding outcome (a stamped artifact resolves to
         // already_bound there).
         ledgerIdentity: {
+          // PRI-915: availability first — an unreadable ledger must not read
+          // as an unresolved chain.
+          isAvailable: (): boolean =>
+            new PrincipleTreeLedgerAdapter({ stateDir: path.join(opts.workspaceDir, '.state') }).isAvailable(),
           listForCandidate: (candidateId: string) =>
             new PrincipleTreeLedgerAdapter({ stateDir: path.join(opts.workspaceDir, '.state') }).listForCandidate(candidateId),
         },
@@ -741,6 +745,10 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
     validator,
     artifactStore,
     ledgerIdentity: {
+      // PRI-915: availability is consulted before membership so an unreadable
+      // ledger surfaces as identity_source_unavailable, not invalid_identity.
+      isAvailable: (): boolean =>
+        new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') }).isAvailable(),
       hasPrinciple: (principleId: string) =>
         new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') }).hasPrinciple(principleId),
     },

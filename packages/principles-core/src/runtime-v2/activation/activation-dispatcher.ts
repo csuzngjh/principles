@@ -205,13 +205,19 @@ export class ActivationDispatcher {
     if (resolution.status === 'resolved') {
       return { principleId: resolution.principleId };
     }
+    // PRI-915: an unreadable ledger must not inherit the intake-minting
+    // guidance — the repair is to the ledger FILE, not to the intake pipeline.
+    let nextAction = 'ensure_intake_minted_a_ledger_principle_for_this_candidate_before_internalization';
+    if (resolution.reason.startsWith('ledger_unavailable')) {
+      nextAction = 'repair_or_restore_the_principle_ledger_then_retry_activation';
+    } else if (resolution.reason.startsWith('principle_not_in_ledger')) {
+      nextAction = 'check_pi_artifacts_source_principle_id_against_ledger_or_run_identity_reconciliation';
+    }
     return {
       error: {
         decision: 'invalid_artifact',
         reason: resolution.reason,
-        nextAction: resolution.reason.startsWith('principle_not_in_ledger')
-          ? 'check_pi_artifacts_source_principle_id_against_ledger_or_run_identity_reconciliation'
-          : 'ensure_intake_minted_a_ledger_principle_for_this_candidate_before_internalization',
+        nextAction,
       },
     };
   }

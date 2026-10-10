@@ -195,8 +195,9 @@ export const TelemetryEventType = Type.Union([
   // PRI-911A (I1+I3 writer boundary): EvaluatorRunner carries the bearer
   // principle's identity onto the RULE artifact. The carry is now a verified
   // stamp — success is recorded, and every refusal reports a SPEC §6.4 reason
-  // (missing_identity / non_canonical_identity / invalid_identity) instead of
-  // falling back to a principleDraft title.
+  // (missing_identity / non_canonical_identity / invalid_identity /
+  // identity_source_unavailable [PRI-915: unreadable ledger, transient — not
+  // drift]) instead of falling back to a principleDraft title.
   Type.Literal('evaluator_identity_stamp_success'),
   Type.Literal('evaluator_identity_stamp_failed'),
   // PRI-911A: DreamerRunner refuses to propagate an LLM-asserted

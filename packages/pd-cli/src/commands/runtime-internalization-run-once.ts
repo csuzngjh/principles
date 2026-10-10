@@ -600,6 +600,10 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
               // ledger principle UUID (via dreamer lineage → candidateId →
               // ledger) at write time; fail-soft on unresolvable chains.
               ledgerIdentity: {
+                // PRI-915: availability first — an unreadable ledger must not
+                // read as an unresolved chain.
+                isAvailable: (): boolean =>
+                  new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).isAvailable(),
                 listForCandidate: (candidateId: string) =>
                   new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).listForCandidate(candidateId),
               },
