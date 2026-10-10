@@ -126,7 +126,14 @@
 
 **r2 修复的部分是真实存在的提示词缺口。** v2 Artificer 校验器要求 Owner 标注样本的 `caseId` 逐字出现在 `goldenTraceCases` 里，但提示词从未陈述这一义务，且 OUTPUT FORMAT 示例用的是占位 id（`negative-1` / `positive-1`）。补法只动提示词：加"必须把 pack 里的 Owner 标注用例逐字带入输出、可新增不可替代"的义务条款，并把示例标注为占位符；契约版本 `artificer-output-v2.prompt.v8 → v9`。**校验器一字未改。**
 
-活证（沙箱 `state.db` runs 表，UTC 时间）：两次连续 `run-rulehost`（下称 run A：artificer 08:54:51 / 09:03:02；run B：artificer 09:24:26 / 09:35:31）共 4 个 artificer round **全部通过 v2 输出契约**，`Owner-labelled example <caseId> was omitted` 不再出现。
+活证（沙箱 `state.db` runs 表，UTC 时间，修复时刻落在两组之间）：
+
+| 阶段 | artificer run | 结果 |
+|---|---|---|
+| 修复前 | 00:57:47 / 01:11:40 / 01:57:47 / 08:27:51 | 4 个 run `failed`，reason 逐字相同：`Validation failed: Owner-labelled example case-negative-5 was omitted; Owner-labelled example case-positive-6 was omitted` |
+| 修复后 | 08:54:51 / 09:03:02（run A 两轮）、09:24:26 / 09:35:31（run B 两轮） | 4 个 run `succeeded`，`was omitted` 在库内停止出现 |
+
+即两次连续 `run-rulehost` 的全部 artificer round 都通过了 v2 输出契约；run B 的 CLI 前端日志逐字记录 `"degradationReason":"max_rounds_exhausted_after_2"`（PRD 硬上限 2 轮，非缺陷）。
 
 **剩余阻塞不是模型质量。** 三次 evaluator 对抗重放（A-r1 09:02:01、B-r1 09:33:13、B-r2 09:42:42）失败在**同一条确定性用例**上：
 
