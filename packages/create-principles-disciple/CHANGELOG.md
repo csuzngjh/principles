@@ -1,5 +1,11 @@
 # create-principles-disciple
 
+## 1.144.25
+
+### Patch Changes
+
+- 4e38342: Phase 1 acceptance: empty release declaration — this PR is test/documentation only (new intervention-evidence BDD feature + step definitions for pd-console; no production source changes).
+
 ## 1.144.24
 
 ### Patch Changes
