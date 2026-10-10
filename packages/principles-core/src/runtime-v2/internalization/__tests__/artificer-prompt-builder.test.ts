@@ -70,8 +70,11 @@ describe('ArtificerPromptBuilder', () => {
     // validator-legal ruleContext object literal, and the CONTEXT MODE
     // position reference is corrected (below); PRI-839 — bumped v7 → v8: the
     // dreamerContext input became a bounded candidate SET and the system
-    // prompt gained the DREAMER_CANDIDATE_SET_INSTRUCTION block.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v8');
+    // prompt gained the DREAMER_CANDIDATE_SET_INSTRUCTION block; PD v2 Phase 1
+    // host acceptance (2026-10-10) — bumped v8 → v9: CONTEXT MODE now states
+    // the Owner-labelled echo obligation (exact pack caseId) that
+    // validateV2OutputContract enforces.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v9');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -233,8 +236,31 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
     expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → … → v8 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v8');
+  it('declares the contract version bump history v1 → … → v9 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v9');
+  });
+
+  // PD v2 Phase 1 host acceptance (2026-10-10): validateV2OutputContract rejects
+  // an output that drops an Owner-labelled case (matched by exact pack caseId),
+  // so the prompt MUST state that obligation — otherwise the model is guessing
+  // at a rule the gate applies (live evidence: 4 identical `was omitted` run
+  // failures while the example demonstrated invented placeholder caseIds).
+  it('states the Owner-labelled echo obligation the v2 output gate enforces', () => {
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
+      taskId: 'task',
+      contextHash: 'hash',
+      sourceScribeArtifactId: 'scribe',
+      scribeArtifact: {},
+      behaviorExamplePack: validBehaviorExamplePack,
+    });
+    expect(systemPrompt).toMatch(/one entry for behaviorExamplePack\.sourceNegativeCase/i);
+    expect(systemPrompt).toMatch(/caseId EXACTLY as the pack states it/);
+    expect(systemPrompt).toContain('was omitted');
+    expect(systemPrompt).toContain('was rewritten');
+  });
+
+  it('marks the OUTPUT FORMAT example caseIds as placeholders, not real ids', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/caseIds and paths inside the example are PLACEHOLDERS/i);
   });
 
   it('still references input.action', () => {

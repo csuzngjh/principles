@@ -201,7 +201,7 @@ OUTPUT FORMAT (pure JSON, no markdown):
   "affectedTools": ["write"],
   "generatedAt": "<ISO-8601 timestamp>"
 }
-NOTE: the example above IS the full v2 contract — requiresContextVersion, evidenceRefs, and case-level ruleContext are REQUIRED fields (see the CONTEXT MODE block below), not optional extras.
+NOTE: the example above IS the full v2 contract — requiresContextVersion, evidenceRefs, and case-level ruleContext are REQUIRED fields (see the CONTEXT MODE block below), not optional extras. The caseIds and paths inside the example are PLACEHOLDERS: the real Owner-labelled caseIds are the ones carried by input.behaviorExamplePack and MUST be used verbatim (see CONTEXT MODE below).
 
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
@@ -302,6 +302,8 @@ DREAMER CANDIDATE SET (PRI-839, when \`dreamerContext\` is present):
 const V2_CONTEXT_INSTRUCTION = `
 CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - Treat behaviorExamplePack labels as authoritative: sourceNegativeCase MUST remain block and every positiveCounterexample MUST remain allow.
+- You MUST carry those Owner-labelled cases into your output: goldenTraceCases needs one entry for behaviorExamplePack.sourceNegativeCase and one entry for EVERY behaviorExamplePack.positiveCounterexamples item, each using the caseId EXACTLY as the pack states it and leaving kind/toolName/params/expectedDecision/ruleContext unchanged. You may ADD your own cases alongside them; adding never replaces one of these.
+- The output gate rejects the whole submission when such a caseId is absent (reported as "Owner-labelled example <caseId> was omitted") or when a protected field differs (reported as "was rewritten") — a case you renamed or reworded counts as omitted.
 - You MUST output requiresContextVersion: 2.
 - Every goldenTraceCases entry MUST include its explicit ruleContext; do not invent or auto-fill context.
 - You may inspect input.context. When it is undefined or context.history.status is unavailable, MUST return { decision: "allow", matched: false, reason: "context unavailable" }.
@@ -356,7 +358,21 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * prompt gained the conditional DREAMER_CANDIDATE_SET_INSTRUCTION block.
  * The OUTPUT schema is unchanged, so only the `.prompt.vN` segment moves.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v8';
+/**
+ * PD v2 Phase 1 host acceptance (2026-10-10): bumped v8 → v9. The CONTEXT MODE
+ * block stated that Owner-labelled labels are authoritative but never stated
+ * the obligation `validateV2OutputContract` enforces — that those cases appear
+ * in `goldenTraceCases` under their exact pack `caseId`. Meanwhile the OUTPUT
+ * FORMAT example demonstrated invented ids (`negative-1`/`positive-1`) and
+ * CONSTRAINTS invited 2-10 self-authored cases, so a model that followed the
+ * example produced a rejection the prompt gave it no way to anticipate
+ * (live evidence: 4 run-rulehost artificer runs rejected with the identical
+ * `Owner-labelled example … was omitted` message).
+ * The obligation is now stated, the placeholder status of the example ids is
+ * explicit, and the two rejection wordings are named so a repair attempt can
+ * map the feedback to a field. The validator is UNCHANGED.
+ */
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v9';
 
 // ── EP002-R4: bounded pack projection at the prompt boundary ─────────────────
 //
