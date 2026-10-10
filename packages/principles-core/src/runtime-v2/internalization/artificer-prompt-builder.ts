@@ -303,7 +303,8 @@ const V2_CONTEXT_INSTRUCTION = `
 CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - Treat behaviorExamplePack labels as authoritative: sourceNegativeCase MUST remain block and every positiveCounterexample MUST remain allow.
 - You MUST carry those Owner-labelled cases into your output: goldenTraceCases needs one entry for behaviorExamplePack.sourceNegativeCase and one entry for EVERY behaviorExamplePack.positiveCounterexamples item, each using the caseId EXACTLY as the pack states it and leaving kind/toolName/params/expectedDecision/ruleContext unchanged. You may ADD your own cases alongside them; adding never replaces one of these.
-- The output gate rejects the whole submission when such a caseId is absent (reported as "Owner-labelled example <caseId> was omitted") or when a protected field differs (reported as "was rewritten") — a case you renamed or reworded counts as omitted.
+- The output gate rejects the whole submission when one of those caseIds is missing from goldenTraceCases — dropping a case and renaming it both report as "Owner-labelled example <caseId> was omitted".
+- An entry that keeps a pack caseId is restored from the authoritative pack BEFORE validation, so editing its fields changes nothing the gate sees and cannot turn a rejection into a pass. Author your own cases under new caseIds; they are validated as written.
 - You MUST output requiresContextVersion: 2.
 - Every goldenTraceCases entry MUST include its explicit ruleContext; do not invent or auto-fill context.
 - You may inspect input.context. When it is undefined or context.history.status is unavailable, MUST return { decision: "allow", matched: false, reason: "context unavailable" }.
@@ -372,7 +373,19 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * explicit, and the two rejection wordings are named so a repair attempt can
  * map the feedback to a field. The validator is UNCHANGED.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v9';
+/**
+ * PD v2 Phase 1 host acceptance r3 (2026-10-10): bumped v9 → v10. The v9 clause
+ * over-declared the gate. `ArtificerRunner.fetchAndParseOutput` (EP002-R4)
+ * restores every entry that keeps a pack `caseId` from the authoritative
+ * bounded pack BEFORE `validateV2OutputContract` runs, so with a pack present
+ * the `<field> was rewritten` branch is unreachable for Owner-labelled cases —
+ * telling the model a reword yields that message is a second prompt↔gate
+ * asymmetry, in the opposite direction. The clause now names the real rejection
+ * vector (missing OR renamed caseId → `was omitted`) and states that editing a
+ * same-ID entry changes nothing the gate compares. Validator UNCHANGED; no
+ * obligation was relaxed.
+ */
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v10';
 
 // ── EP002-R4: bounded pack projection at the prompt boundary ─────────────────
 //
