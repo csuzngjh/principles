@@ -204,3 +204,34 @@ test.describe('R3 desktop keeps the fixed sidebar', () => {
     expect(ml).toBe('256px');
   });
 });
+
+// ── R6: language switch round-trip keeps document.lang and chrome in sync ───
+
+test.describe('R6 language switch syncs document.lang', () => {
+  test('EN → ZH → EN round-trip via the sidebar switcher, persisted across reload', async ({ page }) => {
+    await page.goto('/#/focus');
+    await page.waitForLoadState('networkidle');
+    // Default zh-CN on the fresh e2e context.
+    expect(await documentLang(page)).toBe('zh-cn');
+
+    const switcher = page.locator('aside button[title]').filter({ hasText: 'English' });
+    await switcher.click();
+    await page.waitForTimeout(300);
+    expect(await documentLang(page)).toBe('en');
+    // Static chrome localized: sign-out button now English.
+    await expect(page.locator('aside button', { hasText: 'Sign out' })).toBeVisible();
+
+    await page.locator('aside button', { hasText: '中文' }).click();
+    await page.waitForTimeout(300);
+    expect(await documentLang(page)).toBe('zh-cn');
+    await expect(page.locator('aside button', { hasText: '退出' })).toBeVisible();
+
+    // Switch to EN again and reload — persistence keeps lang + UI.
+    await page.locator('aside button', { hasText: 'English' }).click();
+    await page.waitForTimeout(300);
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    expect(await documentLang(page)).toBe('en');
+    await expect(page.locator('aside button', { hasText: 'Sign out' })).toBeVisible();
+  });
+});
