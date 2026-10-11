@@ -3170,9 +3170,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     try {
       paramsDigest = EvaluatorRunner.digestParams(adv.params);
     } catch {
-      // Whole-params serialization failure (e.g. a poisoned getter at the
-      // top level): keep the explicit degradation marker — the target was
-      // already extracted best-effort inside digestParams.
+      // Whole-params failure other than the contained target-field cases
+      // (e.g. a poisoned getter on a non-target key racing the key sweep):
+      // keep the explicit degradation marker. The context/facts segment is
+      // unaffected either way.
       paramsDigest = '(unserializable params)';
     }
 
@@ -3207,8 +3208,34 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
     // Target via the existing resolution contract (path, then file_path).
     // resolveCasePathParam only reads string fields, so it stays safe even
-    // when OTHER params are unserializable.
-    const target = resolveCasePathParam(params);
+    // when OTHER params are unserializable. A poisoned getter on a target
+    // field itself is contained here: the target degrades to the explicit
+    // none marker (the summarize-level whole-params catch then never fires
+    // for this shape).
+    let target: string | null = null;
+    let targetKey: string | null = null;
+    try {
+      target = resolveCasePathParam(params);
+      if (target !== null) {
+        // Re-derive which key won so the LOSING sibling (e.g. file_path next
+        // to a winning path, or a non-string path) stays visible in the rest
+        // digest instead of silently disappearing.
+        for (const key of ['path', 'file_path'] as const) {
+          try {
+            const raw = params[key];
+            if (typeof raw === 'string' && raw.trim() !== '') {
+              targetKey = key;
+              break;
+            }
+          } catch {
+            // Poisoned getter on this key — skip it; the other may still win.
+          }
+        }
+      }
+    } catch {
+      // resolveCasePathParam threw on a poisoned target field: treat as no
+      // derivable target (the explicit none marker below).
+    }
     const targetSegment = target === null
       ? "target=(none - not derivable from this case's params)"
       : target.length > targetBound
@@ -3216,7 +3243,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         : `target="${target}"`;
 
     const parts = Object.keys(params)
-      .filter((key) => key !== 'path' && key !== 'file_path')
+      .filter((key) => key !== targetKey)
       .map((key) => {
         let value: string;
         try {

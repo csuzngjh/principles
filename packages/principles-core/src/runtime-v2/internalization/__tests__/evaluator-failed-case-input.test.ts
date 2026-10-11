@@ -213,7 +213,8 @@ describe('caseInput producer budget (real mapFailedCases path)', () => {
       boundaryCase({ oldText: 'a'.repeat(350), newText: 'b'.repeat(350), path: 'protected/config.json' }),
     ])).caseInput);
     expect(pathLast).toContain('target="protected/config.json"');
-    // The target segment is identical regardless of key order.
+    // Both orders carry the target verbatim (segment-level equality is
+    // pinned by the identical full literal on each side).
     expect(pathFirst).toContain('target="protected/config.json"');
   });
 
