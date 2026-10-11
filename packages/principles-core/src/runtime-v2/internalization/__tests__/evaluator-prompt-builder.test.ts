@@ -37,8 +37,23 @@ describe('EvaluatorPromptBuilder', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('sourceTrace.artificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId');
   });
 
-  it('promptContractVersion value is evaluator-output-v1.prompt.v6 (PRI-644 validator re-feed anchor)', () => {
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v6');
+  it('promptContractVersion value is evaluator-output-v1.prompt.v7 (PD v2 Phase 1 closeout kind-semantics anchor)', () => {
+    // v6 anchored the PRI-644 validator re-feed; v7 (2026-10-11) anchors the
+    // RUNTIME KIND SEMANTICS clause — the judge must know writeTools all
+    // dispatch as canonicalKind 'write' before flagging same-kind coverage
+    // holes (live evidence: replay-perfect rule judged needs_revision).
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v7');
+  });
+
+  // PD v2 Phase 1 closeout (2026-10-11): the judge evaluated a
+  // canonicalKind==='write' gate as "not handling edit/apply_patch" because
+  // the prompt never stated the kind mapping. The clause must state that
+  // writeTools dispatch as the single kind 'write' and that only literal
+  // toolName matching can miss a same-kind sibling.
+  it('instruction carries RUNTIME KIND SEMANTICS for code review (v7)', () => {
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('RUNTIME KIND SEMANTICS');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain("input.action.canonicalKind === \"write\" ALREADY covers edit and apply_patch dispatches");
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('Only a rule that matches by literal toolName equality');
   });
 
   it('score instruction says number not string/percentage', () => {

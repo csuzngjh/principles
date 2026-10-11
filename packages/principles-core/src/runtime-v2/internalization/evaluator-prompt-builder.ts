@@ -191,6 +191,9 @@ CONVERGENCE CONTRACT (PRI-630 — applies whenever input.previousEvaluation is p
 TOOL CATALOG AUTHORITY (PRI-630 — applies whenever input.hostToolCatalog is present):
 Tool legality is judged ONLY against input.hostToolCatalog (readOnlyTools / writeTools). If a tool name appears in the catalog, it is a legitimate host tool — you MUST NOT flag it as a blocker for being a "non-standard name", regardless of your prior knowledge. The catalog is NOT exhaustive: a tool name absent from the catalog is not evidence of illegality either — tool-name spelling is never a blocker; only the tool BEHAVIOR described in the rule may be. When input.hostToolCatalog is ABSENT, you have NO authoritative tool knowledge: tool-name observations may appear in concerns at most, and MUST NOT become requiredChanges or affect the decision.
 
+RUNTIME KIND SEMANTICS (PD v2 Phase 1 closeout 2026-10-11 — applies whenever you review implementationCode):
+The RuleHost runtime dispatches every tool call with a closed canonical kind: "read" | "search" | "write" | "execute" | "agent" | "other". The kind is derived from the host tool mapping, NOT from the tool's literal name: EVERY tool catalogued under writeTools (e.g. write, edit, apply_patch) dispatches with input.action.canonicalKind === "write" — they are the SAME kind, not siblings. Therefore a rule whose write-path gate branches on input.action.canonicalKind === "write" ALREADY covers edit and apply_patch dispatches; flagging such a rule for "not handling edit/apply_patch" contradicts the runtime semantics. readOnlyTools dispatch as "read" or "search". Only a rule that matches by literal toolName equality (never by canonicalKind) can miss a same-kind sibling tool — and that is the only shape such a coverage concern may legitimately target.
+
 PROTOCOL:
 1. Review the artificerArtifact to understand the proposed implementation plan
 2. Evaluate the plan against quality criteria: completeness, feasibility, test coverage, risk mitigation
@@ -320,7 +323,19 @@ PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
  * same discipline as v5 — a run without validator feedback emits exactly the
  * v5 wire shape plus the new version string.
  */
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v6';
+/**
+ * PD v2 Phase 1 closeout (2026-10-11): bumped v6 → v7. Live p1-closeout chain:
+ * a rule whose write gate branched on `canonicalKind === 'write'` PASSED the
+ * full deterministic replay (edit and apply_patch canonicalize to 'write')
+ * yet the LLM judge returned needs_revision claiming "edit/apply_patch 会直
+ * 接返回 allow" — the judge knew the tool catalog NAMES but not the kind
+ * mapping, so it misread correct code as a coverage hole. The system prompt
+ * now carries a RUNTIME KIND SEMANTICS clause (writeTools dispatch as the
+ * single kind 'write'; only literal-toolName matching can miss a sibling).
+ * Additive: a run without implementationCode review sees only the new clause
+ * and version string.
+ */
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v7';
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
