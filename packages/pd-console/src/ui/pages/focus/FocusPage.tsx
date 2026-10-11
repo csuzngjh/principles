@@ -133,40 +133,69 @@ export function partitionInboxForDisplay<T extends { principleId: string; inbox:
 }
 
 /**
- * SPEC-PD-UIUX-001 R2 (review round): the conclusion strip's headline must not
- * claim "nothing needs you" from the inbox read model alone. The inbox can be
- * feature-disabled (403 feature_disabled → ownerInbox===null, no error), can
- * fail to load, or can legitimately miss objects that other read models still
- * render as on-screen action cards (e.g. approvals grouped under
- * `unlinked:<artifactId>` keys never appear in the ledger-keyed inbox).
+ * SPEC-PD-UIUX-001 R2 (Owner review round 2): the conclusion strip's headline
+ * and total must agree with the objects actually on screen and with the inbox
+ * response contract.
  *
- * Semantics (display-only, no permission derivation):
- * - mode 'unavailable' — the inbox projection is off or failed: the pending
- *   count CANNOT be confirmed; never allClear. Actionable cards may still be
- *   counted and shown (they are on screen regardless of the inbox).
- * - mode 'ok' — displayTotal = max(inbox pendingTotal, actionableCount): the
- *   on-screen action cards are todos regardless of whether the inbox saw
- *   them, so they act as a floor; allClear requires BOTH to be zero.
+ * Modes (display-only; no permission derivation):
+ * - 'unavailable' — inbox projection off (feature_disabled surfaces as
+ *   ownerInbox===null with NO error) or the request failed: the pending count
+ *   CANNOT be confirmed; never allClear.
+ * - 'degraded' — the inbox answered HTTP-success but carries
+ *   `degraded: { reason, nextAction }` (e.g. principle ledger unreadable, the
+ *   server then returns EMPTY groups): counts cannot be trusted; the strip
+ *   shows the server's reason + nextAction and never allClear.
+ * - 'ok' — counts are trusted.
+ *
+ * Counting (S2): displayTotal = actionableCount + inbox pending items NOT
+ * already represented by an on-screen action card. The association is the
+ * verified principleId field (partition.unmatchedDecisions are inbox items
+ * WITHOUT a card). One inbox item matching N cards of the same principle
+ * counts the N cards (each is a distinct decision); disjoint sets sum.
  */
 export function deriveConclusionDisplay(input: {
-  ownerInbox: unknown;
+  ownerInbox: { groups: { decision: unknown[] }; degraded?: { reason: string; nextAction: string } } | null;
   ownerInboxError: string | null;
-  inboxPendingTotal: number;
+  partition: { pendingTotal: number; unmatchedDecisions: unknown[] } | null;
   actionableCount: number;
 }): {
-  mode: 'ok' | 'unavailable';
+  mode: 'ok' | 'degraded' | 'unavailable';
   displayTotal: number;
   actionableCount: number;
+  degraded?: { reason: string; nextAction: string };
 } {
-  const inboxAvailable = input.ownerInbox !== null && input.ownerInboxError === null;
-  if (!inboxAvailable) {
+  if (input.ownerInbox === null || input.ownerInboxError !== null || input.partition === null) {
     return { mode: 'unavailable', displayTotal: input.actionableCount, actionableCount: input.actionableCount };
+  }
+  const matchedDecisions = input.ownerInbox.groups.decision.length - input.partition.unmatchedDecisions.length;
+  const uncoveredInboxPending = Math.max(0, input.partition.pendingTotal - matchedDecisions);
+  const base = {
+    actionableCount: input.actionableCount,
+  };
+  if (input.ownerInbox.degraded !== undefined) {
+    return {
+      mode: 'degraded',
+      displayTotal: input.actionableCount + uncoveredInboxPending,
+      ...base,
+      degraded: input.ownerInbox.degraded,
+    };
   }
   return {
     mode: 'ok',
-    displayTotal: Math.max(input.inboxPendingTotal, input.actionableCount),
-    actionableCount: input.actionableCount,
+    displayTotal: input.actionableCount + uncoveredInboxPending,
+    ...base,
   };
+}
+
+/**
+ * SPEC-PD-UIUX-001 R2 (Owner review S3): EVERY conclusion branch must express
+ * governance readiness the same way — "actionable now" is only claimable when
+ * the actions are not locked. One matrix, one source.
+ */
+export function resolveConclusionActionableKey(mode: 'ok' | 'degraded' | 'unavailable', locked: boolean): string {
+  if (locked) return "pages.focus.conclusion.actionableLocked";
+  if (mode === 'unavailable') return "pages.focus.conclusion.actionableWithoutTotal";
+  return "pages.focus.conclusion.actionableUnlocked";
 }
 
 // ── i18n code mapping helpers ─────────────────────────────────────────────
@@ -1360,12 +1389,14 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // cards) — the same number the「需要你决定」section header shows.
   const actionableCount = (ownerDecisionError === null ? decisionItems.length : 0)
     + (showApprovalCards ? pendingGroups.length : 0);
-  // Review round (P1): the headline never claims allClear from the inbox alone —
-  // see deriveConclusionDisplay for the three reachable contradiction cases.
+  // Review round 2 (P2): the headline never claims allClear from the inbox
+  // alone, degraded payloads surface their reason, and the total is the
+  // association-deduped union of on-screen cards and inbox items — see
+  // deriveConclusionDisplay.
   const conclusionDisplay = deriveConclusionDisplay({
     ownerInbox,
     ownerInboxError,
-    inboxPendingTotal,
+    partition: inboxPartition,
     actionableCount,
   });
 
@@ -1428,31 +1459,40 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               : t(`pages.focus.stateLabel.${governanceState}`)}
           </span>
           <div className="text-ink-2 text-[13px] leading-relaxed" data-testid="focus-conclusion-counts">
-            {conclusionDisplay.mode === 'unavailable' ? (
+            {conclusionDisplay.mode === 'ok' && conclusionDisplay.displayTotal === 0 ? (
+              <span>{t("pages.focus.conclusion.allClear")}</span>
+            ) : conclusionDisplay.mode === 'unavailable' || conclusionDisplay.mode === 'degraded' ? (
               <>
                 <span className="font-medium" data-testid="focus-conclusion-uncertain">{t("pages.focus.conclusion.pendingUncertain")}</span>
                 {conclusionDisplay.actionableCount > 0 && (
                   <span className="text-ink-4">
                     {" · "}
-                    {t("pages.focus.conclusion.actionableWithoutTotal", { count: conclusionDisplay.actionableCount })}
+                    {t(resolveConclusionActionableKey(conclusionDisplay.mode, ownerActionsLockedReason !== null), { count: conclusionDisplay.actionableCount })}
                   </span>
                 )}
               </>
-            ) : conclusionDisplay.displayTotal === 0 ? (
-              <span>{t("pages.focus.conclusion.allClear")}</span>
             ) : (
               <>
                 <span className="font-medium">{t("pages.focus.conclusion.pendingTotal", { count: conclusionDisplay.displayTotal })}</span>
                 <span className="text-ink-4">
                   {" · "}
-                  {ownerActionsLockedReason === null
-                    ? t("pages.focus.conclusion.actionableUnlocked", { count: conclusionDisplay.actionableCount })
-                    : t("pages.focus.conclusion.actionableLocked", { count: conclusionDisplay.actionableCount })}
+                  {t(resolveConclusionActionableKey(conclusionDisplay.mode, ownerActionsLockedReason !== null), { count: conclusionDisplay.actionableCount })}
                 </span>
               </>
             )}
           </div>
         </div>
+        {conclusionDisplay.mode === 'degraded' && conclusionDisplay.degraded && (
+          <div
+            className="mt-3 border border-amber/30 rounded-[6px] bg-surface px-3 py-2.5"
+            data-testid="focus-conclusion-degraded"
+          >
+            <p className="text-[12px] text-ink-3 leading-relaxed">
+              {t("pages.focus.conclusion.degradedLabel")} {conclusionDisplay.degraded.reason}
+            </p>
+            <p className="mt-1 text-[12px] text-ink-3 leading-relaxed">{conclusionDisplay.degraded.nextAction}</p>
+          </div>
+        )}
         {ownerActionsLockedReason !== null && (
           <div
             id="focus-global-lock-notice"

@@ -403,9 +403,10 @@
         "pendingTotal": "{{count}} item(s) waiting on you",
         "actionableUnlocked": "{{count}} of them actionable now",
         "actionableLocked": "{{count}} actionable object(s) — governance actions are locked, see the notice above",
-        "countsNote": "Scope: \"waiting on you\" = pending decisions + blocked items needing individual attention + items needing recovery, never less than the actionable objects on screen; historical unknowns stay explanatory and are not counted as todos.",
+        "countsNote": "Scope: \"waiting on you\" = actionable objects on screen + inbox pending items (decisions / individually-attended blocked / recovery) not already shown; each object counts once; historical unknowns stay explanatory and are not counted.",
         "pendingUncertain": "Pending count cannot be confirmed — decision updates are unavailable.",
-        "actionableWithoutTotal": "{{count}} item(s) actionable now"
+        "actionableWithoutTotal": "{{count}} item(s) actionable now",
+        "degradedLabel": "Decision updates degraded:"
       },
       "ownerAttention": {
         "sectionTitle": "Blocked & needing recovery",

@@ -172,3 +172,27 @@ Owner 要求全面评审后，派出 4 个并行只读评审子代理（Console 
 R1 五状态矩阵严密；R5 裸 red 替换 0 遗漏、对比度数字独立复算全部吻合；i18n 双语键平价、插值匹配、术语规范 0 违规；种子与 DDL/唯一索引/flag/90 天保留窗口自洽且对既有套件零污染；changeset 载体正确（console private、经 installer files 发布）；SPEC 边界（安全门/不隐藏待办/投递≠改善/无新权限 resolver）落地确认；`?host=` 与 VitePress 1.6.3 路由共存核验无冲突（hydration 安全）；R7 全部命令/版本经源码逐条核对属实。
 
 评审轮验证：vitest 141 文件 2797+1ef；playwright 72/72；website contract 7/7；typecheck 0 错误。过程中本地一次 TypeScript 报错为 openclaw-plugin 本地构建产物缺少声明文件的环境陈旧问题（重建该包后消失；同 PR 的 CI TypeScript Check 为绿）。
+
+## 评审轮 2（Owner 双轴审查 4×P2 复验，head 34c1d486）
+
+Owner 以两条独立审查线（Standards/Spec）确认 4 个 P2，全部修复：
+
+### S1 — inbox `degraded` 契约被吞（rc-9 / EP-03）
+
+服务端账本不可读时 HTTP 200 + 空 groups + `degraded: { reason: 'principle ledger unavailable', nextAction: '检查原则账本文件。' }`，旧展示函数只看"响应非空且无 error"，零计数时渲染 allClear，真实故障与恢复入口被吞。修复：`deriveConclusionDisplay` 消费 validated `degraded` 字段 → 新增 `degraded` 模式：headline 一律「待处理数暂不可确认」（degraded 下即使全零也禁 allClear），琥珀色块原样展示服务端 reason + nextAction。e2e 用 Playwright 路由拦截注入生产支持的 degraded 载荷（模拟 API，未触碰真实账本）断言原因/恢复入口可见且无 allClear。
+
+### S2/Q1 — 两组独立对象被 max() 少算
+
+`max(inbox 计数, 可操作卡数)` 在恢复事项 A + 未关联审批 B 并存时报 1 实为 2。修复：displayTotal 改为**按已核实 principleId 关联去重后的并集**：`可操作卡数 + inbox 待处理项中未上屏部分`（matched = groups.decision.length − unmatched）。审查要求的四种回归全部落地为纯函数单测：完全重合→1、完全不重合→2、部分重合→3、同原则两个不同决策卡→2。countsNote 口径说明同步改写。
+
+### S3 — unavailable 分支忽略治理锁定
+
+新降级分支无条件渲染「现在可操作 N 项」，与 no-auth 下的禁用按钮矛盾（review 实测同屏"现在可操作9项"+"治理动作已锁定"+24 个禁用按钮）。修复：新增 `resolveConclusionActionableKey(mode, locked)` 单一矩阵——locked 一律「可操作对象 N 项——治理动作已锁定」（所有模式），仅 unlocked + unavailable 用「现在可操作」；2×3 全矩阵单测钉住。e2e（feature_disabled 拦截 + no-auth 种子）断言锁定措辞且"现在可操作"绝不出现。注：本 e2e 工作区恒为 no-auth→锁定，unlocked 组合由单测矩阵覆盖（覆盖边界如实声明）。
+
+### Q2 — 抽屉跨断点残留遮罩与焦点陷阱
+
+390px 打开抽屉 → 1440px：Sheet portal 在 body，`lg:hidden` 只隐藏 trigger，遮罩/focus trap/body pointer-events:none 残留，桌面无法操作。修复：MobileNav 监听 `matchMedia('(min-width: 1024px)')` 进入桌面即关抽屉；焦点经 Radix `onCloseAutoFocus` 统一处理——桌面关闭时 preventDefault 并聚焦 main（隐藏 trigger 无法接收焦点），移动端保持原归还 trigger 行为。e2e：390 开抽屉→1440，断言抽屉隐藏、body pointer-events 恢复、activeElement=main、桌面侧栏可见。
+
+### 评审轮 2 验证（终态）
+
+vitest 141 文件 / **2805 passed + 1 expected-fail**（新增 14 用例：deriveConclusionDisplay 9 + actionable 矩阵 5）；playwright **75/75**（新增 3 用例）；typecheck 0 错误；verify:merge EXIT=0。e2e 复验同样覆盖上一轮修复（S2 计数 e2e 守卫、degraded/feature-off 组合、resize）。

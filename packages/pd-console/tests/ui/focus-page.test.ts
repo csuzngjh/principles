@@ -21,7 +21,7 @@ import {
   showsUnlinkedCandidateNote,
   validateApprovalsGroupedData as validateApprovalsGroupedDataReal,
 } from "../../src/ui/pages/focus/focus-validation.js";
-import { partitionInboxForDisplay, deriveConclusionDisplay } from "../../src/ui/pages/focus/FocusPage.js";
+import { partitionInboxForDisplay, deriveConclusionDisplay, resolveConclusionActionableKey } from "../../src/ui/pages/focus/FocusPage.js";
 
 // ── Mock the API module ──────────────────────────────────────────────────────
 
@@ -823,45 +823,138 @@ describe("SPEC-PD-UIUX-001 R2: partitionInboxForDisplay display semantics", () =
   });
 });
 
-// Review round (P1): the conclusion headline must never claim allClear from
-// the inbox read model alone. Three reachable contradiction combos:
-// inbox feature-disabled, inbox load failure, and on-screen action cards the
-// inbox cannot see (e.g. unlinked approvals).
-describe("SPEC-PD-UIUX-001 R2 (review): deriveConclusionDisplay honesty", () => {
-  const inbox = { seen: true };
+// Owner review round 2: the conclusion headline/total must (S1) consume the
+// inbox `degraded` contract, (S2/Q1) report the association-deduped UNION of
+// on-screen cards and inbox items — not a max() of two partial counts — and
+// (S3) express governance readiness identically in every branch.
+describe("SPEC-PD-UIUX-001 R2 (review round 2): deriveConclusionDisplay", () => {
+  function mkInbox(overrides?: Partial<{
+    decisionCount: number;
+    degraded: { reason: string; nextAction: string };
+  }>) {
+    const inbox: { groups: { decision: unknown[] }; degraded?: { reason: string; nextAction: string } } = {
+      groups: { decision: Array.from({ length: overrides?.decisionCount ?? 0 }, () => ({})) },
+    };
+    if (overrides?.degraded) inbox.degraded = overrides.degraded;
+    return inbox;
+  }
 
-  it("inbox feature-disabled (null inbox, no error) degrades to 'unavailable', never allClear", () => {
-    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: null, inboxPendingTotal: 0, actionableCount: 0 });
+  // ── S2/Q1 counting: association-deduped union ────────────────────────────
+
+  it("fully overlapping (1 inbox decision matched by 1 card) counts 1, not 2", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ decisionCount: 1 }),
+      ownerInboxError: null,
+      partition: { pendingTotal: 1, unmatchedDecisions: [] },
+      actionableCount: 1,
+    });
+    expect(d.mode).toBe("ok");
+    expect(d.displayTotal).toBe(1);
+  });
+
+  it("fully disjoint (1 recovery item + 1 unlinked approval card) counts 2 (S2 regression)", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ decisionCount: 0 }),
+      ownerInboxError: null,
+      // pendingTotal=1 (the recovery item); the unlinked approval card is NOT
+      // in the inbox, matchedDecisions=0.
+      partition: { pendingTotal: 1, unmatchedDecisions: [] },
+      actionableCount: 1,
+    });
+    expect(d.displayTotal).toBe(2);
+  });
+
+  it("partially overlapping sets sum after dedup (matched card + unmatched decision + recovery)", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ decisionCount: 2 }),
+      ownerInboxError: null,
+      // 2 inbox decisions: d1 matched by the card, d2 unmatched; plus 1 recovery.
+      partition: { pendingTotal: 3, unmatchedDecisions: [{ principleId: "d2" }] },
+      actionableCount: 1,
+    });
+    expect(d.displayTotal).toBe(3);
+  });
+
+  it("same principle with TWO different decision cards counts both cards, inbox item once", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ decisionCount: 1 }),
+      ownerInboxError: null,
+      partition: { pendingTotal: 1, unmatchedDecisions: [] },
+      actionableCount: 2,
+    });
+    expect(d.displayTotal).toBe(2);
+  });
+
+  it("allClear requires ok mode AND a zero union count", () => {
+    const allClear = deriveConclusionDisplay({
+      ownerInbox: mkInbox(),
+      ownerInboxError: null,
+      partition: { pendingTotal: 0, unmatchedDecisions: [] },
+      actionableCount: 0,
+    });
+    expect(allClear.mode).toBe("ok");
+    expect(allClear.displayTotal).toBe(0);
+  });
+
+  // ── S1: the validated `degraded` contract is consumed, never swallowed ───
+
+  it("HTTP-success inbox with degraded field never reports allClear, carries reason + nextAction", () => {
+    const degraded = { reason: "principle ledger unavailable", nextAction: "检查原则账本文件。" };
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ degraded }),
+      ownerInboxError: null,
+      partition: { pendingTotal: 0, unmatchedDecisions: [] },
+      actionableCount: 0,
+    });
+    // Even with all counts zero, degraded mode forbids the allClear headline.
+    expect(d.mode).toBe("degraded");
+    expect(d.displayTotal).toBe(0);
+    expect(d.degraded).toEqual(degraded);
+  });
+
+  it("degraded mode still reports the actionable cards that ARE on screen", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ degraded: { reason: "r", nextAction: "n" } }),
+      ownerInboxError: null,
+      partition: { pendingTotal: 0, unmatchedDecisions: [] },
+      actionableCount: 3,
+    });
+    expect(d.mode).toBe("degraded");
+    expect(d.actionableCount).toBe(3);
+    expect(d.displayTotal).toBe(3);
+  });
+
+  // ── unavailable (feature_disabled / load failure) unchanged ──────────────
+
+  it("feature-disabled inbox (null, no error) reports unavailable, count unconfirmed", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: null, partition: null, actionableCount: 0 });
     expect(d.mode).toBe("unavailable");
     expect(d.displayTotal).toBe(0);
   });
 
-  it("inbox feature-disabled WITH on-screen action cards still counts the actionable items", () => {
-    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: null, inboxPendingTotal: 0, actionableCount: 3 });
+  it("inbox load failure reports unavailable even with on-screen action cards", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: "boom", partition: null, actionableCount: 3 });
     expect(d.mode).toBe("unavailable");
     expect(d.actionableCount).toBe(3);
   });
+});
 
-  it("inbox load failure degrades to 'unavailable' regardless of the last-known count", () => {
-    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: "Owner decision inbox unavailable", inboxPendingTotal: 5, actionableCount: 0 });
-    expect(d.mode).toBe("unavailable");
+describe("SPEC-PD-UIUX-001 R2 (review round 2 S3): actionable wording respects the lock in EVERY branch", () => {
+  it("ok + unlocked → 'actionable now'", () => {
+    expect(resolveConclusionActionableKey("ok", false)).toBe("pages.focus.conclusion.actionableUnlocked");
   });
-
-  it("on-screen action cards floor the displayTotal when the inbox saw nothing (unlinked approvals)", () => {
-    const d = deriveConclusionDisplay({ ownerInbox: inbox, ownerInboxError: null, inboxPendingTotal: 0, actionableCount: 2 });
-    expect(d.mode).toBe("ok");
-    expect(d.displayTotal).toBe(2);
+  it("ok + locked → locked wording (never 'actionable now')", () => {
+    expect(resolveConclusionActionableKey("ok", true)).toBe("pages.focus.conclusion.actionableLocked");
   });
-
-  it("allClear requires both the inbox count and the actionable count to be zero", () => {
-    const ok = deriveConclusionDisplay({ ownerInbox: inbox, ownerInboxError: null, inboxPendingTotal: 0, actionableCount: 0 });
-    expect(ok.mode).toBe("ok");
-    expect(ok.displayTotal).toBe(0);
+  it("degraded follows the same readiness semantics as ok", () => {
+    expect(resolveConclusionActionableKey("degraded", false)).toBe("pages.focus.conclusion.actionableUnlocked");
+    expect(resolveConclusionActionableKey("degraded", true)).toBe("pages.focus.conclusion.actionableLocked");
   });
-
-  it("displayTotal never drops below the actionable count (subset wording stays truthful)", () => {
-    const d = deriveConclusionDisplay({ ownerInbox: inbox, ownerInboxError: null, inboxPendingTotal: 1, actionableCount: 2 });
-    expect(d.displayTotal).toBe(2);
+  it("unavailable + unlocked → 'actionable now' (cards ARE clickable)", () => {
+    expect(resolveConclusionActionableKey("unavailable", false)).toBe("pages.focus.conclusion.actionableWithoutTotal");
+  });
+  it("unavailable + locked → locked wording (S3 regression: no 'actionable now' next to disabled buttons)", () => {
+    expect(resolveConclusionActionableKey("unavailable", true)).toBe("pages.focus.conclusion.actionableLocked");
   });
 });
 

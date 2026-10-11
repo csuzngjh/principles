@@ -267,6 +267,22 @@ export function MobileNav({ featureFlags }: { featureFlags?: Record<string, { en
     setOpen(false);
   }, [location.pathname]);
 
+  // SPEC-PD-UIUX-001 R3 (Owner review Q2): the Sheet portals to <body>, so
+  // growing a 390px window to desktop left the overlay + focus trap alive over
+  // the now-visible fixed sidebar. Crossing INTO the desktop breakpoint closes
+  // the drawer; where focus lands is decided in onCloseAutoFocus below (the
+  // hidden trigger cannot receive it on desktop).
+  React.useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches && open) {
+        setOpen(false);
+      }
+    };
+    desktop.addEventListener("change", onChange);
+    return () => desktop.removeEventListener("change", onChange);
+  }, [open]);
+
   return (
     <header className="lg:hidden fixed top-0 left-0 right-0 z-30 h-14 flex items-center gap-2 px-3 bg-surface border-b border-line">
       <Sheet open={open} onOpenChange={setOpen}>
@@ -284,6 +300,18 @@ export function MobileNav({ featureFlags }: { featureFlags?: Record<string, { en
           side="left"
           className="w-[280px] max-w-[85vw] p-0 border-r border-line bg-surface flex flex-col"
           data-testid="mobile-nav-drawer"
+          onCloseAutoFocus={(event) => {
+            // On desktop the trigger is display:none and cannot take focus
+            // back (review Q2): hand focus to the main content instead. On
+            // mobile keep Radix's default return-to-trigger behavior.
+            if (window.matchMedia("(min-width: 1024px)").matches) {
+              event.preventDefault();
+              const main = document.getElementById("main-content");
+              if (main instanceof HTMLElement) {
+                main.focus({ preventScroll: true });
+              }
+            }
+          }}
         >
           <SheetTitle className="sr-only">{t("components.sidebar.navigation")}</SheetTitle>
           <SheetDescription className="sr-only">{t("components.sidebar.navigationDescription")}</SheetDescription>

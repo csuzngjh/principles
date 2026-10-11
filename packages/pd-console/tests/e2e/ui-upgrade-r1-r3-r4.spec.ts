@@ -252,3 +252,83 @@ test.describe('R2 conclusion strip stays honest with on-screen cards', () => {
     expect(text).not.toContain('当前没有需要你处理的治理事项');
   });
 });
+
+// ── Owner review round 2 (P2 S1/S3/Q2): degraded + feature-off + resize ─────
+
+test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', () => {
+  test('degraded inbox payload surfaces the server reason and never claims allClear (S1)', async ({ page }) => {
+    await page.route('**/api/v1/principles/owner-decision-inbox', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            schemaVersion: '1',
+            generatedAt: '2026-10-11T08:00:00.000Z',
+            totalPrinciples: 0,
+            groups: { decision: [], blocked: [], recovery: [] },
+            historicalUnknown: { count: 0, reasonText: '' },
+            degraded: { reason: 'principle ledger unavailable', nextAction: '检查原则账本文件。' },
+          },
+        }),
+      }));
+    await page.goto('/#/focus');
+    await page.waitForLoadState('networkidle');
+    const strip = page.locator('[data-testid="focus-conclusion"]');
+    await expect(strip).toBeVisible();
+    const text = await strip.innerText();
+    expect(text).not.toContain('当前没有需要你处理的治理事项');
+    expect(text).toContain('待处理数暂不可确认');
+    // The server's own reason + nextAction are shown as the recovery entry.
+    const degraded = page.locator('[data-testid="focus-conclusion-degraded"]');
+    await expect(degraded).toBeVisible();
+    expect(await degraded.innerText()).toContain('principle ledger unavailable');
+    expect(await degraded.innerText()).toContain('检查原则账本文件。');
+  });
+
+  test('feature-disabled inbox keeps cards, shows the uncertain headline; locked wording never contradicts disabled buttons (S3)', async ({ page }) => {
+    await page.route('**/api/v1/principles/owner-decision-inbox', (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, error: 'feature_disabled', reason: 'feature_disabled' }),
+      }));
+    await page.goto('/#/focus');
+    await page.waitForLoadState('networkidle');
+    const counts = page.locator('[data-testid="focus-conclusion-counts"]');
+    await expect(counts).toBeVisible();
+    const text = await counts.innerText();
+    // Unavailable headline, never allClear.
+    expect(text).toContain('待处理数暂不可确认');
+    expect(text).not.toContain('当前没有需要你处理的治理事项');
+    // This e2e workspace runs --no-auth, so governance actions are LOCKED
+    // (PRI-787): the S3 regression was the contradictory pairing of the
+    // actionable-now count with the lock notice. The unified wording must
+    // name the lock, never claim actionability.
+    expect(text).not.toMatch(/现在可操作/);
+    expect(text).toContain('治理动作已锁定');
+    // Cards stay on screen.
+    await expect(page.locator('[data-testid="owner-decisions-section"]').locator('button, article, a').first()).toBeVisible();
+  });
+
+  test('drawer open at 390px closes when the window grows to desktop; main regains interaction (Q2)', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/#/focus');
+    await page.waitForLoadState('networkidle');
+    await page.locator('[data-testid="mobile-nav-trigger"]').click();
+    await expect(page.locator('[data-testid="mobile-nav-drawer"]')).toBeVisible();
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const drawer = page.locator('[data-testid="mobile-nav-drawer"]');
+    await expect(drawer).toBeHidden();
+    // The body-level overlay must be gone: body pointer events restored.
+    const pointerEvents = await page.evaluate(() => getComputedStyle(document.body).pointerEvents);
+    expect(pointerEvents).not.toBe('none');
+    // Focus is not stranded on the hidden trigger — it moved into main.
+    const focusId = await page.evaluate(() => document.activeElement?.id ?? '');
+    expect(focusId).toBe('main-content');
+    // Desktop main content is directly interactive again (click a heading link target).
+    await expect(page.locator('aside.w-\\[256px\\]')).toBeVisible();
+  });
+});

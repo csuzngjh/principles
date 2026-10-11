@@ -403,9 +403,10 @@
         "pendingTotal": "待你处理 {{count}} 项",
         "actionableUnlocked": "其中现在可操作 {{count}} 项",
         "actionableLocked": "可操作对象 {{count}} 项——治理动作已锁定，原因见上方说明",
-        "countsNote": "口径：「待你处理」= 待决定 + 被阻塞（需逐条关注）+ 需要恢复，且不低于当前屏上的可操作对象数；历史未知项只作说明，不计入待办。",
+        "countsNote": "口径：「待你处理」= 屏上可操作对象 + 决定动态中未上屏的待决定/被阻塞（需逐条关注）/需要恢复事项；同一对象只计一次；历史未知项只作说明，不计入。",
         "pendingUncertain": "待处理数暂不可确认——决定动态不可用。",
-        "actionableWithoutTotal": "现在可操作 {{count}} 项"
+        "actionableWithoutTotal": "现在可操作 {{count}} 项",
+        "degradedLabel": "决定动态降级："
       },
       "ownerAttention": {
         "sectionTitle": "被阻塞与需要恢复",
