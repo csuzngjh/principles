@@ -22,7 +22,7 @@ import { useTranslation } from "react-i18next";
 import { useNotifications } from "../notifications/useNotifications.js";
 import { clearToken } from "../../api.js";
 import { cn } from "../../../lib/utils.js";
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "../ui/sheet.js";
+import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "../ui/sheet.js";
 
 function ThresholdMark({ className }: { className?: string }) {
   return (
@@ -286,6 +286,7 @@ export function MobileNav({ featureFlags }: { featureFlags?: Record<string, { en
           data-testid="mobile-nav-drawer"
         >
           <SheetTitle className="sr-only">{t("components.sidebar.navigation")}</SheetTitle>
+          <SheetDescription className="sr-only">{t("components.sidebar.navigationDescription")}</SheetDescription>
           <div className="px-5 pt-5 pb-4 border-b border-line">
             <div className="flex items-center gap-2.5">
               <ThresholdMark className="w-6 h-6 text-gov" />

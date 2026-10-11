@@ -1156,12 +1156,16 @@ export function PrincipleDetailPage() {
                             resolution: record.contentReference.resolution === 'resolved' ? t('principles.detail.evidenceAudit.referenceResolved') : t('principles.detail.evidenceAudit.referenceUnresolved'),
                             principleId: record.contentReference.principleId,
                             artifactId: record.contentReference.artifactId ? ` · ${record.contentReference.artifactId}` : '',
+                            // Review round (P2): keep the payload digest traceable —
+                            // the technical note promises it.
+                            payloadDigest: ` · ${t('principles.detail.evidenceAudit.payloadDigestLabel')}: ${record.contentReference.payloadDigest ?? t('principles.detail.evidenceAudit.noPayloadDigest')}`,
                           })}</>
                         )}
                         {record.activationReference && (
                           <> · {t('principles.detail.evidenceAudit.activationReference', {
                             activationId: record.activationReference.activationId,
                             activatedAt: record.activationReference.activatedAt ? ` · ${record.activationReference.activatedAt}` : '',
+                            snapshotDigest: ` · ${t('principles.detail.evidenceAudit.snapshotDigestLabel')}: ${record.activationReference.sourceSnapshotDigest}`,
                           })}</>
                         )}
                         {record.nativeLineage.length > 0 && <> · {t('principles.detail.evidenceAudit.nativeLineage', { lineage: record.nativeLineage.join(' · ') })}</>}

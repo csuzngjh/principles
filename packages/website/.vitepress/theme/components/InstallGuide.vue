@@ -131,17 +131,24 @@
         <h2 class="step-title">{{ isZh ? '步骤 1 · 前置条件（Codex）' : 'Step 1 · Prerequisites (Codex)' }}</h2>
         <ul class="prereq-list">
           <li>
-            <strong>{{ isZh ? 'Codex CLI ≥ 0.147' : 'Codex CLI ≥ 0.147' }}</strong> —
+            <strong>Codex CLI ≥ 0.147</strong> —
             <a href="https://developers.openai.com/codex/cli/" target="_blank" rel="noopener">{{ isZh ? 'Codex CLI 官方安装' : 'Codex CLI official install' }}</a>
           </li>
           <li>
-            <strong>{{ isZh ? '运行时环境' : 'Runtime' }}</strong> —
+            <strong>pd CLI</strong> —
             {{ isZh
-              ? '插件安装后的 $pd-setup 会校验 Node 运行时、工作区与信任链，缺什么会明确告诉你。'
-              : 'after installing the plugin, $pd-setup verifies the Node runtime, workspace, and trust chain — it names anything missing.'
+              ? 'Codex 路径的工作区初始化（$pd-setup）与 $pd-review 需要 pd 命令；缺失时按插件提示安装：'
+              : 'the Codex path workspace setup ($pd-setup) and $pd-review require the pd command; if missing, install it as the plugin instructs:'
             }}
           </li>
         </ul>
+        <div class="command-row"><code>{{ pdCliCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? '安装 pd CLI 命令' : 'install pd CLI command')" aria-live="polite" data-umami-event="copy_pd_cli_command" @click="copyCommand('pdCli', pdCliCommand)">{{ copyState('pdCli') }}</button></div>
+        <p class="step-desc">
+          {{ isZh
+            ? '插件安装后的 $pd-setup 会校验 Node 运行时、工作区与信任链，缺什么会明确告诉你。'
+            : 'after installing the plugin, $pd-setup verifies the Node runtime, workspace, and trust chain — it names anything missing.'
+          }}
+        </p>
       </section>
 
       <section class="guide-step">
@@ -236,6 +243,9 @@ const canaryCommand = computed(() => isZh.value
 const codexMarketCommand = 'codex plugin marketplace add csuzngjh/principles'
 const codexPluginCommand = 'codex plugin add principles-disciple@principles'
 const codexHealthCommand = 'pd health --host codex'
+// Review round (P2): authoritative per the plugin itself — pd-setup.cjs fails
+// with pd_cli_unavailable and instructs exactly this install command.
+const pdCliCommand = 'npm install -g @principles/pd-cli'
 
 const copiedKey = ref<string | null>(null)
 let copyTimer: number | null = null

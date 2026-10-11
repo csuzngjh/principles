@@ -27,7 +27,9 @@ test.describe('R1 receipt semantics on real pages', () => {
     expect(headline).toContain('未观察到上下文投递或效果记录');
     expect(headline).not.toContain('已进入');
     const counts = await page.locator('[data-testid="receipt-history-counts"]').innerText();
-    expect(counts).toContain('0');
+    // Review round: exact counts string — a bare '0' substring would match
+    // dates and any other digit.
+    expect(counts).toContain('行为生效 0 次 · 参与上下文 0 次');
   });
 
   test('presence>0 / effect=0 states injections recorded, no effect claim', async ({ page }) => {
@@ -36,9 +38,9 @@ test.describe('R1 receipt semantics on real pages', () => {
     const headline = await page.locator('#receipt-history-title').innerText();
     expect(headline).toContain('已记录上下文投递');
     expect(headline).toContain('尚无对应效果记录');
-    // zero-effect explanation present and presence-scoped
+    // zero-effect explanation present and presence-scoped (exact zero-effect copy)
     const explain = await page.locator('[data-testid="receipt-history-zero-effect"]').innerText();
-    expect(explain).toContain('0');
+    expect(explain).toContain('只有参与任务上下文（Presence）的记录');
     // no fabricated presence-missing note
     await expect(page.locator('[data-testid="receipt-history-presence-missing"]')).toHaveCount(0);
   });
@@ -47,8 +49,7 @@ test.describe('R1 receipt semantics on real pages', () => {
     await page.goto(`/#/principles/${PRINCIPLE_IDS.effectWithPresence}`);
     await page.waitForSelector('[data-testid="receipt-history"]', { timeout: 15000 });
     const headline = await page.locator('#receipt-history-title').innerText();
-    expect(headline).toContain('1');
-    expect(headline).toContain('行为影响');
+    expect(headline).toContain('1 次行为影响');
     await expect(page.locator('[data-testid="receipt-history-presence-missing"]')).toHaveCount(0);
   });
 
@@ -233,5 +234,21 @@ test.describe('R6 language switch syncs document.lang', () => {
     await page.waitForLoadState('networkidle');
     expect(await documentLang(page)).toBe('en');
     await expect(page.locator('aside button', { hasText: 'Sign out' })).toBeVisible();
+  });
+});
+
+// ── R2 (review round): the conclusion headline must agree with the cards ────
+
+test.describe('R2 conclusion strip stays honest with on-screen cards', () => {
+  test('never claims allClear while pending approval cards are on screen (unlinked-approval case)', async ({ page }) => {
+    // The seed workspace has pending approvals (click approve/reject/edit).
+    // If the inbox projection misses them, the displayTotal floor from the
+    // action cards must still prevent the 'nothing needs you' headline.
+    await page.goto('/#/focus');
+    await page.waitForLoadState('networkidle');
+        const conclusion = page.locator('[data-testid="focus-conclusion-counts"]');
+    await expect(conclusion).toBeVisible();
+    const text = await conclusion.innerText();
+    expect(text).not.toContain('当前没有需要你处理的治理事项');
   });
 });

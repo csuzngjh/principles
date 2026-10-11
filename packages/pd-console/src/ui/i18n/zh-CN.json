@@ -403,8 +403,9 @@
         "pendingTotal": "待你处理 {{count}} 项",
         "actionableUnlocked": "其中现在可操作 {{count}} 项",
         "actionableLocked": "可操作对象 {{count}} 项——治理动作已锁定，原因见上方说明",
-        "countsNote": "口径：「待你处理」= 待决定 + 被阻塞（需逐条关注）+ 需要恢复；历史未知项只作说明，不计入待办。",
-        "inboxUnavailable": "决定动态暂不可用，以上计数可能不完整。"
+        "countsNote": "口径：「待你处理」= 待决定 + 被阻塞（需逐条关注）+ 需要恢复，且不低于当前屏上的可操作对象数；历史未知项只作说明，不计入待办。",
+        "pendingUncertain": "待处理数暂不可确认——决定动态不可用。",
+        "actionableWithoutTotal": "现在可操作 {{count}} 项"
       },
       "ownerAttention": {
         "sectionTitle": "被阻塞与需要恢复",
@@ -412,7 +413,8 @@
         "recoveryCount": "需要恢复 {{count}}",
         "empty": "没有需要逐条关注的被阻塞或需要恢复的对象。",
         "unmatchedTitle": "以下对象有决定动态，但当前没有可用的操作面（关联缺失或数据不完整，不作合并）：",
-        "blockedAggregate": "另有 {{count}} 项被阻塞对象无需逐条关注；恢复完成后会进入「需要你决定」。"
+        "blockedAggregate": "另有 {{count}} 项被阻塞对象无需逐条关注，不计入上方待处理数。",
+        "unmatchedItemNote": "此条目暂无可用操作面；打开原则页查看其最新状态。"
       }
     },
     "pain": {
@@ -989,13 +991,17 @@
           "technicalNote": "以下为工程追溯信息：证据 ID、修订引用、载荷摘要、激活与原生线索。默认视图只展示记录与缺口；这些字段不改变上方的语义。",
           "sourceUnknown": "源可复核性未知",
           "contentRedacted": "正文已于 {{date}} 清除",
-          "contentReference": "内容引用：{{resolution}} · {{principleId}}{{artifactId}}",
+          "contentReference": "内容引用：{{resolution}} · {{principleId}}{{artifactId}}{{payloadDigest}}",
           "referenceResolved": "resolved",
           "referenceUnresolved": "revision 未解析",
-          "activationReference": "激活发生：{{activationId}}{{activatedAt}}",
+          "activationReference": "激活发生：{{activationId}}{{activatedAt}}{{snapshotDigest}}",
           "nativeLineage": "原生线索：{{lineage}}",
           "note": "本区只记录事实：投递确认程度、智能体自述与 Runtime 事实分开列出，缺失=未知而非无效。不提供成功率或有效性评分。",
-          "unavailable": "干预证据链暂不可用"
+          "unavailable": "干预证据链暂不可用",
+          "noPayloadDigest": "无载荷摘要",
+          "noSnapshotDigest": "无快照摘要",
+          "payloadDigestLabel": "载荷摘要",
+          "snapshotDigestLabel": "快照摘要"
         }
       }
     },
@@ -1971,7 +1977,8 @@
       "switchLanguage": "切换语言",
       "signOut": "退出",
       "openMenu": "打开导航菜单",
-      "navigation": "主导航"
+      "navigation": "主导航",
+      "navigationDescription": "导航到控制台各页面；选择后抽屉自动关闭。"
     },
     "approvalCard": {
       "confidence": {

@@ -78,7 +78,8 @@ test('English homepage preserves the same host-neutral contract', async () => {
   assert.doesNotMatch(html, /Thinking OS for Silicon Lifeforms|autonomous evolution/i)
 })
 
-test('videos, posters, and Open Graph image are publishable assets', async () => {  for (const name of ['homepage-demo-zh.mp4', 'homepage-demo-en.mp4']) {
+test('videos, posters, and Open Graph image are publishable assets', async () => {
+  for (const name of ['homepage-demo-zh.mp4', 'homepage-demo-en.mp4']) {
     const asset = await stat(path.join(publicRoot, name))
     assert.ok(asset.size > 100_000, `${name} must contain a rendered video`)
     assert.ok(asset.size <= 4 * 1024 * 1024, `${name} must stay within 4 MiB`)
@@ -216,7 +217,7 @@ test('install and download pages route by host and state prerequisites honestly'
     assert.doesNotMatch(html, /create-principles-disciple --yes/)
     // Node requirement matches the installer engines (>= 22).
     assert.doesNotMatch(html, /Node\.js ≥ 18|Node ≥ 18/)
-    assert.match(html, /≥ 22|≥22|≥ 22/)
+    assert.match(html, /≥ ?22/)
   }
   // Codex path facts survive into the disclaimer.
   assert.match(zhInstall, /Codex CLI ≥ 0\.147/)

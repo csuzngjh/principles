@@ -132,6 +132,43 @@ export function partitionInboxForDisplay<T extends { principleId: string; inbox:
   };
 }
 
+/**
+ * SPEC-PD-UIUX-001 R2 (review round): the conclusion strip's headline must not
+ * claim "nothing needs you" from the inbox read model alone. The inbox can be
+ * feature-disabled (403 feature_disabled → ownerInbox===null, no error), can
+ * fail to load, or can legitimately miss objects that other read models still
+ * render as on-screen action cards (e.g. approvals grouped under
+ * `unlinked:<artifactId>` keys never appear in the ledger-keyed inbox).
+ *
+ * Semantics (display-only, no permission derivation):
+ * - mode 'unavailable' — the inbox projection is off or failed: the pending
+ *   count CANNOT be confirmed; never allClear. Actionable cards may still be
+ *   counted and shown (they are on screen regardless of the inbox).
+ * - mode 'ok' — displayTotal = max(inbox pendingTotal, actionableCount): the
+ *   on-screen action cards are todos regardless of whether the inbox saw
+ *   them, so they act as a floor; allClear requires BOTH to be zero.
+ */
+export function deriveConclusionDisplay(input: {
+  ownerInbox: unknown;
+  ownerInboxError: string | null;
+  inboxPendingTotal: number;
+  actionableCount: number;
+}): {
+  mode: 'ok' | 'unavailable';
+  displayTotal: number;
+  actionableCount: number;
+} {
+  const inboxAvailable = input.ownerInbox !== null && input.ownerInboxError === null;
+  if (!inboxAvailable) {
+    return { mode: 'unavailable', displayTotal: input.actionableCount, actionableCount: input.actionableCount };
+  }
+  return {
+    mode: 'ok',
+    displayTotal: Math.max(input.inboxPendingTotal, input.actionableCount),
+    actionableCount: input.actionableCount,
+  };
+}
+
 // ── i18n code mapping helpers ─────────────────────────────────────────────
 
 /** Map a stateReasonCode to an i18n key, with optional interpolation params. */
@@ -1323,6 +1360,14 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // cards) — the same number the「需要你决定」section header shows.
   const actionableCount = (ownerDecisionError === null ? decisionItems.length : 0)
     + (showApprovalCards ? pendingGroups.length : 0);
+  // Review round (P1): the headline never claims allClear from the inbox alone —
+  // see deriveConclusionDisplay for the three reachable contradiction cases.
+  const conclusionDisplay = deriveConclusionDisplay({
+    ownerInbox,
+    ownerInboxError,
+    inboxPendingTotal,
+    actionableCount,
+  });
 
   // Map codes to i18n text
   // Governance Recovery Actions v1: tasks_need_human_review interpolates the
@@ -1383,26 +1428,31 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               : t(`pages.focus.stateLabel.${governanceState}`)}
           </span>
           <div className="text-ink-2 text-[13px] leading-relaxed" data-testid="focus-conclusion-counts">
-            {inboxPendingTotal === 0 ? (
+            {conclusionDisplay.mode === 'unavailable' ? (
+              <>
+                <span className="font-medium" data-testid="focus-conclusion-uncertain">{t("pages.focus.conclusion.pendingUncertain")}</span>
+                {conclusionDisplay.actionableCount > 0 && (
+                  <span className="text-ink-4">
+                    {" · "}
+                    {t("pages.focus.conclusion.actionableWithoutTotal", { count: conclusionDisplay.actionableCount })}
+                  </span>
+                )}
+              </>
+            ) : conclusionDisplay.displayTotal === 0 ? (
               <span>{t("pages.focus.conclusion.allClear")}</span>
             ) : (
               <>
-                <span className="font-medium">{t("pages.focus.conclusion.pendingTotal", { count: inboxPendingTotal })}</span>
+                <span className="font-medium">{t("pages.focus.conclusion.pendingTotal", { count: conclusionDisplay.displayTotal })}</span>
                 <span className="text-ink-4">
                   {" · "}
                   {ownerActionsLockedReason === null
-                    ? t("pages.focus.conclusion.actionableUnlocked", { count: actionableCount })
-                    : t("pages.focus.conclusion.actionableLocked", { count: actionableCount })}
+                    ? t("pages.focus.conclusion.actionableUnlocked", { count: conclusionDisplay.actionableCount })
+                    : t("pages.focus.conclusion.actionableLocked", { count: conclusionDisplay.actionableCount })}
                 </span>
               </>
             )}
           </div>
         </div>
-        {ownerInboxError !== null && (
-          <p className="text-ink-4 text-[12.5px] leading-relaxed mt-1" data-testid="focus-conclusion-inbox-unavailable">
-            {t("pages.focus.conclusion.inboxUnavailable")}
-          </p>
-        )}
         {ownerActionsLockedReason !== null && (
           <div
             id="focus-global-lock-notice"
@@ -1554,7 +1604,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               </p>
             )}
             {unmatchedInboxDecisions.map((item) => (
-              <InboxItem key={item.principleId} item={item} t={t} />
+              <InboxItem key={item.principleId} item={item} t={t} note={t("pages.focus.ownerAttention.unmatchedItemNote")} />
             ))}
             {inboxBlockedIndividual.map((item) => (
               <InboxItem key={item.principleId} item={item} t={t} />
@@ -1737,7 +1787,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 }
 
 /** Owner Decision Experience v1 inbox item — display-only (SPEC §11.1). */
-function InboxItem({ item, t }: { item: OwnerDecisionInboxData['groups']['decision'][number]; t: (key: string, opts?: Record<string, unknown>) => string }) {
+function InboxItem({ item, t, note }: { item: OwnerDecisionInboxData['groups']['decision'][number]; t: (key: string, opts?: Record<string, unknown>) => string; note?: string }) {
   return (
     <div className="mb-2 rounded-[var(--radius-md)] border border-line p-3" data-testid="owner-inbox-item">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -1750,7 +1800,10 @@ function InboxItem({ item, t }: { item: OwnerDecisionInboxData['groups']['decisi
           {t(`pages.focus.ownerInbox.group.${item.inbox.group}`)}
         </span>
       </div>
-      <p className="mt-1 text-ink-3 text-[12.5px] leading-relaxed">{item.nextAction.ownerText}</p>
+      {/* Review round (P3): unmatched entries have NO action surface, so the
+          inbox's review-flavored ownerText ("choose approve or reject") would
+          promise actions that do not exist here — use the neutral note. */}
+      <p className="mt-1 text-ink-3 text-[12.5px] leading-relaxed">{note ?? item.nextAction.ownerText}</p>
     </div>
   );
 }

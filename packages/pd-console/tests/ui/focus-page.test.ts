@@ -21,7 +21,7 @@ import {
   showsUnlinkedCandidateNote,
   validateApprovalsGroupedData as validateApprovalsGroupedDataReal,
 } from "../../src/ui/pages/focus/focus-validation.js";
-import { partitionInboxForDisplay } from "../../src/ui/pages/focus/FocusPage.js";
+import { partitionInboxForDisplay, deriveConclusionDisplay } from "../../src/ui/pages/focus/FocusPage.js";
 
 // ── Mock the API module ──────────────────────────────────────────────────────
 
@@ -802,10 +802,12 @@ describe("SPEC-PD-UIUX-001 R2: partitionInboxForDisplay display semantics", () =
     expect(partition.blockedAggregate.map((i) => i.principleId)).toEqual(["p-4"]);
   });
 
-  it("keeps two different decisions of the same principle unmerged on the action surface", () => {
-    // The partition never merges action-card objects: two action cards for the
-    // same principle each keep their card; the inbox display item for that
-    // principle is covered exactly once by the principleId association.
+  it("covers the inbox display item exactly once when its principle has an action card", () => {
+    // Review round: renamed to match what is actually asserted. The partition
+    // hides the inbox SUMMARY entry for a principle whose action card is on
+    // screen; the action cards themselves (keyed by reviewKey / group key,
+    // possibly several for one principle) are outside this function and are
+    // never merged by it — see the e2e card-count assertions for the surface.
     const inbox = mkInbox({ decision: [mk("p-1", "decision")] });
     const partition = partitionInboxForDisplay(inbox, new Set(["p-1"]));
     expect(partition.unmatchedDecisions).toHaveLength(0);
@@ -818,6 +820,48 @@ describe("SPEC-PD-UIUX-001 R2: partitionInboxForDisplay display semantics", () =
     expect(partition.blockedIndividual).toHaveLength(0);
     expect(partition.blockedAggregate).toHaveLength(0);
     expect(partition.recovery).toHaveLength(0);
+  });
+});
+
+// Review round (P1): the conclusion headline must never claim allClear from
+// the inbox read model alone. Three reachable contradiction combos:
+// inbox feature-disabled, inbox load failure, and on-screen action cards the
+// inbox cannot see (e.g. unlinked approvals).
+describe("SPEC-PD-UIUX-001 R2 (review): deriveConclusionDisplay honesty", () => {
+  const inbox = { seen: true };
+
+  it("inbox feature-disabled (null inbox, no error) degrades to 'unavailable', never allClear", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: null, inboxPendingTotal: 0, actionableCount: 0 });
+    expect(d.mode).toBe("unavailable");
+    expect(d.displayTotal).toBe(0);
+  });
+
+  it("inbox feature-disabled WITH on-screen action cards still counts the actionable items", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: null, inboxPendingTotal: 0, actionableCount: 3 });
+    expect(d.mode).toBe("unavailable");
+    expect(d.actionableCount).toBe(3);
+  });
+
+  it("inbox load failure degrades to 'unavailable' regardless of the last-known count", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: "Owner decision inbox unavailable", inboxPendingTotal: 5, actionableCount: 0 });
+    expect(d.mode).toBe("unavailable");
+  });
+
+  it("on-screen action cards floor the displayTotal when the inbox saw nothing (unlinked approvals)", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: inbox, ownerInboxError: null, inboxPendingTotal: 0, actionableCount: 2 });
+    expect(d.mode).toBe("ok");
+    expect(d.displayTotal).toBe(2);
+  });
+
+  it("allClear requires both the inbox count and the actionable count to be zero", () => {
+    const ok = deriveConclusionDisplay({ ownerInbox: inbox, ownerInboxError: null, inboxPendingTotal: 0, actionableCount: 0 });
+    expect(ok.mode).toBe("ok");
+    expect(ok.displayTotal).toBe(0);
+  });
+
+  it("displayTotal never drops below the actionable count (subset wording stays truthful)", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: inbox, ownerInboxError: null, inboxPendingTotal: 1, actionableCount: 2 });
+    expect(d.displayTotal).toBe(2);
   });
 });
 

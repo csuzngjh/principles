@@ -403,8 +403,9 @@
         "pendingTotal": "{{count}} item(s) waiting on you",
         "actionableUnlocked": "{{count}} of them actionable now",
         "actionableLocked": "{{count}} actionable object(s) — governance actions are locked, see the notice above",
-        "countsNote": "Scope: \"waiting on you\" = pending decisions + blocked items needing individual attention + items needing recovery; historical unknowns stay explanatory and are not counted as todos.",
-        "inboxUnavailable": "Decision updates are unavailable right now — the counts above may be incomplete."
+        "countsNote": "Scope: \"waiting on you\" = pending decisions + blocked items needing individual attention + items needing recovery, never less than the actionable objects on screen; historical unknowns stay explanatory and are not counted as todos.",
+        "pendingUncertain": "Pending count cannot be confirmed — decision updates are unavailable.",
+        "actionableWithoutTotal": "{{count}} item(s) actionable now"
       },
       "ownerAttention": {
         "sectionTitle": "Blocked & needing recovery",
@@ -412,7 +413,8 @@
         "recoveryCount": "needing recovery {{count}}",
         "empty": "No blocked or recovery items need individual attention.",
         "unmatchedTitle": "These objects have decision updates but no available action surface yet (missing association or incomplete data — not merged away):",
-        "blockedAggregate": "{{count}} more blocked object(s) do not need individual attention; they move to \"Needs your decision\" once recovered."
+        "blockedAggregate": "{{count}} blocked object(s) need no individual attention and are not counted in the total above.",
+        "unmatchedItemNote": "No action surface available for this entry yet; open the principle page for its current state."
       }
     },
     "pain": {
@@ -989,13 +991,17 @@
           "technicalNote": "Engineering traceability data: evidence IDs, revision references, payload digests, activation and native lineage. The default view shows records and gaps; these fields do not change the semantics above.",
           "sourceUnknown": "source verifiability unknown",
           "contentRedacted": "content cleared on {{date}}",
-          "contentReference": "Content reference: {{resolution}} · {{principleId}}{{artifactId}}",
+          "contentReference": "Content reference: {{resolution}} · {{principleId}}{{artifactId}}{{payloadDigest}}",
           "referenceResolved": "resolved",
           "referenceUnresolved": "revision unresolved",
-          "activationReference": "Activation: {{activationId}}{{activatedAt}}",
+          "activationReference": "Activation: {{activationId}}{{activatedAt}}{{snapshotDigest}}",
           "nativeLineage": "Native lineage: {{lineage}}",
           "note": "This section records facts only: delivery confirmation levels, agent self-reports, and runtime facts are listed separately; missing means unknown, not invalid. No success-rate or effectiveness scoring.",
-          "unavailable": "Intervention evidence audit unavailable"
+          "unavailable": "Intervention evidence audit unavailable",
+          "noPayloadDigest": "no payload digest",
+          "noSnapshotDigest": "no snapshot digest",
+          "payloadDigestLabel": "payload digest",
+          "snapshotDigestLabel": "snapshot digest"
         }
       }
     },
@@ -1971,7 +1977,8 @@
       "switchLanguage": "Switch language",
       "signOut": "Sign out",
       "openMenu": "Open navigation menu",
-      "navigation": "Main navigation"
+      "navigation": "Main navigation",
+      "navigationDescription": "Navigate the console pages; the drawer closes after a selection."
     },
     "approvalCard": {
       "confidence": {

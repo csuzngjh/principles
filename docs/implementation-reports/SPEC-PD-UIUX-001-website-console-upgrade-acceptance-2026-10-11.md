@@ -31,9 +31,9 @@
 - 结论条：attention 徽章 + 「待你处理 N 项 / 其中现在可操作 M 项」+ 口径说明 + 一次集中锁定原因（含前往设置）。数据全部来自既有服务端投影，无新权限 resolver。
 - 去重：`partitionInboxForDisplay`（导出纯函数）按已核实 `principleId` 关联字段匹配操作卡；未关联决策保留独立入口；同一原则的两个不同决策不合并；非 individual 阻塞对象聚合为一行计数；历史未知仍为说明。
 - `selectDecisionSurfaceItems` 降级保障原样保留（rc-9）并有测试钉住。
-- 验证：`tests/ui/focus-page.test.ts` 新增 9 用例（去重语义 5 + 阅读顺序 4）；全量 e2e 70/70 含 focus-approve-flow / focus-governance-clicks / governance-experience / BDD steps 零回归。
+- 验证：`tests/ui/focus-page.test.ts` 新增 15 用例（去重语义 5 + 阅读顺序 4 + 评审轮 deriveConclusionDisplay 诚实性 6）；全量 e2e 72/72 含 focus-approve-flow / focus-governance-clicks / governance-experience / BDD steps 零回归。
 
-### R3 窄屏导航与正文可用 — 完成（P1）
+### R3 窄屏导航与正文可用 — 完成（P1；200%/400% 缩放项以 320px 视口重排 + 无溢出断言代理验证，见「未覆盖」#1）
 
 - 断点证据：正文列 max-w 712px；<1024px(lg) 固定 256px 侧栏挤占正文（390px 实测 134px）。lg 以下改为顶栏（56px）+ 左侧 Sheet 抽屉；正文 `ml-0`、`pt-14`。桌面（≥1024px）侧栏原样。
 - 菜单按钮 44×44、`aria-label`；Radix Dialog 提供焦点陷阱/Esc/焦点归还；路由变化自动关抽屉；选中项 `aria-current="page"`。
@@ -93,8 +93,8 @@
 
 | 项 | 命令 | 结果 |
 |---|---|---|
-| Console 单测 | `npx vitest run`（pd-console）| 141 文件 / 2791 passed + 1 expected-fail |
-| Console e2e（生产构建+种子）| `npx playwright test` | **70/70**（含新增 15 用例）|
+| Console 单测 | `npx vitest run`（pd-console）| 141 文件 / 2797 passed + 1 expected-fail（评审轮终态）|
+| Console e2e（生产构建+种子）| `npx playwright test` | **72/72**（新增 16 用例：R1 四态 + R3 抽屉 + R4 键盘 + R6 语言往返 + 评审轮 R2 结论条守卫；评审前基线 71/71）|
 | Console typecheck | `npx tsc --noEmit` | 0 错误 |
 | Console 生产构建 | `npm run build:ui -- --production` | 通过 |
 | 官网 | `npm test`（docs:build+contract+relay+telemetry）| 全绿；contract 7/7 |
@@ -105,7 +105,7 @@
 
 位置：worktree `.tmp-uiux-spec-shots/{before,after}/`（104 张 = 每侧 28 Console + 24 官网；未入库）。
 矩阵：Console focus/detail/welcome/settings × {390,1440} × {浅,暗} × {zh,en}（en/dark 组合覆盖 focus+detail）；官网 home/install/download × {390,1440} × {浅,暗} × {zh,en}。
-要点：390px Console before 正文 134px 竖列 → after 全宽正文（before focus 全页高 24,897px vs after 5,321px——重复投影消除）；官网 before 安装页单一 OpenClaw 默认命令 → after 宿主选择。AFTER 截图取自与最终提交内容一致的构建（唯一差异为一行 eslint 注释，非视觉）；最终提交代码另由 70/70 e2e 在生产构建上复验。
+要点：390px Console before 正文 134px 竖列 → after 全宽正文（before focus 全页高 24,897px vs after 5,321px——重复投影消除）；官网 before 安装页单一 OpenClaw 默认命令 → after 宿主选择。AFTER 截图取自与最终提交内容一致的构建（唯一差异为一行 eslint 注释，非视觉）；最终提交代码另由 72/72 e2e（评审轮终态）在生产构建上复验。
 
 ## 浏览器覆盖与证据等级
 
@@ -138,6 +138,37 @@ UI 提交整体 revert（4 个提交 + changeset）并重建发布即可；无�
 ## MVP 四问
 
 - skip：误导状态（"已进入上下文"）、键盘死路、小屏不可用、安装版本谎言（≥18）与宿主误判继续伤害 Owner 判断与新用户启动。
-- observed：AC-R1–R9 + 截图 + 键盘/路由状态 + 计算样式对比 + 既有权限回归（e2e 70/70 含 approve/reject/edit/激活流）。
+- observed：AC-R1–R9 + 截图 + 键盘/路由状态 + 计算样式对比 + 既有权限回归（e2e 72/72 含 approve/reject/edit/激活流）。
 - disabled：回滚对应 UI 提交并重建；沿用现有 config/flag，无新开关。
 - emotional value：减少误判（状态与数字一致）、降低阅读负担（结论先行/去重）、恢复控制感（口径透明、可追溯入口、回滚说明）。
+
+## 评审轮（子代理全面评审，PR #1985）
+
+Owner 要求全面评审后，派出 4 个并行只读评审子代理（Console R1/R5/R6；Focus R2 + 布局 R3/R4；官网 R7/R8/R9；测试/种子/报告/治理）。结果与本轮处置：
+
+### 已修复（评审轮提交）
+
+- [P1] Focus 结论条 allClear 只信 inbox 单读模型：inbox flag 关闭（AC-R2 明文场景）/ inbox 请求失败 / inbox 看不见 unlinked 审批（`unlinked:` 分组键不出现在账本键控的 inbox）三种组合下与同屏待办卡矛盾 → 新增 `deriveConclusionDisplay`（inbox 不可用→「待处理数暂不可确认」降级；显示总数取 max(inbox 计数, 可操作卡数) 兜底；allClear 需双零且 inbox 可用），补 6 个纯函数单测 + 1 个 e2e 行为守卫（有待批卡时不得显示「当前没有需要你处理的治理事项」）。
+- [P2] 技术详情丢失 `payloadDigest` / `sourceSnapshotDigest` 而文案仍宣称「载荷摘要」→ 技术详情条目补回两个字段（带摘要标签与无摘要回退文案）。
+- [P2] 官网 Codex 路径未声明 pd CLI 前置（pd-setup 对无 CLI 环境硬失败 pd_cli_unavailable；`pd health --host codex` 不可运行）→ Codex 前置补「npm install -g @principles/pd-cli」（插件自身提示的权威命令，带复制按钮）。
+- [P2] 报告「70/70」为 R6 提交前数字，与最终 HEAD 用例数不符 → 本轮在最终代码上重跑并全部改为终态数字（e2e 72/72、单测 2797+1ef、官网 contract 7/7）。
+- [P2] AC-R2 场景缺自动化覆盖 → deriveConclusionDisplay 行为单测（三种矛盾组合 + 兜底 + allClear 双零）+ e2e 结论条守卫；既有弱断言（`toContain('0')` 等）全部改为精确串。
+- [P3] Sheet 关闭按钮 sr-only「Close」硬编码 → 接入 `common.close`；补 sr-only SheetDescription（消除 Radix 告警）。
+- [P3] 「两个不同决策不合并」测试名实不符 → 改名为实际断言的行为，注释说明真正的保证位于卡片渲染层。
+- [P3] blockedAggregate 文案去掉「恢复完成后会进入需要你决定」的无依据承诺 → 改为「不计入上方待处理数」（与口径一致）。
+- [P3] 未关联条目透传 review 类 ownerText（承诺不存在的操作）→ InboxItem 支持 note 覆盖，unmatched 条目使用中性说明。
+- [P3] 官网：homepage-contract 一处换行损伤与重复正则分支；InstallGuide 死三元；ThinkingLog sizes 收紧为 `min(46vw, 461px)`（retina 也命中 880w 变体）。
+
+### 记为 follow-up（不在本 PR）
+
+- [P3] 预先存在：`text-emerald`/`bg-emerald`/`border-emerald` 5 处裸色类与 `red` 同属无 token 失效类（IntentPage/OwnerDecisionCard/PainPage，本 PR 未触碰）→ 建议独立小 PR 统一换 `green`。
+- [P3] 根 README Codex 段仍写「Node ≥ 20」（实际 ≥22；本 PR 已改 website，README 不在 SPEC 范围）。
+- [P3] 安装页同页 SPA 导航（顶栏 Install 链接）会清 `?host=` 而不重挂载组件——刷新/前进后退自愈；如需彻底一致可监听 VitePress 路由变化重读。
+- [P3] CompanionNote 以 `isZh` prop 与兄弟组件 `useIsZh()` 两种约定并存；scoped 样式为复制。
+- 取舍说明：安装页命令完全客户端渲染（SSG 默认视图不含命令）——无 JS 爬虫看不到安装命令；首页 InstallSection 仍静态携带 npx 命令兜底。
+
+### 评审确认通过（无改动）
+
+R1 五状态矩阵严密；R5 裸 red 替换 0 遗漏、对比度数字独立复算全部吻合；i18n 双语键平价、插值匹配、术语规范 0 违规；种子与 DDL/唯一索引/flag/90 天保留窗口自洽且对既有套件零污染；changeset 载体正确（console private、经 installer files 发布）；SPEC 边界（安全门/不隐藏待办/投递≠改善/无新权限 resolver）落地确认；`?host=` 与 VitePress 1.6.3 路由共存核验无冲突（hydration 安全）；R7 全部命令/版本经源码逐条核对属实。
+
+评审轮验证：vitest 141 文件 2797+1ef；playwright 72/72；website contract 7/7；typecheck 0 错误。过程中本地一次 TypeScript 报错为 openclaw-plugin 本地构建产物缺少声明文件的环境陈旧问题（重建该包后消失；同 PR 的 CI TypeScript Check 为绿）。
