@@ -243,7 +243,9 @@ chain A/B 的 artificer 提示词字节未持久化（L2 run `input_payload`=NUL
 
 ---
 
-## 6. Minimal Fix Recommendation（r2 重写：本轮不实施，交 Owner 裁决）
+## 6. Minimal Fix Recommendation（r2 诊断阶段候选，工程路径已由 §12 确定）
+
+> 本节及 §1/§5/§8/§9/§11 中的「待裁决／本轮不实施」保留为诊断阶段历史；不代表当前待办。用户已授权配对修复，例行工程选择按 §12 执行，无需 Owner 三选一。以下比较与历史证据不构成第二套实施契约。
 
 ### 6.1 派生缺口（工具 × 样本无配对校验）的三个处理选项——契约符合性比较
 
@@ -255,7 +257,7 @@ chain A/B 的 artificer 提示词字节未持久化（L2 run `input_payload`=NUL
 | (b) 明确拒绝 | 无法派生可靠配对时 fail-loud（拒绝该轮派生而非降级） | 现行契约对派生缺口一律降级（三种既有 skip 分支），拒绝是**更严格的新姿态**；PRI-634 R3 的 fail-loud 先例针对「合并集为空的 approved 链」，不覆盖派生阶段 | 最诚实（不产出低置信证据）；但会把「可降级运行」的链变成硬失败，影响面需 Owner 评估 |
 | (c) 可观测降级（r1 的守卫建议） | mismatch → 返回 `[]` + 遥测，其余集合照常重放 | 与三种既有降级分支同族，契约上最顺 | **S8 实测的代价**：alias/LLM 非空时 5 条模板检查被删而 approved 仍可达（检查架空）；首正例错配时误删本可保留的检查（S8d）。**r1「无 gate 行为变化」的表述撤回** |
 
-**本轮结论**：三个选项都不改变 Owner 政策，但 (a)(b) 各引入一个新微契约，(c) 有已证实的检查架空风险。**不实施任何一项**；由 Owner 选择方向后再谈最小实现。（补充：若选项 (c) 被选中，其遥测必须携带「因本分支被跳过的模板检查数」，使检查架空可审计——这是 S8 的直接教训，属实现细节，非本轮授权。）
+**诊断阶段结论（历史）**：三个选项都不改变 Owner 政策，但 (a)(b) 各引入一个新微契约，(c) 有已证实的检查架空风险。**当前工程路径已确定**：按 §12 选择完整配对样本；无法派生时立即返回失败，不能用 alias/LLM 用例补足模板检查，不采用 (c) 的降级批准路径。
 
 ### 6.2 helper 段重采——**未验证的验收候选**（r2 降级）
 
@@ -370,87 +372,77 @@ S8  ：(r3 重做，A-r1 × 生产派生 5 模板 × 生产 factory 投影，规
 
 ---
 
-## 12. 最小实施计划（r4，2026-10-11）——**尚未实现，待授权后编码**
+## 12. 最小实施计划（r4，2026-10-11）
 
-> 定位：工程实施计划，只约束派生配对这一个缺口的修复。不动 gate、oracle、模板期望、Owner pack、ADR 与验收标准。Phase 1 保持 PARTIAL；本计划即使完整落地也不解除 B-1（配对修复不是完整解——诊断已证换正确 write 正例后四条现有规则仍失败于 boundary，该失败必须原样保留）。
+> 本轮按下述契约实施，验证状态见 §13。本节是当前实施口径；前文历史诊断证据保留。只修复派生配对缺口，不动 oracle、模板期望、Owner pack、ADR、检查强度与验收标准。Phase 1 保持 PARTIAL；配对修复不会自动解除 B-1：正确 write 正例下的原 boundary 失败必须如实保留，实宿主 Golden Journey 仍需独立取证。
 
-### 12.1 推荐行为契约（一句话）
+### 12.1 行为契约
 
-> 模板目标来源从「两个独立清单各取首项」改为「**先在正例中确定性选出与 `affectedTools[0]` 同 canonicalKind 的样本作为配对正例，其 toolName 作精确工具名、其 path/file_path 作目标路径**；无合格正例时该轮模板派生判定为 `derivation_failed`（新增区分态），由**现有** PRI-634 R3 fail-loud 通道按路径区分处置——不再静默返回 `[]` 伪装成「工具不适用的正常跳过」。
+> 目标 kind 仍由 `affectedTools[0]` 决定；目标为 write 时，保序选择第一个完整合格 positive，其精确工具名与 path/file_path 同源用于全部模板。无法找到完整样本即产生 typed private union 失败；唯一消费者在 alias/LLM 合并与 gate 前立即截断，返回 `updatedOutput:null` 和 `template_derivation_failed:<reason>`，并发出可观测失败事件。
 
-### 12.2 契约细则（实现 AI 不得自行裁量）
+### 12.2 R1–R7 选择与失败规则
 
-**R1 什么样的正例可作为模板来源？**
-`kind==='positive'` 且 `canonicalizeToolKind(toolName)==='write'` 且 `resolveCasePathParam(params)!==null`。三项全部复用现有函数（`rule-context-v2.ts` 的 canonicalizeToolKind、`evaluator-runner.ts:195` 的 resolveCasePathParam），零新解析。
+| 规则 | 当前实施契约 |
+|---|---|
+| R1 合格 positive | `kind==='positive'`、`canonicalizeToolKind(toolName)==='write'`、canonicalKind 匹配目标 kind，且现有 `resolveCasePathParam(params)` 返回有效 path/file_path；全部满足才合格。复用现有工具分类与路径解析，不新增解析权威。 |
+| R2 与声明的关系 | 目标仍取 `affectedTools[0]`；同 canonicalKind 即允许配对，不新增精确工具名相等要求。因此 edit 样本可配 write 声明。 |
+| R3 工具与路径来源 | canonicalKind 决定适用性；生成时传入最终选中 case 的精确 toolName、解析出的 targetPath 与 canonicalKind。工具和路径必须来自同一最终 case。 |
+| R4 多候选选择 | 按 `extractPositiveCases` 的原顺序扫描，取第一个完整合格者；遇到同 kind 但缺有效路径的候选继续扫描。没有相似度、最长前缀等启发式。Owner 样本居前只是四个历史工件的观测，不是顺序契约保证。 |
+| R5 无 write 候选 | 目标为 write，正例中不存在 write-kind 候选 → `derivation_failed`，reason=`no_write_kind_positive_case_for_v2_adversarial_cases`。不得降级为空数组继续批准。 |
+| R6 首工具非 write | `affectedTools[0]` 为 ls/其他非 write，即使后续声明含 write，也保持既有 `non_write_canonical_kind_for_v2_adversarial_cases` skip；不扫描后续 affectedTools。 |
+| R7 路径不足 | 存在 write-kind 候选但全都缺有效 path/file_path → `derivation_failed`，reason=`paired_positive_case_has_no_path_param`。若后续候选有有效路径，则选后续完整 case 的工具及路径，不能保留前一候选工具再借用后一候选路径。 |
 
-**R2 样本工具与 affectedTools 的一致关系如何建立？**
-目标工具仍取 `affectedTools[0]`（该字段是规则对治理面的声明，validateV2OutputContract 已要求非空字符串数组）；配对要求 = `canonicalizeToolKind(positive.toolName) === canonicalizeToolKind(affectedTools[0])`。只要求同类——同名要求会拒绝 edit 样本配 write 规则这类合法组合，且 artificer 校验器从不保证样本工具名与声明工具名一致。
+R1、R4、R7 是同一保序选择算法，不能解释为「先取首个 write，再因其无路径失败」。唯一新增失败边界是目标 write 却不能形成完整配对；不改变五条模板的期望值、oracle、gate 或正常生成时的 merge 顺序。
 
-**R3 精确工具名与 canonicalKind 各承担什么？**
-canonicalKind 决定**是否可派生**（非 write → 既有 `non_write_canonical_kind_for_v2_adversarial_cases` 分支不变）与**正例是否合格**（R1）；精确工具名只作**生成参数**透传（`generateV2ContextAdversarialCases({toolName, targetPath, canonicalKind})`，模板用例的 toolName/params 字段）。canonicalKind 同类 ≠ 同一动作——本契约只声称消除**跨 kind 拼接**（write 工具 × ls 路径），不声称消除同 kind 内的动作歧义（S8e）；后者记录为已知边界。
+### 12.3 四态与立即早退
 
-**R4 多个合格样本如何确定性选择？**
-取**正例序中的第一个合格者**（保序扫描，`extractPositiveCases` 已保序）。不用最相似/最长公共前缀等新启发式。确定性由输入顺序保证：Owner 样本在 pack 顺序中恒在模型自写样本之前（四个真实工件实测），因此「第一个合格 write 正例」在 A-r1 上就是 `case-pos-write-normal`（r3 探针 S8d 已实测该选择派生出完整 5 条、目标 `workspace/readme.md.bak`）。
-
-**R5 只有 ls 正例、没有合格 write 正例怎么办？**
-进入 §12.3 的 `derivation_failed`（reason=`no_write_kind_positive_case_for_v2_adversarial_cases`）。**不降级为空数组跳过**：只要目标工具是 write（即模板本应适用），缺失即缺失。
-
-**R6 首个 affectedTool 为 ls、后续含 write 怎么办？**
-维持现状——canonicalKind(ls)=other ≠ write → 走既有 `non_write_canonical_kind_for_v2_adversarial_cases` 跳过分支。规则声明以 affectedTools[0] 为准是现行契约（doc comment :2975-2978 明示），本计划不引入「扫描后续工具」的第二真源（那是行为面变更，超出最小修复，不在本计划内）。
-
-**R7 路径缺失、参数 schema 不兼容怎么办？**
-配对正例无 path/file_path → 不再回退扫描其他正例拼凑，而是 `derivation_failed`（reason=`paired_positive_case_has_no_path_param`）。「回退扫描」会重新制造跨样本拼接（工具来自 A、路径来自 B），正是本修复要消除的形态。
-
-**边界声明（不越权）**：R1–R7 全部不改变 Owner 行为要求、检查强度与验收目标——五条模板的期望值、oracle、gate、merge 顺序、alias/LLM 用例语义全部不动。唯一行为变化是「write 规则 + 无合格 write 正例」从「静默 0 模板 + 其他用例可能照常通过」变为「可观测的派生失败」。
-
-### 12.3 「无法派生」的结果区分（本轮重点）
-
-四态与现行机制的对应：
-
-| # | 状态 | 现行表现 | r4 后 | 改动 |
-|---|---|---|---|---|
-| 1 | 正常生成并执行 | 5 模板进 merged → gate 执行 | 不变 | 无 |
-| 2 | 目标工具确实不适用模板 | `non_write_canonical_kind_for_v2_adversarial_cases` → `[]` + 遥测 | **不变**（这是正常跳过，不是失败） | 无 |
-| 3 | **本应生成（目标工具为 write）但输入不足/配对失败** | 同样返回 `[]`，与态 2 在数据上不可区分 | 新增区分：返回**带 reason 的失败对象**（`derivation_failed`），reason ∈ {`no_write_kind_positive_case_for_v2_adversarial_cases`, `paired_positive_case_has_no_path_param`}，遥测 `v2_adversarial_cases_derivation_failed`（沿用现有 emitEvent 端口与 rc-9 字段：reason+nextAction） | 见下「最小接口变化」 |
-| 4 | 模板生成了但 replay 未执行 | `executeDeterministicReplay` 的既有 skipReason 族（`no_adversarial_cases_after_merge` 等） | **不变**——态 3 的失败会**流经**这里：merged 为空时 skipReason 照旧产生，且**新增区分点：skipReason 携带派生失败原因**，消费侧据此分流 | 无新机制 |
-
-**缺失时对两条生产路径的影响（复用现有通道，不新增机制）：**
-
-- **approved 路径**：现有 PRI-634 R3 终态守卫（`:1145-1168`）本就把「code-bearing + approved + replay 未跑」转为 `input_invalid` 永久失败并携带 skipReason。态 3 在 approved 路径上**自动落入该守卫**——唯一需要的改动是 R3 失败信息从「原因不可知」变为「reason 指明 no_write_kind_positive_case」，failureReason 文本把修复动作指向 Owner 样本（提供含路径的 write 正例）。**检查强度不变：approved + 模板缺失 = 任务失败**，与 R3 现行语义一致。
-- **needs_revision 路径**：现行语义是诊断证据缺失不影响 verdict（`:1006-1009` 注释明示），维持不变；但 `diagnosticReplayEvidence` 的缺省（= 重放未真正执行）在修复轮 seed 时已 fail-closed（`repairPayload` 不含 diagnosticReplay 字段），无需改动。
-- **alias/LLM 用例为何不能补足**：S8b/c 已实证（Before=5 模板 rejected / After=0 模板 accepted，同规则同投影）——剩余集合通过只证明「alias/LLM 检查通过」，不能证明「模板检查执行」。因此态 3 的判据**只看模板派生本身**，与合并集是否非空无关；「merged 非空」永远不能把态 3 升级为「检查已执行」。
-
-**最小接口变化**：`generateV2CasesFromArtificer` 的私有返回类型从 `readonly AdversarialCase[]` 扩为 `readonly AdversarialCase[] | { derivationFailed: true; reason: string }`（模块内私有类型，无公共 API 变化、无跨包契约变化）。唯一消费者 `:2639` 分流：正常数组 → 现行合并；derivationFailed → 发遥测（新 reason+nextAction=`supply_write_kind_positive_case_with_path_or_accept_missing_template_checks`）、v2Cases 记 `[]`、**并把该 reason 附加到本函数后续产生的 skipReason 前缀**（如 `template_derivation_failed:no_write_kind_positive_case_for_v2_adversarial_cases`），使态 3 与态 2/4 在 runs.output/skipReason 层可区分。不新增服务、不新增持久化状态、不新增 feature flag、不新增检查计数系统——可区分性由「既有 skipReason 字符串承载结构化 reason」实现，遥测只负责过程可观测。
-
-### 12.4 模块改动面
-
-| 文件 | 改动 | 保持不变 |
+| 状态 | 实施后的结果 | 证据意义 |
 |---|---|---|
-| `packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts` | `generateV2CasesFromArtificer`（:2988-3069）按 R1–R7 重写选样与返回；`:2639` 调用点分流 + skipReason 前缀；R3 fail-loud 的 failureReason 文本携带结构化 reason | `parseArtificerArtifact`/`extractPositiveCases`（:2808/:2886）；`resolveCasePathParam`（:195）；gate 调用与 merge 顺序（:2638-2758）；alias/LLM 派生；oracle/gate/模板/validator |
-| `packages/principles-core/src/runtime-v2/internalization/__tests__/evaluator-v2-derivation-pairing.test.ts`（新增） | §12.6 的场景测试 | — |
-| 受影响的既有测试（回归面，预计小改 fixture） | `evaluator-out-of-scope-governance.test.ts`、`evaluator-approved-replay-failed-repair.test.ts` 等含 `affectedTools+goldenTraceCases` fixture 的用例：凡「首正例非 write 但存在 write 正例」的 fixture，模板目标路径会按新契约改变（A-r1 形态：`.`→`workspace/readme.md`） | 断言强度不得放宽——目标路径断言更新为对应合法目标；任何「期望 0 模板」的用例若因配对改善变为 5 模板，须逐个核对是语义正确化而非放水，并在 PR 描述逐条列出 |
+| 1 正常生成并执行 | 完整配对生成五条模板；继续现有 alias/LLM 合并与 gate | 按真实 gate 结果报告，失败原样保留。 |
+| 2 首目标工具不适用 | 保持既有非 write skip 与遥测 | 正常跳过，不是派生失败。 |
+| 3 目标 write 但输入不足 | typed failure；复用 `v2_adversarial_cases_skipped` 与 `adversarial_replay_skipped` 遥测并携带明确 reason/nextAction；唯一消费者立即返回 `{updatedOutput:null, skipReason:'template_derivation_failed:<reason>'}` | 在 alias 生成、LLM 合并、gate 调用之前截断，与剩余用例是否非空无关；不新增遥测事件类别。 |
+| 4 模板已生成但 replay 未执行 | 保持既有 skipReason 族，例如 `no_adversarial_cases_after_merge` | 与态 3 分开；态 3 不再流经合并，也不依赖 merged 为空才能报错。 |
 
-消费者核查结论（已验证）：`generateV2CasesFromArtificer` 唯一调用者是 evaluator-runner 内部 `:2639`；`resolveCasePathParam` 为模块私有；无跨包消费者——改动面封闭于 `@principles/core` 单包。
+**私有接口**：`generateV2CasesFromArtificer` 返回类型以模块内 typed union 区分原有用例结果与 `derivation_failed`；失败 reason 限定为 R5/R7 两个字面量，不能用任意 `string` 逃逸。唯一消费者识别失败后立即返回上述结果，不把失败对象转换成 `[]` 后继续执行。无公共 API 或跨包契约变化。
 
-### 12.5 PR 拆分
+**approved 路径**：立即早退使该轮无 replay proof；现有 PRI-634 R3 将 code-bearing + approved + replay 未跑判为 `input_invalid` 永久失败，携带带前缀的 skipReason。不得让 alias/LLM 的成功结果绕过它。
 
-**单 PR（一个可独立验证的最小变更）**：core 包配对契约 + 遥测区分 + R3 文本 + 新测试 + 既有 fixture 校准 + changeset（`@principles/core` patch）。不拆多 PR——接口变化、行为变化、测试三者在同一审查面内才能验证「不静默消失」。
+**needs_revision 路径**：评价可以完成，task 可以是 `succeeded`；这代表评估完成。verdict 必须仍为 `needs_revision`，不得产生 replay proof、rule assembly 或治理批准，修复轮 seed 不得凭空补出 diagnosticReplay。测试须区分评价任务完成与治理批准，不能将二者都笼统要求为 task failed。
 
-### 12.6 验证计划（全部经 `EvaluatorRunner` 公有行为 `runner.run()`；gateDeps 用真实 `createProductionGateDeps({projectDir, toolSemantics})` 生产 factory，保持真实投影；断言 gate decision + `sandbox.success` + failedCases + 模板派生数）
+失败事件沿用现有 emitEvent 端口，含结构化 reason 与 nextAction（提供含有效路径的 write-kind positive）。不得包含 `accept_missing_template_checks` 或其他接受缺失检查的建议。遥测证明失败可见；阻断保证由立即早退与 R3 提供。
 
-| # | 场景（fixture 形态） | 验证意图 | 归属 |
-|---|---|---|---|
-| T1 | 首正例 ls、后续含合格 write 正例（A-r1 真实工件形态） | 选 `case-pos-write-normal` 为配对样本；5 条模板派生且目标=`workspace/readme.md(.bak)`；**若规则违背模板期望，`rejected_validation_failed` 原样保留（真实失败，不改 expectedDecision 造绿灯）** | 配对修复验收 |
-| T2 | 只有 ls 正例、无合格 write 正例；无 alias/LLM | 模板缺失可见：approved 路径任务 `failed`（R3 通道，reason=no_write_kind_positive_case…）；needs_revision 路径 verdict 保持但无诊断 replay 证据 | 配对修复验收 |
-| T3 | 配对失败（同 T2 形态）+ alias 非空 | 剩余用例**即使全过**，approved 路径仍 `failed`——其他用例通过不能掩盖模板缺失 | 配对修复验收 |
-| T4 | 配对失败 + LLM 用例非空 | 同 T3 | 配对修复验收 |
-| T5 | 多个 write/edit 类正例（write 正例在后） | 确定性选第一个合格者；工具/参数/路径同源自一样本；重排不变性（交换两个 write 正例顺序 → 目标取第一个） | 配对修复验收 |
-| T6 | path/file_path 两种拼写 + 无路径 + 非字符串路径 | 现有 resolveCasePathParam 为唯一解析权威；无效输入 → derivation_failed（reason=paired_positive_case_has_no_path_param），不回退扫描 | 配对修复验收 |
-| T7 | 原 boundary 不匹配规则（真实 A-r1 规则）+ 新配对（目标 workspace/readme.md.bak） | **修复后仍失败于 v2-path-boundary 且失败被如实记录**——成功标准是「不消失」，不是「通过」 | 配对修复验收 |
-| T8 | approved 与 needs_revision 双路径 × T2/T3 形态 | 证据语义一致：两路径都不产生「模板缺失 + 任务 succeeded/可晋级」状态；approved 走 R3 fail-loud；needs_revision 保持诊断语义 | 配对修复验收 |
-| — | protected write 拦截 → runtime_verified → Episode → Effect → Owner Outcome | **不在本 PR**：属实宿主 Golden Journey（B-1 解除条件），按 SPEC §13.9 另行取证 | 实宿主 GJ |
+### 12.4 改动范围
 
-遥测断言：态 3 必发 `v2_adversarial_cases_derivation_failed`（含 reason+nextAction）；skipReason 字符串含 `template_derivation_failed:` 前缀；合并/执行遥测不变。
+| 文件／边界 | 所需改动 | 禁止扩展 |
+|---|---|---|
+| `packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts` | 配对选择、私有 typed union、唯一消费点早退及失败可观测性；复用现有 R3 fail-loud | 不改变 oracle/gate/模板/validator，不新增服务、schema、flag 或公开接口。 |
+| evaluator 配对场景测试 | 通过 `EvaluatorRunner.run()` 观察选择、失败截断、approved/needs_revision 语义；真实 production factory 的投影与 gate 结果 | 不只测私有 helper，不修改期望造绿灯。 |
+| 受影响的既有 fixture | 逐项核对新目标路径和必需配对条件；仅校准契约所必需的 fixture | 不降低断言、删除场景或将 boundary 失败改成通过。 |
+| changeset 与本报告 | core patch；真实实现及验证证据记录 | 不新增 ADR，不更改 Owner 政策，不写安装目录或历史运行状态。 |
+
+历史调查已核查该方法只有 evaluator-runner 内一个消费者；实施须在当前源码再确认。报告中的旧行号用于历史证据导航，不当作本轮修改后的精确行号。
+
+### 12.5 交付与回滚
+
+配对选择、typed failure、消费点早退和回归验证属于同一可审查变更。没有持久化迁移；回滚时 revert 本轮变更与相应 changeset，即恢复旧行为及其已知缺口。无需新 feature flag。回滚不改写已有治理状态，也不能被描述为 B-1 解除。
+
+### 12.6 验证计划（计划，不代表已通过）
+
+公共 runner 路径验证使用真实 `createProductionGateDeps({projectDir, toolSemantics})` 投影；完整模板路径检查 gate decision、sandbox success 与 failedCases。失败早退场景同时检查 gate 未调用、无 replay proof/assembly、可观测 failure。
+
+| # | 场景 | 必须验证的意图 |
+|---|---|---|
+| T1 | 首正例 ls，后续有完整 write（A-r1 形态） | 选完整 write，同 case 的 toolName/path 生成五条；目标 `workspace/readme.md(.bak)`；违反期望的规则仍拒绝。 |
+| T2 | 目标 write，仅有 ls positive，无 alias/LLM | R5 failure、带前缀 skipReason、failure 事件；approved 经 R3 永久 `input_invalid`。 |
+| T3 | T2 加非空 alias 候选 | 在 alias 生成/合并与 gate 前早退；剩余用例不能掩盖模板缺失。 |
+| T4 | T2 加非空 LLM 用例 | 在 LLM 合并与 gate 前早退，不能凭 LLM 用例得到 proof。 |
+| T5 | 多个 write/edit positive，包括首个 write 缺路径、后续 edit 有路径 | 保序选择第一个完整合格者；精确工具名与路径均来自该最终 case；交换两个完整候选顺序后目标随首个完整候选变化。 |
+| T6 | path/file_path、无路径、非字符串／空白路径 | 复用现有解析；全 write 候选无有效路径触发 R7；无 write 候选触发 R5；前者无路径、后者有路径时成功选择后者。 |
+| T7 | 真实 A-r1 boundary 不匹配规则 + 正确配对 | 仍在 `v2-path-boundary` 失败并如实记录；不得修改 expectedDecision 消除失败。 |
+| T8 | approved 与 needs_revision × 缺候选/全无路径 × alias/LLM 非空 | approved task failed、R3 `input_invalid`；needs_revision 评价允许 task succeeded，但 verdict 仍 needs_revision，均无 replay proof/assembly。明确评估完成不等于治理批准。 |
+| — | protected write → runtime_verified → Episode → Effect → Owner Outcome | 实宿主 Golden Journey，独立验收；本轮配对测试不提供该证明。 |
+
+运行受影响 evaluator 回归、相关内部化测试、错误模式 diff 路由与项目要求的 merge 检查；真实命令、通过／失败／跳过结果由 §13 填写。任何未执行项不得写成通过。
 
 ### 12.7 Complexity Delta
 
@@ -458,20 +450,39 @@ canonicalKind 决定**是否可派生**（非 write → 既有 `non_write_canoni
 New durable source of truth: NO
 New persisted schema/state: NO
 New subsystem/service/background process: NO
-New public abstraction/interface: NO（私有返回类型联合，无公共 API 变化）
+New public abstraction/interface: NO（模块内 typed private union）
 New runtime feature flag: NO
-New cross-package dependency: NO（改动封闭于 @principles/core；openclaw-plugin/pd-cli 无接口变化）
+New cross-package dependency: NO
 New host/platform-specific behavior: NO
 New external/network capability: NO
 ```
 
-### 12.8 回滚
+### 12.8 已知边界
 
-单 commit revert（连同 changeset）。无 schema/flag/persisted-state 变化；rollback 后行为精确回到 `deafee04` 形态（含其已知静默性）。风险窗口仅存在于「派生配对改善导致部分既有 fixture 的模板目标变化」——由 12.4 的回归面清单逐项覆盖。
+1. 同 canonicalKind 不证明动作语义等价或参数 schema 完全相容；本轮保证工具与路径来自同一最终 case，不新增更广的匹配政策。
+2. `affectedTools[0]` 的治理声明地位保持不变，后续工具不参与适用性判断。生成侧声明交叉校验留作 follow-up。
+3. Owner 样本居前仅在四个历史工件观测成立；选样契约不依赖它恒真。
+4. 原 boundary/oracle 检查与 Owner 行为要求不变；配对修复不能自动解除 B-1，Phase 1 保持 PARTIAL。实宿主 GJ 与后续样本取证另行验收。
+5. 本轮工程路径已确定，无需 Owner 三选一；缺模板从可能被其他用例掩盖变为 approved 路径永久失败，needs_revision 仍保持评估完成与治理批准的区别。
 
-### 12.9 真正未决事项（不阻塞本 PR，但须记录）
+## 13. 本次实施记录
 
-1. **同 kind 动作歧义**（S8e）：canonicalKind 配对不消除「edit 样本配 write 规则」的路径语义漂移；是否需要第二级配对（精确工具名或参数 schema 相容性）属行为面扩展，**不在本计划**，留作 follow-up 候选。
-2. **`affectedTools[0]` 的权威性**：R6 维持「只看首项」；是否应让声明与正例集交叉校验（如 affectedTools 含 write 而样本全为 ls 时在 artificer 校验层拒收）属生成侧契约变更，**不在本计划**。
-3. **B-1 解除路径**：本计划只修复配对缺口；拦截链实宿主取证（helper 候选或其他 Owner 认可样本）仍待 Owner 启动；原验收链 protected write → runtime_verified → Behavior Episode → Effect Evidence → Owner Outcome Observation 原样保留。
-4. **须 Owner 知情的边界（非阻塞）**：本计划无实质治理契约变化——不改 Owner 行为要求、不改检查强度（R3 fail-loud 是现行语义的精确化而非新增）、不改验收目标；故不需要 Owner 三选一裁决。唯一请 Owner 知悉的行为变化：write 规则 + 无合格 write 正例的链将从「可能静默通过」变为「approved 路径任务失败」。
+本轮在最新 `origin/main`（`0e744eaf`）上完成最小配对修复，保留上文诊断历史。修改仅涉及 core 内部派生和消费分支、回归测试、changeset、本文以及现有 ERR 记录树中的 recurrence。
+
+- 目标为 write 时，扫描完整正例，工具名与 path/file_path 同源取自第一个合格 case；缺路径候选不会阻止后续完整候选。
+- 派生失败复用既有两类 skipped 遥测，立即在 alias/LLM 合并与 gate 调用前返回。approved 经 PRI-634 R3 进入永久 `input_invalid`；needs_revision 可完成评价，但不产生 replay proof、rule assembly 或治理批准。
+- 原模板五例、期望值、oracle、validator 和非 write 自定义用例路径保持原样；旧 authority 测试只校准两处更精确的失败原因，原有终态与未调用 gate 断言保留。
+
+| 本轮证据 | 实际结果 | 证明范围 |
+|---|---|---|
+| 新增 `evaluator-template-pairing.test.ts`，实现前负对照 | 旧代码 7 failed、2 passed | 新测试确实捕获配对与辅助绕过缺口，而非只镜像新实现 |
+| 新增回归与相关五文件测试 | 6 files、40 tests PASS | 真实 runner.run、SQLite 与 production factory 的配对及失败边界 |
+| `node ../../node_modules/vitest/vitest.mjs run src/runtime-v2/internalization` | 78 files、1155 tests PASS，exit 0 | 完整 internalization 回归，含配对后原 boundary 失败仍保留 |
+| `npm run verify:merge`，`NODE_OPTIONS=--max-old-space-size=8192` | exit 0 | 构建、lint、类型、文档、发布资产与运行 writer 等仓库合并门；8 GB 是本机验证配置，未修复既有堆内存边际 |
+| `npm run check:error-handbook` / `npm run check:telemetry-events -- --strict` | exit 0 / exit 0 | recurrence 使用现有 authority；复用原事件，没有新增事件类别 |
+| 独立规格评审 | PASS，无 P0/P1/P2 | 实现符合本节最小行为契约，不扩大模板或 Owner 政策 |
+| 独立质量与工程规范评审 | PASS，无新增 P1/P2 | 验证边界、私有类型、持久化事实与测试断言保持正确，无新子系统 |
+
+根代理在 `.tmp/b1-pairing-internalization.log`、`.tmp/b1-pairing-verify.log` 保留完整本轮日志。ERR-112 recurrence 为 `OCC-20261011T030445Z-9hppkw`，其 mechanized guard 是本轮生产入口回归测试。
+
+本轮没有重新运行真实宿主、采集新 Owner 样本或升级安装 pin。配对修复不会使现有规则与 boundary 的真实不匹配消失，不能替代原 GJ。Phase 1 保持 PARTIAL，B-1 尚未解除。

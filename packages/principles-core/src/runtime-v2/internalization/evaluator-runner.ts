@@ -1159,11 +1159,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         // Artificer content simply cannot be turned into gate input. Permanent
         // because retrying the LLM cannot make the Artificer emit the missing
         // affectedTools / positive-case path.
+        const recoveryAction = replayOutcome.skipReason?.startsWith('template_derivation_failed:')
+          ? 'have the Artificer emit a complete positive write-kind golden-trace case with a string path or file_path; required templates cannot be replaced by LLM adversarialCases.'
+          : 'have the Artificer emit affectedTools plus at least one positive golden-trace case carrying a path, or supply LLM adversarialCases.';
         return this.retryOrFail({
           taskId,
           task,
           errorCategory: 'input_invalid',
-          failureReason: `PRI-634 R3: Artificer artifact ${context.sourceArtificerArtifactId ?? '(unknown)'} is code-bearing and the evaluator approved it, but the deterministic adversarial replay did not run (reason: ${replayOutcome.skipReason ?? 'unknown'}). Refusing to report succeeded with adversarialResult=null — that is the chain-48371236 terminal state. Fix: have the Artificer emit affectedTools plus at least one positive golden-trace case carrying a path, or supply LLM adversarialCases.`,
+          failureReason: `PRI-634 R3: Artificer artifact ${context.sourceArtificerArtifactId ?? '(unknown)'} is code-bearing and the evaluator approved it, but the deterministic adversarial replay did not run (reason: ${replayOutcome.skipReason ?? 'unknown'}). Refusing to report succeeded with adversarialResult=null — that is the chain-48371236 terminal state. Fix: ${recoveryAction}`,
         });
       }
     }
@@ -2629,14 +2632,19 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     }
 
     // (3) PRI-485 Phase 6: auto-generate 5 v2 adversarial cases from the
-    // Artificer's affectedTools + first positive case's path. These defend
+    // Artificer's target kind and one complete positive write case. These defend
     // against the most common false-positive patterns (unavailable/truncation/
     // alias/path/combination). Degrade with telemetry (rc-9) if the spec
-    // cannot be derived — LLM-supplied adversarialCases still replay.
+    // cannot be derived for a write target — auxiliary cases cannot replace them.
     // PRI-634 R1: V1-shaped outputs carry no adversarialCases — the merged
     // set below then relies entirely on the auto-generated v2 cases.
     const llmCases = isEvaluatorOutputV2(output) ? (output.adversarialCases ?? []) : [];
     const v2Cases = this.generateV2CasesFromArtificer(affectedTools, positiveCases, taskId, runId);
+    if (!Array.isArray(v2Cases)) {
+      this.emitEvent('v2_adversarial_cases_skipped', taskId, { runId, ...v2Cases });
+      this.emitEvent('adversarial_replay_skipped', taskId, { runId, ...v2Cases });
+      return { updatedOutput: null, skipReason: `template_derivation_failed:${v2Cases.reason}` };
+    }
     // PRI-741: host-name parity case — the rule must reach the same decision
     // under the REAL host tool name as under the author's vocabulary.
     const hostAliasCase = this.generateHostAliasCase(goldenTraceCases, taskId, runId);
@@ -2973,16 +2981,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * artifact and generate the 5 canonical v2 cases.
    *
    * Spec derivation:
-   *   - toolName: the first entry in `affectedTools` (validated as a non-empty
-   *     string array). Falls back to the first positive case's toolName when
-   *     affectedTools is missing/malformed — the rule still governs that tool.
-   *   - targetPath: the first positive case's `params.path` (validated as a
-   *     non-empty string). When absent, degrade with telemetry (rc-9) and
-   *     return [] — v2 cases cannot be path-realistic without a target path.
-   *   - canonicalKind: canonicalizeToolKind(toolName) — pure lookup.
+   *   - target kind: canonicalize affectedTools[0], falling back to the first
+   *     positive case's toolName when affectedTools is missing/malformed.
+   *   - toolName + targetPath: the first positive case of that write kind with
+   *     a non-empty params.path or params.file_path, taken from the same case.
    *
-   * Never throws. All malformed inputs degrade to [] with a telemetry event
-   * carrying a structured `reason` + `nextAction` (Runtime Contract Rule 9).
+   * Non-write targets retain the observable custom-case fallback. Missing
+   * complete write examples return a typed failure that stops replay before
+   * auxiliary cases can replace the required templates (Runtime Contract 9).
    */
   // eslint-disable-next-line @typescript-eslint/max-params
   private generateV2CasesFromArtificer(
@@ -2990,7 +2996,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     positiveCases: readonly GoldenTraceCase[],
     taskId: string,
     runId: string,
-  ): readonly AdversarialCase[] {
+  ): AdversarialCase[] | {
+    readonly reason: 'no_write_kind_positive_case_for_v2_adversarial_cases' | 'paired_positive_case_has_no_path_param';
+    readonly nextAction: string;
+  } {
     // Resolve toolName: prefer affectedTools[0], fall back to positive case.
     let toolName: string | null = null;
     if (Array.isArray(affectedTools) && affectedTools.length > 0) {
@@ -3015,35 +3024,6 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return [];
     }
 
-    // Resolve targetPath: first positive case's params.path.
-    const [firstPositive] = positiveCases;
-    if (!firstPositive) {
-      this.emitEvent('v2_adversarial_cases_skipped', taskId, {
-        runId,
-        reason: 'no_positive_case_for_v2_adversarial_cases',
-        nextAction: 'verify_artificer_emitted_at_least_one_positive_case',
-      });
-      return [];
-    }
-    // PRI-634: golden-trace params are echoed verbatim from the host
-    // trajectory, and the dominant write-tool schema names its target
-    // `file_path` (OpenClaw / Claude Code), not `path`. Reading only `path`
-    // made v2 auto-generation structurally unreachable on real chains: the
-    // merged case set stayed empty, so the gate never ran and an
-    // LLM-declared adversarialResult.passed=true could stand in for a real
-    // replay (chain 48371236). Accept both spellings — this is the input that
-    // makes the deterministic gate reachable at all.
-    const { params } = firstPositive;
-    const pathParam = resolveCasePathParam(params);
-    if (pathParam === null) {
-      this.emitEvent('v2_adversarial_cases_skipped', taskId, {
-        runId,
-        reason: 'no_path_param_for_v2_adversarial_cases',
-        nextAction: 'verify_positive_case_has_string_path_or_file_path_param',
-      });
-      return [];
-    }
-
     const canonicalKind = canonicalizeToolKind(toolName);
     // PRI-485 Phase 6: the 5 v2 templates are write-path semantics (alias /
     // path-boundary / combination all assume a write action). Generating them
@@ -3061,11 +3041,20 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
       return [];
     }
-    return generateV2ContextAdversarialCases({
-      toolName,
-      targetPath: pathParam,
-      canonicalKind,
-    });
+    // Pair the action and target path from the SAME complete positive case.
+    // Preserve trace order, but keep scanning past write cases without a path.
+    let hasWritePositive = false;
+    for (const positiveCase of positiveCases) {
+      if (canonicalizeToolKind(positiveCase.toolName) !== canonicalKind) continue;
+      hasWritePositive = true;
+      const targetPath = resolveCasePathParam(positiveCase.params);
+      if (targetPath === null) continue;
+      return [...generateV2ContextAdversarialCases({ toolName: positiveCase.toolName, targetPath, canonicalKind })];
+    }
+    return {
+      reason: hasWritePositive ? 'paired_positive_case_has_no_path_param' : 'no_write_kind_positive_case_for_v2_adversarial_cases',
+      nextAction: 'verify_artificer_emitted_complete_positive_write_kind_case_with_string_path_or_file_path',
+    };
   }
 
   /**
