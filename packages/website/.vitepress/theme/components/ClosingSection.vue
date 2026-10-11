@@ -1,13 +1,25 @@
 <template>
+  <!-- SPEC-PD-UIUX-001 R8: the closing invitation centers on reduced repeated
+       corrections, owner control, observability and reversibility. The old
+       suffering declaration is no longer the main closing statement; the
+       brand thinking stays reachable via the Abyss link below. -->
   <section class="pd-section closing-section" aria-label="closing">
-    <blockquote class="closing-quote">
-      <p class="closing-text">{{ isZh ? '“如果你没有在受苦，你就没有在创造价值。”' : '“If you’re not suffering, you’re not building value.”' }}</p>
-      <cite class="closing-sub">{{ isZh ? '燃烧痛苦，协同进化' : 'Burn Pain, Co-Evolve' }}</cite>
-    </blockquote>
+    <h2 class="closing-title">{{ isZh ? '少一点重复纠正，多一点确定感。' : 'Fewer repeated corrections. More certainty.' }}</h2>
+    <p class="closing-sub">
+      {{ isZh
+        ? 'PD 把每一次纠正变成可审查、可观察、可撤回的原则——最终决定始终在你手里。'
+        : 'PD turns each correction into a reviewable, observable, reversible principle — the final decision stays yours.'
+      }}
+    </p>
     <div class="closing-actions">
       <a class="pd-btn pd-btn-brand" :href="isZh ? '/zh/install' : '/install'" data-umami-event="cta_get_started">{{ isZh ? '开始使用' : 'Get started' }}</a>
       <a class="pd-btn pd-btn-alt" href="https://github.com/csuzngjh/principles" target="_blank" rel="noopener" data-umami-event="outbound_click" data-umami-event-target="github">{{ isZh ? 'GitHub' : 'GitHub' }}</a>
     </div>
+    <p class="closing-thought">
+      <a :href="isZh ? '/zh/abyss/' : '/abyss/'" data-umami-event="cta_abyss_index">
+        {{ isZh ? '理念与研究：燃烧痛苦，协同进化 →' : 'Ideas & research: Burn Pain, Co-Evolve →' }}
+      </a>
+    </p>
   </section>
 </template>
 
@@ -17,31 +29,29 @@ const isZh = useIsZh()
 </script>
 
 <style scoped>
-/* A designed closing: motto + CTA, with a calm gradient band that gives
-   the page a deliberate end-point instead of trailing off. */
+/* A designed closing: invitation + CTA, with a calm band that gives the page
+   a deliberate end-point instead of trailing off. */
 .closing-section {
   text-align: center;
   padding: 120px 0;
 }
-.closing-quote { max-width: 820px; margin: 0 auto; }
-.closing-text {
-  margin: 0;
-  font-family: var(--vp-font-family-mono);
+.closing-title {
+  margin: 0 auto;
+  max-width: 820px;
   font-size: clamp(22px, 2.8vw, 32px) !important;
-  line-height: 1.5 !important;
-  letter-spacing: 0.02em;
-  font-style: italic;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.4 !important;
   color: var(--text-main) !important;
+  border: 0;
+  padding: 0;
 }
 .closing-sub {
-  display: block;
-  margin-top: 24px;
-  font-family: var(--vp-font-family-mono);
-  font-size: 13px;
-  font-style: normal;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--accent);
+  max-width: 640px;
+  margin: 18px auto 0;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-secondary);
 }
 .closing-actions {
   display: flex;
@@ -49,6 +59,22 @@ const isZh = useIsZh()
   gap: 12px;
   justify-content: center;
   margin-top: 44px;
+}
+.closing-thought {
+  margin: 40px 0 0;
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.closing-thought a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.closing-thought a:hover,
+.closing-thought a:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
 }
 @media (max-width: 640px) { .closing-section { padding: 88px 0; } .closing-actions { flex-direction: column; align-items: stretch; } .closing-actions .pd-btn { width: 100%; } }
 </style>

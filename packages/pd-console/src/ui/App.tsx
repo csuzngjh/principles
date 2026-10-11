@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { I18nextProvider } from "react-i18next";
+import { I18nextProvider, useTranslation } from "react-i18next";
 import i18n from "./i18n/index.js";
 import { ThemeProvider } from "./components/theme-provider.js";
-import { AppSidebar } from "./components/layout/app-sidebar.js";
+import { AppSidebar, MobileNav } from "./components/layout/app-sidebar.js";
 import { SplashScreen } from "./components/auth/splash-screen.js";
 import { LoginForm } from "./components/auth/login-form.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
@@ -33,6 +33,45 @@ import { getOnboardingState } from "./utils/onboarding-state.js";
 // Vite replaces import.meta.env.DEV with a boolean literal at build time.
 // The cast avoids TS2339 without needing a generated .d.ts file.
 const IS_DEV = (import.meta as unknown as { env: { DEV: boolean } }).env.DEV;
+
+/**
+ * SPEC-PD-UIUX-001 R4: the skip control must NOT touch the URL hash — the app
+ * routes through HashRouter, so an `#main-content` anchor navigates away and
+ * blanks the page. Focus main programmatically instead; the route is kept.
+ */
+function skipToMainContent() {
+  const main = document.getElementById("main-content");
+  if (main instanceof HTMLElement) {
+    main.focus({ preventScroll: true });
+    main.scrollIntoView({ block: "start", behavior: "auto" });
+  }
+}
+
+function AuthenticatedShell({ children, featureFlags }: { children: React.ReactNode; featureFlags?: Record<string, { enabled: boolean }> }) {
+  const { t } = useTranslation();
+  return (
+    <div className="min-h-screen bg-paper text-ink">
+      <button
+        type="button"
+        onClick={skipToMainContent}
+        data-testid="skip-to-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-4 focus:bg-paper focus:text-ink focus:font-medium"
+      >
+        {t("common.skipToMain", { defaultValue: "跳到正文" })}
+      </button>
+      <MobileNav featureFlags={featureFlags} />
+      <AppSidebar featureFlags={featureFlags} />
+      <main
+        id="main-content"
+        tabIndex={-1}
+        data-testid="main-content"
+        className="min-h-screen overflow-y-auto pt-14 lg:pt-0 lg:ml-[256px] focus:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gov"
+      >
+        {children}
+      </main>
+    </div>
+  );
+}
 
 function AuthRoutes() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -172,12 +211,7 @@ function AuthRoutes() {
             </div>
           ) : authed ? (
             <NotificationProvider>
-            <div className="min-h-screen bg-paper text-ink">
-              <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-4 focus:bg-paper focus:text-ink">
-                Skip to main content
-              </a>
-              <AppSidebar featureFlags={featureFlags ?? undefined} />
-              <main id="main-content" className="ml-[256px] min-h-screen overflow-y-auto">
+            <AuthenticatedShell featureFlags={featureFlags ?? undefined}>
                 <ErrorBoundary>
                   <Routes>
                     <Route path="/" element={<Navigate to="/focus" replace />} />
@@ -204,8 +238,7 @@ function AuthRoutes() {
                     )}
                   </Routes>
                 </ErrorBoundary>
-              </main>
-            </div>
+            </AuthenticatedShell>
             </NotificationProvider>
           ) : (
             <Navigate to="/login" replace />

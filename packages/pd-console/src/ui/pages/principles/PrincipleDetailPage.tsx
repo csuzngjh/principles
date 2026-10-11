@@ -119,13 +119,38 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
 };
 
 // ── Component ───────────────────────────────────────────────────────────────
-export function getReceiptPresentation(effectCount: number): {
-  headlineKey: 'principles.detail.receipts.headline' | 'principles.detail.receipts.headlinePresence';
+// SPEC-PD-UIUX-001 R1: the headline must agree with BOTH verified counts.
+//   effect>0            → effect headline (records exist; no permanence claim)
+//   effect=0,presence>0 → "injections recorded, no effect records yet"
+//   effect=0,presence=0 → "nothing observed within the current retention window"
+// Presence is never inferred from approval/activation, and effect is never
+// inferred from presence — the degraded branch (status≠ok) handles
+// "cannot be confirmed" separately.
+export function getReceiptPresentation(effectCount: number, presenceCount: number): {
+  headlineKey: 'principles.detail.receipts.headline' | 'principles.detail.receipts.headlinePresence' | 'principles.detail.receipts.headlineNone';
+  /** effect>0 且 presence=0 — effects exist without any presence records; note it, never fabricate presence. */
+  presenceMissing: boolean;
   showZeroEffectExplanation: boolean;
 } {
-  return effectCount > 0
-    ? { headlineKey: 'principles.detail.receipts.headline', showZeroEffectExplanation: false }
-    : { headlineKey: 'principles.detail.receipts.headlinePresence', showZeroEffectExplanation: true };
+  if (effectCount > 0) {
+    return {
+      headlineKey: 'principles.detail.receipts.headline',
+      presenceMissing: presenceCount === 0,
+      showZeroEffectExplanation: false,
+    };
+  }
+  if (presenceCount > 0) {
+    return {
+      headlineKey: 'principles.detail.receipts.headlinePresence',
+      presenceMissing: false,
+      showZeroEffectExplanation: true,
+    };
+  }
+  return {
+    headlineKey: 'principles.detail.receipts.headlineNone',
+    presenceMissing: false,
+    showZeroEffectExplanation: true,
+  };
 }
 
 // ── Governance control gating (PRI-582) ─────────────────────────────────────
@@ -492,7 +517,7 @@ export function PrincipleDetailPage() {
 
   const hasRules = principle.rules.length > 0;
   const receiptPresentation = receipts?.status === 'ok'
-    ? getReceiptPresentation(receipts.effectCount)
+    ? getReceiptPresentation(receipts.effectCount, receipts.presenceCount)
     : null;
 
   return (
@@ -965,9 +990,10 @@ export function PrincipleDetailPage() {
           {receipts.status === 'ok' ? (
             <div data-testid="receipt-history" className="rounded-[var(--radius-md)] border border-line p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                {/* PRI-572: presence ≠ effect. The behavior-influence headline is
-                    only justified by deterministic/self-reported effect records;
-                    with effectCount=0 the claim degrades to context presence. */}
+                {/* PRI-572 + SPEC-PD-UIUX-001 R1: presence ≠ effect, and zero
+                    ≠ never-happened. The headline is chosen from BOTH verified
+                    counts (getReceiptPresentation) — an unverified "already in
+                    context" claim is never derived from approval/activation. */}
                 <h2 id="receipt-history-title" className="text-[15px] font-semibold text-ink">
                   {receiptPresentation?.headlineKey === 'principles.detail.receipts.headline'
                     ? t(receiptPresentation.headlineKey, {
@@ -975,7 +1001,7 @@ export function PrincipleDetailPage() {
                         effectCount: receipts.effectCount,
                         lastEffectAt: receipts.lastEffectAt ? formatDate(receipts.lastEffectAt, i18n.language) : '',
                       })
-                    : t('principles.detail.receipts.headlinePresence')}
+                    : t(receiptPresentation?.headlineKey ?? 'principles.detail.receipts.headlinePresence')}
                 </h2>
                 <span data-testid="receipt-history-counts" className="font-mono text-[11px] text-ink-3">
                   {t('principles.detail.receipts.counts', { effectCount: receipts.effectCount, presenceCount: receipts.presenceCount })}
@@ -983,7 +1009,14 @@ export function PrincipleDetailPage() {
               </div>
               {receiptPresentation?.showZeroEffectExplanation && (
                 <p data-testid="receipt-history-zero-effect" className="mt-2 text-[12px] leading-relaxed text-ink-3">
-                  {t('principles.detail.receipts.zeroEffect')}
+                  {t(receipts.presenceCount > 0
+                    ? 'principles.detail.receipts.zeroEffectPresence'
+                    : 'principles.detail.receipts.zeroEffectNone')}
+                </p>
+              )}
+              {receiptPresentation?.presenceMissing && (
+                <p data-testid="receipt-history-presence-missing" className="mt-2 text-[12px] leading-relaxed text-ink-3">
+                  {t('principles.detail.receipts.presenceMissingNote')}
                 </p>
               )}
               {receipts.events.length > 0 ? (
@@ -1020,12 +1053,11 @@ export function PrincipleDetailPage() {
       {/* ── PD v2 Phase 1: Intervention Evidence Audit (证据链四问) ─────── */}
       {evidenceAudit !== null && (
         <section className="mb-8" aria-labelledby="evidence-audit-title">
-          <SectionTitle>{t('principles.detail.evidenceAudit.title', { defaultValue: '干预证据链（Phase 1）' })}</SectionTitle>
+          <SectionTitle>{t('principles.detail.evidenceAudit.title')}</SectionTitle>
           {evidenceAudit.status === 'ok' ? (
             <div data-testid="evidence-audit" className="rounded-[var(--radius-md)] border border-line p-4">
               <h2 id="evidence-audit-title" className="text-[15px] font-semibold text-ink">
                 {t('principles.detail.evidenceAudit.headline', {
-                  defaultValue: '投递 {{d}} · 应用 {{a}} · 行为 {{e}} · 效果 {{f}} · 结果 {{o}}',
                   d: evidenceAudit.deliveries.length,
                   a: evidenceAudit.applications.length,
                   e: evidenceAudit.episodes.length,
@@ -1036,25 +1068,24 @@ export function PrincipleDetailPage() {
               {evidenceAudit.unresolvedReferences.length > 0 && (
                 <p data-testid="evidence-audit-unresolved" className="mt-2 text-[12px] text-amber">
                   {t('principles.detail.evidenceAudit.unresolved', {
-                    defaultValue: '{{count}} 条记录的关联对象尚未到达（pending association，非"未发生"）',
                     count: evidenceAudit.unresolvedReferences.length,
                   })}
                 </p>
               )}
               <dl className="mt-3 space-y-2 text-[13px]">
                 {([
-                  ['delivery', '投递（Delivery）', evidenceAudit.deliveries, 'delivery'],
-                  ['application', '应用（Application）', evidenceAudit.applications, 'application'],
-                  ['episode', '行为（Episode）', evidenceAudit.episodes, 'behavior_episode'],
-                  ['effect', '效果（Effect）', evidenceAudit.effects, 'effect'],
-                  ['outcome', '结果（Outcome）', evidenceAudit.outcomes, 'outcome'],
-                ] as const).map(([key, label, list, recordKind]) => (
+                  ['delivery', 'principles.detail.evidenceAudit.sectionDelivery', evidenceAudit.deliveries, 'delivery'],
+                  ['application', 'principles.detail.evidenceAudit.sectionApplication', evidenceAudit.applications, 'application'],
+                  ['episode', 'principles.detail.evidenceAudit.sectionEpisode', evidenceAudit.episodes, 'behavior_episode'],
+                  ['effect', 'principles.detail.evidenceAudit.sectionEffect', evidenceAudit.effects, 'effect'],
+                  ['outcome', 'principles.detail.evidenceAudit.sectionOutcome', evidenceAudit.outcomes, 'outcome'],
+                ] as const).map(([key, labelKey, list, recordKind]) => (
                   <div key={key} className="border-t border-line pt-2">
-                    <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{label}</dt>
+                    <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{t(labelKey)}</dt>
                     <dd className="mt-1">
                       {list.length === 0 ? (
                         <span className="text-[13px] text-ink-3">
-                          {t('principles.detail.evidenceAudit.emptySection', { defaultValue: '本范围内未观察到（≠ 从未发生）' })}
+                          {t('principles.detail.evidenceAudit.emptySection')}
                         </span>
                       ) : (
                         <ul className="space-y-1">
@@ -1062,15 +1093,10 @@ export function PrincipleDetailPage() {
                             <li key={record.evidenceId} className="flex flex-wrap items-baseline gap-2 text-[13px] text-ink-2">
                               <span className="font-mono text-[11px] text-ink-4">{record.recordedAt.slice(0, 16).replace('T', ' ')}</span>
                               <span className="font-mono text-[11px]">{record.summary}</span>
-                              <span className="min-w-0 flex-1 truncate" title={`${record.observationKey}\n${record.detail}`}>{record.detail}</span>
-                              {record.sourceStatus === 'unknown' && <span className="text-[10px] text-amber">源可复核性未知</span>}
-                              {record.contentRedactedAt && <span className="text-[10px] text-ink-4">正文已于 {record.contentRedactedAt.slice(0, 10)} 清除</span>}
-                              {record.contentReference && <span className="text-[10px] text-ink-4" title={record.contentReference.payloadDigest ?? '无载荷摘要'}>内容引用：{record.contentReference.resolution === 'resolved' ? 'resolved' : 'revision 未解析'} · {record.contentReference.principleId}{record.contentReference.artifactId ? ` · ${record.contentReference.artifactId}` : ''}</span>}
-                              {record.activationReference && <span className="text-[10px] text-ink-4" title={`snapshot ${record.activationReference.sourceSnapshotDigest}`}>激活发生：{record.activationReference.activationId}{record.activationReference.activatedAt ? ` · ${record.activationReference.activatedAt}` : ''}</span>}
-                              {record.nativeLineage.length > 0 && <span className="text-[10px] text-ink-4">原生线索：{record.nativeLineage.join(' · ')}</span>}
+                              <span className="min-w-0 flex-1 break-words" title={`${record.observationKey}\n${record.detail}`}>{record.detail}</span>
                               {record.associationStatus === 'pending_association' && (
                                 <span className="font-mono text-[10px] rounded bg-amber/15 px-1.5 py-0.5 text-amber">
-                                  {t('principles.detail.evidenceAudit.pending', { defaultValue: '待关联' })}
+                                  {t('principles.detail.evidenceAudit.pending')}
                                 </span>
                               )}
                             </li>
@@ -1080,7 +1106,7 @@ export function PrincipleDetailPage() {
                     </dd>
                     {evidenceAudit.pages[recordKind].hasMore && (
                       <Button variant="ghost" size="sm" disabled={loadingEvidenceKind !== null} onClick={() => void loadOlderEvidence(recordKind)}>
-                        {loadingEvidenceKind === recordKind ? '读取中…' : '读取更早记录'}
+                        {loadingEvidenceKind === recordKind ? t('principles.detail.evidenceAudit.loading') : t('principles.detail.evidenceAudit.loadOlder')}
                       </Button>
                     )}
                   </div>
@@ -1089,7 +1115,7 @@ export function PrincipleDetailPage() {
               {evidenceAudit.capabilityDeclarations.length > 0 && (
                 <details className="mt-3 border-t border-line pt-3">
                   <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                    {t('principles.detail.evidenceAudit.capabilities', { defaultValue: '宿主能力声明（Supported / Unsupported / Unknown）' })}
+                    {t('principles.detail.evidenceAudit.capabilities')}
                   </summary>
                   <ul className="mt-2 space-y-1">
                     {evidenceAudit.capabilityDeclarations.map((cap) => (
@@ -1101,16 +1127,61 @@ export function PrincipleDetailPage() {
                   </ul>
                 </details>
               )}
+              {/* SPEC-PD-UIUX-001 R6: engineering details (revision references,
+                  payload digests, source identifiers, phase labels) are kept
+                  verbatim for traceability but moved out of the default Owner
+                  view — the default view shows the records and the gaps. */}
+              <details className="mt-3 border-t border-line pt-3" data-testid="evidence-audit-technical">
+                <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                  {t('principles.detail.evidenceAudit.technicalSummary')}
+                </summary>
+                <p className="mt-2 text-[11px] leading-relaxed text-ink-4">
+                  {t('principles.detail.evidenceAudit.technicalNote')}
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {([
+                    ['principles.detail.evidenceAudit.sectionDelivery', evidenceAudit.deliveries],
+                    ['principles.detail.evidenceAudit.sectionApplication', evidenceAudit.applications],
+                    ['principles.detail.evidenceAudit.sectionEpisode', evidenceAudit.episodes],
+                    ['principles.detail.evidenceAudit.sectionEffect', evidenceAudit.effects],
+                    ['principles.detail.evidenceAudit.sectionOutcome', evidenceAudit.outcomes],
+                  ] as const).flatMap(([labelKey, list]) =>
+                    list.map((record) => (
+                      <li key={record.evidenceId} className="text-[11px] leading-relaxed text-ink-4">
+                        <span className="font-mono">{record.evidenceId}</span>
+                        {record.sourceStatus === 'unknown' && <> · {t('principles.detail.evidenceAudit.sourceUnknown')}</>}
+                        {record.contentRedactedAt && <> · {t('principles.detail.evidenceAudit.contentRedacted', { date: record.contentRedactedAt.slice(0, 10) })}</>}
+                        {record.contentReference && (
+                          <> · {t('principles.detail.evidenceAudit.contentReference', {
+                            resolution: record.contentReference.resolution === 'resolved' ? t('principles.detail.evidenceAudit.referenceResolved') : t('principles.detail.evidenceAudit.referenceUnresolved'),
+                            principleId: record.contentReference.principleId,
+                            artifactId: record.contentReference.artifactId ? ` · ${record.contentReference.artifactId}` : '',
+                            // Review round (P2): keep the payload digest traceable —
+                            // the technical note promises it.
+                            payloadDigest: ` · ${t('principles.detail.evidenceAudit.payloadDigestLabel')}: ${record.contentReference.payloadDigest ?? t('principles.detail.evidenceAudit.noPayloadDigest')}`,
+                          })}</>
+                        )}
+                        {record.activationReference && (
+                          <> · {t('principles.detail.evidenceAudit.activationReference', {
+                            activationId: record.activationReference.activationId,
+                            activatedAt: record.activationReference.activatedAt ? ` · ${record.activationReference.activatedAt}` : '',
+                            snapshotDigest: ` · ${t('principles.detail.evidenceAudit.snapshotDigestLabel')}: ${record.activationReference.sourceSnapshotDigest}`,
+                          })}</>
+                        )}
+                        {record.nativeLineage.length > 0 && <> · {t('principles.detail.evidenceAudit.nativeLineage', { lineage: record.nativeLineage.join(' · ') })}</>}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </details>
               <p className="mt-3 text-[11px] leading-relaxed text-ink-4">
-                {t('principles.detail.evidenceAudit.note', {
-                  defaultValue: '本区只记录事实：投递确认程度、Agent 自述与 Runtime 事实分开列出，缺失=未知而非无效。不提供成功率或有效性评分。',
-                })}
+                {t('principles.detail.evidenceAudit.note')}
               </p>
             </div>
           ) : (
             <div data-testid="evidence-audit-degraded" className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
               <h3 className="text-[13px] font-semibold text-ink">
-                {t('principles.detail.evidenceAudit.unavailable', { defaultValue: '干预证据链暂不可用' })}
+                {t('principles.detail.evidenceAudit.unavailable')}
               </h3>
               <p className="mt-1 text-[13px] text-ink-2">{evidenceAudit.reason ?? '—'}</p>
               {evidenceAudit.nextAction && <p className="mt-1 text-[12px] text-ink-3">{evidenceAudit.nextAction}</p>}

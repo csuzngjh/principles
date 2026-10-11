@@ -12,7 +12,10 @@
   --border: rgba(0, 0, 0, 0.08);
   --text-main: #1A1D23;
   --text-secondary: #5A5F6B;
-  --text-muted: #8A8F99;
+  /* SPEC-PD-UIUX-001 R5: muted must read ≥4.5:1 on real backgrounds
+     (white page 5.25:1, --surface 4.86:1) — boundary/disclaimer copy is body
+     text, not decoration. Still dimmer than --text-secondary (5.91:1). */
+  --text-muted: #676C79;
 }
 
 /* Dark mode — serene values */
@@ -20,12 +23,14 @@
   --accent: #7EB8DA;
   --accent-dim: rgba(126, 184, 218, 0.10);
   --accent-border: rgba(126, 184, 218, 0.12);
-  
+
   --surface: #13151A;
   --border: rgba(255, 255, 255, 0.06);
   --text-main: #E0E2E6;
   --text-secondary: #8A8F99;
-  --text-muted: #555960;
+  /* SPEC-PD-UIUX-001 R5: 2.60:1 was unreadable; 5.26:1 on --surface and 5.47:1
+     on the page background, still dimmer than --text-secondary (5.63:1). */
+  --text-muted: #838A97;
 }
 
 /* Legacy compat — map old names to accent */

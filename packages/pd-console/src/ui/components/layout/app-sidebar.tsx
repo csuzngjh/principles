@@ -15,12 +15,14 @@ import {
   RefreshCw,
   LogOut,
   Languages,
+  Menu,
 } from "lucide-react";
 import { useTheme } from "../theme-provider.js";
 import { useTranslation } from "react-i18next";
 import { useNotifications } from "../notifications/useNotifications.js";
 import { clearToken } from "../../api.js";
 import { cn } from "../../../lib/utils.js";
+import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "../ui/sheet.js";
 
 function ThresholdMark({ className }: { className?: string }) {
   return (
@@ -55,7 +57,20 @@ const toolNavItems = [
   { id: "update", labelKey: "components.sidebar.update", href: "/update", icon: RefreshCw },
 ];
 
-export function AppSidebar({ featureFlags }: { featureFlags?: Record<string, { enabled: boolean }> }) {
+/**
+ * Shared sidebar body — rendered by the desktop aside and by the narrow-screen
+ * drawer (SPEC-PD-UIUX-001 R3). Display-only: navigation targets and flags are
+ * unchanged; `onNavigate` lets the drawer close after a selection.
+ */
+function SidebarContent({
+  featureFlags,
+  onNavigate,
+  touchTargets,
+}: {
+  featureFlags?: Record<string, { enabled: boolean }>;
+  onNavigate?: () => void;
+  touchTargets?: boolean;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
@@ -79,24 +94,9 @@ export function AppSidebar({ featureFlags }: { featureFlags?: Record<string, { e
   };
 
   return (
-    <aside className="w-[256px] h-screen fixed left-0 top-0 flex flex-col bg-surface border-r border-line flex-shrink-0 z-20">
-      {/* Brand area */}
-      <div className="px-5 pt-5 pb-4">
-        <div className="flex items-center gap-2.5">
-          <ThresholdMark className="w-6 h-6 text-gov" />
-          <div>
-            <div className="font-mono text-[14px] tracking-[0.16em] font-bold text-ink">
-              PD
-            </div>
-            <div className="font-mono text-[10px] tracking-[0.14em] text-ink-3">
-              GOVERNANCE WORKSPACE
-            </div>
-          </div>
-        </div>
-      </div>
-
+    <>
       {/* Main nav */}
-      <nav className="flex-1 py-2 overflow-y-auto">
+      <nav className="flex-1 py-2 overflow-y-auto" aria-label={t("components.sidebar.navigation", { defaultValue: "主导航" })}>
         <div className="px-2">
           {mainNavItems.map((item) => {
             const Icon = item.icon;
@@ -106,8 +106,11 @@ export function AppSidebar({ featureFlags }: { featureFlags?: Record<string, { e
                 key={item.id}
                 to={item.href}
                 data-testid={`nav-${item.id}`}
+                aria-current={active ? "page" : undefined}
+                onClick={onNavigate}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-[var(--radius-sm)] text-[13px] transition-all duration-150",
+                  "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[13px] transition-all duration-150",
+                  touchTargets ? "min-h-[44px] py-2" : "py-2",
                   active
                     ? "border-l-2 border-l-gov bg-paper-2 text-ink"
                     : "border-l-2 border-l-transparent text-ink-3 hover:text-ink hover:bg-paper-2"
@@ -148,8 +151,11 @@ export function AppSidebar({ featureFlags }: { featureFlags?: Record<string, { e
                   key={item.id}
                   to={item.href}
                   data-testid={`nav-${item.id}`}
+                  aria-current={active ? "page" : undefined}
+                  onClick={onNavigate}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-1.5 rounded-[var(--radius-sm)] text-[12px] transition-all duration-150",
+                    "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[12px] transition-all duration-150",
+                    touchTargets ? "min-h-[44px] py-2" : "py-1.5",
                     active
                       ? "border-l-2 border-l-gov bg-paper-2 text-ink"
                       : "border-l-2 border-l-transparent text-ink-4 hover:text-ink-3 hover:bg-paper-2"
@@ -177,23 +183,29 @@ export function AppSidebar({ featureFlags }: { featureFlags?: Record<string, { e
         <button
           type="button"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          className="flex items-center gap-3 px-3 py-1.5 rounded-[var(--radius-sm)] text-[12px] text-ink-4 hover:text-ink-3 hover:bg-paper-2 transition-colors w-full"
-          title={theme === "dark" ? "切换亮色模式" : "切换暗色模式"}
+          className={cn(
+            "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[12px] text-ink-4 hover:text-ink-3 hover:bg-paper-2 transition-colors w-full",
+            touchTargets ? "min-h-[44px] py-2" : "py-1.5"
+          )}
+          title={theme === "dark" ? t("components.sidebar.themeToLight") : t("components.sidebar.themeToDark")}
         >
           {theme === "dark" ? (
             <Sun className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
           ) : (
             <Moon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
           )}
-          <span>{theme === "dark" ? "亮色模式" : "暗色模式"}</span>
+          <span>{theme === "dark" ? t("components.sidebar.themeToLight") : t("components.sidebar.themeToDark")}</span>
         </button>
 
         {/* Language switcher */}
         <button
           type="button"
           onClick={toggleLanguage}
-          className="flex items-center gap-3 px-3 py-1.5 rounded-[var(--radius-sm)] text-[12px] text-ink-4 hover:text-ink-3 hover:bg-paper-2 transition-colors w-full"
-          title="切换语言"
+          className={cn(
+            "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[12px] text-ink-4 hover:text-ink-3 hover:bg-paper-2 transition-colors w-full",
+            touchTargets ? "min-h-[44px] py-2" : "py-1.5"
+          )}
+          title={t("components.sidebar.switchLanguage")}
         >
           <Languages className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
           <span>{i18n.language === "zh-CN" ? "English" : "中文"}</span>
@@ -203,12 +215,122 @@ export function AppSidebar({ featureFlags }: { featureFlags?: Record<string, { e
         <button
           type="button"
           onClick={handleSignOut}
-          className="flex items-center gap-3 px-3 py-1.5 rounded-[var(--radius-sm)] text-[12px] text-ink-4 hover:text-ink-3 hover:bg-paper-2 transition-colors w-full"
+          className={cn(
+            "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[12px] text-ink-4 hover:text-ink-3 hover:bg-paper-2 transition-colors w-full",
+            touchTargets ? "min-h-[44px] py-2" : "py-1.5"
+          )}
         >
           <LogOut className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-          <span>退出</span>
+          <span>{t("components.sidebar.signOut")}</span>
         </button>
       </div>
+    </>
+  );
+}
+
+export function AppSidebar({ featureFlags }: { featureFlags?: Record<string, { enabled: boolean }> }) {
+  return (
+    <aside className="w-[256px] h-screen fixed left-0 top-0 hidden lg:flex flex-col bg-surface border-r border-line flex-shrink-0 z-20">
+      {/* Brand area */}
+      <div className="px-5 pt-5 pb-4">
+        <div className="flex items-center gap-2.5">
+          <ThresholdMark className="w-6 h-6 text-gov" />
+          <div>
+            <div className="font-mono text-[14px] tracking-[0.16em] font-bold text-ink">
+              PD
+            </div>
+            <div className="font-mono text-[10px] tracking-[0.14em] text-ink-3">
+              GOVERNANCE WORKSPACE
+            </div>
+          </div>
+        </div>
+      </div>
+      <SidebarContent featureFlags={featureFlags} />
     </aside>
+  );
+}
+
+/**
+ * Narrow-screen shell replacement for the fixed 256px sidebar (R3): a top bar
+ * with a 44px menu button opening a left Sheet drawer. Radix Dialog provides
+ * focus trapping, Esc-to-close and focus return to the trigger; selecting a
+ * route closes the drawer. Desktop keeps the fixed sidebar (lg and up).
+ */
+export function MobileNav({ featureFlags }: { featureFlags?: Record<string, { enabled: boolean }> }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = React.useState(false);
+  const location = useLocation();
+
+  // Route changes (e.g. browser back/forward) close the drawer so the main
+  // content is never left behind a stale overlay.
+  React.useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
+
+  // SPEC-PD-UIUX-001 R3 (Owner review Q2): the Sheet portals to <body>, so
+  // growing a 390px window to desktop left the overlay + focus trap alive over
+  // the now-visible fixed sidebar. Crossing INTO the desktop breakpoint closes
+  // the drawer; where focus lands is decided in onCloseAutoFocus below (the
+  // hidden trigger cannot receive it on desktop).
+  React.useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches && open) {
+        setOpen(false);
+      }
+    };
+    desktop.addEventListener("change", onChange);
+    return () => desktop.removeEventListener("change", onChange);
+  }, [open]);
+
+  return (
+    <header className="lg:hidden fixed top-0 left-0 right-0 z-30 h-14 flex items-center gap-2 px-3 bg-surface border-b border-line">
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetTrigger asChild>
+          <button
+            type="button"
+            data-testid="mobile-nav-trigger"
+            aria-label={t("components.sidebar.openMenu")}
+            className="inline-flex items-center justify-center h-11 w-11 rounded-[var(--radius-sm)] text-ink-3 hover:text-ink hover:bg-paper-2 transition-colors"
+          >
+            <Menu className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </SheetTrigger>
+        <SheetContent
+          side="left"
+          className="w-[280px] max-w-[85vw] p-0 border-r border-line bg-surface flex flex-col"
+          data-testid="mobile-nav-drawer"
+          onCloseAutoFocus={(event) => {
+            // On desktop the trigger is display:none and cannot take focus
+            // back (review Q2): hand focus to the main content instead. On
+            // mobile keep Radix's default return-to-trigger behavior.
+            if (window.matchMedia("(min-width: 1024px)").matches) {
+              event.preventDefault();
+              const main = document.getElementById("main-content");
+              if (main instanceof HTMLElement) {
+                main.focus({ preventScroll: true });
+              }
+            }
+          }}
+        >
+          <SheetTitle className="sr-only">{t("components.sidebar.navigation")}</SheetTitle>
+          <SheetDescription className="sr-only">{t("components.sidebar.navigationDescription")}</SheetDescription>
+          <div className="px-5 pt-5 pb-4 border-b border-line">
+            <div className="flex items-center gap-2.5">
+              <ThresholdMark className="w-6 h-6 text-gov" />
+              <div>
+                <div className="font-mono text-[14px] tracking-[0.16em] font-bold text-ink">PD</div>
+                <div className="font-mono text-[10px] tracking-[0.14em] text-ink-3">GOVERNANCE WORKSPACE</div>
+              </div>
+            </div>
+          </div>
+          <SidebarContent featureFlags={featureFlags} onNavigate={() => setOpen(false)} touchTargets />
+        </SheetContent>
+      </Sheet>
+      <div className="flex items-center gap-2 min-w-0">
+        <ThresholdMark className="w-5 h-5 text-gov flex-shrink-0" />
+        <span className="font-mono text-[12px] tracking-[0.12em] font-bold text-ink truncate">PD</span>
+      </div>
+    </header>
   );
 }

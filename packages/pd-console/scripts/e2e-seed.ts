@@ -25,6 +25,7 @@ if (!workspaceDir || !fs.existsSync(workspaceDir)) {
 
 const now = new Date().toISOString();
 const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
 
 // ── I3 activation identity (PR #1856): seed ledger-backed UUID identities ────
 // The activation dispatcher now resolves the artifact's `source_principle_id`
@@ -423,6 +424,29 @@ insertClickApproval.run(
   'apr-click-edit', 'artifact-click-edit', 'prompt', 'low', 'pending', 0.85,
   eightDaysAgo, '点击测试：编辑', 'Owner 审批：UI 点击编辑',
 );
+
+// ── 9b. principle_applications receipts (SPEC-PD-UIUX-001 R1) ────────────────
+// Four VERIFIED receipt states so the principle-detail receipt semantics can
+// be exercised against real pages (not just source contracts):
+//   p-001                         → 0 presence / 0 effect  (nothing observed)
+//   promptBdd                     → 3 presence / 0 effect  (injections, no effects)
+//   clickReject                   → 2 presence / 1 effect   (effects with presence)
+//   clickApprove                  → 0 presence / 1 effect   (effects WITHOUT presence)
+const insertReceipt = stateConn.getDb().prepare(`
+  INSERT INTO principle_applications (
+    principle_id, activation_id, rule_id, channel, level, kind,
+    session_id, tool_name, file_path, digest, created_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+const receiptChannel = 'prompt';
+insertReceipt.run(PRINCIPLE_IDS.promptBdd, null, null, receiptChannel, 'presence', 'prompt_injected', 'session-e2e-r1-a', null, null, 'prompt bdd presence 1', threeDaysAgo);
+insertReceipt.run(PRINCIPLE_IDS.promptBdd, null, null, receiptChannel, 'presence', 'prompt_injected', 'session-e2e-r1-b', null, null, 'prompt bdd presence 2', threeDaysAgo);
+insertReceipt.run(PRINCIPLE_IDS.promptBdd, null, null, receiptChannel, 'presence', 'prompt_injected', 'session-e2e-r1-c', null, null, 'prompt bdd presence 3', threeDaysAgo);
+insertReceipt.run(PRINCIPLE_IDS.clickReject, null, null, receiptChannel, 'presence', 'prompt_injected', 'session-e2e-r1-d', null, null, 'reject presence 1', threeDaysAgo);
+insertReceipt.run(PRINCIPLE_IDS.clickReject, null, null, receiptChannel, 'presence', 'prompt_injected', 'session-e2e-r1-e', null, null, 'reject presence 2', threeDaysAgo);
+insertReceipt.run(PRINCIPLE_IDS.clickReject, null, null, receiptChannel, 'effect', 'self_reported', 'session-e2e-r1-e', null, null, 'reject self-reported effect', threeDaysAgo);
+insertReceipt.run(PRINCIPLE_IDS.clickApprove, null, null, receiptChannel, 'effect', 'auto_correct_applied', 'session-e2e-r1-f', null, null, 'approve auto-correct effect (no presence rows)', threeDaysAgo);
+console.log('[e2e-seed] principle_applications seeded: 4 receipt states for R1 verification');
 
 stateConn.close();
 console.log('[e2e-seed] state.db seeded with approvals plus shadow/live RuleCode Owner review fixtures');

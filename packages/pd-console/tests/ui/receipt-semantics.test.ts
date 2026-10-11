@@ -19,26 +19,61 @@ const en = parseJsonRecord(fs.readFileSync(path.join(SRC_UI_ROOT, 'i18n/en.json'
 const zh = parseJsonRecord(fs.readFileSync(path.join(SRC_UI_ROOT, 'i18n/zh-CN.json'), 'utf8'));
 
 describe('PRI-572 receipt presence/effect semantic separation', () => {
-  it('selects the owner-visible receipt presentation from effect evidence', async () => {
+  it('selects the owner-visible receipt presentation from BOTH verified counts (SPEC-PD-UIUX-001 R1)', async () => {
     const pageModule: Record<string, unknown> = await import('../../src/ui/pages/principles/PrincipleDetailPage.js');
     const getReceiptPresentation = pageModule['getReceiptPresentation'];
     expect(typeof getReceiptPresentation).toBe('function');
     if (typeof getReceiptPresentation !== 'function') return;
 
-    expect(getReceiptPresentation(0)).toEqual({
-      headlineKey: 'principles.detail.receipts.headlinePresence',
+    // R1 state matrix — each verified data combination maps to one intent:
+    // ok + Presence=0 + Effect=0 → "nothing observed in retention window"
+    expect(getReceiptPresentation(0, 0)).toEqual({
+      headlineKey: 'principles.detail.receipts.headlineNone',
+      presenceMissing: false,
       showZeroEffectExplanation: true,
     });
-    expect(getReceiptPresentation(2)).toEqual({
+    // ok + Presence>0 + Effect=0 → "injections recorded, no effects yet"
+    expect(getReceiptPresentation(0, 3)).toEqual({
+      headlineKey: 'principles.detail.receipts.headlinePresence',
+      presenceMissing: false,
+      showZeroEffectExplanation: true,
+    });
+    // ok + Effect>0 + Presence>0 → effect headline, no fabrication needed
+    expect(getReceiptPresentation(2, 5)).toEqual({
       headlineKey: 'principles.detail.receipts.headline',
+      presenceMissing: false,
       showZeroEffectExplanation: false,
     });
+    // ok + Effect>0 + Presence=0 → effects stand alone; note the missing
+    // presence records instead of inventing them
+    expect(getReceiptPresentation(2, 0)).toEqual({
+      headlineKey: 'principles.detail.receipts.headline',
+      presenceMissing: true,
+      showZeroEffectExplanation: false,
+    });
+  });
+
+  it('never maps zero-presence-zero-effect onto the "already in context" headline', async () => {
+    const pageModule: Record<string, unknown> = await import('../../src/ui/pages/principles/PrincipleDetailPage.js');
+    const getReceiptPresentation = pageModule['getReceiptPresentation'] as (e: number, p: number) => { headlineKey: string };
+    // The 0/0 combination must not claim the principle entered the context.
+    expect(getReceiptPresentation(0, 0).headlineKey).not.toBe('principles.detail.receipts.headlinePresence');
+    expect(getReceiptPresentation(0, 0).headlineKey).not.toBe('principles.detail.receipts.headline');
   });
 
   it('explains the zero-effect state instead of leaving an unexplained counter', () => {
     expect(page).toContain('data-testid="receipt-history-zero-effect"');
     expect(page).toContain('receiptPresentation?.showZeroEffectExplanation');
-    expect(page).toContain('principles.detail.receipts.zeroEffect');
+    // The zero-effect copy is chosen from the presence count so the 0/0 and
+    // presence-only states get different, truthful explanations.
+    expect(page).toContain("'principles.detail.receipts.zeroEffectPresence'");
+    expect(page).toContain("'principles.detail.receipts.zeroEffectNone'");
+  });
+
+  it('notes missing presence records when effects exist without injections (no fabricated presence)', () => {
+    expect(page).toContain('data-testid="receipt-history-presence-missing"');
+    expect(page).toContain('receiptPresentation?.presenceMissing');
+    expect(page).toContain("'principles.detail.receipts.presenceMissingNote'");
   });
 
   it('keeps the data contract intact: counts, timeline and degraded block are unchanged', () => {
@@ -47,15 +82,33 @@ describe('PRI-572 receipt presence/effect semantic separation', () => {
     expect(page).toContain('data-testid="receipt-history-degraded"');
   });
 
-  it('ships matching receipts keys in both locales, including the new presence-only copy', () => {
+  it('ships matching receipts keys in both locales, including the R1 state matrix copy', () => {
     for (const locale of [en, zh]) {
       const counts = getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'counts']);
       const headlinePresence = getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'headlinePresence']);
-      const zeroEffect = getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'zeroEffect']);
+      const headlineNone = getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'headlineNone']);
+      const zeroEffectPresence = getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'zeroEffectPresence']);
+      const zeroEffectNone = getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'zeroEffectNone']);
+      const presenceMissingNote = getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'presenceMissingNote']);
       expect(counts).toContain('{{effectCount}}');
       expect(counts).toContain('{{presenceCount}}');
       expect(headlinePresence.length).toBeGreaterThan(0);
-      expect(zeroEffect.length).toBeGreaterThan(0);
+      expect(headlineNone.length).toBeGreaterThan(0);
+      expect(zeroEffectPresence.length).toBeGreaterThan(0);
+      expect(zeroEffectNone.length).toBeGreaterThan(0);
+      expect(presenceMissingNote.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps the zero-count headlines honest in both locales (no contradiction with the numbers)', () => {
+    // The presence-only headline states injections were recorded — wording
+    // must not claim the principle currently influences decisions.
+    for (const locale of [en, zh]) {
+      const headlinePresence = getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'headlinePresence']);
+      expect(headlinePresence).not.toMatch(/已进入|part of the agent/i);
+      const headlineNone = getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'headlineNone']);
+      // The none headline must scope the claim to the retention window.
+      expect(headlineNone).toMatch(/保留范围|retention window/i);
     }
   });
 

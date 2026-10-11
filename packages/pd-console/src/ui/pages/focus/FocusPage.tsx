@@ -84,6 +84,120 @@ export function summarizeDecisionResults(results: readonly DecisionResult[]): {
   };
 }
 
+/**
+ * SPEC-PD-UIUX-001 R2: how the owner-inbox display items map onto the Focus
+ * page after the reading-order rework. Pure display partitioning — no
+ * permission or lifecycle decisions happen here.
+ *
+ * - decision items whose principleId matches an on-screen action card are NOT
+ *   duplicated as full cards (one primary action surface per object); the
+ *   match uses the verified principleId association field, never titles;
+ * - unmatched decision items are preserved (with their own entry) — objects
+ *   are never hidden for visual tidiness;
+ * - two different decisions of the same principle are never merged: each
+ *   action card keeps its own object; this partition only affects the
+ *   display-only inbox projection;
+ * - blocked items follow the inbox.attention semantics: 'individual' items
+ *   render one card each, everything else gets one aggregate count;
+ * - historical unknowns stay an explanatory notice (not part of the todo
+ *   count).
+ */
+export function partitionInboxForDisplay<T extends { principleId: string; inbox: { group: string; attention: string } }>(
+  inbox: {
+    groups: {
+      decision: T[];
+      blocked: T[];
+      recovery: T[];
+    };
+    historicalUnknown: { count: number };
+  },
+  actionCardPrincipleIds: ReadonlySet<string>,
+): {
+  unmatchedDecisions: T[];
+  blockedIndividual: T[];
+  blockedAggregate: T[];
+  recovery: T[];
+  pendingTotal: number;
+} {
+  const blockedIndividual = inbox.groups.blocked.filter((item) => item.inbox.attention === "individual");
+  const blockedAggregate = inbox.groups.blocked.filter((item) => item.inbox.attention !== "individual");
+  const unmatchedDecisions = inbox.groups.decision.filter((item) => !actionCardPrincipleIds.has(item.principleId));
+  return {
+    unmatchedDecisions,
+    blockedIndividual,
+    blockedAggregate,
+    recovery: inbox.groups.recovery,
+    // 待处理口径: decision + blocked-individual + recovery (INV-01 lineage).
+    pendingTotal: inbox.groups.decision.length + blockedIndividual.length + inbox.groups.recovery.length,
+  };
+}
+
+/**
+ * SPEC-PD-UIUX-001 R2 (Owner review round 2): the conclusion strip's headline
+ * and total must agree with the objects actually on screen and with the inbox
+ * response contract.
+ *
+ * Modes (display-only; no permission derivation):
+ * - 'unavailable' — inbox projection off (feature_disabled surfaces as
+ *   ownerInbox===null with NO error) or the request failed: the pending count
+ *   CANNOT be confirmed; never allClear.
+ * - 'degraded' — the inbox answered HTTP-success but carries
+ *   `degraded: { reason, nextAction }` (e.g. principle ledger unreadable, the
+ *   server then returns EMPTY groups): counts cannot be trusted; the strip
+ *   shows the server's reason + nextAction and never allClear.
+ * - 'ok' — counts are trusted.
+ *
+ * Counting (S2): displayTotal = actionableCount + inbox pending items NOT
+ * already represented by an on-screen action card. The association is the
+ * verified principleId field (partition.unmatchedDecisions are inbox items
+ * WITHOUT a card). One inbox item matching N cards of the same principle
+ * counts the N cards (each is a distinct decision); disjoint sets sum.
+ */
+export function deriveConclusionDisplay(input: {
+  ownerInbox: { groups: { decision: unknown[] }; degraded?: { reason: string; nextAction: string } } | null;
+  ownerInboxError: string | null;
+  partition: { pendingTotal: number; unmatchedDecisions: unknown[] } | null;
+  actionableCount: number;
+}): {
+  mode: 'ok' | 'degraded' | 'unavailable';
+  displayTotal: number;
+  actionableCount: number;
+  degraded?: { reason: string; nextAction: string };
+} {
+  if (input.ownerInbox === null || input.ownerInboxError !== null || input.partition === null) {
+    return { mode: 'unavailable', displayTotal: input.actionableCount, actionableCount: input.actionableCount };
+  }
+  const matchedDecisions = input.ownerInbox.groups.decision.length - input.partition.unmatchedDecisions.length;
+  const uncoveredInboxPending = Math.max(0, input.partition.pendingTotal - matchedDecisions);
+  const base = {
+    actionableCount: input.actionableCount,
+  };
+  if (input.ownerInbox.degraded !== undefined) {
+    return {
+      mode: 'degraded',
+      displayTotal: input.actionableCount + uncoveredInboxPending,
+      ...base,
+      degraded: input.ownerInbox.degraded,
+    };
+  }
+  return {
+    mode: 'ok',
+    displayTotal: input.actionableCount + uncoveredInboxPending,
+    ...base,
+  };
+}
+
+/**
+ * SPEC-PD-UIUX-001 R2 (Owner review S3): EVERY conclusion branch must express
+ * governance readiness the same way — "actionable now" is only claimable when
+ * the actions are not locked. One matrix, one source.
+ */
+export function resolveConclusionActionableKey(mode: 'ok' | 'degraded' | 'unavailable', locked: boolean): string {
+  if (locked) return "pages.focus.conclusion.actionableLocked";
+  if (mode === 'unavailable') return "pages.focus.conclusion.actionableWithoutTotal";
+  return "pages.focus.conclusion.actionableUnlocked";
+}
+
 // ── i18n code mapping helpers ─────────────────────────────────────────────
 
 /** Map a stateReasonCode to an i18n key, with optional interpolation params. */
@@ -1253,6 +1367,39 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         : "pages.focus.ownerDecision.actionsLockedIdentity",
     );
 
+  // ── SPEC-PD-UIUX-001 R2: one primary action surface per decision object ──
+  // Matching uses the verified principleId association field (never titles).
+  // See partitionInboxForDisplay for the semantics.
+  const actionCardPrincipleIds = new Set<string>();
+  for (const item of decisionItems) {
+    if (item.principleId !== undefined) actionCardPrincipleIds.add(item.principleId);
+  }
+  for (const group of pendingGroups) actionCardPrincipleIds.add(group.principleId);
+  const inboxPartition = ownerInbox !== null && ownerInboxError === null
+    ? partitionInboxForDisplay(ownerInbox, actionCardPrincipleIds)
+    : null;
+  const inboxBlockedIndividual = inboxPartition?.blockedIndividual ?? [];
+  const inboxBlockedAggregate = inboxPartition?.blockedAggregate ?? [];
+  const inboxRecovery = inboxPartition?.recovery ?? [];
+  const unmatchedInboxDecisions = inboxPartition?.unmatchedDecisions ?? [];
+  // 待处理口径 (INV-01 lineage): decision + blocked-individual + recovery —
+  // same three groups the inbox renders; historical unknowns stay explanatory.
+  const inboxPendingTotal = inboxPartition?.pendingTotal ?? 0;
+  // 可操作口径: the action cards actually on screen (decision cards + approval
+  // cards) — the same number the「需要你决定」section header shows.
+  const actionableCount = (ownerDecisionError === null ? decisionItems.length : 0)
+    + (showApprovalCards ? pendingGroups.length : 0);
+  // Review round 2 (P2): the headline never claims allClear from the inbox
+  // alone, degraded payloads surface their reason, and the total is the
+  // association-deduped union of on-screen cards and inbox items — see
+  // deriveConclusionDisplay.
+  const conclusionDisplay = deriveConclusionDisplay({
+    ownerInbox,
+    ownerInboxError,
+    partition: inboxPartition,
+    actionableCount,
+  });
+
   // Map codes to i18n text
   // Governance Recovery Actions v1: tasks_need_human_review interpolates the
   // needs_human_review task count, not the approvals count.
@@ -1281,48 +1428,86 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         {t("pages.focus.subtitle")}
       </p>
 
-      {/* Owner Decision Experience v1 — canonical decision inbox: 待决定 / 被
-          阻塞 / 需要恢复 (SPEC §11.1)。历史未绑定条目只出现为一条聚合说明,
-          不变成待办卡。 */}
-      <section aria-label={t("pages.focus.ownerInbox.sectionTitle")} className="mb-7" data-testid="owner-decision-inbox-section">
-        <div className="flex items-baseline gap-2 mb-3">
-          <SectionTitle>{t("pages.focus.ownerInbox.sectionTitle")}</SectionTitle>
-          {ownerInbox !== null && (
-            <span className="font-mono text-ink-4 text-[12px]">
-              {`· ${ownerInbox.groups.decision.length + ownerInbox.groups.blocked.filter((item) => item.inbox.attention === 'individual').length + ownerInbox.groups.recovery.length}`}
-            </span>
-          )}
+      {/* SPEC-PD-UIUX-001 R2 Layer 1: 当前结论 — readiness, one lock reason,
+          and 待处理/可操作 counts FIRST, before any object lists. The
+          per-object lock notices and the secondary status cards below keep
+          their own explanations; this strip never re-derives permissions —
+          it displays existing server state (readiness + inbox + action cards). */}
+      <section
+        aria-label={t("pages.focus.conclusion.sectionTitle")}
+        data-testid="focus-conclusion"
+        className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]"
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <span
+            className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+              experienceMode && experienceData !== null
+                ? EXPERIENCE_ATTENTION[experienceData.summary.primaryAttention].badgeClass
+                : governanceState === "owner_review_ready"
+                  ? "bg-gov/10 text-gov border border-gov/20"
+                  : governanceState === "degraded"
+                    ? "bg-amber/10 text-amber border border-amber/20"
+                    : governanceState === "in_progress"
+                      ? "bg-green/10 text-green border border-green/20"
+                      : "text-ink-4 border border-line bg-surface/80"
+            }`}
+            role="status"
+            data-testid="focus-conclusion-badge"
+          >
+            {experienceMode && experienceData !== null
+              ? t(EXPERIENCE_ATTENTION[experienceData.summary.primaryAttention].labelKey)
+              : t(`pages.focus.stateLabel.${governanceState}`)}
+          </span>
+          <div className="text-ink-2 text-[13px] leading-relaxed" data-testid="focus-conclusion-counts">
+            {conclusionDisplay.mode === 'ok' && conclusionDisplay.displayTotal === 0 ? (
+              <span>{t("pages.focus.conclusion.allClear")}</span>
+            ) : conclusionDisplay.mode === 'unavailable' || conclusionDisplay.mode === 'degraded' ? (
+              <>
+                <span className="font-medium" data-testid="focus-conclusion-uncertain">{t("pages.focus.conclusion.pendingUncertain")}</span>
+                {conclusionDisplay.actionableCount > 0 && (
+                  <span className="text-ink-4">
+                    {" · "}
+                    {t(resolveConclusionActionableKey(conclusionDisplay.mode, ownerActionsLockedReason !== null), { count: conclusionDisplay.actionableCount })}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="font-medium">{t("pages.focus.conclusion.pendingTotal", { count: conclusionDisplay.displayTotal })}</span>
+                <span className="text-ink-4">
+                  {" · "}
+                  {t(resolveConclusionActionableKey(conclusionDisplay.mode, ownerActionsLockedReason !== null), { count: conclusionDisplay.actionableCount })}
+                </span>
+              </>
+            )}
+          </div>
         </div>
-        {ownerInboxError !== null && (
-          <p className="text-ink-4 text-[12.5px]">{t("pages.focus.ownerInbox.loadError")}</p>
+        {conclusionDisplay.mode === 'degraded' && conclusionDisplay.degraded && (
+          <div
+            className="mt-3 border border-amber/30 rounded-[6px] bg-surface px-3 py-2.5"
+            data-testid="focus-conclusion-degraded"
+          >
+            <p className="text-[12px] text-ink-3 leading-relaxed">
+              {t("pages.focus.conclusion.degradedLabel")} {conclusionDisplay.degraded.reason}
+            </p>
+            <p className="mt-1 text-[12px] text-ink-3 leading-relaxed">{conclusionDisplay.degraded.nextAction}</p>
+          </div>
         )}
-        {ownerInbox !== null && ownerInboxError === null && (
-          <>
-            {ownerInbox.groups.decision.length === 0
-              && ownerInbox.groups.blocked.filter((item) => item.inbox.attention === 'individual').length === 0
-              && ownerInbox.groups.recovery.length === 0 && (
-              <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerInbox.empty")}</p>
-            )}
-            {ownerInbox.groups.decision.map((item) => (
-              <InboxItem key={item.principleId} item={item} t={t} />
-            ))}
-            {ownerInbox.groups.blocked.filter((item) => item.inbox.attention === 'individual').map((item) => (
-              <InboxItem key={item.principleId} item={item} t={t} />
-            ))}
-            {ownerInbox.groups.recovery.map((item) => (
-              <InboxItem key={item.principleId} item={item} t={t} />
-            ))}
-            {ownerInbox.historicalUnknown.count > 0 && (
-              <p className="text-ink-4 text-[12.5px] leading-relaxed mt-2" data-testid="owner-inbox-aggregate-notice">
-                {ownerInbox.historicalUnknown.reasonText}
-                {" "}
-                <Link to="/principles" className="text-gov hover:underline">
-                  {t("pages.focus.ownerInbox.viewLibrary")}
-                </Link>
-              </p>
-            )}
-          </>
+        {ownerActionsLockedReason !== null && (
+          <div
+            id="focus-global-lock-notice"
+            className="mt-3 flex items-start justify-between gap-3 border border-amber/30 rounded-[6px] bg-surface px-3 py-2.5"
+            data-testid="focus-conclusion-lock"
+          >
+            <p className="text-[12px] text-ink-3 leading-relaxed">{ownerActionsLockedReason}</p>
+            <Link to="/settings" className="shrink-0 text-[12px] text-gov underline hover:text-gov-2">
+              {t("pages.focus.ownerDecision.goSettingsCta")}
+            </Link>
+          </div>
         )}
+        <p className="mt-2 text-ink-4 text-[11.5px] leading-relaxed" data-testid="focus-conclusion-scope-note">
+          {t("pages.focus.conclusion.countsNote")}
+        </p>
       </section>
 
       {/* PRI-629: 需要你决定 — 统一 Owner Inbox。两种治理摘要模式下都渲染;
@@ -1428,6 +1613,67 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         ))}
       </section>
 
+      {/* SPEC-PD-UIUX-001 R2 Layer 3: 被阻塞与需要恢复 — from the owner inbox.
+          Individual-attention items stay fully exposed (never mechanically
+          collapsed); aggregate-attention blocked objects get one count line;
+          decision items WITHOUT a rendered action card stay visible here so no
+          legal todo disappears. Historical unknowns remain an explanatory
+          notice, never a todo card. */}
+      <section aria-label={t("pages.focus.ownerAttention.sectionTitle")} className="mb-7" data-testid="owner-attention-section">
+        <div className="flex items-baseline gap-2 mb-3">
+          <SectionTitle>{t("pages.focus.ownerAttention.sectionTitle")}</SectionTitle>
+          {ownerInbox !== null && ownerInboxError === null && (
+            <span className="font-mono text-ink-4 text-[12px]" data-testid="owner-attention-counts">
+              {`· ${t("pages.focus.ownerAttention.blockedCount", { count: ownerInbox.groups.blocked.length })} · ${t("pages.focus.ownerAttention.recoveryCount", { count: inboxRecovery.length })}`}
+            </span>
+          )}
+        </div>
+        {ownerInboxError !== null && (
+          <p className="text-ink-4 text-[12.5px]">{t("pages.focus.ownerInbox.loadError")}</p>
+        )}
+        {ownerInbox !== null && ownerInboxError === null && (
+          <>
+            {ownerInbox.groups.blocked.length === 0
+              && inboxRecovery.length === 0
+              && unmatchedInboxDecisions.length === 0 && (
+              <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerAttention.empty")}</p>
+            )}
+            {unmatchedInboxDecisions.length > 0 && (
+              <p className="mb-2 text-ink-4 text-[12px] leading-relaxed" data-testid="owner-attention-unmatched-note">
+                {t("pages.focus.ownerAttention.unmatchedTitle")}
+              </p>
+            )}
+            {unmatchedInboxDecisions.map((item) => (
+              <InboxItem key={item.principleId} item={item} t={t} note={t("pages.focus.ownerAttention.unmatchedItemNote")} />
+            ))}
+            {inboxBlockedIndividual.map((item) => (
+              <InboxItem key={item.principleId} item={item} t={t} />
+            ))}
+            {inboxRecovery.map((item) => (
+              <InboxItem key={item.principleId} item={item} t={t} />
+            ))}
+            {inboxBlockedAggregate.length > 0 && (
+              <p className="mt-2 text-ink-4 text-[12.5px] leading-relaxed" data-testid="owner-attention-aggregate-notice">
+                {t("pages.focus.ownerAttention.blockedAggregate", { count: inboxBlockedAggregate.length })}
+                {" "}
+                <Link to="/principles" className="text-gov hover:underline">
+                  {t("pages.focus.ownerInbox.viewLibrary")}
+                </Link>
+              </p>
+            )}
+            {ownerInbox.historicalUnknown.count > 0 && (
+              <p className="text-ink-4 text-[12.5px] leading-relaxed mt-2" data-testid="owner-inbox-aggregate-notice">
+                {ownerInbox.historicalUnknown.reasonText}
+                {" "}
+                <Link to="/principles" className="text-gov hover:underline">
+                  {t("pages.focus.ownerInbox.viewLibrary")}
+                </Link>
+              </p>
+            )}
+          </>
+        )}
+      </section>
+
       {/* Governance blocker/recovery follows the actual decision index so the
           first actionable card remains visible in common Companion viewports. */}
       {experienceMode && experienceData !== null ? (
@@ -1495,12 +1741,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       )}
         </>
       )}
-
-      {/* Daily thought — pause before judgment (reflection content, not governance status).
-          Intentionally retained in BOTH modes: this PR migrates only the governance STATUS
-          source; whether reflection stays on Focus after graduation is PRI-589
-          (Focus Information Architecture Cleanup). */}
-      <DailyThoughtCard />
 
       {experienceMode && experienceData !== null && experienceData.summary.primaryAttention === "all_clear" && pendingGroups.length === 0 && (
         <div className="mt-4">
@@ -1572,6 +1812,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       </section>
       )}
 
+      {/* Daily thought — reflection content, not governance status. Demoted to
+          secondary reading BELOW the evidence sections (SPEC-PD-UIUX-001 R2);
+          retained in BOTH modes with no persistence change (PRI-589 pending). */}
+      <DailyThoughtCard />
+
       {/* Footer — one line (US-1.7) */}
       <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-[13px]">
         {t("pages.focus.footer")}
@@ -1582,7 +1827,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 }
 
 /** Owner Decision Experience v1 inbox item — display-only (SPEC §11.1). */
-function InboxItem({ item, t }: { item: OwnerDecisionInboxData['groups']['decision'][number]; t: (key: string, opts?: Record<string, unknown>) => string }) {
+function InboxItem({ item, t, note }: { item: OwnerDecisionInboxData['groups']['decision'][number]; t: (key: string, opts?: Record<string, unknown>) => string; note?: string }) {
   return (
     <div className="mb-2 rounded-[var(--radius-md)] border border-line p-3" data-testid="owner-inbox-item">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -1595,7 +1840,10 @@ function InboxItem({ item, t }: { item: OwnerDecisionInboxData['groups']['decisi
           {t(`pages.focus.ownerInbox.group.${item.inbox.group}`)}
         </span>
       </div>
-      <p className="mt-1 text-ink-3 text-[12.5px] leading-relaxed">{item.nextAction.ownerText}</p>
+      {/* Review round (P3): unmatched entries have NO action surface, so the
+          inbox's review-flavored ownerText ("choose approve or reject") would
+          promise actions that do not exist here — use the neutral note. */}
+      <p className="mt-1 text-ink-3 text-[12.5px] leading-relaxed">{note ?? item.nextAction.ownerText}</p>
     </div>
   );
 }
