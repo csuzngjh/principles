@@ -3170,14 +3170,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     try {
       paramsDigest = EvaluatorRunner.digestParams(adv.params);
     } catch {
+      // Whole-params serialization failure (e.g. a poisoned getter at the
+      // top level): keep the explicit degradation marker — the target was
+      // already extracted best-effort inside digestParams.
       paramsDigest = '(unserializable params)';
     }
 
-    const rationaleBound = 110;
+    const rationaleBound = 90;
     const rationale =
       adv.rationale.length > rationaleBound ? `${adv.rationale.slice(0, rationaleBound)}…` : adv.rationale;
 
-    const summary = `${identityAndContext} | params=${paramsDigest} | case rationale: ${rationale}`;
+    const summary = `${identityAndContext} | params: ${paramsDigest} | case rationale: ${rationale}`;
     // Defensive only: segment budgets keep the total within the shared bound
     // for realistic inputs; if it ever exceeds, the cut stays visible.
     return summary.length > MAX_FAILED_CASE_INPUT_LENGTH
@@ -3185,24 +3188,53 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       : summary;
   }
 
-  /** Per-key digest: every key survives; long values collapse visibly. */
+  /**
+   * Target-first per-key digest (review round 2, 2026-10-11): the case's
+   * OWN target (path/file_path via the existing resolveCasePathParam
+   * contract) gets an INDEPENDENT budget written FIRST, so legal edit
+   * payloads whose long oldText/newText/content fields precede the target
+   * can no longer evict `protected/…` from the repair input. A long target
+   * truncates visibly inside its own budget; a case with no derivable
+   * target says so explicitly (never guessed, never borrowed). Remaining
+   * keys keep the per-key digest with visible fold markers. The total
+   * params segment stays within the shared MAX_FAILED_CASE_INPUT_LENGTH
+   * arithmetic — the target budget is reserved, not added on top.
+   */
   private static digestParams(params: Record<string, unknown>): string {
-    const valueBound = 48;
-    const segmentBound = 150;
-    const parts = Object.keys(params).map((key) => {
-      let value: string;
-      try {
-        value = JSON.stringify(params[key]) ?? 'undefined';
-      } catch {
-        value = '(unserializable)';
-      }
-      if (value.length > valueBound) {
-        value = `${value.slice(0, valueBound)}…(+${value.length - valueBound} chars)`;
-      }
-      return `${key}=${value}`;
-    });
-    const digest = `{${parts.join(',')}}`;
-    return digest.length > segmentBound ? `${digest.slice(0, segmentBound)}…(+${digest.length - segmentBound} chars total)` : digest;
+    const targetBound = 100;
+    const restBound = 120;
+    const valueBound = 40;
+
+    // Target via the existing resolution contract (path, then file_path).
+    // resolveCasePathParam only reads string fields, so it stays safe even
+    // when OTHER params are unserializable.
+    const target = resolveCasePathParam(params);
+    const targetSegment = target === null
+      ? "target=(none - not derivable from this case's params)"
+      : target.length > targetBound
+        ? `target="${target.slice(0, targetBound - 1)}…(+${target.length - (targetBound - 1)} chars)"`
+        : `target="${target}"`;
+
+    const parts = Object.keys(params)
+      .filter((key) => key !== 'path' && key !== 'file_path')
+      .map((key) => {
+        let value: string;
+        try {
+          value = JSON.stringify(params[key]) ?? 'undefined';
+        } catch {
+          value = '(unserializable)';
+        }
+        if (value.length > valueBound) {
+          value = `${value.slice(0, valueBound)}…(+${value.length - valueBound} chars)`;
+        }
+        return `${key}=${value}`;
+      });
+    const restDigest = `{${parts.join(',')}}`;
+    const rest = restDigest.length > restBound
+      ? `${restDigest.slice(0, restBound)}…(+${restDigest.length - restBound} chars total)`
+      : restDigest;
+
+    return `${targetSegment}; ${rest}`;
   }
 
   // ── PRI-427: rule artifact assembly ────────────────────────────────────────

@@ -345,6 +345,13 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     expect(repairPrompt).toContain('Error: runtime_error');
     expect(repairPrompt).toContain('includes is not a function');
     expect(repairPrompt).toContain('Input: tool='); // v11: the failed case's defining input rides the evidence block
+    // Review round 2 (2026-10-11): the FULL chain producer→durable artifact→
+    // resolver→repair prompt preserves the owner negative's target COMPLETE —
+    // /etc/passwd is a short path so it must survive verbatim, proving the
+    // target-first budget end to end (not just at the producer).
+    // repairPrompts captures the JSON message, so quotes inside are escaped.
+    expect(repairPrompt).toContain('target=\\"/etc/passwd\\"');
+    expect(repairPrompt).toContain('target=\\"/workspace/src/a.ts\\"');
     expect(repairPrompt).toContain(EVAL1_ID); // stable source reference in the evidence header
     expect(emitted.some((e) => e.eventType === 'artificer_repair_replay_evidence_resolved')).toBe(true);
 

@@ -83,7 +83,7 @@
 ## 5. GJ-01（A3）与 Outcome/审计（B）——依赖 Owner 审批，未执行
 
 - 沙箱当前 0 approvals / 0 activations（如实记录）。GJ-01 前置「Owner 已批准的 RuleHost 原则」不存在，本轮不代 Owner 批准、不伪造审批历史（SPEC §13.9 + 任务 §四）。
-- 已就绪：隔离网关（18796）、事件会话/工具调用/宿主语义声明（session aa6d301e，tool_calls id 1/2）、Console 3200 审批与四问查询面、§8 决策卡的具体审批对象。
+- 已就绪：隔离网关（18796）、事件会话/工具调用/宿主语义声明（session aa6d301e，tool_calls id 1/2）、Console 3200 审批与四问查询面。可审批对象尚不存在（§8）：进入 GJ-01 前须先走 §8 决策 1 列出的正式候选工程路径（覆盖 Owner 全部正负例与 protected 只读场景的重放、逐场景语义核对、formal rule artifact）。
 - B1-B3（Outcome、四查询、重放幂等/重启/失败边界）依赖 GJ-01 产生真实 Episode，未执行；四问查询面已在真实路由上验证（诚实空集 + coverage.sourceStatus=available，Console 3200/3201）。
 - GJ-02 保留：真实自述只产生 agent_claimed；本轮无激活原则故无注入会话，不补写。
 

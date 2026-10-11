@@ -119,7 +119,7 @@ describe('caseInput producer budget (real mapFailedCases path)', () => {
       boundaryCase({ path: 'worklog.md.bak' }),
     ]));
     const input = String(failure.caseInput);
-    expect(input).toContain('path="worklog.md.bak"');
+    expect(input).toContain('target="worklog.md.bak"');
     expect(input).toContain('priorReadOfTarget=no');
     expect(input).not.toContain('…(+');
   });
@@ -132,10 +132,13 @@ describe('caseInput producer budget (real mapFailedCases path)', () => {
       ),
     ]));
     const input = String(failure.caseInput);
-    expect(input).toContain('path=');
+    expect(input).toContain('target="deep/deep/'); // long target kept inside its own budget
     expect(input).toContain('mode=');
     expect(input).toContain('encoding=');
-    expect(input).toContain('…(+'); // something was digested (long path or rationale)
+    // The 60-char target fits its budget (complete); the 500-char rationale
+    // is visibly cut. Every segment ends inside the shared bound.
+    expect(input).toContain('target/file.txt"');
+    expect(input.trim().endsWith('…') || input.includes('…')).toBe(true);
     expect(input).toContain('priorReadOfTarget=no');
     expect(input.length).toBeLessThanOrEqual(MAX_FAILED_CASE_INPUT_LENGTH);
   });
@@ -164,10 +167,76 @@ describe('caseInput producer budget (real mapFailedCases path)', () => {
     // Per-key degradation keeps the readable keys and marks only the
     // unserializable one — strictly better than dropping the whole segment.
     expect(input).toContain('self=(unserializable)');
-    expect(input).toContain('path="a.txt"');
+    expect(input).toContain('target="a.txt"');
     expect(input).toContain('priorReadOfTarget=no');
     expect(input).toContain('readCount=1');
     expect(input.length).toBeLessThanOrEqual(MAX_FAILED_CASE_INPUT_LENGTH);
+  });
+
+  // Review round 2 (2026-10-11): a legal edit request whose LONG content
+  // fields precede the target path used to evict the target from the digest
+  // entirely — `protected/config.json` survived only as `path="pro…`, so the
+  // repair round could not see the protected/ prefix. The target must have
+  // its OWN budget, resolved via the existing path/file_path contract, ahead
+  // of the content fields.
+  it('LONG content fields do not evict the target path (edit oldText/newText before path)', () => {
+    const failure = firstOf(mapViaRealRunner([
+      boundaryCase({
+        oldText: 'a'.repeat(350),
+        newText: 'b'.repeat(350),
+        path: 'protected/config.json',
+      }),
+    ]));
+    const input = String(failure.caseInput);
+    expect(input).toContain('target="protected/config.json"');
+    expect(input).toContain('priorReadOfTarget=no');
+    expect(input.length).toBeLessThanOrEqual(MAX_FAILED_CASE_INPUT_LENGTH);
+  });
+
+  it('file_path resolves as the target when path is absent (after a long content field)', () => {
+    const failure = firstOf(mapViaRealRunner([
+      boundaryCase({
+        content: 'c'.repeat(400),
+        file_path: 'workspace/notes.txt',
+      }),
+    ]));
+    const input = String(failure.caseInput);
+    expect(input).toContain('target="workspace/notes.txt"');
+    expect(input).toContain('priorReadOfTarget=no');
+  });
+
+  it('key ORDER does not change target preservation', () => {
+    const pathFirst = String(firstOf(mapViaRealRunner([
+      boundaryCase({ path: 'protected/config.json', oldText: 'a'.repeat(350), newText: 'b'.repeat(350) }),
+    ])).caseInput);
+    const pathLast = String(firstOf(mapViaRealRunner([
+      boundaryCase({ oldText: 'a'.repeat(350), newText: 'b'.repeat(350), path: 'protected/config.json' }),
+    ])).caseInput);
+    expect(pathLast).toContain('target="protected/config.json"');
+    // The target segment is identical regardless of key order.
+    expect(pathFirst).toContain('target="protected/config.json"');
+  });
+
+  it('LONG target path truncates VISIBLY inside its own budget', () => {
+    const longTarget = `${'deep/'.repeat(40)}final.txt`;
+    const failure = firstOf(mapViaRealRunner([
+      boundaryCase({ path: longTarget }),
+    ]));
+    const input = String(failure.caseInput);
+    expect(input).toMatch(/target="deep\/deep\/[^"]*…\(\+\d+ chars\)"/);
+    expect(input).toContain('priorReadOfTarget=no');
+    expect(input.length).toBeLessThanOrEqual(MAX_FAILED_CASE_INPUT_LENGTH);
+  });
+
+  it('NO derivable target is stated explicitly, never guessed', () => {
+    const failure = firstOf(mapViaRealRunner([
+      boundaryCase({ oldText: 'a'.repeat(200), force: true }),
+    ]));
+    const input = String(failure.caseInput);
+    expect(input).toContain('target=');
+    expect(input).toMatch(/target=[^|]*none/i);
+    expect(input).not.toContain('target="');
+    expect(input).toContain('priorReadOfTarget=no');
   });
 
   it('sandbox-only cases (not in the adversarial list) keep the legacy no-input shape', () => {
