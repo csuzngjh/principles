@@ -43,7 +43,8 @@
     "date": "日期",
     "time": "时间",
     "actions": "操作",
-    "copied": "已复制"
+    "copied": "已复制",
+    "skipToMain": "跳到正文"
   },
   "pages": {
     "focus": {
@@ -395,6 +396,23 @@
         "forbiddenBehavior": "禁止行为",
         "evidenceSource": "证据来源",
         "validationExpectation": "验收要求"
+      },
+      "conclusion": {
+        "sectionTitle": "当前状态",
+        "allClear": "当前没有需要你处理的治理事项。",
+        "pendingTotal": "待你处理 {{count}} 项",
+        "actionableUnlocked": "其中现在可操作 {{count}} 项",
+        "actionableLocked": "可操作对象 {{count}} 项——治理动作已锁定，原因见上方说明",
+        "countsNote": "口径：「待你处理」= 待决定 + 被阻塞（需逐条关注）+ 需要恢复；历史未知项只作说明，不计入待办。",
+        "inboxUnavailable": "决定动态暂不可用，以上计数可能不完整。"
+      },
+      "ownerAttention": {
+        "sectionTitle": "被阻塞与需要恢复",
+        "blockedCount": "被阻塞 {{count}}",
+        "recoveryCount": "需要恢复 {{count}}",
+        "empty": "没有需要逐条关注的被阻塞或需要恢复的对象。",
+        "unmatchedTitle": "以下对象有决定动态，但当前没有可用的操作面（关联缺失或数据不完整，不作合并）：",
+        "blockedAggregate": "另有 {{count}} 项被阻塞对象无需逐条关注；恢复完成后会进入「需要你决定」。"
       }
     },
     "pain": {
@@ -694,9 +712,8 @@
         "receipts": {
           "title": "生效履历",
           "headline": "保留记录中有 {{effectCount}} 次行为影响（最近 {{lastEffectAt}}）——记录属历史观察，不代表当前仍在生效",
-          "headlinePresence": "原则已进入智能体决策上下文——尚无行为生效记录",
+          "headlinePresence": "已记录上下文投递，尚无对应效果记录",
           "counts": "行为生效 {{effectCount}} 次 · 参与上下文 {{presenceCount}} 次",
-          "zeroEffect": "为什么「行为生效」是 0？生效需要证据：一次拦截、一次自动纠正，或智能体自述遵循。目前这条原则只进入过任务上下文（Presence）——参与决策 ≠ 已改变行为。随着运行积累出第一条证据，「行为生效」会从这里开始计数。",
           "empty": "最近没有记录——这条原则尚未在运行中被触发。",
           "note": "两级语义：Effect（行为生效）= 拦截 / 自动纠正 / 智能体自述遵循；Presence（参与上下文）= 原则进入任务上下文（灰色行）。参与决策 ≠ 已改变行为。智能体自述为概率性自报，与确定性事件分列。",
           "unavailableReason": "暂无法读取生效履历。",
@@ -723,7 +740,11 @@
             "auto_correct_applied": "自动纠正",
             "self_reported": "智能体自述",
             "prompt_injected": "注入上下文"
-          }
+          },
+          "headlineNone": "当前保留范围内未观察到上下文投递或效果记录",
+          "zeroEffectPresence": "为什么「行为生效」是 0？生效需要证据：一次拦截、一次自动纠正，或智能体自述遵循。目前这条原则只有参与任务上下文（Presence）的记录——参与决策 ≠ 已改变行为。随着运行积累出第一条证据，「行为生效」会从这里开始计数。",
+          "zeroEffectNone": "为什么两项都是 0？「0」表示当前保留范围内没有观察到记录，不等于从未发生：保留窗口之外、采集关闭期间的历史不会显示在这里。当这条原则被注入任务上下文或产生第一条效果证据时，计数会从这里开始变化。",
+          "presenceMissingNote": "当前保留范围内没有这条原则的上下文投递（Presence）记录；以下展示的是效果记录本身。"
         },
         "trajectory": "需要追溯时，查看完整轨迹",
         "stageEvidence": "证据",
@@ -949,6 +970,32 @@
           "invalidTarget": "动作目标缺失，无法提交。",
           "actionDone": "操作已提交。",
           "actionFailed": "操作被拒绝：{{detail}} 可用操作已刷新，请基于最新状态重新决定。"
+        },
+        "evidenceAudit": {
+          "title": "干预证据链",
+          "headline": "投递 {{d}} · 应用 {{a}} · 行为 {{e}} · 效果 {{f}} · 结果 {{o}}",
+          "unresolved": "{{count}} 条记录的关联对象尚未到达（pending association，非「未发生」）",
+          "sectionDelivery": "投递（Delivery）",
+          "sectionApplication": "应用（Application）",
+          "sectionEpisode": "行为（Episode）",
+          "sectionEffect": "效果（Effect）",
+          "sectionOutcome": "结果（Outcome）",
+          "emptySection": "本范围内未观察到（≠ 从未发生）",
+          "pending": "待关联",
+          "loading": "读取中…",
+          "loadOlder": "读取更早记录",
+          "capabilities": "宿主能力声明（Supported / Unsupported / Unknown）",
+          "technicalSummary": "技术详情（Phase 1 · 修订引用 / 摘要 / 来源标识）",
+          "technicalNote": "以下为工程追溯信息：证据 ID、修订引用、载荷摘要、激活与原生线索。默认视图只展示记录与缺口；这些字段不改变上方的语义。",
+          "sourceUnknown": "源可复核性未知",
+          "contentRedacted": "正文已于 {{date}} 清除",
+          "contentReference": "内容引用：{{resolution}} · {{principleId}}{{artifactId}}",
+          "referenceResolved": "resolved",
+          "referenceUnresolved": "revision 未解析",
+          "activationReference": "激活发生：{{activationId}}{{activatedAt}}",
+          "nativeLineage": "原生线索：{{lineage}}",
+          "note": "本区只记录事实：投递确认程度、智能体自述与 Runtime 事实分开列出，缺失=未知而非无效。不提供成功率或有效性评分。",
+          "unavailable": "干预证据链暂不可用"
         }
       }
     },
@@ -1918,7 +1965,13 @@
       "update": "更新",
       "pendingApprovalsAria": "{{count}} 条待审批原则",
       "degradedSignalsAria": "{{count}} 个系统降级信号",
-      "intent": "拥有者意图"
+      "intent": "拥有者意图",
+      "themeToLight": "切换亮色模式",
+      "themeToDark": "切换暗色模式",
+      "switchLanguage": "切换语言",
+      "signOut": "退出",
+      "openMenu": "打开导航菜单",
+      "navigation": "主导航"
     },
     "approvalCard": {
       "confidence": {

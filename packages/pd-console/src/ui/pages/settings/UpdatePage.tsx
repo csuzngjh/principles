@@ -426,7 +426,7 @@ export function UpdatePage() {
           {/* Update result message — enhanced card. PRI-848: a refusal is
               "blocked" (amber), not "failed" (red) — the system is untouched. */}
           {updateResult && (
-            <div className={`mt-4 p-4 rounded-[6px] border animate-[pdFadeIn_400ms_ease-out] ${updateResult.success ? 'bg-green/5 border-green/20' : updateResult.refusal ? 'bg-amber/5 border-amber/25' : 'bg-red/5 border-red/20'}`}>
+            <div className={`mt-4 p-4 rounded-[6px] border animate-[pdFadeIn_400ms_ease-out] ${updateResult.success ? 'bg-green/5 border-green/20' : updateResult.refusal ? 'bg-amber/5 border-amber/25' : 'bg-danger/5 border-danger/20'}`}>
               <div className="flex items-start gap-3">
                 {/* Status icon with animation */}
                 {updateResult.success ? (
@@ -434,7 +434,7 @@ export function UpdatePage() {
                 ) : updateResult.refusal ? (
                   <AlertTriangle className="h-6 w-6 text-amber shrink-0 mt-0.5" />
                 ) : (
-                  <XCircle className="h-6 w-6 text-red shrink-0 mt-0.5" />
+                  <XCircle className="h-6 w-6 text-danger shrink-0 mt-0.5" />
                 )}
                 <div className="flex-1 min-w-0">
                   {/* Refusal label — the message is a blocked reason, not a crash */}
@@ -450,7 +450,7 @@ export function UpdatePage() {
                     </div>
                   )}
                   {/* Message */}
-                  <p className={`text-[13px] ${updateResult.success ? 'text-green' : updateResult.refusal ? 'text-ink-2' : 'text-red'}`}>
+                  <p className={`text-[13px] ${updateResult.success ? 'text-green' : updateResult.refusal ? 'text-ink-2' : 'text-danger'}`}>
                     {updateResult.message}
                   </p>
                   {/* Full update restart prompt (requires console restart) */}
@@ -483,7 +483,7 @@ export function UpdatePage() {
                         type="button"
                         onClick={() => setShowFullUpdateDialog(true)}
                         disabled={fullUpdating}
-                        className="text-[12px] text-red underline hover:text-red/80 disabled:opacity-50"
+                        className="text-[12px] text-danger underline hover:text-danger/80 disabled:opacity-50"
                       >
                         {t("pages.update.retry")}
                       </button>
@@ -530,7 +530,7 @@ export function UpdatePage() {
                       </span>
                     )}
                     {!entry.success && entry.kind !== 'refusal' && (
-                      <span className="inline-flex items-center border border-red/35 text-red rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+                      <span className="inline-flex items-center border border-danger/35 text-danger rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
                         {t("pages.update.failed")}
                       </span>
                     )}

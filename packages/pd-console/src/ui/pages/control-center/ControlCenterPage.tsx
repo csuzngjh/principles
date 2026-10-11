@@ -352,7 +352,9 @@ function readinessTagClasses(readiness: ReadinessStatus): string {
     case "needs_setup":
       return base.replace("border-line", "border-amber/35").replace("text-ink-3", "text-amber");
     case "not_ready":
-      return base.replace("border-line", "border-red/35").replace("text-ink-3", "text-red");
+      // SPEC-PD-UIUX-001 R5: bare `red` utilities have no matching theme token
+      // (silently unstyled) — use the registered danger token.
+      return base.replace("border-line", "border-danger/35").replace("text-ink-3", "text-danger");
     default:
       return base;
   }
@@ -641,7 +643,7 @@ function AdvancedDiagnostics({
             <h3 className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 mb-2">
               {t("pages.controlCenter.configErrors")}
             </h3>
-            <div className="bg-surface/60 border border-red/20 border-l-2 border-l-red rounded-[6px] px-3 py-2">
+            <div className="bg-surface/60 border border-danger/20 border-l-2 border-l-danger rounded-[6px] px-3 py-2">
               <ul className="space-y-2">
                 {config.errors.map((e, i) => (
                   <li key={i} className="text-[13px]">

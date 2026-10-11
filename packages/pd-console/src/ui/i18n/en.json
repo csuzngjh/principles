@@ -43,7 +43,8 @@
     "date": "Date",
     "time": "Time",
     "actions": "Actions",
-    "copied": "Copied"
+    "copied": "Copied",
+    "skipToMain": "Skip to main content"
   },
   "pages": {
     "focus": {
@@ -395,6 +396,23 @@
         "forbiddenBehavior": "Forbidden behavior",
         "evidenceSource": "Evidence source",
         "validationExpectation": "Validation expectation"
+      },
+      "conclusion": {
+        "sectionTitle": "Current status",
+        "allClear": "Nothing needs your attention right now.",
+        "pendingTotal": "{{count}} item(s) waiting on you",
+        "actionableUnlocked": "{{count}} of them actionable now",
+        "actionableLocked": "{{count}} actionable object(s) — governance actions are locked, see the notice above",
+        "countsNote": "Scope: \"waiting on you\" = pending decisions + blocked items needing individual attention + items needing recovery; historical unknowns stay explanatory and are not counted as todos.",
+        "inboxUnavailable": "Decision updates are unavailable right now — the counts above may be incomplete."
+      },
+      "ownerAttention": {
+        "sectionTitle": "Blocked & needing recovery",
+        "blockedCount": "blocked {{count}}",
+        "recoveryCount": "needing recovery {{count}}",
+        "empty": "No blocked or recovery items need individual attention.",
+        "unmatchedTitle": "These objects have decision updates but no available action surface yet (missing association or incomplete data — not merged away):",
+        "blockedAggregate": "{{count}} more blocked object(s) do not need individual attention; they move to \"Needs your decision\" once recovered."
       }
     },
     "pain": {
@@ -694,9 +712,8 @@
         "receipts": {
           "title": "Receipt History",
           "headline": "{{effectCount}} behavior-influence record(s) retained (last {{lastEffectAt}}) — historical observations, not a claim of current enforcement",
-          "headlinePresence": "Your principle is part of the agent's decision context — no recorded behavior effect yet",
+          "headlinePresence": "Context injections recorded — no matching behavior-effect records yet",
           "counts": "{{effectCount}} behavior effect(s) · {{presenceCount}} context injection(s)",
-          "zeroEffect": "Why 0 effects? Effects need evidence: a block, an auto-correction, or an agent self-report. So far this principle has only entered task context (Presence). Being present in a decision does not mean behavior changed — the first effect record will appear here as runtime evidence accumulates.",
           "empty": "No recent records — this principle has not been triggered at runtime yet.",
           "note": "Two levels: Effect = the principle actually changed behavior (block / auto-correction / agent self-report); Presence = the principle entered task context (gray rows). Presence in a decision ≠ changed behavior. Self-reports are probabilistic agent claims, listed separately from deterministic events.",
           "unavailableReason": "Receipt history is unavailable right now.",
@@ -723,7 +740,11 @@
             "auto_correct_applied": "Auto-correct",
             "self_reported": "Agent self-report",
             "prompt_injected": "Context injection"
-          }
+          },
+          "headlineNone": "No context injection or effect records observed within the current retention window",
+          "zeroEffectPresence": "Why 0 effects? Effects need evidence: a block, an auto-correction, or an agent self-report. So far this principle only has context-presence records — being present in a decision does not mean behavior changed. The first effect record will appear here as runtime evidence accumulates.",
+          "zeroEffectNone": "Why both counts are 0: zero means no records observed within the current retention window — not that nothing ever happened. History outside the retention window or during disabled collection does not appear here. Counts start moving as soon as the principle enters task context or produces its first effect.",
+          "presenceMissingNote": "No context-injection (presence) records for this principle within the current retention window; what is listed below are the effect records themselves."
         },
         "trajectory": "View full trajectory when tracing is needed",
         "stageEvidence": "Evidence",
@@ -949,6 +970,32 @@
           "invalidTarget": "Action target missing; cannot submit.",
           "actionDone": "Submitted.",
           "actionFailed": "Refused: {{detail}} Available actions were refreshed — decide again from the latest state."
+        },
+        "evidenceAudit": {
+          "title": "Intervention evidence audit",
+          "headline": "Deliveries {{d}} · Applications {{a}} · Episodes {{e}} · Effects {{f}} · Outcomes {{o}}",
+          "unresolved": "{{count}} record(s) reference objects that have not arrived yet (pending association, not \"never happened\")",
+          "sectionDelivery": "Delivery",
+          "sectionApplication": "Application",
+          "sectionEpisode": "Behavior episode",
+          "sectionEffect": "Effect",
+          "sectionOutcome": "Outcome",
+          "emptySection": "None observed within this scope (not the same as never happened)",
+          "pending": "pending association",
+          "loading": "Loading…",
+          "loadOlder": "Load earlier records",
+          "capabilities": "Host capability declarations (Supported / Unsupported / Unknown)",
+          "technicalSummary": "Technical details (Phase 1 · revisions / digests / source identifiers)",
+          "technicalNote": "Engineering traceability data: evidence IDs, revision references, payload digests, activation and native lineage. The default view shows records and gaps; these fields do not change the semantics above.",
+          "sourceUnknown": "source verifiability unknown",
+          "contentRedacted": "content cleared on {{date}}",
+          "contentReference": "Content reference: {{resolution}} · {{principleId}}{{artifactId}}",
+          "referenceResolved": "resolved",
+          "referenceUnresolved": "revision unresolved",
+          "activationReference": "Activation: {{activationId}}{{activatedAt}}",
+          "nativeLineage": "Native lineage: {{lineage}}",
+          "note": "This section records facts only: delivery confirmation levels, agent self-reports, and runtime facts are listed separately; missing means unknown, not invalid. No success-rate or effectiveness scoring.",
+          "unavailable": "Intervention evidence audit unavailable"
         }
       }
     },
@@ -1918,7 +1965,13 @@
       "update": "Updates",
       "pendingApprovalsAria": "{{count}} pending approvals",
       "degradedSignalsAria": "{{count}} degraded signals",
-      "intent": "Owner Intent"
+      "intent": "Owner Intent",
+      "themeToLight": "Switch to light mode",
+      "themeToDark": "Switch to dark mode",
+      "switchLanguage": "Switch language",
+      "signOut": "Sign out",
+      "openMenu": "Open navigation menu",
+      "navigation": "Main navigation"
     },
     "approvalCard": {
       "confidence": {
