@@ -33,7 +33,7 @@ import type {
   AdversarialFailedCase,
   AdversarialCase,
 } from './evaluator-output.js';
-import { isEvaluatorOutputV2 } from './evaluator-output.js';
+import { isEvaluatorOutputV2, MAX_FAILED_CASE_INPUT_LENGTH } from './evaluator-output.js';
 // PRI-911A: the identity shape gate is the SAME authority the activation
 // boundary uses (PR #1856) — never re-implement a UUID parser here.
 import { canonicalLedgerPrincipleId } from '../activation/low-risk-writers.js';
@@ -821,6 +821,15 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? '',
       previousEvaluation: context.previousEvaluation,
       hostToolCatalog: this.hostToolCatalog ?? undefined,
+      // Review round (2026-10-11): project the runner's existing host
+      // semantic context (the same registry provenance the alias generator
+      // uses) as the judge's kind authority. NOT derived from the catalog —
+      // the catalog's writeTools is a risk grouping that includes
+      // execute/agent-kind tools. Undefined when no host context → prompt
+      // input stays without the field (backward compatible).
+      hostToolKinds: this.hostSemanticContext && this.hostSemanticContext.tools.length > 0
+        ? this.hostSemanticContext.tools.map((tool) => ({ rawToolName: tool.rawToolName, canonicalKind: tool.canonicalKind }))
+        : undefined,
       // PRI-714: language directive for review fields (undefined = none).
       outputLanguage: this.outputLanguage,
       // PRI-703 Phase 1: the scribe artifact's Owner-intent contract is the
@@ -3081,7 +3090,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         readonly forbiddenPatternViolations: readonly string[];
       };
     },
-    adversarialCases: readonly { readonly caseId: string; readonly attackType: 'boundary' | 'omission' | 'inversion'; readonly expectedDecision: 'allow' | 'block' | 'propose_correction' }[],
+    adversarialCases: readonly AdversarialCase[],
   ): AdversarialFailedCase[] {
     const advById = new Map(adversarialCases.map((c) => [c.caseId, c]));
     // PRI-634 PR-A (SPEC §14): the sandbox failedCase is the authority for
@@ -3102,6 +3111,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         ...(fc.actualDecision !== undefined ? { actualDecision: fc.actualDecision } : {}),
         errorType: fc.errorType,
         message,
+        // PD v2 Phase 1 closeout (2026-10-11): carry the failed case's
+        // defining input so the repair round receives actionable evidence —
+        // a bare `Expected block but got allow` names neither the action nor
+        // the context shape that produced it ("failure must increase
+        // information", PRI-634 PR-A). Sandbox failedCases can also cover
+        // merged positive/golden-trace cases the adversarial list does not
+        // know; those keep the legacy no-input shape.
+        ...(adv !== undefined ? { caseInput: EvaluatorRunner.summarizeFailedCaseInput(adv) } : {}),
         rationale: adv
           ? `${fc.errorType}: ${message}`
           : `non-adversarial case ${fc.caseId} failed (${fc.errorType}: ${message}) — likely a code defect, not an adversarial gap`,
@@ -3122,6 +3139,129 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }),
     );
     return [...fromSandbox, ...fromForbidden];
+  }
+
+  /**
+   * PD v2 Phase 1 closeout (2026-10-11), review-round budget rework: the
+   * failed case's defining input in three INDEPENDENTLY bounded segments —
+   *
+   *   1. identity + context facts (history status, truncated,
+   *      priorReadOfTarget, readCount) — written FIRST so a large params
+   *      value can never crowd the context evidence out of the summary;
+   *   2. a bounded params digest — every key survives, big values collapse
+   *      to a VISIBLE `value…(+N chars)` marker instead of inlining;
+   *   3. the case's authored rationale, bounded.
+   *
+   * Each segment carries its own visible truncation marker, so a truncated
+   * summary never looks complete. Total is capped at the shared
+   * MAX_FAILED_CASE_INPUT_LENGTH (rc-8); the resolver uses the SAME bound,
+   * eliminating the old second silent 300-char cut that dropped context
+   * facts from legal 350-char-param inputs.
+   */
+  private static summarizeFailedCaseInput(adv: AdversarialCase): string {
+    const history = adv.ruleContext?.history;
+    const facts = adv.ruleContext?.facts;
+    const contextState = adv.ruleContext
+      ? `history ${history?.status ?? 'unknown'}${history?.truncated ? ' (truncated)' : ''}`
+      : 'none';
+    const identityAndContext = `tool=${adv.toolName} | context: ${contextState}, priorReadOfTarget=${facts?.priorReadOfTarget ?? 'unknown'}, readCount=${facts?.readCount ?? 'unknown'}`;
+
+    let paramsDigest: string;
+    try {
+      paramsDigest = EvaluatorRunner.digestParams(adv.params);
+    } catch {
+      // Whole-params failure other than the contained target-field cases
+      // (e.g. a poisoned getter on a non-target key racing the key sweep):
+      // keep the explicit degradation marker. The context/facts segment is
+      // unaffected either way.
+      paramsDigest = '(unserializable params)';
+    }
+
+    const rationaleBound = 90;
+    const rationale =
+      adv.rationale.length > rationaleBound ? `${adv.rationale.slice(0, rationaleBound)}…` : adv.rationale;
+
+    const summary = `${identityAndContext} | params: ${paramsDigest} | case rationale: ${rationale}`;
+    // Defensive only: segment budgets keep the total within the shared bound
+    // for realistic inputs; if it ever exceeds, the cut stays visible.
+    return summary.length > MAX_FAILED_CASE_INPUT_LENGTH
+      ? `${summary.slice(0, MAX_FAILED_CASE_INPUT_LENGTH - 1)}…`
+      : summary;
+  }
+
+  /**
+   * Target-first per-key digest (review round 2, 2026-10-11): the case's
+   * OWN target (path/file_path via the existing resolveCasePathParam
+   * contract) gets an INDEPENDENT budget written FIRST, so legal edit
+   * payloads whose long oldText/newText/content fields precede the target
+   * can no longer evict `protected/…` from the repair input. A long target
+   * truncates visibly inside its own budget; a case with no derivable
+   * target says so explicitly (never guessed, never borrowed). Remaining
+   * keys keep the per-key digest with visible fold markers. The total
+   * params segment stays within the shared MAX_FAILED_CASE_INPUT_LENGTH
+   * arithmetic — the target budget is reserved, not added on top.
+   */
+  private static digestParams(params: Record<string, unknown>): string {
+    const targetBound = 100;
+    const restBound = 120;
+    const valueBound = 40;
+
+    // Target via the existing resolution contract (path, then file_path).
+    // resolveCasePathParam only reads string fields, so it stays safe even
+    // when OTHER params are unserializable. A poisoned getter on a target
+    // field itself is contained here: the target degrades to the explicit
+    // none marker (the summarize-level whole-params catch then never fires
+    // for this shape).
+    let target: string | null = null;
+    let targetKey: string | null = null;
+    try {
+      target = resolveCasePathParam(params);
+      if (target !== null) {
+        // Re-derive which key won so the LOSING sibling (e.g. file_path next
+        // to a winning path, or a non-string path) stays visible in the rest
+        // digest instead of silently disappearing.
+        for (const key of ['path', 'file_path'] as const) {
+          try {
+            const raw = params[key];
+            if (typeof raw === 'string' && raw.trim() !== '') {
+              targetKey = key;
+              break;
+            }
+          } catch {
+            // Poisoned getter on this key — skip it; the other may still win.
+          }
+        }
+      }
+    } catch {
+      // resolveCasePathParam threw on a poisoned target field: treat as no
+      // derivable target (the explicit none marker below).
+    }
+    const targetSegment = target === null
+      ? "target=(none - not derivable from this case's params)"
+      : target.length > targetBound
+        ? `target="${target.slice(0, targetBound - 1)}…(+${target.length - (targetBound - 1)} chars)"`
+        : `target="${target}"`;
+
+    const parts = Object.keys(params)
+      .filter((key) => key !== targetKey)
+      .map((key) => {
+        let value: string;
+        try {
+          value = JSON.stringify(params[key]) ?? 'undefined';
+        } catch {
+          value = '(unserializable)';
+        }
+        if (value.length > valueBound) {
+          value = `${value.slice(0, valueBound)}…(+${value.length - valueBound} chars)`;
+        }
+        return `${key}=${value}`;
+      });
+    const restDigest = `{${parts.join(',')}}`;
+    const rest = restDigest.length > restBound
+      ? `${restDigest.slice(0, restBound)}…(+${restDigest.length - restBound} chars total)`
+      : restDigest;
+
+    return `${targetSegment}; ${rest}`;
   }
 
   // ── PRI-427: rule artifact assembly ────────────────────────────────────────

@@ -37,6 +37,13 @@ export interface EvaluatorPromptBuilderInput {
    */
   hostToolCatalog?: HostToolCatalogFacts;
   /**
+   * Review round (2026-10-11): runtime kind authority for code review — the
+   * host's own tool→kind mapping projected from the runner's existing
+   * hostSemanticContext. NOT derivable from hostToolCatalog (its writeTools
+   * is a risk grouping that includes exec→execute and sessions_spawn→agent).
+   */
+  hostToolKinds?: readonly HostToolKindFact[];
+  /**
    * PRI-703 Phase 1 (Owner decision 2026-09-07): the scribe artifact's
    * structured Owner-intent contract (runtime-validated). When present, it is
    * the PRIMARY anchor for intentConsistency judging and for scoping which
@@ -140,6 +147,20 @@ export interface HostToolCatalogFacts {
   readonly writeTools: readonly string[];
 }
 
+/**
+ * PD v2 Phase 1 review round (2026-10-11): the runtime kind authority for the
+ * judge — the host's OWN tool→kind mapping (same provenance as the Artificer
+ * HOST SEMANTIC CONTEXT projection; the runner projects its existing
+ * hostSemanticContext). Deliberately NOT derived from HostToolCatalogFacts:
+ * the catalog groups tools by risk/legality and its writeTools includes
+ * entries that dispatch as 'execute' (exec) or 'agent' (sessions_spawn), so
+ * the catalog is not a kind table.
+ */
+export interface HostToolKindFact {
+  readonly rawToolName: string;
+  readonly canonicalKind: string;
+}
+
 export interface EvaluatorPromptInput {
   taskId: string;
   contextHash: string;
@@ -148,6 +169,8 @@ export interface EvaluatorPromptInput {
   scribeArtifact?: unknown;
   previousEvaluation?: PreviousEvaluationContext;
   hostToolCatalog?: HostToolCatalogFacts;
+  /** Host tool→kind mapping when the runner carries a host semantic context (review round 2026-10-11). */
+  hostToolKinds?: readonly HostToolKindFact[];
   /** Present only when the scribe artifact carries a validated intent contract (PRI-703 Phase 1). */
   intentContract?: IntentContractV1;
   /** Present only when the formation evidence resolved (PRI-843). */
@@ -190,6 +213,9 @@ CONVERGENCE CONTRACT (PRI-630 — applies whenever input.previousEvaluation is p
 
 TOOL CATALOG AUTHORITY (PRI-630 — applies whenever input.hostToolCatalog is present):
 Tool legality is judged ONLY against input.hostToolCatalog (readOnlyTools / writeTools). If a tool name appears in the catalog, it is a legitimate host tool — you MUST NOT flag it as a blocker for being a "non-standard name", regardless of your prior knowledge. The catalog is NOT exhaustive: a tool name absent from the catalog is not evidence of illegality either — tool-name spelling is never a blocker; only the tool BEHAVIOR described in the rule may be. When input.hostToolCatalog is ABSENT, you have NO authoritative tool knowledge: tool-name observations may appear in concerns at most, and MUST NOT become requiredChanges or affect the decision.
+
+RUNTIME KIND SEMANTICS (PD v2 Phase 1 review round 2026-10-11 — applies whenever you review implementationCode):
+The RuleHost runtime dispatches every tool call with a closed canonical kind: "read" | "search" | "write" | "execute" | "agent" | "other". The kind authority is input.hostToolKinds — the host's OWN tool→kind mapping — when it is present: judge coverage against THAT mapping. Real hosts disagree with name intuition: a shell tool may dispatch as "execute", an agent-delegation tool as "agent", while the file-mutation family (write, edit, apply_patch) dispatches as "write" — always read the kind from the mapping, never from the name or the grouping. input.hostToolCatalog is a risk/legality grouping, NOT a kind table: its writeTools may contain tools whose dispatch kind is NOT "write", and its readOnlyTools are not automatically "read" or "search" — never infer a kind from the catalog grouping or from a tool's name. When input.hostToolKinds is ABSENT you have NO authoritative kind knowledge: a coverage claim that depends on which kind a tool dispatches as MUST stay a concern at most, stated as unknown — never a requiredChange or decision driver. Even with the mapping present, equal canonicalKind does not prove equal parameter shape or equal rule coverage: a rule that branches on canonicalKind covers same-kind DISPATCH, but a judge may still flag a concrete, evidenced parameter-shape gap (name the parameter and the case) — such a flag must cite the actual input evidence, not the kind equality alone.
 
 PROTOCOL:
 1. Review the artificerArtifact to understand the proposed implementation plan
@@ -320,7 +346,30 @@ PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
  * same discipline as v5 — a run without validator feedback emits exactly the
  * v5 wire shape plus the new version string.
  */
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v6';
+/**
+ * PD v2 Phase 1 closeout (2026-10-11): bumped v6 → v7. Live p1-closeout chain:
+ * a rule whose write gate branched on `canonicalKind === 'write'` PASSED the
+ * full deterministic replay (edit and apply_patch canonicalize to 'write')
+ * yet the LLM judge returned needs_revision claiming "edit/apply_patch 会直
+ * 接返回 allow" — the judge knew the tool catalog NAMES but not the kind
+ * mapping, so it misread correct code as a coverage hole. The system prompt
+ * now carries a RUNTIME KIND SEMANTICS clause (writeTools dispatch as the
+ * single kind 'write'; only literal-toolName matching can miss a sibling).
+ * Additive: a run without implementationCode review sees only the new clause
+ * and version string.
+ */
+// Review round (2026-10-11): bumped v7 -> v8. Review showed the v7 clause
+// itself asserted a false mapping: "EVERY writeTools entry dispatches as
+// 'write'" — but the real OpenClaw catalog's writeTools is a RISK grouping
+// that includes a shell tool dispatching 'execute' and an agent-delegation
+// tool dispatching 'agent', and readOnlyTools are not automatically
+// 'read'/'search'. v8 makes the host's OWN tool-to-kind mapping
+// (input.hostToolKinds, projected from the runner's existing
+// hostSemanticContext — no second mapping table) the kind authority, marks
+// the catalog as a risk grouping that must never be read as a kind table,
+// keeps unknown when no mapping is present, and re-allows concrete
+// parameter-shape coverage flags with evidence. Additive input field.
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v8';
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
@@ -336,6 +385,10 @@ export class EvaluatorPromptBuilder {
       scribeArtifact: input.scribeArtifact,
       previousEvaluation: input.previousEvaluation,
       hostToolCatalog: input.hostToolCatalog,
+      // Review round (2026-10-11): only include hostToolKinds when the runner
+      // carried a host semantic context, so runs without one keep the exact
+      // pre-review payload (backward compatible).
+      ...(input.hostToolKinds !== undefined ? { hostToolKinds: input.hostToolKinds } : {}),
       // PRI-703 Phase 1: only include intentContract when present (pre-contract
       // scribe artifacts), so prompts stay backward-compatible.
       ...(input.intentContract !== undefined ? { intentContract: input.intentContract } : {}),

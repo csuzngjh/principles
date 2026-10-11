@@ -37,8 +37,69 @@ describe('EvaluatorPromptBuilder', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('sourceTrace.artificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId');
   });
 
-  it('promptContractVersion value is evaluator-output-v1.prompt.v6 (PRI-644 validator re-feed anchor)', () => {
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v6');
+  it('promptContractVersion value is evaluator-output-v1.prompt.v8 (review-round mapping-authority anchor)', () => {
+    // v7 (2026-10-11 closeout) anchored the first kind-semantics clause but
+    // asserted a FALSE mapping ("EVERY writeTools entry dispatches as
+    // 'write'") — the real OpenClaw catalog's writeTools is a risk grouping
+    // that includes a shell tool dispatching 'execute' and an
+    // agent-delegation tool dispatching 'agent'. v8 (review round) makes the
+    // host's OWN tool-to-kind mapping the authority and keeps unknown when
+    // no mapping is present.
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v8');
+  });
+
+  // Review round (2026-10-11): the clause must point the judge at the real
+  // mapping (input.hostToolKinds), forbid reading the risk catalog or tool
+  // names as kind authority, keep unknown when the mapping is absent, and
+  // still allow evidenced parameter-shape coverage flags.
+  it('instruction carries RUNTIME KIND SEMANTICS with the mapping authority (v8)', () => {
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('RUNTIME KIND SEMANTICS');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('The kind authority is input.hostToolKinds');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('input.hostToolCatalog is a risk/legality grouping, NOT a kind table');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain("never infer a kind from the catalog grouping or from a tool's name");
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('When input.hostToolKinds is ABSENT you have NO authoritative kind knowledge');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('equal canonicalKind does not prove equal parameter shape');
+  });
+
+  it('v7 false mappings are gone', () => {
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).not.toContain('EVERY tool catalogued under writeTools');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).not.toContain('ALREADY covers edit and apply_patch dispatches');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).not.toContain('readOnlyTools dispatch as "read" or "search"');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).not.toContain('Only a rule that matches by literal toolName equality');
+  });
+
+  // The prompt message must carry the projected mapping when the runner has
+  // a host semantic context — and must NOT carry the field when it does not.
+  // Fixture mirrors the REAL OpenClaw producer data (openclaw-plugin
+  // constants/tool-semantics.ts OPENCLAW_TOOL_SEMANTIC_MAPPINGS): the
+  // file-mutation family as 'write', exec as 'execute', the agent-delegation
+  // tool as 'agent' — the exact counterexample that disproved the v7
+  // "every writeTools entry is write" claim (the risk catalog's writeTools
+  // includes exec and the agent tool).
+  it('message carries hostToolKinds from the host semantic context and omits it when absent', () => {
+    const withMapping = builder.buildPrompt({
+      ...input,
+      hostToolKinds: [
+        { rawToolName: 'write', canonicalKind: 'write' },
+        { rawToolName: 'edit', canonicalKind: 'write' },
+        { rawToolName: 'apply_patch', canonicalKind: 'write' },
+        { rawToolName: 'exec', canonicalKind: 'execute' },
+        { rawToolName: 'sessions_spawn', canonicalKind: 'agent' },
+      ],
+    });
+    const parsedWith = JSON.parse(withMapping.message) as Record<string, unknown>;
+    const kinds = parsedWith.hostToolKinds as { rawToolName: string; canonicalKind: string }[];
+    expect(kinds).toEqual([
+      { rawToolName: 'write', canonicalKind: 'write' },
+      { rawToolName: 'edit', canonicalKind: 'write' },
+      { rawToolName: 'apply_patch', canonicalKind: 'write' },
+      { rawToolName: 'exec', canonicalKind: 'execute' },
+      { rawToolName: 'sessions_spawn', canonicalKind: 'agent' },
+    ]);
+
+    const withoutMapping = builder.buildPrompt({ ...input });
+    const parsedWithout = JSON.parse(withoutMapping.message) as Record<string, unknown>;
+    expect(Object.hasOwn(parsedWithout, 'hostToolKinds')).toBe(false);
   });
 
   it('score instruction says number not string/percentage', () => {

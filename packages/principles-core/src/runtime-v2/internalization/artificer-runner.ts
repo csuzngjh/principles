@@ -383,6 +383,10 @@ function formatReplayEvidenceBlock(context: RepairReplayContext): string {
     if (failure.actualDecision !== undefined) parts.push(`Actual: ${failure.actualDecision}`);
     parts.push(`Error: ${failure.errorType}`);
     if (failure.message !== undefined) parts.push(`Message: ${failure.message}`);
+    // PD v2 Phase 1 closeout (2026-10-11): the failed case's defining input
+    // (tool/params/context facts/authored rationale) — without it a template
+    // mismatch names neither the action nor the context shape to fix.
+    if (failure.caseInput !== undefined) parts.push(`Input: ${failure.caseInput}`);
     lines.push(`- ${parts.join(' | ')}`);
   }
   if (context.truncated) {

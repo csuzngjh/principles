@@ -303,6 +303,12 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     if (!v2Unavailable) return;
     expect(v2Unavailable.expectedDecision).toBe('allow');
     expect(String(v2Unavailable.message)).toContain('includes is not a function');
+    // PD v2 Phase 1 closeout (2026-10-11): every failed adversarial case now
+    // carries a bounded caseInput summary naming the action and context shape,
+    // so the repair round sees WHICH input failed, not just the mismatch.
+    expect(String(v2Unavailable.caseInput)).toContain('tool=');
+    expect(String(v2Unavailable.caseInput)).toContain('context:');
+    expect(String(v2Unavailable.caseInput)).toContain('case rationale:');
 
     // (2) The repair round was seeded with the bounded control summary only.
     expect(seededRepair.payload).toBeDefined();
@@ -338,6 +344,14 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     expect(repairPrompt).toContain('Expected: allow');
     expect(repairPrompt).toContain('Error: runtime_error');
     expect(repairPrompt).toContain('includes is not a function');
+    expect(repairPrompt).toContain('Input: tool='); // v11: the failed case's defining input rides the evidence block
+    // Review round 2 (2026-10-11): the FULL chain producer→durable artifact→
+    // resolver→repair prompt preserves the owner negative's target COMPLETE —
+    // /etc/passwd is a short path so it must survive verbatim, proving the
+    // target-first budget end to end (not just at the producer).
+    // repairPrompts captures the JSON message, so quotes inside are escaped.
+    expect(repairPrompt).toContain('target=\\"/etc/passwd\\"');
+    expect(repairPrompt).toContain('target=\\"/workspace/src/a.ts\\"');
     expect(repairPrompt).toContain(EVAL1_ID); // stable source reference in the evidence header
     expect(emitted.some((e) => e.eventType === 'artificer_repair_replay_evidence_resolved')).toBe(true);
 

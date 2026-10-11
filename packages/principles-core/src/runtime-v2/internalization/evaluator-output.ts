@@ -51,6 +51,17 @@ export interface AdversarialFailedCase {
    * sandbox. Present on runtime-written evidence; absent on legacy artifacts.
    */
   readonly message?: string;
+  /**
+   * PD v2 Phase 1 closeout (2026-10-11): bounded summary of the FAILED
+   * case's defining input — tool, params, context facts (status/truncated,
+   * priorReadOfTarget, readCount) and the case's authored rationale. Without
+   * it a template failure like `v2-path-boundary: Expected block but got
+   * allow` carries zero actionable signal into the repair round: the
+   * artificer cannot see WHICH write or WHICH context shape produced the
+   * mismatch. Present on runtime-written evidence; absent on legacy
+   * artifacts.
+   */
+  readonly caseInput?: string;
 }
 
 export interface EvaluatorCodeReview {
@@ -80,6 +91,14 @@ export interface EvaluatorAdversarialResult {
    */
   readonly failure?: { readonly layer: string; readonly reasonCode: string };
 }
+
+/**
+ * PD v2 Phase 1 review round (2026-10-11): the ONE final bound for a failed
+ * case's `caseInput` summary — shared by the producer (mapFailedCases) and
+ * the consumer (repair-replay-resolver) so a within-budget summary is never
+ * silently re-truncated with its context facts lost.
+ */
+export const MAX_FAILED_CASE_INPUT_LENGTH = 400;
 
 /**
  * PRI-630 收敛契约: 第二轮及之后,评估器必须对上轮 review contract 的每个

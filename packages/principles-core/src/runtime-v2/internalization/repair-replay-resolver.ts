@@ -27,6 +27,7 @@
 import type { TaskRecord } from '../task-status.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import type { PIArtifactStore } from './pi-artifact.js';
+import { MAX_FAILED_CASE_INPUT_LENGTH } from './evaluator-output.js';
 
 /** Sandbox error enums that legacy artifacts stored inside actualDecision. */
 const LEGACY_SANDBOX_ERROR_TYPES: ReadonlySet<string> = new Set([
@@ -66,6 +67,14 @@ export interface ReplayFailureEvidence {
   readonly actualDecision?: string;
   readonly errorType: string;
   readonly message?: string;
+  /**
+   * PD v2 Phase 1 closeout (2026-10-11): bounded summary of the failed
+   * case's defining input (tool/params/context facts/authored rationale),
+   * persisted by the evaluator so the repair prompt can name WHICH action
+   * and context shape failed — not just the decision mismatch. Absent on
+   * legacy artifacts.
+   */
+  readonly caseInput?: string;
 }
 
 export interface RepairReplayContext {
@@ -137,6 +146,12 @@ function boundMessage(message: string): string {
     : message;
 }
 
+function boundCaseInput(caseInput: string): string {
+  return caseInput.length > MAX_FAILED_CASE_INPUT_LENGTH
+    ? `${caseInput.slice(0, MAX_FAILED_CASE_INPUT_LENGTH - 1)}…`
+    : caseInput;
+}
+
 function normalizeFailedCaseEntry(entry: unknown): ReplayFailureEvidence | null {
   if (!isRecord(entry)) return null;
   const caseId = optionalNonEmptyString(entry.caseId);
@@ -168,6 +183,7 @@ function normalizeFailedCaseEntry(entry: unknown): ReplayFailureEvidence | null 
 
   const rationale = optionalNonEmptyString(entry.rationale);
   const message = optionalNonEmptyString(entry.message) ?? rationale;
+  const caseInput = optionalNonEmptyString(entry.caseInput);
   return {
     caseId,
     attackType: optionalNonEmptyString(entry.attackType),
@@ -175,6 +191,11 @@ function normalizeFailedCaseEntry(entry: unknown): ReplayFailureEvidence | null 
     ...(actualDecision !== undefined ? { actualDecision } : {}),
     errorType,
     ...(message !== undefined ? { message: boundMessage(message) } : {}),
+    // Review round (2026-10-11): caseInput uses the SAME shared bound as the
+    // producer (MAX_FAILED_CASE_INPUT_LENGTH) — the old second 300-char cut
+    // dropped context facts from within-budget producer output. Over-long
+    // legacy entries still truncate, visibly.
+    ...(caseInput !== undefined ? { caseInput: boundCaseInput(caseInput) } : {}),
   };
 }
 
