@@ -1,5 +1,0 @@
----
-"@principles/core": patch
----
-
-Give the Evaluator judge the host's OWN tool-to-kind mapping as the kind authority (contract v6 → v8). Live p1-closeout chain evidence: a rule whose write gate branched on `input.action.canonicalKind === 'write'` passed the FULL deterministic replay, yet the LLM judge returned needs_revision claiming "edit/apply_patch return allow" — the prompt's tool catalog carried tool NAMES without any kind mapping. The first fix (v7) over-corrected by claiming every writeTools entry dispatches as 'write'; the real OpenClaw catalog is a RISK grouping whose writeTools also includes a shell tool dispatching 'execute' and an agent-delegation tool dispatching 'agent'. v8 projects the runner's existing host semantic context into the judge prompt as `input.hostToolKinds` (no second mapping table), marks the catalog as never-a-kind-table, keeps unknown when no mapping is present, and re-allows concrete evidenced parameter-shape coverage flags. Replay gate, validator, and decision thresholds unchanged.
