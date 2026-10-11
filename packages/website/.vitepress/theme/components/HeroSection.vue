@@ -7,16 +7,27 @@
         <template v-else><span>Stop correcting the</span><span>same Agent behavior.</span></template>
       </h1>
       <p class="hero-category">{{ isZh ? 'AI Agent 行为治理运行时' : 'AI Agent Governance Runtime' }}</p>
+      <!-- SPEC-PD-UIUX-001 R7: the lead states the core loop in plain language
+           (correction → reviewable principle → your approval → later
+           evidence); the governance-channel vocabulary moved to a secondary
+           line so first-time visitors are not asked to parse jargon first. -->
       <p class="hero-lead">
         {{ isZh
-          ? 'Principles Disciple（PD）是一个 AI Agent 行为治理系统：把你的反复纠正沉淀为经你审批的行为原则，并通过多个治理通道应用——从提示词引导到运行时治理——让 Agent 在下一次相似任务中按你的方式行动。'
-          : 'Principles Disciple is an AI Agent Governance System: it turns repeated corrections into owner-approved behavioral principles and applies them through multiple governance channels — from prompt guidance to runtime governance — so the Agent handles the next similar task your way.' }}
+          ? '把你反复纠正的行为沉淀为 Agent 的行为原则：PD 观察重复纠正 → 生成可审查的原则草案 → 你批准 → 后续任务留下可观察的证据，随时可撤回。'
+          : 'Turn your repeated corrections into Agent behavior principles: PD observes the recurring corrections → drafts a reviewable principle → you approve → later tasks leave observable evidence — reversible at any time.'
+        }}
+      </p>
+      <p class="hero-terms">
+        {{ isZh
+          ? '如何生效（提示词引导、运行时治理等治理通道）在下方各节逐步说明。'
+          : 'How it takes effect (prompt guidance, runtime governance) is explained in the sections below.'
+        }}
       </p>
       <p class="hero-proof">
         {{ isZh ? '每条原则先由你批准，效果可观察，随时可回滚。' : 'You approve every principle first. Its effect stays observable and can be rolled back.' }}
       </p>
       <div class="hero-actions">
-        <a class="pd-btn pd-btn-brand" href="#example" data-umami-event="cta_see_example">{{ isZh ? '看一个真实变化示例' : 'See a behavior change' }}</a>
+        <a class="pd-btn pd-btn-brand" href="#example" data-umami-event="cta_see_example">{{ isZh ? '看一个行为变化示意' : 'See an illustrated behavior change' }}</a>
         <a class="pd-btn pd-btn-alt" :href="isZh ? '/zh/install' : '/install'" data-umami-event="cta_get_started">{{ isZh ? '开始使用' : 'Get started' }}</a>
       </div>
     </div>
@@ -55,6 +66,7 @@ const isZh = useIsZh()
 .hero-copy h1 span { display: block; }
 .hero-category { margin: 0 0 14px; color: var(--accent); font-weight: 600; font-size: 15px; letter-spacing: .04em; }
 .hero-lead { max-width: 670px; font-size: clamp(18px, 2vw, 22px) !important; line-height: 1.65 !important; color: var(--text-main) !important; }
+.hero-terms { max-width: 670px; margin-top: 12px; font-size: 14px; color: var(--text-secondary); }
 .hero-proof { margin-top: 18px; max-width: 620px; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
 .hero-visual-wrapper { aspect-ratio: 16 / 9; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; background: #111827; box-shadow: 0 22px 60px rgba(17, 24, 39, .08); }

@@ -522,9 +522,10 @@ export function RuntimeProfileManager({
             )}
           </div>
 
-          {/* Inline validation / server error */}
+          {/* Inline validation / server error — danger token (SPEC-PD-UIUX-001 R5:
+              bare `red` utilities resolve to nothing in the Tailwind v4 theme). */}
           {formError !== null && (
-            <div className="mt-3 px-[12px] py-[8px] border border-red/35 rounded-[4px] bg-red/10 text-[12px] text-red font-mono">
+            <div className="mt-3 px-[12px] py-[8px] border border-danger/35 rounded-[4px] bg-danger/10 text-[12px] text-danger font-mono">
               {formError}
             </div>
           )}
@@ -638,7 +639,7 @@ export function RuntimeProfileManager({
                         deleting ||
                         deleteTarget !== null
                       }
-                      className="text-[11.5px] px-[10px] py-[4px] rounded-[3px] border border-line bg-surface text-ink-3 hover:border-red/40 hover:text-red transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="text-[11.5px] px-[10px] py-[4px] rounded-[3px] border border-line bg-surface text-ink-3 hover:border-danger/40 hover:text-danger transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {t("pages.controlCenter.profiles.deleteButton")}
                     </button>
@@ -660,7 +661,7 @@ export function RuntimeProfileManager({
                         </div>
                       )}
                       {deleteError !== null && (
-                        <div className="mt-2 font-mono text-[11.5px] text-red">
+                        <div className="mt-2 font-mono text-[11.5px] text-danger">
                           {deleteError}
                         </div>
                       )}

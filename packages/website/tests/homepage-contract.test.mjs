@@ -41,9 +41,18 @@ test('Chinese homepage ships the Owner-governed story and working paths', async 
   assert.match(html, /Codex/)
   assert.match(html, /homepage-demo-zh\.mp4/)
   assert.match(html, /homepage-demo-poster-zh\.webp/)
-  // Motto breathing space is present (rewritten, MVP-aligned placement)
-  assert.match(html, /如果你没有在受苦/)
-  assert.match(html, /燃烧痛苦，协同进化/)
+  // SPEC-PD-UIUX-001 R8 — INTENTIONAL CONTENT CONTRACT CHANGE: the suffering
+  // declaration is no longer the main closing statement. The closing is an
+  // invitation around fewer repeated corrections + owner control +
+  // observability/reversibility; the brand thinking stays reachable via the
+  // Abyss link (燃烧痛苦，协同进化 as the link text).
+  assert.doesNotMatch(html, /如果你没有在受苦/)
+  assert.match(html, /少一点重复纠正/)
+  assert.match(html, /最终决定始终在你手里/)
+  assert.match(html, /理念与研究：燃烧痛苦，协同进化/)
+  // R8: the behavior timeline is labeled an illustration, not a verified case
+  assert.match(html, /行为变化示意/)
+  assert.doesNotMatch(html, /真实变化示例/)
   // Off-position legacy framing stays removed
   assert.doesNotMatch(html, /硅基生命的思维操作系统|自主进化/)
 })
@@ -59,8 +68,13 @@ test('English homepage preserves the same host-neutral contract', async () => {
   assert.match(html, /Codex/)
   assert.match(html, /homepage-demo-en\.mp4/)
   assert.match(html, /homepage-demo-poster-en\.webp/)
-  assert.match(html, /not suffering, you/)
+  // SPEC-PD-UIUX-001 R8 — same contract change as the Chinese page.
+  assert.doesNotMatch(html, /not suffering, you/)
+  assert.match(html, /Fewer repeated corrections\. More certainty\./)
+  assert.match(html, /the final decision stays yours/)
   assert.match(html, /Burn Pain, Co-Evolve/)
+  assert.match(html, /illustrated behavior change/)
+  assert.doesNotMatch(html, /A concrete behavior change/)
   assert.doesNotMatch(html, /Thinking OS for Silicon Lifeforms|autonomous evolution/i)
 })
 
@@ -155,14 +169,18 @@ test('Download pages state what/which version/platform and guide first install',
   assert.match(zh, /首次安装四步/)
   assert.match(zh, /仍要运行/)
   assert.match(zh, /Node\.js/)
-  assert.match(zh, /≥ 18/)
+  // SPEC-PD-UIUX-001 R7: Node floor follows the installer manifest (>= 22);
+  // the old ">= 18" copy was stale.
+  assert.match(zh, /≥ 22/)
+  assert.doesNotMatch(zh, /≥ 18/)
   assert.match(zh, /npx create-principles-disciple/)
   assert.match(zh, /每个版本只提醒一次/)
   assert.match(zh, /不影响.*PD 本体/s)
   assert.match(en, /First install in four steps/)
   assert.match(en, /Run anyway/)
   assert.match(en, /Node\.js/)
-  assert.match(en, /≥ 18/)
+  assert.match(en, /≥ 22/)
+  assert.doesNotMatch(en, /≥ 18/)
 
   // Deterministic CTA branch: SSG bakes the release data at build time
   // (scripts/fetch-companion-release.mjs) and renders either the real download
@@ -182,4 +200,33 @@ test('Download pages state what/which version/platform and guide first install',
       assert.doesNotMatch(html, /companion-download"/)
     }
   }
+})
+
+// SPEC-PD-UIUX-001 R7: the install page asks for the host FIRST; the download
+// page states the PD prerequisite next to its CTA; Node requirements follow
+// the installer manifest (>= 22), not the stale >= 18 copy.
+test('install and download pages route by host and state prerequisites honestly', async () => {
+  const zhInstall = await page(path.join('zh', 'install.html'))
+  const enInstall = await page('install.html')
+  for (const html of [zhInstall, enInstall]) {
+    // Default view = host selection, both entries present, no host assumed.
+    assert.match(html, /install-host-select/)
+    assert.match(html, /install-host-openclaw/)
+    assert.match(html, /install-host-codex/)
+    // The npx command is NOT the unscoped default on the install page.
+    assert.doesNotMatch(html, /create-principles-disciple --yes/)
+    // Node requirement matches the installer engines (>= 22).
+    assert.doesNotMatch(html, /Node\.js ≥ 18|Node ≥ 18/)
+    assert.match(html, /≥ ?22/)
+  }
+  // Codex path facts survive into the disclaimer.
+  assert.match(zhInstall, /Codex CLI ≥ 0\.147/)
+  assert.match(enInstall, /Codex CLI ≥ 0\.147/)
+
+  const zhDownload = await page(path.join('zh', 'download.html'))
+  const enDownload = await page('download.html')
+  assert.match(zhDownload, /需先安装 PD/)
+  assert.match(enDownload, /PD must be installed first/)
+  assert.match(zhDownload, /≥ 22/)
+  assert.match(enDownload, /≥ 22/)
 })

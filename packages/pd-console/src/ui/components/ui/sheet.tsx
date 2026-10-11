@@ -2,6 +2,7 @@ import * as React from "react";
 import * as SheetPrimitive from "@radix-ui/react-dialog";
 import { cva, type VariantProps } from "class-variance-authority";
 import { X } from "lucide-react";
+import i18n from "../../i18n/index.js";
 import { cn } from "../../../lib/utils.js";
 
 const Sheet = SheetPrimitive.Root;
@@ -61,9 +62,11 @@ const SheetContent = React.forwardRef<
       className={cn(sheetVariants({ side }), className)}
       {...props}
     >
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
+      <SheetPrimitive.Close className="absolute right-4 top-4 flex h-11 w-11 items-center justify-center rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
         <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
+        {/* Review round (P3): sr-only name follows the UI language — the only
+            consumer is the zh-first console drawer. */}
+        <span className="sr-only">{i18n.t("common.close", { defaultValue: "关闭" })}</span>
       </SheetPrimitive.Close>
       {children}
     </SheetPrimitive.Content>

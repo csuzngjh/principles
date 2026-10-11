@@ -1,12 +1,16 @@
 <template>
   <section id="example" class="pd-section example-section" aria-labelledby="example-title">
     <div class="section-heading">
-      <p class="pd-eyebrow">{{ isZh ? '真实变化示例' : 'A concrete behavior change' }}</p>
+      <!-- SPEC-PD-UIUX-001 R8: this timeline is an ILLUSTRATION of the loop,
+           not a verified customer case — the eyebrow, the timeline aria-label
+           and the hero CTA all say 示意/illustrated so nobody reads it as
+           proven improvement evidence. -->
+      <p class="pd-eyebrow">{{ isZh ? '行为变化示意' : 'An illustrated behavior change' }}</p>
       <h2 id="example-title">{{ isZh ? '不是记住一句话，而是改变下一次行动。' : 'Not a saved note. A changed next action.' }}</h2>
-      <p>{{ isZh ? '从重复纠正，到 Owner 批准，再到后续行为的可观察改变。' : 'From repeated correction through Owner approval to an observable change in later behavior.' }}</p>
+      <p>{{ isZh ? '从重复纠正，到 Owner 批准，再到后续行为的可观察改变——下面是一条示意链路，展示机制如何运转。' : 'From repeated correction through Owner approval to an observable change in later behavior — the timeline below illustrates how the mechanism works.' }}</p>
     </div>
 
-    <ol class="timeline" :aria-label="isZh ? '一个真实的行为变化流程' : 'A real behavior change flow'">
+    <ol class="timeline" :aria-label="isZh ? '一条行为变化的示意流程' : 'An illustrated behavior-change flow'">
       <li v-for="(item, index) in caseItems" :key="item.label" :class="{ 'is-pivot': item.pivot }">
         <span class="node" :aria-hidden="true">
           <template v-if="item.pivot">{{ isZh ? '决' : 'OK' }}</template>

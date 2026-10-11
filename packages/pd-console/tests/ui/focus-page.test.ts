@@ -21,6 +21,7 @@ import {
   showsUnlinkedCandidateNote,
   validateApprovalsGroupedData as validateApprovalsGroupedDataReal,
 } from "../../src/ui/pages/focus/focus-validation.js";
+import { partitionInboxForDisplay, deriveConclusionDisplay, resolveConclusionActionableKey } from "../../src/ui/pages/focus/FocusPage.js";
 
 // ── Mock the API module ──────────────────────────────────────────────────────
 
@@ -747,5 +748,250 @@ describe("FocusPage: PRI-332 zero state clarity", () => {
     expect(src).toMatch(/degradedSignals && degradedSignals\.length > 0/);
     // Should NOT have the old pattern that gates on governanceState === "degraded"
     expect(src).not.toMatch(/governanceState === "degraded" && degradedSignals/);
+  });
+});
+
+// ── SPEC-PD-UIUX-001 R2: Focus reading order + inbox/action-card dedup ──────
+
+describe("SPEC-PD-UIUX-001 R2: partitionInboxForDisplay display semantics", () => {
+  type InboxItem = { principleId: string; inbox: { group: string; attention: string } };
+  const mk = (principleId: string, group: string, attention = "individual"): InboxItem => ({
+    principleId,
+    inbox: { group, attention },
+  });
+
+  function mkInbox(overrides?: Partial<{
+    decision: InboxItem[];
+    blocked: InboxItem[];
+    recovery: InboxItem[];
+  }>) {
+    return {
+      groups: {
+        decision: overrides?.decision ?? [],
+        blocked: overrides?.blocked ?? [],
+        recovery: overrides?.recovery ?? [],
+      },
+      historicalUnknown: { count: 0 },
+    };
+  }
+
+  it("does not duplicate decision objects that already have an action card (match by principleId)", () => {
+    const inbox = mkInbox({ decision: [mk("p-1", "decision"), mk("p-2", "decision")] });
+    const partition = partitionInboxForDisplay(inbox, new Set(["p-1"]));
+    expect(partition.unmatchedDecisions.map((i) => i.principleId)).toEqual(["p-2"]);
+  });
+
+  it("preserves unlinked decision objects — hiding for visual tidiness is forbidden", () => {
+    const inbox = mkInbox({ decision: [mk("p-orphan", "decision")] });
+    const partition = partitionInboxForDisplay(inbox, new Set(["p-other"]));
+    expect(partition.unmatchedDecisions).toHaveLength(1);
+    expect(partition.pendingTotal).toBe(1);
+  });
+
+  it("counts pending as decision + individual blocked + recovery (aggregate blocked excluded)", () => {
+    const inbox = mkInbox({
+      decision: [mk("p-1", "decision"), mk("p-2", "decision")],
+      blocked: [mk("p-3", "blocked", "individual"), mk("p-4", "blocked", "aggregate")],
+      recovery: [mk("p-5", "recovery")],
+    });
+    const partition = partitionInboxForDisplay(inbox, new Set(["p-1"]));
+    // 2 decision + 1 individual blocked + 1 recovery = 4; the aggregate blocked
+    // item is surfaced separately, not as an individual todo.
+    expect(partition.pendingTotal).toBe(4);
+    expect(partition.blockedIndividual.map((i) => i.principleId)).toEqual(["p-3"]);
+    expect(partition.blockedAggregate.map((i) => i.principleId)).toEqual(["p-4"]);
+  });
+
+  it("covers the inbox display item exactly once when its principle has an action card", () => {
+    // Review round: renamed to match what is actually asserted. The partition
+    // hides the inbox SUMMARY entry for a principle whose action card is on
+    // screen; the action cards themselves (keyed by reviewKey / group key,
+    // possibly several for one principle) are outside this function and are
+    // never merged by it — see the e2e card-count assertions for the surface.
+    const inbox = mkInbox({ decision: [mk("p-1", "decision")] });
+    const partition = partitionInboxForDisplay(inbox, new Set(["p-1"]));
+    expect(partition.unmatchedDecisions).toHaveLength(0);
+  });
+
+  it("empty inbox partitions to zero pending and no items", () => {
+    const partition = partitionInboxForDisplay(mkInbox(), new Set());
+    expect(partition.pendingTotal).toBe(0);
+    expect(partition.unmatchedDecisions).toHaveLength(0);
+    expect(partition.blockedIndividual).toHaveLength(0);
+    expect(partition.blockedAggregate).toHaveLength(0);
+    expect(partition.recovery).toHaveLength(0);
+  });
+});
+
+// Owner review round 2: the conclusion headline/total must (S1) consume the
+// inbox `degraded` contract, (S2/Q1) report the association-deduped UNION of
+// on-screen cards and inbox items — not a max() of two partial counts — and
+// (S3) express governance readiness identically in every branch.
+describe("SPEC-PD-UIUX-001 R2 (review round 2): deriveConclusionDisplay", () => {
+  function mkInbox(overrides?: Partial<{
+    decisionCount: number;
+    degraded: { reason: string; nextAction: string };
+  }>) {
+    const inbox: { groups: { decision: unknown[] }; degraded?: { reason: string; nextAction: string } } = {
+      groups: { decision: Array.from({ length: overrides?.decisionCount ?? 0 }, () => ({})) },
+    };
+    if (overrides?.degraded) inbox.degraded = overrides.degraded;
+    return inbox;
+  }
+
+  // ── S2/Q1 counting: association-deduped union ────────────────────────────
+
+  it("fully overlapping (1 inbox decision matched by 1 card) counts 1, not 2", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ decisionCount: 1 }),
+      ownerInboxError: null,
+      partition: { pendingTotal: 1, unmatchedDecisions: [] },
+      actionableCount: 1,
+    });
+    expect(d.mode).toBe("ok");
+    expect(d.displayTotal).toBe(1);
+  });
+
+  it("fully disjoint (1 recovery item + 1 unlinked approval card) counts 2 (S2 regression)", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ decisionCount: 0 }),
+      ownerInboxError: null,
+      // pendingTotal=1 (the recovery item); the unlinked approval card is NOT
+      // in the inbox, matchedDecisions=0.
+      partition: { pendingTotal: 1, unmatchedDecisions: [] },
+      actionableCount: 1,
+    });
+    expect(d.displayTotal).toBe(2);
+  });
+
+  it("partially overlapping sets sum after dedup (matched card + unmatched decision + recovery)", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ decisionCount: 2 }),
+      ownerInboxError: null,
+      // 2 inbox decisions: d1 matched by the card, d2 unmatched; plus 1 recovery.
+      partition: { pendingTotal: 3, unmatchedDecisions: [{ principleId: "d2" }] },
+      actionableCount: 1,
+    });
+    expect(d.displayTotal).toBe(3);
+  });
+
+  it("same principle with TWO different decision cards counts both cards, inbox item once", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ decisionCount: 1 }),
+      ownerInboxError: null,
+      partition: { pendingTotal: 1, unmatchedDecisions: [] },
+      actionableCount: 2,
+    });
+    expect(d.displayTotal).toBe(2);
+  });
+
+  it("allClear requires ok mode AND a zero union count", () => {
+    const allClear = deriveConclusionDisplay({
+      ownerInbox: mkInbox(),
+      ownerInboxError: null,
+      partition: { pendingTotal: 0, unmatchedDecisions: [] },
+      actionableCount: 0,
+    });
+    expect(allClear.mode).toBe("ok");
+    expect(allClear.displayTotal).toBe(0);
+  });
+
+  // ── S1: the validated `degraded` contract is consumed, never swallowed ───
+
+  it("HTTP-success inbox with degraded field never reports allClear, carries reason + nextAction", () => {
+    const degraded = { reason: "principle ledger unavailable", nextAction: "检查原则账本文件。" };
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ degraded }),
+      ownerInboxError: null,
+      partition: { pendingTotal: 0, unmatchedDecisions: [] },
+      actionableCount: 0,
+    });
+    // Even with all counts zero, degraded mode forbids the allClear headline.
+    expect(d.mode).toBe("degraded");
+    expect(d.displayTotal).toBe(0);
+    expect(d.degraded).toEqual(degraded);
+  });
+
+  it("degraded mode still reports the actionable cards that ARE on screen", () => {
+    const d = deriveConclusionDisplay({
+      ownerInbox: mkInbox({ degraded: { reason: "r", nextAction: "n" } }),
+      ownerInboxError: null,
+      partition: { pendingTotal: 0, unmatchedDecisions: [] },
+      actionableCount: 3,
+    });
+    expect(d.mode).toBe("degraded");
+    expect(d.actionableCount).toBe(3);
+    expect(d.displayTotal).toBe(3);
+  });
+
+  // ── unavailable (feature_disabled / load failure) unchanged ──────────────
+
+  it("feature-disabled inbox (null, no error) reports unavailable, count unconfirmed", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: null, partition: null, actionableCount: 0 });
+    expect(d.mode).toBe("unavailable");
+    expect(d.displayTotal).toBe(0);
+  });
+
+  it("inbox load failure reports unavailable even with on-screen action cards", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: "boom", partition: null, actionableCount: 3 });
+    expect(d.mode).toBe("unavailable");
+    expect(d.actionableCount).toBe(3);
+  });
+});
+
+describe("SPEC-PD-UIUX-001 R2 (review round 2 S3): actionable wording respects the lock in EVERY branch", () => {
+  it("ok + unlocked → 'actionable now'", () => {
+    expect(resolveConclusionActionableKey("ok", false)).toBe("pages.focus.conclusion.actionableUnlocked");
+  });
+  it("ok + locked → locked wording (never 'actionable now')", () => {
+    expect(resolveConclusionActionableKey("ok", true)).toBe("pages.focus.conclusion.actionableLocked");
+  });
+  it("degraded follows the same readiness semantics as ok", () => {
+    expect(resolveConclusionActionableKey("degraded", false)).toBe("pages.focus.conclusion.actionableUnlocked");
+    expect(resolveConclusionActionableKey("degraded", true)).toBe("pages.focus.conclusion.actionableLocked");
+  });
+  it("unavailable + unlocked → 'actionable now' (cards ARE clickable)", () => {
+    expect(resolveConclusionActionableKey("unavailable", false)).toBe("pages.focus.conclusion.actionableWithoutTotal");
+  });
+  it("unavailable + locked → locked wording (S3 regression: no 'actionable now' next to disabled buttons)", () => {
+    expect(resolveConclusionActionableKey("unavailable", true)).toBe("pages.focus.conclusion.actionableLocked");
+  });
+});
+
+describe("SPEC-PD-UIUX-001 R2: Focus page reading order contract", () => {
+  const src = fs.readFileSync(
+    nodePath.join(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"),
+    "utf-8",
+  );
+
+  it("renders the conclusion strip before any object lists", () => {
+    const conclusion = src.indexOf('data-testid="focus-conclusion"');
+    const decisions = src.indexOf('data-testid="owner-decisions-section"');
+    const attention = src.indexOf('data-testid="owner-attention-section"');
+    expect(conclusion).toBeGreaterThan(-1);
+    expect(decisions).toBeGreaterThan(conclusion);
+    expect(attention).toBeGreaterThan(decisions);
+  });
+
+  it("distinguishes pending vs actionable counts and keeps todos visible when locked", () => {
+    expect(src).toContain('data-testid="focus-conclusion-counts"');
+    expect(src).toContain("pages.focus.conclusion.pendingTotal");
+    // The locked variant re-labels actionability instead of dropping the count.
+    expect(src).toContain("pages.focus.conclusion.actionableLocked");
+    // Lock reason shows once, centrally, with a settings entry.
+    expect(src).toContain('data-testid="focus-conclusion-lock"');
+  });
+
+  it("demotes the daily reflection card below the evidence sections", () => {
+    const daily = src.indexOf("<DailyThoughtCard />");
+    const signals = src.indexOf('aria-labelledby="section-signals"');
+    expect(daily).toBeGreaterThan(signals);
+  });
+
+  it("keeps the PRI-889 degradation guarantee for grouped-data failures", () => {
+    // selectDecisionSurfaceItems must remain the decision-surface authority —
+    // R2 reordering must not weaken the rc-9 fallback.
+    expect(src).toMatch(/export function selectDecisionSurfaceItems/);
+    expect(src).toContain("selectDecisionSurfaceItems(ownerDecisionItems, groupedAvailable)");
   });
 });
