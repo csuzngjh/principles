@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.291.2
+
+### Patch Changes
+
+- 10d7e4b: Derive write-context templates from one complete, compatible positive example. Fail explicitly when required templates cannot be derived, before auxiliary cases can make an incomplete replay appear successful.
+
 ## 1.291.1
 
 ### Patch Changes
