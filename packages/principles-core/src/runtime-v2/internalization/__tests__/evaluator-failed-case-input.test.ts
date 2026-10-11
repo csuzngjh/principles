@@ -8,13 +8,14 @@
  * the whole summary at 400 chars, so the context/facts segment (tool,
  * history status, priorReadOfTarget, readCount) fell outside the cut; the
  * resolver then truncated again at 300. The repair round received a summary
- * with NO context evidence at all.
+ * with NO context evidence at all. The new regressions first reproduced the
+ * failure on the old code (3 producer assertions red), then locked the fix.
  *
- * These regressions pin the CONTRACT, end to end:
+ * Contract pinned here, end to end:
  *   - producer: params get their OWN bounded digest; context/facts facts are
  *     written FIRST and always survive; big values are summarized with a
- *     VISIBLE truncation marker; unserializable params degrade explicitly
- *     while keeping the context segment; total length ≤ the shared
+ *     VISIBLE truncation marker; unserializable params degrade per-key while
+ *     keeping the context segment; total length ≤ the shared
  *     MAX_FAILED_CASE_INPUT_LENGTH bound.
  *   - resolver: caseInput is bounded at the SAME shared bound (no second,
  *     tighter silent cut); over-long legacy entries truncate visibly; legacy
@@ -22,22 +23,44 @@
  *
  * The producer-level cases call the real mapFailedCases through the runner
  * prototype (same technique as the PRI-634 evidence probes) because that is
- * the production write path for durable failed-case evidence.
+ * the production write path for durable failed-case evidence. The cast is
+ * test-side only — production callers reach the method through the runner.
  */
 import { describe, it, expect } from 'vitest';
 import { EvaluatorRunner } from '../evaluator-runner.js';
 import { resolveRepairReplayContext, type ReplayFailureEvidence } from '../repair-replay-resolver.js';
-import { MAX_FAILED_CASE_INPUT_LENGTH } from '../evaluator-output.js';
+import { MAX_FAILED_CASE_INPUT_LENGTH, type AdversarialCase, type AdversarialFailedCase } from '../evaluator-output.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import type { TaskRecord } from '../../task-status.js';
 import type { PIArtifactRecord } from '../pi-artifact.js';
-import type { AdversarialCase } from '../evaluator-output.js';
 
-function gateResultFor(failed: { caseId: string }[]) {
-  return {
+type MapFailedCasesFn = (
+  this: EvaluatorRunner,
+  gateResult: {
+    readonly sandboxResult: {
+      readonly failedCases: readonly {
+        readonly caseId: string;
+        readonly errorType: string;
+        readonly message: string;
+        readonly expectedDecision?: string;
+        readonly actualDecision?: string;
+      }[];
+      readonly forbiddenPatternViolations: readonly string[];
+    };
+  },
+  adversarialCases: readonly AdversarialCase[],
+) => AdversarialFailedCase[];
+
+function mapViaRealRunner(
+  adversarialCases: readonly AdversarialCase[],
+  sandboxOnlyCaseIds: readonly string[] = [],
+): AdversarialFailedCase[] {
+  const probe = Object.create(EvaluatorRunner.prototype) as EvaluatorRunner;
+  const writer = (probe as unknown as { mapFailedCases: MapFailedCasesFn }).mapFailedCases;
+  const gateResult = {
     sandboxResult: {
-      failedCases: failed.map((f) => ({
-        caseId: f.caseId,
+      failedCases: [...adversarialCases.map((c) => c.caseId), ...sandboxOnlyCaseIds].map((caseId) => ({
+        caseId,
         errorType: 'validation_failed',
         message: 'Expected block but got allow',
         expectedDecision: 'block',
@@ -46,6 +69,13 @@ function gateResultFor(failed: { caseId: string }[]) {
       forbiddenPatternViolations: [],
     },
   };
+  return writer.call(probe, gateResult, adversarialCases);
+}
+
+function firstOf<T>(failures: readonly T[]): T {
+  const [first] = failures;
+  if (first === undefined) throw new Error('expected at least one entry');
+  return first;
 }
 
 function boundaryCase(params: Record<string, unknown>, overrides: Partial<AdversarialCase> = {}): AdversarialCase {
@@ -65,17 +95,11 @@ function boundaryCase(params: Record<string, unknown>, overrides: Partial<Advers
   };
 }
 
-/** The real production write path for failed-case evidence (private method). */
-function mapViaRealRunner(cases: AdversarialCase[]): ReturnType<EvaluatorRunner['mapFailedCases']> {
-  const probe = Object.create(EvaluatorRunner.prototype) as EvaluatorRunner;
-  return probe.mapFailedCases(gateResultFor(cases), cases);
-}
-
 describe('caseInput producer budget (real mapFailedCases path)', () => {
   it('LONG param value: context facts survive and the big value is visibly digested', () => {
-    const [failure] = mapViaRealRunner([
+    const failure = firstOf(mapViaRealRunner([
       boundaryCase({ path: 'src/module.ts', content: 'x'.repeat(350) }),
-    ]);
+    ]));
     expect(failure.caseInput).toBeDefined();
     const input = String(failure.caseInput);
     // Context/facts facts come first and survive the budget.
@@ -86,14 +110,14 @@ describe('caseInput producer budget (real mapFailedCases path)', () => {
     expect(input).toContain('history available');
     // The big value is digested with a visible truncation marker, not inlined.
     expect(input).toMatch(/…\(\+\d+ chars\)/);
-    expect(input).not.toContain('x'.repeat(60)); // the bulk never gets inlined
+    expect(input).not.toContain('x'.repeat(60));
     expect(input.length).toBeLessThanOrEqual(MAX_FAILED_CASE_INPUT_LENGTH);
   });
 
   it('SHORT params stay complete and readable', () => {
-    const [failure] = mapViaRealRunner([
+    const failure = firstOf(mapViaRealRunner([
       boundaryCase({ path: 'worklog.md.bak' }),
-    ]);
+    ]));
     const input = String(failure.caseInput);
     expect(input).toContain('path="worklog.md.bak"');
     expect(input).toContain('priorReadOfTarget=no');
@@ -101,12 +125,12 @@ describe('caseInput producer budget (real mapFailedCases path)', () => {
   });
 
   it('MULTI-field params keep every key; long path and long rationale are each visibly bounded', () => {
-    const [failure] = mapViaRealRunner([
+    const failure = firstOf(mapViaRealRunner([
       boundaryCase(
         { path: `${'deep/'.repeat(12)}target/file.txt`, mode: 'overwrite', encoding: 'utf-8' },
         { rationale: 'r'.repeat(500) },
       ),
-    ]);
+    ]));
     const input = String(failure.caseInput);
     expect(input).toContain('path=');
     expect(input).toContain('mode=');
@@ -117,25 +141,25 @@ describe('caseInput producer budget (real mapFailedCases path)', () => {
   });
 
   it('history unavailable and truncated are both stated', () => {
-    const unavailable = mapViaRealRunner([
+    const unavailable = String(firstOf(mapViaRealRunner([
       boundaryCase({ path: 'a.txt' }, {
         ruleContext: { version: 2, history: { status: 'unavailable', truncated: false, calls: [] }, facts: { priorReadOfTarget: 'unknown', readCount: null, writeCount: null, uniqueWritePathCount: null, sameActionBlockCount: null } },
       }),
-    ])[0].caseInput;
+    ])).caseInput ?? '');
     expect(unavailable).toContain('history unavailable');
 
-    const truncated = mapViaRealRunner([
+    const truncated = String(firstOf(mapViaRealRunner([
       boundaryCase({ path: 'a.txt' }, {
         ruleContext: { version: 2, history: { status: 'available', truncated: true, calls: [] }, facts: { priorReadOfTarget: 'unknown', readCount: null, writeCount: null, uniqueWritePathCount: null, sameActionBlockCount: null } },
       }),
-    ])[0].caseInput;
+    ])).caseInput ?? '');
     expect(truncated).toContain('truncated');
   });
 
-  it('unserializable params degrade EXPLICITLY while the context segment survives', () => {
+  it('unserializable params degrade EXPLICITLY per key while the context segment survives', () => {
     const circular: Record<string, unknown> = { path: 'a.txt' };
     circular.self = circular;
-    const [failure] = mapViaRealRunner([boundaryCase(circular)]);
+    const failure = firstOf(mapViaRealRunner([boundaryCase(circular)]));
     const input = String(failure.caseInput);
     // Per-key degradation keeps the readable keys and marks only the
     // unserializable one — strictly better than dropping the whole segment.
@@ -147,11 +171,7 @@ describe('caseInput producer budget (real mapFailedCases path)', () => {
   });
 
   it('sandbox-only cases (not in the adversarial list) keep the legacy no-input shape', () => {
-    const probe = Object.create(EvaluatorRunner.prototype) as EvaluatorRunner;
-    const [failure] = probe.mapFailedCases(
-      gateResultFor([{ caseId: 'owner:case-negative-5' }]),
-      [],
-    );
+    const failure = firstOf(mapViaRealRunner([], ['owner:case-negative-5']));
     expect(failure.caseInput).toBeUndefined();
     expect(failure.rationale).toContain('non-adversarial case');
   });
@@ -205,10 +225,11 @@ describe('caseInput resolver bound (same shared limit, visible truncation)', () 
 
   it('current-shape entry: context facts survive the resolver at the SHARED bound', async () => {
     // Exactly what the FIXED producer emits: ≤400 chars with context first.
-    const producerShape = 'tool=write target=src/module.ts | context: history available, priorReadOfTarget=no, readCount=1 | params={"content":"x…(+350 chars)"} | case rationale: targetPath.bak …';
-    const [failure] = await resolve([
+    const producerShape = 'tool=write | context: history available, priorReadOfTarget=no, readCount=1 | params={content="x…(+350 chars)"} | case rationale: targetPath.bak …';
+    const failures = await resolve([
       { caseId: 'v2-path-boundary', attackType: 'boundary', expectedDecision: 'block', actualDecision: 'allow', errorType: 'validation_failed', message: 'Expected block but got allow', caseInput: producerShape },
     ]);
+    const failure = firstOf(failures);
     expect(failure.caseInput).toBeDefined();
     const carried = String(failure.caseInput);
     expect(carried).toBe(producerShape); // within the shared bound → passed through uncut
@@ -218,9 +239,9 @@ describe('caseInput resolver bound (same shared limit, visible truncation)', () 
 
   it('over-long LEGACY entry: truncated VISIBLY at the shared bound, never silently', async () => {
     const oversized = 'x'.repeat(MAX_FAILED_CASE_INPUT_LENGTH + 200);
-    const [failure] = await resolve([
+    const failure = firstOf(await resolve([
       { caseId: 'v2-path-boundary', attackType: 'boundary', expectedDecision: 'block', errorType: 'validation_failed', caseInput: oversized },
-    ]);
+    ]));
     expect(failure.caseInput).toBeDefined();
     const bounded = String(failure.caseInput);
     expect(bounded.length).toBeLessThanOrEqual(MAX_FAILED_CASE_INPUT_LENGTH);
@@ -228,9 +249,9 @@ describe('caseInput resolver bound (same shared limit, visible truncation)', () 
   });
 
   it('legacy artifact WITHOUT caseInput keeps reading without the field', async () => {
-    const [failure] = await resolve([
+    const failure = firstOf(await resolve([
       { caseId: 'v2-unavailable', attackType: 'boundary', expectedDecision: 'allow', errorType: 'runtime_error', message: 'boom' },
-    ]);
+    ]));
     expect(failure.caseInput).toBeUndefined();
     expect(failure.errorType).toBe('runtime_error');
   });

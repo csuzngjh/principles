@@ -32,6 +32,7 @@
 | Codex runtime pin → Phase 1 证据面版本（终值 core 1.291.2） | `24ae7dca` + `be647b0b` | 本 PR（拆分的 #1984 已关并） | check:runtime-pin S1–S5 PASS（对 1.291.2 重跑）；tarball 实装核验；codex-adapter 43/43 |
 | Artificer 修复轮输入保真 + facts 语义文档（prompt v11） | `37fc780c` | 本 PR | internalization 78 文件/1158 测试 PASS；实链活证见 §4 |
 | Evaluator 评判 kind 语义（prompt v7） | `13a8e593` | 本 PR | 同上；链 5 judge 关切质量变化见 §4 |
+| **评审修复轮（2026-10-11 二轮）**：facts 去政策化（v12）+ 评判真实映射权威（v8）+ caseInput 分预算共享上界 | `de1f20e0` 及其修正 commit | 本 PR | internalization 79/1170 PASS（负对照先行：旧代码 3 断言红）；报告 §4/§6/§7/§8 同步修正 |
 
 ## 3. 环境缺陷发现与修复（本轮新发现）
 
