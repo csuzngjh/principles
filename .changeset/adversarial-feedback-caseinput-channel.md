@@ -1,0 +1,5 @@
+---
+"@principles/core": patch
+---
+
+Wire the evaluator's failed-case `caseInput` into the CLI adversarial feedback formatter (`formatAdversarialFeedback`). Phase 1 final acceptance review found that #1986's `caseInput` field reached the persisted evaluator artifact but not the repair loop it was built for: `formatAdversarialFeedback` is the ONLY feedback channel into loop-created round-2 Artificer tasks (the PRI-509 repairPayload channel does not apply to them), and it rendered only `caseId | attackType | expected vs actual | rationale`. Live-chain evidence (p1-final sandbox, 2026-10-11): the real round-2 task's persisted diagnosticJson carried exactly one verdict line — `v2-path-boundary [boundary]: expected block, got allow — validation_failed: Expected block but got allow` — with no failure path and no context facts, so the artificer repaired blind and the chain was rejected on the same deterministic case twice. Failed cases now append an indented `caseInput:` continuation line (already bounded by the producer's shared 400-char budget; absent on legacy artifacts renders nothing). Formatter-only change: validator, oracle, and prompt contracts unchanged.

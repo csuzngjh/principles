@@ -8,7 +8,9 @@
  * Design:
  *   - Pure function, no I/O, no timestamps/random (deterministic).
  *   - Each failed case becomes one line: caseId | attackType | expected vs
- *     actual | rationale.
+ *     actual | rationale, plus an indented `caseInput:` continuation line
+ *     when the producer supplied the failed case's input (absent on legacy
+ *     artifacts).
  *   - Empty input still yields a usable, non-empty string (the gate may
  *     reject on a runtime error with no per-case detail).
  */
@@ -37,7 +39,16 @@ export function formatAdversarialFeedback(failedCases: readonly AdversarialFaile
     const actual = fc.actualDecision !== undefined
       ? `got ${fc.actualDecision}`
       : `error ${fc.errorType ?? 'unknown'}`;
-    return `- ${fc.caseId} [${fc.attackType}]: expected ${fc.expectedDecision}, ${actual} — ${rationale}`;
+    const head = `- ${fc.caseId} [${fc.attackType}]: expected ${fc.expectedDecision}, ${actual} — ${rationale}`;
+    // Phase 1 final acceptance review (2026-10-11): this formatter is the
+    // ONLY feedback channel into loop-created repair rounds (the repairPayload
+    // channel does not apply to them), so a verdict-only line leaves the
+    // round-2 artificer without the input that failed. caseInput is already
+    // bounded by the producer's shared budget; absent on legacy artifacts.
+    if (typeof fc.caseInput === 'string' && fc.caseInput.trim() !== '') {
+      return `${head}\n  caseInput: ${fc.caseInput}`;
+    }
+    return head;
   });
 
   return `${HEADER}\n${lines.join('\n')}`;

@@ -75,4 +75,26 @@ describe('formatAdversarialFeedback', () => {
     expect(text).toContain('error runtime_error');
     expect(text).not.toContain('undefined');
   });
+
+  it('Phase 1 final acceptance review: caseInput reaches the CLI repair round', () => {
+    // The round-2 artificer must see the input that produced the mismatch —
+    // tool, params and context facts — not only the verdict line. This is the
+    // ONLY formatter on the run-rulehost CLI loop path (adversarial-loop
+    // createPITaskDiagnosticJson); the repairPayload channel does not apply
+    // to loop-created rounds.
+    const caseInput = 'tool=write | context: history available, priorReadOfTarget=no, readCount=1 | params: target="worklog.md.bak"; {}';
+    const text = formatAdversarialFeedback([
+      makeFailedCase({ caseInput, rationale: 'validation_failed: Expected block but got allow' }),
+    ]);
+    expect(text).toContain('caseInput:');
+    expect(text).toContain('priorReadOfTarget=no');
+    expect(text).toContain('worklog.md.bak');
+  });
+
+  it('Phase 1 final acceptance review: no caseInput line for legacy artifacts (field absent or empty)', () => {
+    const absent = formatAdversarialFeedback([makeFailedCase()]);
+    expect(absent).not.toContain('caseInput:');
+    const empty = formatAdversarialFeedback([makeFailedCase({ caseInput: '' })]);
+    expect(empty).not.toContain('caseInput:');
+  });
 });
