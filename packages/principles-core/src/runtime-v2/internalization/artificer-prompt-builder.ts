@@ -310,8 +310,8 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - Every goldenTraceCases entry MUST include its explicit ruleContext; do not invent or auto-fill context.
 - You may inspect input.context. When it is undefined or context.history.status is unavailable, MUST return { decision: "allow", matched: false, reason: "context unavailable" }.
 - Prefer deterministic context.facts and canonicalKind over raw context.history.calls.
-- context.facts FIELD SEMANTICS (v11): facts.priorReadOfTarget is "yes" | "no" | "unknown" — whether THIS action's own target path was read earlier in the session window; facts.readCount / writeCount / uniqueWritePathCount count prior calls in that window (null = host did not provide).
-- Write-discipline principles (the target must have been inspected/confirmed before consequential writes) are enforced per-call from those facts: with context available and untruncated, a write whose own target was never read (priorReadOfTarget === "no") while the window shows other reads (readCount > 0) is the sibling-substitution pattern such rules block (e.g. writing X.bak right after reading X); priorReadOfTarget === "yes" is a legitimate edit of an inspected target; a window with no reads at all (readCount === 0) is a fresh session, not a violation.
+- context.facts FIELD SEMANTICS (v12): facts.priorReadOfTarget is "yes" | "no" | "unknown" — whether THIS action's own target path was read earlier in the session window; facts.readCount / writeCount / uniqueWritePathCount count prior calls in that window (null = host did not provide). These are WINDOW-OBSERVATION FACTS ONLY: they say what reads happened, nothing else.
+- facts do NOT establish any of the following, and you MUST NOT treat them as doing so: Owner confirmation (a prior read is not an approval); whether the target file already existed or is newly created; whether the current task is routine or exceptional; whether an earlier read touched a path related (e.g. as a sibling or variant) to THIS target. Those require information the runtime input does not carry — implement only what the rule can actually verify from its input, and state the residual gap in the risks array (observation-gap reporting) instead of letting a read count stand in for an unverified constraint.
 - An empty or truncated history is insufficient evidence; do not infer "not done" from it.
 - You MUST copy evidenceRefs exactly from the behaviorExamplePack into your output. Do not omit, reorder, or rewrite any evidenceRef string.
 - The RuleHost runtime always assembles input.context when the rulecode_context_v2 capability is enabled (the default): history (recent tool-call window) and facts (derived behavior evidence). On hosts that declare no runtime context provider (e.g. Codex), input.context is the schema-valid unavailable posture — honor the unavailable rule above.
@@ -404,7 +404,24 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * existing `unavailable → allow` and risk-dominance clauses. Validator,
  * templates, and oracle are UNCHANGED.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v11';
+/**
+ * PD v2 Phase 1 review round (2026-10-11): bumped v11 → v12. Independent
+ * review showed the v11 "write-discipline mapping" clause crossed from facts
+ * into unsupported policy: it told the model that priorReadOfTarget === "yes"
+ * is a legitimate edit, readCount === 0 is a fresh session (not a violation),
+ * and no+readCount>0 is the sibling-substitution pattern to block. None of
+ * those follow from the fields: a window read count cannot establish Owner
+ * confirmation, file pre-existence vs new creation, routine-task status, or
+ * sibling/variant relation between an earlier read and THIS target. Live
+ * chain-4 R2 artifacts reproduced the gap (unread target allowed at
+ * readCount 0; new worklog blocked after unrelated reads; read-but-unconfirmed
+ * target allowed; unconfirmed protected ls allowed). v12 keeps the factual
+ * field semantics, deletes the allow/block mapping, and obliges the model to
+ * report unverifiable constraints as observation gaps in `risks` instead of
+ * letting read counts stand in for them. Validator, templates, and oracle
+ * UNCHANGED.
+ */
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v12';
 
 // ── EP002-R4: bounded pack projection at the prompt boundary ─────────────────
 //

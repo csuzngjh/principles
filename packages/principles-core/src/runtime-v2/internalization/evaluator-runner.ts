@@ -33,7 +33,7 @@ import type {
   AdversarialFailedCase,
   AdversarialCase,
 } from './evaluator-output.js';
-import { isEvaluatorOutputV2 } from './evaluator-output.js';
+import { isEvaluatorOutputV2, MAX_FAILED_CASE_INPUT_LENGTH } from './evaluator-output.js';
 // PRI-911A: the identity shape gate is the SAME authority the activation
 // boundary uses (PR #1856) — never re-implement a UUID parser here.
 import { canonicalLedgerPrincipleId } from '../activation/low-risk-writers.js';
@@ -821,6 +821,15 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? '',
       previousEvaluation: context.previousEvaluation,
       hostToolCatalog: this.hostToolCatalog ?? undefined,
+      // Review round (2026-10-11): project the runner's existing host
+      // semantic context (the same registry provenance the alias generator
+      // uses) as the judge's kind authority. NOT derived from the catalog —
+      // the catalog's writeTools is a risk grouping that includes
+      // execute/agent-kind tools. Undefined when no host context → prompt
+      // input stays without the field (backward compatible).
+      hostToolKinds: this.hostSemanticContext && this.hostSemanticContext.tools.length > 0
+        ? this.hostSemanticContext.tools.map((tool) => ({ rawToolName: tool.rawToolName, canonicalKind: tool.canonicalKind }))
+        : undefined,
       // PRI-714: language directive for review fields (undefined = none).
       outputLanguage: this.outputLanguage,
       // PRI-703 Phase 1: the scribe artifact's Owner-intent contract is the
@@ -3133,28 +3142,67 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   /**
-   * PD v2 Phase 1 closeout (2026-10-11): one-line bounded summary of a failed
-   * adversarial case's defining input. Params and rationale come from the
-   * case definition (template- or LLM-authored); they are bounded here
-   * (rc-8) so the durable artifact and the repair prompt can never receive
-   * an unbounded payload through this field. Kept a single string so the
-   * persisted entry shape grows by one optional field, not a nested object.
+   * PD v2 Phase 1 closeout (2026-10-11), review-round budget rework: the
+   * failed case's defining input in three INDEPENDENTLY bounded segments —
+   *
+   *   1. identity + context facts (history status, truncated,
+   *      priorReadOfTarget, readCount) — written FIRST so a large params
+   *      value can never crowd the context evidence out of the summary;
+   *   2. a bounded params digest — every key survives, big values collapse
+   *      to a VISIBLE `value…(+N chars)` marker instead of inlining;
+   *   3. the case's authored rationale, bounded.
+   *
+   * Each segment carries its own visible truncation marker, so a truncated
+   * summary never looks complete. Total is capped at the shared
+   * MAX_FAILED_CASE_INPUT_LENGTH (rc-8); the resolver uses the SAME bound,
+   * eliminating the old second silent 300-char cut that dropped context
+   * facts from legal 350-char-param inputs.
    */
   private static summarizeFailedCaseInput(adv: AdversarialCase): string {
-    let paramsJson: string;
-    try {
-      paramsJson = JSON.stringify(adv.params) ?? '{}';
-    } catch {
-      paramsJson = '(unserializable params)';
-    }
-    const facts = adv.ruleContext?.facts;
     const history = adv.ruleContext?.history;
-    const contextPart = adv.ruleContext
-      ? `context: ${history?.status ?? 'unknown'}${history?.truncated ? '/truncated' : ''}, priorReadOfTarget=${facts?.priorReadOfTarget ?? 'unknown'}, readCount=${facts?.readCount ?? 'unknown'}`
-      : 'context: none';
-    const rationale = adv.rationale.length > 160 ? `${adv.rationale.slice(0, 160)}…` : adv.rationale;
-    const summary = `tool=${adv.toolName} params=${paramsJson} | ${contextPart} | case rationale: ${rationale}`;
-    return summary.length > 400 ? `${summary.slice(0, 400)}…` : summary;
+    const facts = adv.ruleContext?.facts;
+    const contextState = adv.ruleContext
+      ? `history ${history?.status ?? 'unknown'}${history?.truncated ? ' (truncated)' : ''}`
+      : 'none';
+    const identityAndContext = `tool=${adv.toolName} | context: ${contextState}, priorReadOfTarget=${facts?.priorReadOfTarget ?? 'unknown'}, readCount=${facts?.readCount ?? 'unknown'}`;
+
+    let paramsDigest: string;
+    try {
+      paramsDigest = EvaluatorRunner.digestParams(adv.params);
+    } catch {
+      paramsDigest = '(unserializable params)';
+    }
+
+    const rationaleBound = 110;
+    const rationale =
+      adv.rationale.length > rationaleBound ? `${adv.rationale.slice(0, rationaleBound)}…` : adv.rationale;
+
+    const summary = `${identityAndContext} | params=${paramsDigest} | case rationale: ${rationale}`;
+    // Defensive only: segment budgets keep the total within the shared bound
+    // for realistic inputs; if it ever exceeds, the cut stays visible.
+    return summary.length > MAX_FAILED_CASE_INPUT_LENGTH
+      ? `${summary.slice(0, MAX_FAILED_CASE_INPUT_LENGTH - 1)}…`
+      : summary;
+  }
+
+  /** Per-key digest: every key survives; long values collapse visibly. */
+  private static digestParams(params: Record<string, unknown>): string {
+    const valueBound = 48;
+    const segmentBound = 150;
+    const parts = Object.keys(params).map((key) => {
+      let value: string;
+      try {
+        value = JSON.stringify(params[key]) ?? 'undefined';
+      } catch {
+        value = '(unserializable)';
+      }
+      if (value.length > valueBound) {
+        value = `${value.slice(0, valueBound)}…(+${value.length - valueBound} chars)`;
+      }
+      return `${key}=${value}`;
+    });
+    const digest = `{${parts.join(',')}}`;
+    return digest.length > segmentBound ? `${digest.slice(0, segmentBound)}…(+${digest.length - segmentBound} chars total)` : digest;
   }
 
   // ── PRI-427: rule artifact assembly ────────────────────────────────────────

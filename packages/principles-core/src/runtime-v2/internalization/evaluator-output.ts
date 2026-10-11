@@ -93,6 +93,14 @@ export interface EvaluatorAdversarialResult {
 }
 
 /**
+ * PD v2 Phase 1 review round (2026-10-11): the ONE final bound for a failed
+ * case's `caseInput` summary — shared by the producer (mapFailedCases) and
+ * the consumer (repair-replay-resolver) so a within-budget summary is never
+ * silently re-truncated with its context facts lost.
+ */
+export const MAX_FAILED_CASE_INPUT_LENGTH = 400;
+
+/**
  * PRI-630 收敛契约: 第二轮及之后,评估器必须对上轮 review contract 的每个
  * 稳定需求 id 裁定 resolved / still_open / regressed。
  */

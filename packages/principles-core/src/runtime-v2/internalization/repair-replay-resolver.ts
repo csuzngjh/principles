@@ -27,6 +27,7 @@
 import type { TaskRecord } from '../task-status.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import type { PIArtifactStore } from './pi-artifact.js';
+import { MAX_FAILED_CASE_INPUT_LENGTH } from './evaluator-output.js';
 
 /** Sandbox error enums that legacy artifacts stored inside actualDecision. */
 const LEGACY_SANDBOX_ERROR_TYPES: ReadonlySet<string> = new Set([
@@ -145,6 +146,12 @@ function boundMessage(message: string): string {
     : message;
 }
 
+function boundCaseInput(caseInput: string): string {
+  return caseInput.length > MAX_FAILED_CASE_INPUT_LENGTH
+    ? `${caseInput.slice(0, MAX_FAILED_CASE_INPUT_LENGTH - 1)}…`
+    : caseInput;
+}
+
 function normalizeFailedCaseEntry(entry: unknown): ReplayFailureEvidence | null {
   if (!isRecord(entry)) return null;
   const caseId = optionalNonEmptyString(entry.caseId);
@@ -184,7 +191,11 @@ function normalizeFailedCaseEntry(entry: unknown): ReplayFailureEvidence | null 
     ...(actualDecision !== undefined ? { actualDecision } : {}),
     errorType,
     ...(message !== undefined ? { message: boundMessage(message) } : {}),
-    ...(caseInput !== undefined ? { caseInput: boundMessage(caseInput) } : {}),
+    // Review round (2026-10-11): caseInput uses the SAME shared bound as the
+    // producer (MAX_FAILED_CASE_INPUT_LENGTH) — the old second 300-char cut
+    // dropped context facts from within-budget producer output. Over-long
+    // legacy entries still truncate, visibly.
+    ...(caseInput !== undefined ? { caseInput: boundCaseInput(caseInput) } : {}),
   };
 }
 

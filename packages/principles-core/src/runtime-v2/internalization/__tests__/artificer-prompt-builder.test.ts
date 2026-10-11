@@ -79,7 +79,10 @@ describe('ArtificerPromptBuilder', () => {
     // PD v2 Phase 1 closeout (2026-10-11) — bumped v10 → v11: CONTEXT MODE now
     // states the context.facts field semantics (priorReadOfTarget/readCount)
     // and the repair evidence block carries the failed case's Input summary.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v11');
+    // Review round — bumped v11 → v12: the v11 write-discipline mapping
+    // (yes=legit edit / 0=fresh session / no+>0=block) crossed from facts
+    // into unsupported policy and is deleted; fields are facts only.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v12');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -241,8 +244,8 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
     expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → … → v11 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3, PD v2 Phase 1 closeout)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v11');
+  it('declares the contract version bump history v1 → … → v12 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3, PD v2 Phase 1 closeout, review round)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v12');
   });
 
   // PD v2 Phase 1 host acceptance (2026-10-10): validateV2OutputContract rejects
@@ -278,10 +281,15 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
   // PD v2 Phase 1 closeout (2026-10-11): the live p1-closeout chain produced a
   // marker-only r2 rule that failed v2-path-boundary with no way to recover —
   // the prompt said "prefer context.facts" without ever defining the fields.
-  // The facts semantics and the write-discipline mapping are part of the
-  // evaluation-environment contract, same genre as unavailable→allow and the
-  // risk-dominance clause.
-  it('states the context.facts field semantics and the per-call write-discipline mapping (v11)', () => {
+  //
+  // Review round (2026-10-11): v11's write-discipline mapping crossed from
+  // facts into unsupported policy — priorRead=yes is NOT proof of a legitimate
+  // edit (a read is not Owner confirmation), readCount=0 is NOT proof of a
+  // fresh session (the file may be pre-existing), and no+readCount>0 is NOT
+  // proof of sibling substitution (the earlier read may be unrelated). The
+  // prompt must state the field semantics and their uncertainty, and must NOT
+  // carry the allow/block mapping.
+  it('states the context.facts field semantics and their uncertainty, without policy mappings (v12)', () => {
     const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
       taskId: 'task',
       contextHash: 'hash',
@@ -292,9 +300,27 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
     expect(systemPrompt).toContain('context.facts FIELD SEMANTICS');
     expect(systemPrompt).toContain('facts.priorReadOfTarget is "yes" | "no" | "unknown"');
     expect(systemPrompt).toContain('facts.readCount / writeCount / uniqueWritePathCount count prior calls');
-    expect(systemPrompt).toContain('priorReadOfTarget === "no"');
-    expect(systemPrompt).toContain('readCount > 0');
-    expect(systemPrompt).toContain('readCount === 0');
+    // Uncertainty statement: what the fields do NOT establish.
+    expect(systemPrompt).toContain('WINDOW-OBSERVATION FACTS ONLY');
+    expect(systemPrompt).toContain('a prior read is not an approval');
+    expect(systemPrompt).toContain('whether the target file already existed or is newly created');
+    expect(systemPrompt).toContain('sibling or variant');
+    // Observation-gap obligation replaces the mapping.
+    expect(systemPrompt).toContain('state the residual gap in the risks array');
+  });
+
+  it('v12 deletes the v11 allow/block policy mapping from the facts clause', () => {
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
+      taskId: 'task',
+      contextHash: 'hash',
+      sourceScribeArtifactId: 'scribe',
+      scribeArtifact: {},
+      behaviorExamplePack: validBehaviorExamplePack,
+    });
+    expect(systemPrompt).not.toContain('is the sibling-substitution pattern');
+    expect(systemPrompt).not.toContain('is a legitimate edit of an inspected target');
+    expect(systemPrompt).not.toContain('is a fresh session, not a violation');
+    expect(systemPrompt).not.toContain('Write-discipline principles');
   });
 
   it('v11 repair guidance names the Input evidence line and forbids hard-coding the literal path', () => {
