@@ -51,6 +51,17 @@ export interface AdversarialFailedCase {
    * sandbox. Present on runtime-written evidence; absent on legacy artifacts.
    */
   readonly message?: string;
+  /**
+   * PD v2 Phase 1 closeout (2026-10-11): bounded summary of the FAILED
+   * case's defining input — tool, params, context facts (status/truncated,
+   * priorReadOfTarget, readCount) and the case's authored rationale. Without
+   * it a template failure like `v2-path-boundary: Expected block but got
+   * allow` carries zero actionable signal into the repair round: the
+   * artificer cannot see WHICH write or WHICH context shape produced the
+   * mismatch. Present on runtime-written evidence; absent on legacy
+   * artifacts.
+   */
+  readonly caseInput?: string;
 }
 
 export interface EvaluatorCodeReview {

@@ -251,8 +251,9 @@ REPAIR FEEDBACK (PRI-509, when \`repairFeedback\` is present):
 - You MUST address each required change specifically — do not regenerate blind. Adjust the matcher/logic so the concerns are resolved while preserving the principle intent.
 - If a required change contradicts the principle intent (from scribeArtifact/dreamerContext), prefer the principle intent and document the conflict in implementationSummary.
 - When the repair feedback contains a "Deterministic Replay Evidence" block (resolved from the source evaluator artifact):
-  - Each entry is a machine-verified failure: Case (id), Expected (decision), Actual (decision, only when your code really returned one), Error (sandbox error type), Message (bounded safe failure detail).
+  - Each entry is a machine-verified failure: Case (id), Expected (decision), Actual (decision, only when your code really returned one), Error (sandbox error type), Message (bounded safe failure detail), and — when present — Input (the failed case's defining input: tool, params, context facts, authored case rationale).
   - Fix EVERY listed deterministic failure so the case produces its Expected decision.
+  - When an entry carries an Input summary, reason from THAT input (which action, which context shape) — the caseId alone names neither the tool call nor the history facts that produced the mismatch, and hard-coding the literal path from one entry will fail every other shape of the same pattern.
   - Preserve the behavior of cases that already passed — do not trade passing cases for failing ones.
   - Do NOT weaken safety constraints (e.g. drop risk-path blocks) just to make replay pass.
   - Respect the canonical RuleHostInput contract, including that paramsSummary is an object (see CONSTRAINTS).
@@ -309,6 +310,8 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - Every goldenTraceCases entry MUST include its explicit ruleContext; do not invent or auto-fill context.
 - You may inspect input.context. When it is undefined or context.history.status is unavailable, MUST return { decision: "allow", matched: false, reason: "context unavailable" }.
 - Prefer deterministic context.facts and canonicalKind over raw context.history.calls.
+- context.facts FIELD SEMANTICS (v11): facts.priorReadOfTarget is "yes" | "no" | "unknown" — whether THIS action's own target path was read earlier in the session window; facts.readCount / writeCount / uniqueWritePathCount count prior calls in that window (null = host did not provide).
+- Write-discipline principles (the target must have been inspected/confirmed before consequential writes) are enforced per-call from those facts: with context available and untruncated, a write whose own target was never read (priorReadOfTarget === "no") while the window shows other reads (readCount > 0) is the sibling-substitution pattern such rules block (e.g. writing X.bak right after reading X); priorReadOfTarget === "yes" is a legitimate edit of an inspected target; a window with no reads at all (readCount === 0) is a fresh session, not a violation.
 - An empty or truncated history is insufficient evidence; do not infer "not done" from it.
 - You MUST copy evidenceRefs exactly from the behaviorExamplePack into your output. Do not omit, reorder, or rewrite any evidenceRef string.
 - The RuleHost runtime always assembles input.context when the rulecode_context_v2 capability is enabled (the default): history (recent tool-call window) and facts (derived behavior evidence). On hosts that declare no runtime context provider (e.g. Codex), input.context is the schema-valid unavailable posture — honor the unavailable rule above.
@@ -385,7 +388,23 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * same-ID entry changes nothing the gate compares. Validator UNCHANGED; no
  * obligation was relaxed.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v10';
+/**
+ * PD v2 Phase 1 closeout (2026-10-11): bumped v10 → v11. Two information
+ * gaps found on the live p1-closeout chain (artificer r2 failed ONLY
+ * `v2-path-boundary` with a marker-only rule and had no way to fix it):
+ * (1) the CONTEXT MODE block said "prefer deterministic context.facts" but
+ * never stated what the facts FIELDS mean — a model cannot express a
+ * "target must have been inspected before consequential writes" principle
+ * per-call without knowing that `priorReadOfTarget` is about THIS action's
+ * target and `readCount` counts prior reads in the window; (2) the repair
+ * prompt's Deterministic Replay Evidence named only the decision mismatch —
+ * the failed case's input summary (`Input:` line, added in the same change)
+ * now rides the same block. The field semantics added below are factual
+ * statements of the evaluation environment, in the same genre as the
+ * existing `unavailable → allow` and risk-dominance clauses. Validator,
+ * templates, and oracle are UNCHANGED.
+ */
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v11';
 
 // ── EP002-R4: bounded pack projection at the prompt boundary ─────────────────
 //

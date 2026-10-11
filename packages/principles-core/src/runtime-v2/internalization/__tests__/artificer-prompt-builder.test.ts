@@ -76,7 +76,10 @@ describe('ArtificerPromptBuilder', () => {
     // validateV2OutputContract enforces; r3 — bumped v9 → v10: that clause no
     // longer promises the `was rewritten` message, which EP002-R4 pack
     // restoration makes unreachable for same-caseId Owner-labelled entries.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v10');
+    // PD v2 Phase 1 closeout (2026-10-11) — bumped v10 → v11: CONTEXT MODE now
+    // states the context.facts field semantics (priorReadOfTarget/readCount)
+    // and the repair evidence block carries the failed case's Input summary.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v11');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -238,8 +241,8 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
     expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → … → v10 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v10');
+  it('declares the contract version bump history v1 → … → v11 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3, PD v2 Phase 1 closeout)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v11');
   });
 
   // PD v2 Phase 1 host acceptance (2026-10-10): validateV2OutputContract rejects
@@ -270,6 +273,33 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
 
   it('marks the OUTPUT FORMAT example caseIds as placeholders, not real ids', () => {
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/caseIds and paths inside the example are PLACEHOLDERS/i);
+  });
+
+  // PD v2 Phase 1 closeout (2026-10-11): the live p1-closeout chain produced a
+  // marker-only r2 rule that failed v2-path-boundary with no way to recover —
+  // the prompt said "prefer context.facts" without ever defining the fields.
+  // The facts semantics and the write-discipline mapping are part of the
+  // evaluation-environment contract, same genre as unavailable→allow and the
+  // risk-dominance clause.
+  it('states the context.facts field semantics and the per-call write-discipline mapping (v11)', () => {
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
+      taskId: 'task',
+      contextHash: 'hash',
+      sourceScribeArtifactId: 'scribe',
+      scribeArtifact: {},
+      behaviorExamplePack: validBehaviorExamplePack,
+    });
+    expect(systemPrompt).toContain('context.facts FIELD SEMANTICS');
+    expect(systemPrompt).toContain('facts.priorReadOfTarget is "yes" | "no" | "unknown"');
+    expect(systemPrompt).toContain('facts.readCount / writeCount / uniqueWritePathCount count prior calls');
+    expect(systemPrompt).toContain('priorReadOfTarget === "no"');
+    expect(systemPrompt).toContain('readCount > 0');
+    expect(systemPrompt).toContain('readCount === 0');
+  });
+
+  it('v11 repair guidance names the Input evidence line and forbids hard-coding the literal path', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain("Input (the failed case's defining input");
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('hard-coding the literal path from one entry will fail every other shape of the same pattern');
   });
 
   it('still references input.action', () => {

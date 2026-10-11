@@ -66,6 +66,14 @@ export interface ReplayFailureEvidence {
   readonly actualDecision?: string;
   readonly errorType: string;
   readonly message?: string;
+  /**
+   * PD v2 Phase 1 closeout (2026-10-11): bounded summary of the failed
+   * case's defining input (tool/params/context facts/authored rationale),
+   * persisted by the evaluator so the repair prompt can name WHICH action
+   * and context shape failed — not just the decision mismatch. Absent on
+   * legacy artifacts.
+   */
+  readonly caseInput?: string;
 }
 
 export interface RepairReplayContext {
@@ -168,6 +176,7 @@ function normalizeFailedCaseEntry(entry: unknown): ReplayFailureEvidence | null 
 
   const rationale = optionalNonEmptyString(entry.rationale);
   const message = optionalNonEmptyString(entry.message) ?? rationale;
+  const caseInput = optionalNonEmptyString(entry.caseInput);
   return {
     caseId,
     attackType: optionalNonEmptyString(entry.attackType),
@@ -175,6 +184,7 @@ function normalizeFailedCaseEntry(entry: unknown): ReplayFailureEvidence | null 
     ...(actualDecision !== undefined ? { actualDecision } : {}),
     errorType,
     ...(message !== undefined ? { message: boundMessage(message) } : {}),
+    ...(caseInput !== undefined ? { caseInput: boundMessage(caseInput) } : {}),
   };
 }
 

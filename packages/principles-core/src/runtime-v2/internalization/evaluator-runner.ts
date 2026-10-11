@@ -3081,7 +3081,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         readonly forbiddenPatternViolations: readonly string[];
       };
     },
-    adversarialCases: readonly { readonly caseId: string; readonly attackType: 'boundary' | 'omission' | 'inversion'; readonly expectedDecision: 'allow' | 'block' | 'propose_correction' }[],
+    adversarialCases: readonly AdversarialCase[],
   ): AdversarialFailedCase[] {
     const advById = new Map(adversarialCases.map((c) => [c.caseId, c]));
     // PRI-634 PR-A (SPEC §14): the sandbox failedCase is the authority for
@@ -3102,6 +3102,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         ...(fc.actualDecision !== undefined ? { actualDecision: fc.actualDecision } : {}),
         errorType: fc.errorType,
         message,
+        // PD v2 Phase 1 closeout (2026-10-11): carry the failed case's
+        // defining input so the repair round receives actionable evidence —
+        // a bare `Expected block but got allow` names neither the action nor
+        // the context shape that produced it ("failure must increase
+        // information", PRI-634 PR-A). Sandbox failedCases can also cover
+        // merged positive/golden-trace cases the adversarial list does not
+        // know; those keep the legacy no-input shape.
+        ...(adv !== undefined ? { caseInput: EvaluatorRunner.summarizeFailedCaseInput(adv) } : {}),
         rationale: adv
           ? `${fc.errorType}: ${message}`
           : `non-adversarial case ${fc.caseId} failed (${fc.errorType}: ${message}) — likely a code defect, not an adversarial gap`,
@@ -3122,6 +3130,31 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }),
     );
     return [...fromSandbox, ...fromForbidden];
+  }
+
+  /**
+   * PD v2 Phase 1 closeout (2026-10-11): one-line bounded summary of a failed
+   * adversarial case's defining input. Params and rationale come from the
+   * case definition (template- or LLM-authored); they are bounded here
+   * (rc-8) so the durable artifact and the repair prompt can never receive
+   * an unbounded payload through this field. Kept a single string so the
+   * persisted entry shape grows by one optional field, not a nested object.
+   */
+  private static summarizeFailedCaseInput(adv: AdversarialCase): string {
+    let paramsJson: string;
+    try {
+      paramsJson = JSON.stringify(adv.params) ?? '{}';
+    } catch {
+      paramsJson = '(unserializable params)';
+    }
+    const facts = adv.ruleContext?.facts;
+    const history = adv.ruleContext?.history;
+    const contextPart = adv.ruleContext
+      ? `context: ${history?.status ?? 'unknown'}${history?.truncated ? '/truncated' : ''}, priorReadOfTarget=${facts?.priorReadOfTarget ?? 'unknown'}, readCount=${facts?.readCount ?? 'unknown'}`
+      : 'context: none';
+    const rationale = adv.rationale.length > 160 ? `${adv.rationale.slice(0, 160)}…` : adv.rationale;
+    const summary = `tool=${adv.toolName} params=${paramsJson} | ${contextPart} | case rationale: ${rationale}`;
+    return summary.length > 400 ? `${summary.slice(0, 400)}…` : summary;
   }
 
   // ── PRI-427: rule artifact assembly ────────────────────────────────────────
