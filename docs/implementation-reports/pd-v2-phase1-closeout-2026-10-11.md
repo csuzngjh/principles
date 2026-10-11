@@ -14,7 +14,7 @@
 | 组件 | 版本 | 来源 | 用途 |
 | --- | --- | --- | --- |
 | 仓库 main | `814d49d1`（#1983，core 1.291.2 含 #1982 配对修复） | origin/main | 本轮基线 |
-| worktree 构建（内化链 CLI/core/prompt） | `37fc780c`（在本分支） | worktree `npm run build` | **内化链运行代码**（含 prompt v11 + caseInput 修复） |
+| worktree 构建（内化链 CLI/core/prompt） | `37fc780c` → `13a8e593` 之间的构建快照随链演进（§4「代码态」列逐链标注） | worktree `npm run build` | **内化链运行代码**（链 1/2 = v10 基线 + #1982；链 3/4 = +v11；链 5 = +v11+v7；终态 `13a8e593`） |
 | 安装运行时（网关插件实际加载） | `~/.pd/runtime`：core 1.291.0 / host-runtime 0.8.1 / codex-adapter 0.5.1 / plugin 2.1.0 | 官方安装器 | **拦截链/GJ 运行时**（Phase 1 证据面已在 10-10 验证存在，本轮复核 bundle.js 含 intervention_evidence/behavior_episode） |
 | npm 最新 | core **1.291.2**（2026-10-11T03:51Z 火车发布，含 #1982）/ host-runtime 0.8.1 / codex-adapter 0.5.1 | npm registry | pin 目标 |
 | 插件 pin（本轮 PR 后） | adapter 0.5.1 / host-runtime 0.8.1 / core **1.291.2** | `plugins/principles-disciple/runtime-version.json` | Codex 安装面 |
@@ -109,7 +109,7 @@
 
 ## 9. 回滚与测试实例停用
 
-- 代码：三个 commit 各自可独立 revert（`be647b0b` pin / `37fc780c` v11 / `13a8e593` v7）；pin 回滚后重跑 `$pd-setup`。
+- 代码：功能单元各自可 revert——pin = `24ae7dca`+`be647b0b` 两 commit（revert `be647b0b` 仅退回 1.291.1，完整回滚 pin 需两者）；v11 = `37fc780c`；v7 = `13a8e593`。pin 回滚后重跑 `$pd-setup`。
 - 测试实例：隔离网关（已停）；Console 3200/3201（`pd console start` 进程，随用随停）；隔离安装 `C:\Users\Administrator\.pd-p1test\codex-home-p1c` 与 `openclaw-state-p1c` 可整目录删除；`~/.pd/install.json` 的测试 worker 注册条目可用插件自带 `scripts/pd-disable.cjs` 清理（与 10-10 验收相同路径）。
 - 历史库：`D:\Code\_pdtest\p1-acceptance\*` 全程只读未动；本轮沙箱 `D:\Code\_pdtest\p1-closeout\*` 保留至 Owner 裁决后处置。
 
@@ -118,3 +118,4 @@
 1. §8 决策 1（GJ-01 候选授权）——唯一阻塞 COMPLETE 的工程可闭合项。
 2. §8 决策 2（pin 随下班火车发布的授权）。
 3. （非本轮）B-1 全链闭合后的六标准重判；Codex 能力声明懒物化是否需要改为显式声明入口。
+4. （评审 follow-up）`caseInput` 的 400/160 截断与不可序列化降级边界无直接单测（现靠集成断言）；旧 v1 对抗回路的 `formatAdversarialFeedback` 渲染面未同步 `caseInput`（按「下游消费者信息对称」不变量评估是否纳入）。
