@@ -21,6 +21,7 @@ import {
   showsUnlinkedCandidateNote,
   validateApprovalsGroupedData as validateApprovalsGroupedDataReal,
 } from "../../src/ui/pages/focus/focus-validation.js";
+import { partitionInboxForDisplay } from "../../src/ui/pages/focus/FocusPage.js";
 
 // ── Mock the API module ──────────────────────────────────────────────────────
 
@@ -747,5 +748,113 @@ describe("FocusPage: PRI-332 zero state clarity", () => {
     expect(src).toMatch(/degradedSignals && degradedSignals\.length > 0/);
     // Should NOT have the old pattern that gates on governanceState === "degraded"
     expect(src).not.toMatch(/governanceState === "degraded" && degradedSignals/);
+  });
+});
+
+// ── SPEC-PD-UIUX-001 R2: Focus reading order + inbox/action-card dedup ──────
+
+describe("SPEC-PD-UIUX-001 R2: partitionInboxForDisplay display semantics", () => {
+  type InboxItem = { principleId: string; inbox: { group: string; attention: string } };
+  const mk = (principleId: string, group: string, attention = "individual"): InboxItem => ({
+    principleId,
+    inbox: { group, attention },
+  });
+
+  function mkInbox(overrides?: Partial<{
+    decision: InboxItem[];
+    blocked: InboxItem[];
+    recovery: InboxItem[];
+  }>) {
+    return {
+      groups: {
+        decision: overrides?.decision ?? [],
+        blocked: overrides?.blocked ?? [],
+        recovery: overrides?.recovery ?? [],
+      },
+      historicalUnknown: { count: 0 },
+    };
+  }
+
+  it("does not duplicate decision objects that already have an action card (match by principleId)", () => {
+    const inbox = mkInbox({ decision: [mk("p-1", "decision"), mk("p-2", "decision")] });
+    const partition = partitionInboxForDisplay(inbox, new Set(["p-1"]));
+    expect(partition.unmatchedDecisions.map((i) => i.principleId)).toEqual(["p-2"]);
+  });
+
+  it("preserves unlinked decision objects — hiding for visual tidiness is forbidden", () => {
+    const inbox = mkInbox({ decision: [mk("p-orphan", "decision")] });
+    const partition = partitionInboxForDisplay(inbox, new Set(["p-other"]));
+    expect(partition.unmatchedDecisions).toHaveLength(1);
+    expect(partition.pendingTotal).toBe(1);
+  });
+
+  it("counts pending as decision + individual blocked + recovery (aggregate blocked excluded)", () => {
+    const inbox = mkInbox({
+      decision: [mk("p-1", "decision"), mk("p-2", "decision")],
+      blocked: [mk("p-3", "blocked", "individual"), mk("p-4", "blocked", "aggregate")],
+      recovery: [mk("p-5", "recovery")],
+    });
+    const partition = partitionInboxForDisplay(inbox, new Set(["p-1"]));
+    // 2 decision + 1 individual blocked + 1 recovery = 4; the aggregate blocked
+    // item is surfaced separately, not as an individual todo.
+    expect(partition.pendingTotal).toBe(4);
+    expect(partition.blockedIndividual.map((i) => i.principleId)).toEqual(["p-3"]);
+    expect(partition.blockedAggregate.map((i) => i.principleId)).toEqual(["p-4"]);
+  });
+
+  it("keeps two different decisions of the same principle unmerged on the action surface", () => {
+    // The partition never merges action-card objects: two action cards for the
+    // same principle each keep their card; the inbox display item for that
+    // principle is covered exactly once by the principleId association.
+    const inbox = mkInbox({ decision: [mk("p-1", "decision")] });
+    const partition = partitionInboxForDisplay(inbox, new Set(["p-1"]));
+    expect(partition.unmatchedDecisions).toHaveLength(0);
+  });
+
+  it("empty inbox partitions to zero pending and no items", () => {
+    const partition = partitionInboxForDisplay(mkInbox(), new Set());
+    expect(partition.pendingTotal).toBe(0);
+    expect(partition.unmatchedDecisions).toHaveLength(0);
+    expect(partition.blockedIndividual).toHaveLength(0);
+    expect(partition.blockedAggregate).toHaveLength(0);
+    expect(partition.recovery).toHaveLength(0);
+  });
+});
+
+describe("SPEC-PD-UIUX-001 R2: Focus page reading order contract", () => {
+  const src = fs.readFileSync(
+    nodePath.join(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"),
+    "utf-8",
+  );
+
+  it("renders the conclusion strip before any object lists", () => {
+    const conclusion = src.indexOf('data-testid="focus-conclusion"');
+    const decisions = src.indexOf('data-testid="owner-decisions-section"');
+    const attention = src.indexOf('data-testid="owner-attention-section"');
+    expect(conclusion).toBeGreaterThan(-1);
+    expect(decisions).toBeGreaterThan(conclusion);
+    expect(attention).toBeGreaterThan(decisions);
+  });
+
+  it("distinguishes pending vs actionable counts and keeps todos visible when locked", () => {
+    expect(src).toContain('data-testid="focus-conclusion-counts"');
+    expect(src).toContain("pages.focus.conclusion.pendingTotal");
+    // The locked variant re-labels actionability instead of dropping the count.
+    expect(src).toContain("pages.focus.conclusion.actionableLocked");
+    // Lock reason shows once, centrally, with a settings entry.
+    expect(src).toContain('data-testid="focus-conclusion-lock"');
+  });
+
+  it("demotes the daily reflection card below the evidence sections", () => {
+    const daily = src.indexOf("<DailyThoughtCard />");
+    const signals = src.indexOf('aria-labelledby="section-signals"');
+    expect(daily).toBeGreaterThan(signals);
+  });
+
+  it("keeps the PRI-889 degradation guarantee for grouped-data failures", () => {
+    // selectDecisionSurfaceItems must remain the decision-surface authority —
+    // R2 reordering must not weaken the rc-9 fallback.
+    expect(src).toMatch(/export function selectDecisionSurfaceItems/);
+    expect(src).toContain("selectDecisionSurfaceItems(ownerDecisionItems, groupedAvailable)");
   });
 });
