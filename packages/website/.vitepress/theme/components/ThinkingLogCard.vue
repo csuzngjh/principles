@@ -18,7 +18,19 @@
 
     <div class="journal-card pd-card">
       <div class="journal-thumb">
-        <img src="/images/abyss/06/abyss-06-cover.png" :alt="lang === 'zh-CN' ? '关于 Owner 与 Agent 边界的文章封面' : 'Article cover about Owner and Agent boundaries'" />
+        <!-- SPEC-PD-UIUX-001 R9: below-the-fold cover — lazy + async decode +
+             a compressed 880px (2× display) variant via srcset; the 1916px
+             original stays in /public untouched for the article page. -->
+        <img
+          src="/images/abyss/06/abyss-06-cover.webp"
+          :srcset="`/images/abyss/06/abyss-06-cover-880.webp 880w, /images/abyss/06/abyss-06-cover.webp 1916w`"
+          sizes="(max-width: 767px) 100vw, 46vw"
+          width="880"
+          height="377"
+          loading="lazy"
+          decoding="async"
+          :alt="lang === 'zh-CN' ? '关于 Owner 与 Agent 边界的文章封面' : 'Article cover about Owner and Agent boundaries'"
+        />
         <div class="thumb-overlay"></div>
       </div>
       

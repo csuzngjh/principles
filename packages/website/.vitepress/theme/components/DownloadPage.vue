@@ -8,6 +8,7 @@ const props = defineProps({
 
 const REPO = 'csuzngjh/principles'
 const zh = props.lang === 'zh'
+const installHref = zh ? '/zh/install' : '/install'
 
 // Allowlist before a URL is bound to the <a href> sink (EP-08). Applies to
 // both the build-time baked URL and the client-side refresh URL, so a crafted
@@ -43,6 +44,8 @@ const labels = zh
       platformSoon: 'macOS 即将推出',
       versionLabel: '当前版本',
       download: '下载安装包',
+      prereqNearCta: '需先安装 PD（OpenClaw 或 Codex 宿主）——Companion 是 Windows 桌面增强入口，不替代安装。',
+      goInstall: '前往安装 →',
       refreshing: '正在检查新版本…',
       fallbackHint: '暂时无法获取版本信息，请前往 GitHub Releases 手动下载：',
       fallbackLink: 'GitHub Releases 下载页',
@@ -56,7 +59,7 @@ const labels = zh
       reqTitle: '环境要求',
       reqs: [
         { k: '操作系统', v: 'Windows 10 / 11（64 位）' },
-        { k: 'Node.js', v: '≥ 18 且在 PATH 中（node -v 可用）——Companion 用系统 Node 运行控制台服务' },
+        { k: 'Node.js', v: '≥ 22 且在 PATH 中（node -v 可用）——Companion 用系统 Node 运行控制台服务' },
         { k: 'PD', v: '已安装：OpenClaw 宿主（npx create-principles-disciple）或 Codex 插件市场安装' },
       ],
       reqNote: 'Companion 是已装 PD 的增强入口——控制台未安装时会显示明确的修复指引，而不是白屏。',
@@ -81,6 +84,8 @@ const labels = zh
       platformSoon: 'macOS coming later',
       versionLabel: 'Current version',
       download: 'Download installer',
+      prereqNearCta: 'PD must be installed first (OpenClaw or Codex host) — Companion is a Windows desktop add-on, not a replacement.',
+      goInstall: 'Go to install →',
       refreshing: 'Checking for a newer version…',
       fallbackHint: 'Could not fetch release info right now. Download manually from GitHub Releases:',
       fallbackLink: 'GitHub Releases page',
@@ -94,7 +99,7 @@ const labels = zh
       reqTitle: 'Requirements',
       reqs: [
         { k: 'OS', v: 'Windows 10 / 11 (64-bit)' },
-        { k: 'Node.js', v: '≥ 18 on PATH (node -v) — Companion runs the console server with your system Node' },
+        { k: 'Node.js', v: '≥ 22 on PATH (node -v) — Companion runs the console server with your system Node' },
         { k: 'PD', v: 'Installed via the OpenClaw host (npx create-principles-disciple) or the Codex plugin marketplace' },
       ],
       reqNote: 'Companion is an add-on to an existing PD install — if the console is missing it shows the exact fix, not a blank window.',
@@ -162,22 +167,31 @@ onMounted(async () => {
         <span class="badge badge-soon">{{ labels.platformSoon }}</span>
       </div>
 
-      <div v-if="downloadUrl" class="dl-cta">
-        <a data-testid="companion-download" class="download-btn" :href="downloadUrl">
-          {{ labels.download }}<span class="btn-arrow" aria-hidden="true">↓</span>
-        </a>
-        <p class="dl-fileinfo" data-testid="companion-download-fileinfo">
-          <span v-if="version" class="fileinfo-version">{{ labels.versionLabel }} v{{ version }}</span>
-          <code>{{ fileName }}</code>
-          <span v-if="sizeMb"> · {{ sizeMb }} MB</span>
-          <span v-if="refreshing" class="dl-refreshing">（{{ labels.refreshing }}）</span>
+      <div class="dl-cta">
+        <template v-if="downloadUrl">
+          <a data-testid="companion-download" class="download-btn" :href="downloadUrl">
+            {{ labels.download }}<span class="btn-arrow" aria-hidden="true">↓</span>
+          </a>
+          <p class="dl-fileinfo" data-testid="companion-download-fileinfo">
+            <span v-if="version" class="fileinfo-version">{{ labels.versionLabel }} v{{ version }}</span>
+            <code>{{ fileName }}</code>
+            <span v-if="sizeMb"> · {{ sizeMb }} MB</span>
+            <span v-if="refreshing" class="dl-refreshing">（{{ labels.refreshing }}）</span>
+          </p>
+        </template>
+        <template v-else>
+          <p class="dl-fallback-hint">{{ labels.fallbackHint }}</p>
+          <a data-testid="companion-download-fallback" class="download-btn download-btn-alt" :href="`https://github.com/${REPO}/releases`">
+            {{ labels.fallbackLink }}
+          </a>
+        </template>
+        <!-- SPEC-PD-UIUX-001 R7: the PD prerequisite is visible next to the
+             download button in BOTH branches — not buried in the requirements
+             below the fold. -->
+        <p class="dl-prereq" data-testid="companion-download-prereq">
+          {{ labels.prereqNearCta }}
+          <a :href="installHref">{{ labels.goInstall }}</a>
         </p>
-      </div>
-      <div v-else class="dl-cta">
-        <p class="dl-fallback-hint">{{ labels.fallbackHint }}</p>
-        <a data-testid="companion-download-fallback" class="download-btn download-btn-alt" :href="`https://github.com/${REPO}/releases`">
-          {{ labels.fallbackLink }}
-        </a>
       </div>
     </section>
 
@@ -310,6 +324,15 @@ onMounted(async () => {
 .badge-ok { color: var(--accent); }
 .badge-soon { color: var(--text-muted); }
 .dl-cta { position: relative; margin-top: 30px; }
+.dl-prereq {
+  margin: 16px auto 0;
+  max-width: 56ch;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.dl-prereq a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.dl-prereq a:hover { text-decoration: underline; }
 .download-btn {
   display: inline-flex;
   align-items: center;
