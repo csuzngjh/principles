@@ -225,7 +225,7 @@ describe('PRI-634 legacy path: non-code-bearing Artificer keeps V1 behavior', ()
 // R3 覆盖其余所有成因（cases 为空 / 无 positive case / 产物不可解析 /
 // conversion drift …）—— 封的是终态，不是某个具体成因。
 describe('PRI-634 R3: code-bearing + approved 若 gate 未产出 adversarialResult 必须 fail-loud', () => {
-  it('affectedTools 缺失 + positive case 无 path → merged cases 为空 → failed(input_invalid)，不得 succeeded', async () => {
+  it('affectedTools 缺失 + positive case 无 path → 必需模板派生失败 → failed(input_invalid)，不得 succeeded', async () => {
     // positive case 保持结构合法（params 允许空对象），但无 path → v2 cases
     // 生成失败（no_path_param_for_v2_adversarial_cases）+ V1 无 LLM cases →
     // merged 为空 → no_adversarial_cases_after_merge。
@@ -253,7 +253,7 @@ describe('PRI-634 R3: code-bearing + approved 若 gate 未产出 adversarialResu
     expect(task?.status).toBe('failed');
     expect(task?.lastError).toBe('input_invalid');
     // A3 可观测性保留：skip 事件仍要发
-    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'no_adversarial_cases_after_merge')).toBe(true);
+    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'paired_positive_case_has_no_path_param')).toBe(true);
   });
 
   it('反向对照：非 code-bearing（无 implementationCode）+ V2 output → 同样 skip，但走 legacy succeeded（R3 不误伤）', async () => {
@@ -371,7 +371,7 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
   });
 
   it('needs_revision + gate 无 positive case 可用 → 重放 skip（skipReason），verdict 保持 needs_revision，不组装 rule', async () => {
-    // positive case 缺 path → 无法生成 v2 adversarial cases → merged 为空 →
+    // positive write case 缺 path → 必需 v2 模板派生失败 → 合并前停止 →
     // executeDeterministicReplay 返回 skipReason 且 updatedOutput=null →
     // 诊断重放未产出证据（diagnostic_failed），verdict 不受影响。
     const store = await seedLineage(codeBearingArtificerContent({
@@ -395,7 +395,7 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
     // 重放试图运行但派生不出 gate 输入：skip（诊断证据缺失），verdict 保持
     expect(result.status).toBe('succeeded');
     expect(calls.count).toBe(0);
-    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'no_adversarial_cases_after_merge')).toBe(true);
+    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'paired_positive_case_has_no_path_param')).toBe(true);
     expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_diagnostic_failed')).toBe(true);
     // verdict 保持 needs_revision：task succeeded，无 rule 组装
     const task = await stateManager.getTask(EVAL_ID);
