@@ -447,7 +447,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       // Contract violation: enabled but no adapter provided. Fail loud.
       stages.push({ name: 'adversarial_loop', status: 'failed', reason: 'artificerAdapter not provided' });
       onProgress('adversarial_loop', 'failed', 'artificerAdapter not provided');
-      return rejectedResult(opts.painId, stages, 'code_rule_capability enabled but artificerAdapter not provided');
+      return withGaps(rejectedResult(opts.painId, stages, 'code_rule_capability enabled but artificerAdapter not provided'), scribeOwnerRequirementGaps);
     }
     // PRI-780: v2-only generation — an enabled code-rule capability without
     // an Owner-labelled BehaviorExamplePack refuses BEFORE any artificer LLM
@@ -456,7 +456,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       const reason = 'behavior_example_pack_missing: v2 is the only RuleCode generation contract (PRI-780); provide Owner-labelled behavior examples via --behavior-examples';
       stages.push({ name: 'adversarial_loop', status: 'failed', reason });
       onProgress('adversarial_loop', 'failed', reason);
-      return rejectedResult(opts.painId, stages, reason);
+      return withGaps(rejectedResult(opts.painId, stages, reason), scribeOwnerRequirementGaps);
     }
     onProgress('adversarial_loop', 'start');
     // PRI-661: the loop's evaluator replay must use the SAME production gate
@@ -472,7 +472,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       const refusalReason = `${evaluatorContext.reason} — ${evaluatorContext.nextAction}`;
       stages.push({ name: 'adversarial_loop', status: 'failed', reason: refusalReason });
       onProgress('adversarial_loop', 'failed', refusalReason);
-      return rejectedResult(opts.painId, stages, `evaluator_runtime_context_unresolvable: ${evaluatorContext.reason} (nextAction: ${evaluatorContext.nextAction})`);
+      return withGaps(rejectedResult(opts.painId, stages, `evaluator_runtime_context_unresolvable: ${evaluatorContext.reason} (nextAction: ${evaluatorContext.nextAction})`), scribeOwnerRequirementGaps);
     }
     // PRI-741: artificer generation + evaluator parity BOTH anchor on the ONE
     // registry snapshot evaluatorContext resolved above (review round: a
@@ -597,6 +597,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
           principleArtifactId: loopResult.principleArtifactId,
           approvalId: null,
           degradationReason: degradeReason,
+          ...(scribeOwnerRequirementGaps.length > 0 ? { ownerRequirementGaps: scribeOwnerRequirementGaps } : {}),
         };
       }
     }
@@ -657,6 +658,10 @@ type DreamerTaskLookup =
  * never a silent fabrication of one; the scribe validator guarantees
  * present-but-malformed never reaches storage.
  */
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 export async function readScribeOwnerRequirementGaps(
   artifactStore: PIArtifactStore,
   scribeTaskId: string,
@@ -675,9 +680,8 @@ export async function readScribeOwnerRequirementGaps(
   } catch {
     return [];
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
-  if (!Object.hasOwn(parsed, 'ownerRequirementGaps')) return [];
-  const gaps = (parsed as { ownerRequirementGaps?: unknown }).ownerRequirementGaps;
+  if (!isRecordObject(parsed) || !Object.hasOwn(parsed, 'ownerRequirementGaps')) return [];
+  const gaps: unknown = parsed.ownerRequirementGaps;
   if (!Array.isArray(gaps)) return [];
   return gaps.filter((gap): gap is string => typeof gap === 'string' && gap.trim() !== '');
 }
@@ -945,6 +949,15 @@ function rejectedResult(painId: string, stages: RuleHostPipelineStage[], degrada
     approvalId: null,
     degradationReason,
   };
+}
+
+/**
+ * r6 review fix (P1-2): post-scribe rejection paths still carry declared gaps —
+ * the rejection reason and the uncovered Owner requirements travel together to
+ * whoever reads the outcome. Empty gaps return the base result unchanged.
+ */
+function withGaps(result: RuleHostPipelineResult, gaps: readonly string[]): RuleHostPipelineResult {
+  return gaps.length > 0 ? { ...result, ownerRequirementGaps: gaps } : result;
 }
 
 /**

@@ -1249,6 +1249,8 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
     expect(await ledgerPrincipleCount(tmpDir)).toBe(1);
   }, 60_000);
 
+});
+
 describe('readScribeOwnerRequirementGaps (r6 review fix P1-2)', () => {
   const makeStore = async (contentJson: string): Promise<PIArtifactStore> => {
     const store = new MemoryPIArtifactStore();
@@ -1287,4 +1289,40 @@ describe('readScribeOwnerRequirementGaps (r6 review fix P1-2)', () => {
     expect(await readScribeOwnerRequirementGaps(empty, 'scribe-gaps-test')).toEqual([]);
   });
 });
+
+describe('ownerRequirementGaps result carriage (r6 review fix P1-2)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } tmpDir = ''; }
+  });
+
+  it('post-scribe rejection carries the scribe-declared gaps (PRI-780 pack-missing path) — gaps reach the Owner even on rejection', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-seeded-gaps', 'pain-gaps-001', 'code_tool_hook', 'cand-gaps');
+    await sm.close();
+    const adapter = new ScriptedAdapter({
+      dreamer: (taskId) => dreamerOut(taskId, 'pain-gaps-001'),
+      philosopher: philosopherOut,
+      scribe: (taskId, priorId) => ({
+        ...(scribeOut(taskId, priorId) as Record<string, unknown>),
+        ownerRequirementGaps: ['protected/ read access requires confirmation — contract narrowed to write-only gating'],
+      }),
+      artificer: artificerV2,
+      evaluator: evaluatorApproved,
+    });
+    const capability: CodeRuleCapability = { enabled: true, artificerAdapter: adapter };
+    // NO behaviorExamplePack → PRI-780 refusal AFTER the scribe stage.
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-gaps-001', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: capability,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+
+    expect(result.decision).toBe('generation_rejected');
+    expect(result.degradationReason).toContain('behavior_example_pack_missing');
+    expect(result.ownerRequirementGaps).toEqual(['protected/ read access requires confirmation — contract narrowed to write-only gating']);
+  }, 60_000);
 });

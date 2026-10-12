@@ -161,17 +161,6 @@ function readDreamerArtifactIdFromScribeArtifact(contentJson: string | null): st
 }
 
 /**
- * PRI-843: does the validated evaluation flag a Principle↔Pain mismatch?
- *
- * The v5 prompt contract requires every such concern to BEGIN with the exported
- * marker token — the marker prefix is the only machine-readable channel plain
- * string concerns have (no schema change). The runner scans the already
- * validated `concerns` array; honoring is additionally gated on formation
- * context having actually been injected (see deriveGovernanceEffect): without
- * formation evidence the model has no pain evidence to cite, so a marker there
- * is hallucination, not signal.
- */
-/**
  * r6 review fix (P2-1, 2026-10-12): routing moved to the STRUCTURED
  * `evaluation.mismatchFindings` field. The old concerns-prefix scan produced a
  * live governance false positive: the judge wrote "[principle_pain_mismatch]

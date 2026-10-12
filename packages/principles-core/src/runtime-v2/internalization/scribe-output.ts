@@ -81,6 +81,14 @@ export const ScribeOutputV1Schema = Type.Object({
   // DefaultScribeValidator via isValidIntentContractV1 — TypeBox Optional
   // keeps the wire shape additive for LLM-facing schema consumers).
   intentContract: Type.Optional(Type.Unknown()),
+  // r6 review fix (P1-2): optional structured coverage-gap channel. This
+  // schema is a LIVE runtime contract (output-schema-registry → pi-ai
+  // adapter → response_format json_schema with additionalProperties:false on
+  // strict decoding endpoints) — an absent field would make declared gaps
+  // IMPOSSIBLE for the model to emit there, silently disabling the whole
+  // disposition path. Element-level validation stays with the hand-rolled
+  // DefaultScribeValidator (same discipline as intentContract).
+  ownerRequirementGaps: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 });
 
 export type ScribeOutputV1TB = Static<typeof ScribeOutputV1Schema>;
