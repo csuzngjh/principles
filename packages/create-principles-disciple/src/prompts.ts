@@ -2,7 +2,8 @@ import { select, confirm, input } from '@inquirer/prompts';
 import * as path from 'path';
 import * as os from 'os';
 import { detectWorkspace, type WorkspaceInfo } from './utils/env.js';
-import { MVP_CHANNELS, type MvpChannel, type RuntimeProfileInput } from './mvp-config.js';
+import { MVP_CHANNELS, getHomeDir, type MvpChannel, type RuntimeProfileInput } from './mvp-config.js';
+import { getInstallLayoutPaths, getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { setLanguage, getLanguage, t, type Language } from './i18n.js';
 import { type HostTarget } from './installers/index.js';
 
@@ -117,6 +118,11 @@ async function promptHost(defaultHost: HostTarget = 'openclaw'): Promise<HostTar
         description: 'Writes ~/.codex/hooks.json — PD runs as a Codex hook subprocess.',
       },
       {
+        name: 'WorkBuddy',
+        value: 'workbuddy' as const,
+        description: 'Registers the PD plugin into WorkBuddy\'s marketplace (~/.pd/workbuddy-marketplace → engine plugin install). Governance stays OFF until explicitly enabled.',
+      },
+      {
         name: 'All hosts',
         value: 'all' as const,
         description: 'Writes both OpenClaw and Codex configs — for operators using multiple hosts.',
@@ -208,6 +214,17 @@ async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean>
   console.log(`  ${t('mode')}: ${options.mode === 'force' ? t('force_overwrite') : t('smart_merge')}`);
   console.log(`  ${t('workspace')}: ${options.workspaceDir}`);
   console.log(`  ${t('mvp_channels_enabled')}: ${MVP_CHANNELS.join(', ')}`);
+  // WorkBuddy has its OWN write scope beyond the generic workspace (SPEC
+  // workbuddy-host-adapter §6): show exactly what will be written and when it
+  // takes effect BEFORE the confirmation (install consent = informed consent).
+  if (options.host === 'workbuddy') {
+    const layout = getInstallLayoutPaths(getHomeDir());
+    console.log('  WorkBuddy target host: WorkBuddy Desktop (settings.json + plugins registry)');
+    console.log(`  PD-owned marketplace: ${path.join(layout.pdDir, 'workbuddy-marketplace')} (rewritten)`);
+    console.log(`  Governance workspace: ${getWorkbuddyWorkspaceDir(getHomeDir())} (created if absent; NEVER deleted by uninstall)`);
+    console.log('  Write scope: settings.json enabledPlugins entry, plugins/installed_plugins.json entry, plugin cache copy, ~/.pd/install.json host+workspace record');
+    console.log('  Takes effect: NEW WorkBuddy sessions (or /reload-plugins). PD governance stays OFF until explicitly enabled.');
+  }
   // Fix-4: surface runtime profile status so user knows whether LLM features will work.
   if (options.runtimeProfile) {
     console.log(`  LLM runtime profile: ${options.runtimeProfile.provider} / ${options.runtimeProfile.model} (key: $${options.runtimeProfile.apiKeyEnv})`);

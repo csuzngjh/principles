@@ -13,6 +13,16 @@ const bundleScript = join(installerRoot, 'scripts', 'bundle-plugin.mjs');
 // PRI-711: keep in sync with generate-release-locks.mjs — release-manager was
 // never verified here before (pre-existing gap), codex-adapter is new.
 const components = ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'codex-adapter'];
+// WorkBuddy adapter: the lock is REQUIRED (and verified installable) once the
+// adapter package has landed in the source tree; pre-integration baselines
+// bundle without the component and have nothing to verify (same gate as
+// bundle-plugin.mjs / generate-release-locks.mjs).
+const workbuddyAdapterPresent = existsSync(join(root, 'packages', 'workbuddy-adapter', 'package.json'));
+if (workbuddyAdapterPresent) {
+  components.push('workbuddy-adapter');
+} else {
+  console.error('[check-release-locks] packages/workbuddy-adapter absent — skipping its lock verification (pre-integration baseline).');
+}
 const stagingRoot = mkdtempSync(join(tmpdir(), 'pd-check-release-locks-'));
 const npmCommand = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'npm';
 const npmArgs = (args) => process.platform === 'win32' ? ['/d', '/s', '/c', ['npm', ...args].join(' ')] : args;

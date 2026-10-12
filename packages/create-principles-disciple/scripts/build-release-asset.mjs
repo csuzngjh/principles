@@ -14,7 +14,16 @@ import { detectLocalMusl, pruneForeignSqlitePrebuilds, resolveKeepPrebuildName }
 // completeness check as every other component — the payload verifier walks
 // the WHOLE asset, a component missing here means its symlinks are never
 // cleaned and the no-symlink guard fails the build).
-const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter'];
+// WorkBuddy third host (SPEC workbuddy-host-adapter §5): workbuddy-adapter
+// joins the same list, gated on the source package's presence so
+// pre-integration baselines (adapter package not yet landed) can still build
+// assets — bundle-plugin.mjs applies the identical gate when producing the
+// staging input, so a present-in-source component missing from the input
+// still fails loud below.
+const SOURCE_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const WORKBUDDY_ADAPTER_IN_SOURCE = existsSync(join(SOURCE_REPO_ROOT, 'packages', 'workbuddy-adapter', 'package.json'));
+const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter']
+  .concat(WORKBUDDY_ADAPTER_IN_SOURCE ? ['workbuddy-adapter'] : []);
 
 function isPathWithin(directory, candidate) {
   const candidateRelativePath = relative(directory, candidate);

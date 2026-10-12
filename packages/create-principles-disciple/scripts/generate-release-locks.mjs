@@ -11,6 +11,16 @@ const installerRoot = fileURLToPath(new URL('../', import.meta.url));
 const lockRoot = join(installerRoot, 'release-locks');
 const bundleScript = join(installerRoot, 'scripts', 'bundle-plugin.mjs');
 const components = ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'codex-adapter'];
+// WorkBuddy third host: the lock is generated only when the adapter package
+// has landed in the source tree (bundle-plugin.mjs gates the payload the same
+// way). Pre-integration baselines bundle without it and must not fabricate a
+// lock for a component that does not exist.
+const workbuddyAdapterPresent = existsSync(join(root, 'packages', 'workbuddy-adapter', 'package.json'));
+if (workbuddyAdapterPresent) {
+  components.push('workbuddy-adapter');
+} else {
+  console.error('[generate-release-locks] packages/workbuddy-adapter absent — no lock generated for it (pre-integration baseline).');
+}
 const stagingRoot = mkdtempSync(join(tmpdir(), 'pd-generate-release-locks-'));
 
 // Run npm through the running Node binary's own toolchain (same resolution as

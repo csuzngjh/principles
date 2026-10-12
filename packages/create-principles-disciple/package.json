@@ -25,6 +25,7 @@
     "core",
     "host-runtime",
     "codex-adapter",
+    "workbuddy-adapter",
     "install-layout",
     "release-manager",
     "trust/root.json",

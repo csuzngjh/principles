@@ -73,6 +73,19 @@ const HOST_RUNTIME_SRC = join(ROOT_DIR, 'packages', 'host-runtime');
 const HOST_RUNTIME_DEST = join(OUTPUT_ROOT, 'host-runtime');
 const CODEX_ADAPTER_SRC = join(ROOT_DIR, 'packages', 'codex-adapter');
 const CODEX_ADAPTER_DEST = join(OUTPUT_ROOT, 'codex-adapter');
+// WorkBuddy third host (SPEC workbuddy-host-adapter §4.1/§5): the adapter
+// payload bundles as a runtime sibling exactly like codex-adapter. The
+// packages/workbuddy-adapter package lands on the integration branch together
+// with this script change (parallel adapter worktree, same baseline); until it
+// exists in the source tree the bundle cannot carry it. Gated on the package
+// manifest: PRESENT → full fail-loud required-item gate (a half-built adapter
+// must never ship silently); ABSENT → loud stderr notice and NO workbuddy
+// payload (installer builds then deploy without the WorkBuddy host and the
+// host installer reports workbuddy_adapter_payload_missing — rc-9 observable,
+// never a silent omission).
+const WORKBUDDY_ADAPTER_SRC = join(ROOT_DIR, 'packages', 'workbuddy-adapter');
+const WORKBUDDY_ADAPTER_DEST = join(OUTPUT_ROOT, 'workbuddy-adapter');
+const WORKBUDDY_ADAPTER_PRESENT = existsSync(join(WORKBUDDY_ADAPTER_SRC, 'package.json'));
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
 const INSTALL_LAYOUT_DEST = join(OUTPUT_ROOT, 'install-layout');
 // PRI-672: the ReleaseManager authority module ships as its own payload
@@ -135,6 +148,18 @@ const CODEX_ADAPTER_REQUIRED = [
   'dist/index.js',
   'dist/pd-hook.js',
   'package.json',
+];
+
+// P05 lesson (frozen hook-runtime-contract): the WorkBuddy plugin must ship
+// its OWN runtime dependencies — the host's bundled better-sqlite3 is NOT
+// requirable from outside. The payload therefore carries the adapter dist AND
+// the plugin skeleton the installer copies into the PD-owned marketplace.
+const WORKBUDDY_ADAPTER_REQUIRED = [
+  'dist',
+  'dist/index.js',
+  'package.json',
+  join('plugin', '.codebuddy-plugin', 'plugin.json'),
+  join('plugin', 'hooks', 'hooks.json'),
 ];
 
 const INSTALL_LAYOUT_REQUIRED = [
@@ -258,9 +283,24 @@ for (const item of CODEX_ADAPTER_REQUIRED) {
   const src = join(CODEX_ADAPTER_SRC, item);
   if (!existsSync(src)) {
     console.error(`❌ Required codex-adapter item not found: ${src}`);
-    console.error(`   Run: cd packages/codex-adapter && npm run build`);
+    console.error('   Run: cd packages/codex-adapter && npm run build');
     process.exit(1);
   }
+}
+
+if (WORKBUDDY_ADAPTER_PRESENT) {
+  for (const item of WORKBUDDY_ADAPTER_REQUIRED) {
+    const src = join(WORKBUDDY_ADAPTER_SRC, item);
+    if (!existsSync(src)) {
+      console.error(`❌ Required workbuddy-adapter item not found: ${src}`);
+      console.error('   Run: cd packages/workbuddy-adapter && npm run build (the plugin skeleton ships as source files under plugin/)');
+      process.exit(1);
+    }
+  }
+} else {
+  log('  ⚠️  packages/workbuddy-adapter is NOT present in this source tree — bundling WITHOUT the WorkBuddy host payload.');
+  log('      Installs from this build cannot serve --host workbuddy (the host installer reports workbuddy_adapter_payload_missing).');
+  log('      This is expected only on pre-integration baselines; release builds MUST carry the component.');
 }
 
 if (existsSync(PLUGIN_DEST)) {
@@ -404,6 +444,22 @@ for (const item of CODEX_ADAPTER_REQUIRED) {
 
 log(`   Codex Adapter: ${CODEX_ADAPTER_DEST}`);
 
+if (WORKBUDDY_ADAPTER_PRESENT) {
+  if (existsSync(WORKBUDDY_ADAPTER_DEST)) {
+    log('  Removing old workbuddy-adapter/ directory...');
+    rmSync(WORKBUDDY_ADAPTER_DEST, { recursive: true, force: true });
+  }
+  mkdirSync(WORKBUDDY_ADAPTER_DEST, { recursive: true });
+  // Copy whole trees (dist/, plugin/ skeleton, manifest); WORKBUDDY_ADAPTER_REQUIRED
+  // above already proved the plugin-skeleton files exist inside them.
+  for (const item of ['dist', 'package.json', 'plugin']) {
+    const src = join(WORKBUDDY_ADAPTER_SRC, item);
+    log(`  Copying workbuddy-adapter/${item}...`);
+    copyPayloadTree(src, join(WORKBUDDY_ADAPTER_DEST, item));
+  }
+  log(`   WorkBuddy Adapter: ${WORKBUDDY_ADAPTER_DEST}`);
+}
+
 if (existsSync(INSTALL_LAYOUT_DEST)) {
   log('  Removing old install-layout/ directory...');
   rmSync(INSTALL_LAYOUT_DEST, { recursive: true, force: true });
@@ -534,6 +590,12 @@ rewriteBundledDependency(join(HOST_RUNTIME_DEST, 'package.json'), 'host-runtime'
 rewriteBundledDependency(join(CODEX_ADAPTER_DEST, 'package.json'), 'codex-adapter', '@principles/core', 'file:../core');
 rewriteBundledDependency(join(CODEX_ADAPTER_DEST, 'package.json'), 'codex-adapter', '@principles/host-runtime', 'file:../host-runtime');
 rewriteBundledDependency(join(CODEX_ADAPTER_DEST, 'package.json'), 'codex-adapter', '@principles/install-layout', 'file:../install-layout');
+// workbuddy-adapter depends on the same sibling components (SPEC §4.1: core,
+// host-runtime, install-layout). Same self-contained pattern; no-ops when the
+// adapter package is absent from this build (rewriteBundledDependency ENOENT).
+rewriteBundledDependency(join(WORKBUDDY_ADAPTER_DEST, 'package.json'), 'workbuddy-adapter', '@principles/core', 'file:../core');
+rewriteBundledDependency(join(WORKBUDDY_ADAPTER_DEST, 'package.json'), 'workbuddy-adapter', '@principles/host-runtime', 'file:../host-runtime');
+rewriteBundledDependency(join(WORKBUDDY_ADAPTER_DEST, 'package.json'), 'workbuddy-adapter', '@principles/install-layout', 'file:../install-layout');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
 // console statically imports OPENCLAW_HOST_LIVENESS_CONTRACT at runtime for the
 // RuleCode owner live-decision readiness checks. Rewrite to a local file reference
@@ -648,6 +710,12 @@ if (BUILD_SELF_CONTAINED_ASSET) {
       // deps must materialize here or every pd command dies with
       // ERR_MODULE_NOT_FOUND on updated installs.
       installBundledRuntimeDependencies(CODEX_ADAPTER_DEST, 'codex-adapter'),
+      // WorkBuddy adapter (SPEC §4.1): P05 lesson — the payload MUST ship its
+      // own runtime deps (better-sqlite3 native module included); the host's
+      // bundled copy is not requirable from outside the engine.
+      ...(WORKBUDDY_ADAPTER_PRESENT
+        ? [installBundledRuntimeDependencies(WORKBUDDY_ADAPTER_DEST, 'workbuddy-adapter')]
+        : []),
     ]);
   } finally {
     rmSync(join(PLUGIN_DEST, 'core'), { recursive: true, force: true });
@@ -757,6 +825,9 @@ for (const { npmName, destDir } of [
   { npmName: '@principles/host-runtime', destDir: HOST_RUNTIME_DEST },
   { npmName: '@principles/codex-adapter', destDir: CODEX_ADAPTER_DEST },
   { npmName: '@principles/install-layout', destDir: INSTALL_LAYOUT_DEST },
+  ...(WORKBUDDY_ADAPTER_PRESENT
+    ? [{ npmName: '@principles/workbuddy-adapter', destDir: WORKBUDDY_ADAPTER_DEST }]
+    : []),
 ]) {
   let npmVersion = null;
   try {
@@ -872,6 +943,7 @@ assertPayloadHygiene([
   CORE_DEST,
   HOST_RUNTIME_DEST,
   CODEX_ADAPTER_DEST,
+  WORKBUDDY_ADAPTER_DEST,
   INSTALL_LAYOUT_DEST,
   RELEASE_MANAGER_DEST,
 ]);

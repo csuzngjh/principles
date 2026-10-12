@@ -30,6 +30,7 @@ import {
   getInstalledPdCliDir,
   getInstalledBinDir,
   getInstalledConsoleDir,
+  getHomeDir,
   isWindows,
   type ComponentStatus,
   type VerificationResult,
@@ -37,7 +38,7 @@ import {
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
+import { INSTALL_LAYOUT_VERSION, getWorkbuddyWorkspaceDir, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
@@ -192,8 +193,8 @@ function pluginInstallDirs(): string[] {
     : [getInstalledPluginDir()];
 }
 
-export function mergeInstallManifestHosts(current: unknown, host: HostTarget): ('codex' | 'openclaw')[] {
-  const hosts = new Set<'codex' | 'openclaw'>();
+export function mergeInstallManifestHosts(current: unknown, host: HostTarget): ('codex' | 'openclaw' | 'workbuddy')[] {
+  const hosts = new Set<'codex' | 'openclaw' | 'workbuddy'>();
   const parsed = parseInstallManifest(current);
   if (current !== undefined && !parsed.manifest) {
     throw new Error(parsed.error ?? 'install_manifest_malformed');
@@ -201,10 +202,13 @@ export function mergeInstallManifestHosts(current: unknown, host: HostTarget): (
   for (const existingHost of parsed.manifest?.hosts ?? []) hosts.add(existingHost);
   if (host === 'all' || host === 'codex') hosts.add('codex');
   if (host === 'all' || host === 'openclaw') hosts.add('openclaw');
+  // WorkBuddy is its own explicit target — 'all' must not attach a third host
+  // the operator never asked for (SPEC workbuddy-host-adapter §6, OD-03).
+  if (host === 'workbuddy') hosts.add('workbuddy');
   return [...hosts];
 }
 
-function resolveInstallManifestHosts(host: HostTarget): ('codex' | 'openclaw')[] {
+function resolveInstallManifestHosts(host: HostTarget): ('codex' | 'openclaw' | 'workbuddy')[] {
   let current: unknown;
   try {
     current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
@@ -218,8 +222,13 @@ function resolveInstallManifestHosts(host: HostTarget): ('codex' | 'openclaw')[]
  * PRI-624 Slice C: the install manifest records every Workspace this install
  * serves so the Companion can discover its per-Workspace workers (SPEC §13
  * "canonical install manifest"). Idempotent by canonical path.
+ *
+ * WorkBuddy (SPEC workbuddy-host-adapter §6): when the run targets workbuddy,
+ * the OD-07 governance workspace (~/.workbuddy/pd-workspace) is registered the
+ * same way — derived from install-layout, never hand-joined, never reused from
+ * another host's state.
  */
-function resolveInstallManifestWorkspaces(workspaceDir: string): string[] {
+function resolveInstallManifestWorkspaces(workspaceDir: string, host?: HostTarget): string[] {
   let current: unknown;
   try {
     current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
@@ -230,10 +239,19 @@ function resolveInstallManifestWorkspaces(workspaceDir: string): string[] {
   if (current !== undefined && !parsed.manifest) {
     throw new Error(parsed.error ?? 'install_manifest_malformed');
   }
-  return mergeInstallManifestWorkspaces(parsed.manifest, path.resolve(workspaceDir));
+  let workspaces = mergeInstallManifestWorkspaces(parsed.manifest, path.resolve(workspaceDir));
+  if (host === 'workbuddy') {
+    // Set-union via the same authority helper — order of existing entries is
+    // preserved, the governance dir is appended when absent (idempotent).
+    workspaces = mergeInstallManifestWorkspaces(
+      { layoutVersion: parsed.manifest?.layoutVersion ?? INSTALL_LAYOUT_VERSION, mode: parsed.manifest?.mode ?? 'canonical', hosts: parsed.manifest?.hosts ?? [], workspaces },
+      getWorkbuddyWorkspaceDir(getHomeDir()),
+    );
+  }
+  return workspaces;
 }
 
-function writeInstallManifest(hosts: ('codex' | 'openclaw')[], workspaces: string[]): void {
+function writeInstallManifest(hosts: ('codex' | 'openclaw' | 'workbuddy')[], workspaces: string[]): void {
   mkdirSync(getPdDir(), { recursive: true });
   // PRI-709 P0-1: merge into the existing record. This file has more than one
   // writer (the update side owns `channel` / `autoCheck` / `releaseMetadataUrl`);
@@ -2303,6 +2321,10 @@ function getInstalledCodexAdapterDir(): string {
   return path.join(getPdRuntimeDir(), 'codex-adapter');
 }
 
+function getInstalledWorkbuddyAdapterDir(): string {
+  return path.join(getPdRuntimeDir(), 'workbuddy-adapter');
+}
+
 function installBundledCore(pluginDir: string): void {
   const coreSrc = path.join(pluginDir, 'core');
   const coreDest = getInstalledCoreDir();
@@ -2363,42 +2385,32 @@ function installBundledCodexAdapter(pluginDir: string): void {
 }
 
 /**
- * PRI-711: materialize node_modules links for the INSTALLED codex-adapter so
- * its declared `file:../<component>` dependencies resolve under ESM realpath
- * rules. The adapter's dist imports @principles/host-runtime and
- * @principles/core, and pd-cli's eager import graph (health-codex) statically
- * imports the adapter — without these links every pd command dies with
- * ERR_MODULE_NOT_FOUND at startup (observed 2026-09-09: the 1.231.2 full
- * update swapped in Slice-D pd-cli while the deployed adapter, laid down by
- * older installers, had no node_modules at all).
- *
- * Data-driven from the deployed adapter manifest: every dependency whose ref
- * starts with `file:../` names a sibling runtime component directory. An
- * existing correct link is kept; a stale physical copy (self-contained
- * payloads ship materialized node_modules) or a wrong-target link is
- * replaced with the canonical junction/symlink, mirroring syncPdCli.
- * Idempotent. MUST run after installBundledCodexAdapter AND the
- * core/host-runtime/install-layout installs — the manifest declares all
- * three as file:../ siblings, and a missing sibling means a corrupted
+ * PRI-711 (generalized for ADR-0020 host adapters): materialize node_modules
+ * links for an INSTALLED runtime component so its declared `file:../<component>`
+ * dependencies resolve under ESM realpath rules. Data-driven from the deployed
+ * manifest: every dependency whose ref starts with `file:../` names a sibling
+ * runtime component directory. An existing correct link is kept; a stale
+ * physical copy or a wrong-target link is replaced with the canonical
+ * junction/symlink. Idempotent. MUST run after the component AND all its
+ * file:../ siblings are installed — a missing sibling means a corrupted
  * payload or a call-order regression, which fails the install loudly.
  */
-export function ensureCodexAdapterResolution(): void {
-  const codexAdapterDir = getInstalledCodexAdapterDir();
-  const manifestPath = path.join(codexAdapterDir, 'package.json');
+function ensureComponentFileDependencyLinks(componentDir: string, componentLabel: string): void {
+  const manifestPath = path.join(componentDir, 'package.json');
   let manifest: unknown;
   try {
     manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
   } catch (error) {
     throw new Error(
-      `Installed @principles/codex-adapter package.json is missing or malformed (${manifestPath}): ${error instanceof Error ? error.message : String(error)}`,
+      `Installed ${componentLabel} package.json is missing or malformed (${manifestPath}): ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }
   if (!isRecord(manifest)) {
-    throw new Error(`Installed @principles/codex-adapter package.json must contain an object (${manifestPath}).`);
+    throw new Error(`Installed ${componentLabel} package.json must contain an object (${manifestPath}).`);
   }
   if (manifest.dependencies !== undefined && !isRecord(manifest.dependencies)) {
-    throw new Error(`Installed @principles/codex-adapter package.json dependencies must be an object (${manifestPath}).`);
+    throw new Error(`Installed ${componentLabel} package.json dependencies must be an object (${manifestPath}).`);
   }
   const runtimeDir = getPdRuntimeDir();
   for (const [name, ref] of Object.entries(manifest.dependencies ?? {})) {
@@ -2407,13 +2419,13 @@ export function ensureCodexAdapterResolution(): void {
     // rc-1: the manifest is untrusted input — only accept single-path segment
     // siblings so a crafted ref cannot escape the runtime dir.
     if (!/^[A-Za-z0-9._-]+$/.test(siblingName) || siblingName === '.' || siblingName === '..') {
-      throw new Error(`Installed @principles/codex-adapter declares an unsupported file dependency ref "${ref}" for ${name}.`);
+      throw new Error(`Installed ${componentLabel} declares an unsupported file dependency ref "${ref}" for ${name}.`);
     }
     const siblingDir = path.join(runtimeDir, siblingName);
     if (!existsSync(siblingDir)) {
-      throw new Error(`@principles/codex-adapter depends on ${ref} but the sibling runtime component is missing: ${siblingDir}`);
+      throw new Error(`${componentLabel} depends on ${ref} but the sibling runtime component is missing: ${siblingDir}`);
     }
-    const linkPath = path.join(codexAdapterDir, 'node_modules', name);
+    const linkPath = path.join(componentDir, 'node_modules', name);
     let stat: Stats | undefined;
     try {
       stat = lstatSync(linkPath);
@@ -2437,6 +2449,69 @@ export function ensureCodexAdapterResolution(): void {
       symlinkSync(path.relative(path.dirname(linkPath), siblingDir), linkPath, 'dir');
     }
   }
+}
+
+/**
+ * PRI-711: materialize node_modules links for the INSTALLED codex-adapter so
+ * its declared `file:../<component>` dependencies resolve under ESM realpath
+ * rules. The adapter's dist imports @principles/host-runtime and
+ * @principles/core, and pd-cli's eager import graph (health-codex) statically
+ * imports the adapter — without these links every pd command dies with
+ * ERR_MODULE_NOT_FOUND at startup (observed 2026-09-09: the 1.231.2 full
+ * update swapped in Slice-D pd-cli while the deployed adapter, laid down by
+ * older installers, had no node_modules at all).
+ */
+export function ensureCodexAdapterResolution(): void {
+  ensureComponentFileDependencyLinks(getInstalledCodexAdapterDir(), '@principles/codex-adapter');
+}
+
+/**
+ * SPEC workbuddy-host-adapter §4.1/§5: the bundled @principles/workbuddy-adapter
+ * payload installs as a runtime sibling exactly like codex-adapter, and its
+ * `file:../<component>` dependency links are materialized the same way so the
+ * plugin wrapper resolves core/host-runtime/install-layout under ESM realpath
+ * rules.
+ *
+ * Unlike codex-adapter, the payload's ABSENCE is an observable skip, not a
+ * failure: installer builds published before the adapter component landed (or
+ * cut from a tree where it is not yet bundled) still deploy OpenClaw/Codex
+ * untouched; the WorkBuddy host installer then reports
+ * workbuddy_adapter_payload_missing for --host workbuddy (rc-9).
+ */
+export function installBundledWorkbuddyAdapter(pluginDir: string): boolean {
+  const workbuddyAdapterSrc = path.join(pluginDir, 'workbuddy-adapter');
+  const workbuddyAdapterDest = getInstalledWorkbuddyAdapterDir();
+
+  if (!existsSync(workbuddyAdapterSrc)) {
+    logger.warn(
+      `Bundled @principles/workbuddy-adapter not found in this installer package (${workbuddyAdapterSrc}) — the WorkBuddy host stays unavailable in this deployment. OpenClaw/Codex installation is unaffected.`,
+    );
+    return false;
+  }
+
+  const workbuddyAdapterPkgJson = path.join(workbuddyAdapterSrc, 'package.json');
+  const workbuddyAdapterDist = path.join(workbuddyAdapterSrc, 'dist');
+  if (!existsSync(workbuddyAdapterPkgJson) || !existsSync(workbuddyAdapterDist)) {
+    throw new Error('Bundled @principles/workbuddy-adapter is incomplete (missing package.json or dist). Package may be corrupted.');
+  }
+
+  rmSync(workbuddyAdapterDest, { recursive: true, force: true });
+  cpSync(workbuddyAdapterSrc, workbuddyAdapterDest, { recursive: true });
+  return true;
+}
+
+/**
+ * Materialize the resolution links for the INSTALLED workbuddy-adapter.
+ * Mirrors ensureCodexAdapterResolution; tolerates the component's absence
+ * (observable skip — see installBundledWorkbuddyAdapter).
+ */
+export function ensureWorkbuddyAdapterResolution(): { installed: boolean; skipReason?: string } {
+  const workbuddyAdapterDir = getInstalledWorkbuddyAdapterDir();
+  if (!existsSync(workbuddyAdapterDir)) {
+    return { installed: false, skipReason: 'workbuddy_adapter_not_installed' };
+  }
+  ensureComponentFileDependencyLinks(workbuddyAdapterDir, '@principles/workbuddy-adapter');
+  return { installed: true };
 }
 
 /**
@@ -3690,7 +3765,7 @@ export async function install(
   let runtimeBackupDir: string | null = null;
   // ADR-0024 D-2: non-null once the transaction is planned (first mutation is imminent).
   let journal: InstallerJournal | null = null;
-  let installManifestHosts: ('codex' | 'openclaw')[];
+  let installManifestHosts: ('codex' | 'openclaw' | 'workbuddy')[];
   const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
   let consoleProcess: ChildProcess | null = null;
@@ -3818,6 +3893,15 @@ export async function install(
     // siblings exist — the manifest declares file:../core, file:../host-runtime
     // AND file:../install-layout, and install-layout lands just above.
     ensureCodexAdapterResolution();
+
+    // WorkBuddy third host (SPEC workbuddy-host-adapter §5 build/delivery
+    // face): the adapter payload refreshes on every runtime deployment like
+    // its codex sibling — updates rewrite the dir and its resolution links,
+    // while WorkBuddy plugin registration and governance data are owned by
+    // the host installer and preserved. Absence of the payload in older
+    // installer builds is an observable skip, not a failure.
+    installBundledWorkbuddyAdapter(pluginDir);
+    ensureWorkbuddyAdapterResolution();
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing release-manager authority module...');
     installBundledReleaseManagerPackage(pluginDir);
@@ -4021,7 +4105,7 @@ export async function install(
     if (hostFailures.length > 0) {
       throw new Error(`Host installation failed: ${hostFailures.join(' | ')}`);
     }
-    writeInstallManifest(installManifestHosts, resolveInstallManifestWorkspaces(options.workspaceDir));
+    writeInstallManifest(installManifestHosts, resolveInstallManifestWorkspaces(options.workspaceDir, options.host));
     // PRI-709 P0-1: persist the metadata source after the manifest write, so
     // the durable tier cannot be clobbered by the same install.
     persistReleaseMetadataSource();

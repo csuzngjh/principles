@@ -28,7 +28,7 @@ import { parseInstallManifest } from '@principles/install-layout';
 import { mergeIntoInstallJson, resolvePdHomePaths } from './update/install-layout.js';
 import { readActiveRecord, type ActiveRecord } from './update/transaction-journal.js';
 import { setLanguage, t, getLanguage } from './i18n.js';
-import { getHostInstallers, type HostTarget } from './installers/index.js';
+import { getHostInstallers, WorkBuddyHostInstaller, type HostTarget } from './installers/index.js';
 import type { HostUninstallContext, HostUninstallResult } from '@principles/core/host';
 
 export interface UninstallResult {
@@ -43,7 +43,7 @@ export interface UninstallResult {
 
 interface SharedRuntimeUninstallPlan {
   removeSharedRuntime: boolean;
-  remainingHosts: ('codex' | 'openclaw')[];
+  remainingHosts: ('codex' | 'openclaw' | 'workbuddy')[];
   manifestHasTarget: boolean;
   warning?: string;
 }
@@ -670,7 +670,13 @@ export async function uninstall(
 
     // 6.5. ADR-0020 §2.3: Clean up host-side configs via HostInstallers.
     // Replaces the old cleanupOpenClawConfig() with multi-host delegation.
-    const hostInstallers = getHostInstallers(hostTarget);
+    // 'all' means "every host PD ever registered with" — WorkBuddy included
+    // even though its INSTALL is a separate explicit opt-in target (removing
+    // a registration is cleanup, not opt-in; getHostInstallers('all')
+    // deliberately stays openclaw+codex for the install direction).
+    const hostInstallers = hostTarget === 'all'
+      ? [...getHostInstallers('all'), new WorkBuddyHostInstaller()]
+      : getHostInstallers(hostTarget);
     for (const installer of hostInstallers) {
       try {
         const ctx: HostUninstallContext = {

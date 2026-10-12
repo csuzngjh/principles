@@ -6,7 +6,11 @@
  * MVP hosts:
  * - 'openclaw' (default) — OpenClawHostInstaller writes ~/.openclaw/openclaw.json.
  * - 'codex'              — CodexHostInstaller writes ~/.codex/hooks.json.
- * - 'all'                — both installers run (for operators using multiple hosts).
+ * - 'workbuddy'          — WorkBuddyHostInstaller registers the PD plugin into
+ *                          WorkBuddy's marketplace/plugin system (quiet, opt-in:
+ *                          'all' deliberately does NOT include it — SPEC
+ *                          workbuddy-host-adapter §6 install≠enable).
+ * - 'all'                — openclaw + codex (both legacy install flows).
  *
  * Runtime Contract Rules:
  * - rc-1-treat-as-unknown: --host CLI value is `unknown` until validated here.
@@ -16,17 +20,20 @@
 import type { HostInstaller } from '@principles/core/host';
 import { OpenClawHostInstaller } from './openclaw-host-installer.js';
 import { CodexHostInstaller } from './codex-host-installer.js';
+import { WorkBuddyHostInstaller } from './workbuddy-host-installer.js';
 
 export { OpenClawHostInstaller } from './openclaw-host-installer.js';
 export { CodexHostInstaller } from './codex-host-installer.js';
+export { WorkBuddyHostInstaller } from './workbuddy-host-installer.js';
 
 /**
- * Host target selector. 'all' runs every registered installer.
- * Add new host IDs here when new HostInstaller implementations land.
+ * Host target selector. 'all' runs openclaw + codex. WorkBuddy is an explicit,
+ * separate target: installing it is an opt-in decision (OD-03/OD-04), so 'all'
+ * must not silently register a third host.
  */
-export type HostTarget = 'openclaw' | 'codex' | 'all';
+export type HostTarget = 'openclaw' | 'codex' | 'workbuddy' | 'all';
 
-export const HOST_TARGETS: readonly HostTarget[] = ['openclaw', 'codex', 'all'];
+export const HOST_TARGETS: readonly HostTarget[] = ['openclaw', 'codex', 'workbuddy', 'all'];
 
 /**
  * Validate a CLI --host value. rc-1/rc-3: treat input as unknown, fail loud.
@@ -38,9 +45,14 @@ export function isHostTarget(value: unknown): value is HostTarget {
 /**
  * Factory: return the concrete HostInstaller instances for a given target.
  *
- * - 'openclaw' → [OpenClawHostInstaller]
- * - 'codex'    → [CodexHostInstaller]
- * - 'all'      → [OpenClawHostInstaller, CodexHostInstaller]
+ * - 'openclaw'  → [OpenClawHostInstaller]
+ * - 'codex'     → [CodexHostInstaller]
+ * - 'workbuddy' → [WorkBuddyHostInstaller]
+ * - 'all'       → [OpenClawHostInstaller, CodexHostInstaller]
+ *
+ * Note: uninstall flows that need "every host PD ever registered with" (the
+ * uninstall --host all contract) widen the list at their call site to include
+ * WorkBuddyHostInstaller — uninstalling a registration is cleanup, not opt-in.
  *
  * Callers iterate the returned array and call install()/uninstall()/detect()
  * on each. This keeps the CLI install/uninstall flow host-agnostic.
@@ -54,7 +66,10 @@ export function getHostInstallers(target: HostTarget): HostInstaller[] {
       return [new OpenClawHostInstaller()];
     case 'codex':
       return [new CodexHostInstaller()];
+    case 'workbuddy':
+      return [new WorkBuddyHostInstaller()];
     case 'all':
       return [new OpenClawHostInstaller(), new CodexHostInstaller()];
   }
 }
+
