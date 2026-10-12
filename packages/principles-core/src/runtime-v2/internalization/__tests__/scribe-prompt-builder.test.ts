@@ -106,8 +106,8 @@ describe('ScribePromptBuilder — PRI-838 formation evidence', () => {
     truncationNotes: [],
   };
 
-  it('promptContractVersion was bumped to v6', () => {
-    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v6');
+  it('promptContractVersion was bumped to v7', () => {
+    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v7');
   });
 
   // ── prompt.v6 (2026-10-12 r6): Owner-source grounding + narrowing disclosure ──
@@ -128,10 +128,12 @@ describe('ScribePromptBuilder — PRI-838 formation evidence', () => {
   //      mechanism must be marked in risks as derived;
   //  (c) declare every Owner-attributed requirement NOT carried into the
   //      contract with a structured `owner_requirement_gap:` risks entry.
-  it('states the OWNER-SOURCE GROUNDING obligations in the intent-contract section (prompt.v6)', () => {
+  it('states the OWNER-SOURCE GROUNDING obligations in the intent-contract section (prompt.v7)', () => {
     const instruction = buildScribeProtocolInstruction();
     expect(instruction).toContain('OWNER-SOURCE GROUNDING');
-    expect(instruction).toContain('owner_requirement_gap:');
+    // r6 review fix (P1-2): gaps go into the STRUCTURED ownerRequirementGaps
+    // field (machine-consumed), not a free-text risks prefix.
+    expect(instruction).toContain('ownerRequirementGaps');
     expect(instruction).toContain('MUST NOT be presented as Owner-mandated');
   });
 

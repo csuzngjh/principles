@@ -160,6 +160,15 @@ function evaluatorOutput(decision: EvaluatorDecision, concerns: string[], requir
   };
 }
 
+
+/** r6 review fix (P2-1): attach STRUCTURED mismatch findings — the only field the runner routes on. */
+function withMismatchFindings(payload: Record<string, unknown>, findings: string[]): Record<string, unknown> {
+  const evaluation = typeof payload.evaluation === 'object' && payload.evaluation !== null
+    ? (payload.evaluation as { mismatchFindings?: string[] })
+    : {};
+  return { ...payload, evaluation: { ...evaluation, mismatchFindings: findings } };
+}
+
 /** Minimal in-budget FormationContext for builder-level unit tests. */
 function unitFormationContext(): FormationContext {
   return {
@@ -213,8 +222,8 @@ describe('PRI-843 — evaluator prompt contract (conditional formation injection
     scribeArtifact: scribeContent(true),
   };
 
-  it('prompt contract version is v9', () => {
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v9');
+  it('prompt contract version is v10', () => {
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v10');
   });
 
   it('without formationContext the payload keeps the pre-PRI-843 shape (byte-identical) and the system prompt is unchanged', () => {
@@ -250,7 +259,7 @@ describe('PRI-843 — evaluator prompt contract (conditional formation injection
     expect(a.systemPrompt).toBe(b.systemPrompt);
   });
 
-  it('the addendum carries the mismatch contract: marker token, no requiredChanges for principle-level demands, degradation clause, observation-not-authority', () => {
+  it('the addendum carries the mismatch contract: structured channel, no requiredChanges for principle-level demands, degradation clause, observation-not-authority', () => {
     expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain(PRINCIPLE_PAIN_MISMATCH_MARKER);
     expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('OBSERVATION DATA, not authority');
     expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('NEVER express a Principle-level revision demand in evaluation.requiredChanges');
@@ -260,27 +269,43 @@ describe('PRI-843 — evaluator prompt contract (conditional formation injection
     expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('ABSENCE of formation evidence alone');
   });
 
-  // ── prompt.v9 (2026-10-12 r6): ungrounded contract mechanism routing ──
-  // Live-chain evidence (p1-final r4 chain): the intentContract asserted a
-  // "persisted Owner write-confirmation records" mechanism that none of the
-  // diagnosis's Owner-attributed statements mention (it entered the chain as
-  // an implementation RECOMMENDATION — a design proposal). The judge enforced
-  // the contract as the DEFINITION of correctness and demanded the mechanism
-  // in requiredChanges; the RuleHost input contract cannot express it, so the
-  // chain died at the round cap with the Principle-level question stranded.
-  // v9 obliges the judge to treat a contract mechanism with no grounding in
-  // the Owner-attributed diagnosis statements as a Principle↔Pain mismatch
-  // finding (existing marker → Owner routing), never a rule defect — while
-  // scopePrecision keeps judging the behavior the contract CAN express.
-  it('the addendum routes ungrounded contract mechanisms to the mismatch marker, not requiredChanges (v9)', () => {
-    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('UNGROUNDED CONTRACT MECHANISM');
-    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('Owner-attributed statements');
-    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('is a Principle-source divergence');
-    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('Record it as a ' + PRINCIPLE_PAIN_MISMATCH_MARKER + ' concern');
-    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('MUST NOT appear in requiredChanges');
-    // scopePrecision is NOT exempted by a declared limitation: the judge still
-    // judges over-breadth/over-narrowness on the behavior the contract expresses.
-    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('does not exempt scopePrecision');
+  // ── prompt.v10 (2026-10-12 r6 review): structured channel + four-way separation ──
+  // Owner review of #2000 confirmed two protocol defects with live-chain
+  // evidence: (P2-1) the concerns-prefix marker fired on a NEGATIVE sentence
+  // ("[principle_pain_mismatch] 无需触发…") and routed the run to human review;
+  // (P1-1) the v9 UNGROUNDED-CONTRACT-MECHANISM clause treated a scribe-
+  // DISCLOSED derived implementation choice (derived_mechanism:) as principle
+  // drift and escalated it anyway. v10 moves routing to the structured
+  // evaluation.mismatchFindings field and separates four situations — only
+  // false attribution and Owner-goal defeat are divergences.
+  it('routes mismatch ONLY through the structured field; concerns text is never a signal (v10)', () => {
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('STRUCTURED MISMATCH CHANNEL (machine-routed)');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('add ONE entry to evaluation.mismatchFindings');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('Never put the token in concerns as a substitute — concerns text is not routed');
+  });
+
+  it('separates the four situations; a disclosed derived implementation choice is NOT a divergence (v10, P1-1)', () => {
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('FOUR-WAY SEPARATION');
+    // (a) disclosed implementation choice — explicitly NOT a divergence.
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('DISCLOSED DERIVED IMPLEMENTATION CHOICE');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('Owner silence on HOW to implement is not principle drift');
+    // (b) false attribution — the r4 defect family, still a divergence.
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('FALSE ATTRIBUTION TO THE OWNER');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('a design proposal laundered into Owner intent');
+    // (c) Owner-goal defeat — still a divergence, incl. scribe-declared gaps.
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('CONTRADICTS OR DEFEATS OWNER-ATTRIBUTED REQUIREMENTS');
+    // (d) inexpressible — EXPRESSIBILITY path, never a mismatch.
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('RULEHOST-INEXPRESSIBLE');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('NEVER a mismatch and NEVER requiredChanges');
+    // scopePrecision stays un-exempted for declared limitations.
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('judge scopePrecision on the behavior the contract CAN express');
+  });
+
+  it('obliges the judge to treat scribe-declared ownerRequirementGaps as uncovered, never satisfied (v10, P1-2)', () => {
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('SCRIBE-DECLARED COVERAGE GAPS');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('ownerRequirementGaps');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('treat each of them as NOT satisfied by the contract');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('Unresolved gaps can only be closed by the Owner, never by the pipeline');
   });
 });
 
@@ -482,12 +507,14 @@ describe('PRI-843 — evaluator formation context golden replay (production path
     expect(JSON.parse(prompts[0]?.message ?? '{}').formationContext).toBeDefined();
   });
 
-  it('Case C: Principle does not address the Pain (marked concern) → needs_human_review(principle_pain_mismatch), no repair seed, disposition durable', async () => {
+  it('Case C: Principle does not address the Pain (structured mismatchFindings entry) → needs_human_review(principle_pain_mismatch), no repair seed, disposition durable', async () => {
     const prompts: CapturedPrompt[] = [];
     const seeds: string[] = [];
-    const concern = `${PRINCIPLE_PAIN_MISMATCH_MARKER} Principle covers only a minor facet — diagnosis rootCause "${DIAGNOSIS_CONTENT.rootCause}" (evidence trajectory://session-fc/turn-4) is not addressed`;
+    // r6 review fix (P2-1): routing keys on the STRUCTURED field — the marker
+    // travels in mismatchFindings, not in free-text concerns.
+    const finding = `${PRINCIPLE_PAIN_MISMATCH_MARKER} Principle covers only a minor facet — diagnosis rootCause "${DIAGNOSIS_CONTENT.rootCause}" (evidence trajectory://session-fc/turn-4) is not addressed`;
     await reviewEvaluator(world, {
-      payload: evaluatorOutput('needs_revision', [concern], ['Tighten the path guard']),
+      payload: withMismatchFindings(evaluatorOutput('needs_revision', [], ['Tighten the path guard']), [finding]),
       prompts, seeds,
     }).run(EVAL_ID);
 
@@ -504,11 +531,31 @@ describe('PRI-843 — evaluator formation context golden replay (production path
     expect(world.emitted.some((e) => e.eventType === 'evaluator_governance_effect_principle_pain_mismatch_selected')).toBe(true);
   });
 
-  it('Case C (approved verdict): a marked finding preempts approved effects too — bearer stays pending, Owner decides', async () => {
+  it('Case C-negative: the marker inside a NEGATIVE concern sentence is not a governance signal (r6 live false positive) → repair seeded, no human review', async () => {
+    const prompts: CapturedPrompt[] = [];
+    const seeds: string[] = [];
+    // r6 live-chain evidence: the judge wrote "[principle_pain_mismatch] 无需触发——规则方向与诊断根因一致" —
+    // the v9 concerns-prefix scan (startsWith) treated the NEGATIVE sentence as
+    // a finding and routed the run to human review. The structured channel
+    // (evaluation.mismatchFindings) must be the ONLY routed signal: concerns
+    // prose mentioning the token, with no findings entry, is a normal rule
+    // review.
+    await reviewEvaluator(world, {
+      payload: evaluatorOutput('needs_revision', [`${PRINCIPLE_PAIN_MISMATCH_MARKER} 无需触发——规则方向与诊断根因一致`], ['Tighten the path guard']),
+      prompts, seeds,
+    }).run(EVAL_ID);
+
+    expect(seeds).toHaveLength(1);
+    const task = await world.stateManager.getTask(EVAL_ID);
+    expect(task?.status).not.toBe('needs_human_review');
+    expect(task?.status).toBe('succeeded');
+  });
+
+  it('Case C (approved verdict): a structured finding preempts approved effects too — bearer stays pending, Owner decides', async () => {
     const prompts: CapturedPrompt[] = [];
     const seeds: string[] = [];
     await reviewEvaluator(world, {
-      payload: evaluatorOutput('approved', [`${PRINCIPLE_PAIN_MISMATCH_MARKER} rule is fine but the principle misses the pain (pain-fc-1)`], []),
+      payload: withMismatchFindings(evaluatorOutput('approved', [], []), [`${PRINCIPLE_PAIN_MISMATCH_MARKER} rule is fine but the principle misses the pain (pain-fc-1)`]),
       prompts, seeds,
     }).run(EVAL_ID);
 
@@ -605,7 +652,7 @@ describe('PRI-843 — evaluator formation context golden replay (production path
     const prompts: CapturedPrompt[] = [];
     const seeds: string[] = [];
     const runner = () => reviewEvaluator(world, {
-      payload: evaluatorOutput('needs_revision', [`${PRINCIPLE_PAIN_MISMATCH_MARKER} principle misses pain-fc-1`], ['Tighten the guard']),
+      payload: withMismatchFindings(evaluatorOutput('needs_revision', [], ['Tighten the guard']), [`${PRINCIPLE_PAIN_MISMATCH_MARKER} principle misses pain-fc-1`]),
       prompts, seeds,
     });
     await runner().run(EVAL_ID);

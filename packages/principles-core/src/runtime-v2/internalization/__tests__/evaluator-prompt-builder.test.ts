@@ -37,7 +37,7 @@ describe('EvaluatorPromptBuilder', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('sourceTrace.artificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId');
   });
 
-  it('promptContractVersion value is evaluator-output-v1.prompt.v9 (derivation-fidelity anchor)', () => {
+  it('promptContractVersion value is evaluator-output-v1.prompt.v10 (r6 review-fix anchor)', () => {
     // v7 (2026-10-11 closeout) anchored the first kind-semantics clause but
     // asserted a FALSE mapping ("EVERY writeTools entry dispatches as
     // 'write'") — the real OpenClaw catalog's writeTools is a risk grouping
@@ -45,7 +45,7 @@ describe('EvaluatorPromptBuilder', () => {
     // agent-delegation tool dispatching 'agent'. v8 (review round) makes the
     // host's OWN tool-to-kind mapping the authority and keeps unknown when
     // no mapping is present.
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v9');
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v10');
   });
 
   // ── prompt.v9 (2026-10-12 r6): requiredChanges expressibility + ungrounded
@@ -67,7 +67,7 @@ describe('EvaluatorPromptBuilder', () => {
   //      marker + Owner routing), never a rule defect. scopePrecision itself
   //      is unchanged — declared limitations do not auto-pass misblock/miss
   //      checks.
-  it('instruction carries the RULEHOST EXPRESSIBILITY clause for requiredChanges (v9)', () => {
+  it('instruction carries the RULEHOST EXPRESSIBILITY clause for requiredChanges (v10)', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('RULEHOST EXPRESSIBILITY');
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('stateless single-call');
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('can never be satisfied by regenerating the rule');

@@ -141,6 +141,7 @@ ${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
     "philosopherArtifactId": "<copy exactly from input.sourcePhilosopherArtifactId>"
   },
   "risks": ["<risk 1>", "<risk 2>"],
+  "ownerRequirementGaps": ["<Owner-attributed requirement NOT carried into the contract, with the reason — omit the field entirely when none>"],
   "generatedAt": "<ISO-8601 timestamp>"
 }
 
@@ -155,7 +156,7 @@ INTENT CONTRACT (required — the alignment anchor for every downstream stage):
 OWNER-SOURCE GROUNDING (applies when formation evidence is present):
 - The requirements source is the diagnosis's Owner-attributed statements: rootCause, summary, violatedPrinciples, and evidence notes that state what the OWNER requires (e.g. "Owner 明确……必须先确认"). The diagnosis's implementation recommendations (kind=implementation / rule / principle) are the pipeline's own DESIGN PROPOSALS — candidate answers, never Owner requirements.
 - Every requirement you write into intentContract (ownerIntent / targetBehavior / forbiddenBehavior / validationExpectation) MUST be grounded in those Owner-attributed statements. A mechanism that appears only in recommendations or upstream proposals (e.g. a persisted confirmation-record store, an authorization table, a new input field) MUST NOT be presented as Owner-mandated: either omit it, or carry it as an explicitly derived implementation choice and mark it in risks with the prefix "derived_mechanism:".
-- Coverage check (when formation evidence is present): enumerate the Owner-attributed requirements you can see, then check each one against your contract. If any of them is NOT carried into the contract — narrowed (e.g. a requirement covering reads AND writes carried as write-only), partially carried, or dropped — you MUST declare it in risks with the prefix "owner_requirement_gap:" followed by the requirement and why it is not carried. Silence about a dropped requirement is a fidelity defect, not a simplification.
+- Coverage check (when formation evidence is present): enumerate the Owner-attributed requirements you can see, then check each one against your contract. If any of them is NOT carried into the contract — narrowed (e.g. a requirement covering reads AND writes carried as write-only), partially carried, or dropped — you MUST declare it in the structured "ownerRequirementGaps" output field (one entry per uncovered requirement: the requirement and why it is not carried). The field is machine-consumed: the pipeline surfaces it to the Owner and the evaluator is obliged to treat those requirements as uncovered — an unresolved gap can only be closed by the Owner, never by silence. Silence about a dropped requirement is a fidelity defect, not a simplification.
 
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
@@ -221,18 +222,30 @@ ${formationEvidenceBlock}${languageDirective}`;
  * pain text — the diagnosis carried it only as an implementation
  * RECOMMENDATION — and the scribe wrote it into intentContract.targetBehavior /
  * validationExpectation as if Owner-mandated, while silently narrowing the
- * Owner's "ALL protected/ access (including read-only ls) requires
- * confirmation" to write-only gating with no disclosure. The evaluator then
- * enforced the contract as the correctness definition and the chain died
- * demanding a check the RuleHost input contract cannot express. v6 obliges
- * the scribe to (a) ground contract requirements in the diagnosis's
- * Owner-attributed statements — never in implementation recommendations, and
- * (b) declare every Owner-attributed requirement NOT carried into the
- * contract with a structured `owner_requirement_gap:` risks entry. Additive:
- * the OUTPUT FORMAT, the validator, and `ScribeOutputV1` are unchanged; a run
- * on v6 emits exactly the v5 wire shape plus the new version string.
+ * Owner's protected/ access requirement to write-only gating with no
+ * disclosure. The evaluator then enforced the contract as the correctness
+ * definition and the chain died demanding a check the RuleHost input contract
+ * cannot express. v6 obliges the scribe to (a) ground contract requirements
+ * in the diagnosis's Owner-attributed statements — never in implementation
+ * recommendations, and (b) declare every Owner-attributed requirement NOT
+ * carried into the contract. Additive: the OUTPUT FORMAT, the validator, and
+ * `ScribeOutputV1` are unchanged; a run on v6 emits exactly the v5 wire shape
+ * plus the new version string.
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v6';
+/**
+ * r6 review fixes (2026-10-12, Owner review of #2000): bumped v6 → v7.
+ * (P1-2) The v6 gap disclosure was a free-text risks prefix
+ * ("owner_requirement_gap:") with NO downstream consumer — a declared gap had
+ * no deterministic path to Owner disposition, and the r6 chain still narrowed
+ * the protected/ read requirement with only partial disclosure. Gaps now go
+ * into the STRUCTURED "ownerRequirementGaps" output field: validated
+ * (present-but-malformed is a hard rejection), carried on the artifact, read
+ * by the pipeline result, and consumed by the evaluator as obligations the
+ * contract does NOT cover. The derived_mechanism: risks prefix is unchanged
+ * (informational mechanism disclosure). Wire shape is additive; a run on v7
+ * emits exactly the v6 shape plus the new optional field and version string.
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v7';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;

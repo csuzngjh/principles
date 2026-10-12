@@ -43,6 +43,17 @@ export interface ScribeOutputV1 {
    * hard validator rejection — a corrupted anchor is worse than none.
    */
   readonly intentContract?: IntentContractV1;
+  /**
+   * r6 review fix (P1-2, 2026-10-12): structured channel for Owner-attributed
+   * requirements the scribe did NOT carry into the intentContract (narrowed,
+   * partially carried, or dropped). Each entry states the requirement and why
+   * it is not carried. This is the machine-consumed governance surface — the
+   * pipeline surfaces it on the result and the evaluator is obliged to treat
+   * these requirements as uncovered (never satisfied by implication); an
+   * unresolved gap can only be closed by the Owner. Optional on the wire;
+   * present-but-malformed is a hard validator rejection.
+   */
+  readonly ownerRequirementGaps?: readonly string[];
 }
 
 export const ScribePrincipleDraftSchema = Type.Object({
@@ -155,6 +166,18 @@ export class DefaultScribeValidator implements ScribeValidator {
       errors.push('risks must be an array');
     } else if (!output.risks.every((e: unknown) => typeof e === 'string')) {
       errors.push('risks must be an array of strings');
+    }
+
+    // ownerRequirementGaps — r6 review fix (P1-2): structured governance
+    // channel for uncovered Owner-attributed requirements. Optional on the
+    // wire; present-but-malformed is a hard rejection (a corrupted gap
+    // disclosure is worse than none — the pipeline surfaces it to the Owner).
+    if (Object.hasOwn(output, 'ownerRequirementGaps') && output.ownerRequirementGaps !== undefined) {
+      if (!Array.isArray(output.ownerRequirementGaps)) {
+        errors.push('ownerRequirementGaps must be an array');
+      } else if (!output.ownerRequirementGaps.every((e: unknown) => typeof e === 'string' && (e).trim() !== '')) {
+        errors.push('ownerRequirementGaps must be an array of non-empty strings');
+      }
     }
 
     // intentContract — PRI-703 Phase 1: optional, but present-but-malformed
