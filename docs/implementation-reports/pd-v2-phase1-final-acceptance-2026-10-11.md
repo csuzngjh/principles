@@ -377,4 +377,66 @@ Owner 对 #1999 提出 4 项修正，全部成立，本轮原位修正（非末�
 | 3 | 「声明架构限制豁免 scopePrecision」建议删除 | §15.5 决策卡 B 重写：scopePrecision 标准保持；无法实现的要求明确披露并走既有 concern 路由，不弱化审核 |
 | 4 | 测试证据分级与计数更正 | §15.2 A3：128 项行为边界与 43 项安装测试分列；§15.2 A2/§14.2/B3：gate mismatch 标注为测试替身注入、「逐字同源」收窄为子串级（全文 equality 无断言）；审计比较口径=业务证据字段（asOf 除外）；`transcript_unavailable` 单独披露且说明不门控账本写入 |
 
-补充证据：§15.2 A2-T2（p1f 安装版时间序重放：安装 11:08:15Z 严格先于重放 11:57:50Z，双次重放+真重启全记录）。Reality Audit 与派生保真/路由修复、修复后候选链另见保真修复 PR 与本节后续更新。
+补充证据：§15.2 A2-T2（p1f 安装版时间序重放：安装 11:08:15Z 严格先于重放 11:57:50Z，双次重放+真重启全记录）。Reality Audit 与派生保真/路由修复、修复后候选链见 §16。
+
+## 16. r6 派生保真修复与修复后候选链（2026-10-12，Owner 任务驱动）
+
+> 修复 PR：#2000（head 49989cbb+changeset；scribe `scribe-output-v1.prompt.v6` + evaluator `evaluator-output-v1.prompt.v9`）。证据根 `D:\Code\_pdtest\p1-r5\`（t3-* 前缀）。
+
+### 16.1 Reality Audit 结论（决定修复形状）
+
+生产路径逐节点核对（Owner 样本→diagnosis→Dreamer→Philosopher→Scribe→Artificer→Evaluator→repair/concern）的三个关键事实：
+
+1. **Owner 原文已可达**：r4 链诊断工件逐字携带 Owner 只读要求（diag_rootcause summary「任何读或写都必须先确认」、diag_router evidence/violatedPrinciples 同）——formationContext.sourceDiagnosis 即载体，**无需新增信息连接**。
+2. **「确认记录」机制的来源**：诊断的 implementation **recommendation**（设计提议，非 Owner 要求）→ Dreamer T-10 升格（persist_authorization_state）→ Scribe 写入 intentContract。缺陷=「无来源机制的下游升格无标注」，非信息丢失。
+3. **既有路由已存在且有测试**：`[principle_pain_mismatch]` marker → evaluator-runner 前缀扫描 → needs_human_review → Owner 决策卡（PRI-843，Case C 消费测试）。r4 的失败是 judge 侧缺两条义务条款，不是路由缺失。
+
+### 16.2 修复（PR #2000，全部提示词契约层，零 schema/validator/oracle/replay/路由改动）
+
+- **Scribe v6 OWNER-SOURCE GROUNDING**：契约要求必须锚定诊断的 Owner 归属声明（rootCause/summary/violatedPrinciples/evidence），不得锚定 implementation 建议；携带的派生机制 risks 标注 `derived_mechanism:`；未带入契约的 Owner 要求 risks 以 `owner_requirement_gap:` 披露——静默丢弃=保真缺陷。
+- **Evaluator v9**：RULEHOST EXPRESSIBILITY（requiredChanges 仅限无状态单次契约可表达行为，预设新输入的改入 concerns——Artificer 侧既有边界的 judge 侧镜像）+ formation addendum UNGROUNDED CONTRACT MECHANISM（契约机制无 Owner 归属来源 → 走**既有** marker 路由交 Owner，绝不进 requiredChanges）。scopePrecision 无豁免。
+- 验证：负对照先红（4 版本锚+4 义务测试在 pre-fix 结构性必红，已实证）→ 修后绿；internalization 80 文件/1190 用例全绿；tsc 干净；双独立子代理复核均 APPROVE；P3 级 commit message 计数已 amend 修正。
+
+### 16.3 修复后隔离候选链（r6 链；同 Owner 原文、同例语义、同 2 轮上限）
+
+前置：真实网关会话 `1202675e`（chatcmpl_2326da59，写配对）→ pain `manual_1791809617710_1jzq27m4`（score 78，会话绑定）→ 诊断 4 候选 admitted → run-rulehost（修复构建，behavior pack Owner 文本与 r4 逐字一致）。编排插曲：pain record 后 code_tool_hook dreamer 被存活网关 auto-intake 抢租约，杀网关留悬置租约 → 首轮 pain_lookup `ambiguous_dreamer_tasks_for_pain` → `runtime recovery sweep --confirm` 回收（leased→retry_wait，正规恢复入口）→ 重跑进入全链。**首轮失败为编排状态问题，非修复/模型因。**
+
+终态：**`generation_rejected`（max_rounds_exhausted_after_2）——无 formal rule 工件**。但失败内容与全部历史链质变：
+
+| 验证点 | r4（修复前） | r6（修复后） |
+| --- | --- | --- |
+| intentContract 机制语义 | 「校验 Owner 专属**持久化**写确认记录存在性」（无 Owner 来源，无标注） | 回到 Owner 确认语义；机制以 `derived_mechanism:` 显式标注（risks[3] 逐字「来自诊断的 implementation 建议，非 Owner 直接要求」） |
+| Owner 要求收窄披露 | 静默收窄无标注 | `owner_requirement_gap:` 披露实锤（risks[4]）；残留：protected 只读收窄仅部分披露（v6 模型遵从为部分，如实记录） |
+| requiredChanges 可表达性 | 要求读取契约外「确认记录」字段 | **全部可表达**（修 golden case 内部矛盾、补路径变体/首建用例、显式声明代理限制）；judge 自己把「确认后放行」不可表达性路由进 risks（「未作为必需变更，因契约无法表达跨调用状态」） |
+| scopePrecision | too_broad（依无来源契约） | **too_narrow**（priorRead 代理误拦例行首建）——按真实标准判，无豁免 |
+| 无来源机制路由 | 塞进规则修复循环 | judge concerns[3] 逐字实锤 UNGROUNDED 检查：「…机制在诊断的 Owner-attributed 表述中并不存在，属于 implementation 建议的 derived_mechanism 漂移」→ 走 marker 路由 |
+
+治理路由：两个 evaluator 任务 `needs_human_review`——r2 为**真实** Principle 级分歧上报（协议正确生效）；r1 为 marker 否定句的机械前缀误报（judge 写「[principle_pain_mismatch] 无需触发」，前缀扫描无法辨析语境——**marker 协议已知盲区**，follow-up 候选）。
+
+### 16.4 行为覆盖矩阵（任务 §六）
+
+| 行为 | 契约表达 | r2 规则 | 用例覆盖 | 判定 |
+| --- | --- | --- | --- | --- |
+| protected 写未确认 | 表达（forbiddenBehavior） | block | case-negative-15 → block | 已验证 |
+| 读 X 后写 X.bak 变体 | Owner 要求 | block（.bak≠X，priorRead 不匹配） | v2-path-boundary-sibling → block | 已验证 |
+| 上下文缺失 | SPEC §7.4 fail-open | allow | v2-unavailable 模板 | 已验证 |
+| protected 只读/ls 先确认 | **部分保留**（契约文本含读写分离状态，但未进 ownerIntent 强制表述且无专项 gap 披露） | 非 write 分支 allow（不可表达） | 无 golden/replay 用例 | **不可表达+部分披露**（比 r4 全静默前进；未达理想） |
+| 例行新建低风险放行 vs 未读既有路径须确认 | Owner 要求两者兼有；per-call 无文件存在性字段 | 一律 block 未读目标（保守代理） | 无专用 golden（judge r2 点名缺失） | **不可表达**（needs 文件存在性输入）——artificer risks[0] 逐字披露 |
+| 已获 Owner 确认放行 | Owner 要求；输入契约无确认信号字段（#1986 v12 声明 read-count 不能充当） | 不可实现 | judge 显式路由 risks | **不可表达——最小未决事项** |
+
+### 16.5 剩余根因与最小未决事项（非三选一）
+
+本轮失败**不再是派生保真缺陷**（已修复并实证）——是无状态单次输入契约对两类 Owner 要求的真实不可表达：(1)「已获对精确目标+后果的确认则放行」需确认信号字段；(2)「例行新建放行 vs 未读既有路径须确认」需文件存在性字段。r2 规则已是契约内最优保守代理且三条限制全部如实披露；轮次上限 2（PRD cap）耗尽时剩余 requiredChanges 已全部可表达（golden case 矛盾修正是机械性的），但 cap 为既有轮次限制不放宽。**最小未决事项（交 Owner）**：是否接受「保守 block 代理+全披露」作为 Phase 1 合格候选语义（若是，下一链以同前提可收敛出可审批候选）；确认信号/文件状态输入是否列入未来授权项（超出本轮边界，不实施）。
+
+### 16.6 r6 后完成标准增量
+
+| 项 | 判定 |
+| --- | --- |
+| 「没有 Owner 来源的持久化机制被无标注升格」回归 | **已修复+实证**（v6 契约回归 Owner 语义+derived_mechanism 标注；v9 judge 检查实锤） |
+| 「protected 只读要求保留或显式暴露遗漏」 | **部分达成**（契约部分保留+risks 披露；专项 gap 披露未触发——模型遵从部分，如实记录） |
+| 「Principle 分歧与 Rule 错误正确分流」 | **达成**（r2 judge 逐字实锤：机制分歧走 marker 路由、规则缺陷走 requiredChanges、不可表达项走 risks） |
+| 「声明限制不豁免 scopePrecision」 | **达成**（too_narrow 按真实标准判定） |
+| 「repair 反馈进最终载荷+lineage 一致」 | **达成并加固**（#1994 路径 + 全等断言） |
+| 正式候选 | 仍 FAIL（generation_rejected）——**根因已从工程缺陷转为真实契约表达力限制**，最小未决事项交 Owner（§16.5） |
+
+**Phase 1 总判定：维持 PARTIAL**。r6 实质推进：派生保真缺陷修复并经真实链实证；候选链失败根因精确定位到「确认信号+文件状态在无状态单次契约不可表达」；Principle 级分歧首次被正确路由到 Owner（needs_human_review 真实生效）。到 COMPLETE 仍需：Owner 对 §16.5 最小未决事项裁决 → （若接受保守代理语义）下一链产出候选 → Owner 审批 → GJ-01 → Episode/Effect/Outcome → 重判。
