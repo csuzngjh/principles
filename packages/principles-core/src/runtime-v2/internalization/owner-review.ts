@@ -52,8 +52,8 @@ export const HUMAN_REVIEW_REASON = {
   evaluatorTestOutOfScope: 'evaluator_test_out_of_scope',
   /**
    * PRI-843 (SPEC v1.1): Evaluator 基于 formation evidence 判定 Principle
-   * 不解决源 Pain（concerns 携带 [principle_pain_mismatch] 标记）——原则级
-   * 缺陷。repair pipeline 只能再生成 Rule，结构性不可收敛（同
+   * 不解决源 Pain（r6 review P2-1 起：结构化 evaluation.mismatchFindings
+   * 字段为唯一路由信号；concerns 文本不路由）——原则级缺陷。repair pipeline 只能再生成 Rule，结构性不可收敛（同
    * evaluator_test_out_of_scope 的死锁形状），且 requiredChanges 禁止承载
    * 原则级诉求。直接进入 Owner 裁决：accept_current（原则其实可用）/
    * 原则修订（rollout→scribe 窄路）/ reject_current。

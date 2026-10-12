@@ -50,7 +50,7 @@ import {
   computeArtifactContentHash,
   type OwnerOverrideResumePlan,
 } from './owner-review.js';
-import { EvaluatorPromptBuilder, deriveRequirementLedger, PRINCIPLE_PAIN_MISMATCH_MARKER, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
+import { EvaluatorPromptBuilder, deriveRequirementLedger, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
 import { resolveFormationContext } from './formation-context.js';
 import type { FormationContext, FormationTaskView } from './formation-context.js';
 import type { ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
@@ -161,20 +161,18 @@ function readDreamerArtifactIdFromScribeArtifact(contentJson: string | null): st
 }
 
 /**
- * PRI-843: does the validated evaluation flag a Principle↔Pain mismatch?
- *
- * The v5 prompt contract requires every such concern to BEGIN with the exported
- * marker token — the marker prefix is the only machine-readable channel plain
- * string concerns have (no schema change). The runner scans the already
- * validated `concerns` array; honoring is additionally gated on formation
- * context having actually been injected (see deriveGovernanceEffect): without
- * formation evidence the model has no pain evidence to cite, so a marker there
- * is hallucination, not signal.
+ * r6 review fix (P2-1, 2026-10-12): routing moved to the STRUCTURED
+ * `evaluation.mismatchFindings` field. The old concerns-prefix scan produced a
+ * live governance false positive: the judge wrote "[principle_pain_mismatch]
+ * 无需触发——…" (a NEGATIVE sentence) and the startsWith() match routed the run
+ * to human review. Free-text concerns are never a signal now; only entries in
+ * the machine-consumed findings field route. Honoring is still gated on
+ * formation context having actually been injected (see deriveGovernanceEffect):
+ * without formation evidence a finding is hallucination, not signal.
  */
-function hasPrinciplePainMismatchConcern(output: EvaluatorOutputV1): boolean {
-  const concerns = output.evaluation?.concerns;
-  if (!Array.isArray(concerns)) return false;
-  return concerns.some((concern) => concern.startsWith(PRINCIPLE_PAIN_MISMATCH_MARKER));
+function hasPrinciplePainMismatchFinding(output: EvaluatorOutputV1): boolean {
+  const findings = output.evaluation?.mismatchFindings;
+  return Array.isArray(findings) && findings.length > 0;
 }
 
 /**
@@ -2170,7 +2168,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // instead, mirroring that precedent. Honored only when formation evidence
     // was actually injected: without it the model has no pain evidence to
     // cite, so a marker would be hallucination, not signal.
-    if (ctx.formationContextPresent && hasPrinciplePainMismatchConcern(ctx.output)) {
+    if (ctx.formationContextPresent && hasPrinciplePainMismatchFinding(ctx.output)) {
       this.emitEvent('governance_effect_principle_pain_mismatch_selected', evaluatorTaskId, {
         nextAction: 'owner_decision_required_principle_pain_mismatch',
       });

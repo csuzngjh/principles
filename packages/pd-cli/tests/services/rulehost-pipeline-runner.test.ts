@@ -16,10 +16,10 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { runRuleHostPipeline, backfillScribeIdentity } from '../../src/services/rulehost-pipeline-runner.js';
+import { runRuleHostPipeline, backfillScribeIdentity, readScribeOwnerRequirementGaps } from '../../src/services/rulehost-pipeline-runner.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
-import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore } from '@principles/core/runtime-v2';
+import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore } from '@principles/core/runtime-v2';
 import { addPrincipleToLedger, updatePrinciple } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
@@ -1247,5 +1247,82 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
     expect(published.principleArtifactId).not.toBe(refused.principleArtifactId);
     // Exactly one ledger principle exists — the pipeline never creates one.
     expect(await ledgerPrincipleCount(tmpDir)).toBe(1);
+  }, 60_000);
+
+});
+
+describe('readScribeOwnerRequirementGaps (r6 review fix P1-2)', () => {
+  const makeStore = async (contentJson: string): Promise<PIArtifactStore> => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact({
+      artifactId: 'pi-art-scribe-gaps-test',
+      artifactKind: 'principle',
+      sourceTaskId: 'scribe-gaps-test',
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson,
+      createdAt: '2026-10-12T00:00:00.000Z',
+      updatedAt: '2026-10-12T00:00:00.000Z',
+    });
+    return store;
+  };
+
+  it('returns the declared gaps from the scribe artifact — the machine-consumed governance surface', async () => {
+    const store = await makeStore(JSON.stringify({
+      taskId: 'scribe-gaps-test',
+      risks: [],
+      ownerRequirementGaps: ['protected/ read access requires confirmation — contract narrowed to write-only gating'],
+    }));
+    const gaps = await readScribeOwnerRequirementGaps(store, 'scribe-gaps-test');
+    expect(gaps).toEqual(['protected/ read access requires confirmation — contract narrowed to write-only gating']);
+  });
+
+  it('returns empty when the field is absent (legacy scribe output) — absence is not a gap', async () => {
+    const store = await makeStore(JSON.stringify({ taskId: 'scribe-gaps-test', risks: ['unrelated risk'] }));
+    expect(await readScribeOwnerRequirementGaps(store, 'scribe-gaps-test')).toEqual([]);
+  });
+
+  it('returns empty — never fabricated — on unreadable content or a missing artifact (rc-9: degradation observable upstream)', async () => {
+    const broken = await makeStore('not-json');
+    expect(await readScribeOwnerRequirementGaps(broken, 'scribe-gaps-test')).toEqual([]);
+    const empty = new MemoryPIArtifactStore();
+    expect(await readScribeOwnerRequirementGaps(empty, 'scribe-gaps-test')).toEqual([]);
+  });
+});
+
+describe('ownerRequirementGaps result carriage (r6 review fix P1-2)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } tmpDir = ''; }
+  });
+
+  it('post-scribe rejection carries the scribe-declared gaps (PRI-780 pack-missing path) — gaps reach the Owner even on rejection', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-seeded-gaps', 'pain-gaps-001', 'code_tool_hook', 'cand-gaps');
+    await sm.close();
+    const adapter = new ScriptedAdapter({
+      dreamer: (taskId) => dreamerOut(taskId, 'pain-gaps-001'),
+      philosopher: philosopherOut,
+      scribe: (taskId, priorId) => ({
+        ...(scribeOut(taskId, priorId) as Record<string, unknown>),
+        ownerRequirementGaps: ['protected/ read access requires confirmation — contract narrowed to write-only gating'],
+      }),
+      artificer: artificerV2,
+      evaluator: evaluatorApproved,
+    });
+    const capability: CodeRuleCapability = { enabled: true, artificerAdapter: adapter };
+    // NO behaviorExamplePack → PRI-780 refusal AFTER the scribe stage.
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-gaps-001', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: capability,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+
+    expect(result.decision).toBe('generation_rejected');
+    expect(result.degradationReason).toContain('behavior_example_pack_missing');
+    expect(result.ownerRequirementGaps).toEqual(['protected/ read access requires confirmation — contract narrowed to write-only gating']);
   }, 60_000);
 });

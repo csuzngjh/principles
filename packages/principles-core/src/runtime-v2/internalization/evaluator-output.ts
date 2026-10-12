@@ -117,6 +117,15 @@ export interface EvaluatorEvaluation {
   readonly score: number;
   readonly strengths: readonly string[];
   readonly concerns: readonly string[];
+  /**
+   * r6 review fix (P2-1, 2026-10-12): the machine-routed mismatch channel.
+   * Each entry is one Principle-source divergence finding beginning with
+   * [principle_pain_mismatch] plus its evidence citation. Governance routing
+   * keys on THIS field only — a marker appearing in free-text `concerns`
+   * (e.g. inside a negative sentence) is never a signal. Omit entirely when
+   * no divergence exists.
+   */
+  readonly mismatchFindings?: readonly string[];
   readonly requiredChanges: readonly string[];
   /** PRI-630: 上轮需求的逐条核销 (仅有上轮上下文时合法;首轮省略) */
   readonly priorRequirementStatuses?: readonly PriorRequirementStatusEntry[];
@@ -221,6 +230,7 @@ export const EvaluatorEvaluationSchema = Type.Object({
   score: Type.Number({ minimum: 0, maximum: 1 }),
   strengths: Type.Array(Type.String()),
   concerns: Type.Array(Type.String()),
+  mismatchFindings: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
   requiredChanges: Type.Array(Type.String()),
   priorRequirementStatuses: Type.Optional(Type.Array(PriorRequirementStatusEntrySchema)),
   requirementLedger: Type.Optional(Type.Array(RequirementLedgerEntrySchema)),
@@ -484,6 +494,14 @@ export class DefaultEvaluatorValidator implements EvaluatorValidator {
       else if (!ev.strengths.every((e: unknown) => typeof e === 'string')) errors.push('evaluation.strengths must be an array of strings');
       if (!Object.hasOwn(ev, 'concerns') || !Array.isArray(ev.concerns)) errors.push('evaluation.concerns must be an array');
       else if (!ev.concerns.every((e: unknown) => typeof e === 'string')) errors.push('evaluation.concerns must be an array of strings');
+      // r6 review fix (P2-1): structured mismatch channel — present-but-malformed
+      // is a hard rejection (a corrupted governance signal is worse than none).
+      if (Object.hasOwn(ev, 'mismatchFindings') && ev.mismatchFindings !== undefined) {
+        if (!Array.isArray(ev.mismatchFindings)) errors.push('evaluation.mismatchFindings must be an array');
+        else if (!ev.mismatchFindings.every((e: unknown) => typeof e === 'string' && (e).trim() !== '')) {
+          errors.push('evaluation.mismatchFindings must be an array of non-empty strings');
+        }
+      }
       if (!Object.hasOwn(ev, 'requiredChanges') || !Array.isArray(ev.requiredChanges)) errors.push('evaluation.requiredChanges must be an array');
       else if (!ev.requiredChanges.every((e: unknown) => typeof e === 'string')) errors.push('evaluation.requiredChanges must be an array of strings');
       // PRI-630 (SPEC §18.4) schema invariant: needs_revision 必须携带至少一条

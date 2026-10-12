@@ -516,6 +516,13 @@ describe('runAdversarialLoop (PRI-428)', () => {
     const meta = parsePITaskMetadata(diagJson);
     expect(meta?.adversarialFeedback).toContain('caseInput:');
     expect(meta!.adversarialFeedback).toContain('target="/etc/x"');
+    // Full-equality lineage (r6 hardening, 2026-10-12): substring checks above
+    // prove presence in both carriers but not identity between them. The
+    // payload must carry the stored feedback text VERBATIM — one string, zero
+    // divergence — so the repair prompt can never drift from the durable
+    // diagnosticJson record.
+    expect(typeof round2Parsed.adversarialFeedback).toBe('string');
+    expect(feedbackText).toBe(meta!.adversarialFeedback);
   });
 
   it('adversarialFeedback is stored on the Round-2 artificer task diagnosticJson', async () => {
