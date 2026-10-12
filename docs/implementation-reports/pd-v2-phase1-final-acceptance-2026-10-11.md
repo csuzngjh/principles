@@ -1,6 +1,6 @@
-# PD v2 Phase 1 实宿主最终验收报告（2026-10-11，第三轮）
+# PD v2 Phase 1 实宿主最终验收报告（2026-10-11，第三轮；2026-10-12 r5 安装验收与语义保真收口轮续）
 
-> 状态：**已交付 · PARTIAL（维持）· 含 Owner 评审修正轮（2026-10-11：4×P2 全部经独立核查确认并修正，见 §11A）**。本轮为 Phase 1 收尾后的最终验收轮（任务书 §一～§十一）。
+> 状态：**已交付 · PARTIAL（维持）· 含 Owner 评审修正轮（2026-10-11：4×P2，见 §11A）· 含 r5 安装验收轮（2026-10-12：重放幂等升级至安装产物层 PASS、候选失败根因精确化，见 §15）**。本轮为 Phase 1 收尾后的最终验收轮（任务书 §一～§十一）。
 > 前序：`pd-v2-phase1-host-acceptance-2026-10-10.md`（r1/r2/r3）、`pd-v2-phase1-b1-diagnosis-2026-10-11.md`、`pd-v2-phase1-closeout-2026-10-11.md`（#1986）。
 > 验收 worktree：`D:\Code\_worktrees\principles\pdv2-p1-final-pdv2-p1-final-acceptance`（基线 = 合并后的 origin/main `ce1ba2ca`，含 #1986 squash `4b84634b`），writer=zcode（租约）。
 > 隔离环境：新沙箱 `D:\Code\_pdtest\p1-final\`（A2 内化链）、历史沙箱 `D:\Code\_pdtest\p1-acceptance\sandbox`（D/C 线，含 10-10 批准与激活，本轮前置快照）、网关 18798（`~/.pd-p1test\openclaw-state-p1f`）、Console 3202、Codex `~/.pd-p1test\codex-home-p1f`（官方 marketplace→plugin add→$pd-setup 安装链）。
@@ -262,3 +262,103 @@ Owner 评审提出 4×P2；本轮以**两个独立只读子代理**（代码考�
 4. **发布/安装完成**：未完成——修复未发布未安装（§14.4），待 Owner 发布授权后按 §14.4 闭环。
 
 **Phase 1 总判定：维持 PARTIAL**（本轮闭合 SPEC 的「重放幂等」必需条件至构建层；全链三环待 §5 决策卡 1 与 C2 候选审批）。
+
+## 15. 安装验收与语义保真收口轮（2026-10-12，r5）
+
+> 前置核实（任务 §四）：Owner 告知「#1992、#1994 已合并，最新版本已安装」。经核实：main = `b0f807b9`；#1992 = squash `6317a63f`、#1994 = squash `5aba079b` 均在 main。**「最新版本已安装」对主运行时属实**：`~/.pd/runtime` 与 `~/.openclaw/extensions/principles-disciple` 于 10-12 12:13–12:37 刷新至 10-12 火车发布值（详见 §15.1 矩阵），四处 P2-2 生产点均含修复；但 Codex 隔离实装（p1f）仍为 0.5.1/0.8.1/1.291.2 且其 marketplace 指向已删除的 worktree——本轮按既有官方安装链重装闭合（§15.2）。
+> 执行环境：证据根 `D:\Code\_pdtest\p1-r5\`（新建，未触碰 p1-final/p1-r4）；10-10 沙箱 DB 前镜像 `p1-r5\snapshot-p1-acceptance-sandbox-state-db-20261012-pre-replay.bak`；隔离安装 worktree `adhoc-20261012-pin-advance-acceptance-pin-advance`（PR #1998）；报告 worktree `adhoc-20261012-p1-r5-report-acceptance-report`；Console 3203（安装版，本轮起停）。
+
+### 15.1 版本矩阵（五层核对，任务 §十-1）
+
+| 层 | 版本 | 证据 |
+| --- | --- | --- |
+| 仓库 main | `b0f807b9`（product 2.3.3）；openclaw-plugin 2.1.1 / codex-adapter 0.5.3 / host-runtime 0.8.2 / core 1.291.4 | package.json 实读 |
+| npm 发布 | 同上四包 = npm latest（发布时间：core 1.291.4 @10-12T00:23Z、adapter 0.5.3 @10-12T03:35Z、host-runtime 0.8.2 @10-11T13:40Z、plugin 2.1.1 @10-12T03:35Z） | `npm view … time` |
+| 主运行时（~/.pd/runtime + extensions） | core 1.291.4 / adapter 0.5.3 / host-runtime 0.8.2 / plugin 2.1.1；extensions `core` symlink → runtime/core（10-12 12:37） | 安装目录 package.json 实读 |
+| 修复在安装字节中 | adapter dist 两处 + plugin bundle.js 两处 `payloadDigest !== undefined` 生产点（bundle 为 minified `payloadDigest!==void 0?"resolved":…`） | grep 实测 |
+| Codex p1f 隔离实装 | **本轮重装前** 0.5.1/0.8.1/1.291.2（10-11 安装）→ **重装后** 0.5.3/0.8.2/1.291.4（11:08:15Z，官方链） | `.pd-runtime.json` 实测 |
+| Marketplace pin（仓库资产） | main 上仍为 0.5.1/0.8.1/1.291.2（10-12 火车未推进，发版流程缺口）→ **PR #1998** 推进至 0.5.3/0.8.2/1.291.4 | runtime-version.json + #1986 先例 |
+
+### 15.2 任务 A：正式安装产物验收
+
+**A1 宿主加载**：
+
+- OpenClaw 主机：extensions 2.1.1 + core symlink 1.291.4，修复在 bundle.js 实测（§15.1）。
+- Codex p1f：marketplace 指针自已删 worktree 改指 #1998 worktree（**前镜像已存** `p1-r5\pre-mirror-codex-home-p1f-config.toml`）→ `codex plugin remove`+`add` → `$pd-setup`（官方 skill 脚本自定位路径）→ `.pd-runtime.json` = 0.5.3/0.8.2/1.291.4（npm 实装，零手改）；安装字节含修复两处。$pd-setup 输出 `ok` + runtime 版本行 + worker registered。
+- pin 推进 PR #1998 验证（全部实跑）：`check:runtime-pin` S1–S5 全 PASS（exit 0）；tarball `principles-codex-adapter-0.5.3.tgz` 含修复两生产点；runtime-pin-guard + codex-plugin-bundle + setup-worker-registration **43/43 PASS**；错误路由 Pass 2 = EP-02/EP-03/EP-14 三 MEDIUM，全部以已执行证据对账（真实 $pd-setup 重装 + tarball 字节检查 + packaged probe）。
+
+**A2 同一事件重复摄取（安装版；任务 §五-A2 全项）**：
+
+- 事件身份：`manual-hook-probe-1` / `turn-manual-1`（10-10 沙箱既有探针行，evidence_id `sha256:75708351…`、record_digest `sha256:2e2f09d6…`，contentRef unresolved）；事件 JSON 存 `p1-r5\replay-event-manual-hook-probe-1.json`。
+- **重放 #1（安装版 pd-hook 0.5.3，隔离 CODEX_HOME，cwd=沙箱）**：exit 0，stdout 正常注入（directive 逐字在 hookSpecificOutput），stderr **零 `evidence_batch_rejected`**（仅 `transcript_unavailable` 诚实 degraded——该探针事件无 transcript，与证据摄取无关）。
+- **账本核验**：5→5 行，与前置快照**逐字节全等**（全部列 JSON 比对）；探针行 resolution 保持 `revision_reference_unresolved`、payload 保持 `submitted/attempted` 不升级。
+- **判定依据区分（任务明令不以行数单证）**：修复前同探针实录为整体拒收（`evidence_batch_rejected`，§6 C3a）；本轮零拒收 + 正常注入输出 + 逐字节不变 = **正常幂等去重**而非「拒收后未写入」「recorder 未执行」「能力关闭」。recorder 确实执行：durable 事件日志 `events_2026-10-12.jsonl` 新增 2 条 `runtime_v2_prompt_activations_injected`（11:00:59Z / 11:05:18Z，同激活）。`duplicateCount` 字段产品未在 hook 输出暴露，不编造（单元层语义由 #1992 ingress 回归承载，见 A3）。
+- **重启后复验**：Console 3203（安装版 server.js）taskkill 真重启（首 kill 因 MSYS/Windows PID 失效产生 EADDRINUSE，已识别并以 taskkill //PID 重做——过程披露 §15.6-2）→ 重放 #2 再次零拒收、账本仍逐字节不变 → 四问查询与重启前**全等**。
+- **判定：PASS（安装产物层幂等去重）**。§14.4 的「安装产物验证 NOT RUN（BLOCKED on 发布授权）」就此闭环。
+
+**A3 冲突与失败边界（当前 main 构建，worktree 复跑）**：**128 用例全绿**——codex-adapter 证据面 12（含 P2-2 重放/冲突回归）+ pin/bundle/setup 43 + host-runtime ingress 17（含同 identity 异内容 conflict 上报、原记录保留）+ openclaw-plugin recorder 13 + pd-console BDD steps 6 + receipts-evidence-audit 9 + evidence-outcomes 9 + core adversarial-loop/contract/normalizer 62（含 resolved-缺-digest 拒收、submitted 不升级）。
+
+**A4 宿主差异**：Codex 具备正式重放入口（hook 事件原样重交即生产入口），本轮以**安装字节**实宿主验证；OpenClaw 无独立于插件事件的正式重放入口（§14.3 已记录），其生产者路径由 A3 边界回归覆盖——记 Unsupported（独立重放），不为填表开发新重放平台。
+
+### 15.3 任务 B：Owner → Scribe → judge 语义保真（差异表与定性）
+
+只读取证（参数绑定 SQL + 工件逐字摘录，全文见 `p1-r5\b1-fidelity-diff-table.md`）：r4 链（pain `manual_1791765989884_lbwj4fh0`，rule 候选 `43d509b9`）五层对照结论：
+
+| # | 要求 | 来源判定 |
+| --- | --- | --- |
+| 写前确认精确目标路径 | **Owner 来源**（ownerDesiredOutcome 第 1 句） |
+| 读 X≠可写 X；X.bak 变体先确认 | **Owner 来源**（r2 已实现，replay 通过） |
+| protected/ 一切访问（含只读 ls）先确认 | **Owner 来源，但被 Scribe 静默收窄为仅写入门控**，未进 requiredChanges/concern（派生保真缺陷候选） |
+| 例行新建低风险放行 | Owner 来源（r2 已实现） |
+| 判断依据「以会话内证据为准」 | **Owner 明文，被下游替换**为「持久化确认记录校验」（语义反转） |
+| 「Owner 专属持久化写确认记录存在性校验」 | **下游新增**：Dreamer 候选 T-10/T-05（`persist_authorization_state`）引入 → Philosopher 升格 → Scribe 写入 intentContract → Evaluator 按「DEFINITION of correctness」强制（evaluator-prompt-builder L233/L296：formationContext 永不覆盖 intentContract） |
+
+**B2 定性**（按任务 §六-B2 五分类）：
+
+1. judge 拒收 r2 的直接原因是实现「从不读取确认记录」——但 **RuleHost 输入契约无该字段**（`judge 假设输入存在实际上不存在的字段`），且「持久化确认记录」本身**不是 Owner 要求**（`Scribe 派生内容超出来源`）。judge 自身在 risks[0] 原文承认「…可能被解释为无法满足的架构要求，**需由 Owner 决定**」。**属治理契约级**（派生权威关系/确认信号通道），按边界不实施 → §15.5 决策卡 B。
+2. protected/ 只读确认被静默收窄 = `已有信息没有传到消费者`，派生保真缺陷候选 → follow-up 立单候选（非本轮阻塞：修复它不改变 r2 拒收结局）。
+3. r2 实现对 Owner 原文的全部可观察行为已忠实覆盖且确定性 replay 全通过——「实现未满足既有要求」不成立（未满足的是派生要求）。
+4. r4 报告「剩余缺口=确认信号/judge 裁量」的表述由本轮取证**精确化**：不是 judge 裁量偏好问题，而是派生链把 Owner 原文没有的持久化语义固化成了正确性定义。
+
+**B3 反馈消费路径**：#1994 保真测试（`adversarial-loop.test.ts`「P2-1 fidelity」：真实 gate mismatch → caseInput 富化 → evaluator 工件 → formatter → Round-2 模型可见载荷逐字断言 + legacy 无 caseInput 负断言）在当前 main 绿（62 用例套件内）；真实链证据为 §14.6 `c2-r2-feedback-evidence.txt`（r2 prompt 含完整 caseInput 续行）。三类验证（生产路径测试 / 真实沙箱重放 / 真实模型链）分列，未混称。
+
+### 15.4 任务 C：正式候选与 Golden Journey
+
+- **C1 不盲跑**：r4（10-12，§14.6）已在本轮同一代码前提（#1992/#1994 不触及内化链）上以同输入失败于 scopePrecision/持久化确认要求；本轮取证（§15.3）证明该失败源于派生链治理语义而非可修复的机械缺陷——**无新前提，同因重跑被任务规则禁止**。沙箱内亦无可审批候选遗留（formal rule 工件不存在；principle 中间工件 pending 于 reuse 闸门，且 prompt 通道无法支撑 GJ-01 的 runtime_verified）。
+- **C2**：决策卡见 §15.5。**C3/C4**：继续 BLOCKED/NOT RUN（依赖候选+Owner 审批）。
+
+### 15.5 Owner 决策卡（r5 轮，集中提交）
+
+**决策卡 A —— GJ-01 路径（承接 §5 决策卡 1，原文有效）**：实库 2 条已批准 RuleHost 规则（mu2yt8y7/mu3ayqqa）测试激活授权（选项 A），或隔离 DB 复制豁免（选项 B），或等待沙箱候选（选项 C，依赖决策卡 B 先裁）。
+
+**决策卡 B —— 「持久化 Owner 写确认记录」语义（本轮新证据升级）**：冲突实例=Owner 原文「以会话内证据为准」vs Dreamer 派生并被 intentContract 固化的「持久化确认记录存在性校验」；输入能力=RuleHost 单次调用契约无确认记录字段（#1986 v12 已声明 read-count 不能充当 Owner confirmation）；judge risks[0] 原文自认需 Owner 裁决。可选方向（非穷尽）：① 维持现架构（「已获 Owner 确认」保持为规则不可消费信号），同时**校准派生链**——intentContract 生成不得引入 Owner 原文之外的机制语义（如「持久化」），judge 对「实现声明了架构限制并保守降级」的规则不再以 scopePrecision 拒收（两项均属 Scribe/judge prompt 契约变更，Owner 批准后立单实施）；② 立项确认信号通道（前轮决策卡 2 选项 2 的独立设计单）；③ 接受「protected/** 一律阻断」为最终语义并显式改写 Owner 要求文本（需 Owner 明示）。任一方向批准前不再跑链。
+
+**决策卡 C —— Scribe 静默收窄（follow-up 候选）**：Owner「protected/ 一切访问（含只读 ls）先确认」在 intentContract 中被收窄为仅写入门控且无任何偏差标注。候选修复方向：Scribe 输出契约增加「Owner 要求覆盖/收窄显式声明」义务（不改变 intentContract 权威架构，只要求披露）。属派生契约变更，立单候选，不随本轮实施。
+
+### 15.6 环境过程披露（诚实清单）
+
+1. p1f `config.toml` marketplace 指针变更：前镜像已存（`pre-mirror-codex-home-p1f-config.toml`）；原指向的 worktree 已被清理（不存在），属修复失效引用而非覆盖有效配置。
+2. Console 3203 生命周期：首 restart 用 MSYS `kill` 失效（进程未死，新进程 EADDRINUSE 退出）——**该次「重启后一致」判定无效并已识别**；以 `taskkill //PID //F` 真重启后重验，§15.2 A2 的重启结论以第二次为准。
+3. Git Bash curl 传 CJK 查询参数产生编码伪影（Q1 返回空集）；以 node `fetch`+`encodeURIComponent` 重验为 4+1——工具伪影，非产品缺陷；审计查询一律 node fetch。
+4. 沙箱 DB 前镜像已存（见 §15 抬头）；重放全程未产生任何写入（逐字节全等为证）。
+5. 本轮未触碰实库（真实 Owner workspace）、未新建激活、未手工插表。
+6. #1998 worktree 与 p1f marketplace 的耦合：p1f 的安装来源指向该 worktree（本地 marketplace 常规形态）；#1998 合并后建议 Owner 将 p1f marketplace 改指主仓或发布面，避免长期指向任务 worktree。
+
+### 15.7 完成标准矩阵更新（增量；基准=§14.7）
+
+| SPEC 必需条件 | r4 判定 | r5 判定 | 证据 |
+| --- | --- | --- | --- |
+| 重放幂等（真实入口） | PASS（构建层）；安装层 NOT RUN | **PASS（安装产物层）** | §15.2 A2 |
+| 稳定来源身份/幂等/冲突上报 | PASS | PASS（回归再证 128 绿） | §15.2 A3 |
+| Delivery submitted 封顶 | PASS | PASS（Q1/Q2 再证） | §15.2 A2 |
+| 审计四问+区分 | PASS | PASS（安装版 Console+真重启） | §15.2 A2 |
+| Codex 非空摄取 | PASS | PASS（无变化） | §7/§14.5 |
+| 重启后可查询 | PASS | PASS（真重启） | §15.2 A2 |
+| 正式候选 | FAIL（缺口换轴） | **FAIL（根因精确化：派生链治理语义，Owner 决策卡 B）** | §15.3/§15.5 |
+| runtime_verified/Episode/Effect | NOT RUN | NOT RUN（无变化） | §15.4 |
+| Owner Outcome | NOT RUN | NOT RUN（无变化） | §15.4 |
+| Golden Journey 全链 | BLOCKED | BLOCKED（决策卡 A/B 前置） | §15.4/§15.5 |
+
+**四层完成度（r5 后）**：① 代码——P2-1/P2-2 修复已并 main（#1992/#1994）且**已发布**（0.5.3/2.1.1）；② 测试——边界回归 128 绿（当前 main）；③ 发布与安装——主运行时与 p1f 均实装含修复版本（p1f 经官方链重装）；Marketplace pin 推进 PR #1998 待 Owner；④ 实宿主验收——重放/重启/四问/失败边界全 PASS；GJ-01/Outcome/正式候选仍 BLOCKED/NOT RUN/FAIL，前置均为 Owner 决策（卡 A/B）。
+
+**Phase 1 总判定：维持 PARTIAL**。r5 相对 r4 的实质推进：SPEC「重放幂等」必需条件从构建层升级到**安装产物层实证**；「正式候选 FAIL」的根因从「judge scopePrecision 裁量」精确到**派生链把 Owner 原文没有的持久化语义固化为正确性定义**（逐字工件证据链），并新发现 Scribe 静默收窄缺陷候选。到 COMPLETE 仍需：Owner 裁决策卡 A（GJ-01 路径）+ 决策卡 B（持久化语义）→ 沙箱候选 → 审批 → GJ-01 → Episode/Effect/Outcome → 六条标准重判。
