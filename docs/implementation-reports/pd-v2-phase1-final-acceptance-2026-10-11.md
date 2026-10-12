@@ -1,6 +1,6 @@
 # PD v2 Phase 1 实宿主最终验收报告（2026-10-11，第三轮；2026-10-12 r5 安装验收与语义保真收口轮续）
 
-> 状态：**已交付 · PARTIAL（维持）· 含 Owner 评审修正轮（2026-10-11：4×P2，见 §11A）· 含 r5 安装验收轮（2026-10-12：重放幂等升级至安装产物层 PASS、候选失败根因精确化，见 §15）**。本轮为 Phase 1 收尾后的最终验收轮（任务书 §一～§十一）。
+> 状态：**已交付 · PARTIAL（维持）· 含 Owner 评审修正轮（2026-10-11：4×P2，见 §11A）· 含 r5 安装验收轮（2026-10-12：重放幂等升级至安装产物层 PASS，见 §15）· 含 r6 评审修正轮（2026-10-12：4 项结论修正+T2 时间序补证，见 §15.9）**。本轮为 Phase 1 收尾后的最终验收轮（任务书 §一～§十一）。
 > 前序：`pd-v2-phase1-host-acceptance-2026-10-10.md`（r1/r2/r3）、`pd-v2-phase1-b1-diagnosis-2026-10-11.md`、`pd-v2-phase1-closeout-2026-10-11.md`（#1986）。
 > 验收 worktree：`D:\Code\_worktrees\principles\pdv2-p1-final-pdv2-p1-final-acceptance`（基线 = 合并后的 origin/main `ce1ba2ca`，含 #1986 squash `4b84634b`），writer=zcode（租约）。
 > 隔离环境：新沙箱 `D:\Code\_pdtest\p1-final\`（A2 内化链）、历史沙箱 `D:\Code\_pdtest\p1-acceptance\sandbox`（D/C 线，含 10-10 批准与激活，本轮前置快照）、网关 18798（`~/.pd-p1test\openclaw-state-p1f`）、Console 3202、Codex `~/.pd-p1test\codex-home-p1f`（官方 marketplace→plugin add→$pd-setup 安装链）。
@@ -200,7 +200,7 @@ Owner 评审提出 4×P2；本轮以**两个独立只读子代理**（代码考�
 
 ### 14.2 任务 B：CLI 反馈保真（caseInput → 最终模型提示词）
 
-新增 loop 生产边界测试（`adversarial-loop.test.ts`「P2-1 fidelity」）：**真实 gate mismatch**（`expectedDecision:block / actualDecision:allow`，caseId 命中 LLM 声明用例）→ `mapFailedCases` 富化 caseInput → evaluator 工件 → `formatAdversarialFeedback` → Round-2 任务 diagnosticJson → **模型可见 payload** 全链断言：`caseInput:` 续行、`tool=write_file`、`target="/etc/x"`、`priorReadOfTarget=` 全部在最终载荷可见，且与 diagnosticJson 中存储文本逐字同源（lineage 一致）。legacy 兼容：既有 :408 测试（无 caseInput 的 gate 失败）新增负断言——不渲染空 `caseInput:` 行。loop 套件 9/9 绿。
+新增 loop 生产边界测试（`adversarial-loop.test.ts`「P2-1 fidelity」）：**测试替身注入的 gate mismatch**（`mismatchGateDeps` 桩返回 `expectedDecision:block / actualDecision:allow`，caseId 命中 LLM 声明用例；r6 修正：gate 失败为注入，非真实产生，真实部分=生产消费路径）→ `mapFailedCases` 富化 caseInput → evaluator 工件 → `formatAdversarialFeedback` → Round-2 任务 diagnosticJson → **模型可见 payload** 全链断言：`caseInput:` 续行、`tool=write_file`、`target="/etc/x"`、`priorReadOfTarget=` 全部在最终载荷可见（r6 修正：断言为**子串包含**级，payload 与 diagnosticJson 各自 `toContain`；「与 diagnosticJson 中存储文本逐字同源」原表述过强——全文 equality 未断言，全文 equality 加固列入 r6 保真 PR）。legacy 兼容：既有 :408 测试（无 caseInput 的 gate 失败）新增负断言——不渲染空 `caseInput:` 行。loop 套件 9/9 绿。
 
 ### 14.3 C1：真实重放验收（仓库构建）
 
@@ -293,10 +293,13 @@ Owner 评审提出 4×P2；本轮以**两个独立只读子代理**（代码考�
 - **重放 #1（安装版 pd-hook 0.5.3，隔离 CODEX_HOME，cwd=沙箱）**：exit 0，stdout 正常注入（directive 逐字在 hookSpecificOutput），stderr **零 `evidence_batch_rejected`**（仅 `transcript_unavailable` 诚实 degraded——该探针事件无 transcript，与证据摄取无关）。
 - **账本核验**：5→5 行，与前置快照**逐字节全等**（全部列 JSON 比对）；探针行 resolution 保持 `revision_reference_unresolved`、payload 保持 `submitted/attempted` 不升级。
 - **判定依据区分（任务明令不以行数单证）**：修复前同探针实录为整体拒收（`evidence_batch_rejected`，§6 C3a）；本轮零拒收 + 正常注入输出 + 逐字节不变 = **正常幂等去重**而非「拒收后未写入」「recorder 未执行」「能力关闭」。recorder 确实执行：durable 事件日志 `events_2026-10-12.jsonl` 新增 2 条 `runtime_v2_prompt_activations_injected`（11:00:59Z / 11:05:18Z，同激活）。`duplicateCount` 字段产品未在 hook 输出暴露，不编造（单元层语义由 #1992 ingress 回归承载，见 A3）。
-- **重启后复验**：Console 3203（安装版 server.js）taskkill 真重启（首 kill 因 MSYS/Windows PID 失效产生 EADDRINUSE，已识别并以 taskkill //PID 重做——过程披露 §15.6-2）→ 重放 #2 再次零拒收、账本仍逐字节不变 → 四问查询与重启前**全等**。
+- **重启后复验**：Console 3203（安装版 server.js）taskkill 真重启（首 kill 因 MSYS/Windows PID 失效产生 EADDRINUSE，已识别并以 taskkill //PID 重做——过程披露 §15.6-2）→ 重放 #2 再次零拒收、账本仍逐字节不变 → 四问查询与重启前业务字段一致。
+- **比较口径**：四问对比的是**业务证据摘要**（selector、计数、evidenceId 集合、application payload），非响应全文；`asOf` 等查询时刻字段不参与比对。
 - **判定：PASS（安装产物层幂等去重）**。§14.4 的「安装产物验证 NOT RUN（BLOCKED on 发布授权）」就此闭环。
 
-**A3 冲突与失败边界（当前 main 构建，worktree 复跑）**：**128 用例全绿**——codex-adapter 证据面 12（含 P2-2 重放/冲突回归）+ pin/bundle/setup 43 + host-runtime ingress 17（含同 identity 异内容 conflict 上报、原记录保留）+ openclaw-plugin recorder 13 + pd-console BDD steps 6 + receipts-evidence-audit 9 + evidence-outcomes 9 + core adversarial-loop/contract/normalizer 62（含 resolved-缺-digest 拒收、submitted 不升级）。
+**A2-T2 补充重放（2026-10-12 评审后补；时间序闭环）**：上述重放 #1/#2（11:00:59Z/11:05:18Z）发生在 p1f 重装完成（installedAt=11:08:15.941Z）之前，使用的是主运行时（~/.pd/runtime，当日 04:13Z 已更新）的 pd-hook——不因此失效，但安装标记无法单独证明当时加载。为此在 p1f 安装版上补执行一轮全记录重放：重放前快照 `t2-pre-replay-rows.json`（11:57:16Z，5 行）→ **重放 A**（11:57:50Z，程序绝对路径、版本、修复字节核对、CODEX_HOME/cwd 全记录于 `t2-replay-run-manifest.md`）：exit 0、零拒收、5 行逐字节全等、probe digest 不变 → Console 真重启（taskkill PID 68860 → 新进程）→ **重放 B**：exit 0、零拒收 → 四问业务字段一致、账本仍逐字节全等。`transcript_unavailable` degraded 如实披露：产生自会话摄取路径（探针事件无 transcript，不读不造），**不门控证据账本写入**——durable 注入事件（11:57:50.117Z）与零拒收即证。证据：`t2-replayA-stdout.json`/`t2-replayA-stderr.txt`/`t2-replayB-*`/`t2-pre-restart-summary.json`/`t2-post-restart-summary.json`/`t2-console-3203-restarted.log`。
+
+**A3 冲突与失败边界（当前 main 构建，worktree 复跑）**：**行为边界回归 128 用例全绿**（不含安装类测试，另计）——codex-adapter 证据面 12（含 P2-2 重放/冲突回归）+ host-runtime ingress 17（含同 identity 异内容 conflict 上报、原记录保留）+ openclaw-plugin recorder 13 + pd-console BDD steps 6 + receipts-evidence-audit 9 + evidence-outcomes 9 + core adversarial-loop/contract/normalizer 62（含 resolved-缺-digest 拒收、submitted 不升级）。**安装/pin 类测试 43 项另行统计**（runtime-pin-guard + codex-plugin-bundle + setup-worker-registration，属安装链验证，非行为边界回归）。
 
 **A4 宿主差异**：Codex 具备正式重放入口（hook 事件原样重交即生产入口），本轮以**安装字节**实宿主验证；OpenClaw 无独立于插件事件的正式重放入口（§14.3 已记录），其生产者路径由 A3 边界回归覆盖——记 Unsupported（独立重放），不为填表开发新重放平台。
 
@@ -307,20 +310,20 @@ Owner 评审提出 4×P2；本轮以**两个独立只读子代理**（代码考�
 | # | 要求 | 来源判定 |
 | --- | --- | --- |
 | 写前确认精确目标路径 | **Owner 来源**（ownerDesiredOutcome 第 1 句） |
-| 读 X≠可写 X；X.bak 变体先确认 | **Owner 来源**（r2 已实现，replay 通过） |
-| protected/ 一切访问（含只读 ls）先确认 | **Owner 来源，但被 Scribe 静默收窄为仅写入门控**，未进 requiredChanges/concern（派生保真缺陷候选） |
-| 例行新建低风险放行 | Owner 来源（r2 已实现） |
-| 判断依据「以会话内证据为准」 | **Owner 明文，被下游替换**为「持久化确认记录校验」（语义反转） |
-| 「Owner 专属持久化写确认记录存在性校验」 | **下游新增**：Dreamer 候选 T-10/T-05（`persist_authorization_state`）引入 → Philosopher 升格 → Scribe 写入 intentContract → Evaluator 按「DEFINITION of correctness」强制（evaluator-prompt-builder L233/L296：formationContext 永不覆盖 intentContract） |
+| 读 X≠可写 X；X.bak 变体先确认 | **Owner 来源**（r2 通过 replay 集 v2-path-boundary 单点；单点通过≠全量覆盖，见 B2-3 未闭项） |
+| protected/ 一切访问（含只读 ls）先确认 | **Owner 来源，被 Scribe 静默收窄为仅写入门控**，无任何偏差标注（派生保真缺陷，r6 轮修复） |
+| 例行新建低风险放行 | Owner 来源（r2 以 golden 正例承载 worklog.md 首建） |
+| 检视证据来源「以会话内证据为准」 | **Owner 来源**——该句规定的是「目标现状是否已被读取检视」这一判断的**证据来源**（会话内证据），不规定确认信息的存储方式；与第 6 行的持久化机制属不同维度，**不构成替换或冲突**（r6 修正：撤回 r5 此处「被替换/语义反转」的表述） |
+| 「Owner 专属持久化写确认记录存在性校验」 | **下游新增（无 Owner 来源）**：Dreamer 候选 T-10/T-05（`persist_authorization_state`）引入 → Philosopher 升格 → Scribe 写入 intentContract → Evaluator 按「DEFINITION of correctness」强制（evaluator-prompt-builder L233/L296：formationContext 永不覆盖 intentContract）。r6 修正：事实=该机制无 Owner 来源却被下游无标注地固化为正确性定义；**撤回**其与第 5 行「相悖/反转」的表述——两者是不同维度，缺陷在「无来源+无标注升格」，不在「相互冲突」 |
 
-**B2 定性**（按任务 §六-B2 五分类）：
+**B2 定性**（r6 修正版；按任务 §六-B2 五分类）：
 
-1. judge 拒收 r2 的直接原因是实现「从不读取确认记录」——但 **RuleHost 输入契约无该字段**（`judge 假设输入存在实际上不存在的字段`），且「持久化确认记录」本身**不是 Owner 要求**（`Scribe 派生内容超出来源`）。judge 自身在 risks[0] 原文承认「…可能被解释为无法满足的架构要求，**需由 Owner 决定**」。**属治理契约级**（派生权威关系/确认信号通道），按边界不实施 → §15.5 决策卡 B。
-2. protected/ 只读确认被静默收窄 = `已有信息没有传到消费者`，派生保真缺陷候选 → follow-up 立单候选（非本轮阻塞：修复它不改变 r2 拒收结局）。
-3. r2 实现对 Owner 原文的全部可观察行为已忠实覆盖且确定性 replay 全通过——「实现未满足既有要求」不成立（未满足的是派生要求）。
-4. r4 报告「剩余缺口=确认信号/judge 裁量」的表述由本轮取证**精确化**：不是 judge 裁量偏好问题，而是派生链把 Owner 原文没有的持久化语义固化成了正确性定义。
+1. judge 拒收 r2 的两个**已证事实**分列：(a) requiredChanges[0] 要求实现读取 `input.context` 中的确认记录，而 **RuleHost 输入契约无该字段**（`judge 假设输入存在实际上不存在的字段`）；(b) 「持久化确认记录」机制**无 Owner 来源**（Dreamer 派生，未标注为派生建议），却被 Scribe 写入 intentContract 并被 Evaluator 当作正确性定义（`Scribe 派生内容超出来源`，且升格无标注）。judge 自身在 risks[0] 原文承认「…可能被解释为无法满足的架构要求，**需由 Owner 决定**」（该自认照录，judge 未滥权）。**定性=派生保真缺陷**（无来源机制的升格 + 契约外字段被写进 requiredChanges），修复走 r6 轮任务 3（见 §15.9 与保真修复 PR），**不设 scopePrecision 豁免**。
+2. protected/ 只读确认被静默收窄 = 派生保真缺陷（`已有信息没有传到消费者`），**属候选链真实缺口**，r6 轮任务 3 同轮修复；r5 曾以「修复不改变本轮 judge 结局」为由降格为 follow-up——该排除逻辑不成立，撤回。
+3. **撤回 r5「r2 对 Owner 原文全部可观察行为已忠实覆盖」的表述。** 准确表述：**r2 通过了当前确定性 replay 集合（2 个 Artificer 正例 + 5 个 v2 模板：unavailable/truncated/alias/path-boundary/combination），尚不能证明完整覆盖 Owner 要求**。未闭项：(a) protected/ 只读访问——replay 集全部用例均为 write 动作，r2 规则的非 write 分支直接放行，Owner「一切访问含只读 ls 先确认」未被覆盖；(b) 普通既有路径未检视时的写入——replay 集无「非保护、会话内未读取的既有路径写入/覆盖」负例（正例仅 worklog.md 首建），该 Owner 要求未证明；(c) 已实现的路径/后缀阻断（protected/** 与备份后缀）不等于全部读取/写入条件都已表达（如上下文缺失→allow 对普通既有路径未检视写入同样放行，Owner 意图未表达）。
+4. r4 报告「剩余缺口=确认信号/judge 裁量」的表述由本轮取证**精确化**：缺口在派生链把无 Owner 来源的机制语义固化为正确性定义、并把契约外字段写进 rule requiredChanges；现有分歧路由（Principle 级 concern / `PRINCIPLE_PAIN_MISMATCH`）的存在与是否被正确使用由 Reality Audit 单独核实（§15.9）。
 
-**B3 反馈消费路径**：#1994 保真测试（`adversarial-loop.test.ts`「P2-1 fidelity」：真实 gate mismatch → caseInput 富化 → evaluator 工件 → formatter → Round-2 模型可见载荷逐字断言 + legacy 无 caseInput 负断言）在当前 main 绿（62 用例套件内）；真实链证据为 §14.6 `c2-r2-feedback-evidence.txt`（r2 prompt 含完整 caseInput 续行）。三类验证（生产路径测试 / 真实沙箱重放 / 真实模型链）分列，未混称。
+**B3 反馈消费路径**（r6 修正证据分级）：#1994 保真测试（`adversarial-loop.test.ts`「P2-1 fidelity」）的验证构成=**测试替身注入的 gate mismatch**（`mismatchGateDeps.evaluateInSandbox` 桩返回 expected/actual 不匹配——gate 失败本身非真实产生）+ **真实生产消费路径**（真实 gate replay 组装器 → `mapFailedCases` caseInput 富化 → evaluator 工件持久化 → `formatAdversarialFeedback` → Round-2 diagnosticJson → 模型可见载荷）。断言强度=**子串包含**（payload 与 diagnosticJson 各自 `toContain` `caseInput:`/`tool=write_file`/`target="/etc/x"`/`priorReadOfTarget=`）+ legacy 无 caseInput 负断言；**无全文 equality 断言**——故 r5 报告「与 diagnosticJson 中存储文本逐字同源」的表述收窄为「同源子串已证，全文一致未断言」（全文 equality 断言加固列入 r6 保真 PR）。在当前 main 绿（62 用例套件内）。真实链证据为 §14.6 `c2-r2-feedback-evidence.txt`（r2 prompt 含完整 caseInput 续行，真实模型链）。四类验证（单测替身 / 真实 sandbox / 真实模型链 / 安装产物）分列，未混称。
 
 ### 15.4 任务 C：正式候选与 Golden Journey
 
@@ -329,11 +332,11 @@ Owner 评审提出 4×P2；本轮以**两个独立只读子代理**（代码考�
 
 ### 15.5 Owner 决策卡（r5 轮，集中提交）
 
-**决策卡 A —— GJ-01 路径（承接 §5 决策卡 1，原文有效）**：实库 2 条已批准 RuleHost 规则（mu2yt8y7/mu3ayqqa）测试激活授权（选项 A），或隔离 DB 复制豁免（选项 B），或等待沙箱候选（选项 C，依赖决策卡 B 先裁）。
+**决策卡 A —— GJ-01 路径（承接 §5 决策卡 1；若 r6 修复后链产出正式候选则自动走沙箱审批路径，本卡仅在前者失败时仍需裁决）**：实库 2 条已批准 RuleHost 规则（mu2yt8y7/mu3ayqqa）测试激活授权（选项 A），或隔离 DB 复制豁免（选项 B），或等待沙箱候选（选项 C）。
 
-**决策卡 B —— 「持久化 Owner 写确认记录」语义（本轮新证据升级）**：冲突实例=Owner 原文「以会话内证据为准」vs Dreamer 派生并被 intentContract 固化的「持久化确认记录存在性校验」；输入能力=RuleHost 单次调用契约无确认记录字段（#1986 v12 已声明 read-count 不能充当 Owner confirmation）；judge risks[0] 原文自认需 Owner 裁决。可选方向（非穷尽）：① 维持现架构（「已获 Owner 确认」保持为规则不可消费信号），同时**校准派生链**——intentContract 生成不得引入 Owner 原文之外的机制语义（如「持久化」），judge 对「实现声明了架构限制并保守降级」的规则不再以 scopePrecision 拒收（两项均属 Scribe/judge prompt 契约变更，Owner 批准后立单实施）；② 立项确认信号通道（前轮决策卡 2 选项 2 的独立设计单）；③ 接受「protected/** 一律阻断」为最终语义并显式改写 Owner 要求文本（需 Owner 明示）。任一方向批准前不再跑链。
+**决策卡 B —— 「持久化 Owner 写确认记录」语义（r6 重写；撤回 r5 豁免建议）**：r5 曾建议「judge 对声明架构限制并保守降级的规则不再以 scopePrecision 拒收」——**撤回**。r6 修正口径：**核对要求来源与行为覆盖，修正派生保真；scopePrecision 标准保持不变。无法实现的要求应明确披露并正确路由（Principle 级分歧走既有 concern 路径），不能通过弱化审核关闭**。该修复已由 Owner 任务（r6）授权实施（派生保真/路由修复 PR，见 §15.9），不再待 Owner 决策；「确认信号通道」无 Owner 需求来源、不在 Phase 1，仅当未来 Owner 明确要求「已获确认可放行」时再单独立项。
 
-**决策卡 C —— Scribe 静默收窄（follow-up 候选）**：Owner「protected/ 一切访问（含只读 ls）先确认」在 intentContract 中被收窄为仅写入门控且无任何偏差标注。候选修复方向：Scribe 输出契约增加「Owner 要求覆盖/收窄显式声明」义务（不改变 intentContract 权威架构，只要求披露）。属派生契约变更，立单候选，不随本轮实施。
+**决策卡 C —— Scribe 静默收窄（r6 重写：已入修复范围）**：Owner「protected/ 一切访问（含只读 ls）先确认」在 intentContract 中被收窄为仅写入门控且无偏差标注。r5 曾列为 follow-up 候选；r6 起该缺口属候选链真实缺口，修复已获 Owner 任务授权（要求保留/显式暴露遗漏，不静默丢弃），不再待 Owner 决策。
 
 ### 15.6 环境过程披露（诚实清单）
 
@@ -348,17 +351,30 @@ Owner 评审提出 4×P2；本轮以**两个独立只读子代理**（代码考�
 
 | SPEC 必需条件 | r4 判定 | r5 判定 | 证据 |
 | --- | --- | --- | --- |
-| 重放幂等（真实入口） | PASS（构建层）；安装层 NOT RUN | **PASS（安装产物层）** | §15.2 A2 |
-| 稳定来源身份/幂等/冲突上报 | PASS | PASS（回归再证 128 绿） | §15.2 A3 |
+| 重放幂等（真实入口） | PASS（构建层）；安装层 NOT RUN | **PASS（安装产物层，含 T2 时间序闭环重放）** | §15.2 A2 + A2-T2 |
+| 稳定来源身份/幂等/冲突上报 | PASS | PASS（行为边界回归 128 项再证，安装类 43 项另计） | §15.2 A3 |
 | Delivery submitted 封顶 | PASS | PASS（Q1/Q2 再证） | §15.2 A2 |
-| 审计四问+区分 | PASS | PASS（安装版 Console+真重启） | §15.2 A2 |
+| 审计四问+区分 | PASS | PASS（安装版 Console+真重启；比较口径=业务证据字段） | §15.2 A2 |
 | Codex 非空摄取 | PASS | PASS（无变化） | §7/§14.5 |
 | 重启后可查询 | PASS | PASS（真重启） | §15.2 A2 |
-| 正式候选 | FAIL（缺口换轴） | **FAIL（根因精确化：派生链治理语义，Owner 决策卡 B）** | §15.3/§15.5 |
+| 正式候选 | FAIL（缺口换轴） | **FAIL（根因=派生保真：无来源机制升格+契约外字段入 requiredChanges+只读要求静默收窄；修复已立项实施，见 §15.9）** | §15.3/§15.5 |
 | runtime_verified/Episode/Effect | NOT RUN | NOT RUN（无变化） | §15.4 |
 | Owner Outcome | NOT RUN | NOT RUN（无变化） | §15.4 |
-| Golden Journey 全链 | BLOCKED | BLOCKED（决策卡 A/B 前置） | §15.4/§15.5 |
+| Golden Journey 全链 | BLOCKED | BLOCKED（候选产出后走沙箱审批路径，决策卡 A） | §15.4/§15.5 |
 
-**四层完成度（r5 后）**：① 代码——P2-1/P2-2 修复已并 main（#1992/#1994）且**已发布**（0.5.3/2.1.1）；② 测试——边界回归 128 绿（当前 main）；③ 发布与安装——主运行时与 p1f 均实装含修复版本（p1f 经官方链重装）；Marketplace pin 推进 PR #1998 待 Owner；④ 实宿主验收——重放/重启/四问/失败边界全 PASS；GJ-01/Outcome/正式候选仍 BLOCKED/NOT RUN/FAIL，前置均为 Owner 决策（卡 A/B）。
+**四层完成度（r5 后；r6 修正口径）**：① 代码——P2-1/P2-2 修复已并 main（#1992/#1994）且**已发布**（0.5.3/2.1.1）；派生保真/路由修复 r6 轮进行中（§15.9）；② 测试——行为边界回归 128 项 + 安装类 43 项（当前 main，分列统计）；③ 发布与安装——主运行时与 p1f 均实装含修复版本（p1f 经官方链重装）；Marketplace pin 推进 PR #1998 待 Owner；④ 实宿主验收——重放（含 T2 时间序）/重启/四问/失败边界 PASS；GJ-01/Outcome 仍 BLOCKED/NOT RUN；正式候选 FAIL，根因为**工程可修的派生保真缺口**（修复进行中），非纯 Owner 前提。
 
-**Phase 1 总判定：维持 PARTIAL**。r5 相对 r4 的实质推进：SPEC「重放幂等」必需条件从构建层升级到**安装产物层实证**；「正式候选 FAIL」的根因从「judge scopePrecision 裁量」精确到**派生链把 Owner 原文没有的持久化语义固化为正确性定义**（逐字工件证据链），并新发现 Scribe 静默收窄缺陷候选。到 COMPLETE 仍需：Owner 裁决策卡 A（GJ-01 路径）+ 决策卡 B（持久化语义）→ 沙箱候选 → 审批 → GJ-01 → Episode/Effect/Outcome → 六条标准重判。
+**Phase 1 总判定：维持 PARTIAL**。r5 相对 r4 的实质推进：SPEC「重放幂等」必需条件从构建层升级到**安装产物层实证**（T2 时间序闭环）；「正式候选 FAIL」的根因从「judge scopePrecision 裁量」精确到**派生链把无 Owner 来源的持久化机制无标注升格为正确性定义 + 契约外字段入 requiredChanges + Owner 只读要求被静默收窄**（逐字工件证据链）。r5 原判定「剩余缺口均为 Owner 前提」**不成立**：派生保真缺口属工程可修，r6 轮已按 Owner 任务实施修复（§15.9）；到 COMPLETE 仍需：派生保真修复落地并验证 → 修复后隔离链产出正式候选 → Owner 对该具体候选审批 → GJ-01（沙箱路径）→ Episode/Effect/Outcome → 六条标准重判。
+
+### 15.9 r6 评审修正轮（2026-10-12，Owner 任务驱动；同日）
+
+Owner 对 #1999 提出 4 项修正，全部成立，本轮原位修正（非末尾追加）：
+
+| # | 修正 | 动作 |
+| --- | --- | --- |
+| 1 | 检视证据来源 vs 确认记录存储方式混同；「语义反转/直接冲突」表述撤回 | §15.3 表第 5/6 行重写：Owner「以会话内证据为准」规定**检视判断的证据来源**，不规定确认信息存储方式；持久化机制的事实定性改为「无 Owner 来源 + 无标注升格」，撤回「替换/冲突」 |
+| 2 | 「r2 已覆盖全部可观察要求」撤回 | §15.3 B2-3 重写：r2 仅通过当前确定性 replay 集合（2 正例+5 模板），列出三项未闭（protected 只读、普通既有路径未检视写入、路径/后缀阻断≠全部读写条件） |
+| 3 | 「声明架构限制豁免 scopePrecision」建议删除 | §15.5 决策卡 B 重写：scopePrecision 标准保持；无法实现的要求明确披露并走既有 concern 路由，不弱化审核 |
+| 4 | 测试证据分级与计数更正 | §15.2 A3：128 项行为边界与 43 项安装测试分列；§15.2 A2/§14.2/B3：gate mismatch 标注为测试替身注入、「逐字同源」收窄为子串级（全文 equality 无断言）；审计比较口径=业务证据字段（asOf 除外）；`transcript_unavailable` 单独披露且说明不门控账本写入 |
+
+补充证据：§15.2 A2-T2（p1f 安装版时间序重放：安装 11:08:15Z 严格先于重放 11:57:50Z，双次重放+真重启全记录）。Reality Audit 与派生保真/路由修复、修复后候选链另见保真修复 PR 与本节后续更新。
