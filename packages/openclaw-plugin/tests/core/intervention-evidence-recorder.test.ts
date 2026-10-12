@@ -95,6 +95,29 @@ describe('intervention evidence recorder (openclaw adapter)', () => {
     });
   });
 
+  it('P2-2 regression: replaying an unresolved delivery stays unresolved — idempotent duplicate, never a batch rejection', () => {
+    // The stored contentRef is an OBJECT; its truthiness must never upgrade
+    // resolution to 'resolved' without a payloadDigest (the normalizer then
+    // rejects the whole replay batch before the dedup branch can no-op it).
+    conn.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                          VALUES ('act-orphan', 'idem-orphan', 'art-missing', 'prompt', 'prompt_activate', 'ref', '2026-10-01T00:00:00Z')`).run();
+    const warn: string[] = [];
+    const input = {
+      workspaceDir,
+      sessionId: 'sess-unresolved-replay',
+      injected: [{ principleId: 'T-01', activationId: 'act-orphan', artifactId: 'art-missing' }],
+      logger: { warn: (line: string) => warn.push(line) },
+    };
+    recordPromptDeliveryEvidence(input);
+    recordPromptDeliveryEvidence(input);
+    expect(warn).toEqual([]);
+    const rows = evidenceRows().filter((row) => row.record_kind === 'delivery');
+    expect(rows).toHaveLength(1);
+    const contentRef = JSON.parse(rows[0]!.content_ref_json ?? '{}');
+    expect(contentRef.resolution).toBe('revision_reference_unresolved');
+    expect(contentRef.payloadDigest).toBeUndefined();
+  });
+
   it('replays the original prompt and gate event after storage failure and deactivation as partial historical evidence', () => {
     seedActivation('act-replay', 'art-replay');
     const warn: string[] = [];
