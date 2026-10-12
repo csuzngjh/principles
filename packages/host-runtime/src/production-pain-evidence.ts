@@ -379,7 +379,11 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     const cooldownActive = last !== undefined && Date.now() - last < PAIN_COOLDOWN_WINDOW_MS;
     const triage = evaluateTriage({ sourceKind, score: painScore, consecutiveErrors: enrichment.consecutiveErrors, isRisky });
     const trigger = evaluateTriggerController({ triageResult: triage, isOwnerManual: false, isCooldownActive: cooldownActive, isValid: true, score: painScore, sessionId: event.context.sessionId });
-    const admitted = outcome.failure && WRITE_TOOLS.has(toolName) && trigger.shouldCreateDiagnosticTask;
+    // WorkBuddy tool names are capitalized (Write/Edit — probe P03) while
+    // OpenClaw/Codex are lowercase; admission is about the tool FAMILY, so
+    // compare case-insensitively at this one boundary. tool_calls evidence
+    // above keeps the raw host name.
+    const admitted = outcome.failure && WRITE_TOOLS.has(toolName.toLowerCase()) && trigger.shouldCreateDiagnosticTask;
     const { eventId, painId } = ids({
       workspaceDir: event.context.workspaceDir,
       sessionId: event.context.sessionId,

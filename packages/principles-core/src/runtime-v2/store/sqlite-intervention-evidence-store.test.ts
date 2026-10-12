@@ -818,4 +818,52 @@ describe('SqliteConnection busyTimeoutMs', () => {
     expect(() => new SqliteConnection({ workspaceDir, busyTimeoutMs: -1 })).toThrow(/non-negative integer/);
     expect(() => new SqliteConnection({ workspaceDir, busyTimeoutMs: 1.5 })).toThrow(/non-negative integer/);
   });
+
+  it('migrates a pre-workbuddy capability-declarations CHECK on reopen, preserving rows and accepting workbuddy', () => {
+    // Simulate a workspace created before the third host: rebuild the table
+    // with the old `host_kind IN ('openclaw','codex')` CHECK and one codex
+    // declaration, then reopen — the guarded migration must widen the CHECK
+    // and carry the declaration across (declarative state, copy preserves).
+    const oldWs = path.join(tmpRoot, `wb-mig-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.mkdirSync(oldWs, { recursive: true });
+    let seed = new SqliteConnection(oldWs);
+    let db = seed.getDb();
+    db.prepare('DROP TABLE intervention_capability_declarations').run();
+    db.prepare(`CREATE TABLE intervention_capability_declarations (
+      host_kind TEXT NOT NULL CHECK (host_kind IN ('openclaw','codex')),
+      capability TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('supported','unsupported','unknown')),
+      adapter_version TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      max_confirmation TEXT,
+      note TEXT,
+      declared_at TEXT NOT NULL,
+      PRIMARY KEY (host_kind, capability)
+    )`).run();
+    db.prepare(`INSERT INTO intervention_capability_declarations
+      (host_kind, capability, status, adapter_version, channel, declared_at)
+      VALUES ('codex', 'agent_context_delivery', 'supported', 'codex-adapter@test', 'pd-hook', '2026-08-01T00:00:00Z')`).run();
+    seed.close();
+
+    const migrated = new SqliteConnection(oldWs);
+    const store2 = new SqliteInterventionEvidenceStore(migrated);
+    const workbuddy = normalized({
+      evidenceScopeId: 'scope-wb-mig',
+      sourceKind: 'workbuddy_pd_hook_event_log',
+      adapterVersion: 'workbuddy-adapter@test',
+      recordedAt: '2026-10-12T08:00:00Z',
+      capabilityDeclarations: [
+        { hostKind: 'workbuddy', capability: 'agent_context_delivery', status: 'supported', adapterVersion: 'workbuddy-adapter@test', channel: 'pd-hook', maxConfirmation: 'submitted', note: 'P04 probe verified' },
+      ],
+      observations: [],
+    });
+    const appended = store2.appendObservationBatch(workbuddy);
+    expect(appended.ok, appended.ok ? undefined : appended.reason).toBe(true);
+    const rows = migrated.getDb().prepare(
+      "SELECT host_kind, capability FROM intervention_capability_declarations ORDER BY host_kind",
+    ).all() as { host_kind: string; capability: string }[];
+    expect(rows).toContainEqual({ host_kind: 'codex', capability: 'agent_context_delivery' });
+    expect(rows).toContainEqual({ host_kind: 'workbuddy', capability: 'agent_context_delivery' });
+    migrated.close();
+  });
 });

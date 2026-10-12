@@ -1291,10 +1291,10 @@ function validatePromptActivationInjectionStatus(v: unknown): PromptActivationIn
   if (Object.hasOwn(v, 'route') && (v.route === 'legacy_trim' || v.route === 'shared_render')) result.route = v.route;
   if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
   if (Object.hasOwn(v, 'perHostFits') && Array.isArray(v.perHostFits)) {
-    const perHostFits: { hostKind: 'openclaw' | 'codex'; fits: boolean }[] = [];
+    const perHostFits: { hostKind: 'openclaw' | 'codex' | 'workbuddy'; fits: boolean }[] = [];
     for (const entry of v.perHostFits) {
       if (!isObject(entry)) return null;
-      if ((entry.hostKind !== 'openclaw' && entry.hostKind !== 'codex') || typeof entry.fits !== 'boolean') return null;
+      if ((entry.hostKind !== 'openclaw' && entry.hostKind !== 'codex' && entry.hostKind !== 'workbuddy') || typeof entry.fits !== 'boolean') return null;
       perHostFits.push({ hostKind: entry.hostKind, fits: entry.fits });
     }
     result.perHostFits = perHostFits;
@@ -1351,7 +1351,7 @@ export function validateActivations(v: unknown): ActivationsData | null {
     const route = v.promptInjectionRoute;
     if ((route.status === 'confirmed' || route.status === 'unconfirmed') && typeof route.flagEnabled === 'boolean') {
       const summary: PromptInjectionRouteSummaryWire = { status: route.status, flagEnabled: route.flagEnabled };
-      if (Object.hasOwn(route, 'hostKind') && (route.hostKind === 'openclaw' || route.hostKind === 'codex')) summary.hostKind = route.hostKind;
+      if (Object.hasOwn(route, 'hostKind') && (route.hostKind === 'openclaw' || route.hostKind === 'codex' || route.hostKind === 'workbuddy')) summary.hostKind = route.hostKind;
       if (Object.hasOwn(route, 'route') && (route.route === 'legacy_trim' || route.route === 'shared_render')) summary.route = route.route;
       if (Object.hasOwn(route, 'unconfirmedReason') && isString(route.unconfirmedReason)) summary.unconfirmedReason = route.unconfirmedReason;
       if (Object.hasOwn(route, 'nextAction') && isString(route.nextAction)) summary.nextAction = route.nextAction;
@@ -2080,7 +2080,7 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
   if (Object.hasOwn(v, 'capacityStatus') && (v.capacityStatus === 'confirmed' || v.capacityStatus === 'unconfirmed')) {
     result.capacityStatus = v.capacityStatus;
   }
-  if (Object.hasOwn(v, 'hostKind') && (v.hostKind === 'openclaw' || v.hostKind === 'codex')) {
+  if (Object.hasOwn(v, 'hostKind') && (v.hostKind === 'openclaw' || v.hostKind === 'codex' || v.hostKind === 'workbuddy')) {
     result.hostKind = v.hostKind;
   }
   if (Object.hasOwn(v, 'route') && (v.route === 'legacy_trim' || v.route === 'shared_render')) {
@@ -2113,7 +2113,7 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
     for (const entry of v.perHost) {
       if (!isObject(entry)) return null;
       const { hostKind, route, usedChars: hostUsed, truncated: hostTruncated } = entry;
-      if ((hostKind !== 'openclaw' && hostKind !== 'codex')
+      if ((hostKind !== 'openclaw' && hostKind !== 'codex' && hostKind !== 'workbuddy')
         || (route !== 'legacy_trim' && route !== 'shared_render')
         || typeof hostUsed !== 'number' || !Number.isInteger(hostUsed) || hostUsed < 0
         || typeof hostTruncated !== 'boolean') {
@@ -2209,8 +2209,8 @@ export interface EvidenceChainRecordData {
   dreamerTaskStatus?: string;
   /** PRI-469: optional intent tension from diagnostician artifact (SPEC §16). */
   intentTension?: IntentTensionData;
-  /** PRI-625 Slice D: evidence host attribution — openclaw | codex | unknown. */
-  hostKind?: 'openclaw' | 'codex' | 'unknown';
+  /** PRI-625 Slice D: evidence host attribution — openclaw | codex | workbuddy | unknown. */
+  hostKind?: 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
 }
 
 // ── Intent Tension (PRI-469, SPEC §16) ───────────────────────────────────────

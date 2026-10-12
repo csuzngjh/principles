@@ -126,15 +126,11 @@ describe('three MVP paths through the real production runtime', () => {
     ]);
   });
 
-  it('delivery evidence is attempted through the frozen workbuddy source kind and degrades OBSERVABLY while the shared evidence schema cannot accept workbuddy rows', async () => {
-    // SHARED-PACKAGE GAP (reported to the main agent):
-    // principles-core intervention-evidence-schema.ts declares
-    // `host_kind TEXT NOT NULL CHECK (host_kind IN ('openclaw','codex'))` —
-    // the normalizer and INTERVENTION_SOURCE_KINDS accept workbuddy, but the
-    // SQLite CHECK constraint does not, so the append degrades. This test
-    // pins the CURRENT honest contract: the injection itself is unaffected,
-    // the degradation is observable (rc-9), and the raw injected event line
-    // stays durable for idempotent replay once the schema gains 'workbuddy'.
+  it('delivery evidence lands durably through the frozen workbuddy source kind (schema CHECK migrated for the third host)', async () => {
+    // The shared evidence schema now accepts workbuddy host rows (the
+    // pre-workbuddy CHECK was migrated in principles-core); this test pins
+    // the full success contract: injection + durable evidence rows + the
+    // capability declarations for the WorkBuddy host, and NO degradation.
     const { home, governance } = productionHome({ receiptLedger: true });
     await activationArtifact(governance, {
       id: 'art-ev-603', kind: 'principle', principleId: 'P_WB_EV_603',
@@ -145,10 +141,25 @@ describe('three MVP paths through the real production runtime', () => {
     const result = runEntry(home, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: project })), 'UserPromptSubmit');
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain('UNIQUE_WB_EVIDENCE_603');
-    // Observable degradation through the shared ingress, never a silent skip.
-    expect(result.stderr).toContain('workbuddy_evidence:');
-    expect(result.stderr).toContain('append degraded');
-    // The durable raw source line exists for replay (SPEC §13.7).
+    // Evidence append succeeded — no observable degradation (rc-9 would have
+    // surfaced one; its absence after the schema fix is the assertion).
+    expect(result.stderr).not.toContain('append degraded');
+    // Durable normalized delivery rows exist under the frozen source kind.
+    const db = new Database(path.join(governance, '.pd', 'state.db'), { readonly: true });
+    try {
+      const evidence = db.prepare(
+        "SELECT source_kind, record_kind FROM intervention_evidence_records WHERE source_kind = 'workbuddy_pd_hook_event_log'",
+      ).all();
+      expect(evidence.length).toBeGreaterThan(0);
+      expect(evidence.some((row) => row.record_kind === 'delivery')).toBe(true);
+      const capabilities = db.prepare(
+        "SELECT capability, status FROM intervention_capability_declarations WHERE host_kind = 'workbuddy'",
+      ).all();
+      expect(capabilities.length).toBeGreaterThan(0);
+    } finally {
+      db.close();
+    }
+    // The durable raw event line also exists (SPEC §13.7 replay source).
     const logsDir = path.join(governance, '.state', 'logs');
     const injectedLines = fs.readdirSync(logsDir)
       .filter((file) => file.startsWith('events_') && file.endsWith('.jsonl'))
@@ -167,10 +178,10 @@ describe('three MVP paths through the real production runtime', () => {
     const project = makeProjectDir(home, 'evdeny');
     const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: path.join(project, 'wb-protected-604.txt'), content: 'x' } })), 'PreToolUse');
     expect(result.status).toBe(0);
-    // The deny is the real blocking signal (P02) — it survives the evidence
-    // degradation caused by the shared schema gap above.
+    // The deny is the real blocking signal (P02). Evidence now appends
+    // cleanly (post schema migration); nothing degrades the decision.
     expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'WB_RULE_DENY_604' } });
-    expect(result.stderr).toContain('workbuddy_evidence:');
+    expect(result.stderr).not.toContain('append degraded');
   });
 });
 

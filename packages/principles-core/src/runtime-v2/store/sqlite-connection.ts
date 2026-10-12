@@ -793,6 +793,41 @@ export class SqliteConnection {
         throw error;
       }
     }
+
+    // WorkBuddy third host (SPEC workbuddy-host-adapter Part 2): existing
+    // workspaces carry the pre-workbuddy `host_kind IN ('openclaw','codex')`
+    // CHECK on intervention_capability_declarations, which rejects every
+    // workbuddy declaration. CREATE TABLE IF NOT EXISTS cannot alter an
+    // existing table's CHECK, so rebuild the table under the write lock with
+    // shape recheck (same pattern as the redaction migration above). The
+    // table is declarative adapter state (latest declaration wins), so the
+    // INSERT SELECT copy is preservation, not authority transfer.
+    const declarationDdl = (): unknown => db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'intervention_capability_declarations'",
+    ).get();
+    const declarationsDdlCurrent = (row: unknown): boolean =>
+      isRecord(row) && typeof row.sql === 'string' && row.sql.includes("'workbuddy'");
+    if (!declarationsDdlCurrent(declarationDdl())) {
+      const [createDeclarations] = INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS.filter(
+        (statement) => statement.includes('intervention_capability_declarations'),
+      );
+      if (typeof createDeclarations !== 'string') {
+        throw new Error('intervention_capability_declarations DDL statement missing from schema');
+      }
+      db.prepare('BEGIN IMMEDIATE').run();
+      try {
+        if (!declarationsDdlCurrent(declarationDdl())) {
+          db.prepare('ALTER TABLE intervention_capability_declarations RENAME TO intervention_capability_declarations_pre_workbuddy').run();
+          db.prepare(createDeclarations).run();
+          db.prepare('INSERT INTO intervention_capability_declarations SELECT * FROM intervention_capability_declarations_pre_workbuddy').run();
+          db.prepare('DROP TABLE intervention_capability_declarations_pre_workbuddy').run();
+        }
+        db.prepare('COMMIT').run();
+      } catch (error) {
+        try { db.prepare('ROLLBACK').run(); } catch { /* migration tx may already be rolled back */ }
+        throw error;
+      }
+    }
   }
 
   private migrateSchema(): void {

@@ -139,7 +139,7 @@ painCmd
   .description('List canonical pain events with host attribution (PRI-640)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-l, --limit <number>', 'Max entries to show (default: 20)', parseInt)
-  .option('--host <kind>', 'Filter by host: openclaw | codex | unknown')
+  .option('--host <kind>', 'Filter by host: openclaw | codex | workbuddy | unknown')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainList(opts);

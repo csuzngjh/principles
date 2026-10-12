@@ -90,11 +90,11 @@ export async function handleActivationsRoute(
     // PD_PROMPT_CAPACITY_V1 R-A1: request-level target host for the
     // per-activation injection statuses (route-unconfirmed rows otherwise).
     const url = new URL(req.url ?? '/api/v1/activations', 'http://localhost');
-    let targetHost: 'openclaw' | 'codex' | undefined;
+    let targetHost: 'openclaw' | 'codex' | 'workbuddy' | undefined;
     const rawHost = url.searchParams.get('host');
     if (rawHost !== null) {
-      if (rawHost !== 'openclaw' && rawHost !== 'codex') {
-        sendError(res, 400, 'validation_error', 'host must be one of: openclaw, codex');
+      if (rawHost !== 'openclaw' && rawHost !== 'codex' && rawHost !== 'workbuddy') {
+        sendError(res, 400, 'validation_error', 'host must be one of: openclaw, codex, workbuddy');
         return;
       }
       targetHost = rawHost;
@@ -176,10 +176,10 @@ export async function handleActivationsRoute(
       sendError(res, 400, 'validation_error', 'statement is required and must be a non-empty string');
       return;
     }
-    let targetHost: 'openclaw' | 'codex' | undefined;
+    let targetHost: 'openclaw' | 'codex' | 'workbuddy' | undefined;
     if (Object.hasOwn(body, 'host')) {
-      if (body.host !== 'openclaw' && body.host !== 'codex') {
-        sendError(res, 400, 'validation_error', 'host must be one of: openclaw, codex');
+      if (body.host !== 'openclaw' && body.host !== 'codex' && body.host !== 'workbuddy') {
+        sendError(res, 400, 'validation_error', 'host must be one of: openclaw, codex, workbuddy');
         return;
       }
       targetHost = body.host;

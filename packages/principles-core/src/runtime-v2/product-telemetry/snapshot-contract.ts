@@ -28,7 +28,7 @@ export const PRODUCT_TELEMETRY_SNAPSHOT_SCHEMA_VERSION = '1';
 export const PRODUCT_TELEMETRY_CONSENT_VERSION = '1';
 
 /** Coarse host kind derived from the install manifest, not the triggering process. */
-export const PRODUCT_TELEMETRY_HOST_KINDS = ['openclaw', 'codex', 'other'] as const;
+export const PRODUCT_TELEMETRY_HOST_KINDS = ['openclaw', 'codex', 'workbuddy', 'other'] as const;
 export type ProductTelemetryHostKind = (typeof PRODUCT_TELEMETRY_HOST_KINDS)[number];
 
 /** Bounded PD version (npm version string, e.g. "1.218.0"). */

@@ -412,7 +412,7 @@ function PendingReviewCard({
   /** PRI-908: 提示词注入预算现状（批准前预告"批了是否会生效"）。 */
   promptInjection?: PromptInjectionBudgetStatus;
   /** PD_PROMPT_CAPACITY_V1 R-A1/R-B2: 请求级目标宿主（未确认横幅中选择），随批准请求发送给写入前预检。 */
-  promptTargetHost?: "openclaw" | "codex";
+  promptTargetHost?: "openclaw" | "codex" | "workbuddy";
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -1218,7 +1218,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // capacity forecast + approve precheck. Set from the 未确认 banner when the
   // workspace's applicable hosts would take different routes; request-scoped
   // only — no persisted host configuration is created here.
-  const [promptTargetHost, setPromptTargetHost] = useState<"openclaw" | "codex" | null>(null);
+  const [promptTargetHost, setPromptTargetHost] = useState<"openclaw" | "codex" | "workbuddy" | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -1574,7 +1574,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               <p className="mt-1 text-ink-2">{unconfirmed.nextAction}</p>
             )}
             <div className="mt-2 flex gap-2">
-              {(["openclaw", "codex"] as const).map((host) => (
+              {(["openclaw", "codex", "workbuddy"] as const).map((host) => (
                 <button
                   key={host}
                   type="button"
@@ -1584,7 +1584,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
                     promptTargetHost === host ? "border-amber bg-amber/10" : "border-line hover:border-line-2"
                   }`}
                 >
-                  {t("pages.focus.promptCapacityViewAsHost", { host: host === "openclaw" ? "OpenClaw" : "Codex" })}
+                  {t("pages.focus.promptCapacityViewAsHost", { host: host === "openclaw" ? "OpenClaw" : host === "workbuddy" ? "WorkBuddy" : "Codex" })}
                 </button>
               ))}
               {promptTargetHost !== null && (

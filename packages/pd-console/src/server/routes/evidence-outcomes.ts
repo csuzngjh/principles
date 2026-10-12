@@ -78,7 +78,7 @@ export interface EvidenceOutcomeRouteContext {
  * store or a missing episode yields null and the caller falls back to the
  * openclaw writer default (the pre-existing behavior for unresolvable refs).
  */
-function resolveEpisodeHostKind(workspaceDir: string, episodeKey: string): 'openclaw' | 'codex' | null {
+function resolveEpisodeHostKind(workspaceDir: string, episodeKey: string): 'openclaw' | 'codex' | 'workbuddy' | null {
   let conn: SqliteConnection | null = null;
   try {
     conn = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false });

@@ -97,11 +97,11 @@ export type ApproveWithActivationResult =
     capacity: {
       category: 'single_item_exceeds_budget' | 'route_unconfirmed' | 'content_unconfirmed';
       route?: 'legacy_trim' | 'shared_render';
-      hostKind?: 'openclaw' | 'codex';
+      hostKind?: 'openclaw' | 'codex' | 'workbuddy';
       budget?: number;
       costChars?: number;
       overByChars?: number;
-      perHost?: { hostKind: 'openclaw' | 'codex'; fits: boolean; costChars: number }[];
+      perHost?: { hostKind: 'openclaw' | 'codex' | 'workbuddy'; fits: boolean; costChars: number }[];
     };
   };
 
