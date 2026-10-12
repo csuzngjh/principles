@@ -424,9 +424,17 @@ Owner 对 #1999 提出 4 项修正，全部成立，本轮原位修正（非末�
 | 例行新建低风险放行 vs 未读既有路径须确认 | Owner 要求两者兼有；per-call 无文件存在性字段 | 一律 block 未读目标（保守代理） | 无专用 golden（judge r2 点名缺失） | **不可表达**（needs 文件存在性输入）——artificer risks[0] 逐字披露 |
 | 已获 Owner 确认放行 | Owner 要求；输入契约无确认信号字段（#1986 v12 声明 read-count 不能充当） | 不可实现 | judge 显式路由 risks | **不可表达——最小未决事项** |
 
-### 16.5 剩余根因与最小未决事项（非三选一）
+### 16.5 剩余根因分层（r6 评审修正版；原「契约内最优保守代理」结论撤回）
 
-本轮失败**不再是派生保真缺陷**（已修复并实证）——是无状态单次输入契约对两类 Owner 要求的真实不可表达：(1)「已获对精确目标+后果的确认则放行」需确认信号字段；(2)「例行新建放行 vs 未读既有路径须确认」需文件存在性字段。r2 规则已是契约内最优保守代理且三条限制全部如实披露；轮次上限 2（PRD cap）耗尽时剩余 requiredChanges 已全部可表达（golden case 矛盾修正是机械性的），但 cap 为既有轮次限制不放宽。**最小未决事项（交 Owner）**：是否接受「保守 block 代理+全披露」作为 Phase 1 合格候选语义（若是，下一链以同前提可收敛出可审批候选）；确认信号/文件状态输入是否列入未来授权项（超出本轮边界，不实施）。
+Owner 评审（#1999 P2-1）指出原结论把三层原因压扁为单一「契约表达力限制」——属实，撤回并分层重写：
+
+**第一层：直接原因（本次失败）**。对抗循环 2 轮上限耗尽（`max_rounds_exhausted_after_2`）——且耗尽时 r2 的 requiredChanges **仍有可修复项**：golden case case-positive-14 的内部矛盾（history 未含 worklog 读取而 facts 断言 priorReadOfTarget='yes'）是机械性修正；路径变体/首建正例的 golden cases 缺失可由下一轮补齐。若无 cap，r3 有合理收敛可能——但 cap 为既有轮次限制，本轮不放宽。
+
+**第二层：仍可修复项（未闭）**。(a) 上项 golden case 矛盾与覆盖缺口；(b) protected 只读要求的契约保留与披露仍只算部分达成（§16.4）——v6 义务的模型遵从是部分的；(c) r1 evaluator 的 marker 否定句误报（协议级，已由 PR #2000 r6 评审修复轮的结构化 mismatchFindings 通道修复，见 §16.8）。
+
+**第三层：长期架构限制（本轮不可修复，交 Owner）**。两类 Owner 要求在无状态单次输入契约中不可表达：(1)「已获对精确目标+后果的确认则放行」需确认信号字段（#1986 v12 已声明 read-count 不能充当）；(2)「例行新建放行 vs 未读既有路径须确认」需文件存在性字段。r2 规则用 priorRead 代理必然误拦其一（judge too_narrow 实锤）——它是**该契约下模型两轮产出的保守代理**，「最优」无证据支持，原表述撤回。
+
+**最小未决事项（交 Owner，非三选一）**：是否接受「保守 block 代理+全披露」作为 Phase 1 合格候选语义（若是，修复第二层可修复项后的下一链以同前提有收敛出可审批候选的合理可能）；确认信号/文件状态输入是否列入未来授权项（超出本轮边界，不实施）。
 
 ### 16.6 r6 后完成标准增量
 
@@ -434,9 +442,52 @@ Owner 对 #1999 提出 4 项修正，全部成立，本轮原位修正（非末�
 | --- | --- |
 | 「没有 Owner 来源的持久化机制被无标注升格」回归 | **已修复+实证**（v6 契约回归 Owner 语义+derived_mechanism 标注；v9 judge 检查实锤） |
 | 「protected 只读要求保留或显式暴露遗漏」 | **部分达成**（契约部分保留+risks 披露；专项 gap 披露未触发——模型遵从部分，如实记录） |
-| 「Principle 分歧与 Rule 错误正确分流」 | **达成**（r2 judge 逐字实锤：机制分歧走 marker 路由、规则缺陷走 requiredChanges、不可表达项走 risks） |
+| 「Principle 分歧与 Rule 错误正确分流」 | **达成**（r2 judge 逐字实锤：机制分歧走 marker 路由、规则缺陷走 requiredChanges、不可表达项走 risks）——附注：r1 的 marker 否定句误报暴露协议缺陷，已在 §16.8 修复 |
 | 「声明限制不豁免 scopePrecision」 | **达成**（too_narrow 按真实标准判定） |
 | 「repair 反馈进最终载荷+lineage 一致」 | **达成并加固**（#1994 路径 + 全等断言） |
-| 正式候选 | 仍 FAIL（generation_rejected）——**根因已从工程缺陷转为真实契约表达力限制**，最小未决事项交 Owner（§16.5） |
+| 正式候选 | 仍 FAIL（generation_rejected）——根因分层见 §16.5（直接原因=cap 耗尽+可修项未修；长期限制=确认信号/文件存在性不可表达），最小未决事项交 Owner |
 
-**Phase 1 总判定：维持 PARTIAL**。r6 实质推进：派生保真缺陷修复并经真实链实证；候选链失败根因精确定位到「确认信号+文件状态在无状态单次契约不可表达」；Principle 级分歧首次被正确路由到 Owner（needs_human_review 真实生效）。到 COMPLETE 仍需：Owner 对 §16.5 最小未决事项裁决 → （若接受保守代理语义）下一链产出候选 → Owner 审批 → GJ-01 → Episode/Effect/Outcome → 重判。
+**Phase 1 总判定：维持 PARTIAL**。r6 实质推进：派生保真缺陷修复并经真实链实证；候选链失败根因分层定位（§16.5）；Principle 级分歧首次被正确路由到 Owner（needs_human_review 真实生效）。到 COMPLETE 仍需：Owner 对 §16.5 最小未决事项裁决 → （若接受保守代理语义）修复 §16.5 第二层可修项后的下一链产出候选 → Owner 审批 → GJ-01 → Episode/Effect/Outcome → 重判。
+
+### 16.7 证据附入（r6 评审 P2-2：独立复核入口）
+
+原始证据保留于验收机本地 `D:\Code\_pdtest\p1-r5\`；以下为脱敏 manifest 与关键摘要，供不接触该机器的复核者验证结论。所有哈希=SHA-256（`sha256sum`），大小为字节。
+
+| 文件 | SHA-256（前 16 位） | 大小 | 作用 |
+| --- | --- | --- | --- |
+| t2-replay-run-manifest.md | `59455fa5b7c3326e` | 1,349 | T2 重放运行清单（UTC 时刻/程序绝对路径/版本/CODEX_HOME/cwd） |
+| t2-pre-replay-rows.json | `7c3262843944fee4` | 11,330 | 重放前账本 5 行全量快照（capturedAt 11:57:16Z） |
+| t2-replayA-stdout.json | `95ccc00e816ef254` | 1,561 | 重放 A hook stdout（p1f 安装版） |
+| t2-replayB-stdout.json | `95ccc00e816ef254` | 1,561 | 重放 B hook stdout——**与 A 逐字节同哈希**（重启前后输出确定性自证） |
+| t2-replayA-stderr.txt（=B=首轮） | `817c4c98c6bbf629` | 138 | 三次重放 stderr 全部同哈希：仅一行 `transcript_unavailable`，**无任何 evidence_batch_rejected** |
+| t2-pre-restart-summary.json | `b5a1257754e78029` | 2,482 | 真重启前四问业务摘要 |
+| t2-post-restart-summary.json | `b5a1257754e78029` | 2,482 | 真重启后四问业务摘要——**与重启前同哈希** |
+| snapshot-…-pre-replay.bak | `50889d717875260f` | 1,323,008 | 10-10 沙箱 state.db 重放前镜像（逐字节全等的比对基准） |
+| replay-event-manual-hook-probe-1.json | `e078f208e2e51162` | 359 | 被重交的原始 hook 事件 |
+| t3-session-request.json / t3-session-resp.json | `0aa63ba3b594a99d` / `84d30fdc8c18e9e1` | 440 / 620 | r6 链真实网关会话（chatcmpl_2326da59）请求/响应 |
+| t3-behavior-examples.json | `2db51e17c81063ed` | 801 | 行为包（ownerDesiredOutcome 与 r4 逐字一致，脚本断言=true） |
+| t3-run-rulehost.json / t3-run-rulehost2.json | `236d1ef9defa30c8` / `1f5b3a3c021b3735` | 659 / 2,280 | 首轮（pain_lookup ambiguous）与正式轮链输出 |
+| t3-chain-analysis.md | `574c16e52cd3c4bc` | 5,573 | 链工件逐字分析（intentContract/risks/judge requiredChanges/concerns 全文） |
+| b1-fidelity-diff-table.md | `7f5029ba34fb4103` | 5,806 | r5 B1 五层对照差异表（Owner 原文/诊断/Dreamer/Scribe/judge 逐字引用） |
+
+关键日志摘要（脱敏；网关 token 为测试自造值，已略去）：
+
+- T2 重放 stderr 全文（138 字节，三次同文）：`[PD] status=degraded reason=transcript_unavailable nextAction=Codex supplied no transcript for this event; nothing is read or fabricated.`
+- T2 durable 注入事件（sandbox/.state/logs/events_2026-10-12.jsonl 尾行）：`{"ts":"2026-10-12T11:57:50.117Z",…,"type":"runtime_v2_prompt_activations_injected","sessionId":"manual-hook-probe-1",…}`——与重放 A 完成时刻一致。
+- 账本核验（重放前后对照脚本输出，两次执行一致）：`pre: 5 post: 5` / `ALL_ROWS_BYTE_IDENTICAL: true` / `probe digest unchanged: true`。
+- p1f 安装标记（`.pd-runtime.json`）：`{"codexAdapter":"0.5.3","hostRuntime":"0.8.2","core":"1.291.4","installedAt":"2026-10-12T11:08:15.941Z"}`——严格早于重放时刻 11:57:50Z。
+- r6 链终态（t3-run-rulehost2.json）：`{"status":"generation_rejected",…stages: pain_lookup/dreamer/philosopher/scribe 均 succeeded, adversarial_loop degraded "max_rounds_exhausted_after_2"}`。
+
+### 16.8 r6 评审修复轮（2026-10-12，Owner 对 #2000/#1999 的评审）
+
+Owner 评审确认 6 项发现（5 修复 + #1998 无阻塞），全部属实并修复：
+
+| # | 发现 | 修复 |
+| --- | --- | --- |
+| #2000 P1-1 | v9 UNGROUNDED 条款把「无 Owner 原文依据的机制」一律定性为 Principle 偏离，与 Scribe v6 允许 `derived_mechanism:` 披露保留相混同；r6 链实证披露后仍被升级 | **四情形分离**（evaluator prompt v10 addendum 条款 3）：(a) 已披露派生实现选择≠divergence；(b) 错误归属 Owner=divergence；(c) 违背/挫败 Owner 归属要求=divergence；(d) RuleHost 不可表达=走 EXPRESSIBILITY，永非 mismatch。scopePrecision 不豁免 |
+| #2000 P1-2 | `owner_requirement_gap:` 仅是 risks 文本约定，无下游消费者——缺口无确定性处置路径 | **结构化 + 双消费**：scribe 输出新增 `ownerRequirementGaps`（validator 硬拒畸形）；pipeline 所有 post-scribe 结果携带（`RuleHostPipelineResult.ownerRequirementGaps`，含 text-principle 路径）；evaluator prompt 第 6 条义务——declared gaps 永不被视为已满足，挫败即情形 (c) → 结构化 finding → Owner |
+| #2000 P2-1 | `startsWith` 扫描把否定句（「[principle_pain_mismatch] 无需触发」）误判为治理信号（r6 r1 实测误报） | **结构化肯定信号**：治理路由改读 `evaluation.mismatchFindings`（schema+validator+runner+Owner 决策卡 brief 首位展示）；concerns 文本永非信号。真实治理消费回归：Case C-negative 经生产 runner 驱动否定句 concern → 修复种子正常、不进 NHR（旧代码结构性必红） |
+| #1999 P2-1 | §16.5 根因结论超证 | 本节 §16.5 分层重写（直接原因/仍可修复/长期限制；撤回「最优」） |
+| #1999 P2-2 | 安装验收证据不可独立复核 | §16.7 脱敏 manifest + 哈希 + 关键摘要附入（重放 A/B 同哈希、重启前后同哈希为自证材料） |
+
+修复实现（PR #2000 追加提交 b9b1bb6b）：prompt 契约 v7/v10；internalization 80 文件/1193 用例全绿（含 Case C-negative 负对照与 3 个 gap-reader 单测）；pd-cli pipeline 套件 28 绿；core tsc 干净；双独立子代理复核。
