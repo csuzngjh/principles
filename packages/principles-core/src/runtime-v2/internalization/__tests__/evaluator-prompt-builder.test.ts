@@ -37,7 +37,7 @@ describe('EvaluatorPromptBuilder', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('sourceTrace.artificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId');
   });
 
-  it('promptContractVersion value is evaluator-output-v1.prompt.v8 (review-round mapping-authority anchor)', () => {
+  it('promptContractVersion value is evaluator-output-v1.prompt.v9 (derivation-fidelity anchor)', () => {
     // v7 (2026-10-11 closeout) anchored the first kind-semantics clause but
     // asserted a FALSE mapping ("EVERY writeTools entry dispatches as
     // 'write'") — the real OpenClaw catalog's writeTools is a risk grouping
@@ -45,7 +45,33 @@ describe('EvaluatorPromptBuilder', () => {
     // agent-delegation tool dispatching 'agent'. v8 (review round) makes the
     // host's OWN tool-to-kind mapping the authority and keeps unknown when
     // no mapping is present.
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v8');
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v9');
+  });
+
+  // ── prompt.v9 (2026-10-12 r6): requiredChanges expressibility + ungrounded
+  // mechanism routing ──
+  // Live-chain evidence (p1-final r4 chain, 2026-10-12): the judge's
+  // requiredChanges[0] demanded the rule read "Owner write-confirmation
+  // records" from input.context — a field the RuleHost stateless single-call
+  // input contract does NOT carry. Regenerating the rule can never satisfy
+  // such a demand, so the item belonged in a marked concern for the Owner
+  // (the contract asserted a mechanism with no Owner source), not in
+  // requiredChanges. v9 adds two clauses:
+  //  (a) RULEHOST EXPRESSIBILITY: requiredChanges may only demand behavior the
+  //      stateless single-call evaluate(input) contract can express; a demand
+  //      presupposing new input (persisted records, authorization tables,
+  //      cross-call state) goes to concerns instead;
+  //  (b) UNGROUNDED CONTRACT MECHANISM: when the intentContract asserts a
+  //      mechanism absent from the diagnosis's Owner-attributed statements,
+  //      that divergence is a Principle↔Pain mismatch finding (existing
+  //      marker + Owner routing), never a rule defect. scopePrecision itself
+  //      is unchanged — declared limitations do not auto-pass misblock/miss
+  //      checks.
+  it('instruction carries the RULEHOST EXPRESSIBILITY clause for requiredChanges (v9)', () => {
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('RULEHOST EXPRESSIBILITY');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('stateless single-call');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('can never be satisfied by regenerating the rule');
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('record it in evaluation.concerns instead');
   });
 
   // Review round (2026-10-11): the clause must point the judge at the real

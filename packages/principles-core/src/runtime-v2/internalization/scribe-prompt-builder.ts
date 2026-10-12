@@ -152,6 +152,11 @@ INTENT CONTRACT (required — the alignment anchor for every downstream stage):
 - evidenceSource: name the actual pain/diagnosis facts this distills from.
 - validationExpectation: what evidence an evaluator should demand before accepting a rule as faithful. A later repair round checks required changes against this field: a change that contradicts it is flagged, not blindly implemented.
 
+OWNER-SOURCE GROUNDING (applies when formation evidence is present):
+- The requirements source is the diagnosis's Owner-attributed statements: rootCause, summary, violatedPrinciples, and evidence notes that state what the OWNER requires (e.g. "Owner 明确……必须先确认"). The diagnosis's implementation recommendations (kind=implementation / rule / principle) are the pipeline's own DESIGN PROPOSALS — candidate answers, never Owner requirements.
+- Every requirement you write into intentContract (ownerIntent / targetBehavior / forbiddenBehavior / validationExpectation) MUST be grounded in those Owner-attributed statements. A mechanism that appears only in recommendations or upstream proposals (e.g. a persisted confirmation-record store, an authorization table, a new input field) MUST NOT be presented as Owner-mandated: either omit it, or carry it as an explicitly derived implementation choice and mark it in risks with the prefix "derived_mechanism:".
+- Coverage check (when formation evidence is present): enumerate the Owner-attributed requirements you can see, then check each one against your contract. If any of them is NOT carried into the contract — narrowed (e.g. a requirement covering reads AND writes carried as write-only), partially carried, or dropped — you MUST declare it in risks with the prefix "owner_requirement_gap:" followed by the requirement and why it is not carried. Silence about a dropped requirement is a fidelity defect, not a simplification.
+
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
 - principleDraft.title MUST be a non-empty string (concise, <=100 chars)
@@ -208,7 +213,26 @@ ${formationEvidenceBlock}${languageDirective}`;
  * prechecks), and a run on v5 emits exactly the v4 shape plus the new
  * version string.
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v5';
+/**
+ * Derivation fidelity (2026-10-12 r6): bumped v5 → v6. The INTENT CONTRACT
+ * section gains the OWNER-SOURCE GROUNDING block. Live-chain evidence
+ * (p1-final r4 chain): the Dreamer proposed a "persisted Owner
+ * write-confirmation records" mechanism that appears NOWHERE in the Owner's
+ * pain text — the diagnosis carried it only as an implementation
+ * RECOMMENDATION — and the scribe wrote it into intentContract.targetBehavior /
+ * validationExpectation as if Owner-mandated, while silently narrowing the
+ * Owner's "ALL protected/ access (including read-only ls) requires
+ * confirmation" to write-only gating with no disclosure. The evaluator then
+ * enforced the contract as the correctness definition and the chain died
+ * demanding a check the RuleHost input contract cannot express. v6 obliges
+ * the scribe to (a) ground contract requirements in the diagnosis's
+ * Owner-attributed statements — never in implementation recommendations, and
+ * (b) declare every Owner-attributed requirement NOT carried into the
+ * contract with a structured `owner_requirement_gap:` risks entry. Additive:
+ * the OUTPUT FORMAT, the validator, and `ScribeOutputV1` are unchanged; a run
+ * on v6 emits exactly the v5 wire shape plus the new version string.
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v6';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;

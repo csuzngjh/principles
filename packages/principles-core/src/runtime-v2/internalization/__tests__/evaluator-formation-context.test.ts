@@ -213,8 +213,8 @@ describe('PRI-843 — evaluator prompt contract (conditional formation injection
     scribeArtifact: scribeContent(true),
   };
 
-  it('prompt contract version is v8', () => {
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v8');
+  it('prompt contract version is v9', () => {
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v9');
   });
 
   it('without formationContext the payload keeps the pre-PRI-843 shape (byte-identical) and the system prompt is unchanged', () => {
@@ -258,6 +258,29 @@ describe('PRI-843 — evaluator prompt contract (conditional formation injection
     // D-2 degradation: the diagnosis is evidence, not truth — absence alone must not reject.
     expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('EVIDENCE, not truth');
     expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('ABSENCE of formation evidence alone');
+  });
+
+  // ── prompt.v9 (2026-10-12 r6): ungrounded contract mechanism routing ──
+  // Live-chain evidence (p1-final r4 chain): the intentContract asserted a
+  // "persisted Owner write-confirmation records" mechanism that none of the
+  // diagnosis's Owner-attributed statements mention (it entered the chain as
+  // an implementation RECOMMENDATION — a design proposal). The judge enforced
+  // the contract as the DEFINITION of correctness and demanded the mechanism
+  // in requiredChanges; the RuleHost input contract cannot express it, so the
+  // chain died at the round cap with the Principle-level question stranded.
+  // v9 obliges the judge to treat a contract mechanism with no grounding in
+  // the Owner-attributed diagnosis statements as a Principle↔Pain mismatch
+  // finding (existing marker → Owner routing), never a rule defect — while
+  // scopePrecision keeps judging the behavior the contract CAN express.
+  it('the addendum routes ungrounded contract mechanisms to the mismatch marker, not requiredChanges (v9)', () => {
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('UNGROUNDED CONTRACT MECHANISM');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('Owner-attributed statements');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('is a Principle-source divergence');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('Record it as a ' + PRINCIPLE_PAIN_MISMATCH_MARKER + ' concern');
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('MUST NOT appear in requiredChanges');
+    // scopePrecision is NOT exempted by a declared limitation: the judge still
+    // judges over-breadth/over-narrowness on the behavior the contract expresses.
+    expect(EVALUATOR_FORMATION_EVIDENCE_ADDENDUM).toContain('does not exempt scopePrecision');
   });
 });
 

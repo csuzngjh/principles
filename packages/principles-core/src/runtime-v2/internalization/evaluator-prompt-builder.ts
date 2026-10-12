@@ -253,6 +253,7 @@ CONSTRAINTS:
 - evaluation.strengths MUST be an array of strings (can be empty)
 - evaluation.concerns MUST be an array of strings (can be empty)
 - evaluation.requiredChanges MUST be an array of strings; when decision is "needs_revision" it MUST contain at least one item (a revision demand without an actionable change is an invalid verdict)
+- RULEHOST EXPRESSIBILITY: requiredChanges may only demand behavior the rule can express within its stateless single-call evaluate(input) contract — the input fields a rule actually receives. A demand that presupposes NEW input (e.g. persisted confirmation records, an authorization table, cross-call state) can never be satisfied by regenerating the rule: record it in evaluation.concerns instead (with the evidence), and judge scopePrecision on the behavior the contract CAN express.
 - evaluation.priorRequirementStatuses is REQUIRED when input.previousEvaluation is present: an array of { id, status } covering EVERY prior requirement id, where status is one of resolved, still_open, regressed; omit the field entirely on the first round (no prior evaluation)
 - evaluation.requirementLedger is REQUIRED under the same condition: an array of { id, statement, status } echoing EVERY input requirement (same ids and statements as given; status one of resolved, still_open, regressed); omit entirely on the first round
 - sourceArtificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId (non-empty string)
@@ -301,6 +302,7 @@ Your input additionally carries \`formationContext\` — the ORIGINAL FORMATION 
 HOW TO USE IT:
 1. Judge faithfulness at TWO levels: (a) does the Rule faithfully implement the Principle — your existing intentConsistency / scopePrecision / traceCoverage duties; and (b) does the Principle actually address the pain described by sourceDiagnosis (rootCause and evidence)? Level (b) asks whether the principle answers the REAL root cause, or only a minor facet of it, or a mis-attributed one.
 2. When you conclude the Principle does NOT address the source pain, record it in evaluation.concerns as a concern whose text BEGINS with the exact token ${PRINCIPLE_PAIN_MISMATCH_MARKER}, followed by the concrete evidence citation (a diagnosis evidence sourceRef, a rootCause excerpt, or a provenance id). The pipeline routes that finding to the Owner for a governance decision.
+2b. UNGROUNDED CONTRACT MECHANISM: check every MECHANISM the intentContract asserts (a store, record, table, signal, or input field) against the diagnosis's Owner-attributed statements (rootCause / summary / violatedPrinciples / evidence notes that state what the OWNER requires). An asserted mechanism that appears only in recommendations or proposals — never in what the diagnosis attributes to the Owner — is a Principle-source divergence: the contract, not the rule, drifted from the pain. Record it as a ${PRINCIPLE_PAIN_MISMATCH_MARKER} concern citing the contract text against the diagnosis text; such a demand MUST NOT appear in requiredChanges (a change presupposing input the RuleHost contract does not carry can never be satisfied by regenerating the rule — see RULEHOST EXPRESSIBILITY). This does not exempt scopePrecision: you still judge over-breadth or over-narrowness on the behavior the contract CAN express, and a declared architecture limitation never auto-passes a misblock or a miss.
 3. NEVER express a Principle-level revision demand in evaluation.requiredChanges — requiredChanges may only demand changes to the RULE itself. The repair pipeline can only regenerate the rule; it can never satisfy a Principle-level demand.
 4. A ${PRINCIPLE_PAIN_MISMATCH_MARKER} finding is NOT a rule defect: by itself it must not flip codeReview dimensions, must not lower the score below what the rule itself merits, and must not appear in requiredChanges. If the rule is sound, judge the rule as sound and let the marked concern carry the principle-level question.
 5. The diagnosis is EVIDENCE, not truth: it is itself an upstream product of this chain and may mis-attribute. When sourceDiagnosis is absent or you find it untrustworthy, say so in risks, weaken your pain-faithfulness conclusion accordingly, and NEVER base a rejection or a ${PRINCIPLE_PAIN_MISMATCH_MARKER} finding on the ABSENCE of formation evidence alone.
@@ -369,7 +371,22 @@ PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
 // the catalog as a risk grouping that must never be read as a kind table,
 // keeps unknown when no mapping is present, and re-allows concrete
 // parameter-shape coverage flags with evidence. Additive input field.
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v8';
+//
+// Derivation fidelity (2026-10-12 r6): bumped v8 → v9. Live p1-final r4 chain:
+// the judge's requiredChanges[0] demanded the rule read "Owner write-
+// confirmation records" from input.context — a field the RuleHost stateless
+// single-call contract does NOT carry — because the intentContract asserted
+// that mechanism while the diagnosis's Owner-attributed statements never
+// mentioned it (it entered the chain as an implementation RECOMMENDATION).
+// Two additive clauses: RULEHOST EXPRESSIBILITY in CONSTRAINTS (a demand
+// presupposing new input goes to concerns, never requiredChanges —
+// regenerating the rule can never satisfy it), and UNGROUNDED CONTRACT
+// MECHANISM in the formation addendum (a contract mechanism absent from the
+// Owner-attributed diagnosis statements is a Principle↔Pain mismatch finding
+// with the existing marker + Owner routing, never a rule defect). Additive:
+// a run without formation evidence sees only the new CONSTRAINTS clause and
+// the version string.
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v9';
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
