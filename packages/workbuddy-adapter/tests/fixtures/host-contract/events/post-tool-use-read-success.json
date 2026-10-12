@@ -1,0 +1,25 @@
+{
+ "description": "Sanitized real WorkBuddy 5.8.1 (engine 2.161.0) hook input payload, captured 2026-10-12T15:28:06.256Z in isolated lab (WORKBUDDY_CONFIG_DIR + CODEBUDDY_CONFIG_DIR), mock model drove the tool call; payload construction is genuine engine behavior.",
+ "probe": "P03",
+ "event": "PostToolUse",
+ "scenario": "engine 2.161.0 CLI print mode, permission_mode=bypassPermissions",
+ "payload": {
+  "session_id": "01a130ba-6a85-7e11-9562-eb776861ef22",
+  "transcript_path": "D:\\Code\\_worktrees\\wb-probe-lab\\iso-home\\projects\\d-Code-_worktrees-wb-probe-lab-proj-a\\01a130ba-6a85-7e11-9562-eb776861ef22.jsonl",
+  "cwd": "d:\\Code\\_worktrees\\wb-probe-lab\\proj-a",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+   "file_path": "D:/Code/_worktrees/wb-probe-lab/proj-a/readme-a.txt"
+  },
+  "tool_response": "   1→hello from proj-a\n   2→",
+  "call_id": "toolu_p03_success",
+  "tool_use_id": "toolu_p03_success",
+  "agent_type": "cli",
+  "permission_mode": "bypassPermissions",
+  "client": "CLI",
+  "version": "2.161.0",
+  "generation_id": "01a130ba6ac7721393a571685d0f778d",
+  "model": "wb-probe-mock"
+ }
+}

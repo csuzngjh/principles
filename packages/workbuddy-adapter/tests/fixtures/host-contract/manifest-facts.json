@@ -1,0 +1,57 @@
+{
+  "$comment": "WorkBuddy plugin manifest/registration facts from Phase 0 probe P01 (2026-10-12), real engine 2.161.0 / desktop 5.8.1, isolated config dir. These facts define how a PD WorkBuddy plugin must declare and register itself.",
+  "pluginLayout": {
+    "manifestPath": ".codebuddy-plugin/plugin.json (aliases .workbuddy-plugin/, .claude-plugin/ also accepted per docs)",
+    "manifestRequiredFields": ["name (kebab-case)"],
+    "manifestOptionalFieldsUsed": ["version", "description", "defaultEnabled"],
+    "hooksFile": "hooks/hooks.json at plugin ROOT (NOT inside .codebuddy-plugin/); hooks field in plugin.json may also point to a custom path",
+    "hooksJsonShape": {
+      "hooks": {
+        "EventName": [
+          { "matcher": "regex-for-tool-names (PreToolUse/PostToolUse/PostToolUseFailure only; '*'/empty/omitted = all)", "hooks": [ { "type": "command", "command": "node \"${CODEBUDDY_PLUGIN_ROOT}/scripts/wrapper.cjs\" <eventArg>", "timeout": 30 } ] }
+        ]
+      }
+    },
+    "envVarsInHookCommand": [
+      "CODEBUDDY_PLUGIN_ROOT (absolute plugin dir; CLAUDE_PLUGIN_ROOT alias also set)",
+      "CODEBUDDY_PROJECT_DIR (absolute project cwd)"
+    ],
+    "frontmatterHooksGate": "hooks/hooks.json is NOT subject to allowUntrustedFrontmatterHooks (that gate is only for Agent/Skill frontmatter hooks)"
+  },
+  "registrationPaths": {
+    "marketplaceInstall": {
+      "marketplaceManifest": "<marketplace-root>/.codebuddy-plugin/marketplace.json with {name, plugins:[{name, source:'./<plugin-dir-inside-marketplace>', ...}]} (root-level marketplace.json is NOT read; source outside marketplace root is rejected: 'Path escapes marketplace root')",
+      "commands": [
+        "node <engine> plugin marketplace add <local-dir>",
+        "node <engine> plugin install <name>@<marketplace> (default scope user)",
+        "node <engine> plugin list",
+        "node <engine> plugin uninstall <name>@<marketplace>",
+        "node <engine> plugin enable|disable <name>@<marketplace>"
+      ],
+      "settingsWrite": "settings.json gains enabledPlugins[\"name@marketplace\"]=true (other keys preserved)",
+      "registryFile": "<config>/plugins/installed_plugins.json (version 2) records scope:user, installPath (absolute, inside cache), version, installedAt",
+      "cacheLayout": "<config>/plugins/cache/<marketplace>/<plugin>/<version>/ (plugin copied from marketplace source; version from plugin.json)",
+      "builtinMarketplaces": "engine materializes official marketplace zips into any config dir on first run (cb_teams_marketplace, codebuddy-plugins-official observed)"
+    },
+    "sessionScopedDevLoad": {
+      "flag": "--plugin-dir <dir> (repeatable)",
+      "writes": "nothing to settings; plugin active for that process only; observed data-dir artifact <config>/plugins/data/<name>-inline"
+    }
+  },
+  "enabledPluginsFormat": {
+    "key": "\"<plugin-name>@<marketplace-name>\"",
+    "value": "boolean (true=enabled)",
+    "observedRealUserSettings": "13 entries, format consistent, e.g. \"workbuddy-sheetagent@workbuddy-builtin\": true"
+  },
+  "activationTime": {
+    "installOrUpdate": "takes effect in NEW sessions, or immediately via /reload-plugins (CLI prints this hint); no restart of other processes required",
+    "uninstall": "same rule; verified: after uninstall, new sessions fire NO plugin hooks; enabledPlugins entry removed (empty object retained); installed_plugins.json entry removed; cache directory orphaned in place (not deleted in probe)"
+  },
+  "hookDiscoveryForSessions": {
+    "sourcesMerged": "settings.json hooks key + installed/enabled plugin hooks/hooks.json + scoped (frontmatter/subagent) registry",
+    "pluginHooksRequire": "plugin installed AND enabledPlugins true (or --plugin-dir / defaultEnabled)"
+  },
+  "hooksSettingsKeyFormat": {
+    "note": "user-level hooks can also be declared directly in settings.json under \"hooks\" with the same EventName shape; probe verified plugin path; settings-path hooks were not separately matrix-tested"
+  }
+}
