@@ -1,6 +1,7 @@
 # PRI-932 — Phase A.2 Independent Adversarial Review Report
 
-> **Version:** 1.0.0; **Date:** 2026-10-12; **Baseline reviewed:** `main@91d75b21ba8ebf458709406756f4b6e7e883c385` (verified == origin/main at review start)  
+> **Version:** 1.1.0; **Date:** 2026-10-12; **Baseline reviewed:** `main@91d75b21ba8ebf458709406756f4b6e7e883c385` (verified == origin/main at review start)  
+> **v1.0.0 → v1.1.0:** added Owner review round 1 record (§7 REQUEST CHANGES: P1-01/P1-02) with real-SQLite reproduction evidence (§Appendix B) and v0.3.0 resolution mapping.  
 > **Materials under review:** SPEC v0.1.0, Writer Reality Map v0.1.0 (untracked drafts), Legacy History Recoverability v0.1.0 (untracked drafts)  
 > **Method:** main agent (architecture adjudicator) + two parallel read-only adversarial reviewers:  
 > — **Reviewer A (SQLite / Persistence):** schema, transactions, idempotency, migration, old-binary bypass, trigger semantics; plus **better-sqlite3 experiments** (Appendix A).  
@@ -111,4 +112,62 @@ Reviewer disagreement check: A-13 ("AUD-021 partially mitigated") vs B-06 ("AUD-
 - **Pre-cutover history** remains partially unrecoverable (Recoverability doc); no SPEC language can change that.
 - Line numbers drift; the docs use method-name anchors and mandate re-anchoring at PR time (AC-14).
 
-**Review gate status:** P0_OPEN = 0; P1_OPEN = 0; P2 unresolved = 0 (all resolved or explicitly gated); SPEC_READY_FOR_OWNER = YES (v0.2.0).
+**Review gate status (after adversarial round):** P0_OPEN = 0; P1_OPEN = 0; P2 unresolved = 0 (all resolved or explicitly gated); SPEC_READY_FOR_OWNER = YES (v0.2.0 — superseded by the Owner round, §7).
+
+---
+
+## 7. Owner review round 1 (v0.2.0 → v0.3.0)
+
+The Owner issued **REQUEST CHANGES** on v0.2.0 with two P1 design defects. Both were independently verified by the main agent before fixing (real-SQLite reproduction + code inspection); both are fixed in SPEC v0.3.0.
+
+### OC-P1-01 [P1] — Stale-fact replay bypasses the DB guard (Owner-identified; CONFIRMED)
+
+**Owner's finding:** the §4.4.3 `BEFORE INSERT` guard as specified accepted *any* historical `activated` fact matching `(idempotency_key, occurred_at)`. Facts are permanent, so replaying the first activation's `INSERT OR REPLACE` after an Owner deactivation matched the old fact and reset `deactivated_at` to NULL — resurrecting a deactivated principle with **zero new facts** (violates INV-01/INV-03 and Owner-governance invariance).
+
+**Verification:** real better-sqlite3 reproduction, exact scenario per the Owner's 5 steps — see §Appendix B checks A1–A4 (bypass confirmed under v0.2.0 semantics: stale replay not aborted, state resurrected, still only 2 facts).
+
+**Resolution (SPEC v0.3.0 §4.4.3):** guards now accept a fact **only while it is the latest transition fact for its key** (normative "consumable fact" definition + recency sub-predicate with deterministic `event_id` tie-break). An INSERT (incl. `INSERT OR REPLACE`) must be justified by a consumable `activated` fact whose shape the NEW row matches; the UPDATE guard gets the same predicate (closing the symmetric stale-UPDATE bypass). Alternatives (authorization-token table, projection version column) evaluated and rejected in-spec (more state, same guarantee / reader-facing schema change). **AC-17** pins the full closure suite, including the Owner's exact scenario and legitimate-path parity.
+
+### OC-P1-02 [P1] — operation_key assumed re-activation yields a new approvalId (Owner-identified; CONFIRMED, and broader than reported)
+
+**Owner's finding:** `makeApprovalId(artifactId, channel) = 'apr_<channel>_<artifactId>'` is deterministic and `enqueue` uses `INSERT OR IGNORE` (`sqlite-approval-store.ts:138-157`), so a genuine re-activation reuses the same approvalId; v0.2.0's `operation_key = …|<approvalId>` would misread every re-activation as a replay, making AC-01 impossible.
+
+**Verification:** confirmed at `sqlite-approval-store.ts:138-140,155-157` (`INSERT OR IGNORE`), `:258-265` (`resetToPending` recycles the same row and clears `decided_at`). **Broader than reported:** `verifyApprovedDispatch` (`activation-dispatcher.ts:537-600`) checks existence, `status === 'approved'`, artifact and channel — but not `decided_at` — and activation does not consume the approval row; the comment at `:644-646` documents that deactivation deliberately re-opens the dispatch path. Net: a stale 'approved' row can authorize a re-activation **without any fresh Owner approval action** — a latent governance-replay path in current code that the lifecycle work must close, not just an operation_key formatting issue.
+
+**Resolution (SPEC v0.3.0 §4.1/§4.4.4):** two-identity model. *Approval identity* (reusable queue slot) gates authorization only; *operation identity* `operation_key = <writer>|<operation>|<idempotency_key>|<request_digest>` is a deterministic digest over the requested transition parameters (incl. the approval's `decided_at` snapshot read inside the transaction) — stable across failed retries, distinct across genuine re-activations, never random. INV-04 is restated as two-level idempotency (subject-state replay + operation_key). New **approval-epoch freshness rule**: a dispatch may create an `activated` transition only when the acting approval's `decided_at` postdates the subject's latest stop fact, else refuse `approval_epoch_stale` — this **tightens** the approval gate to its evident intent, relaxing nothing. **AC-18** (positive + negative controls) and **OD-10** (Owner approval of this behavior change) added.
+
+### Round gate status
+
+Both Owner P1s: CONFIRMED → FIXED in v0.3.0. Reproduction evidence: §Appendix B (15/15 checks: bypass reproduced under v0.2.0 semantics; closure + legitimate-path parity under v0.3.0 semantics). SPEC v0.3.0 gate: P0_OPEN = 0; P1_OPEN = 0; SPEC_READY_FOR_OWNER = YES (pending Owner re-review; no self-approval).
+
+---
+
+## Appendix B — Stale-fact replay reproduction and guard-fix validation (better-sqlite3, in-memory, 2026-10-12)
+
+Setup: repo-exact `activations` DDL (no PK, `UNIQUE(idempotency_key)`) + minimal `activation_lifecycle_events(event_id PK, idempotency_key, transition_kind, action_after, target_ref, occurred_at)`.
+
+**v0.2.0 guard (existential check):** `BEFORE INSERT … RAISE(ABORT) WHERE NOT EXISTS (SELECT 1 FROM events WHERE idempotency_key = NEW.idempotency_key AND transition_kind='activated' AND occurred_at = NEW.activated_at)`.
+
+**v0.3.0 guard (consumption-aware):** same correlation, plus row-shape equality (`action_after = NEW.action AND target_ref = NEW.target_ref`) plus **consumability**: `AND NOT EXISTS (SELECT 1 FROM events f WHERE f.idempotency_key = NEW.idempotency_key AND (f.occurred_at > e.occurred_at OR (f.occurred_at = e.occurred_at AND f.event_id > e.event_id)))`. UPDATE guard: same predicate per changed column (`deactivated`/`superseded` vs `promoted_live`). DELETE guard: unconditional ABORT.
+
+| # | Check | Result |
+| --- | --- | --- |
+| A1 | T1 activate + T2 deactivate under v0.2.0 guard → `deactivated_at` set | PASS |
+| A2 | **Stale T1 replay under v0.2.0 guard → NOT aborted (P1-01 confirmed)** | PASS |
+| A3 | After attack: `deactivated_at` is NULL again, no new fact | PASS |
+| A4 | Still only 2 facts after the state change (INV-01 broken) | PASS |
+| B1 | T1 legitimate first activation under v0.3.0 guards | PASS |
+| B2 | T2 legitimate deactivation | PASS |
+| B3 | **Stale T1 replay → ABORTED (fact consumed by newer E2)** | PASS |
+| B4 | `deactivated_at` unchanged after attack | PASS |
+| B5 | T3 genuine reactivation (new fact @T3, latest) allowed; `deactivated_at` cleared | PASS |
+| B6 | Idempotent same-state rewrite of committed T3 allowed | PASS |
+| B7 | **Owner scenario step 5: T3 INSERT replay after T4 deactivation → ABORTED** | PASS |
+| B8 | **Stale UPDATE reusing old `deactivated` fact on a live row → ABORTED** | PASS |
+| B9 | Fact-less INSERT → ABORTED | PASS |
+| B10 | DELETE on populated projection → ABORTED | PASS |
+| B11 | W03 two-key atomic replacement (new INSERT + old supersede UPDATE, one tx) allowed | PASS |
+
+15/15. Reproduction harness retained in the session workspace (`.tmp/pri932-p101-repro.mjs`); AC-17 requires the equivalent cases as committed Phase B tests on the production schema.
+
+**Review gate status:** P0_OPEN = 0; P1_OPEN = 0; SPEC_READY_FOR_OWNER = YES (v0.3.0).
