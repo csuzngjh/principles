@@ -1,0 +1,275 @@
+/**
+ * Production-path tests (SPEC §8 三路径): the REAL built entry process against
+ * a REAL governance workspace (SQLite state.db + trajectory.db) reached
+ * through the production OD-07 resolution (fake home → os.homedir()).
+ *
+ * Activations are injected through the PRODUCTION store writers
+ * (SqliteActivationStateStore.recordActivation) — never by direct writes to
+ * evidence tables. Assertions cover:
+ *   - approved prompt principle → UserPromptSubmit additionalContext injection;
+ *   - live rule deny on a protected path → deny JSON (the P02-verified host
+ *     blocker; the target file is never written by the hook);
+ *   - a computed deny SURVIVES evidence persistence failure (encode first);
+ *   - real PostToolUse failures → shared pain evidence chain, including the
+ *     is_error-without-exitCode shape that must NOT default to success;
+ *   - A/B project isolation on one governance workspace (P06);
+ *   - degraded config never masquerades as healthy and never writes elsewhere.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
+import { runEntry } from './helpers/hook-runner.js';
+import {
+  activationArtifact,
+  cleanupTempDirs,
+  fixturePayload,
+  makeGovernance,
+  makeHome,
+  makeProjectDir,
+  makeTrajectory,
+} from './helpers/workbench.js';
+import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
+
+afterAll(() => { cleanupTempDirs(); });
+
+const PROMPT_PRINCIPLE = 'P_WB_PROMPT_601';
+const LIVE_RULE = 'R_WB_LIVE_601';
+const liveRuleCode = `function evaluate(input) { if (input.action.normalizedPath.indexOf('wb-protected-601') >= 0) return { decision: 'block', matched: true, reason: 'WB_RULE_DENY_601' }; return { decision: 'allow', matched: false, reason: 'safe' }; } var meta={name:'wb',version:'1',ruleId:'R_WB_LIVE_601',coversCondition:'all'};`;
+
+function productionHome(options: { receiptLedger?: boolean } = {}): { home: string; governance: string } {
+  const home = makeHome();
+  const governance = makeGovernance(home, { workbuddyFlag: true, receiptLedgerFlag: options.receiptLedger ?? false });
+  return { home, governance };
+}
+
+describe('three MVP paths through the real production runtime', () => {
+  it('injects an owner-approved prompt principle into the UserPromptSubmit channel', async () => {
+    const { home, governance } = productionHome();
+    await activationArtifact(governance, {
+      id: 'art-prompt-601', kind: 'principle', principleId: PROMPT_PRINCIPLE,
+      content: { principleId: PROMPT_PRINCIPLE, text: 'UNIQUE_WB_PROMPT_DIRECTIVE_601' },
+      channel: 'prompt', action: 'prompt_activate', target: `ledger://${PROMPT_PRINCIPLE}`,
+    });
+    const project = makeProjectDir(home, 'inj');
+    const payload = fixturePayload('user-prompt-submit.json', { cwd: project });
+    const result = runEntry(home, JSON.stringify(payload), 'UserPromptSubmit');
+    expect(result.status).toBe(0);
+    // Exactly ONE JSON line on stdout — no stray text (P04: raw stdout is injected).
+    expect(result.stdout.trim().split(/\r?\n/)).toHaveLength(1);
+    expect(JSON.parse(result.stdout)).toEqual({
+      hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: expect.stringContaining('UNIQUE_WB_PROMPT_DIRECTIVE_601') },
+    });
+  });
+
+  it('denies a protected live-rule tool call and leaves the target file unwritten; safe control stays neutral', async () => {
+    const { home, governance } = productionHome();
+    await activationArtifact(governance, {
+      id: 'art-rule-601', kind: 'rule', principleId: 'P_WB_RULE_601', ruleId: LIVE_RULE,
+      content: { principleId: 'P_WB_RULE_601', ruleId: LIVE_RULE, implementationCode: liveRuleCode },
+      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: `impl://${LIVE_RULE}`,
+    });
+    const project = makeProjectDir(home, 'deny');
+    const deniedPath = path.join(project, 'wb-protected-601.txt');
+    const denied = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: deniedPath, content: 'must not exist' } })), 'PreToolUse');
+    expect(denied.status).toBe(0);
+    expect(JSON.parse(denied.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'WB_RULE_DENY_601' } });
+    // The hook itself never performs the tool; the deny JSON is the P02-verified
+    // signal the HOST enforces (probe: target file not written).
+    expect(fs.existsSync(deniedPath)).toBe(false);
+
+    const allowedPath = path.join(project, 'wb-safe-601.txt');
+    const allowed = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: allowedPath, content: 'x' } })), 'PreToolUse');
+    expect(allowed.status).toBe(0);
+    expect(allowed.stdout).toBe('');
+  });
+
+  it('keeps the computed deny when evidence persistence fails (encode first, record after)', async () => {
+    const { home, governance } = productionHome();
+    await activationArtifact(governance, {
+      id: 'art-rule-602', kind: 'rule', principleId: 'P_WB_RULE_602', ruleId: 'R_WB_LIVE_602',
+      content: { principleId: 'P_WB_RULE_602', ruleId: 'R_WB_LIVE_602', implementationCode: liveRuleCode.replace(/601/g, '602') },
+      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_WB_LIVE_602',
+    });
+    // Real fs failure at the events writer: the file path is a DIRECTORY.
+    const today = new Date().toISOString().slice(0, 10);
+    fs.mkdirSync(path.join(governance, '.state', 'logs', `events_${today}.jsonl`), { recursive: true });
+    const project = makeProjectDir(home, 'persist');
+    const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: path.join(project, 'wb-protected-602.txt'), content: 'x' } })), 'PreToolUse');
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'WB_RULE_DENY_602' } });
+    expect(result.stderr).toContain('rulehost_evaluation_persist_failed');
+  });
+
+  it('records real PostToolUse failures into the shared evidence chain (exitCode AND is_error shapes)', async () => {
+    const { home, governance } = productionHome({ receiptLedger: false });
+    makeTrajectory(governance);
+    const project = makeProjectDir(home, 'post');
+
+    // Bash non-zero exit (fixture shape): explicit error + exitCode 7.
+    const bash = runEntry(home, JSON.stringify(fixturePayload('post-tool-use-bash-exit7.json', { cwd: project })), 'PostToolUse');
+    expect(bash.status).toBe(0);
+    expect(bash.stdout).toBe('');
+
+    // Read is_error WITHOUT exitCode: decoder normalization must keep it a
+    // FAILURE (forbidden to default to success because exitCode is missing).
+    const read = runEntry(home, JSON.stringify(fixturePayload('post-tool-use-read-iserror.json', { cwd: project })), 'PostToolUse');
+    expect(read.status).toBe(0);
+    expect(read.stdout).toBe('');
+
+    const db = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+    const rows = db.prepare('SELECT session_id, tool_name, outcome, exit_code FROM tool_calls ORDER BY id').all();
+    db.close();
+    expect(rows).toEqual([
+      { session_id: '01a130ba-7d8f-7e0a-9c58-a9d7aade3447', tool_name: 'Bash', outcome: 'failure', exit_code: 7 },
+      { session_id: '01a130ba-742f-703e-a8d6-2902387259ee', tool_name: 'Read', outcome: 'failure', exit_code: 0 },
+    ]);
+  });
+
+  it('delivery evidence is attempted through the frozen workbuddy source kind and degrades OBSERVABLY while the shared evidence schema cannot accept workbuddy rows', async () => {
+    // SHARED-PACKAGE GAP (reported to the main agent):
+    // principles-core intervention-evidence-schema.ts declares
+    // `host_kind TEXT NOT NULL CHECK (host_kind IN ('openclaw','codex'))` —
+    // the normalizer and INTERVENTION_SOURCE_KINDS accept workbuddy, but the
+    // SQLite CHECK constraint does not, so the append degrades. This test
+    // pins the CURRENT honest contract: the injection itself is unaffected,
+    // the degradation is observable (rc-9), and the raw injected event line
+    // stays durable for idempotent replay once the schema gains 'workbuddy'.
+    const { home, governance } = productionHome({ receiptLedger: true });
+    await activationArtifact(governance, {
+      id: 'art-ev-603', kind: 'principle', principleId: 'P_WB_EV_603',
+      content: { principleId: 'P_WB_EV_603', text: 'UNIQUE_WB_EVIDENCE_603' },
+      channel: 'prompt', action: 'prompt_activate', target: 'ledger://P_WB_EV_603',
+    });
+    const project = makeProjectDir(home, 'ev');
+    const result = runEntry(home, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: project })), 'UserPromptSubmit');
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain('UNIQUE_WB_EVIDENCE_603');
+    // Observable degradation through the shared ingress, never a silent skip.
+    expect(result.stderr).toContain('workbuddy_evidence:');
+    expect(result.stderr).toContain('append degraded');
+    // The durable raw source line exists for replay (SPEC §13.7).
+    const logsDir = path.join(governance, '.state', 'logs');
+    const injectedLines = fs.readdirSync(logsDir)
+      .filter((file) => file.startsWith('events_') && file.endsWith('.jsonl'))
+      .flatMap((file) => fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean))
+      .filter((line) => line.includes('"runtime_v2_prompt_activations_injected"'));
+    expect(injectedLines.length).toBeGreaterThan(0);
+  });
+
+  it('deny chain evidence failure never touches the encoded deny (P02 boundary)', async () => {
+    const { home, governance } = productionHome({ receiptLedger: true });
+    await activationArtifact(governance, {
+      id: 'art-rule-604', kind: 'rule', principleId: 'P_WB_RULE_604', ruleId: 'R_WB_LIVE_604',
+      content: { principleId: 'P_WB_RULE_604', ruleId: 'R_WB_LIVE_604', implementationCode: liveRuleCode.replace(/601/g, '604') },
+      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_WB_LIVE_604',
+    });
+    const project = makeProjectDir(home, 'evdeny');
+    const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: path.join(project, 'wb-protected-604.txt'), content: 'x' } })), 'PreToolUse');
+    expect(result.status).toBe(0);
+    // The deny is the real blocking signal (P02) — it survives the evidence
+    // degradation caused by the shared schema gap above.
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'WB_RULE_DENY_604' } });
+    expect(result.stderr).toContain('workbuddy_evidence:');
+  });
+});
+
+describe('P06 workspace semantics: A/B projects share ONE governance workspace', () => {
+  it('both projects read the same governance activations and create no project-local state', async () => {
+    const { home, governance } = productionHome();
+    await activationArtifact(governance, {
+      id: 'art-ab-605', kind: 'principle', principleId: 'P_WB_AB_605',
+      content: { principleId: 'P_WB_AB_605', text: 'UNIQUE_WB_AB_DIRECTIVE_605' },
+      channel: 'prompt', action: 'prompt_activate', target: 'ledger://P_WB_AB_605',
+    });
+    const projectA = makeProjectDir(home, 'a');
+    const projectB = makeProjectDir(home, 'b');
+    for (const project of [projectA, projectB]) {
+      const result = runEntry(home, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: project, session_id: `sess-ab-${path.basename(project)}` })), 'UserPromptSubmit');
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain('UNIQUE_WB_AB_DIRECTIVE_605');
+      // No governance state ever lands in the PROJECT directory.
+      expect(fs.existsSync(path.join(project, '.pd'))).toBe(false);
+      expect(fs.existsSync(path.join(project, '.state'))).toBe(false);
+    }
+  });
+});
+
+describe('degraded / unsupported never masquerade as healthy', () => {
+  it('malformed governance config: neutral result, structured degraded reason, no writes anywhere', () => {
+    const home = makeHome();
+    makeGovernance(home, { malformed: true });
+    const project = makeProjectDir(home, 'malformed');
+    const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project })), 'PreToolUse');
+    // Degraded workspace is NOT escalated to blocking (the Owner has no working
+    // opt-in signal) — and it is not reported as healthy silence either.
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toMatch(/status=degraded reason=[^\s]+/);
+    const governance = getWorkbuddyWorkspaceDir(home);
+    expect(fs.existsSync(path.join(governance, '.pd', 'state.db'))).toBe(false);
+    expect(fs.existsSync(path.join(governance, '.state'))).toBe(false);
+    expect(fs.existsSync(path.join(project, '.pd'))).toBe(false);
+  });
+
+  it('v2 rules stay suspended with the structured workbuddy-unsupported warning (PRI-780 boundary)', async () => {
+    const home = makeHome();
+    const governance = makeGovernance(home, { workbuddyFlag: true, ruleContextV2Flag: true });
+    const v2Code = liveRuleCode.replace(/601/g, '606').replace('wb-protected-601', 'wb-v2ctx-606');
+    await activationArtifact(governance, {
+      id: 'art-v2-606', kind: 'rule', principleId: 'P_WB_V2_606', ruleId: 'R_WB_V2_606',
+      content: { principleId: 'P_WB_V2_606', ruleId: 'R_WB_V2_606', requiresContextVersion: 2, implementationCode: v2Code },
+      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_WB_V2_606',
+    });
+    const project = makeProjectDir(home, 'v2');
+    const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: path.join(project, 'wb-v2ctx-606.txt'), content: 'x' } })), 'PreToolUse');
+    // The v2 rule would DENY if loaded; allow + both warnings proves suspension.
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('rule_context_v2_unavailable');
+    expect(result.stderr).toContain('workbuddy_runtime_context_unsupported');
+  });
+
+  it('an undeliverable deny (stdout serialization failure) escalates to blocking exit 2 — never silent {} + exit 0 (SPEC §4.4)', async () => {
+    const { home, governance } = productionHome();
+    await activationArtifact(governance, {
+      id: 'art-rule-607', kind: 'rule', principleId: 'P_WB_RULE_607', ruleId: 'R_WB_LIVE_607',
+      content: { principleId: 'P_WB_RULE_607', ruleId: 'R_WB_LIVE_607', implementationCode: liveRuleCode.replace(/601/g, '607') },
+      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_WB_LIVE_607',
+    });
+    const project = makeProjectDir(home, 'ser');
+    const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: path.join(project, 'wb-protected-607.txt'), content: 'x' } })), 'PreToolUse', {
+      // Break serialization ONLY for the hookSpecificOutput document — every
+      // other JSON.stringify consumer (gate param hashing, event lines) keeps
+      // working, so the fault under test is exactly the stdout contract.
+      childPrelude: `(() => {`
+        + `  const realStringify = JSON.stringify.bind(JSON);`
+        + `  JSON.stringify = (value, ...rest) => {`
+        + `    if (value && typeof value === 'object' && Object.hasOwn(value, 'hookSpecificOutput')) throw new Error('forced serialize failure');`
+        + `    return realStringify(value, ...rest);`
+        + `  };`
+        + `})();`,
+    });
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('hook_stdout_serialize_failed');
+  });
+
+  it('a deny whose stdout WRITE fails escalates to blocking exit 2 (P02: stdout-closed exit 2 still blocks)', async () => {
+    const { home, governance } = productionHome();
+    await activationArtifact(governance, {
+      id: 'art-rule-608', kind: 'rule', principleId: 'P_WB_RULE_608', ruleId: 'R_WB_LIVE_608',
+      content: { principleId: 'P_WB_RULE_608', ruleId: 'R_WB_LIVE_608', implementationCode: liveRuleCode.replace(/601/g, '608') },
+      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_WB_LIVE_608',
+    });
+    const project = makeProjectDir(home, 'wrfail');
+    const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: path.join(project, 'wb-protected-608.txt'), content: 'x' } })), 'PreToolUse', {
+      // The deny SERIALIZES fine but every stdout write throws: the deny bytes
+      // are lost, so the exit code must become the blocker — never exit 0.
+      childPrelude: `process.stdout.write = () => { throw Object.assign(new Error('EPIPE: broken pipe, write'), { code: 'EPIPE', syscall: 'write' }); };`,
+    });
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('hook_stream_failed');
+  });
+});
