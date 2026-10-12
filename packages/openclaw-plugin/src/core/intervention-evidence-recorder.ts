@@ -159,7 +159,11 @@ export function recordPromptDeliveryEvidence(input: PromptInjectionEvidenceInput
         principleId: entry.principleId,
         ...(activationRef.artifactId ? { artifactId: activationRef.artifactId } : {}),
         ...(contentRef ? { payloadDigest: contentRef.payloadDigest } : {}),
-        resolution: contentRef ? 'resolved' : 'revision_reference_unresolved',
+        // A stored contentRef is an OBJECT — its truthiness must not upgrade
+        // resolution: 'resolved' without a payloadDigest is rejected by the
+        // normalizer before the store's idempotent dedup branch can no-op the
+        // replay. Only a digest-carrying reference counts as resolved.
+        resolution: contentRef?.payloadDigest !== undefined ? 'resolved' : 'revision_reference_unresolved',
       },
       activationRef,
       payload: { targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' },
@@ -231,7 +235,9 @@ export function recordGateEnforcementEvidence(input: GateEnforcementEvidenceInpu
     principleId: input.principleId,
     ...(activationRef.artifactId ? { artifactId: activationRef.artifactId } : {}),
     ...(content ? { payloadDigest: content.payloadDigest } : {}),
-    resolution: content ? 'resolved' as const : 'revision_reference_unresolved' as const,
+    // Same constraint as the prompt-delivery path above: a stored object's
+    // truthiness must not mint a digest-less 'resolved' reference.
+    resolution: content?.payloadDigest !== undefined ? 'resolved' as const : 'revision_reference_unresolved' as const,
   };
   const observations: InterventionObservationInput[] = [
     {

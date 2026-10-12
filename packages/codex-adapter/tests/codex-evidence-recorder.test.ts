@@ -122,6 +122,34 @@ describe('codex evidence recorder', () => {
     expect(warnings).toHaveLength(0);
   });
 
+  it('P2-2 regression: replaying an unresolved delivery stays unresolved — idempotent duplicate, never a batch rejection', () => {
+    // The stored contentRef is an OBJECT; its truthiness must never upgrade
+    // resolution to 'resolved' without a payloadDigest (the normalizer then
+    // rejects the whole replay batch before the dedup branch can no-op it).
+    const root = workspace();
+    const conn = new SqliteConnection(root);
+    conn.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+                          VALUES ('act-orphan', 'idem-orphan', 'art-missing', 'prompt', 'prompt_activate', 'ref', '2026-10-01T00:00:00Z')`).run();
+    conn.close();
+    const warnings: string[] = [];
+    const input = {
+      workspaceDir: root,
+      sessionId: 'sess-unresolved-replay',
+      turnId: 'turn-1',
+      injected: [{ principleId: 'princ-cx', activationId: 'act-orphan', artifactId: 'art-missing' }],
+      evidenceEnabled: true,
+      warn: (line: string) => warnings.push(line),
+    };
+    recordCodexPromptDeliveryEvidence(input);
+    recordCodexPromptDeliveryEvidence(input);
+    expect(warnings).toEqual([]);
+    const rows = evidenceRows(root).filter((row) => row.record_kind === 'delivery');
+    expect(rows).toHaveLength(1);
+    const contentRef = JSON.parse(rows[0]!.content_ref_json ?? '{}');
+    expect(contentRef.resolution).toBe('revision_reference_unresolved');
+    expect(contentRef.payloadDigest).toBeUndefined();
+  });
+
   it('does not attribute a source artifact that conflicts with the activation occurrence', () => {
     const root = workspace();
     seedPromptActivation(root);

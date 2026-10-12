@@ -312,4 +312,57 @@ describe('intervention evidence ingress', () => {
     expect(replay.insertedCount).toBe(0);
     expect(replay.duplicateCount).toBe(1);
   });
+
+  function unresolvedDeliveryBatch(evidenceScopeId = 'placeholder-overridden-by-ingress') {
+    return {
+      evidenceScopeId,
+      sourceKind: 'openclaw_plugin_event_log' as const,
+      adapterVersion: 'test-adapter@1',
+      recordedAt: new Date().toISOString(),
+      observations: [
+        {
+          observationKey: 'openclaw|delivery|agent_context|sess-2|run-1|act-2',
+          sourceLocator: 'openclaw-plugin-event-log:sess-2',
+          kind: 'delivery' as const,
+          nativeRefs: { hostKind: 'openclaw' as const, sessionId: 'sess-2', runId: 'run-1' },
+          principleId: 'T-01',
+          contentRef: { principleId: 'T-01', resolution: 'revision_reference_unresolved' as const },
+          activationRef: { activationId: 'act-2', sourceSnapshotDigest: 'sha256:cc00000000000000000000000000000000000000000000000000000000000000' },
+          payload: { targetKind: 'agent_context' as const, confirmation: 'submitted' as const, outcome: 'attempted' as const },
+        },
+      ],
+    };
+  }
+
+  it('P2-2 regression: replaying a digest-less (unresolved) batch is an idempotent duplicate — not a rejection', () => {
+    const first = ingress.appendObservationBatch({ workspaceDir, batch: unresolvedDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)) });
+    expect(first.ok).toBe(true);
+    expect(first.insertedCount).toBe(1);
+    conn.close();
+    conn = new SqliteConnection(workspaceDir);
+    const replay = ingress.appendObservationBatch({ workspaceDir, batch: unresolvedDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)) });
+    expect(replay.ok).toBe(true);
+    expect(replay.insertedCount).toBe(0);
+    expect(replay.duplicateCount).toBe(1);
+    expect(replay.conflictCount).toBe(0);
+  });
+
+  it('same identity with different content is a reported source conflict — the original record is preserved', () => {
+    ingress.appendObservationBatch({ workspaceDir, batch: validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir)) });
+    conn.close();
+    conn = new SqliteConnection(workspaceDir);
+    const conflicting = validDeliveryBatch(ingress.evidenceScopeIdFor(workspaceDir));
+    conflicting.observations[0] = {
+      ...conflicting.observations[0]!,
+      payload: { targetKind: 'runtime_enforcement' as const, confirmation: 'runtime_loaded' as const, outcome: 'delivered' as const },
+    };
+    const replay = ingress.appendObservationBatch({ workspaceDir, batch: conflicting });
+    expect(replay.ok).toBe(false);
+    expect(replay.conflictCount).toBe(1);
+    expect(replay.insertedCount).toBe(0);
+    const original = conn.getDb()
+      .prepare('SELECT payload_json FROM intervention_evidence_records WHERE observation_key = ?')
+      .get('openclaw|delivery|agent_context|sess-1|run-1|act-1') as { payload_json: string };
+    expect(JSON.parse(original.payload_json)).toMatchObject({ targetKind: 'agent_context', confirmation: 'submitted' });
+  });
 });
