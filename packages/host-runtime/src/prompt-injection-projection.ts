@@ -12,7 +12,7 @@ import { buildActivePrinciplePromptContext, readPromptActivationCandidates, MAX_
 import { readWorkspaceHostKindFacts } from './host-liveness-contract.js';
 
 /** Hosts with a production prompt-injection path today (shared GovernanceHostKind boundary). */
-export type PromptInjectionTargetHost = 'openclaw' | 'codex';
+export type PromptInjectionTargetHost = 'openclaw' | 'codex' | 'workbuddy';
 export const PROMPT_INJECTION_TARGET_HOSTS: readonly PromptInjectionTargetHost[] = ['openclaw', 'codex'];
 
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
@@ -75,6 +75,7 @@ function standardHostRoutes(flagEnabled: boolean): { hostKind: PromptInjectionTa
   return [
     { hostKind: 'openclaw', route: promptRouteForHost('openclaw', flagEnabled) },
     { hostKind: 'codex', route: promptRouteForHost('codex', flagEnabled) },
+    { hostKind: 'workbuddy', route: promptRouteForHost('workbuddy', flagEnabled) },
   ];
 }
 

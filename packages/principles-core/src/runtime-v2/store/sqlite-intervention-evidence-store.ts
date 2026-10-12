@@ -485,7 +485,7 @@ function readCapabilityDeclarations(db: Database.Database): InterventionCapabili
   for (const rawRow of rows) {
     if (!isRecord(rawRow)) continue;
     const declaration: InterventionCapabilityDeclaration = {
-      hostKind: rawRow.host_kind as 'openclaw' | 'codex',
+      hostKind: rawRow.host_kind as 'openclaw' | 'codex' | 'workbuddy',
       capability: rawRow.capability as InterventionCapabilityDeclaration['capability'],
       status: rawRow.status as InterventionCapabilityDeclaration['status'],
       adapterVersion: typeof rawRow.adapter_version === 'string' ? rawRow.adapter_version : '',
@@ -532,7 +532,7 @@ export class SqliteInterventionEvidenceStore {
    * Returns null when the episode is absent or its stored refs are corrupt —
    * callers fall back to an explicit Unknown/derived marker, never a guess.
    */
-  findEpisodeHostKind(episodeKey: string): 'openclaw' | 'codex' | null {
+  findEpisodeHostKind(episodeKey: string): 'openclaw' | 'codex' | 'workbuddy' | null {
     const db = this.connection.getDb();
     if (!interventionEvidenceTablesExist(db)) return null;
     const row = db.prepare(

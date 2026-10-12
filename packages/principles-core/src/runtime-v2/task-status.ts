@@ -102,7 +102,7 @@ export const DiagnosticianTaskRecordSchema = Type.Intersect([
       // valid on read (normalized via normalizePainProvenance), never written.
       Type.Literal('openclaw_context_bound'),
     ])),
-    hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex')])),
+    hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex'), Type.Literal('workbuddy')])),
     provenanceReason: Type.Optional(Type.String()),
     evidence: Type.Optional(Type.Array(Type.Object({
       sourceRef: Type.String({ minLength: 1 }),

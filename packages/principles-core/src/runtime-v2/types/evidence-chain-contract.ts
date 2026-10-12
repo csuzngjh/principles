@@ -94,7 +94,7 @@ export interface EvidenceChainRecord {
    * views identify the Codex host with safe lineage). Validated against the
    * known host kinds; absent/unset rows render as 'unknown'.
    */
-  hostKind?: 'openclaw' | 'codex' | 'unknown';
+  hostKind?: 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
   /**
    * PRI-469: Optional intent tension surfaced from the diagnostician artifact
    * (Stage A output, SPEC §16). Present only when:
@@ -1116,8 +1116,8 @@ export function assembleEvidenceChain(params: {
     // 'unknown' — a missing host kind must not hide the record (§15: safe
     // lineage, no silent drops).
     const rawHostKind = readOwnString(event, 'host_kind');
-    const hostKind: 'openclaw' | 'codex' | 'unknown' =
-      rawHostKind === 'openclaw' || rawHostKind === 'codex' ? rawHostKind : 'unknown';
+    const hostKind: 'openclaw' | 'codex' | 'workbuddy' | 'unknown' =
+      rawHostKind === 'openclaw' || rawHostKind === 'codex' || rawHostKind === 'workbuddy' ? rawHostKind : 'unknown';
 
     // PRI-406: Prefer precise join via canonical_pain_id → tasks.input_ref.
     // When a pain event carries canonical_pain_id, look up the task by that ID
@@ -1287,8 +1287,8 @@ export function assembleEvidenceChain(params: {
         // PRI-625 Slice D: evidence host attribution on the cross-ref path too
         // (review round 3) — missing/legacy host_kind degrades to 'unknown'.
         const eventHostKind = readOwnString(event, 'host_kind');
-        const hostKind: 'openclaw' | 'codex' | 'unknown' =
-          eventHostKind === 'openclaw' || eventHostKind === 'codex' ? eventHostKind : 'unknown';
+        const hostKind: 'openclaw' | 'codex' | 'workbuddy' | 'unknown' =
+          eventHostKind === 'openclaw' || eventHostKind === 'codex' || eventHostKind === 'workbuddy' ? eventHostKind : 'unknown';
 
         // No linked task/candidate: state is admission-driven. tool_call/hook observations
         // are `evidence-only`; manual/review are `recorded-only`. (PRI-385 P1-2)

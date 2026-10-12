@@ -29,7 +29,7 @@ import path from 'node:path';
 export interface InjectionEvidenceRow {
   workspaceDir: string;
   activationId: string;
-  hostKind: 'openclaw' | 'codex' | 'unknown';
+  hostKind: 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
   hostIdentityComplete: boolean;
   eventIdentityComplete: boolean;
   /** Deduplicated injection facts: this activation appeared in the injected set. */

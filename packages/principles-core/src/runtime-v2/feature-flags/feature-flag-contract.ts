@@ -331,6 +331,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // contract, output whitelist, HostAdapter decode/encode for all 4 events).
   // Roll back = set host.codex.enabled: false in .pd/config.yaml.
   { id: 'host.codex', category: 'core', enabled: true, since: '2026-08-11', description: 'ADR-0020: Codex CLI host adapter. Default ON (flipped 2026-08-12 after PRI-282 E2E). Flag-off = pd-hook.js outputs {} + exit 0 + SystemLogger records skip (rc-9). Disable via .pd/config.yaml: host.codex: { enabled: false }.' },
+  // WorkBuddy host adapter (SPEC workbuddy-host-adapter v0.3.0, OD-03). Third
+  // ADR-0020 host. Quiet, default OFF: install does NOT enable; the user
+  // opts in explicitly. Flag-off = the WorkBuddy hook entry emits neutral JSON
+  // + exit 0 with an observable skip record (rc-9), no dispatch, no
+  // transcript access. Enable via .pd/config.yaml: host.workbuddy: { enabled: true }.
+  { id: 'host.workbuddy', category: 'quiet', enabled: false, since: '2026-10-12', description: 'WorkBuddy host adapter (ADR-0020 third host, SPEC workbuddy-host-adapter v0.3.0 OD-03). Default OFF; explicit user opt-in required. Flag-off = neutral JSON + exit 0 + observable skip, no dispatch, no transcript reads.' },
   { id: 'abstraction_layer_v1', category: 'quiet', enabled: false, since: '2026-08-13', description: 'PRI-523 shared host-runtime cutover for OpenClaw. Default OFF preserves the legacy route; enable only for controlled parity validation.' },
   // PRI-530: Principle Receipt P0 — enriched RuleHost block copy. When off,
   // the block message keeps the existing generic English template (byte

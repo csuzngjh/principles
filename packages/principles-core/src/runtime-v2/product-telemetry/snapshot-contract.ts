@@ -44,7 +44,7 @@ export const ProductTelemetrySnapshotV1Schema = Type.Object({
   dailyTelemetryId: Type.String(),
   bucketDate: Type.String(),
   pdVersion: Type.String({ maxLength: PRODUCT_TELEMETRY_PD_VERSION_MAX_LENGTH }),
-  hostKind: Type.Union([Type.Literal('openclaw'), Type.Literal('codex'), Type.Literal('other')]),
+  hostKind: Type.Union([Type.Literal('openclaw'), Type.Literal('codex'), Type.Literal('workbuddy'), Type.Literal('other')]),
   milestones: Type.Object({
     initialized: TelemetryFactSchema,
     painObserved: TelemetryFactSchema,

@@ -124,7 +124,7 @@ export interface EvolutionPainDetectedData {
   taskId?: string;
   traceId?: string;
   provenance?: 'host_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
-  hostKind?: 'openclaw' | 'codex';
+  hostKind?: 'openclaw' | 'codex' | 'workbuddy';
   evidence?: PainEvidenceEntry[];
   /**
    * PRI-844: the Owner's verbatim correction, when the emitting producer had
@@ -327,7 +327,7 @@ export const EvolutionPainDetectedDataSchema = Type.Object({
     Type.Literal('automatic_hook'),
     Type.Literal('openclaw_context_bound'),
   ])),
-  hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex')])),
+  hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex'), Type.Literal('workbuddy')])),
 });
 export type EvolutionPainDetectedDataTB = Static<typeof EvolutionPainDetectedDataSchema>;
 
