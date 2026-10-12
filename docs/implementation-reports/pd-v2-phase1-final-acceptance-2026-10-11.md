@@ -176,3 +176,89 @@ Owner 评审提出 4×P2；本轮以**两个独立只读子代理**（代码考�
 - 主仓 `.pd` ingestion：已紧急停用（consent 删除 + feature 显式 false）；与修改前状态的等效性 **UNKNOWN**（无修改前快照，§9-2）。
 - 隔离目录可整体删除：`~/.pd-p1test/openclaw-state-p1f`、`~/.pd-p1test/codex-home-p1f`、`D:\Code\_pdtest\p1-final\`（建议 Owner 裁决后处置，快照优先）；10-10 沙箱保留（含本轮新增 3 条 codex 证据与 consent 文件——证据链完整性所需）。
 - install.json 测试条目待 Owner 清理（§9-3）。历史沙箱 `p1-closeout/`、`p1-acceptance-r2/` 未动。
+
+## 14. 收尾执行轮（2026-10-12）——P2-2 重放修复 + 反馈保真验证 + 真实重放/链执行
+
+> 前置核实（任务 §三）：main = `91d75b21`（#1991 火车后，core 1.291.4）；#1990 = squash `3c98904b` **已核实其内容在 main 上**（formatter caseInput 接通 + §11A 修正全量在库）。安装运行时（~/.pd/runtime 与 p1f 实装 0.5.1/0.8.1/1.291.2）**不含本轮新修复**——下述一切「修复后行为」均由 worktree 构建（PR #1992 head）提供，安装产物层状态见 §14.4。
+> 执行 worktree：`D:\Code\_worktrees\principles\pdv2-p1-closeout-replay-fix`（分支 `ai/pdv2-p1-closeout-replay-fix` → PR #1992；`ai/pdv2-p1-closeout-test-fidelity` → PR-B），writer=zcode 租约。证据根：`D:\Code\_pdtest\p1-r4\`。
+
+### 14.1 任务 A：重放生产者缺陷修复（PR #1992）
+
+- **缺陷确认（当前 main 代码）**：四处同型生产点把已存 contentRef **对象**按真值置 `resolved`（无 digest）——`codex-evidence-recorder.ts` prompt-delivery 与 deny chain 两处、`openclaw-plugin/core/intervention-evidence-recorder.ts` prompt-delivery 与 gate enforcement 两处。全仓 `revision_reference_unresolved` 生产点穷尽核查=仅此四处（读侧 invariant `ingress.ts:274-276` 已存在且未被破坏）。
+- **修复**：`resolution` 仅在 `payloadDigest` 实存时置 `resolved`。首录权威解析路径不受影响（`resolveInterventionContentRef` 恒 resolved+digest 或 null）。校验器/oracle/store 语义零改动。
+- **负对照先行**：两宿主 recorder 回归在旧代码**红**（重放被拒、warn 带 `evidence_batch_rejected`）→ 修后绿（重放 ok、单行、resolution 保持 unresolved）。
+- **6 场景边界矩阵（真实 recorder → ingress → store）**：
+  | # | 场景 | 证据 |
+  | --- | --- | --- |
+  | 1 | unresolved 首录成功 | 既有 codex/openclaw recorder 测试（继续绿） |
+  | 2 | 同事件原样重放=幂等 no-op | 新增两宿主 P2-2 回归 + 新 ingress 边界测试（`duplicateCount:1, conflictCount:0, insertedCount:0`） |
+  | 3 | resolved 首录+重放 digest 一致 | 既有 ingress :305（duplicateCount=1）+ codex :140/:304 + openclaw :215 |
+  | 4 | 同 identity 不同内容 → 上报 conflict、原记录保留 | 新增 ingress conflict 测试（`ok:false, conflictCount:1`，原 payload 逐字不变） |
+  | 5 | 非法引用明确拒绝且无写入 | 既有 normalizer :101（resolved 缺 digest 拒收，未削弱）+ ingress 结构化拒收（nothing was written） |
+  | 6 | Codex 与 OpenClaw 同型覆盖 | 四处修复 + 两宿主回归各自覆盖 |
+- **先在性取证**：codex-adapter 全套中 1 个 Windows 本地 `workspace-worker` 清理 EPERM 失败——用「单文件还原到 origin/main 后复跑同败」证明与本修复无关（环境性，CI Linux 为准）。
+
+### 14.2 任务 B：CLI 反馈保真（caseInput → 最终模型提示词）
+
+新增 loop 生产边界测试（`adversarial-loop.test.ts`「P2-1 fidelity」）：**真实 gate mismatch**（`expectedDecision:block / actualDecision:allow`，caseId 命中 LLM 声明用例）→ `mapFailedCases` 富化 caseInput → evaluator 工件 → `formatAdversarialFeedback` → Round-2 任务 diagnosticJson → **模型可见 payload** 全链断言：`caseInput:` 续行、`tool=write_file`、`target="/etc/x"`、`priorReadOfTarget=` 全部在最终载荷可见，且与 diagnosticJson 中存储文本逐字同源（lineage 一致）。legacy 兼容：既有 :408 测试（无 caseInput 的 gate 失败）新增负断言——不渲染空 `caseInput:` 行。loop 套件 9/9 绿。
+
+### 14.3 C1：真实重放验收（仓库构建）
+
+- **前置快照**：10-10 沙箱 5 条证据；重放目标行（manual-hook-probe-1/turn-manual-1，unresolved contentRef）evidence_id=`sha256:75708351…` record_digest=`sha256:2e2f09d6…`。
+- **重放（修复构建 pd-hook，正式入口=同一 hook 事件原样重交）**：exit 0、正常注入输出、**零 degraded**；行数 5→5；evidence_id 与 record_digest **逐字节不变**、content_ref unresolved 保持。
+- **重启后复验**：新进程第三次重放同结果（幂等不随进程生命周期变化）；Console 重启后四问查询稳定（§14.5）。
+- **判定**：仓库构建层——**PASS（正常去重成功，非拒收）**。判定依据=单元层 duplicateCount 语义 + 实机 ok/零拒收/digest 不变组合，不以行数单证。
+- **OpenClaw 宿主侧真实重放**：NOT RUN——OpenClaw 无独立于插件事件的正式重放入口（真实重放需重放网关会话的原始 chat id，宿主不提供）；该宿主生产者路径由 §14.1 边界回归覆盖，如实记录。
+
+### 14.4 发布/安装层状态（诚实区分）
+
+- 修复**不在任何已发布 npm 包**中（安装版 codex-adapter 0.5.1 / core 1.291.2 均不含）。正式安装产物验证 **NOT RUN（BLOCKED on 发布授权）**。
+- 发布需求（待 Owner 授权后由常规火车完成）：本 PR changeset 声明 `@principles/codex-adapter` / `principles-disciple` / `create-principles-disciple` patch；火车发布后 Owner 在隔离 CODEX_HOME 重跑 `$pd-setup`，再执行 §14.3 同一重放探针即闭环。未手改任何安装文件。
+
+### 14.5 §七 全链审计与身份索引（Console 真实入口，重启后）
+
+四问（10-10 沙箱，asOf 2026-10-12T00:54Z）：
+1. 该 Principle 是否投递 → **4 条 delivery，全部 confirmation=submitted**（封顶如实）；分项统计=OpenClaw 真实会话 1（402c0f59/chatcmpl_3505cf4a）+ Codex 真实会话 2（01a12b54、01a12b55）+ 手动探针 1（manual-hook-probe-1/turn-manual-1）。
+2. 该 Activation 的 Application → **1 条，来源=agent_claimed**（OpenClaw 402c0f59，自述与 Runtime 事实分列；runtime_verified=0 条如实展示）。
+3. Episode 的 Effect → **0 Episode / 0 Effect（诚实空集）**。
+4. Effect 的 Outcome → **0（诚实空集）**。
+- 身份索引：workspace=`D:\Code\_pdtest\p1-acceptance\sandbox`；activation=`act_prompt_0a54f406…`；principle=`有后果变更前强制确认精确目标路径并前置校验闸门`；**revision 引用=4 条 unresolved 如实可见**（该原则无正式内容版本面——现行 SPEC 允许，PASS 条件按 §14.7 矩阵单列）。
+- 正式可重放事件重复摄入 **0 新增/0 覆盖**（§14.3）；重启后可查询（console 重启 + asOf 前后一致）。
+
+### 14.6 C2：修复后反馈路径的正式内化链（隔离沙箱 p1-final）
+
+真实前置：网关会话 `0c9bd5ca`（2026-10-12T00:44Z，write 配对：正例 id9=worklog.md、负例 id10=protected/secret-plan.txt）→ pain `manual_1791765989884_lbwj4fh0`（score 78，会话绑定）→ 诊断 4 候选全 admitted（**rule 43d509b9 admitted；principle fa4d2025 被 PRI-917 reuse 审查闸门 parked 待 Owner reuse|create 裁决**——闸门真实触发旁证，验收者不代裁）→ run-rulehost（worktree 构建，行为包 behavior-examples-r4.json，2 轮上限）。
+
+结果（`c2-run-rulehost.json` + pi_artifacts）：
+
+- **r1**：replay FAIL 于 `v2-path-boundary`（write worklog.md.bak，expected block got allow）——与此前全部 6 链同一确定性用例。
+- **r2 反馈保真实锤（本轮核心验证点）**：r2 artificer 任务 `pi_metadata.adversarialFeedback` 全文含完整 caseInput 续行——`caseInput: tool=write | context: history available, priorReadOfTarget=no, readCount=1 | params: target="worklog.md.bak"; {} | case rationale: …`（对比 10-11 链同位置仅有判定行；证据 `c2-r2-feedback-evidence.txt`）。**#1990 修复在真实链生效。**
+- **r2 replay passed=true**：拿到完整失败输入的修复轮实现了此前 6 链从未通过的兄弟/变体拦截（v2-path-boundary 通过；正例豁免同时保持）——**修复前 6/6 全败的确定性用例首次在真实链通过**。
+- **终判**：`generation_rejected`（max_rounds_exhausted_after_2）。失败原因**换轴**：r2 evaluator `needs_revision` 0.55，理由=scopePrecision too_broad（规则对 protected/** 与变体后缀无确认一律阻断被判过宽）；requiredChanges 恰好要求「Owner 专属写确认记录的存在性校验」——与 §11A 单列的确认信号缺口呼应。无 formal rule 工件；principle 中间工件 pending（needs_revision）。
+- 按任务规则停止（轮次上限耗尽；非模型方差笼统归因）。剩余缺口=judge scopePrecision 裁量与确认信号表达（Owner 裁决项，原决策卡 2 范围），非输入保真、非反馈通道。
+
+### 14.7 完成标准矩阵（现行 SPEC §13.9/13.10 口径；报告新增更严要求单列）
+
+| SPEC 必需条件 | 证据 | 判定 |
+| --- | --- | --- |
+| 稳定来源身份/幂等/冲突上报 | §14.1 矩阵 1-5 + §14.3 实机 | **PASS** |
+| Delivery submitted 封顶/attempted 如实 | §14.5（4 条全 submitted） | **PASS** |
+| Codex 非空 Phase 1 摄取（按支持范围） | 2 真实会话+1 探针分项入账；能力声明懒物化 | **PASS** |
+| 审计四问 + 未知/零/未解析区分 | §14.5 | **PASS** |
+| 重放幂等（真实入口） | §14.3（仓库构建） | **PASS（构建层）**；安装产物层 NOT RUN（§14.4） |
+| 重启后可查询 | §14.3/§14.5 | **PASS** |
+| runtime_verified Application / Episode / Effect | 无归属 gate 干预（enforcement PRI-780 暂停 + 无已批准规则激活） | NOT RUN |
+| Owner Outcome Observation | 依赖 Episode | NOT RUN |
+| Golden Journey 全链 | 前置=已批准 RuleHost 原则在隔离环境可用（决策卡 1 未裁） | BLOCKED |
+| 正式候选（修复后反馈路径） | §14.6：反馈保真实锤 + r2 通过 v2-path-boundary；formal 候选未产出（judge scopePrecision，轮次耗尽） | **FAIL（缺口换轴：确认信号/judge 裁量，待 Owner）** |
+
+> 单列说明：§11A 评审轮的「重放幂等 PASS」判定标准（拒绝≠幂等）高于本矩阵早期口径，已按其执行；本表为现行 SPEC 必需条件的最低口径。
+
+### 14.8 四层完成度区分
+
+1. **代码修复完成**：P2-2 四处修复 + 测试（PR #1992，head 见 PR）；P2-1 保真验证（PR-B 测试）。
+2. **测试完成**：三包边界回归 + loop 套件绿（1 个先在性已证的 Windows 本地 worker flake 除外）。
+3. **实宿主验收完成**：C1 仓库构建真实重放 PASS；C2 链见 §14.6；GJ-01/Outcome 仍 BLOCKED/NOT RUN。
+4. **发布/安装完成**：未完成——修复未发布未安装（§14.4），待 Owner 发布授权后按 §14.4 闭环。
+
+**Phase 1 总判定：维持 PARTIAL**（本轮闭合 SPEC 的「重放幂等」必需条件至构建层；全链三环待 §5 决策卡 1 与 C2 候选审批）。

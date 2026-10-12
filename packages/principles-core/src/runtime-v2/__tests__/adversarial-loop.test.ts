@@ -438,6 +438,9 @@ describe('runAdversarialLoop (PRI-428)', () => {
     // The feedback must reference the Round-1 failed case (from the real gate).
     // makeFailingGateDeps 的 failedCases 中 caseId 为 'neg-1'。
     expect(promptStr).toContain('neg-1');
+    // Legacy shape: this gate failure carries no caseInput — the prompt must
+    // not render an empty caseInput continuation line.
+    expect(promptStr).not.toContain('caseInput:');
     // Round-1 artificer (index 0) must NOT carry the structured feedback
     // field. (The protocol instruction text always mentions `adversarialFeedback`
     // by name; check the parsed JSON field, not the raw substring.)
@@ -452,6 +455,67 @@ describe('runAdversarialLoop (PRI-428)', () => {
       ? JSON.parse(round2Payload)
       : round2Payload);
     expect(Object.hasOwn(round2Parsed, 'adversarialFeedback')).toBe(true);
+  });
+
+  it('P2-1 fidelity: the failed case caseInput (target + facts) reaches the Round-2 Artificer prompt', async () => {
+    // Full production chain under test: real gate replay → mapFailedCases
+    // (caseInput from the matched adversarial case) → evaluator artifact →
+    // formatAdversarialFeedback → Round-2 diagnosticJson → Artificer prompt.
+    // The gate fails the LLM-declared case 'adv-1' as an expected/actual
+    // MISMATCH (the shape that carries actionable caseInput in real chains).
+    const mismatchGateDeps: RefinerRuleHostGateDeps = {
+      evaluateInSandbox: () => ({
+        success: false,
+        failedCases: [{
+          caseId: 'adv-1', errorType: 'validation_failed',
+          message: 'Expected block but got allow',
+          expectedDecision: 'block', actualDecision: 'allow',
+        }],
+        executionTimeMs: 1,
+        forbiddenPatternViolations: [],
+      }),
+    };
+    const oldH = h;
+    h = await makeHarness({ gateDeps: mismatchGateDeps });
+    await oldH.stateManager.close();
+    try { fs.rmSync(oldH.tmpDir, { recursive: true, force: true }); } catch { /* temp */ }
+    h.adapter.queueArtificer(makeArtificerOutput);
+    h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
+    h.adapter.queueArtificer(makeArtificerOutput);
+    h.adapter.queueEvaluator(makeEvaluatorApproved);
+
+    await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    });
+
+    // Final Round-2 payload (the LLM boundary spy sees exactly what the model
+    // receives; the prompt builder injects the adversarialFeedback field into
+    // the model-visible payload verbatim): the failed case's tool, target
+    // path and context facts must be visible, not just the verdict line.
+    const round2ArtificerCall = h.adapter.startRunCalls[2];
+    expect(round2ArtificerCall).toBeDefined();
+    const round2Payload = round2ArtificerCall!.inputPayload;
+    const round2Parsed = requireRecord(typeof round2Payload === 'string'
+      ? JSON.parse(round2Payload)
+      : round2Payload);
+    const feedbackText = typeof round2Parsed.adversarialFeedback === 'string' ? round2Parsed.adversarialFeedback : '';
+    expect(feedbackText).toContain('caseInput:');
+    expect(feedbackText).toContain('tool=write_file');
+    expect(feedbackText).toContain('target="/etc/x"');
+    expect(feedbackText).toContain('priorReadOfTarget=');
+    // Lineage: the same feedback text stored on the Round-2 task diagnosticJson
+    // is what the payload carried — one source, no divergence.
+    const allTasks = await h.stateManager.listTasks();
+    const artificerTasks = allTasks.filter((t) => t.taskKind === 'artificer');
+    const round2Task = artificerTasks[1]!;
+    const diagJson = typeof round2Task.diagnosticJson === 'string' ? round2Task.diagnosticJson : '';
+    const meta = parsePITaskMetadata(diagJson);
+    expect(meta?.adversarialFeedback).toContain('caseInput:');
+    expect(meta!.adversarialFeedback).toContain('target="/etc/x"');
   });
 
   it('adversarialFeedback is stored on the Round-2 artificer task diagnosticJson', async () => {
