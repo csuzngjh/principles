@@ -285,7 +285,7 @@ Owner 评审提出 4×P2；本轮以**两个独立只读子代理**（代码考�
 
 - OpenClaw 主机：extensions 2.1.1 + core symlink 1.291.4，修复在 bundle.js 实测（§15.1）。
 - Codex p1f：marketplace 指针自已删 worktree 改指 #1998 worktree（**前镜像已存** `p1-r5\pre-mirror-codex-home-p1f-config.toml`）→ `codex plugin remove`+`add` → `$pd-setup`（官方 skill 脚本自定位路径）→ `.pd-runtime.json` = 0.5.3/0.8.2/1.291.4（npm 实装，零手改）；安装字节含修复两处。$pd-setup 输出 `ok` + runtime 版本行 + worker registered。
-- pin 推进 PR #1998 验证（全部实跑）：`check:runtime-pin` S1–S5 全 PASS（exit 0）；tarball `principles-codex-adapter-0.5.3.tgz` 含修复两生产点；runtime-pin-guard + codex-plugin-bundle + setup-worker-registration **43/43 PASS**；错误路由 Pass 2 = EP-02/EP-03/EP-14 三 MEDIUM，全部以已执行证据对账（真实 $pd-setup 重装 + tarball 字节检查 + packaged probe）。
+- pin 推进 PR #1998 验证（全部实跑）：`check:runtime-pin` S1–S5 全 PASS（exit 0）；tarball `principles-codex-adapter-0.5.3.tgz` 含修复两生产点；runtime-pin-guard + codex-plugin-bundle + setup-worker-registration **43/43 PASS**。评审收敛：两个独立只读子代理（规格面/工程面）均 APPROVE；工程面 P2 同轮修复——移除原随附 changeset（plugins/-only 的 pin 变更不映射可发布包，release-intent guard 无 changeset 实测 `intent=none-needed` PASS；保留会催生空发布 0.5.4/0.8.3 并令 pin 再过期——#1986 先例的 changeset 正是空发布 host-runtime 0.8.2 的来源），错误路由复核后零触发。规格面沿袭性观察（note 字段 ADR-0020 §10.4 引用漂移，#1986 起存在）列入 PR Follow-ups。
 
 **A2 同一事件重复摄取（安装版；任务 §五-A2 全项）**：
 
