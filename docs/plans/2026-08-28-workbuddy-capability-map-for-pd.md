@@ -1,5 +1,9 @@
 # WorkBuddy 能力面地图与 PD 利用方案
 
+> **2026-10-12 第二轮整改**：本文保留历史调研和取证，不是当前宿主运行验收。实现基线见 [SPEC v0.3.0](../specs/workbuddy-host-adapter-spec.md)，重点阅读 §4 契约、§5 改动面、§7 探针及 §8 验收。第一轮评审清单须逐项复核；“已改文字”不等于“已验证能力”。
+> **开发状态**：可进入隔离探针开发；生产适配器按探针结论与 Owner 决策冻结后实施。历史引擎字符串命中仅证明存在性，不能证明实际触发、完整实现或用户效果。
+
+
 > **日期**：2026-08-28
 > **目的**：梳理 WorkBuddy 对外暴露的 API / 扩展点，并给出 PD 在每个点上的利用方式
 > **方法**：官方文档（plugins-reference / hooks / sub-agents / sdk）+ 本机引擎取证（WorkBuddy 桌面版 5.3.14, build `825709d`）
@@ -16,7 +20,7 @@
 
 ## 1. 能力面全景
 
-### 1.1 Hook 事件（27 个，本机逐一验证通过）
+### 1.1 Hook 事件（5.3.14 历史静态计数，未逐项运行验证）
 
 | 事件 | 本机命中 | matcher | PD 利用 |
 |---|---:|---|---|
@@ -50,11 +54,11 @@
 | 字段 | 命中 | 说明 |
 |---|---:|---|
 | `hookSpecificOutput` | 50 | 容器字段 |
-| `additionalContext` | 40 | 追加上下文（PreToolUse/PostToolUse/UserPromptSubmit/SessionStart） |
+| `additionalContext` | 40 | 追加上下文（PreToolUse/PostToolUse/UserPromptSubmit/SessionStart；**PreToolUse 一项系本机取证，官方快照 PreToolUse Decision Control 节未列该字段**——2026-10-12 勘误） |
 | `permissionDecisionReason` | 20 | deny/ask 时给 Agent 或用户看的原因 |
 | `modifiedInput` | 17 | **改写工具入参**（比 Codex 强，Codex 0.147 无此字段） |
 | `suppressOutput` / `systemMessage` / `stopReason` | 有 | 通用字段 |
-| `updatedToolOutput` | **0** | ❌ 桌面版未实现，见 §4.1 |
+| `updatedToolOutput` | **0** | ⚠️ 5.3.14 取证时未实现；**本机 2026-10-11 已升级 5.8.1，现行引擎 12 处命中**——见 §4.1 补记 |
 
 `permissionDecision` 三态：`allow`（绕过权限直接执行）/ `deny`（阻断，reason 给 Agent）/ `ask`（强制弹窗让用户确认）。
 
@@ -105,115 +109,54 @@
 
 ## 2. PD 的六个高价值利用点
 
-按「PD 独特价值 / 其他系统做不到」排序。
+以下是候选机会，不代表已获批准的开发范围；当前优先级见 §7。
 
-### 2.1 SessionStart 的 stdout 直接进上下文 —— 零成本原则注入
+### 2.1 原则注入
+官方快照描述 SessionStart/UserPromptSubmit 输出进入上下文，真实行为待探针验证。首版采用 UserPromptSubmit 主注入、SessionStart 健康检查，避免直接复用 Codex session_start 提前返回路径却承诺会注入。恢复/压缩覆盖、内容更新和重复注入须实测。
 
-官方文档明确：
+### 2.2 PreCompact/PostCompact
+属于后续机会。先证明压缩导致既有证据丢失；上下文被压缩不等于 SQLite 已持久化事实被删除。未证明缺口前，不建立新的“抢救”存储或声称独有优势。
 
-> Exit code 0 – Success. Stdout appears in transcript mode, **except for `UserPromptSubmit` and `SessionStart`, where stdout is appended to the context**.
+### 2.3 Notification/IM
+先验证审批延迟和漏审，再考虑提醒。“空闲”不证明提醒不会打断。网络通知、身份与隐私约束独立评审，不纳入首版。
 
-即 `SessionStart` hook 的标准输出会**直接追加进对话上下文**，不需要 `hookSpecificOutput` 包装，也不需要改系统提示词。
+### 2.4 工具失败与权限拒绝
+真实失败采集直接关系首版证据承诺，优先验证 PostToolUse 与 PostToolUseFailure 的分流和载荷。拒绝权限只是拒绝事实，不能自动当作 AI 犯错或 Owner 纠正；需要来源与原因区分。
 
-**PD 用法**：`SessionStart` hook 读 `state.db` 的已激活原则，把「Owner 已批准的活跃原则」渲染成 stdout 直接注入。每次会话/恢复/`clear`/`compact` 都自动生效。
+### 2.5 子智能体与 SDK
+事件存在性不能证明每个子代理都受统一治理。首版复用 PD 既有消费者和调度；不把九个智能体搬成宿主代理，不重建编排。相关能力需后续独立验证。
 
-**价值**：这是 PD 三条 MVP-Core 路径中「prompt injection」的**最短路径**。比 `UserPromptSubmit` 的 `additionalContext` 更轻（少一层 JSON 封装），且 `resume`/`compact` 时机会自动重注，解决「压缩后原则丢失」问题。
+### 2.6 modifiedInput
+历史静态字段命中不是纠偏效果证明。自动改参可能改变用户意图，需要权限、误改、审计与恢复设计；首版 encoder 拒绝该字段。
 
-### 2.2 PreCompact —— 上下文压缩前抢救证据（PD 独有）
+## 3. 当前落地基线
+command 插件→WorkBuddy 薄协议适配器→共享 host-runtime→既有原则/审批/证据/消费者。
 
-官方：`PreCompact` 在上下文压缩前触发，matcher 为 `manual` / `auto`。
+首版四事件基线为 PreToolUse、PostToolUse、UserPromptSubmit、SessionStart；P03 决定失败事件是否需要最小追加。工具输入、结果和真实身份必须显式标准化，不能只做 snake_case 重命名。
 
-**PD 用法**：压缩前把当前会话累积的 `pain_events` / 证据链**抢先落盘到 `PLUGIN_DATA` 或 workspace**，压缩后经 `PostCompact` 回注摘要。
-
-**价值**：这是 PD 相对 WorkBuddy 原生记忆系统的**决定性差异点**。WorkBuddy 的 MEMORY.md 是「记下来」，而 PD 在压缩这个**信息销毁的高危时刻**做「带证据链的抢救 + Owner 可审计」，正好落在工单强调的「可观测、Owner 审批、可逆、带证据链」闭环上。别的记忆系统不做压缩时点治理。
-
-### 2.3 Notification + `idle_prompt` —— 把审批从阻塞改为异步
-
-官方：`idle_prompt` 在 CodeBuddy 等待用户输入超过 60 秒时触发。
-
-**PD 用法**：`Notification` + `matcher: "idle_prompt"` → 查询 pd-console 有无待 Owner 审批的原则，有则提醒。
-
-**价值**：PD 治理闭环的最大摩擦是「Owner 审批延迟」。此事件让 PD 在**用户本来就在等待的空闲时刻**提醒，把同步阻塞变成异步提醒，不打断工作流。配合 `channels`（IM 通道绑定 MCP server）可进一步推送到企业微信/Telegram。
-
-### 2.4 PermissionDenied / PostToolUseFailure —— 最强的痛点信号源
-
-`PostToolUseFailure`(4) 与 `PermissionDenied`(4) 都真实存在。
-
-**PD 用法**：这两个事件捕获的是「Agent 想做但被拒绝/失败了」—— 这比成功的工具调用**诊断价值高得多**，因为它直接暴露意图与约束的冲突。
-
-**价值**：直击用户当前攻关的 **Pain Attribution 问题**。对比之下，只从 `PostToolUse` 成功流里挖痛点是低效的。`PermissionDenied` 更是「用户手动纠正 AI」的直接数字痕迹 —— 正是 PD 要消除的「重复纠正感」的量化入口。
-
-### 2.5 SubagentStart / SubagentStop —— 子智能体治理（OpenClaw 没有）
-
-**PD 用法**：在 `SubagentStart` 注入该子任务相关的原则约束；在 `SubagentStop` 回收产出并做二次校验。
-
-**价值**：PD 现有的 9 个智能体（diagnostician / dreamer / philosopher / scribe / artificer / evaluator / rolloutReviewer / correctionObserver / empathyObserver）可映射为 WorkBuddy 的 plugin agent / sub-agent，用 `background: true` 后台跑诊断，`agentId` resume 做长周期观察，**不阻塞用户主会话**。这是 OpenClaw 侧不具备的编排自由度。
-
-⚠️ 注意：plugin agent **不支持 `hooks`**，拦截逻辑必须放插件级 `hooks.json`——子智能体自身的工具调用由插件级 hook 统一治理，这反而是更干净的设计（治理集中，不被子智能体各自绕过）。
-
-### 2.6 `modifiedInput` —— 比 deny 更柔性的纠偏
-
-本机验证 `modifiedInput`(17) 存在。
-
-**PD 用法**：PreToolUse 除了 `deny`，还可**改写工具入参**后放行。例如把危险路径改写为安全路径、为写操作自动补上必要参数。
-
-**价值**：这是 Codex 侧**没有**的能力（ADR-0020 明记：Codex 0.147 无 `modifiedInput` 字段）。PD 在 WorkBuddy 上可以实现「纠偏而不阻断」的第四种决策，比单纯的 allow/deny 更贴合「降低重复纠正感」—— 用户不必被打断，AI 已被悄悄纠正。
-
----
-
-## 3. 推荐的分层落地架构
-
-```
-┌─ 插件级 hooks/hooks.json（拦截与治理，command 类型，fail-closed 可控）──┐
-│                                                                        │
-│  SessionStart     → stdout 直接注入已激活原则（§2.1）                    │
-│  UserPromptSubmit → additionalContext 注入意图上下文                     │
-│  PreToolUse       → RuleHost 闸门：deny / ask / modifiedInput（§2.6）     │
-│  PostToolUse      → 痛点证据采集 + additionalContext 回注                 │
-│  PostToolUseFailure / PermissionDenied → 高价值痛点信号（§2.4）           │
-│  PreCompact       → 证据抢救落盘（§2.2）                                  │
-│  PostCompact      → 回注摘要                                             │
-│  SubagentStart/Stop → 子智能体原则注入与产出回收（§2.5）                  │
-│  Notification(idle_prompt) → Owner 审批提醒（§2.3）                      │
-│  SessionEnd       → 收尾复盘                                            │
-└────────────────────────────────────────────────────────────────────────┘
-                              ↓ 调用
-┌─ packages/workbuddy-adapter/（薄协议适配器，ADR-0020 §10）──────────────┐
-│   codec/input-decoder.ts   snake_case → HostEvent                       │
-│   codec/output-encoder.ts  HostEventResult → stdout JSON                │
-│   hostKind = 'subprocess'（与 codex-adapter 同构）                       │
-└────────────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─ @principles/host-runtime（共享编排，零重写）───────────────────────────┐
-│   production-rulehost-gate / active-principle-prompt / pain-evidence     │
-└────────────────────────────────────────────────────────────────────────┘
-
-可选增强（按需，非 MVP）：
-  • .mcp.json        → 把 pd-console 治理能力暴露为 MCP 工具，让 Agent 主动查询活跃原则
-  • channels + MCP   → 审批提醒推送到企业微信/Telegram
-  • bin/             → PD CLI 加入 PATH，Agent 可直接调用
-  • plugin agents    → 9 个 PD 智能体映射为后台 sub-agent
-```
-
----
+本机插件发现、治理目录解析、分发产物和后台推进都属于接线面。完整名单和验收见 SPEC §5/§8；不得用架构箭头证明运行连接成立。
 
 ## 4. 与官方文档的差异（重要）
 
-### 4.1 `updatedToolOutput` 在本机不存在
+### 4.1 updatedToolOutput 的历史静态证据
 
 文档称 PostToolUse 可返回 `hookSpecificOutput.updatedToolOutput` **替换**工具结果。本机 grep `updatedToolOutput` / `updatedOutput` / `newToolOutput` / `replaceOutput` / `outputOverride` **全部为 0**，而 `additionalContext`(40) 存在。
 
-**结论**：桌面版 5.3.14 的 PostToolUse 只能**追加**上下文，不能替换/压缩工具输出。
+**2026-10-12 快照补证**：官方 hooks 文档对 `updatedToolOutput` 的规范相当完整——适用于全部工具（含 MCP，数组返回值原样用作 MCP content array）、与 `additionalContext` 可同时返回（先替换后追加）、典型用途是压缩冗长工具输出省 token，并明确 `decision: "block"` 已废弃（PostToolUse 在工具执行后触发，阻断无意义）。**零命中不能区分未实现、路径变化或其他实现形态**——若桌面版引擎升级，该能力可能直接可用。SPEC 中应将其标记为版本依赖能力并加契约测试。
+
+**结论（5.3.14 历史取证）**：桌面版 5.3.14 的 PostToolUse 只能**追加**上下文，不能替换/压缩工具输出。
+
+**2026-10-12 晚补记（版本升级，证据核查 M1）**：本机 WorkBuddy 已于 2026-10-11 从 5.3.14 升级至 **5.8.1**（install-manifest.json），引擎文件由 `cli/dist/codebuddy.js` 变为 `cli/dist/codebuddy-lite-wb.mjs`；在现行引擎中 `updatedToolOutput` **12 处命中**——「桌面版未实现」仅为 5.3.14 历史取证，现时表述已推翻。SPEC（v0.2）的版本门禁设计保留，但门禁依据从「未实现」改为「未复验」，Phase 0 探针须以现行版本重新确认。本报告全部 5.3.14 计数类取证（§1.1 事件命中数、§1.2 payload 字段计数、§3.1 http fail-OPEN 代码摘录、本节 0 命中）均为历史取证，复核前先查 install-manifest 与引擎目录。
 
 **影响**：若 PD 想做「压缩冗长工具输出以省 token」或「改写工具结果」，本版不可用，只能用 `additionalContext` 追加告警。需在 SPEC 中标记为版本依赖能力。
 
-### 4.2 事件数：文档「27+」准确，我上一份报告的「20」有误
+### 4.2 事件数：我上一份报告的「20」有误；「27」的准确口径如下
 
-见 §0。
+见 §0。**2026-10-12 快照补证**：官方 hooks 文档称「27+ events」，但官方 plugins-reference 事件表只列 **26** 个（不含 `Setup`）；本机二进制含 `Setup` 共 **27** 个。三个数字的关系：官方文档自身两处不一致，能力面以本机取证的 27 个为准；`Setup` 无官方文档，属取证独有发现。
 
-### 4.3 文档基于 CLI v1.16.0，本机是桌面版 5.3.14
+### 4.3 文档基于 CodeBuddy Code v1.16.0+，本机是桌面版 5.3.14
 
-两条产品线。凡文档结论，落地前均需在本机 `cli/dist/codebuddy.js` 复核。
+**2026-10-12 勘误**：原文「两条产品线」表述不准确。桌面版引擎本体即 `cli/dist/codebuddy.js`，官方文档 canonical 指向 codebuddy.ai（CodeBuddy CLI 文档）——**同引擎同源**，差异在发布列车与版本基线（v1.16.0+ vs 5.3.14）。27 事件集两处一致，能力下限已确认；Beta 演进风险仍在，复核须先确认产品版本/manifest，再枚举当前引擎文件并记录哈希，不能固定使用已失效的 codebuddy.js 路径。本地已存官方快照：`docs/plans/2026-10-12-workbuddy-official-{plugins-reference,hooks-reference}.md`。
 
 ---
 
@@ -222,40 +165,24 @@
 1. **Plugin agent 不支持 `hooks` / `mcpServers` / `permissionMode`** —— 拦截必须放插件级。
 2. **插件分发的 Skill / Agent frontmatter hooks 默认被安全门拒绝**（`allowUntrustedFrontmatterHooks`，本机 3 处）。但 **plugin `hooks/hooks.json` 不受此限制**——这正是应走插件级 hook 的又一理由。
 3. **hook 配置不热加载**：启动时快照，需在 `/hooks` 面板审查后才生效。
-4. **Windows 强制 Git Bash**（cmd.exe / PowerShell 不支持），hook 脚本须兼容 bash 语法；Python 脚本须显式 `python3 xxx.py`，不能靠 shebang。
-5. **hook 超时默认 60s**，PD 拦截须低延迟。
+4. **Windows 强制 Git Bash**（cmd.exe / PowerShell 不支持），hook 脚本须兼容 bash 语法；Python 脚本须显式 `python3 xxx.py`，不能靠 shebang。官方快照补充：可用 `CODEBUDDY_CODE_GIT_BASH_PATH` 环境变量指定 bash.exe 路径；Git Bash 缺失时会提示安装 Git for Windows。
+5. **hook 超时默认 60s**（`prompt` 类型 hook 默认 30s，均可按 hook 覆盖），PD 拦截须低延迟。
 6. **exit code 2 时 stderr 是 fallback**：仅当 stdout 无输出时才把 stderr 传给 Agent，因此**调试日志可安全写 stderr**。这是可观测性设计的好消息。
 7. **SDK 默认不加载文件系统配置** —— SDK 路径与插件路径是两套体系，若 PD 走 SDK 需显式 `settingSources`，否则插件/hooks/skills 全不生效。
 8. SDK 处于 **Preview**，Hooks 处于 **Beta**。
 
 ---
 
-## 6. 与 OpenClaw 的能力对比（PD 视角）
+## 6. 跨宿主比较的证据边界
+本调研没有当前 OpenClaw/WorkBuddy 的同任务运行对照，不能据 WorkBuddy 文档或字符串计数断言“独有”“更优”或治理深度超过 OpenClaw。比较必须分别写清宿主协议、PD 已连接能力、当前健康与真实用户效果。
 
-| 能力 | OpenClaw | WorkBuddy | PD 受益 |
-|---|---|---|---|
-| 拦截（工具前） | ✅ `api.on()` in-process | ✅ PreToolUse | 持平 |
-| **工具入参改写** | — | ✅ `modifiedInput` | **WorkBuddy 更优**（Codex 亦无） |
-| **上下文压缩治理** | — | ✅ PreCompact/PostCompact | **WorkBuddy 独有** |
-| **子智能体生命周期** | — | ✅ SubagentStart/Stop | **WorkBuddy 独有** |
-| **空闲提醒** | — | ✅ Notification+idle_prompt | **WorkBuddy 独有** |
-| **IM 推送** | — | ✅ channels + MCP | **WorkBuddy 独有** |
-| 后台/可恢复智能体 | — | ✅ background + resume | **WorkBuddy 独有** |
-| 程序化驱动 | — | ✅ Agent SDK | **WorkBuddy 独有** |
-| 事件总数 | 少量 | 27 | **WorkBuddy 更优** |
-
-**结论**：PD 在 WorkBuddy 上能做到的治理深度**显著超过 OpenClaw**。这不是简单的「第二个宿主」，而是 PD 首次获得「上下文生命周期治理 + 异步审批 + 后台智能体编排」的完整能力面。
-
----
+首版的可比较目标是同一批准意图、真实拦截、可观测降级和可撤回；v2 上下文缺失时明确 unsupported，不假装与 OpenClaw 功能全等。
 
 ## 7. 建议优先级
 
-| 优先级 | 事项 | 理由 |
+| 顺序 | 事项 | 开始/完成条件 |
 |---|---|---|
-| P0 | `command` 类型 hook 骨架（PreToolUse + SessionStart + PostToolUse） | 打通三条 MVP-Core 路径，规避 http fail-OPEN |
-| P0 | 修正 PRI-560 方案选型 | 见前置报告的 P0 发现 |
-| P1 | `PreCompact` 证据抢救 | PD 相对原生记忆的决定性差异点 |
-| P1 | `PostToolUseFailure` + `PermissionDenied` 接入痛点检测 | 直击 Pain Attribution |
-| P2 | `Notification` + `idle_prompt` 审批提醒 | 降低审批摩擦 |
-| P2 | `SubagentStart/Stop` + 9 个 PD 智能体后台化 | 编排自由度 |
-| P3 | MCP / channels / bin/ 增强 | 按需，非 MVP |
+| 1 | 可靠接入：插件加载、目录身份、权限保持、安装产物 | P01–P06 有真实证据；Owner 决策冻结 |
+| 2 | 三条路径及可撤回 | 真实注入、未发生的禁止副作用、正确证据、下一轮撤回 |
+| 3 | 完整治理闭环 | 真实信号经后台形成提案、人工审批后生效；不用模拟替代 |
+| 后续 | 压缩、通知、reasoning、改参、子代理/SDK | 先证明现有机制无法满足的缺口，再独立评审 |

@@ -1,15 +1,26 @@
 # PD 作为 WorkBuddy 插件：可行性评估（给维护者）
 
+> **2026-10-12 第二轮整改**：本文保留历史调研和取证，不是当前宿主运行验收。实现基线见 [SPEC v0.3.0](../specs/workbuddy-host-adapter-spec.md)，重点阅读 §4 契约、§5 改动面、§7 探针及 §8 验收。第一轮评审清单须逐项复核；“已改文字”不等于“已验证能力”。
+> **开发状态**：可进入隔离探针开发；生产适配器按探针结论与 Owner 决策冻结后实施。历史引擎字符串命中仅证明存在性，不能证明实际触发、完整实现或用户效果。
+
+
 > 状态：调研结论（未进入实现） · 日期：2026-08-21
 > 目的：回答"PD 能不能做成 WorkBuddy 插件"，并核实官方材料与 PD 源码，给出可落到 MVP 的判断。
 
+> ## ⚠️ 勘误（2026-10-12，官方文档快照复核后）
+>
+> **1. 本文推荐的「混合方案」（`http` 类型 hook 把事件 POST 给 pd-console）已作废。** 2026-08-28 本机引擎二进制取证证明：WorkBuddy 的 `http` hook 三条失败路径——非 2xx 响应 / 网络异常与超时 / 响应非法 JSON——**全部 `allowed: true` 静默放行**（fail-OPEN），与 PD「强制遵守」的治理承诺根本冲突（即 ADR-0020 §1 记录的 Codex 陷阱 E3 的 HTTP 版本）。详见 `docs/plans/2026-08-28-workbuddy-adapter-verification.md` §3.1（P0）。
+> **2. 现行推荐**：`command` 类型 hook + 新建 `packages/workbuddy-adapter/` 薄适配器（复用 `codex-adapter` 模式，`hostKind='subprocess'`，退出码 2 可 fail-closed），走 ADR-0020 多宿主抽象——WorkBuddy 是**第三个宿主适配器**（OpenClaw=inprocess / Codex=subprocess / WorkBuddy=subprocess），不做旁路方案。
+> **3. §8 参考信源里的中文 Hooks 页已过时，勿再引用**：`workbuddy.cn/docs/ide/Features/Hooks` 仅列 7 个事件、仅 `command` 一种类型，与引擎实际（27 事件、四种类型）不符。信源以英文站 `workbuddy.ai/docs/cli/plugins-reference` 与 `.../hooks` 为准，本地快照：`docs/plans/2026-10-12-workbuddy-official-plugins-reference.md`、`docs/plans/2026-10-12-workbuddy-official-hooks-reference.md`。
+> **4. 本文 §2/§3 引用的官方能力（27+ 事件、四种 hook 类型、退出码 2、`permissionDecision` 三态、Beta 状态）经快照复核均准确**，无需修正——错的是落地形态选型，不是能力事实。
+
 ## 0. 结论（TL;DR）
 
-**可以做，且可行性已被官方文档与 PD 源码双向证实。** 关键阻塞点——"WorkBuddy 是否暴露可供插件订阅的 Agent 生命周期 Hook"——已确认存在：WorkBuddy（底层引擎 CodeBuddy）提供 **Beta 阶段的 Hooks 系统**，插件可通过 `hooks/hooks.json` 订阅与 OpenClaw 同构的 `PreToolUse / PostToolUse / UserPromptSubmit / SessionStart …` 事件，且 `PreToolUse` 原生支持 `allow/deny/ask` 决策。
+**现有宿主协议与 PD 共享运行时支持继续验证 command 适配方案；尚未证实完整接入可用。** 关键阻塞点——"WorkBuddy 是否暴露可供插件订阅的 Agent 生命周期 Hook"——已确认存在：WorkBuddy（底层引擎 CodeBuddy）提供 **Beta 阶段的 Hooks 系统**，插件可通过 `hooks/hooks.json` 订阅与 OpenClaw 同构的 `PreToolUse / PostToolUse / UserPromptSubmit / SessionStart …` 事件，且 `PreToolUse` 原生支持 `allow/deny/ask` 决策。
 
 PD 今天在 OpenClaw 上跑的核心机制（拦截→检测痛点→提案→审批→注入）**每一步都能映射到 WorkBuddy 的对应 Hook**，且 PD 的治理/检测引擎（pd-console、runtime-v2）几乎可以不改地复用。
 
-**推荐落地形态：混合方案**——WorkBuddy 插件只做薄薄的 `hooks/hooks.json`（PreToolUse/PostToolUse → `http` 转发到 PD 既有 HTTP 服务），拦截语义与治理闭环留在 PD。详见 §5。
+**推荐落地形态：混合方案**~~——WorkBuddy 插件只做薄薄的 `hooks/hooks.json`（PreToolUse/PostToolUse → `http` 转发到 PD 既有 HTTP 服务）~~**【已作废，见文首勘误】**——现行推荐：`command` 类型 hook + `packages/workbuddy-adapter/` 薄适配器（fail-closed 可控）。拦截语义与治理闭环留在 PD。详见 §4。
 
 > ⚠️ 治理前提（必须如实告知维护者）：按 `AGENTS.md` 的 MVP-First 分层（ADR-0014），"WorkBuddy 插件"是一个**新的接入面（surface）**，不是 PD 既有核心功能。默认应归入 **MVP-Quiet**（feature flag 默认 off、不进 UI），除非维护者明确批准升为 MVP-Core。本报告未替维护者做此批准决定。
 
@@ -25,7 +36,7 @@ PD 是 OpenClaw 的插件，其价值闭环强依赖宿主把 Agent 生命周期
 | 拦截 + 闸门（RuleHost） | `host-runtime/dist/production-rulehost-gate.js` | `createProductionRuleHostGate` 返回 `async (event) => …`；读取 `event.context.toolName / workspaceDir / sessionId` 与 `event.rawPayload.toolInput`；查询 `state.db` 中 `channel='code_tool_hook'` 的激活规则；命中返回 `decision: 'deny'` + `reason`（第 64–66、69–75、120–138、277–283 行） |
 | 激活原则注入上下文 | `host-runtime/dist/active-principle-prompt.js` | `buildActivePrinciplePromptContext` 从 `state.db` 读取已激活原则，经 `renderPrinciplesToDirectives` 渲染为指令，返回 `additionalContext`（第 6、35–67、81–105 行） |
 | 检测痛点（失败/重复纠错） | `host-runtime/dist/production-pain-evidence.js` | `createProductionPainEvidenceHandler` 读取 `event.context.toolName / toolInput / toolOutput`，将 `tool_calls` 与 `pain_events` 写入 `.state/trajectory.db`；写工具失败时触发诊断任务（第 177–179、216–234、248–255 行） |
-| 治理台（审批/证据链） | `packages/pd-console` | 独立 HTTP 服务，`host='127.0.0.1'`、`port=3100`（`src/server/index.ts` 第 114–115 行）；`GET /api/v1/evidence-chain` 返回 JSON 证据链（`src/server/routes/evidence-chain.ts` 第 4、35 行）；其余路由含 `principles / activations / approvals / governance / intent` 等 |
+| 治理台（审批/证据链） | `packages/pd-console` | 独立 HTTP 服务，`host='127.0.0.1'`、`port=3100`（`src/server/index.ts` 默认监听配置；具体以当前入口为准）；`GET /api/v1/evidence-chain` 返回 JSON 证据链（`src/server/routes/evidence-chain.ts` 第 4、35 行）；其余路由含 `principles / activations / approvals / governance / intent` 等 |
 | 提案智能体管线 | `packages/principles-core/src/runtime-v2/` | 9 个智能体均已实现：`diagnostician`、`dreamer`、`philosopher`、`scribe`、`artificer`、`evaluator`（`internalization/` 与 `diagnostician/`）、`rolloutReviewer`、`correctionObserver`（`observer/`）、`empathyObserver`（`observer/`） |
 
 **结论**：PD 的三个运行时集成点（闸门、注入、痛点检测）都是"读 hook 事件 + 读写本地 SQLite"，没有任何 OpenClaw 私有 API 深度耦合——这正是它能迁移到 WorkBuddy 的根本原因。
@@ -95,7 +106,7 @@ PD 是 OpenClaw 的插件，其价值闭环强依赖宿主把 Agent 生命周期
     "modifiedInput": { "field_to_modify": "new value" } } }
 ```
 
-这与 `production-rulehost-gate.js` 输出的 `decision: 'allow' | 'deny'` + `reason` **语义同构**，迁移几乎零转换。
+这与 `production-rulehost-gate.js` 输出的 `decision: 'allow' | 'deny'` + `reason` 需要显式转换：中性结果省略 permissionDecision，不能发 allow 绕过宿主权限；工具输入/结果还须满足共享 runtime 契约。
 
 ### 2.5 Hook 输出注入上下文（= 原则注入）
 
@@ -134,17 +145,17 @@ PD 是 OpenClaw 的插件，其价值闭环强依赖宿主把 Agent 生命周期
 - 缺点：近乎重写；且**Plugin Agent 不允许挂 Hook**（见 §6 坑 3）——拦截逻辑必须放在插件级 `hooks.json`，不能塞进子 Agent。
 - 可行性：✅（Hook 面已证实），但工作量大。
 
-### 路径 C — 混合（推荐）
+### 路径 C — 混合（~~推荐~~ · **2026-10-12 勘误：已作废**，`http` 类型 fail-OPEN 见文首）
 - 做法：WorkBuddy 插件只含 `hooks/hooks.json`，用 `http` 类型把 `PreToolUse`/`PostToolUse` 事件 POST 给 PD 既有 HTTP 服务；PD 的 RuleHost / 痛点检测 / 审批 / 证据链**完全不动**。
 - 优点：改动最小、风险最低、PD 引擎零重写；同时拿到完整拦截闭环。
 - 缺点：依赖 PD 服务在本地运行（与今天 OpenClaw 宿主并存）；Beta Hook API 可能演进。
-- 可行性：✅✅（Hook 面 + `http` 类型 + PD 既有 HTTP 服务三者俱备）。
+- 可行性：已撤销；PD 控制台没有已核实的 hook 接收端点，历史 http 失败放行风险尚未闭环。
 
 ---
 
 ## 5. MVP 三问 + 情绪价值对齐（按 `AGENTS.md`）
 
-`AGENTS.md` 规定每个新 issue 必须回答四问（第 22–25 行）：
+`AGENTS.md` 规定每个新 issue 必须回答四问（§4 的稳定 mvp-q-* 标识）：
 
 > 1. `mvp-q-1-what-if-skip` — 不做会怎样？30 天后还有人会提吗？
 > 2. `mvp-q-2-how-observed` — 如何被观测？用户怎么验证它生效？
@@ -152,19 +163,20 @@ PD 是 OpenClaw 的插件，其价值闭环强依赖宿主把 Agent 生命周期
 > 4. `mvp-q-4-emotional-value` — 交付什么情绪价值？
 
 ### mvp-q-1（不做会怎样）
-PD 继续只在 OpenClaw 上可用。WorkBuddy 是种子用户日常开发的主环境；若不做，种子用户在 WorkBuddy 里仍要**重复纠正同一个 AI 行为**——而这正是 PD 要消除的痛点（`AGENTS.md` 第 31 行核心承诺："把 … 重复纠正感 … 转化为 … 沉淀感"）。30 天后会被反复提起。**但**：这是新接入面，按 ADR-0014 默认应 MVP-Quiet，需维护者批准才升 MVP-Core（见 §0 警告）。
+PD 已有 OpenClaw 和 Codex 接入；WorkBuddy 的可用性仍待验收。WorkBuddy 是种子用户日常开发的主环境；若不做，种子用户在 WorkBuddy 里仍要**重复纠正同一个 AI 行为**——而这正是 PD 要消除的痛点（`docs/product/PRODUCT_IDENTITY.md:66` 核心承诺："把 … 重复纠正感 … 转化为 … 沉淀感"——2026-10-12 勘误：原引「`AGENTS.md` 第 31 行」有误，该行实为 PD does NOT own 列表内容；MVP 四问实际在 `AGENTS.md:323-387`）。30 天后会被反复提起。**但**：这是新接入面，按 ADR-0014 默认应 MVP-Quiet，需维护者批准才升 MVP-Core（见 §0 警告）。
 
 ### mvp-q-2（如何观测）
-- 拦截生效：Hook 决策日志（`allow`/`deny`），pd-console 的 `activations` 路由可查已激活规则。
-- 注入生效：`active-principle-prompt` 的 `principleIds` 计数；`SessionStart` 注入的 `additionalContext` 长度。
-- 痛点检测：`GET /api/v1/evidence-chain`（已确认返回 JSON，§1）展示 `pain_events` 与证据链。
-- 以上三条都有**可观测路径**，满足要求。
+- 拦截：真实受保护操作未产生副作用；日志与 activations 仅是辅助证据。
+- 注入：区分准备/输出、宿主接收和最终上下文存在；principleIds 与长度不能证明模型遵守。
+- 证据：真实失败进入既有证据链，身份与源正确，重送不重复、独立调用不误合并。
+- 完整治理：真实信号→后台推进→提案→Owner 审批→下一轮激活→撤回；不能用直接写 SQLite 替代。
+- 以上为待执行验收，不是已通过结果。
 
 ### mvp-q-3（如何关闭）
 PD 已有 feature-flag 契约（`feature-flag-contract.ts`，注册于 `{workspace}/.pd/config.yaml`，`category: core|quiet|gone`）。WorkBuddy 插件 Hook 可经同一 flag 关闭；或在 WorkBuddy 侧卸载插件 / 移除 `hooks.json`。**满足"从第一天起带 feature flag"的要求**。
 
 ### mvp-q-4（情绪价值）
-直接对齐 `docs/product/emotional-value.md` 核心承诺（第 31 行）：
+直接对齐 `docs/product/PRODUCT_IDENTITY.md:66` 核心承诺（2026-10-12 勘误：原引 `docs/product/emotional-value.md` 不存在，承诺原文在 PRODUCT_IDENTITY.md:66）：
 - 降低：**失控感**（是否生效不可知）→ 通过 pd-console 可见的审批流消除；**重复纠正感** → 原则沉淀后下次自动遵守。
 - 提升：**安心感 / 掌控感**（Owner 对每个原则显式批准）、**沉淀感**（纠正变成可复用原则）。
 
@@ -181,12 +193,10 @@ PD 已有 feature-flag 契约（`feature-flag-contract.ts`，注册于 `{workspa
 ---
 
 ## 7. 推荐下一步（验证动作）
-
-1. **探针脚本**（最高优先）：在目标 WorkBuddy 版本上挂 `PreToolUse`/`PostToolUse` 探针，确认触发与 payload 字段；预计 0.5 天。
-2. **骨架 PR（MVP-Quiet）**：写 `plugin.json` + `hooks/hooks.json`（`http` 转发到 pd-console），配 feature flag 默认 off；预计 1–2 天。
-3. **原生闭环验证**：在骨架上接 PD 的 `production-rulehost-gate` 决策与 `active-principle-prompt` 注入，跑一端到端 demo。
-
----
+1. 按 SPEC §7.1 P01–P06 验证插件发现/启用/退出码/事件/依赖/工作区身份，记录版本、fixture、实际结果和恢复动作。
+2. 根据真实失败分流确定是否最小追加 PostToolUseFailure；区分治理目录与项目目录，解决后台消费者接线。
+3. 冻结 Owner 决策后实现薄适配器，并验证真实安装产物、控制台、审批与撤回。完整自动学习另过后台闭环门槛。
+4. 旧 0.5 天探针和 1–2 天骨架估计不作为开发承诺；以真实未知项和验收工作量重新估算。
 
 ## 8. 参考信源
 
@@ -195,7 +205,7 @@ PD 已有 feature-flag 契约（`feature-flag-contract.ts`，注册于 `{workspa
   - 插件组件列表、Hooks 位置、Plugin Agent 限制、plugin.json 字段 —— 见 §2.1、§2.2、§6 坑 3。
 - WorkBuddy Hooks 参考：https://www.workbuddy.ai/docs/cli/hooks
   - 版本/Beta、事件矩阵、Hook 类型、PreToolUse 阻断、输出 JSON、退出码 —— 见 §2.2–§2.6。
-- WorkBuddy 中文 Hook 文档（交叉核对 payload/output 格式）：https://www.workbuddy.cn/docs/ide/Features/Hooks
+- ~~WorkBuddy 中文 Hook 文档（交叉核对 payload/output 格式）：https://www.workbuddy.cn/docs/ide/Features/Hooks~~ —— **2026-10-12 勘误：已过时，勿作信源**。该页仅 7 事件、仅 `command` 一种类型，与引擎实际（27 事件、四种类型）不符；payload/output 格式以英文站两份文档 + 8-28 本机取证为准（本地快照见 `docs/plans/2026-10-12-workbuddy-official-*.md`）。
 - WorkBuddy 简介：https://www.workbuddy.cn/docs/workbuddy/Overview
 
 ### PD 源码（文件:行号）
@@ -203,7 +213,8 @@ PD 已有 feature-flag 契约（`feature-flag-contract.ts`，注册于 `{workspa
 - `…/host-runtime/dist/production-rulehost-gate.js:64-66, 69-75, 120-138, 277-283`（闸门 allow/deny）
 - `…/host-runtime/dist/active-principle-prompt.js:6, 35-67, 81-105`（原则注入 additionalContext）
 - `…/host-runtime/dist/production-pain-evidence.js:177-179, 216-234, 248-255`（痛点检测写入 trajectory.db）
-- `D:/Code/principles/packages/pd-console/src/server/index.ts:114-115`（host 127.0.0.1 / port 3100）
+- `D:/Code/principles/packages/pd-console/src/server/index.ts:125-126`（host 127.0.0.1 / port 3100；2026-10-12 勘误：原引 114-115 行号漂移，该处实为 workspace 解析日志）
 - `D:/Code/principles/packages/pd-console/src/server/routes/evidence-chain.ts:4, 35`（`GET /api/v1/evidence-chain` JSON）
 - `D:/Code/principles/packages/principles-core/src/runtime-v2/`（9 智能体实现：diagnostician / dreamer / philosopher / scribe / artificer / evaluator / rolloutReviewer / correctionObserver / empathyObserver）
-- `D:/Code/principles/AGENTS.md:22-25, 31`（MVP 三问 + 情绪价值核心承诺）
+- `D:/Code/principles/AGENTS.md:323-387`（MVP 四问——2026-10-12 勘误：原引 22-25/31 有误，22-25 行为「PD owns」列表、31 行为「general agent orchestration」）
+- `docs/product/PRODUCT_IDENTITY.md:66`（情绪价值核心承诺「重复纠正感→沉淀感」——原引 `docs/product/emotional-value.md` 不存在）

@@ -1,5 +1,9 @@
 # PRI-560 复核：PD 适配 WorkBuddy 实证验证报告
 
+> **2026-10-12 第二轮整改**：本文保留历史调研和取证，不是当前宿主运行验收。实现基线见 [SPEC v0.3.0](../specs/workbuddy-host-adapter-spec.md)，重点阅读 §4 契约、§5 改动面、§7 探针及 §8 验收。第一轮评审清单须逐项复核；“已改文字”不等于“已验证能力”。
+> **开发状态**：可进入隔离探针开发；生产适配器按探针结论与 Owner 决策冻结后实施。历史引擎字符串命中仅证明存在性，不能证明实际触发、完整实现或用户效果。
+
+
 > **日期**：2026-08-28
 > **复核对象**：PRI-560 结论「可行，推荐混合方案（MVP-Quiet）」及配套文档 `docs/plans/2026-08-workbuddy-plugin-feasibility.md`
 > **方法**：本机实证（非文献复述）——配置目录勘查 + 引擎二进制取证 + 运行时 HTTP 探测 + PD 源码核对
@@ -11,7 +15,7 @@
 
 **可行，但工单推荐的落地形态需要修正。**
 
-技术阻塞点确实已消除（工单的"可行"判断成立），且 PD 侧已有比"新建混合方案"更好的现成路径。但工单方案所依赖的 `http` hook 类型存在 **fail-OPEN 语义**，与 PD 的治理闭环根本冲突（详见 §3.1，P0）。
+已发现可继续验证的协议与共享实现路径，但端到端技术阻塞尚未全部消除，且 PD 侧已有比"新建混合方案"更好的现成路径。但工单方案所依赖的 `http` hook 类型存在 **fail-OPEN 语义**，与 PD 的治理闭环根本冲突（详见 §3.1，P0）。
 
 ---
 
@@ -30,10 +34,10 @@
 | 事件名（**27 个**。2026-08-28 更正：初版记 20 个系枚举遗漏，已按官方事件表逐一复核，27 个全部存在） | PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, SessionStart, SessionEnd, Stop, StopFailure, SubagentStart, SubagentStop, Notification, PermissionRequest, PermissionDenied, Elicitation, ElicitationResult, PreCompact, PostCompact, InstructionsLoaded, ConfigChange, TaskCreated, TaskCompleted, TeammateIdle, FileChanged, CwdChanged, WorktreeCreate, WorktreeRemove, Setup | 同上；逐事件计数见 `docs/plans/2026-08-28-workbuddy-capability-map-for-pd.md` §1.1 |
 | payload 字段 | `hook_event_name`(49) `tool_name`(88) `tool_input`(48) `tool_response`(17) `session_id`(85) `transcript_path`(35) | 同上 |
 | 阻断语义 | `permissionDecision: "allow" \| "deny" \| "ask"`（52 处）；`continue` / `decision: "block"` | 同上 |
-| 桌面版真实在用 | sheetagent(`SubagentStop`)、tencent-docx(`SessionStart`)、tencent-pptx(`PreToolUse` + `matcher: "Skill"`) | 已安装插件 `hooks/hooks.json` |
+| 桌面版真实在用 | sheetagent(`SubagentStop`)、tencent-docx(`SessionStart`)、tencent-pptx(`PreToolUse` + `matcher: "Skill"`)（tencent-pptx 条 2026-10-12 复核存疑，见 §7 补记 6） | 已安装插件 `hooks/hooks.json` |
 | 环境变量 | `${CODEBUDDY_PLUGIN_ROOT}` | tencent-pptx hooks.json |
 
-**已消除的疑点**（工单列为"开工前必须核实"第 4 条）：桌面版确实会触发 hook——三个内置插件在生产环境实际使用，不是纸面能力。
+**静态证据边界**：内置插件声明了 hooks，支持继续做真实探针；本次历史调研未运行这些 hooks，不能据配置存在证明桌面版实际触发。tencent-pptx 条本身另有存疑补记。
 
 ### 2.2 PD 侧
 
@@ -124,7 +128,7 @@ packages/workbuddy-adapter/
 
 `hostKind` 取值：OpenClaw = `inprocess`，Codex = `subprocess`，**WorkBuddy = `subprocess`** —— 与 Codex 同构，codec 可直接借鉴。
 
-事件订阅建议：`PreToolUse`（RuleHost 闸门）、`PostToolUse`（痛点证据）、`SessionStart`（原则注入）。与 codex-adapter 的 `before_tool_call / after_tool_call / before_prompt_build / session_start` 一一对应。
+事件订阅建议：`PreToolUse`（RuleHost 闸门）、`PostToolUse`（痛点证据）、`SessionStart`（原则注入）。此历史建议漏列 UserPromptSubmit，不能声称四种事件一一对应。当前四事件及失败事件条件项以 SPEC v0.3 §4.2 为准。
 
 Feature flag：沿用 `host.<id>.enabled = false`（默认关）约定，对齐 MVP-Quiet。
 
@@ -140,8 +144,20 @@ Feature flag：沿用 `host.<id>.enabled = false`（默认关）约定，对齐 
 
 ---
 
-## 6. 建议下一步
+## 6. 当前下一步（取代原“唯一未闭环”结论）
+1. 执行 SPEC §7.1 P01–P06：插件发现/启用/缓存、逐事件故障表现、真实成功/失败载荷、注入与恢复、运行依赖、工作区身份。
+2. 明确 Owner 决策、支持范围和后台推进路径后冻结实现；历史 static grep 和 HTTP GET 200 不能替代上述验证。
+3. Phase 1 检验真实安装包、生产并发写入、审批/撤回及后台闭环，回归 Codex/OpenClaw。不能预先称这些验证完成。
+4. 首版不读 transcript，不启用 modifiedInput/updatedToolOutput；不用实现已排除能力作为开工门槛。
 
-1. 起一台本地 HTTP 探针，用 `command` 类型 hook 实测 `PreToolUse`/`PostToolUse` 的 stdin payload 与退出码 2 行为（约 0.5 天）——这是唯一尚未闭环的验证项。
-2. 立 ADR：WorkBuddy 宿主适配器（作为 ADR-0020 的增量，非新架构），或直接在 ADR-0020 追加 §11。
-3. 骨架 PR：`packages/workbuddy-adapter/` + feature flag 默认 off（MVP-Quiet）。
+## 7. 补记（2026-10-12）
+
+官方两份参考文档已完整存档：`docs/plans/2026-10-12-workbuddy-official-plugins-reference.md`、`docs/plans/2026-10-12-workbuddy-official-hooks-reference.md`（来源 `workbuddy.ai/docs/cli`，文档 lastUpdated 2026-09-17，文档站构建 commit `4a4c8c2c72d`）。以快照复核本报告：
+
+1. **§5 遗留风险 2 的「非同一产品线」表述不准确，澄清如下**：桌面版引擎本体即 `cli/dist/codebuddy.js`，官方文档 canonical 指向 codebuddy.ai（CodeBuddy CLI 文档）——两者**同引擎同源**，差异只在发布列车与版本基线（桌面版 5.3.14 vs 文档基线 CodeBuddy Code v1.16.0+）。27 事件集两处一致，能力下限已确认；Beta 演进风险仍然存在，「按目标版本复核」的纪律不变。
+2. **事件数三方口径不一，以取证为准**：官方 plugins-reference 事件表列 **26** 个（不含 `Setup`）；hooks 文档称「**27+** events」；本机二进制含 `Setup` 共 **27** 个（§2.1 表）。官方文档自身两处不一致，能力面以本机取证为准。
+3. **官方文档不写 `http` 类型的失败语义**：四种类型仅在类型列表与一个 frontmatter 示例（`url` + `method: POST`）中出现，非 2xx / 超时 / 非法 JSON 的处理只字未提——§3.1 的 fail-OPEN P0 发现无任何文档依据，再次证明二进制取证不可省。
+4. **安全门获官方确认**：`allowUntrustedFrontmatterHooks` 仅拦截 Agent/Skill frontmatter hooks（插件市场分发的 Agent/Skill 默认拒绝），plugin `hooks/hooks.json` **不受该门禁**——与 `2026-08-28-workbuddy-capability-map-for-pd.md` §5-2 取证一致，是走插件级 hook 的又一理由。
+5. **中文站文档已作废**：`workbuddy.cn/docs/ide/Features/Hooks` 为旧版（7 事件、仅 command 类型），勿作信源；可行性文档 §8 的该条引用已标注作废。
+6. **§2.1 tencent-pptx 条存疑**：2026-10-12 晚复核本机 `~/.workbuddy/plugins/cache/workbuddy-builtin/`——sheetagent（SubagentStop）与 tencent-docx（SessionStart）相符，但 tencent-pptx 三个缓存版本（5.6.2/5.7.6/5.7.7）均无 hooks 字段/目录。§2.1 该条 8-28 当时状态无法确证（疑被后续插件更新移除），标注存疑。
+7. **本机已升级 5.8.1，本报告全部 5.3.14 计数类取证降级为「历史取证」**：2026-10-11 本机 WorkBuddy 从 5.3.14 升级至 5.8.1（install-manifest.json），引擎文件 `cli/dist/codebuddy.js` 已被替换为 `cli/dist/codebuddy-lite-wb.mjs`——§2.1 事件命中数、payload 字段计数、§3.1 http fail-OPEN 代码摘录及 capability-map §4.1「updatedToolOutput 0 命中」在当前机器均不可复现（现行引擎 27 事件全命中、updatedToolOutput 12 处命中）。复核纪律更新：先查 install-manifest 确认版本 → `ls` 引擎目录 → 在现行引擎上复核。「同引擎同源」实质仍成立（现行引擎 27 事件全命中佐证），本条为字面路径的更新依据。
