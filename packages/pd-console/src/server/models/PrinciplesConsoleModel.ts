@@ -159,6 +159,13 @@ export interface PrinciplesListOutput {
   categories?: Record<string, number>;
   /** If the approval cross-check was unavailable, this explains why (ERR-002) */
   approvalCrossCheckUnavailable?: string;
+  /**
+   * PRI-956 (F15, D3): if the activations-table query that determines
+   * CURRENT runtime revocation was unavailable, this explains why — the UI
+   * must express "runtime status cannot be confirmed" instead of defaulting
+   * to either active or revoked.
+   */
+  revocationCheckUnavailable?: string;
 }
 
 export type PrincipleFilter = 'all' | 'actionable';
