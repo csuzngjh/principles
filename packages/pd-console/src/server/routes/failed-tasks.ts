@@ -213,12 +213,11 @@ interface RecoverDispatchOutcome {
 //   unknown    — no usable evidence (fresh workspace, unreadable counters)
 const PIPELINE_STALL_WINDOW_MS = 30 * 60 * 1000;
 const PIPELINE_FRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
-const RUNNER_KINDS_FOR_HEALTH: ReadonlySet<string> = new Set([
-  'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer',
-]);
+// Runner-kind scoping lives inside SqliteTaskStore.aggregatePipelineHealth
+// (the aggregate SQL itself), so unrelated task kinds can never fake freshness.
 
 export interface PipelineHealth {
-  status: 'healthy' | 'backlogged' | 'stalled' | 'unknown';
+  status: 'healthy' | 'backlogged' | 'stalled' | 'disabled' | 'unknown';
   pendingCount: number | null;
   oldestPendingTaskKind: string | null;
   oldestPendingAgeMinutes: number | null;
@@ -234,47 +233,48 @@ function ageMinutes(iso: string | null | undefined, nowMs: number): number | nul
   return Math.max(0, Math.floor((nowMs - ms) / 60000));
 }
 
-async function derivePipelineHealth(store: SqliteTaskStore): Promise<PipelineHealth> {
+async function derivePipelineHealth(store: SqliteTaskStore, consumerEnabled: boolean): Promise<PipelineHealth> {
   const nowMs = Date.now();
   try {
-    const pending = await store.listTasks({ status: 'pending', limit: 200 });
-    const actionable = pending.filter((task) => RUNNER_KINDS_FOR_HEALTH.has(task.taskKind));
-    const succeededNewest = await store.listTasks({ status: 'succeeded', orderBy: 'updated_at_desc', limit: 1 });
-    const lastProgressAt = succeededNewest[0]?.updatedAt ?? null;
-    let oldest = null;
-    for (const task of actionable) {
-      if (typeof task.createdAt === 'string' && task.createdAt.length > 0) {
-        if (oldest === null || task.createdAt < oldest.createdAt) {
-          oldest = { taskKind: task.taskKind, createdAt: task.createdAt };
-        }
-      }
+    // C2/C4 (PRI-955 review): exact, untruncated aggregates over the
+    // authoritative tasks table, scoped to learning-pipeline runner kinds —
+    // a global MAX(succeeded) would let unrelated task kinds fake freshness,
+    // and a LIMIT-200 list length would misreport the queue size.
+    const agg = await store.aggregatePipelineHealth();
+    const {pendingCount} = agg;
+    const oldestPendingAgeMinutes = ageMinutes(agg.oldestPendingCreatedAt, nowMs);
+    const lastProgressAgeMinutes = ageMinutes(agg.lastSucceededAt, nowMs);
+    if (!consumerEnabled) {
+      return {
+        status: 'disabled', pendingCount, oldestPendingTaskKind: agg.oldestPendingTaskKind, oldestPendingAgeMinutes, lastProgressAt: agg.lastSucceededAt,
+        note: `内化自动消费者已禁用（internalization_auto_consumer=false）——学习管道不会推进。当前待处理 ${pendingCount} 个。`,
+        nextAction: '在 .pd/config.yaml 设置 features.internalization_auto_consumer.enabled=true，或改用 pd runtime internalization run-once 手动推进。',
+      };
     }
-    const pendingCount = actionable.length;
-    const oldestPendingAgeMinutes = ageMinutes(oldest?.createdAt ?? null, nowMs);
-    const lastProgressAgeMinutes = ageMinutes(lastProgressAt, nowMs);
     if (pendingCount > 0) {
       const stalled = (oldestPendingAgeMinutes ?? 0) > PIPELINE_STALL_WINDOW_MS / 60000
         && (lastProgressAgeMinutes === null || lastProgressAgeMinutes > PIPELINE_STALL_WINDOW_MS / 60000);
       if (stalled) {
         return {
-          status: 'stalled', pendingCount, oldestPendingTaskKind: oldest?.taskKind ?? null, oldestPendingAgeMinutes, lastProgressAt,
+          status: 'stalled', pendingCount, oldestPendingTaskKind: agg.oldestPendingTaskKind, oldestPendingAgeMinutes, lastProgressAt: agg.lastSucceededAt,
           note: `学习队列有 ${pendingCount} 个待处理任务，最老等待 ${oldestPendingAgeMinutes ?? '?'} 分钟，且窗口内无任何推进。`,
           nextAction: '检查内化消费者是否在运行（OpenClaw 自动消费 / pd codex worker），并查看任务队列明细。',
         };
       }
       return {
-        status: 'backlogged', pendingCount, oldestPendingTaskKind: oldest?.taskKind ?? null, oldestPendingAgeMinutes, lastProgressAt,
-        note: `学习队列有 ${pendingCount} 个待处理任务（最老等待 ${oldestPendingAgeMinutes ?? '?'} 分钟）；最近推进 ${lastProgressAt ?? '未知'}。`,
+        status: 'backlogged', pendingCount, oldestPendingTaskKind: agg.oldestPendingTaskKind, oldestPendingAgeMinutes, lastProgressAt: agg.lastSucceededAt,
+        note: `学习队列有 ${pendingCount} 个待处理任务（最老等待 ${oldestPendingAgeMinutes ?? '?'} 分钟）；最近推进 ${agg.lastSucceededAt ?? '未知'}。`,
+        nextAction: '积压会随消费者周期逐步消化；若长时间不降，检查消费者运行状态与模型通道。',
       };
     }
     if (lastProgressAgeMinutes !== null && lastProgressAgeMinutes <= PIPELINE_FRESH_WINDOW_MS / 60000) {
       return {
-        status: 'healthy', pendingCount: 0, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt,
-        note: `学习队列无积压；最近推进 ${lastProgressAt}。`,
+        status: 'healthy', pendingCount: 0, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt: agg.lastSucceededAt,
+        note: `学习队列无积压；最近推进 ${agg.lastSucceededAt}。`,
       };
     }
     return {
-      status: 'unknown', pendingCount: 0, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt,
+      status: 'unknown', pendingCount: 0, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt: agg.lastSucceededAt,
       note: '当前没有待处理任务，但窗口内没有可确认的推进证据——无法判定管道健康。',
       nextAction: '产生一次真实任务（或运行一次内化消费者）后回到本页复查。',
     };
@@ -538,7 +538,11 @@ export async function handleFailedTasksRoute(
       // PRI-955 (F11): "no failed tasks" ≠ "pipeline healthy" — derive the
       // learning-queue health projection from the same state.db facts and let
       // the UI show it next to the empty claim.
-      const pipeline = await derivePipelineHealth(store);
+      const consumerFlag = ctx.featureFlags && Object.hasOwn(ctx.featureFlags, 'internalization_auto_consumer')
+        ? ctx.featureFlags.internalization_auto_consumer
+        : undefined;
+      const consumerEnabled = consumerFlag ? consumerFlag.enabled === true : true; // 无该 flag 时无法断言禁用——不因缺失而宣称 disabled
+      const pipeline = await derivePipelineHealth(store, consumerEnabled);
 
       // Only claim anything like "healthy" from the pipeline projection, never
       // from the failed-task count alone. When tasks.length === 0 but

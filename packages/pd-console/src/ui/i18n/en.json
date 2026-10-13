@@ -1877,6 +1877,7 @@
         "statusHealthy": "Progressing",
         "statusBacklogged": "Backlogged (still progressing)",
         "statusStalled": "Possibly stalled",
+        "statusDisabled": "Consumer disabled",
         "statusUnknown": "Status unknown",
         "nextActionPrefix": "Suggested: "
       },

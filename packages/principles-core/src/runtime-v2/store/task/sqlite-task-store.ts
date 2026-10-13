@@ -373,6 +373,51 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   /**
+   * PRI-955 (R1 F11 C2/C4): exact learning-queue aggregates for the Console
+   * pipeline-health projection, computed in ONE read-only GROUP BY over the
+   * authoritative tasks table (no second state, no LIMIT truncation):
+   * - pendingCount per runner-kind task (status='pending')
+   * - oldest pending created_at (queue age)
+   * - newest succeeded updated_at per runner-kind task (recent-progress
+   *   evidence, scoped to learning-pipeline kinds — a global MAX would let
+   *   unrelated task kinds fake freshness)
+   *
+   * Read-only; throws storage_unavailable on malformed rows (rc-3), same as
+   * countFailedTasks.
+   */
+  async aggregatePipelineHealth(): Promise<{
+    pendingCount: number;
+    oldestPendingCreatedAt: string | null;
+    oldestPendingTaskKind: string | null;
+    lastSucceededAt: string | null;
+  }> {
+    const db = this.connection.getDb();
+    const kinds = ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'];
+    const placeholders = kinds.map(() => '?').join(', ');
+    const pendingRow = db.prepare(
+      `SELECT COUNT(*) as cnt, MIN(created_at) as oldest, (SELECT task_kind FROM tasks WHERE status = 'pending' AND task_kind IN (${placeholders}) ORDER BY created_at ASC LIMIT 1) as oldest_kind FROM tasks WHERE status = 'pending' AND task_kind IN (${placeholders})`
+    ).get(...kinds, ...kinds) as Record<string, unknown> | undefined;
+    if (!pendingRow || typeof pendingRow.cnt !== 'number' || !Number.isInteger(pendingRow.cnt)) {
+      throw new PDRuntimeError(
+        'storage_unavailable',
+        'aggregatePipelineHealth: expected integer cnt from pending COUNT(*) query',
+      );
+    }
+    const succeededRow = db.prepare(
+      `SELECT MAX(updated_at) as last FROM tasks WHERE status = 'succeeded' AND task_kind IN (${placeholders})`
+    ).get(...kinds) as Record<string, unknown> | undefined;
+    const lastRaw = succeededRow?.last;
+    const lastSucceededAt = typeof lastRaw === 'string' && lastRaw.length > 0 ? lastRaw : null;
+    const oldestRaw = pendingRow.oldest;
+    return {
+      pendingCount: pendingRow.cnt,
+      oldestPendingCreatedAt: typeof oldestRaw === 'string' && oldestRaw.length > 0 ? oldestRaw : null,
+      oldestPendingTaskKind: typeof pendingRow.oldest_kind === 'string' && pendingRow.oldest_kind.length > 0 ? pendingRow.oldest_kind : null,
+      lastSucceededAt,
+    };
+  }
+
+  /**
    * Convert a raw DB row into a validated FailedTaskSummary.
    *
    * Trust boundary (rc-1, rc-2, rc-3): the row is UNTRUSTED data. Each field

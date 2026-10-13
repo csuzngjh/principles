@@ -1877,6 +1877,7 @@
         "statusHealthy": "正常推进",
         "statusBacklogged": "有积压（仍在推进）",
         "statusStalled": "疑似停滞",
+        "statusDisabled": "消费者已禁用",
         "statusUnknown": "状态未知",
         "nextActionPrefix": "建议："
       },

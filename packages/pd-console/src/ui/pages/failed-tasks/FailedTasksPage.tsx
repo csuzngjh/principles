@@ -86,7 +86,7 @@ interface FailedTask {
 }
 
 interface PipelineHealthInfo {
-  status: "healthy" | "backlogged" | "stalled" | "unknown";
+  status: "healthy" | "backlogged" | "stalled" | "disabled" | "unknown";
   pendingCount: number | null;
   oldestPendingTaskKind: string | null;
   oldestPendingAgeMinutes: number | null;
@@ -204,7 +204,7 @@ function validateFailedTasksData(v: unknown): FailedTasksData | null {
     const p = v.pipeline;
     const status = readString(p, "status");
     const note = readString(p, "note");
-    if (status === "healthy" || status === "backlogged" || status === "stalled" || status === "unknown") {
+    if (status === "healthy" || status === "backlogged" || status === "stalled" || status === "disabled" || status === "unknown") {
       if (note !== null) {
         pipeline = {
           status,

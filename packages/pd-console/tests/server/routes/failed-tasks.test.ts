@@ -82,6 +82,7 @@ interface MockStoreOverrides {
   countFailedTasks?: ReturnType<typeof vi.fn>;
   getFailedTaskDetail?: ReturnType<typeof vi.fn>;
   listTasks?: ReturnType<typeof vi.fn>;
+  aggregatePipelineHealth?: ReturnType<typeof vi.fn>;
 }
 
 function createMockStore(overrides: MockStoreOverrides = {}): SqliteTaskStore {
@@ -92,6 +93,7 @@ function createMockStore(overrides: MockStoreOverrides = {}): SqliteTaskStore {
     // PRI-955: pipeline health derivation reads pending/succeeded tasks; a
     // mock without it exercises the degrade-to-unknown path.
     listTasks: overrides.listTasks ?? vi.fn().mockRejectedValue(new Error('not mocked')),
+    aggregatePipelineHealth: overrides.aggregatePipelineHealth ?? vi.fn().mockResolvedValue({ pendingCount: 0, oldestPendingCreatedAt: null, oldestPendingTaskKind: null, lastSucceededAt: new Date().toISOString() }),
   };
   return store as unknown as SqliteTaskStore;
 }
@@ -228,7 +230,7 @@ describe('handleFailedTasksRoute', () => {
 
     // ── PRI-955 (F11): pipeline health projection — "no failed tasks" ≠ healthy ──
     interface PipelineBlock {
-      status: 'healthy' | 'backlogged' | 'stalled' | 'unknown';
+      status: 'healthy' | 'backlogged' | 'stalled' | 'disabled' | 'unknown';
       pendingCount: number | null;
       oldestPendingTaskKind: string | null;
       oldestPendingAgeMinutes: number | null;
@@ -237,20 +239,21 @@ describe('handleFailedTasksRoute', () => {
       nextAction?: string;
     }
 
-    it('a pending backlog with recent progress reports backlogged, never healthy', async () => {
+    function aggregateMock(overrides: { pendingCount?: number; oldestPendingCreatedAt?: string | null; oldestPendingTaskKind?: string | null; lastSucceededAt?: string | null }) {
+      return vi.fn().mockResolvedValue({
+        pendingCount: overrides.pendingCount ?? 0,
+        oldestPendingCreatedAt: overrides.oldestPendingCreatedAt ?? null,
+        oldestPendingTaskKind: overrides.oldestPendingTaskKind ?? null,
+        lastSucceededAt: overrides.lastSucceededAt ?? null,
+      });
+    }
+
+    it('a pending backlog with recent progress reports backlogged with nextAction, never healthy', async () => {
       const now = Date.now();
       const store = createMockStore({
         listFailedTasks: vi.fn().mockResolvedValue([]),
         countFailedTasks: vi.fn().mockResolvedValue(0),
-        listTasks: vi.fn().mockImplementation(async (filter?: { status?: string }) => {
-          if (filter?.status === 'pending') {
-            return [{ taskId: 'philosopher-x', taskKind: 'philosopher', status: 'pending', createdAt: new Date(now - 10 * 60000).toISOString(), updatedAt: new Date(now - 10 * 60000).toISOString() }];
-          }
-          if (filter?.status === 'succeeded') {
-            return [{ taskId: 'dreamer-done', taskKind: 'dreamer', status: 'succeeded', createdAt: new Date(now - 30 * 60000).toISOString(), updatedAt: new Date(now - 2 * 60000).toISOString() }];
-          }
-          return [];
-        }),
+        aggregatePipelineHealth: aggregateMock({ pendingCount: 1, oldestPendingCreatedAt: new Date(now - 10 * 60000).toISOString(), oldestPendingTaskKind: 'philosopher', lastSucceededAt: new Date(now - 2 * 60000).toISOString() }),
       });
       const req = createMockRequest('GET', '/api/v1/failed-tasks');
       const res = createMockResponse();
@@ -259,24 +262,28 @@ describe('handleFailedTasksRoute', () => {
       expect(data.pipeline.status).toBe('backlogged');
       expect(data.pipeline.pendingCount).toBe(1);
       expect(data.pipeline.oldestPendingTaskKind).toBe('philosopher');
+      expect(data.pipeline.nextAction).toBeTruthy();
       expect(data.nextAction).toContain('backlogged');
       expect(data.nextAction).not.toContain('healthy');
+    });
+
+    it('a pending backlog with pendingCount above 200 is reported EXACTLY (no LIMIT truncation)', async () => {
+      const now = Date.now();
+      const store = createMockStore({
+        aggregatePipelineHealth: aggregateMock({ pendingCount: 233, oldestPendingCreatedAt: new Date(now - 5 * 60000).toISOString(), oldestPendingTaskKind: 'dreamer', lastSucceededAt: new Date(now - 60000).toISOString() }),
+      });
+      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
+      const data = okEnvelope<{ pipeline: PipelineBlock }>(res);
+      expect(data.pipeline.pendingCount).toBe(233); // COUNT(*) aggregate, not a LIMIT-200 list length
+      expect(data.pipeline.status).toBe('backlogged');
     });
 
     it('an old pending backlog without progress inside the window reports stalled', async () => {
       const now = Date.now();
       const store = createMockStore({
-        listFailedTasks: vi.fn().mockResolvedValue([]),
-        countFailedTasks: vi.fn().mockResolvedValue(0),
-        listTasks: vi.fn().mockImplementation(async (filter?: { status?: string }) => {
-          if (filter?.status === 'pending') {
-            return [{ taskId: 'philosopher-old', taskKind: 'philosopher', status: 'pending', createdAt: new Date(now - 3 * 3600000).toISOString(), updatedAt: new Date(now - 3 * 3600000).toISOString() }];
-          }
-          if (filter?.status === 'succeeded') {
-            return [{ taskId: 'dreamer-old', taskKind: 'dreamer', status: 'succeeded', createdAt: new Date(now - 5 * 3600000).toISOString(), updatedAt: new Date(now - 4 * 3600000).toISOString() }];
-          }
-          return [];
-        }),
+        aggregatePipelineHealth: aggregateMock({ pendingCount: 1, oldestPendingCreatedAt: new Date(now - 3 * 3600000).toISOString(), oldestPendingTaskKind: 'philosopher', lastSucceededAt: new Date(now - 4 * 3600000).toISOString() }),
       });
       const req = createMockRequest('GET', '/api/v1/failed-tasks');
       const res = createMockResponse();
@@ -286,17 +293,10 @@ describe('handleFailedTasksRoute', () => {
       expect(data.pipeline.nextAction).toBeTruthy();
     });
 
-    it('nothing pending plus fresh progress reports healthy (evidence-based)', async () => {
+    it('nothing pending plus fresh runner-kind progress reports healthy (evidence-based)', async () => {
       const now = Date.now();
       const store = createMockStore({
-        listFailedTasks: vi.fn().mockResolvedValue([]),
-        countFailedTasks: vi.fn().mockResolvedValue(0),
-        listTasks: vi.fn().mockImplementation(async (filter?: { status?: string }) => {
-          if (filter?.status === 'succeeded') {
-            return [{ taskId: 'dreamer-done', taskKind: 'dreamer', status: 'succeeded', createdAt: new Date(now - 3600000).toISOString(), updatedAt: new Date(now - 60000).toISOString() }];
-          }
-          return [];
-        }),
+        aggregatePipelineHealth: aggregateMock({ pendingCount: 0, lastSucceededAt: new Date(now - 60000).toISOString() }),
       });
       const req = createMockRequest('GET', '/api/v1/failed-tasks');
       const res = createMockResponse();
@@ -305,11 +305,11 @@ describe('handleFailedTasksRoute', () => {
       expect(data.pipeline.status).toBe('healthy');
     });
 
-    it('unreadable queue facts degrade to unknown instead of claiming health', async () => {
+    it('only NON-runner-kind succeeded tasks recently → unknown, not healthy (C4 scope)', async () => {
+      // aggregate scoped to runner kinds returns lastSucceededAt=null even if
+      // some other task kind succeeded a minute ago.
       const store = createMockStore({
-        listFailedTasks: vi.fn().mockResolvedValue([]),
-        countFailedTasks: vi.fn().mockResolvedValue(0),
-        listTasks: vi.fn().mockRejectedValue(new Error('db locked')),
+        aggregatePipelineHealth: aggregateMock({ pendingCount: 0, lastSucceededAt: null }),
       });
       const req = createMockRequest('GET', '/api/v1/failed-tasks');
       const res = createMockResponse();
@@ -317,6 +317,35 @@ describe('handleFailedTasksRoute', () => {
       const data = okEnvelope<{ pipeline: PipelineBlock; nextAction: string }>(res);
       expect(data.pipeline.status).toBe('unknown');
       expect(data.nextAction).not.toContain('healthy');
+    });
+
+    it('unreadable pipeline aggregates degrade to unknown instead of claiming health', async () => {
+      const store = createMockStore({
+        aggregatePipelineHealth: vi.fn().mockRejectedValue(new Error('db locked')),
+      });
+      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
+      const data = okEnvelope<{ pipeline: PipelineBlock; nextAction: string }>(res);
+      expect(data.pipeline.status).toBe('unknown');
+      expect(data.nextAction).not.toContain('healthy');
+    });
+
+    it('consumer disabled → disabled state with enable nextAction (C3)', async () => {
+      const now = Date.now();
+      const store = createMockStore({
+        aggregatePipelineHealth: aggregateMock({ pendingCount: 2, oldestPendingCreatedAt: new Date(now - 60000).toISOString(), lastSucceededAt: null }),
+      });
+      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir, subPath: '',
+        sqliteTaskStore: store,
+        featureFlags: { failed_tasks_observability: { enabled: true }, internalization_auto_consumer: { enabled: false } },
+      } as never);
+      const data = okEnvelope<{ pipeline: PipelineBlock }>(res);
+      expect(data.pipeline.status).toBe('disabled');
+      expect(data.pipeline.nextAction).toContain('internalization_auto_consumer');
     });
 
     it('rejects limit > 200 with 400', async () => {
