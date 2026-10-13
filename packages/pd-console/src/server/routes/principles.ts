@@ -166,6 +166,7 @@ async function getDeactivatedPrincipleIds(workspaceDir: string): Promise<{ ids: 
       "COUNT(*) AS total " +
       "FROM activations WHERE target_ref LIKE 'ledger://%' " +
       "GROUP BY target_ref"
+    // runtime-contract-exempt: ERR-001 better-sqlite3 .all() returns unknown[]; narrowing to Record<string, unknown>[] is type-only (fields validated below via typeof checks)
     ).all() as Record<string, unknown>[];
     const ids = new Set<string>();
     for (const row of rows) {
