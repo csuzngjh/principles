@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'js-yaml';
+import { resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { canonicalPath, isPathInside } from '../utils/path-security.js';
 import {
   validatePdConfig,
@@ -280,7 +281,7 @@ export interface WorkspaceDiscoveryResult {
   /** Path to the config file that provided workspace.default. */
   configPath: string;
   /** How the config location was found. */
-  source: 'env_var' | 'openclaw_default' | 'openclaw_plugin_config';
+  source: 'cwd' | 'env_var' | 'openclaw_default' | 'openclaw_plugin_config';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -384,15 +385,37 @@ function assertConfigDirBoundary(dir: string, source: string): void {
 }
 
 /**
+ * Nearest directory at or above cwd that holds a `.pd/config.yaml`, or null.
+ * A filesystem-root hit is dropped: the boundary guard below would throw on it,
+ * and a root-level workspace is never intended.
+ */
+function nearestWorkspaceFromCwd(): string | null {
+  const resolution = resolveNearestPdWorkspace(process.cwd());
+  if (!resolution.ok) return null;
+  const normalized = path.normalize(resolution.workspaceDir);
+  if (normalized === path.parse(normalized).root) return null;
+  return normalized;
+}
+
+/**
  * Search known locations for a .pd/config.yaml that contains a workspace.default field.
  * This runs BEFORE workspace resolution and does NOT require knowing the workspace dir.
  *
  * Returns the extracted workspace.default path, or null if not found.
  */
 export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
-  const candidates: { dir: string; source: 'env_var' | 'openclaw_default' | 'openclaw_plugin_config' }[] = [];
+  const candidates: { dir: string; source: WorkspaceDiscoveryResult['source'] }[] = [];
 
-  // 1. If PD_WORKSPACE_DIR is set, check there first
+  // 0. The workspace the operator is standing in (CONFIGURATION_ARCHITECTURE.md §11.2
+  //    step 3). Multi-host installs keep one .pd/state.db per workspace, so a chain
+  //    that never looks at cwd silently queries another host's library and reports
+  //    "nothing found".
+  const cwdWorkspace = nearestWorkspaceFromCwd();
+  if (cwdWorkspace) {
+    candidates.push({ dir: cwdWorkspace, source: 'cwd' });
+  }
+
+  // 1. If PD_WORKSPACE_DIR is set, check there next
   const envWorkspace = process.env.PD_WORKSPACE_DIR?.trim();
   if (envWorkspace) {
     candidates.push({ dir: envWorkspace, source: 'env_var' });
@@ -425,6 +448,12 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
       const workspaceDefault = extractWorkspaceDefault(configPath);
       if (workspaceDefault) {
         return { workspaceDefault, configPath, source };
+      }
+      // A cwd hit IS a workspace even when its config declares no workspace.default;
+      // the other candidates are mere pointers to a declared default, so they keep
+      // requiring the field.
+      if (source === 'cwd') {
+        return { workspaceDefault: candidateRoot, configPath, source };
       }
     }
   }

@@ -4,7 +4,8 @@
  * Resolution chain (highest priority first):
  * 1. Explicit --workspace flag
  * 2. PD_WORKSPACE_DIR environment variable
- * 3. workspace.default from discovered .pd/config.yaml
+ * 3. Discovered workspace default — the nearest `.pd/config.yaml` at or above cwd
+ *    first, then the OpenClaw default locations (see discoverWorkspaceDefault)
  * 4. Throw Error (preserve current behavior for unconfigured setups)
  *
  * When the resolved path differs from workspace.default in config,
@@ -101,6 +102,7 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
   // Step 5: No resolution possible — throw (preserves current behavior)
   throw new Error(
     'No workspace directory configured. Set --workspace <path>, ' +
-    'PD_WORKSPACE_DIR environment variable, or add workspace.default to .pd/config.yaml.',
+    'PD_WORKSPACE_DIR environment variable, add workspace.default to .pd/config.yaml, ' +
+    'or run from inside a directory whose own or parent .pd/config.yaml exists.',
   );
 }

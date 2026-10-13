@@ -601,12 +601,22 @@ OpenClaw Plugin 同时服务多个 workspace 时：
 ### 11.2 pd-cli 工作区解析顺序
 
 ```
-pd-cli 启动时确定 workspaceDir：
+pd-cli 启动时确定 workspaceDir（resolveWorkspaceDir）：
 1. --workspace flag
 2. PD_WORKSPACE_DIR env
-3. 当前目录搜索 .pd/ 或 .state/principle_training_state.json
-4. ~/.openclaw/workspace-main/（默认）
+3. 发现默认（discoverWorkspaceDefault，候选按此顺序）：
+   a. 从当前目录向上找到的最近一个 .pd/config.yaml 所在目录（PRI-957 补实现）
+   b. PD_WORKSPACE_DIR 指向的目录
+   c. ~/.openclaw/workspace
+   d. OpenClaw plugin config（principles-disciple.json）的 workspace 字段
+   命中的 config 若声明了绝对路径 workspace.default，取该值；
+   只有 (a) 允许在 config 未声明时回退到该目录本身（"我就站在这个工作区里"）。
+4. 以上皆无 → 报错并给出 nextAction
 ```
+
+优先级说明：1 > 2 > 3 是**解析根目录**的优先级，不变；3.a 排在发现候选首位，
+是为了让「用户级 PD_WORKSPACE_DIR 覆盖了当前所在工作区」这一分歧经由既有的
+`differs from config default` stderr 告警可见，而不是静默生效。
 
 ### 11.3 pd-console 单工作区
 
