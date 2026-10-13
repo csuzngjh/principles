@@ -14,8 +14,14 @@ function createFixture(): { inputDir: string; outputDir: string } {
   const outputDir = path.join(root, 'output');
   // PRI-672: release-manager joined the shipped component set — the fixture
   // mirrors REQUIRED_COMPONENTS in build-release-asset.mjs. PRI-711:
-  // codex-adapter joins too.
-  for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter']) {
+  // codex-adapter joins too. WorkBuddy third host (SPEC §5): the script
+  // requires 'workbuddy-adapter' exactly when the source tree carries the
+  // component — the fixture mirrors that same conditional so the two lists
+  // cannot drift apart again.
+  const workbuddyAdapterInSource = fs.existsSync(path.resolve(__dirname, '..', '..', '..', 'packages', 'workbuddy-adapter', 'package.json'));
+  const components = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter']
+    .concat(workbuddyAdapterInSource ? ['workbuddy-adapter'] : []);
+  for (const component of components) {
     fs.mkdirSync(path.join(inputDir, component, 'node_modules', 'runtime-dependency'), { recursive: true });
     fs.writeFileSync(path.join(inputDir, component, 'package.json'), JSON.stringify({
       name: component,
