@@ -202,11 +202,18 @@ export function orderKindsByOldestReadyStage<T extends string>(
   readyTasks: readonly { taskKind: T; createdAt?: string }[],
 ): T[] {
   if (runnerKinds.length <= 1 || readyTasks.length === 0) return [...runnerKinds];
-  let oldest: { taskKind: T; createdAt: string } | null = null;
+  const priorityIndex = new Map<T, number>(runnerKinds.map((k, i) => [k, i] as const));
+  let oldest: { taskKind: T; createdAt: string; index: number } | null = null;
   for (const task of readyTasks) {
     if (typeof task.createdAt !== 'string' || task.createdAt.length === 0) continue;
-    if (!oldest || task.createdAt < oldest.createdAt) {
-      oldest = { taskKind: task.taskKind, createdAt: task.createdAt };
+    const index = priorityIndex.get(task.taskKind);
+    if (index === undefined) continue; // stage outside this consumer's scope
+    if (
+      oldest === null ||
+      task.createdAt < oldest.createdAt ||
+      (task.createdAt === oldest.createdAt && index < oldest.index)
+    ) {
+      oldest = { taskKind: task.taskKind, createdAt: task.createdAt, index };
     }
   }
   const startKind = oldest?.taskKind;

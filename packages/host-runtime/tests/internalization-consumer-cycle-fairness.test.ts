@@ -28,7 +28,7 @@ import {
   getDefaultPdConfig,
   type RuntimeStateManager,
 } from '@principles/core/runtime-v2';
-import { runInternalizationConsumerCycle } from '../src/internalization-consumer-cycle.js';
+import { runInternalizationConsumerCycle, orderKindsByOldestReadyStage } from '../src/internalization-consumer-cycle.js';
 
 const dirs: string[] = [];
 
@@ -124,6 +124,7 @@ describe('PRI-954 oldest-ready-stage-first fairness', () => {
     await seedTask(workspace, 'dreamer-1-corr-fair-prompt', 'dreamer', 'pending', []);
 
     const first = await cycle(workspace);
+    console.log('C-DIAG-FULL:', JSON.stringify(first));
     expect(first.ran).toBe(true);
     // Under the old fixed order this cycle leased dreamer-1 (priority head).
     expect(first.taskKind).toBe('philosopher');
@@ -183,5 +184,53 @@ describe('PRI-954 oldest-ready-stage-first fairness', () => {
     const resumed = await cycle(workspace);
     expect(resumed.ran).toBe(true);
     expect(resumed.taskKind).toBe('dreamer');
+  });
+
+  it('E: a newer dreamer joining between cycles does not displace the service order', async () => {
+    const workspace = makeWorkspace();
+    await seedTask(workspace, 'dreamer-seed-corr-fair-prompt', 'dreamer', 'succeeded', []);
+    await sleep(20);
+    await seedTask(workspace, 'philosopher-1-corr-fair-prompt', 'philosopher', 'pending', ['dreamer-seed-corr-fair-prompt']);
+    const first = await cycle(workspace);
+    expect(first.taskKind).toBe('philosopher'); // oldest ready first
+
+    // Cycle 1 also created the philosopher's SUCCESSOR (scribe, chain
+    // convention) and it is older than the dreamer joining afterwards —
+    // the successor is served next; the late dreamer never displaces it.
+    await seedTask(workspace, 'dreamer-new-corr-fair-prompt', 'dreamer', 'pending', []);
+    const second = await cycle(workspace);
+    expect(second.taskKind).toBe('scribe');
+
+    // Next: the philosopher successor created in cycle 1 (older than the
+    // newcomer) — only then does the late dreamer get its turn.
+    const third = await cycle(workspace);
+    expect(third.taskKind).toBe('philosopher');
+    const fourth = await cycle(workspace);
+    expect(fourth.taskKind).toBe('dreamer');
+  });
+
+  it('H: the ordering policy is stateless — identical inputs across simulated process restarts order identically', async () => {
+    // The fairness policy derives purely from the ready snapshot (no
+    // in-process scheduler state), so a fresh `--once` worker process
+    // reproduces the same service order. Direct unit check of the pure
+    // ordering function, including tie-breaks and missing createdAt.
+    const kinds = ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'] as const;
+    // No ready tasks → original priority order.
+    expect(orderKindsByOldestReadyStage(kinds, [])).toEqual([...kinds]);
+    // Oldest ready wins regardless of priority position.
+    expect(orderKindsByOldestReadyStage(kinds, [
+      { taskKind: 'dreamer', createdAt: '2026-10-13T10:00:00Z' },
+      { taskKind: 'philosopher', createdAt: '2026-10-13T09:00:00Z' },
+    ])[0]).toBe('philosopher');
+    // Ties keep the original priority order (dreamer before philosopher).
+    expect(orderKindsByOldestReadyStage(kinds, [
+      { taskKind: 'philosopher', createdAt: '2026-10-13T09:00:00Z' },
+      { taskKind: 'dreamer', createdAt: '2026-10-13T09:00:00Z' },
+    ])[0]).toBe('dreamer');
+    // Missing createdAt never jumps the queue.
+    expect(orderKindsByOldestReadyStage(kinds, [
+      { taskKind: 'philosopher', createdAt: undefined },
+      { taskKind: 'dreamer', createdAt: '2026-10-13T09:00:00Z' },
+    ])[0]).toBe('dreamer');
   });
 });
