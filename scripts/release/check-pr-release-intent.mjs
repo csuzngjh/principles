@@ -189,6 +189,18 @@ function versionMatchesSnapshotBaseline(name, version) {
 // second materialization authority — except inside the baseline-alignment
 // window above.
 const alignmentAlignedDirs = new Set();
+// Version-field freeze: package versions materialize ONLY through the
+// Version Packages PR (SPEC G3). A normal PR editing a version field is a
+// second materialization authority — with two narrow exemptions:
+//   (a) the baseline-alignment window below (registry snapshot migration);
+//   (b) NEW-PACKAGE BOOTSTRAP (remediation 2026-10-13, Owner-authorized): a
+//       package born in this diff may carry its INITIAL version when a valid
+//       changeset in the same PR declares that package — the changeset is the
+//       intent record and the declared bump materializes the next Version
+//       Packages PR. Without this, npm workspaces cannot even resolve the
+//       new package (versionless workspace deps 404). Existing packages stay
+//       frozen: their version edits still fail unconditionally.
+const deferredVersionChecks = [];
 for (const rel of changedPaths) {
   const m = /^packages\/([^/]+)\/package\.json$/.exec(rel);
   if (!m) continue;
@@ -211,9 +223,7 @@ for (const rel of changedPaths) {
       continue; // legitimate one-time baseline alignment
     }
   }
-  failures.push(
-    `N-version: ${rel} changes a package "version" field in a normal PR. Versions materialize only in the Version Packages PR — revert this edit; declare intent with a changeset instead.`,
-  );
+  deferredVersionChecks.push({ rel, dir, fileNewInDiff: showFile(baseSha, rel) === null });
 }
 
 // This PR's OWN changesets (added between base and head), not base pending ones.
@@ -265,6 +275,20 @@ const nonEmptyDeclarations = declarations.size > 0;
 if (emptyDeclaration && nonEmptyDeclarations) {
   failures.push(
     `N-intent: ${emptyFile} is an empty (no-release) changeset, but this PR also declares releases (${[...declarations.keys()].join(', ')}). An empty changeset means "no release needed for these changes" — remove it, or split the PR.`,
+  );
+}
+
+// Evaluate deferred version-field edits now that the changeset declarations
+// are known: a version edit survives ONLY as (a) baseline alignment (already
+// continued above) or (b) a NEW package whose initial version is declared by
+// a valid changeset in this same PR. Everything else fails.
+for (const { rel, fileNewInDiff } of deferredVersionChecks) {
+  if (fileNewInDiff) {
+    const headPkg = JSON.parse(showFile(headSha, rel));
+    if (declarations.has(headPkg.name)) continue; // new-package bootstrap with recorded intent
+  }
+  failures.push(
+    `N-version: ${rel} changes a package "version" field in a normal PR. Versions materialize only in the Version Packages PR — revert this edit; declare intent with a changeset instead. (A NEW package may carry its initial version only when this PR also adds a changeset declaring it.)`,
   );
 }
 
