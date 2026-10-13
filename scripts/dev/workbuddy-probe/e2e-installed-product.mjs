@@ -71,14 +71,42 @@ function main() {
   if (packed.error) { record('pack', 'FAIL', packed.error); return; }
   record('pack', 'PASS', `tarball ${path.basename(packed.tarball)} (${Math.round(fs.statSync(packed.tarball).size / 1024)} KiB)`);
 
-  // ── 2. Extract and run the SUPPORTED installer into the fake HOME ──
-  const tar = require('tar');
-  tar.x({ file: packed.tarball, cwd: INSTALL_ROOT, sync: true });
-  const installerEntry = path.join(INSTALL_ROOT, 'package', 'dist', 'index.js');
-  if (!fs.existsSync(installerEntry)) { record('extract', 'FAIL', 'dist/index.js missing from package'); return; }
+  // ── 2. Produce the SUPPORTED payload (release train shape): the installer
+  // refuses bare npm-pack tarballs — the payload must carry the stamped
+  // _release/product-identity.json, which only build-release-asset /
+  // build-self-contained-release produce.
+  const nodeDir = path.dirname(process.execPath);
+  const npmCli = path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const releaseOut = path.join(LAB_ROOT, 'release-asset');
+  // NOTE: do NOT pre-create releaseOut — build-self-contained-release refuses
+  // to replace an existing output directory (immutable assets).
+  const buildAsset = spawnSync(process.execPath, [path.join('scripts', 'build-self-contained-release.mjs'), '--output', releaseOut, '--product-version', '2.3.3', '--source-commit', spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD']).stdout.toString().trim()], {
+    cwd: path.join(REPO, 'packages', 'create-principles-disciple'), encoding: 'utf8', timeout: 1200_000,
+    // Deterministic archive: the train stamps SOURCE_DATE_EPOCH from the
+    // source commit; derive the same value here.
+    env: { ...process.env, SOURCE_DATE_EPOCH: spawnSync('git', ['-C', REPO, 'log', '-1', '--format=%ct']).stdout.toString().trim() },
+  });
+  if (buildAsset.status !== 0) {
+    record('build-release-asset', 'FAIL', `status=${buildAsset.status} error=${buildAsset.error?.message ?? 'none'} stdoutTail=${(buildAsset.stdout || '').slice(-300)} stderrTail=${(buildAsset.stderr || '').slice(-300)}`);
+    return;
+  }
+  const assetPayload = path.join(releaseOut, 'payload');
+  const identityStamp = path.join(assetPayload, '_release', 'product-identity.json');
+  if (!fs.existsSync(identityStamp)) { record('build-release-asset', 'FAIL', `payload has no _release/product-identity.json (extracted: ${fs.readdirSync(assetPayload).join(',')})`); return; }
+  record('build-release-asset', 'PASS', `stamped payload ready (${fs.readdirSync(assetPayload).slice(0, 8).join(',')}…)`);
+
+  // Run the SOURCE-built CLI (the repo's own supported isolation: the smoke
+  // test runs the source dist against a hermetic publication) pointed at the
+  // stamped payload via PD_INSTALL_PLUGIN_DIR. The CLI's @principles/*
+  // imports resolve from the workspace (current code); the INSTALLED runtime
+  // comes entirely from the stamped payload — the acceptance point (no dev
+  // override at wrapper time) is unaffected.
+  const installerEntry = path.join(REPO, 'packages', 'create-principles-disciple', 'dist', 'index.js');
+  if (!fs.existsSync(installerEntry)) { record('extract', 'FAIL', 'source CLI dist missing (build create-principles-disciple)'); return; }
+  record('extract', 'PASS', 'stamped payload ready; source-built CLI will consume it via PD_INSTALL_PLUGIN_DIR');
   const install = spawnSync(process.execPath, [installerEntry, '--host', 'workbuddy', '--workspace', PROJECT, '--yes', '--json'], {
     encoding: 'utf8', timeout: 600_000,
-    env: engineEnvBase(),
+    env: { ...engineEnvBase(), PD_INSTALL_PLUGIN_DIR: assetPayload, PD_SKIP_NPM_UPGRADE: '1', PD_SKIP_GLOBAL_SHIM: '1' },
   });
   let installJson = {};
   try { installJson = JSON.parse((install.stdout || '').split('\n').filter((l) => l.startsWith('{')).at(-1) ?? '{}'); } catch { /* non-JSON tail */ }
@@ -97,8 +125,11 @@ function main() {
   if (!deploymentOk) return;
 
   // ── 4. Enable governance through the installer's supported flag writer ──
-  const installerDist = path.join(INSTALL_ROOT, 'package', 'dist', 'installers', 'workbuddy-host-installer.js');
-  const mod = require(pathToFileURL(installerDist).href);
+  // NOTE: require the absolute path directly — createRequire().require of a
+  // file:// URL into a "type": "module" package mis-resolves as
+  // MODULE_NOT_FOUND on Node 26 even when the file exists (isolated repro).
+  const installerDist = path.join(REPO, 'packages', 'create-principles-disciple', 'dist', 'installers', 'workbuddy-host-installer.js');
+  const mod = require(installerDist);
   const installer = new mod.WorkBuddyHostInstaller({ homeDir: () => FAKE_HOME, enginePath: () => undefined });
   const enabled = installer.setWorkbuddyGovernanceFlag?.(GOV, true)
     ?? mod.setWorkbuddyGovernanceFlag?.(GOV, true);
@@ -178,10 +209,31 @@ function main() {
         `roundRan=${injectRan} requests=${reqs.length} marker=${PROMPT_MARKER}; stderr=${(run.stderr || '').slice(-300)}`);
 
       // Deny: protected write blocked, no override.
+      // Reply objects use the PROVEN structural clone (see e2e-full-learning
+      // bashToolReply / the probe) — hand-rolled compact literals keep
+      // misbalancing braces.
+      const toolCallReply = (id, toolName, args) => ({
+        id: `mock-${id}`,
+        model: 'wb-probe-mock',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [{ id: `toolu_${id}`, type: 'function', function: { name: toolName, arguments: JSON.stringify(args) } }],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      });
+      const textReply = (id, text) => ({
+        id: `mock-${id}`,
+        model: 'wb-probe-mock',
+        choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
+      });
       before = reqCount();
       run = runTurn('inst-deny', 'hello again', 'write the protected file', [
-        { id: 'm1', model: 'wb-probe-mock', choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [{ id: 'toolu_inst1', type: 'function', function: { name: 'Write', arguments: JSON.stringify({ file_path: path.join(PROJECT, 'installed-protected-9f2.txt'), content: 'x' } }) } }] }, finish_reason: 'tool_calls' }] },
-        { id: 'm2', model: 'wb-probe-mock', choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }] },
+        toolCallReply('inst1', 'Write', { file_path: path.join(PROJECT, 'installed-protected-9f2.txt'), content: 'x' }),
+        textReply('inst2', 'ok'),
       ]);
       reqs = reqsSince(before);
       const protectedWritten = fs.existsSync(path.join(PROJECT, 'installed-protected-9f2.txt'));

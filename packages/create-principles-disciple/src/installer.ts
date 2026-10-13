@@ -2176,6 +2176,20 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
     }
     localError = detail;
     logger.warn(`PD CLI local verification failed: ${detail}`);
+    // First-install sequencing (WorkBuddy remediation): on a fresh home the
+    // ~/.pd active record is written only at commit (AFTER this verify), and
+    // host targets that deploy no OpenClaw legacy overlay (--host workbuddy)
+    // have no fallback branch in the version report — so the version probe
+    // legitimately reports active_record_missing here. That exact shape
+    // proves the deployed CLI EXECUTES (entry reachable, imports resolved);
+    // activation arrives at commit. Strict behavior is preserved whenever an
+    // active record already exists (upgrades).
+    const activeRecordPath = path.join(getPdDir(), 'active.json');
+    if (!localOk && detail.includes('no active release record') && !existsSync(activeRecordPath)) {
+      localOk = true;
+      localError = undefined;
+      logger.info('PD CLI executed without an activation record (first install); the record is written at commit.');
+    }
   }
 
   const globalOk = (() => {

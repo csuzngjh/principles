@@ -272,7 +272,10 @@ async function main() {
       const pending = pendingApproval();
       if (pending.length > 0) { approval = pending[0]; break; }
       if (parsed.mode === 'paused') break;
-      await new Promise((r2) => setTimeout(r2, 2_000));
+      // Real-LLM provider rate limits: a full diagnostician run is a large
+      // completion. Respect the provider with a long inter-cycle gap — the
+      // deadline budget accounts for this (cycles are minutes apart).
+      await new Promise((r2) => setTimeout(r2, 45_000));
     }
     record('background-chain', approval ? 'PASS' : 'FAIL',
       approval
