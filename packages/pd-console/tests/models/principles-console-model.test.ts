@@ -613,7 +613,7 @@ describe('PrinciplesConsoleModel', () => {
     // PRI-629 INV-02: lifecycle 不是 attention — candidate/probation 全部落入
     // in_pipeline;只有携带 pending approval 的原则 actionable。
     const actionableResult = await model.listPrinciples('actionable');
-    const actionableWithPending = await model.listPrinciples('actionable', undefined, new Set(['P_001']));
+    const actionableWithPending = await model.listPrinciples('actionable', { pendingApproval: new Set(['P_001']) });
 
     // PRI-641: filter=all = all workspace-governed principles (T-01 excluded)
     expect(allResult.principles).toHaveLength(3);
