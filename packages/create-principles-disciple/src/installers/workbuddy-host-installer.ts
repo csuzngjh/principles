@@ -85,6 +85,9 @@ const PLUGIN_UNINSTALL_OK = /Successfully uninstalled/i;
 
 const ENGINE_COMMAND_TIMEOUT_MS = 120_000;
 
+/** `pd runtime init` for the governance workspace (schema + config + state.db). */
+const GOVERNANCE_INIT_TIMEOUT_MS = 180_000;
+
 // ─── Type guards (rc-2: no `as` bypass) ─────────────────────────────────────
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -114,6 +117,14 @@ export interface WorkbuddyHostInstallerDeps {
   homeDir?: () => string;
   /** Engine path resolver (default: env override + Program Files probe). */
   enginePath?: () => string | undefined;
+  /**
+   * pd-cli runtime entry resolver (default: the installed runtime pd-cli under
+   * install-layout's pdCliDir). Its `runtime init` is the SHARED initializer
+   * that creates the governance workspace's .pd/config.yaml (core defaults),
+   * .pd/state.db and the canonical .state/trajectory.db schema — the same
+   * entry the main installer runs for the generic workspace (review R1).
+   */
+  pdCliEntry?: () => string | undefined;
   /** Command runner (default: spawnSync). Tests inject a fake engine boundary. */
   runCommand?: (file: string, args: readonly string[], opts?: WorkbuddyCommandOptions) => WorkbuddyCommandResult;
 }
@@ -419,6 +430,18 @@ const FEATURES_LINE = /^features:\s*(?:#.*)?$/;
 const FEATURES_EMPTY_MAPPING_LINE = /^features:\s*\{\}\s*(?:#.*)?$/;
 const WORKBUDDY_KEY_LINE = /^ {2}host\.workbuddy:\s*(?:#.*)?$/;
 const WORKBUDDY_ENABLED_LINE = /^ {4}enabled:\s*(?:true|false)\s*(?:#.*)?$/;
+const WORKBUDDY_CATEGORY_LINE = /^ {4}category:(?:\s.*)?(?:#.*)?$/;
+
+/**
+ * Registry-required category for the host.workbuddy flag entry. SSoT:
+ * packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts
+ * ({ id: 'host.workbuddy', category: 'quiet', ... }). The production config
+ * validator (pd-config-validate) REJECTS feature entries without a category,
+ * so an enabled-only override makes every hook invocation degrade (review R1).
+ * tests/workbuddy-governance-chain.test.ts pins this literal against
+ * DEFAULT_FEATURE_FLAGS to catch registry drift.
+ */
+const WORKBUDDY_FLAG_CATEGORY = 'quiet';
 
 function stripYamlComment(line: string): string {
   const hash = line.indexOf('#');
@@ -475,6 +498,16 @@ export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boole
     } else {
       lines.splice(keyIndex + 1, 0, `    enabled: ${enabled}`);
     }
+    // R1 write contract: EVERY entry this function writes carries the
+    // schema-required category. A legacy enabled-only entry would fail the
+    // production validator and leave the hook chain degraded even though the
+    // flag edit "succeeded".
+    const categoryLine = lines[keyIndex + 2];
+    if (typeof categoryLine === 'string' && WORKBUDDY_CATEGORY_LINE.test(categoryLine)) {
+      lines[keyIndex + 2] = `    category: ${WORKBUDDY_FLAG_CATEGORY}`;
+    } else {
+      lines.splice(keyIndex + 2, 0, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
+    }
   } else {
     // Match BOTH an existing mapping header (`features:`) and the empty flow
     // mapping the installer template writes (`features: {}`) — appending a
@@ -485,16 +518,17 @@ export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boole
       if (typeof featuresLine === 'string' && isEmptyFeaturesMapping(featuresLine)) {
         lines[featuresIndex] = 'features:';
       }
-      lines.splice(featuresIndex + 1, 0, `  host.workbuddy:`, `    enabled: ${enabled}`);
+      lines.splice(featuresIndex + 1, 0, `  host.workbuddy:`, `    enabled: ${enabled}`, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
     } else {
       // No features: mapping at all — append a block at the end.
-      lines.push('features:', `  host.workbuddy:`, `    enabled: ${enabled}`);
+      lines.push('features:', `  host.workbuddy:`, `    enabled: ${enabled}`, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
     }
   }
 
   const next = lines.join('\n');
   // Round-trip verification: the rewritten config must parse with the flag at
-  // the intended value before it is committed (same discipline as codex-setup).
+  // the intended value AND the registry-required category before it is
+  // committed (same discipline as codex-setup).
   let verify: unknown;
   try {
     verify = yaml.load(next);
@@ -504,9 +538,10 @@ export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boole
   const flagOk = isRecord(verify)
     && isRecord(verify.features)
     && isRecord(verify.features['host.workbuddy'])
-    && verify.features['host.workbuddy'].enabled === enabled;
+    && verify.features['host.workbuddy'].enabled === enabled
+    && verify.features['host.workbuddy'].category === WORKBUDDY_FLAG_CATEGORY;
   if (!flagOk) {
-    return { ok: false, reason: 'config_rewrite_mismatch: round-trip verification did not observe the intended flag value. Nothing was written.', nextAction: 'Report this failure with the config.yaml content.' };
+    return { ok: false, reason: 'config_rewrite_mismatch: round-trip verification did not observe the intended flag value + category. Nothing was written.', nextAction: 'Report this failure with the config.yaml content.' };
   }
 
   try {
@@ -579,9 +614,16 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   private readonly deps: Required<WorkbuddyHostInstallerDeps>;
 
   constructor(deps: WorkbuddyHostInstallerDeps = {}) {
+    const homeDir = deps.homeDir ?? getHomeDir;
     this.deps = {
-      homeDir: deps.homeDir ?? getHomeDir,
+      homeDir,
       enginePath: deps.enginePath ?? resolveWorkbuddyEnginePath,
+      pdCliEntry: deps.pdCliEntry ?? (() => {
+        // install-layout SSoT: the shared runtime pd-cli the main installer
+        // deploys and invokes (getInstallLayoutPaths(home).pdCliDir).
+        const entry = path.join(getInstallLayoutPaths(homeDir()).pdCliDir, 'dist', 'index.js');
+        return existsSync(entry) ? entry : undefined;
+      }),
       runCommand: deps.runCommand ?? ((file, args, opts) => {
         const result = spawnSync(file, [...args], {
           encoding: 'utf-8',
@@ -730,17 +772,21 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       };
     }
 
-    // 6. Initialize the governance workspace (OD-07 explicit creation).
-    try {
-      mkdirSync(p.governanceDir, { recursive: true });
-    } catch (error) {
+    // 6. Initialize the governance workspace (OD-07 explicit creation) with
+    //    the FULL loader-valid state the hook/console/worker chain reads:
+    //    .pd/config.yaml, .pd/state.db and the canonical .state/trajectory.db
+    //    schema. Review 2026-10-13 R1: this step previously only mkdir'd the
+    //    directory, so install reported success while the hook chain saw an
+    //    uninitialized workspace.
+    const governance = this.initializeGovernanceWorkspace(p.governanceDir);
+    if (!governance.ok) {
       return {
         success: false,
         hostId: this.hostId,
         configPath: p.settingsPath,
         configAction: registration.settingsAction,
-        reason: `workbuddy_governance_dir_failed: could not create ${p.governanceDir} (${error instanceof Error ? error.message : String(error)}). The plugin is registered but governance state has no home.`,
-        nextAction: `Create ${p.governanceDir} manually (or free the parent directory) and re-run the installer.`,
+        reason: governance.reason,
+        nextAction: governance.nextAction,
       };
     }
 
@@ -758,15 +804,90 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     }
 
     // 8. Install ≠ enable (OD-03): the host.workbuddy flag stays at its quiet
-    // default (OFF). No config.yaml override is written here.
+    //    default (OFF). No config.yaml override is written here.
     const effectiveNote = 'Registration takes effect in NEW WorkBuddy sessions (or /reload-plugins in a running CLI session).';
     return {
       success: true,
       hostId: this.hostId,
       configPath: p.settingsPath,
       configAction: registration.settingsAction,
-      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace: ${p.governanceDir}. PD governance stays DISABLED until you explicitly enable it.`,
-      nextAction: `${effectiveNote} To enable PD governance, set host.workbuddy: { enabled: true } in ${path.join(p.governanceDir, '.pd', 'config.yaml')} (the console flag surface or the installer enable API shows the target config first).`,
+      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}. PD governance stays DISABLED until you explicitly enable it.`,
+      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To enable PD governance, set host.workbuddy: { enabled: true } in ${path.join(p.governanceDir, '.pd', 'config.yaml')} (the console flag surface or the installer enable API shows the target config first).`,
+    };
+  }
+
+  /**
+   * Initialize the OD-07 governance workspace with the FULL state the
+   * hook/console/worker chain reads (review 2026-10-13 R1).
+   *
+   * Preferred path: the SHARED initializer — `pd-cli runtime init --confirm
+   * --workspace <governanceDir>` — the exact entry the main installer runs for
+   * the generic workspace. It generates .pd/config.yaml from the core default
+   * config authority, .pd/state.db, and .state/trajectory.db with the
+   * canonical schema (idempotent; an existing config.yaml is never
+   * overwritten). Failure is a LOUD install failure — a registration without
+   * working governance state is exactly the R1 defect.
+   *
+   * Degraded path (pd-cli entry not resolvable — standalone host-installer
+   * use): the installer lays down the loader-valid default config from its own
+   * authority (generateConfigYamlContent, the same content the main installer
+   * writes for other hosts) so the hook CONFIG chain works, and reports the
+   * database initialization as an observable skip with an explicit next
+   * action — never a silent mkdir-only "success".
+   */
+  private initializeGovernanceWorkspace(governanceDir: string): { ok: true; dbInit: 'initialized' | 'skipped'; note?: string } | { ok: false; reason: string; nextAction: string } {
+    try {
+      mkdirSync(governanceDir, { recursive: true });
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `workbuddy_governance_dir_failed: could not create ${governanceDir} (${error instanceof Error ? error.message : String(error)}). The plugin is registered but governance state has no home.`,
+        nextAction: `Create ${governanceDir} manually (or free the parent directory) and re-run the installer.`,
+      };
+    }
+
+    const configPath = path.join(governanceDir, '.pd', 'config.yaml');
+    const pdCli = this.deps.pdCliEntry();
+    if (pdCli !== undefined) {
+      const init = this.deps.runCommand(process.execPath, [pdCli, 'runtime', 'init', '--confirm', '--workspace', governanceDir], { timeoutMs: GOVERNANCE_INIT_TIMEOUT_MS });
+      if (init.status !== 0) {
+        return {
+          ok: false,
+          reason: `workbuddy_governance_init_failed: pd runtime init exited ${init.status}: ${(init.stderr || init.stdout).trim().slice(0, 300)}`,
+          nextAction: `Run "node ${pdCli} runtime init --confirm --workspace ${governanceDir}" manually to see the full error, fix it, then re-run the installer.`,
+        };
+      }
+      // Evidence over assumption: the artifacts the hook chain requires must
+      // actually exist after the initializer reported success.
+      if (!existsSync(configPath) || !existsSync(path.join(governanceDir, '.state', 'trajectory.db'))) {
+        return {
+          ok: false,
+          reason: `workbuddy_governance_init_incomplete: runtime init reported success but ${configPath} or ${path.join(governanceDir, '.state', 'trajectory.db')} is missing.`,
+          nextAction: 'Re-run the installer; if it repeats, report the pd runtime init output.',
+        };
+      }
+      return { ok: true, dbInit: 'initialized' };
+    }
+
+    // Degraded path: no pd-cli runtime entry. Lay down the loader-valid
+    // default config from the installer's own authority; never overwrite an
+    // existing config (preservation — the runtime init contract matches).
+    if (!existsSync(configPath)) {
+      try {
+        mkdirSync(path.dirname(configPath), { recursive: true });
+        atomicReplaceTextFile(configPath, generateConfigYamlContent());
+      } catch (error) {
+        return {
+          ok: false,
+          reason: `workbuddy_governance_config_failed: could not write ${configPath} (${error instanceof Error ? error.message : String(error)}).`,
+          nextAction: `Check permissions under ${governanceDir} and re-run the installer.`,
+        };
+      }
+    }
+    return {
+      ok: true,
+      dbInit: 'skipped',
+      note: `governance database initialization SKIPPED: pd-cli runtime entry not found — run "pd runtime init --workspace ${governanceDir}" after the install; until then pain evidence degrades with an explicit trajectory_db_not_found note.`,
     };
   }
 

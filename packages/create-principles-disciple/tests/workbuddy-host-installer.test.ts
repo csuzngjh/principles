@@ -267,9 +267,19 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(manifest.hosts).toContain('workbuddy');
     expect((manifest.workspaces as string[])).toContain(path.join(created.home, '.workbuddy', 'pd-workspace'));
 
-    // Install ≠ enable (OD-03): no config.yaml override written.
-    expect(fs.existsSync(path.join(created.home, '.workbuddy', 'pd-workspace', '.pd', 'config.yaml'))).toBe(false);
+    // R1 (review 2026-10-13): install must initialize the governance
+    // workspace with a LOADER-VALID default config (never a bare mkdir). In
+    // this lab the pd-cli runtime entry is absent, so the installer writes
+    // its own default config and reports the DB init as an observable skip.
+    // Install ≠ enable (OD-03) is preserved: the config carries NO
+    // host.workbuddy override — the flag resolves to its registry default OFF.
+    const governanceConfigPath = path.join(created.home, '.workbuddy', 'pd-workspace', '.pd', 'config.yaml');
+    expect(fs.existsSync(governanceConfigPath)).toBe(true);
+    const governanceConfig = parseYaml(fs.readFileSync(governanceConfigPath, 'utf8'));
+    expect(governanceConfig.version).toBe(1);
+    expect(governanceConfig.features).toEqual({}); // no override — OD-03
     expect(created.installer.detectDetails().flagOverride).toBeNull();
+    expect(created.installer.detectDetails().governanceInitialized).toBe(true);
   });
 
   it('merges the workbuddy host into an existing manifest without dropping codex/openclaw or unknown keys', async () => {
@@ -543,7 +553,7 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
     expect(parsed.features['host.workbuddy'].enabled).toBe(true);
   });
 
-  it('enable is a no-op-safe line edit when host.workbuddy already exists', () => {
+  it('enable keeps the line edit minimal on an existing entry and normalizes it with the registry-required category (R1)', () => {
     const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-flag-'));
     try {
       const configPath = path.join(dir, '.pd', 'config.yaml');
@@ -551,7 +561,24 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
       fs.writeFileSync(configPath, 'features:\n  host.workbuddy:\n    enabled: false\n');
       const outcome = setWorkbuddyGovernanceFlag(dir, true);
       expect(outcome.ok).toBe(true);
-      expect(fs.readFileSync(configPath, 'utf8')).toBe('features:\n  host.workbuddy:\n    enabled: true\n');
+      // The enabled value flips in place; the write contract (R1) adds the
+      // schema-required category so the production validator accepts the
+      // entry (an enabled-only entry makes every hook invocation degrade).
+      expect(fs.readFileSync(configPath, 'utf8')).toBe('features:\n  host.workbuddy:\n    enabled: true\n    category: quiet\n');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('repeated enable keeps the entry single and idempotent (category line not duplicated)', () => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-flag2-'));
+    try {
+      const configPath = path.join(dir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, 'features:\n  host.workbuddy:\n    enabled: true\n    category: quiet\n');
+      const outcome = setWorkbuddyGovernanceFlag(dir, true);
+      expect(outcome.ok).toBe(true);
+      expect(fs.readFileSync(configPath, 'utf8')).toBe('features:\n  host.workbuddy:\n    enabled: true\n    category: quiet\n');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
