@@ -46,6 +46,7 @@ import {
   CODEX_INGESTION_MIN_VERSION,
   CODEX_INGESTION_VERIFIED_VERSION,
 } from '@principles/codex-adapter';
+import { assessCodexInstall, CODEX_INSTALL_NEXT_ACTIONS } from './health-codex-install.js';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
 import { SqliteConnection, SqliteTaskStore, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime-v2';
 
@@ -141,6 +142,21 @@ interface CodexHealthReport {
     leased: number;
     retryWait: number;
     needsHumanReview: number;
+  }>;
+  /**
+   * PRI-953: the runtime actually installed for hooks (PLUGIN_DATA) vs the
+   * marketplace-cache pin, plus the Codex CLI version observed in the newest
+   * real rollout. `adapterVersion`/`runtimeVersion` above are the pd-cli
+   * process's own npm dependencies — they are NOT what hooks execute, and a
+   * stale PLUGIN_DATA or an unverified CLI must never be silent (F1/F2).
+   */
+  install: Degradable<{
+    pluginDataAdapterVersion: string | null;
+    marketplacePinAdapterVersion: string | null;
+    staleInstall: boolean;
+    canonicalAdapterVersion: string | null;
+    latestObservedCliVersion: string | null;
+    cliStatus: 'supported' | 'unsupported_below' | 'unverified_above' | 'unknown';
   }>;
   /** §15: ready is true only under the full §15 conjunction; unknown ⇒ not ready. */
   ready: boolean;
@@ -454,6 +470,26 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
     noteReadyBlocker('diagnostician', diagnosticianTasks.reason);
   }
 
+  // ── PRI-953: installed runtime vs marketplace pin + observed CLI version ───
+  // `adapterVersion` above is pd-cli's own dependency; hooks execute whatever
+  // $pd-setup installed into PLUGIN_DATA. A stale install or a Codex CLI newer
+  // than the verified ingestion contract must never be silent (F1/F2).
+  const install = assessCodexInstall(process.env);
+  if (install.ok) {
+    if (install.staleInstall && ingestionEnabled) {
+      noteReadyBlocker('codexRuntime', `stale_install: hooks run adapter ${install.pluginDataAdapterVersion ?? 'unknown'} but the plugin pin is ${install.marketplacePinAdapterVersion ?? 'unknown'}`);
+      warnings.push(`codexRuntime nextAction: ${CODEX_INSTALL_NEXT_ACTIONS.staleInstall}`);
+    } else if (install.staleInstall) {
+      warnings.push(`codexRuntime stale_install: hooks run adapter ${install.pluginDataAdapterVersion ?? 'unknown'}, plugin pin is ${install.marketplacePinAdapterVersion ?? 'unknown'}. ${CODEX_INSTALL_NEXT_ACTIONS.staleInstall}`);
+    }
+    if (ingestionEnabled && install.cliStatus !== 'supported') {
+      noteReadyBlocker('codexCliVersion', `${install.cliStatus}: ${install.latestObservedCliVersion ?? 'unknown'}`);
+      warnings.push(`codexCliVersion nextAction: ${CODEX_INSTALL_NEXT_ACTIONS.unverifiedCli}`);
+    }
+  } else {
+    warnings.push(`codexRuntime: ${install.reason} — ${install.nextAction}`);
+  }
+
   // ── §15 ready conjunction ──────────────────────────────────────────────────
   if (!hostCodexEnabled) noteReadyBlocker('host.codex', 'disabled');
   if (workerEvaluation.mode === 'paused') noteReadyBlocker('worker', workerEvaluation.reason);
@@ -491,6 +527,16 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
     observations,
     admissions,
     diagnosticianTasks,
+    install: install.ok
+      ? {
+          pluginDataAdapterVersion: install.pluginDataAdapterVersion,
+          marketplacePinAdapterVersion: install.marketplacePinAdapterVersion,
+          staleInstall: install.staleInstall,
+          canonicalAdapterVersion: install.canonicalAdapterVersion,
+          latestObservedCliVersion: install.latestObservedCliVersion,
+          cliStatus: install.cliStatus,
+        }
+      : { reason: install.reason, nextAction: install.nextAction },
     ready,
     readyBlockers: readyBlockers.slice(0, 12),
     warnings,
@@ -511,6 +557,15 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   line('workspace', report.workspace);
   line('adapterVersion', report.adapterVersion);
   line('runtimeVersion', report.runtimeVersion);
+  if ('staleInstall' in report.install) {
+    line('install.pluginDataAdapterVersion', String(report.install.pluginDataAdapterVersion ?? 'not_installed'));
+    line('install.marketplacePinAdapterVersion', String(report.install.marketplacePinAdapterVersion ?? 'not_found'));
+    line('install.staleInstall', String(report.install.staleInstall));
+    line('install.canonicalAdapterVersion', String(report.install.canonicalAdapterVersion ?? 'unknown'));
+    line('install.latestObservedCliVersion', `${report.install.latestObservedCliVersion ?? 'unknown'} (${report.install.cliStatus})`);
+  } else {
+    line('install', `${report.install.reason} — ${report.install.nextAction}`);
+  }
   line('codexIngestionMinVersion', report.codexIngestionMinVersion);
   line('codexIngestionVerifiedVersion', report.codexIngestionVerifiedVersion);
   line('featureFlag.host.codex', `${String(report.featureFlag.enabled)} (${report.featureFlag.source})`);

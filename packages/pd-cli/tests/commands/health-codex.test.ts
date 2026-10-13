@@ -108,6 +108,25 @@ vi.mock('@principles/codex-adapter', () => ({
   CODEX_INGESTION_VERIFIED_VERSION: '0.150.1',
 }));
 
+// PRI-953: the install/version layer is unit-tested against real temp dirs in
+// health-codex-install.test.ts; this report-level suite pins a benign install
+// so the §15 conjunction tests stay focused on their own blockers.
+vi.mock('../../src/commands/health-codex-install.js', () => ({
+  assessCodexInstall: vi.fn(() => ({
+    ok: true,
+    pluginDataAdapterVersion: '0.5.3',
+    marketplacePinAdapterVersion: '0.5.3',
+    staleInstall: false,
+    canonicalAdapterVersion: '0.5.3',
+    latestObservedCliVersion: '0.150.1',
+    cliStatus: 'supported',
+  })),
+  CODEX_INSTALL_NEXT_ACTIONS: {
+    staleInstall: 'refresh plugin + re-run $pd-setup',
+    unverifiedCli: 'update PD',
+  },
+}));
+
 vi.mock('@principles/install-layout', () => ({
   getInstallLayoutPaths: mockGetInstallLayoutPaths,
   parseInstallManifest: mockParseInstallManifest,
