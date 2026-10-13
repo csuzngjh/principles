@@ -144,15 +144,20 @@ export async function runLintByPackage({
 
   let activeChild = null;
   let interrupted = false;
-  const onSignal = (signal) => {
+  const interruptWith = (signal) => {
     interrupted = true;
     activeChild?.kill(signal);
   };
+  // Real `process` invokes signal listeners with NO arguments, so each signal
+  // gets its own closure forwarding the explicit name (a shared
+  // `onSignal(signal)` would forward `undefined` and default to SIGTERM).
+  const onSigint = () => interruptWith('SIGINT');
+  const onSigterm = () => interruptWith('SIGTERM');
   // `signalTarget` is EventEmitter-like (process in production); `null`
   // disables signal handling (tests).
   if (signalTarget) {
-    signalTarget.on('SIGINT', onSignal);
-    signalTarget.on('SIGTERM', onSignal);
+    signalTarget.on('SIGINT', onSigint);
+    signalTarget.on('SIGTERM', onSigterm);
   }
 
   try {
@@ -190,8 +195,8 @@ export async function runLintByPackage({
     }
   } finally {
     if (signalTarget) {
-      signalTarget.off('SIGINT', onSignal);
-      signalTarget.off('SIGTERM', onSignal);
+      signalTarget.off('SIGINT', onSigint);
+      signalTarget.off('SIGTERM', onSigterm);
     }
   }
 

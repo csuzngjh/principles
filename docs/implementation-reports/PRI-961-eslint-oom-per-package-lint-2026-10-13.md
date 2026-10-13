@@ -105,7 +105,14 @@
 - `npm run verify:merge`（含新版 `npm run lint`，实现提交 `c31b24d9` 上执行）：**exit 0 全绿**——release-intent / generated-artifacts / error-handbook / telemetry / repo-hygiene / runtime-contract / docs-structure / security-baseline / workspace-tools / guard-contracts / release-target-matrix / 全量构建 / website 测试 / 新版 lint（36 warnings, 0 errors）/ pipeline-contract / pd-cli+pd-console 构建 / workspace-artifacts / release-artifact-hygiene / 全部 typecheck / satellite-bundle-deps / runtime-writers 全部通过。
 - `npm run check:error-handbook`（新增 ERR-159 落册后）：OK（119 active patterns / 14 routing cards）。
 
-## 6. 残余风险与后续
+## 6. 评审收敛（2026-10-14）
+
+- 独立代码评审（GitHub Review #5511320369，基于 b0245ed8）：**1×P2（F-01），0×P0/P1**；核心 OOM 方案与其余项全部 PASS。
+- **F-01（属实，已修）**：真实 `process` 调用信号 listener 时不传参（本机实证 `argc: 0`），原共享 `onSignal(signal)` 闭包收到 `undefined`，`child.kill(undefined)` 转发为默认 SIGTERM 而非 SIGINT；单测 fake 的 `emit(sig)` 主动传参掩盖了该差异。修复：SIGINT/SIGTERM 各自独立闭包转发显式信号名；测试 fake 改为生产保真的无参调用；另加一个以真实 `process` 对象驱动 `process.emit('SIGINT')` 的探针，实测 `killArg === "SIGINT"`（修复前为 `undefined`）。
+- 针对性回归：调度器测试 13/13、`test:scripts` 43 文件/736 测试全绿。教训落册 **ERR-160**（EP-09：测试替身传参比生产调用约定更"友好"，掩盖 undefined 回退路径）。
+- 评审确认其余全部检查 PASS；不要求重做内存压测（1828 MB 峰值沿用交付报告测量证据）。
+
+## 7. 残余风险与后续
 
 - 逐包调度使总 lint 时间 +~15%（44.0s → 50.5s，纯 lint 段；含构建前置的 `npm run lint` 约 66–69s）。若未来包数/体量增长明显，可评估 `--cache` 等增量手段（本票未引入，保持语义最小变更）。
 - CI Runner（Ubuntu/Node 22）未做内存插桩；由 lint job 全绿 + 本机等价性证据间接覆盖。若未来 CI 出现 OOM，逐包架构下单包峰值（实测最大 1828 MB）本身就是排查下界。

@@ -72,6 +72,10 @@ function makeFakeSpawn({ outcomes = [], recorder }) {
 function makeSignalTarget() {
   const handlers = new Map();
   return {
+    // Production-faithful: real `process` invokes signal listeners with NO
+    // arguments (verified: `process.emit('SIGINT')` calls handlers with argc 0),
+    // so emit() must not pass the signal name either — otherwise the fake
+    // would mask a scheduler bug that forwards `undefined` to child.kill().
     on: (signal, handler) => {
       const list = handlers.get(signal) ?? [];
       list.push(handler);
@@ -81,7 +85,7 @@ function makeSignalTarget() {
       handlers.set(signal, (handlers.get(signal) ?? []).filter((h) => h !== handler));
     },
     emit: (signal) => {
-      for (const handler of [...(handlers.get(signal) ?? [])]) handler(signal);
+      for (const handler of [...(handlers.get(signal) ?? [])]) handler();
     },
   };
 }
@@ -254,8 +258,11 @@ describe('lint-by-package', () => {
       });
       await new Promise((resolve) => setImmediate(resolve));
       assert.ok(firstChild, 'first child should be running');
+      // emit() passes NO listener args (production-faithful, see
+      // makeSignalTarget): the scheduler itself must forward the explicit
+      // signal name to the child, not whatever the emitter supplied.
       signals.emit('SIGINT');
-      assert.equal(firstChild.killedWith, 'SIGINT', 'running child was not killed');
+      assert.equal(firstChild.killedWith, 'SIGINT', 'running child was not killed with the forwarded signal name');
       firstChild.closeWith(null, 'SIGINT');
       const { ok, interrupted } = await runPromise;
       assert.equal(rec.calls.length, 1, 'next package must not be spawned after interrupt');
