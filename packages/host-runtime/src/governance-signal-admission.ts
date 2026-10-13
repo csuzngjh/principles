@@ -370,6 +370,16 @@ const ADMISSION_CREATE_STATEMENTS = [
 function ensureGovernanceAdmissionSchema(db: Database.Database): void {
   db.transaction(() => {
     for (const statement of ADMISSION_CREATE_STATEMENTS) db.exec(statement);
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-01: this store also writes tool_calls
+    // (admitToolFailure); make sure the host tool-use-id join column exists on
+    // workspaces whose base schema predates it (idempotent additive ALTER).
+    try {
+      db.exec('ALTER TABLE tool_calls ADD COLUMN tool_use_id TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_tool_calls_session_tool_use_id ON tool_calls(session_id, tool_use_id)');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column name')) throw err;
+    }
   })();
 }
 
@@ -421,6 +431,8 @@ export interface GovernanceToolFailureCandidate {
   readonly toolName: string;
   /** Host event source (e.g. `codex:post_tool_use`) — identity parity with the live handler. */
   readonly source: string;
+  /** Host tool-call id (SPEC-CODEX-PAIN-CLOSURE-001 CR-01) — same id the live PostToolUse path records. */
+  readonly toolUseId?: string;
   readonly toolInput?: unknown;
   readonly toolOutput?: unknown;
   readonly observedAt: string;
@@ -659,7 +671,7 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
   // Admission gate — identical semantics to the live production handler on a
   // fresh process (ADR-0020 accepts cold in-memory cooldowns for Codex;
   // canonical idempotency is the guard).
-  const sourceObservation = buildToolFailureObservation({ toolName: candidate.toolName, error: outcome.error, exitCode: outcome.exitCode });
+  const sourceObservation = buildToolFailureObservation({ toolName: candidate.toolName, error: outcome.error, exitCode: outcome.exitCode ?? undefined });
   const sourceKind = resolveSourceKind({
     observedAt: nowIso,
     workspaceId: workspaceDir,
@@ -667,7 +679,7 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
     toolName: candidate.toolName,
     failureSource: sourceObservation.failureSource,
     toolNotFound: sourceObservation.toolNotFound,
-    nonZeroExit: outcome.exitCode !== 0,
+    nonZeroExit: outcome.exitCode !== null && outcome.exitCode !== 0,
   });
   // Risk evaluation mirrors the production handler: it reads the RAW params
   // (sanitized params replace paths with placeholders and would lose the
@@ -675,7 +687,7 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
   const rawFile = isRecord(outcome.params) ? (own(outcome.params, 'file_path') ?? own(outcome.params, 'path')) : undefined;
   const relativePath = String(rawFile ?? 'unknown').slice(0, 500);
   const isRisky = path.isAbsolute(relativePath) && !path.resolve(relativePath).startsWith(`${workspaceDir}${path.sep}`);
-  const painScore = Math.min(100, (outcome.exitCode !== 0 ? 70 : 0) + (isRisky ? 20 : 0));
+  const painScore = Math.min(100, (outcome.failure ? 70 : 0) + (isRisky ? 20 : 0));
   const triage = evaluateTriage({ sourceKind, score: painScore, isRisky });
   const trigger = evaluateTriggerController({ triageResult: triage, isOwnerManual: false, isCooldownActive: false, isValid: true, score: painScore, sessionId: candidate.rootSessionId });
   const gateAdmitted = outcome.failure && PRODUCTION_WRITE_TOOLS.has(candidate.toolName) && trigger.shouldCreateDiagnosticTask;
@@ -688,17 +700,22 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
   let duplicateWithoutPain = false;
   let reason = '';
   db.transaction(() => {
-    // Same duplicate probe as the production handler: an identical tool_calls
-    // row means this exact call was already recorded.
-    if (db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?')
-      .get(candidate.rootSessionId, candidate.toolName, paramsJson, outcome.failure ? 'failure' : 'success', outcome.exitCode, outcome.error ?? null, resultPreview) !== undefined) {
+    // Same duplicate probes as the production handler: the host tool-call id
+    // (CR-01) is the stable join key; the content-shape probe stays the
+    // fallback for hosts/candidates without ids.
+    if (candidate.toolUseId !== undefined
+      && db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_use_id = ?').get(candidate.rootSessionId, candidate.toolUseId) !== undefined) {
+      duplicate = true;
+      duplicateWithoutPain = db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) === undefined;
+    } else if (db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?')
+      .get(candidate.rootSessionId, candidate.toolName, paramsJson, outcome.outcome, outcome.exitCode, outcome.error ?? null, resultPreview) !== undefined) {
       duplicate = true;
       duplicateWithoutPain = db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) === undefined;
     } else {
       db.prepare(`INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at`)
         .run(candidate.rootSessionId, nowIso, nowIso);
-      db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(candidate.rootSessionId, candidate.toolName, outcome.failure ? 'failure' : 'success', outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, nowIso);
+      db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(candidate.rootSessionId, candidate.toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, nowIso, candidate.toolUseId ?? null);
       reason = `tool=${candidate.toolName}; error=${outcome.error ?? `exit=${outcome.exitCode}`}; path=${relativePath}`;
       db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(candidate.rootSessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, null, painId, null, candidate.hostKind, nowIso);
