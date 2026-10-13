@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #007 · 2026-10-13</div>
+  <a class="abyss-title" href="/zh/abyss/07-goal-management-paradox">07 | 当我们越来越擅长实现目标，为什么反而可能离目标越来越远？</a>
+  <p class="abyss-desc">从南辕北辙到刻舟求剑：当 AI Agent 成为越来越优秀的“车夫”，我们为什么可能更高效地走向错误的未来？从古德哈特定律到双环学习，探讨人与智能体通过真实反馈共同校准方向、共同成长的可能。</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #006 · 2026-06-17</div>
   <a class="abyss-title" href="/zh/abyss/06-expanding-boundary">06 | 智能的膨胀边界：巨塔、小艇与硅基阿米巴</a>
   <p class="abyss-desc">当智能系统从文本外扩到行动、组织、社会与意义，哪些旧容器会被重写？从 ExO 到 MVO，倒 T 型组织，以及人类永远不能外包的部分——目标、边界、责任、痛感、原则、爱、意义与最终裁决权。</p>
