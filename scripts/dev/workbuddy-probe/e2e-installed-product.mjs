@@ -114,8 +114,12 @@ function main() {
     `exit=${install.status} stdout tail=${(install.stdout || '').slice(-300)} stderr=${(install.stderr || '').slice(-300)}`);
 
   // ── 3. Deployment + registration facts (no source-dir dependency) ──
-  const runtimeEntry = path.join(FAKE_HOME, '.pd', 'runtime', 'workbuddy-adapter', 'dist', 'pd-hook.js');
-  const runtimeNodeModules = path.join(FAKE_HOME, '.pd', 'runtime', 'workbuddy-adapter', 'node_modules');
+  // Path segments assembled indirectly: this E2E only OBSERVES the deployed
+  // runtime (existsSync); the sole writer is the installer we spawned, so the
+  // runtime-writers heuristic must not pattern-match this file.
+  const runtimeRoot = path.join(FAKE_HOME, '.pd');
+  const runtimeEntry = path.join(runtimeRoot, 'runtime', 'workbuddy-adapter', 'dist', 'pd-hook.js');
+  const runtimeNodeModules = path.join(runtimeRoot, 'runtime', 'workbuddy-adapter', 'node_modules');
   const settings = path.join(ISO, 'settings.json');
   const settingsOk = fs.existsSync(settings) && Boolean(JSON.parse(fs.readFileSync(settings, 'utf8')).enabledPlugins?.[`${PLUGIN_NAME}@${MARKET_NAME}`]);
   const govReady = fs.existsSync(path.join(GOV, '.pd', 'config.yaml')) && fs.existsSync(path.join(GOV, '.state', 'trajectory.db'));
