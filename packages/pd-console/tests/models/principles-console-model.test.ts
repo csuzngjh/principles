@@ -102,6 +102,51 @@ describe('PrinciplesConsoleModel', () => {
     expect(result.summary.probation).toBe(1);
   });
 
+  // PRI-956 (F15): the ledger status is asset lifecycle and never reflects
+  // deactivation — the model must annotate runtime revocation from the
+  // activations-table fact (passed by the route) so the UI can disclose it
+  // instead of implying "in effect" from `status: 'active'` alone.
+  it('runtimeDeactivated annotates only the principles the route reports deactivated', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        p1: {
+          id: 'p1',
+          status: 'active',
+          text: 'Revoked at runtime',
+          triggerPattern: 't1',
+          action: 'a1',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        p2: {
+          id: 'p2',
+          status: 'active',
+          text: 'Still in effect',
+          triggerPattern: 't2',
+          action: 'a2',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+      rules: {},
+      implementations: {},
+      metrics: {},
+      lastUpdated: '2026-05-01T00:00:00Z',
+    });
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const deactivated = new Set(['p1']);
+    const result = await model.listPrinciples('all', { deactivated });
+
+    expect(result.summary.total).toBe(2);
+    const p1 = result.principles.find((p) => p.id === 'p1');
+    const p2 = result.principles.find((p) => p.id === 'p2');
+    expect(p1?.runtimeDeactivated).toBe(true);
+    expect(Object.hasOwn(p2 ?? {}, 'runtimeDeactivated')).toBe(false);
+    // The classification stays 'already_decided' — the fix is disclosure, not
+    // re-bucketing (no second Owner authority is introduced).
+  });
+
   it('listPrinciples defaults unknown status to candidate', async () => {
     ws = await createTestWorkspace();
     writeLedger(ws.workspaceDir, {

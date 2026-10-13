@@ -1808,6 +1808,8 @@ export interface PrincipleListItemData {
   conflictsWithCount: number;
   createdAt: string;
   updatedAt: string;
+  /** PRI-956 (F15): runtime authority revoked (activations deactivated). */
+  runtimeDeactivated?: boolean;
   /** PRI-332: Detected language of the principle text */
   detectedLanguage: string;
   /** PRI-332 P1-5: Structured readability warning code */
@@ -1858,6 +1860,12 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
   if (Object.hasOwn(v, 'readabilityWarningCode')) {
     if (!isReadabilityWarningCode(v.readabilityWarningCode)) return null;
     result.readabilityWarningCode = v.readabilityWarningCode;
+  }
+  // PRI-956 (F15): optional runtime-revocation disclosure — present only when
+  // the activations table reports a deactivated prompt activation.
+  if (Object.hasOwn(v, 'runtimeDeactivated')) {
+    if (v.runtimeDeactivated !== true) return null;
+    result.runtimeDeactivated = true;
   }
   return result;
 }

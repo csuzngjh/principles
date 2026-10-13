@@ -42,6 +42,9 @@ interface PrincipleCard {
   evaluability: string;
   /** Owner Decision Experience v1: backend-derived decision state (display only). */
   decisionState?: string;
+  /** PRI-956 (F15): runtime authority revoked (activations deactivated) — the
+   *  ledger status is asset lifecycle and never reflects deactivation. */
+  runtimeDeactivated?: boolean;
   updatedAt: string;
   createdAt: string;
   priority: string;
@@ -296,6 +299,7 @@ export function PrinciplesPage() {
       channels: uniqueChannels,
       evaluability: p.evaluability,
       decisionState: decision?.decisionState,
+      runtimeDeactivated: p.runtimeDeactivated === true,
       updatedAt: p.updatedAt,
       createdAt: p.createdAt,
       priority: p.priority,
@@ -650,6 +654,11 @@ export function PrinciplesPage() {
                       >
                         {decision.glyph} {t(decision.labelKey)}
                       </span>
+                      {card.runtimeDeactivated === true && (
+                        <span className="font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 border-amber-300 text-amber-700 bg-amber-50">
+                          {t("principles.runtimeDeactivated")}
+                        </span>
+                      )}
                     </div>
                     {decisionDate && (
                       <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">

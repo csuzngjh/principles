@@ -125,6 +125,43 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
   }
 }
 
+/**
+ * PRI-956 (F15): principle ids whose runtime authority has been revoked —
+ * at least one activation with `deactivated_at` set. The ledger status never
+ * reflects deactivation (asset lifecycle, see
+ * PrinciplesConsoleModel.runtimeDeactivated), so the review page needs this
+ * runtime-authority fact to avoid implying "in effect" after an Owner
+ * deactivates. Read-only; degrades with a reason like the decided-ids query.
+ */
+async function getDeactivatedPrincipleIds(workspaceDir: string): Promise<{ ids: Set<string>; unavailableReason?: string }> {
+  const dbPath = path.join(workspaceDir, '.pd', 'state.db');
+  if (!fs.existsSync(dbPath)) {
+    return { ids: new Set(), unavailableReason: 'activation_db_not_found' };
+  }
+  let closeFn: (() => void) | null = null;
+  try {
+    const { SqliteConnection } = await import('@principles/core/runtime-v2');
+    const conn = new SqliteConnection({ workspaceDir, readonly: true });
+    closeFn = () => conn.close();
+    const db = conn.getDb();
+    const rows = db.prepare(
+      "SELECT DISTINCT target_ref FROM activations WHERE deactivated_at IS NOT NULL AND deactivated_at <> ''"
+    ).all();
+    const ids = new Set<string>();
+    for (const row of rows) {
+      const ref = getOwnStringField(row, 'target_ref');
+      // activations.target_ref uses the `ledger://<principleId>` scheme
+      if (ref !== undefined && ref.startsWith('ledger://')) ids.add(ref.slice('ledger://'.length));
+    }
+    return { ids };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ids: new Set(), unavailableReason: `activation_query_failed: ${message}` };
+  } finally {
+    closeFn?.();
+  }
+}
+
 interface PrinciplesRouteParams {
   req: IncomingMessage;
   res: ServerResponse;
@@ -276,7 +313,12 @@ export async function handlePrinciplesRoute({
       const filter = (filterRaw !== null && VALID_FILTERS.has(filterRaw) ? filterRaw : 'actionable') as PrincipleFilter;
 
       const decidedResult = await getDecidedPrincipleIds(workspaceDir);
-      const result = await model.listPrinciples(filter, decidedResult.ids, decidedResult.pendingIds);
+      const deactivatedResult = await getDeactivatedPrincipleIds(workspaceDir);
+      const result = await model.listPrinciples(filter, {
+        decided: decidedResult.ids,
+        pendingApproval: decidedResult.pendingIds,
+        deactivated: deactivatedResult.ids,
+      });
       // Surface approval cross-check unavailability to the UI (ERR-002)
       if (decidedResult.unavailableReason) {
         result.approvalCrossCheckUnavailable = decidedResult.unavailableReason;
