@@ -266,8 +266,16 @@ function startSupervision(): void {
 const WORKSPACE_WORKER_SYNC_INTERVAL_MS = 60_000;
 const WORKSPACE_WORKER_CYCLE_INTERVAL_MS = 120_000;
 let workspaceWorkers: WorkspaceWorkerRegistry | undefined;
+// WorkBuddy third host (SPEC workbuddy-host-adapter §5): the Companion
+// schedules ONE `pd workbuddy worker` child for the WorkBuddy governance
+// workspace, supervised by the same registry lifecycle. Execution
+// correctness stays owned by the durable Runtime V2 task lease, so a
+// workspace theoretically listed for both hosts can never double-execute a
+// task — worst case is benign lease contention.
+let workbuddyWorkspaceWorkers: WorkspaceWorkerRegistry | undefined;
+let workbuddyWorkspaceWorkerTimer: ReturnType<typeof setInterval> | undefined;
 
-function manifestCodexWorkspaces(): string[] {
+function manifestWorkspacesForHost(host: 'codex' | 'workbuddy'): string[] {
   const paths = getInstallLayoutPaths(app.getPath('home'));
   let manifest: unknown;
   try {
@@ -277,7 +285,7 @@ function manifestCodexWorkspaces(): string[] {
   }
   const parsed = parseInstallManifest(manifest);
   if (parsed.manifest === undefined) return [];
-  if (!parsed.manifest.hosts.includes('codex')) return [];
+  if (!parsed.manifest.hosts.includes(host)) return [];
   return (parsed.manifest.workspaces ?? []).filter((workspace) => {
     try {
       return fs.statSync(workspace).isDirectory();
@@ -287,26 +295,40 @@ function manifestCodexWorkspaces(): string[] {
   });
 }
 
+function manifestCodexWorkspaces(): string[] {
+  return manifestWorkspacesForHost('codex');
+}
+
+function manifestWorkbuddyWorkspaces(): string[] {
+  return manifestWorkspacesForHost('workbuddy');
+}
+
+function spawnWorkspaceWorkerFor(workerCommand: 'codex' | 'workbuddy'): (canonicalWorkspaceDir: string) => WorkerChild {
+  return (canonicalWorkspaceDir: string): WorkerChild => {
+    // Same system-node discipline as the console server: better-sqlite3 is
+    // built for the SYSTEM Node ABI, never Electron's bundled Node.
+    const entry = extDir !== undefined ? resolvePdCliEntry(extDir) : undefined;
+    if (entry === undefined || !isSafeExistingFile(entry)) {
+      throw new Error('pd-cli entry unavailable');
+    }
+    const child = spawn('node', [
+      entry,
+      workerCommand, 'worker',
+      '--workspace', canonicalWorkspaceDir,
+      '--interval', String(WORKSPACE_WORKER_CYCLE_INTERVAL_MS),
+    ], { env: { ...process.env }, stdio: ['ignore', 'ignore', 'pipe'] });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      // Bounded stderr tail into the companion log — the worker's own
+      // human-readable cycle reports go to stdout (companion does not consume
+      // them; Slice D health surface adds the structured health API).
+      log('workspace_worker_stderr', { workspace: canonicalWorkspaceDir, tail: chunk.toString('utf8').slice(-400) });
+    });
+    return child;
+  };
+}
+
 function spawnWorkspaceWorker(canonicalWorkspaceDir: string): WorkerChild {
-  // Same system-node discipline as the console server: better-sqlite3 is
-  // built for the SYSTEM Node ABI, never Electron's bundled Node.
-  const entry = extDir !== undefined ? resolvePdCliEntry(extDir) : undefined;
-  if (entry === undefined || !isSafeExistingFile(entry)) {
-    throw new Error('pd-cli entry unavailable');
-  }
-  const child = spawn('node', [
-    entry,
-    'codex', 'worker',
-    '--workspace', canonicalWorkspaceDir,
-    '--interval', String(WORKSPACE_WORKER_CYCLE_INTERVAL_MS),
-  ], { env: { ...process.env }, stdio: ['ignore', 'ignore', 'pipe'] });
-  child.stderr?.on('data', (chunk: Buffer) => {
-    // Bounded stderr tail into the companion log — the worker's own
-    // human-readable cycle reports go to stdout (companion does not consume
-    // them; Slice D health surface adds the structured health API).
-    log('workspace_worker_stderr', { workspace: canonicalWorkspaceDir, tail: chunk.toString('utf8').slice(-400) });
-  });
-  return child;
+  return spawnWorkspaceWorkerFor('codex')(canonicalWorkspaceDir);
 }
 
 function startWorkspaceWorkerSupervision(): void {
@@ -341,6 +363,33 @@ function startWorkspaceWorkerSupervision(): void {
     workspaceWorkers?.sync(manifestCodexWorkspaces());
   }, WORKSPACE_WORKER_SYNC_INTERVAL_MS);
   workspaceWorkerTimer.unref();
+
+  // WorkBuddy governance worker — same supervision, own registry and timer;
+  // the worker command itself (pd workbuddy worker) owns the host.workbuddy
+  // flag semantics, so an unenabled governance workspace just reports paused.
+  workbuddyWorkspaceWorkers = new WorkspaceWorkerRegistry({
+    spawnWorker: spawnWorkspaceWorkerFor('workbuddy'),
+    log: (event, fields) => {
+      log(event, fields ?? {});
+      if (event === 'workspace_worker_degraded') {
+        const workspace = fields?.workspace;
+        if (typeof workspace !== 'string' || workspace.length === 0) {
+          log('workspace_worker_degraded_notify_skipped', { reason: 'workspace_field_invalid' });
+          return;
+        }
+        notifyWorkspaceDegraded(workspace);
+        rebuildTrayMenu();
+      } else if (event === 'workspace_worker_stopped') {
+        rebuildTrayMenu();
+      }
+    },
+  });
+  workbuddyWorkspaceWorkers.sync(manifestWorkbuddyWorkspaces());
+  workbuddyWorkspaceWorkerTimer = setInterval(() => {
+    if (quitting) return;
+    workbuddyWorkspaceWorkers?.sync(manifestWorkbuddyWorkspaces());
+  }, WORKSPACE_WORKER_SYNC_INTERVAL_MS);
+  workbuddyWorkspaceWorkerTimer.unref();
 }
 
 /** Owner-facing surface for a permanently degraded workspace worker (PRI-715). */
@@ -363,6 +412,8 @@ function notifyWorkspaceDegraded(canonicalWorkspace: string): void {
 function stopWorkspaceWorkerSupervision(): void {
   if (workspaceWorkerTimer !== undefined) clearInterval(workspaceWorkerTimer);
   workspaceWorkers?.stopAll();
+  if (workbuddyWorkspaceWorkerTimer !== undefined) clearInterval(workbuddyWorkspaceWorkerTimer);
+  workbuddyWorkspaceWorkers?.stopAll();
 }
 
 function spawnCli(): void {  if (extDir === undefined) return;
@@ -825,7 +876,10 @@ function rebuildTrayMenu(): void {
   const s = supervisor.getState();
   // Pure read of the existing degraded state (PRI-715) — querying must never
   // reset degradation, restart a worker or touch the manifest.
-  const degradedView = buildDegradedWorkspacesTrayView(workspaceWorkers?.degradedWorkspaces() ?? []);
+  const degradedView = buildDegradedWorkspacesTrayView([
+    ...(workspaceWorkers?.degradedWorkspaces() ?? []),
+    ...(workbuddyWorkspaceWorkers?.degradedWorkspaces() ?? []),
+  ]);
   const supervisorLabel =
     s.kind === 'running'
       ? s.mode === 'managed' ? `控制台运行中（端口 ${s.port}）` : `控制台已连接·外部实例（端口 ${s.port}）`

@@ -62,6 +62,10 @@ export * from './codex-ingestion-consent.js';
 // PRI-625 Slice D: ONE §15 worker-mode authority, moved from codex-adapter so
 // the CLI, the Console, and the worker share the same semantics.
 export * from './codex-worker-status.js';
+// WorkBuddy third host (SPEC workbuddy-host-adapter §5): the §15 worker-mode
+// authority for the WorkBuddy governance workspace — same one-semantics
+// placement as the Codex evaluation above, no ingestion step to gate.
+export * from './workbuddy-worker-status.js';
 // PRI-625 Slice D: ONE legacy-registration predicate (installer refusal,
 // health dualRegistration, and future setup flows all read the same fact).
 export * from './codex-legacy-registration.js';

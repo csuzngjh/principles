@@ -578,6 +578,12 @@ rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principl
 // self-contained pattern: bundle it as a sibling and rewrite the dep; the
 // installer's syncPdCli() creates the resolving symlink.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/codex-adapter', 'file:../codex-adapter');
+// pd-cli's `workbuddy worker` command imports the WorkBuddy worker cycle from
+// @principles/workbuddy-adapter (SPEC workbuddy-host-adapter §5). Same
+// self-contained pattern: bundle it as a sibling and rewrite the dep; the
+// installer's syncPdCli() creates the resolving symlink. No-op when the
+// adapter payload is absent from this build.
+rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/workbuddy-adapter', 'file:../workbuddy-adapter');
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/install-layout', 'file:../install-layout');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/install-layout', 'file:../install-layout');
 // host-runtime itself depends on @principles/core. Rewrite to a local file

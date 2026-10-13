@@ -41,3 +41,10 @@ export {
   annotateContextWarnings,
   type WorkBuddyPdHookResult,
 } from './pd-hook.js';
+export {
+  runWorkbuddyWorkspaceWorkerCycle,
+  type WorkbuddyWorkerCycleResult,
+  type WorkbuddyWorkerCycleOptions,
+  type WorkbuddyWorkerCycleStepReport,
+  type WorkbuddyWorkerMode,
+} from './worker/workspace-worker.js';
