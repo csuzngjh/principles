@@ -58,7 +58,7 @@ const itBdd = (name: string, fn: () => void | Promise<void>): void =>
       }
       throw error;
     }
-  }, 900_000);
+  }, 1_500_000);
 
 interface BddState {
   home: string;
@@ -478,11 +478,13 @@ registry.when(/^the background worker advances it toward a reviewable proposal$/
       throw new BlockedScenarioError(`BLOCKED: the real LLM provider already rate-limited the diagnostician (${state.providerRateLimited}, runs.error_category=rate_limit) — chain verified up to the LLM boundary; re-run when the provider quota resets`);
     }
     // WALL-CLOCK bound measured from the SCENARIO start: a cycle is never
-    // STARTED after 8 scenario-minutes, so the last cycle (≤5 min provider
-    // timeout) always finishes inside the 900s vitest budget — the scenario
-    // ends in this step's own classification, never in a vitest timeout.
+    // STARTED after 13 scenario-minutes (diagnosis with the real LLM takes
+    // minutes and the downstream dreamer-seed → candidate-intake → approval
+    // cadence adds 6-10 more), so the last cycle (≤5 min provider timeout)
+    // always finishes inside the 1500s vitest budget — the scenario ends in
+    // this step's own classification, never in a vitest timeout.
     const startedAt = state.scenarioStartedAt ?? Date.now();
-    const cycleStartDeadline = startedAt + 480_000;
+    const cycleStartDeadline = startedAt + 780_000;
     let lastReport = 'no cycle ran';
     for (let cycle = 0; ; cycle++) {
       if (Date.now() >= cycleStartDeadline) break;
