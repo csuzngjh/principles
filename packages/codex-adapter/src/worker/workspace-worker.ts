@@ -108,6 +108,10 @@ const DEFAULT_DIAG_CANDIDATE_LIMIT = 5;
 /** CR-05 §9.1: bounded per-cycle post-processing continuation budget. */
 const DEFAULT_POST_PROCESSING_LIMIT = 2;
 /** CR-08 §9.3: liveness facts are worker-owned runtime state (not governance truth). */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 const LIVENESS_FILE = 'codex-worker-liveness.json';
 const LIVENESS_STAGE_DEADLINE_MS = {
   catch_up: 5 * 60_000,
@@ -119,7 +123,8 @@ const LIVENESS_STAGE_DEADLINE_MS = {
 
 export function readCodexWorkerLiveness(workspaceDir: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(fs.readFileSync(path.join(path.resolve(workspaceDir), '.state', LIVENESS_FILE), 'utf8')) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(fs.readFileSync(path.join(path.resolve(workspaceDir), '.state', LIVENESS_FILE), 'utf8'));
+    return isPlainRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -139,10 +144,6 @@ function directoryExists(dir: string): boolean {
   } catch {
     return false;
   }
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function writeLiveness(workspaceDir: string, patch: Record<string, unknown>): void {
