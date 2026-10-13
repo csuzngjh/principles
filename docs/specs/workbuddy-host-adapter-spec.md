@@ -238,26 +238,29 @@ v0.3.0：收窄故障阻断承诺并补 UserPromptSubmit；补治理目录与 wo
 
 v0.3.1（2026-10-13，实施后）：新增 §12 实施状态与支持矩阵。OD-01..08 均按推荐方案执行（Owner 启动授权记录于私有 DECISIONS）；P01–P06 真实宿主探针全部完成（engine 2.161.0）；四事件基线维持（P03 实证常规失败已进 PostToolUse，PostToolUseFailure 未纳入首版 hooks 注册）；治理目录冻结 `~/.workbuddy/pd-workspace`。真实宿主治理主回路（注入/阻断/证据/撤回）E2E 6/6 PASS。
 
-## 12. 实施状态与支持矩阵（2026-10-13）
+## 12. 实施状态与支持矩阵（2026-10-13，第二轮整改后 v0.3.2）
 
-真实宿主：WorkBuddy Desktop 5.8.1 / 引擎 `codebuddy-lite-wb.mjs` v2.161.0（SHA-256 见 fixtures provenance）。隔离机制 `WORKBUDDY_CONFIG_DIR`+`CODEBUDDY_CONFIG_DIR`（P0 实证）。
+真实宿主：WorkBuddy Desktop 5.8.1 / 引擎 `codebuddy-lite-wb.mjs` v2.161.0（SHA-256 `1b1a01bc…`，哈希变更后关键协议探针已复跑并修正两项结论，见下）。隔离机制 `WORKBUDDY_CONFIG_DIR`+`CODEBUDDY_CONFIG_DIR`（P0 实证）。
 
 | 能力 | 状态 | 证据 |
 |---|---|---|
-| 插件发现/注册/启用/卸载（Desktop marketplace 语义） | Supported | P01 9/9 + installer 28 测试；生效时点=新会话 |
+| 插件发现/注册/启用/卸载（Desktop marketplace 语义） | Supported | P01 9/9 + installer 28+4 测试；生效时点=新会话 |
 | PreToolUse 治理阻断（deny/exit2/超时 fail-closed） | Supported | P02 矩阵 + E2E deny（文件未写+reason 达模型） |
 | UserPromptSubmit 原则注入（additionalContext，逐轮新鲜） | Supported | P04 + E2E inject（请求体含原则文本） |
 | PostToolUse 真实失败证据（is_error/exitCode 分流） | Supported | P03 + E2E evidence（trajectory 行） |
+| PostToolUseFailure（thrown 错误，tool_error_code=2009 等） | Supported（五事件订阅；**准入受限**见下行） | 第二轮整改：订阅接入+decoder 归一化（error→failure envelope） |
+| 失败信号准入（诊断队列） | **受限（政策边界）**：thrown 类失败 painScore=20（无 exitCode）< 70 地板 → evidence_only 不入队；is_error/exitCode 类（Bash 非零等）同理不计分；真实 LLM 诊断可将信号分类为 implementation 候选 → skill channel MVP-disabled → not_internalizable 终态 | PTUF 子代理测试+审查者独立实测（provider 健康时诊断 succeeded、链终于策略拒绝）——**Owner 决策点**：调整评分（tool_error_code 视同失败）或启用 skill channel，均影响全部宿主 |
 | SessionStart 健康检查（静默，不注入正文） | Supported（保守：状态提示仅 stderr） | P04 通道验证；会话内不可见为已知限制 |
 | Owner 审批/撤回（既有产品入口） | Supported | E2E withdraw（pd activation deactivate）+ BDD 撤回场景 |
-| 跨项目共享治理工作区（projectDir/workspaceDir 分离） | Supported | P06 8/8 + BDD A/B 场景 |
-| flag-off 中性可观察（默认 off） | Supported | OD-03 + adapter/CLI 测试 |
-| 完整自动学习（失败→入队→后台诊断→提案→审批→生效） | NOT CLAIMED（机制接线已实现并有测试；真实 LLM 提案链 NOT RUN） | worker 8 测试 + BDD 该场景 @disabled |
+| 跨项目共享治理工作区（projectDir/workspaceDir 分离） | Supported | P06 8/8 + BDD A/B 场景；Console/canary/交互提示全部路由治理目录（第二轮 P1 修复，产品级进程证据：console server `--workspace <governance>`） |
+| flag-off 中性可观察（默认 off） | Supported | OD-03 + adapter/CLI 测试；合法 YAML 字段顺序下启停均生效（第二轮 §3 修复） |
+| 完整自动学习（失败→入队→后台诊断→提案→审批→生效） | **受限**：链路全通（learn2 真实 LLM 诊断 succeeded；BDD 健康窗口实测到达 pending approval），但 implementation 类信号终止于 skill channel MVP-disabled（见上）；principle/rule 类信号可正常入队 | BDD 场景去 disabled，真实 LLM 门控 |
 | modifiedInput / updatedToolOutput / ask / continue:false | Unsupported（首版 encoder 拒绝） | 输出白名单测试 |
 | transcript/reasoning 读取 | Unsupported（MVP 排除） | 无此类代码路径 |
 | resume/compact 后自动补注 | Unknown（宿主行为未验证） | 探针边界记录 |
 | 独立 CLI 引擎（~/.codebuddy 根）注册 | Unsupported（本安装器面向 Desktop） | installer 边界注释 |
+| 引擎自动发现 | **受限**：生产解析器只探 C 盘 Program Files；D 盘安装需 `PD_WORKBUDDY_ENGINE` env（direct-write fallback 注册后真实引擎可读取） | 第二轮审查 §3 |
 
-并发/升级/发布档：真实多入口并发、幂等重放、同参数独立调用有进程级测试；`npm pack` tarball 内容断言通过；**隔离机器完整安装链（真实 installer 驱动宿主注册→宿主发现）未跑**，属发布前剩余验证。
+并发/升级/发布档：真实多入口并发、幂等重放、同参数独立调用有进程级测试；`npm pack`→`build-release-asset` 戳版 payload→支持安装器→隔离 HOME→真实引擎发现全链 **8/8 PASS**。
 
 本稿不构成 Owner 批准、部署授权或运行验收通过。原稿保留在用户提供的原目录，本稿在隔离 worktree 中供审阅。
