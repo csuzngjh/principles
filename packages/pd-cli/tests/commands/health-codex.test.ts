@@ -114,15 +114,22 @@ vi.mock('@principles/codex-adapter', () => ({
 vi.mock('../../src/commands/health-codex-install.js', () => ({
   assessCodexInstall: vi.fn(() => ({
     ok: true,
+    installMode: 'INSTALLED_AND_MATCHED',
     pluginDataAdapterVersion: '0.5.3',
     marketplacePinAdapterVersion: '0.5.3',
     staleInstall: false,
     canonicalAdapterVersion: '0.5.3',
-    latestObservedCliVersion: '0.150.1',
+    currentCliVersion: '0.150.1',
+    currentCliVersionSource: 'codex_version_probe',
+    lastRolloutCliVersion: '0.150.1',
     cliStatus: 'supported',
+    cliStatusSource: 'current_cli',
   })),
   CODEX_INSTALL_NEXT_ACTIONS: {
     staleInstall: 'refresh plugin + re-run $pd-setup',
+    missingRuntime: 're-run $pd-setup',
+    pinUnavailable: 're-add plugin + re-run $pd-setup',
+    versionUnreadable: 'reinstall plugin + re-run $pd-setup',
     unverifiedCli: 'update PD',
   },
 }));

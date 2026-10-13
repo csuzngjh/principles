@@ -151,12 +151,16 @@ interface CodexHealthReport {
    * stale PLUGIN_DATA or an unverified CLI must never be silent (F1/F2).
    */
   install: Degradable<{
+    installMode: 'INSTALLED_AND_MATCHED' | 'STALE_INSTALL' | 'MISSING_RUNTIME' | 'PIN_UNAVAILABLE' | 'VERSION_UNREADABLE';
     pluginDataAdapterVersion: string | null;
     marketplacePinAdapterVersion: string | null;
     staleInstall: boolean;
     canonicalAdapterVersion: string | null;
-    latestObservedCliVersion: string | null;
+    /** Best-effort CURRENT installed Codex CLI (`codex --version` probe); null = unverifiable (A4). */
+    currentCliVersion: string | null;
+    lastRolloutCliVersion: string | null;
     cliStatus: 'supported' | 'unsupported_below' | 'unverified_above' | 'unknown';
+    cliStatusSource: 'current_cli' | 'last_rollout' | 'none';
   }>;
   /** §15: ready is true only under the full §15 conjunction; unknown ⇒ not ready. */
   ready: boolean;
@@ -470,24 +474,55 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
     noteReadyBlocker('diagnostician', diagnosticianTasks.reason);
   }
 
-  // ── PRI-953: installed runtime vs marketplace pin + observed CLI version ───
+  // ── PRI-953 (R1 A2): installed runtime vs marketplace pin + CLI signals ────
   // `adapterVersion` above is pd-cli's own dependency; hooks execute whatever
-  // $pd-setup installed into PLUGIN_DATA. A stale install or a Codex CLI newer
-  // than the verified ingestion contract must never be silent (F1/F2).
+  // $pd-setup installed into PLUGIN_DATA. While conversation ingestion is
+  // enabled, ANY install state that cannot be verified as INSTALLED_AND_MATCHED
+  // is a §15 ready blocker with a nextAction — fail-open fake health is the
+  // F2 defect class. With ingestion disabled these stay warnings: hook
+  // enforcement permission semantics are independent of ingestion.
   const install = assessCodexInstall(process.env);
   if (install.ok) {
-    if (install.staleInstall && ingestionEnabled) {
-      noteReadyBlocker('codexRuntime', `stale_install: hooks run adapter ${install.pluginDataAdapterVersion ?? 'unknown'} but the plugin pin is ${install.marketplacePinAdapterVersion ?? 'unknown'}`);
-      warnings.push(`codexRuntime nextAction: ${CODEX_INSTALL_NEXT_ACTIONS.staleInstall}`);
-    } else if (install.staleInstall) {
-      warnings.push(`codexRuntime stale_install: hooks run adapter ${install.pluginDataAdapterVersion ?? 'unknown'}, plugin pin is ${install.marketplacePinAdapterVersion ?? 'unknown'}. ${CODEX_INSTALL_NEXT_ACTIONS.staleInstall}`);
+    const installReason =
+      install.installMode === 'STALE_INSTALL'
+      ? `stale_install: hooks run adapter ${install.pluginDataAdapterVersion ?? 'unknown'} but the plugin pin is ${install.marketplacePinAdapterVersion ?? 'unknown'}`
+      : install.installMode === 'MISSING_RUNTIME'
+      ? 'missing_runtime: no PLUGIN_DATA runtime is installed, so hooks cannot execute'
+      : install.installMode === 'PIN_UNAVAILABLE'
+      ? 'pin_unavailable: the marketplace cache/pin is missing or unreadable, so the effective runtime cannot be verified'
+      : install.installMode === 'VERSION_UNREADABLE'
+      ? 'version_unreadable: the installed runtime and/or pin exists but its version string is unreadable'
+      : null;
+    if (installReason !== null) {
+      const nextAction =
+        install.installMode === 'STALE_INSTALL' ? CODEX_INSTALL_NEXT_ACTIONS.staleInstall
+        : install.installMode === 'MISSING_RUNTIME' ? CODEX_INSTALL_NEXT_ACTIONS.missingRuntime
+        : install.installMode === 'PIN_UNAVAILABLE' ? CODEX_INSTALL_NEXT_ACTIONS.pinUnavailable
+        : CODEX_INSTALL_NEXT_ACTIONS.versionUnreadable;
+      if (ingestionEnabled) {
+        noteReadyBlocker('codexRuntime', installReason);
+        warnings.push(`codexRuntime nextAction: ${nextAction}`);
+      } else {
+        warnings.push(`codexRuntime ${installReason}. ${nextAction}`);
+      }
     }
     if (ingestionEnabled && install.cliStatus !== 'supported') {
-      noteReadyBlocker('codexCliVersion', `${install.cliStatus}: ${install.latestObservedCliVersion ?? 'unknown'}`);
+      const versionLabel = install.currentCliVersion !== null
+        ? `${install.currentCliVersion} (current)`
+        : install.lastRolloutCliVersion !== null
+        ? `${install.lastRolloutCliVersion} (from newest historical rollout; current CLI unverified)`
+        : 'unknown';
+      noteReadyBlocker('codexCliVersion', `${install.cliStatus}: ${versionLabel}`);
       warnings.push(`codexCliVersion nextAction: ${CODEX_INSTALL_NEXT_ACTIONS.unverifiedCli}`);
     }
   } else {
-    warnings.push(`codexRuntime: ${install.reason} — ${install.nextAction}`);
+    const message = `codexRuntime: ${install.reason} — ${install.nextAction}`;
+    if (ingestionEnabled) {
+      noteReadyBlocker('codexRuntime', install.reason);
+      warnings.push(message);
+    } else {
+      warnings.push(message);
+    }
   }
 
   // ── §15 ready conjunction ──────────────────────────────────────────────────
@@ -529,12 +564,15 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
     diagnosticianTasks,
     install: install.ok
       ? {
+          installMode: install.installMode,
           pluginDataAdapterVersion: install.pluginDataAdapterVersion,
           marketplacePinAdapterVersion: install.marketplacePinAdapterVersion,
           staleInstall: install.staleInstall,
           canonicalAdapterVersion: install.canonicalAdapterVersion,
-          latestObservedCliVersion: install.latestObservedCliVersion,
+          currentCliVersion: install.currentCliVersion,
+          lastRolloutCliVersion: install.lastRolloutCliVersion,
           cliStatus: install.cliStatus,
+          cliStatusSource: install.cliStatusSource,
         }
       : { reason: install.reason, nextAction: install.nextAction },
     ready,
@@ -558,11 +596,14 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   line('adapterVersion', report.adapterVersion);
   line('runtimeVersion', report.runtimeVersion);
   if ('staleInstall' in report.install) {
+    line('install.installMode', report.install.installMode);
     line('install.pluginDataAdapterVersion', String(report.install.pluginDataAdapterVersion ?? 'not_installed'));
     line('install.marketplacePinAdapterVersion', String(report.install.marketplacePinAdapterVersion ?? 'not_found'));
     line('install.staleInstall', String(report.install.staleInstall));
     line('install.canonicalAdapterVersion', String(report.install.canonicalAdapterVersion ?? 'unknown'));
-    line('install.latestObservedCliVersion', `${report.install.latestObservedCliVersion ?? 'unknown'} (${report.install.cliStatus})`);
+    line('install.currentCliVersion', `${report.install.currentCliVersion ?? 'unverifiable (codex --version probe failed)'} [current]`);
+    line('install.lastRolloutCliVersion', `${report.install.lastRolloutCliVersion ?? 'unknown'} [newest historical rollout — not the current binary]`);
+    line('install.cliStatus', `${report.install.cliStatus} (source: ${report.install.cliStatusSource})`);
   } else {
     line('install', `${report.install.reason} — ${report.install.nextAction}`);
   }
