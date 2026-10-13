@@ -1,13 +1,18 @@
 /**
  * BDD bindings for the two WorkBuddy feature files (PLAN Part 6): every step
  * drives the REAL production surfaces — the built pd-hook entry in a fresh
- * subprocess (runEntry harness) and the real governance-workspace stores —
- * never internal helpers. The full-learning-loop scenario requires a real
- * LLM provider for the diagnostician proposal and is @disabled with the
- * honest reason (the rest of the loop is covered by the worker tests).
+ * subprocess (runEntry harness), the real governance-workspace stores, and
+ * the real pd-cli product entry for Owner approval/withdrawal — never
+ * internal helpers. The full-learning scenario runs the REAL LLM
+ * diagnostician; provider unavailability (missing key or a provider rate
+ * limit, runs.error_category='rate_limit') SKIPS the scenario with an
+ * explicit BLOCKED reason — never mocked over, and an empty queue is a FAIL,
+ * not a BLOCKED.
  */
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
@@ -25,12 +30,47 @@ import {
 
 const DENY_RULE_CODE = `function evaluate(input) { if (input.action.normalizedPath.indexOf('bdd-protected') >= 0) return { decision: 'block', matched: true, reason: 'WB_BDD_DENY' }; return { decision: 'allow', matched: false, reason: 'safe' }; } var meta={name:'bdd',version:'1',ruleId:'R_WB_BDD',coversCondition:'all'};`;
 
+/** The real product approval/withdrawal entry (packages/pd-cli dist). */
+const PD_CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'pd-cli', 'dist', 'index.js');
+
+interface PendingApprovalRow {
+  approval_id: string;
+  artifact_id: string;
+  channel: string;
+  status: string;
+}
+
+/**
+ * A scenario cannot proceed for an HONEST environmental reason (real LLM
+ * provider unavailable) — surfaces as a vitest SKIP with the BLOCKED reason,
+ * never as a mock-over PASS and never as an empty-queue false BLOCKED.
+ */
+class BlockedScenarioError extends Error {}
+
+const itBdd = (name: string, fn: () => void | Promise<void>): void =>
+  it(name, async (ctx) => {
+    try {
+      await fn();
+    } catch (error) {
+      if (error instanceof BlockedScenarioError) {
+        ctx.skip(error.message);
+        return;
+      }
+      throw error;
+    }
+  }, 900_000);
+
 interface BddState {
   home: string;
   governance: string;
   project: string;
   result?: ReturnType<typeof runEntry>;
   protectedFile?: string;
+  approval?: PendingApprovalRow;
+  activationId?: string;
+  learnedProbe?: string;
+  providerRateLimited?: string;
+  scenarioStartedAt?: number;
 }
 
 const state: Partial<BddState> = {};
@@ -54,6 +94,89 @@ async function seedApprovedBehavior(): Promise<void> {
     content: { principleId: 'P_WB_BDD_RULE', ruleId: 'R_WB_BDD', implementationCode: DENY_RULE_CODE },
     channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_WB_BDD',
   });
+}
+
+/**
+ * Learning-scenario governance: the REAL LLM runtime profile on top of the
+ * flags `freshGovernance` wrote — same shape as e2e-full-learning
+ * governanceSetup (provider/model/keyEnv/baseUrl). Without this profile the
+ * diagnostician can never reach the provider, so the real-LLM scenario would
+ * fail for a configuration reason while looking like a chain defect
+ * (review §4 P2-c).
+ */
+function enableRealLlmProfile(): void {
+  if (!process.env.AMD_RADEON_API_KEY) {
+    throw new BlockedScenarioError('BLOCKED: AMD_RADEON_API_KEY not set — the real LLM diagnostician cannot run; scenario skipped honestly (never mocked over)');
+  }
+  const configPath = path.join(state.governance!, '.pd', 'config.yaml');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
+    runtimeProfiles?: Record<string, unknown>;
+    internalAgents?: { defaultRuntime?: string; agents: Record<string, { runtimeProfile?: string }> };
+  };
+  config.runtimeProfiles ??= {};
+  config.runtimeProfiles['pi-ai.real'] = {
+    type: 'pi-ai',
+    provider: 'openai',
+    model: 'DeepSeek-V4-Flash-Vision-Exp',
+    apiKeyEnv: 'AMD_RADEON_API_KEY',
+    baseUrl: 'https://developer.amd.com.cn/radeon/api/v1',
+    timeoutMs: 300000,
+  };
+  if (config.internalAgents) {
+    config.internalAgents.defaultRuntime = 'pi-ai.real';
+    for (const agent of Object.keys(config.internalAgents.agents)) {
+      config.internalAgents.agents[agent] = { ...config.internalAgents.agents[agent], runtimeProfile: 'pi-ai.real' };
+    }
+  }
+  fs.writeFileSync(configPath, JSON.stringify(config));
+}
+
+function assertPdCliBuilt(): void {
+  if (!fs.existsSync(PD_CLI)) {
+    throw new Error(`pd-cli entry not found: ${PD_CLI} (run: npm run build --workspace=@principles/pd-cli)`);
+  }
+}
+
+/** Run the REAL product approval entry (`pd activation approve`) in a subprocess. */
+function pdCli(args: string[], timeoutMs = 120_000): { status: number; stdout: string; stderr: string } {
+  assertPdCliBuilt();
+  const result = spawnSync(process.execPath, [PD_CLI, ...args], {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    env: { ...process.env, USERPROFILE: state.home!, HOME: state.home! },
+    windowsHide: true,
+  });
+  return { status: result.status ?? 1, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? '') };
+}
+
+function readPendingApprovals(governance: string): PendingApprovalRow[] {
+  const db = new Database(path.join(governance, '.pd', 'state.db'), { readonly: true });
+  try {
+    return db.prepare(
+      "SELECT approval_id, artifact_id, channel, status FROM approvals WHERE status = 'pending' ORDER BY requested_at ASC",
+    ).all() as PendingApprovalRow[];
+  } finally {
+    db.close();
+  }
+}
+
+/** Best-effort telemetry for BLOCKED reasons — the primary rate-limit signal
+ * is the worker report's errorCategory; this cross-checks the durable run row. */
+function latestRunErrorCategory(governance: string, taskId: string): string | undefined {
+  let db: Database.Database | undefined;
+  try {
+    db = new Database(path.join(governance, '.pd', 'state.db'), { readonly: true });
+    const row = db.prepare('SELECT error_category FROM runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 1').get(taskId) as { error_category?: string | null } | undefined;
+    return row?.error_category ?? undefined;
+  } catch {
+    return undefined;
+  } finally {
+    try { db?.close(); } catch { /* handle already closed */ }
+  }
+}
+
+function capabilityNextAction(result: { report?: { diagnostician?: { nextAction?: string } | null } | null }): string {
+  return result.report?.diagnostician?.nextAction ?? 'no nextAction reported';
 }
 
 afterAll(() => {
@@ -149,11 +272,21 @@ registry.then(/^an observable skip reason with a next action is recorded$/, () =
 
 // ── Feature: workbuddy-owner-loop ──
 registry.when(/^the Owner approves the pending principle through the existing approval flow$/, async () => {
-  // Approval happened when the activation was recorded through the production
-  // store writer (the seeded artifact above); the real pd-cli approval flow
-  // is exercised end-to-end in the real-host E2E (withdraw step) and the
-  // installer approval-path tests.
-  expect(state.governance!).toBeDefined();
+  // The Background seeded the synthetic principle through the PRODUCTION store
+  // writer (SqliteActivationStateStore.recordActivation) — the recorded
+  // activation IS the Owner decision this scenario consumes. Assert the
+  // decision rows exist and are live (the approvals-queue → `pd activation
+  // approve` path is exercised end-to-end by the real-LLM scenario below).
+  const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
+  try {
+    const rows = db.prepare(
+      'SELECT activation_id, artifact_id, deactivated_at FROM activations WHERE artifact_id IN (?, ?)',
+    ).all('art-bdd-prompt', 'art-bdd-rule') as Array<{ activation_id: string; artifact_id: string; deactivated_at: string | null }>;
+    expect(rows.map((row) => row.artifact_id).sort()).toEqual(['art-bdd-prompt', 'art-bdd-rule']);
+    for (const row of rows) expect(row.deactivated_at).toBeNull();
+  } finally {
+    db.close();
+  }
 });
 registry.when(/^WorkBuddy submits the next prompt$/, () => {
   state.result = runEntry(state.home!, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: state.project, session_id: 'bdd-next-turn' })), 'UserPromptSubmit');
@@ -200,15 +333,6 @@ registry.then(/^its rule no longer denies matching tools$/, () => {
   // silent when there is no decision) — empty output means no deny reached
   // the host and the tool proceeds under the host's own permission flow.
   expect(result.stdout).not.toContain('"deny"');
-});
-registry.when(/^WorkBuddy reports a real tool failure through the hook$/, () => {
-  state.result = runEntry(state.home!, JSON.stringify(fixturePayload('post-tool-use-bash-exit7.json', { cwd: state.project })), 'PostToolUse');
-});
-registry.then(/^the failure is admitted as evidence in the governance workspace$/, async () => {
-  const db = new Database(path.join(state.governance!, '.state', 'trajectory.db'), { readonly: true });
-  const row = db.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE outcome = 'failure'").get() as { n: number };
-  db.close();
-  expect(row.n).toBeGreaterThan(0);
 });
 registry.when(/^two different WorkBuddy projects run hooks against the same governance workspace$/, () => {
   const projectB = makeProjectDir(state.home!, 'bdd-b');
@@ -274,72 +398,236 @@ registry.then(/^the user prompt still reaches the model$/, () => {
 });
 
 // ── Feature: workbuddy-owner-loop — full learning (real LLM, gated) ─────────
-// The @disabled tag was removed (remediation R2/R3): the scenario now binds
-// to the REAL production chain — synthetic-protocol eligible signal through
-// the real dist entry (the only eligible class on engine 2.161.0/1b1a01bc…,
-// see probe-write-failure-shapes.mjs), real worker admission, and the REAL
-// LLM diagnostician up to a pending proposal. Provider availability gates the
-// run at runtime: without a key, or on provider rate-limit, the scenario is
-// skipped with an explicit BLOCKED reason (never mocked over).
+// The scenario binds to the REAL production chain end to end: a labeled
+// SYNTHETIC-PROTOCOL eligible signal (fixture-shaped Write-failure PostToolUse
+// payload through the real dist entry — the only eligible class on engine
+// 2.161.0, see probe-write-failure-shapes.mjs), real worker admission, the
+// REAL LLM diagnostician, the real full-chain downstream, and Owner approval +
+// withdrawal through the REAL product entry (`pd activation approve|deactivate`).
+// Provider availability gates the run at runtime: without a key, or on a
+// provider rate limit (diagnostician failed/retry_wait with
+// runs.error_category='rate_limit'), the scenario is SKIPPED with the explicit
+// BLOCKED reason. An EMPTY queue at the deadline is a FAIL, never a BLOCKED
+// (review §4 P2-e) — the two are distinguished by runs.error_category.
 registry.when(/^WorkBuddy reports a real tool failure through the hook \(eligible: synthetic-protocol Write failure via the real entry\)$/, () => {
-  if (!process.env.AMD_RADEON_API_KEY) throw new Error('BLOCKED: AMD_RADEON_API_KEY not set — real LLM unavailable');
+  state.scenarioStartedAt = Date.now();
   freshGovernance();
+  enableRealLlmProfile();
+  // SYNTHETIC-PROTOCOL input (evidence class 2, labeled): a real-shaped
+  // Write-failure PostToolUse payload delivered through the REAL dist entry —
+  // not a fabricated store row and not a real engine turn.
   state.result = runEntry(state.home!, JSON.stringify(fixturePayload('post-tool-use-read-iserror.json', {
     cwd: state.project,
     tool_name: 'Write',
     tool_input: { file_path: path.join(state.project!, 'bdd-learn.txt'), content: 'x' },
     tool_response: { is_error: true, tool_error_code: '2002', exitCode: 1 },
   })), 'PostToolUse');
+  expect(state.result!.status).toBe(0);
 });
 registry.then(/^the failure is admitted as evidence and reaches a pending diagnostician task$/, async () => {
   const { runWorkbuddyWorkspaceWorkerCycle } = await import('../src/worker/workspace-worker.js');
+  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
   const first = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: state.governance! });
   expect(first.report?.admission?.ok).toBe(true);
   expect(first.report?.reconcile.ok).toBe(true);
-  const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
-  const marker = db.prepare("SELECT diagnostician_task_id FROM governance_signal_admissions WHERE host_kind = 'workbuddy'").get();
-  const task = marker ? db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(marker.diagnostician_task_id) : null;
-  db.close();
+  // The admission marker lives in the TRAJECTORY store (.state/trajectory.db)
+  // — the former state.db query threw "no such table" (review §4 P2-b).
+  const traj = new Database(path.join(state.governance!, '.state', 'trajectory.db'), { readonly: true });
+  const marker = traj.prepare("SELECT diagnostician_task_id FROM governance_signal_admissions WHERE host_kind = 'workbuddy'").get() as { diagnostician_task_id: string } | undefined;
+  traj.close();
   expect(marker).toBeDefined();
-  expect(['pending', 'succeeded', 'retry_wait', 'leased']).toContain(task?.status);
+  // Tasks live in the governance state store (.pd/state.db).
+  const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
+  const task = marker
+    ? db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(marker.diagnostician_task_id) as { status: string } | undefined
+    : undefined;
+  db.close();
+  // Observability (rc-9): make the admission-cycle state visible in the
+  // vitest output — the durable runs row is the error-category authority.
+  const runsCategory = marker ? latestRunErrorCategory(state.governance!, marker.diagnostician_task_id) : undefined;
+  console.error(`[bdd-learning] admission-cycle: report=${JSON.stringify(first.report?.diagnostician)} task=${task?.status ?? 'none'} runs.error_category=${runsCategory ?? 'none'}`);
+  // The SAME cycle already ran the diagnostician once — a provider rate limit
+  // surfaces here (task terminal-failed "rate limit degraded" or retry_wait
+  // with runs.error_category='rate_limit'). Remember it so this and the
+  // advance step can skip honestly; a terminal failure WITHOUT rate_limit is
+  // a real chain defect and fails loud with the reason.
+  if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
+    const category = runsCategory ?? first.report?.diagnostician?.errorCategory;
+    if (category === 'rate_limit') {
+      state.providerRateLimited = `task=${marker!.diagnostician_task_id}`;
+    } else if (task.status === 'failed') {
+      throw new Error(`diagnostician failed terminally (error_category=${category ?? 'none'}): ${(first.report?.diagnostician?.message ?? 'no message').slice(0, 300)}`);
+    }
+  }
+  const allowedStatuses = ['pending', 'succeeded', 'retry_wait', 'leased'];
+  if (state.providerRateLimited) allowedStatuses.push('failed');
+  expect(allowedStatuses).toContain(task?.status);
+  // Release the cached pain-signal bridge handle the cycle created — without
+  // this the Windows afterAll temp sweep hits EPERM (the worker suite's
+  // afterEach does the same).
+  await disposePainSignalBridgesForWorkspace(state.governance!).catch(() => undefined);
 });
 registry.when(/^the background worker advances it toward a reviewable proposal$/, async () => {
   const { runWorkbuddyWorkspaceWorkerCycle } = await import('../src/worker/workspace-worker.js');
-  // Bounded chain drive: admission → diagnostician (REAL LLM) → downstream.
-  // Provider rate limits surface as diagnostician failed/retry — skipped
-  // BLOCKED rather than mocked.
-  for (let cycle = 0; cycle < 12; cycle++) {
-    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: state.governance! });
-    if (result.report?.diagnostician && ['failed'].includes(result.report.diagnostician.status) && result.report.diagnostician.message?.includes('rate_limit')) {
-      throw new Error('BLOCKED: real LLM provider rate-limited the diagnostician — chain wiring verified up to the LLM boundary');
+  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
+  try {
+    // Bounded chain drive: admission → diagnostician (REAL LLM via the
+    // pi-ai.real profile) → downstream full chain → approval queue.
+    state.approval = undefined;
+    if (state.providerRateLimited) {
+      throw new BlockedScenarioError(`BLOCKED: the real LLM provider already rate-limited the diagnostician (${state.providerRateLimited}, runs.error_category=rate_limit) — chain verified up to the LLM boundary; re-run when the provider quota resets`);
     }
-    const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
-    const pending = db.prepare("SELECT COUNT(*) AS n FROM principle_candidates WHERE consumed_at IS NOT NULL").get() as { n: number } | undefined;
-    const draft = db.prepare('SELECT COUNT(*) AS n FROM pending_agent_drafts').get() as { n: number };
-    db.close();
-    if ((pending?.n ?? 0) > 0 || draft.n > 0) return;
-    await new Promise((r) => setTimeout(r, 20_000));
+    // WALL-CLOCK bound measured from the SCENARIO start: a cycle is never
+    // STARTED after 8 scenario-minutes, so the last cycle (≤5 min provider
+    // timeout) always finishes inside the 900s vitest budget — the scenario
+    // ends in this step's own classification, never in a vitest timeout.
+    const startedAt = state.scenarioStartedAt ?? Date.now();
+    const cycleStartDeadline = startedAt + 480_000;
+    let lastReport = 'no cycle ran';
+    for (let cycle = 0; ; cycle++) {
+      if (Date.now() >= cycleStartDeadline) break;
+      const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: state.governance! });
+      const diag = result.report?.diagnostician;
+      console.error(`[bdd-learning] cycle ${cycle}: mode=${result.mode} diag=${JSON.stringify(diag)} downstreamSkip=${result.report?.downstream && 'skipReason' in result.report.downstream ? result.report.downstream.skipReason : undefined}`);
+      if (diag?.status === 'skipped' && diag.message === 'capability_disabled') {
+        // Config defect, not provider state: the pi-ai.real profile did not
+        // resolve — failing silently through empty cycles would be a fake
+        // FAIL reason (rc-3).
+        throw new Error(`diagnostician capability disabled: ${capabilityNextAction(result)}`);
+      }
+      if (diag && (diag.status === 'failed' || diag.status === 'retried' || diag.status === 'degraded')) {
+        // Durable runs row is the error-category authority (rc-4: do not trust
+        // one report shape); the report field is the fallback.
+        const category = latestRunErrorCategory(state.governance!, diag.taskId) ?? diag.errorCategory;
+        if (category === 'rate_limit') {
+          throw new BlockedScenarioError(`BLOCKED: the real LLM provider rate-limited the diagnostician (task=${diag.taskId}, runs.error_category=rate_limit) — chain verified up to the LLM boundary; re-run when the provider quota resets`);
+        }
+        if (diag.status === 'retried') { await new Promise((resolve) => setTimeout(resolve, 20_000)); continue; } // transient backoff — keep cycling
+        throw new Error(`diagnostician ${diag.status} (error_category=${category ?? 'none'}): ${(diag.message ?? 'no message').slice(0, 300)}`);
+      }
+      const pending = readPendingApprovals(state.governance!);
+      if (pending.length > 0) {
+        state.approval = pending[0];
+        return;
+      }
+      lastReport = JSON.stringify({ mode: result.mode, admission: result.report?.admission, diagnostician: diag, downstreamSkip: result.report?.downstream && 'skipReason' in result.report.downstream ? result.report.downstream.skipReason : undefined }).slice(0, 500);
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+    }
+    // Window exhausted — classify from the DURABLE state, never a bare
+    // timeout: rate_limit anywhere → honest BLOCKED; an unprocessed queue
+    // without rate-limit evidence is a FAIL with that evidence (review
+    // §4 P2-e — an empty queue is never a BLOCKED).
+    let taskStatus = 'none';
+    let finalCategory: string | undefined;
+    const traj = new Database(path.join(state.governance!, '.state', 'trajectory.db'), { readonly: true });
+    const marker = traj.prepare("SELECT diagnostician_task_id FROM governance_signal_admissions WHERE host_kind = 'workbuddy'").get() as { diagnostician_task_id: string } | undefined;
+    traj.close();
+    if (marker) {
+      finalCategory = latestRunErrorCategory(state.governance!, marker.diagnostician_task_id);
+      const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
+      const task = db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(marker.diagnostician_task_id) as { status: string } | undefined;
+      db.close();
+      taskStatus = task?.status ?? 'missing';
+    }
+    if (finalCategory === 'rate_limit') {
+      throw new BlockedScenarioError(`BLOCKED: the real LLM provider did not complete the diagnostician inside the acceptance window (task=${taskStatus}, runs.error_category=rate_limit) — chain verified up to the LLM boundary; re-run when the provider quota resets`);
+    }
+    throw new Error(`FAIL: the chain did not reach a pending approval within the bounded window (task=${taskStatus}, runs.error_category=${finalCategory ?? 'none'}); last=${lastReport}`);
+  } finally {
+    // Release the cached bridge handles (Windows temp sweep EPERM otherwise).
+    await disposePainSignalBridgesForWorkspace(state.governance!).catch(() => undefined);
   }
-  throw new Error('BLOCKED: the real-LLM chain did not reach a consumed candidate/draft within the bounded window (wiring verified through admission+task)');
 });
 registry.then(/^the Owner sees the pending work on the existing approval surfaces$/, () => {
-  // The candidate→approval population is asserted in the real-chain E2E
-  // (e2e-full-learning, real pd approval surfaces); here the scenario proves
-  // the chain reached the Owner-visible pipeline stage.
-  expect(state.governance!).toBeDefined();
+  // Owner visibility on the REAL approval surfaces' store: the pending row
+  // the surfaces read (approvals, state.db) — not an empty assertion.
+  const pending = readPendingApprovals(state.governance!);
+  expect(pending.length).toBeGreaterThan(0);
+  const row = pending.find((p) => p.approval_id === state.approval?.approval_id) ?? pending[0];
+  expect(row).toBeDefined();
+  state.approval = row;
+  expect(state.approval!.artifact_id.startsWith('pi-art-')).toBe(true);
+});
+registry.when(/^the Owner approves the learned principle through the real product approval entry$/, () => {
+  expect(state.approval).toBeDefined();
+  const approve = pdCli([
+    'activation', 'approve',
+    '--approval-id', state.approval!.approval_id,
+    '--workspace', state.governance!,
+    '--decided-by', 'wb-bdd-owner',
+    '--json',
+  ]);
+  let parsed: { ok?: boolean; activationId?: string } = {};
+  try { parsed = JSON.parse(approve.stdout || '{}') as { ok?: boolean; activationId?: string }; } catch { /* assertion below fails loud on non-JSON */ }
+  expect(approve.status).toBe(0);
+  expect(parsed.ok).toBe(true);
+  state.activationId = parsed.activationId;
+});
+registry.then(/^the approval is recorded from pending to approved with a live activation$/, () => {
+  expect(state.approval).toBeDefined();
+  const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
+  try {
+    const approval = db.prepare('SELECT status, decided_at, decided_by FROM approvals WHERE approval_id = ?').get(state.approval!.approval_id) as { status: string; decided_at: string | null; decided_by: string | null } | undefined;
+    expect(approval?.status).toBe('approved');
+    expect(approval?.decided_at).toBeTruthy();
+    expect(approval?.decided_by).toBe('wb-bdd-owner');
+    const activation = db.prepare('SELECT activation_id, deactivated_at FROM activations WHERE artifact_id = ?').get(state.approval!.artifact_id) as { activation_id: string; deactivated_at: string | null } | undefined;
+    expect(activation).toBeDefined();
+    expect(activation!.deactivated_at).toBeNull();
+    if (!state.activationId && activation) state.activationId = activation.activation_id;
+  } finally {
+    db.close();
+  }
+});
+registry.then(/^the next turn carries the learned principle directive$/, () => {
+  expect(state.approval).toBeDefined();
+  // PRODUCTION read contract: the chain artifact is the FULL ScribeOutput, and
+  // the prompt channel resolves content.text falling back to
+  // content.principleDraft.statement (prompt-activation-reader-contract) —
+  // real drafts only carry the nested statement.
+  const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
+  let resolvedText = '';
+  try {
+    const row = db.prepare('SELECT content_json FROM pi_artifacts WHERE artifact_id = ?').get(state.approval!.artifact_id) as { content_json: string } | undefined;
+    const content = JSON.parse(row?.content_json ?? '{}') as { text?: unknown; principleDraft?: { statement?: unknown } };
+    if (typeof content.text === 'string' && content.text.length > 0) resolvedText = content.text;
+    else if (typeof content.principleDraft?.statement === 'string' && content.principleDraft.statement.length > 0) resolvedText = content.principleDraft.statement;
+  } finally {
+    db.close();
+  }
+  expect(resolvedText.length).toBeGreaterThan(0);
+  const probe = resolvedText.split(/\s+/).filter((word) => word.length > 4).slice(0, 4).join(' ');
+  expect(probe.length).toBeGreaterThan(0);
+  state.learnedProbe = probe;
+  const result = runEntry(state.home!, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: state.project, session_id: 'bdd-learn-inject' })), 'UserPromptSubmit');
+  expect(result.status).toBe(0);
+  const output = JSON.parse(result.stdout) as { hookSpecificOutput?: { additionalContext?: string } };
+  expect(output.hookSpecificOutput?.additionalContext ?? '').toContain(probe);
+});
+registry.then(/^withdrawing the learned principle stops future governance$/, () => {
+  expect(state.activationId).toBeDefined();
+  expect(state.learnedProbe).toBeDefined();
+  // REAL product entry for withdrawal: `pd activation deactivate` (the same
+  // CLI surface the Owner uses), then the next turn must not inject.
+  const deactivate = pdCli(['activation', 'deactivate', '--activation-id', state.activationId!, '--workspace', state.governance!], 60_000);
+  expect(deactivate.status).toBe(0);
+  const result = runEntry(state.home!, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: state.project, session_id: 'bdd-learn-withdraw' })), 'UserPromptSubmit');
+  expect(result.status).toBe(0);
+  expect(result.stdout).not.toContain(state.learnedProbe!);
 });
 
 const featureDir = resolveFeaturePath('docs/specs/features/story-a');
 // The real-LLM learning scenario needs minutes (provider latency + worker
 // cycles) — give every BDD scenario a generous timeout instead of the 30s
-// vitest default.
+// vitest default; itBdd additionally converts BlockedScenarioError into an
+// honest vitest SKIP carrying the BLOCKED reason.
 defineFeature(
   fs.readFileSync(path.join(featureDir, 'workbuddy-shared-host-runtime.feature'), 'utf8'),
   registry,
-  { it: (name, fn) => it(name, fn, 900_000) },
+  { it: itBdd },
 );
 defineFeature(
   fs.readFileSync(path.join(featureDir, 'workbuddy-owner-loop.feature'), 'utf8'),
   registry,
-  { it: (name, fn) => it(name, fn, 900_000) },
+  { it: itBdd },
 );

@@ -24,10 +24,14 @@ Feature: WorkBuddy owner governance loop
     And its rule no longer denies matching tools
 
   Scenario: Real tool failure becomes background governance work
-    When WorkBuddy reports a real tool failure through the hook
-    Then the failure is admitted as evidence in the governance workspace
+    When WorkBuddy reports a real tool failure through the hook (eligible: synthetic-protocol Write failure via the real entry)
+    Then the failure is admitted as evidence and reaches a pending diagnostician task
     And the background worker advances it toward a reviewable proposal
     And the Owner sees the pending work on the existing approval surfaces
+    When the Owner approves the learned principle through the real product approval entry
+    Then the approval is recorded from pending to approved with a live activation
+    And the next turn carries the learned principle directive
+    And withdrawing the learned principle stops future governance
 
   Scenario: Governance workspace is shared across projects and explicit
     When two different WorkBuddy projects run hooks against the same governance workspace
