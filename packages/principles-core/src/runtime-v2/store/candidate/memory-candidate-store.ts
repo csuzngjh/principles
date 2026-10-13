@@ -2,9 +2,17 @@
  * CandidateStore — in-memory test double using a Map.
  */
 import type { CandidateRecord, CandidateStore } from './candidate-store.js';
+import {
+  appendAdmissionEvaluation,
+  withProcessing,
+  type AdmissionEvaluationRecord,
+  type AdmissionProcessingRecord,
+  type CandidateAdmissionDocument,
+} from './admission-document.js';
 
 export class MemoryCandidateStore implements CandidateStore {
   private readonly candidates = new Map<string, CandidateRecord>();
+  private readonly admissions = new Map<string, CandidateAdmissionDocument | null>();
 
   /**
    * Returns candidates filtered directly by taskId field.
@@ -34,11 +42,37 @@ export class MemoryCandidateStore implements CandidateStore {
     return true;
   }
 
+  async getAdmissionDocument(candidateId: string): Promise<
+    { ok: true; document: CandidateAdmissionDocument | null } | { ok: false; reason: string }
+  > {
+    if (!this.candidates.has(candidateId)) return { ok: false, reason: 'candidate_not_found' };
+    return { ok: true, document: this.admissions.get(candidateId) ?? null };
+  }
+
+  async appendAdmissionEvaluation(candidateId: string, evaluation: AdmissionEvaluationRecord): Promise<
+    { status: 'appended' | 'reused'; document: CandidateAdmissionDocument } | { status: 'refused'; reason: string }
+  > {
+    if (!this.candidates.has(candidateId)) return { status: 'refused', reason: 'candidate_not_found' };
+    const existing = this.admissions.get(candidateId) ?? null;
+    const result = appendAdmissionEvaluation(existing, evaluation);
+    if (result.status === 'refused') return result;
+    this.admissions.set(candidateId, result.document);
+    return { status: result.status, document: result.document };
+  }
+
+  async updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean> {
+    if (!this.candidates.has(candidateId)) return false;
+    const existing = this.admissions.get(candidateId) ?? null;
+    this.admissions.set(candidateId, withProcessing(existing, processing));
+    return true;
+  }
+
   insert(record: CandidateRecord): void {
     this.candidates.set(record.candidateId, record);
   }
 
   clear(): void {
     this.candidates.clear();
+    this.admissions.clear();
   }
 }

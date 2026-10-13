@@ -90,6 +90,10 @@ function makeBridgeDeps(overrides: {
     getCandidatesByTaskId: async () => overrides.candidates ?? [],
     getRunsByTask: async () => [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }],
     updateCandidateStatus: async () => { return; },
+    getAdmissionDocument: async () => ({ ok: true, document: null }),
+    appendAdmissionEvaluation: async () => ({ status: 'appended' as const, document: { schemaVersion: 1 as const, evaluations: [], currentEvaluationId: null } }),
+    updateAdmissionProcessing: async () => true,
+
   } as unknown as RuntimeStateManager;
 
   const runner = {
@@ -399,6 +403,9 @@ describe('PainSignalBridge dreamer task seeding', () => {
       getCandidatesByTaskId: async () => overrides.candidates,
       getRunsByTask: async () => [{ runId: 'run-1', taskId: TASK_ID_DREAMER, status: 'succeeded' }],
       updateCandidateStatus: updateCandidateStatusMock,
+      getAdmissionDocument: async () => ({ ok: true, document: null }),
+      appendAdmissionEvaluation: async () => ({ status: 'appended' as const, document: { schemaVersion: 1 as const, evaluations: [], currentEvaluationId: null } }),
+      updateAdmissionProcessing: async () => true,
     } as unknown as RuntimeStateManager;
 
     const runner = {

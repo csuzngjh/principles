@@ -39,6 +39,7 @@ import { SqlitePIArtifactStore } from './artifact/sqlite-pi-artifact-store.js';
 import { SqlitePainDiagnosisStore } from './pain-diagnosis/sqlite-pain-diagnosis-store.js';
 import type { CommitStore } from './commit/commit-store.js';
 import type { CandidateStore } from './candidate/candidate-store.js';
+import type { AdmissionEvaluationRecord, AdmissionProcessingRecord, CandidateAdmissionDocument } from './candidate/admission-document.js';
 import type { ArtifactStore } from './artifact/artifact-store.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { PainDiagnosisRecord, PainDiagnosisStore, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
@@ -51,6 +52,11 @@ import { updatePrinciple } from '../../principle-tree-ledger.js';
 // Re-export M5 types for backward compatibility
 export type { CommitRecord } from './commit/commit-store.js';
 export type { CandidateRecord } from './candidate/candidate-store.js';
+export type {
+  AdmissionEvaluationRecord,
+  AdmissionProcessingRecord,
+  CandidateAdmissionDocument,
+} from './candidate/admission-document.js';
 export type { ArtifactRecord, ArtifactWithCandidates } from './artifact/artifact-store.js';
 export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
 
@@ -513,6 +519,26 @@ export class RuntimeStateManager {
   async transitionCandidateStatus(candidateId: string, expectedStatus: CandidateRecord['status'], newStatus: CandidateRecord['status']): Promise<boolean> {
     this.assertInitialized();
     return this._candidateStore.transitionCandidateStatus(candidateId, expectedStatus, newStatus);
+  }
+
+  /** SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (PRI-958): persisted admission disposition. */
+  async getAdmissionDocument(candidateId: string): Promise<
+    { ok: true; document: CandidateAdmissionDocument | null } | { ok: false; reason: string }
+  > {
+    this.assertInitialized();
+    return this._candidateStore.getAdmissionDocument(candidateId);
+  }
+
+  async appendAdmissionEvaluation(candidateId: string, evaluation: AdmissionEvaluationRecord): Promise<
+    { status: 'appended' | 'reused'; document: CandidateAdmissionDocument } | { status: 'refused'; reason: string }
+  > {
+    this.assertInitialized();
+    return this._candidateStore.appendAdmissionEvaluation(candidateId, evaluation);
+  }
+
+  async updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean> {
+    this.assertInitialized();
+    return this._candidateStore.updateAdmissionProcessing(candidateId, processing);
   }
 
   async archivePrinciple(principleId: string): Promise<boolean> {

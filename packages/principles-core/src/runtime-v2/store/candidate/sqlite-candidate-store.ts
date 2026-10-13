@@ -1,6 +1,15 @@
 import type { SqliteConnection } from '../sqlite-connection.js';
 import type { CandidateRecord, CandidateStore } from './candidate-store.js';
 import { resolveRecommendationKind } from './recommendation-kind-resolver.js';
+import {
+  appendAdmissionEvaluation,
+  parseAdmissionDocument,
+  serializeAdmissionDocument,
+  withProcessing,
+  type AdmissionEvaluationRecord,
+  type AdmissionProcessingRecord,
+  type CandidateAdmissionDocument,
+} from './admission-document.js';
 
 interface CandidateRow {
   candidate_id: string;
@@ -96,6 +105,47 @@ export class SqliteCandidateStore implements CandidateStore {
     }
     const info = db.prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ? AND status = ?')
       .run(newStatus, candidateId, expectedStatus);
+    return info.changes > 0;
+  }
+
+  async getAdmissionDocument(candidateId: string): Promise<
+    { ok: true; document: CandidateAdmissionDocument | null } | { ok: false; reason: string }
+  > {
+    const db = this.connection.getDb();
+    const row = db.prepare('SELECT admission_json FROM principle_candidates WHERE candidate_id = ?').get(candidateId) as { admission_json: string | null } | undefined;
+    if (row === undefined) return { ok: false, reason: 'candidate_not_found' };
+    return parseAdmissionDocument(row.admission_json);
+  }
+
+  async appendAdmissionEvaluation(candidateId: string, evaluation: AdmissionEvaluationRecord): Promise<
+    { status: 'appended' | 'reused'; document: CandidateAdmissionDocument } | { status: 'refused'; reason: string }
+  > {
+    const db = this.connection.getDb();
+    const read = db.prepare('SELECT admission_json FROM principle_candidates WHERE candidate_id = ?').get(candidateId) as { admission_json: string | null } | undefined;
+    if (read === undefined) return { status: 'refused', reason: 'candidate_not_found' };
+    const parsed = parseAdmissionDocument(read.admission_json);
+    if (!parsed.ok) return { status: 'refused', reason: parsed.reason ?? 'admission_json_invalid' };
+    const result = appendAdmissionEvaluation(parsed.document, evaluation);
+    if (result.status === 'refused') return result;
+    const serialized = serializeAdmissionDocument(result.document);
+    if (!serialized.ok) return { status: 'refused', reason: serialized.reason };
+    const info = db.prepare('UPDATE principle_candidates SET admission_json = ? WHERE candidate_id = ?')
+      .run(serialized.json, candidateId);
+    if (info.changes === 0) return { status: 'refused', reason: 'candidate_not_found' };
+    return { status: result.status, document: result.document };
+  }
+
+  async updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean> {
+    const db = this.connection.getDb();
+    const read = db.prepare('SELECT admission_json FROM principle_candidates WHERE candidate_id = ?').get(candidateId) as { admission_json: string | null } | undefined;
+    if (read === undefined) return false;
+    const parsed = parseAdmissionDocument(read.admission_json);
+    if (!parsed.ok) return false;
+    const document = withProcessing(parsed.document, processing);
+    const serialized = serializeAdmissionDocument(document);
+    if (!serialized.ok) return false;
+    const info = db.prepare('UPDATE principle_candidates SET admission_json = ? WHERE candidate_id = ?')
+      .run(serialized.json, candidateId);
     return info.changes > 0;
   }
 }

@@ -8,7 +8,14 @@ import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { DiagnosticianOutputV1Schema } from './diagnostician-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
-import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
+import { shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evidence-guards.js';
+import {
+  ADMISSION_POLICY_VERSION,
+  fingerprintMaterial,
+  fingerprintStatement,
+  type AdmissionEvaluationRecord,
+  type AdmissionProcessingRecord,
+} from './store/candidate/admission-document.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
 import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
@@ -45,6 +52,9 @@ export const MAX_EVIDENCE_NOTE_CHARS = 200;
  * point of the field is that the Owner's own words survive verbatim.
  */
 export const MAX_CORRECTION_EVIDENCE_TEXT_CHARS = 2000;
+
+/** SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (§9.2): automatic post-processing continuation budget. */
+export const MAX_POST_PROCESSING_ATTEMPTS = 3;
 
 /**
  * PRI-844: sanitize (strip PD tags / redact tokens / redact absolute paths)
@@ -304,7 +314,7 @@ function inferProvenance(data: PainDetectedData): PainProvenance {
  * payload itself carries a real (non-sentinel) session hint; a manual
  * source without a session normalizes to `owner_reported_no_host_trace`.
  */
-function validatePersistedIngressFacts(diagnosticJson: string | undefined): { provenance: PainProvenance; evidenceCount: number; errorCode: null } | { provenance: null; evidenceCount: null; errorCode: string } {
+function validatePersistedIngressFacts(diagnosticJson: string | undefined): { provenance: PainProvenance; evidenceCount: number; errorCode: null; correctionEvidence?: PainCorrectionEvidence } | { provenance: null; evidenceCount: null; errorCode: string } {
   if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) {
     return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:missing' };
   }
@@ -321,6 +331,16 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
     return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:not_an_object' };
   }
   const record = parsed;
+
+  // CR-02: the persisted correction evidence (including an explicit Owner
+  // statement) is part of the re-entry material — validated, never fabricated.
+  const persistedCorrection = record.correctionEvidence;
+  const correctionEvidence: PainCorrectionEvidence | undefined
+    = typeof persistedCorrection === 'object' && persistedCorrection !== null && !Array.isArray(persistedCorrection)
+      && typeof (persistedCorrection as Record<string, unknown>).text === 'string'
+      && ((persistedCorrection as Record<string, unknown>).text as string).length > 0
+      ? persistedCorrection as PainCorrectionEvidence
+      : undefined;
 
   const evidenceCount = countSubmittedEvidence(diagnosticJson);
   const hasProvenanceField = Object.hasOwn(record, 'provenance');
@@ -350,6 +370,7 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
       provenance: deriveProvenanceFromIngressFacts(ingress.payload.origin, ingress.payload.correlation),
       evidenceCount,
       errorCode: null,
+      ...(correctionEvidence !== undefined ? { correctionEvidence } : {}),
     };
   }
 
@@ -357,7 +378,7 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
   // provenance is the authority. This branch fabricates nothing — it only
   // reads what the writer persisted.
   if (provenance !== undefined) {
-    return { provenance, evidenceCount, errorCode: null };
+    return { provenance, evidenceCount, errorCode: null, ...(correctionEvidence !== undefined ? { correctionEvidence } : {}) };
   }
 
   // Legacy normalization branch (SPEC §9): no top-level provenance and no
@@ -370,7 +391,7 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
     reason: typeof record.reasonSummary === 'string' ? record.reasonSummary : '',
     sessionId: typeof record.sessionIdHint === 'string' ? record.sessionIdHint : undefined,
   };
-  return { provenance: inferProvenance(recordData), evidenceCount, errorCode: null };
+  return { provenance: inferProvenance(recordData), evidenceCount, errorCode: null, ...(correctionEvidence !== undefined ? { correctionEvidence } : {}) };
 }
 
 function provenanceReason(provenance: PainProvenance): string {
@@ -606,7 +627,8 @@ export class PainSignalBridge {
     // and source is not owner-initiated (manual/pain/skill:pain).
     // Zero side effects: no task creation, no runner call, no ledger writes.
     // IMPORTANT: Only short-circuit when there is NO existing task — idempotency must work.
-    if (!existingTask && shouldShortCircuitEmptyEvidence(data.evidence?.length ?? 0, data.source)) {
+    if (!existingTask && !isOwnerStatementEvidence(data.correctionEvidence)
+        && shouldShortCircuitEmptyEvidence(data.evidence?.length ?? 0, data.source)) {
       return {
         status: 'skipped',
         painId,
@@ -682,6 +704,7 @@ export class PainSignalBridge {
       painId,
       provenance,
       inputEvidenceCount: data.evidence?.length ?? 0,
+      ...(data.correctionEvidence !== undefined ? { correctionEvidence: data.correctionEvidence } : {}),
     });
   }
 
@@ -788,7 +811,55 @@ export class PainSignalBridge {
       painId,
       provenance: reentry.provenance,
       inputEvidenceCount: reentry.evidenceCount,
+      ...(reentry.correctionEvidence !== undefined ? { correctionEvidence: reentry.correctionEvidence } : {}),
     });
+  }
+
+  /** Fire-and-forget processing-domain update that must never break the loop (sync-safe). */
+  private safeUpdateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): void {
+    try {
+      void this.stateManager.updateAdmissionProcessing(candidateId, processing).catch(() => undefined);
+    } catch {
+      // partial state-manager seams (test doubles) may not implement the
+      // processing domain; the primary outcome path stays authoritative
+    }
+  }
+
+  /**
+   * SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (§9.2): bounded post-processing
+   * failure bookkeeping in the independent processing domain. Default budget
+   * is 3 automatic continuation attempts; exhaustion is a saved, readable
+   * terminal state (manual_action_required), never a silent loop. The
+   * diagnosis task's own attemptCount is never consumed by this.
+   */
+  private async recordPostProcessingFailure(candidateId: string, rawReason: string): Promise<void> {
+    try {
+      const read = await this.stateManager.getAdmissionDocument(candidateId);
+      if (!read.ok) return;
+      const current = read.document?.processing;
+      const attempts = (current?.attempts ?? 0) + 1;
+      const nowIso = new Date().toISOString();
+      const reason = rawReason.slice(0, 300);
+      const processing: AdmissionProcessingRecord = attempts >= MAX_POST_PROCESSING_ATTEMPTS
+        ? {
+          state: 'exhausted',
+          attempts,
+          lastAttemptAt: nowIso,
+          lastFailure: { reason, nextAction: 'manual_action_required: post-processing retry budget exhausted; inspect state.db principle_candidates and telemetry, then use the supported recovery command', at: nowIso },
+          blockedReason: `post_processing_attempts_exhausted:${rawReason.slice(0, 120)}`,
+        }
+        : {
+          state: 'in_progress',
+          attempts,
+          lastAttemptAt: nowIso,
+          lastFailure: { reason, nextAction: 'the workspace worker continuation retries this candidate automatically', at: nowIso },
+          nextRetryAt: new Date(Date.now() + Math.min(60_000 * 2 ** attempts, 15 * 60_000)).toISOString(),
+        };
+      await this.stateManager.updateAdmissionProcessing(candidateId, processing);
+    } catch {
+      // telemetry for the failure itself was already emitted by the caller;
+      // this bookkeeping must never mask the original processing result.
+    }
   }
 
   /**
@@ -803,8 +874,12 @@ export class PainSignalBridge {
     painId: string;
     provenance: PainProvenance;
     inputEvidenceCount?: number;
+    /** SPEC-CODEX-PAIN-CLOSURE-001 CR-02: the pain's correction evidence, when one was submitted. */
+    correctionEvidence?: PainCorrectionEvidence;
   }): Promise<PainSignalBridgeResult> {
-    const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0 } = opts;
+    const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0, correctionEvidence } = opts;
+    const ownerStatementPresent = isOwnerStatementEvidence(correctionEvidence);
+    const statementFingerprint = ownerStatementPresent && correctionEvidence ? fingerprintStatement(correctionEvidence.text) : undefined;
     const candidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
     const ledgerEntryIds: string[] = [];
 
@@ -821,7 +896,7 @@ export class PainSignalBridge {
     }
 
     const admissionResults = diagnosticianOutput
-      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount })
+      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount, ...(ownerStatementPresent ? { ownerStatementPresent } : {}) })
       : candidates.map((c) => ({
           candidateId: c.candidateId,
           recommendationKind: c.recommendationKind,
@@ -832,6 +907,69 @@ export class PainSignalBridge {
             evidenceStatus: provenance,
           },
         }));
+
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (PRI-958): persist every full-gate
+    // disposition on the candidate row BEFORE any intake/seed/consume write.
+    // A persistence failure must block this candidate's governance writes for
+    // the round (SPEC §7.1) — the diagnosis-success fact itself is untouched.
+    const admissionPersistBlocked = new Set<string>();
+    if (candidates.length > 0) {
+      const evaluatedAt = new Date().toISOString();
+      const materialFingerprint = fingerprintMaterial([
+        diagnosticianOutput ? JSON.stringify(diagnosticianOutput) : 'output-unavailable',
+        provenance,
+        String(inputEvidenceCount),
+        statementFingerprint ?? 'no-owner-statement',
+      ]);
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
+        const admission = admissionResults[i];
+        if (!candidate || !admission) continue;
+        const evaluation: AdmissionEvaluationRecord = {
+          evaluationId: `ae_${fingerprintMaterial([candidate.candidateId, materialFingerprint, ADMISSION_POLICY_VERSION]).slice(0, 16)}`,
+          decision: admission.admission.decision,
+          reason: admission.admission.reason,
+          nextAction: admission.admission.nextAction,
+          evaluatedAt,
+          policyVersion: ADMISSION_POLICY_VERSION,
+          provenance,
+          inputEvidenceCount,
+          ownerStatementPresent,
+          recommendationKind: candidate.rawRecommendationKind,
+          confidence: diagnosticianOutput ? diagnosticianOutput.confidence : null,
+          materialFingerprint,
+          materialSummary: {
+            inputEvidenceCount,
+            outputEvidenceCount: diagnosticianOutput ? diagnosticianOutput.evidence.length : 0,
+            ownerStatementPresent,
+            ...(statementFingerprint !== undefined ? { statementFingerprint } : {}),
+          },
+        };
+        try {
+          if (typeof this.stateManager.appendAdmissionEvaluation !== 'function') {
+            throw new Error('state_manager_admission_persistence_unavailable');
+          }
+          const persisted = await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, evaluation);
+          if (persisted.status === 'refused') {
+            admissionPersistBlocked.add(candidate.candidateId);
+            this.eventEmitter?.emitTelemetry({
+              eventType: 'admission_persistence_failed',
+              traceId: candidate.candidateId,
+              timestamp: evaluatedAt,
+              payload: { reason: persisted.reason, nextAction: 'inspect state.db principle_candidates; the disposition was not saved and intake is blocked for this candidate this round' },
+            });
+          }
+        } catch (persistErr) {
+          admissionPersistBlocked.add(candidate.candidateId);
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'admission_persistence_failed',
+            traceId: candidate.candidateId,
+            timestamp: evaluatedAt,
+            payload: { reason: persistErr instanceof Error ? persistErr.message : String(persistErr), nextAction: 'inspect state.db principle_candidates; the disposition was not saved and intake is blocked for this candidate this round' },
+          });
+        }
+      }
+    }
 
     const seedFailureCandidateIds: string[] = [];
     const notInternalizable: NotInternalizableCandidate[] = [];
@@ -853,6 +991,19 @@ export class PainSignalBridge {
 
         if (admission.admission.decision !== 'admitted') {
           this.emitAdmissionEvent(candidate.candidateId, admission.admission);
+          // CR-03: a non-admitted disposition is a saved, explainable terminal
+          // state for this material — the worker must not keep rescanning it.
+          this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+            state: 'awaiting_owner',
+            attempts: 0,
+            blockedReason: `${admission.admission.decision}:${admission.admission.reason}`,
+          });
+          continue;
+        }
+
+        // CR-03 (SPEC §7.1): the disposition itself failed to persist — no
+        // Ledger write, no consume, no seed for this candidate this round.
+        if (admissionPersistBlocked.has(candidate.candidateId)) {
           continue;
         }
 
@@ -867,6 +1018,10 @@ export class PainSignalBridge {
             timestamp: new Date().toISOString(),
             payload: { reason: intakeErr instanceof Error ? intakeErr.message : String(intakeErr) },
           });
+          // CR-05 (SPEC §9.1): the succeeded diagnosis with an unfinished
+          // intake is an orphan the worker continuation must pick up — record
+          // the attempt in the independent processing domain.
+          void this.recordPostProcessingFailure(candidate.candidateId, `intake_failed:${intakeErr instanceof Error ? intakeErr.message : String(intakeErr)}`).catch(() => undefined);
           continue;
         }
         // Phase 1 / PR1 (Principle Ledger write boundary): the intake service only
@@ -910,6 +1065,13 @@ export class PainSignalBridge {
           reuseReviewRequiredByCandidate.set(candidate.candidateId, {
             selectedPrincipleId: recommended?.selectedPrincipleId,
             confidence: recommended?.confidence,
+          });
+          // CR-05: waiting for the Owner's reuse decision is a saved
+          // awaiting-owner state, not a technical retry.
+          this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+            state: 'awaiting_owner',
+            attempts: 0,
+            blockedReason: 'reuse_pending_owner',
           });
           continue;
         }
@@ -985,12 +1147,33 @@ export class PainSignalBridge {
             timestamp: new Date().toISOString(),
             payload: { error: String(seedErr) },
           });
+          // CR-05 (SPEC §9.1): seed failure is a post-processing orphan —
+          // consumed-but-unseeded must stay discoverable by the worker
+          // continuation (never hidden behind the consumed status).
+          void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
         }
 
         if (candidate.status !== 'consumed') {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
       }
+    }
+
+    // CR-03/CR-05: mark the candidates whose post-processing reached a real
+    // terminal state (seeded / ledger-written / not internalizable) complete
+    // so the worker continuation stops rescanning them.
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      const admission = admissionResults[i];
+      if (!candidate || !admission || admission.admission.decision !== 'admitted') continue;
+      if (admissionPersistBlocked.has(candidate.candidateId)) continue;
+      if (seedFailureCandidateIds.includes(candidate.candidateId)) continue;
+      if (reuseReviewRequiredByCandidate.has(candidate.candidateId)) continue;
+      this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+        state: 'complete',
+        attempts: 0,
+        completedAt: new Date().toISOString(),
+      });
     }
 
     const seedFailureNote = seedFailureCandidateIds.length > 0

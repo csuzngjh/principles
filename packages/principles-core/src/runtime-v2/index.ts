@@ -484,7 +484,21 @@ export { evaluateAdmission, evaluateCandidateAdmissions, evaluateCandidateAdmiss
 export type { AdmissionDecision, AdmissionGateInput, AdmissionGateResult, CandidateAdmissionResult, PainProvenance } from './admission-gate.js';
 
 // Evidence guards (PRI-345) — shared owner-exemption + short-circuit logic
-export { isOwnerExplicitManual, shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
+export { isOwnerExplicitManual, shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evidence-guards.js';
+export {
+  ADMISSION_POLICY_VERSION,
+  CANDIDATE_ADMISSION_SCHEMA_VERSION,
+  appendAdmissionEvaluation as appendAdmissionEvaluationDocument,
+  currentEvaluation as currentAdmissionEvaluation,
+  parseAdmissionDocument,
+  fingerprintMaterial as fingerprintAdmissionMaterial,
+} from './store/candidate/admission-document.js';
+export type {
+  AdmissionEvaluationRecord,
+  AdmissionProcessingRecord,
+  AdmissionProcessingState,
+  CandidateAdmissionDocument,
+} from './store/candidate/admission-document.js';
 
 // Pain-chain read model (PRI-14)
 export { PainChainReadModel } from './pain-chain-read-model.js';

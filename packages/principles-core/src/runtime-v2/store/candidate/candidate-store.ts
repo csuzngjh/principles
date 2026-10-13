@@ -2,6 +2,11 @@
  * CandidateStore — abstract interface for principle candidate queries.
  */
 import type { RecommendationKind } from '../../diagnostician-output.js';
+import type {
+  AdmissionEvaluationRecord,
+  AdmissionProcessingRecord,
+  CandidateAdmissionDocument,
+} from './admission-document.js';
 
 export interface CandidateRecord {
   candidateId: string;
@@ -60,5 +65,30 @@ export interface CandidateStore {
    *          or its current status did not match `expectedStatus`.
    */
   transitionCandidateStatus(candidateId: string, expectedStatus: CandidateRecord['status'], newStatus: CandidateRecord['status']): Promise<boolean>;
+
+  /**
+   * SPEC-CODEX-PAIN-CLOSURE-001 CR-03: read the persisted admission document.
+   * NULL when the column is empty (pre-CR-03 records — "历史准入处置未记录").
+   * Unparseable JSON returns { ok: false, reason } — callers must fail loud,
+   * never treat a corrupt document as absent.
+   */
+  getAdmissionDocument(candidateId: string): Promise<
+    { ok: true; document: CandidateAdmissionDocument | null } | { ok: false; reason: string }
+  >;
+
+  /**
+   * Persist one full-gate evaluation (append-only history, idempotent by
+   * material fingerprint + policy version, current pointer moves forward).
+   * Returns the resulting document and whether the entry was appended/reused.
+   */
+  appendAdmissionEvaluation(candidateId: string, evaluation: AdmissionEvaluationRecord): Promise<
+    { status: 'appended' | 'reused'; document: CandidateAdmissionDocument } | { status: 'refused'; reason: string }
+  >;
+
+  /**
+   * Update ONLY the independent processing-progress domain. Never touches
+   * evaluation history.
+   */
+  updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean>;
 
 }
