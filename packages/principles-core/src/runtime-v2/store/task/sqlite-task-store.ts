@@ -406,6 +406,7 @@ export class SqliteTaskStore implements TaskStore {
     }
     const succeededRow = db.prepare(
       `SELECT MAX(updated_at) as last FROM tasks WHERE status = 'succeeded' AND task_kind IN (${placeholders})`
+      // runtime-contract-exempt: ERR-001 better-sqlite3 .get() returns unknown; narrowing to Record<string, unknown> | undefined is type-only (last is validated below via typeof check)
     ).get(...kinds) as Record<string, unknown> | undefined;
     const lastRaw = succeededRow?.last;
     const lastSucceededAt = typeof lastRaw === 'string' && lastRaw.length > 0 ? lastRaw : null;
