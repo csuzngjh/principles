@@ -1,5 +1,5 @@
 ---
-"@principles/pd-console": patch
+"create-principles-disciple": patch
 ---
 
 PRI-955 (R1 F11): the Console no longer equates "no failed tasks" with "the pipeline is healthy".
