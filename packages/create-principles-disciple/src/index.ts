@@ -6,12 +6,13 @@ import { createRequire } from 'module';
 import { realpathSync } from 'node:fs';
 import { banner, logger, setQuietMode } from './utils/logger.js';
 import { runPrompts, type InstallOptions } from './prompts.js';
-import { install } from './installer.js';
+import { install, resolveConsoleWorkspaceDir } from './installer.js';
 import { uninstall, checkInstallStatus } from './uninstaller.js';
 import { checkEnvironment, detectWorkspace } from './utils/env.js';
 import {
   MVP_CHANNELS,
   buildFailureOutput,
+  getHomeDir,
 } from './mvp-config.js';
 import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
 import { isHostTarget, type HostTarget, HOST_TARGETS } from './installers/index.js';
@@ -287,6 +288,11 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   }
   const pluginDir = pluginDirOverride ?? PLUGIN_DIR;
   const result = await install(installOptions, pluginDir, { quiet: jsonMode, nonInteractive: Boolean(nonInteractive) });
+  // WorkBuddy remediation (review round-2 #2): the operator-facing hints
+  // below must name the directory the console/canary actually manage — the
+  // governance workspace for the workbuddy host, the project dir otherwise
+  // (same resolution the installer's own nextActions use).
+  const operatorWorkspaceDir = resolveConsoleWorkspaceDir(host, result.workspaceDir, getHomeDir());
 
   if (jsonMode) {
     const output = toInstallJsonOutput(result);
@@ -324,16 +330,16 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       if (installOptions.runtimeProfile) {
         console.log(`  LLM runtime profile ............ ${installOptions.runtimeProfile.provider} / ${installOptions.runtimeProfile.model ?? '(default)'} (key: $${installOptions.runtimeProfile.apiKeyEnv})`);
       } else {
-        console.log(`  LLM runtime profile ............ not configured (configure via console: pd console open --workspace "${result.workspaceDir}")`);
+        console.log(`  LLM runtime profile ............ not configured (configure via console: pd console open --workspace "${operatorWorkspaceDir}")`);
       }
       console.log();
       console.log(t('ready'));
-      console.log(`${t('diagnostics')}: pd runtime canary --workspace "${result.workspaceDir}" --json`);
+      console.log(`${t('diagnostics')}: pd runtime canary --workspace "${operatorWorkspaceDir}" --json`);
     } else if (result.components.plugin === 'verified' && (result.components.cli === 'verified' || result.components.cli === 'verified_local_only')) {
       const cliLabel = result.components.cli === 'verified_local_only' ? 'verified (local only)' : result.components.cli;
       const diagCmd = result.components.cli === 'verified_local_only' && result.components.cliLocalPath
-        ? `"${result.components.cliLocalPath}" runtime canary --workspace "${result.workspaceDir}" --json`
-        : `pd runtime canary --workspace "${result.workspaceDir}" --json`;
+        ? `"${result.components.cliLocalPath}" runtime canary --workspace "${operatorWorkspaceDir}" --json`
+        : `pd runtime canary --workspace "${operatorWorkspaceDir}" --json`;
       console.log();
       logger.warn(t('install_partial_complete'));
       console.log();
