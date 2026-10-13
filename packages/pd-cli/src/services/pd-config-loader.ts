@@ -377,8 +377,8 @@ function loadOpenClawPluginConfig(): { workspace?: string } | null {
         }
       } catch (err) {
         // Graceful degradation with observability: log but continue to next location
-        process.stderr.write(
-          `[PD:workspace] WARN: Failed to parse plugin config at ${loc}: ${err instanceof Error ? err.message : String(err)}\n`,
+        emitWorkspaceNotice(
+          `WARN: Failed to parse plugin config at ${loc}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
