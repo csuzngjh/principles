@@ -138,11 +138,31 @@ export function checkInstallStatus(host: HostTarget = 'all'): {
     { path: path.join(pdCodexDir, 'pd-hook-entry.cjs'), name: lang === 'zh' ? 'Codex 钩子入口' : 'Codex hook entry script', type: 'file' as const },
   ];
 
+  // WorkBuddy paths (ADR-0020 third host, SPEC workbuddy-host-adapter §6).
+  // ONLY provably PD-owned artifacts belong here: the PD-owned local
+  // marketplace directory. Everything else in the WorkBuddy domain is
+  // deliberately EXCLUDED from the generic delete loop:
+  //   - the governance workspace (~/.workbuddy/pd-workspace) is NEVER a
+  //     deletion candidate — it owns the governance database (OD-07/§18);
+  //   - settings.json / installed_plugins.json / the plugin cache are shared
+  //     or host-owned — WorkBuddyHostInstaller.uninstall() removes only OUR
+  //     entries from them;
+  //   - the shared runtime payload under ~/.pd/runtime is retained per the
+  //     install.json manifest policy (planSharedRuntimeUninstall).
+  // Review 2026-10-13 S1: without this branch, host==='workbuddy' fell into
+  // the openclaw+codex union and a WorkBuddy-only uninstall DELETED other
+  // hosts' files before the host installer ever ran.
+  const workbuddyPaths = [
+    { path: path.join(os.homedir(), '.pd', 'workbuddy-marketplace'), name: lang === 'zh' ? 'PD WorkBuddy marketplace（PD 拥有）' : 'PD WorkBuddy marketplace (PD-owned)', type: 'dir' as const },
+  ];
+
   const allPaths = host === 'openclaw'
     ? openclawPaths
     : host === 'codex'
       ? codexPaths
-      : [...openclawPaths, ...codexPaths];
+      : host === 'workbuddy'
+        ? workbuddyPaths
+        : [...openclawPaths, ...codexPaths, ...workbuddyPaths];
 
   const checkedPaths = allPaths.map(p => ({
     exists: existsSync(p.path),
