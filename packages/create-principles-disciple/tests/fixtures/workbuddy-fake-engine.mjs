@@ -1,7 +1,8 @@
 /**
  * Fake WorkBuddy engine CLI — implements EXACTLY the registration semantics
  * frozen by Phase 0 probe P01 (packages/workbuddy-adapter/tests/fixtures/
- * host-contract/manifest-facts.json), driven from WORKBUDDY_CONFIG_DIR.
+ * host-contract/manifest-facts.json), driven from CODEBUDDY_CONFIG_DIR first,
+ * then WORKBUDDY_CONFIG_DIR (same precedence as the real engine).
  *
  * Supported commands and their observable effects:
  *   plugin marketplace add <dir>     → "Marketplace <name> added successfully." (idempotent-tolerant: "already registered")
@@ -27,7 +28,11 @@ import path from 'node:path';
 import os from 'node:os';
 
 const argv = process.argv.slice(2); // e.g. ['plugin', 'install', 'key']
-const configDir = process.env.WORKBUDDY_CONFIG_DIR || path.join(os.homedir(), '.workbuddy');
+// S2 parity with the REAL engine (Phase 0 P0): the real engine resolves its
+// config root preferring CODEBUDDY_CONFIG_DIR. The fake must use the SAME
+// precedence, otherwise it masks an installer that drives the engine against
+// the wrong root. The installer injects BOTH variables with the declared root.
+const configDir = process.env.CODEBUDDY_CONFIG_DIR || process.env.WORKBUDDY_CONFIG_DIR || path.join(os.homedir(), '.workbuddy');
 const pluginsDir = path.join(configDir, 'plugins');
 const settingsPath = path.join(configDir, 'settings.json');
 const registryPath = path.join(pluginsDir, 'installed_plugins.json');

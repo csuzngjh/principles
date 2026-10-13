@@ -97,13 +97,25 @@ export interface WorkbuddyCommandResult {
   error?: string;
 }
 
+export interface WorkbuddyCommandOptions {
+  timeoutMs?: number;
+  /**
+   * Extra environment for the engine child (merged over process.env).
+   * S2 (review 2026-10-13): the REAL engine resolves its config root from
+   * CODEBUDDY_CONFIG_DIR first (Phase 0 P0 isolation recipe) — without an
+   * explicit override it registers into ~/.codebuddy or a pre-existing
+   * CodeBuddy root while the installer verifies the declared WorkBuddy root.
+   */
+  env?: Record<string, string>;
+}
+
 export interface WorkbuddyHostInstallerDeps {
   /** Home directory resolver (tests inject a temp dir; default: getHomeDir()). */
   homeDir?: () => string;
   /** Engine path resolver (default: env override + Program Files probe). */
   enginePath?: () => string | undefined;
   /** Command runner (default: spawnSync). Tests inject a fake engine boundary. */
-  runCommand?: (file: string, args: readonly string[], opts?: { timeoutMs?: number }) => WorkbuddyCommandResult;
+  runCommand?: (file: string, args: readonly string[], opts?: WorkbuddyCommandOptions) => WorkbuddyCommandResult;
 }
 
 /** All WorkBuddy paths PD may touch, derived from install-layout (never hand-joined ad hoc). */
@@ -575,6 +587,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
           encoding: 'utf-8',
           timeout: opts?.timeoutMs ?? ENGINE_COMMAND_TIMEOUT_MS,
           windowsHide: true,
+          ...(opts?.env !== undefined ? { env: { ...process.env, ...opts.env } } : {}),
         });
         return {
           status: result.status,
@@ -590,11 +603,29 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     return resolveWorkbuddyPaths(this.deps.homeDir());
   }
 
-  /** Run `node <engine> <args>`; returns undefined when the invocation itself failed. */
+  /**
+   * Run `node <engine> <args>`; returns undefined when the invocation itself
+   * failed.
+   *
+   * S2 (review 2026-10-13): every engine command is pinned to the DECLARED
+   * config root by injecting BOTH isolation variables (the Phase 0 P0
+   * recipe). The real engine prefers CODEBUDDY_CONFIG_DIR; without the
+   * injection it registered into ~/.codebuddy / a pre-existing CodeBuddy root
+   * while this installer verified the declared WorkBuddy root — command
+   * success and target registration diverged. WORKBUDDY_CONFIG_DIR is
+   * injected as well so engine versions that honor the WorkBuddy-scoped
+   * variable stay on the same root.
+   */
   private runEngine(args: readonly string[]): WorkbuddyCommandResult & { engine: string } | undefined {
     const engine = this.deps.enginePath();
     if (engine === undefined) return undefined;
-    const result = this.deps.runCommand(process.execPath, [engine, ...args]);
+    const {configDir} = this.paths();
+    const result = this.deps.runCommand(process.execPath, [engine, ...args], {
+      env: {
+        CODEBUDDY_CONFIG_DIR: configDir,
+        WORKBUDDY_CONFIG_DIR: configDir,
+      },
+    });
     return { ...result, engine };
   }
 
@@ -761,7 +792,22 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         }
         const install = this.runEngine(['plugin', 'install', WORKBUDDY_PLUGIN_KEY]);
         if (install !== undefined && install.status === 0 && PLUGIN_INSTALL_OK.test(install.stdout + install.stderr)) {
-          const after = this.detectDetails();
+          let after = this.detectDetails();
+          if (after.registered && !after.pluginEnabled) {
+            // Engine-version reality (observed on 2.161.0, 2026-10-13): the
+            // engine honors the payload manifest's `defaultEnabled` and
+            // installs hooks-carrying plugins with enabledPlugins[key]=false.
+            // The installer contract (P01 frozen facts + this installer's own
+            // direct-write path) is installed ⇒ enabledPlugins[key]=true —
+            // the explicit host-level act of installing. PD governance stays
+            // OFF either way (OD-03: features.host.workbuddy is a separate,
+            // later, user-visible enable).
+            const enabled = this.enableRegisteredPlugin();
+            if (!enabled.ok) {
+              return { ok: false, reason: enabled.reason, nextAction: enabled.nextAction };
+            }
+            after = this.detectDetails();
+          }
           if (after.registered && after.pluginEnabled) {
             return { ok: true, mode: 'engine', settingsAction: after.settingsExisted ? 'updated' : 'created' };
           }
@@ -792,6 +838,25 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const direct = this.directWriteRegistration(details, version, 'engine binary not found');
     if (direct.ok) return direct;
     return { ok: false, reason: direct.reason, nextAction: direct.nextAction };
+  }
+
+  /**
+   * Set enabledPlugins[OUR_KEY]=true in settings.json, preserving every other
+   * key (same protected write discipline as the direct-write registration).
+   * Converges the engine install path (which honors the payload manifest's
+   * defaultEnabled) onto the installer's frozen installed ⇒ enabled contract.
+   */
+  private enableRegisteredPlugin(): { ok: true } | { ok: false; reason: string; nextAction: string } {
+    const p = this.paths();
+    const settings = readHostJsonFile(p.settingsPath);
+    if (!settings.ok) return { ok: false, reason: settings.reason, nextAction: settings.nextAction };
+    const nextSettings: Record<string, unknown> = { ...(settings.value ?? {}) };
+    const enabledPlugins = isRecord(nextSettings.enabledPlugins) ? { ...nextSettings.enabledPlugins } : {};
+    enabledPlugins[WORKBUDDY_PLUGIN_KEY] = true;
+    nextSettings.enabledPlugins = enabledPlugins;
+    const write = writeHostJsonFileProtected(p.settingsPath, JSON.stringify(nextSettings, null, 2) + '\n');
+    if (!write.ok) return { ok: false, reason: write.reason, nextAction: write.nextAction };
+    return { ok: true };
   }
 
   /**
