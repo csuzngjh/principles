@@ -306,13 +306,17 @@ function emitWorkspaceNotice(msg: string): void {
 
 /**
  * Discriminated outcome of reading `workspace.default` out of one config file.
- * A rejected value must never be indistinguishable from an absent one: the cwd
- * candidate turns "no declared default" into "this directory IS the workspace",
- * so silently dropping an invalid declaration would change which library gets
- * queried without telling the operator (rc-9-no-silent-fallback, ERR-112).
+ * An unreadable or rejected value must never be indistinguishable from an absent
+ * one: the cwd candidate turns "no declared default" into "this directory IS the
+ * workspace", so silently dropping a broken declaration would change which
+ * library gets queried without telling the operator (rc-9-no-silent-fallback,
+ * ERR-112). `parse_failed` is separate from `rejected` because an unparseable
+ * file says nothing about the operator's intent, while a parsed value that fails
+ * the shape check was written by them and is being ignored.
  */
 type DeclaredWorkspaceDefault =
   | { kind: 'absent' }
+  | { kind: 'parse_failed'; reason: string }
   | { kind: 'rejected'; reason: string }
   | { kind: 'declared'; value: string };
 
@@ -326,11 +330,10 @@ function extractWorkspaceDefault(configPath: string): DeclaredWorkspaceDefault {
   try {
     parsed = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
   } catch (err) {
-    // Graceful degradation with observability: log but treat as not configured
-    emitWorkspaceNotice(
-      `WARN: Failed to parse workspace config at ${configPath}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return { kind: 'absent' };
+    return {
+      kind: 'parse_failed',
+      reason: err instanceof Error ? err.message : String(err),
+    };
   }
   if (!isRecord(parsed) || !isRecord(parsed.workspace) || parsed.workspace.default === undefined) {
     return { kind: 'absent' };
@@ -489,20 +492,31 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
     }
     if (fs.existsSync(configPath)) {
       const declared = extractWorkspaceDefault(configPath);
-      if (declared.kind === 'rejected') {
+      if (declared.kind === 'parse_failed' || declared.kind === 'rejected') {
+        const finding = declared.kind === 'parse_failed'
+          ? `Could not parse ${configPath} (${declared.reason}), so its workspace.default is unknown`
+          : `Ignoring ${declared.reason} in ${configPath}`;
+        // State the target this finding leads to, not only the failure: a broken
+        // declaration must not look identical to an absent one when either can
+        // change which library is read and written (PRI-957 review P2).
         emitWorkspaceNotice(
-          `WARN: Ignoring ${declared.reason} in ${configPath} (source: ${source}). ` +
-            `${source === 'cwd' ? 'Falling back to the directory itself as the workspace.' : 'Trying the next config location.'}`,
+          `WARN: ${finding} (source: ${source}). ` +
+            `${source === 'cwd'
+              ? `Treating the directory you are standing in (${candidateRoot}) as the workspace.`
+              : 'Trying the next config location.'}`,
         );
       }
       if (declared.kind === 'declared') {
         if (source === 'cwd' && !isSameDirectory(declared.value, candidateRoot)) {
           // ERR-117 / EP-03: the CLI chain follows the declared default while the
-          // hook chain follows the nearest directory, so standing here and querying
-          // elsewhere must be visible, not silent.
+          // hook chain follows the nearest directory, so the divergence must be
+          // visible. Report the divergence only — which workspace a command ends
+          // up using is declared by the resolution stage, never twice from here
+          // (PRI-957 review P2: a discovery-time "using" claim contradicts the
+          // "using explicit override" line when -w points at this directory).
           emitWorkspaceNotice(
-            `WARN: Standing in "${candidateRoot}" but its config declares ` +
-              `workspace.default "${declared.value}" (${configPath}). Using the declared default.`,
+            `WARN: Standing in "${candidateRoot}" but its config declares workspace.default ` +
+              `"${declared.value}" (${configPath}): two different directories.`,
           );
         }
         return { workspaceDefault: declared.value, configPath, source, declared: true };

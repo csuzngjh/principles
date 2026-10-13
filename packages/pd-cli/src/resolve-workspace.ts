@@ -11,6 +11,11 @@
  * When the resolved path differs from workspace.default in config,
  * a warning is emitted to stderr.
  *
+ * This is the single workspace authority for pd-cli: every command — read and
+ * write alike — resolves its target here, so the cwd step changes write targets
+ * too. Discovery (pd-config-loader) only reports what it found; the statements
+ * about which workspace is actually used live here and nowhere else.
+ *
  * @throws Error if no workspace directory can be determined.
  */
 
@@ -24,21 +29,33 @@ export const WORKSPACE_ENV = 'PD_WORKSPACE_DIR';
 // ── Internal helpers ────────────────────────────────────────────────────────
 
 /**
- * Normalize a path to forward slashes for cross-platform string comparison.
+ * Normalize a path for cross-platform string comparison.
  *
- * Comparison-only helper: it never resolves against the filesystem and never
- * feeds a filesystem operation, so it intentionally uses `path.normalize`
- * (pure string normalization) instead of `path.resolve`. Callers compare two
- * paths for equality after normalization; the workspace root itself is
- * validated by `assertWorkspaceDirInside` before any IO uses it.
+ * Comparison-only helper: it never feeds a filesystem operation. It resolves
+ * against cwd (not just `path.normalize`) because an operator-supplied override
+ * may be relative (`-w .`) while the discovered default is always absolute, and
+ * comparing the two as strings would warn about a difference that does not exist
+ * (PRI-957 review P3). The workspace root itself is still validated by
+ * `assertWorkspaceDirInside` before any IO uses it.
  */
 function normalizePath(p: string): string {
-  return path.normalize(p).replace(/\\/g, '/');
+  const resolved = path.resolve(p).replace(/\\/g, '/');
+  const stripped = resolved.replace(/\/+$/, '');
+  return stripped.length > 0 ? stripped : resolved;
 }
 
 /** Emit workspace warnings to stderr. */
 function emitWarning(msg: string): void {
   process.stderr.write(`[PD:workspace] WARNING: ${msg}\n`);
+}
+
+/**
+ * Emit a non-warning statement about the workspace actually used. Only the
+ * resolution stage may do this: discovery reports what it found, and two
+ * "I used X" lines in one command contradict each other (PRI-957 review P2).
+ */
+function emitUsedWorkspace(msg: string): void {
+  process.stderr.write(`[PD:workspace] ${msg}\n`);
 }
 
 /**
@@ -104,6 +121,18 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
   // Step 4: Use discovered config default
   if (configDefault) {
     assertWorkspaceDirInside(configDefault, 'workspace.default');
+    if (discovered?.source === 'cwd' && discovered.declared === false) {
+      // PRI-957 review P1: this resolution chain serves read AND write commands, so a
+      // workspace inferred from the current directory also redirects writes. It is the
+      // one outcome no operator declared, so name the target instead of leaving it
+      // implied (rc-9-no-silent-fallback). Declared defaults need no line: the config
+      // the operator wrote already states the target. The wording must stay true for
+      // an unreadable config too — "no workspace.default in effect", not "declares none".
+      emitUsedWorkspace(
+        `using workspace "${configDefault}" — inferred from your current directory ` +
+        `(config: ${discovered.configPath}; no workspace.default in effect)`,
+      );
+    }
     return configDefault;
   }
   // Step 5: No resolution possible — throw (preserves current behavior)

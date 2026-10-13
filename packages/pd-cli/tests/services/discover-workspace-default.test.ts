@@ -137,7 +137,48 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
     expect(result!.workspaceDefault).toBe(canonicalPath(ws));
     const text = stderrText(stderrSpy);
     expect(text).toContain('workspace.default "./somewhere" is not an absolute path');
-    expect(text).toContain('Falling back to the directory itself as the workspace');
+    expect(text).toContain('Treating the directory you are standing in');
+
+    stderrSpy.mockRestore();
+  });
+
+  it('names the resulting workspace when the config it found cannot be parsed', () => {
+    // PRI-957 review P2: an unparseable config used to be reported as a parse
+    // failure and then treated exactly like an absent one, so the operator saw a
+    // warning about a file and never a statement about the library the command
+    // would go on to read and write.
+    const ws = makeWorkspace('broken', 'version: 1\nworkspace:\n  default: [unclosed\n');
+    stubEnvironment(ws);
+    const stderrSpy = captureStderr();
+
+    const result = discoverWorkspaceDefault();
+
+    expect(result!.source).toBe('cwd');
+    expect(result!.declared).toBe(false);
+    expect(result!.workspaceDefault).toBe(canonicalPath(ws));
+    const text = stderrText(stderrSpy);
+    expect(text).toContain('Could not parse');
+    expect(text).toContain('its workspace.default is unknown');
+    expect(text).toContain(`Treating the directory you are standing in (${canonicalPath(ws)}) as the workspace.`);
+
+    stderrSpy.mockRestore();
+  });
+
+  it('moves to the next config location when a non-cwd candidate cannot be parsed', () => {
+    const envDir = makeWorkspace('env-broken', 'version: 1\nworkspace:\n  default: [unclosed\n');
+    const openclawWs = path.join(fakeHome, '.openclaw', 'workspace');
+    fs.mkdirSync(path.join(openclawWs, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(openclawWs, '.pd', 'config.yaml'), configWithDefault(openclawWs), 'utf8');
+    const notAWorkspace = path.join(workRoot, 'plain-dir');
+    fs.mkdirSync(notAWorkspace, { recursive: true });
+    stubEnvironment(notAWorkspace);
+    process.env.PD_WORKSPACE_DIR = envDir;
+    const stderrSpy = captureStderr();
+
+    const result = discoverWorkspaceDefault();
+
+    expect(result!.source).toBe('openclaw_default');
+    expect(stderrText(stderrSpy)).toContain('Trying the next config location.');
 
     stderrSpy.mockRestore();
   });
@@ -153,8 +194,13 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
     const result = discoverWorkspaceDefault();
 
     expect(result!.declared).toBe(true);
-    expect(stderrText(stderrSpy)).toContain('Standing in');
-    expect(stderrText(stderrSpy)).toContain('Using the declared default');
+    const text = stderrText(stderrSpy);
+    expect(text).toContain('Standing in');
+    expect(text).toContain(path.join(workRoot, 'elsewhere'));
+    // PRI-957 review P2: discovery reports the divergence only. Which workspace a
+    // command uses is declared by the resolution stage, so a discovery line that
+    // claims a choice contradicts "Using explicit override" when -w points here.
+    expect(text).not.toContain('Using');
 
     stderrSpy.mockRestore();
   });

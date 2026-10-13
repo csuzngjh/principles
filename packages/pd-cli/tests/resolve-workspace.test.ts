@@ -5,6 +5,7 @@
  * discoverWorkspaceDefault function.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as path from 'path';
 
 // ── Mock setup ──────────────────────────────────────────────────────────────
 
@@ -237,6 +238,79 @@ describe('resolveWorkspaceDir', () => {
     expect(stderrSpy).toHaveBeenCalledWith(
       expect.stringContaining('Consider updating workspace.default in config.'),
     );
+
+    stderrSpy.mockRestore();
+  });
+
+  // 17. PRI-957 review P3: `-w .` inside the discovered workspace is the SAME
+  // directory, so warning about a difference would mislead the operator about
+  // which library gets used. Relative overrides must be compared as resolved.
+  it('does NOT warn for a relative override that resolves to the discovered workspace', () => {
+    mockDiscover.mockReturnValue(makeDiscovery(path.resolve('.')));
+    const stderrSpy = captureStderr();
+
+    expect(resolveWorkspaceDir('.')).toBe('.');
+    expect(stderrSpy.mock.calls.map((call) => String(call[0])).join('')).toBe('');
+
+    stderrSpy.mockRestore();
+  });
+
+  it('does NOT warn when the only difference is a trailing separator', () => {
+    mockDiscover.mockReturnValue(makeDiscovery(path.resolve('.')));
+    const stderrSpy = captureStderr();
+
+    resolveWorkspaceDir(`${path.resolve('.')}/`);
+
+    expect(stderrSpy.mock.calls.map((call) => String(call[0])).join('')).toBe('');
+    stderrSpy.mockRestore();
+  });
+
+  it('still warns for a relative override that resolves elsewhere', () => {
+    mockDiscover.mockReturnValue(makeDiscovery(path.resolve('..', 'other-workspace')));
+    const stderrSpy = captureStderr();
+
+    resolveWorkspaceDir('.');
+
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('differs from'));
+    stderrSpy.mockRestore();
+  });
+
+  // 18. PRI-957 review P1: this chain is also what routes WRITE commands, so the
+  // one outcome nobody declared — the inferred cwd workspace — must be stated by
+  // the resolution stage, which is the sole place that declares the used target.
+  it('announces the workspace when it is inferred from the current directory', () => {
+    mockDiscover.mockReturnValue(
+      makeDiscovery('/inferred/cwd/workspace', { source: 'cwd', declared: false }),
+    );
+    const stderrSpy = captureStderr();
+
+    expect(resolveWorkspaceDir()).toBe('/inferred/cwd/workspace');
+
+    const text = stderrSpy.mock.calls.map((call) => String(call[0])).join('');
+    expect(text).toContain('using workspace "/inferred/cwd/workspace"');
+    expect(text).toContain('inferred from your current directory');
+    expect(text).toContain('no workspace.default in effect');
+    stderrSpy.mockRestore();
+  });
+
+  it('does not announce a target the operator declared', () => {
+    mockDiscover.mockReturnValue(
+      makeDiscovery('/declared/default', { source: 'cwd', declared: true }),
+    );
+    const stderrSpy = captureStderr();
+
+    expect(resolveWorkspaceDir()).toBe('/declared/default');
+    expect(stderrSpy.mock.calls.map((call) => String(call[0])).join('')).toBe('');
+
+    stderrSpy.mockRestore();
+  });
+
+  it('does not announce a target from the pre-existing default locations', () => {
+    mockDiscover.mockReturnValue(makeDiscovery('/openclaw/workspace', { source: 'openclaw_default' }));
+    const stderrSpy = captureStderr();
+
+    expect(resolveWorkspaceDir()).toBe('/openclaw/workspace');
+    expect(stderrSpy.mock.calls.map((call) => String(call[0])).join('')).toBe('');
 
     stderrSpy.mockRestore();
   });
