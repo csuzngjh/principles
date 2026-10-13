@@ -45,8 +45,15 @@ function writeRollout(home: string, cliVersion: string, mtimeMs: number): string
 
 describe('assessCodexInstall (PRI-953 F1/F2 observability)', () => {
   it('missing CODEX_HOME degrades with reason + nextAction, never guesses', () => {
-    const result = assessCodexInstall({ CODEX_HOME: path.join(os.tmpdir(), 'pd-health-codex-missing-home') });
-    expect(result).toMatchObject({ ok: false, reason: 'codex_home_missing' });
+    // Private mkdtemp parent; the missing home is a child inside it — never a
+    // predictable name in the shared temp root (CodeQL insecure-temp-file).
+    const privateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-health-codex-missing-'));
+    try {
+      const result = assessCodexInstall({ CODEX_HOME: path.join(privateDir, 'not-a-home') });
+      expect(result).toMatchObject({ ok: false, reason: 'codex_home_missing' });
+    } finally {
+      fs.rmSync(privateDir, { recursive: true, force: true });
+    }
   });
 
   it('detects a stale PLUGIN_DATA install vs the marketplace pin (F1)', () => {
