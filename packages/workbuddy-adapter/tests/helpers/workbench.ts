@@ -59,8 +59,12 @@ export function makeGovernance(home: string, options: GovernanceOptions = {}): s
 /** Load a REAL frozen fixture payload with the cwd (and transcript) pointed at temp reality. */
 export function fixturePayload(name: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const fixture = JSON.parse(fs.readFileSync(path.join(EVENTS_DIR, name), 'utf8')) as { payload?: unknown };
-  if (typeof fixture.payload !== 'object' || fixture.payload === null) throw new Error(`fixture ${name} carries no payload`);
-  return { ...(fixture.payload as Record<string, unknown>), ...overrides };
+  if (typeof fixture.payload !== 'object' || fixture.payload === null || Array.isArray(fixture.payload)) {
+    throw new Error(`fixture ${name} carries no payload object`);
+  }
+  // Runtime-contract discipline (ERR-001): no `as` on the parsed shape —
+  // copy the validated object's own enumerable keys instead.
+  return { ...Object.fromEntries(Object.entries(fixture.payload)), ...overrides };
 }
 
 export interface ArtifactInput {

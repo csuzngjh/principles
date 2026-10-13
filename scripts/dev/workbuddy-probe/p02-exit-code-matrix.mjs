@@ -22,7 +22,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const LAB = process.env.WB_PROBE_LAB || 'D:/Code/_worktrees/wb-probe-lab';
+const LAB = process.env.WB_PROBE_LAB || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..', 'wb-probe-lab');
 const ENGINE = process.env.WB_ENGINE || 'D:/Program Files/WorkBuddy/resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs';
 const ISO = path.join(LAB, 'iso-home');
 const NODE = process.execPath;

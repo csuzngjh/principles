@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-const LAB = process.env.WB_PROBE_LAB || 'D:/Code/_worktrees/wb-probe-lab';
+const LAB = process.env.WB_PROBE_LAB || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..', 'wb-probe-lab');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-p06-'));
 const results = [];

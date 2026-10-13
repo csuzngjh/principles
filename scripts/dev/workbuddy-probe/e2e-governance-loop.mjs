@@ -37,9 +37,11 @@ const Database = require('better-sqlite3');
 // The engine's fs-watch dies on the libuv prefix assertion
 // (src\win\fs-event.c) when any watched path contains an 8.3 short component
 // (os.tmpdir() → ADMINI~1); realpath does NOT expand short names, so the lab
-// lives on the probe lab's long-path drive (WB_E2E_LAB overrides).
+// lives beside the worktree pool on a long path, derived from this script's
+// repo location (WB_E2E_LAB overrides).
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const LAB_ROOT = path.join(
-  process.env.WB_E2E_LAB || 'D:/Code/_worktrees/wb-probe-lab',
+  process.env.WB_E2E_LAB || path.resolve(REPO_ROOT, '../../../wb-probe-lab'),
   `e2e-gov-${Date.now()}`,
 );
 const ISO = path.join(LAB_ROOT, 'iso');
