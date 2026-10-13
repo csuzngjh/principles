@@ -30,13 +30,20 @@ function formatTextOutput(output: DoctorOutput): string {
   // Workspace discovery info
   const discovery = discoverWorkspaceDefault();
   if (discovery) {
-    lines.push(`workspace.default: ${discovery.workspaceDefault} (source: ${discovery.source})`);
+    // PRI-957: only the cwd candidate may return a bare discovered directory, so the
+    // label must not claim a declaration that no config file contains.
+    const label = discovery.declared
+      ? `workspace.default: ${discovery.workspaceDefault} (source: ${discovery.source})`
+      : `workspace (discovered, no workspace.default declared): ${discovery.workspaceDefault} (source: ${discovery.source})`;
+    lines.push(label);
     const normalizedResolved = output.workspaceDir.replace(/\\/g, '/').replace(/\/$/, '');
     const normalizedDefault = discovery.workspaceDefault.replace(/\\/g, '/').replace(/\/$/, '');
     if (normalizedResolved !== normalizedDefault) {
-      lines.push(`  ⚠ RESOLVED path differs from workspace.default!`);
+      lines.push('  ⚠ RESOLVED path differs from the discovered workspace default!');
     } else {
-      lines.push(`  ✓ resolved path matches workspace.default`);
+      lines.push(discovery.declared
+        ? '  ✓ resolved path matches workspace.default'
+        : '  ✓ resolved path matches the discovered workspace directory');
     }
   } else {
     lines.push('workspace.default: (not configured — add workspace.default to .pd/config.yaml)');

@@ -55,13 +55,20 @@ function assertWorkspaceDirInside(p: string, source: string): void {
 function emitWarningIfDiffers(
   override: string,
   configDefault: string | undefined,
-  discovered: { configPath?: string } | null,
+  discovered: { configPath?: string; declared?: boolean } | null,
 ): void {
   if (configDefault && normalizePath(override) !== normalizePath(configDefault)) {
+    // A cwd hit may be a bare directory with no workspace.default at all; telling the
+    // operator to "update workspace.default in config" would then point at a field
+    // nobody declared (PRI-957 review).
+    const isDeclaredDefault = discovered?.declared !== false;
+    const baseline = isDeclaredDefault ? 'config default' : 'workspace discovered from your current directory';
     emitWarning(
-      `"${override}" differs from config default "${configDefault}" ` +
+      `"${override}" differs from ${baseline} "${configDefault}" ` +
         `(source: ${discovered?.configPath}). Using explicit override. ` +
-        `Consider updating workspace.default in config.`,
+        `Consider ${isDeclaredDefault
+          ? 'updating workspace.default in config.'
+          : 'dropping the override, or adding workspace.default to that config.'}`,
     );
   }
 }

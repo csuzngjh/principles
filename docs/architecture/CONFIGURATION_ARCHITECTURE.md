@@ -611,12 +611,21 @@ pd-cli 启动时确定 workspaceDir（resolveWorkspaceDir）：
    d. OpenClaw plugin config（principles-disciple.json）的 workspace 字段
    命中的 config 若声明了绝对路径 workspace.default，取该值；
    只有 (a) 允许在 config 未声明时回退到该目录本身（"我就站在这个工作区里"）。
+   workspace.default 存在但不是非空绝对路径 → 视为未声明，并在 stderr 打出
+   WARN 说明被忽略的原因（rc-9-no-silent-fallback：不得静默改变查询目标）。
 4. 以上皆无 → 报错并给出 nextAction
 ```
 
 优先级说明：1 > 2 > 3 是**解析根目录**的优先级，不变；3.a 排在发现候选首位，
 是为了让「用户级 PD_WORKSPACE_DIR 覆盖了当前所在工作区」这一分歧经由既有的
-`differs from config default` stderr 告警可见，而不是静默生效。
+`differs from …` stderr 告警可见，而不是静默生效。告警措辞按发现结果区分：
+config 真声明了 `workspace.default` 时提示改配置，只有目录发现时提示去掉覆盖或补声明。
+
+与 hook 侧的分歧（ERR-117）：`packages/host-runtime` 的
+`resolveNearestPdWorkspace(cwd)` 停在**最近的目录**本身，不跟随 `workspace.default`；
+pd-cli 这条链会跟随声明值。因此站在 A 目录、config 指向 B 时，CLI 查 B 而 hook 写 A，
+这是刻意保留的既有语义（本票不动 hook 行为），靠 stderr 的
+`Standing in "…" but its config declares workspace.default "…"` 使其可见。
 
 ### 11.3 pd-console 单工作区
 

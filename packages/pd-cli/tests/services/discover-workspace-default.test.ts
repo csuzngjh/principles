@@ -50,6 +50,14 @@ function stubEnvironment(cwdDir: string): void {
   delete process.env.PD_WORKSPACE_DIR;
 }
 
+function captureStderr() {
+  return vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+}
+
+function stderrText(spy: ReturnType<typeof captureStderr>): string {
+  return spy.mock.calls.map((args) => String(args[0])).join('');
+}
+
 beforeEach(() => {
   workRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-957-')));
   fakeHome = path.join(workRoot, 'home');
@@ -73,6 +81,7 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
 
     expect(result).not.toBeNull();
     expect(result!.source).toBe('cwd');
+    expect(result!.declared).toBe(true);
     expect(result!.configPath).toBe(path.resolve(ws, '.pd', 'config.yaml'));
     expect(result!.workspaceDefault).toBe(canonicalPath(path.join(workRoot, 'declared-default')));
   });
@@ -98,6 +107,7 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
     const result = discoverWorkspaceDefault();
 
     expect(result!.source).toBe('cwd');
+    expect(result!.declared).toBe(false);
     expect(result!.workspaceDefault).toBe(canonicalPath(ws));
   });
 
@@ -115,14 +125,51 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
     expect(result!.source).toBe('cwd');
   });
 
-  it('rejects a relative workspace.default and falls back to the containing directory', () => {
+  it('rejects a relative workspace.default, says so, and falls back to the containing directory', () => {
     const ws = makeWorkspace('relative', 'version: 1\nworkspace:\n  default: ./somewhere\n');
     stubEnvironment(ws);
+    const stderrSpy = captureStderr();
 
     const result = discoverWorkspaceDefault();
 
     expect(result!.source).toBe('cwd');
+    expect(result!.declared).toBe(false);
     expect(result!.workspaceDefault).toBe(canonicalPath(ws));
+    const text = stderrText(stderrSpy);
+    expect(text).toContain('workspace.default "./somewhere" is not an absolute path');
+    expect(text).toContain('Falling back to the directory itself as the workspace');
+
+    stderrSpy.mockRestore();
+  });
+
+  it('warns when the directory being stood in points its config somewhere else', () => {
+    // ERR-117 / rc-9: the CLI chain follows the declared default while the
+    // hook chain follows the nearest directory, so "I ran the query against a
+    // library I was not standing in" must be visible on stderr.
+    const elsewhere = makeWorkspace('other-host', configWithDefault(path.join(workRoot, 'elsewhere')));
+    stubEnvironment(elsewhere);
+    const stderrSpy = captureStderr();
+
+    const result = discoverWorkspaceDefault();
+
+    expect(result!.declared).toBe(true);
+    expect(stderrText(stderrSpy)).toContain('Standing in');
+    expect(stderrText(stderrSpy)).toContain('Using the declared default');
+
+    stderrSpy.mockRestore();
+  });
+
+  it('stays quiet when the config default is the directory it lives in', () => {
+    const ws = makeWorkspace('self', configWithDefault(path.join(workRoot, 'self')));
+    stubEnvironment(ws);
+    const stderrSpy = captureStderr();
+
+    const result = discoverWorkspaceDefault();
+
+    expect(result!.workspaceDefault).toBe(canonicalPath(ws));
+    expect(stderrText(stderrSpy)).toBe('');
+
+    stderrSpy.mockRestore();
   });
 
   it('falls through to the OpenClaw default when cwd holds no .pd/config.yaml', () => {
@@ -136,6 +183,7 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
     const result = discoverWorkspaceDefault();
 
     expect(result!.source).toBe('openclaw_default');
+    expect(result!.declared).toBe(true);
     expect(result!.workspaceDefault).toBe(canonicalPath(openclawWs));
   });
 

@@ -27,11 +27,16 @@ function captureStderr() {
   return spy;
 }
 
-function makeDiscovery(workspaceDefault: string, source: 'cwd' | 'env_var' | 'openclaw_default' | 'openclaw_plugin_config' = 'openclaw_default'): import('../src/services/pd-config-loader.js').WorkspaceDiscoveryResult {
+function makeDiscovery(
+  workspaceDefault: string,
+  opts: { source?: 'cwd' | 'env_var' | 'openclaw_default' | 'openclaw_plugin_config'; declared?: boolean } = {},
+): import('../src/services/pd-config-loader.js').WorkspaceDiscoveryResult {
+  const { source = 'openclaw_default', declared = true } = opts;
   return {
     workspaceDefault,
     configPath: `${workspaceDefault}/.pd/config.yaml`,
     source,
+    declared,
   };
 }
 
@@ -189,49 +194,49 @@ describe('resolveWorkspaceDir', () => {
   // 14. Platform-agnostic: a Windows-style path is accepted everywhere.
   // On POSIX runners "Z:\\work" is not absolute; the boundary guard must
   // NOT treat that as invalid (regression for CI failure on Linux).
-  // 14. Platform-agnostic: a Windows-style path is accepted everywhere.
-  // On POSIX runners "Z:\\work" is not absolute; the boundary guard must
-  // NOT treat that as invalid (regression for CI failure on Linux).
   it('accepts Windows-style workspace paths (platform-agnostic)', () => {
     mockDiscover.mockReturnValue(null);
     expect(resolveWorkspaceDir('Z:\\pd-nonexistent-workspace-12345')).toBe('Z:\\pd-nonexistent-workspace-12345');
   });
 
-  // 15. PRI-957: a workspace discovered from cwd is used when nothing overrides it.
-  it('resolves to the cwd-discovered workspace when no flag and no env var', () => {
-    mockDiscover.mockReturnValue(makeDiscovery('/standing/in/codex-workspace', 'cwd'));
-    expect(resolveWorkspaceDir()).toBe('/standing/in/codex-workspace');
-  });
-
-  // 16. PRI-957: precedence is unchanged (env still wins over cwd), but the
-  // divergence must be observable — this is what stops a user-level
-  // PD_WORKSPACE_DIR from silently pinning another host's library.
-  it('keeps env precedence over a cwd hit and warns about the divergence', () => {
-    mockDiscover.mockReturnValue(makeDiscovery('/standing/in/codex-workspace', 'cwd'));
-    process.env.PD_WORKSPACE_DIR = '/env/pinned/openclaw-workspace';
+  // 15. PRI-957: when the discovered default is a bare cwd hit (nothing declared),
+  // the override warning must not advise editing a field that does not exist.
+  // Discriminating against cases 5/7, which use a declared default and keep the
+  // "config default" wording.
+  it('names the discovered workspace and offers the right fix when nothing was declared', () => {
+    mockDiscover.mockReturnValue(
+      makeDiscovery('/standing/in/codex-workspace', { source: 'cwd', declared: false }),
+    );
     const stderrSpy = captureStderr();
 
-    const result = resolveWorkspaceDir();
+    const result = resolveWorkspaceDir('/explicit/path');
 
-    expect(result).toBe('/env/pinned/openclaw-workspace');
+    expect(result).toBe('/explicit/path');
     expect(stderrSpy).toHaveBeenCalledWith(
-      expect.stringContaining('differs from config default "/standing/in/codex-workspace"'),
+      expect.stringContaining('differs from workspace discovered from your current directory'),
+    );
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('dropping the override, or adding workspace.default'),
     );
 
     stderrSpy.mockRestore();
   });
 
-  // 17. PRI-957: no warning when the cwd hit is the workspace being used.
-  it('does NOT warn when the resolved env workspace matches the cwd hit', () => {
-    mockDiscover.mockReturnValue(makeDiscovery('/same/workspace', 'cwd'));
-    process.env.PD_WORKSPACE_DIR = '/same/workspace';
+  // 16. PRI-957: a declared config default keeps the original wording.
+  it('keeps the config-default wording when the discovered default was declared', () => {
+    mockDiscover.mockReturnValue(
+      makeDiscovery('/declared/default', { source: 'cwd', declared: true }),
+    );
     const stderrSpy = captureStderr();
 
-    expect(resolveWorkspaceDir()).toBe('/same/workspace');
-    const warningCalls = stderrSpy.mock.calls.filter(
-      call => typeof call[0] === 'string' && call[0].includes('WARNING'),
+    resolveWorkspaceDir('/explicit/path');
+
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('differs from config default "/declared/default"'),
     );
-    expect(warningCalls).toHaveLength(0);
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Consider updating workspace.default in config.'),
+    );
 
     stderrSpy.mockRestore();
   });
