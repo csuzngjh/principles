@@ -1,18 +1,23 @@
 /**
  * Evidence concurrency (PLAN Part 5 / SPEC §8 并发档): MULTIPLE REAL entry
- * processes writing simultaneously. The shared ingress contract under
- * contention: with busyTimeout=0 an evidence writer never waits the hook —
- * a contended append degrades OBSERVABLY (rc-9) while the already-computed
- * decision (deny/neutral) is untouched; idempotent replay must not
- * double-count; and every event is accounted for exactly once across
- * (persisted rows + observable degradations).
+ * processes writing SIMULTANEOUSLY. The runners are async (`spawn`, never the
+ * blocking `spawnSync`) and share a start barrier, so the children genuinely
+ * overlap — the previous Promise.all-over-spawnSync shape serialized every
+ * process and proved nothing about contention.
+ *
+ * The shared ingress contract under contention: with busyTimeout=0 an
+ * evidence writer never waits the hook — a contended append degrades
+ * OBSERVABLY (rc-9) while the already-computed decision (deny/neutral) is
+ * untouched; idempotent replay must not double-count; and every event is
+ * accounted for exactly once across (persisted rows + observable
+ * degradations).
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { runEntry } from './helpers/hook-runner.js';
+import { createSpawnStartBarrier, runEntry, runEntryAsync } from './helpers/hook-runner.js';
 import {
   makeHome,
   makeGovernance,
@@ -25,6 +30,24 @@ import {
 afterAll(() => {
   cleanupTempDirs();
 });
+
+/** Maximum number of simultaneously-open [start, end) execution windows. */
+function maxConcurrentWindows(windows: ReadonlyArray<{ start: number; end: number }>): number {
+  const events: Array<[number, number]> = [];
+  for (const window of windows) {
+    events.push([window.start, 1], [window.end, -1]);
+  }
+  // At equal timestamps close before open — overlap must be REAL, not a
+  // touching-instant artifact.
+  events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let open = 0;
+  let max = 0;
+  for (const [, delta] of events) {
+    open += delta;
+    if (open > max) max = open;
+  }
+  return max;
+}
 
 describe('concurrent real entry processes (SPEC §8 并发档)', () => {
   it('parallel PostToolUse evidence from N processes: every event accounted for, decisions never blocked', async () => {
@@ -42,15 +65,33 @@ describe('concurrent real entry processes (SPEC §8 并发档)', () => {
         tool_use_id: `toolu_conc_${i}`,
       })));
 
-    const results = await Promise.all(payloads.map((payload) => Promise.resolve(
-      runEntry(home, payload, 'PostToolUse'),
-    )));
+    // TRUE concurrency: spawn all six children first, then write every
+    // payload in the same tick (start barrier), so the processes overlap.
+    const barrier = createSpawnStartBarrier(PROCESSES);
+    const launchAt = Date.now();
+    const results = await Promise.all(payloads.map((payload) =>
+      runEntryAsync(home, payload, 'PostToolUse', { startBarrier: barrier, timeoutMs: 30_000 })));
 
     // The tool ALREADY ran (PostToolUse) — no process may block or crash.
     for (const [i, result] of results.entries()) {
       expect(result.status, `process ${i} exit`).toBe(0);
       expect(result.stdout, `process ${i} stdout (PostToolUse never blocks)`).toBe('');
+      expect(typeof result.startedAt, `process ${i} start timestamp`).toBe('number');
+      expect(typeof result.endedAt, `process ${i} end timestamp`).toBe('number');
     }
+
+    // QUANTIFIED overlap evidence (defect-2 remediation): the previous shape
+    // recorded start offsets 0 → ~5900ms with zero overlap. Here every child's
+    // payload is written within the same tick, so at least two children must
+    // be observed executing at the same instant, and the total wall clock must
+    // be strictly shorter than the children's summed execution time (which is
+    // the definition of overlap — serial runs satisfy neither).
+    const windows = results.map((r) => ({ start: r.startedAt as number, end: r.endedAt as number }));
+    const wallClockMs = Math.max(...windows.map((w) => w.end)) - Math.min(...windows.map((w) => w.start));
+    const summedExecutionMs = windows.reduce((total, w) => total + (w.end - w.start), 0);
+    const concurrentPairs = maxConcurrentWindows(windows);
+    expect(concurrentPairs, `execution windows must overlap (wallClock=${wallClockMs}ms, summed=${summedExecutionMs}ms, launch offset=${Date.now() - launchAt}ms)`).toBeGreaterThanOrEqual(2);
+    expect(wallClockMs, 'concurrent wall clock must beat the serialized sum').toBeLessThan(summedExecutionMs);
 
     // Every event is accounted for exactly once: persisted tool_calls rows
     // (one per session) — plus, for any process whose append degraded under
@@ -78,8 +119,8 @@ describe('concurrent real entry processes (SPEC §8 并发档)', () => {
       tool_use_id: 'toolu_replay_same',
     }));
 
-    runEntry(home, payload, 'PostToolUse');
-    runEntry(home, payload, 'PostToolUse');
+    await runEntryAsync(home, payload, 'PostToolUse');
+    await runEntryAsync(home, payload, 'PostToolUse');
 
     const db = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
     const rows = db.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE session_id = 'replay-sess'").get() as { n: number };
@@ -100,7 +141,7 @@ describe('concurrent real entry processes (SPEC §8 并发档)', () => {
       call_id: `toolu_same_${tag}`,
       tool_use_id: `toolu_same_${tag}`,
     })));
-    for (const payload of payloads) runEntry(home, payload, 'PostToolUse');
+    for (const payload of payloads) await runEntryAsync(home, payload, 'PostToolUse');
 
     const db = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
     const rows = db.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE tool_name = 'Bash' AND outcome = 'failure'").get() as { n: number };

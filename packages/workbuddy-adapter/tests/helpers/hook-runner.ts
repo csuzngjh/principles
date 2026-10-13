@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /**
@@ -16,6 +16,14 @@ export interface WorkBuddyHookRunResult {
   status: number;
   stdout: string;
   stderr: string;
+  /**
+   * Async-runner only (runEntryAsync): ms timestamps of the child's observed
+   * execution window — `startedAt` is taken when the hook payload has been
+   * written into the child's stdin (post start-barrier), `endedAt` when the
+   * child closed. Concurrency tests use these to prove real overlap.
+   */
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export interface RunEntryOptions {
@@ -26,6 +34,34 @@ export interface RunEntryOptions {
   childPostlude?: string;
   /** Extra env overrides (e.g. PD_WORKBUDDY_ADAPTER_ENTRY for the wrapper). */
   env?: Record<string, string>;
+}
+
+/**
+ * Sync-start barrier for concurrent ASYNC runs (defect-2 remediation): pass
+ * the SAME barrier to every concurrent runEntryAsync call. Each runner spawns
+ * its child and arms its stdin payload; the payloads are written to all
+ * children only once every participant has spawned, so the hook processes
+ * genuinely overlap instead of queueing behind each other the way spawnSync
+ * forced them to.
+ */
+export interface SpawnStartBarrier {
+  /** Resolves when every expected participant has spawned and armed its write. */
+  participate(): Promise<void>;
+}
+
+/** Create a barrier that releases after `size` runEntryAsync participants joined. */
+export function createSpawnStartBarrier(size: number): SpawnStartBarrier {
+  let joined = 0;
+  let release: (() => void) | undefined;
+  const ready = new Promise<void>((resolve) => { release = resolve; });
+  if (size < 1) release?.();
+  return {
+    participate(): Promise<void> {
+      joined += 1;
+      if (joined >= size) release?.();
+      return ready;
+    },
+  };
 }
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -74,18 +110,105 @@ function buildInjectedScript(entry: string, entryUrl: string, channel: string | 
 export function runEntry(homeDir: string, payloadJson: string, channel?: string, options: RunEntryOptions = {}): WorkBuddyHookRunResult {
   assertEntryBuilt();
   const timeout = options.timeoutMs ?? 15_000;
+  return interpret(spawnEntry(homeDir, payloadJson, channel, options, timeout), 'pd-hook entry');
+}
+
+interface SpawnArgs {
+  argv: string[];
+  env: NodeJS.ProcessEnv;
+}
+
+/** Build the identical spawn shape the sync and async runners share. */
+function entrySpawnArgs(homeDir: string, channel: string | undefined, options: RunEntryOptions): SpawnArgs {
   const injected = options.childPrelude !== undefined || options.childPostlude !== undefined;
   const argv = injected
     ? ['-e', buildInjectedScript(ENTRY, pathToFileURL(ENTRY).href, channel, options.childPrelude, options.childPostlude)]
     : [ENTRY, ...(channel !== undefined ? [channel] : [])];
-  const result = spawnSync(process.execPath, argv, {
+  return { argv, env: homeEnv(homeDir, options.env) };
+}
+
+function spawnEntry(homeDir: string, payloadJson: string, channel: string | undefined, options: RunEntryOptions, timeout: number): ReturnType<typeof spawnSync> {
+  assertEntryBuilt();
+  const { argv, env } = entrySpawnArgs(homeDir, channel, options);
+  return spawnSync(process.execPath, argv, {
     input: payloadJson,
     encoding: 'utf8',
-    env: homeEnv(homeDir, options.env),
+    env,
     windowsHide: true,
     timeout,
   });
-  return interpret(result, 'pd-hook entry');
+}
+
+export interface RunEntryAsyncOptions extends RunEntryOptions {
+  /**
+   * Sync-start barrier: pass the SAME barrier to every concurrent runner of a
+   * group. Without a barrier the child starts as soon as it is spawned.
+   */
+  startBarrier?: SpawnStartBarrier;
+}
+
+/**
+ * Async sibling of runEntry: the child is spawned with `spawn` (never
+ * `spawnSync`), so several invocations can genuinely overlap. The synchronous
+ * version's semantics are unchanged — this exists because the former
+ * "concurrent" test used Promise.all over a blocking spawnSync, which proved
+ * serialization, not concurrency (defect-2 remediation).
+ */
+export function runEntryAsync(homeDir: string, payloadJson: string, channel?: string, options: RunEntryAsyncOptions = {}): Promise<WorkBuddyHookRunResult> {
+  return new Promise((resolve, reject) => {
+    let spawnArgs: SpawnArgs;
+    try {
+      assertEntryBuilt();
+      spawnArgs = entrySpawnArgs(homeDir, channel, options);
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    const timeout = options.timeoutMs ?? 30_000;
+    const child = spawn(process.execPath, spawnArgs.argv, {
+      env: spawnArgs.env,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let startedAt = 0;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill(); } catch { /* closing an already-dead child is fine */ }
+    }, timeout);
+    const finish = (result: WorkBuddyHookRunResult | Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (result instanceof Error) reject(result);
+      else resolve(result);
+    };
+    child.stdout.on('data', (chunk: Buffer) => { stdout += String(chunk); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += String(chunk); });
+    child.on('error', (error: Error) => finish(new Error(`pd-hook entry spawn failed: ${error.message}`)));
+    child.on('close', (status, signal) => {
+      if (timedOut || status === null || signal !== null) {
+        finish(new Error(
+          `pd-hook entry terminated abnormally (status=${String(status)}, signal=${String(signal)}, timedOut=${String(timedOut)}). `
+            + `An abnormal kill (harness timeout / external signal) is environmental, NOT a governance outcome — re-run before treating it as a regression.\n--- subprocess stderr ---\n${stderr.slice(0, 4000)}`,
+        ));
+        return;
+      }
+      finish({ status, stdout, stderr, startedAt, endedAt: Date.now() });
+    });
+    // The start barrier: hold the payload until every group member has
+    // spawned, then write all payloads within the same tick.
+    const write = () => {
+      startedAt = Date.now();
+      child.stdin.write(payloadJson);
+      child.stdin.end();
+    };
+    if (options.startBarrier) options.startBarrier.participate().then(write);
+    else write();
+  });
 }
 
 /** Run the plugin wrapper (real transport path the WorkBuddy host executes). */
