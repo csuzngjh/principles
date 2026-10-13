@@ -1,10 +1,10 @@
 # WorkBuddy Host Adapter SPEC — PD 第三宿主
 
-> Status: DRAFT v0.3.0 — 第二轮整改稿；Owner 决策与真实宿主探针尚未完成，不能据此宣称已支持 WorkBuddy。
-> Date: 2026-10-12
-> Code baseline: `b0f807b95d8c86e88fe46b7f2a63eec1923af24a`。
+> Status: IMPLEMENTED v0.3.1 — v0.3.0 契约经实施与验收（2026-10-13，PRI-952）；实现状态见 §12，验收边界以 §12 为准，未验证项不得宣称支持。
+> Date: 2026-10-12（v0.3.0 整改稿）；2026-10-13（§12 实施状态补记）。
+> Code baseline: `b0f807b95d8c86e88fe46b7f2a63eec1923af24a`（整改基线）；实现分支见私有执行记录 STATE.md。
 > Input: 同日 v0.2.0、第一轮评审清单，以及 2026-08 的 feasibility / capability-map / adapter-verification 三份调研。
-> Review: 第二轮报告保存在独立 private docs 的 `docs/reviews/2026-10-12-workbuddy-spec-second-review.md`。第一轮报告及旧调研是历史证据，不是当前验收结果。
+> Review: 第二轮报告保存在独立 private docs 的 `docs/reviews/2026-10-12-workbuddy-spec-second-review.md`。第一轮报告及旧调研是历史证据，不是当前验收结果。独立实施后审查（REQUEST CHANGES→resolved）见私有执行记录。
 > Authority: 本文不修改 ADR 或替 Owner 批准 OD；实现服从 AGENTS.md、ADR-0020、ADR-0027/0028。
 
 配套整改稿：[可行性](../plans/2026-08-workbuddy-plugin-feasibility.md)、[能力与机会](../plans/2026-08-28-workbuddy-capability-map-for-pd.md)、[历史取证及当前验证动作](../plans/2026-08-28-workbuddy-adapter-verification.md)。三份原始资料保留，本文链接指向同一隔离 worktree 内的修订稿。
@@ -235,5 +235,29 @@ host.workbuddy 为 quiet、默认 false；保留当前 sparse config 默认值�
 v0.2 的“10 Major + 14 Minor 全部修订”仅代表作者已改文字，不代表整改效果已独立验收。第二轮对原 24 行逐项给出状态，见 private review。
 
 v0.3.0：收窄故障阻断承诺并补 UserPromptSubmit；补治理目录与 worker；修正工具结果/身份契约；SessionStart 首版只做健康检查；补 sourceKind/生产分支/打包/UI 消费面；取消 MVP transcript 读取；按事件细化探针与真实 Owner 验收；机会改为有前提的假设；OD-01/02 更新并新增 OD-07/08；补全八项 Complexity Delta。
+
+v0.3.1（2026-10-13，实施后）：新增 §12 实施状态与支持矩阵。OD-01..08 均按推荐方案执行（Owner 启动授权记录于私有 DECISIONS）；P01–P06 真实宿主探针全部完成（engine 2.161.0）；四事件基线维持（P03 实证常规失败已进 PostToolUse，PostToolUseFailure 未纳入首版 hooks 注册）；治理目录冻结 `~/.workbuddy/pd-workspace`。真实宿主治理主回路（注入/阻断/证据/撤回）E2E 6/6 PASS。
+
+## 12. 实施状态与支持矩阵（2026-10-13）
+
+真实宿主：WorkBuddy Desktop 5.8.1 / 引擎 `codebuddy-lite-wb.mjs` v2.161.0（SHA-256 见 fixtures provenance）。隔离机制 `WORKBUDDY_CONFIG_DIR`+`CODEBUDDY_CONFIG_DIR`（P0 实证）。
+
+| 能力 | 状态 | 证据 |
+|---|---|---|
+| 插件发现/注册/启用/卸载（Desktop marketplace 语义） | Supported | P01 9/9 + installer 28 测试；生效时点=新会话 |
+| PreToolUse 治理阻断（deny/exit2/超时 fail-closed） | Supported | P02 矩阵 + E2E deny（文件未写+reason 达模型） |
+| UserPromptSubmit 原则注入（additionalContext，逐轮新鲜） | Supported | P04 + E2E inject（请求体含原则文本） |
+| PostToolUse 真实失败证据（is_error/exitCode 分流） | Supported | P03 + E2E evidence（trajectory 行） |
+| SessionStart 健康检查（静默，不注入正文） | Supported（保守：状态提示仅 stderr） | P04 通道验证；会话内不可见为已知限制 |
+| Owner 审批/撤回（既有产品入口） | Supported | E2E withdraw（pd activation deactivate）+ BDD 撤回场景 |
+| 跨项目共享治理工作区（projectDir/workspaceDir 分离） | Supported | P06 8/8 + BDD A/B 场景 |
+| flag-off 中性可观察（默认 off） | Supported | OD-03 + adapter/CLI 测试 |
+| 完整自动学习（失败→入队→后台诊断→提案→审批→生效） | NOT CLAIMED（机制接线已实现并有测试；真实 LLM 提案链 NOT RUN） | worker 8 测试 + BDD 该场景 @disabled |
+| modifiedInput / updatedToolOutput / ask / continue:false | Unsupported（首版 encoder 拒绝） | 输出白名单测试 |
+| transcript/reasoning 读取 | Unsupported（MVP 排除） | 无此类代码路径 |
+| resume/compact 后自动补注 | Unknown（宿主行为未验证） | 探针边界记录 |
+| 独立 CLI 引擎（~/.codebuddy 根）注册 | Unsupported（本安装器面向 Desktop） | installer 边界注释 |
+
+并发/升级/发布档：真实多入口并发、幂等重放、同参数独立调用有进程级测试；`npm pack` tarball 内容断言通过；**隔离机器完整安装链（真实 installer 驱动宿主注册→宿主发现）未跑**，属发布前剩余验证。
 
 本稿不构成 Owner 批准、部署授权或运行验收通过。原稿保留在用户提供的原目录，本稿在隔离 worktree 中供审阅。
