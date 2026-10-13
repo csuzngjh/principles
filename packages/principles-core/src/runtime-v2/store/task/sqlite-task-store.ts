@@ -396,6 +396,7 @@ export class SqliteTaskStore implements TaskStore {
     const placeholders = kinds.map(() => '?').join(', ');
     const pendingRow = db.prepare(
       `SELECT COUNT(*) as cnt, MIN(created_at) as oldest, (SELECT task_kind FROM tasks WHERE status = 'pending' AND task_kind IN (${placeholders}) ORDER BY created_at ASC LIMIT 1) as oldest_kind FROM tasks WHERE status = 'pending' AND task_kind IN (${placeholders})`
+      // runtime-contract-exempt: ERR-001 better-sqlite3 .get() returns unknown; narrowing to Record<string, unknown> | undefined is type-only (cnt/oldest/oldest_kind are validated below via typeof checks)
     ).get(...kinds, ...kinds) as Record<string, unknown> | undefined;
     if (!pendingRow || typeof pendingRow.cnt !== 'number' || !Number.isInteger(pendingRow.cnt)) {
       throw new PDRuntimeError(
