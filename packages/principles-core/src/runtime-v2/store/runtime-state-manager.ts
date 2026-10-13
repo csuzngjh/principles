@@ -541,6 +541,46 @@ export class RuntimeStateManager {
     return this._candidateStore.updateAdmissionProcessing(candidateId, processing);
   }
 
+  /**
+   * SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (SPEC §9.1): the diagnosis post-processing
+   * backlog — candidates of SUCCEEDED diagnostician tasks whose admission /
+   * intake / seeding never completed. Includes pre-CR-03 pending rows with no
+   * persisted disposition (the original stuck-candidates incident shape) and
+   * rows whose processing domain is still open and whose nextRetryAt has
+   * elapsed. Terminal processing states (complete / awaiting_owner / exhausted)
+   * and admission_json-NULL consumed rows are excluded — they are saved
+   * explainable states, not work.
+   */
+  async listDiagnosisPostProcessingBacklog(options: { limit: number; nowIso?: string }): Promise<
+    { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[]
+  > {
+    this.assertInitialized();
+    const db = this._connection.getDb();
+    const nowIso = options.nowIso ?? new Date().toISOString();
+    const rows = db.prepare(`
+      SELECT pc.candidate_id AS candidateId, pc.task_id AS taskId, pc.status AS status,
+             pc.created_at AS createdAt,
+             json_extract(pc.admission_json, '$.processing.state') AS processingState
+      FROM principle_candidates pc
+      JOIN tasks t ON t.task_id = pc.task_id
+      WHERE t.task_kind = 'diagnostician' AND t.status = 'succeeded'
+        AND (
+          (pc.admission_json IS NULL AND pc.status = 'pending')
+          OR (
+            pc.admission_json IS NOT NULL
+            AND COALESCE(json_extract(pc.admission_json, '$.processing.state'), 'not_started') IN ('not_started', 'in_progress')
+            AND (
+              json_extract(pc.admission_json, '$.processing.nextRetryAt') IS NULL
+              OR json_extract(pc.admission_json, '$.processing.nextRetryAt') <= ?
+            )
+          )
+        )
+      ORDER BY pc.created_at ASC
+      LIMIT ?
+    `).all(nowIso, options.limit) as { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[];
+    return rows;
+  }
+
   async archivePrinciple(principleId: string): Promise<boolean> {
     this.assertInitialized();
     const stateDir = path.join(this.options.workspaceDir, '.state');

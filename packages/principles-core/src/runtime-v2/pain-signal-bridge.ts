@@ -548,6 +548,95 @@ export class PainSignalBridge {
    * host process) may skip this; per-cycle workers MUST dispose to avoid
    * pinning the workspace SQLite files.
    */
+  /**
+   * SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (SPEC §9.1): continue the post-processing
+   * of a SUCCEEDED diagnosis whose candidates never finished admission /
+   * intake / seeding (crash between router `markTaskSucceeded` and this
+   * bridge's post-processing, intake/seed exceptions, consumed-but-unseeded
+   * orphans, pre-CR-03 rows with no persisted disposition).
+   *
+   * Hard guarantees:
+   *   - NEVER re-runs the diagnosis LLM (materials come from the persisted
+   *     run output + diagnosticJson);
+   *   - idempotent (Ledger writes dedup via existsForCandidate, seeds dedup
+   *     via findExistingDreamerTask, admission appends dedup by material
+   *     fingerprint);
+   *   - bounded (candidates whose processing state is terminal — complete /
+   *     awaiting_owner / exhausted — are skipped and reported, not rescanned);
+   *   - read/CLI paths never call this; only the worker continuation does.
+   */
+  async resumeSucceededDiagnosisPostProcessing(input: { taskId: string }): Promise<{
+    status: 'resumed' | 'not_applicable' | 'blocked';
+    reason?: string;
+    nextAction?: string;
+    result?: PainSignalBridgeResult;
+    processedCandidateIds?: string[];
+    skipped?: { candidateId: string; reason: string }[];
+    remainingCount?: number;
+  }> {
+    const task = await this.stateManager.getTask(input.taskId);
+    if (task === null) return { status: 'not_applicable', reason: 'task_missing' };
+    if (task.status !== 'succeeded') return { status: 'not_applicable', reason: `task_not_succeeded:${task.status}` };
+
+    const candidates = await this.stateManager.getCandidatesByTaskId(input.taskId);
+    if (candidates.length === 0) return { status: 'not_applicable', reason: 'no_candidates' };
+
+    // Reconstruct the persisted diagnosis materials (output + ingress facts +
+    // correction evidence) — exactly what a fresh post-processing round sees.
+    const reentry = validatePersistedIngressFacts(task.diagnosticJson);
+    if (reentry.errorCode !== null) {
+      return { status: 'blocked', reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; repair or re-run the diagnosis via the supported CLI command' };
+    }
+    const runs = await this.stateManager.getRunsByTask(input.taskId);
+    const latestRun = runs.at(-1);
+    let output: DiagnosticianOutputV1 | undefined;
+    if (latestRun !== undefined && typeof latestRun.outputPayload === 'string' && latestRun.outputPayload.length > 0) {
+      try {
+        const parsedOutput: unknown = JSON.parse(latestRun.outputPayload);
+        if (Value.Check(DiagnosticianOutputV1Schema, parsedOutput)) output = parsedOutput;
+      } catch {
+        output = undefined;
+      }
+    }
+
+    // Skip candidates whose processing domain says the work is finished or
+    // blocked-with-budget-spent; they stay visible in `skipped`.
+    const skipped: { candidateId: string; reason: string }[] = [];
+    const eligible: typeof candidates = [];
+    for (const candidate of candidates) {
+      const admission = await this.stateManager.getAdmissionDocument(candidate.candidateId);
+      if (!admission.ok) {
+        skipped.push({ candidateId: candidate.candidateId, reason: `admission_document_unreadable:${admission.reason}` });
+        continue;
+      }
+      const processingState = admission.document?.processing?.state;
+      if (processingState === 'complete' || processingState === 'awaiting_owner' || processingState === 'exhausted') {
+        skipped.push({ candidateId: candidate.candidateId, reason: `processing_${processingState}` });
+        continue;
+      }
+      eligible.push(candidate);
+    }
+    if (eligible.length === 0) {
+      return { status: 'not_applicable', reason: 'no_eligible_candidates', skipped, remainingCount: 0 };
+    }
+
+    const result = await this.onDiagnosisComplete({
+      taskId: input.taskId,
+      diagnosticianOutput: output,
+      painId: typeof task.inputRef === 'string' && task.inputRef.length > 0 ? task.inputRef : `diagnosis-source:${input.taskId}`,
+      provenance: reentry.provenance,
+      inputEvidenceCount: reentry.evidenceCount,
+      ...(reentry.correctionEvidence !== undefined ? { correctionEvidence: reentry.correctionEvidence } : {}),
+    });
+    return {
+      status: 'resumed',
+      result,
+      processedCandidateIds: eligible.map((c) => c.candidateId),
+      skipped,
+      remainingCount: 0,
+    };
+  }
+
   async dispose(): Promise<void> {
     for (const resource of this.ownedResources) {
       try { await resource.close(); } catch { /* best-effort cleanup */ }
@@ -1007,10 +1096,23 @@ export class PainSignalBridge {
           continue;
         }
 
+        // CR-05 (SPEC §9.1): resume idempotency — when a previous round already
+        // wrote this candidate's Ledger entry, skip intake (no duplicate
+        // writes) and fall through to seed/link recovery below.
+        const existingLedgerEntry = this.ledgerAdapter.existsForCandidate(candidate.candidateId);
+        if (existingLedgerEntry !== null) {
+          ledgerEntryIds.push(existingLedgerEntry.id);
+          ledgerEntryByCandidate.set(candidate.candidateId, existingLedgerEntry.id);
+        }
+
         // sibling 隔离：一个 candidate 的 intake 失败不应中止整批（ERR-089 模式）
         let intakeResult;
         try {
-          intakeResult = await this.intakeService.intake(candidate.candidateId);
+          if (existingLedgerEntry !== null) {
+            intakeResult = { outcome: 'ledger_entry' as const, written: false, entry: existingLedgerEntry };
+          } else {
+            intakeResult = await this.intakeService.intake(candidate.candidateId);
+          }
         } catch (intakeErr) {
           this.eventEmitter?.emitTelemetry({
             eventType: 'candidate_intake_failed',

@@ -9,6 +9,10 @@
  *   3. lease + run one Diagnostician task, then ONE bounded downstream
  *      consumer cycle through the SHARED host-neutral executor
  *      (internalization_auto_consumer = workspace execution authority)
+ *   4. SPEC-CODEX-PAIN-CLOSURE-001 CR-05: continue the post-processing of
+ *      succeeded diagnoses (pending candidates, intake/seed orphans) WITHOUT
+ *      re-running the diagnosis LLM; CR-08: persist cycle liveness facts
+ *      (readiness is computed elsewhere and never implies liveness).
  *
  * Every step reuses existing authority: catch-up reuses the Slice A/B
  * ingestion + admission seams, reconciliation reuses
@@ -48,9 +52,20 @@ import { CODEX_TOOL_SEMANTIC_MAPPINGS, CODEX_TOOL_SEMANTICS } from '../tool-sema
 
 export type CodexWorkerMode = 'ready' | 'manual_action_required' | 'paused' | 'degraded';
 
+export interface CodexWorkerPostProcessingReport {
+  readonly resumedTaskIds: readonly string[];
+  readonly processedCount: number;
+  /** Eligible-after-this-cycle backlog size (oldest-first scan is bounded). */
+  readonly remainingCount: number;
+  readonly oldestAgeMs: number | null;
+  readonly blocked: readonly { candidateId: string; reason: string }[];
+}
+
 export interface CodexWorkerCycleStepReport {
   readonly catchUp: CodexCatchUpResult;
   readonly reconcile: ReconcileGovernanceContinuationResult;
+  /** CR-05: succeeded-diagnosis post-processing continuation (no LLM). */
+  readonly postProcessing: CodexWorkerPostProcessingReport | null;
   /** At most ONE diagnostician execution per cycle (bounded work). */
   readonly diagnostician: {
     readonly taskId: string;
@@ -90,6 +105,25 @@ export interface CodexWorkerCycleOptions {
 
 const WORKER_OWNER = 'companion-worker';
 const DEFAULT_DIAG_CANDIDATE_LIMIT = 5;
+/** CR-05 §9.1: bounded per-cycle post-processing continuation budget. */
+const DEFAULT_POST_PROCESSING_LIMIT = 2;
+/** CR-08 §9.3: liveness facts are worker-owned runtime state (not governance truth). */
+const LIVENESS_FILE = 'codex-worker-liveness.json';
+const LIVENESS_STAGE_DEADLINE_MS = {
+  catch_up: 5 * 60_000,
+  reconcile: 5 * 60_000,
+  diagnosis_execution: 15 * 60_000,
+  post_processing: 5 * 60_000,
+  downstream_cycle: 10 * 60_000,
+};
+
+export function readCodexWorkerLiveness(workspaceDir: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(path.resolve(workspaceDir), '.state', LIVENESS_FILE), 'utf8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 function workerLogger(logger?: ConsumerCycleLogger): ConsumerCycleLogger {
   return logger ?? {
@@ -104,6 +138,31 @@ function directoryExists(dir: string): boolean {
     return fs.statSync(dir).isDirectory();
   } catch {
     return false;
+  }
+}
+
+function writeLiveness(workspaceDir: string, patch: Record<string, unknown>): void {
+  try {
+    const root = path.resolve(workspaceDir);
+    const stateDir = path.join(root, '.state');
+    const file = path.join(stateDir, LIVENESS_FILE);
+    // The subpath is a constant, so containment always holds — the explicit
+    // check keeps the write boundary auditable (defense in depth).
+    if (!file.startsWith(root + path.sep)) return;
+    if (!directoryExists(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
+    let current: Record<string, unknown> = {};
+    try {
+      current = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+    } catch {
+      current = {};
+    }
+    const merged = { ...current, ...patch, updatedAt: new Date().toISOString() };
+    const tmp = path.join(stateDir, `${LIVENESS_FILE}.tmp`);
+    fs.writeFileSync(tmp, JSON.stringify(merged));
+    fs.renameSync(tmp, file);
+  } catch {
+    // liveness bookkeeping must never break the cycle (rc-9: the cycle report
+    // itself remains the observable degradation channel)
   }
 }
 
@@ -136,6 +195,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   const logger = workerLogger(options.logger);
   const emitEvent = options.emitEvent ?? ((_event: string, _payload: string) => undefined);
   const base = { workspaceDir };
+  const cycleStartedAt = new Date();
 
   // Step 1 — Workspace eligibility.
   if (!directoryExists(workspaceDir)) {
@@ -151,6 +211,14 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   if (flags['host.codex']?.enabled !== true) {
     return { ...base, mode: 'paused', reason: 'host.codex_disabled', nextAction: 'Set features.host.codex.enabled=true in the Workspace .pd/config.yaml to enable Codex PD behavior.' };
   }
+
+  // CR-08: liveness bookkeeping starts only after the workspace proved
+  // eligible — writing into a missing workspace directory would fabricate it.
+  writeLiveness(workspaceDir, {
+    lastCycleStartedAt: cycleStartedAt.toISOString(),
+    runningStage: 'catch_up',
+    stageDeadline: new Date(cycleStartedAt.getTime() + LIVENESS_STAGE_DEADLINE_MS.catch_up).toISOString(),
+  });
 
   const consumerFlag = loadFeatureFlagFromConfig(workspaceDir, 'internalization_auto_consumer', { info: (m) => logger.info(m), warn: (m) => logger.warn(m) });
 
@@ -197,7 +265,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
       mode: 'paused',
       reason: 'internalization_auto_consumer_disabled',
       nextAction: 'Automatic internalization execution is paused for this Workspace; manual commands remain available: pd diagnose, pd runtime internalization run-once.',
-      report: { catchUp, reconcile, diagnostician: null, downstream: null },
+      report: { catchUp, reconcile, postProcessing: null, diagnostician: null, downstream: null },
     };
   } else {
     // Step 4 — expired-lease recovery sweep, then Step 5/6: at most one
@@ -261,7 +329,70 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
         mode: 'degraded',
         reason: `diagnostician_execution_failed:${detail}`,
         nextAction: 'Inspect the Workspace runtime profile and provider configuration; the task keeps its pending/retry state and no evidence was mutated.',
-        report: { catchUp, reconcile, diagnostician: null, downstream: null },
+        report: { catchUp, reconcile, postProcessing: null, diagnostician: null, downstream: null },
+      };
+    }
+  }
+
+  // Step 6b — SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (SPEC §9.1): continue the
+  // post-processing of SUCCEEDED diagnoses (candidates stuck before
+  // admission/intake/seed — the original incident shape) without re-running
+  // the diagnosis LLM. Runs in the SAME consumer-flag authority as fresh
+  // diagnoses; every class (pending / due-retry / post-processing) is served
+  // every cycle it has eligible work, so no class can starve another
+  // (SPEC §9.1: each eligible class served within 3 full cycles).
+  let postProcessing: CodexWorkerPostProcessingReport | null = null;
+  writeLiveness(workspaceDir, { runningStage: 'post_processing', stageDeadline: new Date(Date.now() + LIVENESS_STAGE_DEADLINE_MS.post_processing).toISOString() });
+  if (consumerFlag.enabled && !diagnosticianDisabled) {
+    try {
+      const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+      try {
+        const backlog = await handle.stateManager.listDiagnosisPostProcessingBacklog({ limit: DEFAULT_POST_PROCESSING_LIMIT });
+        const backlogAll = await handle.stateManager.listDiagnosisPostProcessingBacklog({ limit: 200 });
+        const oldestCreatedAt = backlogAll[0]?.createdAt;
+        const blocked: { candidateId: string; reason: string }[] = [];
+        const resumedTaskIds = new Set<string>();
+        if (backlog.length > 0) {
+          const stateDir = path.join(workspaceDir, '.state');
+          const bridge = await createPainSignalBridge({
+            workspaceDir,
+            stateDir,
+            ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
+            owner: WORKER_OWNER,
+            effectiveConfig: config.effective,
+            getEnvVar: (name: string) => process.env[name],
+          });
+          for (const item of backlog) {
+            const resumed = await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: item.taskId });
+            if (resumed.status === 'resumed') {
+              resumedTaskIds.add(item.taskId);
+            } else if (resumed.status === 'blocked') {
+              blocked.push({ candidateId: item.candidateId, reason: resumed.reason ?? 'blocked' });
+            }
+            for (const skip of resumed.skipped ?? []) blocked.push(skip);
+          }
+        }
+        postProcessing = {
+          resumedTaskIds: [...resumedTaskIds],
+          processedCount: backlog.length,
+          remainingCount: Math.max(0, backlogAll.length - backlog.length),
+          oldestAgeMs: oldestCreatedAt !== undefined ? Math.max(0, Date.now() - Date.parse(oldestCreatedAt)) : null,
+          blocked,
+        };
+        if (backlog.length > 0) {
+          emitEvent('CODEX_WORKER_POST_PROCESSING', JSON.stringify(postProcessing));
+        }
+      } finally {
+        await handle.close().catch(() => undefined);
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+      return {
+        ...base,
+        mode: 'degraded',
+        reason: `post_processing_continuation_failed:${detail}`,
+        nextAction: 'Inspect the workspace state.db principle_candidates/tasks; the worker retries automatically on the next cycle.',
+        report: { catchUp, reconcile, postProcessing: null, diagnostician, downstream: null },
       };
     }
   }
@@ -289,9 +420,10 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
       mode: 'degraded',
       reason: `host_tool_declaration_persist_failed:${declared.reason}`,
       nextAction: 'Repair Codex host declaration persistence (.pd/host-tool-semantics/codex.json) before running the downstream internalization cycle; the worker retries automatically on the next cycle.',
-      report: { catchUp, reconcile, diagnostician, downstream: null },
+      report: { catchUp, reconcile, postProcessing: null, diagnostician, downstream: null },
     };
   }
+  writeLiveness(workspaceDir, { runningStage: 'downstream_cycle', stageDeadline: new Date(Date.now() + LIVENESS_STAGE_DEADLINE_MS.downstream_cycle).toISOString() });
   const downstream = await runInternalizationConsumerCycle(workspaceDir, {
     owner: WORKER_OWNER,
     logLabel: 'CodexWorker',
@@ -317,11 +449,19 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     : diagnostician?.status === 'degraded' ? `diagnostician_degraded:${diagnostician.message ?? 'unknown'}`
     : downstream.skipReason === 'runtime_config_error' || downstream.skipReason === 'cycle_error' || downstream.skipReason === 'config_malformed' ? `downstream:${downstream.skipReason}`
     : undefined;
+  writeLiveness(workspaceDir, {
+    runningStage: null,
+    stageDeadline: null,
+    lastCycleCompletedAt: new Date().toISOString(),
+    lastCycleDurationMs: Date.now() - cycleStartedAt.getTime(),
+    lastCycleMode: degradedReason !== undefined ? 'degraded' : 'ready',
+    ...(degradedReason !== undefined ? { lastDegradedReason: degradedReason } : {}),
+  });
   return {
     ...base,
     mode: degradedReason !== undefined ? 'degraded' : 'ready',
     ...(degradedReason !== undefined ? { reason: degradedReason, nextAction: 'Inspect the Workspace .pd/config.yaml runtime profile and the per-step report above; the worker retries automatically on the next cycle.' } : {}),
-    report: { catchUp, reconcile, diagnostician, downstream },
+    report: { catchUp, reconcile, postProcessing, diagnostician, downstream },
   };
 }
 

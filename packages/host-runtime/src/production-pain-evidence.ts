@@ -444,7 +444,7 @@ export function recordVerifiedToolOutcomes(args: {
       }
     })();
   } catch (error) {
-    const reason = `trajectory_write_failed:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`;
+    const reason: `trajectory_write_failed:${string}` = `trajectory_write_failed:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`;
     const filled = results.length;
     for (let i = filled; i < args.outcomes.length; i += 1) results.push({ status: 'unavailable', reason });
   } finally {

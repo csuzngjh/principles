@@ -22,5 +22,5 @@ export { catchUpCodexIngestion, CODEX_CATCH_UP_NEXT_ACTION } from './ingestion/c
 export type { CodexCatchUpOptions, CodexCatchUpResult, CodexCatchUpRolloutResult } from './ingestion/catch-up.js';
 export { locateCodexTranscriptByRolloutIdentity } from './ingestion/transcript-locate.js';
 export type { CodexTranscriptLookup } from './ingestion/transcript-locate.js';
-export { runCodexWorkspaceWorkerCycle, computeCodexWorkerStatusMode } from './worker/workspace-worker.js';
-export type { CodexWorkerMode, CodexWorkerCycleResult, CodexWorkerCycleStepReport, CodexWorkerCycleOptions, CodexWorkerStatusEvaluation } from './worker/workspace-worker.js';
+export { runCodexWorkspaceWorkerCycle, computeCodexWorkerStatusMode, readCodexWorkerLiveness } from './worker/workspace-worker.js';
+export type { CodexWorkerMode, CodexWorkerCycleResult, CodexWorkerCycleStepReport, CodexWorkerCycleOptions, CodexWorkerStatusEvaluation, CodexWorkerPostProcessingReport } from './worker/workspace-worker.js';
