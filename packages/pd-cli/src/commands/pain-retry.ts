@@ -107,6 +107,10 @@ function resolveTaskIdFromPainId(painId: string): { taskId: string } | { reason:
   return { taskId: `diagnosis_${painId}` };
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** Return value as a non-blank string if it is one, otherwise null. */
 function readNonBlankString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
@@ -406,8 +410,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         // (the new evaluation version is appended, never overwritten).
         let payloadParsed: Record<string, unknown> = {};
         try {
-          const raw = JSON.parse(task.diagnosticJson ?? '{}') as unknown;
-          if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) payloadParsed = raw as Record<string, unknown>;
+          const raw: unknown = JSON.parse(task.diagnosticJson ?? '{}');
+          if (isPlainRecord(raw)) payloadParsed = raw;
         } catch {
           payloadParsed = {};
         }

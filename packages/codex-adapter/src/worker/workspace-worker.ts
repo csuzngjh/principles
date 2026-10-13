@@ -141,6 +141,10 @@ function directoryExists(dir: string): boolean {
   }
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function writeLiveness(workspaceDir: string, patch: Record<string, unknown>): void {
   try {
     const root = path.resolve(workspaceDir);
@@ -152,7 +156,8 @@ function writeLiveness(workspaceDir: string, patch: Record<string, unknown>): vo
     if (!directoryExists(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
     let current: Record<string, unknown> = {};
     try {
-      current = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (isPlainRecord(parsed)) current = parsed;
     } catch {
       current = {};
     }

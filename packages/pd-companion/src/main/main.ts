@@ -357,14 +357,20 @@ const livenessStallNotified = new Set<string>();
  * no running stage within its deadline, surface one workspace_worker_stalled
  * event — readiness/registration alone never counts as liveness.
  */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function checkWorkspaceWorkerLiveness(): void {
   for (const workspace of manifestCodexWorkspaces()) {
-    let record: Record<string, unknown>;
+    let record: Record<string, unknown> = {};
     try {
-      record = JSON.parse(fs.readFileSync(path.join(workspace, '.state', 'codex-worker-liveness.json'), 'utf8')) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(fs.readFileSync(path.join(workspace, '.state', 'codex-worker-liveness.json'), 'utf8'));
+      if (isPlainRecord(parsed)) record = parsed;
     } catch {
       continue;
     }
+    if (Object.keys(record).length === 0) continue;
     const lastCompleted = typeof record.lastCycleCompletedAt === 'string' ? Date.parse(record.lastCycleCompletedAt) : NaN;
     const runningStage = typeof record.runningStage === 'string' ? record.runningStage : null;
     const stageDeadline = typeof record.stageDeadline === 'string' ? Date.parse(record.stageDeadline) : NaN;
