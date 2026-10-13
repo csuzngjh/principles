@@ -3008,6 +3008,21 @@ function probeAutolaunchHealth(port: number, timeoutMs = 1500): Promise<boolean>
  * EP-04: detached + unref keeps the console running after the installer exits.
  * EP-06: reuses pd-cli's handleConsoleOpen via the CLI entry — no new launcher.
  */
+/**
+ * WorkBuddy remediation (review 2026-10-13 §4 P1): the auto-launched Console,
+ * canary and manual-open instructions must manage the directory the host's
+ * hook/worker actually read. For the WorkBuddy host that is the dedicated
+ * governance workspace (SPEC §4.1) — NOT the project directory, which is only
+ * the task project path. Other hosts keep the project workspace.
+ */
+export function resolveConsoleWorkspaceDir(
+  host: HostTarget | undefined,
+  projectWorkspaceDir: string,
+  homeDir: string,
+): string {
+  return host === 'workbuddy' ? getWorkbuddyWorkspaceDir(homeDir) : projectWorkspaceDir;
+}
+
 async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: string; fallbackAction?: string }> {
   // Test/smoke seam (mirrors PD_SKIP_GLOBAL_SHIM): isolated installs (release
   // smoke, upgrade gate) must not spawn a detached console that holds the
@@ -4191,7 +4206,10 @@ export async function install(
     // Task 8: auto-launch console via `pd console open` (reuses PRI-300
     // handleConsoleOpen — no new launcher subsystem). Opens the browser to
     // /welcome for onboarding. Detached so the console survives installer exit.
-    const launchResult = await autoLaunchConsole(options.workspaceDir);
+    // WorkBuddy remediation: the console manages the GOVERNANCE workspace for
+    // this host — the directory hook/worker read — never the project dir.
+    const consoleWorkspaceDir = resolveConsoleWorkspaceDir(activeHostTarget, options.workspaceDir, getHomeDir());
+    const launchResult = await autoLaunchConsole(consoleWorkspaceDir);
 
     // PRI-645: report the ACTUAL effective channels (registry default +
     // sparse override). Never mask an explicit Owner disable with the
@@ -4205,9 +4223,9 @@ export async function install(
     // success=false and be guided to fix the failed host.
     const nextActions: string[] = [];
     if (components.cli === 'verified') {
-      nextActions.push(`pd runtime canary --workspace "${options.workspaceDir}" --json`);
+      nextActions.push(`pd runtime canary --workspace "${consoleWorkspaceDir}" --json`);
     } else if (components.cli === 'verified_local_only' && components.cliLocalPath) {
-      nextActions.push(`"${components.cliLocalPath}" runtime canary --workspace "${options.workspaceDir}" --json`);
+      nextActions.push(`"${components.cliLocalPath}" runtime canary --workspace "${consoleWorkspaceDir}" --json`);
     }
     if (components.console === 'configured') {
       if (launchResult.consoleUrl) {
@@ -4215,7 +4233,7 @@ export async function install(
         nextActions.push(`Console ready at ${launchResult.consoleUrl} (browser opened automatically)`);
       } else {
         // EP-03: auto-launch did not succeed — keep manual start instruction.
-        nextActions.push(`pd console --workspace "${options.workspaceDir}" --no-auth (listens on 127.0.0.1 only)`);
+        nextActions.push(`pd console --workspace "${consoleWorkspaceDir}" --no-auth (listens on 127.0.0.1 only)`);
       }
     }
     if (launchResult.fallbackAction) {

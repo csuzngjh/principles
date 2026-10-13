@@ -491,22 +491,36 @@ export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boole
     if (typeof line === 'string' && WORKBUDDY_KEY_LINE.test(line)) { keyIndex = i; break; }
   }
   if (keyIndex >= 0) {
-    // Replace/insert the enabled line directly under the key.
-    const enabledLine = lines[keyIndex + 1];
-    if (typeof enabledLine === 'string' && WORKBUDDY_ENABLED_LINE.test(enabledLine)) {
-      lines[keyIndex + 1] = `    enabled: ${enabled}`;
+    // Remediation (review 2026-10-13 §3 P2): locate the existing `enabled` and
+    // `category` fields WITHIN the flag's mapping block regardless of their
+    // order, comments or blank lines between them — the previous fixed-offset
+    // (+1/+2) insertion produced a duplicate `enabled` key whenever a legal
+    // ordering (category first) or a comment separated the fields, which the
+    // production loader then rejects. The mapping block ends at the first
+    // non-comment line that is neither field.
+    let enabledIndex = -1;
+    let categoryIndex = -1;
+    for (let i = keyIndex + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (typeof line !== 'string') break;
+      if (line.trim() === '' || /^\s*#/.test(line)) continue; // blank / comment — inside the block
+      if (WORKBUDDY_ENABLED_LINE.test(line)) { enabledIndex = i; continue; }
+      if (WORKBUDDY_CATEGORY_LINE.test(line)) { categoryIndex = i; continue; }
+      break; // dedent or next key — mapping entry ended
+    }
+    if (enabledIndex >= 0) {
+      lines[enabledIndex] = `    enabled: ${enabled}`;
     } else {
-      lines.splice(keyIndex + 1, 0, `    enabled: ${enabled}`);
+      // No enabled field: insert both fields right under the key line.
+      lines.splice(keyIndex + 1, 0, `    enabled: ${enabled}`, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
+      if (categoryIndex > keyIndex) categoryIndex += 2;
     }
     // R1 write contract: EVERY entry this function writes carries the
-    // schema-required category. A legacy enabled-only entry would fail the
-    // production validator and leave the hook chain degraded even though the
-    // flag edit "succeeded".
-    const categoryLine = lines[keyIndex + 2];
-    if (typeof categoryLine === 'string' && WORKBUDDY_CATEGORY_LINE.test(categoryLine)) {
-      lines[keyIndex + 2] = `    category: ${WORKBUDDY_FLAG_CATEGORY}`;
-    } else {
-      lines.splice(keyIndex + 2, 0, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
+    // schema-required category (production validator requirement).
+    if (categoryIndex >= 0) {
+      lines[categoryIndex] = `    category: ${WORKBUDDY_FLAG_CATEGORY}`;
+    } else if (enabledIndex >= 0) {
+      lines.splice(enabledIndex + 1, 0, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
     }
   } else {
     // Match BOTH an existing mapping header (`features:`) and the empty flow

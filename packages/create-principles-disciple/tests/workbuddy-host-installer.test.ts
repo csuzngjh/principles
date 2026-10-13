@@ -583,6 +583,71 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('enable/disable handle legal field orders inside the flag mapping (category before enabled, comments, blank lines) — review 2026-10-13 §3 P2', () => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-flag3-'));
+    try {
+      const configPath = path.join(dir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      // category FIRST, then enabled — the exact ordering the review flagged.
+      fs.writeFileSync(configPath, 'features:\n  host.workbuddy:\n    category: quiet\n    enabled: false\n');
+      const enable = setWorkbuddyGovernanceFlag(dir, true);
+      expect(enable.ok).toBe(true);
+      const parsed = parseYaml(fs.readFileSync(configPath, 'utf8')) as { features: Record<string, Record<string, unknown>> };
+      expect(parsed.features['host.workbuddy']).toEqual({ category: 'quiet', enabled: true });
+      const disable = setWorkbuddyGovernanceFlag(dir, false);
+      expect(disable.ok).toBe(true);
+      const reparsed = parseYaml(fs.readFileSync(configPath, 'utf8')) as { features: Record<string, Record<string, unknown>> };
+      expect(reparsed.features['host.workbuddy'].enabled).toBe(false);
+      expect(reparsed.features['host.workbuddy'].category).toBe('quiet');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('enable handles comments and blank lines inside the flag mapping without duplicating keys', () => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-flag4-'));
+    try {
+      const configPath = path.join(dir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, [
+        'features:',
+        '  host.workbuddy:',
+        '    # user comment',
+        '',
+        '    enabled: false',
+        '    category: quiet',
+        '',
+      ].join('\n'));
+      const outcome = setWorkbuddyGovernanceFlag(dir, true);
+      expect(outcome.ok).toBe(true);
+      const text = fs.readFileSync(configPath, 'utf8');
+      const parsed = parseYaml(text) as { features: Record<string, Record<string, unknown>> };
+      expect(parsed.features['host.workbuddy'].enabled).toBe(true);
+      // No duplicate keys may be introduced.
+      expect(text.match(/enabled: true/g)?.length).toBe(1);
+      expect(text.match(/host\.workbuddy:/g)?.length).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('malformed flag mapping (duplicate enabled keys) is refused with zero modification', () => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-flag5-'));
+    try {
+      const configPath = path.join(dir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      const before = 'features:\n  host.workbuddy:\n    enabled: false\n    enabled: true\n';
+      fs.writeFileSync(configPath, before);
+      const outcome = setWorkbuddyGovernanceFlag(dir, true);
+      // The production loader rejects duplicate keys; the writer must not
+      // edit blind — refuse and leave the file byte-identical.
+      expect(outcome.ok).toBe(false);
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ─── uninstall ───────────────────────────────────────────────────────────────
