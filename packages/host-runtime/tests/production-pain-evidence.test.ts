@@ -137,6 +137,95 @@ describe('production after-tool pain/evidence kernel', () => {
     db.close();
   });
 
+  describe('host tool-call identity (I1: call_id participates when the host supplies it)', () => {
+    function failedWriteWithCallId(workspaceDir: string, toolCallId: string): HostEvent {
+      return {
+        ...failedWrite(workspaceDir),
+        context: { ...failedWrite(workspaceDir).context, toolCallId },
+      };
+    }
+
+    it('keeps two REAL same-argument calls with distinct call ids as two events', async () => {
+      const workspaceDir = workspaceWithTrajectory();
+      const runtime = createProductionHostRuntime();
+
+      const first = await runtime.dispatch(failedWriteWithCallId(workspaceDir, 'call-a'));
+      const second = await runtime.dispatch(failedWriteWithCallId(workspaceDir, 'call-b'));
+
+      // Both real calls leave their own evidence row; the second is NOT a
+      // duplicate of the first (probe P03: the engine does not dedup calls).
+      expect(first.metadata).toMatchObject({ duplicate: false });
+      expect(second.metadata).toMatchObject({ duplicate: false });
+      expect(first.metadata?.eventId).not.toBe(second.metadata?.eventId);
+      const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+      try {
+        expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 2 });
+        // Cooldown is DEBOUNCE, not identity: the second independent failure
+        // shares failureSource+error with the first, so the diagnostic trigger
+        // stays suppressed within the window while the evidence row still lands.
+        expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 1 });
+      } finally {
+        db.close();
+      }
+    });
+
+    it('replay of the SAME call id (host redelivery) stays one event', async () => {
+      const workspaceDir = workspaceWithTrajectory();
+      const runtime = createProductionHostRuntime();
+
+      await runtime.dispatch(failedWriteWithCallId(workspaceDir, 'call-a'));
+      const replay = await runtime.dispatch(failedWriteWithCallId(workspaceDir, 'call-a'));
+
+      expect(replay.metadata).toMatchObject({ duplicate: true });
+      const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+      try {
+        expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 1 });
+        expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 1 });
+      } finally {
+        db.close();
+      }
+    });
+
+    it('derives the same identity as the live handler for one call id (parity with the derivation export)', async () => {
+      const workspaceDir = workspaceWithTrajectory();
+      const event = failedWriteWithCallId(workspaceDir, 'call-a');
+      await createProductionHostRuntime().dispatch(event);
+      const replay = deriveProductionToolPainIdentity({ ...event.context, source: event.source });
+      const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+      try {
+        expect(db.prepare('SELECT params_json, result_preview FROM tool_calls').get()).toEqual({
+          params_json: replay.paramsJson,
+          result_preview: replay.resultPreview,
+        });
+        expect(db.prepare('SELECT canonical_pain_id FROM pain_events').get()).toEqual({ canonical_pain_id: replay.painId });
+      } finally {
+        db.close();
+      }
+    });
+
+    it('legacy hosts without a call id keep the existing merged-identity behavior (documented limitation)', async () => {
+      // failedWrite() carries NO toolCallId: without a host call id two
+      // identical-content calls are indistinguishable, so they still merge.
+      // This is the preserved pre-I1 behavior — PD must not fabricate
+      // precision the host does not supply (rc-6: identity from the SAME
+      // authoritative fields).
+      const workspaceDir = workspaceWithTrajectory();
+      const runtime = createProductionHostRuntime();
+
+      const first = await runtime.dispatch(failedWrite(workspaceDir));
+      const second = await runtime.dispatch(failedWrite(workspaceDir));
+
+      expect(first.metadata).toMatchObject({ duplicate: false });
+      expect(second.metadata).toMatchObject({ duplicate: true });
+      const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+      try {
+        expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 1 });
+      } finally {
+        db.close();
+      }
+    });
+  });
+
   it('binds a supplied event ID to sanitized payload and outcome instead of letting it override identity', async () => {
     const workspaceDir = workspaceWithTrajectory();
     const runtime = createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 'host-reused-id', painScore: 90, isRisky: true, consecutiveErrors: 4 }) });

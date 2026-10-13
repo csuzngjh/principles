@@ -70,6 +70,10 @@ export function buildLiveToolCandidate(args: {
     hostTurnId: fields.turnId,
     toolName: fields.toolName ?? '',
     source: CODEX_POST_TOOL_USE_SOURCE,
+    // I1 identity parity: the live handler derives the canonical pain from the
+    // same tool_use_id, so the candidate must carry it too (one real call →
+    // one canonical pain across the admission + dispatch deliveries).
+    toolCallId: fields.toolUseId,
     ...(fields.toolInput !== undefined ? { toolInput: fields.toolInput } : {}),
     ...(fields.toolResponse !== undefined ? { toolOutput: fields.toolResponse } : {}),
     observedAt: new Date().toISOString(),
@@ -111,6 +115,10 @@ export function buildTranscriptCandidates(observations: readonly GovernanceObser
         hostTurnId: observation.hostTurnId,
         toolName: typeof toolName === 'string' ? toolName : '',
         source: CODEX_POST_TOOL_USE_SOURCE,
+        // I1 identity parity: the decoded observation carries the same
+        // tool_use_id the live delivery derived its canonical pain from, so a
+        // transcript replay converges on that pain instead of a second one.
+        ...(typeof observation.toolUseId === 'string' && observation.toolUseId.length > 0 ? { toolCallId: observation.toolUseId } : {}),
         toolInput: own(facts, 'command') ?? null,
         ...(exitCode !== undefined ? { toolOutput: { exitCode, stdout: own(facts, 'stdout') ?? null, stderr: own(facts, 'stderr') ?? null } } : {}),
         observedAt: observation.observedAt,

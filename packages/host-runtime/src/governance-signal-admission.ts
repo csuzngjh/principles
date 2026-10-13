@@ -428,6 +428,13 @@ export interface GovernanceToolFailureCandidate {
   readonly toolName: string;
   /** Host event source (e.g. `codex:post_tool_use`) — identity parity with the live handler. */
   readonly source: string;
+  /**
+   * I1 identity parity: the host's real per-call id (`tool_use_id`). The live
+   * handler's canonical derivation includes it, so candidate builders MUST
+   * supply it when the host provided one — a candidate without it would derive
+   * a second canonical pain for a call the live path already recorded.
+   */
+  readonly toolCallId?: string;
   readonly toolInput?: unknown;
   readonly toolOutput?: unknown;
   readonly observedAt: string;
@@ -705,6 +712,9 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
     turnId: candidate.hostTurnId,
     toolName: candidate.toolName,
     source: candidate.source,
+    // I1 identity parity: same call id the live handler derived from (the
+    // candidate builder forwards the host `tool_use_id`).
+    ...(candidate.toolCallId !== undefined ? { toolCallId: candidate.toolCallId } : {}),
     ...(candidate.toolInput !== undefined ? { toolInput: candidate.toolInput } : {}),
     ...(candidate.toolOutput !== undefined ? { toolOutput: candidate.toolOutput } : {}),
   });

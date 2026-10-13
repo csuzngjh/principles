@@ -53,6 +53,16 @@ export interface ProductionToolEventFields {
   workspaceDir: string;
   sessionId: string;
   turnId?: string;
+  /**
+   * I1: the host's real per-call identity (Codex `tool_use_id`, WorkBuddy
+   * `call_id`). Two calls with the same session/generation/tool/params/result
+   * but DIFFERENT call ids are two real occurrences and must derive two
+   * identities; a redelivery of the SAME call id is one occurrence. Optional:
+   * hosts that supply no call id keep the historical content-derived identity
+   * (identical-content calls then cannot be distinguished — a documented
+   * limitation, never fabricated precision).
+   */
+  toolCallId?: string;
   toolName?: string;
   toolInput?: unknown;
   toolOutput?: unknown;
@@ -154,12 +164,17 @@ interface IdentityInput {
   toolName?: string;
   source: string;
   canonicalEventId?: string;
+  /** Host per-call identity — present only when the host supplies one (see ProductionToolEventFields.toolCallId). */
+  toolCallId?: string;
   outcome: NormalizedOutcome;
   sanitizedParams: Record<string, unknown>;
 }
 
 function ids(input: IdentityInput): { eventId: string; painId: string } {
   const { outcome, sanitizedParams, canonicalEventId } = input;
+  // The toolCallId key is included ONLY when the host supplied one, so the
+  // canonical string of a no-call-id host is byte-identical to the historical
+  // derivation (persisted rows stay replay-stable across the upgrade).
   const canonical = stable({
     workspaceDir: path.resolve(input.workspaceDir),
     sessionId: input.sessionId,
@@ -167,6 +182,7 @@ function ids(input: IdentityInput): { eventId: string; painId: string } {
     toolName: input.toolName,
     source: input.source,
     suppliedEventId: canonicalEventId ?? null,
+    ...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
     params: sanitizedParams,
     result: sanitizeValue(outcome.result, 0, input.workspaceDir),
     error: outcome.error ?? null,
@@ -192,6 +208,11 @@ export interface DerivedToolPainIdentity {
  * fields fed to the live production handler derive the same deterministic
  * `pain_host_<sha256>` id, so live and observation-delivered admissions of one
  * tool call converge on one canonical pain.
+ *
+ * I1 parity obligation: when the host supplies a call id, BOTH paths must pass
+ * the same `toolCallId` (Codex admission candidates carry it from the same
+ * `tool_use_id` the live decoder required) — otherwise one real call would
+ * derive two canonical pains.
  */
 export function deriveProductionToolPainIdentity(fields: ProductionToolEventFields & { canonicalEventId?: string }): DerivedToolPainIdentity {
   const outcome = normalizeOutcome(fields);
@@ -203,6 +224,7 @@ export function deriveProductionToolPainIdentity(fields: ProductionToolEventFiel
     ...(fields.toolName !== undefined ? { toolName: fields.toolName } : {}),
     source: fields.source,
     ...(fields.canonicalEventId !== undefined ? { canonicalEventId: fields.canonicalEventId } : {}),
+    ...(fields.toolCallId !== undefined ? { toolCallId: fields.toolCallId } : {}),
     outcome,
     sanitizedParams,
   });
@@ -374,6 +396,11 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     const isRisky = enrichment.isRisky ?? (path.isAbsolute(relativePath) && !path.resolve(relativePath).startsWith(`${path.resolve(event.context.workspaceDir)}${path.sep}`));
     const painScore = enrichment.painScore ?? Math.min(100, (outcome.exitCode !== 0 ? 70 : 0) + (isRisky ? 20 : 0));
     const errorHash = enrichment.errorHash ?? createHash('sha256').update(outcome.error ?? String(outcome.exitCode)).digest('hex');
+    // Cooldown is DEBOUNCE, not event identity (I1): the key deliberately has
+    // NO toolCallId. Repeated failures of the same failureSource+error within
+    // the window suppress the diagnostic trigger storm, while each real call
+    // still earns its own tool_calls evidence row through call-id-sensitive
+    // identity below.
     const cooldownKey = `${path.resolve(event.context.workspaceDir)}:${event.context.sessionId}:${sourceObservation.failureSource}:${errorHash}`;
     const last = cooldowns.get(cooldownKey);
     const cooldownActive = last !== undefined && Date.now() - last < PAIN_COOLDOWN_WINDOW_MS;
@@ -391,6 +418,11 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
       ...(toolName !== undefined ? { toolName } : {}),
       source: event.source,
       ...(enrichment.eventId ? { canonicalEventId: enrichment.eventId } : {}),
+      // I1: the host's real call identity participates when supplied —
+      // distinct call ids are distinct events; a same-call-id redelivery
+      // derives the same identity and stays idempotent. Absent → historical
+      // content-derived identity (no fabricated precision).
+      ...(event.context.toolCallId !== undefined ? { toolCallId: event.context.toolCallId } : {}),
       outcome,
       sanitizedParams,
     });

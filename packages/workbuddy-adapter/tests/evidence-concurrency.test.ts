@@ -107,4 +107,76 @@ describe('concurrent real entry processes (SPEC §8 并发档)', () => {
     db.close();
     expect(rows.n).toBe(2);
   });
+
+  describe('tool-call identity at the real entry (I1: same session, distinct call ids)', () => {
+    it('same session + same arguments + distinct call ids stay two events', async () => {
+      // The I1 reproduction (review §5): one session, one generation, the same
+      // tool call shape delivered twice by the engine with DIFFERENT call ids.
+      // Each real call keeps its own evidence row.
+      const home = makeHome();
+      const governance = makeGovernance(home, { workbuddyFlag: true, receiptLedgerFlag: true });
+      makeTrajectory(governance);
+      const project = makeProjectDir(home, 'i1');
+      const payloads = ['toolu_call_a', 'toolu_call_b'].map((callId) => JSON.stringify(fixturePayload('post-tool-use-bash-exit7.json', {
+        cwd: project,
+        session_id: 'i1-sess',
+        generation_id: 'gen-fixed-1',
+        call_id: callId,
+        tool_use_id: callId,
+      })));
+      for (const payload of payloads) runEntry(home, payload, 'PostToolUse');
+
+      const db = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+      const rows = db.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE session_id = 'i1-sess'").get() as { n: number };
+      db.close();
+      expect(rows.n).toBe(2);
+    });
+
+    it('same payload redelivery (same call id) stays one event', async () => {
+      const home = makeHome();
+      const governance = makeGovernance(home, { workbuddyFlag: true, receiptLedgerFlag: true });
+      makeTrajectory(governance);
+      const project = makeProjectDir(home, 'i1replay');
+      const payload = JSON.stringify(fixturePayload('post-tool-use-bash-exit7.json', {
+        cwd: project,
+        session_id: 'i1-replay-sess',
+        generation_id: 'gen-fixed-1',
+        call_id: 'toolu_call_replay',
+        tool_use_id: 'toolu_call_replay',
+      }));
+      runEntry(home, payload, 'PostToolUse');
+      runEntry(home, payload, 'PostToolUse');
+
+      const db = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+      const rows = db.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE session_id = 'i1-replay-sess'").get() as { n: number };
+      db.close();
+      expect(rows.n).toBe(1);
+    });
+
+    it('legacy payload without a call id keeps the pre-I1 merged behavior (documented limitation)', async () => {
+      // A host that supplies no call id cannot have its identical-content
+      // calls distinguished — PD must not fabricate precision the host does
+      // not provide, so the historical merged behavior is preserved.
+      const home = makeHome();
+      const governance = makeGovernance(home, { workbuddyFlag: true, receiptLedgerFlag: true });
+      makeTrajectory(governance);
+      const project = makeProjectDir(home, 'i1legacy');
+      const payloads = [1, 2].map(() => {
+        const payload = fixturePayload('post-tool-use-bash-exit7.json', {
+          cwd: project,
+          session_id: 'i1-legacy-sess',
+          generation_id: 'gen-fixed-1',
+        });
+        delete payload.call_id;
+        delete payload.tool_use_id;
+        return JSON.stringify(payload);
+      });
+      for (const payload of payloads) runEntry(home, payload, 'PostToolUse');
+
+      const db = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+      const rows = db.prepare("SELECT COUNT(*) AS n FROM tool_calls WHERE session_id = 'i1-legacy-sess'").get() as { n: number };
+      db.close();
+      expect(rows.n).toBe(1);
+    });
+  });
 });

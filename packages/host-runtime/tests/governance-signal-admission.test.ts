@@ -429,6 +429,44 @@ describe('tool failure admission (SPEC §10/§12)', () => {
     expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get())).toEqual({ n: 1 });
   });
 
+  it('I1 identity parity holds with a host call id: same call_id converges, distinct call_id is a new event', async () => {
+    const candidate = toolFailure({ toolCallId: 'toolu_par_1' });
+    const result = admit([candidate]);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+
+    // Same call id on the live handler → the same canonical pain, and the
+    // handler's duplicate probe no-ops on the admission's tool_calls row.
+    const handler = createProductionPainEvidenceHandler();
+    const hostEventFor = (toolCallId: string) => ({
+      kind: 'after_tool_call',
+      context: {
+        workspaceDir,
+        sessionId: candidate.rootSessionId,
+        turnId: candidate.hostTurnId,
+        toolName: candidate.toolName,
+        toolCallId,
+        toolInput: candidate.toolInput,
+        toolOutput: candidate.toolOutput,
+      },
+      rawPayload: {},
+      source: candidate.source,
+    } as never);
+    const handled = await handler(hostEventFor('toolu_par_1'));
+    const handlerPainId = (handled.metadata as { painId?: string | null }).painId;
+    const admittedPainId = (result.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId;
+    expect(handlerPainId).toBe(admittedPainId);
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get())).toEqual({ n: 1 });
+
+    // A DIFFERENT real call (distinct tool_use_id, identical content) is a new
+    // event: its own evidence row, its own identity (the handler does not
+    // merge it into the first call's pain).
+    const second = await handler(hostEventFor('toolu_par_2'));
+    expect((second.metadata as { duplicate?: boolean }).duplicate).toBe(false);
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get())).toEqual({ n: 2 });
+    const distinctPains = withTrajectory((db) => db.prepare('SELECT COUNT(DISTINCT canonical_pain_id) AS n FROM pain_events').get()) as { n: number };
+    expect(distinctPains.n).toBeGreaterThanOrEqual(1);
+  });
+
   it('rejects successful calls and non-write tools (conservative gate)', () => {
     const success = admit([toolFailure({ toolOutput: { exitCode: 0 } })]);
     expect(success.outcomes?.[0]).toMatchObject({ disposition: 'not_admitted' });
