@@ -277,6 +277,31 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       hostKind: 'workbuddy',
       toolSemantics: WORKBUDDY_TOOL_SEMANTICS,
       events: workbuddyEventEmitter(stateDir, evidenceContext),
+      // Remediation R2 (candidate-level admission): the diagnostician's
+      // candidates are admitted ONLY with input evidence (needs_evidence
+      // otherwise), and Codex-style transcript promotion does not exist on
+      // this host. OpenClaw-parity: the HOOK supplies the evidence — a
+      // sourceRef to the durable raw event line (idempotent replay source,
+      // SPEC §13.7) plus a bounded failure note. No raw tool output is copied
+      // (ADR-0027 hook-log content rule).
+      painEnrichmentProvider: (hostEvent) => {
+        if (hostEvent.kind !== 'after_tool_call') return {};
+        const toolName = hostEvent.context.toolName ?? 'unknown-tool';
+        const output = hostEvent.context.toolOutput;
+        const detail = typeof output === 'object' && output !== null && !Array.isArray(output)
+          ? Object.hasOwn(output, 'tool_error_code')
+            ? `tool_error_code=${String((output as Record<string, unknown>).tool_error_code)}`
+            : Object.hasOwn(output, 'exitCode')
+              ? `exitCode=${String((output as Record<string, unknown>).exitCode)}`
+              : 'failure'
+          : 'failure';
+        return {
+          evidence: [{
+            sourceRef: `workbuddy-pd-hook-event-log:${hostEvent.context.sessionId}`,
+            note: `${toolName} failed (${detail}); raw payload in the durable workbuddy hook event log for this session`,
+          }],
+        };
+      },
       // PRI-780 boundary: NO context provider — v2 rules stay SUSPENDED on
       // WorkBuddy (never loaded context-blind). See annotateContextWarnings.
     }).dispatch(event);

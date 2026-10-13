@@ -269,14 +269,18 @@ async function main() {
 
   try {
     // ── Turn 1: injection ──
+    // Negative-assertion discipline (review §6): the round must ACTUALLY run —
+    // model requests must exist and carry the real user prompt — otherwise an
+    // engine crash would masquerade as "no marker" PASS.
     let before = mockReqCount();
     let run = runTwoPrompts('inject');
     let reqs = mockReqsSince(before);
     const injectBodies = reqs.map((r) => JSON.stringify(r.body ?? r.bodyRaw ?? ''));
-    const injected = injectBodies.some((b) => b.includes(PROMPT_MARKER));
+    const roundRan = reqs.length > 0 && injectBodies.some((b) => b.includes('hello'));
+    const injected = roundRan && injectBodies.some((b) => b.includes(PROMPT_MARKER));
     record('inject', injected ? 'PASS' : 'FAIL',
       injected ? 'approved principle text reached the model request body via UserPromptSubmit additionalContext'
-        : `marker ${PROMPT_MARKER} absent from ${reqs.length} model requests; stderr=${(run.stderr || '').slice(-400)}`);
+        : `roundRan=${roundRan} requests=${reqs.length}; marker ${PROMPT_MARKER} absent; stderr=${(run.stderr || '').slice(-400)}`);
 
     // ── Turn 2: protected Write denied ──
     before = mockReqCount();
@@ -286,20 +290,24 @@ async function main() {
     reqs = mockReqsSince(before);
     const denied = !fs.existsSync(PROTECTED_FILE());
     const denyReasonSeen = reqs.some((r) => JSON.stringify(r.body ?? '').includes(DENY_REASON));
-    record('deny', denied && denyReasonSeen ? 'PASS' : (denied ? 'PARTIAL' : 'FAIL'),
-      `fileExists=${fs.existsSync(PROTECTED_FILE())} denyReasonInModelRequest=${denyReasonSeen} stderr=${(run.stderr || '').slice(-200)}`);
+    const denyRoundRan = reqs.length > 0;
+    record('deny', denied && denyReasonSeen && denyRoundRan ? 'PASS' : 'FAIL',
+      `roundRan=${denyRoundRan} fileExists=${fs.existsSync(PROTECTED_FILE())} denyReasonInModelRequest=${denyReasonSeen} stderr=${(run.stderr || '').slice(-200)}`);
 
     // ── Turn 3: real failing tool → evidence ──
+    // The row must be the REAL failure shape (outcome=failure, exit_code
+    // recorded, attributed session) — not merely "some Read row exists".
     before = mockReqCount();
     writeMockReply('a', toolCallReply('e2eread', 'Read', { file_path: path.join(PROJECT, 'definitely-missing-e2e.txt') }));
     writeMockReply('b', textReply('e2ewrap2', 'noted'));
     run = runTwoPrompts('fail');
     await new Promise((resolve) => setTimeout(resolve, 500));
     const traj = new Database(path.join(GOV, '.state', 'trajectory.db'), { readonly: true });
-    const toolRow = traj.prepare("SELECT tool_name, outcome, exit_code FROM tool_calls WHERE tool_name = 'Read' ORDER BY id DESC").get();
+    const toolRow = traj.prepare("SELECT tool_name, outcome, exit_code, session_id FROM tool_calls WHERE tool_name = 'Read' ORDER BY id DESC").get();
     traj.close();
-    record('evidence', toolRow ? 'PASS' : 'FAIL',
-      toolRow ? `trajectory tool_calls row: ${JSON.stringify(toolRow)}` : 'no Read failure row in governance trajectory');
+    const evidenceShape = toolRow && toolRow.outcome === 'failure' && toolRow.session_id !== undefined;
+    record('evidence', evidenceShape ? 'PASS' : 'FAIL',
+      evidenceShape ? `trajectory failure row: ${JSON.stringify(toolRow)}` : `expected outcome=failure row with session attribution; got ${JSON.stringify(toolRow)}`);
 
     // ── Withdraw via the REAL pd-cli product entry ──
     const pdCli = path.join(REPO, 'packages', 'pd-cli', 'dist', 'index.js');
@@ -312,12 +320,19 @@ async function main() {
       `pd-cli exit=${withdraw.status} stdout=${(withdraw.stdout || '').slice(0, 200)} stderr=${(withdraw.stderr || '').slice(-200)}`);
 
     // ── Turn 4: injection stops after withdrawal ──
+    // Negative assertion (review §6): this round must itself SUCCEED — model
+    // requests must exist and carry the prompt — before "marker absent" is
+    // meaningful. Old-context residue limitation (SPEC §1 G5): already
+    // delivered turns keep their text; withdrawal blocks FUTURE injection.
     before = mockReqCount();
     run = runTwoPrompts('post-withdraw');
     reqs = mockReqsSince(before);
+    const postRoundRan = reqs.length > 0 && reqs.some((r) => JSON.stringify(r.body ?? '').includes('hello again'));
     const stillInjected = reqs.some((r) => JSON.stringify(r.body ?? '').includes(PROMPT_MARKER));
-    record('post-withdraw', stillInjected ? 'FAIL' : 'PASS',
-      stillInjected ? 'withdrawn principle text STILL reached the model' : 'withdrawn principle no longer injected (new prompt turns are clean)');
+    record('post-withdraw', postRoundRan && !stillInjected ? 'PASS' : 'FAIL',
+      postRoundRan
+        ? (stillInjected ? 'withdrawn principle text STILL reached the model' : 'withdrawn principle no longer injected (round ran; future turns clean; old-context residue is out of scope per SPEC G5)')
+        : `post-withdraw round produced ${reqs.length} model requests — vacuous pass refused; stderr=${(run.stderr || '').slice(-300)}`);
   } finally {
     mock.kill();
   }
