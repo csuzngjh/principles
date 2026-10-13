@@ -9,6 +9,7 @@
  * Usage: node scripts/dev/workbuddy-probe/e2e-installed-product.mjs
  */
 import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +19,8 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 const require = createRequire(path.join(REPO, 'package.json'));
 const Database = require('better-sqlite3');
 const { getDefaultPdConfig, SqliteConnection, SqliteActivationStateStore } = require('@principles/core/runtime-v2');
+// Top-level import: the engine-turn section was promoted out of a
+// fire-and-forget IIFE into main()'s await chain (review P2-1).
 
 const LAB_ROOT = path.join(
   process.env.WB_E2E_LAB || path.resolve(REPO, '../../../wb-probe-lab'),
@@ -45,7 +48,10 @@ const engineEnvBase = () => ({
   CODEBUDDY_CONFIG_DIR: ISO,
   USERPROFILE: FAKE_HOME,
   HOME: FAKE_HOME,
-  // NO PD_WORKBUDDY_ADAPTER_ENTRY — the acceptance point.
+  // NO PD_WORKBUDDY_ADAPTER_ENTRY — the acceptance point (review P3-2: an
+  // inherited value would silently re-enable the dev override and hollow
+  // out this acceptance; strip it explicitly).
+  PD_WORKBUDDY_ADAPTER_ENTRY: undefined,
 });
 
 function packInstaller() {
@@ -62,7 +68,7 @@ function packInstaller() {
   return { tarball: path.join(dest, name) };
 }
 
-function main() {
+async function main() {
   for (const dir of [LAB_ROOT, INSTALL_ROOT, FAKE_HOME, ISO, GOV, PROJECT]) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(PROJECT, 'normal.txt'), 'scratch\n');
 
@@ -141,36 +147,37 @@ function main() {
   if (!enabled || enabled.ok === false) return;
 
   // ── 5. Seed an approved synthetic prompt principle + deny rule (production store writers) ──
-  (async () => {
-    const now = new Date().toISOString();
-    const connection = new SqliteConnection(GOV);
-    try {
-      connection.getDb().prepare(
-        `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run('art-inst-prompt', 'principle', 'task-inst-prompt', 'P_WB_INST_PROMPT', null, '[]', 'validated',
-        JSON.stringify({ principleId: 'P_WB_INST_PROMPT', text: PROMPT_MARKER }), now, now);
-      await new SqliteActivationStateStore(connection).recordActivation({
-        activationId: 'act-inst-prompt', idempotencyKey: 'art-inst-prompt::prompt', artifactId: 'art-inst-prompt',
-        channel: 'prompt', action: 'prompt_activate', targetRef: 'ledger://P_WB_INST_PROMPT', activatedAt: now, deactivatedAt: null,
-      });
-      const ruleCode = `function evaluate(input) { if (input.action.normalizedPath.indexOf('installed-protected-9f2') >= 0) return { decision: 'block', matched: true, reason: '${DENY_REASON}' }; return { decision: 'allow', matched: false, reason: 'safe' }; } var meta={name:'wb-inst',version:'1',ruleId:'R_WB_INST_DENY',coversCondition:'all'};`;
-      connection.getDb().prepare(
-        `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run('art-inst-rule', 'rule', 'task-inst-rule', 'P_WB_INST_RULE', 'R_WB_INST_DENY', '[]', 'validated',
-        JSON.stringify({ principleId: 'P_WB_INST_RULE', ruleId: 'R_WB_INST_DENY', implementationCode: ruleCode }), now, now);
-      await new SqliteActivationStateStore(connection).recordActivation({
-        activationId: 'act-inst-rule', idempotencyKey: 'art-inst-rule::code_tool_hook', artifactId: 'art-inst-rule',
-        channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', targetRef: 'impl://R_WB_INST_DENY', activatedAt: now, deactivatedAt: null,
-      });
-    } finally {
-      connection.close();
-    }
+  // (async body — the seed and the engine turns MUST complete before the
+  // exit-code computation below; fire-and-forget left a regression-blind
+  // PASS, review P2-1.)
+  const now = new Date().toISOString();
+  const connection = new SqliteConnection(GOV);
+  try {
+    connection.getDb().prepare(
+      `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run('art-inst-prompt', 'principle', 'task-inst-prompt', 'P_WB_INST_PROMPT', null, '[]', 'validated',
+      JSON.stringify({ principleId: 'P_WB_INST_PROMPT', text: PROMPT_MARKER }), now, now);
+    await new SqliteActivationStateStore(connection).recordActivation({
+      activationId: 'act-inst-prompt', idempotencyKey: 'art-inst-prompt::prompt', artifactId: 'art-inst-prompt',
+      channel: 'prompt', action: 'prompt_activate', targetRef: 'ledger://P_WB_INST_PROMPT', activatedAt: now, deactivatedAt: null,
+    });
+    const ruleCode = `function evaluate(input) { if (input.action.normalizedPath.indexOf('installed-protected-9f2') >= 0) return { decision: 'block', matched: true, reason: '${DENY_REASON}' }; return { decision: 'allow', matched: false, reason: 'safe' }; } var meta={name:'wb-inst',version:'1',ruleId:'R_WB_INST_DENY',coversCondition:'all'};`;
+    connection.getDb().prepare(
+      `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run('art-inst-rule', 'rule', 'task-inst-rule', 'P_WB_INST_RULE', 'R_WB_INST_DENY', '[]', 'validated',
+      JSON.stringify({ principleId: 'P_WB_INST_RULE', ruleId: 'R_WB_INST_DENY', implementationCode: ruleCode }), now, now);
+    await new SqliteActivationStateStore(connection).recordActivation({
+      activationId: 'act-inst-rule', idempotencyKey: 'art-inst-rule::code_tool_hook', artifactId: 'art-inst-rule',
+      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', targetRef: 'impl://R_WB_INST_DENY', activatedAt: now, deactivatedAt: null,
+    });
+  } finally {
+    connection.close();
+  }
 
     // ── 6. REAL engine turn WITHOUT the dev override (canonical wrapper) ──
     const mockPort = 39493;
-    const { spawn } = await import('node:child_process');
     const mockServer = path.join(REPO, 'scripts', 'dev', 'workbuddy-probe', 'e2e-mock-server.mjs');
     const mock = spawn(process.execPath, [mockServer], {
       env: { ...process.env, MOCK_PORT: String(mockPort), MOCK_LAB: LAB_ROOT },
@@ -247,7 +254,6 @@ function main() {
     } finally {
       mock.kill();
     }
-  })().catch((e) => record('flow', 'FAIL', String(e).slice(0, 300)));
 
   const failed = results.filter((r) => r.verdict === 'FAIL');
   console.log(`\nInstalled-product E2E: ${results.filter((r) => r.verdict === 'PASS').length} PASS, ${failed.length} FAIL`);
@@ -256,4 +262,4 @@ function main() {
 }
 
 import { pathToFileURL } from 'node:url';
-main();
+await main();
