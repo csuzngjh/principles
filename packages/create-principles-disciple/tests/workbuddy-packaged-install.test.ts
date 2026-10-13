@@ -104,8 +104,6 @@ afterAll(() => {
   }
 });
 
-const PACK_AVAILABLE = () => tarballPath !== undefined;
-
 describe('WorkBuddy distribution — packaging contract', () => {
   it('the installer package files manifest declares the workbuddy-adapter payload', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(INSTALLER_DIR, 'package.json'), 'utf8')) as { files: string[] };
@@ -126,7 +124,14 @@ describe('WorkBuddy distribution — packaging contract', () => {
     expect(bundle).toContain('NOT present in this source tree');
   });
 
-  it.skipIf(!PACK_AVAILABLE())('the tarball ships the workbuddy payload iff the adapter package exists in the source tree', () => {
+  // vitest skipIf evaluates at COLLECTION time, before beforeAll has packed —
+  // gating here would silently skip the assertions forever (review P1). The
+  // pack result is therefore asserted INSIDE each body: on the integrated
+  // baseline the pack MUST succeed, and a failure is loud red with its
+  // captured cause, never a skip.
+  it('the tarball ships the workbuddy payload iff the adapter package exists in the source tree', () => {
+    expect(packError, `npm pack failed: ${packError}`).toBeUndefined();
+    expect(tarballPath).toBeDefined();
     if (ADAPTER_PRESENT) {
       expect(tarEntries.has('package/workbuddy-adapter/package.json')).toBe(true);
       expect(tarEntries.has('package/workbuddy-adapter/dist/index.js')).toBe(true);
@@ -137,17 +142,10 @@ describe('WorkBuddy distribution — packaging contract', () => {
     }
   });
 
-  it.skipIf(!PACK_AVAILABLE())('the tarball bundles the compiled WorkBuddy host installer', () => {
+  it('the tarball bundles the compiled WorkBuddy host installer', () => {
+    expect(packError, `npm pack failed: ${packError}`).toBeUndefined();
     expect(tarEntries.has('package/dist/installers/workbuddy-host-installer.js')).toBe(true);
     expect(tarEntries.has('package/dist/installers/index.js')).toBe(true);
-  });
-
-  it.skipIf(PACK_AVAILABLE())('NOT RUN: tarball assertions — real npm pack unavailable on this baseline', () => {
-    // The skip reason is itself VERIFIED here: the pack failure must be the
-    // documented pre-existing cross-package break (host-runtime product
-    // telemetry hostKind / pd-console evidence routes), not a new regression.
-    expect(packError).toBeDefined();
-    expect(String(packError)).toMatch(/pd-console|host-runtime|Command failed/);
   });
 });
 

@@ -13,7 +13,9 @@ import { readWorkspaceHostKindFacts } from './host-liveness-contract.js';
 
 /** Hosts with a production prompt-injection path today (shared GovernanceHostKind boundary). */
 export type PromptInjectionTargetHost = 'openclaw' | 'codex' | 'workbuddy';
-export const PROMPT_INJECTION_TARGET_HOSTS: readonly PromptInjectionTargetHost[] = ['openclaw', 'codex'];
+/** Single host roster (review P2): every consumer derives from this list, so a
+ * new host cannot fork route-unconfirmed per-host forecasts from the routes. */
+export const PROMPT_INJECTION_TARGET_HOSTS: readonly PromptInjectionTargetHost[] = ['openclaw', 'codex', 'workbuddy'];
 
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
 

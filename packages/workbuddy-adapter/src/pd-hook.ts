@@ -295,10 +295,12 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
         const evaluations = result.metadata?.evaluations;
         if (Array.isArray(evaluations)) {
           for (const entry of evaluations) {
-            if (typeof entry !== 'object' || entry === null) continue;
-            const record = entry as { activationMode?: unknown; activationId?: unknown };
-            if (record.activationMode === 'live' && typeof record.activationId === 'string' && record.activationId.length > 0) {
-              ({ activationId: liveActivationId } = record);
+            if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+            const record = entry as Record<string, unknown>;
+            const activationMode = Object.hasOwn(record, 'activationMode') ? record.activationMode : undefined;
+            const activationId = Object.hasOwn(record, 'activationId') ? record.activationId : undefined;
+            if (activationMode === 'live' && typeof activationId === 'string' && activationId.length > 0) {
+              liveActivationId = activationId;
               break;
             }
           }

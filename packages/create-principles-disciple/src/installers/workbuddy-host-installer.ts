@@ -129,6 +129,13 @@ export function resolveWorkbuddyPaths(homeDir: string): WorkbuddyPaths {
   const layout = getInstallLayoutPaths(homeDir);
   // The frozen governance dir (~/.workbuddy/pd-workspace) defines the host
   // config root; deriving configDir from it keeps one path authority.
+  //
+  // HOST BOUNDARY (review P3, probe P0 fact): this installer targets the
+  // WorkBuddy DESKTOP host, whose registration root is ~/.workbuddy (real
+  // desktop plugins observed there). The standalone CLI engine's user-scope
+  // root is ~/.codebuddy (CODEBUDDY_CONFIG_DIR); a CLI-only user's engine
+  // will not read a registration written here. WORKBUDDY_CONFIG_DIR remains
+  // the isolation override (Phase 0 lab discipline).
   const configDir = process.env.WORKBUDDY_CONFIG_DIR && process.env.WORKBUDDY_CONFIG_DIR.length > 0
     ? path.resolve(process.env.WORKBUDDY_CONFIG_DIR)
     : path.dirname(getWorkbuddyWorkspaceDir(homeDir));

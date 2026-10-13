@@ -32,7 +32,7 @@ export interface PainListEntry {
   /** Canonical pain identity; `row:<id>` when the legacy row has none. */
   painId: string;
   source: string;
-  /** 'openclaw' | 'codex' | 'unknown' — unknown covers NULL/unprovable. */
+  /** 'openclaw' | 'codex' | 'workbuddy' | 'unknown' — unknown covers NULL/unprovable. */
   host: PainListHostFilter | 'unknown';
   score: number;
   severity: string | null;

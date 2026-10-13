@@ -88,6 +88,6 @@
     "directory": "packages/create-principles-disciple"
   },
   "pd": {
-    "bundledPluginVersion": "2.0.2"
+    "bundledPluginVersion": "2.1.1"
   }
 }

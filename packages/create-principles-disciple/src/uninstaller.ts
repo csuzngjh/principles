@@ -250,7 +250,7 @@ function getWorkspacePath(): string | null {
  * Execute uninstall
  *
  * @param options.force Skip confirmation prompt (dangerous, for scripts only)
- * @param options.host   ADR-0020: 'openclaw' | 'codex' | 'all' (default 'all')
+ * @param options.host   ADR-0020 host id: 'openclaw' | 'codex' | 'workbuddy' | 'all' (default 'all')
  */
 const REMOVE_RETRY_ATTEMPTS = 3;
 const REMOVE_RETRY_DELAY_MS = 1000;

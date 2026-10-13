@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { runWorkbuddyWorkspaceWorkerCycle, type WorkbuddyWorkerCycleResult } from '@principles/workbuddy-adapter';
 import { computeWorkbuddyWorkerStatusMode } from '@principles/host-runtime';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
@@ -134,7 +135,13 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
     return;
   }
 
-  const workspace = resolveWorkspaceDir(options.workspace);
+  // SPEC §4.1: the WorkBuddy worker's default workspace is the OD-07
+  // governance workspace — NEVER the generic config default (that could be
+  // another host's workspace; scanning or declaring host-tool semantics
+  // there would misattribute WorkBuddy state).
+  const workspace = options.workspace !== undefined && options.workspace.trim().length > 0
+    ? resolveWorkspaceDir(options.workspace)
+    : getWorkbuddyWorkspaceDir(os.homedir());
 
   if (options.status === true) {
     await printStatusReport(workspace, options.json === true);

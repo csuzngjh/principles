@@ -3,7 +3,9 @@
  * command (cli-7, SPEC workbuddy-host-adapter §5 Part 5): `pd workbuddy
  * worker`.
  *
- * Registration mirrors src/index.ts. Functional tests exercise the real
+ * cli-7: the registration assertions spawn the REAL built CLI (`pd workbuddy
+ * worker --help`) — a hand-built copy of the program would stay green through
+ * any src/index.ts drift (review P2). Functional tests exercise the real
  * handler against a temp governance workspace: --json emits exactly one
  * parseable JSON object (cli-1), paused paths carry reason + nextAction
  * (cli-6), and failed paths mutate nothing.
@@ -12,40 +14,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Command } from 'commander';
+import { execFileSync } from 'node:child_process';
 import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
 
-function buildTestProgram(): Command {
-  const program = new Command();
-  const workbuddy = program.command('workbuddy');
-  workbuddy
-    .command('worker')
-    .option('-w, --workspace <path>', 'Governance workspace directory')
-    .option('--once', 'Run exactly one bounded cycle and exit')
-    .option('--interval <ms>', 'Cycle interval for continuous mode')
-    .option('--status', 'Report the §15 worker mode without executing anything')
-    .option('--json', 'Output raw JSON')
-    .action(() => {});
-  return program;
+function runPdHelp(args: string[]): string {
+  try {
+    return execFileSync('node', [getBuiltPdCliPath(), ...args], { encoding: 'utf8' });
+  } catch (err: unknown) {
+    if (err && typeof err === 'object' && Object.hasOwn(err, 'stdout')) {
+      return String(Reflect.get(err, 'stdout'));
+    }
+    throw err;
+  }
 }
 
-describe('workbuddy worker command registration (cli-7)', () => {
-  it('parses workbuddy worker flags including --once and --status', () => {
-    const program = buildTestProgram();
-    program.parse(['node', 'pd', 'workbuddy', 'worker', '--workspace', '/tmp/ws', '--once', '--json']);
-    const workbuddy = program.commands.find((c) => c.name() === 'workbuddy');
-    const worker = workbuddy?.commands.find((c) => c.name() === 'worker');
-    expect(worker).toBeDefined();
-    expect(worker?.opts().workspace).toBe('/tmp/ws');
-    expect(worker?.opts().once).toBe(true);
-    expect(worker?.opts().json).toBe(true);
+describe('workbuddy worker command registration (cli-7, real built CLI)', () => {
+  it('registers `pd workbuddy worker` with the documented options', () => {
+    const help = runPdHelp(['workbuddy', 'worker', '--help']);
+    expect(help).toContain('--workspace');
+    expect(help).toContain('--once');
+    expect(help).toContain('--interval');
+    expect(help).toContain('--status');
+    expect(help).toContain('--json');
+    expect(help).toContain('reconciliation');
+  });
 
-    const program2 = buildTestProgram();
-    program2.parse(['node', 'pd', 'workbuddy', 'worker', '--status']);
-    const worker2 = program2.commands.find((c) => c.name() === 'workbuddy')?.commands.find((c) => c.name() === 'worker');
-    expect(worker2?.opts().status).toBe(true);
-    const intervalOption = worker?.options.find((o) => o.long === '--interval');
-    expect(intervalOption).toBeDefined();
+  it('registers the workbuddy command group (pd workbuddy --help)', () => {
+    const help = runPdHelp(['workbuddy', '--help']);
+    expect(help).toContain('worker');
   });
 });
 

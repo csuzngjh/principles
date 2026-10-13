@@ -89,7 +89,7 @@ export type HostConfigAction = 'created' | 'updated' | 'preserved' | 'skipped';
 
 export interface HostInstallResult {
   readonly success: boolean;
-  /** Host identifier (matches HostInstaller.hostId), e.g. 'openclaw' | 'codex'. */
+  /** Host identifier (matches HostInstaller.hostId), e.g. 'openclaw' | 'codex' | 'workbuddy'. */
   readonly hostId: string;
   /** Path to the host-specific config file that was written/merged, if any. */
   readonly configPath?: string;
