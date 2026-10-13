@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #007 · 2026-10-13</div>
+  <a class="abyss-title" href="/abyss/07-goal-management-paradox">07 | The Goal Management Paradox: The Better We Get at Achieving Goals, the Farther We May Drift</a>
+  <p class="abyss-desc">From an ancient Chinese parable to double-loop learning: as AI Agents become ever-better "charioteers", why might we march ever more efficiently toward the wrong future — and how can humans and agents calibrate direction together through real-world feedback?</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #006 · 2026-06-17</div>
   <a class="abyss-title" href="/abyss/06-expanding-boundary">06 | The Expanding Boundary: The Tower, the Boat, and the Silicon Amoeba</a>
   <p class="abyss-desc">As intelligent systems expand from text to action, organization, society, and meaning, which old containers will be rewritten? From ExO to MVO, the inverted-T organization, and the question of what humans can never outsource — goals, boundaries, responsibility, pain, principles, love, meaning, and final adjudication power.</p>
