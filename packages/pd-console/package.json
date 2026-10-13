@@ -40,7 +40,7 @@
     "clsx": "^2.1.1",
     "create-principles-disciple": "*",
     "i18next": "^26.4.2",
-    "js-yaml": "^5.4.1",
+    "js-yaml": "^5.4.3",
     "lucide-react": "^1.28.0",
     "postcss": "^8.5.14",
     "postcss-cli": "^12.0.0",
@@ -50,7 +50,7 @@
     "react-i18next": "^17.0.11",
     "react-router-dom": "^7.18.3",
     "semver": "^7.8.5",
-    "sonner": "^2.0.7",
+    "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3"
   },

@@ -24,7 +24,7 @@
     "@principles/core": "^1.291.3",
     "@principles/install-layout": "^0.2.7",
     "better-sqlite3": "^13.0.3",
-    "js-yaml": "^5.4.1"
+    "js-yaml": "^5.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
