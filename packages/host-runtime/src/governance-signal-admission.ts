@@ -48,6 +48,7 @@ import {
   disposePainSignalBridgesForWorkspace,
   sanitizeString,
   MAX_EVIDENCE_VALUE_CHARS,
+  type GovernanceHostKind,
   type SignalCollectorConfig,
   type SignalCollectorOutput,
   type UnifiedKeywordStore,
@@ -383,16 +384,22 @@ function openAdmissionStore(workspaceDir: string, factory?: ObservationDatabaseF
   if (!fs.existsSync(dbPath)) {
     return { ok: false, reason: 'trajectory_db_not_found', nextAction: 'initialize the selected PD workspace (pd runtime init) before enabling conversation ingestion' };
   }
+  let db: Database.Database | undefined;
   try {
-    const db = factory ? factory(dbPath) : new Database(dbPath);
+    db = factory ? factory(dbPath) : new Database(dbPath);
     db.pragma('busy_timeout = 5000');
     db.pragma('journal_mode = WAL');
     ensureGovernanceAdmissionSchema(db);
     // The reconciliation pass reads observation-owned tables (promotion
     // tails): one open makes the whole governance schema ready.
     ensureGovernanceSchema(db);
-    return { db, close: () => { try { db.close(); } catch { /* write result already determined */ } } };
+    return { db, close: () => { try { db?.close(); } catch { /* write result already determined */ } } };
   } catch (error) {
+    // PRI-624 discipline: a half-opened handle (e.g. a corrupt/non-SQLite
+    // file that passes the lazy open but fails the first pragma) must be
+    // closed here — the worker retries every cycle, so a leaked handle would
+    // pin the workspace trajectory.db (and its temp dir) forever.
+    try { db?.close(); } catch { /* best-effort cleanup of an unusable handle */ }
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { ok: false, reason: `trajectory_database_unavailable:${detail}`, nextAction: 'inspect or repair the selected PD trajectory database' };
   }
@@ -518,16 +525,46 @@ interface GovernanceTaskSubmissionPayload {
   readonly reason: string;
   readonly score: number;
   readonly sessionId: string;
-  readonly hostKind: 'codex';
+  /** The admitting host — part of the payload so the Diagnostician sees the real origin. */
+  readonly hostKind: GovernanceHostKind;
   readonly evidence: readonly { sourceRef: string; note: string }[];
 }
 
-function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, reason: string): string {
+/**
+ * ONE builder for the tool_failure task payload shape — the Codex inline
+ * admission path and the WorkBuddy bare-pain sweep must produce the SAME
+ * shape, differing only in the attributed host and the pain facts.
+ */
+function toolFailureTaskPayload(fields: {
+  hostKind: GovernanceHostKind;
+  logicalObservationKey: string;
+  sessionId: string;
+  toolName: string;
+  reason: string;
+  score: number;
+  workspaceDir: string;
+}): string {
   // P1-1 privacy (review round 2): sanitize the FULL text before any
   // truncation — a token crossing the 200-char boundary must be redacted, not
   // split into a fragment that survives verbatim. sanitizeString bounds itself.
-  const payload: GovernanceTaskSubmissionPayload = candidate.kind === 'user_correction'
-    ? {
+  const payload: GovernanceTaskSubmissionPayload = {
+    painType: 'tool_failure',
+    source: fields.toolName,
+    reason: fields.reason || `tool=${fields.toolName}`,
+    score: fields.score,
+    sessionId: fields.sessionId,
+    hostKind: fields.hostKind,
+    evidence: [{ sourceRef: `governance_observation:${fields.logicalObservationKey}`, note: sanitizeString(fields.reason || fields.toolName, fields.workspaceDir) }],
+  };
+  return JSON.stringify(payload);
+}
+
+function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, reason: string): string {
+  if (candidate.kind === 'user_correction') {
+    // P1-1 privacy (review round 2): sanitize the FULL text before any
+    // truncation — a token crossing the 200-char boundary must be redacted, not
+    // split into a fragment that survives verbatim. sanitizeString bounds itself.
+    const payload: GovernanceTaskSubmissionPayload = {
       painType: 'user_frustration',
       source: 'user_correction',
       reason: reason || 'User correction detected',
@@ -535,36 +572,45 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDi
       sessionId: candidate.rootSessionId,
       hostKind: 'codex',
       evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString(candidate.text, workspaceDir) }],
-    }
-    : {
-      painType: 'tool_failure',
-      source: candidate.toolName,
-      reason: reason || `tool=${candidate.toolName}`,
-      score: 70,
-      sessionId: candidate.rootSessionId,
-      hostKind: 'codex',
-      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString(reason || candidate.toolName, workspaceDir) }],
     };
-  return JSON.stringify(payload);
+    return JSON.stringify(payload);
+  }
+  return toolFailureTaskPayload({
+    hostKind: candidate.hostKind,
+    logicalObservationKey: candidate.logicalObservationKey,
+    sessionId: candidate.rootSessionId,
+    toolName: candidate.toolName,
+    reason,
+    score: 70,
+    workspaceDir,
+  });
+}
+
+/** The marker identity columns both admission paths (inline candidate and bare-pain sweep) share. */
+interface AdmissionMarkerIdentity {
+  readonly hostKind: GovernanceHostKind;
+  readonly logicalObservationKey: string;
+  readonly rolloutIdentity: string;
+  readonly rootSessionId: string;
+  readonly signalKind: GovernanceSignalKind;
 }
 
 interface AdmissionMarkerArgs {
   db: Database.Database;
-  candidate: GovernanceSignalCandidate;
-  workspaceDir: string;
+  identity: AdmissionMarkerIdentity;
   canonicalPainId: string;
   ruleVersion: number | null;
   reason: string;
+  payloadJson: string;
   nowIso: string;
 }
 
-function insertAdmissionMarker({ db, candidate, workspaceDir, canonicalPainId, ruleVersion, reason, nowIso }: AdmissionMarkerArgs): void {
-  const payload = taskSubmissionPayload(candidate, workspaceDir, reason);
+function insertAdmissionMarker({ db, identity, canonicalPainId, ruleVersion, reason, payloadJson, nowIso }: AdmissionMarkerArgs): void {
   db.prepare(`INSERT INTO governance_signal_admissions
     (host_kind, logical_observation_key, rollout_identity, root_session_id, signal_kind, decision, canonical_pain_id, diagnostician_task_id, rule_version, reason, task_payload_json, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 'admitted', ?, NULL, ?, ?, ?, ?, ?)`)
-    .run(candidate.hostKind, candidate.logicalObservationKey, candidate.rolloutIdentity, candidate.rootSessionId, candidate.kind, canonicalPainId,
-      ruleVersion, reason.slice(0, MAX_REASON_BOUND) || null, payload, nowIso, nowIso);
+    .run(identity.hostKind, identity.logicalObservationKey, identity.rolloutIdentity, identity.rootSessionId, identity.signalKind, canonicalPainId,
+      ruleVersion, reason.slice(0, MAX_REASON_BOUND) || null, payloadJson, nowIso, nowIso);
 }
 
 // ─── Per-kind admission (inside one transaction each) ───────────────────────
@@ -626,7 +672,15 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
         }
         reason = insertCorrectionPain({ db, candidate, workspaceDir, painId, detection: detection.output, nowIso });
       }
-      insertAdmissionMarker({ db, candidate, workspaceDir, canonicalPainId: painId, ruleVersion: detection.ruleVersion, reason, nowIso });
+      insertAdmissionMarker({
+        db,
+        identity: { hostKind: candidate.hostKind, logicalObservationKey: candidate.logicalObservationKey, rolloutIdentity: candidate.rolloutIdentity, rootSessionId: candidate.rootSessionId, signalKind: candidate.kind },
+        canonicalPainId: painId,
+        ruleVersion: detection.ruleVersion,
+        reason,
+        payloadJson: taskSubmissionPayload(candidate, workspaceDir, reason),
+        nowIso,
+      });
     })();
   } catch (error) {
     if (error instanceof RateLimitedSignal) {
@@ -707,7 +761,15 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
     // pain row; the IS NULL guard keeps any durable attribution.
     db.prepare('UPDATE pain_events SET host_kind = ? WHERE canonical_pain_id = ? AND host_kind IS NULL').run(candidate.hostKind, painId);
     if (!duplicateWithoutPain) {
-      insertAdmissionMarker({ db, candidate, workspaceDir, canonicalPainId: painId, ruleVersion: null, reason: sanitizeString(reason, workspaceDir), nowIso });
+      insertAdmissionMarker({
+        db,
+        identity: { hostKind: candidate.hostKind, logicalObservationKey: candidate.logicalObservationKey, rolloutIdentity: candidate.rolloutIdentity, rootSessionId: candidate.rootSessionId, signalKind: candidate.kind },
+        canonicalPainId: painId,
+        ruleVersion: null,
+        reason: sanitizeString(reason, workspaceDir),
+        payloadJson: taskSubmissionPayload(candidate, workspaceDir, reason),
+        nowIso,
+      });
     }
     // A duplicate call row without an admitted pain mirrors the production
     // handler (no pain insert on duplicates) and records no marker, so a later
@@ -810,7 +872,10 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
     if (typeof candidate !== 'string' || candidate.length === 0) return false;
   }
   if (typeof own(value, 'score') !== 'number') return false;
-  if (own(value, 'hostKind') !== 'codex') return false;
+  // The admitting host is part of the frozen payload contract; the Diagnostician
+  // attribution must be one of the governed hosts (never free text).
+  const hostKind = own(value, 'hostKind');
+  if (hostKind !== 'openclaw' && hostKind !== 'codex' && hostKind !== 'workbuddy') return false;
   const evidence = own(value, 'evidence');
   if (!Array.isArray(evidence) || evidence.length === 0 || evidence.length > 8) return false;
   for (const entry of evidence) {
@@ -910,7 +975,10 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
           score: payloadParsed.score,
           sessionId: payloadParsed.sessionId,
           provenance: 'host_context_bound',
-          hostKind: 'codex',
+          // The admitting host comes from the marker's own payload — the ONE
+          // durable attribution fact (existing codex markers keep 'codex',
+          // workbuddy markers attribute 'workbuddy').
+          hostKind: payloadParsed.hostKind,
           evidence: [...payloadParsed.evidence],
           recordObservability: true,
         });
@@ -1030,6 +1098,160 @@ export async function ensureGovernanceContinuation(input: EnsureGovernanceContin
   }
 }
 
+// ─── Bare host pain admission (review R2/P1, WorkBuddy worker sweep) ────────
+
+export interface AdmitBareHostPainsInput {
+  readonly workspaceDir: string;
+  /** The bare-pain host to sweep. Only the WorkBuddy worker uses this seam today. */
+  readonly hostKind: 'workbuddy';
+  /** Bounded work per pass (default 5, aligned with the worker's candidate limit). */
+  readonly limit?: number;
+  readonly now?: Date;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export interface AdmitBareHostPainsResult {
+  readonly ok: boolean;
+  readonly reason?: string;
+  readonly nextAction?: string;
+  /** Bare pains that got an admission marker in THIS pass. */
+  readonly admitted: number;
+  /** Diagnostician tasks actually created in THIS pass (crash-safe ensure). */
+  readonly ensured: number;
+  /** Bare pains below the admission floor — evidence-only by policy. */
+  readonly skippedLowScore: number;
+  /** Rows that failed the required-field guard (rc-3: counted, never silent). */
+  readonly skippedInvalid: number;
+  readonly degradations: readonly string[];
+}
+
+/**
+ * Admit bare host pains — failure rows the shared production pain handler
+ * already persisted (host_kind set, canonical_pain_id set, runtime_task_id
+ * NULL) but that no inline admission exists for. The WorkBuddy hook is the
+ * only evidence producer on that host (SPEC workbuddy-host-adapter §1: no
+ * transcript reads), so these rows would otherwise stay stranded as
+ * evidence-only forever: reconcile only continues ADMITTED markers, and no
+ * WorkBuddy admission step existed (review R2/P1).
+ *
+ * Policy: only failures scoring at/above the Codex tool_failure admission
+ * floor (GOVERNANCE_STRONG_PAIN_SCORE = 70) are queued for diagnosis — that
+ * floor is the existing signal-quality boundary for write-tool failures, and
+ * lower-scored failures stay evidence-only in pain_events/tool_calls rather
+ * than diluting the diagnostician queue. Idempotency reuses the ONE existing
+ * authorities: the unique admission marker (canonical_pain_id probe +
+ * UNIQUE logical key) and the deterministic task id, so repeated sweeps and
+ * crash restarts never mint a second task. Task creation reuses
+ * `ensureGovernanceDiagnosticianTask` unchanged (including its Case-B link
+ * repair). Evidence promotion is deliberately NOT attempted here: the
+ * promotion substrate (governance_rollouts/observations) is fed by transcript
+ * ingestion, which the WorkBuddy MVP excludes.
+ */
+export async function admitBareHostPains(input: AdmitBareHostPainsInput): Promise<AdmitBareHostPainsResult> {
+  const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) {
+    return { ok: false, reason: opened.reason, nextAction: opened.nextAction, admitted: 0, ensured: 0, skippedLowScore: 0, skippedInvalid: 0, degradations: [opened.reason] };
+  }
+  const { db, close } = opened;
+  if (!hasProductionPainSchema(db)) {
+    close();
+    return { ok: false, reason: 'trajectory_schema_invalid', nextAction: 'run the supported PD workspace migration before enabling the worker', admitted: 0, ensured: 0, skippedLowScore: 0, skippedInvalid: 0, degradations: ['trajectory_schema_invalid'] };
+  }
+  const nowIso = (input.now ?? new Date()).toISOString();
+  const workspaceDir = path.resolve(input.workspaceDir);
+  const limit = Math.min(Math.max(input.limit ?? 5, 1), 50);
+
+  // Bare pains of this host that no admission marker covers yet. A marker is
+  // the durable "already handled" fact; runtime_task_id additionally excludes
+  // pains that reached a task through another path.
+  const barePainPredicate = `
+    FROM pain_events p
+    WHERE p.host_kind = ?
+      AND p.runtime_task_id IS NULL
+      AND p.canonical_pain_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM governance_signal_admissions a WHERE a.canonical_pain_id = p.canonical_pain_id)`;
+
+  try {
+    const lowScoreRow = db.prepare(`SELECT COUNT(*) AS n ${barePainPredicate} AND p.score < ?`).get(input.hostKind, GOVERNANCE_STRONG_PAIN_SCORE);
+    const skippedLowScore = typeof rowField(lowScoreRow, 'n') === 'number' ? (rowField(lowScoreRow, 'n') as number) : 0;
+
+    const rows = db.prepare(`SELECT p.canonical_pain_id, p.session_id, p.source, p.score, p.reason ${barePainPredicate} AND p.score >= ? ORDER BY p.id LIMIT ?`)
+      .all(input.hostKind, GOVERNANCE_STRONG_PAIN_SCORE, limit);
+
+    let admitted = 0;
+    let ensured = 0;
+    let skippedInvalid = 0;
+    const degradations: string[] = [];
+    const freshMarkers: { logicalObservationKey: string; canonicalPainId: string }[] = [];
+
+    for (const row of rows) {
+      const painId = rowField(row, 'canonical_pain_id');
+      const sessionId = rowField(row, 'session_id');
+      const score = rowField(row, 'score');
+      if (typeof painId !== 'string' || painId.length === 0 || typeof sessionId !== 'string' || sessionId.length === 0
+        || typeof score !== 'number' || !Number.isFinite(score)) {
+        skippedInvalid += 1;
+        continue;
+      }
+      const logicalObservationKey = `${input.hostKind}|${sessionId}|${painId}`;
+      const reason = typeof rowField(row, 'reason') === 'string' ? (rowField(row, 'reason') as string) : '';
+      const source = typeof rowField(row, 'source') === 'string' ? (rowField(row, 'source') as string) : 'tool_failure';
+      // The pain row carries the tool name only inside its reason prefix
+      // (`tool=<name>; ...` — the production writer's format); the row's
+      // source column is the failure class, used as the fallback.
+      const toolName = /^tool=([^;]{1,120});/.exec(reason)?.[1] ?? source;
+
+      const inserted = db.transaction((): boolean => {
+        // Re-probe inside the transaction: a concurrent sweep or live admission
+        // may have marked this pain between the scan and this write.
+        if (db.prepare('SELECT 1 FROM governance_signal_admissions WHERE canonical_pain_id = ?').get(painId) !== undefined) return false;
+        insertAdmissionMarker({
+          db,
+          identity: { hostKind: input.hostKind, logicalObservationKey, rolloutIdentity: sessionId, rootSessionId: sessionId, signalKind: 'tool_failure' },
+          canonicalPainId: painId,
+          ruleVersion: null,
+          reason,
+          payloadJson: toolFailureTaskPayload({ hostKind: input.hostKind, logicalObservationKey, sessionId, toolName, reason, score, workspaceDir }),
+          nowIso,
+        });
+        return true;
+      })();
+      if (inserted) {
+        admitted += 1;
+        freshMarkers.push({ logicalObservationKey, canonicalPainId: painId });
+      }
+    }
+
+    // Reuse the crash-safe ensure semantics unchanged: deterministic task id,
+    // task-store PK idempotency, Case-B link repair.
+    for (const marker of freshMarkers) {
+      const continuation = await ensureGovernanceDiagnosticianTask({
+        workspaceDir,
+        logicalObservationKey: marker.logicalObservationKey,
+        canonicalPainId: marker.canonicalPainId,
+        ...(input.databaseFactory ? { databaseFactory: input.databaseFactory } : {}),
+      });
+      if (continuation.ok) {
+        if (continuation.created) ensured += 1;
+      } else {
+        degradations.push(`${marker.logicalObservationKey}:${continuation.reason}`);
+      }
+    }
+
+    return {
+      ok: degradations.length === 0,
+      ...(degradations.length > 0 ? { reason: 'bare_pain_admission_degradations', nextAction: 'inspect the per-item degradations; the admitted pains and markers remain durable and reconcile retries task creation' } : {}),
+      admitted, ensured, skippedLowScore, skippedInvalid,
+      degradations: degradations.slice(0, 10),
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+    return { ok: false, reason: `bare_pain_admission_failed:${detail}`, nextAction: 'inspect the workspace trajectory database and retry; committed markers remain durable', admitted: 0, ensured: 0, skippedLowScore: 0, skippedInvalid: 0, degradations: [`bare_pain_admission_failed:${detail}`] };
+  } finally {
+    close();
+  }
+}
+
 // ─── Reconciliation (SPEC §13 crash-gap pass; Slice C worker calls this) ────
 
 export interface ReconcileGovernanceContinuationInput {
@@ -1087,6 +1309,14 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
     //   Case A/B: task link missing (crash before task, or before the link write)
     //   Case C:   promotion never started (no observation carries this painRef)
     //
+    // Case C/D (promotion recovery) is scoped to the hosts whose evidence
+    // substrate it exists for: the promotion rows come from transcript
+    // ingestion (governance_rollouts/observations), which only Codex feeds.
+    // A WorkBuddy marker is COMPLETE with task+link — its hook is the only
+    // evidence producer and the MVP excludes transcript reads, so demanding a
+    // promotion row would degrade reconciliation with rollout_not_found
+    // forever (review R2/P1).
+    //
     // A pending tail (promotion started, waiting for the next assistant turn)
     // is NOT a recovery need — it's a forward-looking state resolved by future
     // evidence. The live already_admitted redelivery path (ensureContinuation
@@ -1094,19 +1324,34 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
     // not retry pending tails, so pending-tail markers do not block later
     // markers. Stale tails are NOT auto-recoverable (substrate refuses to
     // re-arm them): they are counted separately below and reported.
-    const markers = db.prepare(`SELECT a.logical_observation_key, a.canonical_pain_id
+    const markers = db.prepare(`SELECT a.logical_observation_key, a.canonical_pain_id, a.host_kind
       FROM governance_signal_admissions a
       WHERE a.decision = 'admitted'
         AND (
           a.diagnostician_task_id IS NULL
-          OR NOT EXISTS (SELECT 1 FROM governance_observations o
-              WHERE o.promotion_ref = a.canonical_pain_id)
+          OR (a.host_kind = 'codex'
+              AND NOT EXISTS (SELECT 1 FROM governance_observations o
+                  WHERE o.promotion_ref = a.canonical_pain_id))
         )
       ORDER BY a.id LIMIT ?`).all(limit);
     for (const row of markers) {
       const key = rowField(row, 'logical_observation_key');
       const painId = rowField(row, 'canonical_pain_id');
       if (typeof key !== 'string' || typeof painId !== 'string') continue;
+      // WorkBuddy (and any future no-transcript host) markers continue through
+      // the task-ensure seam ONLY: there is no promotion substrate to recover,
+      // and routing them through ensureGovernanceContinuation would report a
+      // permanent rollout_not_found degradation despite a healthy task link.
+      if (rowField(row, 'host_kind') !== 'codex') {
+        const ensured = await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: key, canonicalPainId: painId });
+        if (ensured.ok) {
+          if (ensured.created) tasksEnsured += 1;
+          if (ensured.linkRepaired) linksRepaired += 1;
+        } else {
+          degradations.push(`${key}:${ensured.reason}`);
+        }
+        continue;
+      }
       const cont = await ensureGovernanceContinuation({ workspaceDir, logicalObservationKey: key, canonicalPainId: painId });
       if (cont.ok) {
         // Only count REAL actions: a task actually created, a link actually

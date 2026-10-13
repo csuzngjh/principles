@@ -7,12 +7,23 @@
  * bridge contract and are exercised end-to-end in the real-chain acceptance;
  * here the empty-queue cycle proves the production wiring with zero LLM.
  */
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import {
+  DreamerRunner,
+  getDefaultPdConfig,
+  disposePainSignalBridgesForWorkspace,
+  RuntimeStateManager,
+  SplitDiagnosticianRunner,
+  SqliteConnection,
+  SqliteDiagnosticianCommitter,
+  type DiagnosticianOutputV1,
+} from '@principles/core/runtime-v2';
+import type { HostEvent } from '@principles/core/host';
+import { createProductionPainEvidenceHandler, resetProductionPainCooldownForTest } from '@principles/host-runtime';
 import { runWorkbuddyWorkspaceWorkerCycle } from '../src/worker/workspace-worker.js';
 import { makeHome, makeGovernance, cleanupTempDirs } from './helpers/workbench.js';
 
@@ -133,5 +144,177 @@ describe('WorkBuddy worker status mode (host-runtime authority)', () => {
     const ready = makeWorkerWorkspace({ workbuddy: true, consumer: true });
     expect(computeWorkbuddyWorkerStatusMode({ workspaceDir: ready, registeredInInstallManifest: true })).toMatchObject({ mode: 'ready' });
     expect(computeWorkbuddyWorkerStatusMode({ workspaceDir: ready, registeredInInstallManifest: false })).toMatchObject({ mode: 'manual_action_required', reason: 'workspace_not_in_install_manifest' });
+  });
+});
+
+describe('WorkBuddy worker cycle — bare pain admission wiring (R2/P1)', () => {
+  /**
+   * Write one bare workbuddy pain through the REAL production pain handler —
+   * the exact shared code the pd-hook dist entry dispatches to (proven against
+   * the real entry in pd-hook-production.test.ts). The handler is what leaves
+   * the stranded evidence row this wiring must pick up.
+   */
+  async function writeBarePainViaProductionHandler(governance: string): Promise<string | null> {
+    resetProductionPainCooldownForTest();
+    const handler = createProductionPainEvidenceHandler({ hostKind: 'workbuddy' });
+    const event: HostEvent = {
+      kind: 'after_tool_call',
+      context: {
+        workspaceDir: governance,
+        sessionId: 'wb-r2-session-1',
+        turnId: 'wb-r2-turn-1',
+        toolName: 'Write',
+        toolInput: { file_path: path.join(path.parse(governance).root, 'etc', 'wb-r2-protected.txt'), content: 'x' },
+        toolOutput: { error: 'EACCES permission denied', result: { exitCode: 1 }, durationMs: 5 },
+      },
+      rawPayload: { host: 'r2-worker-test' },
+      source: 'workbuddy:post_tool_use',
+    };
+    const result = await handler(event);
+    const painId = result.metadata?.painId;
+    return typeof painId === 'string' ? painId : null;
+  }
+
+  /**
+   * Fake ONLY the LLM boundary with REAL semantics (the exact Codex-tested
+   * bridge pattern): acquire the durable lease through the production lease
+   * manager, commit through the production committer, mark the task succeeded.
+   * Zero provider calls; everything else on the cycle is the production path.
+   */
+  function spyDiagnosticianSuccess(governance: string): string[] {
+    const calls: string[] = [];
+    vi.spyOn(SplitDiagnosticianRunner.prototype, 'run').mockImplementation(async function (taskId: string) {
+      calls.push(taskId);
+      const self = this as unknown as { stateManager: RuntimeStateManager };
+      try {
+        const leased = await self.stateManager.acquireLease({ taskId, owner: 'split-diagnostician-orchestrator', runtimeKind: 'pi-ai' });
+        const runId = `run_${taskId}_${leased.attemptCount}`;
+        const diagnosis: DiagnosticianOutputV1 = {
+          valid: true,
+          diagnosisId: `diag-${taskId}`,
+          summary: '受保护路径写入失败',
+          rootCause: 'Tooling: 外部路径权限拒绝',
+          violatedPrinciples: [],
+          evidence: [
+            { sourceRef: 'workbuddy:tool_failure', note: 'bare workbuddy pain admitted by the worker sweep' },
+          ],
+          recommendations: [
+            { kind: 'principle', description: '写入受保护路径前先确认权限', abstractedPrinciple: '修改前先调查并确认执行边界' },
+          ],
+          confidence: 0.9,
+        };
+        const connection = new SqliteConnection(governance);
+        try {
+          const committer = new SqliteDiagnosticianCommitter(connection);
+          await committer.commit({ runId, taskId, output: diagnosis, idempotencyKey: `${taskId}:${runId}` });
+        } finally {
+          try { connection.close(); } catch { /* best-effort */ }
+        }
+        await self.stateManager.markTaskSucceeded(taskId, `diagnostician://${runId}`);
+        return { status: 'succeeded', taskId, attemptCount: leased.attemptCount, output: diagnosis };
+      } catch (error) {
+        return { status: 'failed' as const, taskId, errorCategory: 'execution_failed', failureReason: String(error).slice(0, 200), attemptCount: 1 };
+      }
+    });
+    // Safety net: the downstream dreamer LLM boundary is never the subject of
+    // this suite — a spied no-op keeps the shared consumer cycle from spawning
+    // real host runtimes (same discipline as the Codex worker suite).
+    vi.spyOn(DreamerRunner.prototype, 'run').mockImplementation(async (taskId: string) => ({
+      status: 'failed' as const, taskId, errorCategory: 'execution_failed', failureReason: 'test double: dreamer not under test', attemptCount: 1,
+    }));
+    return calls;
+  }
+
+  /** Workspaces this suite created — disposed + de-handle-pinned after each test (Windows file locks). */
+  const createdWorkspaces: string[] = [];
+
+  function trackWorkspace(governance: string): string {
+    createdWorkspaces.push(governance);
+    return governance;
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    // Release the cached-bridge handles the worker cycle created BEFORE the
+    // afterAll temp-dir sweep (the canonical Codex-worker-suite cleanup;
+    // invalidatePainSignalBridge drops cache entries WITHOUT disposing).
+    for (const dir of createdWorkspaces.splice(0)) {
+      await disposePainSignalBridgesForWorkspace(dir).catch(() => undefined);
+    }
+  });
+
+  it('admits a bare workbuddy pain into the existing governance queue and the diagnostician closes the task', async () => {
+    const governance = trackWorkspace(makeWorkerWorkspace({ workbuddy: true, consumer: true }));
+    const painId = await writeBarePainViaProductionHandler(governance);
+    expect(painId).toMatch(/^pain_host_[0-9a-f]{64}$/);
+    const executed = spyDiagnosticianSuccess(governance);
+
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    // Admission report: the bare pain became a marker + a task in ONE cycle.
+    expect(result.report?.admission).toMatchObject({ ok: true, admitted: 1, ensured: 1, skippedLowScore: 0 });
+
+    const db = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+    let marker: Record<string, unknown> | undefined;
+    try {
+      marker = db.prepare('SELECT * FROM governance_signal_admissions WHERE canonical_pain_id = ?').get(painId) as Record<string, unknown> | undefined;
+    } finally {
+      db.close();
+    }
+    expect(marker).toBeDefined();
+    expect(marker?.host_kind).toBe('workbuddy');
+    expect(marker?.logical_observation_key).toBe(`workbuddy|wb-r2-session-1|${painId}`);
+    expect(marker?.diagnostician_task_id).toBe(`diagnosis_${painId}`);
+
+    // The diagnostician step of the SAME cycle claimed and closed the
+    // admission-created task through the real lease/commit path (LLM spied).
+    expect(executed).toEqual([`diagnosis_${painId}`]);
+    expect(result.report?.diagnostician).toMatchObject({ taskId: `diagnosis_${painId}`, status: 'succeeded' });
+    expect(result.mode).toBe('ready');
+
+    // Exactly ONE task exists and it reached terminal success — no second
+    // queue, no re-execution.
+    const state = new Database(path.join(governance, '.pd', 'state.db'), { readonly: true });
+    try {
+      const tasks = state.prepare("SELECT task_id, status FROM tasks WHERE task_kind = 'diagnostician'").all() as { task_id: string; status: string }[];
+      expect(tasks).toEqual([{ task_id: `diagnosis_${painId}`, status: 'succeeded' }]);
+    } finally {
+      state.close();
+    }
+  });
+
+  it('a second cycle over the same pain is an admission no-op (still exactly one, terminal task)', async () => {
+    const governance = trackWorkspace(makeWorkerWorkspace({ workbuddy: true, consumer: true }));
+    const painId = await writeBarePainViaProductionHandler(governance);
+    expect(painId).not.toBeNull();
+    spyDiagnosticianSuccess(governance);
+    await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    const second = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(second.report?.admission).toMatchObject({ ok: true, admitted: 0, ensured: 0 });
+    // The terminal task is not re-picked; no candidate executed again.
+    expect(second.report?.diagnostician).toBeNull();
+    const state = new Database(path.join(governance, '.pd', 'state.db'), { readonly: true });
+    try {
+      expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 1 });
+    } finally {
+      state.close();
+    }
+  });
+
+  it('an admission store failure degrades the cycle observably and stays retryable (rc-9)', async () => {
+    const governance = trackWorkspace(makeWorkerWorkspace({ workbuddy: true, consumer: true }));
+    expect(await writeBarePainViaProductionHandler(governance)).not.toBeNull();
+    // Corrupt the trajectory store: reconcile AND admission must both report
+    // the degradation; the cycle becomes degraded with a nextAction and no
+    // silent skip.
+    fs.writeFileSync(path.join(governance, '.state', 'trajectory.db'), 'definitely not a sqlite database');
+    const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: governance });
+    expect(result.mode).toBe('degraded');
+    expect(result.nextAction).toBeTruthy();
+    expect(result.report?.admission.ok).toBe(false);
+    expect(result.report?.reconcile.ok).toBe(false);
   });
 });

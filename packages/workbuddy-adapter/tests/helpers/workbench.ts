@@ -22,7 +22,22 @@ export function trackTempDir(dir: string): string {
   return dir;
 }
 export function cleanupTempDirs(): void {
-  for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  for (const dir of tempDirs.splice(0)) {
+    // Windows releases closed SQLite handles ASYNCHRONOUSLY — the host-runtime
+    // admission suite and the Codex worker suite retry removal for the same
+    // reason. A directory still pinned after the retry budget is a REAL handle
+    // leak and must fail loud, never be silently swallowed.
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+        break;
+      } catch (error) {
+        if (attempt >= 12) throw error;
+        // Synchronous pause between attempts (afterAll has no async context).
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+      }
+    }
+  }
 }
 
 export function makeHome(): string {

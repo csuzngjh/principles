@@ -7,7 +7,10 @@
  * the WorkBuddy MVP excludes transcript ingestion (SPEC §1 Excluded; the
  * hook itself is the only evidence producer):
  *
- *   1. run the idempotent reconciliation pass (shared host-runtime authority)
+ *   1. run the idempotent reconciliation pass (shared host-runtime authority),
+ *      then admit the hook's BARE failure pains into the same governance
+ *      queue (review R2/P1 — no inline admission exists on this host; the
+ *      sweep reuses the ONE admission table and the crash-safe task ensure)
  *   2. lease + run one Diagnostician execution, then ONE bounded downstream
  *      consumer cycle through the SHARED host-neutral executor
  *      (internalization_auto_consumer = workspace execution authority)
@@ -39,11 +42,13 @@ import {
   type TaskRecord,
 } from '@principles/core/runtime-v2';
 import {
+  admitBareHostPains,
   loadPdConfigForPlugin,
   loadFeatureFlagFromConfig,
   reconcileGovernanceContinuation,
   runInternalizationConsumerCycle,
   saveHostToolDeclaration,
+  type AdmitBareHostPainsResult,
   type InternalizationConsumerCycleOutcome,
   type ConsumerCycleLogger,
   type ReconcileGovernanceContinuationResult,
@@ -54,6 +59,12 @@ export type WorkbuddyWorkerMode = 'ready' | 'manual_action_required' | 'paused' 
 
 export interface WorkbuddyWorkerCycleStepReport {
   readonly reconcile: ReconcileGovernanceContinuationResult;
+  /**
+   * Bare-pain admission sweep (review R2/P1): the WorkBuddy hook writes bare
+   * failure pains with no inline admission, so the worker admits them into the
+   * shared governance queue before the diagnostician step.
+   */
+  readonly admission: AdmitBareHostPainsResult;
   /** At most ONE diagnostician execution per cycle (bounded work). */
   readonly diagnostician: {
     readonly taskId: string;
@@ -157,6 +168,13 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   // Step 2 — Idempotent reconciliation (always runs; creates no LLM work).
   const reconcile = await reconcileGovernanceContinuation({ workspaceDir });
 
+  // Step 2b — Bare-pain admission (review R2/P1): the hook leaves bare
+  // workbuddy failure pains that no inline admission exists for. Without this
+  // sweep the evidence rows never reach the diagnostician queue. Runs AFTER
+  // reconcile (which continues already-admitted markers) and ensures tasks
+  // through the same crash-safe seam; bounded and idempotent.
+  const admission = await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy' });
+
   // Steps 3–5 — execution authority: internalization_auto_consumer.
   let diagnostician: WorkbuddyWorkerCycleStepReport['diagnostician'] = null;
   if (diagnosticianDisabled) {
@@ -172,7 +190,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
       mode: 'paused',
       reason: 'internalization_auto_consumer_disabled',
       nextAction: 'Automatic internalization execution is paused for this governance workspace; manual commands remain available: pd diagnose, pd runtime internalization run-once.',
-      report: { reconcile, diagnostician: null, downstream: null },
+      report: { reconcile, admission, diagnostician: null, downstream: null },
     };
   } else {
     try {
@@ -217,7 +235,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
         mode: 'degraded',
         reason: `diagnostician_execution_failed:${detail}`,
         nextAction: 'Inspect the governance workspace runtime profile and provider configuration; the task keeps its pending/retry state and no evidence was mutated.',
-        report: { reconcile, diagnostician: null, downstream: null },
+        report: { reconcile, admission, diagnostician: null, downstream: null },
       };
     }
   }
@@ -238,7 +256,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
       mode: 'degraded',
       reason: `host_tool_declaration_persist_failed:${declared.reason}`,
       nextAction: 'Repair WorkBuddy host declaration persistence (.pd/host-tool-semantics/workbuddy.json) before running the downstream internalization cycle; the worker retries automatically on the next cycle.',
-      report: { reconcile, diagnostician, downstream: null },
+      report: { reconcile, admission, diagnostician, downstream: null },
     };
   }
   const downstream = await runInternalizationConsumerCycle(workspaceDir, {
@@ -252,6 +270,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
 
   const degradedReason: string | undefined
     = !reconcile.ok ? `reconcile:${reconcile.reason ?? 'failed'}`
+    : !admission.ok ? `admission:${admission.reason ?? 'failed'}`
     : diagnostician?.status === 'failed' && diagnostician.errorCategory !== 'lease_conflict' ? `diagnostician_failed:${diagnostician.message ?? 'max_attempts_exceeded'}`
     : diagnostician?.status === 'degraded' ? `diagnostician_degraded:${diagnostician.message ?? 'unknown'}`
     : downstream.skipReason === 'runtime_config_error' || downstream.skipReason === 'cycle_error' || downstream.skipReason === 'config_malformed' ? `downstream:${downstream.skipReason}`
@@ -260,6 +279,6 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
     ...base,
     mode: degradedReason !== undefined ? 'degraded' : 'ready',
     ...(degradedReason !== undefined ? { reason: degradedReason, nextAction: 'Inspect the governance workspace .pd/config.yaml runtime profile and the per-step report above; the worker retries automatically on the next cycle.' } : {}),
-    report: { reconcile, diagnostician, downstream },
+    report: { reconcile, admission, diagnostician, downstream },
   };
 }
