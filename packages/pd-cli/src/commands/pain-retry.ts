@@ -65,6 +65,12 @@ interface PainRetryOptions {
   workspace?: string;
   json?: boolean;
   force?: boolean;
+  /** SPEC-CODEX-PAIN-CLOSURE-001 CR-06: explicit Owner statement for authorized recovery. */
+  ownerStatement?: string;
+  /** CR-06: zero-mutation recovery preview. */
+  dryRun?: boolean;
+  /** CR-06: explicit confirmation for the mutating statement-based recovery. */
+  confirm?: boolean;
   runtime?: string;
   openclawLocal?: boolean;
   openclawGateway?: boolean;
@@ -279,7 +285,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
   try {
     await stateManager.initialize();
 
-    const task = await stateManager.getTask(taskId);
+    let task = await stateManager.getTask(taskId);
 
     // Dead letter replay: when no task exists, check if the pain signal was
     // persisted to dead_letter_pains (rc-9: no silent failure in pain.ts).
@@ -325,6 +331,100 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // existing logging/output paths have a non-null value to print.
     const previousTaskStatus: PDTaskStatus | 'dead_lettered' = task ? task.status : 'dead_lettered';
     const previousLastError = task ? (task.lastError ?? null) : null;
+
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-06: authorized bounded recovery with an
+    // explicit Owner statement. The statement is validated the same way as
+    // `pd pain record --owner-statement` (non-empty, ≤500 chars, REJECTED —
+    // never truncated). --dry-run is a zero-mutation preview; the mutating
+    // recovery of a succeeded task additionally requires --confirm.
+    if (opts.ownerStatement !== undefined) {
+      const MAX_OWNER_STATEMENT_CHARS = 500;
+      if (opts.ownerStatement.trim().length === 0) {
+        return refuseExit(opts, {
+          painId: opts.painId, taskId,
+          reason: 'owner_statement_empty',
+          message: '--owner-statement must be non-empty',
+          nextAction: 'Submit the Owner verbatim words, or omit the flag.',
+        });
+      }
+      if (opts.ownerStatement.length > MAX_OWNER_STATEMENT_CHARS) {
+        return refuseExit(opts, {
+          painId: opts.painId, taskId,
+          reason: 'owner_statement_too_long',
+          message: `--owner-statement must be at most ${MAX_OWNER_STATEMENT_CHARS} characters (got ${opts.ownerStatement.length}); the Owner intent is never silently truncated`,
+          nextAction: 'Shorten the statement and resubmit.',
+        });
+      }
+      if (opts.dryRun === true) {
+        // Zero governance mutation (A15 dry-run contract): report what exists
+        // and what the recovery WOULD reference.
+        const candidates = await stateManager.getCandidatesByTaskId(taskId);
+        const candidatePreviews: Record<string, unknown>[] = [];
+        for (const candidate of candidates) {
+          const admission = await stateManager.getAdmissionDocument(candidate.candidateId);
+          const document = admission.ok ? admission.document : null;
+          const current = document !== null ? document.evaluations.find((e) => e.evaluationId === document.currentEvaluationId) : undefined;
+          candidatePreviews.push({
+            candidateId: candidate.candidateId,
+            status: candidate.status,
+            recommendationKind: candidate.rawRecommendationKind,
+            admission: current !== undefined
+              ? { decision: current.decision, reason: current.reason, evaluatedAt: current.evaluatedAt, policyVersion: current.policyVersion, ownerStatementPresent: current.ownerStatementPresent }
+              : { recorded: false, note: '历史准入处置未记录（pre-CR-03 记录或处置未持久化）' },
+            processing: document?.processing !== undefined ? { state: document.processing.state, attempts: document.processing.attempts } : { state: 'unknown' },
+          });
+        }
+        const dryRunReport = {
+          status: 'dry-run',
+          painId: opts.painId,
+          taskId,
+          taskStatus: task ? task.status : 'dead_lettered',
+          ownerStatement: { provided: true, chars: opts.ownerStatement.length, classification: 'owner_statement', channel: 'cli_owner_statement' },
+          candidates: candidatePreviews,
+          planned: [
+            're-run the diagnosis with the Owner statement attached (new run/attempt lineage; the prior diagnosis, artifacts and admission history are preserved)',
+            'append a NEW admission evaluation version keyed by the new material fingerprint (the previous decision stays queryable; currentEvaluationId moves forward)',
+            'admitted candidates proceed through the unchanged reuse gate and type routing',
+          ],
+          governanceMutation: 'none',
+        };
+        if (opts.json) console.log(JSON.stringify(dryRunReport, null, 2));
+        else console.log(JSON.stringify(dryRunReport, null, 2));
+        return;
+      }
+      if (task && task.status === 'succeeded') {
+        if (opts.confirm !== true && opts.force !== true) {
+          return refuseExit(opts, {
+            painId: opts.painId, taskId,
+            reason: 'recovery_confirmation_required',
+            message: 'Statement-based recovery of a succeeded task is a governance mutation; explicit confirmation is required.',
+            nextAction: `Preview with --dry-run first, then add --confirm: pd pain retry --pain-id ${opts.painId} --owner-statement <text> --confirm`,
+          });
+        }
+        // Attach the statement as a NEW submission version and re-open the
+        // task: prior diagnosis/artifacts/admission history are preserved
+        // (the new evaluation version is appended, never overwritten).
+        let payloadParsed: Record<string, unknown> = {};
+        try {
+          const raw = JSON.parse(task.diagnosticJson ?? '{}') as unknown;
+          if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) payloadParsed = raw as Record<string, unknown>;
+        } catch {
+          payloadParsed = {};
+        }
+        payloadParsed.correctionEvidence = {
+          text: opts.ownerStatement,
+          classification: 'owner_statement',
+          channel: 'cli_owner_statement',
+          ...(typeof payloadParsed.sessionIdHint === 'string' ? { sessionId: payloadParsed.sessionIdHint } : {}),
+        };
+        await stateManager.updateTask(taskId, {
+          status: 'pending',
+          diagnosticJson: JSON.stringify(payloadParsed),
+        });
+        task = await stateManager.getTask(taskId);
+        console.error(`[PD] owner statement attached to ${taskId}; diagnosis re-opened with the statement as input-basis version`);
+      }
+    }
 
     if (task && task.status === 'succeeded' && !opts.force) {
       return refuseExit(opts, {
@@ -1183,6 +1283,9 @@ export function registerPainRetryCommand(
     .option('--maxTokens <n>', 'Max output tokens (max_tokens) for pi-ai LLM calls — for pi-ai, falls back to policy', parseInt)
     .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
     .option('--force', 'Allow retry of already-succeeded tasks')
+    .option('--owner-statement <text>', 'SPEC-CODEX-PAIN-CLOSURE-001 CR-06: attach the Owner verbatim statement (max 500 chars, rejected when longer) to this pain for an authorized recovery run; for a succeeded task it requires --confirm and re-runs the diagnosis with the statement as the new input-basis version', undefined)
+    .option('--dry-run', 'CR-06: zero-mutation preview of what the statement-based recovery would reference (no diagnosis, no writes)')
+    .option('--confirm', 'CR-06: confirm the mutating statement-based recovery of a succeeded task (dry-run is the no-write preview)')
     .option('--json', 'Output raw JSON')
     .action(async (opts: PainRetryOptions) => {
       await handler(opts);

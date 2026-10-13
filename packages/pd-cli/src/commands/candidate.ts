@@ -41,6 +41,8 @@ import {
   type LedgerPrincipleEntry,
   type ReuseDecision,
   type CandidateIntakeResult,
+  evaluateAndPersistAdmissionFromStore,
+  currentAdmissionEvaluation,
 } from '@principles/core/runtime-v2';
 import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -941,6 +943,53 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
 
     // PRI-442 Stage 4: admission gate check — refuse non-admitted candidates
     // to prevent CLI from bypassing the production admission gate.
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (§7.2): the partial record check is a
+    // FAST pre-refusal only. The write permission itself comes from the
+    // persisted admission disposition; when it is missing (pre-CR-03 records)
+    // a full re-evaluation from the persisted materials runs and is saved.
+    const admissionDocument = await stateManager.getAdmissionDocument(opts.candidateId);
+    let fullGate: { decision: string; reason: string; nextAction: string } | null = null;
+    let admissionNote: string | undefined;
+    if (admissionDocument.ok && admissionDocument.document !== null) {
+      const current = currentAdmissionEvaluation(admissionDocument.document);
+      if (current !== null) {
+        fullGate = { decision: current.decision, reason: current.reason, nextAction: current.nextAction };
+      } else {
+        admissionNote = 'admission document has no current evaluation';
+      }
+    } else if (!admissionDocument.ok) {
+      admissionNote = `admission document unreadable: ${admissionDocument.reason}`;
+    } else {
+      const reevaluated = await evaluateAndPersistAdmissionFromStore(stateManager, [opts.candidateId], { taskId: candidate.taskId });
+      if (reevaluated.ok) {
+        const decision = reevaluated.decisions.get(opts.candidateId);
+        if (decision !== undefined) {
+          fullGate = { decision: decision.decision, reason: `${decision.reason}${admissionNote !== undefined ? ` (re-evaluated; ${admissionNote})` : ' (re-evaluated; persisted)'}`, nextAction: decision.nextAction };
+        } else {
+          fullGate = { decision: 'needs_evidence', reason: 'candidate_not_in_diagnosis_chain', nextAction: 're-run the diagnosis; the candidate is not reachable from its diagnosis task' };
+        }
+      } else {
+        fullGate = { decision: 'needs_evidence', reason: reevaluated.reason, nextAction: reevaluated.nextAction };
+      }
+    }
+    if (fullGate !== null && fullGate.decision !== 'admitted') {
+      const result = {
+        candidateId: opts.candidateId,
+        status: 'refused',
+        admissionDecision: fullGate.decision,
+        reason: fullGate.reason,
+        nextAction: fullGate.nextAction,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Admission gate refused candidate ${opts.candidateId}: ${fullGate.decision}`);
+        console.error(`  Reason:      ${fullGate.reason}`);
+        console.error(`  Next Action: ${fullGate.nextAction}`);
+      }
+      process.exit(1);
+      return;
+    }
     const admissionBlock = checkAdmissionGate(candidate);
     if (admissionBlock) {
       const result = {

@@ -8,6 +8,22 @@ const { mockStateManager, mockAdapter, mockService, MockRuntimeStateManager, Moc
     getCandidate: vi.fn(),
     getArtifact: vi.fn(),
     close: vi.fn().mockResolvedValue(undefined),
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-03: the persisted admission disposition is
+    // the intake write permission; default mock = an admitted current evaluation.
+    getAdmissionDocument: vi.fn().mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    }),
     connection: {
       getDb: () => ({
         prepare: () => ({
@@ -102,6 +118,7 @@ describe('pd candidate intake', () => {
 
     // Reset mock implementations
     mockStateManager.getCandidate.mockReset();
+    mockStateManager.getAdmissionDocument.mockClear();
     mockStateManager.getArtifact.mockReset();
     mockAdapter.writeProbationEntry.mockReset();
     mockAdapter.existsForCandidate.mockReset();

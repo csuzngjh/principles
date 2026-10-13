@@ -495,6 +495,95 @@ export async function persistPainDiagnosis(deps: {
   }
 }
 
+
+
+/**
+ * SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (§7.2): full-gate re-evaluation from
+ * PERSISTED materials only (task diagnosticJson + latest run output), shared
+ * by the CLI mutation paths so their write permission can never contradict
+ * the production gate on the same material. The evaluation is PERSISTED as a
+ * new admission version (append-only; idempotent by material fingerprint).
+ */
+export async function evaluateAndPersistAdmissionFromStore(
+  stateManager: Pick<RuntimeStateManager, 'getTask' | 'getRunsByTask' | 'getCandidatesByTaskId' | 'appendAdmissionEvaluation'>,
+  candidateIds: readonly string[],
+  input: { taskId: string },
+): Promise<
+  { ok: true; decisions: Map<string, { decision: AdmissionDecision; reason: string; nextAction: string }> }
+  | { ok: false; reason: string; nextAction: string }
+> {
+  const task = await stateManager.getTask(input.taskId);
+  if (task === null) return { ok: false, reason: 'task_missing', nextAction: 'the diagnosis task no longer exists; re-run the diagnosis' };
+  const reentry = validatePersistedIngressFacts(task.diagnosticJson);
+  if (reentry.errorCode !== null) {
+    return { ok: false, reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; re-run the diagnosis before intake' };
+  }
+  const runs = await stateManager.getRunsByTask(input.taskId);
+  const latestRun = runs.at(-1);
+  let output: DiagnosticianOutputV1 | undefined;
+  if (latestRun !== undefined && typeof latestRun.outputPayload === 'string' && latestRun.outputPayload.length > 0) {
+    try {
+      const parsedOutput: unknown = JSON.parse(latestRun.outputPayload);
+      if (Value.Check(DiagnosticianOutputV1Schema, parsedOutput)) output = parsedOutput;
+    } catch {
+      output = undefined;
+    }
+  }
+  if (output === undefined) {
+    return { ok: false, reason: 'diagnostician_output_unavailable', nextAction: 're-run the diagnosis before intake (the persisted run carries no parseable output)' };
+  }
+  const ownerStatementPresent = isOwnerStatementEvidence(reentry.correctionEvidence);
+  const candidates = (await stateManager.getCandidatesByTaskId(input.taskId))
+    .filter((candidate) => candidateIds.includes(candidate.candidateId));
+  const results = evaluateCandidateAdmissions(candidates, output, {
+    provenance: reentry.provenance,
+    inputEvidenceCount: reentry.evidenceCount,
+    ...(ownerStatementPresent ? { ownerStatementPresent } : {}),
+  });
+  const decisions = new Map<string, { decision: AdmissionDecision; reason: string; nextAction: string }>();
+  const evaluatedAt = new Date().toISOString();
+  const materialFingerprint = fingerprintMaterial([
+    JSON.stringify(output),
+    reentry.provenance,
+    String(reentry.evidenceCount),
+    ownerStatementPresent && reentry.correctionEvidence ? fingerprintStatement(reentry.correctionEvidence.text) : 'no-owner-statement',
+  ]);
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    const admission = results[i];
+    if (!candidate || !admission) continue;
+    decisions.set(candidate.candidateId, {
+      decision: admission.admission.decision,
+      reason: admission.admission.reason,
+      nextAction: admission.admission.nextAction,
+    });
+    const persisted = await stateManager.appendAdmissionEvaluation(candidate.candidateId, {
+      evaluationId: `ae_${fingerprintMaterial([candidate.candidateId, materialFingerprint, ADMISSION_POLICY_VERSION]).slice(0, 16)}`,
+      decision: admission.admission.decision,
+      reason: admission.admission.reason,
+      nextAction: admission.admission.nextAction,
+      evaluatedAt,
+      policyVersion: ADMISSION_POLICY_VERSION,
+      provenance: reentry.provenance,
+      inputEvidenceCount: reentry.evidenceCount,
+      ownerStatementPresent,
+      recommendationKind: candidate.rawRecommendationKind,
+      confidence: output.confidence,
+      materialFingerprint,
+      materialSummary: {
+        inputEvidenceCount: reentry.evidenceCount,
+        outputEvidenceCount: output.evidence.length,
+        ownerStatementPresent,
+        ...(ownerStatementPresent && reentry.correctionEvidence ? { statementFingerprint: fingerprintStatement(reentry.correctionEvidence.text) } : {}),
+      },
+    });
+    if (persisted.status === 'refused') {
+      return { ok: false, reason: `admission_persistence_failed:${persisted.reason}`, nextAction: 'inspect state.db principle_candidates; the evaluation was not saved and intake is blocked' };
+    }
+  }
+  return { ok: true, decisions };
+}
+
 export class PainSignalBridge {
   private readonly stateManager: RuntimeStateManager;
   private readonly runner: DiagnosticianRunnerLike;
