@@ -104,14 +104,22 @@ describe('frozen fixture payloads decode with exact field mapping', () => {
     expect(toolOutput.result).toEqual(payload['tool_response']);
   });
 
-  it('PostToolUseFailure (thrown tool error): decodes onto after_tool_call with a failure envelope', () => {
+  it('PostToolUseFailure (thrown tool error): decodes onto after_tool_call with a failure envelope — thrown error verbatim, raw payload (incl. tool_error_code) inside result', () => {
     const payload = payloadOf('post-tool-use-failure-write-notread.json');
     const event = decodeWorkbuddyInput(payload);
     expect(event.kind).toBe('after_tool_call');
     expect(event.source).toBe('workbuddy:post_tool_use_failure');
-    const toolOutput = event.context.toolOutput as { error: string };
-    expect(toolOutput.error).toContain('File has not been read yet');
+    const toolOutput = event.context.toolOutput as { error: string; result: Record<string, unknown> };
+    // The thrown error is the failure attribution — verbatim, never swapped
+    // for a success marker (this event is registered in hooks.json since the
+    // 2026-10-13 re-verification proved this failure class emits ONLY it,
+    // never PostToolUse: engine 2.161.0, sha256 1b1a01bc…).
+    expect(toolOutput.error).toBe('File has not been read yet: D:\\Code\\_worktrees\\wb-probe-lab\\proj-a\\guarded-preset2.txt. Read it first before writing to it.');
+    expect(toolOutput.result).toEqual(payload);
+    expect(toolOutput.result['tool_error_code']).toBe('2009');
+    expect(Object.hasOwn(toolOutput.result, 'tool_response')).toBe(false);
     expect(event.context.toolCallId).toBe('toolu_p03_throw');
+    expect(event.context.toolName).toBe('Write');
   });
 
   it('model-request-injection-shapes fixture is NOT an event payload: decode fails loud', () => {

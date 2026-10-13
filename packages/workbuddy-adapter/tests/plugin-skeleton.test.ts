@@ -32,8 +32,15 @@ describe('plugin manifest (probe P01 manifest facts)', () => {
 });
 
 describe('hooks.json (frozen registration shape)', () => {
-  it('registers exactly the four-event baseline — PostToolUseFailure NOT registered (OD-02/P03)', () => {
-    expect(Object.keys(HOOKS.hooks).sort()).toEqual(['PostToolUse', 'PreToolUse', 'SessionStart', 'UserPromptSubmit']);
+  it('registers the five-event baseline including PostToolUseFailure (OD-02 evidence-driven: thrown Write failures emit ONLY PostToolUseFailure — probe P03 + 2026-10-13 re-verification, engine 2.161.0)', () => {
+    expect(Object.keys(HOOKS.hooks).sort()).toEqual(['PostToolUse', 'PostToolUseFailure', 'PreToolUse', 'SessionStart', 'UserPromptSubmit']);
+  });
+
+  it('PostToolUseFailure uses the same matcher/wrapper/timeout pattern as PostToolUse', () => {
+    const [ptuf] = HOOKS.hooks['PostToolUseFailure'] ?? [];
+    expect(ptuf).toBeDefined();
+    expect(ptuf?.matcher).toBe('*');
+    expect(ptuf?.hooks[0]?.command).toBe(`node "\${CODEBUDDY_PLUGIN_ROOT}/scripts/wrapper.cjs" PostToolUseFailure`);
   });
 
   it('uses matchers ONLY on tool events; prompt/session events carry none', () => {

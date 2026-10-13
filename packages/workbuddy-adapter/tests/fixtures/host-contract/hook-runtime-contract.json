@@ -84,7 +84,8 @@
         "observedOptional": ["tool_error_code", "tool_error_name", "is_interrupt", "call_id", "tool_use_id", "agent_type", "permission_mode", "client", "version", "generation_id", "model"],
         "verifiedExample": "error='File has not been read yet...', tool_error_code='2009', tool_error_name='WriteFileNotReadError', is_interrupt=false"
       },
-      "od02Conclusion": "FAILED tool calls (the common pain-evidence class: file-not-found, runtime-wrong usage, non-zero bash) DO enter PostToolUse with is_error/exitCode markers, so after_tool_call evidence collection covers failures WITHOUT a new event. PostToolUseFailure adds only the thrown-error class (unknown-tool and schema-invalid calls are rejected before any hook fires)."
+      "od02Conclusion": "FAILED tool calls (the common pain-evidence class: file-not-found, runtime-wrong usage, non-zero bash) DO enter PostToolUse with is_error/exitCode markers, so after_tool_call evidence collection covers failures WITHOUT a new event. PostToolUseFailure adds only the thrown-error class (unknown-tool and schema-invalid calls are rejected before any hook fires).",
+      "amendment20261013": "Independent re-verification (engine 2.161.0, sha256 1b1a01bc…, scripts/dev/workbuddy-probe/probe-post-tool-use-failure.mjs, lab D:\\Code\\wb-ptuf-lab\\ptuf-1791905652552) FALSIFIED the first sentence's implied completeness for the thrown class: a Write to an existing-but-never-read file emits ONLY PostToolUseFailure (error='File has not been read yet…', tool_error_code='2009', NO tool_response) and PostToolUse never fires for it. hooks.json now registers PostToolUseFailure (matcher '*', wrapper event arg PostToolUseFailure) mapped onto the SAME after_tool_call HostEvent kind — still no new core event kind. The od02Conclusion above is preserved verbatim as the historical P03 reading it superseded."
     }
   },
   "ids": {

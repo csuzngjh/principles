@@ -67,8 +67,9 @@ function writePluginSkeleton(pluginDir: string, version = '0.3.0'): void {
     path.join(pluginDir, '.codebuddy-plugin', 'plugin.json'),
     JSON.stringify({ name: WORKBUDDY_PLUGIN_NAME, version, description: 'Principles Disciple (test skeleton)' }, null, 2),
   );
-  // hooks/hooks.json at the plugin ROOT with the four-event baseline shape
-  // (frozen manifest-facts hooksJsonShape).
+  // hooks/hooks.json at the plugin ROOT with a representative multi-event
+  // baseline shape (frozen manifest-facts hooksJsonShape; the installer copies
+  // the payload verbatim and asserts no event identity of its own).
   const hook = (eventArg: string) => ({
     matcher: '*',
     hooks: [{ type: 'command', command: `node "\${CODEBUDDY_PLUGIN_ROOT}/scripts/wrapper.cjs" ${eventArg}`, timeout: 30 }],

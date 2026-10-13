@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
+import { admitBareHostPains } from '@principles/host-runtime';
 import { runEntry } from './helpers/hook-runner.js';
 import {
   activationArtifact,
@@ -203,6 +204,76 @@ describe('P06 workspace semantics: A/B projects share ONE governance workspace',
       expect(fs.existsSync(path.join(project, '.pd'))).toBe(false);
       expect(fs.existsSync(path.join(project, '.state'))).toBe(false);
     }
+  });
+});
+
+describe('PostToolUseFailure subscription (OD-02 evidence-driven, engine 2.161.0 re-verified 2026-10-13)', () => {
+  it('routes the real thrown-Write-error payload through the shared pain path: failure evidence WITH error attribution, and honestly BELOW the bare-pain admission floor', async () => {
+    const { home, governance } = productionHome();
+    makeTrajectory(governance);
+    const project = makeProjectDir(home, 'ptuf');
+
+    // The REAL engine payload shape (probe P03 fixture + 2026-10-13 lab):
+    // thrown `error` + tool_error_code=2009, NO tool_response. The hook result
+    // is the after_tool_call neutral — nothing blockable exists there (P02).
+    const result = runEntry(home, JSON.stringify(fixturePayload('post-tool-use-failure-write-notread.json', { cwd: project })), 'PostToolUseFailure');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+
+    // Evidence chain: the tool_calls row keeps the REAL failure with the
+    // thrown error text and exit_code 0 — normalization must not invent an
+    // exit code nor misclassify the thrown error as success.
+    const db = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const calls = db.prepare('SELECT tool_name, outcome, exit_code, error_message FROM tool_calls ORDER BY id').all();
+      expect(calls).toEqual([
+        { tool_name: 'Write', outcome: 'failure', exit_code: 0, error_message: expect.stringContaining('File has not been read yet') },
+      ]);
+      // pain_events stays EMPTY — and that is the POLICY outcome, not an
+      // event loss: the thrown-error shape carries no exitCode, so the shared
+      // production score is the risky-path bonus only (20 < the 70 floor of
+      // GOVERNANCE_STRONG_PAIN_SCORE), triage stays evidence_only, and the
+      // production handler only writes pain rows for ADMITTED failures.
+      const pains = db.prepare('SELECT canonical_pain_id, score, host_kind FROM pain_events').all();
+      expect(pains).toEqual([]);
+    } finally {
+      db.close();
+    }
+
+    // The durable WorkBuddy event log (rc-9 receipt chain) carries the failure
+    // attribution too — paths redacted by telemetry policy, message preserved.
+    const logsDir = path.join(governance, '.state', 'logs');
+    const toolLines = fs.readdirSync(logsDir)
+      .filter((file) => file.startsWith('events_') && file.endsWith('.jsonl'))
+      .flatMap((file) => fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean))
+      .filter((line) => line.includes('"tool_call"'));
+    expect(toolLines.length).toBe(1);
+    const parsed = JSON.parse(toolLines[0] ?? '{}') as { type?: string; category?: string; data?: { toolName?: string; error?: string } };
+    expect(parsed.type).toBe('tool_call');
+    expect(parsed.category).toBe('failure');
+    expect(parsed.data?.toolName).toBe('Write');
+    expect(parsed.data?.error).toContain('File has not been read yet');
+
+    // The worker's bare-pain admission sweep (score>=70 floor) confirms there
+    // is nothing to queue for this shape: policy exclusion, nothing stranded.
+    const sweep = await admitBareHostPains({ workspaceDir: governance, hostKind: 'workbuddy' });
+    expect(sweep.ok).toBe(true);
+    expect(sweep.admitted).toBe(0);
+    expect(sweep.ensured).toBe(0);
+    expect(sweep.skippedInvalid).toBe(0);
+  });
+
+  it('decoder keeps PostToolUseFailure honest: a missing thrown error fails loud instead of becoming a success', () => {
+    // Belt for the exact payload family this subscription now receives: the
+    // decoder's requiredString('error') guard (rc-3) — registered in
+    // hooks.json, so a malformed delivery degrades per the after_tool_call
+    // channel instead of poisoning the evidence chain with a fake success.
+    const payload = fixturePayload('post-tool-use-failure-write-notread.json');
+    delete payload['error'];
+    const result = runEntry(makeHome(), JSON.stringify(payload), 'PostToolUseFailure');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('missing or malformed required field "error"');
   });
 });
 

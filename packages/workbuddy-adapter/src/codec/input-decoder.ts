@@ -26,11 +26,17 @@
  *   boundary: PD does not read the transcript);
  * - permission_mode is type-validated and retained WITHOUT granting any extra
  *   authority — bypassPermissions never bypasses the governance gate;
- * - PostToolUseFailure (thrown tool errors, probe P03) maps onto the SAME
- *   after_tool_call pain path as PostToolUse: a thrown tool error is a real
- *   tool failure. v1's shipped hooks.json does NOT register it (OD-02/P03:
- *   ordinary failures already reach PostToolUse); this mapping only defines
- *   honest behavior if an owner registers it manually.
+ * - PostToolUseFailure (thrown tool errors) maps onto the SAME after_tool_call
+ *   pain path as PostToolUse: a thrown tool error is a real tool failure.
+ *   Registration history (OD-02, evidence-driven): v1 did NOT register it —
+ *   P03 was then read as "ordinary failures already reach PostToolUse". The
+ *   independent re-verification (2026-10-13, engine 2.161.0 sha256 1b1a01bc…,
+ *   scripts/dev/workbuddy-probe/probe-post-tool-use-failure.mjs) FALSIFIED
+ *   that reading: a Write to an existing-but-not-read file emits ONLY
+ *   PostToolUseFailure (tool_error_code=2009, thrown `error`, NO
+ *   tool_response) — PostToolUse never fires for that failure class. hooks.json
+ *   therefore registers the event (matcher '*'), still without adding a core
+ *   event kind: the payload normalizes to the shared failure envelope below.
  */
 import path from 'node:path';
 import type { HostEvent, HostEventContext, HostEventKind } from '@principles/core/host';
