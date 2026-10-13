@@ -100,6 +100,7 @@ describe('CR-03 admission document: append-only history', () => {
   it('appends a new evaluation and moves the current pointer', () => {
     const first = appendAdmissionEvaluation(null, makeEvaluation());
     expect(first.status).toBe('appended');
+    if (first.status === 'refused') throw new Error(`append refused: ${first.reason}`);
     const second = appendAdmissionEvaluation(first.document, makeEvaluation({
       evaluationId: 'ae_test_2',
       decision: 'needs_evidence',
@@ -107,23 +108,28 @@ describe('CR-03 admission document: append-only history', () => {
       materialFingerprint: 'fp-2',
     }));
     expect(second.status).toBe('appended');
+    if (second.status === 'refused') throw new Error(`append refused: ${second.reason}`);
     expect(second.document.evaluations).toHaveLength(2);
     expect(second.document.currentEvaluationId).toBe('ae_test_2');
     // A15: the old version stays intact and queryable.
-    expect(second.document.evaluations[0].decision).toBe('admitted');
+    expect(second.document.evaluations[0]?.decision).toBe('admitted');
     expect(currentEvaluation(second.document)?.decision).toBe('needs_evidence');
   });
 
   it('is idempotent for the same material fingerprint + policy version (no duplicate, no overwrite)', () => {
     const first = appendAdmissionEvaluation(null, makeEvaluation());
+    expect(first.status).toBe('appended');
+    if (first.status === 'refused') throw new Error(`first append refused: ${first.reason}`);
     const again = appendAdmissionEvaluation(first.document, makeEvaluation({ evaluationId: 'different-id-same-material' }));
     expect(again.status).toBe('reused');
+    if (again.status === 'refused') throw new Error(`re-append refused: ${again.reason}`);
     expect(again.document.evaluations).toHaveLength(1);
     expect(again.evaluation.evaluationId).toBe('ae_test_1');
   });
 
   it('processing domain updates never touch evaluation history', () => {
     const first = appendAdmissionEvaluation(null, makeEvaluation());
+    if (first.status === 'refused') throw new Error(`append refused: ${first.reason}`);
     const withProcessing = { ...first.document, processing: { state: 'in_progress' as const, attempts: 2 } };
     expect(withProcessing.evaluations).toEqual(first.document.evaluations);
     expect(parseAdmissionDocument(JSON.stringify(withProcessing)).document?.processing?.attempts).toBe(2);
@@ -158,6 +164,8 @@ describe('CR-03 sqlite candidate store: admission_json round-trip + migration', 
       expect(before).toEqual({ ok: true, document: null });
       const appended = await store.appendAdmissionEvaluation('c-1', makeEvaluation());
       expect(appended.status).toBe('appended');
+      if (appended.status === 'refused') throw new Error(`append refused: ${appended.reason}`);
+      expect(appended.document.currentEvaluationId).toBe('ae_test_1');
       const read = await store.getAdmissionDocument('c-1');
       expect(read).toEqual({ ok: true, document: expect.objectContaining({ currentEvaluationId: 'ae_test_1' }) });
       // A08: the column physically exists after migration (raw row check).
