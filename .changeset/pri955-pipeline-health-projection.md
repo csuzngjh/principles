@@ -1,4 +1,5 @@
 ---
+"@principles/core": patch
 "create-principles-disciple": patch
 ---
 
