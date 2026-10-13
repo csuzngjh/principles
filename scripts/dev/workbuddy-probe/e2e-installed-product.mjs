@@ -42,6 +42,24 @@ function record(step, verdict, detail) {
   results.push({ step, verdict, detail });
   console.log(`[verdict=${verdict}] ${step} — ${detail}`);
 }
+
+/** THE single exit path (review §6): persists results, prints the summary and
+ * sets the exit code (FAIL→1). Every early return and the crash handler route
+ * through here — the former bare `return`s (pack/build/extract/deploy/enable
+ * failures) exited 0 with the failure recorded but unreported (fake green). */
+function finalize() {
+  const failed = results.filter((r) => r.verdict === 'FAIL');
+  console.log(`\nInstalled-product E2E: ${results.filter((r) => r.verdict === 'PASS').length} PASS, ${failed.length} FAIL`);
+  try {
+    fs.mkdirSync(LAB_ROOT, { recursive: true });
+    fs.writeFileSync(path.join(LAB_ROOT, 'e2e-results.json'), JSON.stringify(results, null, 2));
+  } catch (error) {
+    console.error(`results persist failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+    return;
+  }
+  process.exitCode = failed.length === 0 ? 0 : 1;
+}
 const engineEnvBase = () => ({
   ...process.env,
   WORKBUDDY_CONFIG_DIR: ISO,
@@ -74,7 +92,7 @@ async function main() {
 
   // ── 1. Pack the actual artifact ──
   const packed = packInstaller();
-  if (packed.error) { record('pack', 'FAIL', packed.error); return; }
+  if (packed.error) { record('pack', 'FAIL', packed.error); return finalize(); }
   record('pack', 'PASS', `tarball ${path.basename(packed.tarball)} (${Math.round(fs.statSync(packed.tarball).size / 1024)} KiB)`);
 
   // ── 2. Produce the SUPPORTED payload (release train shape): the installer
@@ -94,11 +112,11 @@ async function main() {
   });
   if (buildAsset.status !== 0) {
     record('build-release-asset', 'FAIL', `status=${buildAsset.status} error=${buildAsset.error?.message ?? 'none'} stdoutTail=${(buildAsset.stdout || '').slice(-300)} stderrTail=${(buildAsset.stderr || '').slice(-300)}`);
-    return;
+    return finalize();
   }
   const assetPayload = path.join(releaseOut, 'payload');
   const identityStamp = path.join(assetPayload, '_release', 'product-identity.json');
-  if (!fs.existsSync(identityStamp)) { record('build-release-asset', 'FAIL', `payload has no _release/product-identity.json (extracted: ${fs.readdirSync(assetPayload).join(',')})`); return; }
+  if (!fs.existsSync(identityStamp)) { record('build-release-asset', 'FAIL', `payload has no _release/product-identity.json (extracted: ${fs.readdirSync(assetPayload).join(',')})`); return finalize(); }
   record('build-release-asset', 'PASS', `stamped payload ready (${fs.readdirSync(assetPayload).slice(0, 8).join(',')}…)`);
 
   // Run the SOURCE-built CLI (the repo's own supported isolation: the smoke
@@ -108,7 +126,7 @@ async function main() {
   // comes entirely from the stamped payload — the acceptance point (no dev
   // override at wrapper time) is unaffected.
   const installerEntry = path.join(REPO, 'packages', 'create-principles-disciple', 'dist', 'index.js');
-  if (!fs.existsSync(installerEntry)) { record('extract', 'FAIL', 'source CLI dist missing (build create-principles-disciple)'); return; }
+  if (!fs.existsSync(installerEntry)) { record('extract', 'FAIL', 'source CLI dist missing (build create-principles-disciple)'); return finalize(); }
   record('extract', 'PASS', 'stamped payload ready; source-built CLI will consume it via PD_INSTALL_PLUGIN_DIR');
   const install = spawnSync(process.execPath, [installerEntry, '--host', 'workbuddy', '--workspace', PROJECT, '--yes', '--json'], {
     encoding: 'utf8', timeout: 600_000,
@@ -132,7 +150,7 @@ async function main() {
   const deploymentOk = fs.existsSync(runtimeEntry) && fs.existsSync(runtimeNodeModules) && settingsOk && govReady;
   record('deploy-register-init', deploymentOk ? 'PASS' : 'FAIL',
     `runtimeEntry=${fs.existsSync(runtimeEntry)} nodeModules=${fs.existsSync(runtimeNodeModules)} registered=${settingsOk} govReady=${govReady}`);
-  if (!deploymentOk) return;
+  if (!deploymentOk) return finalize();
 
   // ── 4. Enable governance through the installer's supported flag writer ──
   // NOTE: require the absolute path directly — createRequire().require of a
@@ -144,7 +162,7 @@ async function main() {
   const enabled = installer.setWorkbuddyGovernanceFlag?.(GOV, true)
     ?? mod.setWorkbuddyGovernanceFlag?.(GOV, true);
   record('enable', enabled && enabled.ok !== false ? 'PASS' : 'FAIL', JSON.stringify(enabled).slice(0, 200));
-  if (!enabled || enabled.ok === false) return;
+  if (!enabled || enabled.ok === false) return finalize();
 
   // ── 5. Seed an approved synthetic prompt principle + deny rule (production store writers) ──
   // (async body — the seed and the engine turns MUST complete before the
@@ -255,11 +273,14 @@ async function main() {
       mock.kill();
     }
 
-  const failed = results.filter((r) => r.verdict === 'FAIL');
-  console.log(`\nInstalled-product E2E: ${results.filter((r) => r.verdict === 'PASS').length} PASS, ${failed.length} FAIL`);
-  fs.writeFileSync(path.join(LAB_ROOT, 'e2e-results.json'), JSON.stringify(results, null, 2));
-  process.exitCode = failed.length === 0 ? 0 : 1;
+  finalize();
 }
 
 import { pathToFileURL } from 'node:url';
-await main();
+try {
+  await main();
+} catch (error) {
+  console.error('Installed-product E2E crashed:', error);
+  record('crash', 'FAIL', (error instanceof Error ? (error.stack ?? error.message) : String(error)).slice(0, 1000));
+  finalize();
+}

@@ -5,14 +5,16 @@
  *
  * 1. REAL-HOST evidence: the REAL WorkBuddy engine produces a real failing
  *    tool call; the hook records it (tool_calls, outcome=failure, attributed).
- *    ENGINE PROTOCOL DELTA (re-probed 2026-10-13, engine 2.161.0 SHA-256
- *    1b1a01bc…): Write failures fire NEITHER PostToolUse NOR
- *    PostToolUseFailure — the engine returns them as is_error=false results
- *    with the error text and _meta.rawResponse.tool_error_code — and Bash
- *    failures (PostToolUse, exitCode) are evidence-only under the frozen
- *    cross-host WRITE_TOOLS admission policy. Therefore NO real tool failure
- *    is admission-eligible on this build; that leg is BLOCKED with the probe
- *    as evidence (see probe-write-failure-shapes.mjs), NOT mocked over.
+ *    Whether a REAL failure is admission-eligible is MEASURED, not assumed
+ *    (review §4): the script drives a real Write-THROWN failure (invalid
+ *    drive — the proven thrown shape in probe-write-failure-shapes.mjs) and
+ *    classifies from the trajectory store — pain row → PASS (admitted);
+ *    tool_calls row without pain → PASS (policy-excluded, evidence recorded);
+ *    no post-event at all → BLOCKED on evidence (engine 2.161.0 SHA-256
+ *    1b1a01bc… fired no post-event for Write failures with the four-event
+ *    baseline; the PostToolUseFailure subscription is landing separately).
+ *    Bash failures (PostToolUse, exitCode) remain evidence-only under the
+ *    frozen cross-host WRITE_TOOLS admission policy.
  *
  * 2. SYNTHETIC-PROTOCOL evidence (legitimate protocol-shaped input through
  *    the REAL dist entry — the same class the independent review's R2 lab
@@ -54,9 +56,29 @@ const PLUGIN_NAME = 'principles-disciple';
 const LLM_KEY_ENV = 'AMD_RADEON_API_KEY';
 
 const results = [];
+const startedAt = new Date().toISOString();
 function record(step, verdict, detail) {
   results.push({ step, verdict, detail });
   console.log(`[${verdict}] ${step} — ${detail}`);
+}
+
+/** THE single exit path (review §4): persists results, prints the summary and
+ * sets the exit code (FAIL→1, BLOCKED→2, PASS→0). Every early return and the
+ * crash handler route through here — the former bare `return`s exited 0 with
+ * steps unrecorded (fake green). */
+function finalize() {
+  const failed = results.filter((r) => r.verdict === 'FAIL');
+  const blocked = results.filter((r) => r.verdict === 'BLOCKED');
+  console.log(`\nFull-learning E2E: ${results.filter((r) => r.verdict === 'PASS').length} PASS, ${failed.length} FAIL, ${blocked.length} BLOCKED (started ${startedAt})`);
+  try {
+    fs.mkdirSync(LAB_ROOT, { recursive: true });
+    fs.writeFileSync(path.join(LAB_ROOT, 'e2e-results.json'), JSON.stringify(results, null, 2));
+  } catch (error) {
+    console.error(`results persist failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+    return;
+  }
+  process.exitCode = failed.length === 0 && blocked.length === 0 ? 0 : blocked.length > 0 ? 2 : 1;
 }
 
 const engineEnv = {
@@ -146,6 +168,9 @@ function writeMockReply(name, obj) {
 function bashToolReply(id, command) {
   return { id: `mock-${id}`, model: 'wb-probe-mock', choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [{ id: `toolu_${id}`, type: 'function', function: { name: 'Bash', arguments: JSON.stringify({ command }) } }] }, finish_reason: 'tool_calls' }] };
 }
+function writeToolReply(id, filePath) {
+  return { id: `mock-${id}`, model: 'wb-probe-mock', choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [{ id: `toolu_${id}`, type: 'function', function: { name: 'Write', arguments: JSON.stringify({ file_path: filePath, content: 'probe' }) } }] }, finish_reason: 'tool_calls' }] };
+}
 function textReply(id, text) {
   return { id: `mock-${id}`, model: 'wb-probe-mock', choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }] };
 }
@@ -210,15 +235,13 @@ function pendingApproval() {
 }
 
 async function main() {
-  const startedAt = new Date().toISOString();
-
   if (!fs.existsSync(ADAPTER_ENTRY) || !fs.existsSync(PD_CLI)) {
     record('preflight', 'FAIL', 'build packages/workbuddy-adapter and packages/pd-cli first');
-    return;
+    return finalize();
   }
   if (!process.env[LLM_KEY_ENV]) {
     record('preflight', 'BLOCKED', `${LLM_KEY_ENV} not set — real LLM unavailable; full-learning acceptance BLOCKED (not mocked)`);
-    return;
+    return finalize();
   }
   steps();
   governanceSetup();
@@ -245,8 +268,41 @@ async function main() {
     // on this engine build is BLOCKED (see header + protocol probe).
     record('real-failure-evidence', engineRan && toolRow ? 'PASS' : 'FAIL',
       `engineRan=${engineRan} requests=${reqs.length}; tool_calls=${JSON.stringify(toolRow)}; pain=${JSON.stringify(realPain) ?? 'none (Bash evidence-only per frozen policy)'} stderr=${(run.stderr || '').slice(-200)}`);
-    record('real-eligible-signal', 'BLOCKED',
-      'engine 2.161.0 (SHA-256 1b1a01bc…) fires no post-event for Write failures and Bash failures are evidence-only per the frozen policy — no real tool failure is admission-eligible on this build; probe-write-failure-shapes.mjs is the evidence. Chain below uses SYNTHETIC-PROTOCOL input through the real entry (evidence class 2).');
+
+    // ── real-eligible-signal: MEASURED, not assumed (review §4) ──
+    // Drive a REAL Write-THROWN failure (invalid drive — the proven thrown
+    // shape in probe-write-failure-shapes.mjs) and observe whether the engine
+    // fires a post-event the hook can see (PostToolUse/PostToolUseFailure).
+    // The Write-failure subscription is landing separately; until it does this
+    // step is BLOCKED on EVIDENCE (probe), never by assumption.
+    const watermark = new Database(path.join(GOV, '.state', 'trajectory.db'), { readonly: true });
+    const toolWatermark = watermark.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM tool_calls').get().m;
+    const painWatermark = watermark.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM pain_events').get().m;
+    watermark.close();
+    before = mockReqCount();
+    writeMockReply('w1', writeToolReply('learnw', 'Q:\\pd-e2e\\wb-e2e-nope.txt'));
+    writeMockReply('w2', textReply('learnw2', 'noted the write failure'));
+    run = runTwoPrompts('wfail', 'save the file now', 'continue');
+    const wReqList = mockReqsSince(before);
+    await new Promise((r) => setTimeout(r, 800));
+    traj = new Database(path.join(GOV, '.state', 'trajectory.db'), { readonly: true });
+    const writeToolRow = traj.prepare("SELECT tool_name, outcome, session_id FROM tool_calls WHERE tool_name = 'Write' AND outcome = 'failure' AND id > ?").get(toolWatermark);
+    const writePain = traj.prepare("SELECT canonical_pain_id, score, host_kind FROM pain_events WHERE host_kind = 'workbuddy' AND id > ?").get(painWatermark);
+    traj.close();
+    const writeRoundRan = wReqList.some((r) => JSON.stringify(r.body ?? '').includes('save the file now'));
+    if (!writeRoundRan) {
+      record('real-eligible-signal', 'FAIL',
+        `inconclusive experiment: the engine never issued the Write (requests=${wReqList.length}) — mock/feeder problem, not engine evidence; stderr=${(run.stderr || '').slice(-200)}`);
+    } else if (writePain) {
+      record('real-eligible-signal', 'PASS',
+        `real Write failure recorded AND admission-eligible: tool_calls=${JSON.stringify(writeToolRow)} pain=${JSON.stringify(writePain)} (PostToolUse/Failure post-event observed on this build)`);
+    } else if (writeToolRow) {
+      record('real-eligible-signal', 'PASS',
+        `POLICY-EXCLUDED (still PASS): the real Write failure reached the adapter (tool_calls=${JSON.stringify(writeToolRow)}) but the admission trigger produced no pain — excluded by the admission policy (production WRITE_TOOLS set + trigger.shouldCreateDiagnosticTask), not by a wiring gap; chain below uses SYNTHETIC-PROTOCOL input (evidence class 2)`);
+    } else {
+      record('real-eligible-signal', 'BLOCKED',
+        `engine produced the Write failure but fired no post-event the hook could observe (tool_calls=none) — engine 2.161.0 (SHA-256 1b1a01bc…) returns Write failures without PostToolUse/PostToolUseFailure until the Failure subscription is wired; probe-write-failure-shapes.mjs is the evidence. Chain below uses SYNTHETIC-PROTOCOL input through the real entry (evidence class 2).`);
+    }
 
     // ── Evidence class 2: SYNTHETIC-PROTOCOL eligible signal through the REAL entry ──
     const synth = deliverSyntheticWriteFailure('e2e1');
@@ -256,7 +312,7 @@ async function main() {
     traj.close();
     record('eligible-signal-synthetic', synth.status === 0 && synthPain ? 'PASS' : 'FAIL',
       `synthetic Write-failure PostToolUse via real dist entry: status=${synth.status} pain=${JSON.stringify(synthPain)} stderr=${(synth.stderr || '').slice(-200)}`);
-    if (!synthPain) return;
+    if (!synthPain) return finalize();
 
     // ── Background chain: worker cycles until a pending approval exists ──
     let approval = null;
@@ -281,7 +337,7 @@ async function main() {
       approval
         ? `pending approval after ${cycles} REAL worker cycles (real LLM diagnostician): ${JSON.stringify(approval)}`
         : `no pending approval after ${cycles} cycles; last=${JSON.stringify(lastCycle).slice(0, 700)}`);
-    if (!approval) return;
+    if (!approval) return finalize();
 
     // ── Owner approves through the REAL product entry ──
     const approve = pdCli(['activation', 'approve', '--approval-id', approval.approval_id, '--workspace', GOV, '--decided-by', 'wb-e2e-test-owner', '--json'], 120_000);
@@ -290,18 +346,34 @@ async function main() {
     const approvedOk = approve.status === 0 && approveResult.ok === true;
     record('owner-approval', approvedOk ? 'PASS' : 'FAIL',
       `pd activation approve exit=${approve.status} ok=${approveResult.ok === true} activationId=${approveResult.activationId ?? '-'} stdout=${(approve.stdout || '').slice(0, 200)} stderr=${(approve.stderr || '').slice(-200)}`);
-    if (!approvedOk) return;
+    if (!approvedOk) return finalize();
 
     // ── Next REAL engine turn carries the approved principle ──
+    // PRODUCTION read contract (prompt-activation-reader-contract): the chain
+    // artifact is the FULL ScribeOutput — resolved body = content.text falling
+    // back to content.principleDraft.statement. The former root-level
+    // `content.statement` read probed an EMPTY string for real drafts (the
+    // scribe persists no root statement), which would fail the injection check
+    // below even on a correct chain.
     let db = new Database(path.join(GOV, '.pd', 'state.db'), { readonly: true });
     const artifactRow = db.prepare('SELECT content_json FROM pi_artifacts WHERE artifact_id = ?').get(approval.artifact_id);
-    const activationRow = db.prepare('SELECT activation_id, deactivated_at FROM activations ORDER BY activated_at DESC LIMIT 1').get();
+    const activationRow = approveResult.activationId
+      ? db.prepare('SELECT activation_id, artifact_id, deactivated_at FROM activations WHERE activation_id = ?').get(approveResult.activationId)
+      : db.prepare('SELECT activation_id, artifact_id, deactivated_at FROM activations ORDER BY activated_at DESC LIMIT 1').get();
     db.close();
     let statementText = '';
+    let statementSource = 'none';
     try {
       const content = JSON.parse(artifactRow?.content_json ?? '{}');
-      statementText = content.statement ?? content.text ?? content.abstracted_principle ?? JSON.stringify(content).slice(0, 160);
-    } catch { statementText = String(artifactRow?.content_json ?? '').slice(0, 160); }
+      if (typeof content.text === 'string' && content.text.length > 0) {
+        statementText = content.text;
+        statementSource = 'content.text';
+      } else if (content.principleDraft && typeof content.principleDraft.statement === 'string' && content.principleDraft.statement.length > 0) {
+        statementText = content.principleDraft.statement;
+        statementSource = 'principleDraft.statement';
+      }
+    } catch { statementText = ''; }
+    const activationMatches = Boolean(activationRow) && activationRow.artifact_id === approval.artifact_id;
     const probe = statementText.split(/\s+/).filter((w) => w.length > 4).slice(0, 4).join(' ');
     before = mockReqCount();
     writeMockReply('c', textReply('learn3', 'understood'));
@@ -310,8 +382,8 @@ async function main() {
     const postReqs = mockReqsSince(before);
     const postRan = postReqs.length > 0 && postReqs.some((r) => JSON.stringify(r.body ?? '').includes('keep in mind'));
     const learned = postRan && probe.length > 0 && postReqs.some((r) => JSON.stringify(r.body ?? '').includes(probe));
-    record('next-turn-injection', learned ? 'PASS' : 'FAIL',
-      `roundRan=${postRan} requests=${postReqs.length}; probe=${JSON.stringify(probe.slice(0, 90))}; activation=${JSON.stringify(activationRow)}; stderr=${(run.stderr || '').slice(-200)}`);
+    record('next-turn-injection', learned && activationMatches ? 'PASS' : 'FAIL',
+      `roundRan=${postRan} requests=${postReqs.length}; probe=${JSON.stringify(probe.slice(0, 90))} (source=${statementSource}); activationMatchesApprovedArtifact=${activationMatches} activation=${JSON.stringify(activationRow)}; stderr=${(run.stderr || '').slice(-200)}`);
 
     // ── Withdraw through the product entry; next turn stops ──
     const withdraw = pdCli(['activation', 'deactivate', '--activation-id', activationRow.activation_id, '--workspace', GOV], 60_000);
@@ -331,14 +403,11 @@ async function main() {
     mock.kill();
   }
 
-  const failed = results.filter((r) => r.verdict === 'FAIL');
-  const blocked = results.filter((r) => r.verdict === 'BLOCKED');
-  console.log(`\nFull-learning E2E: ${results.filter((r) => r.verdict === 'PASS').length} PASS, ${failed.length} FAIL, ${blocked.length} BLOCKED (started ${startedAt})`);
-  fs.writeFileSync(path.join(LAB_ROOT, 'e2e-results.json'), JSON.stringify(results, null, 2));
-  process.exitCode = failed.length === 0 && blocked.length === 0 ? 0 : blocked.length > 0 ? 2 : 1;
+  finalize();
 }
 
 main().catch((error) => {
   console.error('Full-learning E2E crashed:', error);
-  process.exitCode = 1;
+  record('crash', 'FAIL', (error instanceof Error ? (error.stack ?? error.message) : String(error)).slice(0, 1000));
+  finalize();
 });
