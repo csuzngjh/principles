@@ -17,15 +17,18 @@ import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
 const TASK_ID = 'diagnosis_pain-mixed';
 
 const OUTPUT: DiagnosticianOutputV1 = {
+  valid: true,
   diagnosisId: 'diag-1',
-  painType: 'user_frustration',
+  summary: 'Mixed candidate outcomes remain individually observable',
   rootCause: 'Tooling: over-engineering',
+  violatedPrinciples: [],
+  recommendations: [{ kind: 'prompt', description: 'Check the requested scope before changing code' }],
   evidence: [
-    { sourceRef: 'owner_message:t1', note: 'fix it', relevance: 0.9 },
-    { sourceRef: 'tool_call_failure:t2', note: 'Tool write failed', relevance: 0.8 },
+    { sourceRef: 'owner_message:t1', note: 'fix it' },
+    { sourceRef: 'tool_call_failure:t2', note: 'Tool write failed' },
   ],
   confidence: 0.7,
-} as unknown as DiagnosticianOutputV1;
+};
 
 function candidateRecord(
   candidateId: string,
@@ -57,6 +60,8 @@ function makeBridge(): { bridge: PainSignalBridge; createdTasks: TaskRecord[] } 
   const createdTasks: TaskRecord[] = [];
   const stateManager = {
     getCandidatesByTaskId: async () => candidates,
+    getRun: async () => ({ taskId: TASK_ID, executionStatus: 'succeeded', outputPayload: JSON.stringify(OUTPUT) }),
+    getArtifact: async () => ({ runId: 'run-1', taskId: TASK_ID }),
     getRunsByTask: async () => [],
     getTask: async () => null,
     createTask: async (t: TaskRecord) => { createdTasks.push(t); },

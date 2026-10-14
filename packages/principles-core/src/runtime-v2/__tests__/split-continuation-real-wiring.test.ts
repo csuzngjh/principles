@@ -123,6 +123,49 @@ async function seedSplitDiagnosis(ws: RealWorkspace, opts: { candidateStatus?: '
   }
 }
 
+function roundOutput(round: 'r1' | 'r2', confidence = round === 'r1' ? 0.9 : 0.2): DiagnosticianOutputV1 {
+  return {
+    valid: true,
+    diagnosisId: `diag-${round}`,
+    summary: `summary ${round}`,
+    rootCause: `root cause ${round}`,
+    violatedPrinciples: [],
+    evidence: [{ sourceRef: `trace-${round}`, note: `evidence ${round}` }],
+    recommendations: [{ kind: 'principle', description: `Principle from ${round}` }],
+    confidence,
+  };
+}
+
+async function addRouterRound(ws: RealWorkspace, round: 'r1' | 'r2'): Promise<string> {
+  const runId = `run-router-${round}`;
+  const output = roundOutput(round);
+  const now = new Date(Date.now() + (round === 'r2' ? 1000 : 0)).toISOString();
+  await ws.manager.runStore.createRun({
+    runId,
+    taskId: ROUTER,
+    runtimeKind: 'pi-ai',
+    attemptNumber: round === 'r1' ? 1 : 2,
+    executionStatus: 'succeeded',
+    startedAt: now,
+    endedAt: now,
+    outputPayload: JSON.stringify(output),
+  });
+  const connection = new SqliteConnection(ws.workspaceDir);
+  try {
+    await new SqliteDiagnosticianCommitter(connection).commit({
+      runId,
+      taskId: ROUTER,
+      output,
+      idempotencyKey: `${ROUTER}:${runId}`,
+    });
+  } finally {
+    connection.close();
+  }
+  const candidate = (await ws.manager.getCandidatesByTaskId(PARENT)).find((item) => item.sourceRunId === runId);
+  if (candidate === undefined) throw new Error(`expected candidate for ${runId}`);
+  return candidate.candidateId;
+}
+
 afterEach(async () => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 });
 });
@@ -489,6 +532,74 @@ describe('review round-4 P1: shared write gate resolves REAL split lineage', () 
       if (!result.ok) expect(result.reason).toBe('diagnosis_lineage_inconsistent');
       const document = await ws.manager.getAdmissionDocument(candidateId);
       expect(document.ok && document.document).toBeNull();
+    } finally {
+      await ws.close();
+    }
+  });
+});
+
+describe('review round-5 P1: automatic bridge paths bind each candidate to its own run', () => {
+  it('fresh completion persists each round confidence and fingerprint from that candidate sourceRunId', async () => {
+    const ws = await realWorkspace();
+    try {
+      const r1CandidateId = await seedSplitDiagnosis(ws);
+      const r2CandidateId = await addRouterRound(ws, 'r2');
+      const bridge = new PainSignalBridge({
+        stateManager: ws.manager,
+        runner: { run: async () => { throw new Error('fresh completion must not re-run'); } },
+        intakeService: {} as unknown as CandidateIntakeService,
+        ledgerAdapter: {} as unknown as LedgerAdapter,
+        autoIntakeEnabled: false,
+      });
+
+      // Fresh completion carries r2 in memory, while the r1 candidate remains
+      // in the same task history. Each candidate must use its committed round.
+      await bridge.onDiagnosisComplete({
+        taskId: PARENT,
+        diagnosticianOutput: roundOutput('r2'),
+        painId: 'pain_router_real',
+        provenance: 'owner_reported_no_host_trace',
+        inputEvidenceCount: 1,
+      });
+
+      const r1 = await ws.manager.getAdmissionDocument(r1CandidateId);
+      const r2 = await ws.manager.getAdmissionDocument(r2CandidateId);
+      expect(r1.ok && r1.document?.evaluations.at(-1)?.confidence).toBe(0.9);
+      expect(r2.ok && r2.document?.evaluations.at(-1)?.confidence).toBe(0.2);
+      expect(r1.ok && r2.ok && r1.document?.evaluations.at(-1)?.materialFingerprint)
+        .not.toBe(r2.ok ? r2.document?.evaluations.at(-1)?.materialFingerprint : undefined);
+      await bridge.dispose();
+    } finally {
+      await ws.close();
+    }
+  });
+
+  it('resume refuses only the candidate with corrupt owning output; healthy sibling still uses its own round', async () => {
+    const ws = await realWorkspace();
+    try {
+      const r1CandidateId = await seedSplitDiagnosis(ws);
+      const r2CandidateId = await addRouterRound(ws, 'r2');
+      const db = new Database(path.join(ws.workspaceDir, '.pd', 'state.db'));
+      db.prepare("UPDATE runs SET output_payload = '{' WHERE run_id = (SELECT source_run_id FROM principle_candidates WHERE candidate_id = ?)")
+        .run(r2CandidateId);
+      db.close();
+      const bridge = new PainSignalBridge({
+        stateManager: ws.manager,
+        runner: { run: async () => { throw new Error('resume must not re-run'); } },
+        intakeService: {} as unknown as CandidateIntakeService,
+        ledgerAdapter: {} as unknown as LedgerAdapter,
+        autoIntakeEnabled: false,
+      });
+
+      const resumed = await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: PARENT });
+      expect(resumed.status).toBe('resumed');
+      const r1 = await ws.manager.getAdmissionDocument(r1CandidateId);
+      const r2 = await ws.manager.getAdmissionDocument(r2CandidateId);
+      expect(r1.ok && r1.document?.evaluations.at(-1)?.decision).toBe('admitted');
+      expect(r1.ok && r1.document?.evaluations.at(-1)?.confidence).toBe(0.9);
+      expect(r2.ok && r2.document?.evaluations.at(-1)?.decision).toBe('needs_evidence');
+      expect(r2.ok && r2.document?.evaluations.at(-1)?.reason).toContain('owning_output_unparseable');
+      await bridge.dispose();
     } finally {
       await ws.close();
     }

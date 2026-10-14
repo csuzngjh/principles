@@ -494,12 +494,59 @@ export async function persistPainDiagnosis(deps: {
     });
   }
 }
+type CandidateRunResolution =
+  | { ok: true; output: DiagnosticianOutputV1; sourceRunId: string }
+  | { ok: false; reason: string };
 
+/** Resolve the persisted diagnosis material that actually minted one candidate. */
+async function resolveCandidateRunOutput(
+  stateManager: Pick<RuntimeStateManager, 'getRun' | 'getArtifact'>,
+  candidate: Pick<CandidateRecord, 'candidateId' | 'sourceRunId' | 'artifactId' | 'taskId'>,
+): Promise<CandidateRunResolution> {
+  const refuse = (reason: string): CandidateRunResolution => ({ ok: false, reason: `candidate_round_unresolved:${candidate.candidateId}:${reason}` });
+  const sourceRunId = typeof candidate.sourceRunId === 'string' ? candidate.sourceRunId : '';
+  if (sourceRunId.length === 0) return refuse('missing_source_run_id');
+  let run;
+  try {
+    run = await stateManager.getRun(sourceRunId);
+  } catch {
+    return refuse('source_run_lookup_failed');
+  }
+  if (run === null || run === undefined) return refuse('source_run_missing');
+  if (run.taskId !== candidate.taskId) return refuse('source_run_task_mismatch');
+  if (run.executionStatus !== 'succeeded') return refuse('source_run_not_succeeded');
 
+  const artifactId = typeof candidate.artifactId === 'string' ? candidate.artifactId : '';
+  if (artifactId.length > 0) {
+    let artifact;
+    try {
+      artifact = await stateManager.getArtifact(artifactId);
+    } catch {
+      return refuse('artifact_lookup_failed');
+    }
+    // Some legacy candidates may have no artifact row. A present row must
+    // identify the same task and run as the candidate's source.
+    if (artifact && (artifact.runId !== sourceRunId || artifact.taskId !== candidate.taskId)) {
+      return refuse('artifact_run_mismatch');
+    }
+  }
+
+  let output: DiagnosticianOutputV1 | undefined;
+  if (typeof run.outputPayload === 'string' && run.outputPayload.length > 0) {
+    try {
+      const parsed: unknown = JSON.parse(run.outputPayload);
+      if (Value.Check(DiagnosticianOutputV1Schema, parsed)) output = parsed;
+    } catch {
+      // Refuse this candidate; never substitute a different run's output.
+    }
+  }
+  if (output === undefined) return refuse('owning_output_unparseable');
+  return { ok: true, output, sourceRunId };
+}
 
 /**
  * SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (§7.2): full-gate re-evaluation from
- * PERSISTED materials only (task diagnosticJson + latest run output), shared
+ * PERSISTED materials only (task diagnosticJson + candidate's source run), shared
  * by the CLI mutation paths so their write permission can never contradict
  * the production gate on the same material. The evaluation is PERSISTED as a
  * new admission version (append-only; idempotent by material fingerprint).
@@ -539,15 +586,6 @@ export async function evaluateAndPersistAdmissionFromStore(
   if (reentry.errorCode !== null) {
     return { ok: false, reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; re-run the diagnosis before intake' };
   }
-  const parseV1 = (payload: string | undefined | null): DiagnosticianOutputV1 | undefined => {
-    if (typeof payload !== 'string' || payload.length === 0) return undefined;
-    try {
-      const parsedOutput: unknown = JSON.parse(payload);
-      return Value.Check(DiagnosticianOutputV1Schema, parsedOutput) ? parsedOutput : undefined;
-    } catch {
-      return undefined;
-    }
-  };
   const ownerStatementPresent = isOwnerStatementEvidence(reentry.correctionEvidence);
   const candidates = (await stateManager.getCandidatesByTaskId(ingressTask.taskId))
     .filter((candidate) => candidateIds.includes(candidate.candidateId))
@@ -571,62 +609,12 @@ export async function evaluateAndPersistAdmissionFromStore(
    * another historical successful run of the same task — substituting a
    * different round's material is the exact defect being closed.
    */
-  type ResolvedRound = { output: DiagnosticianOutputV1; sourceRunId: string; artifactId: string };
-  const resolveOwningRound = async (candidate: { candidateId: string; sourceRunId: string; artifactId: string; taskId: string }):
-    Promise<{ ok: true; round: ResolvedRound } | { ok: false; reason: string }> => {
-    const refuse = (reason: string) => ({ ok: false as const, reason });
-    const sourceRunId = typeof candidate.sourceRunId === 'string' ? candidate.sourceRunId : '';
-    if (sourceRunId.length === 0) {
-      return refuse(`candidate_round_unresolved:${candidate.candidateId}:missing_source_run_id`);
-    }
-    let run;
-    try {
-      run = await stateManager.getRun(sourceRunId);
-    } catch {
-      return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_lookup_failed`);
-    }
-    // Defensive null/undefined: the store contract is `RunRecord | null`, but
-    // a partial or throwing-adjacent implementation can yield undefined — and
-    // a crash here would abort the whole gate instead of refusing this one
-    // candidate. Treat both as "the owning run is missing".
-    if (run === null || run === undefined) {
-      return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_missing`);
-    }
-    if (run.taskId !== candidate.taskId) {
-      return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_task_mismatch`);
-    }
-    if (run.executionStatus !== 'succeeded') {
-      return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_not_succeeded`);
-    }
-    const artifactId = typeof candidate.artifactId === 'string' ? candidate.artifactId : '';
-    if (artifactId.length > 0) {
-      let artifact;
-      try {
-        artifact = await stateManager.getArtifact(artifactId);
-      } catch {
-        return refuse(`candidate_round_unresolved:${candidate.candidateId}:artifact_lookup_failed`);
-      }
-      // A missing artifact row (null OR undefined) is tolerated for
-      // pre-artifact candidates, but a PRESENT artifact belonging to another
-      // run/task is lineage corruption and refuses. The truthiness check keeps
-      // a partial implementation from crashing the gate.
-      if (artifact && (artifact.runId !== sourceRunId || artifact.taskId !== candidate.taskId)) {
-        return refuse(`candidate_round_unresolved:${candidate.candidateId}:artifact_run_mismatch`);
-      }
-    }
-    const output = parseV1(run.outputPayload);
-    if (output === undefined) {
-      return refuse(`candidate_round_unresolved:${candidate.candidateId}:owning_output_unparseable`);
-    }
-    return { ok: true, round: { output, sourceRunId, artifactId } };
-  };
-
   // Resolve EVERY candidate's own round BEFORE any evaluation, so a single
   // unresolved round refuses the whole call with zero writes instead of
   // partially persisting a mixed-round admission set.
-  const resolvedRounds = new Map<string, ResolvedRound>();
+  const resolvedRounds = new Map<string, Extract<CandidateRunResolution, { ok: true }>>();
   for (const candidate of candidates) {
-    const resolved = await resolveOwningRound(candidate);
+    const resolved = await resolveCandidateRunOutput(stateManager, candidate);
     if (!resolved.ok) {
       return {
         ok: false,
@@ -634,7 +622,7 @@ export async function evaluateAndPersistAdmissionFromStore(
         nextAction: `candidate ${candidate.candidateId} does not resolve to its own diagnosis run output (${resolved.reason}); re-run the diagnosis for this round before intake`,
       };
     }
-    resolvedRounds.set(candidate.candidateId, resolved.round);
+    resolvedRounds.set(candidate.candidateId, resolved);
   }
 
   const decisions = new Map<string, { decision: AdmissionDecision; reason: string; nextAction: string }>();
@@ -1224,18 +1212,34 @@ export class PainSignalBridge {
       );
     }
 
-    const admissionResults = diagnosticianOutput
-      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount, ...(ownerStatementPresent ? { ownerStatementPresent } : {}) })
-      : candidates.map((c) => ({
-          candidateId: c.candidateId,
-          recommendationKind: c.recommendationKind,
+    // Fresh completion and worker resume share the same per-candidate round
+    // resolver as CLI writes. Never apply the in-memory/latest task output to
+    // candidates minted by other runs of that task.
+    const candidateRounds = new Map<string, Extract<CandidateRunResolution, { ok: true }>>();
+    const admissionResults: CandidateAdmissionResult[] = [];
+    for (const candidate of candidates) {
+      const resolved = await resolveCandidateRunOutput(this.stateManager, candidate);
+      if (!resolved.ok) {
+        admissionResults.push({
+          candidateId: candidate.candidateId,
+          recommendationKind: candidate.recommendationKind,
           admission: {
-            decision: 'needs_evidence' as const,
-            reason: 'diagnostician_output_unavailable',
-            nextAction: 're_run_diagnosis_or_manual_review',
+            decision: 'needs_evidence',
+            reason: resolved.reason,
+            nextAction: 're-run the diagnosis that produced this candidate or send it for manual review',
             evidenceStatus: provenance,
           },
-        }));
+        });
+        continue;
+      }
+      candidateRounds.set(candidate.candidateId, resolved);
+      const [admission] = evaluateCandidateAdmissions([candidate], resolved.output, {
+        provenance,
+        inputEvidenceCount,
+        ...(ownerStatementPresent ? { ownerStatementPresent } : {}),
+      });
+      if (admission !== undefined) admissionResults.push(admission);
+    }
 
     // SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (PRI-958): persist every full-gate
     // disposition on the candidate row BEFORE any intake/seed/consume write.
@@ -1244,16 +1248,27 @@ export class PainSignalBridge {
     const admissionPersistBlocked = new Set<string>();
     if (candidates.length > 0) {
       const evaluatedAt = new Date().toISOString();
-      const materialFingerprint = fingerprintMaterial([
-        diagnosticianOutput ? JSON.stringify(diagnosticianOutput) : 'output-unavailable',
-        provenance,
-        String(inputEvidenceCount),
-        statementFingerprint ?? 'no-owner-statement',
-      ]);
       for (let i = 0; i < candidates.length; i++) {
         const candidate = candidates[i];
         const admission = admissionResults[i];
         if (!candidate || !admission) continue;
+        const round = candidateRounds.get(candidate.candidateId);
+        const materialFingerprint = round
+          ? fingerprintMaterial([
+              JSON.stringify(round.output),
+              provenance,
+              String(inputEvidenceCount),
+              statementFingerprint ?? 'no-owner-statement',
+              round.sourceRunId,
+              candidate.candidateId,
+            ])
+          : fingerprintMaterial([
+              'candidate-round-unresolved',
+              admission.admission.reason,
+              provenance,
+              String(inputEvidenceCount),
+              candidate.candidateId,
+            ]);
         const evaluation: AdmissionEvaluationRecord = {
           evaluationId: `ae_${fingerprintMaterial([candidate.candidateId, materialFingerprint, ADMISSION_POLICY_VERSION]).slice(0, 16)}`,
           decision: admission.admission.decision,
@@ -1265,11 +1280,11 @@ export class PainSignalBridge {
           inputEvidenceCount,
           ownerStatementPresent,
           recommendationKind: candidate.rawRecommendationKind,
-          confidence: diagnosticianOutput ? diagnosticianOutput.confidence : null,
+          confidence: round?.output.confidence ?? null,
           materialFingerprint,
           materialSummary: {
             inputEvidenceCount,
-            outputEvidenceCount: diagnosticianOutput ? diagnosticianOutput.evidence.length : 0,
+            outputEvidenceCount: round?.output.evidence.length ?? 0,
             ownerStatementPresent,
             ...(statementFingerprint !== undefined ? { statementFingerprint } : {}),
           },

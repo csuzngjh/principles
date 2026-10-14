@@ -17,17 +17,16 @@
  *   - across MULTIPLE cycles and a RECREATED state handle: the healthy item
  *     keeps progressing and NEVER double-writes.
  *
- * Isolation: the Diagnostician capability is resolved from config, and the
- * seeded tasks are already `succeeded`, so post-processing runs with provider
- * calls = 0 (the CR-05 contract: continuation NEVER re-runs the LLM). The
- * cycle therefore needs no provider stub — this is a real worker cycle against
- * real SQLite, not a mocked helper.
+ * Isolation: the Diagnostician tasks are already `succeeded`, so continuation
+ * never calls the diagnosis provider. The separate downstream internalization
+ * consumer is held at its existing seam because it may lease the Dreamer seed
+ * and invoke a host runtime; that is outside this continuation regression.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createRuntimeStateHandle,
   getDefaultPdConfig,
@@ -38,6 +37,20 @@ import {
 // consumers import it directly, which is exactly the authority the worker's
 // PrincipleTreeLedgerAdapter writes through.
 import { loadLedger } from '@principles/core/principle-tree-ledger';
+
+// The worker's CR-05 continuation is the behavior under test. The unrelated
+// downstream consumer can lease the Dreamer task created by this test and
+// call a real host/provider, making this SQLite regression depend on network
+// state. Keep that existing worker boundary deterministic while preserving
+// the real worker, stores, committer, bridge and Ledger.
+const { runDownstream } = vi.hoisted(() => ({
+  runDownstream: vi.fn(async () => ({ ran: false as const, skipReason: 'no_ready_tasks' as const })),
+}));
+vi.mock('@principles/host-runtime', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@principles/host-runtime')>(),
+  runInternalizationConsumerCycle: runDownstream,
+}));
+
 import { runCodexWorkspaceWorkerCycle } from '../../src/worker/workspace-worker.js';
 
 const dirs: string[] = [];
@@ -45,14 +58,8 @@ const PARENT = 'diagnosis_r5_worker_mix';
 const ROUTER = `diag_router-${PARENT}`;
 const CORRUPT_ID = 'cand-r5-corrupt';
 const NOW = '2026-10-14T12:00:00.000Z';
-/**
- * Each case drives REAL worker cycles: state handle creation, schema init,
- * recovery sweep, backlog scan and SQLite transactions. Under the package's
- * full-suite fan-out this legitimately exceeds vitest's 5s default on Windows;
- * the previous round-4 test timed out at 30s for exactly this reason. The
- * budget covers real I/O only — no assertion is relaxed to fit it.
- */
-const WORKER_CYCLE_TIMEOUT_MS = 120_000;
+/** A guardrail for real worker/SQLite setup; downstream provider work is stubbed. */
+const WORKER_CYCLE_TIMEOUT_MS = 30_000;
 
 function routerOutput(): object {
   return {
@@ -197,6 +204,8 @@ afterEach(async () => {
   }
 }, WORKER_CYCLE_TIMEOUT_MS);
 
+beforeEach(() => runDownstream.mockClear());
+
 describe('review round-5: the healthy candidate really advances; the corrupt one stays contained', () => {
   it('admits + consumes + writes a REAL Ledger entry + seeds for the healthy candidate, and blocks only the corrupt one', async () => {
     const { root, healthyCandidateId } = await seedHealthyAndCorrupt();
@@ -213,6 +222,7 @@ describe('review round-5: the healthy candidate really advances; the corrupt one
     // Cycle 2 — the healthy candidate reaches intake and the Ledger.
     const cycle2 = await runCodexWorkspaceWorkerCycle({ workspaceDir: root });
     expect(cycle2.mode).not.toBe('degraded');
+    expect(runDownstream).toHaveBeenCalledTimes(2);
 
     const verify = await createRuntimeStateHandle({ workspaceDir: root, readonly: true });
     try {
@@ -267,6 +277,7 @@ describe('review round-5: the healthy candidate really advances; the corrupt one
     await runCodexWorkspaceWorkerCycle({ workspaceDir: root });
     const third = await runCodexWorkspaceWorkerCycle({ workspaceDir: root });
     expect(third.mode).not.toBe('degraded');
+    expect(runDownstream).toHaveBeenCalledTimes(3);
 
     const verify = await createRuntimeStateHandle({ workspaceDir: root, readonly: true });
     let healthyEvaluations: number;

@@ -104,6 +104,12 @@ function makeHarness(overrides: {
     updateTask: async () => { return; },
     getCandidatesByTaskId: async () => [makeCandidate('c-cr05')],
     getRunsByTask: async () => [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded', outputPayload: overrides.outputPayload ?? JSON.stringify(makeOutput()) }],
+    getRun: async (runId: string) => runId === 'run-c-cr05'
+      ? { runId, taskId: TASK_ID, executionStatus: 'succeeded', outputPayload: overrides.outputPayload ?? JSON.stringify(makeOutput()) }
+      : null,
+    getArtifact: async (artifactId: string) => artifactId === 'artifact-c-cr05'
+      ? { artifactId, runId: 'run-c-cr05', taskId: TASK_ID }
+      : null,
     updateCandidateStatus: async () => { return; },
     getAdmissionDocument: async (candidateId: string) => ({ ok: true, document: admissions.get(candidateId) ?? null }),
     appendAdmissionEvaluation: async (candidateId: string, evaluation: { decision: string; materialFingerprint: string; policyVersion: string; evaluationId: string }) => {
