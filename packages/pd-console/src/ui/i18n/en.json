@@ -642,6 +642,7 @@
       "blockBehavior": "Behavior Change",
       "blockBehaviorFallback": "No deterministic behavior rule recorded; the principle guides subsequent similar scenarios as a behavioral policy.",
       "govDecision": "Governance Decision",
+      "revocationStatusUnknown": "Runtime revocation status cannot be confirmed — activation query failed. Awaiting recovery.",
       "runtimeDeactivated": "Runtime Revoked",
       "govApproved": "Owner Approved",
       "govPending": "Pending Review",

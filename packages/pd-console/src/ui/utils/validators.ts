@@ -1876,6 +1876,8 @@ export interface PrinciplesListData {
   categories?: Record<string, number>;
   /** If the approval cross-check was unavailable, this explains why (ERR-002) */
   approvalCrossCheckUnavailable?: string;
+  /** PRI-956 (F15, D3): if the activations-table query was unavailable, this explains why — runtime status cannot be confirmed */
+  revocationCheckUnavailable?: string;
 }
 
 // ── PD Core Principles (PRI-641) ─────────────────────────────────────────────
@@ -1958,11 +1960,20 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
     ? v.approvalCrossCheckUnavailable
     : undefined;
 
+  // PRI-956 (F15, D3): revocationCheckUnavailable — optional string
+  if (Object.hasOwn(v, 'revocationCheckUnavailable') && !isString(v.revocationCheckUnavailable)) {
+    return null;
+  }
+  const revocationCheckUnavailable = isString(v.revocationCheckUnavailable)
+    ? v.revocationCheckUnavailable
+    : undefined;
+
   return {
     principles,
     summary: { candidate, probation, active, deprecated, archived, total },
     ...(categories !== undefined ? { categories } : {}),
     ...(approvalCrossCheckUnavailable !== undefined ? { approvalCrossCheckUnavailable } : {}),
+    ...(revocationCheckUnavailable !== undefined ? { revocationCheckUnavailable } : {}),
   };
 }
 

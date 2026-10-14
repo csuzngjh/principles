@@ -208,6 +208,8 @@ export function PrinciplesPage() {
   // Owner Decision Experience v1: backend semantic titles + decision states
   // (display-only — the page never re-derives decision qualification).
   const [ownerDecisionLibrary, setOwnerDecisionLibrary] = useState<OwnerDecisionLibraryData | null>(null);
+  // PRI-956 (F15, D3): runtime status cannot be confirmed when set
+  const [revocationUnavailable, setRevocationUnavailable] = useState<string | null>(null);
 
   // Fetch data
   const loadData = useCallback(async () => {
@@ -237,6 +239,8 @@ export function PrinciplesPage() {
       setCategories(pData.categories);
       // PRI-558: expose summary for the metrics bar
       setSummary(pData.summary);
+      // PRI-956 (F15, D3): propagate revocation check unavailability
+      setRevocationUnavailable(pData.revocationCheckUnavailable ?? null);
 
       const aData = aResult.success ? validateApprovalsGrouped(aResult.data) : null;
       setApprovalGroups(aData?.groups ?? []);
@@ -340,6 +344,12 @@ export function PrinciplesPage() {
 
   return (
     <PageShell>
+      {/* PRI-956 (F15, D3): revocation status unavailability notice */}
+      {revocationUnavailable && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-[var(--radius-md)] text-sm text-amber-800">
+          {t("principles.revocationStatusUnknown")}
+        </div>
+      )}
       {/* Header */}
       <SectionTitle>{t("principles.reviewTitle")}</SectionTitle>
       <ShinyText
