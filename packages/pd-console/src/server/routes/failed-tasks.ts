@@ -267,6 +267,20 @@ async function derivePipelineHealth(store: SqliteTaskStore, consumerEnabled: boo
         nextAction: '积压会随消费者周期逐步消化；若长时间不降，检查消费者运行状态与模型通道。',
       };
     }
+    // PRI-955 review P1: healthy requires NO unresolved states either —
+    // pendingCount=0 + recent success is NOT healthy if failed, NHR, or
+    // retry_wait tasks are still present.
+    if (agg.failedCount > 0 || agg.needsHumanReviewCount > 0 || agg.retryWaitCount > 0) {
+      const parts: string[] = [];
+      if (agg.failedCount > 0) parts.push(`${agg.failedCount} 个失败`);
+      if (agg.needsHumanReviewCount > 0) parts.push(`${agg.needsHumanReviewCount} 个需人工审查`);
+      if (agg.retryWaitCount > 0) parts.push(`${agg.retryWaitCount} 个等待重试`);
+      return {
+        status: 'backlogged', pendingCount: 0, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt: agg.lastSucceededAt,
+        note: `学习队列无积压，但存在未解决任务：${parts.join('、')}。`,
+        nextAction: '在失败任务列表查看详情，或在治理焦点处理需人工审查的任务。',
+      };
+    }
     if (lastProgressAgeMinutes !== null && lastProgressAgeMinutes <= PIPELINE_FRESH_WINDOW_MS / 60000) {
       return {
         status: 'healthy', pendingCount: 0, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt: agg.lastSucceededAt,

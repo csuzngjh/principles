@@ -83,6 +83,9 @@ interface MockStoreOverrides {
   getFailedTaskDetail?: ReturnType<typeof vi.fn>;
   listTasks?: ReturnType<typeof vi.fn>;
   aggregatePipelineHealth?: ReturnType<typeof vi.fn>;
+  failedCount?: number;
+  needsHumanReviewCount?: number;
+  retryWaitCount?: number;
 }
 
 function createMockStore(overrides: MockStoreOverrides = {}): SqliteTaskStore {
@@ -245,6 +248,9 @@ describe('handleFailedTasksRoute', () => {
         oldestPendingCreatedAt: overrides.oldestPendingCreatedAt ?? null,
         oldestPendingTaskKind: overrides.oldestPendingTaskKind ?? null,
         lastSucceededAt: overrides.lastSucceededAt ?? null,
+        failedCount: overrides.failedCount ?? 0,
+        needsHumanReviewCount: overrides.needsHumanReviewCount ?? 0,
+        retryWaitCount: overrides.retryWaitCount ?? 0,
       });
     }
 
@@ -303,6 +309,46 @@ describe('handleFailedTasksRoute', () => {
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
       const data = okEnvelope<{ pipeline: PipelineBlock }>(res);
       expect(data.pipeline.status).toBe('healthy');
+    });
+
+    it('review P1: failed+NHR tasks exist but recent success → backlogged, NOT healthy', async () => {
+      const now = Date.now();
+      const store = createMockStore({
+        aggregatePipelineHealth: aggregateMock({
+          pendingCount: 0,
+          lastSucceededAt: new Date(now - 60000).toISOString(),
+          failedCount: 3,
+          needsHumanReviewCount: 2,
+          retryWaitCount: 1,
+        }),
+      });
+      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
+      const data = okEnvelope<{ pipeline: PipelineBlock; nextAction: string }>(res);
+      // Unresolved failed/NHR tasks preclude 'healthy' even with fresh success
+      expect(data.pipeline.status).toBe('backlogged');
+      expect(data.pipeline.note).toContain('未解决');
+      expect(data.pipeline.nextAction).toBeTruthy();
+      expect(data.nextAction).not.toContain('healthy');
+    });
+
+    it('only retry_wait tasks exist → backlogged (waiting, not healthy)', async () => {
+      const now = Date.now();
+      const store = createMockStore({
+        aggregatePipelineHealth: aggregateMock({
+          pendingCount: 0,
+          lastSucceededAt: new Date(now - 60000).toISOString(),
+          failedCount: 0,
+          needsHumanReviewCount: 0,
+          retryWaitCount: 4,
+        }),
+      });
+      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
+      const data = okEnvelope<{ pipeline: PipelineBlock }>(res);
+      expect(data.pipeline.status).toBe('backlogged');
     });
 
     it('only NON-runner-kind succeeded tasks recently → unknown, not healthy (C4 scope)', async () => {
