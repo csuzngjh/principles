@@ -1423,6 +1423,21 @@ npm run dev:workspace:snapshot [-- --size]   # what is here, who owns it, what m
 npm run dev:workspace:migrate                # dry-run; --apply moves safe registered worktrees
 ```
 
+## `git-15-session-temp-artifacts`
+
+Every AI session produces throwaway artifacts: browser screenshots, exported
+JSON/Markdown captures, diff baselines, probe output, scratch script copies.
+They MUST be written under `.tmp/<topic-or-date>/` inside the working tree
+(`.tmp/` is gitignored). Never write them to the repository root, a drive
+root, Desktop, or Downloads.
+
+* Browser-tool screenshots default to the workspace root — every save must
+  explicitly target a `.tmp/...` path.
+* Reports cite evidence as `.tmp/...` paths or embed it inline in the
+  conversation.
+* Cleanup follows git-4: an agent deletes only artifacts it created itself.
+  `.tmp/` never enters a commit.
+
 ---
 
 # 24. Adversarial Self-review

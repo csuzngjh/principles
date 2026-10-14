@@ -18,11 +18,32 @@ import { Command } from 'commander';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
-const { MockRuntimeStateManager, mockGetTask, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockGetRunsByTask } = vi.hoisted(() => {
+const { MockRuntimeStateManager, mockGetTask, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockGetRunsByTask, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetCandidateImpl } = vi.hoisted(() => {
   const mockGetTask = vi.fn().mockResolvedValue(null);
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
   const mockUpdateCandidateStatus = vi.fn().mockResolvedValue(undefined);
-  const mockGetRunsByTask = vi.fn().mockResolvedValue([]);
+  const mockGetAdmissionDocument = vi.fn();
+const mockAppendAdmissionEvaluation = vi.fn();
+const mockGetCandidateImpl = vi.fn(async (candidateId: string) => {
+  const all = await mockGetCandidatesByTaskId('any');
+  return all.find((c: { candidateId: string }) => c.candidateId === candidateId) ?? null;
+});
+const mockGetRunsByTask = vi.fn().mockResolvedValue([{
+    runId: 'run-underlying', status: 'succeeded',
+    // SPEC review round-3 P1: the full admission re-evaluation reads the
+    // latest run output — a valid admitting DiagnosticianOutputV1 keeps the
+    // original retry flow for these fixtures.
+    outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+  }]);
+// SPEC-CODEX-PAIN-CLOSURE-001 round-5: the write gate resolves each
+// candidate's own diagnostic round via getRun(candidate.sourceRunId).
+// Fixtures set sourceRunId = 'run-underlying' on the same task the candidate
+// hangs off, so this seam answers with that owning run.
+const mockGetRun = vi.fn(async (runId: string) => (runId === 'run-underlying' ? {
+  runId: 'run-underlying', taskId: 'diagnosis_test-pain-1', status: 'succeeded', executionStatus: 'succeeded' as const,
+  outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+} : null));
+const mockGetArtifact = vi.fn().mockResolvedValue(null);
 
   class MockRuntimeStateManager {
     initialize = vi.fn().mockResolvedValue(undefined);
@@ -31,11 +52,19 @@ const { MockRuntimeStateManager, mockGetTask, mockGetCandidatesByTaskId, mockUpd
     getCandidatesByTaskId = mockGetCandidatesByTaskId;
     updateCandidateStatus = mockUpdateCandidateStatus;
     getRunsByTask = mockGetRunsByTask;
+    getRun = mockGetRun;
+    getArtifact = mockGetArtifact;
+    // SPEC review round-3 P1: the full admission write gate reads these seams.
+    // Defaults = admitted disposition + admitting materials + a resolvable
+    // candidate; each test can override via the exported mocks.
+    getAdmissionDocument = mockGetAdmissionDocument;
+    appendAdmissionEvaluation = mockAppendAdmissionEvaluation;
+    getCandidate = mockGetCandidateImpl;
     connection = {} as Record<string, unknown>;
     taskStore = {};
     runStore = {};
   }
-  return { MockRuntimeStateManager, mockGetTask, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockGetRunsByTask };
+  return { MockRuntimeStateManager, mockGetTask, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockGetRunsByTask, mockGetRun, mockGetArtifact, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetCandidateImpl };
 }, { validateType: true });
 
 const { mockIntake, MockCandidateIntakeService } = vi.hoisted(() => {
@@ -238,6 +267,10 @@ const RETRY_WAIT_TASK = {
   resultRef: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
+  // SPEC review round-3 P1: the full admission re-evaluation reads the
+  // persisted diagnosis payload — a complete admitting diagnosis keeps the
+  // original retry flow (intake proceeds) for these fixtures.
+  diagnosticJson: JSON.stringify({ sourcePainId: 'test-pain-1', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
 };
 
 const FAILED_TASK = {
@@ -287,6 +320,28 @@ const NON_DIAGNOSTICIAN_TASK = {
 describe('pd pain retry — validation and error paths', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetAdmissionDocument.mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    });
+    // SPEC review round-3 P1: clearAllMocks() wipes the class-literal gate
+    // implementations — re-arm the admitting defaults every test.
+    mockGetTask.mockResolvedValue(null);
+    mockGetCandidatesByTaskId.mockResolvedValue([]);
+    mockGetRunsByTask.mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]);
     mockResolveRuntimeConfig.mockReturnValue({
       runtimeKind: 'pi-ai',
       provider: 'test-provider',
@@ -643,7 +698,27 @@ describe('pd pain retry — success paths', () => {
     vi.clearAllMocks();
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
-    mockGetRunsByTask.mockResolvedValue([]);
+    mockAppendAdmissionEvaluation.mockResolvedValue({ status: 'appended', document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null } });
+    // SPEC review round-3 P1: full-gate seams — valid admitting run output
+    // (the original flow asserted intake proceeds on these fixtures).
+    mockGetRunsByTask.mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]);
+    mockGetAdmissionDocument.mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    });
     mockIntake.mockReset();
     // PRI-934: null = nothing recovered, no mutation (post-clearAllMocks re-prime).
     mockRecoverFailedTask.mockResolvedValue(null);
@@ -658,7 +733,7 @@ describe('pd pain retry — success paths', () => {
   it('RETRY-06: retry_wait + last_error → succeeded — JSON output with previousTaskStatus and previousLastError', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
     ]);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
@@ -691,8 +766,8 @@ describe('pd pain retry — success paths', () => {
   it('RETRY-06b (P2-4): parked candidate surfaces review guidance and is EXCLUDED from internalize nextAction', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
-      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'diagnosis_test-pain-1', status: 'pending' },
+      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
     ]);
     mockIntake
       .mockResolvedValueOnce({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-ok', title: 'OK', status: 'probation' } })
@@ -815,7 +890,7 @@ describe('pd pain retry — success paths', () => {
   it('RETRY-10: nextAction mentions internalization is NOT automatic', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
     ]);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
@@ -872,7 +947,7 @@ describe('pd pain retry — success paths', () => {
   it('RETRY-12: intake failure — JSON output with intake_failed + nextAction', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-fail', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
+      { candidateId: 'cand-fail', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
     ]);
     mockIntake.mockImplementation(() => { throw new Error('Ledger write failed'); });
 
@@ -899,9 +974,26 @@ describe('pd pain retry — success paths', () => {
 describe('pd pain retry — human-readable output', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetAdmissionDocument.mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    });
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
-    mockGetRunsByTask.mockResolvedValue([]);
+    mockGetRunsByTask.mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]);
     mockIntake.mockReset();
     mockDeadLetterGetByPainId.mockReturnValue(null);
     // PRI-934: default "nothing recovered" after clearAllMocks() (null = no
@@ -940,7 +1032,7 @@ describe('pd pain retry — human-readable output', () => {
   it('RETRY-14: success — human-readable output shows previous status and nextAction', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
     ]);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
 
@@ -1101,9 +1193,26 @@ describe('Commander wiring for pd pain retry', () => {
 describe('BUG-1 (PRI-442): pain retry — effectiveConfig wiring to split-pipeline runners', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetAdmissionDocument.mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    });
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
-    mockGetRunsByTask.mockResolvedValue([]);
+    mockGetRunsByTask.mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]);
     mockIntake.mockReset();
     // PRI-934: null = nothing recovered, no mutation (post-clearAllMocks re-prime).
     mockRecoverFailedTask.mockResolvedValue(null);
@@ -1226,9 +1335,26 @@ describe('PRI-638: pd pain retry when Diagnostician capability is disabled', () 
 describe('PRI-934: pd pain retry — failed-task recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetAdmissionDocument.mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    });
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
-    mockGetRunsByTask.mockResolvedValue([]);
+    mockGetRunsByTask.mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]);
     mockIntake.mockReset();
     mockRecoverFailedTask.mockResolvedValue(null);
     mockRun.mockResolvedValue({
@@ -1521,11 +1647,28 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetAdmissionDocument.mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    });
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'diagnosis_test-pain-1', sourceRunId: 'run-underlying', status: 'pending' },
     ]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
-    mockGetRunsByTask.mockResolvedValue([]);
+    mockGetRunsByTask.mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]);
     mockIntake.mockReset();
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
     mockRecoverFailedTask.mockResolvedValue(null);

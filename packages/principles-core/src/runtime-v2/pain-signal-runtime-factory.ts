@@ -666,6 +666,10 @@ export class DisabledDiagnosticianRunner implements DiagnosticianRunnerLike {
 const BRIDGE_DEGRADATION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'pain_diagnosis_persist_skipped',
   'pain_diagnosis_persist_failed',
+  // SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (SPEC §7.1): a failed disposition
+  // persist BLOCKS that candidate's governance writes for the round — a real
+  // degradation that must reach the durable workspace sink, not stdout only.
+  'admission_persistence_failed',
 ]);
 
 /**

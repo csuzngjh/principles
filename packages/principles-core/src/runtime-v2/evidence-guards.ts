@@ -37,3 +37,14 @@ export function shouldShortCircuitEmptyEvidence(evidenceLength: number, source: 
     && source !== 'pain'
     && source !== 'skill:pain';
 }
+
+/**
+ * SPEC-CODEX-PAIN-CLOSURE-001 CR-02: a correction-evidence payload is an
+ * explicit Owner statement only when it carries the owner_statement
+ * classification. Legacy correction traces (no classification) never count.
+ */
+export function isOwnerStatementEvidence(correctionEvidence: unknown): boolean {
+  if (typeof correctionEvidence !== 'object' || correctionEvidence === null || Array.isArray(correctionEvidence)) return false;
+  const record = correctionEvidence as Record<string, unknown>;
+  return typeof record.text === 'string' && record.text.length > 0 && record.classification === 'owner_statement';
+}

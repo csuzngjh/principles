@@ -54,6 +54,7 @@ import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import * as path from 'path';
@@ -65,6 +66,12 @@ interface PainRetryOptions {
   workspace?: string;
   json?: boolean;
   force?: boolean;
+  /** SPEC-CODEX-PAIN-CLOSURE-001 CR-06: explicit Owner statement for authorized recovery. */
+  ownerStatement?: string;
+  /** CR-06: zero-mutation recovery preview. */
+  dryRun?: boolean;
+  /** CR-06: explicit confirmation for the mutating statement-based recovery. */
+  confirm?: boolean;
   runtime?: string;
   openclawLocal?: boolean;
   openclawGateway?: boolean;
@@ -99,6 +106,10 @@ function resolveTaskIdFromPainId(painId: string): { taskId: string } | { reason:
     };
   }
   return { taskId: `diagnosis_${painId}` };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Return value as a non-blank string if it is one, otherwise null. */
@@ -279,7 +290,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
   try {
     await stateManager.initialize();
 
-    const task = await stateManager.getTask(taskId);
+    let task = await stateManager.getTask(taskId);
 
     // Dead letter replay: when no task exists, check if the pain signal was
     // persisted to dead_letter_pains (rc-9: no silent failure in pain.ts).
@@ -325,8 +336,92 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // existing logging/output paths have a non-null value to print.
     const previousTaskStatus: PDTaskStatus | 'dead_lettered' = task ? task.status : 'dead_lettered';
     const previousLastError = task ? (task.lastError ?? null) : null;
+    // Authorized statement-based recovery of a succeeded task (CR-06): set by
+    // the pure-validation block above, applied ONLY after runtime/config/
+    // material checks pass (review S2: never mutate-then-refuse).
+    let recoveryPlanned: { statement: string; priorStatus: PDTaskStatus } | null = null;
 
-    if (task && task.status === 'succeeded' && !opts.force) {
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-06: authorized bounded recovery with an
+    // explicit Owner statement. The statement is validated the same way as
+    // `pd pain record --owner-statement` (non-empty, ≤500 chars, REJECTED —
+    // never truncated). --dry-run is a zero-mutation preview; the mutating
+    // recovery of a succeeded task additionally requires --confirm.
+    if (opts.ownerStatement !== undefined) {
+      const MAX_OWNER_STATEMENT_CHARS = 500;
+      if (opts.ownerStatement.trim().length === 0) {
+        return refuseExit(opts, {
+          painId: opts.painId, taskId,
+          reason: 'owner_statement_empty',
+          message: '--owner-statement must be non-empty',
+          nextAction: 'Submit the Owner verbatim words, or omit the flag.',
+        });
+      }
+      if (opts.ownerStatement.length > MAX_OWNER_STATEMENT_CHARS) {
+        return refuseExit(opts, {
+          painId: opts.painId, taskId,
+          reason: 'owner_statement_too_long',
+          message: `--owner-statement must be at most ${MAX_OWNER_STATEMENT_CHARS} characters (got ${opts.ownerStatement.length}); the Owner intent is never silently truncated`,
+          nextAction: 'Shorten the statement and resubmit.',
+        });
+      }
+      if (opts.dryRun === true) {
+        // Zero governance mutation (A15 dry-run contract): report what exists
+        // and what the recovery WOULD reference.
+        const candidates = await stateManager.getCandidatesByTaskId(taskId);
+        const candidatePreviews: Record<string, unknown>[] = [];
+        for (const candidate of candidates) {
+          const admission = await stateManager.getAdmissionDocument(candidate.candidateId);
+          const document = admission.ok ? admission.document : null;
+          const current = document !== null ? document.evaluations.find((e) => e.evaluationId === document.currentEvaluationId) : undefined;
+          candidatePreviews.push({
+            candidateId: candidate.candidateId,
+            status: candidate.status,
+            recommendationKind: candidate.rawRecommendationKind,
+            admission: current !== undefined
+              ? { decision: current.decision, reason: current.reason, evaluatedAt: current.evaluatedAt, policyVersion: current.policyVersion, ownerStatementPresent: current.ownerStatementPresent }
+              : { recorded: false, note: '历史准入处置未记录（pre-CR-03 记录或处置未持久化）' },
+            processing: document?.processing !== undefined ? { state: document.processing.state, attempts: document.processing.attempts } : { state: 'unknown' },
+          });
+        }
+        const dryRunReport = {
+          status: 'dry-run',
+          painId: opts.painId,
+          taskId,
+          taskStatus: task ? task.status : 'dead_lettered',
+          ownerStatement: { provided: true, chars: opts.ownerStatement.length, classification: 'owner_statement', channel: 'cli_owner_statement' },
+          candidates: candidatePreviews,
+          planned: [
+            're-run the diagnosis with the Owner statement attached (new run/attempt lineage; the prior diagnosis, artifacts and admission history are preserved)',
+            'append a NEW admission evaluation version keyed by the new material fingerprint (the previous decision stays queryable; currentEvaluationId moves forward)',
+            'admitted candidates proceed through the unchanged reuse gate and type routing',
+          ],
+          governanceMutation: 'none',
+        };
+        if (opts.json) console.log(JSON.stringify(dryRunReport, null, 2));
+        else console.log(JSON.stringify(dryRunReport, null, 2));
+        return;
+      }
+      // SPEC review S2 fix: PURE validation only here — the task is NOT
+      // mutated before runtime/config/material checks pass. The authorized
+      // reopen happens after every check, at the family-recovery point below
+      // (a failure must leave the original state and input untouched).
+      if (task && task.status === 'succeeded') {
+        if (opts.confirm !== true && opts.force !== true) {
+          return refuseExit(opts, {
+            painId: opts.painId, taskId,
+            reason: 'recovery_confirmation_required',
+            message: 'Statement-based recovery of a succeeded task is a governance mutation; explicit confirmation is required.',
+            nextAction: `Preview with --dry-run first, then add --confirm: pd pain retry --pain-id ${opts.painId} --owner-statement <text> --confirm`,
+          });
+        }
+        recoveryPlanned = {
+          statement: opts.ownerStatement,
+          priorStatus: task.status,
+        };
+      }
+    }
+
+    if (task && task.status === 'succeeded' && !opts.force && recoveryPlanned === null) {
       return refuseExit(opts, {
         painId: opts.painId,
         taskId,
@@ -336,7 +431,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       });
     }
 
-    if (task && !RETRYABLE_STATUSES.has(task.status) && task.status !== 'succeeded') {
+    if (task && !RETRYABLE_STATUSES.has(task.status) && task.status !== 'succeeded' && recoveryPlanned === null) {
       return refuseExit(opts, {
         painId: opts.painId,
         taskId,
@@ -794,7 +889,55 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // live-lease states are deliberately NOT reset — the lease_conflict
     // nextAction below routes those to `pd runtime recovery`.
     const recoveredTasks: { taskId: string; forceApplied: boolean }[] = [];
-    if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
+    // CR-06 (review S2): the authorized reopen runs HERE — after every pure
+    // validation (params/confirm/runtime/config/capability) has passed. The
+    // statement becomes a NEW input-basis version on the preserved task
+    // (prior runs/artifacts/admission history untouched; the re-evaluation
+    // appends a new version keyed by the new material fingerprint), and the
+    // diagnosis family is re-opened with fresh attempt budgets for this
+    // authorized round — new runs/attempt rows carry the lineage.
+    if (recoveryPlanned !== null && task !== null) {
+      let payloadParsed: Record<string, unknown> = {};
+      try {
+        const raw: unknown = JSON.parse(task.diagnosticJson ?? '{}');
+        if (isPlainRecord(raw)) payloadParsed = raw;
+      } catch {
+        payloadParsed = {};
+      }
+      payloadParsed.correctionEvidence = {
+        text: recoveryPlanned.statement,
+        classification: 'owner_statement',
+        channel: 'cli_owner_statement',
+        ...(typeof payloadParsed.sessionIdHint === 'string' ? { sessionId: payloadParsed.sessionIdHint } : {}),
+      };
+      const diagFamily = [
+        `diag_rootcause-${taskId}`,
+        `diag_distiller-${taskId}`,
+        `diag_router-${taskId}`,
+      ];
+      // SPEC review round-3 P1: the whole family reopens in ONE transaction —
+      // a crash can never leave a half-recovered family, and a live lease on
+      // any member refuses the entire reopen (the running diagnosis wins).
+      const reopen = await stateManager.reopenDiagnosticianFamilyAtomic({
+        parentTaskId: taskId,
+        stageTaskIds: diagFamily,
+        parentPatch: { diagnosticJson: JSON.stringify(payloadParsed) },
+      });
+      if (!reopen.reopened) {
+        return refuseExit(opts, {
+          painId: opts.painId, taskId,
+          reason: 'recovery_lease_conflict',
+          message: `A live diagnosis lease holds: ${reopen.leased.join(', ')} — the authorized recovery was NOT applied (zero mutation).`,
+          nextAction: 'Wait for the running diagnosis to finish, or route it to pd runtime recovery; then re-run this recovery.',
+        });
+      }
+      for (const familyTaskId of diagFamily) {
+        const stage = await stateManager.getTask(familyTaskId);
+        if (stage !== null && stage.status === 'pending') recoveredTasks.push({ taskId: familyTaskId, forceApplied: true });
+      }
+      task = await stateManager.getTask(taskId);
+      console.error(`[PD] owner statement attached to ${taskId}; authorized recovery re-opened the diagnosis family atomically`);
+    } else if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
       const diagFamily = [
         taskId,
         `diag_rootcause-${taskId}`,
@@ -933,7 +1076,10 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       // cli-5-failure-no-mutation: refusal path does not call intake(), does
       // not update candidate status, does not write ledger.
       // cli-6-output-next-action: refusal result carries admissionBlock.nextAction.
-      const admissionBlock = checkAdmissionGate(candidate);
+      // SPEC review round-3 P1: the FULL write gate (persisted disposition /
+      // re-evaluation), not the confidence/kind-only partial check — a
+      // corrupted or stale admission document can never be intaked here.
+      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId)) ?? checkAdmissionGate(candidate);
       if (admissionBlock) {
         intakeFailed = true;
         intakeResults.push({
@@ -1183,6 +1329,9 @@ export function registerPainRetryCommand(
     .option('--maxTokens <n>', 'Max output tokens (max_tokens) for pi-ai LLM calls — for pi-ai, falls back to policy', parseInt)
     .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
     .option('--force', 'Allow retry of already-succeeded tasks')
+    .option('--owner-statement <text>', 'SPEC-CODEX-PAIN-CLOSURE-001 CR-06: attach the Owner verbatim statement (max 500 chars, rejected when longer) to this pain for an authorized recovery run; for a succeeded task it requires --confirm and re-runs the diagnosis with the statement as the new input-basis version', undefined)
+    .option('--dry-run', 'CR-06: zero-mutation preview of what the statement-based recovery would reference (no diagnosis, no writes)')
+    .option('--confirm', 'CR-06: confirm the mutating statement-based recovery of a succeeded task (dry-run is the no-write preview)')
     .option('--json', 'Output raw JSON')
     .action(async (opts: PainRetryOptions) => {
       await handler(opts);

@@ -29,14 +29,30 @@ function formatTextOutput(output: DoctorOutput): string {
 
   // Workspace discovery info
   const discovery = discoverWorkspaceDefault();
-  if (discovery) {
-    lines.push(`workspace.default: ${discovery.workspaceDefault} (source: ${discovery.source})`);
+  if (discovery?.kind === 'unparseable') {
+    // PRI-957 review round 3 P1: an unparseable config means the declaration is
+    // UNKNOWN, not absent. Reporting it as "discovered, no workspace.default declared"
+    // would claim a fact no readable config supports, and hide that resolution now
+    // fails closed instead of falling back to the standing directory.
+    lines.push(
+      `workspace config UNPARSEABLE: ${discovery.configPath} (source: ${discovery.source}) — ${discovery.reason}`,
+    );
+    lines.push('  ⚠ workspace.default is unknown — commands without --workspace / PD_WORKSPACE_DIR fail closed');
+  } else if (discovery) {
+    // PRI-957: only the cwd candidate may return a bare discovered directory, so the
+    // label must not claim a declaration that no config file contains.
+    const label = discovery.declared
+      ? `workspace.default: ${discovery.workspaceDefault} (source: ${discovery.source})`
+      : `workspace (discovered, no workspace.default declared): ${discovery.workspaceDefault} (source: ${discovery.source})`;
+    lines.push(label);
     const normalizedResolved = output.workspaceDir.replace(/\\/g, '/').replace(/\/$/, '');
     const normalizedDefault = discovery.workspaceDefault.replace(/\\/g, '/').replace(/\/$/, '');
     if (normalizedResolved !== normalizedDefault) {
-      lines.push(`  ⚠ RESOLVED path differs from workspace.default!`);
+      lines.push('  ⚠ RESOLVED path differs from the discovered workspace default!');
     } else {
-      lines.push(`  ✓ resolved path matches workspace.default`);
+      lines.push(discovery.declared
+        ? '  ✓ resolved path matches workspace.default'
+        : '  ✓ resolved path matches the discovered workspace directory');
     }
   } else {
     lines.push('workspace.default: (not configured — add workspace.default to .pd/config.yaml)');

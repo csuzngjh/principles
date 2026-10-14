@@ -69,11 +69,12 @@ function parseArgs(argv) {
       const value = requireFlagValue(argv, i, '--workspace');
       if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
       out.workspace = value.value; i += 1;
-    } else if (argv[i] === '--adapter-source' || argv[i] === '--host-runtime-source') {
+    } else if (argv[i] === '--adapter-source' || argv[i] === '--host-runtime-source' || argv[i] === '--core-source') {
       const flag = argv[i];
       const value = requireFlagValue(argv, i, flag);
       if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
-      out[flag === '--adapter-source' ? 'adapterSource' : 'hostRuntimeSource'] = path.resolve(value.value); i += 1;
+      const key = flag === '--adapter-source' ? 'adapterSource' : flag === '--host-runtime-source' ? 'hostRuntimeSource' : 'coreSource';
+      out[key] = path.resolve(value.value); i += 1;
     } else if (argv[i] === '--skip-init') out.skipInit = true;
     else if (argv[i] === '--json') out.json = true;
     else if (argv[i] === '--ingest') {
@@ -84,7 +85,7 @@ function parseArgs(argv) {
       }
       out.ingest = value.value; i += 1;
     }
-    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --adapter-source <dir> --host-runtime-source <dir> --skip-init --ingest accept|decline|skip --json' };
+    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --adapter-source <dir> --host-runtime-source <dir> --core-source <dir> --skip-init --ingest accept|decline|skip --json' };
   }
   return out;
 }
@@ -151,11 +152,21 @@ async function main() {
   if (args.hostRuntimeSource) {
     let sourcePackage;
     try { sourcePackage = JSON.parse(fs.readFileSync(path.join(args.hostRuntimeSource, 'package.json'), 'utf8')); }
-    catch { fail('host_runtime_source_invalid', 'Pass the built host-runtime package directory.'); return; }
+    catch { fail('host_runtime_source_invalid', 'Pass the built host-runtime package directory containing package.json.'); return; }
     if (!sourcePackage || sourcePackage.name !== '@principles/host-runtime'
       || sourcePackage.version !== desired.hostRuntime
       || !fs.existsSync(path.join(args.hostRuntimeSource, 'dist', 'index.js'))) {
       fail('host_runtime_source_invalid', 'The built host-runtime name/version must match the plugin runtime pin.'); return;
+    }
+  }
+  if (args.coreSource) {
+    let sourcePackage;
+    try { sourcePackage = JSON.parse(fs.readFileSync(path.join(args.coreSource, 'package.json'), 'utf8')); }
+    catch { fail('core_source_invalid', 'Pass the built @principles/core package directory containing package.json and dist.'); return; }
+    if (!sourcePackage || sourcePackage.name !== '@principles/core'
+      || sourcePackage.version !== desired.core
+      || !fs.existsSync(path.join(args.coreSource, 'dist', 'runtime-v2', 'index.js'))) {
+      fail('core_source_invalid', 'The built core name/version must match the plugin runtime pin (runtime-version.json).'); return;
     }
   }
   const missingPins = Object.entries(desired)
@@ -174,7 +185,7 @@ async function main() {
     if (!adapterSource && typeof marker.adapterSource === 'string') adapterSource = marker.adapterSource;
     if (marker.codexAdapter === desired.codexAdapter
       && marker.hostRuntime === desired.hostRuntime
-      && marker.core === desired.core && !args.adapterSource && !args.hostRuntimeSource) installNeeded = false;
+      && marker.core === desired.core && !args.adapterSource && !args.hostRuntimeSource && !args.coreSource) installNeeded = false;
   } catch { /* no/broken marker → install */ }
 
   if (installNeeded) {
@@ -184,10 +195,10 @@ async function main() {
       [
         'install', '--no-audit', '--no-fund', '--loglevel=error', '--omit=dev',
         '--prefer-offline', '--fetch-retries=0', '--fetch-timeout=30000',
-        ...(args.adapterSource || args.hostRuntimeSource ? ['--install-links'] : []),
+        ...(args.adapterSource || args.hostRuntimeSource || args.coreSource ? ['--install-links'] : []),
         args.adapterSource ? `file:${args.adapterSource}` : `@principles/codex-adapter@${desired.codexAdapter}`,
         args.hostRuntimeSource ? `file:${args.hostRuntimeSource}` : `@principles/host-runtime@${desired.hostRuntime}`,
-        `@principles/core@${desired.core}`,
+        args.coreSource ? `file:${args.coreSource}` : `@principles/core@${desired.core}`,
       ],
       { cwd: runtimeDir, stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 },
     );
@@ -198,7 +209,7 @@ async function main() {
       );
       return;
     }
-    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, ...(args.adapterSource ? { adapterSource: args.adapterSource } : {}), ...(args.hostRuntimeSource ? { hostRuntimeSource: args.hostRuntimeSource } : {}), installedAt: new Date().toISOString() }, null, 2));
+    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, ...(args.adapterSource ? { adapterSource: args.adapterSource } : {}), ...(args.hostRuntimeSource ? { hostRuntimeSource: args.hostRuntimeSource } : {}), ...(args.coreSource ? { coreSource: args.coreSource } : {}), installedAt: new Date().toISOString() }, null, 2));
     adapterSource = args.adapterSource;
   }
 
