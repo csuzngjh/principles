@@ -24,6 +24,26 @@
  *    entry (`pd activation approve`) → the next REAL engine turn carries the
  *    approved statement → withdrawal stops it.
  *
+ * IDENTITY-CHAIN CORRELATION + CHANNEL DISPATCH (P2 remediation): the
+ * acceptance surface is correlated BY IDS from this scenario's own synthetic
+ * pain — admission (canonical_pain_id) → diagnostician task →
+ * principle_candidates (task_id or diag_router input_ref) → chain tasks
+ * (pi_metadata.correlationId) → pi_artifacts (source_task_id) → approvals
+ * (artifact_id). Never a queue-wide pending[0] pick. Each candidate is then
+ * verified on ITS production channel:
+ *   - prompt            → approve → principleDraft.statement injection → withdraw;
+ *   - code_tool_hook    → approve → durable approval/activation row (production
+ *                         writer action, shadow by default; NO injection
+ *                         assertion, NO live promotion);
+ *   - implementation    → not_internalizable intake refusal is the policy
+ *                         terminal: recorded explicitly as POLICY (never a
+ *                         provider BLOCKED, never an injection PASS).
+ * A chain whose candidates are ALL policy-terminal ends there honestly;
+ * prompt legs are recorded SKIP (not FAIL) only when no prompt-channel
+ * candidate exists. Empty chain / missing correlation / approve failure /
+ * failed assertions are FAIL (nonzero); ONLY runs.error_category='rate_limit'
+ * is BLOCKED.
+ *
  * Agent-loop model decisions are scripted by the local mock server (genuine
  * engine behavior); everything governance-side is the real product stack.
  */
@@ -222,15 +242,134 @@ function deliverSyntheticWriteFailure(tag) {
   });
 }
 
-function pendingApproval() {
+// ── Identity-chain correlation (P2 remediation) ─────────────────────────────
+// The acceptance surface of THIS scenario's synthetic pain is correlated by
+// IDs only: admission(trajectory, by canonical_pain_id) → diagnostician task
+// → principle_candidates (task_id = top task or diag_router sub-task whose
+// input_ref is the top task) → chain tasks (durable pi_metadata.correlationId
+// = candidateId) → pi_artifacts(source_task_id) → approvals(artifact_id).
+// No pending[0] queue-wide picking anywhere below. All reads are readonly and
+// parameterized.
+const POLICY_TERMINAL_KINDS = new Set(['implementation', 'defer']);
+
+// The admission gate's durable threshold (evaluateAdmission): a candidate
+// whose persisted confidence is below it can NEVER be admitted — no approval
+// can ever appear for such a chain (rc-7: do not cycle on a terminal state).
+const ADMISSION_CONFIDENCE_THRESHOLD = 0.5;
+
+function readLearningChain(painId) {
+  let admission;
+  let traj;
+  try {
+    traj = new Database(path.join(GOV, '.state', 'trajectory.db'), { readonly: true });
+    admission = traj.prepare(
+      "SELECT canonical_pain_id, diagnostician_task_id FROM governance_signal_admissions WHERE host_kind = 'workbuddy' AND canonical_pain_id = ? ORDER BY created_at DESC LIMIT 1",
+    ).get(painId);
+  } catch {
+    return null; // trajectory store not readable yet — keep cycling
+  } finally {
+    try { traj?.close(); } catch { /* ignore */ }
+  }
+  if (!admission?.diagnostician_task_id) return null; // admission not persisted yet
   let db;
   try {
     db = new Database(path.join(GOV, '.pd', 'state.db'), { readonly: true });
-    return db.prepare("SELECT approval_id, artifact_id, channel, status FROM approvals WHERE status = 'pending' ORDER BY requested_at ASC").all();
   } catch {
-    return [];
+    return null;
+  }
+  const chain = {
+    diagnosticianTaskId: admission.diagnostician_task_id,
+    candidates: [],
+    chainTasks: [],
+    artifacts: [],
+    approvals: [],
+    pendingApprovals: [],
+  };
+  try {
+    chain.candidates = db.prepare(
+      `SELECT candidate_id, artifact_id, task_id, recommendation_kind, status, consumed_at, confidence
+       FROM principle_candidates
+       WHERE task_id = ?
+          OR task_id IN (SELECT task_id FROM tasks WHERE task_kind = 'diag_router' AND input_ref = ?)`,
+    ).all(chain.diagnosticianTaskId, chain.diagnosticianTaskId);
+    for (const candidate of chain.candidates) {
+      const tasks = db.prepare(
+        `SELECT task_id, task_kind, status, json_extract(diagnostic_json, '$.pi_metadata.correlationId') AS candidate_id
+         FROM tasks
+         WHERE json_extract(diagnostic_json, '$.pi_metadata.correlationId') = ?`,
+      ).all(candidate.candidate_id);
+      chain.chainTasks.push(...tasks);
+      for (const task of tasks) {
+        chain.artifacts.push(...db.prepare(
+          'SELECT artifact_id, artifact_kind, source_task_id FROM pi_artifacts WHERE source_task_id = ?',
+        ).all(task.task_id));
+      }
+    }
+    for (const artifact of chain.artifacts) {
+      chain.approvals.push(...db.prepare(
+        'SELECT approval_id, artifact_id, channel, status FROM approvals WHERE artifact_id = ?',
+      ).all(artifact.artifact_id));
+    }
+    chain.pendingApprovals = chain.approvals.filter((a) => a.status === 'pending');
   } finally {
-    try { db?.close(); } catch { /* ignore */ }
+    try { db.close(); } catch { /* ignore */ }
+  }
+  return chain;
+}
+
+function candidateArtifactIds(chain, candidateId) {
+  const taskIds = new Set(chain.chainTasks.filter((t) => t.candidate_id === candidateId).map((t) => t.task_id));
+  return chain.artifacts.filter((a) => taskIds.has(a.source_task_id)).map((a) => a.artifact_id);
+}
+
+function candidateDisposition(chain, candidate) {
+  const artifactIds = candidateArtifactIds(chain, candidate.candidate_id);
+  const approval = chain.approvals.find((a) => artifactIds.includes(a.artifact_id));
+  if (approval?.status === 'pending') return 'pending_approval';
+  if (approval !== undefined) return 'decided';
+  if (POLICY_TERMINAL_KINDS.has(candidate.recommendation_kind) && artifactIds.length === 0) return 'policy_terminal';
+  return 'in_flight';
+}
+
+function chainSummary(chain) {
+  return chain.candidates
+    .map((c) => {
+      const tasks = chain.chainTasks
+        .filter((t) => t.candidate_id === c.candidate_id)
+        .map((t) => `${t.task_kind}:${t.status}`)
+        .join(',');
+      const taskNote = tasks.length > 0 ? `;tasks=${tasks}` : '';
+      return `${c.candidate_id}(kind=${c.recommendation_kind},status=${c.status},${candidateDisposition(chain, c)}${taskNote})`;
+    })
+    .join('; ');
+}
+
+/** Durable error-category authority for the chain's diagnostician task. */
+function latestDiagnosticianCategory(diagTaskId) {
+  try {
+    const db = new Database(path.join(GOV, '.pd', 'state.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT error_category FROM runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 1').get(diagTaskId);
+      return row?.error_category ?? undefined;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+function diagnosticianTaskStatus(diagTaskId) {
+  try {
+    const db = new Database(path.join(GOV, '.pd', 'state.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(diagTaskId);
+      return row?.status ?? undefined;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return undefined;
   }
 }
 
@@ -314,8 +453,12 @@ async function main() {
       `synthetic Write-failure PostToolUse via real dist entry: status=${synth.status} pain=${JSON.stringify(synthPain)} stderr=${(synth.stderr || '').slice(-200)}`);
     if (!synthPain) return finalize();
 
-    // ── Background chain: worker cycles until a pending approval exists ──
-    let approval = null;
+    // ── Background chain: worker cycles until THIS pain's chain reaches a
+    // disposition (identity-chain correlated, never pending[0]) ──
+    let chainSelection = null;      // chain with traceable pending approvals
+    let policyTerminalChain = null; // every candidate at the policy refusal terminal
+    let blockedRateLimit = null;    // provider rate limit (durable runs row)
+    let chainDefect = null;         // terminal chain failure without rate limit
     let lastCycle = null;
     const deadline = Date.now() + 45 * 60_000; // real LLM: diagnosis chain + provider rate-limit backoff
     let cycles = 0;
@@ -325,30 +468,137 @@ async function main() {
       let parsed = {};
       try { parsed = JSON.parse(r.stdout || '{}'); } catch { /* non-JSON */ }
       lastCycle = { exit: r.status, mode: parsed.mode, admission: parsed.report?.admission, diagnostician: parsed.report?.diagnostician, downstreamSkip: parsed.report?.downstream?.skipReason, stderrTail: (r.stderr || '').slice(-300) };
-      const pending = pendingApproval();
-      if (pending.length > 0) { approval = pending[0]; break; }
+      const chain = readLearningChain(synthPain.canonical_pain_id);
+      if (chain !== null) {
+        if (chain.pendingApprovals.length > 0) { chainSelection = chain; break; }
+        // Policy terminal (rc-9): no approval row will EVER exist for this
+        // chain — cycling to the deadline would be dishonest (rc-7).
+        if (chain.candidates.length > 0 && chain.candidates.every((c) => candidateDisposition(chain, c) === 'policy_terminal')) {
+          policyTerminalChain = chain;
+          break;
+        }
+        // Admission terminal (rc-7): every actionable candidate's persisted
+        // confidence is below the admission gate threshold — the gate can
+        // never admit them, so the chain can never reach an approval. Classify
+        // NOW with the root cause instead of burning the window.
+        const actionable = chain.candidates.filter((c) => !POLICY_TERMINAL_KINDS.has(c.recommendation_kind));
+        if (actionable.length > 0 && actionable.every((c) => c.confidence === null || c.confidence < ADMISSION_CONFIDENCE_THRESHOLD)) {
+          chainDefect = `every actionable candidate is below the admission confidence threshold (${ADMISSION_CONFIDENCE_THRESHOLD}) — the admission gate can never admit them (needs_evidence), so no approval can ever be reached: ${chainSummary(chain)}`;
+          break;
+        }
+        // Terminal diagnostician failure → classify NOW from the durable rows
+        // instead of burning the window on a dead chain.
+        if (diagnosticianTaskStatus(chain.diagnosticianTaskId) === 'failed') {
+          const category = latestDiagnosticianCategory(chain.diagnosticianTaskId);
+          if (category === 'rate_limit') blockedRateLimit = chain.diagnosticianTaskId;
+          else chainDefect = `diagnostician task terminal-failed (error_category=${category ?? 'none'}); last=${JSON.stringify(lastCycle).slice(0, 400)}`;
+          break;
+        }
+      }
       if (parsed.mode === 'paused') break;
       // Real-LLM provider rate limits: a full diagnostician run is a large
       // completion. Respect the provider with a long inter-cycle gap — the
       // deadline budget accounts for this (cycles are minutes apart).
       await new Promise((r2) => setTimeout(r2, 45_000));
     }
-    record('background-chain', approval ? 'PASS' : 'FAIL',
-      approval
-        ? `pending approval after ${cycles} REAL worker cycles (real LLM diagnostician): ${JSON.stringify(approval)}`
-        : `no pending approval after ${cycles} cycles; last=${JSON.stringify(lastCycle).slice(0, 700)}`);
-    if (!approval) return finalize();
+    if (blockedRateLimit !== null) {
+      record('background-chain', 'BLOCKED',
+        `the real LLM provider rate-limited the diagnostician (task=${blockedRateLimit}, runs.error_category=rate_limit) — chain verified up to the LLM boundary after ${cycles} cycles; re-run when the provider quota resets`);
+      return finalize();
+    }
+    if (chainDefect !== null) {
+      record('background-chain', 'FAIL', `chain defect, not a provider state: ${chainDefect}`);
+      return finalize();
+    }
+    if (policyTerminalChain !== null) {
+      record('background-chain', 'PASS',
+        `chain reached its designed policy terminal after ${cycles} REAL worker cycles (diagnosis + intake complete): ${chainSummary(policyTerminalChain)}`);
+      record('policy-terminal-candidates', 'POLICY',
+        `not_internalizable intake refusal is the production terminal for these kinds (MVP-disabled channel; approvals row absent BY DESIGN): ${chainSummary(policyTerminalChain)}`);
+      record('prompt-injection-leg', 'SKIP',
+        'no prompt/rule approval exists for a policy-terminal chain — injection + withdrawal legs skipped EXPLICITLY (policy classification, not a provider BLOCKED, not an injection PASS)');
+      return finalize();
+    }
+    record('background-chain', chainSelection ? 'PASS' : 'FAIL',
+      chainSelection
+        ? `identity-chain approvals after ${cycles} REAL worker cycles (real LLM diagnostician), traceable to pain ${synthPain.canonical_pain_id} via task ${chainSelection.diagnosticianTaskId}`
+        : `no identity-chain approval after ${cycles} cycles; last=${JSON.stringify(lastCycle).slice(0, 700)}`);
+    if (!chainSelection) return finalize();
 
-    // ── Owner approves through the REAL product entry ──
-    const approve = pdCli(['activation', 'approve', '--approval-id', approval.approval_id, '--workspace', GOV, '--decided-by', 'wb-e2e-test-owner', '--json'], 120_000);
-    let approveResult = {};
-    try { approveResult = JSON.parse(approve.stdout || '{}'); } catch { /* keep raw */ }
-    const approvedOk = approve.status === 0 && approveResult.ok === true;
+    // ── Denominator: every candidate's disposition is recorded ──
+    record('chain-disposition', 'PASS',
+      `candidates traceable to diagnostician task ${chainSelection.diagnosticianTaskId}: ${chainSummary(chainSelection)}`);
+    const policyCandidates = chainSelection.candidates.filter((c) => candidateDisposition(chainSelection, c) === 'policy_terminal');
+    if (policyCandidates.length > 0) {
+      record('policy-terminal-candidates', 'POLICY',
+        `not_internalizable terminal (approvals absent BY DESIGN, not a provider BLOCKED): ${policyCandidates.map((c) => `${c.candidate_id}(kind=${c.recommendation_kind})`).join(', ')}`);
+    }
+
+    // ── Channel dispatch (P2): each candidate is verified on ITS channel ──
+    const promptApproval = chainSelection.pendingApprovals.find((a) => a.channel === 'prompt');
+    for (const row of chainSelection.pendingApprovals) {
+      if (row.channel !== 'prompt' && row.channel !== 'code_tool_hook') {
+        record('chain-disposition', 'FAIL', `unexpected approval channel '${row.channel}' for artifact ${row.artifact_id} (unknown channel is a chain defect, rc-3)`);
+      }
+    }
+    // The primary approval drives the classic legs; prefer the prompt channel.
+    const approval = promptApproval ?? chainSelection.pendingApprovals[0];
+
+    // ── Owner approves through the REAL product entry (ALL chain approvals) ──
+    const approveResults = [];
+    for (const row of chainSelection.pendingApprovals) {
+      const approve = pdCli(['activation', 'approve', '--approval-id', row.approval_id, '--workspace', GOV, '--decided-by', 'wb-e2e-test-owner', '--json'], 120_000);
+      let approveResult = {};
+      try { approveResult = JSON.parse(approve.stdout || '{}'); } catch { /* keep raw */ }
+      approveResults.push({ row, exit: approve.status, ok: approveResult.ok === true, activationId: approveResult.activationId, stdout: (approve.stdout || '').slice(0, 200), stderr: (approve.stderr || '').slice(-200) });
+    }
+    const primaryResult = approveResults.find((a) => a.row.approval_id === approval.approval_id);
+    const approvedOk = Boolean(primaryResult) && primaryResult.exit === 0 && primaryResult.ok;
     record('owner-approval', approvedOk ? 'PASS' : 'FAIL',
-      `pd activation approve exit=${approve.status} ok=${approveResult.ok === true} activationId=${approveResult.activationId ?? '-'} stdout=${(approve.stdout || '').slice(0, 200)} stderr=${(approve.stderr || '').slice(-200)}`);
+      `pd activation approve (${approval.channel} channel, artifact=${approval.artifact_id}) exit=${primaryResult?.exit} ok=${primaryResult?.ok === true} activationId=${primaryResult?.activationId ?? '-'} stdout=${primaryResult?.stdout ?? ''} stderr=${primaryResult?.stderr ?? ''}`);
     if (!approvedOk) return finalize();
 
-    // ── Next REAL engine turn carries the approved principle ──
+    // ── code_tool_hook (rule) approvals: durable row verification ONLY ──
+    // No prompt-injection assertion and no live promotion — the production
+    // RuleHostWriter persists the shadow action; the read action is asserted,
+    // never hardcoded (P2 channel dispatch).
+    for (const result of approveResults.filter((a) => a.row.channel === 'code_tool_hook')) {
+      if (!(result.exit === 0 && result.ok)) {
+        record('rule-approval-activation', 'FAIL', `approve failed for ${result.row.approval_id}: exit=${result.exit} stderr=${result.stderr}`);
+        continue;
+      }
+      let hookApproval = null;
+      let hookActivation = null;
+      try {
+        const db = new Database(path.join(GOV, '.pd', 'state.db'), { readonly: true });
+        try {
+          hookApproval = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(result.row.approval_id) ?? null;
+          hookActivation = db.prepare('SELECT activation_id, channel, action, deactivated_at FROM activations WHERE artifact_id = ?').get(result.row.artifact_id) ?? null;
+        } finally {
+          db.close();
+        }
+      } catch (error) {
+        record('rule-approval-activation', 'FAIL', `durable read failed: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
+      const hookOk = hookApproval?.status === 'approved'
+        && hookActivation !== null
+        && hookActivation.channel === 'code_tool_hook'
+        && typeof hookActivation.action === 'string' && hookActivation.action.startsWith('code_tool_hook_')
+        && hookActivation.deactivated_at === null;
+      record('rule-approval-activation', hookOk ? 'PASS' : 'FAIL',
+        `code_tool_hook candidate verified on ITS channel (no prompt assertion, no live promotion): approvals.status=${hookApproval?.status} activation=${JSON.stringify(hookActivation)}`);
+    }
+
+    // ── Prompt-channel legs: injection + withdrawal through the REAL engine ──
+    if (!promptApproval) {
+      record('next-turn-injection', 'SKIP',
+        `no prompt-channel approval in this chain (channels=${chainSelection.pendingApprovals.map((a) => a.channel).join(',')}) — prompt injection leg skipped EXPLICITLY (P2 channel dispatch), not a FAIL`);
+      record('withdraw', 'SKIP', 'withdrawal leg belongs to the prompt-channel injection chain (no prompt activation in this chain)');
+      record('post-withdraw', 'SKIP', 'no prompt activation was injected, so no stop-of-injection turn is measurable');
+      return finalize();
+    }
+
     // PRODUCTION read contract (prompt-activation-reader-contract): the chain
     // artifact is the FULL ScribeOutput — resolved body = content.text falling
     // back to content.principleDraft.statement. The former root-level
@@ -356,11 +606,16 @@ async function main() {
     // scribe persists no root statement), which would fail the injection check
     // below even on a correct chain.
     let db = new Database(path.join(GOV, '.pd', 'state.db'), { readonly: true });
-    const artifactRow = db.prepare('SELECT content_json FROM pi_artifacts WHERE artifact_id = ?').get(approval.artifact_id);
-    const activationRow = approveResult.activationId
-      ? db.prepare('SELECT activation_id, artifact_id, deactivated_at FROM activations WHERE activation_id = ?').get(approveResult.activationId)
-      : db.prepare('SELECT activation_id, artifact_id, deactivated_at FROM activations ORDER BY activated_at DESC LIMIT 1').get();
+    const artifactRow = db.prepare('SELECT content_json FROM pi_artifacts WHERE artifact_id = ?').get(promptApproval.artifact_id);
+    const activationRow = primaryResult.activationId
+      ? db.prepare('SELECT activation_id, artifact_id, deactivated_at FROM activations WHERE activation_id = ?').get(primaryResult.activationId)
+      : db.prepare('SELECT activation_id, artifact_id, deactivated_at FROM activations WHERE artifact_id = ?').get(promptApproval.artifact_id);
     db.close();
+    if (!activationRow) {
+      record('next-turn-injection', 'FAIL',
+        `no live activation found for the approved prompt artifact ${promptApproval.artifact_id} (activationId=${primaryResult.activationId ?? '-'}) — approve reported ok but the activation row is missing`);
+      return finalize();
+    }
     let statementText = '';
     let statementSource = 'none';
     try {
