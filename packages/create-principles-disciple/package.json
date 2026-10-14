@@ -1,6 +1,6 @@
 {
   "name": "create-principles-disciple",
-  "version": "1.144.27",
+  "version": "1.144.28",
   "description": "Interactive CLI installer for Principles Disciple OpenClaw plugin",
   "type": "module",
   "bin": {
@@ -62,7 +62,7 @@
     "@inquirer/prompts": "^8.7.2",
     "commander": "^14.0.3",
     "fs-extra": "^11.4.0",
-    "js-yaml": "^5.4.1",
+    "js-yaml": "^5.4.3",
     "ora": "^9.4.1",
     "picocolors": "^1.0.0",
     "semver": "^7.8.5",
@@ -76,7 +76,7 @@
     "@types/semver": "^7.8.0",
     "@types/tar": "^7.0.87",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0",
+    "vite": "^8.3.4",
     "vitest": "^5.0.0"
   },
   "engines": {

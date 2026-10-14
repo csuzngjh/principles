@@ -463,7 +463,11 @@ export async function buildOwnerDecisionReview(
       ? artificerSummary.value.fields.apiSurface
       : readString(artificerContent, 'implementationSummary');
     const affectedTools = readStringArray(artificerContent, 'affectedTools', 20);
-    const concerns = readStringArray(evaluation, 'concerns');
+    // r6 review fix (P2-1): the structured mismatchFindings channel is the
+    // governance signal — surface it FIRST on the Owner decision brief so the
+    // divergences that routed the run here are the first thing the Owner reads.
+    const mismatchFindings = readStringArray(evaluation, 'mismatchFindings');
+    const concerns = [...mismatchFindings, ...readStringArray(evaluation, 'concerns')];
     const requiredChanges = readStringArray(evaluation, 'requiredChanges');
     brief = {
       kind: 'evaluator',

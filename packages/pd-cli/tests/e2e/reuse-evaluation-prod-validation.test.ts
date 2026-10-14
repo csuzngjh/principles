@@ -104,19 +104,32 @@ async function seedPrincipleCandidate(opts: { painId?: string } = {}): Promise<s
   const artifactId = randomUUID();
   const now = new Date().toISOString();
 
+  // CR-03: seed a complete admitting diagnosis (payload + parseable output)
+  // so the CLI full-gate re-evaluation reflects a real admitted candidate.
   const taskId = randomUUID();
   await stateManager.taskStore.createTask({
     taskId,
     taskKind: 'diagnostician',
-    status: 'pending',
-    attemptCount: 0,
+    status: 'succeeded',
+    attemptCount: 1,
     maxAttempts: 3,
     leaseOwner: undefined,
     leaseExpiresAt: undefined,
     lastError: undefined,
-    inputRef: '',
+    inputRef: opts.painId ?? `pain-seed-${candidateId}`,
     resultRef: '',
-    diagnosticJson: undefined,
+    diagnosticJson: JSON.stringify({
+      sourcePainId: opts.painId ?? `pain-seed-${candidateId}`,
+      reasonSummary: 'seeded',
+      source: 'manual',
+      severity: 'moderate',
+      sessionIdHint: null,
+      agentIdHint: null,
+      provenance: 'owner_reported_no_host_trace',
+      provenanceReason: 'seeded fixture',
+      evidence: [{ sourceRef: 'seed:trace-1', note: 'seeded evidence entry' }],
+      workspaceDir: null,
+    }),
   });
   const runId = randomUUID();
   await stateManager.runStore.createRun({
@@ -127,6 +140,16 @@ async function seedPrincipleCandidate(opts: { painId?: string } = {}): Promise<s
     executionStatus: 'succeeded',
     startedAt: now,
     endedAt: now,
+    outputPayload: JSON.stringify({
+      valid: true,
+      diagnosisId: `diag-${candidateId}`,
+      summary: 'seeded diagnosis',
+      rootCause: 'seeded root cause',
+      violatedPrinciples: [],
+      evidence: [{ sourceRef: 'seed:trace-1', note: 'seeded output evidence' }],
+      recommendations: [{ kind: 'principle', description: 'seeded recommendation' }],
+      confidence: 0.9,
+    }),
   });
   if (opts.painId !== undefined) {
     await stateManager.recordPainDiagnosis({
@@ -171,6 +194,10 @@ async function seedPrincipleCandidate(opts: { painId?: string } = {}): Promise<s
       `${artifactId}::prompt`,
       now,
     );
+
+    // CR-03: getCandidatesByTaskId resolves through tasks→runs→commits.
+    db.prepare('INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(randomUUID(), taskId, runId, artifactId, `seed-${artifactId}`, 'committed', now);
   } finally {
     db.close();
   }
@@ -642,6 +669,8 @@ async function seedPrincipleCandidateInto(
     `).run(candidateId, artifactId, taskId, runId, '测试候选', CANDIDATE_TEXT, 0.9,
       JSON.stringify({ text: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }),
       `${artifactId}::prompt`, now);
+    db.prepare('INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(randomUUID(), taskId, runId, artifactId, `seed2-${artifactId}`, 'committed', now);
   } finally {
     db.close();
   }

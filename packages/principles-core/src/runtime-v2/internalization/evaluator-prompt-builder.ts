@@ -252,7 +252,9 @@ CONSTRAINTS:
 - evaluation.score MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
 - evaluation.strengths MUST be an array of strings (can be empty)
 - evaluation.concerns MUST be an array of strings (can be empty)
+- evaluation.mismatchFindings: the ONLY machine-routed channel for Principle-source divergence findings. When (and only when) such a divergence exists, this MUST be an array whose entries each BEGIN with the exact token [principle_pain_mismatch] followed by the evidence citation; omit the field entirely when none exists. A marker appearing anywhere in free-text concerns is NOT a finding and is never routed.
 - evaluation.requiredChanges MUST be an array of strings; when decision is "needs_revision" it MUST contain at least one item (a revision demand without an actionable change is an invalid verdict)
+- RULEHOST EXPRESSIBILITY: requiredChanges may only demand behavior the rule can express within its stateless single-call evaluate(input) contract — the input fields a rule actually receives. A demand that presupposes NEW input (e.g. persisted confirmation records, an authorization table, cross-call state) can never be satisfied by regenerating the rule: record it in evaluation.concerns instead (with the evidence), and judge scopePrecision on the behavior the contract CAN express.
 - evaluation.priorRequirementStatuses is REQUIRED when input.previousEvaluation is present: an array of { id, status } covering EVERY prior requirement id, where status is one of resolved, still_open, regressed; omit the field entirely on the first round (no prior evaluation)
 - evaluation.requirementLedger is REQUIRED under the same condition: an array of { id, statement, status } echoing EVERY input requirement (same ids and statements as given; status one of resolved, still_open, regressed); omit entirely on the first round
 - sourceArtificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId (non-empty string)
@@ -300,11 +302,17 @@ Your input additionally carries \`formationContext\` — the ORIGINAL FORMATION 
 
 HOW TO USE IT:
 1. Judge faithfulness at TWO levels: (a) does the Rule faithfully implement the Principle — your existing intentConsistency / scopePrecision / traceCoverage duties; and (b) does the Principle actually address the pain described by sourceDiagnosis (rootCause and evidence)? Level (b) asks whether the principle answers the REAL root cause, or only a minor facet of it, or a mis-attributed one.
-2. When you conclude the Principle does NOT address the source pain, record it in evaluation.concerns as a concern whose text BEGINS with the exact token ${PRINCIPLE_PAIN_MISMATCH_MARKER}, followed by the concrete evidence citation (a diagnosis evidence sourceRef, a rootCause excerpt, or a provenance id). The pipeline routes that finding to the Owner for a governance decision.
-3. NEVER express a Principle-level revision demand in evaluation.requiredChanges — requiredChanges may only demand changes to the RULE itself. The repair pipeline can only regenerate the rule; it can never satisfy a Principle-level demand.
-4. A ${PRINCIPLE_PAIN_MISMATCH_MARKER} finding is NOT a rule defect: by itself it must not flip codeReview dimensions, must not lower the score below what the rule itself merits, and must not appear in requiredChanges. If the rule is sound, judge the rule as sound and let the marked concern carry the principle-level question.
+2. STRUCTURED MISMATCH CHANNEL (machine-routed): when you conclude a Principle-source divergence exists, add ONE entry to evaluation.mismatchFindings beginning with the exact token ${PRINCIPLE_PAIN_MISMATCH_MARKER}, followed by the concrete evidence citation (a diagnosis evidence sourceRef, a rootCause excerpt, or a provenance id). The pipeline routes entries in this field to the Owner for a governance decision. Never put the token in concerns as a substitute — concerns text is not routed. Omit the field entirely when no divergence exists.
+3. FOUR-WAY SEPARATION — before flagging any mechanism or requirement, classify it; only (b) and (c) are Principle-source divergences:
+   (a) DISCLOSED DERIVED IMPLEMENTATION CHOICE — a mechanism the contract carries as an engineering design choice (the scribe marked it "derived_mechanism:" in risks, or it is plainly framed as design rather than Owner mandate). Owner silence on HOW to implement is not principle drift: this is NOT a divergence — do not flag it, and judge the rule against the contract as written under your existing duties.
+   (b) FALSE ATTRIBUTION TO THE OWNER — the contract presents a mechanism or requirement as Owner-mandated while the diagnosis's Owner-attributed statements (rootCause / summary / violatedPrinciples / evidence notes) never state it: a design proposal laundered into Owner intent. A Principle-source divergence → mismatchFindings, citing the contract text against the diagnosis text.
+   (c) CONTRADICTS OR DEFEATS OWNER-ATTRIBUTED REQUIREMENTS — the contract or the rule narrows, drops, or inverts a requirement the diagnosis attributes to the Owner (including a requirement the scribe itself declared uncovered): a Principle-source divergence → mismatchFindings, citing the requirement and where it is defeated.
+   (d) RULEHOST-INEXPRESSIBLE — a requirement the stateless single-call evaluate(input) contract cannot carry (e.g. confirmation signals, cross-call state, file existence): NEVER a mismatch and NEVER requiredChanges — RULEHOST EXPRESSIBILITY governs it (record it in concerns with the limitation, judge scopePrecision on the behavior the contract CAN express). Precedence: when an Owner-attributed requirement is BOTH scribe-declared uncovered (ownerRequirementGaps) AND inexpressible, (d) governs the classification — the divergence channel is not used — and the requirement still reaches the Owner through your concerns entry and the pipeline's gap surface; it is never treated as satisfied.
+   A ${PRINCIPLE_PAIN_MISMATCH_MARKER} finding is NOT a rule defect: by itself it must not flip codeReview dimensions, must not lower the score below what the rule itself merits, and MUST NOT appear in requiredChanges. If the rule is sound, judge the rule as sound and let the structured finding carry the principle-level question.
+4. NEVER express a Principle-level revision demand in evaluation.requiredChanges — requiredChanges may only demand changes to the RULE itself. The repair pipeline can only regenerate the rule; it can never satisfy a Principle-level demand.
 5. The diagnosis is EVIDENCE, not truth: it is itself an upstream product of this chain and may mis-attribute. When sourceDiagnosis is absent or you find it untrustworthy, say so in risks, weaken your pain-faithfulness conclusion accordingly, and NEVER base a rejection or a ${PRINCIPLE_PAIN_MISMATCH_MARKER} finding on the ABSENCE of formation evidence alone.
-6. Do not re-litigate which dreamer proposal should have been selected (the Philosopher critique already decided that — do not revive a proposal the critique rejected); use the proposals only as evidence of what alternatives existed.`;
+6. SCRIBE-DECLARED COVERAGE GAPS: when input.scribeArtifact carries ownerRequirementGaps (Owner-attributed requirements the scribe explicitly did NOT carry into the contract), treat each of them as NOT satisfied by the contract — never as covered by implication. If an uncovered requirement defeats the Owner's goal, that is situation (c): a Principle-source divergence → mismatchFindings. Unresolved gaps can only be closed by the Owner, never by the pipeline.
+7. Do not re-litigate which dreamer proposal should have been selected (the Philosopher critique already decided that — do not revive a proposal the critique rejected); use the proposals only as evidence of what alternatives existed.`;
 
 /**
  * PRI-644 (PRI-700 factor B wiring): system-channel addendum appended ONLY
@@ -369,7 +377,43 @@ PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
 // the catalog as a risk grouping that must never be read as a kind table,
 // keeps unknown when no mapping is present, and re-allows concrete
 // parameter-shape coverage flags with evidence. Additive input field.
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v8';
+//
+// Derivation fidelity (2026-10-12 r6): bumped v8 → v9. Live p1-final r4 chain:
+// the judge's requiredChanges[0] demanded the rule read "Owner write-
+// confirmation records" from input.context — a field the RuleHost stateless
+// single-call contract does NOT carry — because the intentContract asserted
+// that mechanism while the diagnosis's Owner-attributed statements never
+// mentioned it (it entered the chain as an implementation RECOMMENDATION).
+// Two additive clauses: RULEHOST EXPRESSIBILITY in CONSTRAINTS (a demand
+// presupposing new input goes to concerns, never requiredChanges —
+// regenerating the rule can never satisfy it), and UNGROUNDED CONTRACT
+// MECHANISM in the formation addendum (a contract mechanism absent from the
+// Owner-attributed diagnosis statements is a Principle↔Pain mismatch finding
+// with the existing marker + Owner routing, never a rule defect). Additive:
+// a run without formation evidence sees only the new CONSTRAINTS clause and
+// the version string.
+//
+// r6 review fixes (2026-10-12, Owner review of #2000): bumped v9 → v10.
+// Three changes driven by live-chain evidence and Owner review:
+// 1. (P2-1) Mismatch routing moved to the STRUCTURED evaluation.mismatchFindings
+//    field — the v9 concerns-prefix protocol produced a real governance false
+//    positive (the judge wrote "[principle_pain_mismatch] 无需触发…" in a
+//    negative sentence; startsWith() routed the run to human review). Free-text
+//    concerns are never a signal now.
+// 2. (P1-1) The v9 UNGROUNDED CONTRACT MECHANISM clause conflated a disclosed
+//    derived implementation choice with principle drift — the r6 chain showed
+//    the scribe disclosing "derived_mechanism:" while the judge still escalated
+//    the mechanism to a mismatch. Replaced by a FOUR-WAY separation:
+//    disclosed implementation choice (not a divergence) / false attribution to
+//    the Owner (divergence) / defeats Owner-attributed requirements
+//    (divergence) / RuleHost-inexpressible (EXPRESSIBILITY path, never
+//    mismatch).
+// 3. (P1-2) SCRIBE-DECLARED COVERAGE GAPS: ownerRequirementGaps declared by
+//    the scribe are obligations the judge must not treat as satisfied;
+//    defeating one is situation (c) → mismatchFindings → Owner.
+// Additive: mismatchFindings is optional on the wire; a run without formation
+// evidence sees only the new CONSTRAINTS clause and the version string.
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v10';
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this

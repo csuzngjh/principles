@@ -106,8 +106,47 @@ describe('ScribePromptBuilder — PRI-838 formation evidence', () => {
     truncationNotes: [],
   };
 
-  it('promptContractVersion was bumped to v5', () => {
-    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v5');
+  it('promptContractVersion was bumped to v7', () => {
+    expect(SCRIBE_PROMPT_CONTRACT_VERSION).toBe('scribe-output-v1.prompt.v7');
+  });
+
+  // ── prompt.v6 (2026-10-12 r6): Owner-source grounding + narrowing disclosure ──
+  // Live-chain evidence (p1-final r4 chain, 2026-10-12): the Dreamer proposed a
+  // "persisted Owner write-confirmation records" mechanism that appears NOWHERE
+  // in the Owner's pain text; the diagnosis carried it only as an implementation
+  // RECOMMENDATION (a design proposal). The scribe then wrote it into
+  // intentContract.targetBehavior / validationExpectation as if Owner-mandated;
+  // the evaluator (treating the contract as the DEFINITION of correctness)
+  // demanded a check the RuleHost input contract cannot express and the chain
+  // died at the round cap. The same chain silently narrowed the Owner's
+  // "ALL protected/ access (including read-only ls) requires confirmation" to
+  // write-only gating with no disclosure. v6 obliges the scribe to:
+  //  (a) ground contract requirements in the diagnosis's OWNER-attributed
+  //      statements (rootCause / summary / violatedPrinciples / evidence), never
+  //      in the diagnosis's implementation recommendations (design proposals);
+  //  (b) never present a derived mechanism as Owner-mandated — a carried
+  //      mechanism must be marked in risks as derived;
+  //  (c) declare every Owner-attributed requirement NOT carried into the
+  //      contract with a structured `owner_requirement_gap:` risks entry.
+  it('states the OWNER-SOURCE GROUNDING obligations in the intent-contract section (prompt.v7)', () => {
+    const instruction = buildScribeProtocolInstruction();
+    expect(instruction).toContain('OWNER-SOURCE GROUNDING');
+    // r6 review fix (P1-2): gaps go into the STRUCTURED ownerRequirementGaps
+    // field (machine-consumed), not a free-text risks prefix.
+    expect(instruction).toContain('ownerRequirementGaps');
+    expect(instruction).toContain('MUST NOT be presented as Owner-mandated');
+  });
+
+  it('grounds the obligations in formation evidence terminology and scope (prompt.v6)', () => {
+    const instruction = buildScribeProtocolInstruction();
+    // The obligation names the authority hierarchy: Owner-attributed diagnosis
+    // statements are the requirement source; implementation recommendations are
+    // derivative design proposals.
+    expect(instruction).toContain('Owner-attributed statements');
+    expect(instruction).toContain('implementation recommendations');
+    // The disclosure duty is conditional on evidence presence, mirroring the
+    // existing "source intent UNAVAILABLE" idiom.
+    expect(instruction).toContain('when formation evidence is present');
   });
 
   // PD_PROMPT_CAPACITY_V1 R-B1: the statement is the only budget-capped

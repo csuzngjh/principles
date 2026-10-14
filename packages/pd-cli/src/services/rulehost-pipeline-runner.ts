@@ -210,6 +210,15 @@ export interface RuleHostPipelineResult {
   readonly approvalId: string | null;
   /** Structured reason when decision is not candidate_ready_for_owner_review. */
   readonly degradationReason?: string;
+  /**
+   * r6 review fix (P1-2): Owner-attributed requirements the scribe explicitly
+   * declared NOT carried into the intentContract. Non-empty means an unresolved
+   * gap exists — the candidate must never silently count as satisfying Owner
+   * requirements; disposition (accept the narrowing, or extend the contract)
+   * belongs to the Owner. The evaluator is separately obliged to treat these
+   * requirements as uncovered (prompt.v10, four-way separation situation (c)).
+   */
+  readonly ownerRequirementGaps?: readonly string[];
 }
 
 // ── gateDeps builder ─────────────────────────────────────────────────────────
@@ -405,6 +414,13 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       if (scribeStage) (scribeStage as { reason?: string }).reason = scribeIdentityNote(identityBinding).replace(/^; /, '');
     }
 
+    // r6 review fix (P1-2): read the scribe's structured ownerRequirementGaps —
+    // Owner-attributed requirements the contract does not cover. Carried on
+    // every post-scribe outcome so an unresolved gap is observable everywhere
+    // the candidate travels (approval queue included) and can never silently
+    // count as satisfying Owner requirements.
+    const scribeOwnerRequirementGaps = await readScribeOwnerRequirementGaps(artifactStore, scribeTaskId);
+
     // ── Atomic capability branching ──
     // Per user correction (2026-06-18): ArtificerL2 + Evaluator are atomic.
     // When OFF (or not provided), skip the adversarial loop entirely and
@@ -420,6 +436,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
         painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason,
         artifactStore, approvalStore, now: new Date().toISOString(),
         identityBinding,
+        ownerRequirementGaps: scribeOwnerRequirementGaps,
       });
     }
 
@@ -430,7 +447,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       // Contract violation: enabled but no adapter provided. Fail loud.
       stages.push({ name: 'adversarial_loop', status: 'failed', reason: 'artificerAdapter not provided' });
       onProgress('adversarial_loop', 'failed', 'artificerAdapter not provided');
-      return rejectedResult(opts.painId, stages, 'code_rule_capability enabled but artificerAdapter not provided');
+      return withGaps(rejectedResult(opts.painId, stages, 'code_rule_capability enabled but artificerAdapter not provided'), scribeOwnerRequirementGaps);
     }
     // PRI-780: v2-only generation — an enabled code-rule capability without
     // an Owner-labelled BehaviorExamplePack refuses BEFORE any artificer LLM
@@ -439,7 +456,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       const reason = 'behavior_example_pack_missing: v2 is the only RuleCode generation contract (PRI-780); provide Owner-labelled behavior examples via --behavior-examples';
       stages.push({ name: 'adversarial_loop', status: 'failed', reason });
       onProgress('adversarial_loop', 'failed', reason);
-      return rejectedResult(opts.painId, stages, reason);
+      return withGaps(rejectedResult(opts.painId, stages, reason), scribeOwnerRequirementGaps);
     }
     onProgress('adversarial_loop', 'start');
     // PRI-661: the loop's evaluator replay must use the SAME production gate
@@ -455,7 +472,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       const refusalReason = `${evaluatorContext.reason} — ${evaluatorContext.nextAction}`;
       stages.push({ name: 'adversarial_loop', status: 'failed', reason: refusalReason });
       onProgress('adversarial_loop', 'failed', refusalReason);
-      return rejectedResult(opts.painId, stages, `evaluator_runtime_context_unresolvable: ${evaluatorContext.reason} (nextAction: ${evaluatorContext.nextAction})`);
+      return withGaps(rejectedResult(opts.painId, stages, `evaluator_runtime_context_unresolvable: ${evaluatorContext.reason} (nextAction: ${evaluatorContext.nextAction})`), scribeOwnerRequirementGaps);
     }
     // PRI-741: artificer generation + evaluator parity BOTH anchor on the ONE
     // registry snapshot evaluatorContext resolved above (review round: a
@@ -549,6 +566,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
           principleArtifactId: loopResult.principleArtifactId,
           approvalId: null,
           degradationReason: `identity_binding_unverified: ${reasonCode}. Rule artifact NOT enqueued for Owner approval (governance publication boundary). Artifacts preserved; repair the ledger identity and re-run this pipeline to publish.`,
+          ...(scribeOwnerRequirementGaps.length > 0 ? { ownerRequirementGaps: scribeOwnerRequirementGaps } : {}),
         };
       }
       try {
@@ -579,6 +597,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
           principleArtifactId: loopResult.principleArtifactId,
           approvalId: null,
           degradationReason: degradeReason,
+          ...(scribeOwnerRequirementGaps.length > 0 ? { ownerRequirementGaps: scribeOwnerRequirementGaps } : {}),
         };
       }
     }
@@ -593,6 +612,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       principleArtifactId: loopResult.principleArtifactId,
       approvalId,
       degradationReason: loopResult.degradationReason,
+      ...(scribeOwnerRequirementGaps.length > 0 ? { ownerRequirementGaps: scribeOwnerRequirementGaps } : {}),
     };
   } finally {
     await stateManager.close();
@@ -629,6 +649,42 @@ type DreamerTaskLookup =
   | { readonly status: 'found'; readonly taskId: string; readonly taskStatus: 'pending' | 'retry_wait' | 'succeeded' }
   | { readonly status: 'not_found' }
   | { readonly status: 'ambiguous'; readonly taskIds: readonly string[] };
+
+/**
+ * r6 review fix (P1-2): read the scribe output's structured
+ * `ownerRequirementGaps` — the Owner-attributed requirements the scribe
+ * explicitly declared NOT carried into the intentContract. Tolerant by design
+ * (rc-1/rc-9): a missing/unreadable artifact or field means NO gaps declared,
+ * never a silent fabrication of one; the scribe validator guarantees
+ * present-but-malformed never reaches storage.
+ */
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export async function readScribeOwnerRequirementGaps(
+  artifactStore: PIArtifactStore,
+  scribeTaskId: string,
+): Promise<readonly string[]> {
+  let artifacts;
+  try {
+    artifacts = await artifactStore.listBySourceTaskId(scribeTaskId);
+  } catch {
+    return [];
+  }
+  const scribeArtifact = artifacts.find((a) => a.artifactKind === 'principle') ?? artifacts[0];
+  if (!scribeArtifact || typeof scribeArtifact.contentJson !== 'string') return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(scribeArtifact.contentJson);
+  } catch {
+    return [];
+  }
+  if (!isRecordObject(parsed) || !Object.hasOwn(parsed, 'ownerRequirementGaps')) return [];
+  const gaps: unknown = parsed.ownerRequirementGaps;
+  if (!Array.isArray(gaps)) return [];
+  return gaps.filter((gap): gap is string => typeof gap === 'string' && gap.trim() !== '');
+}
 
 async function findDreamerTaskForPain(
   stateManager: RuntimeStateManager,
@@ -896,6 +952,15 @@ function rejectedResult(painId: string, stages: RuleHostPipelineStage[], degrada
 }
 
 /**
+ * r6 review fix (P1-2): post-scribe rejection paths still carry declared gaps —
+ * the rejection reason and the uncovered Owner requirements travel together to
+ * whoever reads the outcome. Empty gaps return the base result unchanged.
+ */
+function withGaps(result: RuleHostPipelineResult, gaps: readonly string[]): RuleHostPipelineResult {
+  return gaps.length > 0 ? { ...result, ownerRequirementGaps: gaps } : result;
+}
+
+/**
  * Build a text-principle-only result when the code-rule capability is OFF.
  *
  * The scribe stage already produced a principle artifact (stored via the
@@ -913,6 +978,8 @@ interface TextPrincipleOnlyParams {
   readonly now: string;
   /** Phase A: structured identity outcome from the shared post-scribe backfill. */
   readonly identityBinding: ScribeIdentityBinding;
+  /** r6 review fix (P1-2): scribe-declared Owner-requirement gaps, carried on the outcome. */
+  readonly ownerRequirementGaps?: readonly string[];
 }
 
 /**
@@ -1160,7 +1227,7 @@ async function resolveRuleArtifactIdentity(
 async function textPrincipleOnlyResult(
   params: TextPrincipleOnlyParams,
 ): Promise<RuleHostPipelineResult> {
-  const { painId, stages, scribeTaskId, disabledReason, artifactStore, approvalStore, now, identityBinding } = params;
+  const { painId, stages, scribeTaskId, disabledReason, artifactStore, approvalStore, now, identityBinding, ownerRequirementGaps } = params;
   // Look up the principle artifact produced by the scribe stage.
   try {
     const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
@@ -1225,6 +1292,7 @@ async function textPrincipleOnlyResult(
       principleArtifactId: principleArt?.artifactId ?? null,
       approvalId,
       degradationReason: `code_rule_capability_off: ${disabledReason}${identityNote}${enqueueNote}`,
+      ...(ownerRequirementGaps && ownerRequirementGaps.length > 0 ? { ownerRequirementGaps } : {}),
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

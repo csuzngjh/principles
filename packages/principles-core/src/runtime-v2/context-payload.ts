@@ -142,6 +142,20 @@ export const PainCorrectionEvidenceSchema = Type.Object({
   referencesAssistantTurnId: Type.Optional(Type.Integer({ minimum: 0 })),
   /** When the correction turn happened (ISO). */
   occurredAt: Type.Optional(Type.String()),
+  /**
+   * SPEC-CODEX-PAIN-CLOSURE-001 CR-02: the material classification. Absent on
+   * pre-existing records (behavior-trace / system-event semantics unchanged);
+   * `owner_statement` marks text the Owner explicitly submitted through a
+   * declared channel — an unverified-but-verbatim statement, never an AI
+   * summary. It is written exclusively by the explicit submission channels.
+   */
+  classification: Type.Optional(Type.Literal('owner_statement')),
+  /** How the statement was explicitly submitted (disclosure, not authentication). */
+  channel: Type.Optional(Type.Union([
+    Type.Literal('cli_owner_statement'),
+    Type.Literal('codex_explicit_prefix'),
+    Type.Literal('openclaw_manual_pain'),
+  ])),
 });
 
 export type PainCorrectionEvidence = Static<typeof PainCorrectionEvidenceSchema>;

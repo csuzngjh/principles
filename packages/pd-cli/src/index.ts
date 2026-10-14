@@ -126,6 +126,7 @@ painCmd
   .option('--rollout-id <id>', 'PRI-743: Codex rollout identity — required by --host codex', undefined)
   .option('--host-turn-id <id>', 'PRI-743: Codex turn id — required by --host codex', undefined)
   .option('--logical-key <key>', 'PRI-743: Codex logical observation key override for --host codex (default: codex|<rollout-id>|<host-turn-id>|user)', undefined)
+  .option('--owner-statement <text>', 'SPEC-CODEX-PAIN-CLOSURE-001 CR-02: the Owner verbatim statement (explicit submission, max 500 chars, rejected when longer — never truncated). It satisfies only the empty-input-evidence admission condition and is disclosed as an unverified owner_statement.', undefined)
   .option('--wait', 'Wait for diagnosis to complete (sync mode, overrides async flag)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {

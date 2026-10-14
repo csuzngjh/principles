@@ -1,5 +1,26 @@
 # @principles/pd-cli
 
+## 1.155.4
+
+### Patch Changes
+
+- 69fa3f3: chore(deps): bump js-yaml 5.4.1 -> 5.4.3（#2011）。js-yaml 是 core / host-runtime / plugin / pd-cli / console 的运行时 dependency，console 随 installer 分发，故这 4 个可发布包与 installer 各声明 patch。
+- 69c64e3: fix(PRI-957): `pd` 不带 `-w`/`PD_WORKSPACE_DIR` 时先在当前目录向上发现工作区（补 §11.2 承诺的解析步），空候选结果回显被查询的工作区绝对路径；读写共用同一条解析权威，因此「没人声明过的 cwd 推断目标」会在 stderr 说出被使用的工作区，「所在目录 ≠ 声明的 workspace.default」也显式告警；config **解析失败**不再被当作「未声明」——声明值未知时若无 `-w`/`PD_WORKSPACE_DIR` 覆盖则 fail-closed 报错，不再把脚下目录交给写命令（`pd pain record`），有显式覆盖时保留覆盖并说出采用的目标；`-w .` 这类等价相对路径不再误报分歧。杜绝多宿主下「查错库 = 查无候选」的假阴性与静默改目标。
+- Updated dependencies [69fa3f3]
+  - @principles/core@1.291.6
+  - @principles/host-runtime@0.8.3
+  - principles-disciple@2.1.2
+
+## 1.155.3
+
+### Patch Changes
+
+- 4e56337: Derivation-fidelity obligations for the internalization chain (Phase 1 acceptance r6). Live-chain evidence (p1-final r4 chain, 2026-10-12) showed the chain dying on a rule demanded to read "Owner write-confirmation records" from `input.context` — a field the RuleHost stateless single-call contract does not carry — because (a) the Scribe promoted a diagnosis **implementation recommendation** (a design proposal for persisted confirmation records) into `intentContract` as if Owner-mandated while silently narrowing the Owner's "ALL protected/ access (including read-only) requires confirmation" to write-only gating, and (b) the judge, treating the contract as the definition of correctness, put the unexpressible check into `requiredChanges`. Two additive prompt-contract clauses, no schema/validator/oracle/replay/routing changes: Scribe `scribe-output-v1.prompt.v6` adds OWNER-SOURCE GROUNDING (contract requirements must be grounded in the diagnosis's Owner-attributed statements, never in implementation recommendations; carried derived mechanisms must be marked `derived_mechanism:` in risks; every Owner-attributed requirement not carried into the contract must be declared with a structured `owner_requirement_gap:` risks entry — silence about a dropped requirement is a fidelity defect). Evaluator `evaluator-output-v1.prompt.v9` adds RULEHOST EXPRESSIBILITY (requiredChanges may only demand behavior the stateless single-call contract can express; demands presupposing new input go to concerns). r6 review round (2026-10-12) then bumped both contracts again: scribe `scribe-output-v1.prompt.v7` moves gap disclosure into a STRUCTURED `ownerRequirementGaps` output field (validated, machine-consumed — the free-text risks prefix had no downstream consumer), and evaluator `evaluator-output-v1.prompt.v10` replaces the concerns-prefix mismatch protocol with a STRUCTURED `evaluation.mismatchFindings` field (the prefix scan mis-routed a negative-sentence mention to human review on a live chain) and separates four situations — a disclosed derived implementation choice is NOT a divergence; false attribution to the Owner and defeating Owner-attributed requirements are; RuleHost-inexpressible requirements follow the EXPRESSIBILITY path and route to the Owner through concerns and the pipeline's gap surface instead. scopePrecision is unchanged: a declared limitation never auto-passes misblock/miss checks. Obligation regressions were executed red against the pre-fix code, then green; internalization suite 80 files / 1190 tests PASS.
+  
+  **pd-cli (@principles/pd-cli)**: the rulehost pipeline reads the scribe's structured `ownerRequirementGaps` and carries them on EVERY post-scribe outcome — candidate-ready, text-principle-only, identity-unverified, enqueue-failed, and all post-scribe rejection paths (`RuleHostPipelineResult.ownerRequirementGaps`, via `withGaps`/`readScribeOwnerRequirementGaps`). Declared gaps therefore reach the Owner on any outcome and can never silently count as satisfied.
+- Updated dependencies [4e56337]
+  - @principles/core@1.291.5
+
 ## 1.155.2
 
 ### Patch Changes
