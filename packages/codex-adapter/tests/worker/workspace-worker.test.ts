@@ -179,6 +179,10 @@ function spySplitPipelineSuccess(ws: WorkerWorkspace): { calls: string[] } {
       const runId = `run_${taskId}_${leased.attemptCount}`;
       const connection = new SqliteConnection(ws.root);
       try {
+        // Match DiagRouterRunner's persisted contract: updateRunOutput marks
+        // this lease-created run succeeded with the schema-valid payload
+        // before the committer links its artifact/candidates to sourceRunId.
+        await self.stateManager.updateRunOutput(runId, JSON.stringify(fakeDiagnosis(taskId)));
         const committer = new SqliteDiagnosticianCommitter(connection);
         await committer.commit({ runId, taskId, output: fakeDiagnosis(taskId), idempotencyKey: `${taskId}:${runId}` });
       } finally {
@@ -485,8 +489,6 @@ describe('worker cycle — SPEC §18 scenario 12: provider failure and recovery 
     expect(diagnosticianTask(ws.root)).toMatchObject({ status: 'retry_wait', attempt_count: 1 });
 
     // Backoff elapsed (retry deadline passed): recovery converges — no duplicate candidate.
-    const db = stateDbOf(ws.root);
-    void db;
     const writer = new Database(path.join(ws.root, '.pd', 'state.db'));
     writer.prepare('UPDATE tasks SET lease_expires_at = ? WHERE task_id = ?').run(new Date(Date.now() - 60_000).toISOString(), taskId);
     writer.close();

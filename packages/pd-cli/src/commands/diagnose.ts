@@ -46,6 +46,7 @@ import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-
 import { SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, resolveDiagnosticianCapability } from '@principles/core/runtime-v2';
 import { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from '../services/runtime-adapter-resolver.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
+import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import { resolveSourcePainIdFromDiagnostician } from './candidate.js';
 import * as path from 'path';
@@ -612,7 +613,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         // candidates. cli-5-failure-no-mutation: refusal path does not call
         // intake(), does not update candidate status, does not write ledger.
         // cli-6-output-next-action: refusal result carries admissionBlock.nextAction.
-        const admissionBlock = checkAdmissionGate(candidate);
+        // SPEC review round-3 P1: the FULL write gate (persisted disposition /
+        // re-evaluation), not the confidence/kind-only partial check.
+        const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId)) ?? checkAdmissionGate(candidate);
         if (admissionBlock) {
           intakeFailed = true;
           intakeResults.push({

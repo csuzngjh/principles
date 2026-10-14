@@ -57,6 +57,8 @@ interface RecordOptions {
   hostTurnId?: string;
   /** PRI-743 follow-up: Codex logical observation key override for --host codex. */
   logicalKey?: string;
+  /** SPEC-CODEX-PAIN-CLOSURE-001 CR-02: explicit Owner statement (--owner-statement). */
+  ownerStatement?: string;
 }
 
 function emitSessionBindingFailure(
@@ -342,6 +344,35 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     return;
   }
 
+  // SPEC-CODEX-PAIN-CLOSURE-001 CR-02: the explicit Owner statement. Non-empty,
+  // at most 500 chars, REJECTED (never truncated) when longer. Only an
+  // explicitly submitted statement may take this path — an AI-drafted reason
+  // must never be copied into it.
+  const MAX_OWNER_STATEMENT_CHARS = 500;
+  if (opts.ownerStatement !== undefined) {
+    const statement = opts.ownerStatement;
+    if (statement.trim().length === 0) {
+      if (opts.json) {
+        console.log(JSON.stringify({ status: 'failed', reason: 'owner_statement_empty', message: '--owner-statement must be non-empty', nextAction: 'Submit the Owner verbatim words, or omit the flag.' }, null, 2));
+      } else {
+        console.error('Error: --owner-statement must be non-empty');
+        console.error('Next action: submit the Owner verbatim words, or omit the flag.');
+      }
+      process.exit(1);
+      return;
+    }
+    if (statement.length > MAX_OWNER_STATEMENT_CHARS) {
+      if (opts.json) {
+        console.log(JSON.stringify({ status: 'failed', reason: 'owner_statement_too_long', message: `--owner-statement must be at most ${MAX_OWNER_STATEMENT_CHARS} characters (got ${statement.length}); the Owner intent is never silently truncated`, nextAction: 'Shorten the statement and resubmit.' }, null, 2));
+      } else {
+        console.error(`Error: --owner-statement must be at most ${MAX_OWNER_STATEMENT_CHARS} characters (got ${statement.length})`);
+        console.error('Next action: shorten the statement and resubmit — it is never silently truncated.');
+      }
+      process.exit(1);
+      return;
+    }
+  }
+
   if (opts.score !== undefined && (isNaN(opts.score) || opts.score < 0 || opts.score > 100)) {
     if (opts.json) {
       console.log(JSON.stringify({
@@ -441,6 +472,9 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     provenance: binding.provenance,
     hostKind: binding.hostKind,
     evidence: binding.evidence,
+    ...(opts.ownerStatement !== undefined
+      ? { correctionEvidence: { text: opts.ownerStatement, classification: 'owner_statement' as const, channel: 'cli_owner_statement' as const, ...(binding.sessionId !== undefined ? { sessionId: binding.sessionId } : {}) } }
+      : {}),
     recordObservability,
     painIngress: binding.painIngress,
   });
@@ -572,6 +606,9 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
         + 'Use --wait to diagnose synchronously instead.'
       : null;
     const allWarnings = [...cliWarnings];
+    if (opts.ownerStatement !== undefined) {
+      allWarnings.push('owner_statement: 经 CLI 显式提交的 Owner 陈述（未经独立验证）——仅满足空输入证据的准入条件，不降低置信度、复用、类型与 Owner 审批等其他门禁。');
+    }
     if (submittedWarning !== null) allWarnings.unshift(submittedWarning);
     if (allWarnings.length > 0) {
       out.warning = allWarnings.join(' ');

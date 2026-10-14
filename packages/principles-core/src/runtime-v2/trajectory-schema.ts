@@ -142,6 +142,16 @@ export function applyTrajectorySchemaBase(
     if (!isDuplicateColumnError(err)) throw err;
   }
 
+  // SPEC-CODEX-PAIN-CLOSURE-001 CR-01: host tool-call id — the join key the
+  // consent-gated transcript-facts upgrade uses to give text-only live
+  // PostToolUse observations their verified final outcome.
+  try {
+    db.exec('ALTER TABLE tool_calls ADD COLUMN tool_use_id TEXT');
+  } catch (err: unknown) {
+    if (!isDuplicateColumnError(err)) throw err;
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tool_calls_session_tool_use_id ON tool_calls(session_id, tool_use_id)');
+
   // PRI-406: Partial unique index on canonical_pain_id (non-null only) for dedup.
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL');
 

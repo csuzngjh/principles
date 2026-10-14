@@ -65,10 +65,33 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
   // The status scan itself delegates mode computation to the cycle module's
   // flag/config semantics by running a paused-compatible evaluation: a real
   // cycle is NOT run (no execution, no lease, no transcript I/O).
-  const { computeCodexWorkerStatusMode } = await import('@principles/codex-adapter');
+  const { computeCodexWorkerStatusMode, readCodexWorkerLiveness } = await import('@principles/codex-adapter');
   const evaluation = computeCodexWorkerStatusMode({ workspaceDir: workspace, registeredInInstallManifest: registered });
 
-  const report: CodexWorkerStatusReport = {
+  // SPEC-CODEX-PAIN-CLOSURE-001 CR-08 (A20): readiness (registration/config)
+  // and liveness (recent real cycles) are SEPARATE facts — a ready workspace
+  // with no recent cycle evidence reports no_recent_cycle, never "running".
+  const liveness = readCodexWorkerLiveness(workspace);
+  const livenessReport: Record<string, unknown> = liveness === null
+    ? { state: 'no_liveness_record' }
+    : { state: 'recorded', ...liveness };
+  if (liveness !== null) {
+    const lastCompleted = typeof liveness.lastCycleCompletedAt === 'string' ? Date.parse(liveness.lastCycleCompletedAt) : NaN;
+    const runningStage = typeof liveness.runningStage === 'string' ? liveness.runningStage : null;
+    const stageDeadline = typeof liveness.stageDeadline === 'string' ? Date.parse(liveness.stageDeadline) : NaN;
+    const ageMs = Number.isFinite(lastCompleted) ? Date.now() - lastCompleted : null;
+    if (ageMs !== null) livenessReport.ageMs = ageMs;
+    if (runningStage !== null && Number.isFinite(stageDeadline)) {
+      livenessReport.withinStageDeadline = Date.now() <= stageDeadline;
+    }
+    // Two poll windows (default 240s) with no cycle evidence and no running
+    // stage within its deadline = the worker is not running, not "diagnosing".
+    const stalled = (ageMs === null || ageMs > 240_000)
+      && !(runningStage !== null && Number.isFinite(stageDeadline) && Date.now() <= stageDeadline);
+    livenessReport.verdict = stalled ? 'no_recent_cycle' : 'live';
+  }
+
+  const report: CodexWorkerStatusReport & { liveness?: Record<string, unknown> } = {
     generatedAt,
     host: 'codex',
     workspace,
@@ -77,6 +100,7 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     ...(evaluation.reason !== undefined ? { reason: evaluation.reason } : {}),
     ...(evaluation.nextAction !== undefined ? { nextAction: evaluation.nextAction } : {}),
     ...(manifestError !== undefined ? { reason: `${evaluation.reason ?? manifestError}` } : {}),
+    liveness: livenessReport,
   };
   if (json) {
     console.log(JSON.stringify(report));
@@ -89,6 +113,9 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
   ];
   if (report.reason !== undefined) lines.push(`  reason: ${report.reason}`);
   if (report.nextAction !== undefined) lines.push(`  next action: ${report.nextAction}`);
+  lines.push(`  liveness state: ${String(livenessReport.state)}${livenessReport.verdict !== undefined ? ` (${String(livenessReport.verdict)})` : ''}`);
+  if (typeof livenessReport.lastCycleCompletedAt === 'string') lines.push(`  last cycle completed: ${livenessReport.lastCycleCompletedAt}`);
+  if (typeof livenessReport.lastCycleMode === 'string') lines.push(`  last cycle mode: ${livenessReport.lastCycleMode}`);
   console.log(lines.join('\n'));
   if (report.mode === 'degraded') process.exitCode = 1;
 }

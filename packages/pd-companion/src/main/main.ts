@@ -339,8 +339,54 @@ function startWorkspaceWorkerSupervision(): void {
   workspaceWorkerTimer = setInterval(() => {
     if (quitting) return;
     workspaceWorkers?.sync(manifestCodexWorkspaces());
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-08 (§9.3): supervision also reads the
+    // worker's persisted liveness facts — a spawned process with no recent
+    // cycle evidence is NOT alive progress. Meaningful transitions only
+    // (one-shot per workspace while stalled) so the Owner is not spammed
+    // every sync tick.
+    checkWorkspaceWorkerLiveness();
   }, WORKSPACE_WORKER_SYNC_INTERVAL_MS);
   workspaceWorkerTimer.unref();
+}
+
+const livenessStallNotified = new Set<string>();
+
+/**
+ * CR-08/A20: a worker process being alive is not progress. When the persisted
+ * liveness record shows no completed cycle within two poll windows (240s) and
+ * no running stage within its deadline, surface one workspace_worker_stalled
+ * event — readiness/registration alone never counts as liveness.
+ */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function checkWorkspaceWorkerLiveness(): void {
+  for (const workspace of manifestCodexWorkspaces()) {
+    let record: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(path.join(workspace, '.state', 'codex-worker-liveness.json'), 'utf8'));
+      if (isPlainRecord(parsed)) record = parsed;
+    } catch {
+      continue;
+    }
+    if (Object.keys(record).length === 0) continue;
+    const lastCompleted = typeof record.lastCycleCompletedAt === 'string' ? Date.parse(record.lastCycleCompletedAt) : NaN;
+    const runningStage = typeof record.runningStage === 'string' ? record.runningStage : null;
+    const stageDeadline = typeof record.stageDeadline === 'string' ? Date.parse(record.stageDeadline) : NaN;
+    const withinStage = runningStage !== null && Number.isFinite(stageDeadline) && Date.now() <= stageDeadline;
+    const stalled = (Number.isNaN(lastCompleted) || Date.now() - lastCompleted > WORKSPACE_WORKER_CYCLE_INTERVAL_MS * 2) && !withinStage;
+    if (stalled && !livenessStallNotified.has(workspace)) {
+      livenessStallNotified.add(workspace);
+      log('workspace_worker_stalled', {
+        workspace,
+        lastCycleCompletedAt: Number.isFinite(lastCompleted) ? record.lastCycleCompletedAt : null,
+        runningStage,
+      });
+    } else if (!stalled) {
+      livenessStallNotified.delete(workspace);
+    }
+  }
 }
 
 /** Owner-facing surface for a permanently degraded workspace worker (PRI-715). */

@@ -398,6 +398,7 @@ export class SqliteConnection {
         trigger_pattern TEXT,
         action TEXT,
         abstracted_principle TEXT,
+        admission_json TEXT,
         FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE,
         FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
         FOREIGN KEY (source_run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -811,6 +812,11 @@ export class SqliteConnection {
       { name: 'trigger_pattern', sql: 'ALTER TABLE principle_candidates ADD COLUMN trigger_pattern TEXT' },
       { name: 'action', sql: 'ALTER TABLE principle_candidates ADD COLUMN action TEXT' },
       { name: 'abstracted_principle', sql: 'ALTER TABLE principle_candidates ADD COLUMN abstracted_principle TEXT' },
+      // SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (PRI-958): persisted admission
+      // disposition — immutable evaluation history + current pointer + an
+      // independent processing-progress domain. Additive; NULL = the
+      // pre-CR-03 era where dispositions were emitted as telemetry only.
+      { name: 'admission_json', sql: 'ALTER TABLE principle_candidates ADD COLUMN admission_json TEXT' },
     ];
 
     for (const migration of candidateMigrations) {
