@@ -1,5 +1,14 @@
 # create-principles-disciple
 
+## 1.144.28
+
+### Patch Changes
+
+- 9fb95ff: chore(deps): bump tailwind-merge 3.6.0 -> 3.7.0（#2007；@principles/pd-console 运行时 dependency，打进 console bundle 随 installer 工件分发）。
+- 06b46b0: chore(deps): bump sonner 2.0.7 -> 2.0.8（#2009；@principles/pd-console 运行时 dependency，打进 console bundle 随 installer 工件分发）。
+- a6b824d: chore(deps): bump js-yaml 5.4.2 -> 5.4.3（#2010，installer 自身 lockfile）。js-yaml 是 create-principles-disciple 的运行时 dependency，随发布工件分发，故声明 patch。
+- 69fa3f3: chore(deps): bump js-yaml 5.4.1 -> 5.4.3（#2011）。js-yaml 是 core / host-runtime / plugin / pd-cli / console 的运行时 dependency，console 随 installer 分发，故这 4 个可发布包与 installer 各声明 patch。
+
 ## 1.144.27
 
 ### Patch Changes
