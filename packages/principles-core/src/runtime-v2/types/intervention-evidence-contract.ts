@@ -47,6 +47,7 @@ export const INTERVENTION_SOURCE_KINDS = [
   'openclaw_trajectory',
   'codex_pd_hook_event_log',
   'codex_governance_observation',
+  'workbuddy_pd_hook_event_log',
   'host_runtime_dispatch',
   'owner_console_input',
 ] as const;
@@ -144,7 +145,7 @@ export interface InterventionActivationOccurrenceRef {
 
 /** Native host identities available on the observed event. */
 export interface InterventionNativeRefs {
-  hostKind: 'openclaw' | 'codex';
+  hostKind: 'openclaw' | 'codex' | 'workbuddy';
   sessionId?: string;
   runId?: string;
   turnId?: string;
@@ -246,7 +247,7 @@ export interface InterventionObservationInput {
 // ── Batch input (the single ingress entry shape) ────────────────────────────
 
 export interface InterventionCapabilityDeclaration {
-  hostKind: 'openclaw' | 'codex';
+  hostKind: 'openclaw' | 'codex' | 'workbuddy';
   capability: InterventionCapability;
   status: InterventionCapabilityStatus;
   adapterVersion: string;

@@ -12,7 +12,7 @@
  * If fields are ever extended and validation rules added, follow the
  * feedback-contract pilot (TypeBox schema + schema-vs-validator equivalence test).
  */
-export type PromptInjectionTargetHostName = 'openclaw' | 'codex';
+export type PromptInjectionTargetHostName = 'openclaw' | 'codex' | 'workbuddy';
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
 export type PromptInjectionBudgetScopeName = 'selected_lines' | 'full_directive_context';
 

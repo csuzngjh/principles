@@ -85,7 +85,7 @@ export interface PainEvidenceEntry {
  * admission, diagnosis, approval, or activation. NULL at the persistence
  * layer means legacy / manual / unknown (read models report `unknown`).
  */
-export type GovernanceHostKind = 'openclaw' | 'codex';
+export type GovernanceHostKind = 'openclaw' | 'codex' | 'workbuddy';
 
 export interface PainDetectedData {
   painId: string;

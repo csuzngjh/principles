@@ -170,7 +170,7 @@ describe('MemoryCandidateStore', () => {
 
     const backlog = store.listDiagnosisPostProcessingBacklog({ limit: 10, nowIso: NOW });
     expect(backlog.eligible.map((e) => e.candidateId)).toEqual(['retry-due']);
-    expect(backlog.eligible[0]!.processingState).toBe('in_progress');
+    expect(backlog.eligible[0]?.processingState).toBe('in_progress');
   });
 
   it('listDiagnosisPostProcessingBacklog honours the limit', () => {

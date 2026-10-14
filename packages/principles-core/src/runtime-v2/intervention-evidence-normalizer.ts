@@ -71,7 +71,14 @@ const EFFECT_STATUSES = new Set<string>(['observed', 'disputed', 'invalidated'])
 const OUTCOME_SOURCES = new Set<string>(['authorized_result_observation', 'owner_feedback']);
 const CAPABILITY_STATUSES = new Set<string>(['supported', 'unsupported', 'unknown']);
 const CAPABILITY_SET = new Set<string>(INTERVENTION_CAPABILITIES);
-const HOST_KINDS = new Set<string>(['openclaw', 'codex']);
+const HOST_KINDS = new Set<string>(['openclaw', 'codex', 'workbuddy']);
+/**
+ * Hook event-log sources are short-lived raw logs. Copying raw source content
+ * (claim/input/feedback text) into the durable normalized ledger would turn a
+ * derived store into a second copy of private session data — the same
+ * anti-forgery/privacy invariant applies to every hook-log source family.
+ */
+const HOOK_LOG_SOURCE_KINDS = new Set<InterventionSourceKind>(['codex_pd_hook_event_log', 'workbuddy_pd_hook_event_log']);
 
 const BATCH_KEYS = new Set([
   'evidenceScopeId', 'sourceKind', 'adapterVersion', 'recordedAt',
@@ -231,7 +238,7 @@ function normalizeNativeRefs(raw: unknown): { value?: InterventionNativeRefs; er
   if (err) return { error: err };
   const enums = enumChecks('observation_nativeRefs');
   const strings = stringChecks('observation_nativeRefs');
-  const hostKind = enums.require<'openclaw' | 'codex'>(raw, 'hostKind', HOST_KINDS);
+  const hostKind = enums.require<'openclaw' | 'codex' | 'workbuddy'>(raw, 'hostKind', HOST_KINDS);
   if (hostKind.error) return { error: hostKind.error };
   const value: InterventionNativeRefs = { hostKind: hostKind.value };
   for (const key of ['sessionId', 'runId', 'turnId', 'toolCallId', 'toolName', 'rolloutIdentity'] as const) {
@@ -446,10 +453,10 @@ function normalizeObservation(
 
   const payload = normalizePayload(kind.value, raw.payload);
   if (payload.error || !payload.value) return { error: payload.error ?? 'observation_payload_missing' };
-  if (ctx.sourceKind === 'codex_pd_hook_event_log' && isRecord(raw.payload)) {
+  if (HOOK_LOG_SOURCE_KINDS.has(ctx.sourceKind) && isRecord(raw.payload)) {
     for (const sensitiveField of ['claimText', 'inputPreview', 'feedbackText'] as const) {
       if (Object.hasOwn(raw.payload, sensitiveField)) {
-        return { error: `codex_hook_evidence_forbids_source_content:${sensitiveField}` };
+        return { error: `${ctx.sourceKind === 'codex_pd_hook_event_log' ? 'codex' : 'workbuddy'}_hook_evidence_forbids_source_content:${sensitiveField}` };
       }
     }
   }
@@ -559,7 +566,7 @@ function normalizeCapabilityDeclaration(raw: unknown): { value?: InterventionCap
   if (err) return { error: err };
   const strings = stringChecks('capability');
   const enums = enumChecks('capability');
-  const hostKind = enums.require<'openclaw' | 'codex'>(raw, 'hostKind', HOST_KINDS);
+  const hostKind = enums.require<'openclaw' | 'codex' | 'workbuddy'>(raw, 'hostKind', HOST_KINDS);
   if (hostKind.error) return { error: hostKind.error };
   const capability = enums.require<InterventionCapabilityDeclaration['capability']>(raw, 'capability', CAPABILITY_SET);
   if (capability.error) return { error: capability.error };

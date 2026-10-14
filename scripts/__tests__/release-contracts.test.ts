@@ -371,6 +371,38 @@ describe('guard: normal PR release-intent contract', () => {
     await git(['reset', '--hard', base]);
   });
 
+  it('N-version bootstrap: a NEW package with its initial version passes when a changeset declares it (remediation 2026-10-13)', async () => {
+    const base = await git(['rev-parse', 'HEAD']);
+    // A brand-new publishable package born WITH its initial version — npm
+    // workspaces cannot resolve a versionless package, so the bootstrap
+    // version must be allowed exactly once, with the changeset as the intent
+    // record.
+    write(
+      'packages/newpkg/package.json',
+      JSON.stringify({ name: '@principles/newpkg', version: '0.1.0', main: 'index.js' }, null, 2) + '\n',
+    );
+    write('packages/newpkg/index.js', "module.exports = 'new';\n");
+    write('.changeset/newpkg.md', changeset("'@principles/newpkg': minor"));
+    await commitAll('feat(newpkg): third-host adapter package bootstrap');
+    const r = await runGuard(base);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('RELEASE_INTENT_GUARD PASS mode=normal');
+    await git(['reset', '--hard', base]);
+  });
+
+  it('N-version bootstrap is narrow: a NEW package without a declaring changeset still fails', async () => {
+    const base = await git(['rev-parse', 'HEAD']);
+    write(
+      'packages/newpkg2/package.json',
+      JSON.stringify({ name: '@principles/newpkg2', version: '0.1.0', main: 'index.js' }, null, 2) + '\n',
+    );
+    await commitAll('feat(newpkg2): bootstrap without intent');
+    const r = await runGuard(base);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('N-version');
+    await git(['reset', '--hard', base]);
+  });
+
   it('T13/C4-3: plugin in the final plan via a sibling changeset requires the installer', async () => {
     // Reality check vs the SPEC's wording: under changesets v5 with
     // updateInternalDependencies: "patch", an internal dep release does NOT

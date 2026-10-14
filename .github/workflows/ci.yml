@@ -262,6 +262,9 @@ jobs:
       - name: Build codex adapter dependency
         run: npm run build --workspace=@principles/codex-adapter
 
+      - name: Build workbuddy adapter dependency
+        run: npm run build --workspace=@principles/workbuddy-adapter
+
       - name: Build plugin dependency
         run: npm run build --workspace=principles-disciple
 
@@ -368,6 +371,7 @@ jobs:
           npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=@principles/codex-adapter
+          npm run build --workspace=@principles/workbuddy-adapter
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
           npm run build --workspace=create-principles-disciple
@@ -405,6 +409,7 @@ jobs:
           npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=@principles/codex-adapter
+          npm run build --workspace=@principles/workbuddy-adapter
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
           npm run build --workspace=create-principles-disciple
@@ -442,6 +447,7 @@ jobs:
           npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=@principles/codex-adapter
+          npm run build --workspace=@principles/workbuddy-adapter
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
           npm run build --workspace=create-principles-disciple

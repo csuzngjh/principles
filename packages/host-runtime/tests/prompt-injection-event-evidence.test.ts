@@ -99,6 +99,17 @@ describe('AC-12: readInjectionEventEvidence', () => {
     expect(report.rows.find((row) => row.hostKind === 'openclaw')).toMatchObject({ hostIdentityComplete: true, eventIdentityComplete: true });
   });
 
+  it('a workbuddy event is a known host bucket with complete identity (roster third host, never unknown)', () => {
+    const dir = tempStateDir();
+    const base = { sessionId: 's-1', workspaceDir: 'ws-wb', activationIds: ['act-1'], injectedCharCount: 240 };
+    writeEvents(dir, '2026-10-07', [
+      injectedEvent({ data: { ...base, hostKind: 'workbuddy', eventId: 'evt-wb-1' } }),
+    ]);
+    const report = readInjectionEventEvidence({ stateDir: dir });
+    expect(report.rows).toHaveLength(1);
+    expect(report.rows[0]).toMatchObject({ hostKind: 'workbuddy', hostIdentityComplete: true, eventIdentityComplete: true, provenInjections: 1 });
+  });
+
   it('counts same-run same-time payload events separately when their event ids differ', () => {
     const dir = tempStateDir();
     const base = { sessionId: 's-1', workspaceDir: 'ws-a', activationIds: ['act-1'], runId: 'r1', hostKind: 'codex', injectedCharCount: 240 };

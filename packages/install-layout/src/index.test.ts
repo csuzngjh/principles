@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import {
   getInstallLayoutPaths,
   getConsoleServerEntry,
+  getWorkbuddyWorkspaceDir,
   parseInstallManifest,
   resolveInstallLayout,
   mergeInstallManifestWorkspaces,
@@ -38,8 +39,29 @@ describe('install layout', () => {
 
   it('rejects malformed manifests instead of silently treating them as canonical', () => {
     expect(parseInstallManifest({ layoutVersion: 1, mode: 'canonical', hosts: ['wat'] })).toEqual({
-      error: 'install_manifest_malformed: hosts must contain codex and/or openclaw',
+      error: 'install_manifest_malformed: hosts must contain codex, openclaw and/or workbuddy',
     });
+  });
+
+  it('accepts workbuddy as an install host and exposes its runtime adapter dir', () => {
+    const paths = getInstallLayoutPaths('C:/Users/alice');
+    const result = resolveInstallLayout({
+      homeDir: 'C:/Users/alice',
+      manifest: { layoutVersion: 1, mode: 'canonical', hosts: ['workbuddy'] },
+      canonicalRuntimeExists: true,
+      legacyExtensionExists: false,
+    });
+    expect(result.mode).toBe('canonical');
+    expect(result.manifest?.hosts).toEqual(['workbuddy']);
+    expect(paths.workbuddyAdapterDir).toBe(path.join(paths.runtimeDir, 'workbuddy-adapter'));
+  });
+
+  it('freezes the WorkBuddy governance workspace under the WorkBuddy config root (OD-07)', () => {
+    const dir = getWorkbuddyWorkspaceDir('C:/Users/alice');
+    expect(dir).toBe(path.join(path.resolve('C:/Users/alice'), '.workbuddy', 'pd-workspace'));
+    // Never collides with Codex or OpenClaw state roots.
+    expect(dir).not.toContain('.pd');
+    expect(dir).not.toContain('.openclaw');
   });
 
   it('accepts a manifest without workspaces (pre-PRI-624 manifests stay valid)', () => {

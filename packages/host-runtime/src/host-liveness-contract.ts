@@ -153,7 +153,13 @@ export function readWorkspaceHostKindFacts(workspaceDir: string): WorkspaceHostK
       nextAction: provenance.nextAction,
     };
   }
-  const evidenceKinds = provenance.kinds.filter((kind) => kind === 'openclaw' || kind === 'codex');
+  // Known-host filter — must stay in lockstep with PROMPT_INJECTION_TARGET_HOSTS
+  // (prompt-injection-projection.ts, the roster SSoT). Importing that roster here
+  // would create a module cycle (the projection reads host facts from THIS
+  // module), so the set is restated with this sync note. Review R1: a two-host
+  // filter silently dropped WorkBuddy pain evidence, so a WorkBuddy-only
+  // workspace could never confirm its shared route from persisted facts.
+  const evidenceKinds = provenance.kinds.filter((kind) => kind === 'openclaw' || kind === 'codex' || kind === 'workbuddy');
   const effectiveKinds = [...new Set([...declaredKinds, ...evidenceKinds])].sort();
   return { ok: true, declaredKinds, evidenceKinds, effectiveKinds };
 }

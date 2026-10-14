@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/codex-adapter && npm run build --workspace=principles-disciple && npm run build --workspace=create-principles-disciple",
+    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/codex-adapter && npm run build --workspace=@principles/workbuddy-adapter && npm run build --workspace=principles-disciple && npm run build --workspace=create-principles-disciple",
     "lint": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs",
     "lint:fix": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs --fix",
     "typecheck:openclaw-plugin": "cd packages/openclaw-plugin && npx tsc --noEmit",

@@ -1279,7 +1279,7 @@ interface ActivationApproveOptions {
   note?: string;
   json?: boolean;
   /** PD_PROMPT_CAPACITY_V1 R-A1/R-B2: request-level target host for the prompt capacity precheck. */
-  targetHost?: 'openclaw' | 'codex';
+  targetHost?: 'openclaw' | 'codex' | 'workbuddy';
   retryActivation?: boolean;
   confirmIntent?: boolean;
 }
@@ -1315,12 +1315,12 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
   const decidedBy = opts.decidedBy ?? 'cli-operator';
   // PD_PROMPT_CAPACITY_V1 R-A1: request-level target host must be a known
   // host kind — validated before ANY read or write (cli-2/cli-5).
-  if (opts.targetHost !== undefined && opts.targetHost !== 'openclaw' && opts.targetHost !== 'codex') {
+  if (opts.targetHost !== undefined && opts.targetHost !== 'openclaw' && opts.targetHost !== 'codex' && opts.targetHost !== 'workbuddy') {
     const result: ApproveResult = {
       ok: false,
       approvalId: opts.approvalId,
       reason: `invalid_target_host: ${opts.targetHost}`,
-      nextAction: 'Pass --target-host openclaw or --target-host codex, or omit it to use workspace host facts.',
+      nextAction: 'Pass --target-host openclaw, --target-host codex, or --target-host workbuddy, or omit it to use workspace host facts.',
     };
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
@@ -1771,7 +1771,7 @@ export function registerRuntimeActivationApproveCommand(parent: Command): Comman
     .option('--note <text>', 'Optional approval note')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--json', 'Output raw JSON')
-    .option('--target-host <host>', 'Request-level target host for the prompt capacity precheck (openclaw|codex); omit to use workspace host facts')
+    .option('--target-host <host>', 'Request-level target host for the prompt capacity precheck (openclaw|codex|workbuddy); omit to use workspace host facts')
     .option('--retry-activation', 'Retry activation of an already approved record without changing its Owner decision')
     .option('--confirm-intent', 'Confirm that the revised statement preserves the reviewed Owner intent')
     .action(async (opts) => {

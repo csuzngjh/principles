@@ -110,7 +110,7 @@ describe('localizeApprovalWarning (PRI-908)', () => {
   });
 
   it('maps injection_capacity_unconfirmed to the unconfirmed copy (AC-01)', () => {
-    const raw = 'injection_capacity_unconfirmed: the activation is committed but this workspace\'s effective injection route cannot be confirmed (multi_host_routes_differ); per-host forecasts: openclaw=legacy_trim (1855c, truncated); codex=shared_render (1980c, truncated). nextAction=pass an explicit target host (openclaw|codex)';
+    const raw = 'injection_capacity_unconfirmed: the activation is committed but this workspace\'s effective injection route cannot be confirmed (multi_host_routes_differ); per-host forecasts: openclaw=legacy_trim (1855c, truncated); codex=shared_render (1980c, truncated); workbuddy=shared_render (1980c, truncated). nextAction=pass an explicit target host (openclaw|codex|workbuddy)';
     const result = localizeApprovalWarning(raw, fakeT);
     expect(result.code).toBe('injection_capacity_unconfirmed');
     expect(result.title).toBe('pages.focus.approveWarning.capacityUnconfirmedTitle');

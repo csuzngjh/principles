@@ -172,7 +172,7 @@ export const DiagnosisTargetSchema = Type.Object({
     Type.Literal('automatic_hook'),
   ])),
   /** Codex Governance Closure SPEC §14: the diagnosis target names the evidence host. */
-  hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex')])),
+  hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex'), Type.Literal('workbuddy')])),
   provenanceReason: Type.Optional(Type.String()),
   traceAvailability: Type.Optional(Type.Union([
     Type.Literal('available'),

@@ -1,0 +1,115 @@
+{
+  "$comment": "Frozen WorkBuddy host runtime contract for the PD workbuddy-adapter, from Phase 0 real-host probes P01-P06 (2026-10-12). Host: WorkBuddy Desktop 5.8.1, engine codebuddy-lite-wb.mjs --version 2.161.0, SHA-256 fd9d20c75264d20caf8878edc9cf374b333081113595486628d0bd8b8ca374ad. Probes ran the REAL engine in an isolated config dir (WORKBUDDY_CONFIG_DIR + CODEBUDDY_CONFIG_DIR) with a local OpenAI-compatible mock model; hook pipeline, tool execution, payload construction and context assembly are genuine engine behavior. Only model decisions were synthetic.",
+  "provenance": {
+    "engineVersion": "2.161.0",
+    "desktopVersion": "5.8.1",
+    "engineSha256": "fd9d20c75264d20caf8878edc9cf374b333081113595486628d0bd8b8ca374ad",
+    "platform": "win32 x64, Git Bash enforced for command hooks",
+    "hookTimeoutObserved": "per-hook timeout honored (probe used hooks.json timeout:30; hook killed at 30s)",
+    "evidenceBoundary": "mock model; desktop UI review panel and interactive TUI not verifiable headlessly; resume/compact injection persistence not verified (feeder used --no-session-persistence)"
+  },
+  "events": {
+    "SessionStart": {
+      "fires": "at session creation, before first prompt processing; source=startup observed",
+      "payloadFields": {
+        "required": ["session_id", "transcript_path", "hook_event_name", "source", "permission_mode", "client", "version"],
+        "observedOptional": ["generation_id", "model"],
+        "note": "NO cwd field on SessionStart"
+      },
+      "exitCodeEffects": {
+        "exit0-neutral": "session proceeds; no context effect",
+        "exit0-with-stdout": "stdout (raw text, even invalid JSON) is wrapped as <system-reminder data-role=\"hook\"> and appended to the next user message visible to the model",
+        "exit0-additionalContext": "hookSpecificOutput.additionalContext value wrapped the same way (clean channel)",
+        "exit2": "NON-blocking for the session; stdout message still injected; stderr-only message NOT injected but session continues",
+        "exit1-exit3": "non-blocking; exit3 stdout WAS injected (any stdout injects); exit1 stderr not injected",
+        "timeout": "hook killed at configured timeout; session proceeds"
+      }
+    },
+    "UserPromptSubmit": {
+      "fires": "on real user prompt submission. CRITICAL: the FIRST startup prompt in -p print mode does NOT fire it (pre-marked reviewed); subsequent prompts in the same stream-json session DO. Desktop interactive sessions are expected to fire on every user prompt (unverified headlessly - PTY unavailable).",
+      "payloadFields": {
+        "required": ["session_id", "transcript_path", "cwd", "hook_event_name", "prompt"],
+        "observedOptional": ["is_internal_continuation", "agent_type", "permission_mode", "client", "version", "generation_id", "model"]
+      },
+      "exitCodeEffects": {
+        "exit0-neutral": "prompt processed normally",
+        "exit0-stdout-any-exitcode": "stdout appended to context as hook system-reminder before <user_query> (verified for exit 0 and exit 3)",
+        "exit0-additionalContext": "additionalContext value injected into the SAME turn's user message (recommended injection channel)",
+        "exit2-stdout-msg": "BLOCKS the prompt: prompt does not reach the model (model request count drops), stdout message shown as block reason",
+        "exit2-stderr-only": "BLOCKS the prompt (stderr is fallback message source; blocking still happens)",
+        "deny-json-permissionDecision": "BLOCKS the prompt",
+        "exit1": "non-blocking, prompt processed",
+        "bad-json-exit0": "non-blocking; no injection observed",
+        "continue-false": "BLOCKS the prompt (exit-2-family behavior)",
+        "stdout-closed-exit2": "BLOCKS the prompt (exit code honored even when stdout closed)"
+      }
+    },
+    "PreToolUse": {
+      "fires": "after tool args built, before execution; matcher '*' matches all tools",
+      "payloadFields": {
+        "required": ["session_id", "transcript_path", "cwd", "hook_event_name", "tool_name", "tool_input"],
+        "observedOptional": ["call_id", "tool_use_id", "agent_type", "permission_mode", "client", "version", "generation_id", "model"]
+      },
+      "exitCodeEffects": {
+        "exit0-neutral": "tool executes",
+        "deny-json": "tool BLOCKED (verified: target file not written); deny reason fed to the model as role=tool message 'Error: <reason>'",
+        "allow-json": "tool executes (bypasses permission ask)",
+        "exit2-stdout-msg": "tool BLOCKED; message fed to model",
+        "exit2-stderr-only": "tool BLOCKED (stderr message used)",
+        "exit1-exit3-bad-json-stdout-direct-deps-missing": "tool EXECUTES (non-blocking)",
+        "continue-false": "tool BLOCKED; side effect: the user prompt gets re-submitted (UserPromptSubmit hook fired again in the same session) - do NOT use continue:false in the PD adapter",
+        "stdout-closed-exit2": "tool BLOCKED (exit code alone is sufficient)",
+        "timeout": "hook killed at configured timeout; tool BLOCKED (fail-closed on timeout)"
+      }
+    },
+    "PostToolUse": {
+      "fires": "after tool completes, INCLUDING is_error responses (file-not-found Read, directory Read, non-zero Bash). NOT for thrown tool errors (those go to PostToolUseFailure).",
+      "payloadFields": {
+        "required": ["session_id", "transcript_path", "cwd", "hook_event_name", "tool_name", "tool_input", "tool_response"],
+        "observedOptional": ["call_id", "tool_use_id", "agent_type", "permission_mode", "client", "version", "generation_id", "model"],
+        "toolResponseShapes": {
+          "Read-success": "STRING (rendered text with line-number gutter)",
+          "Read-failure": "OBJECT {is_error:true, tool_error_code:'1001'} (1001 file-not-found; 1003 read-directory)",
+          "Bash": "OBJECT {exitCode:number, signal, interrupted, sandboxDenied, stderrBytesTruncated, stdoutBytesTruncated, tool_error_code}"
+        }
+      },
+      "exitCodeEffects": {
+        "any-scenario": "tool already ran; nothing is blocked. deny/exit2 have no undo effect. additionalContext is appended to the tool result message as <system-reminder data-role=\"tool-hint\">"
+      }
+    },
+    "PostToolUseFailure": {
+      "fires": "ONLY when tool execution THROWS (verified: Write to an existing-unread file throws WriteFileNotReadError). Ordinary failures (is_error) do NOT reach this event.",
+      "payloadFields": {
+        "required": ["session_id", "transcript_path", "cwd", "hook_event_name", "tool_name", "tool_input", "error"],
+        "observedOptional": ["tool_error_code", "tool_error_name", "is_interrupt", "call_id", "tool_use_id", "agent_type", "permission_mode", "client", "version", "generation_id", "model"],
+        "verifiedExample": "error='File has not been read yet...', tool_error_code='2009', tool_error_name='WriteFileNotReadError', is_interrupt=false"
+      },
+      "od02Conclusion": "FAILED tool calls (the common pain-evidence class: file-not-found, runtime-wrong usage, non-zero bash) DO enter PostToolUse with is_error/exitCode markers, so after_tool_call evidence collection covers failures WITHOUT a new event. PostToolUseFailure adds only the thrown-error class (unknown-tool and schema-invalid calls are rejected before any hook fires).",
+      "amendment20261013": "Independent re-verification (engine 2.161.0, sha256 1b1a01bc…, scripts/dev/workbuddy-probe/probe-post-tool-use-failure.mjs, lab D:\\Code\\wb-ptuf-lab\\ptuf-1791905652552) FALSIFIED the first sentence's implied completeness for the thrown class: a Write to an existing-but-never-read file emits ONLY PostToolUseFailure (error='File has not been read yet…', tool_error_code='2009', NO tool_response) and PostToolUse never fires for it. hooks.json now registers PostToolUseFailure (matcher '*', wrapper event arg PostToolUseFailure) mapped onto the SAME after_tool_call HostEvent kind — still no new core event kind. The od02Conclusion above is preserved verbatim as the historical P03 reading it superseded."
+    }
+  },
+  "ids": {
+    "session_id": "present on all events (uuid)",
+    "generation_id": "present on all observed events incl. SessionStart; stable within one turn - maps to turnId",
+    "call_id": "present on tool events, equals tool_use_id, originates from the model tool_call id; two model-issued identical ids executed twice (no host-side dedup observed)",
+    "tool_use_id": "alias of call_id",
+    "transcript_path": "present on all events; under WORKBUDDY_CONFIG_DIR isolation resolves inside the isolated dir only when CODEBUDDY_CONFIG_DIR is also set (else ~/.codebuddy)"
+  },
+  "injectionChannels": {
+    "userPromptSubmit.additionalContext": "VERIFIED: value lands in the same turn's user message as <system-reminder data-role=\"hook\"> before <user_query>; fresh per turn",
+    "userPromptSubmit.rawStdout": "VERIFIED but UNSUITABLE: any stdout (even JSON garbage, even with exit 3) is injected verbatim; PD must emit structured JSON and keep stdout free of stray text",
+    "sessionStart.additionalContext": "VERIFIED equivalent wrapper",
+    "sessionStart.rawStdout": "verified injects (even with exit 2) - same unsuitability",
+    "postToolUse.additionalContext": "VERIFIED: appended to tool result as <system-reminder data-role=\"tool-hint\">",
+    "preToolUse.denyReason": "VERIFIED: deny reason reaches the model as 'Error: <reason>' role=tool message",
+    "modifiedInput": "source names the field updatedInput in this engine build; NOT probed (first adapter version rejects it anyway)",
+    "resumeCompactPersistence": "UNKNOWN: not verified (probe feeder disabled session persistence)"
+  },
+  "shellAndRuntime": {
+    "commandHooks": "executed via Git Bash on Windows (SHELL=Git usr bin bash.EXE observed); 'node' resolves from PATH (system node v26 in probe), host does not force its bundled node",
+    "cjsWrapper": "VERIFIED: real .cjs wrapper launched via hook command with paths containing spaces AND Chinese characters in both plugin root and project cwd",
+    "nativeDeps": "better-sqlite3 with N-API prebuilds loads under node v26 (ABI 147) and host-bundled node v22 (ABI 127); the engine's own bundled better-sqlite3 is NOT requirable from outside (missing 'bindings' dependency resolution) - PD must ship its own runtime deps",
+    "nodeVersions": "node v26.7.0 baseline recorded; node v22.22.2 verified; node 20 NOT PRESENT on machine (NOT RUN)"
+  },
+  "forbiddenForV1": ["modifiedInput/updatedInput", "updatedToolOutput", "ask permissionDecision", "continue:false on PreToolUse (causes prompt re-submission)"]
+}

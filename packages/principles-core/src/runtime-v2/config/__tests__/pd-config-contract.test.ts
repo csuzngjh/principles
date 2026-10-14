@@ -24,6 +24,8 @@ import {
   DEFAULT_RUNTIME_PROFILE_ID,
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
+  resolveAgentRuntimeBinding,
+  createAdapterConfigFromProfile,
 } from '../index.js';
 import { DEFAULT_FEATURE_FLAGS as FLAGS_ARRAY } from '../../feature-flags/index.js';
 import type {
@@ -655,6 +657,96 @@ describe('Scenario 8: Redaction does not leak secrets', () => {
     expect(Object.hasOwn(result, '__proto__')).toBe(false);
     expect(Object.hasOwn(result, 'constructor')).toBe(false);
     expect(result.normal).toBe('ok');
+  });
+});
+
+// ── Scenario 9: Fresh defaults inherit defaultRuntime (round-4 S1) ─────────
+//
+// WorkBuddy round-4 review S1: the fresh-config defaults used to seed an
+// EXPLICIT per-agent `runtimeProfile: 'openclaw.default'` row for every
+// agent. Because a per-agent row outranks `internalAgents.defaultRuntime`
+// in resolveAgentRuntimeBinding, a WorkBuddy install that flips
+// `defaultRuntime` to the configured `pd.default` profile left the whole
+// learning chain (dreamer → philosopher → scribe → artificer → evaluator →
+// rolloutReviewer, plus signalCollector) explicitly bound to
+// openclaw.default. The authority-level fix: fresh defaults carry `enabled`
+// only and every agent inherits `defaultRuntime` (the same semantics the
+// effective layer already applies for configs without per-agent rows).
+
+describe('Scenario 9: fresh defaults carry no explicit per-agent runtimeProfile rows (round-4 S1)', () => {
+  it('fresh default agents carry enabled but no explicit runtimeProfile row', () => {
+    const config = getDefaultPdConfig();
+    for (const name of INTERNAL_AGENT_NAMES) {
+      const binding = nn(config.internalAgents.agents[name], name);
+      expect(Object.hasOwn(binding, 'runtimeProfile'), `${name} must not seed an explicit runtimeProfile`).toBe(false);
+      expect(typeof binding.enabled, name).toBe('boolean');
+    }
+    expect(config.internalAgents.defaultRuntime).toBe(DEFAULT_RUNTIME_PROFILE_ID);
+  });
+
+  it('vanilla defaults still resolve every ENABLED agent to openclaw.default via defaultRuntime (openclaw/codex host behavior unchanged)', () => {
+    const effective = computeEffectivePdConfig(null);
+    for (const name of INTERNAL_AGENT_NAMES) {
+      const binding = resolveAgentRuntimeBinding(effective, name);
+      if (!nn(effective.config.internalAgents.agents[name]).enabled) {
+        expect(binding.ok, `${name} is disabled by default`).toBe(false);
+        if (!binding.ok) expect(binding.readiness, name).toBe('disabled');
+        continue;
+      }
+      expect(binding.ok, `${name}: ${binding.ok ? '' : binding.reason}`).toBe(true);
+      if (!binding.ok) continue;
+      expect(binding.profileId, name).toBe('openclaw.default');
+      expect(binding.source, name).toBe('default_runtime');
+    }
+  });
+
+  it('flipping defaultRuntime to a configured pd.default reaches EVERY agent that has no explicit Owner row (install shape)', () => {
+    // The exact shape a WorkBuddy install produces on a fresh init config:
+    // defaultRuntime → 'pd.default' (configured pi-ai profile), no per-agent
+    // rows. Every learning agent must resolve to the install-configured
+    // runtime — never back to openclaw.default.
+    const raw = makeValidConfig();
+    raw.runtimeProfiles['pd.default'] = { type: 'pi-ai', provider: 'openai', model: 'install-model', apiKeyEnv: 'INSTALL_KEY_ENV' };
+    raw.internalAgents.defaultRuntime = 'pd.default';
+    for (const name of INTERNAL_AGENT_NAMES) {
+      const binding = nn(raw.internalAgents.agents[name]);
+      delete binding.runtimeProfile; // fresh-init shape: enabled only
+    }
+    const result = validatePdConfig(raw);
+    if (!result.ok) throw new Error(`Expected ok: ${JSON.stringify(result.errors)}`);
+    const effective = computeEffectivePdConfig(result.value);
+
+    for (const name of INTERNAL_AGENT_NAMES) {
+      if (!nn(effective.config.internalAgents.agents[name]).enabled) continue; // disabled agents never resolve a runtime
+      const binding = resolveAgentRuntimeBinding(effective, name);
+      expect(binding.ok, `${name}: ${binding.ok ? '' : binding.reason}`).toBe(true);
+      if (!binding.ok) continue;
+      expect(binding.profileId, name).toBe('pd.default');
+      const adapter = createAdapterConfigFromProfile(binding.profile, '/tmp/ws');
+      expect(adapter.runtimeKind, `${name} must ride the install-configured pi-ai runtime`).toBe('pi-ai');
+    }
+  });
+
+  it('legacy explicit per-agent rows keep their profile after defaultRuntime flips (Owner/init rows are never silently overridden)', () => {
+    const raw = makeValidConfig();
+    raw.runtimeProfiles['pd.default'] = { type: 'pi-ai', provider: 'openai', model: 'install-model', apiKeyEnv: 'INSTALL_KEY_ENV' };
+    raw.internalAgents.defaultRuntime = 'pd.default';
+    // Old-init shape: every agent carries an explicit openclaw.default row.
+    for (const name of INTERNAL_AGENT_NAMES) {
+      nn(raw.internalAgents.agents[name]).runtimeProfile = 'openclaw.default';
+    }
+    const result = validatePdConfig(raw);
+    if (!result.ok) throw new Error('Expected ok');
+    const effective = computeEffectivePdConfig(result.value);
+
+    for (const name of INTERNAL_AGENT_NAMES) {
+      if (!nn(effective.config.internalAgents.agents[name]).enabled) continue; // disabled agents never resolve a runtime
+      const binding = resolveAgentRuntimeBinding(effective, name);
+      expect(binding.ok, name).toBe(true);
+      if (!binding.ok) continue;
+      expect(binding.profileId, `${name} keeps its explicit row`).toBe('openclaw.default');
+      expect(binding.source, name).toBe('agent_override');
+    }
   });
 });
 

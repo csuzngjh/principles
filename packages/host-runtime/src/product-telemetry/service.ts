@@ -280,7 +280,7 @@ function resolveInstallContext(homeDir: string): InstallContext {
   const legacyExtensionExists = fs.existsSync(paths.openClawExtensionDir);
   const layout = resolveInstallLayout({ homeDir, manifest, canonicalRuntimeExists, legacyExtensionExists });
   let hostKind: ProductTelemetryHostKind = 'other';
-  if (manifest && manifest.hosts.length === 1 && (manifest.hosts[0] === 'codex' || manifest.hosts[0] === 'openclaw')) {
+  if (manifest && manifest.hosts.length === 1 && (manifest.hosts[0] === 'codex' || manifest.hosts[0] === 'openclaw' || manifest.hosts[0] === 'workbuddy')) {
     [hostKind] = manifest.hosts;
   } else if (legacyExtensionExists) {
     hostKind = 'openclaw';

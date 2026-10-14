@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
-export type PainListHostFilter = 'openclaw' | 'codex' | 'unknown';
+export type PainListHostFilter = 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
 
 export interface PainListOptions {
   workspace?: string;
@@ -32,7 +32,7 @@ export interface PainListEntry {
   /** Canonical pain identity; `row:<id>` when the legacy row has none. */
   painId: string;
   source: string;
-  /** 'openclaw' | 'codex' | 'unknown' — unknown covers NULL/unprovable. */
+  /** 'openclaw' | 'codex' | 'workbuddy' | 'unknown' — unknown covers NULL/unprovable. */
   host: PainListHostFilter | 'unknown';
   score: number;
   severity: string | null;
@@ -52,7 +52,7 @@ export interface PainListResult {
    * column — the distribution is unprovable there, never guessed (rc-3/rc-9;
    * see the accompanying host_kind_column_missing warning).
    */
-  byHost: { openclaw: number; codex: number; unknown: number } | null;
+  byHost: { openclaw: number; codex: number; workbuddy: number; unknown: number } | null;
   warnings: string[];
 }
 
@@ -78,7 +78,7 @@ function toPainEntry(row: unknown): PainListEntry | null {
   const severity = ownField(row, 'severity');
   const runtimeTaskId = ownField(row, 'runtime_task_id');
   const host: PainListEntry['host'] =
-    hostKind === 'openclaw' || hostKind === 'codex' ? hostKind : 'unknown';
+    hostKind === 'openclaw' || hostKind === 'codex' || hostKind === 'workbuddy' ? hostKind : 'unknown';
   return {
     painId: typeof canonicalPainId === 'string' && canonicalPainId.length > 0 ? canonicalPainId : `row:${id}`,
     source,
@@ -107,7 +107,7 @@ export async function listPains(dbPath: string, options: { limit?: number; host?
     // count cannot answer. Non-openclaw/codex values (incl. NULL) count as
     // unknown, mirroring toPainEntry's read-side normalization.
     const byHost: PainListResult['byHost'] = hasHostKindColumn
-      ? { openclaw: 0, codex: 0, unknown: 0 }
+      ? { openclaw: 0, codex: 0, workbuddy: 0, unknown: 0 }
       : null;
     if (byHost) {
       const distRows: unknown[] = db
@@ -116,7 +116,7 @@ export async function listPains(dbPath: string, options: { limit?: number; host?
       for (const row of distRows) {
         const bucket = ownField(row, 'host_bucket');
         const n = ownField(row, 'n');
-        if ((bucket === 'openclaw' || bucket === 'codex' || bucket === 'unknown') && typeof n === 'number') {
+        if ((bucket === 'openclaw' || bucket === 'codex' || bucket === 'workbuddy' || bucket === 'unknown') && typeof n === 'number') {
           byHost[bucket] += n;
         }
       }
@@ -128,7 +128,7 @@ export async function listPains(dbPath: string, options: { limit?: number; host?
     query += ' FROM pain_events WHERE 1=1';
     if (options.host === 'unknown') {
       query += hasHostKindColumn ? ' AND host_kind IS NULL' : '';
-    } else if (options.host === 'openclaw' || options.host === 'codex') {
+    } else if (options.host === 'openclaw' || options.host === 'codex' || options.host === 'workbuddy') {
       if (!hasHostKindColumn) {
         return { count: 0, pains: [], workspace: path.dirname(path.dirname(dbPath)), hostFilter: options.host, byHost, warnings };
       }
@@ -165,8 +165,8 @@ function printHuman(result: PainListResult): void {
   const filterNote = result.hostFilter ? ` (host: ${result.hostFilter})` : '';
   console.log(`Pain events — ${result.count} shown${filterNote}`);
   if (result.byHost) {
-    const { openclaw, codex, unknown } = result.byHost;
-    console.log(`By host: openclaw=${openclaw} codex=${codex} unknown=${unknown}`);
+    const { openclaw, codex, workbuddy, unknown } = result.byHost;
+    console.log(`By host: openclaw=${openclaw} codex=${codex} workbuddy=${workbuddy} unknown=${unknown}`);
   }
   console.log('─'.repeat(96));
   for (const pain of result.pains) {
@@ -186,13 +186,13 @@ function printHuman(result: PainListResult): void {
 export async function handlePainList(opts: PainListOptions): Promise<void> {
   const { workspace, limit: rawLimit, host: rawHost, json } = opts;
 
-  if (rawHost !== undefined && rawHost !== 'openclaw' && rawHost !== 'codex' && rawHost !== 'unknown') {
-    const message = `invalid host filter: expected openclaw | codex | unknown, got ${rawHost}`;
+  if (rawHost !== undefined && rawHost !== 'openclaw' && rawHost !== 'codex' && rawHost !== 'workbuddy' && rawHost !== 'unknown') {
+    const message = `invalid host filter: expected openclaw | codex | workbuddy | unknown, got ${rawHost}`;
     if (json) {
-      console.log(JSON.stringify({ status: 'failed', reason: 'invalid_host_filter', message, nextAction: 'Pass --host openclaw, --host codex, or --host unknown.' }));
+      console.log(JSON.stringify({ status: 'failed', reason: 'invalid_host_filter', message, nextAction: 'Pass --host openclaw, --host codex, --host workbuddy, or --host unknown.' }));
     } else {
       console.error('Error: ' + message);
-      console.error('Next: Pass --host openclaw, --host codex, or --host unknown.');
+      console.error('Next: Pass --host openclaw, --host codex, --host workbuddy, or --host unknown.');
     }
     process.exit(1);
     return; // guard: test stubs of process.exit continue execution (cli-2-exit-stops)

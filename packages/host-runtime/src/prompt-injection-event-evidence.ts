@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { isPromptInjectionTargetHost } from './prompt-injection-projection.js';
 
 /**
  * PD_PROMPT_CAPACITY_V1 Phase C / AC-12: read-model over the EXISTING
@@ -29,7 +30,7 @@ import path from 'node:path';
 export interface InjectionEvidenceRow {
   workspaceDir: string;
   activationId: string;
-  hostKind: 'openclaw' | 'codex' | 'unknown';
+  hostKind: 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
   hostIdentityComplete: boolean;
   eventIdentityComplete: boolean;
   /** Deduplicated injection facts: this activation appeared in the injected set. */
@@ -113,7 +114,10 @@ export function readInjectionEventEvidence(input: { stateDir: string }): Injecti
       const runId = nonEmptyString(data.runId);
       const eventId = nonEmptyString(data.eventId);
       const rawHostKind = data.hostKind;
-      const hostKind = rawHostKind === 'openclaw' || rawHostKind === 'codex' ? rawHostKind : 'unknown';
+      // Known-host membership comes from the roster predicate (review R1: the
+      // hand-typed openclaw|codex check classified real WorkBuddy injection
+      // events as the unknown bucket, contradicting this row's own type).
+      const hostKind = isPromptInjectionTargetHost(rawHostKind) ? rawHostKind : 'unknown';
       const {activationIds} = data;
       if (workspaceDir === undefined || sessionId === undefined || !Array.isArray(activationIds)
         || !activationIds.every((id): id is string => typeof id === 'string')) {

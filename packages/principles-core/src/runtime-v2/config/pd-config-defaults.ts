@@ -58,6 +58,22 @@ export const DEFAULT_RUNTIME_PROFILE_ID = OPENCLAW_DEFAULT_PROFILE_ID;
 export const DEFAULT_RUNTIME_PROFILE: OpenClawRuntimeProfile = OPENCLAW_DEFAULT_PROFILE;
 
 // ── Default Internal Agents ─────────────────────────────────────────────────
+//
+// Round-4 S1 (WorkBuddy install remediation, 2026-10-14): fresh defaults
+// intentionally carry NO explicit per-agent `runtimeProfile` row. A per-agent
+// row outranks `internalAgents.defaultRuntime` in resolveAgentRuntimeBinding,
+// so seeding one used to pin every learning agent to openclaw.default even
+// after an installer flipped `defaultRuntime` to the install-configured
+// profile — the diagnostician rode the new runtime while
+// dreamer→philosopher→scribe→artificer→evaluator→rolloutReviewer and
+// signalCollector stayed on the host runtime. With no per-agent row, every
+// agent inherits `defaultRuntime`:
+//   - vanilla default (openclaw/codex hosts): defaultRuntime stays
+//     'openclaw.default' → identical effective behavior as before;
+//   - install-configured workspace: defaultRuntime → 'pd.default' → the whole
+//     learning chain rides the install runtime.
+// Owner-written explicit rows are untouched by this authority and keep
+// outranking defaultRuntime (P4: Owner choice is not silently overridden).
 
 const DEFAULT_AGENT_ENABLED: Record<InternalAgentName, boolean> = {
   diagnostician: true,
@@ -79,7 +95,6 @@ export function getDefaultInternalAgents(): InternalAgentsConfig {
   for (const name of INTERNAL_AGENT_NAMES) {
     agents[name] = {
       enabled: DEFAULT_AGENT_ENABLED[name],
-      runtimeProfile: DEFAULT_RUNTIME_PROFILE_ID,
     };
   }
   return {

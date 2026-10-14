@@ -97,11 +97,11 @@ export type ApproveWithActivationResult =
     capacity: {
       category: 'single_item_exceeds_budget' | 'route_unconfirmed' | 'content_unconfirmed';
       route?: 'legacy_trim' | 'shared_render';
-      hostKind?: 'openclaw' | 'codex';
+      hostKind?: 'openclaw' | 'codex' | 'workbuddy';
       budget?: number;
       costChars?: number;
       overByChars?: number;
-      perHost?: { hostKind: 'openclaw' | 'codex'; fits: boolean; costChars: number }[];
+      perHost?: { hostKind: 'openclaw' | 'codex' | 'workbuddy'; fits: boolean; costChars: number }[];
     };
   };
 
@@ -406,7 +406,7 @@ export class ApprovalsConsoleModel {
       return `injection_budget_check_failed: could not recompute the prompt injection projection (${message}); the activation is committed but its injection status is unverified. nextAction=check .pd/state.db readability and re-run pd runtime activation list`;
     }
     if (resolution.status === 'unconfirmed') {
-      return `injection_capacity_unconfirmed: the activation is committed but this workspace's effective injection route cannot be confirmed (${resolution.decision.unconfirmedReason ?? 'unknown reason'}); per-host forecasts: ${resolution.perHost.map((entry) => `${entry.hostKind}=${entry.projection.route} (${entry.projection.usedChars}c${entry.projection.truncated ? ', truncated' : ''})`).join('; ')}. nextAction=${resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex)'}`;
+      return `injection_capacity_unconfirmed: the activation is committed but this workspace's effective injection route cannot be confirmed (${resolution.decision.unconfirmedReason ?? 'unknown reason'}); per-host forecasts: ${resolution.perHost.map((entry) => `${entry.hostKind}=${entry.projection.route} (${entry.projection.usedChars}c${entry.projection.truncated ? ', truncated' : ''})`).join('; ')}. nextAction=${resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)'}`;
     }
     const {projection} = resolution;
     if (projection.injectedActivationIds.includes(activationId)) {

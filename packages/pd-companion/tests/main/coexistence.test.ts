@@ -121,7 +121,11 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
   it('PRI-715: 永久 degraded 接入 Owner 可见表面——托盘投影 + 一次性通知（纯读，无副作用）', () => {
     const source = src();
     // 托盘菜单/tooltip 每次重建时纯读 registry 的 degraded 查询。
-    expect(source).toContain('buildDegradedWorkspacesTrayView(workspaceWorkers?.degradedWorkspaces() ?? [])');
+    // (合并语义：WorkBuddy 第三个宿主的 degraded workspace 与 Codex 的一起
+    // 投影进同一个托盘视图 — 两个 registry 都是纯读，PRI-715 契约不变。)
+    expect(source).toContain('buildDegradedWorkspacesTrayView([');
+    expect(source).toContain('...(workspaceWorkers?.degradedWorkspaces() ?? []),');
+    expect(source).toContain('...(workbuddyWorkspaceWorkers?.degradedWorkspaces() ?? []),');
     // 降级迁移事件触发一次性系统通知，并重建托盘让投影立即生效。
     expect(source).toContain("event === 'workspace_worker_degraded'");
     expect(source).toContain('notifyWorkspaceDegraded(workspace)');

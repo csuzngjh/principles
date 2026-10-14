@@ -1,0 +1,17 @@
+{
+ "description": "Sanitized real WorkBuddy 5.8.1 (engine 2.161.0) hook input payload, captured 2026-10-12T15:28:05.976Z in isolated lab (WORKBUDDY_CONFIG_DIR + CODEBUDDY_CONFIG_DIR), mock model drove the tool call; payload construction is genuine engine behavior.",
+ "probe": "P00",
+ "event": "SessionStart",
+ "scenario": "engine 2.161.0 CLI print mode, permission_mode=bypassPermissions",
+ "payload": {
+  "session_id": "01a130ba-6a85-7e11-9562-eb776861ef22",
+  "transcript_path": "D:\\Code\\_worktrees\\wb-probe-lab\\iso-home\\projects\\d-Code-_worktrees-wb-probe-lab-proj-a\\01a130ba-6a85-7e11-9562-eb776861ef22.jsonl",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "permission_mode": "bypassPermissions",
+  "client": "CLI",
+  "version": "2.161.0",
+  "generation_id": "01a130ba6ac7721393a571685d0f778d",
+  "model": "wb-probe-mock"
+ }
+}

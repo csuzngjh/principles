@@ -426,7 +426,7 @@ export class ApprovalsGroupedConsoleModel {
             truncated: reference?.truncated ?? false,
             capacityStatus: 'unconfirmed',
             unconfirmedReason: resolution.decision.unconfirmedReason ?? 'effective injection route cannot be confirmed',
-            nextAction: resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex)',
+            nextAction: resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)',
             perHost: resolution.perHost.map((entry) => ({
               hostKind: entry.hostKind,
               route: entry.projection.route,

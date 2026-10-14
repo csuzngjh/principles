@@ -452,7 +452,7 @@ export class SqliteContextAssembler implements ContextAssembler {
               : undefined,
             hostKind: SqliteContextAssembler.extractStringField(parsed, 'hostKind') === 'openclaw'
               || SqliteContextAssembler.extractStringField(parsed, 'hostKind') === 'codex'
-              ? SqliteContextAssembler.extractStringField(parsed, 'hostKind') as 'openclaw' | 'codex'
+              ? SqliteContextAssembler.extractStringField(parsed, 'hostKind') as 'openclaw' | 'codex' | 'workbuddy'
               : undefined,
             provenanceReason: SqliteContextAssembler.extractStringField(parsed, 'provenanceReason'),
             evidence: SqliteContextAssembler.extractEvidence(parsed),

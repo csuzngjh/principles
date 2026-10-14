@@ -144,10 +144,10 @@ export async function handleApprovalsRoute(
       // PD_PROMPT_CAPACITY_V1 R-A1/R-B2: optional request-level target host
       // for the prompt-capacity precheck — the request-scoped selection entry
       // when the workspace's applicable hosts would take different routes.
-      let targetHost: 'openclaw' | 'codex' | undefined;
+      let targetHost: 'openclaw' | 'codex' | 'workbuddy' | undefined;
       if (Object.hasOwn(parsed, 'host')) {
-        if (parsed.host !== 'openclaw' && parsed.host !== 'codex') {
-          sendBadRequest(res, 'host must be one of: openclaw, codex');
+        if (parsed.host !== 'openclaw' && parsed.host !== 'codex' && parsed.host !== 'workbuddy') {
+          sendBadRequest(res, 'host must be one of: openclaw, codex, workbuddy');
           return;
         }
         targetHost = parsed.host;

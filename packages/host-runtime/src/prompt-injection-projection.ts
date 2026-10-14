@@ -12,8 +12,18 @@ import { buildActivePrinciplePromptContext, readPromptActivationCandidates, MAX_
 import { readWorkspaceHostKindFacts } from './host-liveness-contract.js';
 
 /** Hosts with a production prompt-injection path today (shared GovernanceHostKind boundary). */
-export type PromptInjectionTargetHost = 'openclaw' | 'codex';
-export const PROMPT_INJECTION_TARGET_HOSTS: readonly PromptInjectionTargetHost[] = ['openclaw', 'codex'];
+export type PromptInjectionTargetHost = 'openclaw' | 'codex' | 'workbuddy';
+/** Single host roster (review P2): every consumer derives from this list, so a
+ * new host cannot fork route-unconfirmed per-host forecasts from the routes. */
+export const PROMPT_INJECTION_TARGET_HOSTS: readonly PromptInjectionTargetHost[] = ['openclaw', 'codex', 'workbuddy'];
+
+/** Runtime membership test derived from the roster (rc-2): the ONE guard for
+ * "is this untrusted host-kind string a host with a known prompt-injection
+ * route". Every consumer narrows with this — never by re-typing the literals
+ * (review R1: each re-typed list forked the roster and dropped WorkBuddy). */
+export function isPromptInjectionTargetHost(kind: unknown): kind is PromptInjectionTargetHost {
+  return typeof kind === 'string' && (PROMPT_INJECTION_TARGET_HOSTS as readonly string[]).includes(kind);
+}
 
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
 
@@ -62,20 +72,19 @@ export interface PromptInjectionRouteDecision {
 
 /**
  * THE one route formula (P4): Codex always injects through the shared route
- * (codex-adapter has no flag branch); OpenClaw routes by its
- * `abstraction_layer_v1` gate. Every consumer that needs "which route would
- * host X take" must call this — never re-type the ternary.
+ * (codex-adapter has no flag branch); so does WorkBuddy (workbuddy-adapter
+ * renders through the shared runtime unconditionally — it has no legacy
+ * route); OpenClaw routes by its `abstraction_layer_v1` gate. Every consumer
+ * that needs "which route would host X take" must call this — never re-type
+ * the ternary.
  */
 export function promptRouteForHost(hostKind: PromptInjectionTargetHost, flagEnabled: boolean): PromptInjectionRouteName {
-  if (hostKind === 'codex') return 'shared_render';
+  if (hostKind === 'codex' || hostKind === 'workbuddy') return 'shared_render';
   return flagEnabled ? 'shared_render' : 'legacy_trim';
 }
 
 function standardHostRoutes(flagEnabled: boolean): { hostKind: PromptInjectionTargetHost; route: PromptInjectionRouteName }[] {
-  return [
-    { hostKind: 'openclaw', route: promptRouteForHost('openclaw', flagEnabled) },
-    { hostKind: 'codex', route: promptRouteForHost('codex', flagEnabled) },
-  ];
+  return PROMPT_INJECTION_TARGET_HOSTS.map((hostKind) => ({ hostKind, route: promptRouteForHost(hostKind, flagEnabled) }));
 }
 
 /**
@@ -143,9 +152,8 @@ export function resolvePromptInjectionRouteDecision(input: {
     };
   }
 
-  const knownKinds = facts.effectiveKinds.filter((kind): kind is PromptInjectionTargetHost =>
-    kind === 'openclaw' || kind === 'codex');
-  const unknownKinds = facts.effectiveKinds.filter((kind) => kind !== 'openclaw' && kind !== 'codex');
+  const knownKinds = facts.effectiveKinds.filter(isPromptInjectionTargetHost);
+  const unknownKinds = facts.effectiveKinds.filter((kind) => !isPromptInjectionTargetHost(kind));
 
   if (unknownKinds.length > 0) {
     return {
@@ -154,7 +162,7 @@ export function resolvePromptInjectionRouteDecision(input: {
       declaredHostKinds: facts.declaredKinds,
       effectiveHostKinds: facts.effectiveKinds,
       unconfirmedReason: `unknown_host_kind_declared: ${unknownKinds.join(', ')} has no known prompt-injection route`,
-      nextAction: 'pass an explicit target host (openclaw|codex) for this request, or remove the unknown host declaration',
+      nextAction: 'pass an explicit target host (openclaw|codex|workbuddy) for this request, or remove the unknown host declaration',
       perHost: standardHostRoutes(flagEnabled),
     };
   }
@@ -180,7 +188,7 @@ export function resolvePromptInjectionRouteDecision(input: {
       declaredHostKinds: facts.declaredKinds,
       effectiveHostKinds: facts.effectiveKinds,
       unconfirmedReason: 'no_host_facts_and_flag_off: no host declaration or host evidence exists, and the applicable hosts would take different routes',
-      nextAction: 'pass an explicit target host (openclaw|codex), or let a host run once in this workspace so it persists its declaration',
+      nextAction: 'pass an explicit target host (openclaw|codex|workbuddy), or let a host run once in this workspace so it persists its declaration',
       perHost: standardHostRoutes(flagEnabled),
     };
   }
@@ -216,8 +224,8 @@ export function resolvePromptInjectionRouteDecision(input: {
     flagEnabled,
     declaredHostKinds: facts.declaredKinds,
     effectiveHostKinds: facts.effectiveKinds,
-    unconfirmedReason: 'multi_host_routes_differ: openclaw would take the legacy list route and codex the shared route under the current flag-off config',
-    nextAction: 'pass an explicit target host (openclaw|codex) for this request, or enable abstraction_layer_v1 so both hosts share one route',
+    unconfirmedReason: 'multi_host_routes_differ: openclaw would take the legacy list route while codex/workbuddy would take the shared route under the current flag-off config',
+    nextAction: 'pass an explicit target host (openclaw|codex|workbuddy) for this request, or enable abstraction_layer_v1 so all hosts share one route',
     perHost: standardHostRoutes(flagEnabled),
   };
 }
@@ -366,13 +374,19 @@ export async function buildLivePromptInjectionProjection(input: {
    * rather than assuming FIFO.
    */
   roundKey?: number;
-  /** AC-01: explicit route binding — 'codex' always shared, 'openclaw' by flag. */
+  /** AC-01: explicit route binding — 'codex'/'workbuddy' always shared, 'openclaw' by flag. */
   targetHost?: PromptInjectionTargetHost;
 }): Promise<PromptInjectionProjection> {
   const flagEnabled = computeFeatureFlagsFromConfig(
     loadPdConfigForPlugin(input.workspaceDir).effective,
   ).flags.abstraction_layer_v1?.enabled === true;
-  const sharedRoute = input.targetHost === 'codex' ? true : flagEnabled;
+  // Route face follows THE one route formula (review P2-2: a re-typed
+  // codex-only ternary forecast WorkBuddy as legacy_trim while its adapter
+  // renders shared unconditionally). No explicit target (console callers)
+  // keeps the flag-gated workspace default.
+  const sharedRoute = input.targetHost === undefined
+    ? flagEnabled
+    : promptRouteForHost(input.targetHost, flagEnabled) === 'shared_render';
 
   if (sharedRoute) {
     const context = await buildActivePrinciplePromptContext(input);
