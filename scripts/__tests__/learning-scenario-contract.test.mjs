@@ -17,6 +17,7 @@ import {
   SCENARIO_IDS,
   STEPS,
   VERDICTS,
+  defineScenario,
   evaluateScenario,
   formatEvaluationReport,
   isBlockingRecord,
@@ -352,5 +353,74 @@ describe('formatEvaluationReport', () => {
     const report = formatEvaluationReport(evaluateScenario(SCENARIO_IDS.FULL, records));
     expect(report).toContain('BLOCKING BLOCKED ROW [preflight]');
     expect(report).toContain('SCENARIO VERDICT: BLOCKED (exit 2)');
+  });
+});
+
+// ── Round-5 R2b: FAIL+BLOCKED precedence + parameterized installed scenario ──
+describe('round-5 R2b: FAIL outranks BLOCKED; defineScenario parameterization', () => {
+  it('a product FAIL plus a provider BLOCKED exits 1 (FAIL), never 2 (BLOCKED masks the defect)', () => {
+    const records = [
+      rec(STEPS.ELIGIBLE_SIGNAL_SYNTHETIC, VERDICTS.PASS),
+      rec('real-failure-evidence', VERDICTS.FAIL, 'engine never issued the Bash turn — product defect'),
+      rec(STEPS.BACKGROUND_CHAIN, VERDICTS.BLOCKED, 'provider rate-limited the diagnostician (runs.error_category=rate_limit)'),
+    ];
+    const evaluation = evaluateScenario(SCENARIO_IDS.FULL, records);
+    expect(evaluation.exitCode).toBe(EXIT_CODES.FAIL);
+    expect(evaluation.failures.map((f) => f.step)).toContain('real-failure-evidence');
+    expect(evaluation.blocked.map((b) => b.step)).toContain(STEPS.BACKGROUND_CHAIN);
+    expect(formatEvaluationReport(evaluation)).toContain('SCENARIO VERDICT: FAIL (exit 1)');
+  });
+
+  it('the installed-product scenario definition rides the SAME evaluator and precedence', () => {
+    const installed = defineScenario({
+      id: 'installed-full-principle-learning',
+      label: '正式安装产物完整原则学习 (INSTALLED FULL PRINCIPLE LEARNING)',
+      requiresFullLearning: true,
+      required: {
+        pack: [VERDICTS.PASS],
+        'tarball-installer-entry': [VERDICTS.PASS],
+        'owner-approval': [VERDICTS.PASS],
+        'post-withdraw': [VERDICTS.PASS],
+      },
+    });
+    // Product FAIL + provider BLOCKED → 1 (the fifth-round R2b repro).
+    const mixed = evaluateScenario(installed, [
+      rec('pack', VERDICTS.PASS),
+      rec('tarball-installer-entry', VERDICTS.PASS),
+      rec('owner-approval', VERDICTS.FAIL, 'approve exited non-zero'),
+      rec('background-chain', VERDICTS.BLOCKED, 'provider rate-limited'),
+    ]);
+    expect(mixed.exitCode).toBe(EXIT_CODES.FAIL);
+    // Everything satisfied, but a durable provider rate limit → 2.
+    const blocked = evaluateScenario(installed, [
+      rec('pack', VERDICTS.PASS),
+      rec('tarball-installer-entry', VERDICTS.PASS),
+      rec('owner-approval', VERDICTS.PASS),
+      rec('post-withdraw', VERDICTS.PASS),
+      rec(STEPS.BACKGROUND_CHAIN, VERDICTS.BLOCKED, 'rate_limit'),
+    ]);
+    expect(blocked.exitCode).toBe(EXIT_CODES.BLOCKED);
+    // Clean run of every required leg → 0 even though other steps never ran.
+    const ok = evaluateScenario(installed, [
+      rec('pack', VERDICTS.PASS),
+      rec('tarball-installer-entry', VERDICTS.PASS),
+      rec('owner-approval', VERDICTS.PASS),
+      rec('post-withdraw', VERDICTS.PASS),
+    ]);
+    expect(ok.exitCode).toBe(EXIT_CODES.OK);
+    // An unrecorded required leg is a miss (the run-1 false-green hole).
+    const hole = evaluateScenario(installed, [
+      rec('pack', VERDICTS.PASS),
+      rec('tarball-installer-entry', VERDICTS.PASS),
+      rec('owner-approval', VERDICTS.PASS),
+    ]);
+    expect(hole.exitCode).toBe(EXIT_CODES.FAIL);
+    expect(hole.missingRequired.map((m) => m.step)).toContain('post-withdraw');
+  });
+
+  it('defineScenario rejects a definition without id/label/required', () => {
+    expect(() => defineScenario({ label: 'x', required: {} })).toThrow();
+    expect(() => defineScenario({ id: 'x', required: {} })).toThrow();
+    expect(() => defineScenario({ id: 'x', label: 'x' })).toThrow();
   });
 });

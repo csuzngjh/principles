@@ -40,6 +40,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { defineScenario, evaluateScenario, formatEvaluationReport } from './lib/learning-scenario-contract.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const require = createRequire(path.join(REPO, 'package.json'));
@@ -59,6 +60,7 @@ const MARKET_NAME = 'principles-disciple-market';
 const PLUGIN_NAME = 'principles-disciple';
 const LLM_MODEL = process.env.WB_E2E_LLM_MODEL || 'DeepSeek-V4-Flash-Vision-Exp';
 const LLM_KEY_ENV = 'AMD_RADEON_API_KEY';
+const LLM_BASE_URL = process.env.WB_E2E_LLM_BASE_URL || 'https://developer.amd.com.cn/radeon/api/v1';
 const POLICY_TERMINAL_KINDS = new Set(['implementation', 'defer']);
 const ADMISSION_CONFIDENCE_THRESHOLD = 0.5;
 
@@ -69,40 +71,61 @@ function record(step, verdict, detail) {
   console.log(`[${verdict}] ${step} — ${detail}`);
 }
 
-/** THE single exit path. Exit 0 requires every REQUIRED step PASS (a POLICY or
- * SKIP verdict on a required step is a failure of the full scenario — R2/R3:
- * missing legs can never exit 0). BLOCKED (2) only for a durable provider rate
- * limit. */
+/** THE single exit path. Round-5 R2b: the exit code comes ONLY from the
+ * shared scenario-contract module (defineScenario + evaluateScenario) — this
+ * runner declares its required-step set through that ONE authority and carries
+ * NO exit logic of its own. The module's precedence (FAIL > blocking BLOCKED >
+ * missing leg) means a real product failure is never masked as a provider
+ * BLOCKED, and a required leg that was never RECORDED is a miss (an early
+ * return can never shrink the denominator). */
 function finalize() {
-  const required = new Set(REQUIRED_STEPS);
-  // A required step that was never RECORDED is a miss too (R2 defect class:
-  // an early return must never shrink the denominator to the steps that ran).
-  const missing = [...required].filter((step) => {
-    const row = results.find((r) => r.step === step);
-    return !row || row.verdict !== 'PASS';
-  });
-  const failed = results.filter((r) => r.verdict === 'FAIL');
-  const blocked = results.filter((r) => r.verdict === 'BLOCKED');
-  console.log(`\nInstalled-full-learning E2E: ${results.filter((r) => r.verdict === 'PASS').length} PASS, ${failed.length} FAIL, ${blocked.length} BLOCKED, ${missing.length} required-step miss (started ${startedAt})`);
+  let evaluation;
+  try {
+    evaluation = evaluateScenario(INSTALLED_FULL_SCENARIO, results);
+  } catch (error) {
+    console.error(`scenario evaluation failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`\nInstalled-full-learning E2E: ${results.filter((r) => r.verdict === 'PASS').length} PASS, ${evaluation.failures.length} FAIL, ${evaluation.blocked.length} blocking BLOCKED, ${evaluation.missingRequired.length} required-leg miss (started ${startedAt})`);
+  console.log(formatEvaluationReport(evaluation));
   try {
     fs.mkdirSync(LAB_ROOT, { recursive: true });
     fs.writeFileSync(path.join(LAB_ROOT, 'e2e-results.json'), JSON.stringify(results, null, 2));
+    fs.writeFileSync(path.join(LAB_ROOT, 'e2e-evaluation.json'), JSON.stringify(evaluation, null, 2));
   } catch (error) {
     console.error(`results persist failed: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
     return;
   }
-  process.exitCode = blocked.length > 0 ? 2 : (failed.length > 0 || missing.length > 0) ? 1 : 0;
+  process.exitCode = evaluation.exitCode;
 }
 
-// Required steps for the FULL-PRINCIPLE scenario (R3: no dynamic PASS counting;
-// the set is fixed and every member must PASS).
-const REQUIRED_STEPS = [
-  'pack', 'build-release-asset', 'installer-run', 'deploy-register-init',
-  'governance-config-from-args', 'enable', 'real-failure-evidence',
-  'eligible-signal-synthetic', 'background-chain', 'chain-disposition',
-  'owner-approval', 'next-turn-injection', 'withdraw', 'post-withdraw',
-];
+/** The installed runner's required-step set, declared through the shared
+ * contract module (round-5 R2b) — the FULL-principle chain plus the install
+ * legs that make this the INSTALLED-product acceptance. */
+const INSTALLED_FULL_SCENARIO = defineScenario({
+  id: 'installed-full-principle-learning',
+  label: '正式安装产物完整原则学习 (INSTALLED FULL PRINCIPLE LEARNING)',
+  requiresFullLearning: true,
+  required: {
+    'pack': ['PASS'],
+    'build-release-asset': ['PASS'],
+    'tarball-installer-entry': ['PASS'],
+    'installer-run': ['PASS'],
+    'deploy-register-init': ['PASS'],
+    'governance-config-from-args': ['PASS'],
+    'enable': ['PASS'],
+    'real-failure-evidence': ['PASS'],
+    'eligible-signal-synthetic': ['PASS'],
+    'background-chain': ['PASS'],
+    'chain-disposition': ['PASS'],
+    'owner-approval': ['PASS'],
+    'next-turn-injection': ['PASS'],
+    'withdraw': ['PASS'],
+    'post-withdraw': ['PASS'],
+  },
+});
 
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
@@ -265,17 +288,61 @@ async function main() {
   if (!fs.existsSync(identityStamp)) { record('build-release-asset', 'FAIL', `payload has no product-identity stamp (${fs.readdirSync(assetPayload).slice(0, 8).join(',')}…)`) ; return finalize(); }
   record('build-release-asset', 'PASS', `stamped payload; identity=${fs.readFileSync(identityStamp, 'utf8').slice(0, 200)}`);
 
+  // ── 1b. Consume the PACKAGED npm installer entry itself (round-5 R3
+  // boundary): the main install below runs the source-built CLI dist; this
+  // leg proves the tarball's OWN entry installs in a FRESH HOME with no
+  // source tree, consuming the same stamped payload. Isolated second HOME.
+  const tarballHome = path.join(LAB_ROOT, 'tarball-home');
+  const tarballProject = path.join(LAB_ROOT, 'tarball-project');
+  const tarballGov = path.join(tarballHome, '.workbuddy', 'pd-workspace');
+  const tarballExtractDir = path.join(LAB_ROOT, 'tarball-pkg');
+  for (const dir of [tarballHome, tarballProject]) fs.mkdirSync(dir, { recursive: true });
+  const extract = spawnSync('tar', ['-xzf', packed.tarball, '-C', tarballExtractDir], { encoding: 'utf8', timeout: 120_000 });
+  const tarballEntry = path.join(tarballExtractDir, 'package', 'dist', 'index.js');
+  if (extract.status !== 0 || !fs.existsSync(tarballEntry)) {
+    record('tarball-installer-entry', 'FAIL',
+      `packaged npm installer entry unusable: tarExit=${extract.status} entryFound=${fs.existsSync(tarballEntry)} stderr=${(extract.stderr || '').slice(-200)}`);
+  } else {
+    const tarballInstall = spawnSync(process.execPath, [
+      tarballEntry, '--host', 'workbuddy', '--workspace', tarballProject, '--yes', '--json',
+      '--provider', 'openai', '--model', LLM_MODEL, '--api-key-env', LLM_KEY_ENV,
+      '--base-url', LLM_BASE_URL,
+    ], {
+      encoding: 'utf8', timeout: 900_000,
+      env: {
+        ...process.env,
+        WORKBUDDY_CONFIG_DIR: path.join(tarballHome, '.workbuddy'),
+        CODEBUDDY_CONFIG_DIR: path.join(tarballHome, '.workbuddy'),
+        USERPROFILE: tarballHome,
+        HOME: tarballHome,
+        PD_WORKBUDDY_ADAPTER_ENTRY: undefined,
+        PD_INSTALL_PLUGIN_DIR: assetPayload,
+        PD_SKIP_NPM_UPGRADE: '1',
+        PD_SKIP_GLOBAL_SHIM: '1',
+      },
+    });
+    let tarballGovOk = false;
+    try {
+      const tarballConfigText = fs.readFileSync(path.join(tarballGov, '.pd', 'config.yaml'), 'utf8');
+      tarballGovOk = new RegExp(`model:\\s*["']?${LLM_MODEL}`).test(tarballConfigText)
+        && new RegExp(`baseUrl:\\s*["']?${LLM_BASE_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(tarballConfigText);
+    } catch { /* config absent */ }
+    const tarballJson = parseLastJsonBlock(tarballInstall.stdout);
+    const tarballOk = tarballInstall.status === 0 && tarballJson.success === true && tarballGovOk;
+    record('tarball-installer-entry', tarballOk ? 'PASS' : 'FAIL',
+      `packaged tarball's OWN installer entry (fresh HOME, no source tree): exit=${tarballInstall.status} success=${tarballJson.success === true} govProfileCarriesArgs=${tarballGovOk} stdoutTail=${(tarballInstall.stdout || '').slice(-200)} stderr=${(tarballInstall.stderr || '').slice(-200)}`);
+  }
+
   // ── 2. OFFICIAL install with the LLM profile from INSTALL ARGS ──
   // --base-url is required for a custom OpenAI-compatible deployment: pi-ai
   // validates the model against the provider catalog unless the profile
   // carries a custom endpoint (the first R3 run failed exactly there — the
   // install-arg surface could not express a baseUrl, so the diagnostician
   // died in provider catalog validation).
-  const llmBaseUrl = process.env.WB_E2E_LLM_BASE_URL || 'https://developer.amd.com.cn/radeon/api/v1';
   const install = spawnSync(process.execPath, [
     installerEntry, '--host', 'workbuddy', '--workspace', PROJECT, '--yes', '--json',
     '--provider', 'openai', '--model', LLM_MODEL, '--api-key-env', LLM_KEY_ENV,
-    '--base-url', llmBaseUrl,
+    '--base-url', LLM_BASE_URL,
   ], {
     encoding: 'utf8', timeout: 900_000,
     env: { ...engineEnvBase(), PD_INSTALL_PLUGIN_DIR: assetPayload, PD_SKIP_NPM_UPGRADE: '1', PD_SKIP_GLOBAL_SHIM: '1' },
@@ -302,7 +369,7 @@ async function main() {
   const configText = fs.readFileSync(govConfig, 'utf8');
   const profileFromArgs = new RegExp(`model:\\s*["']?${LLM_MODEL}["']?`).test(configText)
     && new RegExp(`apiKeyEnv:\\s*["']?${LLM_KEY_ENV}["']?`).test(configText)
-    && new RegExp(`baseUrl:\\s*["']?${llmBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']?`).test(configText);
+    && new RegExp(`baseUrl:\\s*["']?${LLM_BASE_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']?`).test(configText);
   record('governance-config-from-args', profileFromArgs ? 'PASS' : 'FAIL',
     `config.yaml written by the installer carries the install-arg model/apiKeyEnv (read-only assertion; the worker cycles below prove consumption through the real loader)`);
 

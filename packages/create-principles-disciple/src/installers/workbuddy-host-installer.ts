@@ -54,7 +54,7 @@ import {
   type InstallHost,
 } from '@principles/install-layout';
 import { atomicReplaceTextFile } from '../utils/config-file-io.js';
-import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider } from '../mvp-config.js';
+import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
 import type {
   HostInstaller,
   HostInstallContext,
@@ -674,14 +674,25 @@ function applyWorkbuddyGovernanceRuntimeProfile(
       nextAction: 'Re-run the installer with both --provider <openai|anthropic|deepseek> and --api-key-env <ENV_VAR_NAME>.',
     };
   }
-  // Round-4 R3: an explicit --base-url must be a usable http(s) endpoint —
-  // pi-ai treats its PRESENCE as "custom endpoint, skip the model catalog",
-  // so a junk value would silently break every governance LLM call.
-  const baseUrl = typeof profile.baseUrl === 'string' ? profile.baseUrl.trim() : '';
-  if (baseUrl.length > 0 && !/^https?:\/\//.test(baseUrl)) {
+  // Round-4 R3 / round-5 S3: an explicit --base-url must be a usable http(s)
+  // endpoint — pi-ai treats its PRESENCE as "custom endpoint, skip the model
+  // catalog", so a junk value would silently break every governance LLM call.
+  // EXPLICIT blank fails loud (same rule as blank --model); validity is real
+  // URL parsing via the ONE shared validation (a prefix regex let `https://`
+  // through — round-5 independent repro round5-badurl-results.json).
+  const baseUrlRaw = typeof profile.baseUrl === 'string' ? profile.baseUrl : undefined;
+  const baseUrl = baseUrlRaw !== undefined ? baseUrlRaw.trim() : '';
+  if (baseUrlRaw !== undefined && baseUrl.length === 0) {
     return {
       ok: false,
-      reason: `workbuddy_governance_profile_invalid: --base-url "${baseUrl}" is not a valid http(s) URL.`,
+      reason: `workbuddy_governance_profile_invalid: --base-url was given but blank. Pass a valid http(s) endpoint URL, or omit --base-url to use the provider default.`,
+      nextAction: 'Re-run the installer with --base-url <https endpoint> (or omit it).',
+    };
+  }
+  if (baseUrl.length > 0 && !isValidHttpBaseUrl(baseUrl)) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_invalid: --base-url "${baseUrl}" is not a valid http(s) URL with a hostname.`,
       nextAction: 'Re-run the installer with --base-url <https endpoint> (or omit it to use the provider default).',
     };
   }

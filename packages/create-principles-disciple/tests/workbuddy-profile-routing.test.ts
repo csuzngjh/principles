@@ -374,14 +374,18 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
     expect(binding.profile.baseUrl).toBe('https://llm.example.test/v1');
 
     // Malformed endpoint → fail loud at the write boundary (rc-3), no write.
-    const bad = currentLab();
-    const badResult = await install(
-      baseOptions(bad, { provider: 'openai', apiKeyEnv: 'WB_TEST_KEY', model: 'm', baseUrl: 'not-a-url' }),
-      bad.payloadDir,
-      { quiet: true },
-    );
-    expect(badResult.success).toBe(false);
-    expect(String(badResult.reason ?? '')).toContain('not a valid http(s) URL');
+    // Round-5 S3: `https://` (no hostname) and EXPLICIT blank are invalid too
+    // (the prefix-regex era accepted `https://` and silently dropped blanks).
+    for (const badBaseUrl of ['not-a-url', 'https://', '   ']) {
+      const bad = currentLab();
+      const badResult = await install(
+        baseOptions(bad, { provider: 'openai', apiKeyEnv: 'WB_TEST_KEY', model: 'm', baseUrl: badBaseUrl }),
+        bad.payloadDir,
+        { quiet: true },
+      );
+      expect(badResult.success, `base-url ${JSON.stringify(badBaseUrl)} must not install`).toBe(false);
+      expect(String(badResult.reason ?? '')).toMatch(/not a valid http\(s\) URL|was given but blank/);
+    }
   });
 
   it('no --provider: the governance config keeps the runtime-init default (no empty-value write, no binding overwrite)', { timeout: 240_000 }, async () => {

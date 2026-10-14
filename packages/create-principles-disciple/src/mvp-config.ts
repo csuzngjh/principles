@@ -339,6 +339,22 @@ export function resolveDefaultModelForProvider(provider: string): string {
 }
 
 /**
+ * Round-5 S3: THE one custom-endpoint validation — real URL parsing (rc-3),
+ * not a protocol-prefix regex (`https://` alone parses to no hostname and
+ * would poison every governance LLM call). Shared by the interactive prompt,
+ * the CLI flag, and the governance write boundary. No network reachability
+ * check — only the URL is well-formed.
+ */
+export function isValidHttpBaseUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * PRI-308: Generate .pd/config.yaml content.
  *
  * This replaces the old feature-flags.yaml generation.

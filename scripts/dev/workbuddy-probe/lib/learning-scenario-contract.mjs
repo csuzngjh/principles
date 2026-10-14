@@ -157,6 +157,30 @@ export function resolveScenarioId(raw) {
 }
 
 /**
+ * Round-5 R2b: declare a scenario DEFINITION with the same shape and rules
+ * as the built-ins — the ONE way for another acceptance runner (e.g. the
+ * installed-product driver) to parameterize its required-step set. It MUST
+ * reuse this module's evaluator: no runner may carry a second finalize with
+ * its own exit precedence (that duplication is exactly how the installed
+ * runner came to rank BLOCKED above FAIL and mask a product defect).
+ */
+export function defineScenario({ id, label, requiresFullLearning = true, required }) {
+  if (!id || !label || !required || typeof required !== 'object') {
+    throw new Error('defineScenario requires id, label and a required-step map');
+  }
+  return Object.freeze({
+    id: String(id),
+    label: String(label),
+    requiresFullLearning: requiresFullLearning === true,
+    exitContract:
+      'all required legs PASS → 0; any FAIL row or missing required leg → 1; blocking provider BLOCKED (persisted evidence only) → 2; FAIL outranks BLOCKED so a real defect is never reported as environment',
+    required: Object.freeze(Object.fromEntries(
+      Object.entries(required).map(([step, accepted]) => [step, Object.freeze([...accepted])]),
+    )),
+  });
+}
+
+/**
  * A BLOCKED record blocks the scenario exit unless it was EXPLICITLY recorded
  * `blocking: false` (probe-scope classification). An omitted flag blocks —
  * the conservative default.
@@ -166,8 +190,9 @@ export function isBlockingRecord(record) {
 }
 
 /**
- * Evaluate one scenario run. `records` is the script's result rows
- * ({ step, verdict, detail, blocking? }).
+ * Evaluate one scenario run. Accepts a scenario ID (built-ins) or a
+ * DEFINITION from defineScenario (parameterized runners — same rules).
+ * `records` is the script's result rows ({ step, verdict, detail, blocking? }).
  *
  * Returns a frozen evaluation:
  *   ok                  true iff exitCode === 0
@@ -181,10 +206,12 @@ export function isBlockingRecord(record) {
  *   failures            FAIL rows
  *   blocked             BLOCKING BLOCKED rows only
  */
-export function evaluateScenario(scenarioId, records) {
-  const scenario = SCENARIOS[scenarioId];
-  if (!scenario) {
-    throw new Error(`unknown scenario '${scenarioId}' (known: ${Object.keys(SCENARIOS).join(', ')})`);
+export function evaluateScenario(scenarioIdOrDefinition, records) {
+  const scenario = typeof scenarioIdOrDefinition === 'string'
+    ? SCENARIOS[scenarioIdOrDefinition]
+    : scenarioIdOrDefinition;
+  if (!scenario || typeof scenario !== 'object' || !scenario.required) {
+    throw new Error(`unknown scenario '${typeof scenarioIdOrDefinition === 'string' ? scenarioIdOrDefinition : 'definition'}' (known: ${Object.keys(SCENARIOS).join(', ')}, or pass a defineScenario() definition)`);
   }
   const list = (Array.isArray(records) ? records : []).filter((r) => r && typeof r === 'object');
   const failures = list.filter((r) => r.verdict === VERDICTS.FAIL);
@@ -230,7 +257,7 @@ export function evaluateScenario(scenarioId, records) {
       : 'full principle learning did NOT run in this scenario (this is not a full-learning acceptance; see the scenario exit contract)');
 
   return Object.freeze({
-    scenarioId,
+    scenarioId: scenario.id,
     scenarioLabel: scenario.label,
     exitContract: scenario.exitContract,
     ok,

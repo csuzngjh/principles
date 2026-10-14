@@ -731,11 +731,15 @@ registry.when(/^the background worker advances it toward a reviewable proposal$/
       // provider BLOCKED and never a fake injection PASS): every candidate's
       // production disposition is the intake policy refusal — no approval row
       // will EVER exist for this chain, so cycling to the deadline would be
-      // dishonest. The classification ends the WHOLE scenario here (explicit
-      // skip with the reason below) — it must never degrade into a silent
-      // skip of an individual required step (round-4 R2).
+      // dishonest. Round-5 R2a: this BDD feature IS the full-principle
+      // scenario — a DETERMINISTIC policy refusal means its required chain
+      // did NOT run, so it FAILS the scenario (plain thrown Error, never
+      // ctx.skip). The policy-refusal CONTRACT has its own dedicated scenario
+      // in the acceptance script (`--scenario policy-refusal`); throwing
+      // BlockedScenarioError here let the suite exit 0 without a principle
+      // chain — exactly the vacuous pass this remediation closes.
       if (chain !== null && chain.candidates.length > 0 && chain.candidates.every((c) => candidateDisposition(chain, c) === 'policy_terminal')) {
-        throw new BlockedScenarioError(`POLICY-TERMINAL: every candidate of diagnostician task ${chain.diagnosticianTaskId} ends at the not_internalizable intake policy refusal (approvals row absent BY DESIGN): ${chainSummary(chain)} — full principle learning did NOT run in this scenario; reported as its policy terminal, NOT a provider BLOCKED and not an injection PASS`);
+        throw new Error(`FAIL (policy terminal, not a provider BLOCKED): every candidate of diagnostician task ${chain.diagnosticianTaskId} ends at the not_internalizable intake policy refusal (approvals row absent BY DESIGN): ${chainSummary(chain)} — the full-principle scenario requires an actionable prompt candidate, so full principle learning did NOT run in this scenario. The policy-refusal contract is verified by the dedicated policy-refusal scenario, not by this feature.`);
       }
       // Admission terminal (rc-7 loop-state freshness): every ACTIONABLE
       // candidate's persisted confidence is below the admission gate's

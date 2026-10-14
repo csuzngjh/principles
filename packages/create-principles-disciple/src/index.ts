@@ -13,6 +13,7 @@ import {
   MVP_CHANNELS,
   buildFailureOutput,
   getHomeDir,
+  isValidHttpBaseUrl,
 } from './mvp-config.js';
 import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
 import { isHostTarget, type HostTarget, HOST_TARGETS } from './installers/index.js';
@@ -246,17 +247,26 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         return;
       }
       cliOptions.runtimeProfile = { provider, apiKeyEnv, model: model || undefined };
-      // Round-4 R3: --base-url / PD_BASE_URL — an OpenAI-compatible custom
-      // endpoint. Present → pi-ai calls it directly and skips the provider
-      // model catalog (custom deployment model ids are catalog-rejected
-      // without it). rc-3: validate the shape; a bad URL must fail loud.
-      const baseUrl = typeof options.baseUrl === 'string' && options.baseUrl.length > 0
-        ? options.baseUrl
-        : process.env.PD_BASE_URL;
-      if (typeof baseUrl === 'string' && baseUrl.trim().length > 0) {
-        const trimmed = baseUrl.trim();
-        if (!/^https?:\/\//.test(trimmed)) {
-          const msg = `--base-url "${trimmed}" is not a valid http(s) URL.`;
+      // Round-4 R3 / round-5 S3: --base-url / PD_BASE_URL — an OpenAI-compatible
+      // custom endpoint. Present → pi-ai calls it directly and skips the
+      // provider model catalog. rc-3: an EXPLICIT blank value fails loud (same
+      // rule as blank --model); a value that does not parse as a real http(s)
+      // URL fails loud (a prefix regex let `https://` through).
+      const baseUrlRaw = typeof options.baseUrl === 'string' ? options.baseUrl : process.env.PD_BASE_URL;
+      if (baseUrlRaw !== undefined) {
+        const trimmed = baseUrlRaw.trim();
+        if (trimmed.length === 0) {
+          const msg = `--base-url was given but blank. Pass a valid http(s) endpoint URL, or omit --base-url to use the provider default.`;
+          if (jsonMode) {
+            console.log(JSON.stringify(buildFailureOutput('runtime_profile_invalid', msg), null, 2));
+          } else {
+            logger.error(msg);
+          }
+          process.exit(1);
+          return;
+        }
+        if (!isValidHttpBaseUrl(trimmed)) {
+          const msg = `--base-url "${trimmed}" is not a valid http(s) URL with a hostname.`;
           if (jsonMode) {
             console.log(JSON.stringify(buildFailureOutput('runtime_profile_invalid', msg), null, 2));
           } else {
@@ -270,6 +280,18 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     } else if (apiKeyEnv) {
       // rc-3: fail loud — apiKeyEnv without provider is unusable.
       const msg = `--api-key-env given without --provider. Pass --provider openai (or set PD_PROVIDER).`;
+      if (jsonMode) {
+        console.log(JSON.stringify(buildFailureOutput('runtime_profile_incomplete', msg), null, 2));
+      } else {
+        logger.error(msg);
+      }
+      process.exit(1);
+      return;
+    } else if (options.baseUrl !== undefined || process.env.PD_BASE_URL !== undefined) {
+      // Round-5 S3 (rc-9/cli-6): an endpoint without a provider cannot attach
+      // to any profile — fail loud instead of silently dropping it (explicit
+      // blank included; blanks fail loud in the provider branch too).
+      const msg = `--base-url given without --provider. Pass --provider openai (or set PD_PROVIDER).`;
       if (jsonMode) {
         console.log(JSON.stringify(buildFailureOutput('runtime_profile_incomplete', msg), null, 2));
       } else {
