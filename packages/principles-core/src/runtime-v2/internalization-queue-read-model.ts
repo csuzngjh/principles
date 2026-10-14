@@ -43,6 +43,12 @@ export interface ReadyTask {
   taskId: string;
   taskKind: RunnerKind;
   channel: InternalizationChannel;
+  /**
+   * PRI-954 (F10): when the ready row was created (task `created_at`). Lets
+   * consumers implement oldest-ready-first stage fairness without a second
+   * query; ISO timestamp, absent only for malformed legacy rows.
+   */
+  createdAt?: string;
 }
 
 export type QueueNoReadyTasksReason =
@@ -255,7 +261,14 @@ export class InternalizationQueueReadModel {
       }
 
       // decision === 'proceed' — task passed dependency gate, actionable
-      readyTasks.push({ taskId: piTask.taskId, taskKind: piTask.taskKind, channel: piTask.channel });
+      readyTasks.push({
+        taskId: piTask.taskId,
+        taskKind: piTask.taskKind,
+        channel: piTask.channel,
+        // Queue age authority = the task row's created_at; fall back to the
+        // hydrated pi-metadata timestamp for legacy rows.
+        createdAt: rawTask.createdAt ?? piTask.createdAt,
+      });
     }
 
     // Determine noReadyTasks reason using dominance logic (same as orchestrator)
