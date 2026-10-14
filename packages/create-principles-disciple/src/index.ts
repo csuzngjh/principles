@@ -327,8 +327,18 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       console.log(`  Demo verification .............. ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
       // Fix-4: surface runtime profile status so the user knows whether LLM
       // features (diagnose, candidate intake, internalization) will work.
+      // Round-3 remediation P1: the WorkBuddy host writes the profile into
+      // the GOVERNANCE workspace config (and fails the install loudly if the
+      // write fails), so this success line can truthfully name that file —
+      // reaching it at all means the write was round-trip verified. Other
+      // hosts keep the project-dir profile (operatorWorkspaceDir === project
+      // workspace there); the line stays path-free for them (an existing
+      // valid config is preserved verbatim, so a path claim could be false).
       if (installOptions.runtimeProfile) {
-        console.log(`  LLM runtime profile ............ ${installOptions.runtimeProfile.provider} / ${installOptions.runtimeProfile.model ?? '(default)'} (key: $${installOptions.runtimeProfile.apiKeyEnv})`);
+        const profileLocation = host === 'workbuddy'
+          ? ` [written to ${path.join(operatorWorkspaceDir, '.pd', 'config.yaml')}]`
+          : '';
+        console.log(`  LLM runtime profile ............ ${installOptions.runtimeProfile.provider} / ${installOptions.runtimeProfile.model ?? '(default)'} (key: $${installOptions.runtimeProfile.apiKeyEnv})${profileLocation}`);
       } else {
         console.log(`  LLM runtime profile ............ not configured (configure via console: pd console open --workspace "${operatorWorkspaceDir}")`);
       }

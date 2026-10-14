@@ -54,7 +54,7 @@ import {
   type InstallHost,
 } from '@principles/install-layout';
 import { atomicReplaceTextFile } from '../utils/config-file-io.js';
-import { getHomeDir, generateConfigYamlContent } from '../mvp-config.js';
+import { getHomeDir, generateConfigYamlContent, getConfigYamlPath } from '../mvp-config.js';
 import type {
   HostInstaller,
   HostInstallContext,
@@ -582,6 +582,188 @@ export function readWorkbuddyGovernanceFlagOverride(governanceDir: string): bool
   }
 }
 
+// ─── Governance LLM runtime profile (round-3 remediation P1) ────────────────
+
+/**
+ * Profile id the installer writes — the same id `generateConfigYamlContent`
+ * pre-fills for the project config (Fix-4 shape), so the WorkBuddy governance
+ * profile and the other hosts' project profile have ONE shape.
+ */
+const GOVERNANCE_PROFILE_ID = 'pd.default';
+
+type GovernanceProfileApplyResult =
+  | { ok: true; configPath: string; profileId: string }
+  | { ok: false; reason: string; nextAction: string };
+
+/**
+ * Apply the install-collected LLM runtime profile (--provider/--api-key-env/
+ * --model) to the GOVERNANCE workspace's .pd/config.yaml — the single config
+ * the WorkBuddy worker/console/hook chain reads (round-3 P1: the main
+ * installer previously wrote the profile into the PROJECT config.yaml while
+ * this host's governance workspace kept the runtime-init defaults, so the
+ * diagnostician had no usable profile).
+ *
+ * Semantics (frozen remediation contract):
+ * - explicit install profile ⇒ override `runtimeProfiles.pd.default` (same
+ *   write shape as generateConfigYamlContent; unknown extra fields of an
+ *   existing pd.default such as baseUrl/maxTokens are preserved) and point
+ *   `internalAgents.defaultRuntime` + the diagnostician binding at it.
+ *   Other profiles and every other agent binding are preserved; the
+ *   diagnostician's `enabled` kill switch is never touched (PRI-638: Owner
+ *   capability authority stays with the Owner).
+ * - Only `apiKeyEnv` (an environment variable NAME) is ever written — no key
+ *   material reaches config, logs or errors.
+ * - The leading comment header of the existing config is preserved; the
+ *   rewrite carries an explicit installer marker so the provenance of the
+ *   override stays observable. (Inline comments inside the rewritten nested
+ *   blocks cannot survive a parse-mutate-dump edit; the previous content is
+ *   only ever replaced atomically AFTER a full round-trip verification.)
+ * - Round-trip verified loader-grade (JSON_SCHEMA parse + non-empty
+ *   provider/apiKeyEnv + binding assertions) BEFORE the atomic replace;
+ *   any mismatch or write failure leaves the file untouched and fails the
+ *   install loudly (rc-3/rc-9).
+ *
+ * Module-private: the only writer/reader is install() below (step 6.5); the
+ * regression suite exercises it through the REAL install() boundary.
+ */
+function applyWorkbuddyGovernanceRuntimeProfile(
+  governanceDir: string,
+  profile: { readonly provider?: string; readonly model?: string; readonly apiKeyEnv?: string },
+): GovernanceProfileApplyResult {
+  // rc-1/rc-3: validate here — upstream CLI validation is not trusted as a
+  // substitute for a guard at the write boundary.
+  const provider = typeof profile.provider === 'string' ? profile.provider.trim() : '';
+  const model = typeof profile.model === 'string' ? profile.model.trim() : '';
+  const apiKeyEnv = typeof profile.apiKeyEnv === 'string' ? profile.apiKeyEnv.trim() : '';
+  if (provider.length === 0 || apiKeyEnv.length === 0) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_invalid: --provider/--api-key-env must both be non-empty (got provider=${JSON.stringify(provider || undefined)}, apiKeyEnv=${JSON.stringify(apiKeyEnv || undefined)}).`,
+      nextAction: 'Re-run the installer with both --provider <openai|anthropic|deepseek> and --api-key-env <ENV_VAR_NAME>.',
+    };
+  }
+
+  const configPath = getConfigYamlPath(governanceDir);
+  if (!existsSync(configPath)) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_read_failed: ${configPath} does not exist after governance initialization.`,
+      nextAction: `Re-run the installer; if it repeats, run "pd runtime init --confirm --workspace ${governanceDir}" manually to see the underlying error.`,
+    };
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(configPath, 'utf-8');
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_read_failed: ${configPath} (${error instanceof Error ? error.message : String(error)}).`,
+      nextAction: 'Close other tools holding the config file, check permissions, then re-run the installer.',
+    };
+  }
+  // A config that cannot parse is a hard stop (rc-3) — never edited blind.
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(raw);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_unparsable: ${configPath} is not valid YAML (${error instanceof Error ? error.message : String(error)}). No write was performed.`,
+      nextAction: 'Fix or delete the malformed governance config.yaml, then re-run the installer.',
+    };
+  }
+  // rc-2: structural guards with explicit narrowing — the sections the edit
+  // touches must already exist (a loader-valid config always carries them).
+  const configRecord = isRecord(parsed) ? parsed : undefined;
+  const runtimeProfiles = configRecord !== undefined && isRecord(configRecord.runtimeProfiles) ? configRecord.runtimeProfiles : undefined;
+  const internalAgents = configRecord !== undefined && isRecord(configRecord.internalAgents) ? configRecord.internalAgents : undefined;
+  const agentBindings = internalAgents !== undefined && isRecord(internalAgents.agents) ? internalAgents.agents : undefined;
+  if (runtimeProfiles === undefined || internalAgents === undefined || agentBindings === undefined) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_invalid_structure: ${configPath} is missing runtimeProfiles/internalAgents (the loader would reject it). No write was performed.`,
+      nextAction: `Restore a loader-valid governance config ("pd runtime init --confirm --workspace ${governanceDir}" never overwrites an existing file — fix the sections manually), then re-run the installer.`,
+    };
+  }
+
+  // Preserve unknown extra fields of an existing pd.default (baseUrl,
+  // timeoutMs, maxTokens, …); the three install-collected fields win.
+  const existingProfile = isRecord(runtimeProfiles[GOVERNANCE_PROFILE_ID]) ? runtimeProfiles[GOVERNANCE_PROFILE_ID] : {};
+  runtimeProfiles[GOVERNANCE_PROFILE_ID] = {
+    ...existingProfile,
+    type: 'pi-ai',
+    provider,
+    model,
+    apiKeyEnv,
+  };
+  internalAgents.defaultRuntime = GOVERNANCE_PROFILE_ID;
+  // Preserve the diagnostician's other binding fields (its `enabled` kill
+  // switch stays Owner-authoritative — PRI-638 — never re-enabled here).
+  const existingBinding = isRecord(agentBindings.diagnostician) ? agentBindings.diagnostician : {};
+  agentBindings.diagnostician = { ...existingBinding, runtimeProfile: GOVERNANCE_PROFILE_ID };
+
+  // Preserve the leading comment header (the "single source of truth" banner
+  // pd runtime init writes) and mark the installer override.
+  const headerLines: string[] = [];
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' && headerLines.length === 0) continue;
+    if (trimmed.startsWith('#')) headerLines.push(line);
+    else break;
+  }
+  const marker = '# runtimeProfiles.pd.default + internalAgents default/diagnostician binding written by the Principles Disciple installer (--provider/--api-key-env/--model).';
+  const body = yaml.dump(parsed, { lineWidth: -1, quoteStyle: 'double' });
+  const next = headerLines.length > 0 ? `${headerLines.join('\n')}\n${marker}\n${body}` : `${marker}\n${body}`;
+
+  // Round-trip verification, loader-grade: parse with the SAME schema the
+  // production loader uses and assert exactly what the install promised
+  // before anything touches the disk.
+  let verify: unknown;
+  try {
+    verify = yaml.load(next, { schema: yaml.JSON_SCHEMA });
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_rewrite_invalid: verification parse failed (${error instanceof Error ? error.message : String(error)}). Nothing was written.`,
+      nextAction: 'Report this failure — the profile edit produced invalid YAML.',
+    };
+  }
+  const verifiedRecord = isRecord(verify) ? verify : undefined;
+  const verifiedProfiles = verifiedRecord !== undefined && isRecord(verifiedRecord.runtimeProfiles) ? verifiedRecord.runtimeProfiles : undefined;
+  const verifiedInternal = verifiedRecord !== undefined && isRecord(verifiedRecord.internalAgents) ? verifiedRecord.internalAgents : undefined;
+  const verifiedAgentBindings = verifiedInternal !== undefined && isRecord(verifiedInternal.agents) ? verifiedInternal.agents : undefined;
+  const verifiedProfile = verifiedProfiles !== undefined ? verifiedProfiles[GOVERNANCE_PROFILE_ID] : undefined;
+  const verifiedBinding = verifiedAgentBindings !== undefined ? verifiedAgentBindings.diagnostician : undefined;
+  const verifyOk = isRecord(verifiedProfile)
+    && verifiedProfile.type === 'pi-ai'
+    && verifiedProfile.provider === provider && provider.length > 0
+    && verifiedProfile.model === model
+    && verifiedProfile.apiKeyEnv === apiKeyEnv && apiKeyEnv.length > 0
+    && verifiedInternal !== undefined
+    && verifiedInternal.defaultRuntime === GOVERNANCE_PROFILE_ID
+    && isRecord(verifiedBinding)
+    && verifiedBinding.runtimeProfile === GOVERNANCE_PROFILE_ID;
+  if (!verifyOk) {
+    return {
+      ok: false,
+      reason: 'workbuddy_governance_profile_rewrite_mismatch: round-trip verification did not observe the requested profile + binding. Nothing was written.',
+      nextAction: 'Report this failure with the governance config.yaml content.',
+    };
+  }
+
+  try {
+    mkdirSync(path.dirname(configPath), { recursive: true });
+    atomicReplaceTextFile(configPath, next);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_write_failed: could not write ${configPath} (${error instanceof Error ? error.message : String(error)}). The previous governance config was left unchanged.`,
+      nextAction: `Check permissions under ${path.dirname(configPath)}, close tools holding the file, then re-run the installer.`,
+    };
+  }
+  return { ok: true, configPath, profileId: GOVERNANCE_PROFILE_ID };
+}
+
 // ─── Detect details ─────────────────────────────────────────────────────────
 
 export interface WorkbuddyDetectDetails extends HostDetectResult {
@@ -804,6 +986,29 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       };
     }
 
+    // 6.5 Round-3 remediation P1: the install-collected LLM runtime profile
+    //     (--provider/--api-key-env/--model) is GOVERNANCE state for this
+    //     host — it must land in the governance workspace config the
+    //     worker/console/hook chain actually reads. (The main installer no
+    //     longer writes it into the project config.yaml for this host, so
+    //     this is the single writer — no second truth.) Without a profile the
+    //     governance config keeps its runtime-init default untouched.
+    let profileNote = '';
+    if (ctx.runtimeProfile) {
+      const applied = applyWorkbuddyGovernanceRuntimeProfile(p.governanceDir, ctx.runtimeProfile);
+      if (!applied.ok) {
+        return {
+          success: false,
+          hostId: this.hostId,
+          configPath: p.settingsPath,
+          configAction: registration.settingsAction,
+          reason: applied.reason,
+          nextAction: applied.nextAction,
+        };
+      }
+      profileNote = ` LLM runtime profile '${applied.profileId}' written to ${applied.configPath}.`;
+    }
+
     // 7. Record host + governance workspace in the install manifest (set union).
     const manifest = mergeWorkbuddyIntoInstallManifest(p.installManifestPath, p.governanceDir);
     if (!manifest.ok) {
@@ -825,7 +1030,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       hostId: this.hostId,
       configPath: p.settingsPath,
       configAction: registration.settingsAction,
-      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}. PD governance stays DISABLED until you explicitly enable it.`,
+      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote} PD governance stays DISABLED until you explicitly enable it.`,
       nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To enable PD governance, set host.workbuddy: { enabled: true } in ${path.join(p.governanceDir, '.pd', 'config.yaml')} (the console flag surface or the installer enable API shows the target config first).`,
     };
   }

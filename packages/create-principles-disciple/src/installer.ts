@@ -4031,7 +4031,15 @@ export async function install(
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Generating config.yaml...');
-    const configYamlPath = await generateConfigYamlConfig(options.workspaceDir, options.runtimeProfile);
+    // Round-3 remediation P1: for the WorkBuddy host the LLM runtime profile
+    // is GOVERNANCE state — WorkBuddyHostInstaller applies it to the
+    // governance workspace config (the file its worker/console/hook chain
+    // reads). Writing it here too would create a second truth. Other hosts
+    // keep the historical project-dir profile (Fix-4 behavior, unchanged).
+    const configYamlPath = await generateConfigYamlConfig(
+      options.workspaceDir,
+      options.host === 'workbuddy' ? undefined : options.runtimeProfile,
+    );
     verification.features = 'passed';
     stepIndex++;
 
