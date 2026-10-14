@@ -159,7 +159,7 @@ describe('serializeAdmissionDocument', () => {
       schemaVersion: CANDIDATE_ADMISSION_SCHEMA_VERSION,
       evaluations: [evaluation()],
       currentEvaluationId: 'eval-1',
-    } as CandidateAdmissionDocument);
+    });
     expect(result.ok).toBe(true);
   });
 
@@ -169,7 +169,7 @@ describe('serializeAdmissionDocument', () => {
       schemaVersion: CANDIDATE_ADMISSION_SCHEMA_VERSION,
       evaluations: [huge],
       currentEvaluationId: 'eval-1',
-    } as CandidateAdmissionDocument);
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('admission_json_size_exceeded');
   });
