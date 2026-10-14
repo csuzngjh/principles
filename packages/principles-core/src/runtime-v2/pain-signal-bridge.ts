@@ -505,7 +505,7 @@ export async function persistPainDiagnosis(deps: {
  * new admission version (append-only; idempotent by material fingerprint).
  */
 export async function evaluateAndPersistAdmissionFromStore(
-  stateManager: Pick<RuntimeStateManager, 'getTask' | 'getRunsByTask' | 'getCandidatesByTaskId' | 'appendAdmissionEvaluation'>,
+  stateManager: Pick<RuntimeStateManager, 'getTask' | 'getRunsByTask' | 'getRun' | 'getArtifact' | 'getCandidatesByTaskId' | 'appendAdmissionEvaluation'>,
   candidateIds: readonly string[],
   input: { taskId: string },
 ): Promise<
@@ -525,7 +525,6 @@ export async function evaluateAndPersistAdmissionFromStore(
   // can only come from a partial test-double fixture and follows the flat path.
   const isSplitSubtask = typeof task.taskKind === 'string' && task.taskKind.startsWith('diag_');
   let ingressTask = task;
-  const outputSourceTaskIds: string[] = [input.taskId];
   if (isSplitSubtask) {
     const parentRef = typeof task.inputRef === 'string' ? task.inputRef : '';
     const parent = parentRef.length > 0 ? await stateManager.getTask(parentRef) : null;
@@ -533,7 +532,6 @@ export async function evaluateAndPersistAdmissionFromStore(
       return { ok: false, reason: 'diagnosis_lineage_inconsistent', nextAction: 'the router subtask does not resolve to a succeeded diagnostician parent; re-run the diagnosis before intake' };
     }
     ingressTask = parent;
-    outputSourceTaskIds.unshift(input.taskId);
   } else if (typeof task.taskKind === 'string' && task.taskKind !== 'diagnostician') {
     return { ok: false, reason: 'diagnosis_lineage_inconsistent', nextAction: `candidate task kind '${task.taskKind}' is not a diagnostician task or split stage; re-run the diagnosis` };
   }
@@ -541,7 +539,6 @@ export async function evaluateAndPersistAdmissionFromStore(
   if (reentry.errorCode !== null) {
     return { ok: false, reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; re-run the diagnosis before intake' };
   }
-  let output: DiagnosticianOutputV1 | undefined;
   const parseV1 = (payload: string | undefined | null): DiagnosticianOutputV1 | undefined => {
     if (typeof payload !== 'string' || payload.length === 0) return undefined;
     try {
@@ -551,16 +548,6 @@ export async function evaluateAndPersistAdmissionFromStore(
       return undefined;
     }
   };
-  for (const sourceTaskId of outputSourceTaskIds) {
-    const runs = await stateManager.getRunsByTask(sourceTaskId);
-    for (let i = runs.length - 1; i >= 0 && output === undefined; i -= 1) {
-      output = parseV1(runs[i]?.outputPayload);
-    }
-    if (output !== undefined) break;
-  }
-  if (output === undefined) {
-    return { ok: false, reason: 'diagnostician_output_unavailable', nextAction: 're-run the diagnosis before intake (the persisted run carries no parseable output)' };
-  }
   const ownerStatementPresent = isOwnerStatementEvidence(reentry.correctionEvidence);
   const candidates = (await stateManager.getCandidatesByTaskId(ingressTask.taskId))
     .filter((candidate) => candidateIds.includes(candidate.candidateId))
@@ -568,23 +555,102 @@ export async function evaluateAndPersistAdmissionFromStore(
   if (candidates.length !== candidateIds.length) {
     return { ok: false, reason: 'diagnosis_lineage_inconsistent', nextAction: 'requested candidates do not resolve through the validated diagnosis lineage; re-run the diagnosis' };
   }
-  const results = evaluateCandidateAdmissions(candidates, output, {
-    provenance: reentry.provenance,
-    inputEvidenceCount: reentry.evidenceCount,
-    ...(ownerStatementPresent ? { ownerStatementPresent } : {}),
-  });
+
+  /**
+   * SPEC review round-4 P1 (round binding): the diagnostic output is resolved
+   * PER CANDIDATE from that candidate's OWN `source_run_id`, cross-checked
+   * against its `artifact_id` + `task_id`. The previous shape picked the first
+   * parseable run by reverse task order and evaluated EVERY candidate against
+   * that one shared output, so a later round (r2) silently rewrote an earlier
+   * round's (r1) admission basis — confidence, evidence count and material
+   * fingerprint all came from the wrong diagnosis.
+   *
+   * Fail-closed (rc-3/rc-9): a missing run row, a non-succeeded run, a
+   * run/task mismatch, an artifact that belongs to a different run, or an
+   * unparseable owning output refuses the candidate. It NEVER falls back to
+   * another historical successful run of the same task — substituting a
+   * different round's material is the exact defect being closed.
+   */
+  type ResolvedRound = { output: DiagnosticianOutputV1; sourceRunId: string; artifactId: string };
+  const resolveOwningRound = async (candidate: { candidateId: string; sourceRunId: string; artifactId: string; taskId: string }):
+    Promise<{ ok: true; round: ResolvedRound } | { ok: false; reason: string }> => {
+    const refuse = (reason: string) => ({ ok: false as const, reason });
+    const sourceRunId = typeof candidate.sourceRunId === 'string' ? candidate.sourceRunId : '';
+    if (sourceRunId.length === 0) {
+      return refuse(`candidate_round_unresolved:${candidate.candidateId}:missing_source_run_id`);
+    }
+    let run;
+    try {
+      run = await stateManager.getRun(sourceRunId);
+    } catch {
+      return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_lookup_failed`);
+    }
+    if (run === null) return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_missing`);
+    if (run.taskId !== candidate.taskId) {
+      return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_task_mismatch`);
+    }
+    if (run.executionStatus !== 'succeeded') {
+      return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_not_succeeded`);
+    }
+    const artifactId = typeof candidate.artifactId === 'string' ? candidate.artifactId : '';
+    if (artifactId.length > 0) {
+      let artifact;
+      try {
+        artifact = await stateManager.getArtifact(artifactId);
+      } catch {
+        return refuse(`candidate_round_unresolved:${candidate.candidateId}:artifact_lookup_failed`);
+      }
+      // A missing artifact row is tolerated for pre-artifact candidates, but a
+      // PRESENT artifact that belongs to another run/task is lineage corruption.
+      if (artifact !== null && (artifact.runId !== sourceRunId || artifact.taskId !== candidate.taskId)) {
+        return refuse(`candidate_round_unresolved:${candidate.candidateId}:artifact_run_mismatch`);
+      }
+    }
+    const output = parseV1(run.outputPayload);
+    if (output === undefined) {
+      return refuse(`candidate_round_unresolved:${candidate.candidateId}:owning_output_unparseable`);
+    }
+    return { ok: true, round: { output, sourceRunId, artifactId } };
+  };
+
+  // Resolve EVERY candidate's own round BEFORE any evaluation, so a single
+  // unresolved round refuses the whole call with zero writes instead of
+  // partially persisting a mixed-round admission set.
+  const resolvedRounds = new Map<string, ResolvedRound>();
+  for (const candidate of candidates) {
+    const resolved = await resolveOwningRound(candidate);
+    if (!resolved.ok) {
+      return {
+        ok: false,
+        reason: 'candidate_diagnosis_round_unresolved',
+        nextAction: `candidate ${candidate.candidateId} does not resolve to its own diagnosis run output (${resolved.reason}); re-run the diagnosis for this round before intake`,
+      };
+    }
+    resolvedRounds.set(candidate.candidateId, resolved.round);
+  }
+
   const decisions = new Map<string, { decision: AdmissionDecision; reason: string; nextAction: string }>();
   const evaluatedAt = new Date().toISOString();
-  const materialFingerprint = fingerprintMaterial([
-    JSON.stringify(output),
-    reentry.provenance,
-    String(reentry.evidenceCount),
-    ownerStatementPresent && reentry.correctionEvidence ? fingerprintStatement(reentry.correctionEvidence.text) : 'no-owner-statement',
-  ]);
-  for (let i = 0; i < candidates.length; i++) {
-    const candidate = candidates[i];
-    const admission = results[i];
-    if (!candidate || !admission) continue;
+  for (const candidate of candidates) {
+    const round = resolvedRounds.get(candidate.candidateId);
+    if (round === undefined) continue;
+    const {output} = round;
+    // The fingerprint is computed from THIS candidate's own material, so two
+    // rounds never collide on the same idempotency key.
+    const materialFingerprint = fingerprintMaterial([
+      JSON.stringify(output),
+      reentry.provenance,
+      String(reentry.evidenceCount),
+      ownerStatementPresent && reentry.correctionEvidence ? fingerprintStatement(reentry.correctionEvidence.text) : 'no-owner-statement',
+      round.sourceRunId,
+      candidate.candidateId,
+    ]);
+    const [admission] = evaluateCandidateAdmissions([candidate], output, {
+      provenance: reentry.provenance,
+      inputEvidenceCount: reentry.evidenceCount,
+      ...(ownerStatementPresent ? { ownerStatementPresent } : {}),
+    });
+    if (admission === undefined) continue;
     decisions.set(candidate.candidateId, {
       decision: admission.admission.decision,
       reason: admission.admission.reason,
