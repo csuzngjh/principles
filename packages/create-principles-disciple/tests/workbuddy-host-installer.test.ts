@@ -39,7 +39,8 @@ import {
   findWorkbuddyPluginPayload,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
-import { computeEffectiveFlags, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
+import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
+import { loadPdConfigForPlugin } from '@principles/host-runtime';
 
 function parseYaml(text: string): Record<string, unknown> {
   return yaml.load(text) as Record<string, unknown>;
@@ -628,6 +629,160 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
       // No duplicate keys may be introduced.
       expect(text.match(/enabled: true/g)?.length).toBe(1);
       expect(text.match(/host\.workbuddy:/g)?.length).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── Round-3 remediation P2: a legal `source` field (PRI-637 provenance,
+  //    FeatureFlagEntry source?: 'owner' | 'system') may sit anywhere in the
+  //    flag mapping. The previous scanner treated the first unrecognized line
+  //    as the end of the mapping block and spliced duplicate keys ABOVE it, so
+  //    the rewrite verification failed (config_rewrite_invalid) and
+  //    enable/disable was refused with the stale enabled value preserved.
+  //    Every assertion below that observes the flag value goes through the
+  //    PRODUCTION loader composition (loadPdConfigForPlugin → validatePdConfig
+  //    → computeFeatureFlagsFromConfig — the same path
+  //    packages/workbuddy-adapter/src/pd-hook.ts uses to gate the flag), never
+  //    through text matching alone.
+
+  // Minimal config that the production validator accepts (version,
+  // runtimeProfiles and internalAgents are required sections). The
+  // `host.workbuddy:` key line is emitted by the helper; the argument is the
+  // mapping BLOCK (fields/comments/blank lines indented 4 spaces).
+  const governanceConfigYaml = (workbuddyBlock: string[], afterBlock: string[] = []): string =>
+    [
+      'version: 1',
+      'features:',
+      '  host.workbuddy:',
+      ...workbuddyBlock,
+      ...afterBlock,
+      'runtimeProfiles:',
+      '  pd.default:',
+      '    type: pi-ai',
+      '    provider: probe',
+      '    model: probe-model',
+      '    apiKeyEnv: PD_PROBE_KEY',
+      'internalAgents:',
+      '  defaultRuntime: pd.default',
+      '  agents: {}',
+      '',
+    ].join('\n');
+
+  function readGovernanceFlagThroughProductionLoader(governanceDir: string, flagId = 'host.workbuddy'): boolean {
+    const loaded = loadPdConfigForPlugin(governanceDir);
+    expect(loaded.ok, `production loader must accept the config: ${JSON.stringify(loaded.errors)}`).toBe(true);
+    const flag = computeFeatureFlagsFromConfig(loaded.effective).flags[flagId];
+    expect(flag, `${flagId} must resolve through the frozen flag contract`).toBeDefined();
+    return flag?.enabled === true;
+  }
+
+  it.each([
+    ['before enabled (category, source, enabled)', ['    category: quiet', '    source: owner', '    enabled: false']],
+    ['between enabled and category (enabled, source, category)', ['    enabled: false', '    source: owner', '    category: quiet']],
+    ['after category (enabled, category, source)', ['    enabled: false', '    category: quiet', '    source: owner']],
+  ])('legal source field %s: enable reads true and disable reads false through the production loader', (_ordering, block) => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-flag-src-'));
+    try {
+      const configPath = path.join(dir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, governanceConfigYaml(block));
+
+      const enable = setWorkbuddyGovernanceFlag(dir, true);
+      expect(enable.ok, `enable failed: ${enable.ok ? '' : JSON.stringify(enable)}`).toBe(true);
+      expect(readGovernanceFlagThroughProductionLoader(dir)).toBe(true);
+
+      const disable = setWorkbuddyGovernanceFlag(dir, false);
+      expect(disable.ok, `disable failed: ${disable.ok ? '' : JSON.stringify(disable)}`).toBe(true);
+      expect(readGovernanceFlagThroughProductionLoader(dir)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('enable preserves the source field, comments and blank lines inside the mapping without duplicate keys', () => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-flag-srcmix-'));
+    try {
+      const configPath = path.join(dir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, governanceConfigYaml([
+        '    # PRI-637 provenance recorded by the Owner',
+        '    source: owner',
+        '',
+        '    enabled: false',
+        '    # registry-required category',
+        '    category: quiet',
+      ]));
+
+      const outcome = setWorkbuddyGovernanceFlag(dir, true);
+      expect(outcome.ok, `enable failed: ${outcome.ok ? '' : JSON.stringify(outcome)}`).toBe(true);
+
+      const text = fs.readFileSync(configPath, 'utf8');
+      expect(text).toContain('# PRI-637 provenance recorded by the Owner');
+      expect(text).toContain('# registry-required category');
+      expect(text.match(/    source: owner/g)?.length).toBe(1);
+      expect(text.match(/^ {4}enabled:/gm)?.length).toBe(1);
+      expect(text.match(/^ {4}category:/gm)?.length).toBe(1);
+      const parsed = parseYaml(text) as { features: Record<string, Record<string, unknown>> };
+      expect(parsed.features['host.workbuddy']).toEqual({ source: 'owner', enabled: true, category: 'quiet' });
+      expect(readGovernanceFlagThroughProductionLoader(dir)).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rewrite stops at the mapping block boundary: neighbor feature override and top-level sections untouched', () => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-flag-srcnb-'));
+    try {
+      const configPath = path.join(dir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      // Dedent boundaries right after the workbuddy mapping: the next feature
+      // key at 2-space indent, then the required top-level sections at 0.
+      fs.writeFileSync(configPath, governanceConfigYaml(
+        ['    category: quiet', '    source: owner', '    enabled: false'],
+        ['  signal_collector:', '    enabled: true # neighbor override', '    category: quiet'],
+      ));
+
+      const outcome = setWorkbuddyGovernanceFlag(dir, true);
+      expect(outcome.ok, `enable failed: ${outcome.ok ? '' : JSON.stringify(outcome)}`).toBe(true);
+
+      const text = fs.readFileSync(configPath, 'utf8');
+      expect(text).toContain('enabled: true # neighbor override');
+      const parsed = parseYaml(text) as { features: Record<string, Record<string, unknown>> };
+      expect(parsed.features.signal_collector.enabled).toBe(true);
+      expect(parsed.features['host.workbuddy'].enabled).toBe(true);
+      expect(parsed.features['host.workbuddy'].source).toBe('owner');
+      expect(readGovernanceFlagThroughProductionLoader(dir)).toBe(true);
+      expect(readGovernanceFlagThroughProductionLoader(dir, 'signal_collector')).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('full official round trip true→false→true with a source-first mapping: every leg loader-verified', () => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-flag-srcrt-'));
+    try {
+      const configPath = path.join(dir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      // source BEFORE enabled — the exact shape that made the old writer
+      // refuse the rewrite and silently keep the stale value.
+      fs.writeFileSync(configPath, governanceConfigYaml(['    category: quiet', '    source: owner', '    enabled: false']));
+
+      const firstEnable = setWorkbuddyGovernanceFlag(dir, true);
+      expect(firstEnable.ok, `enable 1 failed: ${firstEnable.ok ? '' : JSON.stringify(firstEnable)}`).toBe(true);
+      expect(readGovernanceFlagThroughProductionLoader(dir)).toBe(true);
+
+      const disable = setWorkbuddyGovernanceFlag(dir, false);
+      expect(disable.ok, `disable failed: ${disable.ok ? '' : JSON.stringify(disable)}`).toBe(true);
+      expect(readGovernanceFlagThroughProductionLoader(dir)).toBe(false);
+
+      const secondEnable = setWorkbuddyGovernanceFlag(dir, true);
+      expect(secondEnable.ok, `enable 2 failed: ${secondEnable.ok ? '' : JSON.stringify(secondEnable)}`).toBe(true);
+      expect(readGovernanceFlagThroughProductionLoader(dir)).toBe(true);
+
+      const text = fs.readFileSync(configPath, 'utf8');
+      expect(text.match(/^ {4}enabled:/gm)?.length).toBe(1);
+      expect(text.match(/^ {4}source:/gm)?.length).toBe(1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

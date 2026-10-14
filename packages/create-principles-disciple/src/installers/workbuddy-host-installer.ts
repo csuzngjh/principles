@@ -491,36 +491,48 @@ export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boole
     if (typeof line === 'string' && WORKBUDDY_KEY_LINE.test(line)) { keyIndex = i; break; }
   }
   if (keyIndex >= 0) {
-    // Remediation (review 2026-10-13 §3 P2): locate the existing `enabled` and
-    // `category` fields WITHIN the flag's mapping block regardless of their
-    // order, comments or blank lines between them — the previous fixed-offset
-    // (+1/+2) insertion produced a duplicate `enabled` key whenever a legal
-    // ordering (category first) or a comment separated the fields, which the
-    // production loader then rejects. The mapping block ends at the first
-    // non-comment line that is neither field.
+    // Remediation (review 2026-10-13 §3 P2 + round-3 P2): locate the existing
+    // `enabled` and `category` fields WITHIN the flag's mapping block. The
+    // block boundary is INDENTATION, not field identity: it spans every
+    // non-blank line indented ≥ 4 spaces after the 2-space `host.workbuddy:`
+    // key, plus the comments/blank lines interleaved with them, and ends at
+    // the first structural line indented < 4 spaces (dedent / next key) or
+    // EOF. Legal entry fields other than the two we manage — e.g. `source:`
+    // (PRI-637 provenance, FeatureFlagEntry source?: 'owner' | 'system') —
+    // live INSIDE the block and must NEVER end the scan: the previous
+    // first-unrecognized-line break mistook `source: owner` for the block end
+    // and spliced duplicate keys above it, so the rewrite verification threw
+    // (config_rewrite_invalid) and enable/disable was refused with the stale
+    // value preserved.
     let enabledIndex = -1;
     let categoryIndex = -1;
     for (let i = keyIndex + 1; i < lines.length; i++) {
       const line = lines[i];
-      if (typeof line !== 'string') break;
-      if (line.trim() === '' || /^\s*#/.test(line)) continue; // blank / comment — inside the block
+      if (typeof line !== 'string') break; // EOF — block ended
+      if (line.trim() === '' || /^\s*#/.test(line)) continue; // blank / comment — transparent, inside the block
+      if (!/^ {4}/.test(line)) break; // dedent — mapping entry ended
       if (WORKBUDDY_ENABLED_LINE.test(line)) { enabledIndex = i; continue; }
       if (WORKBUDDY_CATEGORY_LINE.test(line)) { categoryIndex = i; continue; }
-      break; // dedent or next key — mapping entry ended
+      // Any other legal field (source: …) or nested content — inside the
+      // block: keep scanning, never touch it.
     }
     if (enabledIndex >= 0) {
+      // In-place flip; nothing else in the block moves.
       lines[enabledIndex] = `    enabled: ${enabled}`;
     } else {
-      // No enabled field: insert both fields right under the key line.
-      lines.splice(keyIndex + 1, 0, `    enabled: ${enabled}`, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
-      if (categoryIndex > keyIndex) categoryIndex += 2;
+      // No enabled field anywhere in the block: insert it under the key line.
+      lines.splice(keyIndex + 1, 0, `    enabled: ${enabled}`);
+      if (categoryIndex > keyIndex) categoryIndex += 1;
     }
     // R1 write contract: EVERY entry this function writes carries the
-    // schema-required category (production validator requirement).
+    // schema-required category (production validator requirement). Insert it
+    // only when the block has none — never alongside an existing one.
     if (categoryIndex >= 0) {
       lines[categoryIndex] = `    category: ${WORKBUDDY_FLAG_CATEGORY}`;
     } else if (enabledIndex >= 0) {
       lines.splice(enabledIndex + 1, 0, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
+    } else {
+      lines.splice(keyIndex + 2, 0, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
     }
   } else {
     // Match BOTH an existing mapping header (`features:`) and the empty flow
