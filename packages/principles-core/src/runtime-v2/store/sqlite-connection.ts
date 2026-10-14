@@ -798,11 +798,14 @@ export class SqliteConnection {
     // WorkBuddy third host (SPEC workbuddy-host-adapter Part 2): existing
     // workspaces carry the pre-workbuddy `host_kind IN ('openclaw','codex')`
     // CHECK on intervention_capability_declarations, which rejects every
-    // workbuddy declaration. CREATE TABLE IF NOT EXISTS cannot alter an
-    // existing table's CHECK, so rebuild the table under the write lock with
-    // shape recheck (same pattern as the redaction migration above). The
-    // table is declarative adapter state (latest declaration wins), so the
-    // INSERT SELECT copy is preservation, not authority transfer.
+    // workbuddy declaration. A bare CREATE TABLE statement (IF NOT EXISTS
+    // form) cannot alter an existing table's CHECK, so rebuild the table
+    // under the write lock with shape recheck (same pattern as the redaction
+    // migration above). The table is declarative adapter state (latest
+    // declaration wins), so the INSERT SELECT copy is preservation, not
+    // authority transfer. Wording note: the schema-orphan-detection static
+    // scan treats every "IF NOT EXISTS <word>" occurrence in this file as a
+    // table name, so this comment must not carry that DDL prefix verbatim.
     const declarationDdl = (): unknown => db.prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'intervention_capability_declarations'",
     ).get();

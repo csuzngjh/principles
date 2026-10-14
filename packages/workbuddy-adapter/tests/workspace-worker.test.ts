@@ -205,6 +205,13 @@ describe('WorkBuddy worker cycle — bare pain admission wiring (R2/P1)', () => 
         };
         const connection = new SqliteConnection(governance);
         try {
+          // Match DiagRouterRunner's persisted contract (also required by
+          // main's CR-05 admission resolution, merged from origin/main):
+          // updateRunOutput marks this lease-created run succeeded with the
+          // schema-valid payload BEFORE the committer links its artifact and
+          // candidates to sourceRunId — otherwise the CR-05 owning-output
+          // resolution refuses the candidate as owning_output_unparseable.
+          await self.stateManager.updateRunOutput(runId, JSON.stringify(diagnosis));
           const committer = new SqliteDiagnosticianCommitter(connection);
           await committer.commit({ runId, taskId, output: diagnosis, idempotencyKey: `${taskId}:${runId}` });
         } finally {

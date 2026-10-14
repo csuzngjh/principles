@@ -549,7 +549,16 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     });
     const relativePath = enrichment.relativePath ?? String(field(outcome.params, 'file_path') ?? field(outcome.params, 'path') ?? 'unknown').slice(0, 500);
     const isRisky = enrichment.isRisky ?? (path.isAbsolute(relativePath) && !path.resolve(relativePath).startsWith(`${path.resolve(event.context.workspaceDir)}${path.sep}`));
-    const painScore = enrichment.painScore ?? Math.min(100, (outcome.failure ? 70 : 0) + (isRisky ? 20 : 0));
+    // Merged scoring semantics (WorkBuddy admission floor × CR-01): the 70
+    // failure base requires a VERIFIED non-zero exit code (branch review
+    // round: a thrown error with no exit evidence stays at the risky-path
+    // bonus only, honestly below the GOVERNANCE_STRONG_PAIN_SCORE floor, so
+    // unverified error shapes never spawn diagnostician work on their own).
+    // Classification and RECORDING remain main's three-way contract — the
+    // row still records outcome='failure' with exit_code NULL (never a
+    // fabricated 0).
+    const verifiedNonZeroExit = outcome.exitCode !== null && outcome.exitCode !== 0;
+    const painScore = enrichment.painScore ?? Math.min(100, (verifiedNonZeroExit ? 70 : 0) + (isRisky ? 20 : 0));
     const errorHash = enrichment.errorHash ?? createHash('sha256').update(outcome.error ?? String(outcome.exitCode)).digest('hex');
     // Cooldown is DEBOUNCE, not event identity (I1): the key deliberately has
     // NO toolCallId. Repeated failures of the same failureSource+error within

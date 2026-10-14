@@ -114,6 +114,9 @@ describe('three MVP paths through the real production runtime', () => {
 
     // Read is_error WITHOUT exitCode: decoder normalization must keep it a
     // FAILURE (forbidden to default to success because exitCode is missing).
+    // exit_code stays NULL (SPEC-CODEX-PAIN-CLOSURE-001 CR-01, merged from
+    // main): a missing exit code is never fabricated as 0 — the failure
+    // classification comes from the is_error/error shape, not the exit code.
     const read = runEntry(home, JSON.stringify(fixturePayload('post-tool-use-read-iserror.json', { cwd: project })), 'PostToolUse');
     expect(read.status).toBe(0);
     expect(read.stdout).toBe('');
@@ -123,7 +126,7 @@ describe('three MVP paths through the real production runtime', () => {
     db.close();
     expect(rows).toEqual([
       { session_id: '01a130ba-7d8f-7e0a-9c58-a9d7aade3447', tool_name: 'Bash', outcome: 'failure', exit_code: 7 },
-      { session_id: '01a130ba-742f-703e-a8d6-2902387259ee', tool_name: 'Read', outcome: 'failure', exit_code: 0 },
+      { session_id: '01a130ba-742f-703e-a8d6-2902387259ee', tool_name: 'Read', outcome: 'failure', exit_code: null },
     ]);
   });
 
@@ -221,13 +224,14 @@ describe('PostToolUseFailure subscription (OD-02 evidence-driven, engine 2.161.0
     expect(result.stdout).toBe('');
 
     // Evidence chain: the tool_calls row keeps the REAL failure with the
-    // thrown error text and exit_code 0 — normalization must not invent an
-    // exit code nor misclassify the thrown error as success.
+    // thrown error text and exit_code NULL — normalization must not invent
+    // an exit code (CR-01, merged from main: missing stays null, never a
+    // fabricated 0) nor misclassify the thrown error as success.
     const db = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
     try {
       const calls = db.prepare('SELECT tool_name, outcome, exit_code, error_message FROM tool_calls ORDER BY id').all();
       expect(calls).toEqual([
-        { tool_name: 'Write', outcome: 'failure', exit_code: 0, error_message: expect.stringContaining('File has not been read yet') },
+        { tool_name: 'Write', outcome: 'failure', exit_code: null, error_message: expect.stringContaining('File has not been read yet') },
       ]);
       // pain_events stays EMPTY — and that is the POLICY outcome, not an
       // event loss: the thrown-error shape carries no exitCode, so the shared
