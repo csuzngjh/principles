@@ -484,7 +484,7 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
   const candidates: { dir: string; source: WorkspaceDiscoverySource }[] = [];
 
   // 0. The workspace the operator is standing in (CONFIGURATION_ARCHITECTURE.md §11.2
-  //    step 3). Multi-host installs keep one .pd/state.db per workspace, so a chain
+  //    step 4.a). Multi-host installs keep one .pd/state.db per workspace, so a chain
   //    that never looks at cwd silently queries another host's library and reports
   //    "nothing found".
   const cwdWorkspace = nearestWorkspaceFromCwd();

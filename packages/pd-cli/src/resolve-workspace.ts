@@ -124,12 +124,12 @@ function announceOverrideOverUnreadable(
  * All 13 command files and 20 test mocks rely on this exact signature.
  */
 export function resolveWorkspaceDir(workspaceDir?: string): string {
-  // Step 1: Discover config-based default (runs always for warning comparison)
+  // Discovery runs before the chain so an override can be compared against it.
   const discovered = discoverWorkspaceDefault();
   const usable = discovered?.kind === 'resolved' ? discovered : null;
   const configDefault = usable?.workspaceDefault;
 
-  // Step 2: Check --workspace flag (highest priority)
+  // Chain step 1: --workspace flag (highest priority)
   if (workspaceDir) {
     assertWorkspaceDirInside(workspaceDir, '--workspace');
     emitWarningIfDiffers(workspaceDir, configDefault, usable);
@@ -137,7 +137,7 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
     return workspaceDir;
   }
 
-  // Step 3: Check PD_WORKSPACE_DIR env var
+  // Chain step 2: PD_WORKSPACE_DIR env var
   const envWorkspace = process.env.PD_WORKSPACE_DIR?.trim();
   if (envWorkspace) {
     assertWorkspaceDirInside(envWorkspace, WORKSPACE_ENV);
@@ -146,9 +146,9 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
     return envWorkspace;
   }
 
-  // Step 4: Fail closed on a config that exists but cannot be read. Reaching here
-  // means no operator override is in force, so the only remaining "answer" would be
-  // the directory the operator happens to be standing in — inferred from a file whose
+  // Chain step 3: fail closed on a config that exists but cannot be read. Reaching
+  // here means no operator override is in force, so the only remaining "answer" would
+  // be the directory the operator happens to be standing in — inferred from a file whose
   // declaration is unknown. This chain feeds write commands (pd pain record), so that
   // guess is not acceptable (PRI-957 review round 3 P1).
   if (discovered?.kind === 'unparseable') {
@@ -161,7 +161,7 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
     );
   }
 
-  // Step 5: Use discovered config default
+  // Chain step 4: discovered config default
   if (configDefault && usable) {
     assertWorkspaceDirInside(configDefault, 'workspace.default');
     if (usable.source === 'cwd' && usable.declared === false) {
@@ -177,7 +177,7 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
     }
     return configDefault;
   }
-  // Step 6: No resolution possible — throw (preserves current behavior)
+  // Chain step 5: no resolution possible — throw (preserves current behavior)
   throw new Error(
     'No workspace directory configured. Set --workspace <path>, ' +
     'PD_WORKSPACE_DIR environment variable, add workspace.default to .pd/config.yaml, ' +
