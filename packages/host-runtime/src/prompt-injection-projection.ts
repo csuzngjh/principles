@@ -64,12 +64,14 @@ export interface PromptInjectionRouteDecision {
 
 /**
  * THE one route formula (P4): Codex always injects through the shared route
- * (codex-adapter has no flag branch); OpenClaw routes by its
- * `abstraction_layer_v1` gate. Every consumer that needs "which route would
- * host X take" must call this — never re-type the ternary.
+ * (codex-adapter has no flag branch); so does WorkBuddy (workbuddy-adapter
+ * renders through the shared runtime unconditionally — it has no legacy
+ * route); OpenClaw routes by its `abstraction_layer_v1` gate. Every consumer
+ * that needs "which route would host X take" must call this — never re-type
+ * the ternary.
  */
 export function promptRouteForHost(hostKind: PromptInjectionTargetHost, flagEnabled: boolean): PromptInjectionRouteName {
-  if (hostKind === 'codex') return 'shared_render';
+  if (hostKind === 'codex' || hostKind === 'workbuddy') return 'shared_render';
   return flagEnabled ? 'shared_render' : 'legacy_trim';
 }
 
@@ -147,8 +149,8 @@ export function resolvePromptInjectionRouteDecision(input: {
   }
 
   const knownKinds = facts.effectiveKinds.filter((kind): kind is PromptInjectionTargetHost =>
-    kind === 'openclaw' || kind === 'codex');
-  const unknownKinds = facts.effectiveKinds.filter((kind) => kind !== 'openclaw' && kind !== 'codex');
+    kind === 'openclaw' || kind === 'codex' || kind === 'workbuddy');
+  const unknownKinds = facts.effectiveKinds.filter((kind) => kind !== 'openclaw' && kind !== 'codex' && kind !== 'workbuddy');
 
   if (unknownKinds.length > 0) {
     return {
@@ -157,7 +159,7 @@ export function resolvePromptInjectionRouteDecision(input: {
       declaredHostKinds: facts.declaredKinds,
       effectiveHostKinds: facts.effectiveKinds,
       unconfirmedReason: `unknown_host_kind_declared: ${unknownKinds.join(', ')} has no known prompt-injection route`,
-      nextAction: 'pass an explicit target host (openclaw|codex) for this request, or remove the unknown host declaration',
+      nextAction: 'pass an explicit target host (openclaw|codex|workbuddy) for this request, or remove the unknown host declaration',
       perHost: standardHostRoutes(flagEnabled),
     };
   }

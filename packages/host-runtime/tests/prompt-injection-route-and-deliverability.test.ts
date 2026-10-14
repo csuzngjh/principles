@@ -160,9 +160,11 @@ describe('AC-01: resolvePromptInjectionRouteDecision binds the route to host fac
     const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
     expect(d.status).toBe('unconfirmed');
     expect(d.unconfirmedReason).toContain('multi_host_routes_differ');
+    // WorkBuddy joined the standard roster (third host): always shared_render.
     expect(d.perHost).toEqual([
       { hostKind: 'openclaw', route: 'legacy_trim' },
       { hostKind: 'codex', route: 'shared_render' },
+      { hostKind: 'workbuddy', route: 'shared_render' },
     ]);
   });
 

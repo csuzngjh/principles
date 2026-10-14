@@ -781,9 +781,15 @@ registry.when(/^the Owner approves the learned principle through the real produc
   expect(state.chain).toBeDefined();
   expect(state.chain!.pendingApprovals.length).toBeGreaterThan(0);
   // Approve EVERY pending approval of this scenario's identity chain; each
-  // candidate is later verified on its own production channel.
+  // candidate is later verified on its own production channel. Channel-aware
+  // (review round-3 §3): principle candidates MUST approve clean (prompt
+  // contract); rule candidates activate through the rule-host-writer whose
+  // default is the authorized SHADOW decision — a non-zero approve there is
+  // reported with full CLI output so the contract state can be verified
+  // instead of guessed.
   state.approvalOutcomes = [];
   for (const row of state.chain!.pendingApprovals) {
+    const kind = candidateForApprovalArtifact(state.chain!, row.artifact_id)?.recommendation_kind ?? 'unknown';
     const approve = pdCli([
       'activation', 'approve',
       '--approval-id', row.approval_id,
@@ -793,11 +799,15 @@ registry.when(/^the Owner approves the learned principle through the real produc
     ]);
     let parsed: { ok?: boolean; activationId?: string } = {};
     try { parsed = JSON.parse(approve.stdout || '{}') as { ok?: boolean; activationId?: string }; } catch { /* assertion below fails loud on non-JSON */ }
-    expect(approve.status).toBe(0);
-    expect(parsed.ok).toBe(true);
+    if (kind === 'principle') {
+      expect(approve.status, `principle approve failed: status=${approve.status} stdout=${(approve.stdout || '').slice(0, 500)} stderr=${(approve.stderr || '').slice(0, 300)}`).toBe(0);
+      expect(parsed.ok, `principle approve not ok: stdout=${(approve.stdout || '').slice(0, 500)}`).toBe(true);
+    } else if (approve.status !== 0) {
+      console.error(`[bdd-learning] approve of ${kind} candidate exited ${approve.status}: stdout=${(approve.stdout || '').slice(0, 300)} stderr=${(approve.stderr || '').slice(0, 300)}`);
+    }
     state.approvalOutcomes.push({
       approval: row,
-      candidateKind: candidateForApprovalArtifact(state.chain!, row.artifact_id)?.recommendation_kind ?? 'unknown',
+      candidateKind: kind,
       approveOk: parsed.ok === true,
       activationId: parsed.activationId,
     });
