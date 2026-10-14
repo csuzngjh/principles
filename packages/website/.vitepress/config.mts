@@ -43,6 +43,10 @@ export default defineConfig({
     // *.pages.dev 的 NS 归 Cloudflare，我们无权放 DNS TXT，只能走这一条；删掉它等于
     // 悄悄失去站长平台的 sitemap 提交与收录请求配额，所以 tests/seo-contract.test.mjs 有断言守着。
     ['meta', { name: 'google-site-verification', content: 'Bj8PCwx4YUwfQKZZpL_uFHKJLSxWGOIBTaZd7M57vMc' }],
+    // Bing Webmaster Tools 所有权验证（站点 https://principles-website.pages.dev/）。
+    // 同一理由：*.pages.dev 无权放 DNS 记录，HTML 标记是唯一不动 Cloudflare 的路；
+    // 标签删掉后 Bing 不立刻报错，下次重新校验才发现，所以同样由 seo 契约测试守着。
+    ['meta', { name: 'msvalidate.01', content: '0406CE95FAFB007F71CD3F1E4492C498' }],
     // Fonts: Inter (VitePress built-in), JetBrains Mono (code), Noto Sans SC (Chinese)
     ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
