@@ -13,7 +13,7 @@
     "verify-package": "node scripts/verify-package.mjs"
   },
   "dependencies": {
-    "@principles/install-layout": "^0.2.7"
+    "@principles/install-layout": "^0.3.0"
   },
   "devDependencies": {
     "@electron/asar": "4.3.1",
