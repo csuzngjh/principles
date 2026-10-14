@@ -1,5 +1,11 @@
 # @principles/install-layout
 
+## 0.3.0
+
+### Minor Changes
+
+- 5e794be: WorkBuddy install contract: 'workbuddy' install host, workbuddyAdapterDir, getWorkbuddyWorkspaceDir (OD-07 governance workspace).
+
 ## 0.2.7
 
 ### Patch Changes
