@@ -1,11 +1,41 @@
 import { defineConfig } from 'vitepress'
 
+// 站点地址的唯一来源：og:image / twitter:image / sitemap / canonical 全部从这里派生。
+// 换主域时只改这一行——原来散在 og 注释里的"update if primary domain changes"从此作废。
+const SITE_URL = 'https://principles-website.pages.dev'
+
+// 与 VitePress `generateSitemap()` 的拼法逐字对齐（它做的是同样的两次 replace），
+// 否则 canonical 与 sitemap 的 <loc> 会分叉，等于给搜索引擎两个权威地址。
+function canonicalHref(page: string, cleanUrls: boolean | undefined): string {
+  const url = page
+    .replace(/(^|\/)index\.md$/, '$1')
+    .replace(/\.md$/, cleanUrls ? '' : '.html')
+  return new URL(url, SITE_URL).href
+}
+
 export default defineConfig({
   title: "Principles Disciple",
   description: "Principles Disciple is an AI Agent Governance System that turns repeated Agent corrections into reviewable, reversible behavior principles governed by the Owner.",
   lastUpdated: true,
   cleanUrls: true,
   ignoreDeadLinks: false,
+
+  // VitePress 只在设置了 hostname 时才产出 sitemap.xml（此前 404 就是这个原因）。
+  sitemap: {
+    hostname: SITE_URL,
+    // `video/**` 是首页演示视频的工程目录，里面自带 AGENTS.md / CLAUDE.md /
+    // design.md，VitePress 会把它们当正文页面渲染（线上实测
+    // `GET /video/homepage-demo/README` = 200）。本文件不擅自下线这些 URL，
+    // 只保证不把内部文档广播给搜索引擎。
+    transformItems: (items) =>
+      items.filter((item) => !(item.url ?? '').startsWith('video/')),
+  },
+
+  // VitePress 不自动生成 <link rel="canonical">；缺它时同一页的
+  // `/foo`、`/foo.html`、带查询参数的版本会被当成三个页面。
+  transformHead({ page, siteConfig }) {
+    return [['link', { rel: 'canonical', href: canonicalHref(page, siteConfig.cleanUrls) }]]
+  },
 
   head: [
     ['link', { rel: 'icon', href: '/images/favicon.svg' }],
@@ -16,13 +46,13 @@ export default defineConfig({
       href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap',
       rel: 'stylesheet'
     }],
-    // Open Graph — canonical production URL; update if primary domain changes
+    // Open Graph — 地址一律取自上面的 SITE_URL，不再各处硬编码域名
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:title', content: 'Principles Disciple' }],
     ['meta', { property: 'og:description', content: 'Principles Disciple is an AI Agent Governance System — turn repeated corrections into Owner-approved, observable, reversible Agent behavior principles.' }],
-    ['meta', { property: 'og:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
+    ['meta', { property: 'og:image', content: `${SITE_URL}/images/og-image.png` }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
-    ['meta', { name: 'twitter:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
+    ['meta', { name: 'twitter:image', content: `${SITE_URL}/images/og-image.png` }],
     // Cloudflare Web Analytics beacon — privacy-first, no cookies, gives Core Web Vitals
     ['script', {
       defer: true,
