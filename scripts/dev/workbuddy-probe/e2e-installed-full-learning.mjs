@@ -75,7 +75,12 @@ function record(step, verdict, detail) {
  * limit. */
 function finalize() {
   const required = new Set(REQUIRED_STEPS);
-  const missing = results.filter((r) => required.has(r.step) && r.verdict !== 'PASS');
+  // A required step that was never RECORDED is a miss too (R2 defect class:
+  // an early return must never shrink the denominator to the steps that ran).
+  const missing = [...required].filter((step) => {
+    const row = results.find((r) => r.step === step);
+    return !row || row.verdict !== 'PASS';
+  });
   const failed = results.filter((r) => r.verdict === 'FAIL');
   const blocked = results.filter((r) => r.verdict === 'BLOCKED');
   console.log(`\nInstalled-full-learning E2E: ${results.filter((r) => r.verdict === 'PASS').length} PASS, ${failed.length} FAIL, ${blocked.length} BLOCKED, ${missing.length} required-step miss (started ${startedAt})`);
@@ -119,6 +124,23 @@ const installedPdCli = () => path.join(FAKE_HOME, '.pd', 'runtime', 'pd-cli', 'd
 const pdCli = (args, timeoutMs = 420_000) => spawnSync(process.execPath, [installedPdCli(), ...args], {
   encoding: 'utf8', timeout: timeoutMs, env: { ...engineEnvBase() },
 });
+
+/** The installer's --json result may be pretty-printed (multi-line): parse the
+ * LAST top-level JSON block, falling back to single-line scans. (First R3 run
+ * aborted a SUCCESSFUL install because a lone `{` line failed the old parse.) */
+function parseLastJsonBlock(text) {
+  const attempts = [];
+  if (text) {
+    const idx = text.lastIndexOf('\n{');
+    if (idx >= 0) attempts.push(text.slice(idx + 1));
+    if (text.trimStart().startsWith('{')) attempts.push(text);
+    attempts.push(...text.split('\n').filter((l) => l.startsWith('{')).reverse());
+  }
+  for (const attempt of attempts) {
+    try { return JSON.parse(attempt.trim()); } catch { /* try next shape */ }
+  }
+  return {};
+}
 
 function packInstaller() {
   const nodeDir = path.dirname(process.execPath);
@@ -251,11 +273,11 @@ async function main() {
     encoding: 'utf8', timeout: 900_000,
     env: { ...engineEnvBase(), PD_INSTALL_PLUGIN_DIR: assetPayload, PD_SKIP_NPM_UPGRADE: '1', PD_SKIP_GLOBAL_SHIM: '1' },
   });
-  let installJson = {};
-  try { installJson = JSON.parse((install.stdout || '').split('\n').filter((l) => l.startsWith('{')).at(-1) ?? '{}'); } catch { /* non-JSON tail */ }
-  record('installer-run', install.status === 0 ? 'PASS' : 'FAIL',
-    `exit=${install.status} success=${installJson.success === true} reason=${String(installJson.reason ?? '').slice(0, 200)} stderr=${(install.stderr || '').slice(-200)}`);
-  if (install.status !== 0 || installJson.success !== true) return finalize();
+  const installJson = parseLastJsonBlock(install.stdout);
+  const installOk = install.status === 0 && installJson.success === true;
+  record('installer-run', installOk ? 'PASS' : 'FAIL',
+    `exit=${install.status} success=${installJson.success === true} reason=${String(installJson.reason ?? '').slice(0, 200)} stdoutTail=${(install.stdout || '').slice(-300)} stderr=${(install.stderr || '').slice(-200)}`);
+  if (!installOk) return finalize();
 
   // ── 3. Deployment + registration + OFFICIAL init facts (no handwritten DDL) ──
   const runtimeEntry = installedAdapterEntry();
