@@ -758,7 +758,7 @@ function PendingReviewCard({
                     ? t("pages.focus.promptScopeFullRender", { count: promptInjection.fullRenderChars })
                     : "",
                 })}
-            {promptInjection.hostKind !== undefined ? ` · ${promptInjection.hostKind === "openclaw" ? "OpenClaw" : "Codex"}` : ""}
+            {promptInjection.hostKind !== undefined ? ` · ${promptInjection.hostKind === "openclaw" ? "OpenClaw" : promptInjection.hostKind === "workbuddy" ? "WorkBuddy" : "Codex"}` : ""}
           </div>
         </div>
       )}
@@ -1559,7 +1559,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               {(unconfirmed.perHost ?? []).map((entry) => (
                 <li key={entry.hostKind} data-testid={`prompt-capacity-perhost-${entry.hostKind}`}>
                   {t("pages.focus.promptCapacityPerHostEntry", {
-                    host: entry.hostKind === "openclaw" ? "OpenClaw" : "Codex",
+                    host: entry.hostKind === "openclaw" ? "OpenClaw" : entry.hostKind === "workbuddy" ? "WorkBuddy" : "Codex",
                     billing: entry.route === "shared_render"
                       ? t("pages.focus.promptCapacitySharedRoute")
                       : t("pages.focus.promptCapacityListRoute"),

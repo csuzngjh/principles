@@ -349,9 +349,10 @@ function ActivationFactCard({
               {record.promptInjection.status === "route_unconfirmed" && (
                 <>
                   {t("pages.activation.injectionRouteUnconfirmed", {
-                    defaultValue: "当前宿主容量未确认：OpenClaw {{oc}} / Codex {{cx}}",
+                    defaultValue: "当前宿主容量未确认：OpenClaw {{oc}} / Codex {{cx}} / WorkBuddy {{wb}}",
                     oc: record.promptInjection.perHostFits?.find((f) => f.hostKind === "openclaw")?.fits === undefined ? t("pages.activation.fitUnknown", { defaultValue: "未知" }) : record.promptInjection.perHostFits?.find((f) => f.hostKind === "openclaw")?.fits ? t("pages.activation.fitYes", { defaultValue: "可装入" }) : t("pages.activation.fitNo", { defaultValue: "超长" }),
                     cx: record.promptInjection.perHostFits?.find((f) => f.hostKind === "codex")?.fits === undefined ? t("pages.activation.fitUnknown", { defaultValue: "未知" }) : record.promptInjection.perHostFits?.find((f) => f.hostKind === "codex")?.fits ? t("pages.activation.fitYes", { defaultValue: "可装入" }) : t("pages.activation.fitNo", { defaultValue: "超长" }),
+                    wb: record.promptInjection.perHostFits?.find((f) => f.hostKind === "workbuddy")?.fits === undefined ? t("pages.activation.fitUnknown", { defaultValue: "未知" }) : record.promptInjection.perHostFits?.find((f) => f.hostKind === "workbuddy")?.fits ? t("pages.activation.fitYes", { defaultValue: "可装入" }) : t("pages.activation.fitNo", { defaultValue: "超长" }),
                   })}
                   {record.promptInjection.reason !== undefined && (
                     <span className="block text-ink-4 text-[11.5px]">{record.promptInjection.reason}</span>

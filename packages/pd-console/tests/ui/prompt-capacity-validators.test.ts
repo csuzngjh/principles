@@ -42,20 +42,35 @@ describe('validatePromptInjectionBudgetStatus — PD_PROMPT_CAPACITY_V1 fields',
     expect(v?.oversizedDiagnosticTruncated).toBe(false);
   });
 
-  it('keeps the unconfirmed payload with per-host forecasts and reasons', () => {
+  it('keeps the unconfirmed payload with per-host forecasts for ALL roster hosts and reasons', () => {
     const v = validatePromptInjectionBudgetStatus({
       ...baseStatus(),
       capacityStatus: 'unconfirmed',
-      unconfirmedReason: 'multi_host_routes_differ: openclaw legacy vs codex shared',
-      nextAction: 'pass an explicit target host (openclaw|codex)',
+      unconfirmedReason: 'multi_host_routes_differ: openclaw legacy vs codex/workbuddy shared',
+      nextAction: 'pass an explicit target host (openclaw|codex|workbuddy)',
       perHost: [
         { hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true },
         { hostKind: 'codex', route: 'shared_render', usedChars: 1980, truncated: true },
+        { hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true },
       ],
     });
     expect(v?.capacityStatus).toBe('unconfirmed');
-    expect(v?.perHost).toHaveLength(2);
+    expect(v?.perHost).toHaveLength(3);
     expect(v?.perHost?.[0]).toEqual({ hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true });
+    expect(v?.perHost?.[2]).toEqual({ hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true });
+  });
+
+  it('keeps workbuddy as a valid hostKind on the confirmed payload (roster third host)', () => {
+    const v = validatePromptInjectionBudgetStatus({
+      ...baseStatus(),
+      capacityStatus: 'confirmed',
+      hostKind: 'workbuddy',
+      route: 'shared_render',
+      budgetScope: 'full_directive_context',
+    });
+    expect(v?.hostKind).toBe('workbuddy');
+    expect(v?.route).toBe('shared_render');
+    expect(v?.budgetScope).toBe('full_directive_context');
   });
 
   it.each([

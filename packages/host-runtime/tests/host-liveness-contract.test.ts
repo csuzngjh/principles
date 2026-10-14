@@ -17,6 +17,7 @@ import Database from 'better-sqlite3';
 import { saveHostToolDeclaration } from '../src/host-tool-declaration.js';
 import {
   OPENCLAW_HOST_LIVENESS_CONTRACT,
+  readWorkspaceHostKindFacts,
   resolvePromotionHostLiveness,
 } from '../src/host-liveness-contract.js';
 
@@ -139,6 +140,25 @@ describe('resolvePromotionHostLiveness (PRI-813 fail-closed capability routing)'
       reason: 'host_declaration_missing_for_configured_host',
       hostKinds: ['codex', 'openclaw'],
       hostContract: null,
+    });
+  });
+
+  it('review R1: workbuddy pain evidence counts as a workspace host fact (never silently dropped)', () => {
+    seedProvenance(['workbuddy']);
+    const facts = readWorkspaceHostKindFacts(ws);
+    expect(facts.ok).toBe(true);
+    if (!facts.ok) return;
+    expect(facts.evidenceKinds).toEqual(['workbuddy']);
+    expect(facts.effectiveKinds).toEqual(['workbuddy']);
+    // The promotion gate itself is unchanged: workbuddy-only evidence is not
+    // Codex evidence, so the historical OpenClaw default still stands.
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toEqual({
+      ok: true,
+      hostKind: 'openclaw',
+      hostKinds: [],
+      hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+      hostRuntimeVersion: 'openclaw-legacy@1',
     });
   });
 

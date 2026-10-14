@@ -36,6 +36,7 @@ interface WorkspaceOpts {
   promptFlagOff?: boolean;
   declare?: PromptInjectionTargetHost[];
   codexEvidence?: boolean;
+  workbuddyEvidence?: boolean;
 }
 
 function tempWorkspace(opts?: WorkspaceOpts): string {
@@ -62,11 +63,12 @@ function tempWorkspace(opts?: WorkspaceOpts): string {
     });
     if (!saved.ok) throw new Error(`declaration save failed: ${saved.reason}`);
   }
-  if (opts?.codexEvidence) {
+  if (opts?.codexEvidence || opts?.workbuddyEvidence) {
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
     const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
     db.exec('CREATE TABLE pain_events (pain_id TEXT PRIMARY KEY, host_kind TEXT)');
-    db.prepare('INSERT INTO pain_events (pain_id, host_kind) VALUES (?, ?)').run('p1', 'codex');
+    if (opts?.codexEvidence) db.prepare('INSERT INTO pain_events (pain_id, host_kind) VALUES (?, ?)').run('p1', 'codex');
+    if (opts?.workbuddyEvidence) db.prepare('INSERT INTO pain_events (pain_id, host_kind) VALUES (?, ?)').run('p2', 'workbuddy');
     db.close();
   }
   return workspaceDir;
@@ -146,6 +148,31 @@ describe('AC-01: resolvePromptInjectionRouteDecision binds the route to host fac
     expect(d.route).toBe('shared_render');
   });
 
+  it('workbuddy declared, flag OFF → confirmed shared route (the third host never takes the list route)', () => {
+    const dir = tempWorkspace({ declare: ['workbuddy'] });
+    const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
+    expect(d.status).toBe('confirmed');
+    expect(d.hostKind).toBe('workbuddy');
+    expect(d.route).toBe('shared_render');
+    expect(d.basis).toBe('workspace_host_facts');
+  });
+
+  it('workbuddy declared, flag ON → still confirmed shared route', () => {
+    const dir = tempWorkspace({ sharedFlag: true, declare: ['workbuddy'] });
+    const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
+    expect(d.status).toBe('confirmed');
+    expect(d.hostKind).toBe('workbuddy');
+    expect(d.route).toBe('shared_render');
+  });
+
+  it('workbuddy pain evidence without a declaration also confirms the shared route (persisted host facts)', () => {
+    const dir = tempWorkspace({ workbuddyEvidence: true });
+    const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
+    expect(d.status).toBe('confirmed');
+    expect(d.hostKind).toBe('workbuddy');
+    expect(d.route).toBe('shared_render');
+  });
+
   it('both hosts declared with the flag ON → one shared route for all hosts', () => {
     const dir = tempWorkspace({ sharedFlag: true, declare: ['openclaw', 'codex'] });
     const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
@@ -192,6 +219,15 @@ describe('AC-01: resolvePromptInjectionRouteDecision binds the route to host fac
     expect(d.basis).toBe('explicit_target');
   });
 
+  it('an explicit workbuddy target overrides the facts and confirms the shared route', () => {
+    const dir = tempWorkspace({ declare: ['openclaw'] });
+    const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir, targetHost: 'workbuddy' });
+    expect(d.status).toBe('confirmed');
+    expect(d.hostKind).toBe('workbuddy');
+    expect(d.route).toBe('shared_render');
+    expect(d.basis).toBe('explicit_target');
+  });
+
   it('an unknown host kind declared → unconfirmed, never silently treated as openclaw', () => {
     const dir = tempWorkspace();
     const saved = saveHostToolDeclaration(dir, {
@@ -222,6 +258,29 @@ describe('AC-01: resolveLivePromptInjectionProjection follows the resolved route
     expect(resolution.projection.injectedActivationIds).toEqual(['act-C-1']);
   });
 
+  it('a workbuddy workspace with the flag off forecasts the SAME shared injection as codex (old code said legacy_trim)', async () => {
+    const dir = tempWorkspace({ declare: ['workbuddy'] });
+    await seedActivation(dir, 'WB-1', 'workbuddy 原则内容');
+    const resolution = await resolveLivePromptInjectionProjection({ workspaceDir: dir });
+    expect(resolution.status).toBe('confirmed');
+    if (resolution.status !== 'confirmed') return;
+    expect(resolution.decision.hostKind).toBe('workbuddy');
+    expect(resolution.projection.route).toBe('shared_render');
+    expect(resolution.projection.budgetScope).toBe('full_directive_context');
+    expect(resolution.projection.unit).toBe('utf16_code_units');
+    expect(resolution.projection.usedChars).toBeGreaterThan(0);
+    expect(resolution.projection.injectedActivationIds).toEqual(['act-WB-1']);
+    // WorkBuddy renders through the same shared runtime as Codex: identical
+    // billable context for identical content (the adapter has no list route).
+    const codexDir = tempWorkspace({ declare: ['codex'] });
+    await seedActivation(codexDir, 'WB-1', 'workbuddy 原则内容');
+    const codexResolution = await resolveLivePromptInjectionProjection({ workspaceDir: codexDir });
+    expect(codexResolution.status).toBe('confirmed');
+    if (codexResolution.status !== 'confirmed') return;
+    expect(codexResolution.projection.usedChars).toBe(resolution.projection.usedChars);
+    expect(codexResolution.projection.injectedActivationIds).toEqual(resolution.projection.injectedActivationIds);
+  });
+
   it('an unconfirmed route returns per-host forecasts instead of one guessed projection', async () => {
     const dir = tempWorkspace({ declare: ['openclaw', 'codex'] });
     await seedActivation(dir, 'M-1', '多宿主工作区原则');
@@ -242,6 +301,13 @@ describe('AC-01: resolveLivePromptInjectionProjection follows the resolved route
     expect(workbuddy.budgetScope).toBe('full_directive_context');
     expect(codex.usedChars).toBeGreaterThan(openclaw.usedChars);
     expect(workbuddy.usedChars).toBe(codex.usedChars);
+    // 轮转语义按宿主如实标注 (PR-1894): 列表路由轮转, 共享路由不轮转 —
+    // WorkBuddy 与 Codex 同为共享路由, selection/rotation 语义必须一致
+    expect(openclaw.productionRotates).toBe(true);
+    expect(codex.productionRotates).toBe(false);
+    expect(workbuddy.productionRotates).toBe(false);
+    expect(openclaw.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+    expect(workbuddy.selectionPolicy).toBe(codex.selectionPolicy);
   });
 });
 
@@ -296,6 +362,33 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
       expect(sharedResult.costChars).toBe(2009);
       expect(sharedResult.overByChars).toBe(9);
       expect(sharedResult.budgetScope).toBe('full_directive_context');
+    }
+  });
+
+  it('an explicit workbuddy target measures the single-item fit on the shared route, identical to codex', async () => {
+    const text = 'S'.repeat(1250);
+    const artifact = { artifactId: 'art-WB', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'WB-1', text }), validationStatus: 'validated' };
+    const dir = tempWorkspace({ declare: ['openclaw'] });
+    const result = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'workbuddy', artifact });
+    expect(result.status).toBe('undeliverable');
+    if (result.status === 'undeliverable') {
+      expect(result.route).toBe('shared_render');
+      expect(result.hostKind).toBe('workbuddy');
+      expect(result.basis).toBe('explicit_target');
+      expect(result.costChars).toBe(2009);
+      expect(result.overByChars).toBe(9);
+      expect(result.budgetScope).toBe('full_directive_context');
+    }
+
+    // 同一候选在 workbuddy 显式目标下装入/超长的分界与 codex 完全一致
+    const shortArtifact = { ...artifact, contentJson: JSON.stringify({ principleId: 'WB-2', text: 'short' }) };
+    const ok = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'workbuddy', artifact: shortArtifact });
+    expect(ok.status).toBe('deliverable');
+    if (ok.status === 'deliverable') {
+      expect(ok.route).toBe('shared_render');
+      expect(ok.hostKind).toBe('workbuddy');
+      expect(ok.budgetScope).toBe('full_directive_context');
+      expect(ok.unit).toBe('utf16_code_units');
     }
   });
 

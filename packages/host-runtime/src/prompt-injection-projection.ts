@@ -17,6 +17,14 @@ export type PromptInjectionTargetHost = 'openclaw' | 'codex' | 'workbuddy';
  * new host cannot fork route-unconfirmed per-host forecasts from the routes. */
 export const PROMPT_INJECTION_TARGET_HOSTS: readonly PromptInjectionTargetHost[] = ['openclaw', 'codex', 'workbuddy'];
 
+/** Runtime membership test derived from the roster (rc-2): the ONE guard for
+ * "is this untrusted host-kind string a host with a known prompt-injection
+ * route". Every consumer narrows with this — never by re-typing the literals
+ * (review R1: each re-typed list forked the roster and dropped WorkBuddy). */
+export function isPromptInjectionTargetHost(kind: unknown): kind is PromptInjectionTargetHost {
+  return typeof kind === 'string' && (PROMPT_INJECTION_TARGET_HOSTS as readonly string[]).includes(kind);
+}
+
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
 
 /**
@@ -76,11 +84,7 @@ export function promptRouteForHost(hostKind: PromptInjectionTargetHost, flagEnab
 }
 
 function standardHostRoutes(flagEnabled: boolean): { hostKind: PromptInjectionTargetHost; route: PromptInjectionRouteName }[] {
-  return [
-    { hostKind: 'openclaw', route: promptRouteForHost('openclaw', flagEnabled) },
-    { hostKind: 'codex', route: promptRouteForHost('codex', flagEnabled) },
-    { hostKind: 'workbuddy', route: promptRouteForHost('workbuddy', flagEnabled) },
-  ];
+  return PROMPT_INJECTION_TARGET_HOSTS.map((hostKind) => ({ hostKind, route: promptRouteForHost(hostKind, flagEnabled) }));
 }
 
 /**
@@ -148,9 +152,8 @@ export function resolvePromptInjectionRouteDecision(input: {
     };
   }
 
-  const knownKinds = facts.effectiveKinds.filter((kind): kind is PromptInjectionTargetHost =>
-    kind === 'openclaw' || kind === 'codex' || kind === 'workbuddy');
-  const unknownKinds = facts.effectiveKinds.filter((kind) => kind !== 'openclaw' && kind !== 'codex' && kind !== 'workbuddy');
+  const knownKinds = facts.effectiveKinds.filter(isPromptInjectionTargetHost);
+  const unknownKinds = facts.effectiveKinds.filter((kind) => !isPromptInjectionTargetHost(kind));
 
   if (unknownKinds.length > 0) {
     return {

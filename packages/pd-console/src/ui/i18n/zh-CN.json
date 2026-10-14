@@ -1033,7 +1033,7 @@
       "injectionWindowFifo": "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符），当前路由不轮转，需腾出容量才会注入",
       "injectionOversized": "超长不可注入：单条已 {{cost}} 字符 > 上限 {{budget}} 字符，轮转也救不了——需精简正文",
       "injectionResolutionFailed": "无法判定：{{reason}}",
-      "injectionRouteUnconfirmed": "当前宿主容量未确认：OpenClaw {{oc}} / Codex {{cx}}",
+      "injectionRouteUnconfirmed": "当前宿主容量未确认：OpenClaw {{oc}} / Codex {{cx}} / WorkBuddy {{wb}}",
       "revisionOpen": "修改为可注入版本",
       "revisionPlaceholder": "输入新的原则正文（保留触发条件、必须动作和必要例外，尽量精简）",
       "revisionSubmit": "创建待审批的新版本",

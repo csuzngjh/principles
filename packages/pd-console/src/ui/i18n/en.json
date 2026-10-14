@@ -1033,7 +1033,7 @@
       "injectionWindowFifo": "Out of window this turn: fits alone ({{cost}}/{{budget}} chars); this route does not rotate, capacity must free up first",
       "injectionOversized": "Oversized, not injectable: {{cost}} chars alone > {{budget}} cap — rotation cannot help; shorten the statement",
       "injectionResolutionFailed": "Cannot determine: {{reason}}",
-      "injectionRouteUnconfirmed": "Host capacity unconfirmed: OpenClaw {{oc}} / Codex {{cx}}",
+      "injectionRouteUnconfirmed": "Host capacity unconfirmed: OpenClaw {{oc}} / Codex {{cx}} / WorkBuddy {{wb}}",
       "revisionOpen": "Modify to injectable version",
       "revisionPlaceholder": "Enter the new principle statement (keep trigger, required action, and necessary exception; be concise)",
       "revisionSubmit": "Create pending new version",
