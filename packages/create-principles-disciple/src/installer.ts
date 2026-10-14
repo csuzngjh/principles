@@ -4119,6 +4119,7 @@ export async function install(
             provider: options.runtimeProfile.provider,
             model: options.runtimeProfile.model,
             apiKeyEnv: options.runtimeProfile.apiKeyEnv,
+            baseUrl: options.runtimeProfile.baseUrl,
           }
         : undefined,
     });

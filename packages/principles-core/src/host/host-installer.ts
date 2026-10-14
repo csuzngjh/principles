@@ -61,6 +61,8 @@ export interface HostRuntimeProfileInput {
   readonly provider?: string;
   readonly model?: string;
   readonly apiKeyEnv?: string;
+  /** OpenAI-compatible custom endpoint; present → skip provider model catalog. */
+  readonly baseUrl?: string;
 }
 
 // ─── Host uninstall context ─────────────────────────────────────────────────

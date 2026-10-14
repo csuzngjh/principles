@@ -266,9 +266,16 @@ async function main() {
   record('build-release-asset', 'PASS', `stamped payload; identity=${fs.readFileSync(identityStamp, 'utf8').slice(0, 200)}`);
 
   // ── 2. OFFICIAL install with the LLM profile from INSTALL ARGS ──
+  // --base-url is required for a custom OpenAI-compatible deployment: pi-ai
+  // validates the model against the provider catalog unless the profile
+  // carries a custom endpoint (the first R3 run failed exactly there — the
+  // install-arg surface could not express a baseUrl, so the diagnostician
+  // died in provider catalog validation).
+  const llmBaseUrl = process.env.WB_E2E_LLM_BASE_URL || 'https://developer.amd.com.cn/radeon/api/v1';
   const install = spawnSync(process.execPath, [
     installerEntry, '--host', 'workbuddy', '--workspace', PROJECT, '--yes', '--json',
     '--provider', 'openai', '--model', LLM_MODEL, '--api-key-env', LLM_KEY_ENV,
+    '--base-url', llmBaseUrl,
   ], {
     encoding: 'utf8', timeout: 900_000,
     env: { ...engineEnvBase(), PD_INSTALL_PLUGIN_DIR: assetPayload, PD_SKIP_NPM_UPGRADE: '1', PD_SKIP_GLOBAL_SHIM: '1' },
@@ -294,7 +301,8 @@ async function main() {
   // ── 4. The governance LLM profile came from INSTALL ARGS (consumable) ──
   const configText = fs.readFileSync(govConfig, 'utf8');
   const profileFromArgs = new RegExp(`model:\\s*["']?${LLM_MODEL}["']?`).test(configText)
-    && new RegExp(`apiKeyEnv:\\s*["']?${LLM_KEY_ENV}["']?`).test(configText);
+    && new RegExp(`apiKeyEnv:\\s*["']?${LLM_KEY_ENV}["']?`).test(configText)
+    && new RegExp(`baseUrl:\\s*["']?${llmBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']?`).test(configText);
   record('governance-config-from-args', profileFromArgs ? 'PASS' : 'FAIL',
     `config.yaml written by the installer carries the install-arg model/apiKeyEnv (read-only assertion; the worker cycles below prove consumption through the real loader)`);
 

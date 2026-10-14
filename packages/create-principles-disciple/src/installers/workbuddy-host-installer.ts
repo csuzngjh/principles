@@ -619,11 +619,11 @@ type GovernanceProfileApplyResult =
 
 /**
  * Apply the install-collected LLM runtime profile (--provider/--api-key-env/
- * --model) to the GOVERNANCE workspace's .pd/config.yaml — the single config
- * the WorkBuddy worker/console/hook chain reads (round-3 P1: the main
- * installer previously wrote the profile into the PROJECT config.yaml while
- * this host's governance workspace kept the runtime-init defaults, so the
- * diagnostician had no usable profile).
+ * --model/--base-url) to the GOVERNANCE workspace's .pd/config.yaml — the
+ * single config the WorkBuddy worker/console/hook chain reads (round-3 P1:
+ * the main installer previously wrote the profile into the PROJECT
+ * config.yaml while this host's governance workspace kept the runtime-init
+ * defaults, so the diagnostician had no usable profile).
  *
  * Semantics (frozen remediation contract):
  * - explicit install profile ⇒ override `runtimeProfiles.pd.default` (same
@@ -661,7 +661,7 @@ type GovernanceProfileApplyResult =
  */
 function applyWorkbuddyGovernanceRuntimeProfile(
   governanceDir: string,
-  profile: { readonly provider?: string; readonly model?: string; readonly apiKeyEnv?: string },
+  profile: { readonly provider?: string; readonly model?: string; readonly apiKeyEnv?: string; readonly baseUrl?: string },
 ): GovernanceProfileApplyResult {
   // rc-1/rc-3: validate here — upstream CLI validation is not trusted as a
   // substitute for a guard at the write boundary.
@@ -672,6 +672,17 @@ function applyWorkbuddyGovernanceRuntimeProfile(
       ok: false,
       reason: `workbuddy_governance_profile_invalid: --provider/--api-key-env must both be non-empty (got provider=${JSON.stringify(provider || undefined)}, apiKeyEnv=${JSON.stringify(apiKeyEnv || undefined)}).`,
       nextAction: 'Re-run the installer with both --provider <openai|anthropic|deepseek> and --api-key-env <ENV_VAR_NAME>.',
+    };
+  }
+  // Round-4 R3: an explicit --base-url must be a usable http(s) endpoint —
+  // pi-ai treats its PRESENCE as "custom endpoint, skip the model catalog",
+  // so a junk value would silently break every governance LLM call.
+  const baseUrl = typeof profile.baseUrl === 'string' ? profile.baseUrl.trim() : '';
+  if (baseUrl.length > 0 && !/^https?:\/\//.test(baseUrl)) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_invalid: --base-url "${baseUrl}" is not a valid http(s) URL.`,
+      nextAction: 'Re-run the installer with --base-url <https endpoint> (or omit it to use the provider default).',
     };
   }
   // Round-4 S2: a blank --model is an EXPLICIT invalid value — reject it
@@ -757,6 +768,9 @@ function applyWorkbuddyGovernanceRuntimeProfile(
     provider,
     model,
     apiKeyEnv,
+    // Custom endpoint only when collected; an existing pd.default.baseUrl
+    // survives via the spread above when the arg is omitted.
+    ...(baseUrl.length > 0 ? { baseUrl } : {}),
   };
   internalAgents.defaultRuntime = GOVERNANCE_PROFILE_ID;
   // Preserve the diagnostician's other binding fields (its `enabled` kill
@@ -784,7 +798,7 @@ function applyWorkbuddyGovernanceRuntimeProfile(
     if (trimmed.startsWith('#')) headerLines.push(line);
     else break;
   }
-  const marker = '# runtimeProfiles.pd.default + internalAgents default/diagnostician binding written by the Principles Disciple installer (--provider/--api-key-env/--model).';
+  const marker = '# runtimeProfiles.pd.default + internalAgents default/diagnostician binding written by the Principles Disciple installer (--provider/--api-key-env/--model/--base-url).';
   const body = yaml.dump(parsed, { lineWidth: -1, quoteStyle: 'double' });
   const next = headerLines.length > 0 ? `${headerLines.join('\n')}\n${marker}\n${body}` : `${marker}\n${body}`;
 
@@ -812,6 +826,9 @@ function applyWorkbuddyGovernanceRuntimeProfile(
     && verifiedProfile.provider === provider && provider.length > 0
     && verifiedProfile.model === model && typeof model === 'string' && model.length > 0
     && verifiedProfile.apiKeyEnv === apiKeyEnv && apiKeyEnv.length > 0
+    // A requested custom endpoint must survive the round trip (dropping it
+    // would silently reintroduce provider catalog validation).
+    && (baseUrl.length === 0 || verifiedProfile.baseUrl === baseUrl)
     && verifiedInternal !== undefined
     && verifiedInternal.defaultRuntime === GOVERNANCE_PROFILE_ID
     && isRecord(verifiedBinding)

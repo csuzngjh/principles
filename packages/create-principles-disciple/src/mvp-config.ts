@@ -314,6 +314,10 @@ export interface RuntimeProfileInput {
   provider?: string;
   model?: string;
   apiKeyEnv?: string;
+  /** Round-4 R3: OpenAI-compatible custom endpoint. Present → pi-ai calls it
+   * directly and skips the provider model catalog (custom model ids like the
+   * AMD RADEON deployment are otherwise catalog-rejected). */
+  baseUrl?: string;
 }
 
 /**
@@ -378,6 +382,9 @@ export function generateConfigYamlContent(
         provider: runtimeProfile?.provider ?? '',
         model: runtimeProfile?.model ?? '',
         apiKeyEnv: runtimeProfile?.apiKeyEnv ?? '',
+        // Custom endpoint only when collected — an empty baseUrl must not be
+        // written (the resolver treats presence as "skip catalog validation").
+        ...(runtimeProfile?.baseUrl ? { baseUrl: runtimeProfile.baseUrl } : {}),
       },
       // Fallback: openclaw.default delegates LLM calls to the OpenClaw main
       // agent. Users can switch back via web console if pi-ai is unavailable.

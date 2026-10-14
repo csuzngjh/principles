@@ -246,6 +246,27 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         return;
       }
       cliOptions.runtimeProfile = { provider, apiKeyEnv, model: model || undefined };
+      // Round-4 R3: --base-url / PD_BASE_URL — an OpenAI-compatible custom
+      // endpoint. Present → pi-ai calls it directly and skips the provider
+      // model catalog (custom deployment model ids are catalog-rejected
+      // without it). rc-3: validate the shape; a bad URL must fail loud.
+      const baseUrl = typeof options.baseUrl === 'string' && options.baseUrl.length > 0
+        ? options.baseUrl
+        : process.env.PD_BASE_URL;
+      if (typeof baseUrl === 'string' && baseUrl.trim().length > 0) {
+        const trimmed = baseUrl.trim();
+        if (!/^https?:\/\//.test(trimmed)) {
+          const msg = `--base-url "${trimmed}" is not a valid http(s) URL.`;
+          if (jsonMode) {
+            console.log(JSON.stringify(buildFailureOutput('runtime_profile_invalid', msg), null, 2));
+          } else {
+            logger.error(msg);
+          }
+          process.exit(1);
+          return;
+        }
+        cliOptions.runtimeProfile.baseUrl = trimmed;
+      }
     } else if (apiKeyEnv) {
       // rc-3: fail loud — apiKeyEnv without provider is unusable.
       const msg = `--api-key-env given without --provider. Pass --provider openai (or set PD_PROVIDER).`;
@@ -496,6 +517,7 @@ program
   .option('--provider <provider>', 'LLM provider for pd.default profile (openai/anthropic/deepseek). Enables non-interactive runtime profile config.')
   .option('--api-key-env <name>', 'Environment variable name holding the LLM API key (e.g. OPENAI_API_KEY). Requires --provider.')
   .option('--model <model>', 'LLM model id (optional; keeps the existing configured model, else applies the per-provider default)')
+  .option('--base-url <url>', 'OpenAI-compatible custom endpoint for pd.default (optional; present = call it directly, skip the provider model catalog). Env: PD_BASE_URL.')
   // ADR-0020 §2.3: host target selector. Default 'openclaw' for backward compat.
   .option('--host <host>', `Host platform (${HOST_TARGETS.join('/')})`, 'openclaw')
   // Gateway lock prevention: auto-stop a running OpenClaw gateway before

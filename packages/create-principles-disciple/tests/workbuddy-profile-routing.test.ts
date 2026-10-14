@@ -253,7 +253,7 @@ function currentLab(): Lab {
   return (globalThis as Record<string, unknown>).__pdWbProfileLab as Lab;
 }
 
-function baseOptions(lab: Lab, runtimeProfile?: { provider: string; apiKeyEnv: string; model?: string }): InstallOptions {
+function baseOptions(lab: Lab, runtimeProfile?: { provider: string; apiKeyEnv: string; model?: string; baseUrl?: string }): InstallOptions {
   return {
     language: 'en',
     mode: 'force',
@@ -347,6 +347,41 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
     expect(projectRaw).not.toContain('test-model');
     const projectConfig = yaml.load(projectRaw) as GovernanceRawConfig;
     expect(projectConfig.runtimeProfiles['pd.default']['provider']).toBe('');
+  });
+
+  it('round-4 R3: --base-url lands in the governance profile and reaches the binding resolver; a malformed base-url fails loud with nothing written', { timeout: 240_000 }, async () => {
+    // The first installed-product E2E run died here: pi-ai validates the
+    // model against the provider catalog UNLESS the profile carries a custom
+    // endpoint, and the install surface could not express one — the custom
+    // AMD RADEON deployment model was catalog-rejected and the diagnostician
+    // burned its attempts. The endpoint must round-trip to the resolver.
+    const lab = currentLab();
+    const result = await install(
+      baseOptions(lab, { provider: 'openai', apiKeyEnv: 'WB_TEST_KEY', model: 'custom-deployment-model', baseUrl: 'https://llm.example.test/v1' }),
+      lab.payloadDir,
+      { quiet: true },
+    );
+    expect(result.success, `install failed: ${result.error ?? result.reason} Next: ${result.nextAction}`).toBe(true);
+
+    const governance = readGovernanceConfig(lab);
+    expect(governance.runtimeProfiles['pd.default']['baseUrl']).toBe('https://llm.example.test/v1');
+
+    const loaded = loadPdConfigForPlugin(lab.governanceDir);
+    expect(loaded.ok, `loader errors: ${JSON.stringify(loaded.errors)}`).toBe(true);
+    const binding = resolveAgentRuntimeBinding(loaded.effective, 'diagnostician');
+    expect(binding.ok).toBe(true);
+    if (!binding.ok) return;
+    expect(binding.profile.baseUrl).toBe('https://llm.example.test/v1');
+
+    // Malformed endpoint → fail loud at the write boundary (rc-3), no write.
+    const bad = currentLab();
+    const badResult = await install(
+      baseOptions(bad, { provider: 'openai', apiKeyEnv: 'WB_TEST_KEY', model: 'm', baseUrl: 'not-a-url' }),
+      bad.payloadDir,
+      { quiet: true },
+    );
+    expect(badResult.success).toBe(false);
+    expect(String(badResult.reason ?? '')).toContain('not a valid http(s) URL');
   });
 
   it('no --provider: the governance config keeps the runtime-init default (no empty-value write, no binding overwrite)', { timeout: 240_000 }, async () => {
