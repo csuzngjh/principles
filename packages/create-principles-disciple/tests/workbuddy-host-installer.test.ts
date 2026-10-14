@@ -287,11 +287,17 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
   it('merges the workbuddy host into an existing manifest without dropping codex/openclaw or unknown keys', async () => {
     const created = lab();
     fs.mkdirSync(path.join(created.home, '.pd'), { recursive: true });
+    // The manifest validator requires ABSOLUTE workspace paths, and
+    // `path.isAbsolute` is platform-dependent: the hard-coded 'D:/elsewhere/ws'
+    // is absolute on Windows but NOT on Linux, where install() then refused the
+    // whole merge with `workspaces must be non-empty absolute paths`. Derive it
+    // from the lab home so the fixture is a real absolute path everywhere.
+    const elsewhereWorkspace = path.resolve(created.home, 'elsewhere', 'ws');
     fs.writeFileSync(path.join(created.home, '.pd', 'install.json'), JSON.stringify({
       layoutVersion: 1,
       mode: 'canonical',
       hosts: ['openclaw', 'codex'],
-      workspaces: ['D:/elsewhere/ws'],
+      workspaces: [elsewhereWorkspace],
       channel: 'stable', // owned by the update side — must survive (PRI-709 P0-1)
     }, null, 2));
 
@@ -307,7 +313,7 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(manifest.hosts).toEqual(['openclaw', 'codex', 'workbuddy']);
     expect(manifest.channel).toBe('stable');
     // install-layout's merge resolves canonical absolute paths (win32 separators).
-    expect((manifest.workspaces as string[])).toContain(path.resolve('D:/elsewhere/ws'));
+    expect((manifest.workspaces as string[])).toContain(elsewhereWorkspace);
     expect((manifest.workspaces as string[])).toContain(path.join(created.home, '.workbuddy', 'pd-workspace'));
   });
 
