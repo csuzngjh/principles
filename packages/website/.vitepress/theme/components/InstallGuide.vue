@@ -209,7 +209,7 @@
         <h2 class="step-title">{{ isZh ? '步骤 1 · 前置条件（WorkBuddy）' : 'Step 1 · Prerequisites (WorkBuddy)' }}</h2>
         <ul class="prereq-list">
           <li>
-            <strong>WorkBuddy Desktop（已在 5.8.1 实测）</strong> —
+            <strong>{{ isZh ? 'WorkBuddy Desktop（已在 5.8.1 实测）' : 'WorkBuddy Desktop (verified on 5.8.1)' }}</strong> —
             {{ isZh ? '引擎 CLI 随 Desktop 一起安装，无需单独下载。' : 'the engine CLI ships inside Desktop — no separate download.' }}
           </li>
           <li>
@@ -295,7 +295,8 @@
 
       <section class="guide-step">
         <h2 class="step-title">{{ isZh ? '常见失败与处理' : 'Common failures and fixes' }}</h2>
-        <table class="failure-table">
+        <div class="failure-table-wrap">
+          <table class="failure-table">
           <thead>
             <tr><th>{{ isZh ? '现象' : 'Symptom' }}</th><th>{{ isZh ? '含义' : 'Meaning' }}</th><th>{{ isZh ? '下一步' : 'Next action' }}</th></tr>
           </thead>
@@ -313,7 +314,7 @@
             <tr>
               <td>{{ isZh ? '供应商限额 / 不可用' : 'Provider quota / unavailability' }}</td>
               <td>{{ isZh ? '诊断任务按 rate_limit → runtime_unavailable 分类失败，内化队列出现 blocked' : 'Diagnosis tasks fail classified rate_limit → runtime_unavailable; the internalization queue shows blocked entries' }}</td>
-              <td>{{ isZh ? '恢复额度后 pd internalization retry --task <id> --confirm，并用 pd workbuddy worker --status 观察队列' : 'After quota recovers: pd internalization retry --task <id> --confirm, and watch the queue with pd workbuddy worker --status' }}</td>
+              <td>{{ isZh ? '恢复额度后 pd runtime internalization retry --task <id> --confirm，并用 pd workbuddy worker --status 观察队列' : 'After quota recovers: pd runtime internalization retry --task <id> --confirm, and watch the queue with pd workbuddy worker --status' }}</td>
             </tr>
             <tr>
               <td>{{ isZh ? '引擎路径未发现' : 'Engine path not found' }}</td>
@@ -321,7 +322,8 @@
               <td>{{ isZh ? '设置 PD_WORKBUDDY_ENGINE 指向 codebuddy-lite-wb.mjs 后重跑；若提示未安装 WorkBuddy Desktop，先安装并启动一次' : 'Set PD_WORKBUDDY_ENGINE to codebuddy-lite-wb.mjs and re-run; if it reports WorkBuddy Desktop missing, install it and start it once' }}</td>
             </tr>
           </tbody>
-        </table>
+          </table>
+        </div>
       </section>
 
       <section class="guide-step">
@@ -722,6 +724,14 @@ function copyLabel(commandName: string) {
   border-collapse: collapse;
   font-size: 0.88rem;
   color: var(--text-secondary);
+}
+/* Narrow viewports: the three-column table cannot shrink below its content,
+ * so let the table scroll inside its own container instead of overflowing
+ * the page (review F2: 375px viewport clipped the third column). */
+.failure-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .failure-table th,
 .failure-table td {
