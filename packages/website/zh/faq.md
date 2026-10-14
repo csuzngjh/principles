@@ -61,7 +61,7 @@ Prompt 工程在执行前显式下达指令；PD 基于执行后真实交互中�
 
 Claude Code、Codex、OpenClaw 这些产品回答的是「Agent 怎么运行」——执行任务、调用工具、编排循环。PD 回答的是另一个问题：「Agent 如何在 Owner 权威下变得更好」。
 
-PD 不执行任务、不管理工具。它以治理层的方式架设在你已有的宿主之上（当前支持 OpenClaw 与 Codex），通过宿主自身的扩展点——提示词钩子与工具调用钩子——应用原则。使用 PD 不需要换掉你的 Agent；Agent 还是你的 Agent，只是它的行为从此可治理。
+PD 不执行任务、不管理工具。它以治理层的方式架设在你已有的宿主之上（当前支持 OpenClaw 与 Codex，WorkBuddy Desktop 支持随下个发布版本到来），通过宿主自身的扩展点——提示词钩子与工具调用钩子——应用原则。使用 PD 不需要换掉你的 Agent；Agent 还是你的 Agent，只是它的行为从此可治理。
 
 ## PD 会消耗额外的 Token 吗？
 
@@ -77,7 +77,7 @@ PD 不执行任务、不管理工具。它以治理层的方式架设在你已�
 
 ## PD 支持哪些环境？
 
-PD 目前支持 OpenClaw 与 Codex 宿主，详见[安装指南](/zh/install)。
+PD 目前支持 OpenClaw 与 Codex 宿主。WorkBuddy Desktop 是第三个受支持的宿主——其安装路径随下个发布版本可用，步骤与前置条件已先行写在[安装指南](/zh/install?host=workbuddy)中。
 
 ## PD 会训练 AI 模型吗？
 

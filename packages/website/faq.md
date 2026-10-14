@@ -61,7 +61,7 @@ No.
 
 Claude Code, Codex, OpenClaw and their peers answer *"how does the agent run?"* — they execute tasks, call tools, and orchestrate the loop. PD answers a different question: *how does the agent improve under owner authority?*
 
-PD does not execute tasks or manage tools. It installs as a governance layer on top of the host you already use (OpenClaw and Codex today), applying principles through the host's own extension points — prompt hooks and tool-call hooks. You don't switch agents to use PD; you keep your agent, and its behavior becomes governable.
+PD does not execute tasks or manage tools. It installs as a governance layer on top of the host you already use (OpenClaw and Codex today, with WorkBuddy Desktop support landing in the next release), applying principles through the host's own extension points — prompt hooks and tool-call hooks. You don't switch agents to use PD; you keep your agent, and its behavior becomes governable.
 
 ## Does PD cost extra tokens?
 
@@ -77,7 +77,7 @@ And the most expensive thing in agentic work is rarely the token bill — it is 
 
 ## Which environments does PD support?
 
-PD currently integrates with OpenClaw and Codex hosts. See the [installation guide](/install) for details.
+PD currently integrates with OpenClaw and Codex hosts. WorkBuddy Desktop is the third supported host — its install path ships with the next release and is already documented in the [installation guide](/install?host=workbuddy).
 
 ## Does PD train the AI model?
 
